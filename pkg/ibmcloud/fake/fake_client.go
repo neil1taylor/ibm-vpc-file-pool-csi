@@ -143,3 +143,13 @@ func (f *FakeVPCClient) GetShareDirect(id string) *ibmcloud.ShareInfo {
 	defer f.mu.Unlock()
 	return f.shares[id]
 }
+
+// SetShareState changes the LifecycleState of a stored share.
+// Used by reconciler tests to simulate degraded/failed VPC shares.
+func (f *FakeVPCClient) SetShareState(id string, state string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if info, ok := f.shares[id]; ok {
+		info.LifecycleState = state
+	}
+}

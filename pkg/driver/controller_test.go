@@ -71,6 +71,10 @@ func (m *mockK8sClient) UpdateFileSharePoolStatus(_ context.Context, _ *v1alpha1
 	return nil
 }
 
+func (m *mockK8sClient) UpdateFileSharePool(_ context.Context, _ *v1alpha1.FileSharePool) error {
+	return nil
+}
+
 func (m *mockK8sClient) GetSubVolume(_ context.Context, name string) (*v1alpha1.SubVolume, error) {
 	if m.getErr != nil {
 		return nil, m.getErr

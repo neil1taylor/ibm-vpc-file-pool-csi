@@ -236,6 +236,16 @@ func (f *fakeK8sClient) DeleteSubVolume(_ context.Context, name string) error {
 	return nil
 }
 
+func (f *fakeK8sClient) UpdateFileSharePool(_ context.Context, pool *v1alpha1.FileSharePool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.pools[pool.Name]; !ok {
+		return fmt.Errorf("pool %q not found", pool.Name)
+	}
+	f.pools[pool.Name] = pool.DeepCopy()
+	return nil
+}
+
 func (f *fakeK8sClient) GetNodeZone(_ context.Context, _ string) (string, error) {
 	return "us-south-1", nil
 }

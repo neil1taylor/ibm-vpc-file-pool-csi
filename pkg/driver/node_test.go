@@ -66,6 +66,9 @@ func (n *nodeTestK8sClient) GetFileSharePool(_ context.Context, _ string) (*v1al
 func (n *nodeTestK8sClient) UpdateFileSharePoolStatus(_ context.Context, _ *v1alpha1.FileSharePool) error {
 	return nil
 }
+func (n *nodeTestK8sClient) UpdateFileSharePool(_ context.Context, _ *v1alpha1.FileSharePool) error {
+	return nil
+}
 func (n *nodeTestK8sClient) GetSubVolume(_ context.Context, _ string) (*v1alpha1.SubVolume, error) {
 	return nil, fmt.Errorf("not implemented")
 }
