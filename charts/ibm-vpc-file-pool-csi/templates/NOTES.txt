@@ -1,0 +1,24 @@
+IBM VPC File Pool CSI Driver has been installed.
+
+Release:   {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+
+Verify the installation:
+
+  # Check controller pod
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/component=controller,app.kubernetes.io/instance={{ .Release.Name }}
+
+  # Check node pods
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/component=node,app.kubernetes.io/instance={{ .Release.Name }}
+
+  # Check CSIDriver registration
+  kubectl get csidriver vpc-file-pool.csi.ibm.io
+
+{{- if .Values.storageClass.create }}
+
+StorageClass "{{ .Values.storageClass.name }}" has been created.
+{{- end }}
+
+Note: CRDs (FileSharePool, SubVolume) must be installed separately:
+
+  make install-crds

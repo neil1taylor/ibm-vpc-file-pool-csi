@@ -22,10 +22,17 @@ Create a default fully qualified app name.
 {{- end }}
 
 {{/*
+Chart label value.
+*/}}
+{{- define "ibm-vpc-file-pool-csi.chart" -}}
+{{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
 Common labels.
 */}}
 {{- define "ibm-vpc-file-pool-csi.labels" -}}
-helm.sh/chart: {{ include "ibm-vpc-file-pool-csi.name" . }}-{{ .Chart.Version | replace "+" "_" }}
+helm.sh/chart: {{ include "ibm-vpc-file-pool-csi.chart" . }}
 app.kubernetes.io/name: {{ include "ibm-vpc-file-pool-csi.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}

@@ -3,6 +3,8 @@ image:
   tag: latest
   pullPolicy: IfNotPresent
 
+imagePullSecrets: []
+
 config:
   region: us-south
   vpcID: ""
@@ -11,6 +13,14 @@ config:
 
 controller:
   replicas: 1
+  resources: {}
+  tolerations: []
+  nodeSelector: {}
+  affinity: {}
+
+node:
+  tolerations:
+    - operator: Exists
 
 logLevel: 4
 
