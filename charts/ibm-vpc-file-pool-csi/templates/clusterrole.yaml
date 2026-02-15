@@ -19,10 +19,10 @@ rules:
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
     verbs: ["get", "list", "watch"]
-  # Secrets (for IBM Cloud API key)
+  # Secrets (for IBM Cloud API key and sidecar secret watcher)
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get"]
+    verbs: ["get", "watch", "list"]
   # ConfigMaps (for cluster config)
   - apiGroups: [""]
     resources: ["configmaps"]

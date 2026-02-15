@@ -32,9 +32,29 @@ spec:
             - "--endpoint=unix:///csi/csi.sock"
             - "--region={{ .Values.config.region }}"
             - "--v={{ .Values.logLevel }}"
+            {{- if .Values.secretProvider.managed }}
+            - "--sidecarEndpoint=/csi/providerfile.sock"
+            {{- end }}
+          {{- if .Values.secretProvider.managed }}
+          env:
+            - name: IKS_ENABLED
+              value: "True"
+            - name: SECRET_CONFIG_PATH
+              value: /etc/storage_ibmc
+          {{- end }}
           volumeMounts:
             - name: socket-dir
               mountPath: /csi
+            {{- if .Values.secretProvider.managed }}
+            - name: customer-auth
+              mountPath: /etc/storage_ibmc
+              readOnly: true
+            - name: cluster-info
+              mountPath: /etc/storage_ibmc/cluster_info
+              readOnly: true
+            - name: vault-token
+              mountPath: /var/run/secrets/tokens
+            {{- end }}
           {{- with .Values.controller.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -71,9 +91,41 @@ spec:
             - name: socket-dir
               mountPath: /csi
 
+        {{- if .Values.secretProvider.managed }}
+        - name: storage-secret-sidecar
+          image: {{ .Values.secretProvider.sidecar.image }}
+          args:
+            - "--endpoint=$(ENDPOINT)"
+          env:
+            - name: ENDPOINT
+              value: "unix:/sidecardir/providerfile.sock"
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /sidecardir
+            - name: customer-auth
+              mountPath: /etc/storage_ibmc
+              readOnly: true
+            - name: vault-token
+              mountPath: /var/run/secrets/tokens
+        {{- end }}
+
       volumes:
         - name: socket-dir
           emptyDir: {}
+        {{- if .Values.secretProvider.managed }}
+        - name: customer-auth
+          secret:
+            secretName: storage-secret-store
+        - name: cluster-info
+          configMap:
+            name: cluster-info
+        - name: vault-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: vault-token
+                  expirationSeconds: 600
+        {{- end }}
       {{- with .Values.controller.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

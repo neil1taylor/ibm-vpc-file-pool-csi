@@ -24,6 +24,11 @@ node:
 
 logLevel: 4
 
+secretProvider:
+  managed: true
+  sidecar:
+    image: icr.io/obs/armada-storage-secret:v1.2.75
+
 sidecars:
   provisioner:
     image: registry.k8s.io/sig-storage/csi-provisioner:v5.1.0
