@@ -1,0 +1,16 @@
+apiVersion: v2
+name: ibm-vpc-file-pool-csi
+description: IBM VPC File Pool CSI Driver — pools multiple PVCs as subdirectories within shared VPC file shares
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - ibm
+  - vpc
+  - csi
+  - storage
+  - nfs
+  - file
+home: https://github.com/IBM/ibm-vpc-file-pool-csi
+maintainers:
+  - name: IBM Cloud

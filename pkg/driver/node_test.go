@@ -1,0 +1,758 @@
+package driver
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+
+	csi "github.com/container-storage-interface/spec/lib/go/csi"
+	"google.golang.org/grpc/codes"
+	mount "k8s.io/mount-utils"
+
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/util"
+)
+
+// Valid PVC subDir for tests (matches the /pvcs/pvc-[a-f0-9-]{36} pattern).
+const testSubDir = "/pvcs/pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"
+
+// resolvedTempDir returns a temp dir with symlinks resolved (macOS /var → /private/var).
+func resolvedTempDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%s): %v", dir, err)
+	}
+	return resolved
+}
+
+func newNodeTestDriver(mounter mount.Interface, cache *util.MountCache) *Driver {
+	if cache == nil {
+		cache = util.NewMountCache()
+	}
+	return &Driver{
+		name:       DriverName,
+		version:    "test",
+		nodeID:     "test-node-01",
+		mode:       "node",
+		mounter:    mounter,
+		mountCache: cache,
+	}
+}
+
+// ---------------------------------------------------------------------------
+// NodeGetCapabilities
+// ---------------------------------------------------------------------------
+
+func TestNodeGetCapabilities(t *testing.T) {
+	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil)
+
+	resp, err := d.NodeGetCapabilities(context.Background(), &csi.NodeGetCapabilitiesRequest{})
+	if err != nil {
+		t.Fatalf("NodeGetCapabilities failed: %v", err)
+	}
+
+	caps := resp.GetCapabilities()
+	if len(caps) != 2 {
+		t.Fatalf("expected 2 capabilities, got %d", len(caps))
+	}
+
+	foundStage := false
+	foundStats := false
+	for _, c := range caps {
+		switch c.GetRpc().GetType() {
+		case csi.NodeServiceCapability_RPC_STAGE_UNSTAGE_VOLUME:
+			foundStage = true
+		case csi.NodeServiceCapability_RPC_GET_VOLUME_STATS:
+			foundStats = true
+		}
+	}
+	if !foundStage {
+		t.Error("missing STAGE_UNSTAGE_VOLUME capability")
+	}
+	if !foundStats {
+		t.Error("missing GET_VOLUME_STATS capability")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// NodeStageVolume
+// ---------------------------------------------------------------------------
+
+func TestNodeStageVolume_MountsNFS(t *testing.T) {
+	fakeMounter := mount.NewFakeMounter(nil)
+	d := newNodeTestDriver(fakeMounter, nil)
+
+	stagingPath := filepath.Join(resolvedTempDir(t), "staging")
+
+	resp, err := d.NodeStageVolume(context.Background(), &csi.NodeStageVolumeRequest{
+		VolumeId:          "pool/share/pvc",
+		StagingTargetPath: stagingPath,
+		VolumeContext: map[string]string{
+			"server": "10.240.0.1",
+			"share":  "/",
+		},
+		VolumeCapability: &csi.VolumeCapability{
+			AccessType: &csi.VolumeCapability_Mount{
+				Mount: &csi.VolumeCapability_MountVolume{},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NodeStageVolume failed: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+
+	// Verify the staging dir was created
+	if _, err := os.Stat(stagingPath); os.IsNotExist(err) {
+		t.Error("expected staging directory to be created")
+	}
+
+	// Verify mount was called with correct args
+	actions := fakeMounter.GetLog()
+	if len(actions) != 1 {
+		t.Fatalf("expected 1 mount action, got %d", len(actions))
+	}
+	a := actions[0]
+	if a.Action != "mount" {
+		t.Errorf("expected 'mount' action, got %q", a.Action)
+	}
+	if a.Source != "10.240.0.1:/" {
+		t.Errorf("expected source '10.240.0.1:/', got %q", a.Source)
+	}
+	if a.Target != stagingPath {
+		t.Errorf("expected target %q, got %q", stagingPath, a.Target)
+	}
+	if a.FSType != "nfs4" {
+		t.Errorf("expected fsType 'nfs4', got %q", a.FSType)
+	}
+
+	// Verify mount cache was updated
+	if !d.mountCache.IsMounted(stagingPath) {
+		t.Error("expected staging path to be in mount cache")
+	}
+}
+
+func TestNodeStageVolume_DefaultMountOptions(t *testing.T) {
+	fakeMounter := mount.NewFakeMounter(nil)
+	d := newNodeTestDriver(fakeMounter, nil)
+
+	stagingPath := filepath.Join(resolvedTempDir(t), "staging")
+
+	_, err := d.NodeStageVolume(context.Background(), &csi.NodeStageVolumeRequest{
+		VolumeId:          "pool/share/pvc",
+		StagingTargetPath: stagingPath,
+		VolumeContext: map[string]string{
+			"server": "10.240.0.1",
+			"share":  "/",
+		},
+		VolumeCapability: &csi.VolumeCapability{
+			AccessType: &csi.VolumeCapability_Mount{
+				Mount: &csi.VolumeCapability_MountVolume{
+					// No MountFlags → uses defaults
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NodeStageVolume failed: %v", err)
+	}
+
+	// The fake mounter doesn't expose mount options directly in FakeAction,
+	// but we can verify the mount was called (default options: nfsvers=4.1, soft, timeo=600, retrans=3)
+	actions := fakeMounter.GetLog()
+	if len(actions) != 1 {
+		t.Fatalf("expected 1 mount action, got %d", len(actions))
+	}
+}
+
+func TestNodeStageVolume_CustomMountFlags(t *testing.T) {
+	fakeMounter := mount.NewFakeMounter(nil)
+	d := newNodeTestDriver(fakeMounter, nil)
+
+	stagingPath := filepath.Join(resolvedTempDir(t), "staging")
+
+	_, err := d.NodeStageVolume(context.Background(), &csi.NodeStageVolumeRequest{
+		VolumeId:          "pool/share/pvc",
+		StagingTargetPath: stagingPath,
+		VolumeContext: map[string]string{
+			"server": "10.240.0.1",
+			"share":  "/export",
+		},
+		VolumeCapability: &csi.VolumeCapability{
+			AccessType: &csi.VolumeCapability_Mount{
+				Mount: &csi.VolumeCapability_MountVolume{
+					MountFlags: []string{"nfsvers=4.1", "hard", "rsize=1048576"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NodeStageVolume failed: %v", err)
+	}
+
+	actions := fakeMounter.GetLog()
+	if len(actions) != 1 {
+		t.Fatalf("expected 1 mount action, got %d", len(actions))
+	}
+	if actions[0].Source != "10.240.0.1:/export" {
+		t.Errorf("expected source '10.240.0.1:/export', got %q", actions[0].Source)
+	}
+}
+
+func TestNodeStageVolume_Idempotent(t *testing.T) {
+	fakeMounter := mount.NewFakeMounter(nil)
+	cache := util.NewMountCache()
+	d := newNodeTestDriver(fakeMounter, cache)
+
+	stagingPath := filepath.Join(resolvedTempDir(t), "staging")
+
+	// Pre-populate mount cache to simulate already-staged volume
+	cache.Add(stagingPath, "10.240.0.1", "/")
+
+	resp, err := d.NodeStageVolume(context.Background(), &csi.NodeStageVolumeRequest{
+		VolumeId:          "pool/share/pvc",
+		StagingTargetPath: stagingPath,
+		VolumeContext: map[string]string{
+			"server": "10.240.0.1",
+			"share":  "/",
+		},
+		VolumeCapability: &csi.VolumeCapability{
+			AccessType: &csi.VolumeCapability_Mount{
+				Mount: &csi.VolumeCapability_MountVolume{},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("idempotent NodeStageVolume failed: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+
+	// No mount should have been called (idempotent)
+	actions := fakeMounter.GetLog()
+	if len(actions) != 0 {
+		t.Errorf("expected 0 mount actions for idempotent call, got %d", len(actions))
+	}
+}
+
+func TestNodeStageVolume_MountFails(t *testing.T) {
+	d := newNodeTestDriver(&failingMounter{mountErr: os.ErrPermission}, nil)
+
+	stagingPath := filepath.Join(resolvedTempDir(t), "staging")
+
+	_, err := d.NodeStageVolume(context.Background(), &csi.NodeStageVolumeRequest{
+		VolumeId:          "pool/share/pvc",
+		StagingTargetPath: stagingPath,
+		VolumeContext: map[string]string{
+			"server": "10.240.0.1",
+			"share":  "/",
+		},
+		VolumeCapability: &csi.VolumeCapability{
+			AccessType: &csi.VolumeCapability_Mount{
+				Mount: &csi.VolumeCapability_MountVolume{},
+			},
+		},
+	})
+
+	assertGRPCCode(t, err, codes.Internal)
+}
+
+// ---------------------------------------------------------------------------
+// NodePublishVolume
+// ---------------------------------------------------------------------------
+
+func TestNodePublishVolume_ValidatesSubDir(t *testing.T) {
+	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil)
+
+	tests := []struct {
+		name   string
+		subDir string
+	}{
+		{"empty", ""},
+		{"traversal_dotdot", "/../etc/passwd"},
+		{"traversal_nested", "/pvcs/../../../etc"},
+		{"wrong_prefix", "/something-else/pvc-abc"},
+		{"just_slash", "/"},
+		{"no_leading_slash", "pvcs/pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"},
+		{"not_a_uuid", "/pvcs/not-a-uuid"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := d.NodePublishVolume(context.Background(), &csi.NodePublishVolumeRequest{
+				VolumeId:          "pool/share/pvc",
+				StagingTargetPath: "/staging",
+				TargetPath:        "/target",
+				VolumeContext: map[string]string{
+					"subDir": tt.subDir,
+				},
+			})
+			assertGRPCCode(t, err, codes.InvalidArgument)
+		})
+	}
+}
+
+func TestNodePublishVolume_ValidSubDir(t *testing.T) {
+	fakeMounter := mount.NewFakeMounter(nil)
+	d := newNodeTestDriver(fakeMounter, nil)
+
+	// Create real staging directory with the subdirectory present
+	tmpDir := resolvedTempDir(t)
+	stagingPath := filepath.Join(tmpDir, "staging")
+	subDirPath := filepath.Join(stagingPath, testSubDir)
+	if err := os.MkdirAll(subDirPath, 0755); err != nil {
+		t.Fatalf("setup: create subdir: %v", err)
+	}
+
+	targetPath := filepath.Join(tmpDir, "target")
+
+	resp, err := d.NodePublishVolume(context.Background(), &csi.NodePublishVolumeRequest{
+		VolumeId:          "pool/share/pvc",
+		StagingTargetPath: stagingPath,
+		TargetPath:        targetPath,
+		VolumeContext: map[string]string{
+			"subDir": testSubDir,
+		},
+		VolumeCapability: &csi.VolumeCapability{
+			AccessType: &csi.VolumeCapability_Mount{
+				Mount: &csi.VolumeCapability_MountVolume{},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NodePublishVolume failed: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+}
+
+func TestNodePublishVolume_BindMountCorrectSource(t *testing.T) {
+	fakeMounter := mount.NewFakeMounter(nil)
+	d := newNodeTestDriver(fakeMounter, nil)
+
+	tmpDir := resolvedTempDir(t)
+	stagingPath := filepath.Join(tmpDir, "staging")
+	subDirPath := filepath.Join(stagingPath, testSubDir)
+	if err := os.MkdirAll(subDirPath, 0755); err != nil {
+		t.Fatalf("setup: create subdir: %v", err)
+	}
+
+	targetPath := filepath.Join(tmpDir, "target")
+
+	_, err := d.NodePublishVolume(context.Background(), &csi.NodePublishVolumeRequest{
+		VolumeId:          "pool/share/pvc",
+		StagingTargetPath: stagingPath,
+		TargetPath:        targetPath,
+		VolumeContext: map[string]string{
+			"subDir": testSubDir,
+		},
+		VolumeCapability: &csi.VolumeCapability{
+			AccessType: &csi.VolumeCapability_Mount{
+				Mount: &csi.VolumeCapability_MountVolume{},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NodePublishVolume failed: %v", err)
+	}
+
+	actions := fakeMounter.GetLog()
+	if len(actions) != 1 {
+		t.Fatalf("expected 1 mount action, got %d", len(actions))
+	}
+
+	a := actions[0]
+	if a.Action != "mount" {
+		t.Errorf("expected 'mount' action, got %q", a.Action)
+	}
+
+	expectedSource := filepath.Join(stagingPath, testSubDir)
+	if a.Source != expectedSource {
+		t.Errorf("expected source %q, got %q", expectedSource, a.Source)
+	}
+	if a.Target != targetPath {
+		t.Errorf("expected target %q, got %q", targetPath, a.Target)
+	}
+}
+
+func TestNodePublishVolume_ReadOnly(t *testing.T) {
+	fakeMounter := mount.NewFakeMounter(nil)
+	d := newNodeTestDriver(fakeMounter, nil)
+
+	tmpDir := resolvedTempDir(t)
+	stagingPath := filepath.Join(tmpDir, "staging")
+	subDirPath := filepath.Join(stagingPath, testSubDir)
+	if err := os.MkdirAll(subDirPath, 0755); err != nil {
+		t.Fatalf("setup: create subdir: %v", err)
+	}
+
+	targetPath := filepath.Join(tmpDir, "target")
+
+	_, err := d.NodePublishVolume(context.Background(), &csi.NodePublishVolumeRequest{
+		VolumeId:          "pool/share/pvc",
+		StagingTargetPath: stagingPath,
+		TargetPath:        targetPath,
+		Readonly:          true,
+		VolumeContext: map[string]string{
+			"subDir": testSubDir,
+		},
+		VolumeCapability: &csi.VolumeCapability{
+			AccessType: &csi.VolumeCapability_Mount{
+				Mount: &csi.VolumeCapability_MountVolume{},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NodePublishVolume failed: %v", err)
+	}
+
+	// Verify that mount was called — can't inspect options directly from FakeAction,
+	// but we can verify the mount happened. The "ro" option is passed to the mounter
+	// and the fake mounter records it internally via MountPoints.
+	actions := fakeMounter.GetLog()
+	if len(actions) != 1 {
+		t.Fatalf("expected 1 mount action, got %d", len(actions))
+	}
+
+	// Check MountPoints for the "ro" option
+	mountPoints, _ := fakeMounter.List()
+	found := false
+	for _, mp := range mountPoints {
+		if mp.Path == targetPath {
+			found = true
+			hasRO := false
+			for _, opt := range mp.Opts {
+				if opt == "ro" {
+					hasRO = true
+				}
+			}
+			if !hasRO {
+				t.Error("expected 'ro' in mount options for readonly volume")
+			}
+		}
+	}
+	if !found {
+		t.Error("expected mount point for target path in fake mounter")
+	}
+}
+
+func TestNodePublishVolume_SubDirNotExist(t *testing.T) {
+	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil)
+
+	tmpDir := resolvedTempDir(t)
+	stagingPath := filepath.Join(tmpDir, "staging")
+	// Don't create the subdir — os.Stat will fail
+	if err := os.MkdirAll(stagingPath, 0755); err != nil {
+		t.Fatalf("setup: create staging dir: %v", err)
+	}
+
+	targetPath := filepath.Join(tmpDir, "target")
+
+	_, err := d.NodePublishVolume(context.Background(), &csi.NodePublishVolumeRequest{
+		VolumeId:          "pool/share/pvc",
+		StagingTargetPath: stagingPath,
+		TargetPath:        targetPath,
+		VolumeContext: map[string]string{
+			"subDir": testSubDir,
+		},
+	})
+
+	assertGRPCCode(t, err, codes.NotFound)
+}
+
+func TestNodePublishVolume_MountFails(t *testing.T) {
+	d := newNodeTestDriver(&failingMounter{mountErr: os.ErrPermission}, nil)
+
+	tmpDir := resolvedTempDir(t)
+	stagingPath := filepath.Join(tmpDir, "staging")
+	subDirPath := filepath.Join(stagingPath, testSubDir)
+	if err := os.MkdirAll(subDirPath, 0755); err != nil {
+		t.Fatalf("setup: create subdir: %v", err)
+	}
+
+	targetPath := filepath.Join(tmpDir, "target")
+
+	_, err := d.NodePublishVolume(context.Background(), &csi.NodePublishVolumeRequest{
+		VolumeId:          "pool/share/pvc",
+		StagingTargetPath: stagingPath,
+		TargetPath:        targetPath,
+		VolumeContext: map[string]string{
+			"subDir": testSubDir,
+		},
+		VolumeCapability: &csi.VolumeCapability{
+			AccessType: &csi.VolumeCapability_Mount{
+				Mount: &csi.VolumeCapability_MountVolume{},
+			},
+		},
+	})
+
+	assertGRPCCode(t, err, codes.Internal)
+}
+
+// ---------------------------------------------------------------------------
+// NodeUnpublishVolume
+// ---------------------------------------------------------------------------
+
+func TestNodeUnpublishVolume_Unmounts(t *testing.T) {
+	fakeMounter := mount.NewFakeMounter(nil)
+	d := newNodeTestDriver(fakeMounter, nil)
+
+	// Create a target dir that will be removed after unmount
+	tmpDir := resolvedTempDir(t)
+	targetPath := filepath.Join(tmpDir, "target")
+	if err := os.MkdirAll(targetPath, 0755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	resp, err := d.NodeUnpublishVolume(context.Background(), &csi.NodeUnpublishVolumeRequest{
+		VolumeId:   "pool/share/pvc",
+		TargetPath: targetPath,
+	})
+	if err != nil {
+		t.Fatalf("NodeUnpublishVolume failed: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+
+	// Verify unmount was called
+	actions := fakeMounter.GetLog()
+	if len(actions) != 1 {
+		t.Fatalf("expected 1 action, got %d", len(actions))
+	}
+	if actions[0].Action != "unmount" {
+		t.Errorf("expected 'unmount' action, got %q", actions[0].Action)
+	}
+	if actions[0].Target != targetPath {
+		t.Errorf("expected target %q, got %q", targetPath, actions[0].Target)
+	}
+
+	// Verify the directory was removed
+	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
+		t.Error("expected target directory to be removed after unpublish")
+	}
+}
+
+func TestNodeUnpublishVolume_UnmountFails(t *testing.T) {
+	d := newNodeTestDriver(&failingMounter{unmountErr: os.ErrPermission}, nil)
+
+	_, err := d.NodeUnpublishVolume(context.Background(), &csi.NodeUnpublishVolumeRequest{
+		VolumeId:   "pool/share/pvc",
+		TargetPath: "/some/target",
+	})
+
+	assertGRPCCode(t, err, codes.Internal)
+}
+
+func TestNodeUnpublishVolume_TargetAlreadyGone(t *testing.T) {
+	fakeMounter := mount.NewFakeMounter(nil)
+	d := newNodeTestDriver(fakeMounter, nil)
+
+	// Target path doesn't exist — os.Remove returns ErrNotExist which is tolerated
+	resp, err := d.NodeUnpublishVolume(context.Background(), &csi.NodeUnpublishVolumeRequest{
+		VolumeId:   "pool/share/pvc",
+		TargetPath: "/nonexistent/path",
+	})
+	if err != nil {
+		t.Fatalf("NodeUnpublishVolume failed: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// NodeUnstageVolume
+// ---------------------------------------------------------------------------
+
+func TestNodeUnstageVolume_UnmountsNFS(t *testing.T) {
+	fakeMounter := mount.NewFakeMounter(nil)
+	cache := util.NewMountCache()
+	d := newNodeTestDriver(fakeMounter, cache)
+
+	tmpDir := resolvedTempDir(t)
+	stagingPath := filepath.Join(tmpDir, "staging")
+	if err := os.MkdirAll(stagingPath, 0755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	// Pre-populate cache
+	cache.Add(stagingPath, "10.240.0.1", "/")
+
+	resp, err := d.NodeUnstageVolume(context.Background(), &csi.NodeUnstageVolumeRequest{
+		VolumeId:          "pool/share/pvc",
+		StagingTargetPath: stagingPath,
+	})
+	if err != nil {
+		t.Fatalf("NodeUnstageVolume failed: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+
+	// Verify unmount was called
+	actions := fakeMounter.GetLog()
+	if len(actions) != 1 {
+		t.Fatalf("expected 1 action, got %d", len(actions))
+	}
+	if actions[0].Action != "unmount" {
+		t.Errorf("expected 'unmount', got %q", actions[0].Action)
+	}
+	if actions[0].Target != stagingPath {
+		t.Errorf("expected target %q, got %q", stagingPath, actions[0].Target)
+	}
+
+	// Verify mount cache was cleaned up
+	if cache.IsMounted(stagingPath) {
+		t.Error("expected staging path to be removed from mount cache")
+	}
+
+	// Verify the staging directory was removed
+	if _, err := os.Stat(stagingPath); !os.IsNotExist(err) {
+		t.Error("expected staging directory to be removed after unstage")
+	}
+}
+
+func TestNodeUnstageVolume_UnmountFails(t *testing.T) {
+	d := newNodeTestDriver(&failingMounter{unmountErr: os.ErrPermission}, nil)
+
+	_, err := d.NodeUnstageVolume(context.Background(), &csi.NodeUnstageVolumeRequest{
+		VolumeId:          "pool/share/pvc",
+		StagingTargetPath: "/some/staging",
+	})
+
+	assertGRPCCode(t, err, codes.Internal)
+}
+
+func TestNodeUnstageVolume_StagingAlreadyGone(t *testing.T) {
+	fakeMounter := mount.NewFakeMounter(nil)
+	cache := util.NewMountCache()
+	d := newNodeTestDriver(fakeMounter, cache)
+
+	// Staging path doesn't exist — os.Remove returns ErrNotExist which is tolerated
+	resp, err := d.NodeUnstageVolume(context.Background(), &csi.NodeUnstageVolumeRequest{
+		VolumeId:          "pool/share/pvc",
+		StagingTargetPath: "/nonexistent/staging",
+	})
+	if err != nil {
+		t.Fatalf("NodeUnstageVolume failed: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// NodeGetVolumeStats
+// ---------------------------------------------------------------------------
+
+func TestNodeGetVolumeStats_Success(t *testing.T) {
+	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil)
+
+	// Use a real temp dir so unix.Statfs works
+	tmpDir := resolvedTempDir(t)
+
+	resp, err := d.NodeGetVolumeStats(context.Background(), &csi.NodeGetVolumeStatsRequest{
+		VolumeId:   "pool/share/pvc",
+		VolumePath: tmpDir,
+	})
+	if err != nil {
+		t.Fatalf("NodeGetVolumeStats failed: %v", err)
+	}
+
+	usage := resp.GetUsage()
+	if len(usage) != 2 {
+		t.Fatalf("expected 2 usage entries (bytes + inodes), got %d", len(usage))
+	}
+
+	var bytesEntry, inodesEntry *csi.VolumeUsage
+	for _, u := range usage {
+		switch u.Unit {
+		case csi.VolumeUsage_BYTES:
+			bytesEntry = u
+		case csi.VolumeUsage_INODES:
+			inodesEntry = u
+		}
+	}
+
+	if bytesEntry == nil {
+		t.Fatal("missing BYTES usage entry")
+	}
+	if bytesEntry.Total <= 0 {
+		t.Errorf("expected positive total bytes, got %d", bytesEntry.Total)
+	}
+	if bytesEntry.Available < 0 {
+		t.Errorf("expected non-negative available bytes, got %d", bytesEntry.Available)
+	}
+	if bytesEntry.Used < 0 {
+		t.Errorf("expected non-negative used bytes, got %d", bytesEntry.Used)
+	}
+
+	if inodesEntry == nil {
+		t.Fatal("missing INODES usage entry")
+	}
+	if inodesEntry.Total <= 0 {
+		t.Errorf("expected positive total inodes, got %d", inodesEntry.Total)
+	}
+}
+
+func TestNodeGetVolumeStats_InvalidPath(t *testing.T) {
+	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil)
+
+	_, err := d.NodeGetVolumeStats(context.Background(), &csi.NodeGetVolumeStatsRequest{
+		VolumeId:   "pool/share/pvc",
+		VolumePath: "/nonexistent/path/that/doesnt/exist",
+	})
+
+	assertGRPCCode(t, err, codes.Internal)
+}
+
+// ---------------------------------------------------------------------------
+// NodeGetInfo
+// ---------------------------------------------------------------------------
+
+func TestNodeGetInfo_ReturnsError(t *testing.T) {
+	// getNodeZone() is not yet implemented, so this returns Internal error
+	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil)
+
+	_, err := d.NodeGetInfo(context.Background(), &csi.NodeGetInfoRequest{})
+
+	assertGRPCCode(t, err, codes.Internal)
+}
+
+// ---------------------------------------------------------------------------
+// failingMounter — a mount.Interface that returns errors for testing
+// ---------------------------------------------------------------------------
+
+type failingMounter struct {
+	mount.FakeMounter
+	mountErr   error
+	unmountErr error
+}
+
+func (f *failingMounter) Mount(source string, target string, fstype string, options []string) error {
+	if f.mountErr != nil {
+		return f.mountErr
+	}
+	return f.FakeMounter.Mount(source, target, fstype, options)
+}
+
+func (f *failingMounter) MountSensitive(source string, target string, fstype string, options []string, sensitiveOptions []string) error {
+	if f.mountErr != nil {
+		return f.mountErr
+	}
+	return f.FakeMounter.MountSensitive(source, target, fstype, options, sensitiveOptions)
+}
+
+func (f *failingMounter) Unmount(target string) error {
+	if f.unmountErr != nil {
+		return f.unmountErr
+	}
+	return f.FakeMounter.Unmount(target)
+}

@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ibm-vpc-file-pool-csi-controller
+  namespace: kube-system
+  labels:
+    app: ibm-vpc-file-pool-csi-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ibm-vpc-file-pool-csi-controller
+  template:
+    metadata:
+      labels:
+        app: ibm-vpc-file-pool-csi-controller
+    spec:
+      serviceAccountName: ibm-vpc-file-pool-csi-controller
+      containers:
+        - name: csi-controller
+          image: icr.io/ibm-vpc-file-pool-csi/driver:latest
+          args:
+            - "--mode=controller"
+            - "--endpoint=unix:///csi/csi.sock"
+            - "--v=4"
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+
+        - name: csi-provisioner
+          image: registry.k8s.io/sig-storage/csi-provisioner:v5.1.0
+          args:
+            - "--csi-address=/csi/csi.sock"
+            - "--feature-gates=Topology=true"
+            - "--leader-election"
+            - "--leader-election-namespace=kube-system"
+            - "--timeout=300s"
+            - "--retry-interval-start=5s"
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+
+        - name: csi-resizer
+          image: registry.k8s.io/sig-storage/csi-resizer:v1.12.0
+          args:
+            - "--csi-address=/csi/csi.sock"
+            - "--leader-election"
+            - "--leader-election-namespace=kube-system"
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+
+        - name: liveness-probe
+          image: registry.k8s.io/sig-storage/livenessprobe:v2.14.0
+          args:
+            - "--csi-address=/csi/csi.sock"
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+
+      volumes:
+        - name: socket-dir
+          emptyDir: {}

@@ -1,0 +1,38 @@
+image:
+  repository: icr.io/ibm-vpc-file-pool-csi/driver
+  tag: latest
+  pullPolicy: IfNotPresent
+
+config:
+  region: us-south
+  vpcID: ""
+  subnetID: ""
+  resourceGroupID: ""
+
+controller:
+  replicas: 1
+
+logLevel: 4
+
+sidecars:
+  provisioner:
+    image: registry.k8s.io/sig-storage/csi-provisioner:v5.1.0
+  resizer:
+    image: registry.k8s.io/sig-storage/csi-resizer:v1.12.0
+  registrar:
+    image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.12.0
+  liveness:
+    image: registry.k8s.io/sig-storage/livenessprobe:v2.14.0
+
+storageClass:
+  create: true
+  name: ibm-vpc-file-pool
+  pool: general-purpose
+  reclaimPolicy: Delete
+  volumeBindingMode: Immediate
+  allowVolumeExpansion: true
+  mountOptions:
+    - nfsvers=4.1
+    - soft
+    - timeo=600
+    - retrans=3

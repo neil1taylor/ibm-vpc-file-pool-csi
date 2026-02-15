@@ -1,0 +1,18 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ibm-vpc-file-pool
+provisioner: vpc-file-pool.csi.ibm.io
+parameters:
+  pool: general-purpose
+  uid: "1000"
+  gid: "1000"
+  permissions: "0755"
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+mountOptions:
+  - nfsvers=4.1
+  - soft
+  - timeo=600
+  - retrans=3

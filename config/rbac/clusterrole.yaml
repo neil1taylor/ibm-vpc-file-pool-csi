@@ -1,0 +1,56 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ibm-vpc-file-pool-csi-controller
+rules:
+  # CRD access
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["filesharepools", "filesharepools/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["subvolumes", "subvolumes/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # PV/PVC read access
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch"]
+  # Secrets (for IBM Cloud API key)
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+  # ConfigMaps (for cluster config)
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+  # Events
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  # Leader election
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "create", "update"]
+  # CSI node info
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["csinodes"]
+    verbs: ["get", "list", "watch"]
+  # Storage classes
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ibm-vpc-file-pool-csi-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ibm-vpc-file-pool-csi-controller
+subjects:
+  - kind: ServiceAccount
+    name: ibm-vpc-file-pool-csi-controller
+    namespace: kube-system
