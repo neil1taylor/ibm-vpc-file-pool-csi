@@ -230,7 +230,7 @@ func (r *FileSharePoolReconciler) reconcileMetrics(ctx context.Context, pool *v1
 	// Update pool totals
 	pool.Status.TotalAllocatedGB = totalAllocated
 	pool.Status.TotalPVCCount = totalPVCs
-	pool.Status.ShareCount = int32(len(pool.Status.Shares))
+	pool.Status.ShareCount = int32(len(pool.Status.Shares)) //nolint:gosec // safe: MaxShares capped at 100
 
 	// Recalculate total capacity
 	var totalCapacity int64
@@ -246,7 +246,7 @@ func (r *FileSharePoolReconciler) proactiveExpansion(ctx context.Context, pool *
 		return
 	}
 
-	if int32(len(pool.Status.Shares)) >= pool.Spec.MaxShares {
+	if int32(len(pool.Status.Shares)) >= pool.Spec.MaxShares { //nolint:gosec // safe: MaxShares capped at 100
 		return
 	}
 
@@ -261,7 +261,7 @@ func (r *FileSharePoolReconciler) proactiveExpansion(ctx context.Context, pool *
 		return
 	}
 
-	utilization := int32(pool.Status.TotalAllocatedGB * 100 / pool.Status.TotalCapacityGB)
+	utilization := int32(pool.Status.TotalAllocatedGB * 100 / pool.Status.TotalCapacityGB) //nolint:gosec // safe: percentage 0-100
 	if utilization <= pool.Spec.ExpandThresholdPercent {
 		return
 	}
@@ -322,7 +322,7 @@ func (r *FileSharePoolReconciler) createPoolShare(ctx context.Context, pool *v1a
 	}
 
 	pool.Status.Shares = append(pool.Status.Shares, newShare)
-	pool.Status.ShareCount = int32(len(pool.Status.Shares))
+	pool.Status.ShareCount = int32(len(pool.Status.Shares)) //nolint:gosec // safe: MaxShares capped at 100
 	pool.Status.TotalCapacityGB += shareInfo.SizeGB
 
 	klog.V(2).InfoS("Created pool share",
@@ -366,7 +366,7 @@ func determinePhase(pool *v1alpha1.FileSharePool) string {
 	}
 
 	// Check if all shares are full at max capacity
-	if int32(len(pool.Status.Shares)) >= pool.Spec.MaxShares {
+	if int32(len(pool.Status.Shares)) >= pool.Spec.MaxShares { //nolint:gosec // safe: MaxShares capped at 100
 		allFull := true
 		for _, s := range pool.Status.Shares {
 			if s.State == "stable" && s.AllocatedGB < s.TotalGB {

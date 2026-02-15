@@ -100,10 +100,10 @@ type fakeSecretProvider struct {
 	token    string
 	tokenErr error
 
-	riaasEndpoint        string
-	riaasEndpointErr     error
-	privateEndpoint      string
-	privateEndpointErr   error
+	riaasEndpoint      string
+	riaasEndpointErr   error
+	privateEndpoint    string
+	privateEndpointErr error
 }
 
 func (f *fakeSecretProvider) GetDefaultIAMToken(_ bool, _ ...string) (string, uint64, error) {
@@ -125,8 +125,8 @@ func (f *fakeSecretProvider) GetPrivateRIAASEndpoint(_ bool) (string, error) {
 
 func TestNewClientWithProvider_Success(t *testing.T) {
 	sp := &fakeSecretProvider{
-		token:           "test-token",
-		riaasEndpoint:   "https://us-south.iaas.cloud.ibm.com/v1",
+		token:         "test-token",
+		riaasEndpoint: "https://us-south.iaas.cloud.ibm.com/v1",
 	}
 
 	client, err := NewClientWithProvider(sp, "us-south")

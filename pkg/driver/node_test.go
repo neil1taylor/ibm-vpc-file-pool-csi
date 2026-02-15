@@ -353,7 +353,7 @@ func TestNodePublishVolume_ValidSubDir(t *testing.T) {
 	tmpDir := resolvedTempDir(t)
 	stagingPath := filepath.Join(tmpDir, "staging")
 	subDirPath := filepath.Join(stagingPath, testSubDir)
-	if err := os.MkdirAll(subDirPath, 0755); err != nil {
+	if err := os.MkdirAll(subDirPath, 0750); err != nil {
 		t.Fatalf("setup: create subdir: %v", err)
 	}
 
@@ -387,7 +387,7 @@ func TestNodePublishVolume_BindMountCorrectSource(t *testing.T) {
 	tmpDir := resolvedTempDir(t)
 	stagingPath := filepath.Join(tmpDir, "staging")
 	subDirPath := filepath.Join(stagingPath, testSubDir)
-	if err := os.MkdirAll(subDirPath, 0755); err != nil {
+	if err := os.MkdirAll(subDirPath, 0750); err != nil {
 		t.Fatalf("setup: create subdir: %v", err)
 	}
 
@@ -436,7 +436,7 @@ func TestNodePublishVolume_ReadOnly(t *testing.T) {
 	tmpDir := resolvedTempDir(t)
 	stagingPath := filepath.Join(tmpDir, "staging")
 	subDirPath := filepath.Join(stagingPath, testSubDir)
-	if err := os.MkdirAll(subDirPath, 0755); err != nil {
+	if err := os.MkdirAll(subDirPath, 0750); err != nil {
 		t.Fatalf("setup: create subdir: %v", err)
 	}
 
@@ -496,7 +496,7 @@ func TestNodePublishVolume_SubDirNotExist(t *testing.T) {
 	tmpDir := resolvedTempDir(t)
 	stagingPath := filepath.Join(tmpDir, "staging")
 	// Don't create the subdir — os.Stat will fail
-	if err := os.MkdirAll(stagingPath, 0755); err != nil {
+	if err := os.MkdirAll(stagingPath, 0750); err != nil {
 		t.Fatalf("setup: create staging dir: %v", err)
 	}
 
@@ -520,7 +520,7 @@ func TestNodePublishVolume_MountFails(t *testing.T) {
 	tmpDir := resolvedTempDir(t)
 	stagingPath := filepath.Join(tmpDir, "staging")
 	subDirPath := filepath.Join(stagingPath, testSubDir)
-	if err := os.MkdirAll(subDirPath, 0755); err != nil {
+	if err := os.MkdirAll(subDirPath, 0750); err != nil {
 		t.Fatalf("setup: create subdir: %v", err)
 	}
 
@@ -554,7 +554,7 @@ func TestNodeUnpublishVolume_Unmounts(t *testing.T) {
 	// Create a target dir that will be removed after unmount
 	tmpDir := resolvedTempDir(t)
 	targetPath := filepath.Join(tmpDir, "target")
-	if err := os.MkdirAll(targetPath, 0755); err != nil {
+	if err := os.MkdirAll(targetPath, 0750); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 
@@ -626,7 +626,7 @@ func TestNodeUnstageVolume_UnmountsNFS(t *testing.T) {
 
 	tmpDir := resolvedTempDir(t)
 	stagingPath := filepath.Join(tmpDir, "staging")
-	if err := os.MkdirAll(stagingPath, 0755); err != nil {
+	if err := os.MkdirAll(stagingPath, 0750); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 

@@ -292,7 +292,7 @@ func (m *Manager) tryAutoExpand(ctx context.Context, pool *v1alpha1.FileSharePoo
 		return nil, ErrPoolExhausted
 	}
 
-	if int32(len(pool.Status.Shares)) >= pool.Spec.MaxShares {
+	if int32(len(pool.Status.Shares)) >= pool.Spec.MaxShares { //nolint:gosec // safe: MaxShares capped at 100
 		return nil, ErrPoolExhausted
 	}
 
@@ -340,7 +340,7 @@ func (m *Manager) tryAutoExpand(ctx context.Context, pool *v1alpha1.FileSharePoo
 	}
 
 	pool.Status.Shares = append(pool.Status.Shares, newShare)
-	pool.Status.ShareCount = int32(len(pool.Status.Shares))
+	pool.Status.ShareCount = int32(len(pool.Status.Shares)) //nolint:gosec // safe: MaxShares capped at 100
 	pool.Status.TotalCapacityGB += shareInfo.SizeGB
 
 	return &newShare, nil

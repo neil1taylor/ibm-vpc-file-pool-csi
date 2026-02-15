@@ -1,3 +1,5 @@
+// +groupName=storage.ibmcloud.io
+
 package v1alpha1
 
 import (

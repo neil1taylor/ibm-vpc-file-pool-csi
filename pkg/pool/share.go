@@ -11,7 +11,7 @@ import (
 // Spread: pick the share with the most free space.
 // Binpack: pick the share with the least free space that still fits.
 func selectShare(strategy string, shares []v1alpha1.PoolShareStatus, requestedGB int64) (*v1alpha1.PoolShareStatus, error) {
-	var bestIdx int = -1
+	var bestIdx = -1
 	var bestFree int64
 
 	for i := range shares {

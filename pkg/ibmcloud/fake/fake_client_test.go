@@ -259,9 +259,9 @@ func TestListFileShares_ReturnsAll(t *testing.T) {
 	c := NewFakeVPCClient()
 	ctx := context.Background()
 
-	c.CreateFileShare(ctx, ibmcloud.CreateShareInput{Name: "s1", Zone: "z", Profile: "p", SizeGB: 100})
-	c.CreateFileShare(ctx, ibmcloud.CreateShareInput{Name: "s2", Zone: "z", Profile: "p", SizeGB: 200})
-	c.CreateFileShare(ctx, ibmcloud.CreateShareInput{Name: "s3", Zone: "z", Profile: "p", SizeGB: 300})
+	_, _ = c.CreateFileShare(ctx, ibmcloud.CreateShareInput{Name: "s1", Zone: "z", Profile: "p", SizeGB: 100})
+	_, _ = c.CreateFileShare(ctx, ibmcloud.CreateShareInput{Name: "s2", Zone: "z", Profile: "p", SizeGB: 200})
+	_, _ = c.CreateFileShare(ctx, ibmcloud.CreateShareInput{Name: "s3", Zone: "z", Profile: "p", SizeGB: 300})
 
 	result, err := c.ListFileShares(ctx, "any-rg", []string{"tag1"})
 	if err != nil {
@@ -277,9 +277,9 @@ func TestListFileShares_AfterDelete(t *testing.T) {
 	ctx := context.Background()
 
 	s1, _ := c.CreateFileShare(ctx, ibmcloud.CreateShareInput{Name: "s1", Zone: "z", Profile: "p", SizeGB: 100})
-	c.CreateFileShare(ctx, ibmcloud.CreateShareInput{Name: "s2", Zone: "z", Profile: "p", SizeGB: 200})
+	_, _ = c.CreateFileShare(ctx, ibmcloud.CreateShareInput{Name: "s2", Zone: "z", Profile: "p", SizeGB: 200})
 
-	c.DeleteFileShare(ctx, s1.ID)
+	_ = c.DeleteFileShare(ctx, s1.ID)
 
 	result, err := c.ListFileShares(ctx, "", nil)
 	if err != nil {
@@ -325,12 +325,12 @@ func TestShareCount(t *testing.T) {
 		t.Errorf("ShareCount = %d, want 1", c.ShareCount())
 	}
 
-	c.CreateFileShare(ctx, ibmcloud.CreateShareInput{Name: "s2", Zone: "z", Profile: "p", SizeGB: 100})
+	_, _ = c.CreateFileShare(ctx, ibmcloud.CreateShareInput{Name: "s2", Zone: "z", Profile: "p", SizeGB: 100})
 	if c.ShareCount() != 2 {
 		t.Errorf("ShareCount = %d, want 2", c.ShareCount())
 	}
 
-	c.DeleteFileShare(ctx, s1.ID)
+	_ = c.DeleteFileShare(ctx, s1.ID)
 	if c.ShareCount() != 1 {
 		t.Errorf("ShareCount after delete = %d, want 1", c.ShareCount())
 	}
@@ -341,10 +341,10 @@ func TestCallCounters(t *testing.T) {
 	ctx := context.Background()
 
 	created, _ := c.CreateFileShare(ctx, ibmcloud.CreateShareInput{Name: "s", Zone: "z", Profile: "p", SizeGB: 100})
-	c.GetFileShare(ctx, created.ID)
-	c.GetFileShare(ctx, created.ID)
-	c.ExpandFileShare(ctx, created.ID, 200)
-	c.DeleteFileShare(ctx, created.ID)
+	_, _ = c.GetFileShare(ctx, created.ID)
+	_, _ = c.GetFileShare(ctx, created.ID)
+	_ = c.ExpandFileShare(ctx, created.ID, 200)
+	_ = c.DeleteFileShare(ctx, created.ID)
 
 	if c.CreateCalls != 1 {
 		t.Errorf("CreateCalls = %d, want 1", c.CreateCalls)

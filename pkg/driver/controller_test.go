@@ -23,7 +23,7 @@ type mockPoolManager struct {
 	deallocateErr  error
 	expandErr      error
 
-	lastAllocateReq   pool.AllocationRequest
+	lastAllocateReq    pool.AllocationRequest
 	lastDeallocateName string
 	lastExpandName     string
 	lastExpandSizeGB   int64
@@ -328,12 +328,12 @@ func TestCreateVolume_Success_VerifiesAllocationRequest(t *testing.T) {
 	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
 		Name: "pvc-test",
 		Parameters: map[string]string{
-			"pool":                                "my-pool",
-			"csi.storage.k8s.io/pvc/name":        "my-pvc",
-			"csi.storage.k8s.io/pvc/namespace":   "my-ns",
-			"uid":                                 "1000",
-			"gid":                                 "2000",
-			"permissions":                         "0750",
+			"pool":                             "my-pool",
+			"csi.storage.k8s.io/pvc/name":      "my-pvc",
+			"csi.storage.k8s.io/pvc/namespace": "my-ns",
+			"uid":                              "1000",
+			"gid":                              "2000",
+			"permissions":                      "0750",
 		},
 		CapacityRange: &csi.CapacityRange{
 			RequiredBytes: gbToBytes(5),

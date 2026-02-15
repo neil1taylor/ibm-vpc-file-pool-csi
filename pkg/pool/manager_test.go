@@ -18,13 +18,13 @@ import (
 // ---------------------------------------------------------------------------
 
 type fakeNFSOperations struct {
-	mu       sync.Mutex
-	dirs     map[string]os.FileMode
-	chowns   map[string][2]int // path → [uid, gid]
-	MkdirErr error
+	mu        sync.Mutex
+	dirs      map[string]os.FileMode
+	chowns    map[string][2]int // path → [uid, gid]
+	MkdirErr  error
 	RemoveErr error
-	ChownErr error
-	ChmodErr error
+	ChownErr  error
+	ChmodErr  error
 }
 
 func newFakeNFSOperations() *fakeNFSOperations {
@@ -105,15 +105,17 @@ type fakeK8sClient struct {
 	pools      map[string]*v1alpha1.FileSharePool
 	subVolumes map[string]*v1alpha1.SubVolume
 
-	GetPoolErr            error
-	UpdatePoolStatusErr   error
-	GetSubVolumeErr       error
-	CreateSubVolumeErr    error
-	UpdateSubVolumeErr    error
-	DeleteSubVolumeErr    error
+	GetPoolErr          error
+	UpdatePoolStatusErr error
+	GetSubVolumeErr     error
+	CreateSubVolumeErr  error
+	UpdateSubVolumeErr  error
+	DeleteSubVolumeErr  error
 }
 
-var _ = (interface{ GetFileSharePool(context.Context, string) (*v1alpha1.FileSharePool, error) })((*fakeK8sClient)(nil))
+var _ = (interface {
+	GetFileSharePool(context.Context, string) (*v1alpha1.FileSharePool, error)
+})((*fakeK8sClient)(nil))
 
 func newFakeK8sClient() *fakeK8sClient {
 	return &fakeK8sClient{
@@ -308,7 +310,7 @@ func newTestPool(name, strategy string, shareSizeGB int64, shares ...v1alpha1.Po
 		Status: v1alpha1.FileSharePoolStatus{
 			Phase:            "Ready",
 			Shares:           shares,
-			ShareCount:       int32(len(shares)),
+			ShareCount:       int32(len(shares)), //nolint:gosec // safe: test data, small count
 			TotalCapacityGB:  totalCapacity,
 			TotalAllocatedGB: totalAllocated,
 			TotalPVCCount:    totalPVCs,

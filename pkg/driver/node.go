@@ -146,12 +146,12 @@ func (d *Driver) NodeGetVolumeStats(_ context.Context, req *csi.NodeGetVolumeSta
 		return nil, status.Errorf(codes.Internal, "statfs failed: %v", err)
 	}
 
-	totalBytes := int64(stat.Blocks) * int64(stat.Bsize)
-	freeBytes := int64(stat.Bfree) * int64(stat.Bsize)
+	totalBytes := int64(stat.Blocks) * int64(stat.Bsize) //nolint:gosec // safe: filesystem stats won't overflow
+	freeBytes := int64(stat.Bfree) * int64(stat.Bsize)   //nolint:gosec // safe: filesystem stats won't overflow
 	usedBytes := totalBytes - freeBytes
 
-	totalInodes := int64(stat.Files)
-	freeInodes := int64(stat.Ffree)
+	totalInodes := int64(stat.Files) //nolint:gosec // safe: inode count won't overflow int64
+	freeInodes := int64(stat.Ffree)  //nolint:gosec // safe: inode count won't overflow int64
 	usedInodes := totalInodes - freeInodes
 
 	return &csi.NodeGetVolumeStatsResponse{

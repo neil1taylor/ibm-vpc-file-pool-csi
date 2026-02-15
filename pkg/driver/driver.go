@@ -71,10 +71,7 @@ func NewDriver(cfg Config) (*Driver, error) {
 
 // Run starts the gRPC server and registers CSI services based on mode.
 func (d *Driver) Run() error {
-	addr := d.endpoint
-	if strings.HasPrefix(addr, "unix://") {
-		addr = strings.TrimPrefix(addr, "unix://")
-	}
+	addr := strings.TrimPrefix(d.endpoint, "unix://")
 
 	// Remove existing socket file
 	if err := os.Remove(addr); err != nil && !os.IsNotExist(err) {
