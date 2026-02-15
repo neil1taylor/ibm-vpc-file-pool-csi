@@ -58,3 +58,30 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-controller
     namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-node
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+rules:
+  # Node read access (for zone detection)
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-node
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-node
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-node
+    namespace: {{ .Release.Namespace }}
