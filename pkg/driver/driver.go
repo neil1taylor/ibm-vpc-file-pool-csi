@@ -22,11 +22,14 @@ const DriverName = "vpc-file-pool.csi.ibm.io"
 
 // Config holds the configuration for creating a new Driver.
 type Config struct {
-	Name     string
-	Version  string
-	NodeID   string
-	Endpoint string
-	Mode     string // "controller" or "node"
+	Name        string
+	Version     string
+	NodeID      string
+	Endpoint    string
+	Mode        string // "controller" or "node"
+	Mounter     mount.Interface
+	K8sClient   k8s.Client
+	PoolManager pool.PoolManager
 }
 
 // Driver implements the CSI Identity, Controller, and Node services.
@@ -47,16 +50,22 @@ type Driver struct {
 }
 
 // NewDriver creates a new CSI driver instance.
-// Dependencies (poolManager, k8sClient, mounter) are nil in the scaffold;
-// they will be wired up during full implementation.
 func NewDriver(cfg Config) (*Driver, error) {
+	mounter := cfg.Mounter
+	if mounter == nil {
+		mounter = mount.New("")
+	}
+
 	return &Driver{
-		name:       cfg.Name,
-		version:    cfg.Version,
-		nodeID:     cfg.NodeID,
-		endpoint:   cfg.Endpoint,
-		mode:       cfg.Mode,
-		mountCache: util.NewMountCache(),
+		name:        cfg.Name,
+		version:     cfg.Version,
+		nodeID:      cfg.NodeID,
+		endpoint:    cfg.Endpoint,
+		mode:        cfg.Mode,
+		poolManager: cfg.PoolManager,
+		k8sClient:   cfg.K8sClient,
+		mounter:     mounter,
+		mountCache:  util.NewMountCache(),
 	}, nil
 }
 

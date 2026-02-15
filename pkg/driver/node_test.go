@@ -2,15 +2,17 @@ package driver
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
+	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/k8s"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/util"
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	mount "k8s.io/mount-utils"
-
-	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/util"
 )
 
 // Valid PVC subDir for tests (matches the /pvcs/pvc-[a-f0-9-]{36} pattern).
@@ -27,7 +29,7 @@ func resolvedTempDir(t *testing.T) string {
 	return resolved
 }
 
-func newNodeTestDriver(mounter mount.Interface, cache *util.MountCache) *Driver {
+func newNodeTestDriver(mounter mount.Interface, cache *util.MountCache, k8sClient k8s.Client) *Driver {
 	if cache == nil {
 		cache = util.NewMountCache()
 	}
@@ -38,15 +40,58 @@ func newNodeTestDriver(mounter mount.Interface, cache *util.MountCache) *Driver 
 		mode:       "node",
 		mounter:    mounter,
 		mountCache: cache,
+		k8sClient:  k8sClient,
 	}
 }
+
+// ---------------------------------------------------------------------------
+// nodeTestK8sClient — minimal k8s.Client mock for node tests
+// ---------------------------------------------------------------------------
+
+type nodeTestK8sClient struct {
+	zone    string
+	zoneErr error
+}
+
+func (n *nodeTestK8sClient) GetNodeZone(_ context.Context, _ string) (string, error) {
+	if n.zoneErr != nil {
+		return "", n.zoneErr
+	}
+	return n.zone, nil
+}
+
+func (n *nodeTestK8sClient) GetFileSharePool(_ context.Context, _ string) (*v1alpha1.FileSharePool, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (n *nodeTestK8sClient) UpdateFileSharePoolStatus(_ context.Context, _ *v1alpha1.FileSharePool) error {
+	return nil
+}
+func (n *nodeTestK8sClient) GetSubVolume(_ context.Context, _ string) (*v1alpha1.SubVolume, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (n *nodeTestK8sClient) ListSubVolumes(_ context.Context, _ string) ([]v1alpha1.SubVolume, error) {
+	return nil, nil
+}
+func (n *nodeTestK8sClient) ListSubVolumesByShare(_ context.Context, _ string) ([]v1alpha1.SubVolume, error) {
+	return nil, nil
+}
+func (n *nodeTestK8sClient) CreateSubVolume(_ context.Context, _ *v1alpha1.SubVolume) error {
+	return nil
+}
+func (n *nodeTestK8sClient) UpdateSubVolume(_ context.Context, _ *v1alpha1.SubVolume) error {
+	return nil
+}
+func (n *nodeTestK8sClient) UpdateSubVolumeStatus(_ context.Context, _ *v1alpha1.SubVolume) error {
+	return nil
+}
+func (n *nodeTestK8sClient) DeleteSubVolume(_ context.Context, _ string) error { return nil }
 
 // ---------------------------------------------------------------------------
 // NodeGetCapabilities
 // ---------------------------------------------------------------------------
 
 func TestNodeGetCapabilities(t *testing.T) {
-	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil)
+	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil, nil)
 
 	resp, err := d.NodeGetCapabilities(context.Background(), &csi.NodeGetCapabilitiesRequest{})
 	if err != nil {
@@ -82,7 +127,7 @@ func TestNodeGetCapabilities(t *testing.T) {
 
 func TestNodeStageVolume_MountsNFS(t *testing.T) {
 	fakeMounter := mount.NewFakeMounter(nil)
-	d := newNodeTestDriver(fakeMounter, nil)
+	d := newNodeTestDriver(fakeMounter, nil, nil)
 
 	stagingPath := filepath.Join(resolvedTempDir(t), "staging")
 
@@ -138,7 +183,7 @@ func TestNodeStageVolume_MountsNFS(t *testing.T) {
 
 func TestNodeStageVolume_DefaultMountOptions(t *testing.T) {
 	fakeMounter := mount.NewFakeMounter(nil)
-	d := newNodeTestDriver(fakeMounter, nil)
+	d := newNodeTestDriver(fakeMounter, nil, nil)
 
 	stagingPath := filepath.Join(resolvedTempDir(t), "staging")
 
@@ -171,7 +216,7 @@ func TestNodeStageVolume_DefaultMountOptions(t *testing.T) {
 
 func TestNodeStageVolume_CustomMountFlags(t *testing.T) {
 	fakeMounter := mount.NewFakeMounter(nil)
-	d := newNodeTestDriver(fakeMounter, nil)
+	d := newNodeTestDriver(fakeMounter, nil, nil)
 
 	stagingPath := filepath.Join(resolvedTempDir(t), "staging")
 
@@ -206,7 +251,7 @@ func TestNodeStageVolume_CustomMountFlags(t *testing.T) {
 func TestNodeStageVolume_Idempotent(t *testing.T) {
 	fakeMounter := mount.NewFakeMounter(nil)
 	cache := util.NewMountCache()
-	d := newNodeTestDriver(fakeMounter, cache)
+	d := newNodeTestDriver(fakeMounter, cache, nil)
 
 	stagingPath := filepath.Join(resolvedTempDir(t), "staging")
 
@@ -241,7 +286,7 @@ func TestNodeStageVolume_Idempotent(t *testing.T) {
 }
 
 func TestNodeStageVolume_MountFails(t *testing.T) {
-	d := newNodeTestDriver(&failingMounter{mountErr: os.ErrPermission}, nil)
+	d := newNodeTestDriver(&failingMounter{mountErr: os.ErrPermission}, nil, nil)
 
 	stagingPath := filepath.Join(resolvedTempDir(t), "staging")
 
@@ -267,7 +312,7 @@ func TestNodeStageVolume_MountFails(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNodePublishVolume_ValidatesSubDir(t *testing.T) {
-	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil)
+	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil, nil)
 
 	tests := []struct {
 		name   string
@@ -299,7 +344,7 @@ func TestNodePublishVolume_ValidatesSubDir(t *testing.T) {
 
 func TestNodePublishVolume_ValidSubDir(t *testing.T) {
 	fakeMounter := mount.NewFakeMounter(nil)
-	d := newNodeTestDriver(fakeMounter, nil)
+	d := newNodeTestDriver(fakeMounter, nil, nil)
 
 	// Create real staging directory with the subdirectory present
 	tmpDir := resolvedTempDir(t)
@@ -334,7 +379,7 @@ func TestNodePublishVolume_ValidSubDir(t *testing.T) {
 
 func TestNodePublishVolume_BindMountCorrectSource(t *testing.T) {
 	fakeMounter := mount.NewFakeMounter(nil)
-	d := newNodeTestDriver(fakeMounter, nil)
+	d := newNodeTestDriver(fakeMounter, nil, nil)
 
 	tmpDir := resolvedTempDir(t)
 	stagingPath := filepath.Join(tmpDir, "staging")
@@ -383,7 +428,7 @@ func TestNodePublishVolume_BindMountCorrectSource(t *testing.T) {
 
 func TestNodePublishVolume_ReadOnly(t *testing.T) {
 	fakeMounter := mount.NewFakeMounter(nil)
-	d := newNodeTestDriver(fakeMounter, nil)
+	d := newNodeTestDriver(fakeMounter, nil, nil)
 
 	tmpDir := resolvedTempDir(t)
 	stagingPath := filepath.Join(tmpDir, "staging")
@@ -443,7 +488,7 @@ func TestNodePublishVolume_ReadOnly(t *testing.T) {
 }
 
 func TestNodePublishVolume_SubDirNotExist(t *testing.T) {
-	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil)
+	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil, nil)
 
 	tmpDir := resolvedTempDir(t)
 	stagingPath := filepath.Join(tmpDir, "staging")
@@ -467,7 +512,7 @@ func TestNodePublishVolume_SubDirNotExist(t *testing.T) {
 }
 
 func TestNodePublishVolume_MountFails(t *testing.T) {
-	d := newNodeTestDriver(&failingMounter{mountErr: os.ErrPermission}, nil)
+	d := newNodeTestDriver(&failingMounter{mountErr: os.ErrPermission}, nil, nil)
 
 	tmpDir := resolvedTempDir(t)
 	stagingPath := filepath.Join(tmpDir, "staging")
@@ -501,7 +546,7 @@ func TestNodePublishVolume_MountFails(t *testing.T) {
 
 func TestNodeUnpublishVolume_Unmounts(t *testing.T) {
 	fakeMounter := mount.NewFakeMounter(nil)
-	d := newNodeTestDriver(fakeMounter, nil)
+	d := newNodeTestDriver(fakeMounter, nil, nil)
 
 	// Create a target dir that will be removed after unmount
 	tmpDir := resolvedTempDir(t)
@@ -540,7 +585,7 @@ func TestNodeUnpublishVolume_Unmounts(t *testing.T) {
 }
 
 func TestNodeUnpublishVolume_UnmountFails(t *testing.T) {
-	d := newNodeTestDriver(&failingMounter{unmountErr: os.ErrPermission}, nil)
+	d := newNodeTestDriver(&failingMounter{unmountErr: os.ErrPermission}, nil, nil)
 
 	_, err := d.NodeUnpublishVolume(context.Background(), &csi.NodeUnpublishVolumeRequest{
 		VolumeId:   "pool/share/pvc",
@@ -552,7 +597,7 @@ func TestNodeUnpublishVolume_UnmountFails(t *testing.T) {
 
 func TestNodeUnpublishVolume_TargetAlreadyGone(t *testing.T) {
 	fakeMounter := mount.NewFakeMounter(nil)
-	d := newNodeTestDriver(fakeMounter, nil)
+	d := newNodeTestDriver(fakeMounter, nil, nil)
 
 	// Target path doesn't exist — os.Remove returns ErrNotExist which is tolerated
 	resp, err := d.NodeUnpublishVolume(context.Background(), &csi.NodeUnpublishVolumeRequest{
@@ -574,7 +619,7 @@ func TestNodeUnpublishVolume_TargetAlreadyGone(t *testing.T) {
 func TestNodeUnstageVolume_UnmountsNFS(t *testing.T) {
 	fakeMounter := mount.NewFakeMounter(nil)
 	cache := util.NewMountCache()
-	d := newNodeTestDriver(fakeMounter, cache)
+	d := newNodeTestDriver(fakeMounter, cache, nil)
 
 	tmpDir := resolvedTempDir(t)
 	stagingPath := filepath.Join(tmpDir, "staging")
@@ -620,7 +665,7 @@ func TestNodeUnstageVolume_UnmountsNFS(t *testing.T) {
 }
 
 func TestNodeUnstageVolume_UnmountFails(t *testing.T) {
-	d := newNodeTestDriver(&failingMounter{unmountErr: os.ErrPermission}, nil)
+	d := newNodeTestDriver(&failingMounter{unmountErr: os.ErrPermission}, nil, nil)
 
 	_, err := d.NodeUnstageVolume(context.Background(), &csi.NodeUnstageVolumeRequest{
 		VolumeId:          "pool/share/pvc",
@@ -633,7 +678,7 @@ func TestNodeUnstageVolume_UnmountFails(t *testing.T) {
 func TestNodeUnstageVolume_StagingAlreadyGone(t *testing.T) {
 	fakeMounter := mount.NewFakeMounter(nil)
 	cache := util.NewMountCache()
-	d := newNodeTestDriver(fakeMounter, cache)
+	d := newNodeTestDriver(fakeMounter, cache, nil)
 
 	// Staging path doesn't exist — os.Remove returns ErrNotExist which is tolerated
 	resp, err := d.NodeUnstageVolume(context.Background(), &csi.NodeUnstageVolumeRequest{
@@ -653,7 +698,7 @@ func TestNodeUnstageVolume_StagingAlreadyGone(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNodeGetVolumeStats_Success(t *testing.T) {
-	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil)
+	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil, nil)
 
 	// Use a real temp dir so unix.Statfs works
 	tmpDir := resolvedTempDir(t)
@@ -703,7 +748,7 @@ func TestNodeGetVolumeStats_Success(t *testing.T) {
 }
 
 func TestNodeGetVolumeStats_InvalidPath(t *testing.T) {
-	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil)
+	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil, nil)
 
 	_, err := d.NodeGetVolumeStats(context.Background(), &csi.NodeGetVolumeStatsRequest{
 		VolumeId:   "pool/share/pvc",
@@ -717,9 +762,34 @@ func TestNodeGetVolumeStats_InvalidPath(t *testing.T) {
 // NodeGetInfo
 // ---------------------------------------------------------------------------
 
-func TestNodeGetInfo_ReturnsError(t *testing.T) {
-	// getNodeZone() is not yet implemented, so this returns Internal error
-	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil)
+func TestNodeGetInfo_ReturnsZone(t *testing.T) {
+	k := &nodeTestK8sClient{zone: "us-south-1"}
+	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil, k)
+
+	resp, err := d.NodeGetInfo(context.Background(), &csi.NodeGetInfoRequest{})
+	if err != nil {
+		t.Fatalf("NodeGetInfo failed: %v", err)
+	}
+	if resp.NodeId != "test-node-01" {
+		t.Errorf("expected node ID 'test-node-01', got %q", resp.NodeId)
+	}
+	zone := resp.GetAccessibleTopology().GetSegments()["topology.kubernetes.io/zone"]
+	if zone != "us-south-1" {
+		t.Errorf("expected zone 'us-south-1', got %q", zone)
+	}
+}
+
+func TestNodeGetInfo_ZoneDetectionFails(t *testing.T) {
+	k := &nodeTestK8sClient{zoneErr: fmt.Errorf("node not found")}
+	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil, k)
+
+	_, err := d.NodeGetInfo(context.Background(), &csi.NodeGetInfoRequest{})
+
+	assertGRPCCode(t, err, codes.Internal)
+}
+
+func TestNodeGetInfo_NoK8sClient(t *testing.T) {
+	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil, nil)
 
 	_, err := d.NodeGetInfo(context.Background(), &csi.NodeGetInfoRequest{})
 

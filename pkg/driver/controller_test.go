@@ -106,6 +106,10 @@ func (m *mockK8sClient) DeleteSubVolume(_ context.Context, _ string) error {
 	return nil
 }
 
+func (m *mockK8sClient) GetNodeZone(_ context.Context, _ string) (string, error) {
+	return "us-south-1", nil
+}
+
 // ---------------------------------------------------------------------------
 // Test Helper
 // ---------------------------------------------------------------------------

@@ -173,8 +173,8 @@ func (d *Driver) NodeGetVolumeStats(_ context.Context, req *csi.NodeGetVolumeSta
 }
 
 // NodeGetInfo returns the node ID and accessible topology (zone).
-func (d *Driver) NodeGetInfo(_ context.Context, _ *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
-	zone, err := d.getNodeZone()
+func (d *Driver) NodeGetInfo(ctx context.Context, _ *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
+	zone, err := d.getNodeZone(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to determine node zone: %v", err)
 	}
@@ -189,8 +189,17 @@ func (d *Driver) NodeGetInfo(_ context.Context, _ *csi.NodeGetInfoRequest) (*csi
 	}, nil
 }
 
-// getNodeZone reads the zone from node labels.
-// TODO: Implement real zone detection via the Kubernetes API.
-func (d *Driver) getNodeZone() (string, error) {
-	return "", fmt.Errorf("not implemented: node zone detection")
+// getNodeZone reads the zone from node labels via the Kubernetes API.
+func (d *Driver) getNodeZone(ctx context.Context) (string, error) {
+	if d.k8sClient == nil {
+		return "", fmt.Errorf("k8s client not configured")
+	}
+	zone, err := d.k8sClient.GetNodeZone(ctx, d.nodeID)
+	if err != nil {
+		return "", fmt.Errorf("get node zone for %q: %w", d.nodeID, err)
+	}
+	if zone == "" {
+		return "", fmt.Errorf("node %q has no topology.kubernetes.io/zone label", d.nodeID)
+	}
+	return zone, nil
 }

@@ -13,6 +13,9 @@ type Client interface {
 	GetFileSharePool(ctx context.Context, name string) (*v1alpha1.FileSharePool, error)
 	UpdateFileSharePoolStatus(ctx context.Context, pool *v1alpha1.FileSharePool) error
 
+	// Node operations
+	GetNodeZone(ctx context.Context, nodeName string) (string, error)
+
 	// SubVolume operations
 	GetSubVolume(ctx context.Context, name string) (*v1alpha1.SubVolume, error)
 	ListSubVolumes(ctx context.Context, poolName string) ([]v1alpha1.SubVolume, error)
