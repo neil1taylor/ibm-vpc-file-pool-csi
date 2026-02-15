@@ -4,12 +4,15 @@ import (
 	"flag"
 	"os"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/driver"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/k8s"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/pool"
 )
 
@@ -44,6 +47,10 @@ func runController(endpoint, nodeID string) {
 		klog.ErrorS(err, "Failed to add CRD types to scheme")
 		os.Exit(1)
 	}
+	if err := corev1.AddToScheme(scheme); err != nil {
+		klog.ErrorS(err, "Failed to add corev1 types to scheme")
+		os.Exit(1)
+	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                  scheme,
@@ -56,10 +63,12 @@ func runController(endpoint, nodeID string) {
 		os.Exit(1)
 	}
 
-	// TODO: Create real k8s.Client and ibmcloud.VPCFileClient implementations.
-	// These are separate tasks per API-KEY-SETUP.md and will be wired here once implemented.
-	// For now, pass nil — the reconciler will panic if actually invoked without real clients.
-	reconciler := pool.NewFileSharePoolReconciler(nil, nil)
+	k8sClient := k8s.NewClient(mgr.GetClient())
+
+	// TODO: Create real ibmcloud.VPCFileClient implementation.
+	// This is a separate task per API-KEY-SETUP.md and will be wired here once implemented.
+	// For now, pass nil — the reconciler will panic if actually invoked without a real VPC client.
+	reconciler := pool.NewFileSharePoolReconciler(k8sClient, nil)
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		klog.ErrorS(err, "Failed to set up reconciler")
 		os.Exit(1)
@@ -67,11 +76,13 @@ func runController(endpoint, nodeID string) {
 
 	// Run CSI gRPC server in a goroutine
 	d, err := driver.NewDriver(driver.Config{
-		Name:     driver.DriverName,
-		Version:  version,
-		NodeID:   nodeID,
-		Endpoint: endpoint,
-		Mode:     "controller",
+		Name:        driver.DriverName,
+		Version:     version,
+		NodeID:      nodeID,
+		Endpoint:    endpoint,
+		Mode:        "controller",
+		K8sClient:   k8sClient,
+		PoolManager: pool.NewManager(k8sClient, nil, nil, "/var/lib/kubelet/plugins/vpc-file-pool.csi.ibm.io/staging"),
 	})
 	if err != nil {
 		klog.ErrorS(err, "Failed to create driver")
@@ -94,12 +105,31 @@ func runController(endpoint, nodeID string) {
 }
 
 func runNode(endpoint, nodeID, mode string) {
+	scheme := runtime.NewScheme()
+	if err := v1alpha1.AddToScheme(scheme); err != nil {
+		klog.ErrorS(err, "Failed to add CRD types to scheme")
+		os.Exit(1)
+	}
+	if err := corev1.AddToScheme(scheme); err != nil {
+		klog.ErrorS(err, "Failed to add corev1 types to scheme")
+		os.Exit(1)
+	}
+
+	restConfig := ctrl.GetConfigOrDie()
+	ctrlClient, err := client.New(restConfig, client.Options{Scheme: scheme})
+	if err != nil {
+		klog.ErrorS(err, "Failed to create controller-runtime client")
+		os.Exit(1)
+	}
+	k8sClient := k8s.NewClient(ctrlClient)
+
 	d, err := driver.NewDriver(driver.Config{
-		Name:     driver.DriverName,
-		Version:  version,
-		NodeID:   nodeID,
-		Endpoint: endpoint,
-		Mode:     mode,
+		Name:      driver.DriverName,
+		Version:   version,
+		NodeID:    nodeID,
+		Endpoint:  endpoint,
+		Mode:      mode,
+		K8sClient: k8sClient,
 	})
 	if err != nil {
 		klog.ErrorS(err, "Failed to create driver")
