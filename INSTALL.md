@@ -216,14 +216,7 @@ spec:
   defaultPermissions: "0755"
   defaultUID: 1000
   defaultGID: 1000
-  secretRef:
-    name: ibm-vpc-file-pool-csi-secret
-    namespace: kube-system
-  mountOptions:
-    - nfsvers=4.1
-    - soft
-    - timeo=600
-    - retrans=3
+  resourceGroup: "your-resource-group-id"
   tags:
     - "env:production"
     - "managed-by:file-pool-csi"
@@ -441,7 +434,7 @@ kubectl logs -n kube-system -l app=vpc-file-pool-csi-node --field-selector spec.
 
 # Common causes:
 # - "NFS mount failed" → TCP 2049 blocked in security group
-# - "subdirectory does not exist" → SubVolume CR exists but mkdir failed; check controller logs
+# - "failed to create subdirectory" → NodePublishVolume could not mkdir on the NFS share; check node agent logs and NFS mount health
 # - "permission denied" → UID/GID mismatch between StorageClass and pod securityContext
 ```
 

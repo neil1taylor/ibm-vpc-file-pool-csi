@@ -18,7 +18,7 @@
 │        │                    │  │  Pool Manager   │                │    │
 │  ┌─────┴───────┐            │  │                 │                │    │
 │  │  CSI Node   │            │  │  - Pick share   │                │    │
-│  │  Agent      │            │  │  - mkdir subdir │                │    │
+│  │  Agent      │            │  │  - Record CR    │                │    │
 │  │  (DaemonSet)│            │  │  - Track alloc  │                │    │
 │  │             │            │  │  - Auto-expand  │                │    │
 │  │  NFS mount  │            │  └───────┬────────┘                │    │
@@ -83,7 +83,7 @@ Runs on every worker node. Implements CSI Node RPCs.
 
 **Responsibilities:**
 - `NodeStageVolume`: Mount the VPC file share (NFS) to a staging directory on the node. If the share is already mounted (another PVC on the same share), reuse the existing mount.
-- `NodePublishVolume`: Bind-mount the specific subdirectory from the staging mount into the pod's volume path.
+- `NodePublishVolume`: Create the subdirectory on the share if it does not already exist (with uid/gid/permissions from VolumeContext), then bind-mount it into the pod's volume path.
 - `NodeUnpublishVolume`: Unmount the bind-mount from the pod path.
 - `NodeUnstageVolume`: Unmount the NFS share from the staging directory (only when no more PVCs reference it on this node).
 - `NodeGetVolumeStats`: Return capacity/usage stats for the subdirectory (via `du` or `statfs`).
@@ -115,11 +115,12 @@ The core logic component. Runs within the controller pod but is architecturally 
 
 ```go
 type PoolManager interface {
-    // Allocate finds a share with room, creates the subdirectory, records the
-    // SubVolume CR, and returns the share's mount info.
+    // Allocate finds a share with room, records the SubVolume CR, and returns
+    // the share's mount info. Subdirectory creation is deferred to NodePublishVolume.
     Allocate(ctx context.Context, req AllocationRequest) (*AllocationResult, error)
 
-    // Deallocate removes the subdirectory and updates tracking.
+    // Deallocate deletes the SubVolume CR and updates pool tracking.
+    // Does not remove the subdirectory on the NFS share (nfsOps is nil in controller mode).
     Deallocate(ctx context.Context, subVolumeName string) error
 
     // Expand updates the allocation size for an existing SubVolume.
@@ -140,6 +141,9 @@ type AllocationResult struct {
     MountTargetIP string
     SubPath       string   // e.g., "/pvcs/pvc-abc123"
     SharePath     string   // e.g., "/" (the NFS export root)
+    UID           *int64   // Optional UID for subdirectory ownership (passed to node via VolumeContext)
+    GID           *int64   // Optional GID for subdirectory ownership (passed to node via VolumeContext)
+    Permissions   string   // Optional permissions for subdirectory (e.g., "0755", passed to node via VolumeContext)
 }
 ```
 
@@ -201,14 +205,12 @@ See `CRD-SPEC.md` for full type definitions.
        │       │   Use this new share
        │       └─ Else: return codes.ResourceExhausted error (retriable)
        │
-       ├─ 4e. Create subdirectory on the share via NFS
-       │       Mount the share temporarily on the controller pod (or use an NFS client library)
-       │       mkdir /pvcs/pvc-{uuid}
-       │       chown uid:gid, chmod permissions
+       ├─ 4e. Create SubVolume CR recording the allocation
        │
-       ├─ 4f. Create SubVolume CR recording the allocation
+       └─ 4f. Return AllocationResult (share IP, subpath, uid, gid, permissions)
        │
-       └─ 4g. Return AllocationResult (share IP, subpath)
+       │   NOTE: Subdirectory creation is deferred to NodePublishVolume on the node agent.
+       │   The controller does NOT create directories on the NFS share (nfsOps is nil).
        │
 5. CSI Controller returns CreateVolumeResponse with:
        - volume_id: "{pool}/{share-id}/{subdir-name}"
@@ -216,13 +218,20 @@ See `CRD-SPEC.md` for full type definitions.
            server: "10.240.1.5"
            share: "/"
            subDir: "/pvcs/pvc-abc123"
+           pool: "general-purpose"
+           shareID: "r006-a1b2c3d4-..."
+           permissions: "0755"   # optional
+           uid: "1000"           # optional
+           gid: "1000"           # optional
        - accessible_topology: [zone]
        │
 6. Kubernetes creates PV, binds it to the PVC
        │
 7. Pod scheduled → kubelet calls NodeStageVolume + NodePublishVolume
        │
-8. Node agent mounts share (if not cached) + bind-mounts subdir into pod
+8. Node agent mounts share (if not cached), creates subdirectory if it
+       does not exist (with uid/gid/permissions from VolumeContext), then
+       bind-mounts subdir into pod
 ```
 
 ## Data Flow: DeleteVolume
@@ -239,11 +248,12 @@ See `CRD-SPEC.md` for full type definitions.
 4. Call PoolManager.Deallocate(ctx, subVolumeName)
        │
        ├─ 4a. Read SubVolume CR to get share details
-       ├─ 4b. Remove subdirectory from share via NFS
-       │       (validate path is within expected share root!)
-       │       rm -rf /pvcs/pvc-{uuid}
-       ├─ 4c. Update FileSharePool.Status (decrement allocated capacity)
-       ├─ 4d. Delete SubVolume CR
+       ├─ 4b. Update FileSharePool.Status (decrement allocated capacity)
+       ├─ 4c. Delete SubVolume CR
+       │
+       │   NOTE: The controller does NOT remove subdirectories on the NFS share
+       │   (nfsOps is nil in controller mode). Subdirectory cleanup is a future
+       │   enhancement or handled by an external garbage collection process.
        │
 5. CSI Controller returns success
 ```
@@ -306,16 +316,20 @@ This format is:
 ### RBAC
 The controller ServiceAccount needs:
 - FileSharePool, SubVolume: full CRUD
-- PersistentVolumes: get, list, watch
-- PersistentVolumeClaims: get, list, watch
-- Secrets: get (for IBM Cloud API key)
+- PersistentVolumes: get, list, watch, create, update, patch, delete (CSI provisioner creates PVs)
+- PersistentVolumeClaims: get, list, watch, update, patch
+- PersistentVolumeClaims/status: patch
+- Nodes: get, list, watch (for topology)
+- Secrets: get, list, watch
+- ConfigMaps: get, list, watch
+- StorageClasses: get, list, watch
 - Events: create, patch
 - Leases: get, create, update (for leader election)
 - CSINode: get, list, watch
 
 ### Secrets
-- IBM Cloud API key stored in a Kubernetes Secret (`ibm-vpc-file-pool-csi-secret`).
-- Referenced by the controller Deployment as an env var or volume mount.
+- On managed clusters (ROKS/IKS), authentication is provided by the `storage-secret-sidecar` which populates the `storage-secret-store` secret. No standalone API key secret is needed.
+- On self-managed clusters, an IBM Cloud API key is stored in a Kubernetes Secret (`ibm-cloud-credentials`).
 - Never logged, never included in CRD status or events.
 
 ### NFS Security

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 IBM VPC File Pool CSI Driver (`ibm-vpc-file-pool-csi`) — a Kubernetes CSI driver that pools multiple PVCs as subdirectories within shared VPC file shares, instead of the traditional 1:1 PVC-to-share mapping. Think of it like VMware: one NFS datastore holds many VMDKs.
 
-**Current state:** This is a design-first project. The repository contains comprehensive specification documents; the Go implementation is to be built following these specs.
+**Current state:** The Go implementation is built. The repository contains both the specification documents and the working code.
 
 ## Reference Documents
 
@@ -70,7 +70,7 @@ test/          → Integration and e2e tests (unit tests live next to code)
 
 ## Key Design Rules
 
-1. **CreateVolume picks an existing share + mkdir** — never creates VPC shares in the hot path
+1. **CreateVolume picks an existing share + records SubVolume CR** — never creates VPC shares in the hot path
 2. **All state in CRDs** — no external DB, no ConfigMaps for state
 3. **Node mounts cached** — one NFS mount per share per node, PVCs bind-mount subdirectories
 4. **Fail safe** — return retriable gRPC errors, never silently overcommit
@@ -78,7 +78,7 @@ test/          → Integration and e2e tests (unit tests live next to code)
 
 ## Testing Conventions
 
-- **Go 1.22+**, module path: `github.com/IBM/ibm-vpc-file-pool-csi`
+- **Go 1.25+**, module path: `github.com/IBM/ibm-vpc-file-pool-csi`
 - Unit tests live next to code (`_test.go`), use table-driven tests
 - Race detector mandatory: `-race` flag
 - Fake VPC client: `pkg/ibmcloud/fake/fake_client.go`

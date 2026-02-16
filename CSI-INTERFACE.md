@@ -167,13 +167,7 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
         Volume: &csi.Volume{
             VolumeId:      volumeID,
             CapacityBytes: requiredGB * (1 << 30),
-            VolumeContext: map[string]string{
-                "server":  result.MountTargetIP,
-                "share":   result.SharePath,
-                "subDir":  result.SubPath,
-                "pool":    poolName,
-                "shareID": result.ShareID,
-            },
+            VolumeContext: buildVolumeContext(result, poolName),
             AccessibleTopology: []*csi.Topology{
                 {
                     Segments: map[string]string{
@@ -183,6 +177,31 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
             },
         },
     }, nil
+}
+```
+
+**VolumeContext helper:**
+
+```go
+func buildVolumeContext(result *pool.AllocationResult, poolName string) map[string]string {
+    vc := map[string]string{
+        "server":  result.MountTargetIP,
+        "share":   result.SharePath,
+        "subDir":  result.SubPath,
+        "pool":    poolName,
+        "shareID": result.ShareID,
+    }
+    // Optional fields — passed through to NodePublishVolume for subdirectory creation
+    if result.Permissions != "" {
+        vc["permissions"] = result.Permissions
+    }
+    if result.UID != nil {
+        vc["uid"] = strconv.FormatInt(*result.UID, 10)
+    }
+    if result.GID != nil {
+        vc["gid"] = strconv.FormatInt(*result.GID, 10)
+    }
+    return vc
 }
 ```
 
@@ -394,9 +413,34 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
     // 3. Build source path (staging mount + subdirectory)
     sourcePath := filepath.Join(stagingPath, subDir)
 
-    // 4. Verify the source subdirectory exists
+    // 4. Create the subdirectory if it does not exist (deferred from controller)
     if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
-        return nil, status.Errorf(codes.NotFound, "subdirectory %s does not exist on share", subDir)
+        perm := os.FileMode(0755)
+        if p := req.GetVolumeContext()["permissions"]; p != "" {
+            if parsed, err := strconv.ParseUint(p, 8, 32); err == nil {
+                perm = os.FileMode(parsed)
+            }
+        }
+        if err := os.MkdirAll(sourcePath, perm); err != nil {
+            return nil, status.Errorf(codes.Internal, "failed to create subdirectory %s: %v", subDir, err)
+        }
+        // Set ownership if uid/gid provided in VolumeContext
+        uid, gid := -1, -1
+        if u := req.GetVolumeContext()["uid"]; u != "" {
+            if parsed, err := strconv.Atoi(u); err == nil {
+                uid = parsed
+            }
+        }
+        if g := req.GetVolumeContext()["gid"]; g != "" {
+            if parsed, err := strconv.Atoi(g); err == nil {
+                gid = parsed
+            }
+        }
+        if uid >= 0 || gid >= 0 {
+            if err := os.Chown(sourcePath, uid, gid); err != nil {
+                klog.ErrorS(err, "Failed to chown subdirectory", "subDir", subDir, "uid", uid, "gid", gid)
+            }
+        }
     }
 
     // 5. Create target directory
@@ -596,6 +640,8 @@ The controller and node run from the same binary but with different flags:
 - `--mode=node` — starts Identity + Node services
 - `--endpoint=/csi/csi.sock` — Unix socket path
 - `--node-id=<hostname>` — node identifier (from downward API)
+- `--vpc-id=<vpc-id>` — VPC ID for mount target creation (controller mode)
+- `--subnet-id=<subnet-id>` — Subnet ID for mount target creation (controller mode)
 
 ---
 

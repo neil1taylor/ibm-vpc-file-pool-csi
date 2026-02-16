@@ -2,7 +2,7 @@
 
 ## Language & Toolchain
 
-- **Go 1.22+** (match the version used by kubernetes/kubernetes at the time of development)
+- **Go 1.25+** (match the version used by kubernetes/kubernetes at the time of development)
 - **Module path:** `github.com/IBM/ibm-vpc-file-pool-csi`
 - **Linter:** `golangci-lint` with the config below
 - **Code generation:** `controller-gen` for CRD types and DeepCopy
@@ -410,7 +410,7 @@ var (
 
 ```dockerfile
 # Build stage
-FROM golang:1.22 AS builder
+FROM golang:1.25 AS builder
 
 WORKDIR /workspace
 COPY go.mod go.sum ./
@@ -422,8 +422,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /vpc-file
 # Runtime stage
 FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
 
-# Install NFS client utilities (needed by node agent for mounting)
-RUN microdnf install -y nfs-utils && microdnf clean all
+# No nfs-utils needed — the node agent runs privileged with host mount utilities.
 
 COPY --from=builder /vpc-file-pool-csi /usr/local/bin/vpc-file-pool-csi
 
@@ -457,7 +456,9 @@ lint:
 	golangci-lint run ./...
 
 generate:
-	controller-gen object paths="./api/..."
+	# NOTE: controller-gen object is NOT run here due to a Go 1.25 bug where
+	# controller-gen generates incomplete deepcopy (nested Spec/Status types
+	# missing). Manually maintain zz_generated.deepcopy.go instead.
 	controller-gen crd paths="./api/..." output:crd:dir=config/crd
 
 docker-build:
@@ -483,20 +484,22 @@ run-local:
 ## golangci-lint Configuration
 
 ```yaml
-# .golangci.yml
+# .golangci.yml (golangci-lint v2)
 linters:
   enable:
     - errcheck
     - govet
-    - staticcheck
-    - gosimple
+    - staticcheck        # includes gosimple (merged in v2)
     - ineffassign
     - unused
     - misspell
+    - gosec
+
+# In v2, gofmt and goimports moved from linters to formatters
+formatters:
+  enable:
     - gofmt
     - goimports
-    - gosec
-    - prealloc
 
 linters-settings:
   errcheck:

@@ -88,7 +88,7 @@ ibm-vpc-file-pool-csi/
 ## Key Design Principles
 
 ### 1. One Share, Many PVCs
-Every `CreateVolume` call picks an existing VPC file share from a pool and creates a subdirectory — it does NOT create a new VPC file share. New shares are only created by the pool manager when capacity runs low.
+Every `CreateVolume` call picks an existing VPC file share from a pool and records a SubVolume CR — it does NOT create a new VPC file share. New shares are only created by the pool manager when capacity runs low.
 
 ### 2. State Lives in CRDs
 All state (which PVC is on which share, capacity allocations, pool membership) is stored in Kubernetes CRDs (`FileSharePool` and `SubVolume`). No external database, no local files on the controller pod.
@@ -136,14 +136,14 @@ make run-local                # Run controller locally against a cluster (dry-ru
 ### When implementing CSI Controller methods
 - Read `CSI-INTERFACE.md` first
 - The controller MUST be idempotent — if called twice with the same volume name, return the same result
-- CreateVolume: call pool manager → mkdir → create SubVolume CR → return
-- DeleteVolume: delete subdir → update pool tracking → delete SubVolume CR
+- CreateVolume: call pool manager → create SubVolume CR → return (no mkdir; subdirectory creation is deferred to NodePublishVolume)
+- DeleteVolume: update pool tracking → delete SubVolume CR (no subdir removal; nfsOps is nil in controller mode)
 - Never call IBM VPC API directly from CSI handlers — go through pool manager
 
 ### When implementing CSI Node methods
 - Read `CSI-INTERFACE.md` (Node section) first
 - NodeStageVolume: mount the whole NFS share if not already mounted
-- NodePublishVolume: bind-mount the subdirectory into the pod path
+- NodePublishVolume: create the subdirectory if it does not exist (with uid/gid/permissions from VolumeContext), then bind-mount it into the pod path
 - Track active mounts in memory with a sync.RWMutex-protected map
 - Always validate mount paths to prevent directory traversal
 
