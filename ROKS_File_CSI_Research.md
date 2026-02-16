@@ -402,6 +402,52 @@ Pods could potentially traverse up the directory tree if mount is misconfigured.
 - Snapshot support (whole-share snapshots with per-PVC restore)
 - Migration tool: convert existing 1:1 PVCs to pool-based PVCs
 
+### Phase 4: OpenShift Virtualization Ready (ODF Replacement)
+
+**Why replace ODF?** ODF (OpenShift Data Foundation / Ceph) is the default storage for KubeVirt on ROKS, but it's expensive (3+ dedicated nodes), operationally complex (Ceph tuning, PG balancing), and slow to deploy. NFS file shares give RWX access mode for free — required for live migration — without a storage cluster. The pool CSI driver already handles provisioning and capacity management; Phase 4 fills the remaining gaps (snapshots, clones, DR) to make it a viable ODF replacement for VM workloads.
+
+#### 4a: Snapshots + Clones (P0 — blocks golden image workflows)
+- CSI `CreateSnapshot` / `DeleteSnapshot` / `ListSnapshots` implementation
+- Two snapshot strategies configurable per pool:
+  - `share` — VPC API whole-share snapshot; fast CoW, restores entire share state
+  - `copy` — directory-level `cp -a` within the share; per-SubVolume granularity, no snapshot quota cost
+- New CRD: `SnapshotRecord` (cluster-scoped) — tracks SubVolume → VPC snapshot mapping, stores snapshot strategy and source metadata
+- Volume cloning via `CreateVolume` with `VolumeContentSource` (both snapshot source and volume source)
+- New VPC client methods: `CreateShareSnapshot`, `GetShareSnapshot`, `DeleteShareSnapshot`, `ListShareSnapshots`
+- `csi-snapshotter` sidecar added to controller deployment
+- Capability additions: `CREATE_DELETE_SNAPSHOT`, `LIST_SNAPSHOTS`, `CLONE_VOLUME`
+
+#### 4b: CDI Integration (P1 — required for VM import)
+- Mostly validation — CDI already works with filesystem-mode PVCs
+- Publish a `StorageProfile` CR for the pool StorageClass (cloneStrategy, access modes, volume mode)
+- Smart cloning: CDI auto-detects CSI snapshot/clone capabilities from 4a and prefers CSI clone over host-assisted copy
+- Validate `qemu-img` file locking over NFSv4.1 (required for CDI's QCOW2 → raw conversion)
+- Test matrix: import from HTTP, registry, upload, and clone-from-existing-VM workflows
+
+#### 4c: Volume Group Snapshots (P2 — multi-disk VM consistency)
+- CSI `CreateVolumeGroupSnapshot` / `DeleteVolumeGroupSnapshot` (CSI spec v1.11+, K8s 1.32+ beta)
+- Same-share case: naturally crash-consistent — one VPC snapshot covers all subdirectories on the share
+- Cross-share case: best-effort — separate VPC snapshots per share, no cross-share consistency guarantee
+- Group affinity in allocator: new `groupKey` parameter co-locates multi-disk VM PVCs on the same share to maximize consistency
+- `csi-group-snapshotter` sidecar added to controller deployment
+
+#### 4d: Disaster Recovery / Cross-Region Replication (P2 — production DR SLAs)
+- Leverage VPC file share async replication (source share → replica share in another zone/region)
+- New VPC client methods: `CreateReplicaShare`, `FailoverShare`, `GetShareReplicaStatus`
+- New fields on FileSharePool CR: `replication.enabled`, `replication.targetZone`, `replication.cronSpec`, `replication.failoverPolicy`
+- Planned failover: quiesce workloads → final sync → promote replica → update SubVolume CRs
+- Unplanned failover: promote replica immediately → accept RPO data loss → update SubVolume CRs
+- DR reconstruction tool: scan replica share directories → recreate SubVolume CRs in target cluster
+- Constraints: ~15-min RPO same-region, ~1-hour RPO cross-region (VPC replication limits)
+
+#### Phase 4 Risks / Limitations
+- **NFS performance tax:** VM disk I/O over NFS adds latency vs. block storage; acceptable for general workloads, not for I/O-intensive databases
+- **Noisy neighbor IOPS:** shared shares mean one VM can starve others — mitigate with smaller max shares per pool and dedicated VM-only pools
+- **Soft quotas only:** no hard per-subdirectory NFS quotas; a runaway VM disk can fill the share
+- **Clone duration:** ~7 min for a 40 GB disk at ~100 MB/s NFS throughput (directory-copy strategy)
+- **Snapshot quota:** 750 snapshots per zonal share, 30 per regional share (VPC limits)
+- **Replication lag:** 15 min to 1 hour RPO depending on zone/region — not suitable for RPO < 15 min SLAs
+
 ---
 
 ## 8. Key Design Decisions to Make
