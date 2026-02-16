@@ -490,12 +490,12 @@ func TestNodePublishVolume_ReadOnly(t *testing.T) {
 	}
 }
 
-func TestNodePublishVolume_SubDirNotExist(t *testing.T) {
+func TestNodePublishVolume_SubDirNotExist_CreatesIt(t *testing.T) {
 	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil, nil)
 
 	tmpDir := resolvedTempDir(t)
 	stagingPath := filepath.Join(tmpDir, "staging")
-	// Don't create the subdir — os.Stat will fail
+	// Don't create the subdir — NodePublishVolume should create it
 	if err := os.MkdirAll(stagingPath, 0750); err != nil {
 		t.Fatalf("setup: create staging dir: %v", err)
 	}
@@ -507,11 +507,26 @@ func TestNodePublishVolume_SubDirNotExist(t *testing.T) {
 		StagingTargetPath: stagingPath,
 		TargetPath:        targetPath,
 		VolumeContext: map[string]string{
-			"subDir": testSubDir,
+			"subDir":      testSubDir,
+			"permissions": "0700",
+			"uid":         "1000",
+			"gid":         "1000",
 		},
 	})
 
-	assertGRPCCode(t, err, codes.NotFound)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	// Verify the subdirectory was created
+	subDirPath := filepath.Join(stagingPath, testSubDir)
+	info, err := os.Stat(subDirPath)
+	if err != nil {
+		t.Fatalf("expected subdirectory to be created: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected %s to be a directory", subDirPath)
+	}
 }
 
 func TestNodePublishVolume_MountFails(t *testing.T) {

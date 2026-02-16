@@ -26,12 +26,16 @@ func main() {
 		nodeID   string
 		mode     string
 		region   string
+		vpcID    string
+		subnetID string
 	)
 
 	flag.StringVar(&endpoint, "endpoint", "unix:///csi/csi.sock", "CSI endpoint")
 	flag.StringVar(&nodeID, "node-id", "", "Node ID")
 	flag.StringVar(&mode, "mode", "controller", "Driver mode: controller or node")
 	flag.StringVar(&region, "region", "", "IBM Cloud region (e.g. us-south), required in controller mode")
+	flag.StringVar(&vpcID, "vpc-id", "", "IBM Cloud VPC ID for creating file share mount targets")
+	flag.StringVar(&subnetID, "subnet-id", "", "IBM Cloud subnet ID for creating file share mount targets")
 
 	klog.InitFlags(nil)
 	flag.Parse()
@@ -43,13 +47,13 @@ func main() {
 			klog.ErrorS(nil, "--region flag is required in controller mode")
 			os.Exit(1)
 		}
-		runController(endpoint, nodeID, region)
+		runController(endpoint, nodeID, region, vpcID, subnetID)
 	} else {
 		runNode(endpoint, nodeID, mode)
 	}
 }
 
-func runController(endpoint, nodeID, region string) {
+func runController(endpoint, nodeID, region, vpcID, subnetID string) {
 	scheme := runtime.NewScheme()
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
 		klog.ErrorS(err, "Failed to add CRD types to scheme")
@@ -89,6 +93,7 @@ func runController(endpoint, nodeID, region string) {
 	}
 
 	reconciler := pool.NewFileSharePoolReconciler(k8sClient, vpcClient)
+	reconciler.SetVPCConfig(vpcID, subnetID)
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		klog.ErrorS(err, "Failed to set up reconciler")
 		os.Exit(1)

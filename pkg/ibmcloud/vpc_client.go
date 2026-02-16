@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/IBM/go-sdk-core/v5/core"
@@ -77,6 +78,13 @@ func NewClientWithProvider(sp SecretProvider, region string) (*Client, error) {
 	}
 	if riaasEndpoint == "" {
 		riaasEndpoint = fmt.Sprintf("https://%s.iaas.cloud.ibm.com/v1", region)
+	}
+
+	// Ensure endpoint ends with /v1 — secret providers return the base URL
+	// (e.g. "https://eu-de.private.iaas.cloud.ibm.com") but the VPC SDK
+	// expects the versioned path.
+	if !strings.HasSuffix(riaasEndpoint, "/v1") {
+		riaasEndpoint = strings.TrimSuffix(riaasEndpoint, "/") + "/v1"
 	}
 
 	klog.V(2).InfoS("Creating VPC API client",

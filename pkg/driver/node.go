@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"golang.org/x/sys/unix"
@@ -82,8 +83,37 @@ func (d *Driver) NodePublishVolume(_ context.Context, req *csi.NodePublishVolume
 
 	sourcePath := filepath.Join(stagingPath, subDir)
 
+	// Create the subdirectory on the NFS share if it doesn't exist yet.
+	// The controller only records the SubVolume CR; actual mkdir happens here
+	// on the node where the NFS share is mounted.
 	if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
-		return nil, status.Errorf(codes.NotFound, "subdirectory %s does not exist on share", subDir)
+		perm := os.FileMode(0755)
+		if p := req.GetVolumeContext()["permissions"]; p != "" {
+			if parsed, err := strconv.ParseUint(p, 8, 32); err == nil {
+				perm = os.FileMode(parsed)
+			}
+		}
+		if err := os.MkdirAll(sourcePath, perm); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to create subdirectory %s: %v", subDir, err)
+		}
+		// Set ownership if specified
+		uidVal, gidVal := -1, -1
+		if u := req.GetVolumeContext()["uid"]; u != "" {
+			if v, err := strconv.Atoi(u); err == nil {
+				uidVal = v
+			}
+		}
+		if g := req.GetVolumeContext()["gid"]; g != "" {
+			if v, err := strconv.Atoi(g); err == nil {
+				gidVal = v
+			}
+		}
+		if uidVal >= 0 || gidVal >= 0 {
+			if err := os.Chown(sourcePath, uidVal, gidVal); err != nil {
+				klog.ErrorS(err, "Failed to chown subdirectory", "path", sourcePath)
+			}
+		}
+		klog.V(2).InfoS("Created subdirectory on NFS share", "path", sourcePath, "perm", perm)
 	}
 
 	if err := os.MkdirAll(targetPath, 0750); err != nil {

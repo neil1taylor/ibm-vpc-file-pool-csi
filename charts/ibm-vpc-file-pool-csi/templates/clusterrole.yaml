@@ -12,13 +12,16 @@ rules:
   - apiGroups: ["storage.ibmcloud.io"]
     resources: ["subvolumes", "subvolumes/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # PV/PVC read access
+  # PV/PVC access (CSI provisioner creates PVs and updates PVC status)
   - apiGroups: [""]
     resources: ["persistentvolumes"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims/status"]
+    verbs: ["patch"]
   # Secrets (for IBM Cloud API key and sidecar secret watcher)
   - apiGroups: [""]
     resources: ["secrets"]
@@ -35,6 +38,10 @@ rules:
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     verbs: ["get", "create", "update"]
+  # Nodes (for CSI topology)
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
   # CSI node info
   - apiGroups: ["storage.k8s.io"]
     resources: ["csinodes"]

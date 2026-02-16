@@ -102,17 +102,28 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 		"requestedGB", requiredGB,
 	)
 
+	volCtx := map[string]string{
+		"server":  result.MountTargetIP,
+		"share":   result.SharePath,
+		"subDir":  result.SubPath,
+		"pool":    poolName,
+		"shareID": result.ShareID,
+	}
+	if result.Permissions != "" {
+		volCtx["permissions"] = result.Permissions
+	}
+	if result.UID != nil {
+		volCtx["uid"] = strconv.FormatInt(*result.UID, 10)
+	}
+	if result.GID != nil {
+		volCtx["gid"] = strconv.FormatInt(*result.GID, 10)
+	}
+
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
 			VolumeId:      volumeID,
 			CapacityBytes: requiredGB * (1 << 30),
-			VolumeContext: map[string]string{
-				"server":  result.MountTargetIP,
-				"share":   result.SharePath,
-				"subDir":  result.SubPath,
-				"pool":    poolName,
-				"shareID": result.ShareID,
-			},
+			VolumeContext: volCtx,
 			AccessibleTopology: []*csi.Topology{
 				{
 					Segments: map[string]string{

@@ -54,6 +54,9 @@ type AllocationResult struct {
 	MountTargetIP string
 	SubPath       string // e.g., "/pvcs/pvc-abc123"
 	SharePath     string // e.g., "/" (the NFS export root)
+	UID           *int64
+	GID           *int64
+	Permissions   string
 }
 
 // Manager implements PoolManager. It is the core brain of the CSI driver.
@@ -103,6 +106,9 @@ func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (*Allocat
 			MountTargetIP: existing.Spec.ShareMountTargetIP,
 			SubPath:       existing.Spec.SubPath,
 			SharePath:     "/",
+			UID:           existing.Spec.UID,
+			GID:           existing.Spec.GID,
+			Permissions:   existing.Spec.Permissions,
 		}, nil
 	}
 
@@ -118,12 +124,14 @@ func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (*Allocat
 		return nil, err
 	}
 
-	// 6. Create subdirectory
+	// 6. Create subdirectory (only when running on the node with NFS access)
 	subPath := fmt.Sprintf("/pvcs/%s", req.PVName)
 	uid, gid, perms := m.resolvePermissions(req, pool)
-	if err := createSubDirectory(m.nfsOps, m.stagingBasePath, subPath, uid, gid, perms); err != nil {
-		klog.ErrorS(err, "Failed to create subdirectory", "subPath", subPath)
-		return nil, fmt.Errorf("create subdirectory: %w", err)
+	if m.nfsOps != nil {
+		if err := createSubDirectory(m.nfsOps, m.stagingBasePath, subPath, uid, gid, perms); err != nil {
+			klog.ErrorS(err, "Failed to create subdirectory", "subPath", subPath)
+			return nil, fmt.Errorf("create subdirectory: %w", err)
+		}
 	}
 
 	// 7. Build and create SubVolume CR
@@ -179,6 +187,9 @@ func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (*Allocat
 		MountTargetIP: share.MountTargetIP,
 		SubPath:       subPath,
 		SharePath:     "/",
+		UID:           uid,
+		GID:           gid,
+		Permissions:   perms,
 	}, nil
 }
 
@@ -198,10 +209,12 @@ func (m *Manager) Deallocate(ctx context.Context, subVolumeName string) error {
 		return fmt.Errorf("get pool %s: %w", sv.Spec.PoolName, err)
 	}
 
-	// 3. Remove subdirectory
-	if err := removeSubDirectory(m.nfsOps, m.stagingBasePath, sv.Spec.SubPath); err != nil {
-		klog.ErrorS(err, "Failed to remove subdirectory, retaining SubVolume CR", "subPath", sv.Spec.SubPath)
-		return fmt.Errorf("remove subdirectory: %w", err)
+	// 3. Remove subdirectory (only when running on the node with NFS access)
+	if m.nfsOps != nil {
+		if err := removeSubDirectory(m.nfsOps, m.stagingBasePath, sv.Spec.SubPath); err != nil {
+			klog.ErrorS(err, "Failed to remove subdirectory, retaining SubVolume CR", "subPath", sv.Spec.SubPath)
+			return fmt.Errorf("remove subdirectory: %w", err)
+		}
 	}
 
 	// 4. Delete SubVolume CR

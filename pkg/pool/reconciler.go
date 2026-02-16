@@ -28,6 +28,8 @@ const (
 type FileSharePoolReconciler struct {
 	k8sClient k8s.Client
 	vpcClient ibmcloud.VPCFileClient
+	vpcID     string
+	subnetID  string
 }
 
 // NewFileSharePoolReconciler creates a new reconciler with the given dependencies.
@@ -36,6 +38,12 @@ func NewFileSharePoolReconciler(k8sClient k8s.Client, vpcClient ibmcloud.VPCFile
 		k8sClient: k8sClient,
 		vpcClient: vpcClient,
 	}
+}
+
+// SetVPCConfig sets the VPC ID and subnet ID used when creating shares with mount targets.
+func (r *FileSharePoolReconciler) SetVPCConfig(vpcID, subnetID string) {
+	r.vpcID = vpcID
+	r.subnetID = subnetID
 }
 
 // Reconcile performs a single reconciliation pass for a FileSharePool.
@@ -288,6 +296,8 @@ func (r *FileSharePoolReconciler) createPoolShare(ctx context.Context, pool *v1a
 		ResourceGroupID:  pool.Spec.ResourceGroup,
 		Tags:             pool.Spec.Tags,
 		EncryptInTransit: pool.Spec.EncryptionInTransit,
+		VPCId:            r.vpcID,
+		SubnetID:         r.subnetID,
 	}
 
 	shareInfo, err := r.vpcClient.CreateFileShare(ctx, input)
