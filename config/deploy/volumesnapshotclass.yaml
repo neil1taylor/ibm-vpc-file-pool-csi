@@ -1,0 +1,6 @@
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: ibm-vpc-file-pool
+driver: vpc-file-pool.csi.ibm.io
+deletionPolicy: Delete

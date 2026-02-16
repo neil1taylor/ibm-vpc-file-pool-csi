@@ -117,6 +117,12 @@ type FileSharePoolSpec struct {
 	// define an implicit default tier.
 	// +optional
 	Tiers []ShareTier `json:"tiers,omitempty"`
+
+	// DrainShares lists VPC share IDs that should be drained (evacuated).
+	// Shares in this list will be marked as "draining" and excluded from new allocations.
+	// Once all SubVolumes are removed from a draining share, it is considered fully drained.
+	// +optional
+	DrainShares []string `json:"drainShares,omitempty"`
 }
 
 // AccessorZone defines a zone where pool shares should have additional mount targets.
@@ -236,6 +242,10 @@ type FileSharePoolStatus struct {
 	// TotalPVCCount is the total number of active SubVolumes across all shares.
 	TotalPVCCount int32 `json:"totalPVCCount"`
 
+	// DrainStatus tracks the progress of share draining operations.
+	// +optional
+	DrainStatus []ShareDrainStatus `json:"drainStatus,omitempty"`
+
 	// Conditions follows the standard Kubernetes conditions pattern.
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
@@ -243,6 +253,22 @@ type FileSharePoolStatus struct {
 	// LastReconcileTime is when the pool was last reconciled.
 	// +optional
 	LastReconcileTime *metav1.Time `json:"lastReconcileTime,omitempty"`
+}
+
+// ShareDrainStatus tracks the draining progress for a single share.
+type ShareDrainStatus struct {
+	// ShareID is the VPC file share ID being drained.
+	ShareID string `json:"shareID"`
+
+	// RemainingSubVolumes is the number of SubVolumes still on this share.
+	RemainingSubVolumes int32 `json:"remainingSubVolumes"`
+
+	// Drained is true when the share has zero SubVolumes remaining.
+	Drained bool `json:"drained"`
+
+	// DrainStartedAt is when the drain was initiated.
+	// +optional
+	DrainStartedAt *metav1.Time `json:"drainStartedAt,omitempty"`
 }
 
 type PoolShareStatus struct {

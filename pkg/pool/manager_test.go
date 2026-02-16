@@ -23,16 +23,19 @@ type fakeNFSOperations struct {
 	mu        sync.Mutex
 	dirs      map[string]os.FileMode
 	chowns    map[string][2]int // path → [uid, gid]
+	copies    map[string]string // dst → src
 	MkdirErr  error
 	RemoveErr error
 	ChownErr  error
 	ChmodErr  error
+	CopyErr   error
 }
 
 func newFakeNFSOperations() *fakeNFSOperations {
 	return &fakeNFSOperations{
 		dirs:   make(map[string]os.FileMode),
 		chowns: make(map[string][2]int),
+		copies: make(map[string]string),
 	}
 }
 
@@ -85,6 +88,23 @@ func (f *fakeNFSOperations) Chmod(path string, mode os.FileMode) error {
 	return nil
 }
 
+func (f *fakeNFSOperations) CopyDir(src, dst string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.CopyErr != nil {
+		return f.CopyErr
+	}
+	f.copies[dst] = src
+	f.dirs[dst] = 0755
+	return nil
+}
+
+func (f *fakeNFSOperations) copyCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.copies)
+}
+
 func (f *fakeNFSOperations) exists(path string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -106,6 +126,7 @@ type fakeK8sClient struct {
 	mu         sync.Mutex
 	pools      map[string]*v1alpha1.FileSharePool
 	subVolumes map[string]*v1alpha1.SubVolume
+	snapshots  map[string]*v1alpha1.Snapshot
 
 	GetPoolErr          error
 	UpdatePoolStatusErr error
@@ -113,6 +134,9 @@ type fakeK8sClient struct {
 	CreateSubVolumeErr  error
 	UpdateSubVolumeErr  error
 	DeleteSubVolumeErr  error
+	GetSnapshotErr      error
+	CreateSnapshotErr   error
+	DeleteSnapshotErr   error
 }
 
 var _ = (interface {
@@ -123,6 +147,7 @@ func newFakeK8sClient() *fakeK8sClient {
 	return &fakeK8sClient{
 		pools:      make(map[string]*v1alpha1.FileSharePool),
 		subVolumes: make(map[string]*v1alpha1.SubVolume),
+		snapshots:  make(map[string]*v1alpha1.Snapshot),
 	}
 }
 
@@ -256,6 +281,122 @@ func (f *fakeK8sClient) GetConfigMapValue(_ context.Context, _, _, _ string) (st
 
 func (f *fakeK8sClient) GetNodeZone(_ context.Context, _ string) (string, error) {
 	return "us-south-1", nil
+}
+
+// --- Snapshot operations ---
+
+func (f *fakeK8sClient) GetSnapshot(_ context.Context, name string) (*v1alpha1.Snapshot, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.GetSnapshotErr != nil {
+		return nil, f.GetSnapshotErr
+	}
+	snap, ok := f.snapshots[name]
+	if !ok {
+		return nil, fmt.Errorf("snapshot %q not found", name)
+	}
+	return snap.DeepCopy(), nil
+}
+
+func (f *fakeK8sClient) ListSnapshots(_ context.Context, poolName string) ([]v1alpha1.Snapshot, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var result []v1alpha1.Snapshot
+	for _, snap := range f.snapshots {
+		if snap.Spec.PoolName == poolName {
+			result = append(result, *snap.DeepCopy())
+		}
+	}
+	return result, nil
+}
+
+func (f *fakeK8sClient) ListSnapshotsByShare(_ context.Context, shareID string) ([]v1alpha1.Snapshot, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var result []v1alpha1.Snapshot
+	for _, snap := range f.snapshots {
+		if snap.Spec.ShareID == shareID {
+			result = append(result, *snap.DeepCopy())
+		}
+	}
+	return result, nil
+}
+
+func (f *fakeK8sClient) ListSnapshotsBySource(_ context.Context, sourceSubVolume string) ([]v1alpha1.Snapshot, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var result []v1alpha1.Snapshot
+	for _, snap := range f.snapshots {
+		if snap.Spec.SourceSubVolume == sourceSubVolume {
+			result = append(result, *snap.DeepCopy())
+		}
+	}
+	return result, nil
+}
+
+func (f *fakeK8sClient) CreateSnapshot(_ context.Context, snap *v1alpha1.Snapshot) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.CreateSnapshotErr != nil {
+		return f.CreateSnapshotErr
+	}
+	if _, exists := f.snapshots[snap.Name]; exists {
+		return fmt.Errorf("snapshot %q already exists", snap.Name)
+	}
+	f.snapshots[snap.Name] = snap.DeepCopy()
+	return nil
+}
+
+func (f *fakeK8sClient) UpdateSnapshot(_ context.Context, snap *v1alpha1.Snapshot) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, exists := f.snapshots[snap.Name]; !exists {
+		return fmt.Errorf("snapshot %q not found", snap.Name)
+	}
+	f.snapshots[snap.Name] = snap.DeepCopy()
+	return nil
+}
+
+func (f *fakeK8sClient) UpdateSnapshotStatus(_ context.Context, snap *v1alpha1.Snapshot) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	existing, ok := f.snapshots[snap.Name]
+	if !ok {
+		return fmt.Errorf("snapshot %q not found", snap.Name)
+	}
+	existing.Status = snap.Status
+	return nil
+}
+
+func (f *fakeK8sClient) DeleteSnapshot(_ context.Context, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.DeleteSnapshotErr != nil {
+		return f.DeleteSnapshotErr
+	}
+	if _, exists := f.snapshots[name]; !exists {
+		return fmt.Errorf("snapshot %q not found", name)
+	}
+	delete(f.snapshots, name)
+	return nil
+}
+
+func (f *fakeK8sClient) addSnapshot(snap *v1alpha1.Snapshot) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.snapshots[snap.Name] = snap.DeepCopy()
+}
+
+func (f *fakeK8sClient) getSnapshot(name string) *v1alpha1.Snapshot {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.snapshots[name]
+}
+
+func (f *fakeK8sClient) snapshotCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.snapshots)
 }
 
 func (f *fakeK8sClient) addPool(pool *v1alpha1.FileSharePool) {
@@ -1702,6 +1843,709 @@ func TestAllocate_NoTiersBackwardCompat(t *testing.T) {
 	}
 	if result.ShareID != "share-1" {
 		t.Errorf("expected share-1 (backward compat), got %s", result.ShareID)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Share Draining Tests
+// ---------------------------------------------------------------------------
+
+func TestAllocate_SkipsDrainingShares(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	drainingShare := newStableShare("share-draining", "s1", 1000, 100, 1)
+	drainingShare.State = "draining"
+	stableShare := newStableShare("share-stable", "s2", 1000, 500, 3)
+
+	pool := newTestPool("test-pool", "spread", 1000, drainingShare, stableShare)
+	k.addPool(pool)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	result, err := mgr.Allocate(context.Background(), AllocationRequest{
+		PVName:       testPVName,
+		PVCName:      "my-pvc",
+		PVCNamespace: "default",
+		PoolName:     "test-pool",
+		RequestedGB:  10,
+	})
+	if err != nil {
+		t.Fatalf("Allocate failed: %v", err)
+	}
+
+	// Should pick stable share, not the draining one
+	if result.ShareID != "share-stable" {
+		t.Errorf("expected share-stable (draining shares excluded), got %s", result.ShareID)
+	}
+}
+
+func TestAllocate_AllSharesDraining_Exhausted(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	drainingShare1 := newStableShare("share-1", "s1", 1000, 100, 1)
+	drainingShare1.State = "draining"
+	drainingShare2 := newStableShare("share-2", "s2", 1000, 200, 2)
+	drainingShare2.State = "draining"
+
+	pool := newTestPool("test-pool", "spread", 1000, drainingShare1, drainingShare2)
+	pool.Spec.AutoExpand = false
+	k.addPool(pool)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	_, err := mgr.Allocate(context.Background(), AllocationRequest{
+		PVName:       testPVName,
+		PVCName:      "my-pvc",
+		PVCNamespace: "default",
+		PoolName:     "test-pool",
+		RequestedGB:  10,
+	})
+
+	if !errors.Is(err, ErrPoolExhausted) {
+		t.Fatalf("expected ErrPoolExhausted when all shares are draining, got: %v", err)
+	}
+}
+
+func TestSelectShare_SkipsDraining(t *testing.T) {
+	shares := []v1alpha1.PoolShareStatus{
+		{ShareID: "s1", TotalGB: 1000, AllocatedGB: 0, State: "draining"},
+		{ShareID: "s2", TotalGB: 1000, AllocatedGB: 0, State: "draining"},
+		newStableShare("s3", "s3", 1000, 500, 3),
+	}
+
+	got, err := selectShare("spread", shares, 10, "")
+	if err != nil {
+		t.Fatalf("selectShare failed: %v", err)
+	}
+	if got.ShareID != "s3" {
+		t.Errorf("expected s3 (only non-draining stable), got %s", got.ShareID)
+	}
+}
+
+func TestSelectShare_AllDraining_Exhausted(t *testing.T) {
+	shares := []v1alpha1.PoolShareStatus{
+		{ShareID: "s1", TotalGB: 1000, AllocatedGB: 0, State: "draining"},
+		{ShareID: "s2", TotalGB: 1000, AllocatedGB: 0, State: "draining"},
+	}
+
+	_, err := selectShare("spread", shares, 10, "")
+	if !errors.Is(err, ErrPoolExhausted) {
+		t.Fatalf("expected ErrPoolExhausted when all shares are draining, got: %v", err)
+	}
+}
+
+func TestAllocate_ConcurrentDrainAndAllocate(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	// One draining, one stable with room, one stable full
+	drainingShare := newStableShare("share-draining", "s1", 1000, 100, 1)
+	drainingShare.State = "draining"
+	stableShare := newStableShare("share-stable", "s2", 1000, 500, 3)
+	fullShare := newStableShare("share-full", "s3", 1000, 1000, 10)
+
+	pool := newTestPool("test-pool", "spread", 1000, drainingShare, stableShare, fullShare)
+	k.addPool(pool)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	// Run 5 concurrent allocations — all should go to share-stable
+	errCh := make(chan error, 5)
+	resultCh := make(chan *AllocationResult, 5)
+	for i := 0; i < 5; i++ {
+		go func(i int) {
+			pvName := fmt.Sprintf("pvc-%08x-0000-0000-0000-000000000000", i)
+			r, err := mgr.Allocate(context.Background(), AllocationRequest{
+				PVName:       pvName,
+				PVCName:      fmt.Sprintf("pvc-%d", i),
+				PVCNamespace: "default",
+				PoolName:     "test-pool",
+				RequestedGB:  10,
+			})
+			errCh <- err
+			resultCh <- r
+		}(i)
+	}
+
+	for i := 0; i < 5; i++ {
+		err := <-errCh
+		result := <-resultCh
+		if err != nil {
+			t.Errorf("allocation %d failed: %v", i, err)
+			continue
+		}
+		if result.ShareID == "share-draining" {
+			t.Errorf("allocation %d went to draining share", i)
+		}
+		if result.ShareID == "share-full" {
+			t.Errorf("allocation %d went to full share", i)
+		}
+	}
+}
+
+func TestDeallocate_FromDrainingShare(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	// Share is draining but still has SubVolumes
+	drainingShare := newStableShare("share-draining", "s1", 1000, 50, 1)
+	drainingShare.State = "draining"
+	pool := newTestPool("test-pool", "spread", 1000, drainingShare)
+	k.addPool(pool)
+
+	sv := newTestSubVolume(testPVName, "test-pool", "share-draining", 50)
+	k.addSubVolume(sv)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	err := mgr.Deallocate(context.Background(), testPVName)
+	if err != nil {
+		t.Fatalf("Deallocate from draining share should succeed: %v", err)
+	}
+
+	// SubVolume should be deleted
+	if k.subVolumeCount() != 0 {
+		t.Error("SubVolume CR should be deleted even from draining share")
+	}
+
+	// Pool status should be updated
+	updatedPool := k.getPool("test-pool")
+	if updatedPool.Status.Shares[0].AllocatedGB != 0 {
+		t.Errorf("expected AllocatedGB=0 after deallocation, got %d", updatedPool.Status.Shares[0].AllocatedGB)
+	}
+	if updatedPool.Status.Shares[0].PVCCount != 0 {
+		t.Errorf("expected PVCCount=0 after deallocation, got %d", updatedPool.Status.Shares[0].PVCCount)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Snapshot Tests
+// ---------------------------------------------------------------------------
+
+func TestCreateSnapshot_Success(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 100, 1),
+	)
+	k.addPool(pool)
+
+	sv := newTestSubVolume(testPVName, "test-pool", "share-1", 10)
+	k.addSubVolume(sv)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	sourceVolumeID := fmt.Sprintf("test-pool/share-1/%s", testPVName)
+	result, err := mgr.CreateSnapshot(context.Background(), "my-snapshot", sourceVolumeID, nil)
+	if err != nil {
+		t.Fatalf("CreateSnapshot failed: %v", err)
+	}
+
+	if result.SnapshotName != "my-snapshot" {
+		t.Errorf("expected snapshot name 'my-snapshot', got %q", result.SnapshotName)
+	}
+	if result.PoolName != "test-pool" {
+		t.Errorf("expected pool 'test-pool', got %q", result.PoolName)
+	}
+	if result.ShareID != "share-1" {
+		t.Errorf("expected shareID 'share-1', got %q", result.ShareID)
+	}
+	if !result.ReadyToUse {
+		t.Error("expected ReadyToUse=true")
+	}
+	if result.SizeBytes != 10*(1<<30) {
+		t.Errorf("expected SizeBytes=%d, got %d", 10*(1<<30), result.SizeBytes)
+	}
+
+	// Verify Snapshot CR was created
+	snap := k.getSnapshot("my-snapshot")
+	if snap == nil {
+		t.Fatal("Snapshot CR not created")
+	}
+	if snap.Spec.SourceSubVolume != testPVName {
+		t.Errorf("expected source %s, got %s", testPVName, snap.Spec.SourceSubVolume)
+	}
+
+	// Verify NFS copy happened
+	if nfs.copyCount() != 1 {
+		t.Errorf("expected 1 copy, got %d", nfs.copyCount())
+	}
+
+	// Verify pool allocation was updated (snapshot counts toward capacity)
+	updatedPool := k.getPool("test-pool")
+	if updatedPool.Status.TotalAllocatedGB != 110 {
+		t.Errorf("expected TotalAllocatedGB=110 (100 + 10 snapshot), got %d", updatedPool.Status.TotalAllocatedGB)
+	}
+}
+
+func TestCreateSnapshot_Idempotent(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 100, 1),
+	)
+	k.addPool(pool)
+
+	sv := newTestSubVolume(testPVName, "test-pool", "share-1", 10)
+	k.addSubVolume(sv)
+
+	// Pre-existing snapshot
+	now := metav1.Now()
+	existingSnap := &v1alpha1.Snapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-snapshot"},
+		Spec: v1alpha1.SnapshotSpec{
+			SourceSubVolume: testPVName,
+			PoolName:        "test-pool",
+			ShareID:         "share-1",
+			SnapshotPath:    "/pvcs/.snapshots/snap-my-snapshot",
+			SourceSubPath:   fmt.Sprintf("/pvcs/%s", testPVName),
+			SizeGB:          10,
+		},
+		Status: v1alpha1.SnapshotStatus{
+			Phase:        "Ready",
+			ReadyToUse:   true,
+			SizeBytes:    10 * (1 << 30),
+			CreationTime: &now,
+		},
+	}
+	k.addSnapshot(existingSnap)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	sourceVolumeID := fmt.Sprintf("test-pool/share-1/%s", testPVName)
+	result, err := mgr.CreateSnapshot(context.Background(), "my-snapshot", sourceVolumeID, nil)
+	if err != nil {
+		t.Fatalf("CreateSnapshot failed: %v", err)
+	}
+
+	if result.SnapshotName != "my-snapshot" {
+		t.Errorf("expected idempotent return, got %q", result.SnapshotName)
+	}
+
+	// No copy should have happened
+	if nfs.copyCount() != 0 {
+		t.Errorf("expected no copies for idempotent call, got %d", nfs.copyCount())
+	}
+}
+
+func TestCreateSnapshot_SourceNotFound(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	_, err := mgr.CreateSnapshot(context.Background(), "my-snapshot", "test-pool/share-1/nonexistent", nil)
+
+	if !errors.Is(err, ErrSourceNotFound) {
+		t.Fatalf("expected ErrSourceNotFound, got: %v", err)
+	}
+}
+
+func TestCreateSnapshot_CopyFails(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+	nfs.CopyErr = errors.New("cp failed")
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 100, 1),
+	)
+	k.addPool(pool)
+
+	sv := newTestSubVolume(testPVName, "test-pool", "share-1", 10)
+	k.addSubVolume(sv)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	sourceVolumeID := fmt.Sprintf("test-pool/share-1/%s", testPVName)
+	_, err := mgr.CreateSnapshot(context.Background(), "my-snapshot", sourceVolumeID, nil)
+
+	if err == nil {
+		t.Fatal("expected error when copy fails")
+	}
+
+	// Snapshot CR should not be created
+	if k.snapshotCount() != 0 {
+		t.Error("Snapshot CR should not be created when copy fails")
+	}
+}
+
+func TestDeleteSnapshot_Success(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 110, 2), // 100 from SVs + 10 from snapshot
+	)
+	k.addPool(pool)
+
+	now := metav1.Now()
+	snap := &v1alpha1.Snapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-snapshot"},
+		Spec: v1alpha1.SnapshotSpec{
+			SourceSubVolume: testPVName,
+			PoolName:        "test-pool",
+			ShareID:         "share-1",
+			SnapshotPath:    "/pvcs/.snapshots/snap-my-snapshot",
+			SourceSubPath:   fmt.Sprintf("/pvcs/%s", testPVName),
+			SizeGB:          10,
+		},
+		Status: v1alpha1.SnapshotStatus{
+			Phase:        "Ready",
+			ReadyToUse:   true,
+			CreationTime: &now,
+		},
+	}
+	k.addSnapshot(snap)
+
+	// Pre-create snapshot dir
+	nfs.dirs["/mnt/staging/pvcs/.snapshots/snap-my-snapshot"] = 0755
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	err := mgr.DeleteSnapshot(context.Background(), "my-snapshot")
+	if err != nil {
+		t.Fatalf("DeleteSnapshot failed: %v", err)
+	}
+
+	// Snapshot CR should be deleted
+	if k.snapshotCount() != 0 {
+		t.Error("Snapshot CR should be deleted")
+	}
+
+	// Directory should be removed
+	if nfs.exists("/mnt/staging/pvcs/.snapshots/snap-my-snapshot") {
+		t.Error("expected snapshot directory to be removed")
+	}
+
+	// Pool capacity should be freed
+	updatedPool := k.getPool("test-pool")
+	if updatedPool.Status.TotalAllocatedGB != 100 {
+		t.Errorf("expected TotalAllocatedGB=100, got %d", updatedPool.Status.TotalAllocatedGB)
+	}
+}
+
+func TestDeleteSnapshot_NotFound(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	err := mgr.DeleteSnapshot(context.Background(), "nonexistent")
+
+	if !errors.Is(err, ErrSnapshotNotFound) {
+		t.Fatalf("expected ErrSnapshotNotFound, got: %v", err)
+	}
+}
+
+func TestDeleteSnapshot_RemoveFails(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+	nfs.RemoveErr = errors.New("I/O error")
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 110, 2),
+	)
+	k.addPool(pool)
+
+	snap := &v1alpha1.Snapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-snapshot"},
+		Spec: v1alpha1.SnapshotSpec{
+			PoolName:     "test-pool",
+			ShareID:      "share-1",
+			SnapshotPath: "/pvcs/.snapshots/snap-my-snapshot",
+			SizeGB:       10,
+		},
+	}
+	k.addSnapshot(snap)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	err := mgr.DeleteSnapshot(context.Background(), "my-snapshot")
+	if err == nil {
+		t.Fatal("expected error when remove fails")
+	}
+
+	// Snapshot CR should still exist
+	if k.snapshotCount() == 0 {
+		t.Error("Snapshot CR should be retained when remove fails")
+	}
+}
+
+func TestRestoreSnapshot_Success(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 100, 1),
+	)
+	k.addPool(pool)
+
+	now := metav1.Now()
+	snap := &v1alpha1.Snapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-snapshot"},
+		Spec: v1alpha1.SnapshotSpec{
+			SourceSubVolume:    testPVName,
+			PoolName:           "test-pool",
+			ShareID:            "share-1",
+			ShareMountTargetIP: "10.240.0.1",
+			SnapshotPath:       "/pvcs/.snapshots/snap-my-snapshot",
+			SourceSubPath:      fmt.Sprintf("/pvcs/%s", testPVName),
+			SizeGB:             10,
+		},
+		Status: v1alpha1.SnapshotStatus{
+			Phase:        "Ready",
+			ReadyToUse:   true,
+			CreationTime: &now,
+		},
+	}
+	k.addSnapshot(snap)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	const restorePVName = "pvc-b2c3d4e5-6789-01ab-cdef-234567890abc"
+	result, err := mgr.RestoreSnapshot(context.Background(), "my-snapshot", AllocationRequest{
+		PVName:       restorePVName,
+		PVCName:      "restore-pvc",
+		PVCNamespace: "default",
+		PoolName:     "test-pool",
+		RequestedGB:  10,
+	})
+	if err != nil {
+		t.Fatalf("RestoreSnapshot failed: %v", err)
+	}
+
+	if result.ShareID != "share-1" {
+		t.Errorf("expected shareID 'share-1', got %q", result.ShareID)
+	}
+	if result.SubPath != fmt.Sprintf("/pvcs/%s", restorePVName) {
+		t.Errorf("expected subPath '/pvcs/%s', got %q", restorePVName, result.SubPath)
+	}
+
+	// Verify SubVolume CR was created
+	sv := k.getSubVolume(restorePVName)
+	if sv == nil {
+		t.Fatal("SubVolume CR not created")
+	}
+
+	// Verify NFS copy happened
+	if nfs.copyCount() != 1 {
+		t.Errorf("expected 1 copy, got %d", nfs.copyCount())
+	}
+}
+
+func TestRestoreSnapshot_Idempotent(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 100, 1),
+	)
+	k.addPool(pool)
+
+	now := metav1.Now()
+	snap := &v1alpha1.Snapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-snapshot"},
+		Spec: v1alpha1.SnapshotSpec{
+			PoolName:     "test-pool",
+			ShareID:      "share-1",
+			SnapshotPath: "/pvcs/.snapshots/snap-my-snapshot",
+			SizeGB:       10,
+		},
+		Status: v1alpha1.SnapshotStatus{
+			Phase:        "Ready",
+			ReadyToUse:   true,
+			CreationTime: &now,
+		},
+	}
+	k.addSnapshot(snap)
+
+	// Pre-existing SubVolume (already restored)
+	const restorePVName = "pvc-b2c3d4e5-6789-01ab-cdef-234567890abc"
+	existingSV := newTestSubVolume(restorePVName, "test-pool", "share-1", 10)
+	k.addSubVolume(existingSV)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	result, err := mgr.RestoreSnapshot(context.Background(), "my-snapshot", AllocationRequest{
+		PVName:       restorePVName,
+		PVCName:      "restore-pvc",
+		PVCNamespace: "default",
+		PoolName:     "test-pool",
+		RequestedGB:  10,
+	})
+	if err != nil {
+		t.Fatalf("RestoreSnapshot failed: %v", err)
+	}
+
+	if result.ShareID != "share-1" {
+		t.Errorf("expected idempotent return with shareID 'share-1', got %q", result.ShareID)
+	}
+
+	// No copy should happen
+	if nfs.copyCount() != 0 {
+		t.Errorf("expected no copies for idempotent call, got %d", nfs.copyCount())
+	}
+}
+
+func TestRestoreSnapshot_NotFound(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 100, 1),
+	)
+	k.addPool(pool)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	_, err := mgr.RestoreSnapshot(context.Background(), "nonexistent", AllocationRequest{
+		PVName:       "pvc-b2c3d4e5-6789-01ab-cdef-234567890abc",
+		PVCName:      "restore-pvc",
+		PVCNamespace: "default",
+		PoolName:     "test-pool",
+		RequestedGB:  10,
+	})
+
+	if !errors.Is(err, ErrSnapshotNotFound) {
+		t.Fatalf("expected ErrSnapshotNotFound, got: %v", err)
+	}
+}
+
+func TestRestoreSnapshot_PoolExhausted(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 1000, 10), // full
+	)
+	pool.Spec.AutoExpand = false
+	pool.Spec.MaxShares = 1
+	k.addPool(pool)
+
+	now := metav1.Now()
+	snap := &v1alpha1.Snapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-snapshot"},
+		Spec: v1alpha1.SnapshotSpec{
+			PoolName:     "test-pool",
+			ShareID:      "share-1",
+			SnapshotPath: "/pvcs/.snapshots/snap-my-snapshot",
+			SizeGB:       10,
+		},
+		Status: v1alpha1.SnapshotStatus{
+			Phase:        "Ready",
+			ReadyToUse:   true,
+			CreationTime: &now,
+		},
+	}
+	k.addSnapshot(snap)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	_, err := mgr.RestoreSnapshot(context.Background(), "my-snapshot", AllocationRequest{
+		PVName:       "pvc-b2c3d4e5-6789-01ab-cdef-234567890abc",
+		PVCName:      "restore-pvc",
+		PVCNamespace: "default",
+		PoolName:     "test-pool",
+		RequestedGB:  10,
+	})
+
+	if !errors.Is(err, ErrPoolExhausted) {
+		t.Fatalf("expected ErrPoolExhausted, got: %v", err)
+	}
+}
+
+func TestListSnapshots_BySource(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	now := metav1.Now()
+	snap1 := &v1alpha1.Snapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "snap-1"},
+		Spec: v1alpha1.SnapshotSpec{
+			SourceSubVolume: testPVName,
+			PoolName:        "test-pool",
+			ShareID:         "share-1",
+			SizeGB:          10,
+		},
+		Status: v1alpha1.SnapshotStatus{ReadyToUse: true, CreationTime: &now},
+	}
+	snap2 := &v1alpha1.Snapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "snap-2"},
+		Spec: v1alpha1.SnapshotSpec{
+			SourceSubVolume: testPVName,
+			PoolName:        "test-pool",
+			ShareID:         "share-1",
+			SizeGB:          10,
+		},
+		Status: v1alpha1.SnapshotStatus{ReadyToUse: true, CreationTime: &now},
+	}
+	k.addSnapshot(snap1)
+	k.addSnapshot(snap2)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	sourceVolumeID := fmt.Sprintf("test-pool/share-1/%s", testPVName)
+	results, err := mgr.ListSnapshots(context.Background(), sourceVolumeID)
+	if err != nil {
+		t.Fatalf("ListSnapshots failed: %v", err)
+	}
+
+	if len(results) != 2 {
+		t.Errorf("expected 2 snapshots, got %d", len(results))
+	}
+}
+
+func TestCreateSnapshot_MetricsIncremented(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	pool := newTestPool("snap-metrics-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 0, 0),
+	)
+	k.addPool(pool)
+
+	sv := newTestSubVolume(testPVName, "snap-metrics-pool", "share-1", 10)
+	k.addSubVolume(sv)
+
+	var before dto.Metric
+	_ = metrics.SnapshotsTotal.WithLabelValues("snap-metrics-pool", "create", "success").Write(&before)
+	beforeVal := getCounterValue(&before)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	sourceVolumeID := fmt.Sprintf("snap-metrics-pool/share-1/%s", testPVName)
+	_, err := mgr.CreateSnapshot(context.Background(), "metrics-snap", sourceVolumeID, nil)
+	if err != nil {
+		t.Fatalf("CreateSnapshot failed: %v", err)
+	}
+
+	var after dto.Metric
+	_ = metrics.SnapshotsTotal.WithLabelValues("snap-metrics-pool", "create", "success").Write(&after)
+	afterVal := getCounterValue(&after)
+
+	if afterVal <= beforeVal {
+		t.Errorf("expected snapshot create success counter to increment, before=%f after=%f", beforeVal, afterVal)
 	}
 }
 

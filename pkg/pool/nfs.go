@@ -1,6 +1,10 @@
 package pool
 
-import "os"
+import (
+	"fmt"
+	"os"
+	"os/exec"
+)
 
 // NFSOperations wraps filesystem calls for testability.
 // The real implementation delegates to os.* functions.
@@ -11,6 +15,7 @@ type NFSOperations interface {
 	Stat(path string) (os.FileInfo, error)
 	Chown(path string, uid, gid int) error
 	Chmod(path string, mode os.FileMode) error
+	CopyDir(src, dst string) error
 }
 
 type realNFSOperations struct{}
@@ -38,4 +43,13 @@ func (r *realNFSOperations) Chown(path string, uid, gid int) error {
 
 func (r *realNFSOperations) Chmod(path string, mode os.FileMode) error {
 	return os.Chmod(path, mode)
+}
+
+func (r *realNFSOperations) CopyDir(src, dst string) error {
+	cmd := exec.Command("cp", "-a", src, dst)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("cp -a %s %s: %w (output: %s)", src, dst, err, string(output))
+	}
+	return nil
 }

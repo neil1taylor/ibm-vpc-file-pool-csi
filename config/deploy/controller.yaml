@@ -50,6 +50,16 @@ spec:
             - name: socket-dir
               mountPath: /csi
 
+        - name: csi-snapshotter
+          image: registry.k8s.io/sig-storage/csi-snapshotter:v8.2.0
+          args:
+            - "--csi-address=/csi/csi.sock"
+            - "--leader-election"
+            - "--leader-election-namespace=kube-system"
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+
         - name: liveness-probe
           image: registry.k8s.io/sig-storage/livenessprobe:v2.14.0
           args:

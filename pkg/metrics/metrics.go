@@ -76,6 +76,25 @@ var (
 		},
 		[]string{"operation"},
 	)
+
+	// SnapshotsTotal counts snapshot operations by pool, operation (create/delete/restore), and status.
+	SnapshotsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "vpc_file_pool_snapshots_total",
+			Help: "Total number of snapshot operations",
+		},
+		[]string{"pool", "operation", "status"},
+	)
+
+	// SnapshotDuration tracks the time for snapshot operations.
+	SnapshotDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "vpc_file_pool_snapshot_duration_seconds",
+			Help:    "Time for snapshot operations",
+			Buckets: prometheus.ExponentialBuckets(0.01, 2, 15), // 10ms to ~163s
+		},
+		[]string{"pool", "operation"},
+	)
 )
 
 func init() {
@@ -88,5 +107,7 @@ func init() {
 		PoolPVCCount,
 		VPCAPICallsTotal,
 		VPCAPICallDuration,
+		SnapshotsTotal,
+		SnapshotDuration,
 	)
 }

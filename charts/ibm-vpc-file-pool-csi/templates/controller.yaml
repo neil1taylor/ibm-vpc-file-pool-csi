@@ -95,6 +95,16 @@ spec:
             - name: socket-dir
               mountPath: /csi
 
+        - name: csi-snapshotter
+          image: {{ .Values.sidecars.snapshotter.image }}
+          args:
+            - "--csi-address=/csi/csi.sock"
+            - "--leader-election"
+            - "--leader-election-namespace={{ .Release.Namespace }}"
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+
         - name: liveness-probe
           image: {{ .Values.sidecars.liveness.image }}
           args:

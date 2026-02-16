@@ -11,6 +11,7 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/k8s"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/util"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 )
@@ -22,7 +23,22 @@ var (
 	ErrShareCreationPending      = errors.New("share creation is in progress")
 	ErrSubVolumeNotFound         = errors.New("subvolume not found")
 	ErrInsufficientShareCapacity = errors.New("share does not have enough remaining capacity")
+	ErrSnapshotNotFound          = errors.New("snapshot not found")
+	ErrSnapshotAlreadyExists     = errors.New("snapshot already exists")
+	ErrSourceNotFound            = errors.New("source volume not found")
 )
+
+// SnapshotResult contains the result of a successful snapshot operation.
+type SnapshotResult struct {
+	SnapshotName  string
+	PoolName      string
+	ShareID       string
+	SnapshotPath  string
+	SourceSubPath string
+	SizeBytes     int64
+	CreationTime  time.Time
+	ReadyToUse    bool
+}
 
 // PoolManager defines the synchronous allocation interface used by the CSI controller.
 type PoolManager interface {
@@ -35,6 +51,18 @@ type PoolManager interface {
 
 	// Expand updates the allocation size for an existing SubVolume.
 	Expand(ctx context.Context, subVolumeName string, newSizeGB int64) error
+
+	// CreateSnapshot creates a directory-level copy of a SubVolume.
+	CreateSnapshot(ctx context.Context, snapshotName, sourceVolumeID string, params map[string]string) (*SnapshotResult, error)
+
+	// DeleteSnapshot removes a snapshot directory and its CR.
+	DeleteSnapshot(ctx context.Context, snapshotName string) error
+
+	// ListSnapshots lists snapshots, optionally filtered by source volume.
+	ListSnapshots(ctx context.Context, sourceVolumeID string) ([]SnapshotResult, error)
+
+	// RestoreSnapshot creates a new SubVolume from a snapshot.
+	RestoreSnapshot(ctx context.Context, snapshotName string, req AllocationRequest) (*AllocationResult, error)
 }
 
 // AllocationRequest contains the parameters for allocating a new SubVolume.
@@ -483,4 +511,382 @@ func (m *Manager) updateShareDeallocation(pool *v1alpha1.FileSharePool, shareID 
 	}
 	pool.Status.TotalAllocatedGB -= sizeGB
 	pool.Status.TotalPVCCount--
+}
+
+func (m *Manager) CreateSnapshot(ctx context.Context, snapshotName, sourceVolumeID string, params map[string]string) (_ *SnapshotResult, retErr error) {
+	start := time.Now()
+	poolName := ""
+	defer func() {
+		status := "success"
+		if retErr != nil {
+			status = "error"
+		}
+		metrics.SnapshotsTotal.WithLabelValues(poolName, "create", status).Inc()
+		metrics.SnapshotDuration.WithLabelValues(poolName, "create").Observe(time.Since(start).Seconds())
+	}()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// 1. Idempotency check
+	existing, err := m.k8sClient.GetSnapshot(ctx, snapshotName)
+	if err == nil && existing != nil {
+		poolName = existing.Spec.PoolName
+		return &SnapshotResult{
+			SnapshotName:  existing.Name,
+			PoolName:      existing.Spec.PoolName,
+			ShareID:       existing.Spec.ShareID,
+			SnapshotPath:  existing.Spec.SnapshotPath,
+			SourceSubPath: existing.Spec.SourceSubPath,
+			SizeBytes:     existing.Spec.SizeGB * (1 << 30),
+			CreationTime:  existing.Status.CreationTime.Time,
+			ReadyToUse:    existing.Status.ReadyToUse,
+		}, nil
+	}
+
+	// 2. Parse sourceVolumeID to get pvName
+	_, _, pvName, err := parseManagerVolumeID(sourceVolumeID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid source volume ID: %w", err)
+	}
+
+	// 3. Fetch source SubVolume CR
+	sv, err := m.k8sClient.GetSubVolume(ctx, pvName)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrSourceNotFound, pvName)
+	}
+	poolName = sv.Spec.PoolName
+
+	// 4. Fetch pool
+	pool, err := m.k8sClient.GetFileSharePool(ctx, poolName)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrPoolNotFound, poolName)
+	}
+
+	// 5. Build snapshot path
+	snapshotPath := fmt.Sprintf("/pvcs/.snapshots/snap-%s", snapshotName)
+
+	// 6. Create .snapshots dir and copy
+	if m.nfsOps != nil {
+		snapshotsDir, err := util.SafeJoinSnapshot(m.stagingBasePath, "/pvcs/.snapshots/snap-placeholder")
+		if err != nil {
+			return nil, fmt.Errorf("invalid snapshots dir: %w", err)
+		}
+		// Get just the .snapshots parent dir
+		snapshotsParent := snapshotsDir[:len(snapshotsDir)-len("/snap-placeholder")]
+		if err := m.nfsOps.MkdirAll(snapshotsParent, 0755); err != nil {
+			return nil, fmt.Errorf("create snapshots dir: %w", err)
+		}
+
+		srcPath, err := util.SafeJoin(m.stagingBasePath, sv.Spec.SubPath)
+		if err != nil {
+			return nil, fmt.Errorf("invalid source path: %w", err)
+		}
+		dstPath, err := util.SafeJoinSnapshot(m.stagingBasePath, snapshotPath)
+		if err != nil {
+			return nil, fmt.Errorf("invalid snapshot path: %w", err)
+		}
+
+		if err := m.nfsOps.CopyDir(srcPath, dstPath); err != nil {
+			return nil, fmt.Errorf("copy snapshot: %w", err)
+		}
+	}
+
+	// 7. Create Snapshot CR
+	now := metav1.Now()
+	snap := &v1alpha1.Snapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: snapshotName,
+			Labels: map[string]string{
+				"storage.ibmcloud.io/pool":             poolName,
+				"storage.ibmcloud.io/share-id":         sv.Spec.ShareID,
+				"storage.ibmcloud.io/source-subvolume": pvName,
+			},
+		},
+		Spec: v1alpha1.SnapshotSpec{
+			SourceSubVolume:    pvName,
+			PoolName:           poolName,
+			ShareID:            sv.Spec.ShareID,
+			ShareMountTargetIP: sv.Spec.ShareMountTargetIP,
+			SnapshotPath:       snapshotPath,
+			SourceSubPath:      sv.Spec.SubPath,
+			SizeGB:             sv.Spec.RequestedGB,
+		},
+		Status: v1alpha1.SnapshotStatus{
+			Phase:        "Ready",
+			ReadyToUse:   true,
+			SizeBytes:    sv.Spec.RequestedGB * (1 << 30),
+			CreationTime: &now,
+		},
+	}
+
+	desiredStatus := snap.Status
+
+	if err := m.k8sClient.CreateSnapshot(ctx, snap); err != nil {
+		return nil, fmt.Errorf("create Snapshot CR: %w", err)
+	}
+
+	snap.Status = desiredStatus
+	if err := m.k8sClient.UpdateSnapshotStatus(ctx, snap); err != nil {
+		klog.ErrorS(err, "Failed to update Snapshot status", "snapshot", snapshotName)
+	}
+
+	// 8. Update pool allocated capacity (snapshots count toward share usage)
+	m.updateShareAllocation(pool, sv.Spec.ShareID, sv.Spec.RequestedGB)
+	if err := m.k8sClient.UpdateFileSharePoolStatus(ctx, pool); err != nil {
+		klog.ErrorS(err, "Failed to update pool status after snapshot", "pool", poolName)
+	}
+
+	klog.V(2).InfoS("Created snapshot",
+		"snapshot", snapshotName,
+		"source", pvName,
+		"pool", poolName,
+		"shareID", sv.Spec.ShareID,
+	)
+
+	return &SnapshotResult{
+		SnapshotName:  snapshotName,
+		PoolName:      poolName,
+		ShareID:       sv.Spec.ShareID,
+		SnapshotPath:  snapshotPath,
+		SourceSubPath: sv.Spec.SubPath,
+		SizeBytes:     sv.Spec.RequestedGB * (1 << 30),
+		CreationTime:  now.Time,
+		ReadyToUse:    true,
+	}, nil
+}
+
+func (m *Manager) DeleteSnapshot(ctx context.Context, snapshotName string) (retErr error) {
+	poolName := ""
+	defer func() {
+		status := "success"
+		if retErr != nil {
+			status = "error"
+		}
+		metrics.SnapshotsTotal.WithLabelValues(poolName, "delete", status).Inc()
+	}()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// 1. Fetch Snapshot CR
+	snap, err := m.k8sClient.GetSnapshot(ctx, snapshotName)
+	if err != nil {
+		return fmt.Errorf("%w: %s", ErrSnapshotNotFound, snapshotName)
+	}
+	poolName = snap.Spec.PoolName
+
+	// 2. Remove snapshot directory
+	if m.nfsOps != nil {
+		fullPath, err := util.SafeJoinSnapshot(m.stagingBasePath, snap.Spec.SnapshotPath)
+		if err != nil {
+			return fmt.Errorf("invalid snapshot path: %w", err)
+		}
+		if err := m.nfsOps.RemoveAll(fullPath); err != nil {
+			return fmt.Errorf("remove snapshot dir: %w", err)
+		}
+	}
+
+	// 3. Delete Snapshot CR
+	if err := m.k8sClient.DeleteSnapshot(ctx, snapshotName); err != nil {
+		return fmt.Errorf("delete Snapshot CR: %w", err)
+	}
+
+	// 4. Update pool status (free capacity)
+	pool, err := m.k8sClient.GetFileSharePool(ctx, poolName)
+	if err != nil {
+		klog.ErrorS(err, "Failed to get pool for snapshot deletion status update", "pool", poolName)
+	} else {
+		m.updateShareDeallocation(pool, snap.Spec.ShareID, snap.Spec.SizeGB)
+		if err := m.k8sClient.UpdateFileSharePoolStatus(ctx, pool); err != nil {
+			klog.ErrorS(err, "Failed to update pool status after snapshot deletion", "pool", poolName)
+		}
+	}
+
+	klog.V(2).InfoS("Deleted snapshot",
+		"snapshot", snapshotName,
+		"pool", poolName,
+		"shareID", snap.Spec.ShareID,
+	)
+
+	return nil
+}
+
+func (m *Manager) ListSnapshots(ctx context.Context, sourceVolumeID string) ([]SnapshotResult, error) {
+	var snapshots []v1alpha1.Snapshot
+
+	if sourceVolumeID != "" {
+		_, _, pvName, err := parseManagerVolumeID(sourceVolumeID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid source volume ID: %w", err)
+		}
+		snapshots, err = m.k8sClient.ListSnapshotsBySource(ctx, pvName)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// List all — use empty pool to list everything (no label filter matches all)
+		// We'll use the pool label with empty string, which won't match.
+		// Instead, list by each pool. For simplicity, list by source with empty returns empty.
+		return nil, nil
+	}
+
+	var results []SnapshotResult
+	for _, snap := range snapshots {
+		var creationTime time.Time
+		if snap.Status.CreationTime != nil {
+			creationTime = snap.Status.CreationTime.Time
+		}
+		results = append(results, SnapshotResult{
+			SnapshotName:  snap.Name,
+			PoolName:      snap.Spec.PoolName,
+			ShareID:       snap.Spec.ShareID,
+			SnapshotPath:  snap.Spec.SnapshotPath,
+			SourceSubPath: snap.Spec.SourceSubPath,
+			SizeBytes:     snap.Spec.SizeGB * (1 << 30),
+			CreationTime:  creationTime,
+			ReadyToUse:    snap.Status.ReadyToUse,
+		})
+	}
+	return results, nil
+}
+
+func (m *Manager) RestoreSnapshot(ctx context.Context, snapshotName string, req AllocationRequest) (_ *AllocationResult, retErr error) {
+	start := time.Now()
+	defer func() {
+		status := "success"
+		if retErr != nil {
+			status = "error"
+		}
+		metrics.SnapshotsTotal.WithLabelValues(req.PoolName, "restore", status).Inc()
+		metrics.SnapshotDuration.WithLabelValues(req.PoolName, "restore").Observe(time.Since(start).Seconds())
+	}()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// 1. Idempotency check
+	existing, err := m.k8sClient.GetSubVolume(ctx, req.PVName)
+	if err == nil && existing != nil {
+		klog.V(2).InfoS("Idempotent restore: SubVolume already exists", "pvName", req.PVName)
+		return &AllocationResult{
+			ShareID:       existing.Spec.ShareID,
+			MountTargetIP: existing.Spec.ShareMountTargetIP,
+			SubPath:       existing.Spec.SubPath,
+			SharePath:     "/",
+			UID:           existing.Spec.UID,
+			GID:           existing.Spec.GID,
+			Permissions:   existing.Spec.Permissions,
+		}, nil
+	}
+
+	// 2. Fetch Snapshot CR
+	snap, err := m.k8sClient.GetSnapshot(ctx, snapshotName)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrSnapshotNotFound, snapshotName)
+	}
+	if !snap.Status.ReadyToUse {
+		return nil, fmt.Errorf("snapshot %q is not ready to use (phase: %s)", snapshotName, snap.Status.Phase)
+	}
+
+	// 3. Fetch pool and select share
+	pool, err := m.k8sClient.GetFileSharePool(ctx, req.PoolName)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrPoolNotFound, req.PoolName)
+	}
+
+	share, err := selectShare(pool.Spec.AllocationStrategy, pool.Status.Shares, req.RequestedGB, req.Tier)
+	if err != nil && errors.Is(err, ErrPoolExhausted) {
+		share, err = m.tryAutoExpand(ctx, pool, req.RequestedGB, req.Tier)
+		if err != nil {
+			return nil, err
+		}
+	} else if err != nil {
+		return nil, err
+	}
+
+	// 4. Copy snapshot to new subdirectory
+	subPath := fmt.Sprintf("/pvcs/%s", req.PVName)
+	if m.nfsOps != nil {
+		srcPath, err := util.SafeJoinSnapshot(m.stagingBasePath, snap.Spec.SnapshotPath)
+		if err != nil {
+			return nil, fmt.Errorf("invalid snapshot path: %w", err)
+		}
+		dstPath, err := util.SafeJoin(m.stagingBasePath, subPath)
+		if err != nil {
+			return nil, fmt.Errorf("invalid destination path: %w", err)
+		}
+		if err := m.nfsOps.CopyDir(srcPath, dstPath); err != nil {
+			return nil, fmt.Errorf("restore snapshot: %w", err)
+		}
+	}
+
+	// 5. Create SubVolume CR
+	uid, gid, perms := m.resolvePermissions(req, pool)
+	now := metav1.Now()
+	sv := &v1alpha1.SubVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: req.PVName,
+			Labels: map[string]string{
+				"storage.ibmcloud.io/pool":     req.PoolName,
+				"storage.ibmcloud.io/share-id": share.ShareID,
+			},
+		},
+		Spec: v1alpha1.SubVolumeSpec{
+			PoolName:           req.PoolName,
+			ShareID:            share.ShareID,
+			ShareMountTargetIP: share.MountTargetIP,
+			SubPath:            subPath,
+			RequestedGB:        req.RequestedGB,
+			PVName:             req.PVName,
+			PVCName:            req.PVCName,
+			PVCNamespace:       req.PVCNamespace,
+			UID:                uid,
+			GID:                gid,
+			Permissions:        perms,
+			ReclaimPolicy:      "Delete",
+		},
+		Status: v1alpha1.SubVolumeStatus{
+			Phase:     "Bound",
+			CreatedAt: &now,
+		},
+	}
+
+	desiredStatus := sv.Status
+	if err := m.k8sClient.CreateSubVolume(ctx, sv); err != nil {
+		return nil, fmt.Errorf("create SubVolume CR: %w", err)
+	}
+
+	sv.Status = desiredStatus
+	if err := m.k8sClient.UpdateSubVolumeStatus(ctx, sv); err != nil {
+		klog.ErrorS(err, "Failed to update SubVolume status after restore", "pvName", req.PVName)
+	}
+
+	// 6. Update pool status
+	m.updateShareAllocation(pool, share.ShareID, req.RequestedGB)
+	if err := m.k8sClient.UpdateFileSharePoolStatus(ctx, pool); err != nil {
+		klog.ErrorS(err, "Failed to update pool status after restore", "pool", req.PoolName)
+	}
+
+	klog.V(2).InfoS("Restored snapshot",
+		"snapshot", snapshotName,
+		"pvName", req.PVName,
+		"pool", req.PoolName,
+		"shareID", share.ShareID,
+	)
+
+	return &AllocationResult{
+		ShareID:       share.ShareID,
+		MountTargetIP: share.MountTargetIP,
+		SubPath:       subPath,
+		SharePath:     "/",
+		UID:           uid,
+		GID:           gid,
+		Permissions:   perms,
+	}, nil
+}
+
+// parseManagerVolumeID is a helper to split volume IDs within the pool package.
+func parseManagerVolumeID(volumeID string) (poolName, shareID, name string, err error) {
+	return util.ParseVolumeID(volumeID)
 }

@@ -82,8 +82,32 @@ func TestVPCAPICallDuration_Observe(t *testing.T) {
 	}
 }
 
+func TestSnapshotsTotal_Increment(t *testing.T) {
+	SnapshotsTotal.WithLabelValues("test-pool", "create", "success").Inc()
+
+	var m dto.Metric
+	if err := SnapshotsTotal.WithLabelValues("test-pool", "create", "success").Write(&m); err != nil {
+		t.Fatalf("failed to write metric: %v", err)
+	}
+	if m.Counter == nil || *m.Counter.Value < 1 {
+		t.Error("expected counter to be at least 1")
+	}
+}
+
+func TestSnapshotDuration_Observe(t *testing.T) {
+	SnapshotDuration.WithLabelValues("test-pool", "create").Observe(0.5)
+
+	var m dto.Metric
+	if err := SnapshotDuration.WithLabelValues("test-pool", "create").(prometheus.Metric).Write(&m); err != nil {
+		t.Fatalf("failed to write metric: %v", err)
+	}
+	if m.Histogram == nil || *m.Histogram.SampleCount < 1 {
+		t.Error("expected histogram sample count to be at least 1")
+	}
+}
+
 func TestAllCollectorsRegistered(t *testing.T) {
-	// Gather all registered metrics and check our 8 are present.
+	// Gather all registered metrics and check our 10 are present.
 	families, err := prometheus.DefaultGatherer.Gather()
 	if err != nil {
 		t.Fatalf("failed to gather metrics: %v", err)
@@ -98,6 +122,8 @@ func TestAllCollectorsRegistered(t *testing.T) {
 		"vpc_file_pool_pvc_count":                   false,
 		"vpc_file_pool_api_calls_total":             false,
 		"vpc_file_pool_api_call_duration_seconds":   false,
+		"vpc_file_pool_snapshots_total":             false,
+		"vpc_file_pool_snapshot_duration_seconds":   false,
 	}
 
 	for _, fam := range families {

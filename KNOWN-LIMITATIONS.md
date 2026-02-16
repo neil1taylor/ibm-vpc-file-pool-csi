@@ -87,15 +87,20 @@ rsync -avz /old-pvc/ /new-pvc/
 
 **Roadmap:** No support planned — VPC Classic is deprecated.
 
-## Manual Share Draining
+## Share Draining (Graceful Evacuation)
 
-**What:** There is no user-facing API or CLI command to drain all SubVolumes off a specific share (e.g., before maintenance or decommissioning).
+**What:** The driver supports graceful share draining via `spec.drainShares`. Adding a share ID to this list marks it as "draining," which excludes it from new allocations. The reconciler tracks drain progress in `status.drainStatus`, reporting remaining SubVolumes per share. Once all SubVolumes are removed (via application redeployment with new PVCs or manual PVC deletion), the share is reported as fully drained.
 
-**Why:** Draining requires migrating data between shares, which involves application-level coordination. The Pool Manager does not implement live data migration.
+**Note:** Draining prevents new allocations to the share but does not automatically migrate existing data. Applications must be redeployed or PVCs manually deleted to complete the drain.
 
-**Workaround:** Cordon the pool (set `maxShares: 0` or reduce capacity), wait for applications to be redeployed with new PVCs, then manually clean up old SubVolume CRs and delete the share.
+**Usage:**
+```yaml
+spec:
+  drainShares:
+    - "r006-share-to-drain"
+```
 
-**Roadmap:** Under consideration for a future release.
+Monitor progress via `status.drainStatus` or the `DrainComplete` condition.
 
 ## Hard NFS Mounts
 

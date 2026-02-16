@@ -100,3 +100,64 @@ func TestSafeJoin_InvalidSubDir(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// ValidateSnapshotPath Tests
+// ---------------------------------------------------------------------------
+
+func TestValidateSnapshotPath_Valid(t *testing.T) {
+	valid := []string{
+		"/pvcs/.snapshots/snap-abc123",
+		"/pvcs/.snapshots/snap-my-snapshot-name",
+		"/pvcs/.snapshots/snap-A1B2C3",
+		"/pvcs/.snapshots/snap-pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab",
+	}
+	for _, s := range valid {
+		if err := ValidateSnapshotPath(s); err != nil {
+			t.Errorf("ValidateSnapshotPath(%q) = %v, want nil", s, err)
+		}
+	}
+}
+
+func TestValidateSnapshotPath_Invalid(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+	}{
+		{"empty", ""},
+		{"just_slash", "/"},
+		{"no_snap_prefix", "/pvcs/.snapshots/abc123"},
+		{"wrong_base", "/volumes/.snapshots/snap-abc123"},
+		{"missing_snapshots_dir", "/pvcs/snap-abc123"},
+		{"traversal", "/pvcs/.snapshots/../../../etc/passwd"},
+		{"trailing_slash", "/pvcs/.snapshots/snap-abc123/"},
+		{"nested", "/pvcs/.snapshots/snap-abc123/data"},
+		{"spaces", "/pvcs/.snapshots/snap abc123"},
+		{"dotdot", "/pvcs/..snapshots/snap-abc123"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateSnapshotPath(tt.path); err == nil {
+				t.Errorf("ValidateSnapshotPath(%q) = nil, want error", tt.path)
+			}
+		})
+	}
+}
+
+func TestSafeJoinSnapshot_Valid(t *testing.T) {
+	got, err := SafeJoinSnapshot("/mnt/staging", "/pvcs/.snapshots/snap-abc123")
+	if err != nil {
+		t.Fatalf("SafeJoinSnapshot failed: %v", err)
+	}
+	want := "/mnt/staging/pvcs/.snapshots/snap-abc123"
+	if got != want {
+		t.Errorf("SafeJoinSnapshot = %q, want %q", got, want)
+	}
+}
+
+func TestSafeJoinSnapshot_InvalidPath(t *testing.T) {
+	_, err := SafeJoinSnapshot("/mnt/staging", "/pvcs/../etc/passwd")
+	if err == nil {
+		t.Error("SafeJoinSnapshot should reject invalid snapshot path")
+	}
+}

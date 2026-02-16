@@ -109,6 +109,9 @@ func (r *FileSharePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// 4b. Ensure accessor mount targets
 	r.ensureAccessorMountTargets(ctx, pool)
 
+	// 4c. Process drain requests
+	r.processDrainRequests(ctx, pool)
+
 	// 5. Reconcile metrics from SubVolume CRs
 	r.reconcileMetrics(ctx, pool)
 
@@ -316,6 +319,97 @@ func (r *FileSharePoolReconciler) ensureAccessorMountTargets(_ context.Context, 
 				"pool", pool.Name, "shareID", share.ShareID,
 				"zone", az.Zone, "server", share.MountTargetIP)
 		}
+	}
+}
+
+// processDrainRequests handles share drain requests from spec.drainShares.
+// It marks requested shares as "draining", tracks drain progress, and detects completion.
+func (r *FileSharePoolReconciler) processDrainRequests(ctx context.Context, pool *v1alpha1.FileSharePool) {
+	if len(pool.Spec.DrainShares) == 0 {
+		// No drain requests: clear any stale drain status
+		pool.Status.DrainStatus = nil
+		return
+	}
+
+	// Build a set of requested drain share IDs
+	drainSet := make(map[string]bool, len(pool.Spec.DrainShares))
+	for _, id := range pool.Spec.DrainShares {
+		drainSet[id] = true
+	}
+
+	// Mark requested shares as "draining" if they are currently stable
+	for i := range pool.Status.Shares {
+		share := &pool.Status.Shares[i]
+		if drainSet[share.ShareID] && share.State == "stable" {
+			share.State = "draining"
+			klog.V(2).InfoS("Share marked as draining (user-requested)",
+				"pool", pool.Name, "shareID", share.ShareID)
+		}
+	}
+
+	// Build/update drain status for each requested share
+	existingDrainStatus := make(map[string]*v1alpha1.ShareDrainStatus, len(pool.Status.DrainStatus))
+	for i := range pool.Status.DrainStatus {
+		existingDrainStatus[pool.Status.DrainStatus[i].ShareID] = &pool.Status.DrainStatus[i]
+	}
+
+	var updatedDrainStatus []v1alpha1.ShareDrainStatus
+	for _, shareID := range pool.Spec.DrainShares {
+		// Count SubVolumes on this share
+		subVolumes, err := r.k8sClient.ListSubVolumesByShare(ctx, shareID)
+		if err != nil {
+			klog.ErrorS(err, "Failed to list SubVolumes for draining share", "shareID", shareID)
+			continue
+		}
+
+		remaining := int32(len(subVolumes))
+		drained := remaining == 0
+
+		ds := v1alpha1.ShareDrainStatus{
+			ShareID:             shareID,
+			RemainingSubVolumes: remaining,
+			Drained:             drained,
+		}
+
+		// Preserve DrainStartedAt from existing status
+		if existing, ok := existingDrainStatus[shareID]; ok && existing.DrainStartedAt != nil {
+			ds.DrainStartedAt = existing.DrainStartedAt
+		} else {
+			now := metav1.Now()
+			ds.DrainStartedAt = &now
+		}
+
+		updatedDrainStatus = append(updatedDrainStatus, ds)
+
+		if drained {
+			klog.V(2).InfoS("Share fully drained",
+				"pool", pool.Name, "shareID", shareID)
+		} else {
+			klog.V(4).InfoS("Share drain in progress",
+				"pool", pool.Name, "shareID", shareID, "remaining", remaining)
+		}
+	}
+
+	pool.Status.DrainStatus = updatedDrainStatus
+
+	// Set a condition summarizing drain progress
+	totalDraining := len(pool.Spec.DrainShares)
+	drainedCount := 0
+	totalRemaining := int32(0)
+	for _, ds := range updatedDrainStatus {
+		if ds.Drained {
+			drainedCount++
+		}
+		totalRemaining += ds.RemainingSubVolumes
+	}
+
+	if drainedCount == totalDraining {
+		r.setCondition(pool, "DrainComplete", metav1.ConditionTrue, "AllSharesDrained",
+			fmt.Sprintf("All %d shares fully drained", totalDraining))
+	} else {
+		r.setCondition(pool, "DrainComplete", metav1.ConditionFalse, "DrainInProgress",
+			fmt.Sprintf("%d/%d shares drained, %d SubVolumes remaining",
+				drainedCount, totalDraining, totalRemaining))
 	}
 }
 

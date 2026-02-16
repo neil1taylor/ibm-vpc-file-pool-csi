@@ -12,6 +12,16 @@ rules:
   - apiGroups: ["storage.ibmcloud.io"]
     resources: ["subvolumes", "subvolumes/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["snapshots", "snapshots/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # VolumeSnapshot CRDs (for csi-snapshotter sidecar)
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots", "volumesnapshotcontents", "volumesnapshotclasses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshotcontents/status"]
+    verbs: ["update", "patch"]
   # PV/PVC access (CSI provisioner creates PVs and updates PVC status)
   - apiGroups: [""]
     resources: ["persistentvolumes"]

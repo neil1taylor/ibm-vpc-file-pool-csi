@@ -138,9 +138,5 @@ func logInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServer
 // parseVolumeID splits a volume ID into its components.
 // Format: {pool-name}/{share-vpc-id}/{pv-name}
 func parseVolumeID(volumeID string) (poolName, shareID, pvName string, err error) {
-	parts := strings.SplitN(volumeID, "/", 3)
-	if len(parts) != 3 {
-		return "", "", "", fmt.Errorf("volume ID must have 3 parts separated by '/', got: %s", volumeID)
-	}
-	return parts[0], parts[1], parts[2], nil
+	return util.ParseVolumeID(volumeID)
 }

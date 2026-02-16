@@ -871,6 +871,355 @@ func TestReconcile_NoAccessorZones_BackwardCompat(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// 18. Drain Requests — Marks Shares as Draining
+// ---------------------------------------------------------------------------
+
+func TestReconcile_DrainRequests_MarksSharesDraining(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+
+	// Create a share in VPC
+	shareInfo, _ := vpc.CreateFileShare(context.Background(), ibmcloudInput("test-pool", 1000))
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		v1alpha1.PoolShareStatus{
+			ShareID:       shareInfo.ID,
+			ShareName:     shareInfo.Name,
+			MountTargetIP: "10.240.0.1",
+			TotalGB:       1000,
+			AllocatedGB:   100,
+			PVCCount:      2,
+			State:         "stable",
+			Zone:          "us-south-1",
+		},
+	)
+	pool.Spec.InitialShares = 1
+	pool.Spec.DrainShares = []string{shareInfo.ID}
+	k.addPool(pool)
+
+	// Add SubVolumes on this share
+	k.addSubVolume(newTestSubVolume("pvc-drain-1", "test-pool", shareInfo.ID, 50))
+	k.addSubVolume(newTestSubVolume("pvc-drain-2", "test-pool", shareInfo.ID, 50))
+
+	r := newReconciler(k, vpc)
+	_, err := reconcilePool(r, "test-pool")
+	if err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	updated := k.getPool("test-pool")
+
+	// Share state should be "draining"
+	if updated.Status.Shares[0].State != "draining" {
+		t.Errorf("expected share state 'draining', got %q", updated.Status.Shares[0].State)
+	}
+
+	// DrainStatus should exist with 2 remaining SubVolumes
+	if len(updated.Status.DrainStatus) != 1 {
+		t.Fatalf("expected 1 drain status entry, got %d", len(updated.Status.DrainStatus))
+	}
+	ds := updated.Status.DrainStatus[0]
+	if ds.ShareID != shareInfo.ID {
+		t.Errorf("expected drain status shareID %q, got %q", shareInfo.ID, ds.ShareID)
+	}
+	if ds.RemainingSubVolumes != 2 {
+		t.Errorf("expected 2 remaining SubVolumes, got %d", ds.RemainingSubVolumes)
+	}
+	if ds.Drained {
+		t.Error("expected Drained=false when SubVolumes remain")
+	}
+	if ds.DrainStartedAt == nil {
+		t.Error("expected DrainStartedAt to be set")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 19. Drain Requests — Fully Drained
+// ---------------------------------------------------------------------------
+
+func TestReconcile_DrainRequests_FullyDrained(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+
+	shareInfo, _ := vpc.CreateFileShare(context.Background(), ibmcloudInput("test-pool", 1000))
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		v1alpha1.PoolShareStatus{
+			ShareID:       shareInfo.ID,
+			ShareName:     shareInfo.Name,
+			MountTargetIP: "10.240.0.1",
+			TotalGB:       1000,
+			AllocatedGB:   0,
+			PVCCount:      0,
+			State:         "stable",
+			Zone:          "us-south-1",
+		},
+	)
+	pool.Spec.InitialShares = 1
+	pool.Spec.DrainShares = []string{shareInfo.ID}
+	k.addPool(pool)
+
+	// No SubVolumes on this share — it should be reported as drained
+
+	r := newReconciler(k, vpc)
+	_, err := reconcilePool(r, "test-pool")
+	if err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	updated := k.getPool("test-pool")
+
+	// DrainStatus should show drained=true
+	if len(updated.Status.DrainStatus) != 1 {
+		t.Fatalf("expected 1 drain status entry, got %d", len(updated.Status.DrainStatus))
+	}
+	ds := updated.Status.DrainStatus[0]
+	if !ds.Drained {
+		t.Error("expected Drained=true when no SubVolumes remain")
+	}
+	if ds.RemainingSubVolumes != 0 {
+		t.Errorf("expected 0 remaining SubVolumes, got %d", ds.RemainingSubVolumes)
+	}
+
+	// DrainComplete condition should be True
+	drainComplete := findCondition(updated.Status.Conditions, "DrainComplete")
+	if drainComplete == nil {
+		t.Fatal("expected DrainComplete condition")
+	}
+	if drainComplete.Status != metav1.ConditionTrue {
+		t.Errorf("expected DrainComplete=True, got %s", drainComplete.Status)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 20. Drain Requests — Progress Tracking
+// ---------------------------------------------------------------------------
+
+func TestReconcile_DrainRequests_ProgressTracking(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+
+	shareInfo1, _ := vpc.CreateFileShare(context.Background(), ibmcloudInput("test-pool", 1000))
+	shareInfo2, _ := vpc.CreateFileShare(context.Background(), ibmcloud.CreateShareInput{
+		Name: "test-pool-share-2", Zone: "us-south-1", Profile: "dp2", SizeGB: 1000,
+	})
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		v1alpha1.PoolShareStatus{
+			ShareID: shareInfo1.ID, ShareName: shareInfo1.Name,
+			MountTargetIP: "10.240.0.1", TotalGB: 1000, State: "stable", Zone: "us-south-1",
+		},
+		v1alpha1.PoolShareStatus{
+			ShareID: shareInfo2.ID, ShareName: shareInfo2.Name,
+			MountTargetIP: "10.240.0.2", TotalGB: 1000, State: "stable", Zone: "us-south-1",
+		},
+	)
+	pool.Spec.InitialShares = 2
+	pool.Spec.DrainShares = []string{shareInfo1.ID, shareInfo2.ID}
+	k.addPool(pool)
+
+	// share1 has SubVolumes, share2 is empty
+	k.addSubVolume(newTestSubVolume("pvc-d1", "test-pool", shareInfo1.ID, 50))
+	k.addSubVolume(newTestSubVolume("pvc-d2", "test-pool", shareInfo1.ID, 30))
+
+	r := newReconciler(k, vpc)
+	_, err := reconcilePool(r, "test-pool")
+	if err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	updated := k.getPool("test-pool")
+
+	if len(updated.Status.DrainStatus) != 2 {
+		t.Fatalf("expected 2 drain status entries, got %d", len(updated.Status.DrainStatus))
+	}
+
+	// Find drain statuses by share ID
+	drainMap := make(map[string]*v1alpha1.ShareDrainStatus)
+	for i := range updated.Status.DrainStatus {
+		drainMap[updated.Status.DrainStatus[i].ShareID] = &updated.Status.DrainStatus[i]
+	}
+
+	ds1 := drainMap[shareInfo1.ID]
+	if ds1 == nil {
+		t.Fatalf("missing drain status for share %s", shareInfo1.ID)
+	}
+	if ds1.RemainingSubVolumes != 2 {
+		t.Errorf("expected 2 remaining for share1, got %d", ds1.RemainingSubVolumes)
+	}
+	if ds1.Drained {
+		t.Error("share1 should not be drained")
+	}
+
+	ds2 := drainMap[shareInfo2.ID]
+	if ds2 == nil {
+		t.Fatalf("missing drain status for share %s", shareInfo2.ID)
+	}
+	if ds2.RemainingSubVolumes != 0 {
+		t.Errorf("expected 0 remaining for share2, got %d", ds2.RemainingSubVolumes)
+	}
+	if !ds2.Drained {
+		t.Error("share2 should be drained")
+	}
+
+	// DrainComplete should be False (1/2 drained)
+	drainComplete := findCondition(updated.Status.Conditions, "DrainComplete")
+	if drainComplete == nil {
+		t.Fatal("expected DrainComplete condition")
+	}
+	if drainComplete.Status != metav1.ConditionFalse {
+		t.Errorf("expected DrainComplete=False (partial drain), got %s", drainComplete.Status)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 21. Drain Requests — No DrainShares Clears Status
+// ---------------------------------------------------------------------------
+
+func TestReconcile_DrainRequests_NoDrainSharesClearsStatus(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+
+	shareInfo, _ := vpc.CreateFileShare(context.Background(), ibmcloudInput("test-pool", 1000))
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		v1alpha1.PoolShareStatus{
+			ShareID: shareInfo.ID, ShareName: shareInfo.Name,
+			MountTargetIP: "10.240.0.1", TotalGB: 1000, State: "stable", Zone: "us-south-1",
+		},
+	)
+	pool.Spec.InitialShares = 1
+	// No DrainShares — but status has stale drain data
+	pool.Status.DrainStatus = []v1alpha1.ShareDrainStatus{
+		{ShareID: "old-share", RemainingSubVolumes: 5, Drained: false},
+	}
+	k.addPool(pool)
+
+	r := newReconciler(k, vpc)
+	_, err := reconcilePool(r, "test-pool")
+	if err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	updated := k.getPool("test-pool")
+	if len(updated.Status.DrainStatus) != 0 {
+		t.Errorf("expected drain status cleared, got %d entries", len(updated.Status.DrainStatus))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 22. Drain — Preserves DrainStartedAt Across Reconciles
+// ---------------------------------------------------------------------------
+
+func TestReconcile_DrainRequests_PreservesDrainStartedAt(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+
+	shareInfo, _ := vpc.CreateFileShare(context.Background(), ibmcloudInput("test-pool", 1000))
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		v1alpha1.PoolShareStatus{
+			ShareID: shareInfo.ID, ShareName: shareInfo.Name,
+			MountTargetIP: "10.240.0.1", TotalGB: 1000, State: "stable", Zone: "us-south-1",
+		},
+	)
+	pool.Spec.InitialShares = 1
+	pool.Spec.DrainShares = []string{shareInfo.ID}
+	k.addPool(pool)
+
+	k.addSubVolume(newTestSubVolume("pvc-d1", "test-pool", shareInfo.ID, 50))
+
+	r := newReconciler(k, vpc)
+
+	// First reconcile — sets DrainStartedAt
+	_, err := reconcilePool(r, "test-pool")
+	if err != nil {
+		t.Fatalf("Reconcile 1 failed: %v", err)
+	}
+
+	updated := k.getPool("test-pool")
+	if len(updated.Status.DrainStatus) != 1 {
+		t.Fatalf("expected 1 drain status entry, got %d", len(updated.Status.DrainStatus))
+	}
+	firstStartedAt := updated.Status.DrainStatus[0].DrainStartedAt
+	if firstStartedAt == nil {
+		t.Fatal("expected DrainStartedAt to be set on first reconcile")
+	}
+
+	// Second reconcile — DrainStartedAt should be preserved
+	_, err = reconcilePool(r, "test-pool")
+	if err != nil {
+		t.Fatalf("Reconcile 2 failed: %v", err)
+	}
+
+	updated = k.getPool("test-pool")
+	if len(updated.Status.DrainStatus) != 1 {
+		t.Fatalf("expected 1 drain status entry, got %d", len(updated.Status.DrainStatus))
+	}
+	secondStartedAt := updated.Status.DrainStatus[0].DrainStartedAt
+	if secondStartedAt == nil {
+		t.Fatal("expected DrainStartedAt to be preserved on second reconcile")
+	}
+	if !firstStartedAt.Time.Equal(secondStartedAt.Time) {
+		t.Errorf("DrainStartedAt changed: %v -> %v", firstStartedAt.Time, secondStartedAt.Time)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 23. Drain — Draining Share Excluded from Proactive Expansion Calculation
+// ---------------------------------------------------------------------------
+
+func TestReconcile_DrainExcludesFromAllocation(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+
+	shareInfo, _ := vpc.CreateFileShare(context.Background(), ibmcloudInput("test-pool", 1000))
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		v1alpha1.PoolShareStatus{
+			ShareID: shareInfo.ID, ShareName: shareInfo.Name,
+			MountTargetIP: "10.240.0.1", MountTargetID: shareInfo.MountTargets[0].ID,
+			TotalGB: 1000, State: "stable", Zone: "us-south-1",
+		},
+		newStableShare("share-stable", "s2", 1000, 500, 3),
+	)
+	pool.Spec.InitialShares = 2
+	pool.Spec.DrainShares = []string{shareInfo.ID}
+	k.addPool(pool)
+
+	// Add SubVolumes on the stable share only
+	k.addSubVolume(newTestSubVolume("pvc-s1", "test-pool", "share-stable", 500))
+
+	r := newReconciler(k, vpc)
+	_, err := reconcilePool(r, "test-pool")
+	if err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	updated := k.getPool("test-pool")
+
+	// The drained share should be "draining"
+	for _, s := range updated.Status.Shares {
+		if s.ShareID == shareInfo.ID && s.State != "draining" {
+			t.Errorf("expected share %s state 'draining', got %q", shareInfo.ID, s.State)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Condition Helper
+// ---------------------------------------------------------------------------
+
+func findCondition(conditions []metav1.Condition, condType string) *metav1.Condition {
+	for i := range conditions {
+		if conditions[i].Type == condType {
+			return &conditions[i]
+		}
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
 // Test Helpers
 // ---------------------------------------------------------------------------
 

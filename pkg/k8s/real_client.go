@@ -89,6 +89,66 @@ func (r *realClient) DeleteSubVolume(ctx context.Context, name string) error {
 	return r.client.Delete(ctx, sv)
 }
 
+// --- Snapshot operations ---
+
+func (r *realClient) GetSnapshot(ctx context.Context, name string) (*v1alpha1.Snapshot, error) {
+	snap := &v1alpha1.Snapshot{}
+	if err := r.client.Get(ctx, types.NamespacedName{Name: name}, snap); err != nil {
+		return nil, err
+	}
+	return snap, nil
+}
+
+func (r *realClient) ListSnapshots(ctx context.Context, poolName string) ([]v1alpha1.Snapshot, error) {
+	list := &v1alpha1.SnapshotList{}
+	if err := r.client.List(ctx, list, client.MatchingLabels{
+		"storage.ibmcloud.io/pool": poolName,
+	}); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
+func (r *realClient) ListSnapshotsByShare(ctx context.Context, shareID string) ([]v1alpha1.Snapshot, error) {
+	list := &v1alpha1.SnapshotList{}
+	if err := r.client.List(ctx, list, client.MatchingLabels{
+		"storage.ibmcloud.io/share-id": shareID,
+	}); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
+func (r *realClient) ListSnapshotsBySource(ctx context.Context, sourceSubVolume string) ([]v1alpha1.Snapshot, error) {
+	list := &v1alpha1.SnapshotList{}
+	if err := r.client.List(ctx, list, client.MatchingLabels{
+		"storage.ibmcloud.io/source-subvolume": sourceSubVolume,
+	}); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
+func (r *realClient) CreateSnapshot(ctx context.Context, snap *v1alpha1.Snapshot) error {
+	return r.client.Create(ctx, snap)
+}
+
+func (r *realClient) UpdateSnapshot(ctx context.Context, snap *v1alpha1.Snapshot) error {
+	return r.client.Update(ctx, snap)
+}
+
+func (r *realClient) UpdateSnapshotStatus(ctx context.Context, snap *v1alpha1.Snapshot) error {
+	return r.client.Status().Update(ctx, snap)
+}
+
+func (r *realClient) DeleteSnapshot(ctx context.Context, name string) error {
+	snap := &v1alpha1.Snapshot{}
+	if err := r.client.Get(ctx, types.NamespacedName{Name: name}, snap); err != nil {
+		return err
+	}
+	return r.client.Delete(ctx, snap)
+}
+
 // --- ConfigMap operations ---
 
 func (r *realClient) GetConfigMapValue(ctx context.Context, namespace, name, key string) (string, error) {

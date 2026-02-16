@@ -97,6 +97,28 @@ func (n *nodeTestK8sClient) DeleteSubVolume(_ context.Context, _ string) error {
 func (n *nodeTestK8sClient) GetConfigMapValue(_ context.Context, _, _, _ string) (string, error) {
 	return "", fmt.Errorf("not implemented")
 }
+func (n *nodeTestK8sClient) GetSnapshot(_ context.Context, _ string) (*v1alpha1.Snapshot, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (n *nodeTestK8sClient) ListSnapshots(_ context.Context, _ string) ([]v1alpha1.Snapshot, error) {
+	return nil, nil
+}
+func (n *nodeTestK8sClient) ListSnapshotsByShare(_ context.Context, _ string) ([]v1alpha1.Snapshot, error) {
+	return nil, nil
+}
+func (n *nodeTestK8sClient) ListSnapshotsBySource(_ context.Context, _ string) ([]v1alpha1.Snapshot, error) {
+	return nil, nil
+}
+func (n *nodeTestK8sClient) CreateSnapshot(_ context.Context, _ *v1alpha1.Snapshot) error {
+	return nil
+}
+func (n *nodeTestK8sClient) UpdateSnapshot(_ context.Context, _ *v1alpha1.Snapshot) error {
+	return nil
+}
+func (n *nodeTestK8sClient) UpdateSnapshotStatus(_ context.Context, _ *v1alpha1.Snapshot) error {
+	return nil
+}
+func (n *nodeTestK8sClient) DeleteSnapshot(_ context.Context, _ string) error { return nil }
 
 // ---------------------------------------------------------------------------
 // NodeGetCapabilities

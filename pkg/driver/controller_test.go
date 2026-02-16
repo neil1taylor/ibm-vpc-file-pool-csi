@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/pool"
@@ -27,6 +28,22 @@ type mockPoolManager struct {
 	lastDeallocateName string
 	lastExpandName     string
 	lastExpandSizeGB   int64
+
+	// Snapshot fields
+	createSnapshotResult  *pool.SnapshotResult
+	createSnapshotErr     error
+	deleteSnapshotErr     error
+	listSnapshotsResults  []pool.SnapshotResult
+	listSnapshotsErr      error
+	restoreSnapshotResult *pool.AllocationResult
+	restoreSnapshotErr    error
+
+	lastCreateSnapshotName     string
+	lastCreateSnapshotSourceID string
+	lastDeleteSnapshotName     string
+	lastListSnapshotsSourceID  string
+	lastRestoreSnapshotName    string
+	lastRestoreSnapshotReq     pool.AllocationRequest
 }
 
 func (m *mockPoolManager) Allocate(_ context.Context, req pool.AllocationRequest) (*pool.AllocationResult, error) {
@@ -48,18 +65,51 @@ func (m *mockPoolManager) Expand(_ context.Context, subVolumeName string, newSiz
 	return m.expandErr
 }
 
+func (m *mockPoolManager) CreateSnapshot(_ context.Context, snapshotName, sourceVolumeID string, _ map[string]string) (*pool.SnapshotResult, error) {
+	m.lastCreateSnapshotName = snapshotName
+	m.lastCreateSnapshotSourceID = sourceVolumeID
+	if m.createSnapshotErr != nil {
+		return nil, m.createSnapshotErr
+	}
+	return m.createSnapshotResult, nil
+}
+
+func (m *mockPoolManager) DeleteSnapshot(_ context.Context, snapshotName string) error {
+	m.lastDeleteSnapshotName = snapshotName
+	return m.deleteSnapshotErr
+}
+
+func (m *mockPoolManager) ListSnapshots(_ context.Context, sourceVolumeID string) ([]pool.SnapshotResult, error) {
+	m.lastListSnapshotsSourceID = sourceVolumeID
+	if m.listSnapshotsErr != nil {
+		return nil, m.listSnapshotsErr
+	}
+	return m.listSnapshotsResults, nil
+}
+
+func (m *mockPoolManager) RestoreSnapshot(_ context.Context, snapshotName string, req pool.AllocationRequest) (*pool.AllocationResult, error) {
+	m.lastRestoreSnapshotName = snapshotName
+	m.lastRestoreSnapshotReq = req
+	if m.restoreSnapshotErr != nil {
+		return nil, m.restoreSnapshotErr
+	}
+	return m.restoreSnapshotResult, nil
+}
+
 // ---------------------------------------------------------------------------
 // Mock K8s Client (only GetSubVolume needed for controller idempotency path)
 // ---------------------------------------------------------------------------
 
 type mockK8sClient struct {
 	subVolumes map[string]*v1alpha1.SubVolume
+	snapshots  map[string]*v1alpha1.Snapshot
 	getErr     error
 }
 
 func newMockK8sClient() *mockK8sClient {
 	return &mockK8sClient{
 		subVolumes: make(map[string]*v1alpha1.SubVolume),
+		snapshots:  make(map[string]*v1alpha1.Snapshot),
 	}
 }
 
@@ -116,6 +166,42 @@ func (m *mockK8sClient) GetConfigMapValue(_ context.Context, _, _, _ string) (st
 
 func (m *mockK8sClient) GetNodeZone(_ context.Context, _ string) (string, error) {
 	return "us-south-1", nil
+}
+
+func (m *mockK8sClient) GetSnapshot(_ context.Context, name string) (*v1alpha1.Snapshot, error) {
+	snap, ok := m.snapshots[name]
+	if !ok {
+		return nil, fmt.Errorf("not found")
+	}
+	return snap, nil
+}
+
+func (m *mockK8sClient) ListSnapshots(_ context.Context, _ string) ([]v1alpha1.Snapshot, error) {
+	return nil, nil
+}
+
+func (m *mockK8sClient) ListSnapshotsByShare(_ context.Context, _ string) ([]v1alpha1.Snapshot, error) {
+	return nil, nil
+}
+
+func (m *mockK8sClient) ListSnapshotsBySource(_ context.Context, _ string) ([]v1alpha1.Snapshot, error) {
+	return nil, nil
+}
+
+func (m *mockK8sClient) CreateSnapshot(_ context.Context, _ *v1alpha1.Snapshot) error {
+	return nil
+}
+
+func (m *mockK8sClient) UpdateSnapshot(_ context.Context, _ *v1alpha1.Snapshot) error {
+	return nil
+}
+
+func (m *mockK8sClient) UpdateSnapshotStatus(_ context.Context, _ *v1alpha1.Snapshot) error {
+	return nil
+}
+
+func (m *mockK8sClient) DeleteSnapshot(_ context.Context, _ string) error {
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -829,18 +915,24 @@ func TestControllerGetCapabilities(t *testing.T) {
 	}
 
 	caps := resp.GetCapabilities()
-	if len(caps) != 2 {
-		t.Fatalf("expected 2 capabilities, got %d", len(caps))
+	if len(caps) != 4 {
+		t.Fatalf("expected 4 capabilities, got %d", len(caps))
 	}
 
 	foundCreate := false
 	foundExpand := false
+	foundCreateSnap := false
+	foundListSnap := false
 	for _, cap := range caps {
 		switch cap.GetRpc().GetType() {
 		case csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME:
 			foundCreate = true
 		case csi.ControllerServiceCapability_RPC_EXPAND_VOLUME:
 			foundExpand = true
+		case csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT:
+			foundCreateSnap = true
+		case csi.ControllerServiceCapability_RPC_LIST_SNAPSHOTS:
+			foundListSnap = true
 		}
 	}
 
@@ -849,6 +941,12 @@ func TestControllerGetCapabilities(t *testing.T) {
 	}
 	if !foundExpand {
 		t.Error("missing EXPAND_VOLUME capability")
+	}
+	if !foundCreateSnap {
+		t.Error("missing CREATE_DELETE_SNAPSHOT capability")
+	}
+	if !foundListSnap {
+		t.Error("missing LIST_SNAPSHOTS capability")
 	}
 }
 
@@ -1055,4 +1153,464 @@ func TestParseOptionalInt64(t *testing.T) {
 
 func int64Ptr(v int64) *int64 {
 	return &v
+}
+
+// ---------------------------------------------------------------------------
+// CreateSnapshot Tests
+// ---------------------------------------------------------------------------
+
+func TestCreateSnapshot_MissingName(t *testing.T) {
+	d := newTestDriver(&mockPoolManager{}, nil)
+
+	_, err := d.CreateSnapshot(context.Background(), &csi.CreateSnapshotRequest{
+		SourceVolumeId: "pool/share/pvc-test",
+	})
+
+	assertGRPCCode(t, err, codes.InvalidArgument)
+}
+
+func TestCreateSnapshot_MissingSourceVolumeID(t *testing.T) {
+	d := newTestDriver(&mockPoolManager{}, nil)
+
+	_, err := d.CreateSnapshot(context.Background(), &csi.CreateSnapshotRequest{
+		Name: "snap-test",
+	})
+
+	assertGRPCCode(t, err, codes.InvalidArgument)
+}
+
+func TestCreateSnapshot_SourceNotFound(t *testing.T) {
+	pm := &mockPoolManager{
+		createSnapshotErr: pool.ErrSourceNotFound,
+	}
+	d := newTestDriver(pm, nil)
+
+	_, err := d.CreateSnapshot(context.Background(), &csi.CreateSnapshotRequest{
+		Name:           "snap-test",
+		SourceVolumeId: "pool/share/pvc-missing",
+	})
+
+	assertGRPCCode(t, err, codes.NotFound)
+}
+
+func TestCreateSnapshot_InternalError(t *testing.T) {
+	pm := &mockPoolManager{
+		createSnapshotErr: fmt.Errorf("NFS copy failed"),
+	}
+	d := newTestDriver(pm, nil)
+
+	_, err := d.CreateSnapshot(context.Background(), &csi.CreateSnapshotRequest{
+		Name:           "snap-test",
+		SourceVolumeId: "pool/share/pvc-test",
+	})
+
+	assertGRPCCode(t, err, codes.Internal)
+}
+
+func TestCreateSnapshot_Success(t *testing.T) {
+	now := time.Now()
+	pm := &mockPoolManager{
+		createSnapshotResult: &pool.SnapshotResult{
+			SnapshotName:  "snap-test",
+			PoolName:      "test-pool",
+			ShareID:       "share-1",
+			SnapshotPath:  "/pvcs/.snapshots/snap-snap-test",
+			SourceSubPath: "/pvcs/pvc-test",
+			SizeBytes:     10 * (1 << 30),
+			CreationTime:  now,
+			ReadyToUse:    true,
+		},
+	}
+	d := newTestDriver(pm, nil)
+
+	resp, err := d.CreateSnapshot(context.Background(), &csi.CreateSnapshotRequest{
+		Name:           "snap-test",
+		SourceVolumeId: "test-pool/share-1/pvc-test",
+	})
+	if err != nil {
+		t.Fatalf("CreateSnapshot failed: %v", err)
+	}
+
+	snap := resp.GetSnapshot()
+	if snap == nil {
+		t.Fatal("expected snapshot in response")
+	}
+
+	expectedID := "test-pool/share-1/snap-test"
+	if snap.SnapshotId != expectedID {
+		t.Errorf("expected snapshotID %q, got %q", expectedID, snap.SnapshotId)
+	}
+	if snap.SourceVolumeId != "test-pool/share-1/pvc-test" {
+		t.Errorf("expected sourceVolumeId 'test-pool/share-1/pvc-test', got %q", snap.SourceVolumeId)
+	}
+	if snap.SizeBytes != 10*(1<<30) {
+		t.Errorf("expected sizeBytes %d, got %d", 10*(1<<30), snap.SizeBytes)
+	}
+	if !snap.ReadyToUse {
+		t.Error("expected ReadyToUse=true")
+	}
+
+	if pm.lastCreateSnapshotName != "snap-test" {
+		t.Errorf("expected snapshot name 'snap-test', got %q", pm.lastCreateSnapshotName)
+	}
+	if pm.lastCreateSnapshotSourceID != "test-pool/share-1/pvc-test" {
+		t.Errorf("expected source ID 'test-pool/share-1/pvc-test', got %q", pm.lastCreateSnapshotSourceID)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// DeleteSnapshot Tests
+// ---------------------------------------------------------------------------
+
+func TestDeleteSnapshot_MissingSnapshotID(t *testing.T) {
+	d := newTestDriver(&mockPoolManager{}, nil)
+
+	_, err := d.DeleteSnapshot(context.Background(), &csi.DeleteSnapshotRequest{
+		SnapshotId: "",
+	})
+
+	assertGRPCCode(t, err, codes.InvalidArgument)
+}
+
+func TestDeleteSnapshot_InvalidSnapshotID(t *testing.T) {
+	d := newTestDriver(&mockPoolManager{}, nil)
+
+	_, err := d.DeleteSnapshot(context.Background(), &csi.DeleteSnapshotRequest{
+		SnapshotId: "invalid-no-slashes",
+	})
+
+	assertGRPCCode(t, err, codes.InvalidArgument)
+}
+
+func TestDeleteSnapshot_NotFound_Idempotent(t *testing.T) {
+	pm := &mockPoolManager{
+		deleteSnapshotErr: pool.ErrSnapshotNotFound,
+	}
+	d := newTestDriver(pm, nil)
+
+	resp, err := d.DeleteSnapshot(context.Background(), &csi.DeleteSnapshotRequest{
+		SnapshotId: "pool/share/snap-missing",
+	})
+
+	if err != nil {
+		t.Fatalf("expected idempotent success for not-found, got: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+}
+
+func TestDeleteSnapshot_Success(t *testing.T) {
+	pm := &mockPoolManager{}
+	d := newTestDriver(pm, nil)
+
+	resp, err := d.DeleteSnapshot(context.Background(), &csi.DeleteSnapshotRequest{
+		SnapshotId: "test-pool/share-1/snap-test",
+	})
+	if err != nil {
+		t.Fatalf("DeleteSnapshot failed: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+
+	if pm.lastDeleteSnapshotName != "snap-test" {
+		t.Errorf("expected delete called with 'snap-test', got %q", pm.lastDeleteSnapshotName)
+	}
+}
+
+func TestDeleteSnapshot_InternalError(t *testing.T) {
+	pm := &mockPoolManager{
+		deleteSnapshotErr: fmt.Errorf("NFS failure"),
+	}
+	d := newTestDriver(pm, nil)
+
+	_, err := d.DeleteSnapshot(context.Background(), &csi.DeleteSnapshotRequest{
+		SnapshotId: "pool/share/snap-test",
+	})
+
+	assertGRPCCode(t, err, codes.Internal)
+}
+
+// ---------------------------------------------------------------------------
+// ListSnapshots Tests
+// ---------------------------------------------------------------------------
+
+func TestListSnapshots_BySnapshotID(t *testing.T) {
+	k := newMockK8sClient()
+	now := metav1.Now()
+	k.snapshots["snap-test"] = &v1alpha1.Snapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "snap-test"},
+		Spec: v1alpha1.SnapshotSpec{
+			SourceSubVolume: "pvc-source",
+			PoolName:        "test-pool",
+			ShareID:         "share-1",
+			SizeGB:          10,
+		},
+		Status: v1alpha1.SnapshotStatus{
+			ReadyToUse:   true,
+			CreationTime: &now,
+		},
+	}
+	d := newTestDriver(&mockPoolManager{}, k)
+
+	resp, err := d.ListSnapshots(context.Background(), &csi.ListSnapshotsRequest{
+		SnapshotId: "test-pool/share-1/snap-test",
+	})
+	if err != nil {
+		t.Fatalf("ListSnapshots failed: %v", err)
+	}
+
+	entries := resp.GetEntries()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+
+	snap := entries[0].GetSnapshot()
+	if snap.SnapshotId != "test-pool/share-1/snap-test" {
+		t.Errorf("expected snapshotID 'test-pool/share-1/snap-test', got %q", snap.SnapshotId)
+	}
+	if snap.SourceVolumeId != "test-pool/share-1/pvc-source" {
+		t.Errorf("expected sourceVolumeId 'test-pool/share-1/pvc-source', got %q", snap.SourceVolumeId)
+	}
+	if !snap.ReadyToUse {
+		t.Error("expected ReadyToUse=true")
+	}
+	if snap.SizeBytes != 10*(1<<30) {
+		t.Errorf("expected sizeBytes %d, got %d", 10*(1<<30), snap.SizeBytes)
+	}
+}
+
+func TestListSnapshots_BySnapshotID_NotFound(t *testing.T) {
+	k := newMockK8sClient()
+	d := newTestDriver(&mockPoolManager{}, k)
+
+	resp, err := d.ListSnapshots(context.Background(), &csi.ListSnapshotsRequest{
+		SnapshotId: "pool/share/snap-missing",
+	})
+	if err != nil {
+		t.Fatalf("ListSnapshots failed: %v", err)
+	}
+
+	if len(resp.GetEntries()) != 0 {
+		t.Errorf("expected 0 entries for missing snapshot, got %d", len(resp.GetEntries()))
+	}
+}
+
+func TestListSnapshots_BySourceVolumeID(t *testing.T) {
+	now := time.Now()
+	pm := &mockPoolManager{
+		listSnapshotsResults: []pool.SnapshotResult{
+			{
+				SnapshotName: "snap-1",
+				PoolName:     "test-pool",
+				ShareID:      "share-1",
+				SizeBytes:    10 * (1 << 30),
+				CreationTime: now,
+				ReadyToUse:   true,
+			},
+			{
+				SnapshotName: "snap-2",
+				PoolName:     "test-pool",
+				ShareID:      "share-1",
+				SizeBytes:    5 * (1 << 30),
+				CreationTime: now,
+				ReadyToUse:   true,
+			},
+		},
+	}
+	d := newTestDriver(pm, nil)
+
+	resp, err := d.ListSnapshots(context.Background(), &csi.ListSnapshotsRequest{
+		SourceVolumeId: "test-pool/share-1/pvc-source",
+	})
+	if err != nil {
+		t.Fatalf("ListSnapshots failed: %v", err)
+	}
+
+	entries := resp.GetEntries()
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+
+	if entries[0].GetSnapshot().SnapshotId != "test-pool/share-1/snap-1" {
+		t.Errorf("expected first snapshot ID 'test-pool/share-1/snap-1', got %q", entries[0].GetSnapshot().SnapshotId)
+	}
+	if entries[1].GetSnapshot().SnapshotId != "test-pool/share-1/snap-2" {
+		t.Errorf("expected second snapshot ID 'test-pool/share-1/snap-2', got %q", entries[1].GetSnapshot().SnapshotId)
+	}
+}
+
+func TestListSnapshots_Pagination(t *testing.T) {
+	now := time.Now()
+	pm := &mockPoolManager{
+		listSnapshotsResults: []pool.SnapshotResult{
+			{SnapshotName: "snap-1", PoolName: "pool", ShareID: "share", SizeBytes: 1, CreationTime: now, ReadyToUse: true},
+			{SnapshotName: "snap-2", PoolName: "pool", ShareID: "share", SizeBytes: 2, CreationTime: now, ReadyToUse: true},
+			{SnapshotName: "snap-3", PoolName: "pool", ShareID: "share", SizeBytes: 3, CreationTime: now, ReadyToUse: true},
+		},
+	}
+	d := newTestDriver(pm, nil)
+
+	// First page: max 2 entries
+	resp, err := d.ListSnapshots(context.Background(), &csi.ListSnapshotsRequest{
+		SourceVolumeId: "pool/share/pvc-source",
+		MaxEntries:     2,
+	})
+	if err != nil {
+		t.Fatalf("ListSnapshots page 1 failed: %v", err)
+	}
+
+	if len(resp.GetEntries()) != 2 {
+		t.Fatalf("expected 2 entries on page 1, got %d", len(resp.GetEntries()))
+	}
+	if resp.NextToken == "" {
+		t.Fatal("expected non-empty NextToken for pagination")
+	}
+
+	// Second page: use token
+	resp2, err := d.ListSnapshots(context.Background(), &csi.ListSnapshotsRequest{
+		SourceVolumeId: "pool/share/pvc-source",
+		MaxEntries:     2,
+		StartingToken:  resp.NextToken,
+	})
+	if err != nil {
+		t.Fatalf("ListSnapshots page 2 failed: %v", err)
+	}
+
+	if len(resp2.GetEntries()) != 1 {
+		t.Fatalf("expected 1 entry on page 2, got %d", len(resp2.GetEntries()))
+	}
+	if resp2.NextToken != "" {
+		t.Errorf("expected empty NextToken on last page, got %q", resp2.NextToken)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// CreateVolume from Snapshot Tests
+// ---------------------------------------------------------------------------
+
+func TestCreateVolume_FromSnapshot_Success(t *testing.T) {
+	pm := &mockPoolManager{
+		restoreSnapshotResult: &pool.AllocationResult{
+			ShareID:       "share-1",
+			MountTargetIP: "10.240.0.1",
+			SubPath:       "/pvcs/pvc-restored",
+			SharePath:     "/",
+		},
+	}
+	d := newTestDriver(pm, nil)
+
+	resp, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name:       "pvc-restored",
+		Parameters: map[string]string{"pool": "test-pool"},
+		CapacityRange: &csi.CapacityRange{
+			RequiredBytes: gbToBytes(10),
+		},
+		VolumeContentSource: &csi.VolumeContentSource{
+			Type: &csi.VolumeContentSource_Snapshot{
+				Snapshot: &csi.VolumeContentSource_SnapshotSource{
+					SnapshotId: "test-pool/share-1/snap-source",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume from snapshot failed: %v", err)
+	}
+
+	vol := resp.GetVolume()
+	if vol == nil {
+		t.Fatal("expected volume in response")
+	}
+
+	expectedID := "test-pool/share-1/pvc-restored"
+	if vol.VolumeId != expectedID {
+		t.Errorf("expected volumeID %q, got %q", expectedID, vol.VolumeId)
+	}
+
+	if vol.ContentSource == nil {
+		t.Fatal("expected content source in response")
+	}
+	snapSource := vol.ContentSource.GetSnapshot()
+	if snapSource == nil {
+		t.Fatal("expected snapshot content source")
+	}
+	if snapSource.SnapshotId != "test-pool/share-1/snap-source" {
+		t.Errorf("expected content source snapshot ID 'test-pool/share-1/snap-source', got %q", snapSource.SnapshotId)
+	}
+
+	if pm.lastRestoreSnapshotName != "snap-source" {
+		t.Errorf("expected restore called with 'snap-source', got %q", pm.lastRestoreSnapshotName)
+	}
+}
+
+func TestCreateVolume_FromSnapshot_SnapshotNotFound(t *testing.T) {
+	pm := &mockPoolManager{
+		restoreSnapshotErr: pool.ErrSnapshotNotFound,
+	}
+	d := newTestDriver(pm, nil)
+
+	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name:       "pvc-restored",
+		Parameters: map[string]string{"pool": "test-pool"},
+		CapacityRange: &csi.CapacityRange{
+			RequiredBytes: gbToBytes(10),
+		},
+		VolumeContentSource: &csi.VolumeContentSource{
+			Type: &csi.VolumeContentSource_Snapshot{
+				Snapshot: &csi.VolumeContentSource_SnapshotSource{
+					SnapshotId: "pool/share/snap-missing",
+				},
+			},
+		},
+	})
+
+	assertGRPCCode(t, err, codes.NotFound)
+}
+
+func TestCreateVolume_FromSnapshot_PoolExhausted(t *testing.T) {
+	pm := &mockPoolManager{
+		restoreSnapshotErr: pool.ErrPoolExhausted,
+	}
+	d := newTestDriver(pm, nil)
+
+	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name:       "pvc-restored",
+		Parameters: map[string]string{"pool": "test-pool"},
+		CapacityRange: &csi.CapacityRange{
+			RequiredBytes: gbToBytes(10),
+		},
+		VolumeContentSource: &csi.VolumeContentSource{
+			Type: &csi.VolumeContentSource_Snapshot{
+				Snapshot: &csi.VolumeContentSource_SnapshotSource{
+					SnapshotId: "pool/share/snap-test",
+				},
+			},
+		},
+	})
+
+	assertGRPCCode(t, err, codes.ResourceExhausted)
+}
+
+func TestCreateVolume_FromSnapshot_InvalidSnapshotID(t *testing.T) {
+	pm := &mockPoolManager{}
+	d := newTestDriver(pm, nil)
+
+	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name:       "pvc-restored",
+		Parameters: map[string]string{"pool": "test-pool"},
+		CapacityRange: &csi.CapacityRange{
+			RequiredBytes: gbToBytes(10),
+		},
+		VolumeContentSource: &csi.VolumeContentSource{
+			Type: &csi.VolumeContentSource_Snapshot{
+				Snapshot: &csi.VolumeContentSource_SnapshotSource{
+					SnapshotId: "invalid-id",
+				},
+			},
+		},
+	})
+
+	assertGRPCCode(t, err, codes.InvalidArgument)
 }

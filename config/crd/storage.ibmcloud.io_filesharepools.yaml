@@ -115,6 +115,14 @@ spec:
                 description: DefaultUID is the default owner UID for new subdirectories.
                 format: int64
                 type: integer
+              drainShares:
+                description: |-
+                  DrainShares lists VPC share IDs that should be drained (evacuated).
+                  Shares in this list will be marked as "draining" and excluded from new allocations.
+                  Once all SubVolumes are removed from a draining share, it is considered fully drained.
+                items:
+                  type: string
+                type: array
               encryptionInTransit:
                 default: false
                 description: EncryptionInTransit enables NFS encryption in transit
@@ -304,6 +312,34 @@ spec:
                   - reason
                   - status
                   - type
+                  type: object
+                type: array
+              drainStatus:
+                description: DrainStatus tracks the progress of share draining operations.
+                items:
+                  description: ShareDrainStatus tracks the draining progress for a
+                    single share.
+                  properties:
+                    drainStartedAt:
+                      description: DrainStartedAt is when the drain was initiated.
+                      format: date-time
+                      type: string
+                    drained:
+                      description: Drained is true when the share has zero SubVolumes
+                        remaining.
+                      type: boolean
+                    remainingSubVolumes:
+                      description: RemainingSubVolumes is the number of SubVolumes
+                        still on this share.
+                      format: int32
+                      type: integer
+                    shareID:
+                      description: ShareID is the VPC file share ID being drained.
+                      type: string
+                  required:
+                  - drained
+                  - remainingSubVolumes
+                  - shareID
                   type: object
                 type: array
               lastReconcileTime:

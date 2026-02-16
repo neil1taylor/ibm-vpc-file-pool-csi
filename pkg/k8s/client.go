@@ -28,4 +28,14 @@ type Client interface {
 	UpdateSubVolume(ctx context.Context, sv *v1alpha1.SubVolume) error
 	UpdateSubVolumeStatus(ctx context.Context, sv *v1alpha1.SubVolume) error
 	DeleteSubVolume(ctx context.Context, name string) error
+
+	// Snapshot operations
+	GetSnapshot(ctx context.Context, name string) (*v1alpha1.Snapshot, error)
+	ListSnapshots(ctx context.Context, poolName string) ([]v1alpha1.Snapshot, error)
+	ListSnapshotsByShare(ctx context.Context, shareID string) ([]v1alpha1.Snapshot, error)
+	ListSnapshotsBySource(ctx context.Context, sourceSubVolume string) ([]v1alpha1.Snapshot, error)
+	CreateSnapshot(ctx context.Context, snap *v1alpha1.Snapshot) error
+	UpdateSnapshot(ctx context.Context, snap *v1alpha1.Snapshot) error
+	UpdateSnapshotStatus(ctx context.Context, snap *v1alpha1.Snapshot) error
+	DeleteSnapshot(ctx context.Context, name string) error
 }

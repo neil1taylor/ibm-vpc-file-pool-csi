@@ -396,6 +396,148 @@ func TestListSubVolumesByShare(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Snapshot Tests
+// ---------------------------------------------------------------------------
+
+func TestGetSnapshot_Found(t *testing.T) {
+	scheme := newTestScheme(t)
+	snap := &v1alpha1.Snapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "snap-test"},
+		Spec: v1alpha1.SnapshotSpec{
+			PoolName:        "test-pool",
+			ShareID:         "r006-share1",
+			SourceSubVolume: "pvc-abc123",
+			SizeGB:          10,
+		},
+	}
+
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(snap).Build()
+	c := NewClient(fc)
+
+	got, err := c.GetSnapshot(context.Background(), "snap-test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Spec.SourceSubVolume != "pvc-abc123" {
+		t.Errorf("expected sourceSubVolume pvc-abc123, got %s", got.Spec.SourceSubVolume)
+	}
+}
+
+func TestGetSnapshot_NotFound(t *testing.T) {
+	scheme := newTestScheme(t)
+	fc := fake.NewClientBuilder().WithScheme(scheme).Build()
+	c := NewClient(fc)
+
+	_, err := c.GetSnapshot(context.Background(), "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent Snapshot, got nil")
+	}
+}
+
+func TestCreateSnapshot(t *testing.T) {
+	scheme := newTestScheme(t)
+	fc := fake.NewClientBuilder().WithScheme(scheme).Build()
+	c := NewClient(fc)
+
+	snap := &v1alpha1.Snapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "snap-new",
+			Labels: map[string]string{
+				"storage.ibmcloud.io/pool":             "test-pool",
+				"storage.ibmcloud.io/share-id":         "r006-share1",
+				"storage.ibmcloud.io/source-subvolume": "pvc-abc123",
+			},
+		},
+		Spec: v1alpha1.SnapshotSpec{
+			PoolName:        "test-pool",
+			ShareID:         "r006-share1",
+			SourceSubVolume: "pvc-abc123",
+			SizeGB:          10,
+		},
+	}
+
+	if err := c.CreateSnapshot(context.Background(), snap); err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+
+	got, err := c.GetSnapshot(context.Background(), "snap-new")
+	if err != nil {
+		t.Fatalf("get after create failed: %v", err)
+	}
+	if got.Spec.SizeGB != 10 {
+		t.Errorf("expected sizeGB 10, got %d", got.Spec.SizeGB)
+	}
+}
+
+func TestDeleteSnapshot(t *testing.T) {
+	scheme := newTestScheme(t)
+	snap := &v1alpha1.Snapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "snap-delete"},
+		Spec: v1alpha1.SnapshotSpec{
+			PoolName: "test-pool",
+			ShareID:  "r006-share1",
+		},
+	}
+
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(snap).Build()
+	c := NewClient(fc)
+
+	if err := c.DeleteSnapshot(context.Background(), "snap-delete"); err != nil {
+		t.Fatalf("delete failed: %v", err)
+	}
+
+	_, err := c.GetSnapshot(context.Background(), "snap-delete")
+	if err == nil {
+		t.Fatal("expected error after deletion, got nil")
+	}
+}
+
+func TestListSnapshotsBySource(t *testing.T) {
+	scheme := newTestScheme(t)
+	snap1 := &v1alpha1.Snapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "snap-1",
+			Labels: map[string]string{
+				"storage.ibmcloud.io/pool":             "pool-a",
+				"storage.ibmcloud.io/source-subvolume": "pvc-abc123",
+			},
+		},
+		Spec: v1alpha1.SnapshotSpec{PoolName: "pool-a", SourceSubVolume: "pvc-abc123"},
+	}
+	snap2 := &v1alpha1.Snapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "snap-2",
+			Labels: map[string]string{
+				"storage.ibmcloud.io/pool":             "pool-a",
+				"storage.ibmcloud.io/source-subvolume": "pvc-abc123",
+			},
+		},
+		Spec: v1alpha1.SnapshotSpec{PoolName: "pool-a", SourceSubVolume: "pvc-abc123"},
+	}
+	snap3 := &v1alpha1.Snapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "snap-3",
+			Labels: map[string]string{
+				"storage.ibmcloud.io/pool":             "pool-a",
+				"storage.ibmcloud.io/source-subvolume": "pvc-other",
+			},
+		},
+		Spec: v1alpha1.SnapshotSpec{PoolName: "pool-a", SourceSubVolume: "pvc-other"},
+	}
+
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(snap1, snap2, snap3).Build()
+	c := NewClient(fc)
+
+	results, err := c.ListSnapshotsBySource(context.Background(), "pvc-abc123")
+	if err != nil {
+		t.Fatalf("list failed: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 Snapshots for source pvc-abc123, got %d", len(results))
+	}
+}
+
 func TestGetConfigMapValue_Found(t *testing.T) {
 	scheme := newTestScheme(t)
 	cm := &corev1.ConfigMap{
