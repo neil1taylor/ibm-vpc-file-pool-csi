@@ -60,9 +60,11 @@ nav:
   - Getting Started:
       - Installation: INSTALL.md
       - User Guide: USER-GUIDE.md
+      - Helm Values Reference: HELM-VALUES.md
   - Operations:
       - Troubleshooting: TROUBLESHOOTING.md
       - Performance Tuning: PERFORMANCE-TUNING.md
+      - Known Limitations: KNOWN-LIMITATIONS.md
   - Architecture:
       - System Design: ARCHITECTURE.md
       - CRD Specification: CRD-SPEC.md
@@ -73,5 +75,6 @@ nav:
       - Contributing: CONTRIBUTING.md
       - Coding Guidelines: CODING-GUIDELINES.md
       - Testing: TESTING.md
+      - Changelog: CHANGELOG.md
   - Examples:
       - Overview: examples/README.md

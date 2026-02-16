@@ -164,6 +164,10 @@ go test ./pkg/pool/ -v -race -run TestAllocate_SpreadStrategy
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Comprehensive troubleshooting guide |
 | [PERFORMANCE-TUNING.md](PERFORMANCE-TUNING.md) | NFS tuning, IOPS planning, benchmarking |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Developer guide and contribution process |
+| [HELM-VALUES.md](HELM-VALUES.md) | Complete Helm chart values reference |
+| [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md) | Known limitations and workarounds |
+| [CHANGELOG.md](CHANGELOG.md) | Version history and release notes |
+| [SECURITY.md](SECURITY.md) | Security policy and hardening guide |
 | [examples/](examples/) | Ready-to-use YAML examples |
 
 ## License
