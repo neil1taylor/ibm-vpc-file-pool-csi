@@ -2550,6 +2550,432 @@ func TestCreateSnapshot_MetricsIncremented(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// CloneVolume Tests
+// ---------------------------------------------------------------------------
+
+func TestCloneVolume_SyncPath(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 100, 1),
+	)
+	k.addPool(pool)
+
+	// Source SubVolume: 5 GB on share-1
+	source := newTestSubVolume("pvc-aaaa1111-2222-3333-4444-555566667777", "test-pool", "share-1", 5)
+	k.addSubVolume(source)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	result, err := mgr.CloneVolume(context.Background(),
+		"test-pool/share-1/pvc-aaaa1111-2222-3333-4444-555566667777",
+		AllocationRequest{
+			PVName:       testPVName,
+			PVCName:      "my-clone",
+			PVCNamespace: "default",
+			PoolName:     "test-pool",
+			RequestedGB:  5,
+		},
+		10, // syncThreshold = 10 GB
+	)
+	if err != nil {
+		t.Fatalf("CloneVolume failed: %v", err)
+	}
+
+	// Should land on same share (source share has capacity)
+	if result.ShareID != "share-1" {
+		t.Errorf("expected share-1 (same share), got %s", result.ShareID)
+	}
+
+	// CopyDir should have been called (sync path)
+	if nfs.copyCount() != 1 {
+		t.Errorf("expected 1 copy, got %d", nfs.copyCount())
+	}
+
+	// SubVolume CR should exist with cloneStatus=Complete
+	sv := k.getSubVolume(testPVName)
+	if sv == nil {
+		t.Fatal("SubVolume CR not created")
+	}
+	if sv.Status.CloneStatus != "Complete" {
+		t.Errorf("expected cloneStatus=Complete, got %q", sv.Status.CloneStatus)
+	}
+	if sv.Status.Phase != "Bound" {
+		t.Errorf("expected phase=Bound, got %q", sv.Status.Phase)
+	}
+	if sv.Spec.SourceVolume != "pvc-aaaa1111-2222-3333-4444-555566667777" {
+		t.Errorf("expected sourceVolume set, got %q", sv.Spec.SourceVolume)
+	}
+	if sv.Spec.SourceShareID != "share-1" {
+		t.Errorf("expected sourceShareID=share-1, got %q", sv.Spec.SourceShareID)
+	}
+}
+
+func TestCloneVolume_AsyncPath(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 100, 1),
+	)
+	k.addPool(pool)
+
+	// Source SubVolume: 20 GB on share-1 (above threshold)
+	source := newTestSubVolume("pvc-aaaa1111-2222-3333-4444-555566667777", "test-pool", "share-1", 20)
+	k.addSubVolume(source)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	result, err := mgr.CloneVolume(context.Background(),
+		"test-pool/share-1/pvc-aaaa1111-2222-3333-4444-555566667777",
+		AllocationRequest{
+			PVName:       testPVName,
+			PVCName:      "my-clone",
+			PVCNamespace: "default",
+			PoolName:     "test-pool",
+			RequestedGB:  20,
+		},
+		10, // syncThreshold = 10 GB (source is 20 GB, so async)
+	)
+	if err != nil {
+		t.Fatalf("CloneVolume failed: %v", err)
+	}
+
+	if result.ShareID != "share-1" {
+		t.Errorf("expected share-1, got %s", result.ShareID)
+	}
+
+	// CopyDir should NOT have been called (async path)
+	if nfs.copyCount() != 0 {
+		t.Errorf("expected 0 copies for async path, got %d", nfs.copyCount())
+	}
+
+	// SubVolume CR should exist with cloneStatus=Pending
+	sv := k.getSubVolume(testPVName)
+	if sv == nil {
+		t.Fatal("SubVolume CR not created")
+	}
+	if sv.Status.CloneStatus != "Pending" {
+		t.Errorf("expected cloneStatus=Pending, got %q", sv.Status.CloneStatus)
+	}
+	if sv.Status.Phase != "Cloning" {
+		t.Errorf("expected phase=Cloning, got %q", sv.Status.Phase)
+	}
+}
+
+func TestCloneVolume_SameShare(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 100, 1),
+		newStableShare("share-2", "s2", 1000, 0, 0),
+	)
+	k.addPool(pool)
+
+	source := newTestSubVolume("pvc-aaaa1111-2222-3333-4444-555566667777", "test-pool", "share-1", 5)
+	k.addSubVolume(source)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	result, err := mgr.CloneVolume(context.Background(),
+		"test-pool/share-1/pvc-aaaa1111-2222-3333-4444-555566667777",
+		AllocationRequest{
+			PVName:       testPVName,
+			PVCName:      "my-clone",
+			PVCNamespace: "default",
+			PoolName:     "test-pool",
+			RequestedGB:  5,
+		},
+		10,
+	)
+	if err != nil {
+		t.Fatalf("CloneVolume failed: %v", err)
+	}
+
+	// Should prefer same share (share-1) since it has capacity
+	if result.ShareID != "share-1" {
+		t.Errorf("expected share-1 (same share preference), got %s", result.ShareID)
+	}
+}
+
+func TestCloneVolume_CrossShare(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	// share-1 is full (source is there), share-2 has space
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 995, 10),
+		newStableShare("share-2", "s2", 1000, 0, 0),
+	)
+	k.addPool(pool)
+
+	source := newTestSubVolume("pvc-aaaa1111-2222-3333-4444-555566667777", "test-pool", "share-1", 10)
+	k.addSubVolume(source)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	result, err := mgr.CloneVolume(context.Background(),
+		"test-pool/share-1/pvc-aaaa1111-2222-3333-4444-555566667777",
+		AllocationRequest{
+			PVName:       testPVName,
+			PVCName:      "my-clone",
+			PVCNamespace: "default",
+			PoolName:     "test-pool",
+			RequestedGB:  10,
+		},
+		10,
+	)
+	if err != nil {
+		t.Fatalf("CloneVolume failed: %v", err)
+	}
+
+	// Should fall back to share-2 (share-1 only has 5 GB free, need 10)
+	if result.ShareID != "share-2" {
+		t.Errorf("expected share-2 (cross-share), got %s", result.ShareID)
+	}
+
+	// Cross-share clone is always async (different share even if small)
+	sv := k.getSubVolume(testPVName)
+	if sv == nil {
+		t.Fatal("SubVolume CR not created")
+	}
+	if sv.Status.CloneStatus != "Pending" {
+		t.Errorf("expected cloneStatus=Pending for cross-share, got %q", sv.Status.CloneStatus)
+	}
+}
+
+func TestCloneVolume_SourceNotFound(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 0, 0),
+	)
+	k.addPool(pool)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	_, err := mgr.CloneVolume(context.Background(),
+		"test-pool/share-1/pvc-nonexistent-0000-0000-000000000000",
+		AllocationRequest{
+			PVName:       testPVName,
+			PVCName:      "my-clone",
+			PVCNamespace: "default",
+			PoolName:     "test-pool",
+			RequestedGB:  5,
+		},
+		10,
+	)
+
+	if !errors.Is(err, ErrSourceNotFound) {
+		t.Fatalf("expected ErrSourceNotFound, got: %v", err)
+	}
+}
+
+func TestCloneVolume_InsufficientCapacity(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	// Pool is full, no auto-expand
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 1000, 10),
+	)
+	pool.Spec.AutoExpand = false
+	k.addPool(pool)
+
+	source := newTestSubVolume("pvc-aaaa1111-2222-3333-4444-555566667777", "test-pool", "share-1", 5)
+	k.addSubVolume(source)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	_, err := mgr.CloneVolume(context.Background(),
+		"test-pool/share-1/pvc-aaaa1111-2222-3333-4444-555566667777",
+		AllocationRequest{
+			PVName:       testPVName,
+			PVCName:      "my-clone",
+			PVCNamespace: "default",
+			PoolName:     "test-pool",
+			RequestedGB:  5,
+		},
+		10,
+	)
+
+	if !errors.Is(err, ErrPoolExhausted) {
+		t.Fatalf("expected ErrPoolExhausted, got: %v", err)
+	}
+}
+
+func TestCloneVolume_SizeTooSmall(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 0, 0),
+	)
+	k.addPool(pool)
+
+	source := newTestSubVolume("pvc-aaaa1111-2222-3333-4444-555566667777", "test-pool", "share-1", 50)
+	k.addSubVolume(source)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	_, err := mgr.CloneVolume(context.Background(),
+		"test-pool/share-1/pvc-aaaa1111-2222-3333-4444-555566667777",
+		AllocationRequest{
+			PVName:       testPVName,
+			PVCName:      "my-clone",
+			PVCNamespace: "default",
+			PoolName:     "test-pool",
+			RequestedGB:  10, // less than source's 50 GB
+		},
+		10,
+	)
+
+	if err == nil {
+		t.Fatal("expected error for clone size smaller than source")
+	}
+	if !contains(err.Error(), "clone size") {
+		t.Errorf("expected 'clone size' in error, got: %v", err)
+	}
+}
+
+func TestCloneVolume_Idempotent(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 100, 1),
+	)
+	k.addPool(pool)
+
+	source := newTestSubVolume("pvc-aaaa1111-2222-3333-4444-555566667777", "test-pool", "share-1", 5)
+	k.addSubVolume(source)
+
+	// Pre-existing clone SubVolume (already completed)
+	existingClone := newTestSubVolume(testPVName, "test-pool", "share-1", 5)
+	existingClone.Spec.SourceVolume = "pvc-aaaa1111-2222-3333-4444-555566667777"
+	existingClone.Status.CloneStatus = "Complete"
+	k.addSubVolume(existingClone)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	result, err := mgr.CloneVolume(context.Background(),
+		"test-pool/share-1/pvc-aaaa1111-2222-3333-4444-555566667777",
+		AllocationRequest{
+			PVName:       testPVName,
+			PVCName:      "my-clone",
+			PVCNamespace: "default",
+			PoolName:     "test-pool",
+			RequestedGB:  5,
+		},
+		10,
+	)
+	if err != nil {
+		t.Fatalf("idempotent CloneVolume failed: %v", err)
+	}
+
+	if result.ShareID != "share-1" {
+		t.Errorf("expected share-1, got %s", result.ShareID)
+	}
+
+	// No copy should have happened
+	if nfs.copyCount() != 0 {
+		t.Errorf("expected 0 copies for idempotent call, got %d", nfs.copyCount())
+	}
+}
+
+func TestCloneVolume_CopyFailure(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+	nfs.CopyErr = errors.New("NFS copy failed: disk full")
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 100, 1),
+	)
+	k.addPool(pool)
+
+	source := newTestSubVolume("pvc-aaaa1111-2222-3333-4444-555566667777", "test-pool", "share-1", 5)
+	k.addSubVolume(source)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	_, err := mgr.CloneVolume(context.Background(),
+		"test-pool/share-1/pvc-aaaa1111-2222-3333-4444-555566667777",
+		AllocationRequest{
+			PVName:       testPVName,
+			PVCName:      "my-clone",
+			PVCNamespace: "default",
+			PoolName:     "test-pool",
+			RequestedGB:  5,
+		},
+		10,
+	)
+
+	if err == nil {
+		t.Fatal("expected error for copy failure")
+	}
+	if !contains(err.Error(), "clone copy") {
+		t.Errorf("expected 'clone copy' in error, got: %v", err)
+	}
+
+	// No SubVolume should be created after copy failure
+	if k.subVolumeCount() != 1 { // only the source exists
+		t.Errorf("expected 1 SubVolume (source only), got %d", k.subVolumeCount())
+	}
+}
+
+func TestCloneVolume_UpdatesPoolCapacity(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 100, 1),
+	)
+	k.addPool(pool)
+
+	source := newTestSubVolume("pvc-aaaa1111-2222-3333-4444-555566667777", "test-pool", "share-1", 5)
+	k.addSubVolume(source)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	_, err := mgr.CloneVolume(context.Background(),
+		"test-pool/share-1/pvc-aaaa1111-2222-3333-4444-555566667777",
+		AllocationRequest{
+			PVName:       testPVName,
+			PVCName:      "my-clone",
+			PVCNamespace: "default",
+			PoolName:     "test-pool",
+			RequestedGB:  5,
+		},
+		10,
+	)
+	if err != nil {
+		t.Fatalf("CloneVolume failed: %v", err)
+	}
+
+	updatedPool := k.getPool("test-pool")
+	// Original: 100 allocated + 5 for clone = 105
+	if updatedPool.Status.TotalAllocatedGB != 105 {
+		t.Errorf("expected TotalAllocatedGB=105, got %d", updatedPool.Status.TotalAllocatedGB)
+	}
+	if updatedPool.Status.TotalPVCCount != 2 {
+		t.Errorf("expected TotalPVCCount=2, got %d", updatedPool.Status.TotalPVCCount)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Helper
 // ---------------------------------------------------------------------------
 

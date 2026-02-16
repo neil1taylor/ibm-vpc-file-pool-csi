@@ -195,12 +195,28 @@ func (f *fakeK8sClient) ListSnapshots(_ context.Context, _ string) ([]v1alpha1.S
 	return result, nil
 }
 
-func (f *fakeK8sClient) ListSnapshotsByShare(_ context.Context, _ string) ([]v1alpha1.Snapshot, error) {
-	return nil, nil
+func (f *fakeK8sClient) ListSnapshotsByShare(_ context.Context, shareID string) ([]v1alpha1.Snapshot, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var result []v1alpha1.Snapshot
+	for _, snap := range f.snapshots {
+		if snap.Spec.ShareID == shareID {
+			result = append(result, *snap.DeepCopy())
+		}
+	}
+	return result, nil
 }
 
-func (f *fakeK8sClient) ListSnapshotsBySource(_ context.Context, _ string) ([]v1alpha1.Snapshot, error) {
-	return nil, nil
+func (f *fakeK8sClient) ListSnapshotsBySource(_ context.Context, sourceSubVolume string) ([]v1alpha1.Snapshot, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var result []v1alpha1.Snapshot
+	for _, snap := range f.snapshots {
+		if snap.Spec.SourceSubVolume == sourceSubVolume {
+			result = append(result, *snap.DeepCopy())
+		}
+	}
+	return result, nil
 }
 
 func (f *fakeK8sClient) CreateSnapshot(_ context.Context, snap *v1alpha1.Snapshot) error {
@@ -291,6 +307,21 @@ func (f *fakeK8sClient) subVolumeNames() []string {
 	return names
 }
 
+func (f *fakeK8sClient) snapshotCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.snapshots)
+}
+
+func (f *fakeK8sClient) getSnapshot(name string) *v1alpha1.Snapshot {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if snap, ok := f.snapshots[name]; ok {
+		return snap.DeepCopy()
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Fake NFS Operations
 // ---------------------------------------------------------------------------
@@ -299,16 +330,19 @@ type fakeNFSOperations struct {
 	mu        sync.Mutex
 	dirs      map[string]os.FileMode
 	chowns    map[string][2]int
+	copies    map[string]string // dst → src
 	MkdirErr  error
 	RemoveErr error
 	ChownErr  error
 	ChmodErr  error
+	CopyErr   error
 }
 
 func newFakeNFSOperations() *fakeNFSOperations {
 	return &fakeNFSOperations{
 		dirs:   make(map[string]os.FileMode),
 		chowns: make(map[string][2]int),
+		copies: make(map[string]string),
 	}
 }
 
@@ -361,8 +395,20 @@ func (f *fakeNFSOperations) Chmod(path string, mode os.FileMode) error {
 	return nil
 }
 
-func (f *fakeNFSOperations) CopyDir(_, _ string) error {
+func (f *fakeNFSOperations) CopyDir(src, dst string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.CopyErr != nil {
+		return f.CopyErr
+	}
+	f.copies[dst] = src
 	return nil
+}
+
+func (f *fakeNFSOperations) copyCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.copies)
 }
 
 func (f *fakeNFSOperations) dirCount() int {
@@ -496,5 +542,46 @@ func createVolumeRequest(pvName, poolName string, sizeGB int64) *csi.CreateVolum
 func deleteVolumeRequest(volumeID string) *csi.DeleteVolumeRequest {
 	return &csi.DeleteVolumeRequest{
 		VolumeId: volumeID,
+	}
+}
+
+func createSnapshotRequest(snapshotName, sourceVolumeID string) *csi.CreateSnapshotRequest {
+	return &csi.CreateSnapshotRequest{
+		Name:           snapshotName,
+		SourceVolumeId: sourceVolumeID,
+	}
+}
+
+func deleteSnapshotRequest(snapshotID string) *csi.DeleteSnapshotRequest {
+	return &csi.DeleteSnapshotRequest{
+		SnapshotId: snapshotID,
+	}
+}
+
+func listSnapshotsRequest(sourceVolumeID string) *csi.ListSnapshotsRequest {
+	return &csi.ListSnapshotsRequest{
+		SourceVolumeId: sourceVolumeID,
+	}
+}
+
+func createVolumeFromSnapshotRequest(pvName, poolName string, sizeGB int64, snapshotID string) *csi.CreateVolumeRequest {
+	return &csi.CreateVolumeRequest{
+		Name:       pvName,
+		Parameters: map[string]string{"pool": poolName},
+		CapacityRange: &csi.CapacityRange{
+			RequiredBytes: gbToBytes(sizeGB),
+		},
+		VolumeContentSource: &csi.VolumeContentSource{
+			Type: &csi.VolumeContentSource_Snapshot{
+				Snapshot: &csi.VolumeContentSource_SnapshotSource{
+					SnapshotId: snapshotID,
+				},
+			},
+		},
+		AccessibilityRequirements: &csi.TopologyRequirement{
+			Preferred: []*csi.Topology{
+				{Segments: map[string]string{"topology.kubernetes.io/zone": "us-south-1"}},
+			},
+		},
 	}
 }

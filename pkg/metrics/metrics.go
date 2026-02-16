@@ -95,6 +95,25 @@ var (
 		},
 		[]string{"pool", "operation"},
 	)
+
+	// ClonesTotal counts clone operations by pool and status (success/error).
+	ClonesTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "vpc_file_pool_clones_total",
+			Help: "Total number of clone operations",
+		},
+		[]string{"pool", "status"},
+	)
+
+	// CloneDuration tracks the time for synchronous clone operations.
+	CloneDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "vpc_file_pool_clone_duration_seconds",
+			Help:    "Time for synchronous clone operations",
+			Buckets: prometheus.ExponentialBuckets(0.01, 2, 15), // 10ms to ~163s
+		},
+		[]string{"pool"},
+	)
 )
 
 func init() {
@@ -109,5 +128,7 @@ func init() {
 		VPCAPICallDuration,
 		SnapshotsTotal,
 		SnapshotDuration,
+		ClonesTotal,
+		CloneDuration,
 	)
 }

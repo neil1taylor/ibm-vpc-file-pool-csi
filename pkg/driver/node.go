@@ -79,7 +79,7 @@ func (d *Driver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRe
 }
 
 // NodePublishVolume bind-mounts the specific subdirectory into the pod's volume path.
-func (d *Driver) NodePublishVolume(_ context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
+func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
 	stagingPath := req.GetStagingTargetPath()
 	targetPath := req.GetTargetPath()
 	subDir := req.GetVolumeContext()["subDir"]
@@ -87,6 +87,30 @@ func (d *Driver) NodePublishVolume(_ context.Context, req *csi.NodePublishVolume
 	// SECURITY: Validate subDir path
 	if err := util.ValidateSubDir(subDir); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid subDir path: %s", subDir)
+	}
+
+	// Check if this is a clone that is still in progress
+	if d.k8sClient != nil {
+		_, _, pvName, parseErr := parseVolumeID(req.GetVolumeId())
+		if parseErr == nil {
+			sv, svErr := d.k8sClient.GetSubVolume(ctx, pvName)
+			if svErr == nil && sv.Status.CloneStatus != "" {
+				switch sv.Status.CloneStatus {
+				case "Complete":
+					// Clone is done, proceed with normal mount
+				case "Failed":
+					errMsg := "clone failed"
+					if sv.Status.CloneProgress != nil && sv.Status.CloneProgress.Error != "" {
+						errMsg = sv.Status.CloneProgress.Error
+					}
+					return nil, status.Errorf(codes.Internal, "clone failed: %s", errMsg)
+				default:
+					// Pending or InProgress -- tell kubelet to retry
+					return nil, status.Errorf(codes.Unavailable,
+						"clone is %s, not ready for mount (retry later)", sv.Status.CloneStatus)
+				}
+			}
+		}
 	}
 
 	sourcePath := filepath.Join(stagingPath, subDir)

@@ -14,23 +14,30 @@ Explicit list of what the IBM VPC File Pool CSI Driver does not support, why, an
 
 ## Snapshots and Clones
 
-**What:** Volume snapshots (`VolumeSnapshot`) and volume cloning (`dataSource` in PVC) are not implemented.
+**What:** Volume snapshots (`VolumeSnapshot`) and volume cloning (`dataSource` in PVC) are implemented via directory-level copies on the NFS share. Snapshots are created using `cp -a` from the source subdirectory to a `.snapshots/` directory on the same share. Clones use a similar copy mechanism with two paths:
 
-**Why:** Snapshotting a subdirectory within a shared NFS mount requires either filesystem-level snapshots (not exposed by VPC file shares) or a copy-on-write mechanism at the CSI layer.
+- **Synchronous clones:** For small volumes (configurable threshold, default 10 GB) on the same share, the copy completes inline during `CreateVolume`.
+- **Asynchronous clones:** For large volumes or cross-share clones, the SubVolume CR is created with `cloneStatus=Pending` and the background worker completes the copy. `NodePublishVolume` gates mount until the clone is `Complete`.
 
-**Workaround:** Use `rsync` or application-level backup tools to copy data from one PVC to another.
+**Limitations:**
+- Snapshots and clones are not instantaneous — they are full data copies proportional to the source volume size.
+- Cross-share clones require the async path (no same-share optimization).
+- Per-PVC quota enforcement limitations (see above) also apply to cloned volumes.
+- No incremental or COW snapshots — each snapshot is a full copy.
 
-**Roadmap:** Phase 4a — planned for a future release.
+**Workaround:** For very large volumes where copy time is unacceptable, consider application-level backup/restore tools.
+
+**Roadmap:** Phase 4a (snapshots) and Phase 4b (clones) are complete.
 
 ## Volume Group Snapshots
 
 **What:** Volume group snapshots (`VolumeGroupSnapshot`) are not implemented.
 
-**Why:** Requires Kubernetes 1.32+ and depends on single-volume snapshot support (Phase 4a) as a prerequisite.
+**Why:** Requires Kubernetes 1.32+ and the VolumeGroupSnapshot API. Single-volume snapshot support (Phase 4a) is now complete as a prerequisite.
 
 **Workaround:** None. Coordinate application-level quiesce and backup across PVCs manually.
 
-**Roadmap:** Phase 4c — planned after single-volume snapshots.
+**Roadmap:** Phase 4c — planned for a future release. Prerequisites (Phase 4a/4b) are complete.
 
 ## Cross-Region Replication and Disaster Recovery
 

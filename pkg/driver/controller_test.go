@@ -44,6 +44,13 @@ type mockPoolManager struct {
 	lastListSnapshotsSourceID  string
 	lastRestoreSnapshotName    string
 	lastRestoreSnapshotReq     pool.AllocationRequest
+
+	// Clone fields
+	cloneVolumeResult        *pool.AllocationResult
+	cloneVolumeErr           error
+	lastCloneSourceVolumeID  string
+	lastCloneReq             pool.AllocationRequest
+	lastCloneSyncThresholdGB int64
 }
 
 func (m *mockPoolManager) Allocate(_ context.Context, req pool.AllocationRequest) (*pool.AllocationResult, error) {
@@ -94,6 +101,16 @@ func (m *mockPoolManager) RestoreSnapshot(_ context.Context, snapshotName string
 		return nil, m.restoreSnapshotErr
 	}
 	return m.restoreSnapshotResult, nil
+}
+
+func (m *mockPoolManager) CloneVolume(_ context.Context, sourceVolumeID string, req pool.AllocationRequest, syncThresholdGB int64) (*pool.AllocationResult, error) {
+	m.lastCloneSourceVolumeID = sourceVolumeID
+	m.lastCloneReq = req
+	m.lastCloneSyncThresholdGB = syncThresholdGB
+	if m.cloneVolumeErr != nil {
+		return nil, m.cloneVolumeErr
+	}
+	return m.cloneVolumeResult, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -915,14 +932,15 @@ func TestControllerGetCapabilities(t *testing.T) {
 	}
 
 	caps := resp.GetCapabilities()
-	if len(caps) != 4 {
-		t.Fatalf("expected 4 capabilities, got %d", len(caps))
+	if len(caps) != 5 {
+		t.Fatalf("expected 5 capabilities, got %d", len(caps))
 	}
 
 	foundCreate := false
 	foundExpand := false
 	foundCreateSnap := false
 	foundListSnap := false
+	foundClone := false
 	for _, cap := range caps {
 		switch cap.GetRpc().GetType() {
 		case csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME:
@@ -933,6 +951,8 @@ func TestControllerGetCapabilities(t *testing.T) {
 			foundCreateSnap = true
 		case csi.ControllerServiceCapability_RPC_LIST_SNAPSHOTS:
 			foundListSnap = true
+		case csi.ControllerServiceCapability_RPC_CLONE_VOLUME:
+			foundClone = true
 		}
 	}
 
@@ -947,6 +967,9 @@ func TestControllerGetCapabilities(t *testing.T) {
 	}
 	if !foundListSnap {
 		t.Error("missing LIST_SNAPSHOTS capability")
+	}
+	if !foundClone {
+		t.Error("missing CLONE_VOLUME capability")
 	}
 }
 
@@ -1613,4 +1636,175 @@ func TestCreateVolume_FromSnapshot_InvalidSnapshotID(t *testing.T) {
 	})
 
 	assertGRPCCode(t, err, codes.InvalidArgument)
+}
+
+// ---------------------------------------------------------------------------
+// CreateVolume from Clone Tests
+// ---------------------------------------------------------------------------
+
+func TestCreateVolume_FromClone_Success(t *testing.T) {
+	pm := &mockPoolManager{
+		cloneVolumeResult: &pool.AllocationResult{
+			ShareID:       "share-1",
+			MountTargetIP: "10.240.0.1",
+			SubPath:       "/pvcs/pvc-clone",
+			SharePath:     "/",
+		},
+	}
+	d := newTestDriver(pm, nil)
+
+	resp, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name:       "pvc-clone",
+		Parameters: map[string]string{"pool": "test-pool"},
+		CapacityRange: &csi.CapacityRange{
+			RequiredBytes: gbToBytes(10),
+		},
+		VolumeContentSource: &csi.VolumeContentSource{
+			Type: &csi.VolumeContentSource_Volume{
+				Volume: &csi.VolumeContentSource_VolumeSource{
+					VolumeId: "test-pool/share-1/pvc-source",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume from clone failed: %v", err)
+	}
+
+	vol := resp.GetVolume()
+	if vol == nil {
+		t.Fatal("expected volume in response")
+	}
+
+	expectedID := "test-pool/share-1/pvc-clone"
+	if vol.VolumeId != expectedID {
+		t.Errorf("expected volumeID %q, got %q", expectedID, vol.VolumeId)
+	}
+
+	if vol.ContentSource == nil {
+		t.Fatal("expected content source in response")
+	}
+	volSource := vol.ContentSource.GetVolume()
+	if volSource == nil {
+		t.Fatal("expected volume content source")
+	}
+	if volSource.VolumeId != "test-pool/share-1/pvc-source" {
+		t.Errorf("expected content source volume ID 'test-pool/share-1/pvc-source', got %q", volSource.VolumeId)
+	}
+
+	if pm.lastCloneSourceVolumeID != "test-pool/share-1/pvc-source" {
+		t.Errorf("expected clone called with source 'test-pool/share-1/pvc-source', got %q", pm.lastCloneSourceVolumeID)
+	}
+	if pm.lastCloneReq.PVName != "pvc-clone" {
+		t.Errorf("expected clone PVName 'pvc-clone', got %q", pm.lastCloneReq.PVName)
+	}
+}
+
+func TestCreateVolume_FromClone_SourceNotFound(t *testing.T) {
+	pm := &mockPoolManager{
+		cloneVolumeErr: pool.ErrSourceNotFound,
+	}
+	d := newTestDriver(pm, nil)
+
+	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name:       "pvc-clone",
+		Parameters: map[string]string{"pool": "test-pool"},
+		CapacityRange: &csi.CapacityRange{
+			RequiredBytes: gbToBytes(10),
+		},
+		VolumeContentSource: &csi.VolumeContentSource{
+			Type: &csi.VolumeContentSource_Volume{
+				Volume: &csi.VolumeContentSource_VolumeSource{
+					VolumeId: "pool/share/pvc-missing",
+				},
+			},
+		},
+	})
+
+	assertGRPCCode(t, err, codes.NotFound)
+}
+
+func TestCreateVolume_FromClone_PoolExhausted(t *testing.T) {
+	pm := &mockPoolManager{
+		cloneVolumeErr: pool.ErrPoolExhausted,
+	}
+	d := newTestDriver(pm, nil)
+
+	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name:       "pvc-clone",
+		Parameters: map[string]string{"pool": "test-pool"},
+		CapacityRange: &csi.CapacityRange{
+			RequiredBytes: gbToBytes(10),
+		},
+		VolumeContentSource: &csi.VolumeContentSource{
+			Type: &csi.VolumeContentSource_Volume{
+				Volume: &csi.VolumeContentSource_VolumeSource{
+					VolumeId: "pool/share/pvc-source",
+				},
+			},
+		},
+	})
+
+	assertGRPCCode(t, err, codes.ResourceExhausted)
+}
+
+func TestCreateVolume_FromClone_InternalError(t *testing.T) {
+	pm := &mockPoolManager{
+		cloneVolumeErr: fmt.Errorf("NFS copy failed"),
+	}
+	d := newTestDriver(pm, nil)
+
+	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name:       "pvc-clone",
+		Parameters: map[string]string{"pool": "test-pool"},
+		CapacityRange: &csi.CapacityRange{
+			RequiredBytes: gbToBytes(10),
+		},
+		VolumeContentSource: &csi.VolumeContentSource{
+			Type: &csi.VolumeContentSource_Volume{
+				Volume: &csi.VolumeContentSource_VolumeSource{
+					VolumeId: "pool/share/pvc-source",
+				},
+			},
+		},
+	})
+
+	assertGRPCCode(t, err, codes.Internal)
+}
+
+func TestCreateVolume_FromClone_CustomSyncThreshold(t *testing.T) {
+	pm := &mockPoolManager{
+		cloneVolumeResult: &pool.AllocationResult{
+			ShareID:       "share-1",
+			MountTargetIP: "10.240.0.1",
+			SubPath:       "/pvcs/pvc-clone",
+			SharePath:     "/",
+		},
+	}
+	d := newTestDriver(pm, nil)
+
+	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name: "pvc-clone",
+		Parameters: map[string]string{
+			"pool":                 "test-pool",
+			"cloneSyncThresholdGB": "20",
+		},
+		CapacityRange: &csi.CapacityRange{
+			RequiredBytes: gbToBytes(10),
+		},
+		VolumeContentSource: &csi.VolumeContentSource{
+			Type: &csi.VolumeContentSource_Volume{
+				Volume: &csi.VolumeContentSource_VolumeSource{
+					VolumeId: "pool/share/pvc-source",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume from clone failed: %v", err)
+	}
+
+	if pm.lastCloneSyncThresholdGB != 20 {
+		t.Errorf("expected sync threshold 20, got %d", pm.lastCloneSyncThresholdGB)
+	}
 }

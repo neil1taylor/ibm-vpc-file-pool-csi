@@ -24,6 +24,7 @@ func (d *Driver) ControllerGetCapabilities(_ context.Context, _ *csi.ControllerG
 			newControllerCap(csi.ControllerServiceCapability_RPC_EXPAND_VOLUME),
 			newControllerCap(csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT),
 			newControllerCap(csi.ControllerServiceCapability_RPC_LIST_SNAPSHOTS),
+			newControllerCap(csi.ControllerServiceCapability_RPC_CLONE_VOLUME),
 		},
 	}, nil
 }
@@ -68,10 +69,13 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 		}
 	}
 
-	// Check for snapshot restore
+	// Check for content source (snapshot restore or volume clone)
 	if req.GetVolumeContentSource() != nil {
 		if snapSource := req.GetVolumeContentSource().GetSnapshot(); snapSource != nil {
 			return d.createVolumeFromSnapshot(ctx, req, snapSource.GetSnapshotId(), poolName, requiredGB, zone)
+		}
+		if volSource := req.GetVolumeContentSource().GetVolume(); volSource != nil {
+			return d.createVolumeFromClone(ctx, req, volSource.GetVolumeId(), poolName, requiredGB, zone)
 		}
 	}
 
@@ -338,6 +342,73 @@ func (d *Driver) createVolumeFromSnapshot(ctx context.Context, req *csi.CreateVo
 				Type: &csi.VolumeContentSource_Snapshot{
 					Snapshot: &csi.VolumeContentSource_SnapshotSource{
 						SnapshotId: snapshotID,
+					},
+				},
+			},
+		},
+	}, nil
+}
+
+// createVolumeFromClone handles CreateVolume when a volume content source (clone) is provided.
+func (d *Driver) createVolumeFromClone(ctx context.Context, req *csi.CreateVolumeRequest, sourceVolumeID, poolName string, requiredGB int64, zone string) (*csi.CreateVolumeResponse, error) {
+	params := req.GetParameters()
+
+	syncThreshold := int64(10) // default 10 GB
+	if t := params["cloneSyncThresholdGB"]; t != "" {
+		if parsed, err := strconv.ParseInt(t, 10, 64); err == nil {
+			syncThreshold = parsed
+		}
+	}
+
+	allocReq := pool.AllocationRequest{
+		PVName:       req.GetName(),
+		PVCName:      params["csi.storage.k8s.io/pvc/name"],
+		PVCNamespace: params["csi.storage.k8s.io/pvc/namespace"],
+		PoolName:     poolName,
+		RequestedGB:  requiredGB,
+		Zone:         zone,
+		Tier:         params["tier"],
+		UID:          parseOptionalInt64(params["uid"]),
+		GID:          parseOptionalInt64(params["gid"]),
+		Permissions:  params["permissions"],
+	}
+
+	result, err := d.poolManager.CloneVolume(ctx, sourceVolumeID, allocReq, syncThreshold)
+	if err != nil {
+		switch {
+		case errors.Is(err, pool.ErrSourceNotFound):
+			return nil, status.Errorf(codes.NotFound, "source volume not found")
+		case errors.Is(err, pool.ErrPoolExhausted):
+			return nil, status.Errorf(codes.ResourceExhausted, "pool %q has no available capacity", poolName)
+		default:
+			return nil, status.Errorf(codes.Internal, "clone failed: %v", err)
+		}
+	}
+
+	volumeID := fmt.Sprintf("%s/%s/%s", poolName, result.ShareID, req.GetName())
+	volCtx := map[string]string{
+		"server":  result.MountTargetIP,
+		"share":   result.SharePath,
+		"subDir":  result.SubPath,
+		"pool":    poolName,
+		"shareID": result.ShareID,
+	}
+
+	klog.V(2).InfoS("Created volume from clone",
+		"volumeID", volumeID,
+		"source", sourceVolumeID,
+		"pool", poolName,
+	)
+
+	return &csi.CreateVolumeResponse{
+		Volume: &csi.Volume{
+			VolumeId:      volumeID,
+			CapacityBytes: requiredGB * (1 << 30),
+			VolumeContext: volCtx,
+			ContentSource: &csi.VolumeContentSource{
+				Type: &csi.VolumeContentSource_Volume{
+					Volume: &csi.VolumeContentSource_VolumeSource{
+						VolumeId: sourceVolumeID,
 					},
 				},
 			},

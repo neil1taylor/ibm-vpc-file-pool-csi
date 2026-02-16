@@ -1194,3 +1194,207 @@ func (f *failingMounter) Unmount(target string) error {
 	}
 	return f.FakeMounter.Unmount(target)
 }
+
+// ---------------------------------------------------------------------------
+// NodePublishVolume — Clone Gate Tests
+// ---------------------------------------------------------------------------
+
+func TestNodePublishVolume_CloneInProgress(t *testing.T) {
+	pvName := "pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"
+	k := &nodeTestK8sClient{
+		zone: "us-south-1",
+		subVolumes: map[string]*v1alpha1.SubVolume{
+			pvName: {
+				Spec: v1alpha1.SubVolumeSpec{
+					SourceVolume: "pvc-source",
+				},
+				Status: v1alpha1.SubVolumeStatus{
+					Phase:       "Cloning",
+					CloneStatus: "InProgress",
+				},
+			},
+		},
+	}
+	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil, k)
+
+	tmpDir := resolvedTempDir(t)
+	stagingPath := filepath.Join(tmpDir, "staging")
+	subDirPath := filepath.Join(stagingPath, "/pvcs/"+pvName)
+	if err := os.MkdirAll(subDirPath, 0750); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	_, err := d.NodePublishVolume(context.Background(), &csi.NodePublishVolumeRequest{
+		VolumeId:          fmt.Sprintf("pool/share/%s", pvName),
+		StagingTargetPath: stagingPath,
+		TargetPath:        filepath.Join(tmpDir, "target"),
+		VolumeContext: map[string]string{
+			"subDir": "/pvcs/" + pvName,
+		},
+	})
+
+	assertGRPCCode(t, err, codes.Unavailable)
+}
+
+func TestNodePublishVolume_ClonePending(t *testing.T) {
+	pvName := "pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"
+	k := &nodeTestK8sClient{
+		zone: "us-south-1",
+		subVolumes: map[string]*v1alpha1.SubVolume{
+			pvName: {
+				Spec: v1alpha1.SubVolumeSpec{
+					SourceVolume: "pvc-source",
+				},
+				Status: v1alpha1.SubVolumeStatus{
+					Phase:       "Cloning",
+					CloneStatus: "Pending",
+				},
+			},
+		},
+	}
+	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil, k)
+
+	tmpDir := resolvedTempDir(t)
+	stagingPath := filepath.Join(tmpDir, "staging")
+	subDirPath := filepath.Join(stagingPath, "/pvcs/"+pvName)
+	if err := os.MkdirAll(subDirPath, 0750); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	_, err := d.NodePublishVolume(context.Background(), &csi.NodePublishVolumeRequest{
+		VolumeId:          fmt.Sprintf("pool/share/%s", pvName),
+		StagingTargetPath: stagingPath,
+		TargetPath:        filepath.Join(tmpDir, "target"),
+		VolumeContext: map[string]string{
+			"subDir": "/pvcs/" + pvName,
+		},
+	})
+
+	assertGRPCCode(t, err, codes.Unavailable)
+}
+
+func TestNodePublishVolume_CloneFailed(t *testing.T) {
+	pvName := "pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"
+	k := &nodeTestK8sClient{
+		zone: "us-south-1",
+		subVolumes: map[string]*v1alpha1.SubVolume{
+			pvName: {
+				Spec: v1alpha1.SubVolumeSpec{
+					SourceVolume: "pvc-source",
+				},
+				Status: v1alpha1.SubVolumeStatus{
+					Phase:       "Failed",
+					CloneStatus: "Failed",
+					CloneProgress: &v1alpha1.CloneProgress{
+						Error: "NFS copy failed: disk full",
+					},
+				},
+			},
+		},
+	}
+	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil, k)
+
+	tmpDir := resolvedTempDir(t)
+	stagingPath := filepath.Join(tmpDir, "staging")
+	subDirPath := filepath.Join(stagingPath, "/pvcs/"+pvName)
+	if err := os.MkdirAll(subDirPath, 0750); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	_, err := d.NodePublishVolume(context.Background(), &csi.NodePublishVolumeRequest{
+		VolumeId:          fmt.Sprintf("pool/share/%s", pvName),
+		StagingTargetPath: stagingPath,
+		TargetPath:        filepath.Join(tmpDir, "target"),
+		VolumeContext: map[string]string{
+			"subDir": "/pvcs/" + pvName,
+		},
+	})
+
+	assertGRPCCode(t, err, codes.Internal)
+}
+
+func TestNodePublishVolume_CloneComplete(t *testing.T) {
+	pvName := "pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"
+	k := &nodeTestK8sClient{
+		zone: "us-south-1",
+		subVolumes: map[string]*v1alpha1.SubVolume{
+			pvName: {
+				Spec: v1alpha1.SubVolumeSpec{
+					SourceVolume: "pvc-source",
+				},
+				Status: v1alpha1.SubVolumeStatus{
+					Phase:       "Bound",
+					CloneStatus: "Complete",
+				},
+			},
+		},
+	}
+	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil, k)
+
+	tmpDir := resolvedTempDir(t)
+	stagingPath := filepath.Join(tmpDir, "staging")
+	subDirPath := filepath.Join(stagingPath, "/pvcs/"+pvName)
+	if err := os.MkdirAll(subDirPath, 0750); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	targetPath := filepath.Join(tmpDir, "target")
+
+	resp, err := d.NodePublishVolume(context.Background(), &csi.NodePublishVolumeRequest{
+		VolumeId:          fmt.Sprintf("pool/share/%s", pvName),
+		StagingTargetPath: stagingPath,
+		TargetPath:        targetPath,
+		VolumeContext: map[string]string{
+			"subDir": "/pvcs/" + pvName,
+		},
+	})
+	if err != nil {
+		t.Fatalf("NodePublishVolume failed: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+}
+
+func TestNodePublishVolume_NonClone(t *testing.T) {
+	pvName := "pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"
+	k := &nodeTestK8sClient{
+		zone: "us-south-1",
+		subVolumes: map[string]*v1alpha1.SubVolume{
+			pvName: {
+				Spec: v1alpha1.SubVolumeSpec{
+					// No SourceVolume -- not a clone
+				},
+				Status: v1alpha1.SubVolumeStatus{
+					Phase: "Bound",
+					// CloneStatus is empty -- not a clone
+				},
+			},
+		},
+	}
+	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil, k)
+
+	tmpDir := resolvedTempDir(t)
+	stagingPath := filepath.Join(tmpDir, "staging")
+	subDirPath := filepath.Join(stagingPath, "/pvcs/"+pvName)
+	if err := os.MkdirAll(subDirPath, 0750); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	targetPath := filepath.Join(tmpDir, "target")
+
+	resp, err := d.NodePublishVolume(context.Background(), &csi.NodePublishVolumeRequest{
+		VolumeId:          fmt.Sprintf("pool/share/%s", pvName),
+		StagingTargetPath: stagingPath,
+		TargetPath:        targetPath,
+		VolumeContext: map[string]string{
+			"subDir": "/pvcs/" + pvName,
+		},
+	})
+	if err != nil {
+		t.Fatalf("NodePublishVolume failed for non-clone: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+}

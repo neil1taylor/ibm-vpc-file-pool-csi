@@ -74,11 +74,21 @@ type SubVolumeSpec struct {
 	// +kubebuilder:validation:Enum=Delete;Retain;Archive
 	// +kubebuilder:default=Delete
 	ReclaimPolicy string `json:"reclaimPolicy"`
+
+	// SourceVolume is the name of the source SubVolume this was cloned from.
+	// Empty for non-clone SubVolumes.
+	// +optional
+	SourceVolume string `json:"sourceVolume,omitempty"`
+
+	// SourceShareID is the VPC file share ID of the source SubVolume.
+	// Populated when the clone source is on a different share than the target.
+	// +optional
+	SourceShareID string `json:"sourceShareID,omitempty"`
 }
 
 type SubVolumeStatus struct {
 	// Phase is the SubVolume lifecycle state.
-	// +kubebuilder:validation:Enum=Creating;Bound;Expanding;Deleting;Retained;Archived;Failed
+	// +kubebuilder:validation:Enum=Creating;Cloning;Bound;Expanding;Deleting;Retained;Archived;Failed
 	Phase string `json:"phase,omitempty"`
 
 	// ActualUsageBytes is the last measured disk usage of the subdirectory.
@@ -96,6 +106,37 @@ type SubVolumeStatus struct {
 	// CreatedAt is when the subdirectory was created on the share.
 	// +optional
 	CreatedAt *metav1.Time `json:"createdAt,omitempty"`
+
+	// CloneStatus tracks the progress of a clone operation.
+	// Empty for non-clone SubVolumes.
+	// +kubebuilder:validation:Enum=Pending;InProgress;Complete;Failed
+	// +optional
+	CloneStatus string `json:"cloneStatus,omitempty"`
+
+	// CloneProgress tracks bytes copied during a clone operation.
+	// +optional
+	CloneProgress *CloneProgress `json:"cloneProgress,omitempty"`
+}
+
+// CloneProgress tracks the data copy progress for a clone operation.
+type CloneProgress struct {
+	// BytesCopied is the number of bytes copied so far.
+	BytesCopied int64 `json:"bytesCopied"`
+
+	// TotalBytes is the total size of the source data to copy.
+	TotalBytes int64 `json:"totalBytes"`
+
+	// StartedAt is when the copy operation started.
+	// +optional
+	StartedAt *metav1.Time `json:"startedAt,omitempty"`
+
+	// CompletedAt is when the copy operation finished (success or failure).
+	// +optional
+	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
+
+	// Error records the failure reason if cloneStatus is Failed.
+	// +optional
+	Error string `json:"error,omitempty"`
 }
 
 // +kubebuilder:object:root=true
