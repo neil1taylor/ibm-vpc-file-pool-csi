@@ -2,6 +2,16 @@
 
 A Kubernetes [CSI](https://kubernetes-csi.github.io/docs/) driver that pools multiple PVCs as subdirectories within shared IBM Cloud VPC file shares, instead of the traditional 1:1 PVC-to-share mapping.
 
+## Why Pooling?
+
+The standard IBM VPC file CSI driver creates one VPC file share per PVC — a 1:1 mapping. That hits three walls fast:
+
+- **Quota** — VPC accounts cap at 300 file shares. A busy cluster with lots of small PVCs burns through that quickly.
+- **Speed** — Creating a VPC file share takes 30-90 seconds. Pods sit waiting for storage.
+- **Cost** — Each share has a 10 GB minimum and its own billing line. Hundreds of tiny PVCs mean hundreds of minimums.
+
+Pooling flips the model: pre-provision a few large shares, then hand out subdirectories within them. Creating a subdirectory is instant, shares nothing with the VPC API, and lets many PVCs share the capacity of a single share. Think of it like a VMware datastore — one NFS export holds many volumes.
+
 ## How It Works
 
 Traditional CSI drivers create one VPC file share per PVC. This driver takes a different approach: a **FileSharePool** CR defines a pool of VPC file shares, and each PVC gets a subdirectory on an existing share.
