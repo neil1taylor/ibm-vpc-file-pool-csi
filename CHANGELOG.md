@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [v0.4.0] — 2026-02-16
+
+### Added
+
+- **Volume cloning (Phase 4b)** — CSI `CreateVolume` with `VolumeContentSource` of type `VOLUME` creates a copy of an existing SubVolume. Dual-path design: synchronous `cp -a` for volumes under 10 GB, async background worker for larger volumes with `NodePublishVolume` gating until clone completes
+- **Background clone worker** (`pkg/pool/clone_worker.go`) — ticker-based goroutine that discovers Pending/InProgress clone SubVolumes and processes them. Handles crash recovery, concurrent dedup via `sync.Map`, partial copy cleanup on failure, and Prometheus metrics
+- **Share draining** — `FileSharePool.spec.drainShares` marks shares for graceful evacuation. Draining shares are excluded from new allocations. Reconciler tracks progress in `status.drainStatus` and sets `DrainComplete` condition when all SubVolumes are removed
+- **Clone CRD fields** — SubVolume `spec.sourceVolume`, `spec.sourceShareID`, `status.cloneStatus` (Pending/InProgress/Complete/Failed), `status.cloneProgress` (bytesCopied, totalBytes, timestamps), and `Cloning` phase
+- **Clone metrics** — `pool_csi_clones_total` counter and `pool_csi_clone_duration_seconds` histogram with sync/async and success/error labels
+- **`CLONE_VOLUME` CSI capability** — advertised in `ControllerGetCapabilities`
+- **Integration test suite** (`test/integration/`) — 35 tests covering pool lifecycle, concurrent allocation, capacity management, and error recovery. Wires real `pool.Manager` + `driver.Driver` + `Reconciler` with fake infrastructure
+- **VPC API client test coverage** — increased from 22% to 90% with 57 test functions using `httptest` servers
+- **GitHub Actions CI/CD** — `ci.yml` workflow with lint, test, build, and generate-check jobs; `release.yml` for tagged container image builds
+- **Helm validation** — `make helm-lint` and `make helm-template` targets; fixed node DaemonSet template for resources/nodeSelector/affinity
+- **Phase 4 design documents** — `VOLUME-CLONING.md` (Phase 4b), `VOLUME-GROUP-SNAPSHOTS.md` (Phase 4c), `CROSS-REGION-DR.md` (Phase 4d) with CRD designs, consistency analysis, and architecture diagrams
+
+### Fixed
+
+- SubVolume CRD YAML now includes clone fields (`sourceVolume`, `sourceShareID`, `cloneStatus`, `cloneProgress`, `Cloning` phase)
+- Helm `values.yaml` missing `nameOverride`/`fullnameOverride` defaults
+- Helm `NOTES.txt` updated for Snapshot CRD and VolumeSnapshotClass
+
 ## [v0.3.0] — 2026-02-16
 
 ### Added
@@ -66,6 +88,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Mount target IP resolution when share has multiple mount targets across zones
 - Makefile targets for end-to-end build pipeline
 
+[v0.4.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.3.0...v0.4.0
 [v0.3.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.2.0...v0.3.0
 [v0.2.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.1.0...v0.2.0
 [v0.1.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/releases/tag/v0.1.0

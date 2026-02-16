@@ -73,6 +73,10 @@ nav:
       - CSI Interface: CSI-INTERFACE.md
       - IBM VPC API: IBM-VPC-API.md
       - API Key Setup: API-KEY-SETUP.md
+  - Design (Phase 4):
+      - Volume Cloning: VOLUME-CLONING.md
+      - Volume Group Snapshots: VOLUME-GROUP-SNAPSHOTS.md
+      - Cross-Region DR: CROSS-REGION-DR.md
   - Development:
       - Contributing: CONTRIBUTING.md
       - Coding Guidelines: CODING-GUIDELINES.md
