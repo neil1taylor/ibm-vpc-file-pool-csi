@@ -49,6 +49,18 @@ IBM VPC Client ──► VPC File Share API
 - **FileSharePool** (cluster-scoped) — defines a pool of VPC file shares with allocation strategy, auto-expansion, and capacity limits
 - **SubVolume** (cluster-scoped) — tracks individual PVC allocations: which share, subdirectory path, and requested size
 
+## Glossary
+
+| Term | Definition |
+|------|-----------|
+| **Pool** (FileSharePool) | A group of VPC file shares managed as a unit, defined by a FileSharePool CR |
+| **Share** (VPC File Share) | An NFS-exported block of cloud storage created via the IBM VPC API; each pool contains one or more shares |
+| **SubVolume** | A subdirectory on a share that backs a single PVC, tracked by a SubVolume CR |
+| **Subdirectory** | The physical directory on the NFS share (e.g., `/pvcs/pvc-abc123`), created by the node agent during publish |
+| **Mount Target** | The VPC-managed NFS endpoint (IP address) used to mount a share on worker nodes |
+| **Allocation** | The process of selecting a share, recording a SubVolume CR, and creating a subdirectory for a new PVC |
+| **Staging** | Per-node NFS mount of a share at a staging directory; done once per share per node |
+
 ## Getting Started
 
 ### Prerequisites

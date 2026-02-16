@@ -17,6 +17,9 @@ type Client interface {
 	// Node operations
 	GetNodeZone(ctx context.Context, nodeName string) (string, error)
 
+	// ConfigMap operations
+	GetConfigMapValue(ctx context.Context, namespace, name, key string) (string, error)
+
 	// SubVolume operations
 	GetSubVolume(ctx context.Context, name string) (*v1alpha1.SubVolume, error)
 	ListSubVolumes(ctx context.Context, poolName string) ([]v1alpha1.SubVolume, error)

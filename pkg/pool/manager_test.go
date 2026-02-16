@@ -248,6 +248,10 @@ func (f *fakeK8sClient) UpdateFileSharePool(_ context.Context, pool *v1alpha1.Fi
 	return nil
 }
 
+func (f *fakeK8sClient) GetConfigMapValue(_ context.Context, _, _, _ string) (string, error) {
+	return "", fmt.Errorf("not implemented in fake")
+}
+
 func (f *fakeK8sClient) GetNodeZone(_ context.Context, _ string) (string, error) {
 	return "us-south-1", nil
 }

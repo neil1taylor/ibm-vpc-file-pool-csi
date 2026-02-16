@@ -23,15 +23,17 @@ type SecretProvider interface {
 	GetDefaultIAMToken(freshTokenRequired bool, reasonForCall ...string) (string, uint64, error)
 	GetRIAASEndpoint(readConfig bool) (string, error)
 	GetPrivateRIAASEndpoint(readConfig bool) (string, error)
+	GetResourceGroupID() string
 }
 
 // Client implements VPCFileClient by wrapping the IBM VPC Go SDK.
 type Client struct {
-	vpcService     *vpcv1.VpcV1
-	secretProvider SecretProvider
-	region         string
-	rateLimiter    *rate.Limiter
-	pollInterval   time.Duration // default 10s, configurable for tests
+	vpcService      *vpcv1.VpcV1
+	secretProvider  SecretProvider
+	region          string
+	resourceGroupID string
+	rateLimiter     *rate.Limiter
+	pollInterval    time.Duration // default 10s, configurable for tests
 
 	// getShareFunc allows tests to inject a fake for waitForShareStable polling.
 	getShareFunc func(ctx context.Context, shareID string) (*ShareInfo, error)
@@ -76,6 +78,15 @@ func NewClientWithProvider(sp SecretProvider, region string) (*Client, error) {
 			riaasEndpoint = ep
 		}
 	}
+
+	// Auto-discover region from endpoint if not explicitly provided.
+	if region == "" && riaasEndpoint != "" {
+		region = ParseRegionFromEndpoint(riaasEndpoint)
+		if region != "" {
+			klog.V(2).InfoS("Auto-discovered region from endpoint", "region", region, "endpoint", riaasEndpoint)
+		}
+	}
+
 	if riaasEndpoint == "" {
 		riaasEndpoint = fmt.Sprintf("https://%s.iaas.cloud.ibm.com/v1", region)
 	}
@@ -87,9 +98,13 @@ func NewClientWithProvider(sp SecretProvider, region string) (*Client, error) {
 		riaasEndpoint = strings.TrimSuffix(riaasEndpoint, "/") + "/v1"
 	}
 
+	// Read resource group from secret provider config.
+	resourceGroupID := sp.GetResourceGroupID()
+
 	klog.V(2).InfoS("Creating VPC API client",
 		"region", region,
 		"endpoint", riaasEndpoint,
+		"resourceGroupID", resourceGroupID,
 	)
 
 	authenticator := &core.BearerTokenAuthenticator{
@@ -105,12 +120,18 @@ func NewClientWithProvider(sp SecretProvider, region string) (*Client, error) {
 	}
 
 	return &Client{
-		vpcService:     vpcService,
-		secretProvider: sp,
-		region:         region,
-		rateLimiter:    rate.NewLimiter(rate.Every(time.Second/5), 1), // 5 req/sec
-		pollInterval:   10 * time.Second,
+		vpcService:      vpcService,
+		secretProvider:  sp,
+		region:          region,
+		resourceGroupID: resourceGroupID,
+		rateLimiter:     rate.NewLimiter(rate.Every(time.Second/5), 1), // 5 req/sec
+		pollInterval:    10 * time.Second,
 	}, nil
+}
+
+// ResourceGroupID returns the resource group ID discovered from the secret provider.
+func (c *Client) ResourceGroupID() string {
+	return c.resourceGroupID
 }
 
 // refreshToken gets a fresh IAM token and updates the VPC service authenticator.

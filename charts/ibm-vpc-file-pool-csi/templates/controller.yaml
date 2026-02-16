@@ -30,8 +30,10 @@ spec:
           args:
             - "--mode=controller"
             - "--endpoint=unix:///csi/csi.sock"
-            - "--region={{ .Values.config.region }}"
             - "--v={{ .Values.logLevel }}"
+            {{- if .Values.config.region }}
+            - "--region={{ .Values.config.region }}"
+            {{- end }}
             {{- if .Values.config.vpcID }}
             - "--vpc-id={{ .Values.config.vpcID }}"
             {{- end }}

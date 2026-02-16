@@ -6,6 +6,29 @@ import (
 	"strings"
 )
 
+// ParseRegionFromEndpoint extracts the IBM Cloud region from a RIAAS endpoint URL.
+// Examples: "https://eu-de.private.iaas.cloud.ibm.com" → "eu-de"
+//
+//	"https://us-south.iaas.cloud.ibm.com/v1" → "us-south"
+func ParseRegionFromEndpoint(endpoint string) string {
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	// Host is like "eu-de.private.iaas.cloud.ibm.com" or "us-south.iaas.cloud.ibm.com"
+	host := u.Host
+	idx := strings.IndexByte(host, '.')
+	if idx <= 0 {
+		return ""
+	}
+	region := host[:idx]
+	// Sanity check: region should contain a hyphen (e.g. "us-south", "eu-de")
+	if !strings.Contains(region, "-") {
+		return ""
+	}
+	return region
+}
+
 // regionFromZone extracts the region from a VPC zone name.
 // For example, "us-south-1" → "us-south", "eu-de-2" → "eu-de".
 func regionFromZone(zone string) string {

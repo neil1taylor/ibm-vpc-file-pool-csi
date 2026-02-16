@@ -104,6 +104,7 @@ type fakeSecretProvider struct {
 	riaasEndpointErr   error
 	privateEndpoint    string
 	privateEndpointErr error
+	resourceGroupID    string
 }
 
 func (f *fakeSecretProvider) GetDefaultIAMToken(_ bool, _ ...string) (string, uint64, error) {
@@ -119,6 +120,72 @@ func (f *fakeSecretProvider) GetRIAASEndpoint(_ bool) (string, error) {
 
 func (f *fakeSecretProvider) GetPrivateRIAASEndpoint(_ bool) (string, error) {
 	return f.privateEndpoint, f.privateEndpointErr
+}
+
+func (f *fakeSecretProvider) GetResourceGroupID() string {
+	return f.resourceGroupID
+}
+
+// --- ParseRegionFromEndpoint tests ---
+
+func TestParseRegionFromEndpoint(t *testing.T) {
+	tests := []struct {
+		name     string
+		endpoint string
+		want     string
+	}{
+		{"private endpoint", "https://eu-de.private.iaas.cloud.ibm.com", "eu-de"},
+		{"public endpoint", "https://us-south.iaas.cloud.ibm.com/v1", "us-south"},
+		{"jp-tok", "https://jp-tok.iaas.cloud.ibm.com", "jp-tok"},
+		{"au-syd private", "https://au-syd.private.iaas.cloud.ibm.com/v1", "au-syd"},
+		{"br-sao", "https://br-sao.iaas.cloud.ibm.com/v1", "br-sao"},
+		{"empty string", "", ""},
+		{"no host", "/v1", ""},
+		{"no hyphen in region", "https://localhost/v1", ""},
+		{"bare hostname", "https://iaas.cloud.ibm.com", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseRegionFromEndpoint(tt.endpoint)
+			if got != tt.want {
+				t.Errorf("ParseRegionFromEndpoint(%q) = %q, want %q", tt.endpoint, got, tt.want)
+			}
+		})
+	}
+}
+
+// --- ResourceGroupID tests ---
+
+func TestNewClientWithProvider_ResourceGroupID(t *testing.T) {
+	sp := &fakeSecretProvider{
+		token:           "test-token",
+		riaasEndpoint:   "https://us-south.iaas.cloud.ibm.com/v1",
+		resourceGroupID: "rg-abc123",
+	}
+
+	client, err := NewClientWithProvider(sp, "us-south")
+	if err != nil {
+		t.Fatalf("NewClientWithProvider() error = %v", err)
+	}
+	if client.ResourceGroupID() != "rg-abc123" {
+		t.Errorf("ResourceGroupID() = %q, want %q", client.ResourceGroupID(), "rg-abc123")
+	}
+}
+
+func TestNewClientWithProvider_AutoDiscoverRegion(t *testing.T) {
+	sp := &fakeSecretProvider{
+		token:           "test-token",
+		privateEndpoint: "https://eu-de.private.iaas.cloud.ibm.com",
+	}
+
+	client, err := NewClientWithProvider(sp, "")
+	if err != nil {
+		t.Fatalf("NewClientWithProvider() error = %v", err)
+	}
+	if client.region != "eu-de" {
+		t.Errorf("client.region = %q, want %q", client.region, "eu-de")
+	}
 }
 
 // --- Auth flow tests ---

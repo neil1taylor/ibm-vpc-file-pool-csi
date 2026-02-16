@@ -88,6 +88,9 @@ func (n *nodeTestK8sClient) UpdateSubVolumeStatus(_ context.Context, _ *v1alpha1
 	return nil
 }
 func (n *nodeTestK8sClient) DeleteSubVolume(_ context.Context, _ string) error { return nil }
+func (n *nodeTestK8sClient) GetConfigMapValue(_ context.Context, _, _, _ string) (string, error) {
+	return "", fmt.Errorf("not implemented")
+}
 
 // ---------------------------------------------------------------------------
 // NodeGetCapabilities

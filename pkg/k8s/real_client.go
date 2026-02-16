@@ -89,6 +89,20 @@ func (r *realClient) DeleteSubVolume(ctx context.Context, name string) error {
 	return r.client.Delete(ctx, sv)
 }
 
+// --- ConfigMap operations ---
+
+func (r *realClient) GetConfigMapValue(ctx context.Context, namespace, name, key string) (string, error) {
+	cm := &corev1.ConfigMap{}
+	if err := r.client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, cm); err != nil {
+		return "", err
+	}
+	val, ok := cm.Data[key]
+	if !ok {
+		return "", fmt.Errorf("key %q not found in configmap %s/%s", key, namespace, name)
+	}
+	return val, nil
+}
+
 // --- Node operations ---
 
 func (r *realClient) GetNodeZone(ctx context.Context, nodeName string) (string, error) {

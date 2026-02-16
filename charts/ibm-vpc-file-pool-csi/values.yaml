@@ -6,9 +6,11 @@ image:
 imagePullSecrets: []
 
 config:
-  region: us-south
-  vpcID: ""
-  subnetID: ""
+  # Auto-discovered on managed ROKS/IKS clusters.
+  # Only set these for unmanaged clusters or to override auto-discovery.
+  region: ""      # Auto-discovered from secret provider endpoint
+  vpcID: ""       # Auto-discovered from ibm-cloud-provider-data configmap
+  subnetID: ""    # Auto-discovered from ibm-cloud-provider-data configmap
   resourceGroupID: ""
 
 controller:

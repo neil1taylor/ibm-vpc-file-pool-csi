@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -33,7 +35,7 @@ func main() {
 	flag.StringVar(&endpoint, "endpoint", "unix:///csi/csi.sock", "CSI endpoint")
 	flag.StringVar(&nodeID, "node-id", "", "Node ID")
 	flag.StringVar(&mode, "mode", "controller", "Driver mode: controller or node")
-	flag.StringVar(&region, "region", "", "IBM Cloud region (e.g. us-south), required in controller mode")
+	flag.StringVar(&region, "region", "", "IBM Cloud region (e.g. us-south); auto-discovered from secret provider if omitted")
 	flag.StringVar(&vpcID, "vpc-id", "", "IBM Cloud VPC ID for creating file share mount targets")
 	flag.StringVar(&subnetID, "subnet-id", "", "IBM Cloud subnet ID for creating file share mount targets")
 
@@ -43,10 +45,6 @@ func main() {
 	klog.InfoS("Starting IBM VPC File Pool CSI Driver", "version", version, "mode", mode)
 
 	if mode == "controller" {
-		if region == "" {
-			klog.ErrorS(nil, "--region flag is required in controller mode")
-			os.Exit(1)
-		}
 		runController(endpoint, nodeID, region, vpcID, subnetID)
 	} else {
 		runNode(endpoint, nodeID, mode)
@@ -85,21 +83,43 @@ func runController(endpoint, nodeID, region, vpcID, subnetID string) {
 		os.Exit(1)
 	}
 
+	// Auto-discover VPC config from ibm-cloud-provider-data configmap.
+	ctx := context.Background()
+	if vpcID == "" {
+		if v, cmErr := k8sClient.GetConfigMapValue(ctx, "kube-system", "ibm-cloud-provider-data", "vpc_id"); cmErr == nil && v != "" {
+			vpcID = v
+			klog.V(2).InfoS("Auto-discovered VPC ID", "source", "ibm-cloud-provider-data", "vpcID", vpcID)
+		}
+	}
+	if subnetID == "" {
+		if v, cmErr := k8sClient.GetConfigMapValue(ctx, "kube-system", "ibm-cloud-provider-data", "vpc_subnet_ids"); cmErr == nil && v != "" {
+			subnetID = strings.Split(strings.TrimSpace(v), ",")[0]
+			klog.V(2).InfoS("Auto-discovered subnet ID", "source", "ibm-cloud-provider-data", "subnetID", subnetID)
+		}
+	}
+
 	// Create real VPC API client using cluster credentials.
+	// Region is auto-discovered from the RIAAS endpoint if not set via flag.
 	vpcClient, err := ibmcloud.NewClient(clientset, region)
 	if err != nil {
 		klog.ErrorS(err, "Failed to create VPC API client", "region", region)
 		os.Exit(1)
 	}
 
+	// Get default resource group from secret provider for pools that don't specify one.
+	defaultResourceGroup := vpcClient.ResourceGroupID()
+
 	reconciler := pool.NewFileSharePoolReconciler(k8sClient, vpcClient)
-	reconciler.SetVPCConfig(vpcID, subnetID)
+	reconciler.SetVPCConfig(vpcID, subnetID, defaultResourceGroup)
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		klog.ErrorS(err, "Failed to set up reconciler")
 		os.Exit(1)
 	}
 
 	stagingBasePath := "/var/lib/kubelet/plugins/vpc-file-pool.csi.ibm.io/staging"
+
+	poolManager := pool.NewManager(k8sClient, vpcClient, nil, stagingBasePath)
+	poolManager.SetDefaultResourceGroup(defaultResourceGroup)
 
 	// Run CSI gRPC server in a goroutine
 	d, err := driver.NewDriver(driver.Config{
@@ -109,7 +129,7 @@ func runController(endpoint, nodeID, region, vpcID, subnetID string) {
 		Endpoint:    endpoint,
 		Mode:        "controller",
 		K8sClient:   k8sClient,
-		PoolManager: pool.NewManager(k8sClient, vpcClient, nil, stagingBasePath),
+		PoolManager: poolManager,
 	})
 	if err != nil {
 		klog.ErrorS(err, "Failed to create driver")

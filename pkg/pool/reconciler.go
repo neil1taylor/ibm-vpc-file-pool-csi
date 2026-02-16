@@ -26,10 +26,11 @@ const (
 // provisioning, health checks, proactive expansion, metrics reconciliation,
 // and safe deletion.
 type FileSharePoolReconciler struct {
-	k8sClient k8s.Client
-	vpcClient ibmcloud.VPCFileClient
-	vpcID     string
-	subnetID  string
+	k8sClient            k8s.Client
+	vpcClient            ibmcloud.VPCFileClient
+	vpcID                string
+	subnetID             string
+	defaultResourceGroup string
 }
 
 // NewFileSharePoolReconciler creates a new reconciler with the given dependencies.
@@ -40,10 +41,11 @@ func NewFileSharePoolReconciler(k8sClient k8s.Client, vpcClient ibmcloud.VPCFile
 	}
 }
 
-// SetVPCConfig sets the VPC ID and subnet ID used when creating shares with mount targets.
-func (r *FileSharePoolReconciler) SetVPCConfig(vpcID, subnetID string) {
+// SetVPCConfig sets the VPC ID, subnet ID, and default resource group used when creating shares.
+func (r *FileSharePoolReconciler) SetVPCConfig(vpcID, subnetID, defaultResourceGroup string) {
 	r.vpcID = vpcID
 	r.subnetID = subnetID
+	r.defaultResourceGroup = defaultResourceGroup
 }
 
 // Reconcile performs a single reconciliation pass for a FileSharePool.
@@ -287,13 +289,18 @@ func (r *FileSharePoolReconciler) proactiveExpansion(ctx context.Context, pool *
 
 // createPoolShare creates a new VPC share and appends it to pool status.
 func (r *FileSharePoolReconciler) createPoolShare(ctx context.Context, pool *v1alpha1.FileSharePool) error {
+	resourceGroup := pool.Spec.ResourceGroup
+	if resourceGroup == "" {
+		resourceGroup = r.defaultResourceGroup
+	}
+
 	input := ibmcloud.CreateShareInput{
 		Name:             fmt.Sprintf("%s-share-%d", pool.Name, len(pool.Status.Shares)+1),
 		Zone:             pool.Spec.Zone,
 		Profile:          pool.Spec.Profile,
 		SizeGB:           pool.Spec.ShareSizeGB,
 		IOPS:             pool.Spec.IOPS,
-		ResourceGroupID:  pool.Spec.ResourceGroup,
+		ResourceGroupID:  resourceGroup,
 		Tags:             pool.Spec.Tags,
 		EncryptInTransit: pool.Spec.EncryptionInTransit,
 		VPCId:            r.vpcID,

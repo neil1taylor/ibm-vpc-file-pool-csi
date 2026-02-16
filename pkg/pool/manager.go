@@ -61,15 +61,21 @@ type AllocationResult struct {
 
 // Manager implements PoolManager. It is the core brain of the CSI driver.
 type Manager struct {
-	mu              sync.Mutex
-	k8sClient       k8s.Client
-	vpcClient       ibmcloud.VPCFileClient
-	nfsOps          NFSOperations
-	stagingBasePath string
+	mu                   sync.Mutex
+	k8sClient            k8s.Client
+	vpcClient            ibmcloud.VPCFileClient
+	nfsOps               NFSOperations
+	stagingBasePath      string
+	defaultResourceGroup string
 }
 
 // Verify Manager implements PoolManager at compile time.
 var _ PoolManager = (*Manager)(nil)
+
+// SetDefaultResourceGroup sets the fallback resource group used when the pool spec doesn't specify one.
+func (m *Manager) SetDefaultResourceGroup(rg string) {
+	m.defaultResourceGroup = rg
+}
 
 // NewManager creates a new pool manager with the given dependencies.
 func NewManager(k8sClient k8s.Client, vpcClient ibmcloud.VPCFileClient, nfsOps NFSOperations, stagingBasePath string) *Manager {
@@ -315,13 +321,18 @@ func (m *Manager) tryAutoExpand(ctx context.Context, pool *v1alpha1.FileSharePoo
 
 	klog.V(2).InfoS("Auto-expanding pool", "pool", pool.Name, "currentShares", len(pool.Status.Shares))
 
+	resourceGroup := pool.Spec.ResourceGroup
+	if resourceGroup == "" {
+		resourceGroup = m.defaultResourceGroup
+	}
+
 	input := ibmcloud.CreateShareInput{
 		Name:             fmt.Sprintf("%s-share-%d", pool.Name, len(pool.Status.Shares)+1),
 		Zone:             pool.Spec.Zone,
 		Profile:          pool.Spec.Profile,
 		SizeGB:           pool.Spec.ShareSizeGB,
 		IOPS:             pool.Spec.IOPS,
-		ResourceGroupID:  pool.Spec.ResourceGroup,
+		ResourceGroupID:  resourceGroup,
 		Tags:             pool.Spec.Tags,
 		EncryptInTransit: pool.Spec.EncryptionInTransit,
 	}

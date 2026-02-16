@@ -396,6 +396,63 @@ func TestListSubVolumesByShare(t *testing.T) {
 	}
 }
 
+func TestGetConfigMapValue_Found(t *testing.T) {
+	scheme := newTestScheme(t)
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ibm-cloud-provider-data",
+			Namespace: "kube-system",
+		},
+		Data: map[string]string{
+			"vpc_id":         "r006-abc123",
+			"vpc_subnet_ids": "subnet-1,subnet-2",
+		},
+	}
+
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cm).Build()
+	c := NewClient(fc)
+
+	val, err := c.GetConfigMapValue(context.Background(), "kube-system", "ibm-cloud-provider-data", "vpc_id")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if val != "r006-abc123" {
+		t.Errorf("expected vpc_id r006-abc123, got %s", val)
+	}
+}
+
+func TestGetConfigMapValue_KeyNotFound(t *testing.T) {
+	scheme := newTestScheme(t)
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ibm-cloud-provider-data",
+			Namespace: "kube-system",
+		},
+		Data: map[string]string{
+			"vpc_id": "r006-abc123",
+		},
+	}
+
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cm).Build()
+	c := NewClient(fc)
+
+	_, err := c.GetConfigMapValue(context.Background(), "kube-system", "ibm-cloud-provider-data", "nonexistent_key")
+	if err == nil {
+		t.Fatal("expected error for missing key, got nil")
+	}
+}
+
+func TestGetConfigMapValue_ConfigMapNotFound(t *testing.T) {
+	scheme := newTestScheme(t)
+	fc := fake.NewClientBuilder().WithScheme(scheme).Build()
+	c := NewClient(fc)
+
+	_, err := c.GetConfigMapValue(context.Background(), "kube-system", "nonexistent-cm", "key")
+	if err == nil {
+		t.Fatal("expected error for nonexistent configmap, got nil")
+	}
+}
+
 func TestGetNodeZone(t *testing.T) {
 	scheme := newTestScheme(t)
 	node := &corev1.Node{
