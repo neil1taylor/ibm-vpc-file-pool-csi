@@ -67,6 +67,7 @@ nav:
       - Known Limitations: KNOWN-LIMITATIONS.md
   - Architecture:
       - System Design: ARCHITECTURE.md
+      - VPC Networking: vpc-networking.md
       - CRD Specification: CRD-SPEC.md
       - CSI Interface: CSI-INTERFACE.md
       - IBM VPC API: IBM-VPC-API.md
