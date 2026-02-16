@@ -168,7 +168,7 @@ func (f *fakeK8sClient) UpdateSubVolumeStatus(_ context.Context, sv *v1alpha1.Su
 	if !ok {
 		return fmt.Errorf("subvolume %q not found", sv.Name)
 	}
-	existing.Status = sv.Status
+	sv.Status.DeepCopyInto(&existing.Status)
 	return nil
 }
 
@@ -283,6 +283,12 @@ func (f *fakeK8sClient) addPool(pool *v1alpha1.FileSharePool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.pools[pool.Name] = pool.DeepCopy()
+}
+
+func (f *fakeK8sClient) addSubVolume(sv *v1alpha1.SubVolume) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.subVolumes[sv.Name] = sv.DeepCopy()
 }
 
 func (f *fakeK8sClient) getPool(name string) *v1alpha1.FileSharePool {
