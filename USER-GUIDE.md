@@ -23,6 +23,31 @@ This means PVCs provision in under a second (a mkdir vs. a 30-90 second API call
 
 ---
 
+## Quick Start
+
+Get a PVC running in 4 steps:
+
+```bash
+# 1. Create a pool (if one doesn't exist yet)
+kubectl apply -f examples/basic/pool.yaml
+kubectl get filesharepools -w          # Wait for Phase: Ready (~60 seconds)
+
+# 2. Create a StorageClass
+kubectl apply -f examples/basic/storageclass.yaml
+
+# 3. Create a PVC
+kubectl apply -f examples/basic/pvc.yaml
+kubectl get pvc my-app-data            # Should be Bound within seconds
+
+# 4. Use the PVC in a pod
+kubectl apply -f examples/basic/pod.yaml
+kubectl logs my-app-pod                # Should print "Hello from pool CSI"
+```
+
+See `examples/` for more patterns: multi-zone, StatefulSet, shared RWX, tiered performance, custom permissions, and data retention.
+
+---
+
 ## Concepts
 
 ### FileSharePool
@@ -468,93 +493,23 @@ kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controlle
 
 ## Troubleshooting
 
+Here are the three most common issues. For the full troubleshooting guide (pool issues, VPC API errors, mount debugging, metrics, logging), see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+
 ### PVC Pending: "pool not found"
 
-The `pool` parameter in the StorageClass doesn't match any `FileSharePool` CR name.
-
+The `pool` parameter in the StorageClass doesn't match any `FileSharePool` CR name. Verify with:
 ```bash
-# List available pools
 kubectl get filesharepools
-
-# Check the StorageClass pool parameter
-kubectl get storageclass ibm-vpc-file-pool -o jsonpath='{.parameters.pool}'
+kubectl get storageclass <sc-name> -o jsonpath='{.parameters.pool}'
 ```
 
-Fix: ensure the pool name in the StorageClass matches the `metadata.name` of a FileSharePool.
+### NFS mount failed
 
-### PVC Pending: "pool has no available capacity"
+TCP port 2049 is blocked between worker nodes and NFS mount targets. Check security group rules. See [TROUBLESHOOTING.md — Mount Issues](TROUBLESHOOTING.md#nfs-mount-failed) for detailed steps.
 
-All shares in the pool are fully allocated and auto-expand can't add more.
+### Permission denied
 
-```bash
-# Check pool utilization
-kubectl get filesharespool <pool-name> -o yaml | grep -A5 "status:"
-
-# Options:
-# 1. Increase maxShares
-kubectl patch filesharespool <pool-name> --type merge -p '{"spec":{"maxShares":20}}'
-
-# 2. Increase share size (requires VPC API call, takes time)
-kubectl patch filesharespool <pool-name> --type merge -p '{"spec":{"shareSizeGB":4000}}'
-
-# 3. Delete unused PVCs to free capacity
-kubectl get subvolumes -l storage.ibmcloud.io/pool=<pool-name> -o wide
-```
-
-### PVC Pending: "pool is expanding, retry shortly"
-
-A new share is being created to handle the capacity demand. This is normal and self-resolving — the PVC will bind once the share is stable (30-90 seconds).
-
-If it stays in this state for more than 5 minutes, check the controller logs for VPC API errors:
-
-```bash
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller --tail=100 | grep -i "error\|fail\|share"
-```
-
-### Pod MountVolume failed: "NFS mount failed"
-
-The node agent can't mount the NFS share. Almost always a networking issue.
-
-```bash
-# Verify TCP 2049 is allowed in the worker node security group
-ibmcloud is security-group-rules <security-group-id> --output json | jq '.[] | select(.port_min <= 2049 and .port_max >= 2049)'
-
-# Test NFS connectivity from a worker node (debug pod)
-kubectl debug node/<node-name> -it --image=busybox -- sh
-# Inside the debug pod:
-nc -zv <mount-target-ip> 2049
-```
-
-### Permission denied on mount
-
-The UID/GID in the pod's `securityContext` doesn't match the subdirectory ownership.
-
-```bash
-# Check what UID/GID the subdirectory was created with
-kubectl get subvolume <pvc-name> -o jsonpath='{.spec.uid}/{.spec.gid}'
-
-# Compare with the pod's security context
-kubectl get pod <pod-name> -o jsonpath='{.spec.containers[0].securityContext}'
-```
-
-Fix: ensure the pod's `runAsUser`/`runAsGroup` matches the StorageClass's `uid`/`gid` parameters, or use `fsGroup` in the pod spec to have Kubernetes chown the mount.
-
-### Data visible across PVCs (security concern)
-
-Each PVC is bind-mounted at its own subdirectory. A pod cannot traverse above its bind-mount root. However, if a pod runs as root with `privileged: true` and mounts the host filesystem, it could theoretically access the NFS staging mount. This is the same risk as any privileged pod on any storage — enforce `PodSecurityAdmission` or `SecurityContextConstraints` (on OpenShift) to prevent privileged pods in tenant namespaces.
-
-### SubVolume CR exists but data is gone
-
-If someone manually deleted the subdirectory on the NFS share (e.g., via a debug pod or direct NFS access), the SubVolume CR will still exist but the data is lost. The controller will detect this on the next reconciliation cycle and mark the SubVolume as `Failed`.
-
-To clean up:
-```bash
-# Delete the orphaned SubVolume CR
-kubectl delete subvolume <name>
-
-# The PVC will also need to be deleted and recreated
-kubectl delete pvc <pvc-name>
-```
+UID/GID mismatch between the pod's `securityContext` and the StorageClass's `uid`/`gid` parameters. See [TROUBLESHOOTING.md — Permission denied](TROUBLESHOOTING.md#permission-denied-on-mount) for details.
 
 ---
 
@@ -580,3 +535,27 @@ VPC file shares are zonal. Create one FileSharePool per zone and one StorageClas
 
 **Q: Does this work with IBM Cloud Satellite?**
 This driver targets IBM Cloud VPC infrastructure specifically (it uses the VPC API to create file shares). For Satellite locations with their own storage backends, the community `csi-driver-nfs` may be more appropriate since it works with any existing NFS server.
+
+---
+
+## Compatibility Matrix
+
+| Component | Minimum Version | Tested With |
+|-----------|----------------|-------------|
+| Kubernetes | 1.28 | 1.28, 1.29, 1.30, 1.31 |
+| OpenShift (ROKS) | 4.14 | 4.14, 4.15, 4.16, 4.17 |
+| Infrastructure | VPC Gen2 | VPC Gen2 only (Classic not supported) |
+| Helm | v3.10 | v3.10+ |
+| CSI sidecar: csi-provisioner | v4.0 | v4.0, v5.0 |
+| CSI sidecar: csi-resizer | v1.10 | v1.10, v1.11 |
+| CSI sidecar: liveness-probe | v2.12 | v2.12, v2.13 |
+| NFS | v4.1 | NFSv4.1 |
+
+---
+
+## See Also
+
+- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — Comprehensive troubleshooting guide
+- [PERFORMANCE-TUNING.md](PERFORMANCE-TUNING.md) — NFS mount optimization, IOPS planning, benchmarking
+- [CONTRIBUTING.md](CONTRIBUTING.md) — Developer guide for contributing to the project
+- [examples/](examples/) — Ready-to-use YAML examples for common deployment patterns

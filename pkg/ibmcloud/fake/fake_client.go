@@ -17,16 +17,18 @@ type FakeVPCClient struct {
 	nextID int
 
 	// Test hooks — set these to inject failures.
-	CreateErr error
-	GetErr    error
-	ExpandErr error
-	DeleteErr error
+	CreateErr            error
+	GetErr               error
+	ExpandErr            error
+	DeleteErr            error
+	CreateMountTargetErr error
 
 	// Counters for assertions.
-	CreateCalls int
-	GetCalls    int
-	ExpandCalls int
-	DeleteCalls int
+	CreateCalls            int
+	GetCalls               int
+	ExpandCalls            int
+	DeleteCalls            int
+	CreateMountTargetCalls int
 }
 
 // Verify the fake implements the interface at compile time.
@@ -117,6 +119,31 @@ func (f *FakeVPCClient) DeleteFileShare(_ context.Context, shareID string) error
 
 	delete(f.shares, shareID)
 	return nil
+}
+
+func (f *FakeVPCClient) CreateShareMountTarget(_ context.Context, shareID string, input ibmcloud.CreateMountTargetInput) (*ibmcloud.MountTargetInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.CreateMountTargetCalls++
+
+	if f.CreateMountTargetErr != nil {
+		return nil, f.CreateMountTargetErr
+	}
+
+	info, ok := f.shares[shareID]
+	if !ok {
+		return nil, ibmcloud.ErrShareNotFound
+	}
+
+	f.nextID++
+	mt := ibmcloud.MountTargetInfo{
+		ID:        fmt.Sprintf("%s-mt-%d", shareID, f.nextID),
+		Name:      input.Name,
+		IPAddress: fmt.Sprintf("10.240.%d.%d", f.nextID, len(info.MountTargets)+1),
+	}
+
+	info.MountTargets = append(info.MountTargets, mt)
+	return &mt, nil
 }
 
 func (f *FakeVPCClient) ListFileShares(_ context.Context, _ string, _ []string) ([]*ibmcloud.ShareInfo, error) {

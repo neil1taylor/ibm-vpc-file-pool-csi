@@ -1531,6 +1531,152 @@ func TestAllocate_TierRequiredWhenPoolHasTiers(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Cross-Zone Allocation Tests
+// ---------------------------------------------------------------------------
+
+func TestAllocate_CrossZone_Allowed(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 100, 1),
+	)
+	pool.Spec.AccessorZones = []v1alpha1.AccessorZone{
+		{Zone: "us-south-2", SubnetID: "subnet-2"},
+	}
+	k.addPool(pool)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	// Request from accessor zone us-south-2 (pool home is us-south-1)
+	result, err := mgr.Allocate(context.Background(), AllocationRequest{
+		PVName:       testPVName,
+		PVCName:      "my-pvc",
+		PVCNamespace: "default",
+		PoolName:     "test-pool",
+		RequestedGB:  10,
+		Zone:         "us-south-2",
+	})
+	if err != nil {
+		t.Fatalf("Allocate from accessor zone should succeed: %v", err)
+	}
+	if result.ShareID != "share-1" {
+		t.Errorf("expected share-1, got %s", result.ShareID)
+	}
+}
+
+func TestAllocate_CrossZone_PopulatesMountTargets(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	share := newStableShare("share-1", "s1", 1000, 100, 1)
+	share.MountTargets = []v1alpha1.ZoneMountTarget{
+		{Zone: "us-south-1", MountTargetID: "mt-1", MountTargetIP: "10.0.0.1"},
+		{Zone: "us-south-2", MountTargetID: "mt-2", MountTargetIP: "10.0.1.1"},
+	}
+
+	pool := newTestPool("test-pool", "spread", 1000, share)
+	pool.Spec.AccessorZones = []v1alpha1.AccessorZone{
+		{Zone: "us-south-2", SubnetID: "subnet-2"},
+	}
+	k.addPool(pool)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	result, err := mgr.Allocate(context.Background(), AllocationRequest{
+		PVName:       testPVName,
+		PVCName:      "my-pvc",
+		PVCNamespace: "default",
+		PoolName:     "test-pool",
+		RequestedGB:  10,
+	})
+	if err != nil {
+		t.Fatalf("Allocate failed: %v", err)
+	}
+
+	if result.MountTargets == nil {
+		t.Fatal("expected MountTargets to be populated")
+	}
+	if result.MountTargets["us-south-1"] != "10.0.0.1" {
+		t.Errorf("expected us-south-1 IP 10.0.0.1, got %q", result.MountTargets["us-south-1"])
+	}
+	if result.MountTargets["us-south-2"] != "10.0.1.1" {
+		t.Errorf("expected us-south-2 IP 10.0.1.1, got %q", result.MountTargets["us-south-2"])
+	}
+	if len(result.AccessibleZones) != 2 {
+		t.Errorf("expected 2 accessible zones, got %d", len(result.AccessibleZones))
+	}
+}
+
+func TestAllocate_UnknownZone_Rejected(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 0, 0),
+	)
+	pool.Spec.AccessorZones = []v1alpha1.AccessorZone{
+		{Zone: "us-south-2", SubnetID: "subnet-2"},
+	}
+	k.addPool(pool)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	// us-south-3 is not home zone or accessor zone
+	_, err := mgr.Allocate(context.Background(), AllocationRequest{
+		PVName:       testPVName,
+		PVCName:      "my-pvc",
+		PVCNamespace: "default",
+		PoolName:     "test-pool",
+		RequestedGB:  10,
+		Zone:         "us-south-3",
+	})
+
+	if err == nil {
+		t.Fatal("expected zone mismatch error for unknown zone")
+	}
+	if !contains(err.Error(), "zone mismatch") {
+		t.Errorf("expected 'zone mismatch' in error, got: %v", err)
+	}
+}
+
+func TestAllocate_NoAccessorZones_BackwardCompat(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 100, 1),
+	)
+	// No AccessorZones
+	k.addPool(pool)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	result, err := mgr.Allocate(context.Background(), AllocationRequest{
+		PVName:       testPVName,
+		PVCName:      "my-pvc",
+		PVCNamespace: "default",
+		PoolName:     "test-pool",
+		RequestedGB:  10,
+	})
+	if err != nil {
+		t.Fatalf("Allocate failed: %v", err)
+	}
+
+	// MountTargets should be nil when no accessor zones
+	if result.MountTargets != nil {
+		t.Error("expected nil MountTargets when no accessor zones")
+	}
+	if result.AccessibleZones != nil {
+		t.Error("expected nil AccessibleZones when no accessor zones")
+	}
+}
+
 func TestAllocate_NoTiersBackwardCompat(t *testing.T) {
 	k := newFakeK8sClient()
 	vpc := fake.NewFakeVPCClient()

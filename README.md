@@ -161,6 +161,10 @@ go test ./pkg/pool/ -v -race -run TestAllocate_SpreadStrategy
 | [TESTING.md](TESTING.md) | Testing strategy and coverage targets |
 | [USER-GUIDE.md](USER-GUIDE.md) | End-user guide |
 | [INSTALL.md](INSTALL.md) | Build, deploy, and Helm chart |
+| [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Comprehensive troubleshooting guide |
+| [PERFORMANCE-TUNING.md](PERFORMANCE-TUNING.md) | NFS tuning, IOPS planning, benchmarking |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Developer guide and contribution process |
+| [examples/](examples/) | Ready-to-use YAML examples |
 
 ## License
 

@@ -23,6 +23,7 @@ type VPCFileClient interface {
 	ExpandFileShare(ctx context.Context, shareID string, newSizeGB int64) error
 	DeleteFileShare(ctx context.Context, shareID string) error
 	ListFileShares(ctx context.Context, resourceGroupID string, tags []string) ([]*ShareInfo, error)
+	CreateShareMountTarget(ctx context.Context, shareID string, input CreateMountTargetInput) (*MountTargetInfo, error)
 }
 
 // CreateShareInput contains the parameters for creating a new VPC file share.
@@ -51,6 +52,14 @@ type ShareInfo struct {
 	Zone           string
 	MountTargets   []MountTargetInfo
 	CreatedAt      time.Time
+}
+
+// CreateMountTargetInput contains the parameters for creating a mount target on an existing share.
+type CreateMountTargetInput struct {
+	Name             string
+	VPCId            string
+	SubnetID         string
+	EncryptInTransit bool
 }
 
 // MountTargetInfo contains metadata about a VPC file share mount target.

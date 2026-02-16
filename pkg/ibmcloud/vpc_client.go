@@ -244,6 +244,68 @@ func (c *Client) CreateFileShare(ctx context.Context, input CreateShareInput) (i
 	return shareInfo, nil
 }
 
+// CreateShareMountTarget creates an additional mount target on an existing share.
+// This is used to add accessor zone mount targets for cross-zone access.
+func (c *Client) CreateShareMountTarget(ctx context.Context, shareID string, input CreateMountTargetInput) (_ *MountTargetInfo, retErr error) {
+	start := time.Now()
+	defer func() { recordAPIMetrics("create_mount_target", start, retErr) }()
+
+	if err := c.withAuth(ctx, "CreateShareMountTarget"); err != nil {
+		return nil, err
+	}
+
+	transitEncryption := "none"
+	if input.EncryptInTransit {
+		transitEncryption = "user_managed"
+	}
+
+	mtPrototype := &vpcv1.ShareMountTargetPrototype{
+		Name:              core.StringPtr(input.Name),
+		VPC:               &vpcv1.VPCIdentityByID{ID: core.StringPtr(input.VPCId)},
+		AccessProtocol:    core.StringPtr("nfs4"),
+		TransitEncryption: core.StringPtr(transitEncryption),
+	}
+
+	opts := c.vpcService.NewCreateShareMountTargetOptions(shareID, mtPrototype)
+	mt, response, err := c.vpcService.CreateShareMountTargetWithContext(ctx, opts)
+	if err != nil {
+		statusCode := 0
+		if response != nil {
+			statusCode = response.StatusCode
+		}
+		return nil, mapHTTPError(statusCode, err)
+	}
+
+	klog.V(4).InfoS("Mount target created, waiting for IP",
+		"shareID", shareID,
+		"mountTargetID", *mt.ID,
+		"name", *mt.Name,
+	)
+
+	// Poll until the mount target has an IP address populated.
+	deadline := time.Now().Add(5 * time.Minute)
+	for {
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("mount target %s IP not populated after timeout", *mt.ID)
+		}
+
+		mtInfo, err := c.getMountTarget(ctx, shareID, *mt.ID)
+		if err != nil {
+			return nil, fmt.Errorf("get mount target %s: %w", *mt.ID, err)
+		}
+		if mtInfo.IPAddress != "" {
+			return mtInfo, nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(c.pollInterval):
+			continue
+		}
+	}
+}
+
 // GetFileShare retrieves a VPC file share by ID, including mount target IPs.
 func (c *Client) GetFileShare(ctx context.Context, shareID string) (_ *ShareInfo, retErr error) {
 	start := time.Now()

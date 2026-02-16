@@ -1,0 +1,22 @@
+# Pod that mounts the PVC and writes a test file.
+# Note: securityContext UID/GID should match the pool's defaultUID/defaultGID.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-app-pod
+  namespace: default
+spec:
+  containers:
+    - name: app
+      image: busybox:latest
+      command: ["sh", "-c", "echo 'Hello from pool CSI' > /data/test.txt && cat /data/test.txt && sleep 3600"]
+      volumeMounts:
+        - name: data
+          mountPath: /data
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: my-app-data

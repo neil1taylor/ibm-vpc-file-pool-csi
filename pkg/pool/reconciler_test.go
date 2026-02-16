@@ -705,6 +705,163 @@ func TestReconcile_ProactiveExpansion_PerTier(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// 17. Ensure Accessor Mount Targets
+// ---------------------------------------------------------------------------
+
+func TestReconcile_EnsureAccessorMountTargets(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+
+	// Create a share in VPC first
+	shareInfo, _ := vpc.CreateFileShare(context.Background(), ibmcloudInput("test-pool", 1000))
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		v1alpha1.PoolShareStatus{
+			ShareID:       shareInfo.ID,
+			ShareName:     shareInfo.Name,
+			MountTargetIP: shareInfo.MountTargets[0].IPAddress,
+			MountTargetID: shareInfo.MountTargets[0].ID,
+			TotalGB:       1000,
+			State:         "stable",
+			Zone:          "us-south-1",
+			MountTargets: []v1alpha1.ZoneMountTarget{
+				{Zone: "us-south-1", MountTargetID: shareInfo.MountTargets[0].ID, MountTargetIP: shareInfo.MountTargets[0].IPAddress},
+			},
+		},
+	)
+	pool.Spec.InitialShares = 1
+	pool.Spec.AccessorZones = []v1alpha1.AccessorZone{
+		{Zone: "us-south-2", SubnetID: "subnet-2"},
+		{Zone: "us-south-3", SubnetID: "subnet-3"},
+	}
+	k.addPool(pool)
+
+	r := newReconciler(k, vpc)
+	r.SetVPCConfig("vpc-1", "subnet-1", "rg-1")
+	_, err := reconcilePool(r, "test-pool")
+	if err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	// Should have created 2 mount targets (us-south-2 + us-south-3)
+	if vpc.CreateMountTargetCalls != 2 {
+		t.Errorf("expected 2 CreateMountTarget calls, got %d", vpc.CreateMountTargetCalls)
+	}
+
+	updated := k.getPool("test-pool")
+	share := updated.Status.Shares[0]
+	if len(share.MountTargets) != 3 {
+		t.Errorf("expected 3 mount targets (home + 2 accessor), got %d", len(share.MountTargets))
+	}
+}
+
+func TestReconcile_EnsureAccessorMountTargets_AlreadyExists(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+
+	shareInfo, _ := vpc.CreateFileShare(context.Background(), ibmcloudInput("test-pool", 1000))
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		v1alpha1.PoolShareStatus{
+			ShareID:       shareInfo.ID,
+			ShareName:     shareInfo.Name,
+			MountTargetIP: shareInfo.MountTargets[0].IPAddress,
+			MountTargetID: shareInfo.MountTargets[0].ID,
+			TotalGB:       1000,
+			State:         "stable",
+			Zone:          "us-south-1",
+			MountTargets: []v1alpha1.ZoneMountTarget{
+				{Zone: "us-south-1", MountTargetID: shareInfo.MountTargets[0].ID, MountTargetIP: shareInfo.MountTargets[0].IPAddress},
+				{Zone: "us-south-2", MountTargetID: "existing-mt", MountTargetIP: "10.0.1.1"},
+			},
+		},
+	)
+	pool.Spec.InitialShares = 1
+	pool.Spec.AccessorZones = []v1alpha1.AccessorZone{
+		{Zone: "us-south-2", SubnetID: "subnet-2"},
+	}
+	k.addPool(pool)
+
+	r := newReconciler(k, vpc)
+	r.SetVPCConfig("vpc-1", "subnet-1", "rg-1")
+	_, err := reconcilePool(r, "test-pool")
+	if err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	// Should NOT create any mount targets (already exists)
+	if vpc.CreateMountTargetCalls != 0 {
+		t.Errorf("expected 0 CreateMountTarget calls (idempotent), got %d", vpc.CreateMountTargetCalls)
+	}
+}
+
+func TestReconcile_EnsureAccessorMountTargets_SkipsCreatingShares(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		v1alpha1.PoolShareStatus{
+			ShareID:       "share-creating",
+			ShareName:     "s1",
+			MountTargetIP: "",
+			TotalGB:       1000,
+			State:         "creating",
+			Zone:          "us-south-1",
+		},
+	)
+	pool.Spec.InitialShares = 1
+	pool.Spec.AccessorZones = []v1alpha1.AccessorZone{
+		{Zone: "us-south-2", SubnetID: "subnet-2"},
+	}
+	k.addPool(pool)
+
+	r := newReconciler(k, vpc)
+	r.SetVPCConfig("vpc-1", "subnet-1", "rg-1")
+	_, err := reconcilePool(r, "test-pool")
+	if err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	// Should NOT create mount targets for non-stable shares
+	if vpc.CreateMountTargetCalls != 0 {
+		t.Errorf("expected 0 CreateMountTarget calls for creating shares, got %d", vpc.CreateMountTargetCalls)
+	}
+}
+
+func TestReconcile_NoAccessorZones_BackwardCompat(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+
+	shareInfo, _ := vpc.CreateFileShare(context.Background(), ibmcloudInput("test-pool", 1000))
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		v1alpha1.PoolShareStatus{
+			ShareID:       shareInfo.ID,
+			ShareName:     shareInfo.Name,
+			MountTargetIP: shareInfo.MountTargets[0].IPAddress,
+			MountTargetID: shareInfo.MountTargets[0].ID,
+			TotalGB:       1000,
+			State:         "stable",
+			Zone:          "us-south-1",
+		},
+	)
+	pool.Spec.InitialShares = 1
+	// No AccessorZones
+	k.addPool(pool)
+
+	r := newReconciler(k, vpc)
+	_, err := reconcilePool(r, "test-pool")
+	if err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	// No mount target creation calls
+	if vpc.CreateMountTargetCalls != 0 {
+		t.Errorf("expected 0 CreateMountTarget calls, got %d", vpc.CreateMountTargetCalls)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Test Helpers
 // ---------------------------------------------------------------------------
 

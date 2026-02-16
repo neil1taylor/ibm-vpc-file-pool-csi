@@ -1,0 +1,18 @@
+# StorageClass for the high-IOPS performance tier.
+# Use for databases, analytics, and latency-sensitive workloads.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ibm-vpc-file-pool-high-iops
+provisioner: vpc-file-pool.csi.ibm.io
+parameters:
+  pool: tiered-pool
+  tier: high-iops
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+mountOptions:
+  - nfsvers=4.1
+  - soft
+  - timeo=600
+  - retrans=3

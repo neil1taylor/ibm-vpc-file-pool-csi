@@ -196,7 +196,7 @@ kubectl apply -f config/deploy/storageclass.yaml
 
 ## Step 4: Create a File Share Pool
 
-The driver won't provision any PVCs until at least one `FileSharePool` exists. Create one for your target zone:
+The driver won't provision any PVCs until at least one `FileSharePool` exists. Create one for your target zone (see also `examples/basic/pool.yaml` for a ready-to-use template):
 
 ```yaml
 # pool-general.yaml
@@ -389,64 +389,21 @@ kubectl delete secret ibm-vpc-file-pool-csi-secret -n kube-system
 
 ## Installation Troubleshooting
 
-### PVC stuck in Pending
-
-```bash
-# Check PVC events
-kubectl describe pvc <pvc-name>
-
-# Check controller logs
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller --tail=100
-
-# Common causes:
-# - "pool not found" → FileSharePool CR doesn't exist or name doesn't match StorageClass
-# - "pool has no available capacity" → All shares full, autoExpand may be false or maxShares reached
-# - "pool is expanding" → A new share is being created; PVC will bind after ~60 seconds
-# - "VPC API authentication failed" → API key in secret is invalid or expired
-```
+If something goes wrong during installation, start with these two quick checks:
 
 ### Pool stuck in Initializing
 
 ```bash
-# Check pool events
 kubectl describe filesharespool <pool-name>
-
-# Check controller logs for VPC API errors
 kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller --tail=100 | grep -i "error\|fail"
-
-# Common causes:
-# - Wrong zone (must match a zone where you have worker nodes)
-# - Invalid profile name
-# - VPC quota exceeded (300 shares per account)
-# - Security group doesn't allow TCP 2049
-# - API key lacks VPC Infrastructure Editor role
 ```
-
-### Pod can't mount the volume
-
-```bash
-# Check pod events
-kubectl describe pod <pod-name>
-
-# Check node agent logs on the specific node
-NODE=$(kubectl get pod <pod-name> -o jsonpath='{.spec.nodeName}')
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-node --field-selector spec.nodeName=${NODE} -c csi-node --tail=100
-
-# Common causes:
-# - "NFS mount failed" → TCP 2049 blocked in security group
-# - "failed to create subdirectory" → NodePublishVolume could not mkdir on the NFS share; check node agent logs and NFS mount health
-# - "permission denied" → UID/GID mismatch between StorageClass and pod securityContext
-```
+Common causes: wrong zone, invalid profile, VPC quota exceeded, TCP 2049 blocked, API key permissions.
 
 ### Driver pods CrashLoopBackOff
 
 ```bash
-# Check pod logs for the crash reason
 kubectl logs -n kube-system <pod-name> -c csi-controller --previous
-kubectl logs -n kube-system <pod-name> -c csi-node --previous
-
-# Common causes:
-# - Missing or invalid API key secret
-# - Wrong image tag or pull errors (check image pull secrets)
-# - RBAC misconfiguration (check ClusterRole and ClusterRoleBinding)
 ```
+Common causes: missing API key secret, wrong image tag, RBAC misconfiguration.
+
+For the full troubleshooting guide (PVC issues, mount failures, pool problems, VPC API errors, and more), see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).

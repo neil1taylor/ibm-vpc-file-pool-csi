@@ -105,11 +105,42 @@ type FileSharePoolSpec struct {
 	// +optional
 	MountOptions []string `json:"mountOptions,omitempty"`
 
+	// AccessorZones defines additional zones where pool shares should have mount targets.
+	// This enables cross-zone access: nodes in accessor zones can mount shares via
+	// zone-local NFS IPs instead of cross-zone traffic.
+	// When empty, shares are only accessible from the home zone (spec.zone).
+	// +optional
+	AccessorZones []AccessorZone `json:"accessorZones,omitempty"`
+
 	// Tiers defines multiple performance tiers within the pool.
 	// If empty, the top-level profile/shareSizeGB/iops/maxShares/initialShares fields
 	// define an implicit default tier.
 	// +optional
 	Tiers []ShareTier `json:"tiers,omitempty"`
+}
+
+// AccessorZone defines a zone where pool shares should have additional mount targets.
+type AccessorZone struct {
+	// Zone is the VPC availability zone (e.g., "us-south-2").
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^[a-z]{2}-[a-z]+-\d+$`
+	Zone string `json:"zone"`
+
+	// SubnetID is the VPC subnet in the accessor zone to create mount targets in.
+	// +kubebuilder:validation:Required
+	SubnetID string `json:"subnetID"`
+}
+
+// ZoneMountTarget records a mount target created in a specific zone.
+type ZoneMountTarget struct {
+	// Zone is the VPC availability zone of this mount target.
+	Zone string `json:"zone"`
+
+	// MountTargetID is the VPC mount target resource ID.
+	MountTargetID string `json:"mountTargetID"`
+
+	// MountTargetIP is the NFS server IP in this zone.
+	MountTargetIP string `json:"mountTargetIP"`
 }
 
 // ShareTier defines the VPC share configuration for a performance tier within the pool.
@@ -161,6 +192,28 @@ func (s *FileSharePoolSpec) TierConfig(tierName string) (profile string, sizeGB 
 		}
 	}
 	return "", 0, nil, 0, 0, fmt.Errorf("tier %q not found in pool", tierName)
+}
+
+// AllAccessibleZones returns all zones that this pool can serve: home zone + accessor zones.
+func (s *FileSharePoolSpec) AllAccessibleZones() []string {
+	zones := []string{s.Zone}
+	for _, az := range s.AccessorZones {
+		zones = append(zones, az.Zone)
+	}
+	return zones
+}
+
+// IsAccessibleZone returns true if the given zone is the home zone or an accessor zone.
+func (s *FileSharePoolSpec) IsAccessibleZone(zone string) bool {
+	if zone == s.Zone {
+		return true
+	}
+	for _, az := range s.AccessorZones {
+		if az.Zone == zone {
+			return true
+		}
+	}
+	return false
 }
 
 type FileSharePoolStatus struct {
@@ -225,8 +278,33 @@ type PoolShareStatus struct {
 	// Zone is the availability zone of this share.
 	Zone string `json:"zone"`
 
+	// MountTargets records mount targets across all zones (home + accessor).
+	// When empty, only the primary MountTargetIP/MountTargetID are used (backward compat).
+	// +optional
+	MountTargets []ZoneMountTarget `json:"mountTargets,omitempty"`
+
 	// CreatedAt is when the share was created.
 	CreatedAt *metav1.Time `json:"createdAt,omitempty"`
+}
+
+// MountTargetIPForZone returns the mount target IP for the given zone.
+// Falls back to the primary MountTargetIP if no zone-specific target exists.
+func (s *PoolShareStatus) MountTargetIPForZone(zone string) string {
+	for _, mt := range s.MountTargets {
+		if mt.Zone == zone {
+			return mt.MountTargetIP
+		}
+	}
+	return s.MountTargetIP
+}
+
+// AllAccessibleZones returns all zones that have mount targets for this share.
+func (s *PoolShareStatus) AllAccessibleZones() []string {
+	var zones []string
+	for _, mt := range s.MountTargets {
+		zones = append(zones, mt.Zone)
+	}
+	return zones
 }
 
 // +kubebuilder:object:root=true

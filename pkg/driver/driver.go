@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc"
@@ -38,15 +39,17 @@ type Driver struct {
 	csi.UnimplementedControllerServer
 	csi.UnimplementedNodeServer
 
-	name        string
-	version     string
-	nodeID      string
-	endpoint    string
-	mode        string
-	poolManager pool.PoolManager
-	k8sClient   k8s.Client
-	mounter     mount.Interface
-	mountCache  *util.MountCache
+	name         string
+	version      string
+	nodeID       string
+	endpoint     string
+	mode         string
+	poolManager  pool.PoolManager
+	k8sClient    k8s.Client
+	mounter      mount.Interface
+	mountCache   *util.MountCache
+	nodeZone     string
+	nodeZoneOnce sync.Once
 }
 
 // NewDriver creates a new CSI driver instance.
@@ -99,6 +102,20 @@ func (d *Driver) Run() error {
 
 	klog.InfoS("CSI driver serving", "endpoint", addr, "mode", d.mode)
 	return server.Serve(listener)
+}
+
+// cachedNodeZone lazily caches the node's zone from the Kubernetes API.
+// Returns empty string if zone detection fails (best-effort for cross-zone).
+func (d *Driver) cachedNodeZone(ctx context.Context) string {
+	d.nodeZoneOnce.Do(func() {
+		zone, err := d.getNodeZone(ctx)
+		if err != nil {
+			klog.V(4).InfoS("Failed to cache node zone, cross-zone IP selection disabled", "error", err)
+			return
+		}
+		d.nodeZone = zone
+	})
+	return d.nodeZone
 }
 
 func (d *Driver) isController() bool {

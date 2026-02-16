@@ -120,18 +120,37 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 		volCtx["gid"] = strconv.FormatInt(*result.GID, 10)
 	}
 
-	return &csi.CreateVolumeResponse{
-		Volume: &csi.Volume{
-			VolumeId:      volumeID,
-			CapacityBytes: requiredGB * (1 << 30),
-			VolumeContext: volCtx,
-			AccessibleTopology: []*csi.Topology{
-				{
-					Segments: map[string]string{
-						"topology.kubernetes.io/zone": zone,
-					},
+	// Add zone-specific mount target IPs for cross-zone access
+	for z, ip := range result.MountTargets {
+		volCtx["server."+z] = ip
+	}
+
+	// Build accessible topology
+	var topologies []*csi.Topology
+	if len(result.AccessibleZones) > 0 {
+		for _, z := range result.AccessibleZones {
+			topologies = append(topologies, &csi.Topology{
+				Segments: map[string]string{
+					"topology.kubernetes.io/zone": z,
+				},
+			})
+		}
+	} else {
+		topologies = []*csi.Topology{
+			{
+				Segments: map[string]string{
+					"topology.kubernetes.io/zone": zone,
 				},
 			},
+		}
+	}
+
+	return &csi.CreateVolumeResponse{
+		Volume: &csi.Volume{
+			VolumeId:           volumeID,
+			CapacityBytes:      requiredGB * (1 << 30),
+			VolumeContext:      volCtx,
+			AccessibleTopology: topologies,
 		},
 	}, nil
 }

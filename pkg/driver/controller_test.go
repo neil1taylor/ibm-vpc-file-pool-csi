@@ -853,6 +853,116 @@ func TestControllerGetCapabilities(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Cross-Zone Tests
+// ---------------------------------------------------------------------------
+
+func TestCreateVolume_CrossZone_VolumeContext(t *testing.T) {
+	pm := &mockPoolManager{
+		allocateResult: &pool.AllocationResult{
+			ShareID:       "share-1",
+			MountTargetIP: "10.0.0.1",
+			SubPath:       "/pvcs/pvc-test",
+			SharePath:     "/",
+			MountTargets: map[string]string{
+				"us-south-1": "10.0.0.1",
+				"us-south-2": "10.0.1.1",
+				"us-south-3": "10.0.2.1",
+			},
+			AccessibleZones: []string{"us-south-1", "us-south-2", "us-south-3"},
+		},
+	}
+	d := newTestDriver(pm, nil)
+
+	resp, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name:       "pvc-test",
+		Parameters: map[string]string{"pool": "test-pool"},
+		CapacityRange: &csi.CapacityRange{
+			RequiredBytes: gbToBytes(10),
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume failed: %v", err)
+	}
+
+	ctx := resp.GetVolume().VolumeContext
+	if ctx["server.us-south-1"] != "10.0.0.1" {
+		t.Errorf("expected server.us-south-1='10.0.0.1', got %q", ctx["server.us-south-1"])
+	}
+	if ctx["server.us-south-2"] != "10.0.1.1" {
+		t.Errorf("expected server.us-south-2='10.0.1.1', got %q", ctx["server.us-south-2"])
+	}
+	if ctx["server.us-south-3"] != "10.0.2.1" {
+		t.Errorf("expected server.us-south-3='10.0.2.1', got %q", ctx["server.us-south-3"])
+	}
+	// Primary server should still be set
+	if ctx["server"] != "10.0.0.1" {
+		t.Errorf("expected server='10.0.0.1', got %q", ctx["server"])
+	}
+
+	// Should have 3 topology entries
+	topos := resp.GetVolume().GetAccessibleTopology()
+	if len(topos) != 3 {
+		t.Fatalf("expected 3 topologies, got %d", len(topos))
+	}
+
+	zones := make(map[string]bool)
+	for _, topo := range topos {
+		zones[topo.GetSegments()["topology.kubernetes.io/zone"]] = true
+	}
+	for _, z := range []string{"us-south-1", "us-south-2", "us-south-3"} {
+		if !zones[z] {
+			t.Errorf("expected zone %q in topologies", z)
+		}
+	}
+}
+
+func TestCreateVolume_SingleZone_BackwardCompat(t *testing.T) {
+	pm := &mockPoolManager{
+		allocateResult: &pool.AllocationResult{
+			ShareID:       "share-1",
+			MountTargetIP: "10.0.0.1",
+			SubPath:       "/pvcs/pvc-test",
+			SharePath:     "/",
+			// No MountTargets or AccessibleZones (single-zone)
+		},
+	}
+	d := newTestDriver(pm, nil)
+
+	resp, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name:       "pvc-test",
+		Parameters: map[string]string{"pool": "test-pool"},
+		CapacityRange: &csi.CapacityRange{
+			RequiredBytes: gbToBytes(10),
+		},
+		AccessibilityRequirements: &csi.TopologyRequirement{
+			Preferred: []*csi.Topology{
+				{Segments: map[string]string{"topology.kubernetes.io/zone": "us-south-1"}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume failed: %v", err)
+	}
+
+	// Should have single topology (backward compat)
+	topos := resp.GetVolume().GetAccessibleTopology()
+	if len(topos) != 1 {
+		t.Fatalf("expected 1 topology, got %d", len(topos))
+	}
+	if zone := topos[0].GetSegments()["topology.kubernetes.io/zone"]; zone != "us-south-1" {
+		t.Errorf("expected zone 'us-south-1', got %q", zone)
+	}
+
+	// No server.<zone> keys
+	ctx := resp.GetVolume().VolumeContext
+	for key := range ctx {
+		if key != "server" && len(key) > 7 && key[:7] == "server." {
+			t.Errorf("unexpected zone-specific key %q in single-zone mode", key)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // parseVolumeID Tests
 // ---------------------------------------------------------------------------
 

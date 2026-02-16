@@ -41,10 +41,17 @@ func (d *Driver) NodeGetCapabilities(_ context.Context, _ *csi.NodeGetCapabiliti
 
 // NodeStageVolume mounts the NFS share to a staging directory.
 // Called once per share per node (not once per PVC).
-func (d *Driver) NodeStageVolume(_ context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
+func (d *Driver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
 	server := req.GetVolumeContext()["server"]
 	sharePath := req.GetVolumeContext()["share"]
 	stagingPath := req.GetStagingTargetPath()
+
+	// Use zone-local IP when available for cross-zone access
+	if nodeZone := d.cachedNodeZone(ctx); nodeZone != "" {
+		if zoneIP := req.GetVolumeContext()["server."+nodeZone]; zoneIP != "" {
+			server = zoneIP
+		}
+	}
 
 	if d.mountCache.IsMounted(stagingPath) {
 		return &csi.NodeStageVolumeResponse{}, nil

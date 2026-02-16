@@ -63,6 +63,29 @@ spec:
             type: object
           spec:
             properties:
+              accessorZones:
+                description: |-
+                  AccessorZones defines additional zones where pool shares should have mount targets.
+                  This enables cross-zone access: nodes in accessor zones can mount shares via
+                  zone-local NFS IPs instead of cross-zone traffic.
+                  When empty, shares are only accessible from the home zone (spec.zone).
+                items:
+                  description: AccessorZone defines a zone where pool shares should
+                    have additional mount targets.
+                  properties:
+                    subnetID:
+                      description: SubnetID is the VPC subnet in the accessor zone
+                        to create mount targets in.
+                      type: string
+                    zone:
+                      description: Zone is the VPC availability zone (e.g., "us-south-2").
+                      pattern: ^[a-z]{2}-[a-z]+-\d+$
+                      type: string
+                  required:
+                  - subnetID
+                  - zone
+                  type: object
+                type: array
               allocationStrategy:
                 default: spread
                 description: |-
@@ -320,6 +343,32 @@ spec:
                     mountTargetIP:
                       description: MountTargetIP is the NFS server IP for this share.
                       type: string
+                    mountTargets:
+                      description: |-
+                        MountTargets records mount targets across all zones (home + accessor).
+                        When empty, only the primary MountTargetIP/MountTargetID are used (backward compat).
+                      items:
+                        description: ZoneMountTarget records a mount target created
+                          in a specific zone.
+                        properties:
+                          mountTargetID:
+                            description: MountTargetID is the VPC mount target resource
+                              ID.
+                            type: string
+                          mountTargetIP:
+                            description: MountTargetIP is the NFS server IP in this
+                              zone.
+                            type: string
+                          zone:
+                            description: Zone is the VPC availability zone of this
+                              mount target.
+                            type: string
+                        required:
+                        - mountTargetID
+                        - mountTargetIP
+                        - zone
+                        type: object
+                      type: array
                     pvcCount:
                       description: PVCCount is the number of SubVolumes on this share.
                       format: int32

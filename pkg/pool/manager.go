@@ -53,13 +53,15 @@ type AllocationRequest struct {
 
 // AllocationResult contains the result of a successful allocation.
 type AllocationResult struct {
-	ShareID       string
-	MountTargetIP string
-	SubPath       string // e.g., "/pvcs/pvc-abc123"
-	SharePath     string // e.g., "/" (the NFS export root)
-	UID           *int64
-	GID           *int64
-	Permissions   string
+	ShareID         string
+	MountTargetIP   string
+	SubPath         string // e.g., "/pvcs/pvc-abc123"
+	SharePath       string // e.g., "/" (the NFS export root)
+	UID             *int64
+	GID             *int64
+	Permissions     string
+	MountTargets    map[string]string // zone -> IP (nil when single-zone)
+	AccessibleZones []string          // all zones this volume is accessible from
 }
 
 // Manager implements PoolManager. It is the core brain of the CSI driver.
@@ -111,9 +113,9 @@ func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (_ *Alloc
 		return nil, fmt.Errorf("%w: %s", ErrPoolNotFound, req.PoolName)
 	}
 
-	// 2. Validate zone
-	if req.Zone != "" && req.Zone != pool.Spec.Zone {
-		return nil, fmt.Errorf("zone mismatch: requested %q but pool is in %q", req.Zone, pool.Spec.Zone)
+	// 2. Validate zone (accept home zone and accessor zones)
+	if req.Zone != "" && !pool.Spec.IsAccessibleZone(req.Zone) {
+		return nil, fmt.Errorf("zone mismatch: requested %q but pool serves %v", req.Zone, pool.Spec.AllAccessibleZones())
 	}
 
 	// 3. Idempotency check
@@ -206,7 +208,7 @@ func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (_ *Alloc
 		"requestedGB", req.RequestedGB,
 	)
 
-	return &AllocationResult{
+	result := &AllocationResult{
 		ShareID:       share.ShareID,
 		MountTargetIP: share.MountTargetIP,
 		SubPath:       subPath,
@@ -214,7 +216,18 @@ func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (_ *Alloc
 		UID:           uid,
 		GID:           gid,
 		Permissions:   perms,
-	}, nil
+	}
+
+	// Populate cross-zone mount targets if accessor zones are configured
+	if len(pool.Spec.AccessorZones) > 0 && len(share.MountTargets) > 0 {
+		result.MountTargets = make(map[string]string, len(share.MountTargets))
+		for _, mt := range share.MountTargets {
+			result.MountTargets[mt.Zone] = mt.MountTargetIP
+		}
+		result.AccessibleZones = pool.Spec.AllAccessibleZones()
+	}
+
+	return result, nil
 }
 
 func (m *Manager) Deallocate(ctx context.Context, subVolumeName string) (retErr error) {

@@ -1032,6 +1032,117 @@ func TestNodeGetInfo_NoK8sClient(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Cross-Zone NodeStageVolume Tests
+// ---------------------------------------------------------------------------
+
+func TestNodeStageVolume_UsesZoneLocalIP(t *testing.T) {
+	fakeMounter := mount.NewFakeMounter(nil)
+	k := &nodeTestK8sClient{zone: "us-south-2"}
+	d := newNodeTestDriver(fakeMounter, nil, k)
+
+	stagingPath := filepath.Join(resolvedTempDir(t), "staging")
+
+	_, err := d.NodeStageVolume(context.Background(), &csi.NodeStageVolumeRequest{
+		VolumeId:          "pool/share/pvc",
+		StagingTargetPath: stagingPath,
+		VolumeContext: map[string]string{
+			"server":            "10.0.0.1", // primary (us-south-1)
+			"share":             "/",
+			"server.us-south-1": "10.0.0.1",
+			"server.us-south-2": "10.0.1.1", // zone-local for this node
+			"server.us-south-3": "10.0.2.1",
+		},
+		VolumeCapability: &csi.VolumeCapability{
+			AccessType: &csi.VolumeCapability_Mount{
+				Mount: &csi.VolumeCapability_MountVolume{},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NodeStageVolume failed: %v", err)
+	}
+
+	actions := fakeMounter.GetLog()
+	if len(actions) != 1 {
+		t.Fatalf("expected 1 mount action, got %d", len(actions))
+	}
+	// Should mount using the zone-local IP for us-south-2
+	if actions[0].Source != "10.0.1.1:/" {
+		t.Errorf("expected source '10.0.1.1:/' (zone-local), got %q", actions[0].Source)
+	}
+}
+
+func TestNodeStageVolume_FallsBackToServer(t *testing.T) {
+	fakeMounter := mount.NewFakeMounter(nil)
+	k := &nodeTestK8sClient{zone: "us-south-2"}
+	d := newNodeTestDriver(fakeMounter, nil, k)
+
+	stagingPath := filepath.Join(resolvedTempDir(t), "staging")
+
+	// No server.us-south-2 key → falls back to primary server
+	_, err := d.NodeStageVolume(context.Background(), &csi.NodeStageVolumeRequest{
+		VolumeId:          "pool/share/pvc",
+		StagingTargetPath: stagingPath,
+		VolumeContext: map[string]string{
+			"server": "10.0.0.1",
+			"share":  "/",
+		},
+		VolumeCapability: &csi.VolumeCapability{
+			AccessType: &csi.VolumeCapability_Mount{
+				Mount: &csi.VolumeCapability_MountVolume{},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NodeStageVolume failed: %v", err)
+	}
+
+	actions := fakeMounter.GetLog()
+	if len(actions) != 1 {
+		t.Fatalf("expected 1 mount action, got %d", len(actions))
+	}
+	// Should fall back to primary server IP
+	if actions[0].Source != "10.0.0.1:/" {
+		t.Errorf("expected source '10.0.0.1:/' (fallback), got %q", actions[0].Source)
+	}
+}
+
+func TestNodeStageVolume_NoK8sClient_FallsBackToServer(t *testing.T) {
+	fakeMounter := mount.NewFakeMounter(nil)
+	// No k8s client → can't determine zone
+	d := newNodeTestDriver(fakeMounter, nil, nil)
+
+	stagingPath := filepath.Join(resolvedTempDir(t), "staging")
+
+	_, err := d.NodeStageVolume(context.Background(), &csi.NodeStageVolumeRequest{
+		VolumeId:          "pool/share/pvc",
+		StagingTargetPath: stagingPath,
+		VolumeContext: map[string]string{
+			"server":            "10.0.0.1",
+			"share":             "/",
+			"server.us-south-2": "10.0.1.1",
+		},
+		VolumeCapability: &csi.VolumeCapability{
+			AccessType: &csi.VolumeCapability_Mount{
+				Mount: &csi.VolumeCapability_MountVolume{},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NodeStageVolume failed: %v", err)
+	}
+
+	actions := fakeMounter.GetLog()
+	if len(actions) != 1 {
+		t.Fatalf("expected 1 mount action, got %d", len(actions))
+	}
+	// Without k8s client, should use primary server
+	if actions[0].Source != "10.0.0.1:/" {
+		t.Errorf("expected source '10.0.0.1:/' (no k8s client), got %q", actions[0].Source)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // failingMounter — a mount.Interface that returns errors for testing
 // ---------------------------------------------------------------------------
 
