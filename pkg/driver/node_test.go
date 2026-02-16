@@ -84,6 +84,9 @@ func (n *nodeTestK8sClient) ListSubVolumes(_ context.Context, _ string) ([]v1alp
 func (n *nodeTestK8sClient) ListSubVolumesByShare(_ context.Context, _ string) ([]v1alpha1.SubVolume, error) {
 	return nil, nil
 }
+func (n *nodeTestK8sClient) ListCloneSubVolumes(_ context.Context) ([]v1alpha1.SubVolume, error) {
+	return nil, nil
+}
 func (n *nodeTestK8sClient) CreateSubVolume(_ context.Context, _ *v1alpha1.SubVolume) error {
 	return nil
 }

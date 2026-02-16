@@ -215,6 +215,18 @@ func (f *fakeK8sClient) ListSubVolumesByShare(_ context.Context, shareID string)
 	return result, nil
 }
 
+func (f *fakeK8sClient) ListCloneSubVolumes(_ context.Context) ([]v1alpha1.SubVolume, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var result []v1alpha1.SubVolume
+	for _, sv := range f.subVolumes {
+		if sv.Spec.SourceVolume != "" {
+			result = append(result, *sv.DeepCopy())
+		}
+	}
+	return result, nil
+}
+
 func (f *fakeK8sClient) CreateSubVolume(_ context.Context, sv *v1alpha1.SubVolume) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -248,7 +260,9 @@ func (f *fakeK8sClient) UpdateSubVolumeStatus(_ context.Context, sv *v1alpha1.Su
 	if !ok {
 		return fmt.Errorf("subvolume %q not found", sv.Name)
 	}
-	existing.Status = sv.Status
+	// DeepCopy into existing to avoid sharing pointers (e.g. CloneProgress)
+	// between the caller's object and the stored object.
+	sv.Status.DeepCopyInto(&existing.Status)
 	return nil
 }
 

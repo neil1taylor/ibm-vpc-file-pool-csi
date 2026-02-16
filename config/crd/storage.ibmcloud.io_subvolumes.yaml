@@ -103,6 +103,16 @@ spec:
                   ShareMountTargetIP is the NFS mount target IP.
                   Denormalized here for fast lookups during NodePublishVolume.
                 type: string
+              sourceShareID:
+                description: |-
+                  SourceShareID is the VPC file share ID of the source SubVolume.
+                  Populated when the clone source is on a different share than the target.
+                type: string
+              sourceVolume:
+                description: |-
+                  SourceVolume is the name of the source SubVolume this was cloned from.
+                  Empty for non-clone SubVolumes.
+                type: string
               subPath:
                 description: SubPath is the subdirectory path within the share (e.g.,
                   "/pvcs/pvc-abc123").
@@ -196,10 +206,50 @@ spec:
                 description: LastUsageCheck is when ActualUsageBytes was last updated.
                 format: date-time
                 type: string
+              cloneProgress:
+                description: CloneProgress tracks bytes copied during a clone operation.
+                properties:
+                  bytesCopied:
+                    description: BytesCopied is the number of bytes copied so far.
+                    format: int64
+                    type: integer
+                  completedAt:
+                    description: CompletedAt is when the copy operation finished (success
+                      or failure).
+                    format: date-time
+                    type: string
+                  error:
+                    description: Error records the failure reason if cloneStatus is
+                      Failed.
+                    type: string
+                  startedAt:
+                    description: StartedAt is when the copy operation started.
+                    format: date-time
+                    type: string
+                  totalBytes:
+                    description: TotalBytes is the total size of the source data to
+                      copy.
+                    format: int64
+                    type: integer
+                required:
+                - bytesCopied
+                - totalBytes
+                type: object
+              cloneStatus:
+                description: |-
+                  CloneStatus tracks the progress of a clone operation.
+                  Empty for non-clone SubVolumes.
+                enum:
+                - Pending
+                - InProgress
+                - Complete
+                - Failed
+                type: string
               phase:
                 description: Phase is the SubVolume lifecycle state.
                 enum:
                 - Creating
+                - Cloning
                 - Bound
                 - Expanding
                 - Deleting

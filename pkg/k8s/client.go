@@ -24,6 +24,7 @@ type Client interface {
 	GetSubVolume(ctx context.Context, name string) (*v1alpha1.SubVolume, error)
 	ListSubVolumes(ctx context.Context, poolName string) ([]v1alpha1.SubVolume, error)
 	ListSubVolumesByShare(ctx context.Context, shareID string) ([]v1alpha1.SubVolume, error)
+	ListCloneSubVolumes(ctx context.Context) ([]v1alpha1.SubVolume, error)
 	CreateSubVolume(ctx context.Context, sv *v1alpha1.SubVolume) error
 	UpdateSubVolume(ctx context.Context, sv *v1alpha1.SubVolume) error
 	UpdateSubVolumeStatus(ctx context.Context, sv *v1alpha1.SubVolume) error

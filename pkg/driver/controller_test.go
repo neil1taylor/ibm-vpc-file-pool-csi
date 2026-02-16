@@ -161,6 +161,10 @@ func (m *mockK8sClient) ListSubVolumesByShare(_ context.Context, _ string) ([]v1
 	return nil, nil
 }
 
+func (m *mockK8sClient) ListCloneSubVolumes(_ context.Context) ([]v1alpha1.SubVolume, error) {
+	return nil, nil
+}
+
 func (m *mockK8sClient) CreateSubVolume(_ context.Context, _ *v1alpha1.SubVolume) error {
 	return nil
 }

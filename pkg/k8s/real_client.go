@@ -69,6 +69,16 @@ func (r *realClient) ListSubVolumesByShare(ctx context.Context, shareID string) 
 	return list.Items, nil
 }
 
+func (r *realClient) ListCloneSubVolumes(ctx context.Context) ([]v1alpha1.SubVolume, error) {
+	list := &v1alpha1.SubVolumeList{}
+	if err := r.client.List(ctx, list, client.HasLabels{
+		"storage.ibmcloud.io/clone-source",
+	}); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
 func (r *realClient) CreateSubVolume(ctx context.Context, sv *v1alpha1.SubVolume) error {
 	return r.client.Create(ctx, sv)
 }

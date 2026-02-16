@@ -148,9 +148,17 @@ func runController(endpoint, nodeID, region, vpcID, subnetID string) {
 		}
 	}()
 
+	// Start the background clone worker for async volume clones.
+	// It uses real NFS operations to perform the actual cp -a copies.
+	// The signal context ensures graceful shutdown alongside the manager.
+	signalCtx := ctrl.SetupSignalHandler()
+	nfsOps := pool.NewRealNFSOperations()
+	cloneWorker := pool.NewCloneWorker(k8sClient, nfsOps, stagingBasePath)
+	go cloneWorker.Run(signalCtx)
+
 	// mgr.Start blocks until signal or error
 	klog.InfoS("Starting controller-runtime manager with leader election")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(signalCtx); err != nil {
 		klog.ErrorS(err, "Controller manager failed")
 		os.Exit(1)
 	}

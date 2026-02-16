@@ -1,3 +1,6 @@
+nameOverride: ""
+fullnameOverride: ""
+
 image:
   repository: icr.io/ibm-vpc-file-pool-csi/driver
   tag: latest
@@ -21,8 +24,11 @@ controller:
   affinity: {}
 
 node:
+  resources: {}
   tolerations:
     - operator: Exists
+  nodeSelector: {}
+  affinity: {}
 
 logLevel: 4
 

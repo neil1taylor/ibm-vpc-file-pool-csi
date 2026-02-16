@@ -8,7 +8,7 @@ GOLANGCI_LINT := $(GOBIN)/golangci-lint
 CONTROLLER_GEN := $(GOBIN)/controller-gen
 
 .PHONY: build test test-integration test-e2e test-coverage vet lint generate docker-build \
-        install-crds deploy helm-install run-local tools clean
+        install-crds deploy helm-install helm-lint helm-template run-local tools clean
 
 build:
 	CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$(VERSION)" -o bin/$(BINARY_NAME) ./cmd/
@@ -44,6 +44,22 @@ install-crds:
 deploy: install-crds
 	kubectl apply -f config/rbac/
 	kubectl apply -f config/deploy/
+
+helm-lint:
+	helm lint charts/ibm-vpc-file-pool-csi/
+
+helm-template:
+	helm template test-release charts/ibm-vpc-file-pool-csi/ > /dev/null
+	@echo "Default values: OK"
+	helm template test-release charts/ibm-vpc-file-pool-csi/ --set controller.replicas=3 > /dev/null
+	@echo "Custom replicas: OK"
+	helm template test-release charts/ibm-vpc-file-pool-csi/ --set metrics.serviceMonitor.enabled=true --set metrics.alerts.enabled=true > /dev/null
+	@echo "Monitoring enabled: OK"
+	helm template test-release charts/ibm-vpc-file-pool-csi/ --set secretProvider.managed=false > /dev/null
+	@echo "Unmanaged secret provider: OK"
+	helm template test-release charts/ibm-vpc-file-pool-csi/ --set volumeSnapshotClass.create=false --set storageClass.create=false > /dev/null
+	@echo "Disabled optional resources: OK"
+	@echo "All Helm template checks passed."
 
 helm-install:
 	helm upgrade --install ibm-vpc-file-pool-csi charts/ibm-vpc-file-pool-csi/ \
