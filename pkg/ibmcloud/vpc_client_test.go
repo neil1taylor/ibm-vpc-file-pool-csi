@@ -575,7 +575,7 @@ func writeJSON(w http.ResponseWriter, statusCode int, body interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	if body != nil {
-		json.NewEncoder(w).Encode(body) //nolint:errcheck
+		_ = json.NewEncoder(w).Encode(body)
 	}
 }
 
@@ -1158,7 +1158,7 @@ func TestCreateFileShare_WithEncryptInTransit(t *testing.T) {
 		}
 		// Verify the request body includes transit encryption.
 		var reqBody map[string]interface{}
-		json.NewDecoder(r.Body).Decode(&reqBody) //nolint:errcheck
+		_ = json.NewDecoder(r.Body).Decode(&reqBody)
 		if mts, ok := reqBody["mount_targets"].([]interface{}); ok && len(mts) > 0 {
 			mt := mts[0].(map[string]interface{})
 			if mt["transit_encryption"] != "user_managed" {
@@ -1208,7 +1208,7 @@ func TestCreateFileShare_AlreadyExists(t *testing.T) {
 		if r.Method == http.MethodPost {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprint(w, `{"errors":[{"code":"already_exists","message":"share name already exists"}]}`)
+			_, _ = fmt.Fprint(w, `{"errors":[{"code":"already_exists","message":"share name already exists"}]}`)
 			return
 		}
 		if r.Method == http.MethodGet {

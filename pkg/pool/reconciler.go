@@ -362,7 +362,7 @@ func (r *FileSharePoolReconciler) processDrainRequests(ctx context.Context, pool
 			continue
 		}
 
-		remaining := int32(len(subVolumes))
+		remaining := int32(len(subVolumes)) //nolint:gosec // len bounded by MaxShares * PVCs-per-share, well within int32
 		drained := remaining == 0
 
 		ds := v1alpha1.ShareDrainStatus{
