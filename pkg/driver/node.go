@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -167,22 +168,71 @@ func (d *Driver) NodeUnstageVolume(_ context.Context, req *csi.NodeUnstageVolume
 	return &csi.NodeUnstageVolumeResponse{}, nil
 }
 
-// NodeGetVolumeStats reports capacity/usage for the mount point via statfs.
-func (d *Driver) NodeGetVolumeStats(_ context.Context, req *csi.NodeGetVolumeStatsRequest) (*csi.NodeGetVolumeStatsResponse, error) {
+// NodeGetVolumeStats reports per-PVC capacity and usage.
+//
+// It looks up the SubVolume CR to get the PVC's requested size (quota),
+// then walks the bind-mount directory to compute actual disk usage.
+// This gives meaningful per-PVC stats instead of repeated share-level numbers.
+// Falls back to share-level statfs if the SubVolume lookup fails.
+func (d *Driver) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVolumeStatsRequest) (*csi.NodeGetVolumeStatsResponse, error) {
 	volumePath := req.GetVolumePath()
 
+	// Always get share-level stats for inode reporting and fallback.
 	var stat unix.Statfs_t
 	if err := unix.Statfs(volumePath, &stat); err != nil {
 		return nil, status.Errorf(codes.Internal, "statfs failed: %v", err)
 	}
 
-	totalBytes := int64(stat.Blocks) * int64(stat.Bsize) //nolint:gosec // safe: filesystem stats won't overflow
-	freeBytes := int64(stat.Bfree) * int64(stat.Bsize)   //nolint:gosec // safe: filesystem stats won't overflow
-	usedBytes := totalBytes - freeBytes
-
 	totalInodes := int64(stat.Files) //nolint:gosec // safe: inode count won't overflow int64
 	freeInodes := int64(stat.Ffree)  //nolint:gosec // safe: inode count won't overflow int64
 	usedInodes := totalInodes - freeInodes
+
+	// Try per-PVC usage: look up SubVolume CR for RequestedGB, walk dir for actual usage.
+	volumeID := req.GetVolumeId()
+	_, _, pvName, parseErr := parseVolumeID(volumeID)
+	if parseErr == nil && d.k8sClient != nil {
+		sv, svErr := d.k8sClient.GetSubVolume(ctx, pvName)
+		if svErr == nil && sv.Spec.RequestedGB > 0 {
+			usedBytes, walkErr := dirUsageBytes(volumePath)
+			if walkErr == nil {
+				const gb = 1024 * 1024 * 1024
+				totalBytes := sv.Spec.RequestedGB * gb
+				available := totalBytes - usedBytes
+				if available < 0 {
+					available = 0
+				}
+
+				klog.V(6).InfoS("Per-PVC volume stats",
+					"pvName", pvName,
+					"requestedGB", sv.Spec.RequestedGB,
+					"usedBytes", usedBytes,
+				)
+
+				return &csi.NodeGetVolumeStatsResponse{
+					Usage: []*csi.VolumeUsage{
+						{
+							Available: available,
+							Total:     totalBytes,
+							Used:      usedBytes,
+							Unit:      csi.VolumeUsage_BYTES,
+						},
+						{
+							Available: freeInodes,
+							Total:     totalInodes,
+							Used:      usedInodes,
+							Unit:      csi.VolumeUsage_INODES,
+						},
+					},
+				}, nil
+			}
+			klog.V(4).InfoS("Directory walk failed, falling back to statfs", "path", volumePath, "error", walkErr)
+		}
+	}
+
+	// Fallback: share-level statfs
+	totalBytes := int64(stat.Blocks) * int64(stat.Bsize) //nolint:gosec // safe: filesystem stats won't overflow
+	freeBytes := int64(stat.Bfree) * int64(stat.Bsize)   //nolint:gosec // safe: filesystem stats won't overflow
+	usedBytes := totalBytes - freeBytes
 
 	return &csi.NodeGetVolumeStatsResponse{
 		Usage: []*csi.VolumeUsage{
@@ -200,6 +250,25 @@ func (d *Driver) NodeGetVolumeStats(_ context.Context, req *csi.NodeGetVolumeSta
 			},
 		},
 	}, nil
+}
+
+// dirUsageBytes walks a directory tree and returns the total size of all regular files.
+func dirUsageBytes(root string) (int64, error) {
+	var total int64
+	err := filepath.WalkDir(root, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.Type().IsRegular() {
+			info, infoErr := d.Info()
+			if infoErr != nil {
+				return infoErr
+			}
+			total += info.Size()
+		}
+		return nil
+	})
+	return total, err
 }
 
 // NodeGetInfo returns the node ID and accessible topology (zone).
