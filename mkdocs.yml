@@ -68,6 +68,7 @@ nav:
   - Architecture:
       - System Design: ARCHITECTURE.md
       - VPC Networking: vpc-networking.md
+      - VM Disk Formats: vm-disk-formats.md
       - CRD Specification: CRD-SPEC.md
       - CSI Interface: CSI-INTERFACE.md
       - IBM VPC API: IBM-VPC-API.md
