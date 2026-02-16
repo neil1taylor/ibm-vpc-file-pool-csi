@@ -145,7 +145,37 @@ Worker Node Security Group
 
 ### Single-Zone (Default)
 
-A pool with only `spec.zone` creates shares and mount targets in one availability zone. Worker nodes in that zone connect via zone-local networking. Worker nodes in **other zones cannot access the share** unless accessor zones are configured.
+A pool with only `spec.zone` creates shares and mount targets in one availability zone. All worker nodes and file shares are co-located — NFS traffic never leaves the zone.
+
+```
+Zone 1 (us-south-1)
+┌──────────────────────────────────────────────────────────────┐
+│                                                              │
+│  Worker Node A          Worker Node B          VPC File Share│
+│  ┌──────────────┐      ┌──────────────┐      ┌─────────────┐│
+│  │ Pod          │      │ Pod          │      │ NFS backend  ││
+│  │ /data/ ←─────┼──┐   │ /data/ ←─────┼──┐   │             ││
+│  └──────────────┘  │   └──────────────┘  │   │ /pvcs/      ││
+│                    │                     │   │  ├─ pvc-aaa/ ││
+│                    │   NFS (TCP 2049)    │   │  └─ pvc-bbb/ ││
+│                    └─────────────────────┼──▶│             ││
+│                        zone-local        └──▶│ Mount Target ││
+│                        ~0.2ms latency        │ FQDN → IP   ││
+│                                              └─────────────┘│
+└──────────────────────────────────────────────────────────────┘
+```
+
+```yaml
+apiVersion: storage.ibm.io/v1alpha1
+kind: FileSharePool
+metadata:
+  name: general-purpose
+spec:
+  zone: us-south-1
+  # no accessorZones — single-zone only
+```
+
+Worker nodes in **other zones cannot access the share** unless accessor zones are configured. This is the simplest and lowest-latency configuration.
 
 ### Multi-Zone with Accessor Zones
 
@@ -207,6 +237,51 @@ All NFS traffic stays within the VPC private network — it never traverses the 
 **Good fit for cross-zone:** log storage, batch processing, model artifacts, config data — workloads that are read-heavy or latency-tolerant.
 
 **Prefer same-zone for:** databases, real-time applications, latency-sensitive workloads — create a separate pool per zone instead.
+
+### Alternative: One Pool Per Zone
+
+For latency-sensitive workloads, avoid cross-zone NFS entirely by creating a **separate pool in each zone**. Each pool's shares and consumers stay zone-local.
+
+```
+Zone 1 (us-south-1)                      Zone 2 (us-south-2)
+┌───────────────────────────┐            ┌───────────────────────────┐
+│                           │            │                           │
+│  Pool: db-storage-z1      │            │  Pool: db-storage-z2      │
+│                           │            │                           │
+│  Worker Node              │            │  Worker Node              │
+│  ┌─────────────────┐     │            │  ┌─────────────────┐     │
+│  │ DB Pod          │     │            │  │ DB Pod          │     │
+│  │ /data/ ←────────┼──┐  │            │  │ /data/ ←────────┼──┐  │
+│  └─────────────────┘  │  │            │  └─────────────────┘  │  │
+│                       │  │            │                       │  │
+│  VPC File Share    ◄──┘  │            │  VPC File Share    ◄──┘  │
+│  zone-local NFS          │            │  zone-local NFS          │
+│  ~0.2ms latency          │            │  ~0.2ms latency          │
+│                           │            │                           │
+└───────────────────────────┘            └───────────────────────────┘
+
+              No cross-zone NFS traffic
+```
+
+```yaml
+# Pool for zone 1
+apiVersion: storage.ibm.io/v1alpha1
+kind: FileSharePool
+metadata:
+  name: db-storage-z1
+spec:
+  zone: us-south-1
+---
+# Pool for zone 2
+apiVersion: storage.ibm.io/v1alpha1
+kind: FileSharePool
+metadata:
+  name: db-storage-z2
+spec:
+  zone: us-south-2
+```
+
+Use Kubernetes topology constraints (node affinity or `allowedTopologies` on the StorageClass) to ensure pods land in the same zone as their pool. This trades operational simplicity for guaranteed low latency.
 
 ### How the Node Agent Selects the Right IP
 
@@ -290,10 +365,45 @@ All shares in a pool belong to the same IBM Cloud resource group, set via `spec.
 
 ## Encryption in Transit
 
-When `spec.encryptInTransit: true` is set on the pool, the mount target is created with `TransitEncryption: "user_managed"`. This enables NFS traffic encryption between the worker node and the VPC file share backend. The NFS mount adds `sec=krb5p` to the mount options.
+When `spec.encryptInTransit: true` is set on the pool, the mount target is created with `TransitEncryption: "user_managed"`. This adds Kerberos encryption (`sec=krb5p`) to the NFS mount, encrypting all data on the wire between the worker node and the file share.
+
+```
+Without encryption (default):
+
+  Worker Node                        VPC File Share
+  ┌──────────────┐    NFS v4.1      ┌──────────────┐
+  │ Pod /data/   │─────────────────▶│ /pvcs/...    │
+  └──────────────┘   plaintext       └──────────────┘
+                     TCP 2049
+                     (within VPC)
+
+
+With encryption (encryptInTransit: true):
+
+  Worker Node                        VPC File Share
+  ┌──────────────┐    NFS v4.1      ┌──────────────┐
+  │ Pod /data/   │──── krb5p ──────▶│ /pvcs/...    │
+  └──────────────┘   encrypted       └──────────────┘
+                     TCP 2049
+                     (within VPC)
+
+  Mount options: nfsvers=4.1,soft,timeo=600,retrans=3,sec=krb5p
+  Mount target:  TransitEncryption: "user_managed"
+```
+
+```yaml
+apiVersion: storage.ibm.io/v1alpha1
+kind: FileSharePool
+metadata:
+  name: compliant-storage
+spec:
+  zone: us-south-1
+  encryptInTransit: true
+  # ...
+```
 
 !!! note
-    Encryption in transit adds CPU overhead on both the client and server. Use it when compliance requirements mandate encrypted storage traffic.
+    Encryption in transit adds CPU overhead on both the client (worker node) and server (file share backend). Use it when compliance requirements (HIPAA, PCI-DSS, etc.) mandate encrypted storage traffic. For workloads within a single VPC where the network is already trusted, the default plaintext NFS is sufficient.
 
 ## Summary: What Must Be in Place
 
