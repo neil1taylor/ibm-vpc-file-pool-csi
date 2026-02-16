@@ -1027,7 +1027,7 @@ func TestSelectShare_SpreadPicksMostFree(t *testing.T) {
 		newStableShare("s3", "s3", 1000, 500, 3),
 	}
 
-	got, err := selectShare("spread", shares, 10)
+	got, err := selectShare("spread", shares, 10, "")
 	if err != nil {
 		t.Fatalf("selectShare failed: %v", err)
 	}
@@ -1043,7 +1043,7 @@ func TestSelectShare_BinpackPicksLeastFree(t *testing.T) {
 		newStableShare("s3", "s3", 1000, 500, 3), // 500 free
 	}
 
-	got, err := selectShare("binpack", shares, 10)
+	got, err := selectShare("binpack", shares, 10, "")
 	if err != nil {
 		t.Fatalf("selectShare failed: %v", err)
 	}
@@ -1057,7 +1057,7 @@ func TestSelectShare_NoShareFits(t *testing.T) {
 		newStableShare("s1", "s1", 1000, 995, 10), // 5 free
 	}
 
-	_, err := selectShare("spread", shares, 10)
+	_, err := selectShare("spread", shares, 10, "")
 	if !errors.Is(err, ErrPoolExhausted) {
 		t.Fatalf("expected ErrPoolExhausted, got: %v", err)
 	}
@@ -1070,7 +1070,7 @@ func TestSelectShare_SkipsNonStable(t *testing.T) {
 		newStableShare("s3", "s3", 1000, 500, 3),
 	}
 
-	got, err := selectShare("spread", shares, 10)
+	got, err := selectShare("spread", shares, 10, "")
 	if err != nil {
 		t.Fatalf("selectShare failed: %v", err)
 	}
@@ -1084,7 +1084,7 @@ func TestSelectShare_UnknownStrategy(t *testing.T) {
 		newStableShare("s1", "s1", 1000, 0, 0),
 	}
 
-	_, err := selectShare("unknown", shares, 10)
+	_, err := selectShare("unknown", shares, 10, "")
 	if err == nil {
 		t.Fatal("expected error for unknown strategy")
 	}
@@ -1301,6 +1301,261 @@ func TestDeallocate_IncrementsMetric(t *testing.T) {
 
 	if afterVal <= beforeVal {
 		t.Errorf("expected deallocate_success counter to increment, before=%f after=%f", beforeVal, afterVal)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Share Selection — Tier Tests
+// ---------------------------------------------------------------------------
+
+func newStableShareWithTier(id, name string, totalGB, allocatedGB int64, pvcCount int32, tier string) v1alpha1.PoolShareStatus {
+	s := newStableShare(id, name, totalGB, allocatedGB, pvcCount)
+	s.Tier = tier
+	return s
+}
+
+func TestSelectShare_FiltersByTier(t *testing.T) {
+	shares := []v1alpha1.PoolShareStatus{
+		newStableShareWithTier("s1", "s1", 1000, 200, 2, "standard"),
+		newStableShareWithTier("s2", "s2", 500, 100, 1, "premium"),
+		newStableShareWithTier("s3", "s3", 1000, 500, 3, "standard"),
+	}
+
+	got, err := selectShare("spread", shares, 10, "premium")
+	if err != nil {
+		t.Fatalf("selectShare failed: %v", err)
+	}
+	if got.ShareID != "s2" {
+		t.Errorf("expected s2 (only premium share), got %s", got.ShareID)
+	}
+}
+
+func TestSelectShare_EmptyTierMatchesEmptyShares(t *testing.T) {
+	shares := []v1alpha1.PoolShareStatus{
+		newStableShareWithTier("s1", "s1", 1000, 200, 2, "premium"),
+		newStableShare("s2", "s2", 1000, 100, 1), // no tier (empty)
+	}
+
+	got, err := selectShare("spread", shares, 10, "")
+	if err != nil {
+		t.Fatalf("selectShare failed: %v", err)
+	}
+	if got.ShareID != "s2" {
+		t.Errorf("expected s2 (empty tier), got %s", got.ShareID)
+	}
+}
+
+func TestSelectShare_TierMismatchReturnsExhausted(t *testing.T) {
+	shares := []v1alpha1.PoolShareStatus{
+		newStableShareWithTier("s1", "s1", 1000, 200, 2, "standard"),
+		newStableShareWithTier("s2", "s2", 1000, 100, 1, "standard"),
+	}
+
+	_, err := selectShare("spread", shares, 10, "premium")
+	if !errors.Is(err, ErrPoolExhausted) {
+		t.Fatalf("expected ErrPoolExhausted for tier mismatch, got: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Allocate — Tier Tests
+// ---------------------------------------------------------------------------
+
+func newTestPoolWithTiers(name, strategy string, tiers []v1alpha1.ShareTier, shares ...v1alpha1.PoolShareStatus) *v1alpha1.FileSharePool {
+	var totalCapacity, totalAllocated int64
+	var totalPVCs int32
+	for _, s := range shares {
+		totalCapacity += s.TotalGB
+		totalAllocated += s.AllocatedGB
+		totalPVCs += s.PVCCount
+	}
+
+	return &v1alpha1.FileSharePool{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: v1alpha1.FileSharePoolSpec{
+			Zone:               "us-south-1",
+			Profile:            "dp2",
+			ShareSizeGB:        1000,
+			MaxShares:          10,
+			InitialShares:      1,
+			AutoExpand:         true,
+			AllocationStrategy: strategy,
+			DefaultPermissions: "0755",
+			Tiers:              tiers,
+		},
+		Status: v1alpha1.FileSharePoolStatus{
+			Phase:            "Ready",
+			Shares:           shares,
+			ShareCount:       int32(len(shares)), //nolint:gosec // safe: test data
+			TotalCapacityGB:  totalCapacity,
+			TotalAllocatedGB: totalAllocated,
+			TotalPVCCount:    totalPVCs,
+		},
+	}
+}
+
+func TestAllocate_WithTier(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	pool := newTestPoolWithTiers("test-pool", "spread",
+		[]v1alpha1.ShareTier{
+			{Name: "standard", Profile: "dp2", ShareSizeGB: 1000, MaxShares: 5, InitialShares: 1},
+			{Name: "premium", Profile: "custom", ShareSizeGB: 500, MaxShares: 3, InitialShares: 1},
+		},
+		newStableShareWithTier("s1", "s1", 1000, 100, 1, "standard"),
+		newStableShareWithTier("s2", "s2", 500, 50, 1, "premium"),
+	)
+	k.addPool(pool)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	result, err := mgr.Allocate(context.Background(), AllocationRequest{
+		PVName:       testPVName,
+		PVCName:      "my-pvc",
+		PVCNamespace: "default",
+		PoolName:     "test-pool",
+		RequestedGB:  10,
+		Tier:         "premium",
+	})
+	if err != nil {
+		t.Fatalf("Allocate failed: %v", err)
+	}
+
+	if result.ShareID != "s2" {
+		t.Errorf("expected allocation on premium share s2, got %s", result.ShareID)
+	}
+}
+
+func TestAllocate_TierAutoExpand(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	pool := newTestPoolWithTiers("test-pool", "spread",
+		[]v1alpha1.ShareTier{
+			{Name: "standard", Profile: "dp2", ShareSizeGB: 1000, MaxShares: 5, InitialShares: 1},
+			{Name: "premium", Profile: "custom", ShareSizeGB: 500, MaxShares: 3, InitialShares: 1},
+		},
+		newStableShareWithTier("s1", "s1", 1000, 100, 1, "standard"),
+		newStableShareWithTier("s2", "s2", 500, 500, 10, "premium"), // fully allocated
+	)
+	k.addPool(pool)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	result, err := mgr.Allocate(context.Background(), AllocationRequest{
+		PVName:       testPVName,
+		PVCName:      "my-pvc",
+		PVCNamespace: "default",
+		PoolName:     "test-pool",
+		RequestedGB:  10,
+		Tier:         "premium",
+	})
+	if err != nil {
+		t.Fatalf("Allocate failed: %v", err)
+	}
+
+	// Should auto-expand with a new premium share
+	if vpc.CreateCalls != 1 {
+		t.Errorf("expected 1 VPC create call for auto-expand, got %d", vpc.CreateCalls)
+	}
+	// Result should be on the new share, not s2 (which is full) or s1 (wrong tier)
+	if result.ShareID == "s1" || result.ShareID == "s2" {
+		t.Errorf("expected allocation on new share, got %s", result.ShareID)
+	}
+}
+
+func TestAllocate_TierMaxSharesReached(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	pool := newTestPoolWithTiers("test-pool", "spread",
+		[]v1alpha1.ShareTier{
+			{Name: "premium", Profile: "custom", ShareSizeGB: 500, MaxShares: 1, InitialShares: 1},
+		},
+		newStableShareWithTier("s1", "s1", 500, 500, 10, "premium"), // full, and maxShares=1
+	)
+	k.addPool(pool)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	_, err := mgr.Allocate(context.Background(), AllocationRequest{
+		PVName:       testPVName,
+		PVCName:      "my-pvc",
+		PVCNamespace: "default",
+		PoolName:     "test-pool",
+		RequestedGB:  10,
+		Tier:         "premium",
+	})
+
+	if !errors.Is(err, ErrPoolExhausted) {
+		t.Fatalf("expected ErrPoolExhausted, got: %v", err)
+	}
+	if vpc.CreateCalls != 0 {
+		t.Errorf("expected 0 VPC create calls, got %d", vpc.CreateCalls)
+	}
+}
+
+func TestAllocate_TierRequiredWhenPoolHasTiers(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	pool := newTestPoolWithTiers("test-pool", "spread",
+		[]v1alpha1.ShareTier{
+			{Name: "standard", Profile: "dp2", ShareSizeGB: 1000, MaxShares: 5, InitialShares: 1},
+		},
+		newStableShareWithTier("s1", "s1", 1000, 100, 1, "standard"),
+	)
+	k.addPool(pool)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	_, err := mgr.Allocate(context.Background(), AllocationRequest{
+		PVName:       testPVName,
+		PVCName:      "my-pvc",
+		PVCNamespace: "default",
+		PoolName:     "test-pool",
+		RequestedGB:  10,
+		Tier:         "", // empty tier when pool has tiers
+	})
+
+	if err == nil {
+		t.Fatal("expected error when tier is required but not provided")
+	}
+	if !contains(err.Error(), "tier is required") {
+		t.Errorf("expected 'tier is required' in error, got: %v", err)
+	}
+}
+
+func TestAllocate_NoTiersBackwardCompat(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	// Pool without tiers — should work exactly as before
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 100, 1),
+	)
+	k.addPool(pool)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	result, err := mgr.Allocate(context.Background(), AllocationRequest{
+		PVName:       testPVName,
+		PVCName:      "my-pvc",
+		PVCNamespace: "default",
+		PoolName:     "test-pool",
+		RequestedGB:  10,
+	})
+	if err != nil {
+		t.Fatalf("Allocate failed: %v", err)
+	}
+	if result.ShareID != "share-1" {
+		t.Errorf("expected share-1 (backward compat), got %s", result.ShareID)
 	}
 }
 

@@ -73,6 +73,7 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 		PoolName:     poolName,
 		RequestedGB:  requiredGB,
 		Zone:         zone,
+		Tier:         params["tier"],
 		UID:          parseOptionalInt64(params["uid"]),
 		GID:          parseOptionalInt64(params["gid"]),
 		Permissions:  params["permissions"],

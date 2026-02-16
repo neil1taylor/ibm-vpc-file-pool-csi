@@ -7,15 +7,18 @@ import (
 )
 
 // selectShare picks a share from the pool based on the allocation strategy.
-// Only shares in "stable" state are considered.
+// Only shares in "stable" state with a matching tier are considered.
 // Spread: pick the share with the most free space.
 // Binpack: pick the share with the least free space that still fits.
-func selectShare(strategy string, shares []v1alpha1.PoolShareStatus, requestedGB int64) (*v1alpha1.PoolShareStatus, error) {
+func selectShare(strategy string, shares []v1alpha1.PoolShareStatus, requestedGB int64, tier string) (*v1alpha1.PoolShareStatus, error) {
 	var bestIdx = -1
 	var bestFree int64
 
 	for i := range shares {
 		if shares[i].State != "stable" {
+			continue
+		}
+		if shares[i].Tier != tier {
 			continue
 		}
 		freeGB := shares[i].TotalGB - shares[i].AllocatedGB

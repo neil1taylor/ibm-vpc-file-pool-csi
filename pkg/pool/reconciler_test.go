@@ -605,6 +605,106 @@ func TestReconcile_EmitsPrometheusGauges(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// 15. Initial Provisioning with Tiers
+// ---------------------------------------------------------------------------
+
+func TestReconcile_InitialProvisioning_WithTiers(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+
+	pool := newTestPoolWithTiers("test-pool", "spread",
+		[]v1alpha1.ShareTier{
+			{Name: "standard", Profile: "dp2", ShareSizeGB: 1000, MaxShares: 5, InitialShares: 2},
+			{Name: "premium", Profile: "custom", ShareSizeGB: 500, MaxShares: 3, InitialShares: 1},
+		},
+	)
+	pool.Status.Phase = "" // triggers initial provisioning
+	k.addPool(pool)
+
+	r := newReconciler(k, vpc)
+	result, err := reconcilePool(r, "test-pool")
+	if err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	if result.RequeueAfter != ReconcileInterval {
+		t.Errorf("expected RequeueAfter=%v, got %v", ReconcileInterval, result.RequeueAfter)
+	}
+
+	// 2 standard + 1 premium = 3 total
+	if vpc.CreateCalls != 3 {
+		t.Errorf("expected 3 VPC create calls, got %d", vpc.CreateCalls)
+	}
+
+	updated := k.getPool("test-pool")
+	if len(updated.Status.Shares) != 3 {
+		t.Errorf("expected 3 shares in status, got %d", len(updated.Status.Shares))
+	}
+
+	// Count by tier
+	tierCounts := map[string]int{}
+	for _, s := range updated.Status.Shares {
+		tierCounts[s.Tier]++
+	}
+	if tierCounts["standard"] != 2 {
+		t.Errorf("expected 2 standard shares, got %d", tierCounts["standard"])
+	}
+	if tierCounts["premium"] != 1 {
+		t.Errorf("expected 1 premium share, got %d", tierCounts["premium"])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 16. Proactive Expansion Per Tier
+// ---------------------------------------------------------------------------
+
+func TestReconcile_ProactiveExpansion_PerTier(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+
+	pool := newTestPoolWithTiers("test-pool", "spread",
+		[]v1alpha1.ShareTier{
+			{Name: "standard", Profile: "dp2", ShareSizeGB: 1000, MaxShares: 5, InitialShares: 1},
+			{Name: "premium", Profile: "custom", ShareSizeGB: 500, MaxShares: 3, InitialShares: 1},
+		},
+		// standard at 50% — below threshold
+		newStableShareWithTier("s1", "s1", 1000, 500, 3, "standard"),
+		// premium at 90% — above threshold
+		newStableShareWithTier("s2", "s2", 500, 450, 5, "premium"),
+	)
+	pool.Spec.ExpandThresholdPercent = 80
+	pool.Spec.AutoExpand = true
+	pool.Spec.InitialShares = 1
+	k.addPool(pool)
+
+	// Add SubVolumes matching allocations
+	k.addSubVolume(newTestSubVolume("pvc-s1", "test-pool", "s1", 500))
+	k.addSubVolume(newTestSubVolume("pvc-s2", "test-pool", "s2", 450))
+
+	r := newReconciler(k, vpc)
+	_, err := reconcilePool(r, "test-pool")
+	if err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	// Should create 1 new share for premium tier only
+	if vpc.CreateCalls != 1 {
+		t.Errorf("expected 1 VPC create call for premium tier expansion, got %d", vpc.CreateCalls)
+	}
+
+	updated := k.getPool("test-pool")
+	if len(updated.Status.Shares) != 3 {
+		t.Errorf("expected 3 shares (2 original + 1 new premium), got %d", len(updated.Status.Shares))
+	}
+
+	// New share should be premium tier
+	newShare := updated.Status.Shares[2]
+	if newShare.Tier != "premium" {
+		t.Errorf("expected new share tier 'premium', got %q", newShare.Tier)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Test Helpers
 // ---------------------------------------------------------------------------
 

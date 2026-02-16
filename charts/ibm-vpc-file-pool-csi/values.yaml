@@ -55,6 +55,7 @@ storageClass:
   create: true
   name: ibm-vpc-file-pool
   pool: general-purpose
+  tier: ""  # Empty = default (no tier). Set to tier name when pool uses tiers.
   reclaimPolicy: Delete
   volumeBindingMode: Immediate
   allowVolumeExpansion: true

@@ -45,6 +45,7 @@ type AllocationRequest struct {
 	PoolName     string
 	RequestedGB  int64
 	Zone         string
+	Tier         string // Tier name from StorageClass (empty = default/no tiers)
 	UID          *int64
 	GID          *int64
 	Permissions  string
@@ -130,11 +131,16 @@ func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (_ *Alloc
 		}, nil
 	}
 
-	// 4. Select share
-	share, err := selectShare(pool.Spec.AllocationStrategy, pool.Status.Shares, req.RequestedGB)
+	// 4. Validate tier when pool has tiers configured
+	if len(pool.Spec.Tiers) > 0 && req.Tier == "" {
+		return nil, fmt.Errorf("tier is required when pool has tiers configured")
+	}
+
+	// 5. Select share
+	share, err := selectShare(pool.Spec.AllocationStrategy, pool.Status.Shares, req.RequestedGB, req.Tier)
 	if err != nil && errors.Is(err, ErrPoolExhausted) {
-		// 5. Auto-expand: create a new share if allowed
-		share, err = m.tryAutoExpand(ctx, pool, req.RequestedGB)
+		// 6. Auto-expand: create a new share if allowed
+		share, err = m.tryAutoExpand(ctx, pool, req.RequestedGB, req.Tier)
 		if err != nil {
 			return nil, err
 		}
@@ -328,32 +334,49 @@ func (m *Manager) Expand(ctx context.Context, subVolumeName string, newSizeGB in
 }
 
 // tryAutoExpand attempts to create a new VPC share when the pool is exhausted.
-func (m *Manager) tryAutoExpand(ctx context.Context, pool *v1alpha1.FileSharePool, requestedGB int64) (*v1alpha1.PoolShareStatus, error) {
+func (m *Manager) tryAutoExpand(ctx context.Context, pool *v1alpha1.FileSharePool, requestedGB int64, tier string) (*v1alpha1.PoolShareStatus, error) {
 	if !pool.Spec.AutoExpand {
 		return nil, ErrPoolExhausted
 	}
 
-	if int32(len(pool.Status.Shares)) >= pool.Spec.MaxShares { //nolint:gosec // safe: MaxShares capped at 100
+	profile, sizeGB, iops, maxShares, _, err := pool.Spec.TierConfig(tier)
+	if err != nil {
+		return nil, err
+	}
+
+	// Count shares in this tier
+	tierShareCount := int32(0)
+	for _, s := range pool.Status.Shares {
+		if s.Tier == tier {
+			tierShareCount++
+		}
+	}
+	if tierShareCount >= maxShares {
 		return nil, ErrPoolExhausted
 	}
 
-	if requestedGB > pool.Spec.ShareSizeGB {
-		return nil, fmt.Errorf("request of %d GB exceeds share size of %d GB", requestedGB, pool.Spec.ShareSizeGB)
+	if requestedGB > sizeGB {
+		return nil, fmt.Errorf("request of %d GB exceeds share size of %d GB", requestedGB, sizeGB)
 	}
 
-	klog.V(2).InfoS("Auto-expanding pool", "pool", pool.Name, "currentShares", len(pool.Status.Shares))
+	klog.V(2).InfoS("Auto-expanding pool", "pool", pool.Name, "tier", tier, "currentShares", len(pool.Status.Shares))
 
 	resourceGroup := pool.Spec.ResourceGroup
 	if resourceGroup == "" {
 		resourceGroup = m.defaultResourceGroup
 	}
 
+	shareName := fmt.Sprintf("%s-share-%d", pool.Name, len(pool.Status.Shares)+1)
+	if tier != "" {
+		shareName = fmt.Sprintf("%s-%s-share-%d", pool.Name, tier, tierShareCount+1)
+	}
+
 	input := ibmcloud.CreateShareInput{
-		Name:             fmt.Sprintf("%s-share-%d", pool.Name, len(pool.Status.Shares)+1),
+		Name:             shareName,
 		Zone:             pool.Spec.Zone,
-		Profile:          pool.Spec.Profile,
-		SizeGB:           pool.Spec.ShareSizeGB,
-		IOPS:             pool.Spec.IOPS,
+		Profile:          profile,
+		SizeGB:           sizeGB,
+		IOPS:             iops,
 		ResourceGroupID:  resourceGroup,
 		Tags:             pool.Spec.Tags,
 		EncryptInTransit: pool.Spec.EncryptionInTransit,
@@ -381,6 +404,7 @@ func (m *Manager) tryAutoExpand(ctx context.Context, pool *v1alpha1.FileSharePoo
 		AllocatedGB:   0,
 		PVCCount:      0,
 		State:         "stable",
+		Tier:          tier,
 		Zone:          shareInfo.Zone,
 		CreatedAt:     &now,
 	}

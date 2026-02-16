@@ -154,9 +154,28 @@ func (r *FileSharePoolReconciler) handleDeletion(ctx context.Context, pool *v1al
 	return reconcile.Result{}, nil
 }
 
-// initialProvisioning creates VPC shares up to spec.initialShares.
+// initialProvisioning creates VPC shares up to spec.initialShares (or per-tier initialShares).
 func (r *FileSharePoolReconciler) initialProvisioning(ctx context.Context, pool *v1alpha1.FileSharePool) error {
-	// Count existing creating+stable shares
+	if len(pool.Spec.Tiers) > 0 {
+		// Tier-aware provisioning: iterate each tier
+		for _, tier := range pool.Spec.Tiers {
+			existingCount := int32(0)
+			for _, s := range pool.Status.Shares {
+				if s.Tier == tier.Name && (s.State == "creating" || s.State == "stable") {
+					existingCount++
+				}
+			}
+			needed := tier.InitialShares - existingCount
+			for i := int32(0); i < needed; i++ {
+				if err := r.createPoolShare(ctx, pool, tier.Name); err != nil {
+					return fmt.Errorf("create initial share for tier %q %d/%d: %w", tier.Name, i+1, needed, err)
+				}
+			}
+		}
+		return nil
+	}
+
+	// No tiers: use top-level fields
 	existingCount := int32(0)
 	for _, s := range pool.Status.Shares {
 		if s.State == "creating" || s.State == "stable" {
@@ -166,7 +185,7 @@ func (r *FileSharePoolReconciler) initialProvisioning(ctx context.Context, pool 
 
 	needed := pool.Spec.InitialShares - existingCount
 	for i := int32(0); i < needed; i++ {
-		if err := r.createPoolShare(ctx, pool); err != nil {
+		if err := r.createPoolShare(ctx, pool, ""); err != nil {
 			return fmt.Errorf("create initial share %d/%d: %w", i+1, needed, err)
 		}
 	}
@@ -263,15 +282,49 @@ func (r *FileSharePoolReconciler) proactiveExpansion(ctx context.Context, pool *
 		return
 	}
 
-	if int32(len(pool.Status.Shares)) >= pool.Spec.MaxShares { //nolint:gosec // safe: MaxShares capped at 100
-		return
-	}
-
 	// Skip if any share is still creating
 	for _, s := range pool.Status.Shares {
 		if s.State == "creating" {
 			return
 		}
+	}
+
+	if len(pool.Spec.Tiers) > 0 {
+		// Tier-aware expansion: check utilization per tier
+		for _, tier := range pool.Spec.Tiers {
+			var tierCapacity, tierAllocated int64
+			tierShareCount := int32(0)
+			for _, s := range pool.Status.Shares {
+				if s.Tier == tier.Name {
+					tierCapacity += s.TotalGB
+					tierAllocated += s.AllocatedGB
+					tierShareCount++
+				}
+			}
+			if tierShareCount >= tier.MaxShares {
+				continue
+			}
+			if tierCapacity == 0 {
+				continue
+			}
+			utilization := int32(tierAllocated * 100 / tierCapacity) //nolint:gosec // safe: percentage 0-100
+			if utilization <= pool.Spec.ExpandThresholdPercent {
+				continue
+			}
+			klog.V(2).InfoS("Proactive expansion triggered for tier",
+				"pool", pool.Name, "tier", tier.Name,
+				"utilization", utilization, "threshold", pool.Spec.ExpandThresholdPercent,
+			)
+			if err := r.createPoolShare(ctx, pool, tier.Name); err != nil {
+				klog.ErrorS(err, "Proactive expansion failed for tier", "pool", pool.Name, "tier", tier.Name)
+			}
+		}
+		return
+	}
+
+	// No tiers: pool-wide check
+	if int32(len(pool.Status.Shares)) >= pool.Spec.MaxShares { //nolint:gosec // safe: MaxShares capped at 100
+		return
 	}
 
 	if pool.Status.TotalCapacityGB == 0 {
@@ -289,24 +342,42 @@ func (r *FileSharePoolReconciler) proactiveExpansion(ctx context.Context, pool *
 		"threshold", pool.Spec.ExpandThresholdPercent,
 	)
 
-	if err := r.createPoolShare(ctx, pool); err != nil {
+	if err := r.createPoolShare(ctx, pool, ""); err != nil {
 		klog.ErrorS(err, "Proactive expansion failed", "pool", pool.Name)
 	}
 }
 
 // createPoolShare creates a new VPC share and appends it to pool status.
-func (r *FileSharePoolReconciler) createPoolShare(ctx context.Context, pool *v1alpha1.FileSharePool) error {
+// tier is the name of the ShareTier; empty for pools without tiers.
+func (r *FileSharePoolReconciler) createPoolShare(ctx context.Context, pool *v1alpha1.FileSharePool, tier string) error {
+	profile, sizeGB, iops, _, _, err := pool.Spec.TierConfig(tier)
+	if err != nil {
+		return err
+	}
+
 	resourceGroup := pool.Spec.ResourceGroup
 	if resourceGroup == "" {
 		resourceGroup = r.defaultResourceGroup
 	}
 
+	// Build share name: include tier when present
+	shareName := fmt.Sprintf("%s-share-%d", pool.Name, len(pool.Status.Shares)+1)
+	if tier != "" {
+		tierShareCount := int32(0)
+		for _, s := range pool.Status.Shares {
+			if s.Tier == tier {
+				tierShareCount++
+			}
+		}
+		shareName = fmt.Sprintf("%s-%s-share-%d", pool.Name, tier, tierShareCount+1)
+	}
+
 	input := ibmcloud.CreateShareInput{
-		Name:             fmt.Sprintf("%s-share-%d", pool.Name, len(pool.Status.Shares)+1),
+		Name:             shareName,
 		Zone:             pool.Spec.Zone,
-		Profile:          pool.Spec.Profile,
-		SizeGB:           pool.Spec.ShareSizeGB,
-		IOPS:             pool.Spec.IOPS,
+		Profile:          profile,
+		SizeGB:           sizeGB,
+		IOPS:             iops,
 		ResourceGroupID:  resourceGroup,
 		Tags:             pool.Spec.Tags,
 		EncryptInTransit: pool.Spec.EncryptionInTransit,
@@ -341,6 +412,7 @@ func (r *FileSharePoolReconciler) createPoolShare(ctx context.Context, pool *v1a
 		AllocatedGB:   0,
 		PVCCount:      0,
 		State:         state,
+		Tier:          tier,
 		Zone:          shareInfo.Zone,
 		CreatedAt:     &now,
 	}
@@ -351,6 +423,7 @@ func (r *FileSharePoolReconciler) createPoolShare(ctx context.Context, pool *v1a
 
 	klog.V(2).InfoS("Created pool share",
 		"pool", pool.Name,
+		"tier", tier,
 		"shareID", shareInfo.ID,
 		"state", state,
 	)

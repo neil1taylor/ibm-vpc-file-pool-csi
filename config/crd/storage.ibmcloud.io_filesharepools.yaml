@@ -154,6 +154,58 @@ spec:
                 items:
                   type: string
                 type: array
+              tiers:
+                description: |-
+                  Tiers defines multiple performance tiers within the pool.
+                  If empty, the top-level profile/shareSizeGB/iops/maxShares/initialShares fields
+                  define an implicit default tier.
+                items:
+                  description: ShareTier defines the VPC share configuration for a
+                    performance tier within the pool.
+                  properties:
+                    initialShares:
+                      default: 1
+                      description: InitialShares is the number of shares to pre-create
+                        for this tier.
+                      format: int32
+                      minimum: 0
+                      type: integer
+                    iops:
+                      description: IOPS is the IOPS allocation per share. Only used
+                        with custom profiles.
+                      format: int64
+                      type: integer
+                    maxShares:
+                      description: MaxShares is the maximum number of shares for this
+                        tier.
+                      format: int32
+                      maximum: 100
+                      minimum: 1
+                      type: integer
+                    name:
+                      description: Name is the tier identifier referenced from StorageClass
+                        parameters.
+                      pattern: ^[a-z0-9-]+$
+                      type: string
+                    profile:
+                      description: Profile is the VPC file storage profile (e.g.,
+                        "dp2", "custom").
+                      type: string
+                    shareSizeGB:
+                      description: ShareSizeGB is the size in GB for shares in this
+                        tier.
+                      format: int64
+                      maximum: 32000
+                      minimum: 10
+                      type: integer
+                  required:
+                  - initialShares
+                  - maxShares
+                  - name
+                  - profile
+                  - shareSizeGB
+                  type: object
+                type: array
               zone:
                 description: Zone is the VPC availability zone for shares in this
                   pool.
@@ -286,6 +338,10 @@ spec:
                       - draining
                       - degraded
                       - deleting
+                      type: string
+                    tier:
+                      description: Tier is the name of the ShareTier this share belongs
+                        to. Empty for pools without tiers.
                       type: string
                     totalGB:
                       description: TotalGB is the provisioned size of this share.

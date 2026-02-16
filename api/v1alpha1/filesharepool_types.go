@@ -1,6 +1,8 @@
 package v1alpha1
 
 import (
+	"fmt"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -102,6 +104,63 @@ type FileSharePoolSpec struct {
 	// MountOptions are additional NFS mount options applied by the node agent.
 	// +optional
 	MountOptions []string `json:"mountOptions,omitempty"`
+
+	// Tiers defines multiple performance tiers within the pool.
+	// If empty, the top-level profile/shareSizeGB/iops/maxShares/initialShares fields
+	// define an implicit default tier.
+	// +optional
+	Tiers []ShareTier `json:"tiers,omitempty"`
+}
+
+// ShareTier defines the VPC share configuration for a performance tier within the pool.
+type ShareTier struct {
+	// Name is the tier identifier referenced from StorageClass parameters.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^[a-z0-9-]+$`
+	Name string `json:"name"`
+
+	// Profile is the VPC file storage profile (e.g., "dp2", "custom").
+	// +kubebuilder:validation:Required
+	Profile string `json:"profile"`
+
+	// ShareSizeGB is the size in GB for shares in this tier.
+	// +kubebuilder:validation:Minimum=10
+	// +kubebuilder:validation:Maximum=32000
+	ShareSizeGB int64 `json:"shareSizeGB"`
+
+	// IOPS is the IOPS allocation per share. Only used with custom profiles.
+	// +optional
+	IOPS *int64 `json:"iops,omitempty"`
+
+	// MaxShares is the maximum number of shares for this tier.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=100
+	MaxShares int32 `json:"maxShares"`
+
+	// InitialShares is the number of shares to pre-create for this tier.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:default=1
+	InitialShares int32 `json:"initialShares"`
+}
+
+// TierConfig returns the share configuration for the given tier name.
+// If no tiers are defined, returns the top-level spec fields regardless of tierName.
+// If tiers are defined and tierName is empty, returns an error.
+// Returns an error if the named tier doesn't exist.
+func (s *FileSharePoolSpec) TierConfig(tierName string) (profile string, sizeGB int64, iops *int64, maxShares int32, initialShares int32, err error) {
+	if len(s.Tiers) == 0 {
+		return s.Profile, s.ShareSizeGB, s.IOPS, s.MaxShares, s.InitialShares, nil
+	}
+	if tierName == "" {
+		return "", 0, nil, 0, 0, fmt.Errorf("tier is required when pool has tiers configured")
+	}
+	for i := range s.Tiers {
+		if s.Tiers[i].Name == tierName {
+			t := &s.Tiers[i]
+			return t.Profile, t.ShareSizeGB, t.IOPS, t.MaxShares, t.InitialShares, nil
+		}
+	}
+	return "", 0, nil, 0, 0, fmt.Errorf("tier %q not found in pool", tierName)
 }
 
 type FileSharePoolStatus struct {
@@ -158,6 +217,10 @@ type PoolShareStatus struct {
 	// State is the share's health state.
 	// +kubebuilder:validation:Enum=creating;stable;draining;degraded;deleting
 	State string `json:"state"`
+
+	// Tier is the name of the ShareTier this share belongs to. Empty for pools without tiers.
+	// +optional
+	Tier string `json:"tier,omitempty"`
 
 	// Zone is the availability zone of this share.
 	Zone string `json:"zone"`

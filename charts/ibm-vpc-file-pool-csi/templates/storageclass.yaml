@@ -11,6 +11,9 @@ volumeBindingMode: {{ .Values.storageClass.volumeBindingMode }}
 allowVolumeExpansion: {{ .Values.storageClass.allowVolumeExpansion }}
 parameters:
   pool: {{ .Values.storageClass.pool | quote }}
+{{- if .Values.storageClass.tier }}
+  tier: {{ .Values.storageClass.tier | quote }}
+{{- end }}
 {{- with .Values.storageClass.mountOptions }}
 mountOptions:
   {{- toYaml . | nindent 2 }}
