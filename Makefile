@@ -7,11 +7,14 @@ GOBIN := $(shell go env GOPATH)/bin
 GOLANGCI_LINT := $(GOBIN)/golangci-lint
 CONTROLLER_GEN := $(GOBIN)/controller-gen
 
-.PHONY: build test test-integration test-e2e test-coverage vet lint generate docker-build \
+.PHONY: build build-migrate test test-integration test-e2e test-coverage vet lint generate docker-build \
         install-crds deploy helm-install helm-lint helm-template run-local tools clean
 
 build:
 	CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$(VERSION)" -o bin/$(BINARY_NAME) ./cmd/
+
+build-migrate:
+	CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$(VERSION)" -o bin/kubectl-migrate ./cmd/migrate/
 
 test:
 	go test ./... -v -race -count=1

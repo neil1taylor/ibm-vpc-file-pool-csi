@@ -59,20 +59,34 @@ Explicit list of what the IBM VPC File Pool CSI Driver does not support, why, an
 
 **Roadmap:** No change planned — NFS protocol limitation.
 
-## No Migration Tool from Stock CSI Driver
+## Migration from Stock CSI Driver
 
-**What:** There is no automated migration path from the standard IBM VPC File CSI driver (1:1 PVC-to-share mapping) to the pool CSI driver.
+**What:** Migrating from the standard IBM VPC File CSI driver (1:1 PVC-to-share mapping) to the pool CSI driver requires data copying because the two drivers use fundamentally different storage models.
 
-**Why:** The two drivers use fundamentally different storage models. Migrating requires moving data from standalone shares into subdirectories on pooled shares.
+**Why:** Kubernetes does not support in-place changes to a PV's CSI driver. Migration requires creating new PVCs on the pool driver and copying data from the old PVCs.
 
-**Workaround:** Create new PVCs on the pool driver and `rsync` data from old PVCs:
+**Tool:** The `kubectl-migrate` CLI tool automates the migration workflow:
 
 ```bash
-# From a pod with both PVCs mounted:
-rsync -avz /old-pvc/ /new-pvc/
+# Build the migration tool
+make build-migrate
+
+# 1. Plan: discover PVCs to migrate
+kubectl migrate plan --namespace default --storage-class ibm-vpc-file-5iops --target-pool general-purpose
+
+# 2. Execute: migrate a specific PVC (creates new PVC, rsync data, verify)
+kubectl migrate execute --namespace default --pvc my-data --target-pool general-purpose --target-storage-class ibm-vpc-file-pool
+
+# 3. Status: check migration progress
+kubectl migrate status --namespace default
 ```
 
-**Roadmap:** A migration guide is planned; automated tooling is not on the current roadmap.
+The tool creates a new PVC on the pool driver, launches a temporary pod that rsyncs data from the old PVC to the new one, and verifies file counts. The old PVC is NOT deleted automatically — you switch your workloads to the new PVC and delete the old one when ready.
+
+**Limitations:**
+- Migration speed depends on data volume and NFS throughput.
+- Applications must tolerate brief downtime or support live migration at the application layer.
+- The tool does not handle StatefulSet ordinal PVC naming automatically — migrate each PVC individually.
 
 ## IBM Cloud Satellite
 
