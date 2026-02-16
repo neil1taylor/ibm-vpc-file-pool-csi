@@ -107,6 +107,16 @@ rsync -avz /old-pvc/ /new-pvc/
 
 **Roadmap:** No change planned.
 
+## Cross-Zone Node Failover
+
+**What:** Cross-zone accessor bindings (`spec.accessorZones`) create mount targets in multiple VPC zones, but the node agent always selects the mount target IP matching the node's own zone. If all nodes in a zone are lost, pods rescheduled to a different zone will use that zone's mount target IP (if configured). There is no automatic failover to a different zone's mount target for an already-mounted share.
+
+**Why:** NFS mount targets are zone-local. A mount target in `us-south-1` is only reachable from nodes in `us-south-1`. The driver selects the correct zone IP at mount time, not dynamically at runtime.
+
+**Workaround:** Configure `accessorZones` for all zones where worker nodes may be scheduled. This ensures mount targets exist in every zone before pods arrive.
+
+**Roadmap:** No change planned — this is by design. Zone-local mount targets are a VPC networking constraint.
+
 ## VPC Account Quota
 
 **What:** IBM Cloud VPC accounts are limited to 300 file shares per account. This quota is shared with the standard IBM VPC File CSI driver.

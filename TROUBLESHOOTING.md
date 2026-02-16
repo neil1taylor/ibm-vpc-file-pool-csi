@@ -211,6 +211,27 @@ If many pods on the same node are affected, the node agent will detect the stale
 
 ---
 
+### NFS mount fails with nsenter/namespace errors
+
+**Symptom:** Pod stuck in `ContainerCreating` and node agent logs show errors related to `nsenter`, `mount namespace`, or `/proc/1/ns/mnt`.
+
+**Cause:** The node DaemonSet is not running with `hostPID: true`, so the nsenter mount wrapper cannot access the host's mount namespace via `/proc/1`.
+
+**Fix:**
+```bash
+# Verify hostPID is enabled on the DaemonSet
+kubectl get daemonset -n kube-system ibm-vpc-file-pool-csi-node -o jsonpath='{.spec.template.spec.hostPID}'
+# Should output: true
+
+# If false, patch it:
+kubectl patch daemonset -n kube-system ibm-vpc-file-pool-csi-node --type merge \
+  -p '{"spec":{"template":{"spec":{"hostPID":true}}}}'
+```
+
+The nsenter wrapper at `/usr/local/bin/mount` routes NFS mounts through `nsenter --mount=/proc/1/ns/mnt --root=/proc/1/root` (host namespace) and bind mounts through the container's local `/usr/bin/mount`.
+
+---
+
 ### Mount stuck — pod hangs on I/O
 
 **Symptom:** Pod hangs indefinitely on file operations. `kubectl exec` into the pod also hangs.

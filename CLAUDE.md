@@ -35,6 +35,7 @@ make generate           # controller-gen for CRD types and DeepCopy
 make docker-build       # Container image (UBI9-based)
 make deploy             # Apply CRDs + RBAC + manifests to cluster
 make helm-install       # Helm chart installation
+make test-e2e           # E2E tests (requires live ROKS cluster + env vars)
 make run-local          # Run controller locally in dry-run mode
 ```
 

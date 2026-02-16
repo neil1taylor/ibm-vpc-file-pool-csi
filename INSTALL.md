@@ -57,6 +57,8 @@ export NAMESPACE=your-icr-namespace
 export VERSION=$(git describe --tags --always)
 
 make docker-build IMAGE_NAME=${REGISTRY}/${NAMESPACE}/vpc-file-pool-csi:${VERSION}
+# Note: .dockerignore excludes .git, docs, site, test, charts, and config
+# from the build context for faster container builds.
 
 # Login to IBM Cloud Container Registry
 ibmcloud cr login

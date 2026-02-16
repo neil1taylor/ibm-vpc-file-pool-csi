@@ -244,6 +244,12 @@ type CreateShareInput struct {
     VPCId             string     // needed for mount target
     SubnetID          string     // needed for mount target
     SecurityGroupIDs  []string   // must allow TCP 2049
+    AccessorZones     []AccessorZoneInput  // additional zones for cross-zone mount targets
+}
+
+type AccessorZoneInput struct {
+    Zone     string   // VPC availability zone (e.g., "us-south-2")
+    SubnetID string   // Subnet in the accessor zone for mount target IP
 }
 
 func (c *Client) CreateFileShare(ctx context.Context, input CreateShareInput) (*ShareInfo, error) {
@@ -303,10 +309,27 @@ func (c *Client) CreateFileShare(ctx context.Context, input CreateShareInput) (*
         mountTargetPrototype,
     }
 
-    // 2. Create the share
+    // 2. Create accessor mount targets (cross-zone support)
+    for _, az := range input.AccessorZones {
+        azMT := &vpcv1.ShareMountTargetPrototypeShareMountTargetByAccessControlModeSecurityGroup{
+            Name: core.StringPtr(input.Name + "-mt-" + az.Zone),
+            VPC:  &vpcv1.VPCIdentityByID{ID: core.StringPtr(input.VPCId)},
+            PrimaryIPPrototype: &vpcv1.ShareMountTargetIPPrototypeReservedIPPrototypeShareMountTargetContext{
+                Subnet: &vpcv1.SubnetIdentityByID{ID: core.StringPtr(az.SubnetID)},
+            },
+        }
+        sharePrototype.MountTargets = append(sharePrototype.MountTargets, azMT)
+    }
+
+    // 3. Create the share
     createOpts := c.vpcService.NewCreateShareOptions(sharePrototype)
     share, response, err := c.vpcService.CreateShareWithContext(ctx, createOpts)
     if err != nil {
+        // Idempotency: if the share already exists (e.g., status update conflict caused retry),
+        // look it up by name and return it instead of failing.
+        if response != nil && response.StatusCode == 400 && strings.Contains(err.Error(), "already exists") {
+            return c.getShareByName(ctx, input.Name)
+        }
         return nil, fmt.Errorf("VPC API CreateShare failed (HTTP %d): %w", response.StatusCode, err)
     }
 
@@ -318,6 +341,22 @@ func (c *Client) CreateFileShare(ctx context.Context, input CreateShareInput) (*
 
     return shareInfo, nil
 }
+```
+
+### Create Share Mount Target (for Accessor Zones)
+
+Called by the reconciler to add mount targets in accessor zones after share creation.
+
+```go
+func (c *Client) CreateShareMountTarget(ctx context.Context, shareID string, input CreateMountTargetInput) (*MountTargetInfo, error)
+```
+
+### getShareByName (Internal — Idempotent Share Lookup)
+
+When `CreateFileShare` gets HTTP 400 "already exists" (e.g., reconciler retried after a status update conflict), this method looks up the existing share by name via `ListShares` with a name filter, waits for stable state, and returns its full info including mount target IPs.
+
+```go
+func (c *Client) getShareByName(ctx context.Context, name string) (*ShareInfo, error)
 ```
 
 ### Wait for Share Stable
@@ -382,6 +421,7 @@ type MountTargetInfo struct {
     ID        string
     Name      string
     IPAddress string    // This is the NFS server IP to mount
+    Zone      string    // VPC zone of this mount target (for cross-zone support)
 }
 
 func (c *Client) GetFileShare(ctx context.Context, shareID string) (*ShareInfo, error) {

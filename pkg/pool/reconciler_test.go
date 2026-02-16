@@ -743,15 +743,24 @@ func TestReconcile_EnsureAccessorMountTargets(t *testing.T) {
 		t.Fatalf("Reconcile failed: %v", err)
 	}
 
-	// Should have created 2 mount targets (us-south-2 + us-south-3)
-	if vpc.CreateMountTargetCalls != 2 {
-		t.Errorf("expected 2 CreateMountTarget calls, got %d", vpc.CreateMountTargetCalls)
+	// VPC mode: no VPC API calls to create additional mount targets (one per VPC limit).
+	// Accessor zones are populated using the same VPC FQDN/IP.
+	if vpc.CreateMountTargetCalls != 0 {
+		t.Errorf("expected 0 CreateMountTarget calls (VPC mode uses same FQDN), got %d", vpc.CreateMountTargetCalls)
 	}
 
 	updated := k.getPool("test-pool")
 	share := updated.Status.Shares[0]
 	if len(share.MountTargets) != 3 {
 		t.Errorf("expected 3 mount targets (home + 2 accessor), got %d", len(share.MountTargets))
+	}
+
+	// All zones should use the same VPC-mode server address
+	homeIP := share.MountTargetIP
+	for _, mt := range share.MountTargets {
+		if mt.MountTargetIP != homeIP {
+			t.Errorf("mount target zone %s has IP %s, expected same as home %s (VPC mode)", mt.Zone, mt.MountTargetIP, homeIP)
+		}
 	}
 }
 

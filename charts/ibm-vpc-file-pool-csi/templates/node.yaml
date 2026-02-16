@@ -17,6 +17,7 @@ spec:
         {{- include "ibm-vpc-file-pool-csi.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: node
     spec:
+      hostPID: true
       serviceAccountName: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-node
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:

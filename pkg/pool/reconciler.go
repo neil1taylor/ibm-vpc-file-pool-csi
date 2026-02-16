@@ -85,6 +85,22 @@ func (r *FileSharePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			_ = r.k8sClient.UpdateFileSharePoolStatus(ctx, pool)
 			return reconcile.Result{RequeueAfter: 15 * time.Second}, nil
 		}
+
+		// Persist status immediately after provisioning to prevent share name
+		// conflicts on retry. VPC shares are expensive resources; losing them
+		// from status due to a later conflict error means the next reconcile
+		// would try to create the same share name again and get HTTP 400.
+		pool.Status.Phase = "Expanding"
+		pool.Status.LastReconcileTime = timeNow()
+		if err := r.k8sClient.UpdateFileSharePoolStatus(ctx, pool); err != nil {
+			klog.ErrorS(err, "Failed to persist post-provisioning status", "pool", pool.Name)
+			return reconcile.Result{}, err
+		}
+		// Re-fetch to get fresh resource version after status write.
+		pool, err = r.k8sClient.GetFileSharePool(ctx, req.Name)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
 	}
 
 	// 4. Health check
@@ -211,13 +227,15 @@ func (r *FileSharePoolReconciler) healthCheck(ctx context.Context, pool *v1alpha
 		case "stable":
 			if share.State == "creating" {
 				share.State = "stable"
-				// Backfill mount target IP if missing
-				if share.MountTargetIP == "" && len(info.MountTargets) > 0 {
-					share.MountTargetIP = info.MountTargets[0].IPAddress
-					share.MountTargetID = info.MountTargets[0].ID
-				}
 				klog.V(2).InfoS("Share transitioned to stable",
 					"shareID", share.ShareID, "pool", pool.Name)
+			}
+			// Backfill mount target IP if missing (regardless of previous state)
+			if share.MountTargetIP == "" && len(info.MountTargets) > 0 {
+				share.MountTargetIP = info.MountTargets[0].IPAddress
+				share.MountTargetID = info.MountTargets[0].ID
+				klog.V(2).InfoS("Backfilled mount target IP",
+					"shareID", share.ShareID, "ip", share.MountTargetIP)
 			}
 			// Backfill MountTargets from all discovered mount targets
 			if len(info.MountTargets) > 0 && len(share.MountTargets) < len(info.MountTargets) {
@@ -249,20 +267,23 @@ func (r *FileSharePoolReconciler) healthCheck(ctx context.Context, pool *v1alpha
 	}
 }
 
-// ensureAccessorMountTargets creates mount targets in accessor zones for stable shares.
-func (r *FileSharePoolReconciler) ensureAccessorMountTargets(ctx context.Context, pool *v1alpha1.FileSharePool) {
+// ensureAccessorMountTargets populates MountTargets status for accessor zones.
+// VPC access mode uses a single mount target per VPC with a FQDN that the VPC
+// DNS resolves to zone-optimal IPs automatically. We record this FQDN as the
+// IP for each accessible zone so that the CSI driver can emit server.<zone> keys.
+func (r *FileSharePoolReconciler) ensureAccessorMountTargets(_ context.Context, pool *v1alpha1.FileSharePool) {
 	if len(pool.Spec.AccessorZones) == 0 {
 		return
 	}
 
 	for i := range pool.Status.Shares {
 		share := &pool.Status.Shares[i]
-		if share.State != "stable" {
+		if share.State != "stable" || share.MountTargetIP == "" {
 			continue
 		}
 
-		// Ensure home zone is in MountTargets
-		if share.MountTargetIP != "" && len(share.MountTargets) == 0 {
+		// Seed MountTargets with home zone if not present
+		if len(share.MountTargets) == 0 {
 			share.MountTargets = []v1alpha1.ZoneMountTarget{
 				{
 					Zone:          share.Zone,
@@ -272,8 +293,8 @@ func (r *FileSharePoolReconciler) ensureAccessorMountTargets(ctx context.Context
 			}
 		}
 
+		// Add accessor zones using the same VPC-mode FQDN/IP (DNS handles routing)
 		for _, az := range pool.Spec.AccessorZones {
-			// Check if a mount target already exists for this zone
 			exists := false
 			for _, mt := range share.MountTargets {
 				if mt.Zone == az.Zone {
@@ -285,30 +306,15 @@ func (r *FileSharePoolReconciler) ensureAccessorMountTargets(ctx context.Context
 				continue
 			}
 
-			mtName := fmt.Sprintf("%s-%s-mt", share.ShareName, az.Zone)
-			input := ibmcloud.CreateMountTargetInput{
-				Name:             mtName,
-				VPCId:            r.vpcID,
-				SubnetID:         az.SubnetID,
-				EncryptInTransit: pool.Spec.EncryptionInTransit,
-			}
-
-			mtInfo, err := r.vpcClient.CreateShareMountTarget(ctx, share.ShareID, input)
-			if err != nil {
-				klog.ErrorS(err, "Failed to create accessor mount target",
-					"pool", pool.Name, "shareID", share.ShareID, "zone", az.Zone)
-				continue
-			}
-
 			share.MountTargets = append(share.MountTargets, v1alpha1.ZoneMountTarget{
 				Zone:          az.Zone,
-				MountTargetID: mtInfo.ID,
-				MountTargetIP: mtInfo.IPAddress,
+				MountTargetID: share.MountTargetID,
+				MountTargetIP: share.MountTargetIP,
 			})
 
-			klog.V(2).InfoS("Created accessor mount target",
+			klog.V(2).InfoS("Added accessor zone to mount targets (same VPC FQDN)",
 				"pool", pool.Name, "shareID", share.ShareID,
-				"zone", az.Zone, "ip", mtInfo.IPAddress)
+				"zone", az.Zone, "server", share.MountTargetIP)
 		}
 	}
 }

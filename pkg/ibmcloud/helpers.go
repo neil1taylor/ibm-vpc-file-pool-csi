@@ -58,6 +58,18 @@ func mapHTTPError(statusCode int, sdkErr error) error {
 	}
 }
 
+// parseMountPathServer extracts the server component from an NFS mount path.
+// The mount path format is "server:/export_path" where server is either an IP
+// address (security_group mode) or a FQDN (vpc mode).
+// Returns empty string if the format is unrecognized.
+func parseMountPathServer(mountPath string) string {
+	idx := strings.Index(mountPath, ":/")
+	if idx <= 0 {
+		return ""
+	}
+	return mountPath[:idx]
+}
+
 // parseStartFromURL extracts the "start" query parameter from a pagination URL.
 // Returns nil if the URL is invalid or the parameter is absent.
 func parseStartFromURL(href string) *string {

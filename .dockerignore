@@ -1,0 +1,13 @@
+.git
+site
+docs
+bin
+coverage.*
+*.md
+mkdocs.yml
+examples
+hack
+test
+charts
+config
+.dockerignore

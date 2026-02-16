@@ -40,6 +40,7 @@ Settings for the CSI node agent DaemonSet (runs on every worker node).
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
+| `node.hostPID` | bool | `true` | Enable hostPID for node agent pods. Required for nsenter mount wrapper to access host mount namespace for NFS mounts |
 | `node.tolerations` | list | `[{operator: Exists}]` | Tolerations for node agent pods. Default tolerates all taints so the agent runs on every node |
 
 ## Logging

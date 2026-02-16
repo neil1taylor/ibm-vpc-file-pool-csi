@@ -190,9 +190,21 @@ func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (_ *Alloc
 		},
 	}
 
+	// Save desired status before Create — Create() strips status because it's
+	// a subresource and the server response doesn't include it.
+	desiredStatus := sv.Status
+
 	if err := m.k8sClient.CreateSubVolume(ctx, sv); err != nil {
 		klog.ErrorS(err, "Failed to create SubVolume CR", "pvName", req.PVName)
 		return nil, fmt.Errorf("create SubVolume CR: %w", err)
+	}
+
+	// Restore status and write it via the status subresource.
+	sv.Status = desiredStatus
+	if err := m.k8sClient.UpdateSubVolumeStatus(ctx, sv); err != nil {
+		klog.ErrorS(err, "Failed to update SubVolume status", "pvName", req.PVName)
+		// Non-fatal: the SubVolume exists and will be usable, just Phase will be empty
+		// until a reconciler fills it in.
 	}
 
 	// 8. Update pool status

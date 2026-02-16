@@ -87,9 +87,7 @@ spec:
   defaultPermissions: "0755"
   defaultUID: 1000
   defaultGID: 1000
-  secretRef:
-    name: ibm-vpc-file-pool-csi-secret
-    namespace: kube-system
+  # Authentication is handled globally via secret-common-lib (no secretRef needed)
   mountOptions:
     - nfsvers=4.1
     - soft
@@ -141,7 +139,39 @@ The status section shows each share's ID, mount target IP, total/allocated capac
 
 ### Multi-Zone Pools
 
-VPC file shares are zonal. If your cluster spans multiple zones, create one pool per zone:
+VPC file shares are zonal, but the driver supports **cross-zone accessor bindings** to make shares accessible from multiple zones with zone-local NFS IPs.
+
+#### Option A: Cross-Zone Pool (Recommended for Multi-Zone Clusters)
+
+A single pool with `accessorZones` creates mount targets in additional zones:
+
+```yaml
+apiVersion: storage.ibmcloud.io/v1alpha1
+kind: FileSharePool
+metadata:
+  name: general-purpose
+spec:
+  zone: us-south-1                    # Home zone — shares created here
+  profile: dp2
+  shareSizeGB: 2000
+  maxShares: 10
+  initialShares: 1
+  autoExpand: true
+  expandThresholdPercent: 80
+  allocationStrategy: spread
+  defaultPermissions: "0755"
+  accessorZones:                       # Nodes in these zones get zone-local IPs
+    - zone: us-south-2
+      subnetID: "0717-xxxx-yyyy"
+    - zone: us-south-3
+      subnetID: "0727-aaaa-bbbb"
+```
+
+Nodes in `us-south-2` mount via the accessor mount target IP in their zone, avoiding cross-zone NFS traffic. The PV volumeAttributes include `server.us-south-1`, `server.us-south-2`, etc.
+
+#### Option B: One Pool Per Zone
+
+Alternatively, create separate pools per zone:
 
 ```yaml
 # pool-south-1.yaml
@@ -531,7 +561,7 @@ Currently, quotas are advisory (soft enforcement). The driver tracks allocated v
 There's no hard limit in the driver. The practical limits are the share's total capacity and the NFS server's ability to handle concurrent connections. In testing, hundreds of PVCs per share work well. If you're running thousands, monitor NFS connection counts and consider spreading across more shares (use the `spread` allocation strategy).
 
 **Q: Can I use this across multiple availability zones?**
-VPC file shares are zonal. Create one FileSharePool per zone and one StorageClass per zone (or use `volumeBindingMode: WaitForFirstConsumer` for automatic zone matching). Cross-zone access is possible via VPC accessor bindings but adds latency and complexity — it's better to keep storage in the same zone as the pods.
+Yes. Add `accessorZones` to your `FileSharePool` spec — the driver creates mount targets in each accessor zone so nodes get zone-local NFS IPs. This avoids cross-zone NFS traffic. See [Multi-Zone Pools](#multi-zone-pools) for details. Alternatively, create one pool per zone with separate StorageClasses.
 
 **Q: Does this work with IBM Cloud Satellite?**
 This driver targets IBM Cloud VPC infrastructure specifically (it uses the VPC API to create file shares). For Satellite locations with their own storage backends, the community `csi-driver-nfs` may be more appropriate since it works with any existing NFS server.

@@ -105,6 +105,14 @@ Node filesystem:
 
 The node agent maintains an in-memory reference count per share mount. When the last PVC using a share on that node is unpublished, the NFS mount is unmounted.
 
+**NFS mount via nsenter wrapper:**
+
+The node agent container includes a `/usr/local/bin/mount` wrapper that routes NFS mounts through the host's mount namespace using `nsenter --mount=/proc/1/ns/mnt --root=/proc/1/root`. Bind mounts use the container's local `/usr/bin/mount`. This requires `hostPID: true` on the DaemonSet so `/proc/1` refers to the host's PID 1.
+
+**Cross-zone server selection:**
+
+When volumeContext contains `server.<zone>` keys (from pools with accessor zones), the node agent selects the IP matching its own zone (`topology.kubernetes.io/zone` label). This ensures NFS traffic stays within the zone for lower latency. Falls back to the default `server` key if no zone match is found.
+
 ### 3. Pool Manager
 
 The core logic component. Runs within the controller pod but is architecturally distinct.
@@ -137,13 +145,14 @@ type AllocationRequest struct {
 }
 
 type AllocationResult struct {
-    ShareID       string
-    MountTargetIP string
-    SubPath       string   // e.g., "/pvcs/pvc-abc123"
-    SharePath     string   // e.g., "/" (the NFS export root)
-    UID           *int64   // Optional UID for subdirectory ownership (passed to node via VolumeContext)
-    GID           *int64   // Optional GID for subdirectory ownership (passed to node via VolumeContext)
-    Permissions   string   // Optional permissions for subdirectory (e.g., "0755", passed to node via VolumeContext)
+    ShareID            string
+    MountTargetIP      string              // Primary (home zone) NFS IP
+    ZoneMountTargetIPs map[string]string   // Zone → NFS IP (for cross-zone access)
+    SubPath            string              // e.g., "/pvcs/pvc-abc123"
+    SharePath          string              // e.g., "/" (the NFS export root)
+    UID                *int64
+    GID                *int64
+    Permissions        string
 }
 ```
 
@@ -215,7 +224,9 @@ See `CRD-SPEC.md` for full type definitions.
 5. CSI Controller returns CreateVolumeResponse with:
        - volume_id: "{pool}/{share-id}/{subdir-name}"
        - volume_context:
-           server: "10.240.1.5"
+           server: "10.240.1.5"                  # Primary (home zone) IP
+           server.us-south-1: "10.240.1.5"       # Zone-keyed IPs (when accessorZones configured)
+           server.us-south-2: "10.240.2.10"      # Accessor zone IP
            share: "/"
            subDir: "/pvcs/pvc-abc123"
            pool: "general-purpose"

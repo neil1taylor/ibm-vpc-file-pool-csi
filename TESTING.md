@@ -5,7 +5,7 @@
 ```
                     ┌─────────┐
                     │  E2E    │  Real ROKS cluster + real VPC shares
-                    │ (manual)│  Run by humans before release
+                    │  Tests  │  `make test-e2e` (requires live cluster)
                    ─┼─────────┼─
                   / │ Integr. │ \  Local NFS server in Docker
                  /  │  Tests  │  \ No IBM Cloud needed
@@ -658,6 +658,51 @@ TEST_NFS_SERVER=localhost go test -tags=integration ./test/integration/... -v
 ```
 
 ### Integration tests are NOT required for Claude Code to run during development. They are a nice-to-have for local validation before pushing to a real cluster.
+
+---
+
+## E2E Tests
+
+End-to-end tests run against a real ROKS cluster with live VPC file shares. They validate the full CreateVolume → PVC Bound → Pod mount flow.
+
+### Running E2E Tests
+
+```bash
+E2E_HOME_ZONE=us-south-1 \
+E2E_ACCESSOR_ZONE=us-south-2 \
+E2E_ACCESSOR_SUBNET_ID=0717-xxxx \
+E2E_RESOURCE_GROUP_ID=xxxx \
+make test-e2e
+```
+
+### Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `E2E_HOME_ZONE` | Yes | VPC zone for pool creation (e.g., `eu-de-1`) |
+| `E2E_ACCESSOR_ZONE` | Yes | Second zone for cross-zone mount target testing |
+| `E2E_ACCESSOR_SUBNET_ID` | Yes | Subnet ID in the accessor zone |
+| `E2E_RESOURCE_GROUP_ID` | No | IBM Cloud resource group (auto-discovered if omitted) |
+| `E2E_NAMESPACE` | No | Kubernetes namespace for test resources (default: `default`) |
+
+### Test Structure
+
+All files use `//go:build e2e` — `make test` never runs them.
+
+| File | Tests |
+|------|-------|
+| `test/e2e/e2e_test.go` | Suite setup: env vars, controller-runtime client, `TestMain` cleanup |
+| `test/e2e/helpers_test.go` | Shared builders and wait functions |
+| `test/e2e/basic_test.go` | `TestBasicPool` — pool with no accessor zones, verifies no `server.<zone>` keys |
+| `test/e2e/crosszone_test.go` | `TestCrossZonePool` — pool with accessor zones, verifies mount targets in both zones and `server.<zone>` keys in PV. `TestCrossZonePool_CRDValidation` — CRD schema validation |
+
+### Key Design Decisions
+
+- **Standard `testing.T`** — no Ginkgo/Gomega, matches project conventions
+- **controller-runtime `client.Client`** — typed access to FileSharePool/SubVolume CRs
+- **100 GB shares** with `dp2` profile — cheapest valid test configuration
+- **Timeouts:** pool creation 3min, PVC bind 1min, pod mount 2min
+- **Cleanup via `t.Cleanup()`** — pod → PVC → SubVolumes → pool → StorageClass
 
 ---
 

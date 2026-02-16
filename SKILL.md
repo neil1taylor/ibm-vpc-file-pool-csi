@@ -122,6 +122,7 @@ make helm-install             # Install via Helm chart
 
 # Development
 make run-local                # Run controller locally against a cluster (dry-run mode)
+make test-e2e                 # E2E tests (requires live cluster, //go:build e2e tag)
 ```
 
 ## Task-Specific Guidance
@@ -170,7 +171,7 @@ make run-local                # Run controller locally against a cluster (dry-ru
 
 ### When writing Kubernetes manifests
 - Controller runs as a Deployment (1-2 replicas, leader election)
-- Node agent runs as a DaemonSet (needs hostNetwork: false, but hostPID: false)
+- Node agent runs as a DaemonSet (needs `hostNetwork: false`, `hostPID: true` — required for nsenter mount wrapper to access host mount namespace for NFS mounts)
 - Node agent needs `/var/lib/kubelet` mounted for bind-mounts
 - RBAC must cover: FileSharePool, SubVolume (get/list/watch/create/update/patch), PVs, PVCs, Secrets, ConfigMaps, Events, CSINode, CSIDriver
 

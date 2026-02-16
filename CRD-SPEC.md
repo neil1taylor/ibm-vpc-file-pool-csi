@@ -137,6 +137,25 @@ type FileSharePoolSpec struct {
     // MountOptions are additional NFS mount options applied by the node agent.
     // +optional
     MountOptions []string `json:"mountOptions,omitempty"`
+
+    // AccessorZones defines additional zones where pool shares should have mount targets.
+    // This enables cross-zone access: nodes in accessor zones can mount shares via
+    // zone-local NFS IPs instead of cross-zone traffic.
+    // When empty, shares are only accessible from the home zone (spec.zone).
+    // +optional
+    AccessorZones []AccessorZone `json:"accessorZones,omitempty"`
+}
+
+// AccessorZone defines a zone where pool shares should have additional mount targets.
+type AccessorZone struct {
+    // Zone is the VPC availability zone (e.g., "us-south-2").
+    // +kubebuilder:validation:Required
+    // +kubebuilder:validation:Pattern=`^[a-z]{2}-[a-z]+-\d+$`
+    Zone string `json:"zone"`
+
+    // SubnetID is the VPC subnet in the accessor zone for mount target IP allocation.
+    // +kubebuilder:validation:Required
+    SubnetID string `json:"subnetID"`
 }
 
 // NOTE: No secretRef field. Authentication is handled globally by secret-common-lib,
@@ -203,8 +222,25 @@ type PoolShareStatus struct {
     // Zone is the availability zone of this share.
     Zone string `json:"zone"`
 
+    // MountTargets records mount targets across all zones (home + accessor).
+    // When empty, only the primary MountTargetIP/MountTargetID are used (backward compat).
+    // +optional
+    MountTargets []ZoneMountTarget `json:"mountTargets,omitempty"`
+
     // CreatedAt is when the share was created.
     CreatedAt *metav1.Time `json:"createdAt,omitempty"`
+}
+
+// ZoneMountTarget records a mount target created in a specific zone.
+type ZoneMountTarget struct {
+    // Zone is the VPC availability zone of this mount target.
+    Zone string `json:"zone"`
+
+    // MountTargetID is the VPC mount target resource ID.
+    MountTargetID string `json:"mountTargetID"`
+
+    // MountTargetIP is the NFS server IP in this zone.
+    MountTargetIP string `json:"mountTargetIP"`
 }
 ```
 
@@ -241,6 +277,34 @@ spec:
     - timeo=600
     - retrans=3
 ```
+
+### Example FileSharePool CR with Cross-Zone Accessors
+
+```yaml
+apiVersion: storage.ibmcloud.io/v1alpha1
+kind: FileSharePool
+metadata:
+  name: cross-zone-pool
+spec:
+  zone: us-south-1                  # Home zone — shares are created here
+  profile: dp2
+  shareSizeGB: 2000
+  maxShares: 10
+  initialShares: 1
+  autoExpand: true
+  expandThresholdPercent: 80
+  allocationStrategy: spread
+  defaultPermissions: "0755"
+  accessorZones:                     # Mount targets created in these zones too
+    - zone: us-south-2
+      subnetID: "0717-xxxx-yyyy"     # Subnet in us-south-2
+    - zone: us-south-3
+      subnetID: "0727-aaaa-bbbb"     # Subnet in us-south-3
+```
+
+When a share is created, mount targets are provisioned in the home zone and all accessor zones.
+The PV volumeAttributes include zone-keyed server IPs: `server.us-south-1`, `server.us-south-2`, etc.
+The node agent selects the IP matching its own zone for NFS mounts.
 
 ### Reconciler Behavior
 

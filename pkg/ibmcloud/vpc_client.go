@@ -212,18 +212,30 @@ func (c *Client) CreateFileShare(ctx context.Context, input CreateShareInput) (i
 			transitEncryption = "user_managed"
 		}
 
+		// VPC access mode: one mount target per VPC. The mount path contains a
+		// FQDN that the VPC DNS resolves to zone-optimal IPs automatically,
+		// enabling cross-zone access without additional mount targets.
+		// Note: VPC API allows only one mount target per VPC per share.
 		mountTarget := &vpcv1.ShareMountTargetPrototype{
 			Name:              core.StringPtr(input.Name + "-mt"),
 			VPC:               &vpcv1.VPCIdentityByID{ID: core.StringPtr(input.VPCId)},
 			AccessProtocol:    core.StringPtr("nfs4"),
 			TransitEncryption: core.StringPtr(transitEncryption),
 		}
+
 		sharePrototype.MountTargets = []vpcv1.ShareMountTargetPrototypeIntf{mountTarget}
 	}
 
 	createOpts := c.vpcService.NewCreateShareOptions(sharePrototype)
 	share, response, err := c.vpcService.CreateShareWithContext(ctx, createOpts)
 	if err != nil {
+		// Idempotency: if the share already exists, look it up and return it.
+		// This handles retries where the share was created but the caller
+		// didn't persist the result (e.g., status update conflict).
+		if response != nil && response.StatusCode == 400 && strings.Contains(err.Error(), "already exists") {
+			klog.V(2).InfoS("Share already exists, adopting", "name", input.Name)
+			return c.getShareByName(ctx, input.Name)
+		}
 		statusCode := 0
 		if response != nil {
 			statusCode = response.StatusCode
@@ -239,6 +251,32 @@ func (c *Client) CreateFileShare(ctx context.Context, input CreateShareInput) (i
 	shareInfo, err := c.waitForShareStable(ctx, *share.ID, 5*time.Minute)
 	if err != nil {
 		return nil, fmt.Errorf("share %s did not become stable: %w", *share.ID, err)
+	}
+
+	// VPC mode mount targets may not have MountPath populated immediately
+	// after the share reaches stable. Poll until at least one mount target
+	// has an IP address so the caller can record it in pool status.
+	if len(shareInfo.MountTargets) > 0 && shareInfo.MountTargets[0].IPAddress == "" {
+		klog.V(4).InfoS("Mount target IP not yet available, polling",
+			"shareID", *share.ID, "mountTargetID", shareInfo.MountTargets[0].ID)
+		deadline := time.Now().Add(2 * time.Minute)
+		for time.Now().Before(deadline) {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(c.pollInterval):
+			}
+			mtInfo, mtErr := c.getMountTarget(ctx, *share.ID, shareInfo.MountTargets[0].ID)
+			if mtErr != nil {
+				continue
+			}
+			if mtInfo.IPAddress != "" {
+				shareInfo.MountTargets[0].IPAddress = mtInfo.IPAddress
+				klog.V(4).InfoS("Mount target IP now available",
+					"shareID", *share.ID, "ip", mtInfo.IPAddress)
+				break
+			}
+		}
 	}
 
 	return shareInfo, nil
@@ -524,12 +562,70 @@ func (c *Client) getMountTarget(ctx context.Context, shareID, mtID string) (*Mou
 		Name: *mt.Name,
 	}
 
-	// Extract NFS IP from PrimaryIP (security_group mode) or MountPath (vpc mode).
+	// Extract NFS server address.
+	// security_group mode: IP is in PrimaryIP.Address
+	// vpc mode: server is in MountPath (format "server:/path")
 	if mt.PrimaryIP != nil && mt.PrimaryIP.Address != nil {
 		info.IPAddress = *mt.PrimaryIP.Address
+	} else if mt.MountPath != nil && *mt.MountPath != "" {
+		info.IPAddress = parseMountPathServer(*mt.MountPath)
 	}
 
 	return info, nil
+}
+
+// getShareByName looks up a VPC file share by name and returns its full info
+// (including waiting for stable and populating mount target IPs).
+// Used by CreateFileShare for idempotent retry when a share already exists.
+func (c *Client) getShareByName(ctx context.Context, name string) (*ShareInfo, error) {
+	if err := c.withAuth(ctx, "getShareByName"); err != nil {
+		return nil, err
+	}
+
+	opts := c.vpcService.NewListSharesOptions()
+	opts.SetName(name)
+	opts.SetLimit(1)
+
+	result, _, err := c.vpcService.ListSharesWithContext(ctx, opts)
+	if err != nil {
+		return nil, fmt.Errorf("lookup share by name %q: %w", name, err)
+	}
+
+	if len(result.Shares) == 0 {
+		return nil, fmt.Errorf("share %q not found after 'already exists' error", name)
+	}
+
+	shareID := *result.Shares[0].ID
+
+	// Wait for the share to be stable (it may still be provisioning).
+	shareInfo, err := c.waitForShareStable(ctx, shareID, 5*time.Minute)
+	if err != nil {
+		return nil, err
+	}
+
+	// Poll for mount target IP if needed (same logic as fresh creation).
+	if len(shareInfo.MountTargets) > 0 && shareInfo.MountTargets[0].IPAddress == "" {
+		deadline := time.Now().Add(2 * time.Minute)
+		for time.Now().Before(deadline) {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(c.pollInterval):
+			}
+			mtInfo, mtErr := c.getMountTarget(ctx, shareID, shareInfo.MountTargets[0].ID)
+			if mtErr != nil {
+				continue
+			}
+			if mtInfo.IPAddress != "" {
+				shareInfo.MountTargets[0].IPAddress = mtInfo.IPAddress
+				break
+			}
+		}
+	}
+
+	klog.V(2).InfoS("Adopted existing share", "name", name, "id", shareID,
+		"state", shareInfo.LifecycleState)
+	return shareInfo, nil
 }
 
 // shareToInfo converts a VPC SDK Share to our ShareInfo type.

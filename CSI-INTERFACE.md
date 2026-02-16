@@ -185,11 +185,16 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 ```go
 func buildVolumeContext(result *pool.AllocationResult, poolName string) map[string]string {
     vc := map[string]string{
-        "server":  result.MountTargetIP,
+        "server":  result.MountTargetIP,     // Primary (home zone) IP — backward compat
         "share":   result.SharePath,
         "subDir":  result.SubPath,
         "pool":    poolName,
         "shareID": result.ShareID,
+    }
+    // Cross-zone support: add server.<zone> keys for each zone with a mount target.
+    // The node agent selects the IP matching its own zone for NFS mounts.
+    for zone, ip := range result.ZoneMountTargetIPs {
+        vc["server."+zone] = ip               // e.g., "server.us-south-1": "10.240.1.5"
     }
     // Optional fields — passed through to NodePublishVolume for subdirectory creation
     if result.Permissions != "" {
@@ -357,9 +362,13 @@ Mounts the whole NFS share to a staging directory. Called once per share per nod
 
 ```go
 func (d *Driver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
-    // 1. Extract volume context
-    server := req.GetVolumeContext()["server"]
-    sharePath := req.GetVolumeContext()["share"]
+    // 1. Extract volume context — prefer zone-local server IP
+    vc := req.GetVolumeContext()
+    server := vc["server"]                      // Default (home zone)
+    if zoneIP, ok := vc["server."+d.nodeZone]; ok {
+        server = zoneIP                          // Use zone-local mount target IP
+    }
+    sharePath := vc["share"]
     stagingPath := req.GetStagingTargetPath()
 
     // 2. Check if already mounted
@@ -696,6 +705,7 @@ containers:
 ### Node DaemonSet
 
 ```yaml
+hostPID: true                   # Required for nsenter mount wrapper (NFS mounts via host namespace)
 containers:
   - name: csi-node
     image: ibm-vpc-file-pool-csi:latest

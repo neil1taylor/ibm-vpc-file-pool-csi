@@ -7,7 +7,7 @@ GOBIN := $(shell go env GOPATH)/bin
 GOLANGCI_LINT := $(GOBIN)/golangci-lint
 CONTROLLER_GEN := $(GOBIN)/controller-gen
 
-.PHONY: build test test-coverage vet lint generate docker-build \
+.PHONY: build test test-e2e test-coverage vet lint generate docker-build \
         install-crds deploy helm-install run-local tools clean
 
 build:
@@ -15,6 +15,9 @@ build:
 
 test:
 	go test ./... -v -race -count=1
+
+test-e2e:
+	go test ./test/e2e/ -v -tags e2e -timeout 10m -count=1
 
 test-coverage:
 	go test ./... -v -race -coverprofile=coverage.out

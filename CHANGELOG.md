@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [v0.3.0] — 2026-02-16
+
+### Added
+
+- **Cross-zone accessor binding support** — `FileSharePool.spec.accessorZones` enables mount targets in additional VPC zones, allowing nodes in non-home zones to mount shares via zone-local NFS IPs. PV volumeAttributes include `server.<zone>` keys for zone-aware node agent mounting
+- **`ZoneMountTarget` in pool status** — `status.shares[].mountTargets` records mount target IPs per zone for full observability
+- **Idempotent `CreateFileShare`** — when the VPC API returns HTTP 400 "already exists" (e.g., reconciler retry after status update conflict), the client looks up the existing share by name via `getShareByName` and returns it
+- **`CreateShareMountTarget`** — new VPC client method to add mount targets to existing shares (used for accessor zone mount target creation)
+- **E2E test framework** (`test/e2e/`) — automated end-to-end tests using `//go:build e2e` tag with `make test-e2e` target. Tests: `TestBasicPool`, `TestCrossZonePool`, `TestCrossZonePool_CRDValidation`
+- **nsenter mount wrapper** — Dockerfile injects `/usr/local/bin/mount` that routes NFS mounts through `nsenter --mount=/proc/1/ns/mnt` (host namespace) and bind mounts through container's `/usr/bin/mount`
+- **`.dockerignore`** — excludes `.git`, `docs`, `site`, `test`, `charts`, `config` from build context for faster container builds
+
+### Fixed
+
+- SubVolume status now correctly persisted after creation — saves `desiredStatus` before `Create()` (which strips status due to subresource) and writes via `Status().Update()`
+- Pool reconciler no longer gets stuck in Initializing when share name conflict occurs on retry
+- Node DaemonSet requires `hostPID: true` for nsenter mount wrapper to access host mount namespace
+
 ## [v0.2.0] — 2026-02-16
 
 ### Added
@@ -48,5 +66,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Mount target IP resolution when share has multiple mount targets across zones
 - Makefile targets for end-to-end build pipeline
 
+[v0.3.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.2.0...v0.3.0
 [v0.2.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.1.0...v0.2.0
 [v0.1.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/releases/tag/v0.1.0
