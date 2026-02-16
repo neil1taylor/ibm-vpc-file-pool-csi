@@ -166,6 +166,48 @@ spec:
 
 Because VPC mode uses DNS-based routing, the same FQDN is recorded for all zones in the pool status. VPC DNS automatically resolves it to the zone-optimal NFS server IP for each requesting node.
 
+### Cross-Zone Traffic Flow
+
+In a cross-zone pool, the file share lives in the home zone but pods on worker nodes in accessor zones access it over the VPC backbone:
+
+```
+Zone 1 (us-south-1)                      Zone 2 (us-south-2)
+┌─────────────────────────┐              ┌─────────────────────────┐
+│                         │              │                         │
+│  VPC File Share         │              │  Worker Node / VM       │
+│  (NFS backend)          │◄────NFS──────│  running Pod            │
+│                         │   TCP 2049   │                         │
+│  /pvcs/pvc-aaa/  ◄──┐  │  cross-zone  │  /data/ ← bind-mount   │
+│  /pvcs/pvc-bbb/     │  │  VPC backbone │       of pvc-aaa/      │
+│                     │  │              │                         │
+│  Mount Target       │  │              │  DNS resolves share     │
+│  FQDN: share-xxx.. │  │              │  FQDN → zone-2 IP      │
+│                     │  │              │  → routes to zone-1     │
+└─────────────────────┘  │              └─────────────────────────┘
+                         │
+                         │              ┌─────────────────────────┐
+                         │              │  Zone 3 (us-south-3)    │
+                         └──────NFS─────│  Worker Node / VM       │
+                             TCP 2049   │  running Pod            │
+                             cross-zone │  /data/ ← pvc-bbb/     │
+                                        └─────────────────────────┘
+```
+
+All NFS traffic stays within the VPC private network — it never traverses the public internet.
+
+### Cross-Zone Trade-offs
+
+| Factor | Same-Zone | Cross-Zone |
+|--------|-----------|------------|
+| **NFS latency** | ~0.2ms | ~1-2ms |
+| **Bandwidth cost** | Included | Metered cross-zone traffic |
+| **Reliability** | Zone-local only | Inter-zone link dependency |
+| **Failure mode** | `soft` mount returns error | `soft` mount returns error (no hang) |
+
+**Good fit for cross-zone:** log storage, batch processing, model artifacts, config data — workloads that are read-heavy or latency-tolerant.
+
+**Prefer same-zone for:** databases, real-time applications, latency-sensitive workloads — create a separate pool per zone instead.
+
 ### How the Node Agent Selects the Right IP
 
 During `NodeStageVolume`, the node agent:
