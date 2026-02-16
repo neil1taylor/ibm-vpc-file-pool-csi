@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/IBM/go-sdk-core/v5/core"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
 	secretlib "github.com/IBM/secret-common-lib/pkg/secret_provider"
 	"github.com/IBM/secret-utils-lib/pkg/k8s_utils"
 	sp "github.com/IBM/secret-utils-lib/pkg/secret_provider"
@@ -157,8 +158,21 @@ func (c *Client) withAuth(ctx context.Context, operation string) error {
 	return c.refreshToken(ctx, operation)
 }
 
+// recordAPIMetrics records API call duration and status for a VPC operation.
+func recordAPIMetrics(operation string, start time.Time, err error) {
+	status := "success"
+	if err != nil {
+		status = "error"
+	}
+	metrics.VPCAPICallsTotal.WithLabelValues(operation, status).Inc()
+	metrics.VPCAPICallDuration.WithLabelValues(operation).Observe(time.Since(start).Seconds())
+}
+
 // CreateFileShare creates a new VPC file share with an inline mount target.
-func (c *Client) CreateFileShare(ctx context.Context, input CreateShareInput) (*ShareInfo, error) {
+func (c *Client) CreateFileShare(ctx context.Context, input CreateShareInput) (info *ShareInfo, retErr error) {
+	start := time.Now()
+	defer func() { recordAPIMetrics("create_share", start, retErr) }()
+
 	if err := c.withAuth(ctx, "CreateFileShare"); err != nil {
 		return nil, err
 	}
@@ -231,7 +245,10 @@ func (c *Client) CreateFileShare(ctx context.Context, input CreateShareInput) (*
 }
 
 // GetFileShare retrieves a VPC file share by ID, including mount target IPs.
-func (c *Client) GetFileShare(ctx context.Context, shareID string) (*ShareInfo, error) {
+func (c *Client) GetFileShare(ctx context.Context, shareID string) (_ *ShareInfo, retErr error) {
+	start := time.Now()
+	defer func() { recordAPIMetrics("get_share", start, retErr) }()
+
 	if err := c.withAuth(ctx, "GetFileShare"); err != nil {
 		return nil, err
 	}
@@ -263,7 +280,10 @@ func (c *Client) GetFileShare(ctx context.Context, shareID string) (*ShareInfo, 
 }
 
 // ExpandFileShare increases a VPC file share's size.
-func (c *Client) ExpandFileShare(ctx context.Context, shareID string, newSizeGB int64) error {
+func (c *Client) ExpandFileShare(ctx context.Context, shareID string, newSizeGB int64) (retErr error) {
+	start := time.Now()
+	defer func() { recordAPIMetrics("expand_share", start, retErr) }()
+
 	if err := c.withAuth(ctx, "ExpandFileShare"); err != nil {
 		return err
 	}
@@ -287,7 +307,10 @@ func (c *Client) ExpandFileShare(ctx context.Context, shareID string, newSizeGB 
 
 // DeleteFileShare deletes a VPC file share and its mount targets.
 // Idempotent: returns nil if the share is already gone.
-func (c *Client) DeleteFileShare(ctx context.Context, shareID string) error {
+func (c *Client) DeleteFileShare(ctx context.Context, shareID string) (retErr error) {
+	start := time.Now()
+	defer func() { recordAPIMetrics("delete_share", start, retErr) }()
+
 	// Check if share exists first.
 	share, err := c.GetFileShare(ctx, shareID)
 	if err != nil {
@@ -332,7 +355,10 @@ func (c *Client) DeleteFileShare(ctx context.Context, shareID string) error {
 
 // ListFileShares lists VPC file shares filtered by resource group.
 // Mount target IPs are NOT fetched during list (too expensive for N+1 calls).
-func (c *Client) ListFileShares(ctx context.Context, resourceGroupID string, _ []string) ([]*ShareInfo, error) {
+func (c *Client) ListFileShares(ctx context.Context, resourceGroupID string, _ []string) (_ []*ShareInfo, retErr error) {
+	startTime := time.Now()
+	defer func() { recordAPIMetrics("list_shares", startTime, retErr) }()
+
 	var allShares []*ShareInfo
 	var start *string
 

@@ -41,6 +41,16 @@ sidecars:
   liveness:
     image: registry.k8s.io/sig-storage/livenessprobe:v2.14.0
 
+metrics:
+  port: 8080
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+  alerts:
+    enabled: false
+    utilizationWarning: 80
+    utilizationCritical: 95
+
 storageClass:
   create: true
   name: ibm-vpc-file-pool

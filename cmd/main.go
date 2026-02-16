@@ -12,11 +12,13 @@ import (
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/driver"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/k8s"
+	_ "github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics" // Register Prometheus collectors via init()
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/pool"
 )
 
@@ -68,6 +70,9 @@ func runController(endpoint, nodeID, region, vpcID, subnetID string) {
 		LeaderElection:          true,
 		LeaderElectionID:        "ibm-vpc-file-pool-csi-leader",
 		LeaderElectionNamespace: "kube-system",
+		Metrics: metricsserver.Options{
+			BindAddress: ":8080",
+		},
 	})
 	if err != nil {
 		klog.ErrorS(err, "Failed to create controller-runtime manager")

@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/k8s"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 )
@@ -87,7 +89,17 @@ func NewManager(k8sClient k8s.Client, vpcClient ibmcloud.VPCFileClient, nfsOps N
 	}
 }
 
-func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (*AllocationResult, error) {
+func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (_ *AllocationResult, retErr error) {
+	start := time.Now()
+	defer func() {
+		status := "success"
+		if retErr != nil {
+			status = "error"
+		}
+		metrics.AllocationsTotal.WithLabelValues(req.PoolName, status).Inc()
+		metrics.AllocationDuration.WithLabelValues(req.PoolName).Observe(time.Since(start).Seconds())
+	}()
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -199,7 +211,16 @@ func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (*Allocat
 	}, nil
 }
 
-func (m *Manager) Deallocate(ctx context.Context, subVolumeName string) error {
+func (m *Manager) Deallocate(ctx context.Context, subVolumeName string) (retErr error) {
+	poolName := ""
+	defer func() {
+		status := "deallocate_success"
+		if retErr != nil {
+			status = "deallocate_error"
+		}
+		metrics.AllocationsTotal.WithLabelValues(poolName, status).Inc()
+	}()
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -208,11 +229,12 @@ func (m *Manager) Deallocate(ctx context.Context, subVolumeName string) error {
 	if err != nil {
 		return fmt.Errorf("%w: %s", ErrSubVolumeNotFound, subVolumeName)
 	}
+	poolName = sv.Spec.PoolName
 
 	// 2. Fetch FileSharePool CR
-	pool, err := m.k8sClient.GetFileSharePool(ctx, sv.Spec.PoolName)
+	pool, err := m.k8sClient.GetFileSharePool(ctx, poolName)
 	if err != nil {
-		return fmt.Errorf("get pool %s: %w", sv.Spec.PoolName, err)
+		return fmt.Errorf("get pool %s: %w", poolName, err)
 	}
 
 	// 3. Remove subdirectory (only when running on the node with NFS access)

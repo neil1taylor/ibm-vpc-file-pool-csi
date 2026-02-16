@@ -43,6 +43,10 @@ spec:
             {{- if .Values.secretProvider.managed }}
             - "--sidecarEndpoint=/csi/providerfile.sock"
             {{- end }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
           {{- if .Values.secretProvider.managed }}
           env:
             - name: IKS_ENABLED

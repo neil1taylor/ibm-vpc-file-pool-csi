@@ -8,6 +8,7 @@ import (
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/k8s"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -248,6 +249,12 @@ func (r *FileSharePoolReconciler) reconcileMetrics(ctx context.Context, pool *v1
 		totalCapacity += s.TotalGB
 	}
 	pool.Status.TotalCapacityGB = totalCapacity
+
+	// Emit Prometheus gauges
+	metrics.PoolCapacityGB.WithLabelValues(pool.Name).Set(float64(pool.Status.TotalCapacityGB))
+	metrics.PoolAllocatedGB.WithLabelValues(pool.Name).Set(float64(pool.Status.TotalAllocatedGB))
+	metrics.PoolShareCount.WithLabelValues(pool.Name).Set(float64(pool.Status.ShareCount))
+	metrics.PoolPVCCount.WithLabelValues(pool.Name).Set(float64(pool.Status.TotalPVCCount))
 }
 
 // proactiveExpansion creates a new share if utilization exceeds the threshold.

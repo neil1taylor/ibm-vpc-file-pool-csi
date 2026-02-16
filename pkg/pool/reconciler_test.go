@@ -9,6 +9,8 @@ import (
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud/fake"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
+	dto "github.com/prometheus/client_model/go"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -539,6 +541,66 @@ func TestReconcile_InitialProvisioning_VPCError(t *testing.T) {
 	// No shares should have been created
 	if len(updated.Status.Shares) != 0 {
 		t.Errorf("expected 0 shares, got %d", len(updated.Status.Shares))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 14. Prometheus Pool Gauge Metrics
+// ---------------------------------------------------------------------------
+
+func TestReconcile_EmitsPrometheusGauges(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+
+	pool := newTestPool("gauge-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 0, 0),
+		newStableShare("share-2", "s2", 2000, 0, 0),
+	)
+	pool.Spec.InitialShares = 2
+	k.addPool(pool)
+
+	// Add SubVolumes totalling 150 GB across 3 PVCs
+	k.addSubVolume(newTestSubVolume("pvc-g1", "gauge-pool", "share-1", 50))
+	k.addSubVolume(newTestSubVolume("pvc-g2", "gauge-pool", "share-1", 30))
+	k.addSubVolume(newTestSubVolume("pvc-g3", "gauge-pool", "share-2", 70))
+
+	r := newReconciler(k, vpc)
+	_, err := reconcilePool(r, "gauge-pool")
+	if err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	// Check capacity gauge: 1000 + 2000 = 3000
+	var m dto.Metric
+	if err := metrics.PoolCapacityGB.WithLabelValues("gauge-pool").Write(&m); err != nil {
+		t.Fatalf("failed to read PoolCapacityGB: %v", err)
+	}
+	if *m.Gauge.Value != 3000 {
+		t.Errorf("expected PoolCapacityGB=3000, got %f", *m.Gauge.Value)
+	}
+
+	// Check allocated gauge: 50 + 30 + 70 = 150
+	if err := metrics.PoolAllocatedGB.WithLabelValues("gauge-pool").Write(&m); err != nil {
+		t.Fatalf("failed to read PoolAllocatedGB: %v", err)
+	}
+	if *m.Gauge.Value != 150 {
+		t.Errorf("expected PoolAllocatedGB=150, got %f", *m.Gauge.Value)
+	}
+
+	// Check share count: 2
+	if err := metrics.PoolShareCount.WithLabelValues("gauge-pool").Write(&m); err != nil {
+		t.Fatalf("failed to read PoolShareCount: %v", err)
+	}
+	if *m.Gauge.Value != 2 {
+		t.Errorf("expected PoolShareCount=2, got %f", *m.Gauge.Value)
+	}
+
+	// Check PVC count: 3
+	if err := metrics.PoolPVCCount.WithLabelValues("gauge-pool").Write(&m); err != nil {
+		t.Fatalf("failed to read PoolPVCCount: %v", err)
+	}
+	if *m.Gauge.Value != 3 {
+		t.Errorf("expected PoolPVCCount=3, got %f", *m.Gauge.Value)
 	}
 }
 

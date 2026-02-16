@@ -1,0 +1,52 @@
+{{- if .Values.metrics.alerts.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: vpc-file-pool-csi
+      rules:
+        - alert: VPCFilePoolUtilizationWarning
+          expr: |
+            (vpc_file_pool_allocated_gb / vpc_file_pool_capacity_gb) * 100
+            > {{ .Values.metrics.alerts.utilizationWarning }}
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "VPC file pool utilization above {{ .Values.metrics.alerts.utilizationWarning }}%"
+            description: >-
+              Pool {{`{{ $labels.pool }}`}} is at
+              {{`{{ printf "%.0f" $value }}`}}% utilization.
+        - alert: VPCFilePoolUtilizationCritical
+          expr: |
+            (vpc_file_pool_allocated_gb / vpc_file_pool_capacity_gb) * 100
+            > {{ .Values.metrics.alerts.utilizationCritical }}
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "VPC file pool utilization above {{ .Values.metrics.alerts.utilizationCritical }}%"
+            description: >-
+              Pool {{`{{ $labels.pool }}`}} is at
+              {{`{{ printf "%.0f" $value }}`}}% utilization. Immediate action required.
+        - alert: VPCFilePoolAtMaxShares
+          expr: |
+            vpc_file_pool_share_count >= on(pool) group_left
+            (vpc_file_pool_capacity_gb * 0 + vpc_file_pool_share_count)
+            and
+            (vpc_file_pool_allocated_gb / vpc_file_pool_capacity_gb) * 100
+            > {{ .Values.metrics.alerts.utilizationWarning }}
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "VPC file pool at maximum shares with high utilization"
+            description: >-
+              Pool {{`{{ $labels.pool }}`}} has reached its share limit
+              with {{`{{ printf "%.0f" $value }}`}}% utilization. No further auto-expansion is possible.
+{{- end }}

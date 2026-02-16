@@ -10,6 +10,8 @@ import (
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud/fake"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
+	dto "github.com/prometheus/client_model/go"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -1194,6 +1196,111 @@ func TestAllocate_WithCustomUIDGID(t *testing.T) {
 	expectedPath := "/mnt/staging/pvcs/" + testPVName
 	if got := nfs.chowns[expectedPath]; got != [2]int{1000, 2000} {
 		t.Errorf("expected chown(1000, 2000), got %v", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Metrics Tests
+// ---------------------------------------------------------------------------
+
+func getCounterValue(counter *dto.Metric) float64 {
+	if counter.Counter != nil {
+		return *counter.Counter.Value
+	}
+	return 0
+}
+
+func TestAllocate_IncrementsSuccessMetric(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	pool := newTestPool("metrics-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 0, 0),
+	)
+	k.addPool(pool)
+
+	// Record counter before
+	var before dto.Metric
+	_ = metrics.AllocationsTotal.WithLabelValues("metrics-pool", "success").Write(&before)
+	beforeVal := getCounterValue(&before)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+	_, err := mgr.Allocate(context.Background(), AllocationRequest{
+		PVName:       testPVName,
+		PVCName:      "my-pvc",
+		PVCNamespace: "default",
+		PoolName:     "metrics-pool",
+		RequestedGB:  5,
+	})
+	if err != nil {
+		t.Fatalf("Allocate failed: %v", err)
+	}
+
+	var after dto.Metric
+	_ = metrics.AllocationsTotal.WithLabelValues("metrics-pool", "success").Write(&after)
+	afterVal := getCounterValue(&after)
+
+	if afterVal <= beforeVal {
+		t.Errorf("expected success counter to increment, before=%f after=%f", beforeVal, afterVal)
+	}
+}
+
+func TestAllocate_IncrementsErrorMetric(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+	// No pool added → will fail
+
+	var before dto.Metric
+	_ = metrics.AllocationsTotal.WithLabelValues("missing-pool", "error").Write(&before)
+	beforeVal := getCounterValue(&before)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+	_, _ = mgr.Allocate(context.Background(), AllocationRequest{
+		PVName:       testPVName,
+		PVCName:      "my-pvc",
+		PVCNamespace: "default",
+		PoolName:     "missing-pool",
+		RequestedGB:  5,
+	})
+
+	var after dto.Metric
+	_ = metrics.AllocationsTotal.WithLabelValues("missing-pool", "error").Write(&after)
+	afterVal := getCounterValue(&after)
+
+	if afterVal <= beforeVal {
+		t.Errorf("expected error counter to increment, before=%f after=%f", beforeVal, afterVal)
+	}
+}
+
+func TestDeallocate_IncrementsMetric(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	pool := newTestPool("metrics-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 50, 1),
+	)
+	k.addPool(pool)
+	k.addSubVolume(newTestSubVolume(testPVName, "metrics-pool", "share-1", 50))
+
+	var before dto.Metric
+	_ = metrics.AllocationsTotal.WithLabelValues("metrics-pool", "deallocate_success").Write(&before)
+	beforeVal := getCounterValue(&before)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+	err := mgr.Deallocate(context.Background(), testPVName)
+	if err != nil {
+		t.Fatalf("Deallocate failed: %v", err)
+	}
+
+	var after dto.Metric
+	_ = metrics.AllocationsTotal.WithLabelValues("metrics-pool", "deallocate_success").Write(&after)
+	afterVal := getCounterValue(&after)
+
+	if afterVal <= beforeVal {
+		t.Errorf("expected deallocate_success counter to increment, before=%f after=%f", beforeVal, afterVal)
 	}
 }
 
