@@ -123,6 +123,18 @@ func (f *fakeK8sClient) ListSubVolumesByShare(_ context.Context, shareID string)
 	return result, nil
 }
 
+func (f *fakeK8sClient) ListCloneSubVolumes(_ context.Context) ([]v1alpha1.SubVolume, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var result []v1alpha1.SubVolume
+	for _, sv := range f.subVolumes {
+		if sv.Spec.SourceVolume != "" {
+			result = append(result, *sv.DeepCopy())
+		}
+	}
+	return result, nil
+}
+
 func (f *fakeK8sClient) CreateSubVolume(_ context.Context, sv *v1alpha1.SubVolume) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -575,6 +587,53 @@ func createVolumeFromSnapshotRequest(pvName, poolName string, sizeGB int64, snap
 			Type: &csi.VolumeContentSource_Snapshot{
 				Snapshot: &csi.VolumeContentSource_SnapshotSource{
 					SnapshotId: snapshotID,
+				},
+			},
+		},
+		AccessibilityRequirements: &csi.TopologyRequirement{
+			Preferred: []*csi.Topology{
+				{Segments: map[string]string{"topology.kubernetes.io/zone": "us-south-1"}},
+			},
+		},
+	}
+}
+
+func createVolumeFromCloneRequest(pvName, poolName string, sizeGB int64, sourceVolumeID string) *csi.CreateVolumeRequest {
+	return &csi.CreateVolumeRequest{
+		Name:       pvName,
+		Parameters: map[string]string{"pool": poolName},
+		CapacityRange: &csi.CapacityRange{
+			RequiredBytes: gbToBytes(sizeGB),
+		},
+		VolumeContentSource: &csi.VolumeContentSource{
+			Type: &csi.VolumeContentSource_Volume{
+				Volume: &csi.VolumeContentSource_VolumeSource{
+					VolumeId: sourceVolumeID,
+				},
+			},
+		},
+		AccessibilityRequirements: &csi.TopologyRequirement{
+			Preferred: []*csi.Topology{
+				{Segments: map[string]string{"topology.kubernetes.io/zone": "us-south-1"}},
+			},
+		},
+	}
+}
+
+func createVolumeFromCloneRequestWithThreshold(pvName, poolName string, sizeGB int64, sourceVolumeID string, thresholdGB int64) *csi.CreateVolumeRequest {
+	return &csi.CreateVolumeRequest{
+		Name: pvName,
+		Parameters: map[string]string{
+			"pool":                 poolName,
+			"cloneSyncThresholdGB": fmt.Sprintf("%d", thresholdGB),
+		},
+		CapacityRange: &csi.CapacityRange{
+			RequiredBytes: gbToBytes(sizeGB),
+		},
+		VolumeContentSource: &csi.VolumeContentSource{
+			Type: &csi.VolumeContentSource_Volume{
+				Volume: &csi.VolumeContentSource_VolumeSource{
+					VolumeId: sourceVolumeID,
 				},
 			},
 		},
