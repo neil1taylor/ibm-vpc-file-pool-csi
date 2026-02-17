@@ -49,15 +49,21 @@ IBM VPC Client ──► VPC File Share API
 |-----------|----------|------|
 | CSI Controller | `pkg/driver/controller.go` | gRPC handlers for volume lifecycle |
 | CSI Node Agent | `pkg/driver/node.go` | NFS mount + bind-mount into pods |
-| Pool Manager | `pkg/pool/manager.go` | Core brain: allocation, deallocation, expansion |
+| Pool Manager | `pkg/pool/manager.go` | Core brain: allocation, deallocation, expansion, snapshots, clones |
 | Share Selection | `pkg/pool/share.go` | Spread (most free) or binpack (least free) strategy |
+| Clone Worker | `pkg/pool/clone_worker.go` | Async clone operations for large volumes |
+| Replication Controller | `pkg/pool/replication_controller.go` | Cross-region disaster recovery |
+| Migration CLI | `pkg/migrate/` | Migrate PVCs from stock IBM CSI driver |
 | IBM VPC Client | `pkg/ibmcloud/client.go` | Thin wrapper around VPC file share API |
-| CRD Types | `api/v1alpha1/` | FileSharePool and SubVolume definitions |
+| CRD Types | `api/v1alpha1/` | FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, ReplicationPolicy |
 
 ## CRDs
 
 - **FileSharePool** (cluster-scoped) — defines a pool of VPC file shares with allocation strategy, auto-expansion, and capacity limits
-- **SubVolume** (cluster-scoped) — tracks individual PVC allocations: which share, subdirectory path, and requested size
+- **SubVolume** (cluster-scoped) — tracks individual PVC allocations: which share, subdirectory path, requested size, and clone/snapshot state
+- **Snapshot** (cluster-scoped) — tracks point-in-time directory copies of SubVolumes
+- **VolumeGroupSnapshot** (cluster-scoped) — coordinates multi-PVC consistent snapshots with optional quiesce hooks
+- **ReplicationPolicy** (cluster-scoped) — defines cross-region replication relationships between pools
 
 ## Glossary
 
@@ -146,8 +152,10 @@ go test ./pkg/pool/ -v -race -run TestAllocate_SpreadStrategy
 | `pkg/util/` | 88.0% |
 | `pkg/driver/` | 81.2% |
 | `pkg/ibmcloud/fake/` | 100% |
+| `pkg/migrate/` | 78.5% |
+| `test/integration/` | — (integration) |
 
-132 tests total, all passing with `-race`.
+510+ tests total, all passing with `-race`.
 
 ## Documentation
 
@@ -165,6 +173,10 @@ go test ./pkg/pool/ -v -race -run TestAllocate_SpreadStrategy
 | [PERFORMANCE-TUNING.md](PERFORMANCE-TUNING.md) | NFS tuning, IOPS planning, benchmarking |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Developer guide and contribution process |
 | [HELM-VALUES.md](HELM-VALUES.md) | Complete Helm chart values reference |
+| [VOLUME-CLONING.md](VOLUME-CLONING.md) | Volume cloning design and usage |
+| [VOLUME-GROUP-SNAPSHOTS.md](VOLUME-GROUP-SNAPSHOTS.md) | Multi-PVC coordinated snapshots |
+| [CROSS-REGION-DR.md](CROSS-REGION-DR.md) | Cross-region disaster recovery |
+| [CONSISTENCY-MODEL.md](CONSISTENCY-MODEL.md) | NFS consistency guarantees and limitations |
 | [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md) | Known limitations and workarounds |
 | [CHANGELOG.md](CHANGELOG.md) | Version history and release notes |
 | [SECURITY.md](SECURITY.md) | Security policy and hardening guide |

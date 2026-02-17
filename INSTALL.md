@@ -256,9 +256,12 @@ kubectl get pods -n kube-system -l app=vpc-file-pool-csi-controller
 # Node agent pods (one per worker node, all Running)
 kubectl get pods -n kube-system -l app=vpc-file-pool-csi-node
 
-# CRDs installed
+# CRDs installed (all 5)
 kubectl get crd filesharepools.storage.ibmcloud.io
 kubectl get crd subvolumes.storage.ibmcloud.io
+kubectl get crd snapshots.storage.ibmcloud.io
+kubectl get crd volumegroupsnapshots.storage.ibmcloud.io
+kubectl get crd replicationpolicies.storage.ibmcloud.io
 
 # Pool is ready
 kubectl get filesharepools

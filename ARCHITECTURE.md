@@ -133,6 +133,30 @@ type PoolManager interface {
 
     // Expand updates the allocation size for an existing SubVolume.
     Expand(ctx context.Context, subVolumeName string, newSizeGB int64) error
+
+    // CreateSnapshot creates a directory-level copy of a SubVolume.
+    CreateSnapshot(ctx context.Context, snapshotName, sourceVolumeID string, params map[string]string) (*SnapshotResult, error)
+
+    // DeleteSnapshot removes a snapshot directory and its CR.
+    DeleteSnapshot(ctx context.Context, snapshotName string) error
+
+    // ListSnapshots lists snapshots, optionally filtered by source volume.
+    ListSnapshots(ctx context.Context, sourceVolumeID string) ([]SnapshotResult, error)
+
+    // RestoreSnapshot creates a new SubVolume from a snapshot.
+    RestoreSnapshot(ctx context.Context, snapshotName string, req AllocationRequest) (*AllocationResult, error)
+
+    // CloneVolume creates a new SubVolume that is a copy of an existing one.
+    // For small volumes (below syncThreshold), the copy completes before returning.
+    // For large volumes, the copy runs asynchronously.
+    CloneVolume(ctx context.Context, sourceVolumeID string, req AllocationRequest, syncThresholdGB int64) (*AllocationResult, error)
+
+    // CreateVolumeGroupSnapshot creates snapshots for multiple SubVolumes in sequence.
+    // Does NOT execute hooks -- the CSI controller handles hook orchestration.
+    CreateVolumeGroupSnapshot(ctx context.Context, req GroupSnapshotRequest) (*GroupSnapshotResult, error)
+
+    // DeleteVolumeGroupSnapshot deletes all member snapshots and the group CR.
+    DeleteVolumeGroupSnapshot(ctx context.Context, groupName string) error
 }
 
 type AllocationRequest struct {
@@ -145,14 +169,15 @@ type AllocationRequest struct {
 }
 
 type AllocationResult struct {
-    ShareID            string
-    MountTargetIP      string              // Primary (home zone) NFS IP
-    ZoneMountTargetIPs map[string]string   // Zone → NFS IP (for cross-zone access)
-    SubPath            string              // e.g., "/pvcs/pvc-abc123"
-    SharePath          string              // e.g., "/" (the NFS export root)
-    UID                *int64
-    GID                *int64
-    Permissions        string
+    ShareID         string            // VPC share ID
+    MountTargetIP   string            // Primary mount target IP
+    SubPath         string            // Subdirectory path, e.g., "/pvcs/pvc-abc123"
+    SharePath       string            // NFS export root, e.g., "/"
+    UID             *int64            // Unix user ID for the subdirectory
+    GID             *int64            // Unix group ID
+    Permissions     string            // Unix permissions string (e.g., "755")
+    MountTargets    map[string]string // Zone -> IP mapping (nil for single-zone)
+    AccessibleZones []string          // All zones this volume is accessible from
 }
 ```
 
@@ -177,12 +202,54 @@ Thin wrapper around the `vpc-go-sdk`. Isolates all IBM Cloud API calls.
 
 All operations are idempotent or check-before-act. All have context-based timeouts.
 
-### 5. CRD Controllers
+### 5. Clone Worker
 
-Two CRD types, managed by controller-runtime:
+Background component within the controller pod that handles asynchronous clone operations for large SubVolumes.
 
-- **FileSharePool** — defines a pool; reconciler ensures the pool has enough capacity.
-- **SubVolume** — tracks a single PVC's allocation; created by Pool Manager during Allocate, deleted during Deallocate.
+**Responsibilities:**
+- Process SubVolumes with `cloneStatus=Pending` or `cloneStatus=InProgress`.
+- Mount source and target shares (same-share or cross-share) and perform `cp -a` data copy.
+- Update SubVolume CR status as clone progresses: `Pending` → `InProgress` → `Complete` or `Failed`.
+- Handle crash recovery by restarting incomplete clones on controller restart.
+
+**Does NOT:**
+- Block `CreateVolume` — the CSI controller returns immediately for async clones.
+- Allow pod access before clone completes — the node agent gates `NodePublishVolume` on `cloneStatus=Complete`.
+
+### 6. Replication Controller
+
+Standalone reconciler that handles cross-region disaster recovery by copying SubVolume data between pools.
+
+**Responsibilities:**
+- Watch `ReplicationPolicy` CRs and execute replication cycles on a configurable schedule.
+- Mount source shares (read-only) and destination shares (read-write, cross-region via Transit Gateway).
+- Copy each matching SubVolume's subdirectory from source to destination using `CopyDir`.
+- Track replication progress, RPO, bytes transferred, and consecutive failures in `ReplicationPolicy.Status`.
+- Expose Prometheus metrics for replication lag, RPO, and error counts.
+
+**Does NOT:**
+- Create or delete VPC file shares (destination pool must already exist).
+- Interfere with the CSI controller, node agent, or pool manager.
+- Provide crash consistency or cross-file transactional consistency (file-level consistency only).
+
+### 7. Migration CLI
+
+Utility package (`pkg/migrate/`) for migrating PVCs from the stock IBM VPC file CSI driver to the pool-based driver.
+
+**Components:**
+- **Planner** (`planner.go`) — analyzes existing PVCs and generates a migration plan.
+- **Executor** (`executor.go`) — executes the migration plan: creates SubVolume CRs, spawns data-copy pods, and rebinds PVCs.
+- **Pod** (`pod.go`) — manages ephemeral pods used for data transfer during migration.
+
+### 8. CRD Controllers
+
+Five CRD types, managed by controller-runtime:
+
+- **FileSharePool** — defines a pool of VPC file shares; reconciler ensures the pool has enough capacity.
+- **SubVolume** — tracks a single PVC's allocation: which share, subdirectory path, requested size, and clone/snapshot state.
+- **Snapshot** — tracks a point-in-time directory copy of a SubVolume, stored under `/pvcs/.snapshots/`.
+- **VolumeGroupSnapshot** — coordinates multiple Snapshot CRs for multi-PVC consistent snapshots, with optional quiesce hooks.
+- **ReplicationPolicy** — defines a cross-region replication relationship between a source pool and a destination pool.
 
 See `CRD-SPEC.md` for full type definitions.
 
@@ -300,6 +367,55 @@ Every 60 seconds (or on FileSharePool CR change):
        - pool_share_count
        - share_allocated_capacity_gb (per share)
        - share_pvc_count (per share)
+```
+
+## Data Flow: CreateSnapshot
+
+```
+1. User creates VolumeSnapshot referencing a PVC
+       │
+2. csi-snapshotter sidecar calls CreateSnapshot gRPC
+       │
+3. CSI Controller receives CreateSnapshot
+       │
+       ├─ Parse source volume ID to extract pool, share ID, subdir name
+       │
+4. Call PoolManager.CreateSnapshot(ctx, snapshotName, sourceVolumeID, params)
+       │
+       ├─ 4a. Read source SubVolume CR
+       ├─ 4b. Create snapshot directory: /pvcs/.snapshots/{snap-name}/
+       ├─ 4c. cp -a from source subdir to snapshot directory
+       ├─ 4d. Create Snapshot CR recording the snapshot metadata
+       │
+5. CSI Controller returns CreateSnapshotResponse
+```
+
+## Data Flow: CloneVolume
+
+```
+1. User creates PVC with dataSource referencing an existing PVC
+       │
+2. csi-provisioner detects dataSource, sets VolumeContentSource
+       │
+3. CSI Controller receives CreateVolume with VolumeContentSource.Volume
+       │
+4. Call PoolManager.CloneVolume(ctx, sourceVolumeID, req, syncThresholdGB)
+       │
+       ├─ Source size <= syncThreshold?
+       │
+       ├─ YES (synchronous): cp -a during call, return with cloneStatus=Complete
+       │
+       └─ NO (asynchronous):
+           ├─ Create SubVolume CR with cloneStatus=Pending
+           ├─ Return immediately (pod will wait)
+           │
+           │  (background Clone Worker)
+           ├─ Update CR: cloneStatus=InProgress
+           ├─ cp -a from source to target
+           └─ Update CR: cloneStatus=Complete or Failed
+       │
+5. NodePublishVolume gates pod access on cloneStatus=Complete
+       (kubelet retries with backoff until clone finishes)
 ```
 
 ## Volume ID Format

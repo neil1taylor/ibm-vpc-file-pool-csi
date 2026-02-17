@@ -1,10 +1,16 @@
 # Cross-Region Disaster Recovery (Phase 4d)
 
-Design document for cross-region replication of pooled file share data. This is a **specification for a future phase** -- not yet implemented.
+Design document for cross-region replication of pooled file share data.
 
-**Status:** Draft
+**Status:** Implemented (v0.5.0)
 **Depends on:** Phase 4a (Snapshots), cross-region VPC connectivity
-**Last updated:** 2026-02-16
+**Last updated:** 2026-02-17
+
+> **Implementation note:** The implementation simplifies several aspects of this design:
+> - Uses `CopyDir` (directory copy) instead of rsync for data transfer
+> - Uses `time.Duration` schedule intervals instead of cron expressions
+> - Destination is specified via `DestinationNFSServer` IP rather than a pool reference with share mappings
+> - Quiesce hooks are deferred to a future phase
 
 ---
 
@@ -230,7 +236,7 @@ Replication cycle with quiesce:
 
 ---
 
-## Proposed Architecture
+## Architecture
 
 ### Design Principles
 

@@ -2,9 +2,11 @@
 
 Design document for coordinated multi-PVC snapshots within the IBM VPC File Pool CSI Driver.
 
-**Status:** Design
+**Status:** Implemented (v0.4.0)
 **Depends on:** Phase 4a (Volume Snapshots) -- must be complete
 **Kubernetes:** 1.27+ (VolumeGroupSnapshot API, alpha)
+
+> **Implementation note:** Quiesce hooks (`PreSnapshotHooks`/`PostSnapshotHooks`) are defined in the CRD but hook execution is deferred to a future phase. The current implementation supports best-effort coordinated snapshots (sequential copy without application quiesce).
 
 ---
 
@@ -181,7 +183,7 @@ func (d *Driver) ControllerGetCapabilities(...) {
 
 ---
 
-## Proposed Architecture
+## Architecture
 
 ### Component Interaction
 

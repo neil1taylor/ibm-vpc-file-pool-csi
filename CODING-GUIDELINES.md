@@ -64,6 +64,11 @@ test/          → Integration and e2e tests (unit tests live next to code).
 return fmt.Errorf("failed to create subdirectory %s on share %s: %w", subDir, shareID, err)
 
 // GOOD: Define sentinel errors for expected conditions
+// All current sentinel errors (pkg/pool/manager.go):
+//   ErrPoolNotFound, ErrPoolExhausted, ErrShareCreationPending,
+//   ErrSubVolumeNotFound, ErrInsufficientShareCapacity,
+//   ErrSnapshotNotFound, ErrSnapshotAlreadyExists, ErrSourceNotFound,
+//   ErrGroupSnapshotNotFound, ErrGroupSnapshotFailed, ErrEmptySourceList
 var ErrPoolExhausted = errors.New("pool has no available capacity")
 
 // GOOD: Check with errors.Is
@@ -400,6 +405,72 @@ var (
             Buckets: prometheus.ExponentialBuckets(0.1, 2, 15), // 100ms to 1638s
         },
         []string{"operation"},
+    )
+
+    // Phase 4 metrics: snapshots
+    snapshotsTotal = prometheus.NewCounterVec(
+        prometheus.CounterOpts{
+            Name: "pool_csi_snapshots_total",
+            Help: "Total snapshot operations",
+        },
+        []string{"pool", "status"},
+    )
+    snapshotDuration = prometheus.NewHistogramVec(
+        prometheus.HistogramOpts{
+            Name:    "pool_csi_snapshot_duration_seconds",
+            Help:    "Time to create a snapshot",
+            Buckets: prometheus.ExponentialBuckets(0.1, 2, 15),
+        },
+        []string{"pool"},
+    )
+
+    // Phase 4 metrics: clones
+    clonesTotal = prometheus.NewCounterVec(
+        prometheus.CounterOpts{
+            Name: "pool_csi_clones_total",
+            Help: "Total clone operations",
+        },
+        []string{"pool", "status"},
+    )
+    clonesPending = prometheus.NewGaugeVec(
+        prometheus.GaugeOpts{
+            Name: "pool_csi_clones_pending",
+            Help: "Number of clones in Pending state",
+        },
+        []string{"pool"},
+    )
+
+    // Phase 4 metrics: group snapshots
+    groupSnapshotsTotal = prometheus.NewCounterVec(
+        prometheus.CounterOpts{
+            Name: "pool_csi_group_snapshots_total",
+            Help: "Total group snapshot operations",
+        },
+        []string{"pool", "status"},
+    )
+    groupSnapshotInconsistencyWindow = prometheus.NewHistogramVec(
+        prometheus.HistogramOpts{
+            Name:    "pool_csi_group_snapshot_inconsistency_window_seconds",
+            Help:    "Time between first and last copy in group snapshot",
+            Buckets: prometheus.ExponentialBuckets(0.1, 2, 15),
+        },
+        []string{"pool"},
+    )
+
+    // Phase 4 metrics: replication
+    replicationRPO = prometheus.NewGaugeVec(
+        prometheus.GaugeOpts{
+            Name: "pool_csi_replication_rpo_seconds",
+            Help: "Current RPO in seconds (now - last sync)",
+        },
+        []string{"policy", "source_pool"},
+    )
+    replicationSyncTotal = prometheus.NewCounterVec(
+        prometheus.CounterOpts{
+            Name: "pool_csi_replication_sync_total",
+            Help: "Total sync attempts",
+        },
+        []string{"policy", "source_pool", "result"},
     )
 )
 ```

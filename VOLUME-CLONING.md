@@ -1,5 +1,7 @@
 # Volume Cloning Design (Phase 4b)
 
+**Status:** Implemented (v0.4.0)
+
 ## Overview
 
 Volume cloning creates a new SubVolume that is a copy of an existing one. In the pool model, a SubVolume is a subdirectory under `/pvcs/pvc-{uuid}` on a shared VPC NFS file share. Cloning is therefore a directory copy (`cp -a`) from one subdirectory to another.
@@ -175,7 +177,7 @@ This is the same consistency level as `rsync` against a live NFS mount.
 
 ---
 
-## Proposed Architecture
+## Architecture
 
 The core challenge is that `cp -a` of a large SubVolume can take minutes, but the CSI `CreateVolume` call should not block the provisioner indefinitely. The design uses a dual-path approach: synchronous for small volumes, asynchronous for large ones.
 

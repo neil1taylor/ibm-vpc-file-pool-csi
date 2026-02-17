@@ -432,6 +432,155 @@ kubectl get subvolume pvc-abc123 -o yaml
 
 ---
 
+## Snapshots
+
+### Creating a Snapshot
+
+Create a `VolumeSnapshot` referencing an existing PVC to capture a point-in-time copy of the data:
+
+```yaml
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata:
+  name: my-app-snapshot
+  namespace: default
+spec:
+  volumeSnapshotClassName: ibm-vpc-file-pool-snapclass
+  source:
+    persistentVolumeClaimName: my-app-data
+```
+
+```bash
+kubectl apply -f snapshot.yaml
+
+# Check snapshot status
+kubectl get volumesnapshot my-app-snapshot
+```
+
+The snapshot creates a directory copy under `/pvcs/.snapshots/` on the same share. Snapshot creation time is proportional to data size.
+
+### Restoring from a Snapshot
+
+Create a new PVC with `dataSource` referencing the snapshot:
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: my-app-restored
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ibm-vpc-file-pool
+  resources:
+    requests:
+      storage: 5Gi
+  dataSource:
+    name: my-app-snapshot
+    kind: VolumeSnapshot
+    apiGroup: snapshot.storage.k8s.io
+```
+
+### Deleting a Snapshot
+
+```bash
+kubectl delete volumesnapshot my-app-snapshot
+```
+
+This removes the snapshot directory and frees capacity on the share.
+
+---
+
+## Volume Cloning
+
+### Cloning a PVC
+
+Create a new PVC with `dataSource` referencing an existing PVC:
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: my-app-clone
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ibm-vpc-file-pool
+  resources:
+    requests:
+      storage: 5Gi          # Must be >= source PVC size
+  dataSource:
+    kind: PersistentVolumeClaim
+    name: my-app-data        # Source PVC in the same namespace
+```
+
+```bash
+kubectl apply -f clone-pvc.yaml
+
+# Check clone status
+kubectl get subvolumes -l storage.ibmcloud.io/clone-source
+```
+
+**Small volumes** (default: <= 10 GB) clone synchronously — the PVC binds immediately with data ready.
+
+**Large volumes** clone asynchronously — the PVC binds immediately but pods wait in `ContainerCreating` until the background copy completes. Monitor progress via the SubVolume CR's `cloneStatus` field.
+
+### Clone Consistency
+
+- **Best practice:** Scale down the application or pause writes before cloning for full consistency.
+- If the source is being actively written to, each file is individually consistent (NFS close-to-open), but cross-file relationships are not guaranteed.
+- **Do not clone running VM disk images** — the clone will be corrupt.
+
+---
+
+## Volume Group Snapshots
+
+Group snapshots coordinate the snapshot of multiple related PVCs in a single operation.
+
+### Creating a Group Snapshot
+
+```yaml
+apiVersion: storage.ibmcloud.io/v1alpha1
+kind: VolumeGroupSnapshot
+metadata:
+  name: myapp-group-snap
+spec:
+  poolName: general-purpose
+  sourcePVCs:
+    - pvcName: myapp-data
+      pvcNamespace: default
+    - pvcName: myapp-wal
+      pvcNamespace: default
+    - pvcName: myapp-config
+      pvcNamespace: default
+  failurePolicy: Abort          # Abort or Continue
+```
+
+```bash
+kubectl apply -f group-snapshot.yaml
+
+# Check group snapshot status
+kubectl get volumegroupsnapshots myapp-group-snap
+```
+
+### Group Snapshot Consistency
+
+Without quiesce hooks (current implementation), group snapshots provide **best-effort coordinated** consistency — SubVolumes are copied sequentially with an inconsistency window equal to the total copy duration.
+
+For workloads requiring cross-PVC consistency, scale down the application before taking the group snapshot.
+
+### Deleting a Group Snapshot
+
+```bash
+kubectl delete volumegroupsnapshot myapp-group-snap
+```
+
+This deletes all member snapshots and frees the associated capacity.
+
+---
+
 ## Coexistence with the Stock IBM CSI Driver
 
 This driver runs alongside the stock `ibm-vpc-file-csi-driver` without conflict. They use different provisioner names:
