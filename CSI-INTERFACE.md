@@ -32,14 +32,14 @@ Minimal implementation. Every CSI driver must implement this.
 ```go
 // pkg/driver/identity.go
 
-func (d *Driver) GetPluginInfo(ctx context.Context, req *csi.GetPluginInfoRequest) (*csi.GetPluginInfoResponse, error) {
+func (d *Driver) GetPluginInfo(_ context.Context, _ *csi.GetPluginInfoRequest) (*csi.GetPluginInfoResponse, error) {
     return &csi.GetPluginInfoResponse{
         Name:          DriverName,
         VendorVersion: d.version,
     }, nil
 }
 
-func (d *Driver) GetPluginCapabilities(ctx context.Context, req *csi.GetPluginCapabilitiesRequest) (*csi.GetPluginCapabilitiesResponse, error) {
+func (d *Driver) GetPluginCapabilities(_ context.Context, _ *csi.GetPluginCapabilitiesRequest) (*csi.GetPluginCapabilitiesResponse, error) {
     return &csi.GetPluginCapabilitiesResponse{
         Capabilities: []*csi.PluginCapability{
             {
@@ -60,10 +60,17 @@ func (d *Driver) GetPluginCapabilities(ctx context.Context, req *csi.GetPluginCa
     }, nil
 }
 
-func (d *Driver) Probe(ctx context.Context, req *csi.ProbeRequest) (*csi.ProbeResponse, error) {
+func (d *Driver) Probe(_ context.Context, _ *csi.ProbeRequest) (*csi.ProbeResponse, error) {
     return &csi.ProbeResponse{}, nil
 }
 ```
+
+**Plugin capabilities:**
+
+| Capability | Purpose |
+|-----------|---------|
+| `CONTROLLER_SERVICE` | Driver has a controller component (not node-only) |
+| `VOLUME_ACCESSIBILITY_CONSTRAINTS` | Driver reports topology (zone) for volume placement |
 
 ---
 
@@ -72,23 +79,35 @@ func (d *Driver) Probe(ctx context.Context, req *csi.ProbeRequest) (*csi.ProbeRe
 ### Capabilities
 
 ```go
-func (d *Driver) ControllerGetCapabilities(ctx context.Context, req *csi.ControllerGetCapabilitiesRequest) (*csi.ControllerGetCapabilitiesResponse, error) {
+func (d *Driver) ControllerGetCapabilities(_ context.Context, _ *csi.ControllerGetCapabilitiesRequest) (*csi.ControllerGetCapabilitiesResponse, error) {
     return &csi.ControllerGetCapabilitiesResponse{
         Capabilities: []*csi.ControllerServiceCapability{
-            newCap(csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME),
-            newCap(csi.ControllerServiceCapability_RPC_EXPAND_VOLUME),
+            newControllerCap(csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME),
+            newControllerCap(csi.ControllerServiceCapability_RPC_EXPAND_VOLUME),
+            newControllerCap(csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT),
+            newControllerCap(csi.ControllerServiceCapability_RPC_LIST_SNAPSHOTS),
+            newControllerCap(csi.ControllerServiceCapability_RPC_CLONE_VOLUME),
             // We do NOT support:
             // - PUBLISH_UNPUBLISH_VOLUME (no attach needed for NFS)
-            // - CREATE_DELETE_SNAPSHOT (future work)
-            // - LIST_VOLUMES (optional, implement if useful for debugging)
+            // - LIST_VOLUMES (optional, not needed)
         },
     }, nil
 }
 ```
 
+**Advertised capabilities:**
+
+| Capability | Purpose |
+|-----------|---------|
+| `CREATE_DELETE_VOLUME` | Standard PVC create/delete via SubVolume CRs |
+| `EXPAND_VOLUME` | Online resize of SubVolume quota |
+| `CREATE_DELETE_SNAPSHOT` | Directory-level snapshots of SubVolumes |
+| `LIST_SNAPSHOTS` | Enumerate snapshots with filtering and pagination |
+| `CLONE_VOLUME` | Create a new volume pre-populated from an existing volume |
+
 ### CreateVolume
 
-This is the most critical method. It MUST be idempotent.
+This is the most critical method. It MUST be idempotent. Supports three creation paths: fresh allocation, restore from snapshot, and clone from existing volume.
 
 ```go
 func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
@@ -105,18 +124,19 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 
     // 2. Extract requested size
     requiredBytes := req.GetCapacityRange().GetRequiredBytes()
-    requiredGB := (requiredBytes + (1<<30 - 1)) / (1 << 30) // Round up to GB
+    requiredGB := (requiredBytes + (1<<30 - 1)) / (1 << 30)
     if requiredGB < 1 {
         requiredGB = 1
     }
 
     // 3. Check for idempotency — does a SubVolume CR already exist for this volume name?
-    existing, err := d.k8sClient.GetSubVolume(ctx, req.GetName())
-    if err == nil && existing != nil {
-        // Already exists — return the same response (idempotent)
-        return &csi.CreateVolumeResponse{
-            Volume: subVolumeToCSIVolume(existing),
-        }, nil
+    if d.k8sClient != nil {
+        existing, err := d.k8sClient.GetSubVolume(ctx, req.GetName())
+        if err == nil && existing != nil {
+            return &csi.CreateVolumeResponse{
+                Volume: subVolumeToCSIVolume(existing),
+            }, nil
+        }
     }
 
     // 4. Extract topology preference (zone)
@@ -130,7 +150,17 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
         }
     }
 
-    // 5. Delegate to Pool Manager
+    // 5. Check for content source (snapshot restore or volume clone)
+    if req.GetVolumeContentSource() != nil {
+        if snapSource := req.GetVolumeContentSource().GetSnapshot(); snapSource != nil {
+            return d.createVolumeFromSnapshot(ctx, req, snapSource.GetSnapshotId(), poolName, requiredGB, zone)
+        }
+        if volSource := req.GetVolumeContentSource().GetVolume(); volSource != nil {
+            return d.createVolumeFromClone(ctx, req, volSource.GetVolumeId(), poolName, requiredGB, zone)
+        }
+    }
+
+    // 6. Delegate to Pool Manager (fresh allocation)
     allocReq := pool.AllocationRequest{
         PVName:       req.GetName(),
         PVCName:      params["csi.storage.k8s.io/pvc/name"],
@@ -138,6 +168,7 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
         PoolName:     poolName,
         RequestedGB:  requiredGB,
         Zone:         zone,
+        Tier:         params["tier"],
         UID:          parseOptionalInt64(params["uid"]),
         GID:          parseOptionalInt64(params["gid"]),
         Permissions:  params["permissions"],
@@ -145,33 +176,122 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 
     result, err := d.poolManager.Allocate(ctx, allocReq)
     if err != nil {
-        // Map pool errors to CSI gRPC codes
         switch {
         case errors.Is(err, pool.ErrPoolNotFound):
             return nil, status.Errorf(codes.NotFound, "pool %q not found", poolName)
         case errors.Is(err, pool.ErrPoolExhausted):
             return nil, status.Errorf(codes.ResourceExhausted, "pool %q has no available capacity", poolName)
         case errors.Is(err, pool.ErrShareCreationPending):
-            // A new share is being created — tell the provisioner to retry
             return nil, status.Errorf(codes.Unavailable, "pool %q is expanding, retry shortly", poolName)
         default:
             return nil, status.Errorf(codes.Internal, "allocation failed: %v", err)
         }
     }
 
-    // 6. Build volume ID
+    // 7. Build volume ID and context
     volumeID := fmt.Sprintf("%s/%s/%s", poolName, result.ShareID, req.GetName())
 
-    // 7. Return response
+    volCtx := map[string]string{
+        "server":  result.MountTargetIP,
+        "share":   result.SharePath,
+        "subDir":  result.SubPath,
+        "pool":    poolName,
+        "shareID": result.ShareID,
+    }
+    if result.Permissions != "" {
+        volCtx["permissions"] = result.Permissions
+    }
+    if result.UID != nil {
+        volCtx["uid"] = strconv.FormatInt(*result.UID, 10)
+    }
+    if result.GID != nil {
+        volCtx["gid"] = strconv.FormatInt(*result.GID, 10)
+    }
+    // Cross-zone support: add server.<zone> keys for each zone with a mount target.
+    // The node agent selects the IP matching its own zone for NFS mounts.
+    for z, ip := range result.MountTargets {
+        volCtx["server."+z] = ip               // e.g., "server.us-south-1": "10.240.1.5"
+    }
+
+    // 8. Build accessible topology
+    var topologies []*csi.Topology
+    if len(result.AccessibleZones) > 0 {
+        for _, z := range result.AccessibleZones {
+            topologies = append(topologies, &csi.Topology{
+                Segments: map[string]string{
+                    "topology.kubernetes.io/zone": z,
+                },
+            })
+        }
+    } else {
+        topologies = []*csi.Topology{
+            {
+                Segments: map[string]string{
+                    "topology.kubernetes.io/zone": zone,
+                },
+            },
+        }
+    }
+
+    return &csi.CreateVolumeResponse{
+        Volume: &csi.Volume{
+            VolumeId:           volumeID,
+            CapacityBytes:      requiredGB * (1 << 30),
+            VolumeContext:      volCtx,
+            AccessibleTopology: topologies,
+        },
+    }, nil
+}
+```
+
+#### CreateVolume from Snapshot (Restore)
+
+When `VolumeContentSource` contains a snapshot reference, the controller delegates to `poolManager.RestoreSnapshot`. This copies the snapshot directory contents into a new SubVolume allocation. The response includes a `ContentSource` pointing back to the source snapshot.
+
+```go
+func (d *Driver) createVolumeFromSnapshot(ctx context.Context, req *csi.CreateVolumeRequest, snapshotID, poolName string, requiredGB int64, zone string) (*csi.CreateVolumeResponse, error) {
+    _, _, snapshotName, err := parseVolumeID(snapshotID)
+    if err != nil {
+        return nil, status.Errorf(codes.InvalidArgument, "invalid snapshot ID: %v", err)
+    }
+
+    params := req.GetParameters()
+    allocReq := pool.AllocationRequest{
+        PVName:       req.GetName(),
+        PVCName:      params["csi.storage.k8s.io/pvc/name"],
+        PVCNamespace: params["csi.storage.k8s.io/pvc/namespace"],
+        PoolName:     poolName,
+        RequestedGB:  requiredGB,
+        Zone:         zone,
+        Tier:         params["tier"],
+        UID:          parseOptionalInt64(params["uid"]),
+        GID:          parseOptionalInt64(params["gid"]),
+        Permissions:  params["permissions"],
+    }
+
+    result, err := d.poolManager.RestoreSnapshot(ctx, snapshotName, allocReq)
+    if err != nil {
+        switch {
+        case errors.Is(err, pool.ErrSnapshotNotFound):
+            return nil, status.Errorf(codes.NotFound, "snapshot %q not found", snapshotName)
+        case errors.Is(err, pool.ErrPoolExhausted):
+            return nil, status.Errorf(codes.ResourceExhausted, "pool %q has no available capacity", poolName)
+        default:
+            return nil, status.Errorf(codes.Internal, "restore snapshot failed: %v", err)
+        }
+    }
+
+    volumeID := fmt.Sprintf("%s/%s/%s", poolName, result.ShareID, req.GetName())
+    // Response includes ContentSource referencing the snapshot
     return &csi.CreateVolumeResponse{
         Volume: &csi.Volume{
             VolumeId:      volumeID,
             CapacityBytes: requiredGB * (1 << 30),
-            VolumeContext: buildVolumeContext(result, poolName),
-            AccessibleTopology: []*csi.Topology{
-                {
-                    Segments: map[string]string{
-                        "topology.kubernetes.io/zone": zone,
+            VolumeContext: map[string]string{...},
+            ContentSource: &csi.VolumeContentSource{
+                Type: &csi.VolumeContentSource_Snapshot{
+                    Snapshot: &csi.VolumeContentSource_SnapshotSource{
+                        SnapshotId: snapshotID,
                     },
                 },
             },
@@ -180,35 +300,87 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 }
 ```
 
-**VolumeContext helper:**
+**Error mapping:**
+
+| Pool Error | gRPC Code | Meaning |
+|-----------|-----------|---------|
+| `ErrSnapshotNotFound` | `NOT_FOUND` | Source snapshot does not exist |
+| `ErrPoolExhausted` | `RESOURCE_EXHAUSTED` | No capacity in pool for the new volume |
+
+#### CreateVolume from Clone
+
+When `VolumeContentSource` contains a volume reference, the controller delegates to `poolManager.CloneVolume`. The clone behavior depends on the source volume size relative to a configurable threshold:
+
+- **Small volumes** (below `cloneSyncThresholdGB`, default 10 GB): The directory copy completes synchronously before CreateVolume returns.
+- **Large volumes** (at or above the threshold): The SubVolume CR is created with `cloneStatus=Pending` and a background worker copies the data asynchronously. The node agent gates the mount until the clone completes (see [NodePublishVolume Clone Gate](#nodepublishvolume-clone-gate)).
 
 ```go
-func buildVolumeContext(result *pool.AllocationResult, poolName string) map[string]string {
-    vc := map[string]string{
-        "server":  result.MountTargetIP,     // Primary (home zone) IP — backward compat
-        "share":   result.SharePath,
-        "subDir":  result.SubPath,
-        "pool":    poolName,
-        "shareID": result.ShareID,
+func (d *Driver) createVolumeFromClone(ctx context.Context, req *csi.CreateVolumeRequest, sourceVolumeID, poolName string, requiredGB int64, zone string) (*csi.CreateVolumeResponse, error) {
+    params := req.GetParameters()
+
+    syncThreshold := int64(10) // default 10 GB
+    if t := params["cloneSyncThresholdGB"]; t != "" {
+        if parsed, err := strconv.ParseInt(t, 10, 64); err == nil {
+            syncThreshold = parsed
+        }
     }
-    // Cross-zone support: add server.<zone> keys for each zone with a mount target.
-    // The node agent selects the IP matching its own zone for NFS mounts.
-    for zone, ip := range result.ZoneMountTargetIPs {
-        vc["server."+zone] = ip               // e.g., "server.us-south-1": "10.240.1.5"
+
+    allocReq := pool.AllocationRequest{
+        PVName:       req.GetName(),
+        PVCName:      params["csi.storage.k8s.io/pvc/name"],
+        PVCNamespace: params["csi.storage.k8s.io/pvc/namespace"],
+        PoolName:     poolName,
+        RequestedGB:  requiredGB,
+        Zone:         zone,
+        Tier:         params["tier"],
+        UID:          parseOptionalInt64(params["uid"]),
+        GID:          parseOptionalInt64(params["gid"]),
+        Permissions:  params["permissions"],
     }
-    // Optional fields — passed through to NodePublishVolume for subdirectory creation
-    if result.Permissions != "" {
-        vc["permissions"] = result.Permissions
+
+    result, err := d.poolManager.CloneVolume(ctx, sourceVolumeID, allocReq, syncThreshold)
+    if err != nil {
+        switch {
+        case errors.Is(err, pool.ErrSourceNotFound):
+            return nil, status.Errorf(codes.NotFound, "source volume not found")
+        case errors.Is(err, pool.ErrPoolExhausted):
+            return nil, status.Errorf(codes.ResourceExhausted, "pool %q has no available capacity", poolName)
+        default:
+            return nil, status.Errorf(codes.Internal, "clone failed: %v", err)
+        }
     }
-    if result.UID != nil {
-        vc["uid"] = strconv.FormatInt(*result.UID, 10)
-    }
-    if result.GID != nil {
-        vc["gid"] = strconv.FormatInt(*result.GID, 10)
-    }
-    return vc
+
+    volumeID := fmt.Sprintf("%s/%s/%s", poolName, result.ShareID, req.GetName())
+    // Response includes ContentSource referencing the source volume
+    return &csi.CreateVolumeResponse{
+        Volume: &csi.Volume{
+            VolumeId:      volumeID,
+            CapacityBytes: requiredGB * (1 << 30),
+            VolumeContext: map[string]string{...},
+            ContentSource: &csi.VolumeContentSource{
+                Type: &csi.VolumeContentSource_Volume{
+                    Volume: &csi.VolumeContentSource_VolumeSource{
+                        VolumeId: sourceVolumeID,
+                    },
+                },
+            },
+        },
+    }, nil
 }
 ```
+
+**StorageClass parameters for cloning:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `cloneSyncThresholdGB` | `10` | Volumes smaller than this are cloned synchronously; larger ones use the async background worker |
+
+**Error mapping:**
+
+| Pool Error | gRPC Code | Meaning |
+|-----------|-----------|---------|
+| `ErrSourceNotFound` | `NOT_FOUND` | Source volume does not exist |
+| `ErrPoolExhausted` | `RESOURCE_EXHAUSTED` | No capacity in pool for the clone |
 
 ### DeleteVolume
 
@@ -306,19 +478,333 @@ func (d *Driver) ValidateVolumeCapabilities(ctx context.Context, req *csi.Valida
 }
 ```
 
+### CreateSnapshot
+
+Creates a directory-level copy of a SubVolume's data. The snapshot is stored as a separate directory on the same NFS share and tracked by a Snapshot CR in Kubernetes. The snapshot ID follows the same `{pool}/{share}/{name}` format as volume IDs.
+
+```go
+func (d *Driver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotRequest) (*csi.CreateSnapshotResponse, error) {
+    if req.GetName() == "" {
+        return nil, status.Error(codes.InvalidArgument, "snapshot name is required")
+    }
+    if req.GetSourceVolumeId() == "" {
+        return nil, status.Error(codes.InvalidArgument, "source volume ID is required")
+    }
+
+    result, err := d.poolManager.CreateSnapshot(ctx, req.GetName(), req.GetSourceVolumeId(), req.GetParameters())
+    if err != nil {
+        switch {
+        case errors.Is(err, pool.ErrSourceNotFound):
+            return nil, status.Errorf(codes.NotFound, "source volume not found")
+        default:
+            return nil, status.Errorf(codes.Internal, "create snapshot failed: %v", err)
+        }
+    }
+
+    snapshotID := fmt.Sprintf("%s/%s/%s", result.PoolName, result.ShareID, result.SnapshotName)
+
+    return &csi.CreateSnapshotResponse{
+        Snapshot: &csi.Snapshot{
+            SnapshotId:     snapshotID,
+            SourceVolumeId: req.GetSourceVolumeId(),
+            SizeBytes:      result.SizeBytes,
+            CreationTime:   timestamppb.New(result.CreationTime),
+            ReadyToUse:     result.ReadyToUse,
+        },
+    }, nil
+}
+```
+
+**Snapshot ID format:** `{pool-name}/{share-vpc-id}/{snapshot-name}` -- reuses the same 3-part format as volume IDs.
+
+**Error mapping:**
+
+| Pool Error | gRPC Code | Meaning |
+|-----------|-----------|---------|
+| `ErrSourceNotFound` | `NOT_FOUND` | Source volume does not exist |
+
+### DeleteSnapshot
+
+Removes a snapshot directory from the NFS share and deletes its Snapshot CR. Idempotent -- returns success if the snapshot is already gone.
+
+```go
+func (d *Driver) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotRequest) (*csi.DeleteSnapshotResponse, error) {
+    snapshotID := req.GetSnapshotId()
+    if snapshotID == "" {
+        return nil, status.Error(codes.InvalidArgument, "snapshot ID is required")
+    }
+
+    _, _, snapshotName, err := parseVolumeID(snapshotID)
+    if err != nil {
+        return nil, status.Errorf(codes.InvalidArgument, "invalid snapshot ID: %v", err)
+    }
+
+    err = d.poolManager.DeleteSnapshot(ctx, snapshotName)
+    if err != nil {
+        if errors.Is(err, pool.ErrSnapshotNotFound) {
+            return &csi.DeleteSnapshotResponse{}, nil  // idempotent
+        }
+        return nil, status.Errorf(codes.Internal, "delete snapshot failed: %v", err)
+    }
+
+    return &csi.DeleteSnapshotResponse{}, nil
+}
+```
+
+### ListSnapshots
+
+Lists snapshots with support for single-snapshot lookup by ID, filtering by source volume ID, and pagination via `MaxEntries` / `StartingToken`.
+
+```go
+func (d *Driver) ListSnapshots(ctx context.Context, req *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
+    // Single snapshot lookup by ID
+    if req.GetSnapshotId() != "" {
+        poolName, shareID, snapshotName, err := parseVolumeID(req.GetSnapshotId())
+        if err != nil {
+            return &csi.ListSnapshotsResponse{}, nil
+        }
+
+        if d.k8sClient != nil {
+            snap, err := d.k8sClient.GetSnapshot(ctx, snapshotName)
+            if err != nil {
+                return &csi.ListSnapshotsResponse{}, nil
+            }
+
+            sourceVolumeID := fmt.Sprintf("%s/%s/%s", snap.Spec.PoolName, snap.Spec.ShareID, snap.Spec.SourceSubVolume)
+            return &csi.ListSnapshotsResponse{
+                Entries: []*csi.ListSnapshotsResponse_Entry{
+                    {
+                        Snapshot: &csi.Snapshot{
+                            SnapshotId:     fmt.Sprintf("%s/%s/%s", poolName, shareID, snapshotName),
+                            SourceVolumeId: sourceVolumeID,
+                            SizeBytes:      snap.Spec.SizeGB * (1 << 30),
+                            CreationTime:   timestamppb.New(snap.Status.CreationTime.Time),
+                            ReadyToUse:     snap.Status.ReadyToUse,
+                        },
+                    },
+                },
+            }, nil
+        }
+        return &csi.ListSnapshotsResponse{}, nil
+    }
+
+    // Filter by source volume
+    results, err := d.poolManager.ListSnapshots(ctx, req.GetSourceVolumeId())
+    if err != nil {
+        return nil, status.Errorf(codes.Internal, "list snapshots failed: %v", err)
+    }
+
+    var entries []*csi.ListSnapshotsResponse_Entry
+    for _, r := range results {
+        snapshotID := fmt.Sprintf("%s/%s/%s", r.PoolName, r.ShareID, r.SnapshotName)
+        entries = append(entries, &csi.ListSnapshotsResponse_Entry{
+            Snapshot: &csi.Snapshot{
+                SnapshotId:     snapshotID,
+                SourceVolumeId: req.GetSourceVolumeId(),
+                SizeBytes:      r.SizeBytes,
+                CreationTime:   timestamppb.New(r.CreationTime),
+                ReadyToUse:     r.ReadyToUse,
+            },
+        })
+    }
+
+    // Pagination
+    maxEntries := int(req.GetMaxEntries())
+    startIdx := 0
+    if req.GetStartingToken() != "" {
+        parsed, err := strconv.Atoi(req.GetStartingToken())
+        if err == nil {
+            startIdx = parsed
+        }
+    }
+    if startIdx > len(entries) {
+        startIdx = len(entries)
+    }
+    entries = entries[startIdx:]
+
+    nextToken := ""
+    if maxEntries > 0 && len(entries) > maxEntries {
+        entries = entries[:maxEntries]
+        nextToken = strconv.Itoa(startIdx + maxEntries)
+    }
+
+    return &csi.ListSnapshotsResponse{
+        Entries:   entries,
+        NextToken: nextToken,
+    }, nil
+}
+```
+
+**Pagination:** The `StartingToken` is an integer offset into the snapshot list. When `MaxEntries` is set and there are more results, `NextToken` returns the next offset for the caller.
+
+### CreateVolumeGroupSnapshot
+
+Creates coordinated snapshots for multiple volumes in a single operation. All member volumes must be in the same pool. Each member gets its own individual Snapshot CR, and a parent VolumeGroupSnapshot CR tracks the group.
+
+```go
+func (d *Driver) CreateVolumeGroupSnapshot(ctx context.Context, req *csi.CreateVolumeGroupSnapshotRequest) (*csi.CreateVolumeGroupSnapshotResponse, error) {
+    if req.GetName() == "" {
+        return nil, status.Error(codes.InvalidArgument, "group snapshot name is required")
+    }
+    if len(req.GetSourceVolumeIds()) == 0 {
+        return nil, status.Error(codes.InvalidArgument, "at least one source volume ID is required")
+    }
+
+    params := req.GetParameters()
+    poolName := params["pool"]
+    // Falls back to extracting pool name from the first source volume ID
+    failurePolicy := params["failurePolicy"]  // "Abort" (default) or "Continue"
+
+    groupReq := pool.GroupSnapshotRequest{
+        GroupName:       req.GetName(),
+        PoolName:        poolName,
+        SourceVolumeIDs: req.GetSourceVolumeIds(),
+        CopyOrder:       parseCSV(params["copyOrder"]),
+        FailurePolicy:   failurePolicy,
+        Parameters:      params,
+    }
+
+    result, err := d.poolManager.CreateVolumeGroupSnapshot(ctx, groupReq)
+    if err != nil {
+        switch {
+        case errors.Is(err, pool.ErrEmptySourceList):
+            return nil, status.Error(codes.InvalidArgument, "source volume list is empty")
+        case errors.Is(err, pool.ErrSourceNotFound):
+            return nil, status.Errorf(codes.NotFound, "source volume not found: %v", err)
+        case errors.Is(err, pool.ErrGroupSnapshotFailed):
+            return nil, status.Errorf(codes.Internal, "group snapshot failed: %v", err)
+        default:
+            return nil, status.Errorf(codes.Internal, "create group snapshot failed: %v", err)
+        }
+    }
+
+    groupSnapshotID := fmt.Sprintf("%s/%s", poolName, req.GetName())
+
+    // Each member snapshot gets its own entry with GroupSnapshotId set
+    var snapshots []*csi.Snapshot
+    for _, member := range result.Members {
+        snapshotID := fmt.Sprintf("%s/%s/%s", member.PoolName, member.ShareID, member.SnapshotName)
+        snapshots = append(snapshots, &csi.Snapshot{
+            SnapshotId:      snapshotID,
+            SourceVolumeId:  member.SourceVolumeID,
+            SizeBytes:       member.SizeBytes,
+            CreationTime:    timestamppb.New(member.CreationTime),
+            ReadyToUse:      member.ReadyToUse,
+            GroupSnapshotId: groupSnapshotID,
+        })
+    }
+
+    return &csi.CreateVolumeGroupSnapshotResponse{
+        GroupSnapshot: &csi.VolumeGroupSnapshot{
+            GroupSnapshotId: groupSnapshotID,
+            Snapshots:       snapshots,
+            CreationTime:    timestamppb.New(result.CreationTime),
+            ReadyToUse:      result.ReadyToUse,
+        },
+    }, nil
+}
+```
+
+**Group snapshot ID format:** `{pool-name}/{group-name}` -- a 2-part format (unlike the 3-part volume/snapshot IDs).
+
+**Parameters:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `pool` | *(extracted from first source volume)* | Pool that contains all source volumes |
+| `failurePolicy` | `Abort` | `Abort` rolls back all snapshots on first failure; `Continue` skips failed members |
+| `copyOrder` | *(empty)* | Comma-separated SubVolume names specifying the order in which snapshots are created |
+
+**Error mapping:**
+
+| Pool Error | gRPC Code | Meaning |
+|-----------|-----------|---------|
+| `ErrEmptySourceList` | `INVALID_ARGUMENT` | No source volume IDs provided |
+| `ErrSourceNotFound` | `NOT_FOUND` | One of the source volumes does not exist |
+| `ErrGroupSnapshotFailed` | `INTERNAL` | One or more member snapshots failed (with `Abort` policy) |
+
+### DeleteVolumeGroupSnapshot
+
+Deletes a group snapshot and all its member snapshots. The group snapshot ID is parsed to extract the group name, and the pool manager removes the VolumeGroupSnapshot CR and all associated individual Snapshot CRs and directories.
+
+```go
+func (d *Driver) DeleteVolumeGroupSnapshot(ctx context.Context, req *csi.DeleteVolumeGroupSnapshotRequest) (*csi.DeleteVolumeGroupSnapshotResponse, error) {
+    groupSnapshotID := req.GetGroupSnapshotId()
+    if groupSnapshotID == "" {
+        return nil, status.Error(codes.InvalidArgument, "group snapshot ID is required")
+    }
+
+    // Parse group snapshot ID: {pool-name}/{group-name}
+    groupName := groupSnapshotID
+    parts := splitVolumeID(groupSnapshotID)
+    if len(parts) >= 2 {
+        groupName = parts[len(parts)-1]
+    }
+
+    err := d.poolManager.DeleteVolumeGroupSnapshot(ctx, groupName)
+    if err != nil {
+        return nil, status.Errorf(codes.Internal, "delete group snapshot failed: %v", err)
+    }
+
+    return &csi.DeleteVolumeGroupSnapshotResponse{}, nil
+}
+```
+
+### GetVolumeGroupSnapshot
+
+Fetches group snapshot details from the VolumeGroupSnapshot CR in Kubernetes. Returns the group status and all member snapshots that are in the `Ready` phase.
+
+```go
+func (d *Driver) GetVolumeGroupSnapshot(ctx context.Context, req *csi.GetVolumeGroupSnapshotRequest) (*csi.GetVolumeGroupSnapshotResponse, error) {
+    groupSnapshotID := req.GetGroupSnapshotId()
+    if groupSnapshotID == "" {
+        return nil, status.Error(codes.InvalidArgument, "group snapshot ID is required")
+    }
+
+    // Parse ID and look up the VolumeGroupSnapshot CR
+    groupName := groupSnapshotID
+    poolName := ""
+    parts := splitVolumeID(groupSnapshotID)
+    if len(parts) >= 2 {
+        poolName = parts[0]
+        groupName = parts[len(parts)-1]
+    }
+
+    vgs, err := d.k8sClient.GetVolumeGroupSnapshot(ctx, groupName)
+    if err != nil {
+        return nil, status.Errorf(codes.NotFound, "group snapshot %q not found", groupName)
+    }
+
+    var snapshots []*csi.Snapshot
+    for _, member := range vgs.Status.Members {
+        if member.Phase == "Ready" {
+            snapshots = append(snapshots, &csi.Snapshot{
+                SnapshotId:      member.SnapshotName,
+                SourceVolumeId:  member.SubVolumeName,
+                ReadyToUse:      true,
+                GroupSnapshotId: groupSnapshotID,
+            })
+        }
+    }
+
+    return &csi.GetVolumeGroupSnapshotResponse{
+        GroupSnapshot: &csi.VolumeGroupSnapshot{
+            GroupSnapshotId: fmt.Sprintf("%s/%s", poolName, vgs.Name),
+            Snapshots:       snapshots,
+            ReadyToUse:      vgs.Status.Phase == "Complete",
+        },
+    }, nil
+}
+```
+
 ### Unimplemented Methods
 
-These must exist but return `Unimplemented`:
+These methods exist via the embedded `csi.UnimplementedControllerServer` and return `Unimplemented`:
 
 ```go
 // Not needed — NFS doesn't require controller publish (no attach)
 func (d *Driver) ControllerPublishVolume(ctx, req) { return Unimplemented }
 func (d *Driver) ControllerUnpublishVolume(ctx, req) { return Unimplemented }
-
-// Not implemented yet (future work)
-func (d *Driver) CreateSnapshot(ctx, req) { return Unimplemented }
-func (d *Driver) DeleteSnapshot(ctx, req) { return Unimplemented }
-func (d *Driver) ListSnapshots(ctx, req) { return Unimplemented }
 
 // Optional
 func (d *Driver) ListVolumes(ctx, req) { return Unimplemented }
@@ -404,7 +890,7 @@ func (d *Driver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRe
 
 ### NodePublishVolume
 
-Bind-mounts the specific subdirectory into the pod's volume path.
+Bind-mounts the specific subdirectory into the pod's volume path. Includes a clone gate that prevents mounting volumes whose background clone is still in progress.
 
 ```go
 func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
@@ -414,15 +900,38 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
     subDir := req.GetVolumeContext()["subDir"]
 
     // 2. SECURITY: Validate subDir path
-    //    Must match pattern /pvcs/pvc-<uuid> and must not contain ".."
-    if !isValidSubDir(subDir) {
+    if err := util.ValidateSubDir(subDir); err != nil {
         return nil, status.Errorf(codes.InvalidArgument, "invalid subDir path: %s", subDir)
     }
 
-    // 3. Build source path (staging mount + subdirectory)
+    // 3. Clone gate — block mount until async clone completes
+    if d.k8sClient != nil {
+        _, _, pvName, parseErr := parseVolumeID(req.GetVolumeId())
+        if parseErr == nil {
+            sv, svErr := d.k8sClient.GetSubVolume(ctx, pvName)
+            if svErr == nil && sv.Status.CloneStatus != "" {
+                switch sv.Status.CloneStatus {
+                case "Complete":
+                    // Clone is done, proceed with normal mount
+                case "Failed":
+                    errMsg := "clone failed"
+                    if sv.Status.CloneProgress != nil && sv.Status.CloneProgress.Error != "" {
+                        errMsg = sv.Status.CloneProgress.Error
+                    }
+                    return nil, status.Errorf(codes.Internal, "clone failed: %s", errMsg)
+                default:
+                    // Pending or InProgress — tell kubelet to retry
+                    return nil, status.Errorf(codes.Unavailable,
+                        "clone is %s, not ready for mount (retry later)", sv.Status.CloneStatus)
+                }
+            }
+        }
+    }
+
+    // 4. Build source path (staging mount + subdirectory)
     sourcePath := filepath.Join(stagingPath, subDir)
 
-    // 4. Create the subdirectory if it does not exist (deferred from controller)
+    // 5. Create the subdirectory if it does not exist (deferred from controller)
     if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
         perm := os.FileMode(0755)
         if p := req.GetVolumeContext()["permissions"]; p != "" {
@@ -434,30 +943,30 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
             return nil, status.Errorf(codes.Internal, "failed to create subdirectory %s: %v", subDir, err)
         }
         // Set ownership if uid/gid provided in VolumeContext
-        uid, gid := -1, -1
+        uidVal, gidVal := -1, -1
         if u := req.GetVolumeContext()["uid"]; u != "" {
-            if parsed, err := strconv.Atoi(u); err == nil {
-                uid = parsed
+            if v, err := strconv.Atoi(u); err == nil {
+                uidVal = v
             }
         }
         if g := req.GetVolumeContext()["gid"]; g != "" {
-            if parsed, err := strconv.Atoi(g); err == nil {
-                gid = parsed
+            if v, err := strconv.Atoi(g); err == nil {
+                gidVal = v
             }
         }
-        if uid >= 0 || gid >= 0 {
-            if err := os.Chown(sourcePath, uid, gid); err != nil {
-                klog.ErrorS(err, "Failed to chown subdirectory", "subDir", subDir, "uid", uid, "gid", gid)
+        if uidVal >= 0 || gidVal >= 0 {
+            if err := os.Chown(sourcePath, uidVal, gidVal); err != nil {
+                klog.ErrorS(err, "Failed to chown subdirectory", "path", sourcePath)
             }
         }
     }
 
-    // 5. Create target directory
+    // 6. Create target directory
     if err := os.MkdirAll(targetPath, 0750); err != nil {
         return nil, status.Errorf(codes.Internal, "failed to create target dir: %v", err)
     }
 
-    // 6. Bind mount
+    // 7. Bind mount
     mountOptions := []string{"bind"}
     if req.GetReadonly() {
         mountOptions = append(mountOptions, "ro")
@@ -470,6 +979,19 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
     return &csi.NodePublishVolumeResponse{}, nil
 }
 ```
+
+#### NodePublishVolume Clone Gate
+
+When a volume was created via `CLONE_VOLUME`, the background clone worker may still be copying data. The node agent checks the SubVolume CR's `status.cloneStatus` field before allowing the bind mount:
+
+| CloneStatus | Behavior |
+|-------------|----------|
+| `""` (empty) | Normal volume, no clone gate. Proceed immediately. |
+| `Complete` | Clone finished. Proceed with mount. |
+| `Pending` / `InProgress` | Return `UNAVAILABLE` so kubelet retries later. |
+| `Failed` | Return `INTERNAL` with the error message from `status.cloneProgress.error`. |
+
+This prevents pods from seeing partially-copied data. The kubelet's exponential backoff retries the mount until the clone completes.
 
 ### NodeUnpublishVolume
 
@@ -517,46 +1039,64 @@ func (d *Driver) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageVolu
 
 ### NodeGetVolumeStats
 
-Reports per-subdirectory usage. This is how `kubectl exec -- df` shows capacity info for the PVC.
+Reports per-PVC usage by looking up the SubVolume CR for the requested quota and walking the bind-mount directory to compute actual disk usage. Falls back to share-level `statfs` if the SubVolume lookup fails.
 
 ```go
 func (d *Driver) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVolumeStatsRequest) (*csi.NodeGetVolumeStatsResponse, error) {
     volumePath := req.GetVolumePath()
 
-    // Use statfs to get filesystem stats for the mount point
+    // Always get share-level stats for inode reporting and fallback
     var stat unix.Statfs_t
     if err := unix.Statfs(volumePath, &stat); err != nil {
         return nil, status.Errorf(codes.Internal, "statfs failed: %v", err)
     }
 
-    totalBytes := int64(stat.Blocks) * int64(stat.Bsize)
-    freeBytes := int64(stat.Bfree) * int64(stat.Bsize)
-    usedBytes := totalBytes - freeBytes
-
     totalInodes := int64(stat.Files)
     freeInodes := int64(stat.Ffree)
     usedInodes := totalInodes - freeInodes
 
+    // Try per-PVC usage: look up SubVolume CR for RequestedGB, walk dir for actual usage
+    volumeID := req.GetVolumeId()
+    _, _, pvName, parseErr := parseVolumeID(volumeID)
+    if parseErr == nil && d.k8sClient != nil {
+        sv, svErr := d.k8sClient.GetSubVolume(ctx, pvName)
+        if svErr == nil && sv.Spec.RequestedGB > 0 {
+            usedBytes, walkErr := dirUsageBytes(volumePath)
+            if walkErr == nil {
+                totalBytes := sv.Spec.RequestedGB * (1024 * 1024 * 1024)
+                available := totalBytes - usedBytes
+                if available < 0 {
+                    available = 0
+                }
+                return &csi.NodeGetVolumeStatsResponse{
+                    Usage: []*csi.VolumeUsage{
+                        {Available: available, Total: totalBytes, Used: usedBytes, Unit: csi.VolumeUsage_BYTES},
+                        {Available: freeInodes, Total: totalInodes, Used: usedInodes, Unit: csi.VolumeUsage_INODES},
+                    },
+                }, nil
+            }
+        }
+    }
+
+    // Fallback: share-level statfs
+    totalBytes := int64(stat.Blocks) * int64(stat.Bsize)
+    freeBytes := int64(stat.Bfree) * int64(stat.Bsize)
+    usedBytes := totalBytes - freeBytes
+
     return &csi.NodeGetVolumeStatsResponse{
         Usage: []*csi.VolumeUsage{
-            {
-                Available: freeBytes,
-                Total:     totalBytes,
-                Used:      usedBytes,
-                Unit:      csi.VolumeUsage_BYTES,
-            },
-            {
-                Available: freeInodes,
-                Total:     totalInodes,
-                Used:      usedInodes,
-                Unit:      csi.VolumeUsage_INODES,
-            },
+            {Available: freeBytes, Total: totalBytes, Used: usedBytes, Unit: csi.VolumeUsage_BYTES},
+            {Available: freeInodes, Total: totalInodes, Used: usedInodes, Unit: csi.VolumeUsage_INODES},
         },
     }, nil
 }
 ```
 
-**Note:** `statfs` on a bind-mounted subdirectory returns stats for the whole NFS share, not just the subdirectory. This is a known limitation of NFS. The reported capacity is the share's total capacity, not the PVC's requested capacity. To report per-PVC capacity, you would need to run `du` on the subdirectory, which is expensive. For now, accept the share-level stats — this is what the community NFS driver does too.
+**Per-PVC stats strategy:** The preferred path looks up the SubVolume CR to get `RequestedGB` (the PVC's quota) and walks the subdirectory with `filepath.WalkDir` to compute actual bytes used. This gives accurate per-PVC numbers instead of the NFS share's aggregate stats.
+
+**Fallback:** If the SubVolume CR lookup or directory walk fails, the method falls back to `statfs` which returns share-level numbers. This matches the behavior of the community NFS CSI driver.
+
+**Note:** Inode stats always come from `statfs` and reflect the whole NFS share, since per-directory inode tracking is not supported by NFS.
 
 ### NodeGetInfo
 
@@ -607,14 +1147,21 @@ func parseVolumeID(volumeID string) (poolName, shareID, pvName string, err error
 // pkg/driver/driver.go
 
 type Driver struct {
-    name        string
-    version     string
-    nodeID      string
-    endpoint    string
-    poolManager pool.PoolManager
-    k8sClient   k8s.Client
-    mounter     mount.Interface
-    mountCache  *MountCache
+    csi.UnimplementedIdentityServer
+    csi.UnimplementedControllerServer
+    csi.UnimplementedNodeServer
+
+    name         string
+    version      string
+    nodeID       string
+    endpoint     string
+    mode         string
+    poolManager  pool.PoolManager
+    k8sClient    k8s.Client
+    mounter      mount.Interface
+    mountCache   *util.MountCache
+    nodeZone     string
+    nodeZoneOnce sync.Once
 }
 
 func (d *Driver) Run() error {
@@ -689,6 +1236,17 @@ containers:
       - "--csi-address=/csi/csi.sock"
       - "--leader-election"
       - "--leader-election-namespace=kube-system"
+    volumeMounts:
+      - name: socket-dir
+        mountPath: /csi
+
+  - name: csi-snapshotter
+    image: registry.k8s.io/sig-storage/csi-snapshotter:v8.2.0
+    args:
+      - "--csi-address=/csi/csi.sock"
+      - "--leader-election"
+      - "--leader-election-namespace=kube-system"
+      - "--enable-volume-group-snapshots=true"
     volumeMounts:
       - name: socket-dir
         mountPath: /csi

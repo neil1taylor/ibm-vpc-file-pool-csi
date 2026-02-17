@@ -67,6 +67,7 @@ nav:
       - Known Limitations: KNOWN-LIMITATIONS.md
   - Architecture:
       - System Design: ARCHITECTURE.md
+      - Consistency Model: CONSISTENCY-MODEL.md
       - VPC Networking: vpc-networking.md
       - VM Disk Formats: vm-disk-formats.md
       - CRD Specification: CRD-SPEC.md
