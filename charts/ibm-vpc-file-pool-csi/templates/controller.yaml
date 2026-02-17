@@ -50,6 +50,11 @@ spec:
             - name: metrics
               containerPort: {{ .Values.metrics.port }}
               protocol: TCP
+            {{- if .Values.webhook.enabled }}
+            - name: webhook
+              containerPort: {{ .Values.webhook.port }}
+              protocol: TCP
+            {{- end }}
           {{- if .Values.secretProvider.managed }}
           env:
             - name: IKS_ENABLED
@@ -60,6 +65,11 @@ spec:
           volumeMounts:
             - name: socket-dir
               mountPath: /csi
+            {{- if .Values.webhook.enabled }}
+            - name: webhook-certs
+              mountPath: /tmp/k8s-webhook-server/serving-certs
+              readOnly: true
+            {{- end }}
             {{- if .Values.secretProvider.managed }}
             - name: customer-auth
               mountPath: /etc/storage_ibmc
@@ -137,6 +147,11 @@ spec:
       volumes:
         - name: socket-dir
           emptyDir: {}
+        {{- if .Values.webhook.enabled }}
+        - name: webhook-certs
+          secret:
+            secretName: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-webhook-certs
+        {{- end }}
         {{- if .Values.secretProvider.managed }}
         - name: customer-auth
           secret:

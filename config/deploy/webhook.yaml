@@ -1,0 +1,99 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ibm-vpc-file-pool-csi-webhook
+  namespace: kube-system
+  labels:
+    app: ibm-vpc-file-pool-csi-controller
+spec:
+  ports:
+    - name: https
+      port: 443
+      targetPort: 9443
+      protocol: TCP
+  selector:
+    app: ibm-vpc-file-pool-csi-controller
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: ibm-vpc-file-pool-csi
+  annotations:
+    # If using cert-manager, add:
+    # cert-manager.io/inject-ca-from: kube-system/ibm-vpc-file-pool-csi-webhook
+    {}
+webhooks:
+  - name: validate-filesharepool.storage.ibmcloud.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Fail
+    clientConfig:
+      service:
+        name: ibm-vpc-file-pool-csi-webhook
+        namespace: kube-system
+        path: /validate-storage-ibmcloud-io-v1alpha1-filesharepool
+      # caBundle must be populated with the CA certificate.
+      # If using cert-manager, the cert-manager.io/inject-ca-from annotation handles this.
+      # If using manual certs, base64-encode your CA cert and set it here.
+      # caBundle: <base64-encoded-ca-cert>
+    rules:
+      - apiGroups: ["storage.ibmcloud.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["filesharepools"]
+  - name: validate-subvolume.storage.ibmcloud.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Fail
+    clientConfig:
+      service:
+        name: ibm-vpc-file-pool-csi-webhook
+        namespace: kube-system
+        path: /validate-storage-ibmcloud-io-v1alpha1-subvolume
+    rules:
+      - apiGroups: ["storage.ibmcloud.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["subvolumes"]
+  - name: validate-replicationpolicy.storage.ibmcloud.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Fail
+    clientConfig:
+      service:
+        name: ibm-vpc-file-pool-csi-webhook
+        namespace: kube-system
+        path: /validate-storage-ibmcloud-io-v1alpha1-replicationpolicy
+    rules:
+      - apiGroups: ["storage.ibmcloud.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["replicationpolicies"]
+  - name: validate-snapshot.storage.ibmcloud.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Fail
+    clientConfig:
+      service:
+        name: ibm-vpc-file-pool-csi-webhook
+        namespace: kube-system
+        path: /validate-storage-ibmcloud-io-v1alpha1-snapshot
+    rules:
+      - apiGroups: ["storage.ibmcloud.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["snapshots"]
+  - name: validate-volumegroupsnapshot.storage.ibmcloud.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Fail
+    clientConfig:
+      service:
+        name: ibm-vpc-file-pool-csi-webhook
+        namespace: kube-system
+        path: /validate-storage-ibmcloud-io-v1alpha1-volumegroupsnapshot
+    rules:
+      - apiGroups: ["storage.ibmcloud.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["volumegroupsnapshots"]

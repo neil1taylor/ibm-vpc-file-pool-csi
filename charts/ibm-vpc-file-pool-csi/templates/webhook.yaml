@@ -1,0 +1,131 @@
+{{- if .Values.webhook.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-webhook
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+spec:
+  ports:
+    - name: https
+      port: 443
+      targetPort: {{ .Values.webhook.port }}
+      protocol: TCP
+  selector:
+    {{- include "ibm-vpc-file-pool-csi.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+  annotations:
+    {{- if eq .Values.webhook.certProvider "cert-manager" }}
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "ibm-vpc-file-pool-csi.fullname" . }}-webhook
+    {{- end }}
+webhooks:
+  - name: validate-filesharepool.storage.ibmcloud.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Fail
+    clientConfig:
+      service:
+        name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-webhook
+        namespace: {{ .Release.Namespace }}
+        path: /validate-storage-ibmcloud-io-v1alpha1-filesharepool
+    rules:
+      - apiGroups: ["storage.ibmcloud.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["filesharepools"]
+  - name: validate-subvolume.storage.ibmcloud.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Fail
+    clientConfig:
+      service:
+        name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-webhook
+        namespace: {{ .Release.Namespace }}
+        path: /validate-storage-ibmcloud-io-v1alpha1-subvolume
+    rules:
+      - apiGroups: ["storage.ibmcloud.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["subvolumes"]
+  - name: validate-replicationpolicy.storage.ibmcloud.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Fail
+    clientConfig:
+      service:
+        name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-webhook
+        namespace: {{ .Release.Namespace }}
+        path: /validate-storage-ibmcloud-io-v1alpha1-replicationpolicy
+    rules:
+      - apiGroups: ["storage.ibmcloud.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["replicationpolicies"]
+  - name: validate-snapshot.storage.ibmcloud.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Fail
+    clientConfig:
+      service:
+        name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-webhook
+        namespace: {{ .Release.Namespace }}
+        path: /validate-storage-ibmcloud-io-v1alpha1-snapshot
+    rules:
+      - apiGroups: ["storage.ibmcloud.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["snapshots"]
+  - name: validate-volumegroupsnapshot.storage.ibmcloud.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Fail
+    clientConfig:
+      service:
+        name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-webhook
+        namespace: {{ .Release.Namespace }}
+        path: /validate-storage-ibmcloud-io-v1alpha1-volumegroupsnapshot
+    rules:
+      - apiGroups: ["storage.ibmcloud.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["volumegroupsnapshots"]
+---
+{{- if and (eq .Values.webhook.certProvider "cert-manager") (not .Values.webhook.certManager.issuerName) }}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-selfsigned
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+{{- end }}
+{{- if eq .Values.webhook.certProvider "cert-manager" }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-webhook
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+spec:
+  secretName: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-webhook-certs
+  dnsNames:
+    - {{ include "ibm-vpc-file-pool-csi.fullname" . }}-webhook.{{ .Release.Namespace }}.svc
+    - {{ include "ibm-vpc-file-pool-csi.fullname" . }}-webhook.{{ .Release.Namespace }}.svc.cluster.local
+  issuerRef:
+    kind: {{ default "Issuer" .Values.webhook.certManager.issuerKind }}
+    name: {{ default (printf "%s-selfsigned" (include "ibm-vpc-file-pool-csi.fullname" .)) .Values.webhook.certManager.issuerName }}
+{{- end }}
+{{- end }}

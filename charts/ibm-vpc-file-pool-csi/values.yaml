@@ -34,6 +34,21 @@ cloneWorker:
   # Interval between clone worker poll cycles (Go duration string).
   interval: 10s
 
+webhook:
+  # Enable validating admission webhooks for CRD resources.
+  enabled: true
+  # Webhook server port (must match the Service targetPort).
+  port: 9443
+  # Certificate provisioning method: "cert-manager" or "manual".
+  # cert-manager: auto-provisions TLS certs via cert-manager (must be installed).
+  # manual: you must create the TLS secret yourself before deploying.
+  certProvider: cert-manager
+  # cert-manager issuer configuration (only used when certProvider=cert-manager).
+  certManager:
+    # Use a self-signed issuer by default.
+    issuerKind: Issuer
+    issuerName: ""  # Leave empty to create a self-signed Issuer automatically.
+
 logLevel: 4
 
 secretProvider:

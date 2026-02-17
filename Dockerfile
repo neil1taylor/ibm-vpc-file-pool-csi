@@ -11,8 +11,8 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /vpc-file
 # Runtime stage
 FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
 
-# Install nsenter for host-namespace mount execution.
-RUN microdnf install -y util-linux-core && microdnf clean all
+# Install nsenter for host-namespace mount execution and rsync for incremental replication.
+RUN microdnf install -y util-linux-core rsync && microdnf clean all
 
 COPY --from=builder /vpc-file-pool-csi /usr/local/bin/vpc-file-pool-csi
 

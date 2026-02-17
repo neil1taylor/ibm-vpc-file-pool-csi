@@ -23,9 +23,19 @@ spec:
             - "--mode=controller"
             - "--endpoint=unix:///csi/csi.sock"
             - "--v=4"
+          ports:
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
+            - name: webhook
+              containerPort: 9443
+              protocol: TCP
           volumeMounts:
             - name: socket-dir
               mountPath: /csi
+            - name: webhook-certs
+              mountPath: /tmp/k8s-webhook-server/serving-certs
+              readOnly: true
 
         - name: csi-provisioner
           image: registry.k8s.io/sig-storage/csi-provisioner:v5.1.0
@@ -71,3 +81,6 @@ spec:
       volumes:
         - name: socket-dir
           emptyDir: {}
+        - name: webhook-certs
+          secret:
+            secretName: ibm-vpc-file-pool-csi-webhook-certs
