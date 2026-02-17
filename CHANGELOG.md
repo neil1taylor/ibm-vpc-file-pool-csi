@@ -23,6 +23,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **DeepCopy generation for hook types** — `make generate` produces DeepCopy methods for `Hook`, `ExecHookSpec`, `HTTPHookSpec`, `HookResult` types. Updated CRD YAML manifests for ReplicationPolicy and VolumeGroupSnapshot with hook fields
 - **Test coverage** — 15 hook tests (executor, HTTP hook, orchestrator) and 37 webhook validator tests, all with race detector. Fake NFS operations updated with `SyncDir` across all test packages
 
+### Fixed
+
+- **VPC auto-discovery silent failure** — `mgr.GetClient()` returns a cached client whose cache is not started until `mgr.Start()`, causing ConfigMap lookups for `ibm-cloud-provider-data` (VPC ID, subnet ID) to silently fail. Pools were created without mount targets because the VPC ID and subnet ID were empty. Fixed by using the standard `kubernetes.Clientset` for pre-start ConfigMap reads instead of the controller-runtime cached client (`cmd/main.go`)
+- **CSI provisioner missing `--extra-create-metadata`** — The `csi-provisioner` sidecar was not passing PVC name and namespace to `CreateVolume` parameters, causing the `SubVolume` webhook to reject every provision request with `spec.pvcName is required`. Added the `--extra-create-metadata` flag to provisioner args in both the Helm chart template and the static deployment manifest
+
+### Cluster Testing Validated
+
+- Full end-to-end deployment on ROKS eu-de cluster (3-node VPC Gen2)
+- FileSharePool reconciliation with VPC share creation and mount target binding
+- PVC provisioning (10Gi, 20Gi) via `ibm-vpc-file-pool` StorageClass — binds in seconds
+- Pod mount with NFS write/read verification
+- VolumeSnapshot creation and readiness
+- PVC deletion with capacity reclamation
+- All five admission webhooks rejecting invalid resources (FileSharePool, SubVolume path traversal, ReplicationPolicy, Snapshot, VolumeGroupSnapshot)
+
 ## [v0.5.0] — 2026-02-17
 
 ### Added

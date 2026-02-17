@@ -17,6 +17,20 @@
 - A VPC with at least one subnet in the target availability zone
 - Security groups on worker nodes must allow **TCP port 2049** (NFS) inbound and outbound
 
+### cert-manager (for Admission Webhooks)
+
+The driver registers validating admission webhooks that require TLS certificates. The Helm chart can automatically provision these certificates via [cert-manager](https://cert-manager.io/):
+
+```bash
+# Install cert-manager if not already present
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
+
+# Verify it's running
+kubectl get pods -n cert-manager
+```
+
+If you prefer to manage webhook TLS certificates manually, set `webhook.certProvider=manual` in the Helm values and populate the `ibm-vpc-file-pool-csi-webhook-certs` Secret yourself. To disable webhooks entirely, set `webhook.enabled=false`.
+
 ### Tooling
 
 - `kubectl` or `oc` CLI configured against your cluster
@@ -138,15 +152,22 @@ For pod identity (Trusted Profiles) setup or more details, see `API-KEY-SETUP.md
 
 ```bash
 # Add the chart repo (if published) or install from local checkout
+## Managed clusters (ROKS / IKS) — region, VPC, and subnet auto-discovered:
 helm upgrade --install ibm-vpc-file-pool-csi \
   charts/ibm-vpc-file-pool-csi/ \
   --namespace kube-system \
   --set image.repository=${REGISTRY}/${NAMESPACE}/vpc-file-pool-csi \
-  --set image.tag=${VERSION} \
-  --set config.region=us-south \
-  --set config.vpcID=<YOUR_VPC_ID> \
-  --set config.subnetID=<YOUR_SUBNET_ID> \
-  --set config.resourceGroupID=<YOUR_RESOURCE_GROUP_ID>
+  --set image.tag=${VERSION}
+
+## Self-managed clusters — provide VPC config explicitly:
+# helm upgrade --install ibm-vpc-file-pool-csi \
+#   charts/ibm-vpc-file-pool-csi/ \
+#   --namespace kube-system \
+#   --set image.repository=${REGISTRY}/${NAMESPACE}/vpc-file-pool-csi \
+#   --set image.tag=${VERSION} \
+#   --set config.region=us-south \
+#   --set config.vpcID=<YOUR_VPC_ID> \
+#   --set config.subnetID=<YOUR_SUBNET_ID>
 ```
 
 **Helm values reference:**
@@ -155,11 +176,11 @@ helm upgrade --install ibm-vpc-file-pool-csi \
 |-------|----------|---------|-------------|
 | `image.repository` | Yes | — | Container image registry path |
 | `image.tag` | Yes | — | Image tag |
-| `image.pullPolicy` | No | `IfNotPresent` | Image pull policy |
-| `config.region` | Yes | — | IBM Cloud region (e.g., `us-south`) |
-| `config.vpcID` | Yes | — | VPC ID where shares will be created |
-| `config.subnetID` | Yes | — | Subnet ID for NFS mount targets |
-| `config.resourceGroupID` | No | Account default | Resource group for billing |
+| `image.pullPolicy` | No | `IfNotPresent` | Image pull policy (`Always` recommended during iterative testing) |
+| `config.region` | No | Auto-discovered | IBM Cloud region (e.g., `us-south`). Auto-discovered from the secret provider RIAAS endpoint on managed ROKS/IKS clusters |
+| `config.vpcID` | No | Auto-discovered | VPC ID where shares will be created. Auto-discovered from the `ibm-cloud-provider-data` ConfigMap on managed clusters |
+| `config.subnetID` | No | Auto-discovered | Subnet ID for NFS mount targets. Auto-discovered from `ibm-cloud-provider-data` on managed clusters (uses first subnet) |
+| `config.resourceGroupID` | No | Auto-discovered | Resource group for billing. Auto-discovered from the secret provider on managed clusters |
 | `secret.name` | No | `ibm-vpc-file-pool-csi-secret` | Name of the API key secret |
 | `secret.namespace` | No | `kube-system` | Namespace of the API key secret |
 | `controller.replicas` | No | `2` | Controller replicas (leader-elected) |
@@ -168,6 +189,11 @@ helm upgrade --install ibm-vpc-file-pool-csi \
 | `node.resources.requests.cpu` | No | `50m` | Node agent CPU request |
 | `node.resources.requests.memory` | No | `64Mi` | Node agent memory request |
 | `logLevel` | No | `2` | klog verbosity (2=normal, 4=detailed, 6=trace) |
+| `webhook.enabled` | No | `true` | Enable validating admission webhooks |
+| `webhook.port` | No | `9443` | Webhook server port |
+| `webhook.certProvider` | No | `cert-manager` | TLS certificate provider: `cert-manager` or `manual` |
+| `cloneWorker.interval` | No | `30s` | Background clone worker poll interval |
+| `secretProvider.managed` | No | `false` | Enable managed secret provider sidecar (ROKS/IKS) |
 
 ### Option B: Raw Manifests
 
