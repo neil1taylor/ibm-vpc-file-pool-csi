@@ -7,10 +7,10 @@ Design document for cross-region replication of pooled file share data.
 **Last updated:** 2026-02-17
 
 > **Implementation note:** The implementation simplifies several aspects of this design:
-> - Uses `CopyDir` (directory copy) instead of rsync for data transfer
+> - Uses `SyncDir` (rsync-based incremental) by default, with `CopyDir` (full copy) as fallback when `incrementalSync` is disabled
 > - Uses `time.Duration` schedule intervals instead of cron expressions
 > - Destination is specified via `DestinationNFSServer` IP rather than a pool reference with share mappings
-> - Quiesce hooks are deferred to a future phase
+> - Pre/post-sync lifecycle hooks are implemented (Phase 5) — supports both exec (pod command) and HTTP hook types with configurable abort/continue-on-error policies
 
 ---
 

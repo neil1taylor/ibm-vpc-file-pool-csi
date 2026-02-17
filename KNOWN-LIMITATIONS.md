@@ -59,18 +59,16 @@ Explicit list of what the IBM VPC File Pool CSI Driver does not support, why, an
 4. Tracks consecutive failures and pauses the policy after exceeding `maxRetries`
 
 **Limitations:**
-- **File-level consistency only.** Each individual file is consistent (NFS close-to-open semantics), but cross-file consistency is NOT guaranteed. See `CROSS-REGION-DR.md` for detailed consistency analysis.
+- **File-level consistency only** (without hooks). Each individual file is consistent (NFS close-to-open semantics), but cross-file consistency is NOT guaranteed unless pre/post-sync hooks are configured to quiesce application writes. See `CROSS-REGION-DR.md` for detailed consistency analysis.
 - **Not suitable for VMs, databases, or workloads requiring crash consistency.** Actively written disk images (qcow2, vmdk, raw) and databases with WALs will produce corrupted replicas. Use IBM VPC block storage replication or application-level replication for these workloads.
-- **Full directory copy on every cycle** — no incremental/delta transfer. Optimizing to true rsync with delta detection is a future enhancement.
 - **Requires pre-configured cross-region network connectivity** (Transit Gateway or VPN) and a pre-existing destination FileSharePool.
 - **Failover is manual.** Automated failover is explicitly out of scope due to limited consistency guarantees.
-- **No quiesce hooks yet.** Application-consistent replication via pre/post-sync hooks is designed in the CRD spec but not yet implemented in the controller.
 
-**Best suited for:** Static assets, model weights, log aggregation, and workloads with non-zero RPO tolerance (minutes to hours).
+**Best suited for:** Static assets, model weights, log aggregation, workloads with non-zero RPO tolerance, and workloads that support quiesce hooks for application-consistent replication.
 
 **Workaround for unsupported workloads:** Use application-level replication (PostgreSQL streaming replication, MySQL Group Replication, etc.) or IBM VPC block storage snapshots for crash-consistent DR.
 
-**Roadmap:** Phase 4d — implemented. Future enhancements: incremental rsync, quiesce hooks, bandwidth limiting.
+**Roadmap:** Phase 4d (replication) and Phase 5 (hooks + incremental rsync) — implemented. Future enhancements: bandwidth limiting, parallel rsync.
 
 ## statfs Reports Share-Level Stats
 

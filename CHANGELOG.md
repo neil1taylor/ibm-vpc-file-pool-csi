@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [v0.6.0] — 2026-02-17
+
+### Added
+
+- **Lifecycle hooks (Phase 5)** — `Hook` CRD types (`api/v1alpha1/hook_types.go`) supporting `exec` (pod command execution) and `http` (webhook callback) hook types. Configurable `OnError` policy per hook: `Abort` halts the operation on failure, `Continue` logs and proceeds. Timeout enforcement via context deadline (default 30s). `HookResult` type tracks per-hook success, message, timing, and phase
+- **Hook orchestrator** (`pkg/hooks/`) — Sequential hook execution engine with `RunPreHooks()` and `RunPostHooks()` methods. `ExecHook` executor finds pods via label selector and runs commands via Kubernetes exec API (SPDY). `HTTPHook` executor sends HTTP requests with custom headers and validates 2xx responses. `Orchestrator` dispatches to the correct executor based on hook type. Output truncated to 256 chars for CRD status safety
+- **Pre/post-sync hooks for replication** — `ReplicationPolicy.spec.preSyncHooks` and `postSyncHooks` fields enable application-consistent replication. Hook orchestrator wired into the replication controller: pre-sync hooks execute before each cycle (abort on failure), post-sync hooks execute after successful sync (log-only on failure). Resolves the "quiesce hooks deferred" limitation from Phase 4d
+- **Pre/post-snapshot hooks for group snapshots** — `VolumeGroupSnapshot.spec.preSnapshotHooks` and `postSnapshotHooks` fields with `HookResult` status tracking. Resolves the "hooks deferred" limitation from Phase 4c
+- **Incremental sync (rsync)** — `NFSOperations.SyncDir()` method using `rsync -a --delete` for delta-only data transfer. `ReplicationPolicy.spec.incrementalSync` field (default `true`) enables rsync-based replication instead of full `cp -a` copies. Reduces replication time and bandwidth for large volumes with few changes
+- **Validating admission webhooks** (`pkg/webhook/`) — Five webhook validators registered with the controller-runtime manager, enforcing CRD field constraints at admission time:
+  - `FileSharePoolValidator` — zone/profile required, shareSizeGB 10-32000, maxShares 1-1000, initialShares <= maxShares, expandThresholdPercent 1-99, allocationStrategy enum, zone/profile immutable on update
+  - `SubVolumeValidator` — poolName/pvcName/pvcNamespace required, requestedGB > 0, subPath validated against `^/pvcs/pvc-[a-f0-9-]{36}$` (path traversal protection)
+  - `ReplicationPolicyValidator` — source pool/destination/schedule required, schedule validated as Go duration, maxRetries >= 0
+  - `SnapshotValidator` — sourceSubVolume and poolName required
+  - `VolumeGroupSnapshotValidator` — poolName required, sourcePVCs non-empty, failurePolicy enum
+- **Webhook registration in controller** — All five validators registered via `ctrl.NewWebhookManagedBy()` in `cmd/main.go` using controller-runtime v0.23 typed generic `admission.Validator[T]` interface
+- **DeepCopy generation for hook types** — `make generate` produces DeepCopy methods for `Hook`, `ExecHookSpec`, `HTTPHookSpec`, `HookResult` types. Updated CRD YAML manifests for ReplicationPolicy and VolumeGroupSnapshot with hook fields
+- **Test coverage** — 15 hook tests (executor, HTTP hook, orchestrator) and 37 webhook validator tests, all with race detector. Fake NFS operations updated with `SyncDir` across all test packages
+
 ## [v0.5.0] — 2026-02-17
 
 ### Added
@@ -94,6 +113,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Mount target IP resolution when share has multiple mount targets across zones
 - Makefile targets for end-to-end build pipeline
 
+[v0.6.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.5.0...v0.6.0
 [v0.5.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.4.0...v0.5.0
 [v0.4.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.3.0...v0.4.0
 [v0.3.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.2.0...v0.3.0

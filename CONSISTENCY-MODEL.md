@@ -173,13 +173,13 @@ Application-consistent (with quiesce hooks):
 | Clone -- sync (Phase 4b) | Yes | No | No | N/A |
 | Clone -- async (Phase 4b) | Yes | No | No | N/A |
 | Group Snapshot (Phase 4c) | Yes (per member) | No (across members) | No | Yes (with hooks) |
-| DR Replication (Phase 4d) | Yes | No | No | Designed, not yet implemented |
+| DR Replication (Phase 4d+5) | Yes | No | No | Yes (with hooks) |
 
 **Notes:**
 
 - **Snapshot and Clone** do not support quiesce hooks. The application must be manually quiesced before triggering these operations if consistency is required.
-- **Group Snapshot** supports quiesce hooks via `preSnapshotHooks` and `postSnapshotHooks` in the VolumeGroupSnapshot spec. This is the only built-in path to application-consistent multi-PVC snapshots.
-- **DR Replication** has `quiesceHooks` defined in the ReplicationPolicy CRD spec but the controller does not yet execute them (future enhancement).
+- **Group Snapshot** supports quiesce hooks via `preSnapshotHooks` and `postSnapshotHooks` in the VolumeGroupSnapshot spec. Hooks support `exec` (pod command) and `http` (webhook callback) types. This is one of the built-in paths to application-consistent multi-PVC snapshots.
+- **DR Replication** supports quiesce hooks via `preSyncHooks` and `postSyncHooks` in the ReplicationPolicy spec. Pre-sync hooks execute before each replication cycle (abort on failure); post-sync hooks execute after successful sync (log-only on failure). Combined with incremental rsync (`SyncDir`), this provides efficient application-consistent cross-region replication.
 - For group snapshots without hooks, the inconsistency window equals the time from the first member copy starting to the last member copy completing. This window is tracked in `status.inconsistencyWindowSeconds`.
 
 ---
@@ -336,7 +336,7 @@ This is the single most impactful improvement IBM could make. It would eliminate
 
 ### Application Quiesce Hooks
 
-Already supported for group snapshots (Phase 4c) and designed for DR replication (Phase 4d). The application freezes writes before the copy and thaws after. This achieves **application consistency** at the cost of an I/O pause.
+Implemented for group snapshots (Phase 4c) and DR replication (Phase 4d), with hook execution added in Phase 5. The application freezes writes before the copy and thaws after. This achieves **application consistency** at the cost of an I/O pause. Hooks support both `exec` (pod command via Kubernetes exec API) and `http` (webhook callback) execution types.
 
 **Limitations of quiesce hooks:**
 

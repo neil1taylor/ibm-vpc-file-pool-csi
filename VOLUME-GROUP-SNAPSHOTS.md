@@ -6,7 +6,7 @@ Design document for coordinated multi-PVC snapshots within the IBM VPC File Pool
 **Depends on:** Phase 4a (Volume Snapshots) -- must be complete
 **Kubernetes:** 1.27+ (VolumeGroupSnapshot API, alpha)
 
-> **Implementation note:** Quiesce hooks (`PreSnapshotHooks`/`PostSnapshotHooks`) are defined in the CRD but hook execution is deferred to a future phase. The current implementation supports best-effort coordinated snapshots (sequential copy without application quiesce).
+> **Implementation note:** Quiesce hooks (`PreSnapshotHooks`/`PostSnapshotHooks`) are defined in the VolumeGroupSnapshot CRD and implemented in Phase 5. Hooks support both `exec` (pod command execution via Kubernetes exec API) and `http` (webhook callback) types, with configurable `OnError` policies (`Abort` or `Continue`). Hook execution results are recorded in `status.hookResults`. Without hooks configured, the driver provides best-effort coordinated snapshots (sequential copy without application quiesce).
 
 ---
 

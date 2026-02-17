@@ -52,18 +52,20 @@ IBM VPC Client ──► VPC File Share API
 | Pool Manager | `pkg/pool/manager.go` | Core brain: allocation, deallocation, expansion, snapshots, clones |
 | Share Selection | `pkg/pool/share.go` | Spread (most free) or binpack (least free) strategy |
 | Clone Worker | `pkg/pool/clone_worker.go` | Async clone operations for large volumes |
-| Replication Controller | `pkg/pool/replication_controller.go` | Cross-region disaster recovery |
+| Replication Controller | `pkg/pool/replication_controller.go` | Cross-region disaster recovery with incremental rsync |
+| Hook Orchestrator | `pkg/hooks/` | Lifecycle hooks (exec + HTTP) for replication and group snapshots |
+| Admission Webhooks | `pkg/webhook/` | Validating webhooks for all CRD types |
 | Migration CLI | `pkg/migrate/` | Migrate PVCs from stock IBM CSI driver |
 | IBM VPC Client | `pkg/ibmcloud/client.go` | Thin wrapper around VPC file share API |
-| CRD Types | `api/v1alpha1/` | FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, ReplicationPolicy |
+| CRD Types | `api/v1alpha1/` | FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, ReplicationPolicy, Hook |
 
 ## CRDs
 
 - **FileSharePool** (cluster-scoped) — defines a pool of VPC file shares with allocation strategy, auto-expansion, and capacity limits
 - **SubVolume** (cluster-scoped) — tracks individual PVC allocations: which share, subdirectory path, requested size, and clone/snapshot state
 - **Snapshot** (cluster-scoped) — tracks point-in-time directory copies of SubVolumes
-- **VolumeGroupSnapshot** (cluster-scoped) — coordinates multi-PVC consistent snapshots with optional quiesce hooks
-- **ReplicationPolicy** (cluster-scoped) — defines cross-region replication relationships between pools
+- **VolumeGroupSnapshot** (cluster-scoped) — coordinates multi-PVC consistent snapshots with pre/post-snapshot lifecycle hooks
+- **ReplicationPolicy** (cluster-scoped) — defines cross-region replication relationships between pools with pre/post-sync lifecycle hooks and incremental rsync
 
 ## Glossary
 

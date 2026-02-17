@@ -223,14 +223,15 @@ Standalone reconciler that handles cross-region disaster recovery by copying Sub
 **Responsibilities:**
 - Watch `ReplicationPolicy` CRs and execute replication cycles on a configurable schedule.
 - Mount source shares (read-only) and destination shares (read-write, cross-region via Transit Gateway).
-- Copy each matching SubVolume's subdirectory from source to destination using `CopyDir`.
+- Copy each matching SubVolume's subdirectory from source to destination using `SyncDir` (rsync, incremental) or `CopyDir` (full copy).
+- Execute pre-sync and post-sync lifecycle hooks via the Hook Orchestrator for application-consistent replication.
 - Track replication progress, RPO, bytes transferred, and consecutive failures in `ReplicationPolicy.Status`.
 - Expose Prometheus metrics for replication lag, RPO, and error counts.
 
 **Does NOT:**
 - Create or delete VPC file shares (destination pool must already exist).
 - Interfere with the CSI controller, node agent, or pool manager.
-- Provide crash consistency or cross-file transactional consistency (file-level consistency only).
+- Provide crash consistency or cross-file transactional consistency (file-level consistency only, unless application quiesce hooks are configured).
 
 ### 7. Migration CLI
 
@@ -241,15 +242,43 @@ Utility package (`pkg/migrate/`) for migrating PVCs from the stock IBM VPC file 
 - **Executor** (`executor.go`) — executes the migration plan: creates SubVolume CRs, spawns data-copy pods, and rebinds PVCs.
 - **Pod** (`pod.go`) — manages ephemeral pods used for data transfer during migration.
 
-### 8. CRD Controllers
+### 8. Hook Orchestrator
 
-Five CRD types, managed by controller-runtime:
+Sequential hook execution engine (`pkg/hooks/`) that runs pre/post lifecycle hooks for replication and group snapshot operations.
+
+**Responsibilities:**
+- Dispatch hooks to the correct executor based on hook type (`exec` or `http`).
+- `ExecHook`: Find pods via Kubernetes label selector and execute commands via the pod exec API (SPDY remote command).
+- `HTTPHook`: Send HTTP requests (GET/POST/PUT) with custom headers to webhook endpoints and validate 2xx responses.
+- Enforce per-hook timeouts via context deadlines (default 30 seconds).
+- Respect `OnError` policy: `Abort` stops the operation on hook failure, `Continue` logs and proceeds.
+- Collect `HookResult` records with success/failure, timing, and truncated output for CRD status.
+
+**Wired into:**
+- Replication Controller — pre/post-sync hooks for application-consistent DR replication.
+- VolumeGroupSnapshot — pre/post-snapshot hooks for coordinated multi-PVC snapshots.
+
+### 9. Admission Webhooks
+
+Validating admission webhooks (`pkg/webhook/`) registered with the controller-runtime manager. Enforce CRD field constraints at admission time, rejecting invalid create/update requests before they are persisted.
+
+**Validators:**
+- `FileSharePoolValidator` — field ranges, required fields, immutable zone/profile on update.
+- `SubVolumeValidator` — required fields, subPath regex validation with path traversal protection.
+- `ReplicationPolicyValidator` — required fields, Go duration parsing for schedule, maxRetries range.
+- `SnapshotValidator` — required sourceSubVolume and poolName.
+- `VolumeGroupSnapshotValidator` — required fields, failurePolicy enum validation.
+
+### 10. CRD Controllers
+
+Six CRD types, managed by controller-runtime:
 
 - **FileSharePool** — defines a pool of VPC file shares; reconciler ensures the pool has enough capacity.
 - **SubVolume** — tracks a single PVC's allocation: which share, subdirectory path, requested size, and clone/snapshot state.
 - **Snapshot** — tracks a point-in-time directory copy of a SubVolume, stored under `/pvcs/.snapshots/`.
-- **VolumeGroupSnapshot** — coordinates multiple Snapshot CRs for multi-PVC consistent snapshots, with optional quiesce hooks.
-- **ReplicationPolicy** — defines a cross-region replication relationship between a source pool and a destination pool.
+- **VolumeGroupSnapshot** — coordinates multiple Snapshot CRs for multi-PVC consistent snapshots, with pre/post-snapshot lifecycle hooks.
+- **ReplicationPolicy** — defines a cross-region replication relationship between a source pool and a destination pool, with pre/post-sync lifecycle hooks and incremental rsync support.
+- **Hook** (embedded type) — defines a lifecycle hook with exec or HTTP execution, timeout, and on-error policy. Embedded in VolumeGroupSnapshot and ReplicationPolicy specs.
 
 See `CRD-SPEC.md` for full type definitions.
 
