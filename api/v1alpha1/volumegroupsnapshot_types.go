@@ -44,6 +44,14 @@ type VolumeGroupSnapshotSpec struct {
 	// +kubebuilder:validation:Enum=Abort;Continue
 	// +kubebuilder:default=Abort
 	FailurePolicy string `json:"failurePolicy"`
+
+	// PreSnapshotHooks are hooks executed before the group snapshot operation begins.
+	// +optional
+	PreSnapshotHooks []Hook `json:"preSnapshotHooks,omitempty"`
+
+	// PostSnapshotHooks are hooks executed after the group snapshot operation completes.
+	// +optional
+	PostSnapshotHooks []Hook `json:"postSnapshotHooks,omitempty"`
 }
 
 // VolumeGroupSnapshotStatus defines the observed state of a VolumeGroupSnapshot.
@@ -83,6 +91,10 @@ type VolumeGroupSnapshotStatus struct {
 	// CreationTime is when the group snapshot CR was created.
 	// +optional
 	CreationTime *metav1.Time `json:"creationTime,omitempty"`
+
+	// HookResults records the outcomes of pre/post hook executions.
+	// +optional
+	HookResults []HookResult `json:"hookResults,omitempty"`
 }
 
 // GroupSnapshotMember tracks the status of a single snapshot within the group.

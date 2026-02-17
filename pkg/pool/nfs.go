@@ -1,6 +1,7 @@
 package pool
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,6 +17,7 @@ type NFSOperations interface {
 	Chown(path string, uid, gid int) error
 	Chmod(path string, mode os.FileMode) error
 	CopyDir(src, dst string) error
+	SyncDir(ctx context.Context, src, dst string) error
 }
 
 type realNFSOperations struct{}
@@ -50,6 +52,15 @@ func (r *realNFSOperations) CopyDir(src, dst string) error {
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("cp -a %s %s: %w (output: %s)", src, dst, err, string(output))
+	}
+	return nil
+}
+
+func (r *realNFSOperations) SyncDir(ctx context.Context, src, dst string) error {
+	cmd := exec.CommandContext(ctx, "rsync", "-a", "--delete", src+"/", dst+"/")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("rsync %s/ %s/: %w (output: %s)", src, dst, err, string(output))
 	}
 	return nil
 }

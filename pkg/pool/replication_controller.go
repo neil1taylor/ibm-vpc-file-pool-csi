@@ -7,6 +7,7 @@ import (
 	"time"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/hooks"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/k8s"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,8 +23,9 @@ const (
 // It runs as a background goroutine (like CloneWorker) that periodically
 // checks ReplicationPolicy CRs and syncs SubVolume data to the destination.
 type ReplicationController struct {
-	k8sClient k8s.Client
-	nfsOps    NFSOperations
+	k8sClient    k8s.Client
+	nfsOps       NFSOperations
+	orchestrator *hooks.Orchestrator
 
 	// interval is the poll interval for checking replication policies.
 	interval time.Duration
@@ -45,6 +47,11 @@ func NewReplicationController(k8sClient k8s.Client, nfsOps NFSOperations) *Repli
 		lastSyncTimes: make(map[string]time.Time),
 		nowFunc:       time.Now,
 	}
+}
+
+// SetOrchestrator sets the hook orchestrator for pre/post sync hooks.
+func (rc *ReplicationController) SetOrchestrator(orch *hooks.Orchestrator) {
+	rc.orchestrator = orch
 }
 
 // SetInterval overrides the default poll interval. Useful for tests.
@@ -159,6 +166,15 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 	// Update SubVolume count metric.
 	metrics.ReplicationSubVolumeCount.WithLabelValues(policyName, sourcePool).Set(float64(len(matched)))
 
+	// 2a. Run pre-sync hooks.
+	if rc.orchestrator != nil && len(policy.Spec.PreSyncHooks) > 0 {
+		_, hookErr := rc.orchestrator.RunPreHooks(ctx, policy.Spec.PreSyncHooks)
+		if hookErr != nil {
+			rc.handleFailure(ctx, policy, fmt.Sprintf("pre-sync hooks: %v", hookErr), start)
+			return
+		}
+	}
+
 	// 3. Sync each matched SubVolume.
 	var svStatuses []v1alpha1.SubVolumeReplicationStatus
 	var syncErrors []string
@@ -184,6 +200,14 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 			klog.ErrorS(err, "Failed to update policy status after partial failure", "policy", policyName)
 		}
 		return
+	}
+
+	// 3a. Run post-sync hooks.
+	if rc.orchestrator != nil && len(policy.Spec.PostSyncHooks) > 0 {
+		_, hookErr := rc.orchestrator.RunPostHooks(ctx, policy.Spec.PostSyncHooks)
+		if hookErr != nil {
+			klog.ErrorS(hookErr, "Post-sync hooks failed", "policy", policyName)
+		}
 	}
 
 	// All succeeded.

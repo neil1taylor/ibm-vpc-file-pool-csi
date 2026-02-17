@@ -70,6 +70,12 @@ spec:
                   DestinationNFSServer is the NFS mount target IP of the destination pool,
                   reachable over Transit Gateway or VPN.
                 type: string
+              incrementalSync:
+                default: true
+                description: |-
+                  IncrementalSync enables rsync-based incremental replication instead of full copy.
+                  When true (default), only changed files are transferred.
+                type: boolean
               maxRetries:
                 default: 3
                 description: MaxRetries is the number of consecutive failures before
@@ -77,6 +83,196 @@ spec:
                 format: int32
                 minimum: 0
                 type: integer
+              postSyncHooks:
+                description: PostSyncHooks are hooks executed after each replication
+                  sync cycle.
+                items:
+                  description: Hook defines a pre or post action to execute around
+                    snapshot/replication operations.
+                  properties:
+                    exec:
+                      description: |-
+                        Exec specifies a command to run in a pod container.
+                        Required when type is "exec".
+                      properties:
+                        command:
+                          description: Command is the command and arguments to execute.
+                          items:
+                            type: string
+                          minItems: 1
+                          type: array
+                        container:
+                          description: Container is the container name to exec into.
+                            If empty, the first container is used.
+                          type: string
+                        namespace:
+                          description: Namespace is the namespace to search for matching
+                            pods.
+                          type: string
+                        podSelector:
+                          additionalProperties:
+                            type: string
+                          description: PodSelector selects pods by labels. The hook
+                            runs in the first matching pod.
+                          type: object
+                      required:
+                      - command
+                      - namespace
+                      - podSelector
+                      type: object
+                    http:
+                      description: |-
+                        HTTP specifies an HTTP endpoint to call.
+                        Required when type is "http".
+                      properties:
+                        headers:
+                          additionalProperties:
+                            type: string
+                          description: Headers are additional HTTP headers to include
+                            in the request.
+                          type: object
+                        method:
+                          default: POST
+                          description: Method is the HTTP method. Defaults to POST.
+                          enum:
+                          - GET
+                          - POST
+                          - PUT
+                          type: string
+                        url:
+                          description: URL is the HTTP endpoint to call.
+                          pattern: ^https?://
+                          type: string
+                      required:
+                      - url
+                      type: object
+                    name:
+                      description: Name is a unique identifier for this hook within
+                        the hook list.
+                      type: string
+                    onError:
+                      default: Abort
+                      description: |-
+                        OnError controls behavior when this hook fails.
+                        "Continue" proceeds with the operation; "Abort" stops it.
+                      enum:
+                      - Continue
+                      - Abort
+                      type: string
+                    timeoutSeconds:
+                      default: 30
+                      description: TimeoutSeconds is the maximum time to wait for
+                        the hook to complete.
+                      format: int32
+                      minimum: 1
+                      type: integer
+                    type:
+                      description: 'Type is the hook execution type: "exec" (pod exec)
+                        or "http" (HTTP call).'
+                      enum:
+                      - exec
+                      - http
+                      type: string
+                  required:
+                  - name
+                  - type
+                  type: object
+                type: array
+              preSyncHooks:
+                description: PreSyncHooks are hooks executed before each replication
+                  sync cycle.
+                items:
+                  description: Hook defines a pre or post action to execute around
+                    snapshot/replication operations.
+                  properties:
+                    exec:
+                      description: |-
+                        Exec specifies a command to run in a pod container.
+                        Required when type is "exec".
+                      properties:
+                        command:
+                          description: Command is the command and arguments to execute.
+                          items:
+                            type: string
+                          minItems: 1
+                          type: array
+                        container:
+                          description: Container is the container name to exec into.
+                            If empty, the first container is used.
+                          type: string
+                        namespace:
+                          description: Namespace is the namespace to search for matching
+                            pods.
+                          type: string
+                        podSelector:
+                          additionalProperties:
+                            type: string
+                          description: PodSelector selects pods by labels. The hook
+                            runs in the first matching pod.
+                          type: object
+                      required:
+                      - command
+                      - namespace
+                      - podSelector
+                      type: object
+                    http:
+                      description: |-
+                        HTTP specifies an HTTP endpoint to call.
+                        Required when type is "http".
+                      properties:
+                        headers:
+                          additionalProperties:
+                            type: string
+                          description: Headers are additional HTTP headers to include
+                            in the request.
+                          type: object
+                        method:
+                          default: POST
+                          description: Method is the HTTP method. Defaults to POST.
+                          enum:
+                          - GET
+                          - POST
+                          - PUT
+                          type: string
+                        url:
+                          description: URL is the HTTP endpoint to call.
+                          pattern: ^https?://
+                          type: string
+                      required:
+                      - url
+                      type: object
+                    name:
+                      description: Name is a unique identifier for this hook within
+                        the hook list.
+                      type: string
+                    onError:
+                      default: Abort
+                      description: |-
+                        OnError controls behavior when this hook fails.
+                        "Continue" proceeds with the operation; "Abort" stops it.
+                      enum:
+                      - Continue
+                      - Abort
+                      type: string
+                    timeoutSeconds:
+                      default: 30
+                      description: TimeoutSeconds is the maximum time to wait for
+                        the hook to complete.
+                      format: int32
+                      minimum: 1
+                      type: integer
+                    type:
+                      description: 'Type is the hook execution type: "exec" (pod exec)
+                        or "http" (HTTP call).'
+                      enum:
+                      - exec
+                      - http
+                      type: string
+                  required:
+                  - name
+                  - type
+                  type: object
+                type: array
               schedule:
                 description: |-
                   Schedule is a Go duration string controlling replication frequency.

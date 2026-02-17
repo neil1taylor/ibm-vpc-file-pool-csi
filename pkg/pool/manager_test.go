@@ -106,6 +106,10 @@ func (f *fakeNFSOperations) CopyDir(src, dst string) error {
 	return nil
 }
 
+func (f *fakeNFSOperations) SyncDir(_ context.Context, src, dst string) error {
+	return f.CopyDir(src, dst)
+}
+
 func (f *fakeNFSOperations) copyCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()

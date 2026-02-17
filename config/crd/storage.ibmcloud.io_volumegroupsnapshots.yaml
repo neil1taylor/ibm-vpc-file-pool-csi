@@ -79,6 +79,196 @@ spec:
                   PoolName references the FileSharePool containing the source volumes.
                   All source volumes must belong to this pool.
                 type: string
+              postSnapshotHooks:
+                description: PostSnapshotHooks are hooks executed after the group
+                  snapshot operation completes.
+                items:
+                  description: Hook defines a pre or post action to execute around
+                    snapshot/replication operations.
+                  properties:
+                    exec:
+                      description: |-
+                        Exec specifies a command to run in a pod container.
+                        Required when type is "exec".
+                      properties:
+                        command:
+                          description: Command is the command and arguments to execute.
+                          items:
+                            type: string
+                          minItems: 1
+                          type: array
+                        container:
+                          description: Container is the container name to exec into.
+                            If empty, the first container is used.
+                          type: string
+                        namespace:
+                          description: Namespace is the namespace to search for matching
+                            pods.
+                          type: string
+                        podSelector:
+                          additionalProperties:
+                            type: string
+                          description: PodSelector selects pods by labels. The hook
+                            runs in the first matching pod.
+                          type: object
+                      required:
+                      - command
+                      - namespace
+                      - podSelector
+                      type: object
+                    http:
+                      description: |-
+                        HTTP specifies an HTTP endpoint to call.
+                        Required when type is "http".
+                      properties:
+                        headers:
+                          additionalProperties:
+                            type: string
+                          description: Headers are additional HTTP headers to include
+                            in the request.
+                          type: object
+                        method:
+                          default: POST
+                          description: Method is the HTTP method. Defaults to POST.
+                          enum:
+                          - GET
+                          - POST
+                          - PUT
+                          type: string
+                        url:
+                          description: URL is the HTTP endpoint to call.
+                          pattern: ^https?://
+                          type: string
+                      required:
+                      - url
+                      type: object
+                    name:
+                      description: Name is a unique identifier for this hook within
+                        the hook list.
+                      type: string
+                    onError:
+                      default: Abort
+                      description: |-
+                        OnError controls behavior when this hook fails.
+                        "Continue" proceeds with the operation; "Abort" stops it.
+                      enum:
+                      - Continue
+                      - Abort
+                      type: string
+                    timeoutSeconds:
+                      default: 30
+                      description: TimeoutSeconds is the maximum time to wait for
+                        the hook to complete.
+                      format: int32
+                      minimum: 1
+                      type: integer
+                    type:
+                      description: 'Type is the hook execution type: "exec" (pod exec)
+                        or "http" (HTTP call).'
+                      enum:
+                      - exec
+                      - http
+                      type: string
+                  required:
+                  - name
+                  - type
+                  type: object
+                type: array
+              preSnapshotHooks:
+                description: PreSnapshotHooks are hooks executed before the group
+                  snapshot operation begins.
+                items:
+                  description: Hook defines a pre or post action to execute around
+                    snapshot/replication operations.
+                  properties:
+                    exec:
+                      description: |-
+                        Exec specifies a command to run in a pod container.
+                        Required when type is "exec".
+                      properties:
+                        command:
+                          description: Command is the command and arguments to execute.
+                          items:
+                            type: string
+                          minItems: 1
+                          type: array
+                        container:
+                          description: Container is the container name to exec into.
+                            If empty, the first container is used.
+                          type: string
+                        namespace:
+                          description: Namespace is the namespace to search for matching
+                            pods.
+                          type: string
+                        podSelector:
+                          additionalProperties:
+                            type: string
+                          description: PodSelector selects pods by labels. The hook
+                            runs in the first matching pod.
+                          type: object
+                      required:
+                      - command
+                      - namespace
+                      - podSelector
+                      type: object
+                    http:
+                      description: |-
+                        HTTP specifies an HTTP endpoint to call.
+                        Required when type is "http".
+                      properties:
+                        headers:
+                          additionalProperties:
+                            type: string
+                          description: Headers are additional HTTP headers to include
+                            in the request.
+                          type: object
+                        method:
+                          default: POST
+                          description: Method is the HTTP method. Defaults to POST.
+                          enum:
+                          - GET
+                          - POST
+                          - PUT
+                          type: string
+                        url:
+                          description: URL is the HTTP endpoint to call.
+                          pattern: ^https?://
+                          type: string
+                      required:
+                      - url
+                      type: object
+                    name:
+                      description: Name is a unique identifier for this hook within
+                        the hook list.
+                      type: string
+                    onError:
+                      default: Abort
+                      description: |-
+                        OnError controls behavior when this hook fails.
+                        "Continue" proceeds with the operation; "Abort" stops it.
+                      enum:
+                      - Continue
+                      - Abort
+                      type: string
+                    timeoutSeconds:
+                      default: 30
+                      description: TimeoutSeconds is the maximum time to wait for
+                        the hook to complete.
+                      format: int32
+                      minimum: 1
+                      type: integer
+                    type:
+                      description: 'Type is the hook execution type: "exec" (pod exec)
+                        or "http" (HTTP call).'
+                      enum:
+                      - exec
+                      - http
+                      type: string
+                  required:
+                  - name
+                  - type
+                  type: object
+                type: array
               sourcePVCs:
                 description: SourcePVCs lists the SubVolume names to include in the
                   group snapshot.
@@ -108,6 +298,41 @@ spec:
                 description: FailedCount is the number of member snapshots that failed.
                 format: int32
                 type: integer
+              hookResults:
+                description: HookResults records the outcomes of pre/post hook executions.
+                items:
+                  description: HookResult records the outcome of a single hook execution.
+                  properties:
+                    duration:
+                      description: Duration is how long the hook took as a Go duration
+                        string.
+                      type: string
+                    message:
+                      description: Message contains details about the hook outcome
+                        or error.
+                      type: string
+                    name:
+                      description: Name is the hook name that was executed.
+                      type: string
+                    phase:
+                      description: Phase is whether this was a "Pre" or "Post" hook.
+                      type: string
+                    startedAt:
+                      description: StartedAt is when the hook execution began.
+                      format: date-time
+                      type: string
+                    success:
+                      description: Success indicates whether the hook completed without
+                        error.
+                      type: boolean
+                  required:
+                  - duration
+                  - name
+                  - phase
+                  - startedAt
+                  - success
+                  type: object
+                type: array
               inconsistencyWindowMs:
                 description: |-
                   InconsistencyWindowMs is the duration in milliseconds between

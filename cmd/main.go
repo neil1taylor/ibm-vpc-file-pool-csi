@@ -17,10 +17,12 @@ import (
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/driver"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/hooks"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/k8s"
 	_ "github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics" // Register Prometheus collectors via init()
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/pool"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/webhook"
 )
 
 var version = "dev"
@@ -124,6 +126,39 @@ func runController(endpoint, nodeID, region, vpcID, subnetID string, cloneWorker
 		os.Exit(1)
 	}
 
+	// Register validating webhooks for CRD resources.
+	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.FileSharePool{}).
+		WithValidator(&webhook.FileSharePoolValidator{}).
+		Complete(); err != nil {
+		klog.ErrorS(err, "Failed to register FileSharePool webhook")
+		os.Exit(1)
+	}
+	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.SubVolume{}).
+		WithValidator(&webhook.SubVolumeValidator{}).
+		Complete(); err != nil {
+		klog.ErrorS(err, "Failed to register SubVolume webhook")
+		os.Exit(1)
+	}
+	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.ReplicationPolicy{}).
+		WithValidator(&webhook.ReplicationPolicyValidator{}).
+		Complete(); err != nil {
+		klog.ErrorS(err, "Failed to register ReplicationPolicy webhook")
+		os.Exit(1)
+	}
+	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.Snapshot{}).
+		WithValidator(&webhook.SnapshotValidator{}).
+		Complete(); err != nil {
+		klog.ErrorS(err, "Failed to register Snapshot webhook")
+		os.Exit(1)
+	}
+	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.VolumeGroupSnapshot{}).
+		WithValidator(&webhook.VolumeGroupSnapshotValidator{}).
+		Complete(); err != nil {
+		klog.ErrorS(err, "Failed to register VolumeGroupSnapshot webhook")
+		os.Exit(1)
+	}
+	klog.V(2).InfoS("Registered validating webhooks for all CRD types")
+
 	stagingBasePath := "/var/lib/kubelet/plugins/vpc-file-pool.csi.ibm.io/staging"
 
 	poolManager := pool.NewManager(k8sClient, vpcClient, nil, stagingBasePath)
@@ -164,6 +199,11 @@ func runController(endpoint, nodeID, region, vpcID, subnetID string, cloneWorker
 
 	// Start the background replication controller for cross-region DR.
 	replController := pool.NewReplicationController(k8sClient, nfsOps)
+	hookOrchestrator := hooks.NewOrchestrator(
+		hooks.NewExecHook(clientset, restConfig),
+		hooks.NewHTTPHook(nil),
+	)
+	replController.SetOrchestrator(hookOrchestrator)
 	go replController.Run(signalCtx)
 
 	// mgr.Start blocks until signal or error

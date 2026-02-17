@@ -634,3 +634,7 @@ func (s *slowFakeNFSOperations) CopyDir(_, _ string) error {
 	time.Sleep(s.delay)
 	return nil
 }
+
+func (s *slowFakeNFSOperations) SyncDir(_ context.Context, _, _ string) error {
+	return s.CopyDir("", "")
+}

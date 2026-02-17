@@ -54,6 +54,20 @@ type ReplicationPolicySpec struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:default=3
 	MaxRetries int32 `json:"maxRetries"`
+
+	// IncrementalSync enables rsync-based incremental replication instead of full copy.
+	// When true (default), only changed files are transferred.
+	// +kubebuilder:default=true
+	// +optional
+	IncrementalSync *bool `json:"incrementalSync,omitempty"`
+
+	// PreSyncHooks are hooks executed before each replication sync cycle.
+	// +optional
+	PreSyncHooks []Hook `json:"preSyncHooks,omitempty"`
+
+	// PostSyncHooks are hooks executed after each replication sync cycle.
+	// +optional
+	PostSyncHooks []Hook `json:"postSyncHooks,omitempty"`
 }
 
 // ReplicationPolicyStatus describes the observed state of a replication policy.
