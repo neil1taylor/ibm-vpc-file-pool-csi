@@ -122,6 +122,21 @@ func (n *nodeTestK8sClient) UpdateSnapshotStatus(_ context.Context, _ *v1alpha1.
 	return nil
 }
 func (n *nodeTestK8sClient) DeleteSnapshot(_ context.Context, _ string) error { return nil }
+func (n *nodeTestK8sClient) GetVolumeGroupSnapshot(_ context.Context, _ string) (*v1alpha1.VolumeGroupSnapshot, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (n *nodeTestK8sClient) CreateVolumeGroupSnapshot(_ context.Context, _ *v1alpha1.VolumeGroupSnapshot) error {
+	return nil
+}
+func (n *nodeTestK8sClient) UpdateVolumeGroupSnapshotStatus(_ context.Context, _ *v1alpha1.VolumeGroupSnapshot) error {
+	return nil
+}
+func (n *nodeTestK8sClient) DeleteVolumeGroupSnapshot(_ context.Context, _ string) error {
+	return nil
+}
+func (n *nodeTestK8sClient) ListVolumeGroupSnapshots(_ context.Context, _ string) ([]v1alpha1.VolumeGroupSnapshot, error) {
+	return nil, nil
+}
 
 // ---------------------------------------------------------------------------
 // NodeGetCapabilities

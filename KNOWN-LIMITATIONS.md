@@ -31,13 +31,22 @@ Explicit list of what the IBM VPC File Pool CSI Driver does not support, why, an
 
 ## Volume Group Snapshots
 
-**What:** Volume group snapshots (`VolumeGroupSnapshot`) are not implemented.
+**What:** Volume group snapshots (`VolumeGroupSnapshot`) are implemented. The driver supports coordinated multi-PVC snapshots via `CreateVolumeGroupSnapshot` and `DeleteVolumeGroupSnapshot` CSI RPCs.
 
-**Why:** Requires Kubernetes 1.32+ and the VolumeGroupSnapshot API. Single-volume snapshot support (Phase 4a) is now complete as a prerequisite.
+**How it works:** Group snapshots iterate through the source PVCs sequentially, creating individual snapshots for each member. The order can be controlled via the `csi.ibm.com/copy-order` parameter (comma-separated PVC names). Two failure policies are supported:
 
-**Workaround:** None. Coordinate application-level quiesce and backup across PVCs manually.
+- **Abort (default):** If any member snapshot fails, all previously completed snapshots are rolled back and the operation returns an error.
+- **Continue:** If a member snapshot fails, the operation continues with remaining members and returns a `PartialFailure` status. Successfully completed snapshots are preserved.
 
-**Roadmap:** Phase 4c — planned for a future release. Prerequisites (Phase 4a/4b) are complete.
+**Limitations:**
+- Snapshots are sequential, not atomic — there is an inconsistency window between the first and last member snapshot (tracked in `status.inconsistencyWindow`).
+- Each member snapshot is a full directory copy (same as single-volume snapshots), so total time is proportional to the combined size of all source volumes.
+- All source PVCs must belong to the same pool.
+- Requires Kubernetes 1.32+ for the external VolumeGroupSnapshot API (the CSI-level RPCs work with any Kubernetes version).
+
+**Workaround:** For applications requiring point-in-time consistency across volumes, quiesce writes at the application level before triggering the group snapshot.
+
+**Roadmap:** Phase 4c — complete.
 
 ## Cross-Region Replication and Disaster Recovery
 

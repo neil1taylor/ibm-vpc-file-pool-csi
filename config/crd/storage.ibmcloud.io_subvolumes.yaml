@@ -140,6 +140,45 @@ spec:
                   subdirectory.
                 format: int64
                 type: integer
+              cloneProgress:
+                description: CloneProgress tracks bytes copied during a clone operation.
+                properties:
+                  bytesCopied:
+                    description: BytesCopied is the number of bytes copied so far.
+                    format: int64
+                    type: integer
+                  completedAt:
+                    description: CompletedAt is when the copy operation finished (success
+                      or failure).
+                    format: date-time
+                    type: string
+                  error:
+                    description: Error records the failure reason if cloneStatus is
+                      Failed.
+                    type: string
+                  startedAt:
+                    description: StartedAt is when the copy operation started.
+                    format: date-time
+                    type: string
+                  totalBytes:
+                    description: TotalBytes is the total size of the source data to
+                      copy.
+                    format: int64
+                    type: integer
+                required:
+                - bytesCopied
+                - totalBytes
+                type: object
+              cloneStatus:
+                description: |-
+                  CloneStatus tracks the progress of a clone operation.
+                  Empty for non-clone SubVolumes.
+                enum:
+                - Pending
+                - InProgress
+                - Complete
+                - Failed
+                type: string
               conditions:
                 description: Conditions for detailed state tracking.
                 items:
@@ -205,45 +244,6 @@ spec:
               lastUsageCheck:
                 description: LastUsageCheck is when ActualUsageBytes was last updated.
                 format: date-time
-                type: string
-              cloneProgress:
-                description: CloneProgress tracks bytes copied during a clone operation.
-                properties:
-                  bytesCopied:
-                    description: BytesCopied is the number of bytes copied so far.
-                    format: int64
-                    type: integer
-                  completedAt:
-                    description: CompletedAt is when the copy operation finished (success
-                      or failure).
-                    format: date-time
-                    type: string
-                  error:
-                    description: Error records the failure reason if cloneStatus is
-                      Failed.
-                    type: string
-                  startedAt:
-                    description: StartedAt is when the copy operation started.
-                    format: date-time
-                    type: string
-                  totalBytes:
-                    description: TotalBytes is the total size of the source data to
-                      copy.
-                    format: int64
-                    type: integer
-                required:
-                - bytesCopied
-                - totalBytes
-                type: object
-              cloneStatus:
-                description: |-
-                  CloneStatus tracks the progress of a clone operation.
-                  Empty for non-clone SubVolumes.
-                enum:
-                - Pending
-                - InProgress
-                - Complete
-                - Failed
                 type: string
               phase:
                 description: Phase is the SubVolume lifecycle state.

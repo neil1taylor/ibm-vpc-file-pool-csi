@@ -25,3 +25,4 @@ site/
 
 # Claude Code
 .claude/
+migrate

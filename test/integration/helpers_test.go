@@ -269,6 +269,20 @@ func (f *fakeK8sClient) DeleteSnapshot(_ context.Context, name string) error {
 	return nil
 }
 
+func (f *fakeK8sClient) GetVolumeGroupSnapshot(_ context.Context, _ string) (*v1alpha1.VolumeGroupSnapshot, error) {
+	return nil, fmt.Errorf("not implemented in fake")
+}
+func (f *fakeK8sClient) CreateVolumeGroupSnapshot(_ context.Context, _ *v1alpha1.VolumeGroupSnapshot) error {
+	return nil
+}
+func (f *fakeK8sClient) UpdateVolumeGroupSnapshotStatus(_ context.Context, _ *v1alpha1.VolumeGroupSnapshot) error {
+	return nil
+}
+func (f *fakeK8sClient) DeleteVolumeGroupSnapshot(_ context.Context, _ string) error { return nil }
+func (f *fakeK8sClient) ListVolumeGroupSnapshots(_ context.Context, _ string) ([]v1alpha1.VolumeGroupSnapshot, error) {
+	return nil, nil
+}
+
 func (f *fakeK8sClient) GetConfigMapValue(_ context.Context, _, _, _ string) (string, error) {
 	return "", fmt.Errorf("not implemented in fake")
 }

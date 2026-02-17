@@ -51,6 +51,14 @@ type mockPoolManager struct {
 	lastCloneSourceVolumeID  string
 	lastCloneReq             pool.AllocationRequest
 	lastCloneSyncThresholdGB int64
+
+	// Group snapshot fields
+	createGroupSnapshotResult *pool.GroupSnapshotResult
+	createGroupSnapshotErr    error
+	deleteGroupSnapshotErr    error
+
+	lastCreateGroupSnapshotReq  pool.GroupSnapshotRequest
+	lastDeleteGroupSnapshotName string
 }
 
 func (m *mockPoolManager) Allocate(_ context.Context, req pool.AllocationRequest) (*pool.AllocationResult, error) {
@@ -113,20 +121,35 @@ func (m *mockPoolManager) CloneVolume(_ context.Context, sourceVolumeID string, 
 	return m.cloneVolumeResult, nil
 }
 
+func (m *mockPoolManager) CreateVolumeGroupSnapshot(_ context.Context, req pool.GroupSnapshotRequest) (*pool.GroupSnapshotResult, error) {
+	m.lastCreateGroupSnapshotReq = req
+	if m.createGroupSnapshotErr != nil {
+		return nil, m.createGroupSnapshotErr
+	}
+	return m.createGroupSnapshotResult, nil
+}
+
+func (m *mockPoolManager) DeleteVolumeGroupSnapshot(_ context.Context, groupName string) error {
+	m.lastDeleteGroupSnapshotName = groupName
+	return m.deleteGroupSnapshotErr
+}
+
 // ---------------------------------------------------------------------------
 // Mock K8s Client (only GetSubVolume needed for controller idempotency path)
 // ---------------------------------------------------------------------------
 
 type mockK8sClient struct {
-	subVolumes map[string]*v1alpha1.SubVolume
-	snapshots  map[string]*v1alpha1.Snapshot
-	getErr     error
+	subVolumes     map[string]*v1alpha1.SubVolume
+	snapshots      map[string]*v1alpha1.Snapshot
+	groupSnapshots map[string]*v1alpha1.VolumeGroupSnapshot
+	getErr         error
 }
 
 func newMockK8sClient() *mockK8sClient {
 	return &mockK8sClient{
-		subVolumes: make(map[string]*v1alpha1.SubVolume),
-		snapshots:  make(map[string]*v1alpha1.Snapshot),
+		subVolumes:     make(map[string]*v1alpha1.SubVolume),
+		snapshots:      make(map[string]*v1alpha1.Snapshot),
+		groupSnapshots: make(map[string]*v1alpha1.VolumeGroupSnapshot),
 	}
 }
 
@@ -223,6 +246,25 @@ func (m *mockK8sClient) UpdateSnapshotStatus(_ context.Context, _ *v1alpha1.Snap
 
 func (m *mockK8sClient) DeleteSnapshot(_ context.Context, _ string) error {
 	return nil
+}
+func (m *mockK8sClient) GetVolumeGroupSnapshot(_ context.Context, name string) (*v1alpha1.VolumeGroupSnapshot, error) {
+	vgs, ok := m.groupSnapshots[name]
+	if !ok {
+		return nil, fmt.Errorf("group snapshot %q not found", name)
+	}
+	return vgs, nil
+}
+func (m *mockK8sClient) CreateVolumeGroupSnapshot(_ context.Context, _ *v1alpha1.VolumeGroupSnapshot) error {
+	return nil
+}
+func (m *mockK8sClient) UpdateVolumeGroupSnapshotStatus(_ context.Context, _ *v1alpha1.VolumeGroupSnapshot) error {
+	return nil
+}
+func (m *mockK8sClient) DeleteVolumeGroupSnapshot(_ context.Context, _ string) error {
+	return nil
+}
+func (m *mockK8sClient) ListVolumeGroupSnapshots(_ context.Context, _ string) ([]v1alpha1.VolumeGroupSnapshot, error) {
+	return nil, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -1810,5 +1852,222 @@ func TestCreateVolume_FromClone_CustomSyncThreshold(t *testing.T) {
 
 	if pm.lastCloneSyncThresholdGB != 20 {
 		t.Errorf("expected sync threshold 20, got %d", pm.lastCloneSyncThresholdGB)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Group Snapshot CSI Handler Tests
+// ---------------------------------------------------------------------------
+
+func TestCreateVolumeGroupSnapshot_MissingName(t *testing.T) {
+	pm := &mockPoolManager{}
+	d := newTestDriver(pm, nil)
+
+	_, err := d.CreateVolumeGroupSnapshot(context.Background(), &csi.CreateVolumeGroupSnapshotRequest{
+		// Name intentionally empty
+		SourceVolumeIds: []string{"pool/share/pvc-1"},
+		Parameters:      map[string]string{"pool": "test-pool"},
+	})
+
+	assertGRPCCode(t, err, codes.InvalidArgument)
+}
+
+func TestCreateVolumeGroupSnapshot_NoSourceVolumes(t *testing.T) {
+	pm := &mockPoolManager{}
+	d := newTestDriver(pm, nil)
+
+	_, err := d.CreateVolumeGroupSnapshot(context.Background(), &csi.CreateVolumeGroupSnapshotRequest{
+		Name:            "test-group",
+		SourceVolumeIds: []string{},
+		Parameters:      map[string]string{"pool": "test-pool"},
+	})
+
+	assertGRPCCode(t, err, codes.InvalidArgument)
+}
+
+func TestCreateVolumeGroupSnapshot_Success(t *testing.T) {
+	pm := &mockPoolManager{
+		createGroupSnapshotResult: &pool.GroupSnapshotResult{
+			GroupName:  "test-group",
+			PoolName:   "test-pool",
+			ReadyToUse: true,
+			Members: []pool.SnapshotResult{
+				{
+					SnapshotName:   "snap-1",
+					PoolName:       "test-pool",
+					ShareID:        "share-1",
+					SizeBytes:      gbToBytes(10),
+					ReadyToUse:     true,
+					SourceVolumeID: "test-pool/share-1/pvc-1",
+					CreationTime:   time.Now(),
+				},
+				{
+					SnapshotName:   "snap-2",
+					PoolName:       "test-pool",
+					ShareID:        "share-1",
+					SizeBytes:      gbToBytes(5),
+					ReadyToUse:     true,
+					SourceVolumeID: "test-pool/share-1/pvc-2",
+					CreationTime:   time.Now(),
+				},
+			},
+			CreationTime: time.Now(),
+		},
+	}
+	d := newTestDriver(pm, nil)
+
+	resp, err := d.CreateVolumeGroupSnapshot(context.Background(), &csi.CreateVolumeGroupSnapshotRequest{
+		Name:            "test-group",
+		SourceVolumeIds: []string{"test-pool/share-1/pvc-1", "test-pool/share-1/pvc-2"},
+		Parameters:      map[string]string{"pool": "test-pool"},
+	})
+	if err != nil {
+		t.Fatalf("CreateVolumeGroupSnapshot failed: %v", err)
+	}
+
+	gs := resp.GetGroupSnapshot()
+	if gs == nil {
+		t.Fatal("expected group snapshot in response")
+	}
+	if !gs.ReadyToUse {
+		t.Error("expected ReadyToUse=true")
+	}
+	if len(gs.Snapshots) != 2 {
+		t.Errorf("expected 2 snapshots, got %d", len(gs.Snapshots))
+	}
+
+	// Verify pool manager received correct request
+	if pm.lastCreateGroupSnapshotReq.GroupName != "test-group" {
+		t.Errorf("expected group name 'test-group', got %q", pm.lastCreateGroupSnapshotReq.GroupName)
+	}
+	if pm.lastCreateGroupSnapshotReq.PoolName != "test-pool" {
+		t.Errorf("expected pool name 'test-pool', got %q", pm.lastCreateGroupSnapshotReq.PoolName)
+	}
+}
+
+func TestCreateVolumeGroupSnapshot_PoolFromVolumeID(t *testing.T) {
+	pm := &mockPoolManager{
+		createGroupSnapshotResult: &pool.GroupSnapshotResult{
+			GroupName:    "test-group",
+			PoolName:     "my-pool",
+			ReadyToUse:   true,
+			Members:      []pool.SnapshotResult{},
+			CreationTime: time.Now(),
+		},
+	}
+	d := newTestDriver(pm, nil)
+
+	// No "pool" parameter -- extracted from volume ID
+	_, err := d.CreateVolumeGroupSnapshot(context.Background(), &csi.CreateVolumeGroupSnapshotRequest{
+		Name:            "test-group",
+		SourceVolumeIds: []string{"my-pool/share-1/pvc-1"},
+		Parameters:      map[string]string{},
+	})
+	if err != nil {
+		t.Fatalf("CreateVolumeGroupSnapshot failed: %v", err)
+	}
+
+	if pm.lastCreateGroupSnapshotReq.PoolName != "my-pool" {
+		t.Errorf("expected pool name 'my-pool', got %q", pm.lastCreateGroupSnapshotReq.PoolName)
+	}
+}
+
+func TestCreateVolumeGroupSnapshot_GroupSnapshotFailed(t *testing.T) {
+	pm := &mockPoolManager{
+		createGroupSnapshotErr: pool.ErrGroupSnapshotFailed,
+	}
+	d := newTestDriver(pm, nil)
+
+	_, err := d.CreateVolumeGroupSnapshot(context.Background(), &csi.CreateVolumeGroupSnapshotRequest{
+		Name:            "test-group",
+		SourceVolumeIds: []string{"test-pool/share-1/pvc-1"},
+		Parameters:      map[string]string{"pool": "test-pool"},
+	})
+
+	assertGRPCCode(t, err, codes.Internal)
+}
+
+func TestDeleteVolumeGroupSnapshot_MissingID(t *testing.T) {
+	pm := &mockPoolManager{}
+	d := newTestDriver(pm, nil)
+
+	_, err := d.DeleteVolumeGroupSnapshot(context.Background(), &csi.DeleteVolumeGroupSnapshotRequest{
+		// GroupSnapshotId intentionally empty
+	})
+
+	assertGRPCCode(t, err, codes.InvalidArgument)
+}
+
+func TestDeleteVolumeGroupSnapshot_Success(t *testing.T) {
+	pm := &mockPoolManager{
+		deleteGroupSnapshotErr: nil,
+	}
+	d := newTestDriver(pm, nil)
+
+	_, err := d.DeleteVolumeGroupSnapshot(context.Background(), &csi.DeleteVolumeGroupSnapshotRequest{
+		GroupSnapshotId: "test-pool/test-group",
+	})
+	if err != nil {
+		t.Fatalf("DeleteVolumeGroupSnapshot failed: %v", err)
+	}
+
+	if pm.lastDeleteGroupSnapshotName != "test-group" {
+		t.Errorf("expected group name 'test-group', got %q", pm.lastDeleteGroupSnapshotName)
+	}
+}
+
+func TestDeleteVolumeGroupSnapshot_InternalError(t *testing.T) {
+	pm := &mockPoolManager{
+		deleteGroupSnapshotErr: fmt.Errorf("VPC API error"),
+	}
+	d := newTestDriver(pm, nil)
+
+	_, err := d.DeleteVolumeGroupSnapshot(context.Background(), &csi.DeleteVolumeGroupSnapshotRequest{
+		GroupSnapshotId: "test-pool/test-group",
+	})
+
+	assertGRPCCode(t, err, codes.Internal)
+}
+
+func TestGetVolumeGroupSnapshot_Success(t *testing.T) {
+	k8sMock := newMockK8sClient()
+	now := metav1.Now()
+	k8sMock.groupSnapshots = map[string]*v1alpha1.VolumeGroupSnapshot{
+		"test-group": {
+			ObjectMeta: metav1.ObjectMeta{Name: "test-group"},
+			Spec: v1alpha1.VolumeGroupSnapshotSpec{
+				PoolName: "test-pool",
+			},
+			Status: v1alpha1.VolumeGroupSnapshotStatus{
+				Phase: "Complete",
+				Members: []v1alpha1.GroupSnapshotMember{
+					{SubVolumeName: "pvc-1", SnapshotName: "snap-1", Phase: "Ready"},
+					{SubVolumeName: "pvc-2", SnapshotName: "snap-2", Phase: "Ready"},
+				},
+				MemberCount:  2,
+				ReadyCount:   2,
+				CreationTime: &now,
+			},
+		},
+	}
+	pm := &mockPoolManager{}
+	d := newTestDriver(pm, k8sMock)
+
+	resp, err := d.GetVolumeGroupSnapshot(context.Background(), &csi.GetVolumeGroupSnapshotRequest{
+		GroupSnapshotId: "test-pool/test-group",
+	})
+	if err != nil {
+		t.Fatalf("GetVolumeGroupSnapshot failed: %v", err)
+	}
+
+	gs := resp.GetGroupSnapshot()
+	if gs == nil {
+		t.Fatal("expected group snapshot in response")
+	}
+	if !gs.ReadyToUse {
+		t.Error("expected ReadyToUse=true")
+	}
+	if len(gs.Snapshots) != 2 {
+		t.Errorf("expected 2 snapshots, got %d", len(gs.Snapshots))
 	}
 }

@@ -563,6 +563,206 @@ func (d *Driver) ListSnapshots(ctx context.Context, req *csi.ListSnapshotsReques
 	}, nil
 }
 
+// CreateVolumeGroupSnapshot creates coordinated snapshots for multiple volumes.
+func (d *Driver) CreateVolumeGroupSnapshot(ctx context.Context, req *csi.CreateVolumeGroupSnapshotRequest) (*csi.CreateVolumeGroupSnapshotResponse, error) {
+	if req.GetName() == "" {
+		return nil, status.Error(codes.InvalidArgument, "group snapshot name is required")
+	}
+	if len(req.GetSourceVolumeIds()) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "at least one source volume ID is required")
+	}
+
+	params := req.GetParameters()
+	poolName := params["pool"]
+	if poolName == "" {
+		// Try to extract pool from the first volume ID
+		if len(req.GetSourceVolumeIds()) > 0 {
+			p, _, _, err := parseVolumeID(req.GetSourceVolumeIds()[0])
+			if err == nil {
+				poolName = p
+			}
+		}
+		if poolName == "" {
+			return nil, status.Error(codes.InvalidArgument, "parameter 'pool' is required or source volume IDs must contain pool name")
+		}
+	}
+
+	failurePolicy := params["failurePolicy"]
+	if failurePolicy == "" {
+		failurePolicy = "Abort"
+	}
+
+	var copyOrder []string
+	if order := params["copyOrder"]; order != "" {
+		// Parse comma-separated list
+		for _, name := range splitCSV(order) {
+			if name != "" {
+				copyOrder = append(copyOrder, name)
+			}
+		}
+	}
+
+	groupReq := pool.GroupSnapshotRequest{
+		GroupName:       req.GetName(),
+		PoolName:        poolName,
+		SourceVolumeIDs: req.GetSourceVolumeIds(),
+		CopyOrder:       copyOrder,
+		FailurePolicy:   failurePolicy,
+		Parameters:      params,
+	}
+
+	result, err := d.poolManager.CreateVolumeGroupSnapshot(ctx, groupReq)
+	if err != nil {
+		switch {
+		case errors.Is(err, pool.ErrEmptySourceList):
+			return nil, status.Error(codes.InvalidArgument, "source volume list is empty")
+		case errors.Is(err, pool.ErrSourceNotFound):
+			return nil, status.Errorf(codes.NotFound, "source volume not found: %v", err)
+		case errors.Is(err, pool.ErrGroupSnapshotFailed):
+			return nil, status.Errorf(codes.Internal, "group snapshot failed: %v", err)
+		default:
+			return nil, status.Errorf(codes.Internal, "create group snapshot failed: %v", err)
+		}
+	}
+
+	groupSnapshotID := fmt.Sprintf("%s/%s", poolName, req.GetName())
+
+	// Build individual snapshot entries
+	var snapshots []*csi.Snapshot
+	for _, member := range result.Members {
+		snapshotID := fmt.Sprintf("%s/%s/%s", member.PoolName, member.ShareID, member.SnapshotName)
+		snapshots = append(snapshots, &csi.Snapshot{
+			SnapshotId:     snapshotID,
+			SourceVolumeId: member.SourceVolumeID,
+			SizeBytes:      member.SizeBytes,
+			CreationTime:   timestamppb.New(member.CreationTime),
+			ReadyToUse:     member.ReadyToUse,
+			GroupSnapshotId: groupSnapshotID,
+		})
+	}
+
+	klog.V(2).InfoS("Created volume group snapshot",
+		"groupSnapshotID", groupSnapshotID,
+		"members", len(snapshots),
+		"readyToUse", result.ReadyToUse,
+	)
+
+	return &csi.CreateVolumeGroupSnapshotResponse{
+		GroupSnapshot: &csi.VolumeGroupSnapshot{
+			GroupSnapshotId: groupSnapshotID,
+			Snapshots:       snapshots,
+			CreationTime:    timestamppb.New(result.CreationTime),
+			ReadyToUse:      result.ReadyToUse,
+		},
+	}, nil
+}
+
+// DeleteVolumeGroupSnapshot deletes a group snapshot and all its member snapshots.
+func (d *Driver) DeleteVolumeGroupSnapshot(ctx context.Context, req *csi.DeleteVolumeGroupSnapshotRequest) (*csi.DeleteVolumeGroupSnapshotResponse, error) {
+	groupSnapshotID := req.GetGroupSnapshotId()
+	if groupSnapshotID == "" {
+		return nil, status.Error(codes.InvalidArgument, "group snapshot ID is required")
+	}
+
+	// Parse group snapshot ID: {pool-name}/{group-name}
+	groupName := groupSnapshotID
+	parts := splitVolumeID(groupSnapshotID)
+	if len(parts) >= 2 {
+		groupName = parts[len(parts)-1]
+	}
+
+	err := d.poolManager.DeleteVolumeGroupSnapshot(ctx, groupName)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "delete group snapshot failed: %v", err)
+	}
+
+	klog.V(2).InfoS("Deleted volume group snapshot", "groupSnapshotID", groupSnapshotID)
+	return &csi.DeleteVolumeGroupSnapshotResponse{}, nil
+}
+
+// GetVolumeGroupSnapshot fetches group snapshot details from the Kubernetes API.
+func (d *Driver) GetVolumeGroupSnapshot(ctx context.Context, req *csi.GetVolumeGroupSnapshotRequest) (*csi.GetVolumeGroupSnapshotResponse, error) {
+	groupSnapshotID := req.GetGroupSnapshotId()
+	if groupSnapshotID == "" {
+		return nil, status.Error(codes.InvalidArgument, "group snapshot ID is required")
+	}
+
+	groupName := groupSnapshotID
+	poolName := ""
+	parts := splitVolumeID(groupSnapshotID)
+	if len(parts) >= 2 {
+		poolName = parts[0]
+		groupName = parts[len(parts)-1]
+	}
+
+	if d.k8sClient == nil {
+		return nil, status.Error(codes.Internal, "k8s client not available")
+	}
+
+	vgs, err := d.k8sClient.GetVolumeGroupSnapshot(ctx, groupName)
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "group snapshot %q not found", groupName)
+	}
+
+	if poolName == "" {
+		poolName = vgs.Spec.PoolName
+	}
+
+	var snapshots []*csi.Snapshot
+	for _, member := range vgs.Status.Members {
+		if member.Phase == "Ready" {
+			snapshots = append(snapshots, &csi.Snapshot{
+				SnapshotId:      member.SnapshotName,
+				SourceVolumeId:  member.SubVolumeName,
+				ReadyToUse:      true,
+				GroupSnapshotId: groupSnapshotID,
+			})
+		}
+	}
+
+	return &csi.GetVolumeGroupSnapshotResponse{
+		GroupSnapshot: &csi.VolumeGroupSnapshot{
+			GroupSnapshotId: fmt.Sprintf("%s/%s", poolName, vgs.Name),
+			Snapshots:       snapshots,
+			ReadyToUse:      vgs.Status.Phase == "Complete",
+		},
+	}, nil
+}
+
+// splitCSV splits a comma-separated string and trims whitespace.
+func splitCSV(s string) []string {
+	var result []string
+	start := 0
+	for i := 0; i <= len(s); i++ {
+		if i == len(s) || s[i] == ',' {
+			part := s[start:i]
+			// Trim whitespace
+			for len(part) > 0 && part[0] == ' ' {
+				part = part[1:]
+			}
+			for len(part) > 0 && part[len(part)-1] == ' ' {
+				part = part[:len(part)-1]
+			}
+			result = append(result, part)
+			start = i + 1
+		}
+	}
+	return result
+}
+
+// splitVolumeID splits a volume/snapshot ID by '/' separator.
+func splitVolumeID(id string) []string {
+	var parts []string
+	start := 0
+	for i := 0; i <= len(id); i++ {
+		if i == len(id) || id[i] == '/' {
+			parts = append(parts, id[start:i])
+			start = i + 1
+		}
+	}
+	return parts
+}
+
 func newControllerCap(cap csi.ControllerServiceCapability_RPC_Type) *csi.ControllerServiceCapability {
 	return &csi.ControllerServiceCapability{
 		Type: &csi.ControllerServiceCapability_Rpc{

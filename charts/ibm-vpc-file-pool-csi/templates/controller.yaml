@@ -40,6 +40,9 @@ spec:
             {{- if .Values.config.subnetID }}
             - "--subnet-id={{ .Values.config.subnetID }}"
             {{- end }}
+            {{- if .Values.cloneWorker.interval }}
+            - "--clone-worker-interval={{ .Values.cloneWorker.interval }}"
+            {{- end }}
             {{- if .Values.secretProvider.managed }}
             - "--sidecarEndpoint=/csi/providerfile.sock"
             {{- end }}

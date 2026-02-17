@@ -20,15 +20,17 @@ import (
 // ---------------------------------------------------------------------------
 
 type fakeNFSOperations struct {
-	mu        sync.Mutex
-	dirs      map[string]os.FileMode
-	chowns    map[string][2]int // path → [uid, gid]
-	copies    map[string]string // dst → src
-	MkdirErr  error
-	RemoveErr error
-	ChownErr  error
-	ChmodErr  error
-	CopyErr   error
+	mu             sync.Mutex
+	dirs           map[string]os.FileMode
+	chowns         map[string][2]int // path → [uid, gid]
+	copies         map[string]string // dst → src
+	copyCallCount  int              // tracks total CopyDir calls
+	MkdirErr       error
+	RemoveErr      error
+	ChownErr       error
+	ChmodErr       error
+	CopyErr        error
+	CopyErrAfterN  int // if > 0, return CopyErr only after N successful copies
 }
 
 func newFakeNFSOperations() *fakeNFSOperations {
@@ -91,8 +93,13 @@ func (f *fakeNFSOperations) Chmod(path string, mode os.FileMode) error {
 func (f *fakeNFSOperations) CopyDir(src, dst string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.copyCallCount++
 	if f.CopyErr != nil {
-		return f.CopyErr
+		if f.CopyErrAfterN > 0 && f.copyCallCount <= f.CopyErrAfterN {
+			// Allow first N copies to succeed
+		} else {
+			return f.CopyErr
+		}
 	}
 	f.copies[dst] = src
 	f.dirs[dst] = 0755
@@ -123,10 +130,11 @@ func (f *fakeNFSOperations) dirCount() int {
 // ---------------------------------------------------------------------------
 
 type fakeK8sClient struct {
-	mu         sync.Mutex
-	pools      map[string]*v1alpha1.FileSharePool
-	subVolumes map[string]*v1alpha1.SubVolume
-	snapshots  map[string]*v1alpha1.Snapshot
+	mu             sync.Mutex
+	pools          map[string]*v1alpha1.FileSharePool
+	subVolumes     map[string]*v1alpha1.SubVolume
+	snapshots      map[string]*v1alpha1.Snapshot
+	groupSnapshots map[string]*v1alpha1.VolumeGroupSnapshot
 
 	GetPoolErr          error
 	UpdatePoolStatusErr error
@@ -145,9 +153,10 @@ var _ = (interface {
 
 func newFakeK8sClient() *fakeK8sClient {
 	return &fakeK8sClient{
-		pools:      make(map[string]*v1alpha1.FileSharePool),
-		subVolumes: make(map[string]*v1alpha1.SubVolume),
-		snapshots:  make(map[string]*v1alpha1.Snapshot),
+		pools:          make(map[string]*v1alpha1.FileSharePool),
+		subVolumes:     make(map[string]*v1alpha1.SubVolume),
+		snapshots:      make(map[string]*v1alpha1.Snapshot),
+		groupSnapshots: make(map[string]*v1alpha1.VolumeGroupSnapshot),
 	}
 }
 
@@ -393,6 +402,71 @@ func (f *fakeK8sClient) DeleteSnapshot(_ context.Context, name string) error {
 	}
 	delete(f.snapshots, name)
 	return nil
+}
+
+func (f *fakeK8sClient) GetVolumeGroupSnapshot(_ context.Context, name string) (*v1alpha1.VolumeGroupSnapshot, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	vgs, ok := f.groupSnapshots[name]
+	if !ok {
+		return nil, fmt.Errorf("volume group snapshot %q not found", name)
+	}
+	return vgs.DeepCopy(), nil
+}
+
+func (f *fakeK8sClient) CreateVolumeGroupSnapshot(_ context.Context, vgs *v1alpha1.VolumeGroupSnapshot) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, exists := f.groupSnapshots[vgs.Name]; exists {
+		return fmt.Errorf("volume group snapshot %q already exists", vgs.Name)
+	}
+	f.groupSnapshots[vgs.Name] = vgs.DeepCopy()
+	return nil
+}
+
+func (f *fakeK8sClient) UpdateVolumeGroupSnapshotStatus(_ context.Context, vgs *v1alpha1.VolumeGroupSnapshot) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	existing, ok := f.groupSnapshots[vgs.Name]
+	if !ok {
+		return fmt.Errorf("volume group snapshot %q not found", vgs.Name)
+	}
+	existing.Status = *vgs.Status.DeepCopy()
+	return nil
+}
+
+func (f *fakeK8sClient) DeleteVolumeGroupSnapshot(_ context.Context, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, exists := f.groupSnapshots[name]; !exists {
+		return fmt.Errorf("volume group snapshot %q not found", name)
+	}
+	delete(f.groupSnapshots, name)
+	return nil
+}
+
+func (f *fakeK8sClient) ListVolumeGroupSnapshots(_ context.Context, poolName string) ([]v1alpha1.VolumeGroupSnapshot, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var result []v1alpha1.VolumeGroupSnapshot
+	for _, vgs := range f.groupSnapshots {
+		if vgs.Spec.PoolName == poolName {
+			result = append(result, *vgs.DeepCopy())
+		}
+	}
+	return result, nil
+}
+
+func (f *fakeK8sClient) getGroupSnapshot(name string) *v1alpha1.VolumeGroupSnapshot {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.groupSnapshots[name]
+}
+
+func (f *fakeK8sClient) groupSnapshotCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.groupSnapshots)
 }
 
 func (f *fakeK8sClient) addSnapshot(snap *v1alpha1.Snapshot) {
@@ -2986,6 +3060,427 @@ func TestCloneVolume_UpdatesPoolCapacity(t *testing.T) {
 	}
 	if updatedPool.Status.TotalPVCCount != 2 {
 		t.Errorf("expected TotalPVCCount=2, got %d", updatedPool.Status.TotalPVCCount)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Group Snapshot Tests
+// ---------------------------------------------------------------------------
+
+func setupGroupSnapshotTest(t *testing.T) (*fakeK8sClient, *fakeNFSOperations, *Manager) {
+	t.Helper()
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 100, 3),
+	)
+	k.addPool(pool)
+
+	// Add 3 source SubVolumes
+	sv1 := newTestSubVolume("pvc-aaaa0001-0000-0000-0000-000000000001", "test-pool", "share-1", 5)
+	sv2 := newTestSubVolume("pvc-aaaa0002-0000-0000-0000-000000000002", "test-pool", "share-1", 5)
+	sv3 := newTestSubVolume("pvc-aaaa0003-0000-0000-0000-000000000003", "test-pool", "share-1", 5)
+	k.addSubVolume(sv1)
+	k.addSubVolume(sv2)
+	k.addSubVolume(sv3)
+
+	mgr := newManagerForTest(k, vpc, nfs)
+	return k, nfs, mgr
+}
+
+func TestCreateVolumeGroupSnapshot_AllSucceed(t *testing.T) {
+	k, nfs, mgr := setupGroupSnapshotTest(t)
+
+	req := GroupSnapshotRequest{
+		GroupName: "test-group-snap",
+		PoolName:  "test-pool",
+		SourceVolumeIDs: []string{
+			"test-pool/share-1/pvc-aaaa0001-0000-0000-0000-000000000001",
+			"test-pool/share-1/pvc-aaaa0002-0000-0000-0000-000000000002",
+			"test-pool/share-1/pvc-aaaa0003-0000-0000-0000-000000000003",
+		},
+		FailurePolicy: "Abort",
+	}
+
+	result, err := mgr.CreateVolumeGroupSnapshot(context.Background(), req)
+	if err != nil {
+		t.Fatalf("CreateVolumeGroupSnapshot failed: %v", err)
+	}
+
+	if result.GroupName != "test-group-snap" {
+		t.Errorf("expected group name 'test-group-snap', got %q", result.GroupName)
+	}
+	if result.PoolName != "test-pool" {
+		t.Errorf("expected pool name 'test-pool', got %q", result.PoolName)
+	}
+	if !result.ReadyToUse {
+		t.Error("expected ReadyToUse=true")
+	}
+	if len(result.Members) != 3 {
+		t.Fatalf("expected 3 members, got %d", len(result.Members))
+	}
+
+	// Verify individual snapshots created
+	if k.snapshotCount() != 3 {
+		t.Errorf("expected 3 snapshot CRs, got %d", k.snapshotCount())
+	}
+
+	// Verify NFS copies happened
+	if nfs.copyCount() != 3 {
+		t.Errorf("expected 3 NFS copies, got %d", nfs.copyCount())
+	}
+
+	// Verify VolumeGroupSnapshot CR was created and is Complete
+	vgs := k.getGroupSnapshot("test-group-snap")
+	if vgs == nil {
+		t.Fatal("VolumeGroupSnapshot CR not found")
+	}
+	if vgs.Status.Phase != "Complete" {
+		t.Errorf("expected phase 'Complete', got %q", vgs.Status.Phase)
+	}
+	if vgs.Status.ReadyCount != 3 {
+		t.Errorf("expected ReadyCount=3, got %d", vgs.Status.ReadyCount)
+	}
+	if vgs.Status.FailedCount != 0 {
+		t.Errorf("expected FailedCount=0, got %d", vgs.Status.FailedCount)
+	}
+	if vgs.Status.ConsistencyLevel != "BestEffort" {
+		t.Errorf("expected consistency 'BestEffort', got %q", vgs.Status.ConsistencyLevel)
+	}
+}
+
+func TestCreateVolumeGroupSnapshot_AbortPolicy_RollbackOnFailure(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 100, 3),
+	)
+	k.addPool(pool)
+
+	sv1 := newTestSubVolume("pvc-aaaa0001-0000-0000-0000-000000000001", "test-pool", "share-1", 5)
+	sv2 := newTestSubVolume("pvc-aaaa0002-0000-0000-0000-000000000002", "test-pool", "share-1", 5)
+	sv3 := newTestSubVolume("pvc-aaaa0003-0000-0000-0000-000000000003", "test-pool", "share-1", 5)
+	k.addSubVolume(sv1)
+	k.addSubVolume(sv2)
+	k.addSubVolume(sv3)
+
+	// Make NFS copy fail after the first successful copy
+	nfs.CopyErr = fmt.Errorf("NFS copy failure")
+	nfs.CopyErrAfterN = 1
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	req := GroupSnapshotRequest{
+		GroupName: "test-group-snap",
+		PoolName:  "test-pool",
+		SourceVolumeIDs: []string{
+			"test-pool/share-1/pvc-aaaa0001-0000-0000-0000-000000000001",
+			"test-pool/share-1/pvc-aaaa0002-0000-0000-0000-000000000002",
+			"test-pool/share-1/pvc-aaaa0003-0000-0000-0000-000000000003",
+		},
+		FailurePolicy: "Abort",
+	}
+
+	_, err := mgr.CreateVolumeGroupSnapshot(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected error for Abort policy with member failure")
+	}
+	if !errors.Is(err, ErrGroupSnapshotFailed) {
+		t.Errorf("expected ErrGroupSnapshotFailed, got %v", err)
+	}
+
+	// Verify rollback: the first snapshot that succeeded should have been deleted
+	// (rollback deletes completed snapshots)
+	if k.snapshotCount() != 0 {
+		t.Errorf("expected 0 snapshots after rollback, got %d", k.snapshotCount())
+	}
+
+	// Verify group snapshot CR exists and is Failed
+	vgs := k.getGroupSnapshot("test-group-snap")
+	if vgs == nil {
+		t.Fatal("VolumeGroupSnapshot CR not found")
+	}
+	if vgs.Status.Phase != "Failed" {
+		t.Errorf("expected phase 'Failed', got %q", vgs.Status.Phase)
+	}
+}
+
+func TestCreateVolumeGroupSnapshot_ContinuePolicy_PartialFailure(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	nfs := newFakeNFSOperations()
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 100, 3),
+	)
+	k.addPool(pool)
+
+	sv1 := newTestSubVolume("pvc-aaaa0001-0000-0000-0000-000000000001", "test-pool", "share-1", 5)
+	sv2 := newTestSubVolume("pvc-aaaa0002-0000-0000-0000-000000000002", "test-pool", "share-1", 5)
+	sv3 := newTestSubVolume("pvc-aaaa0003-0000-0000-0000-000000000003", "test-pool", "share-1", 5)
+	k.addSubVolume(sv1)
+	k.addSubVolume(sv2)
+	k.addSubVolume(sv3)
+
+	// Make NFS copy fail after the first successful copy
+	nfs.CopyErr = fmt.Errorf("NFS copy failure")
+	nfs.CopyErrAfterN = 1
+
+	mgr := newManagerForTest(k, vpc, nfs)
+
+	req := GroupSnapshotRequest{
+		GroupName: "test-group-snap",
+		PoolName:  "test-pool",
+		SourceVolumeIDs: []string{
+			"test-pool/share-1/pvc-aaaa0001-0000-0000-0000-000000000001",
+			"test-pool/share-1/pvc-aaaa0002-0000-0000-0000-000000000002",
+			"test-pool/share-1/pvc-aaaa0003-0000-0000-0000-000000000003",
+		},
+		FailurePolicy: "Continue",
+	}
+
+	result, err := mgr.CreateVolumeGroupSnapshot(context.Background(), req)
+	if err != nil {
+		t.Fatalf("CreateVolumeGroupSnapshot with Continue policy should not error, got: %v", err)
+	}
+
+	// With Continue policy: first succeeds, second fails, third fails (CopyErr still active)
+	if result.ReadyToUse {
+		t.Error("expected ReadyToUse=false for partial failure")
+	}
+	if len(result.Members) != 1 {
+		t.Errorf("expected 1 successful member, got %d", len(result.Members))
+	}
+
+	// Verify group snapshot CR shows PartialFailure
+	vgs := k.getGroupSnapshot("test-group-snap")
+	if vgs == nil {
+		t.Fatal("VolumeGroupSnapshot CR not found")
+	}
+	if vgs.Status.Phase != "PartialFailure" {
+		t.Errorf("expected phase 'PartialFailure', got %q", vgs.Status.Phase)
+	}
+	if vgs.Status.ReadyCount != 1 {
+		t.Errorf("expected ReadyCount=1, got %d", vgs.Status.ReadyCount)
+	}
+	if vgs.Status.FailedCount != 2 {
+		t.Errorf("expected FailedCount=2, got %d", vgs.Status.FailedCount)
+	}
+}
+
+func TestCreateVolumeGroupSnapshot_EmptySourceList(t *testing.T) {
+	_, _, mgr := setupGroupSnapshotTest(t)
+
+	req := GroupSnapshotRequest{
+		GroupName:       "test-group-snap",
+		PoolName:        "test-pool",
+		SourceVolumeIDs: []string{},
+		FailurePolicy:   "Abort",
+	}
+
+	_, err := mgr.CreateVolumeGroupSnapshot(context.Background(), req)
+	if !errors.Is(err, ErrEmptySourceList) {
+		t.Errorf("expected ErrEmptySourceList, got %v", err)
+	}
+}
+
+func TestCreateVolumeGroupSnapshot_Idempotent(t *testing.T) {
+	k, _, mgr := setupGroupSnapshotTest(t)
+
+	req := GroupSnapshotRequest{
+		GroupName: "test-group-snap",
+		PoolName:  "test-pool",
+		SourceVolumeIDs: []string{
+			"test-pool/share-1/pvc-aaaa0001-0000-0000-0000-000000000001",
+			"test-pool/share-1/pvc-aaaa0002-0000-0000-0000-000000000002",
+			"test-pool/share-1/pvc-aaaa0003-0000-0000-0000-000000000003",
+		},
+		FailurePolicy: "Abort",
+	}
+
+	// First call
+	result1, err := mgr.CreateVolumeGroupSnapshot(context.Background(), req)
+	if err != nil {
+		t.Fatalf("First CreateVolumeGroupSnapshot failed: %v", err)
+	}
+
+	initialSnapshotCount := k.snapshotCount()
+
+	// Second call (idempotent)
+	result2, err := mgr.CreateVolumeGroupSnapshot(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Second CreateVolumeGroupSnapshot failed: %v", err)
+	}
+
+	// Should return the same result without creating new snapshots
+	if result2.GroupName != result1.GroupName {
+		t.Errorf("idempotent call returned different group name: %q vs %q", result2.GroupName, result1.GroupName)
+	}
+	if len(result2.Members) != len(result1.Members) {
+		t.Errorf("idempotent call returned different member count: %d vs %d", len(result2.Members), len(result1.Members))
+	}
+
+	// No new snapshots should have been created
+	if k.snapshotCount() != initialSnapshotCount {
+		t.Errorf("expected snapshot count to remain %d, got %d", initialSnapshotCount, k.snapshotCount())
+	}
+}
+
+func TestDeleteVolumeGroupSnapshot_DeletesAllMembers(t *testing.T) {
+	k, _, mgr := setupGroupSnapshotTest(t)
+
+	// Create a group snapshot first
+	req := GroupSnapshotRequest{
+		GroupName: "test-group-snap",
+		PoolName:  "test-pool",
+		SourceVolumeIDs: []string{
+			"test-pool/share-1/pvc-aaaa0001-0000-0000-0000-000000000001",
+			"test-pool/share-1/pvc-aaaa0002-0000-0000-0000-000000000002",
+			"test-pool/share-1/pvc-aaaa0003-0000-0000-0000-000000000003",
+		},
+		FailurePolicy: "Abort",
+	}
+
+	_, err := mgr.CreateVolumeGroupSnapshot(context.Background(), req)
+	if err != nil {
+		t.Fatalf("CreateVolumeGroupSnapshot failed: %v", err)
+	}
+
+	if k.snapshotCount() != 3 {
+		t.Fatalf("expected 3 snapshots before delete, got %d", k.snapshotCount())
+	}
+	if k.groupSnapshotCount() != 1 {
+		t.Fatalf("expected 1 group snapshot before delete, got %d", k.groupSnapshotCount())
+	}
+
+	// Delete the group snapshot
+	err = mgr.DeleteVolumeGroupSnapshot(context.Background(), "test-group-snap")
+	if err != nil {
+		t.Fatalf("DeleteVolumeGroupSnapshot failed: %v", err)
+	}
+
+	// All individual snapshots should be deleted
+	if k.snapshotCount() != 0 {
+		t.Errorf("expected 0 snapshots after delete, got %d", k.snapshotCount())
+	}
+
+	// Group snapshot CR should be deleted
+	if k.groupSnapshotCount() != 0 {
+		t.Errorf("expected 0 group snapshots after delete, got %d", k.groupSnapshotCount())
+	}
+}
+
+func TestDeleteVolumeGroupSnapshot_IdempotentNotFound(t *testing.T) {
+	_, _, mgr := setupGroupSnapshotTest(t)
+
+	// Delete a non-existent group snapshot — should return nil (idempotent)
+	err := mgr.DeleteVolumeGroupSnapshot(context.Background(), "nonexistent")
+	if err != nil {
+		t.Errorf("expected nil error for non-existent group, got %v", err)
+	}
+}
+
+func TestCreateVolumeGroupSnapshot_CopyOrderRespected(t *testing.T) {
+	k, nfs, mgr := setupGroupSnapshotTest(t)
+
+	// Specify CopyOrder: 3, 1, 2 (reverse of natural alphabetical)
+	req := GroupSnapshotRequest{
+		GroupName: "test-group-snap",
+		PoolName:  "test-pool",
+		SourceVolumeIDs: []string{
+			"test-pool/share-1/pvc-aaaa0001-0000-0000-0000-000000000001",
+			"test-pool/share-1/pvc-aaaa0002-0000-0000-0000-000000000002",
+			"test-pool/share-1/pvc-aaaa0003-0000-0000-0000-000000000003",
+		},
+		CopyOrder: []string{
+			"pvc-aaaa0003-0000-0000-0000-000000000003",
+			"pvc-aaaa0001-0000-0000-0000-000000000001",
+			"pvc-aaaa0002-0000-0000-0000-000000000002",
+		},
+		FailurePolicy: "Abort",
+	}
+
+	result, err := mgr.CreateVolumeGroupSnapshot(context.Background(), req)
+	if err != nil {
+		t.Fatalf("CreateVolumeGroupSnapshot failed: %v", err)
+	}
+
+	// Verify members are in the specified copy order
+	if len(result.Members) != 3 {
+		t.Fatalf("expected 3 members, got %d", len(result.Members))
+	}
+
+	// Verify the VolumeGroupSnapshot CR members are in order
+	vgs := k.getGroupSnapshot("test-group-snap")
+	if vgs == nil {
+		t.Fatal("VolumeGroupSnapshot CR not found")
+	}
+	expectedOrder := []string{
+		"pvc-aaaa0003-0000-0000-0000-000000000003",
+		"pvc-aaaa0001-0000-0000-0000-000000000001",
+		"pvc-aaaa0002-0000-0000-0000-000000000002",
+	}
+	for i, member := range vgs.Status.Members {
+		if member.SubVolumeName != expectedOrder[i] {
+			t.Errorf("member %d: expected SubVolumeName %q, got %q", i, expectedOrder[i], member.SubVolumeName)
+		}
+	}
+
+	// Verify NFS copies happened (3 copies)
+	if nfs.copyCount() != 3 {
+		t.Errorf("expected 3 NFS copies, got %d", nfs.copyCount())
+	}
+}
+
+func TestCreateVolumeGroupSnapshot_SourceNotFound(t *testing.T) {
+	_, _, mgr := setupGroupSnapshotTest(t)
+
+	req := GroupSnapshotRequest{
+		GroupName: "test-group-snap",
+		PoolName:  "test-pool",
+		SourceVolumeIDs: []string{
+			"test-pool/share-1/pvc-aaaa0001-0000-0000-0000-000000000001",
+			"test-pool/share-1/pvc-nonexistent-0000-0000-000000000000", // doesn't exist
+		},
+		FailurePolicy: "Abort",
+	}
+
+	_, err := mgr.CreateVolumeGroupSnapshot(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected error for missing source volume")
+	}
+	if !errors.Is(err, ErrSourceNotFound) {
+		t.Errorf("expected ErrSourceNotFound, got %v", err)
+	}
+}
+
+func TestCreateVolumeGroupSnapshot_CrossPoolRejected(t *testing.T) {
+	k, _, mgr := setupGroupSnapshotTest(t)
+
+	// Add a SubVolume in a different pool
+	otherPoolSV := newTestSubVolume("pvc-bbbb0001-0000-0000-0000-000000000001", "other-pool", "share-2", 5)
+	k.addSubVolume(otherPoolSV)
+
+	req := GroupSnapshotRequest{
+		GroupName: "test-group-snap",
+		PoolName:  "test-pool",
+		SourceVolumeIDs: []string{
+			"test-pool/share-1/pvc-aaaa0001-0000-0000-0000-000000000001",
+			"test-pool/share-2/pvc-bbbb0001-0000-0000-0000-000000000001", // different pool
+		},
+		FailurePolicy: "Abort",
+	}
+
+	_, err := mgr.CreateVolumeGroupSnapshot(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected error for cross-pool source")
+	}
+	if !contains(err.Error(), "belongs to pool") {
+		t.Errorf("expected cross-pool error, got %v", err)
 	}
 }
 

@@ -26,18 +26,42 @@ var (
 	ErrSnapshotNotFound          = errors.New("snapshot not found")
 	ErrSnapshotAlreadyExists     = errors.New("snapshot already exists")
 	ErrSourceNotFound            = errors.New("source volume not found")
+	ErrGroupSnapshotNotFound     = errors.New("group snapshot not found")
+	ErrGroupSnapshotFailed       = errors.New("group snapshot failed")
+	ErrEmptySourceList           = errors.New("source volume list is empty")
 )
 
 // SnapshotResult contains the result of a successful snapshot operation.
 type SnapshotResult struct {
-	SnapshotName  string
-	PoolName      string
-	ShareID       string
-	SnapshotPath  string
-	SourceSubPath string
-	SizeBytes     int64
-	CreationTime  time.Time
-	ReadyToUse    bool
+	SnapshotName    string
+	PoolName        string
+	ShareID         string
+	SnapshotPath    string
+	SourceSubPath   string
+	SizeBytes       int64
+	CreationTime    time.Time
+	ReadyToUse      bool
+	SourceVolumeID  string // CSI volume ID of the source, set during group snapshots
+}
+
+// GroupSnapshotRequest contains the parameters for a group snapshot.
+type GroupSnapshotRequest struct {
+	GroupName       string
+	PoolName        string
+	SourceVolumeIDs []string
+	CopyOrder       []string // SubVolume names in desired copy order
+	FailurePolicy   string   // "Abort" or "Continue"
+	Parameters      map[string]string
+}
+
+// GroupSnapshotResult contains the result of a group snapshot.
+type GroupSnapshotResult struct {
+	GroupName             string
+	PoolName              string
+	Members               []SnapshotResult
+	CreationTime          time.Time
+	ReadyToUse            bool
+	InconsistencyWindowMs int64
 }
 
 // PoolManager defines the synchronous allocation interface used by the CSI controller.
@@ -69,6 +93,13 @@ type PoolManager interface {
 	// For large volumes, the copy runs asynchronously -- the SubVolume CR is
 	// created with cloneStatus=Pending and the background worker completes the copy.
 	CloneVolume(ctx context.Context, sourceVolumeID string, req AllocationRequest, syncThresholdGB int64) (*AllocationResult, error)
+
+	// CreateVolumeGroupSnapshot creates snapshots for multiple SubVolumes in sequence.
+	// Does NOT execute hooks -- the CSI controller handles hook orchestration.
+	CreateVolumeGroupSnapshot(ctx context.Context, req GroupSnapshotRequest) (*GroupSnapshotResult, error)
+
+	// DeleteVolumeGroupSnapshot deletes all member snapshots and the group CR.
+	DeleteVolumeGroupSnapshot(ctx context.Context, groupName string) error
 }
 
 // AllocationRequest contains the parameters for allocating a new SubVolume.
@@ -1106,6 +1137,377 @@ func (m *Manager) CloneVolume(ctx context.Context, sourceVolumeID string, req Al
 		GID:           gid,
 		Permissions:   perms,
 	}, nil
+}
+
+func (m *Manager) CreateVolumeGroupSnapshot(ctx context.Context, req GroupSnapshotRequest) (_ *GroupSnapshotResult, retErr error) {
+	start := time.Now()
+	defer func() {
+		status := "success"
+		if retErr != nil {
+			status = "error"
+		}
+		metrics.GroupSnapshotsTotal.WithLabelValues(req.PoolName, "create", status).Inc()
+		metrics.GroupSnapshotDuration.WithLabelValues(req.PoolName, "create").Observe(time.Since(start).Seconds())
+	}()
+
+	// Validate source list
+	if len(req.SourceVolumeIDs) == 0 {
+		return nil, ErrEmptySourceList
+	}
+
+	// Idempotency: if a VolumeGroupSnapshot CR already exists with the same name
+	// and is Complete or PartialFailure, return the existing result.
+	existing, err := m.k8sClient.GetVolumeGroupSnapshot(ctx, req.GroupName)
+	if err == nil && existing != nil {
+		if existing.Status.Phase == "Complete" || existing.Status.Phase == "PartialFailure" {
+			result := &GroupSnapshotResult{
+				GroupName:             existing.Name,
+				PoolName:              existing.Spec.PoolName,
+				ReadyToUse:            existing.Status.Phase == "Complete",
+				InconsistencyWindowMs: existing.Status.InconsistencyWindowMs,
+			}
+			if existing.Status.CreationTime != nil {
+				result.CreationTime = existing.Status.CreationTime.Time
+			}
+			for _, member := range existing.Status.Members {
+				if member.Phase == "Ready" {
+					result.Members = append(result.Members, SnapshotResult{
+						SnapshotName:   member.SnapshotName,
+						PoolName:       existing.Spec.PoolName,
+						ReadyToUse:     true,
+						SourceVolumeID: member.SubVolumeName,
+					})
+				}
+			}
+			return result, nil
+		}
+	}
+
+	// Resolve copy order: use CopyOrder if provided, otherwise derive from SourceVolumeIDs
+	orderedVolumeIDs := req.SourceVolumeIDs
+	if len(req.CopyOrder) > 0 {
+		orderedVolumeIDs, err = m.resolveCopyOrder(req.SourceVolumeIDs, req.CopyOrder)
+		if err != nil {
+			return nil, fmt.Errorf("resolve copy order: %w", err)
+		}
+	} else {
+		// Sort alphabetically by PV name for deterministic ordering
+		orderedVolumeIDs = sortVolumeIDsByPVName(req.SourceVolumeIDs)
+	}
+
+	// Validate all source SubVolumes exist and belong to the same pool
+	for _, volID := range orderedVolumeIDs {
+		_, _, pvName, parseErr := parseManagerVolumeID(volID)
+		if parseErr != nil {
+			return nil, fmt.Errorf("invalid source volume ID %q: %w", volID, parseErr)
+		}
+		sv, svErr := m.k8sClient.GetSubVolume(ctx, pvName)
+		if svErr != nil {
+			return nil, fmt.Errorf("%w: %s", ErrSourceNotFound, pvName)
+		}
+		if sv.Spec.PoolName != req.PoolName {
+			return nil, fmt.Errorf("source volume %q belongs to pool %q, not %q", pvName, sv.Spec.PoolName, req.PoolName)
+		}
+	}
+
+	// Create VolumeGroupSnapshot CR with Pending status
+	now := metav1.Now()
+	members := make([]v1alpha1.GroupSnapshotMember, 0, len(orderedVolumeIDs))
+	for _, volID := range orderedVolumeIDs {
+		_, _, pvName, _ := parseManagerVolumeID(volID)
+		snapshotName := fmt.Sprintf("%s-%s", req.GroupName, pvName)
+		members = append(members, v1alpha1.GroupSnapshotMember{
+			SubVolumeName: pvName,
+			SnapshotName:  snapshotName,
+			Phase:         "Pending",
+		})
+	}
+
+	vgs := &v1alpha1.VolumeGroupSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: req.GroupName,
+			Labels: map[string]string{
+				"storage.ibmcloud.io/pool": req.PoolName,
+			},
+		},
+		Spec: v1alpha1.VolumeGroupSnapshotSpec{
+			PoolName:      req.PoolName,
+			SourcePVCs:    orderedVolumeIDsToPVCNames(orderedVolumeIDs),
+			CopyOrder:     req.CopyOrder,
+			FailurePolicy: req.FailurePolicy,
+		},
+		Status: v1alpha1.VolumeGroupSnapshotStatus{
+			Phase:        "Pending",
+			Members:      members,
+			MemberCount:  int32(len(members)),
+			CreationTime: &now,
+		},
+	}
+
+	desiredStatus := vgs.Status
+	if err := m.k8sClient.CreateVolumeGroupSnapshot(ctx, vgs); err != nil {
+		return nil, fmt.Errorf("create VolumeGroupSnapshot CR: %w", err)
+	}
+	vgs.Status = desiredStatus
+	if err := m.k8sClient.UpdateVolumeGroupSnapshotStatus(ctx, vgs); err != nil {
+		klog.ErrorS(err, "Failed to update VolumeGroupSnapshot status to Pending", "group", req.GroupName)
+	}
+
+	// Update phase to InProgress
+	vgs.Status.Phase = "InProgress"
+	vgs.Status.StartedAt = &now
+	if err := m.k8sClient.UpdateVolumeGroupSnapshotStatus(ctx, vgs); err != nil {
+		klog.ErrorS(err, "Failed to update VolumeGroupSnapshot status to InProgress", "group", req.GroupName)
+	}
+
+	// Create individual snapshots
+	var (
+		completedSnapshots []SnapshotResult
+		firstCopyTime      time.Time
+		lastCopyTime       time.Time
+		failed             bool
+		readyCount         int32
+		failedCount        int32
+	)
+
+	for i, volID := range orderedVolumeIDs {
+		_, _, pvName, _ := parseManagerVolumeID(volID)
+		snapshotName := fmt.Sprintf("%s-%s", req.GroupName, pvName)
+
+		// Mark member as Creating
+		vgs.Status.Members[i].Phase = "Creating"
+		_ = m.k8sClient.UpdateVolumeGroupSnapshotStatus(ctx, vgs)
+
+		copyStart := time.Now()
+		if firstCopyTime.IsZero() {
+			firstCopyTime = copyStart
+		}
+
+		snapResult, snapErr := m.CreateSnapshot(ctx, snapshotName, volID, req.Parameters)
+
+		copyEnd := time.Now()
+		lastCopyTime = copyEnd
+
+		if snapErr != nil {
+			vgs.Status.Members[i].Phase = "Failed"
+			vgs.Status.Members[i].Error = snapErr.Error()
+			failedCount++
+			failed = true
+
+			klog.ErrorS(snapErr, "Group snapshot member failed",
+				"group", req.GroupName,
+				"member", pvName,
+				"snapshot", snapshotName,
+			)
+
+			if req.FailurePolicy == "Abort" {
+				// Rollback: delete all completed snapshots
+				for _, completed := range completedSnapshots {
+					if delErr := m.DeleteSnapshot(ctx, completed.SnapshotName); delErr != nil {
+						klog.ErrorS(delErr, "Failed to rollback snapshot during group abort",
+							"group", req.GroupName,
+							"snapshot", completed.SnapshotName,
+						)
+					}
+				}
+
+				// Mark remaining members as Failed
+				for j := i + 1; j < len(vgs.Status.Members); j++ {
+					vgs.Status.Members[j].Phase = "Failed"
+					vgs.Status.Members[j].Error = "aborted due to earlier failure"
+					failedCount++
+				}
+
+				// Update group to Failed
+				completedAt := metav1.Now()
+				vgs.Status.Phase = "Failed"
+				vgs.Status.ReadyCount = 0
+				vgs.Status.FailedCount = int32(len(vgs.Status.Members))
+				vgs.Status.CompletedAt = &completedAt
+				vgs.Status.ConsistencyLevel = "Unknown"
+				_ = m.k8sClient.UpdateVolumeGroupSnapshotStatus(ctx, vgs)
+
+				return nil, fmt.Errorf("%w: member %q failed: %v", ErrGroupSnapshotFailed, pvName, snapErr)
+			}
+			// Continue policy: keep going
+			continue
+		}
+
+		// Success
+		snapResult.SourceVolumeID = volID
+		completedSnapshots = append(completedSnapshots, *snapResult)
+		vgs.Status.Members[i].Phase = "Ready"
+		readyCount++
+		_ = m.k8sClient.UpdateVolumeGroupSnapshotStatus(ctx, vgs)
+	}
+
+	// Calculate inconsistency window
+	var inconsistencyMs int64
+	if !firstCopyTime.IsZero() && !lastCopyTime.IsZero() {
+		inconsistencyMs = lastCopyTime.Sub(firstCopyTime).Milliseconds()
+	}
+
+	// Determine final phase
+	completedAt := metav1.Now()
+	finalPhase := "Complete"
+	consistencyLevel := "BestEffort"
+	readyToUse := true
+	if failed {
+		finalPhase = "PartialFailure"
+		readyToUse = false
+	}
+
+	vgs.Status.Phase = finalPhase
+	vgs.Status.ReadyCount = readyCount
+	vgs.Status.FailedCount = failedCount
+	vgs.Status.CompletedAt = &completedAt
+	vgs.Status.ConsistencyLevel = consistencyLevel
+	vgs.Status.InconsistencyWindowMs = inconsistencyMs
+	if err := m.k8sClient.UpdateVolumeGroupSnapshotStatus(ctx, vgs); err != nil {
+		klog.ErrorS(err, "Failed to update VolumeGroupSnapshot final status", "group", req.GroupName)
+	}
+
+	metrics.GroupSnapshotMemberCount.WithLabelValues(req.PoolName).Observe(float64(len(orderedVolumeIDs)))
+	metrics.GroupSnapshotInconsistencyWindow.WithLabelValues(req.PoolName).Observe(float64(inconsistencyMs))
+
+	klog.V(2).InfoS("Created group snapshot",
+		"group", req.GroupName,
+		"pool", req.PoolName,
+		"members", len(orderedVolumeIDs),
+		"ready", readyCount,
+		"failed", failedCount,
+		"inconsistencyMs", inconsistencyMs,
+	)
+
+	return &GroupSnapshotResult{
+		GroupName:             req.GroupName,
+		PoolName:              req.PoolName,
+		Members:               completedSnapshots,
+		CreationTime:          now.Time,
+		ReadyToUse:            readyToUse,
+		InconsistencyWindowMs: inconsistencyMs,
+	}, nil
+}
+
+func (m *Manager) DeleteVolumeGroupSnapshot(ctx context.Context, groupName string) (retErr error) {
+	poolName := ""
+	defer func() {
+		status := "success"
+		if retErr != nil {
+			status = "error"
+		}
+		metrics.GroupSnapshotsTotal.WithLabelValues(poolName, "delete", status).Inc()
+	}()
+
+	// Fetch VolumeGroupSnapshot CR
+	vgs, err := m.k8sClient.GetVolumeGroupSnapshot(ctx, groupName)
+	if err != nil {
+		// Idempotent: if not found, return nil
+		return nil
+	}
+	poolName = vgs.Spec.PoolName
+
+	// Delete all member snapshots
+	for _, member := range vgs.Status.Members {
+		if member.SnapshotName == "" {
+			continue
+		}
+		if member.Phase == "Failed" {
+			// Try to delete anyway in case a partial CR was created
+			_ = m.DeleteSnapshot(ctx, member.SnapshotName)
+			continue
+		}
+		if err := m.DeleteSnapshot(ctx, member.SnapshotName); err != nil {
+			// Log but continue — best effort cleanup
+			klog.ErrorS(err, "Failed to delete member snapshot during group deletion",
+				"group", groupName,
+				"snapshot", member.SnapshotName,
+			)
+		}
+	}
+
+	// Delete the VolumeGroupSnapshot CR
+	if err := m.k8sClient.DeleteVolumeGroupSnapshot(ctx, groupName); err != nil {
+		return fmt.Errorf("delete VolumeGroupSnapshot CR: %w", err)
+	}
+
+	klog.V(2).InfoS("Deleted group snapshot",
+		"group", groupName,
+		"pool", poolName,
+	)
+
+	return nil
+}
+
+// resolveCopyOrder reorders sourceVolumeIDs according to the desired CopyOrder (which uses PV names).
+// Volume IDs not listed in CopyOrder are appended at the end in their original order.
+func (m *Manager) resolveCopyOrder(sourceVolumeIDs []string, copyOrder []string) ([]string, error) {
+	// Build a map of pvName -> volumeID
+	pvToVolID := make(map[string]string, len(sourceVolumeIDs))
+	for _, volID := range sourceVolumeIDs {
+		_, _, pvName, err := parseManagerVolumeID(volID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid volume ID %q: %w", volID, err)
+		}
+		pvToVolID[pvName] = volID
+	}
+
+	ordered := make([]string, 0, len(sourceVolumeIDs))
+	used := make(map[string]bool)
+
+	for _, pvName := range copyOrder {
+		volID, ok := pvToVolID[pvName]
+		if !ok {
+			// CopyOrder references a PV that's not in the source list — skip it
+			continue
+		}
+		ordered = append(ordered, volID)
+		used[pvName] = true
+	}
+
+	// Append remaining volume IDs not in CopyOrder
+	for _, volID := range sourceVolumeIDs {
+		_, _, pvName, _ := parseManagerVolumeID(volID)
+		if !used[pvName] {
+			ordered = append(ordered, volID)
+		}
+	}
+
+	return ordered, nil
+}
+
+// sortVolumeIDsByPVName returns a copy of volumeIDs sorted alphabetically by the PV name component.
+func sortVolumeIDsByPVName(volumeIDs []string) []string {
+	type entry struct {
+		volID  string
+		pvName string
+	}
+	entries := make([]entry, 0, len(volumeIDs))
+	for _, volID := range volumeIDs {
+		_, _, pvName, _ := parseManagerVolumeID(volID)
+		entries = append(entries, entry{volID: volID, pvName: pvName})
+	}
+	// Simple insertion sort for small slices
+	for i := 1; i < len(entries); i++ {
+		for j := i; j > 0 && entries[j].pvName < entries[j-1].pvName; j-- {
+			entries[j], entries[j-1] = entries[j-1], entries[j]
+		}
+	}
+	sorted := make([]string, len(entries))
+	for i, e := range entries {
+		sorted[i] = e.volID
+	}
+	return sorted
+}
+
+// orderedVolumeIDsToPVCNames extracts PV names from volume IDs and returns them as string slice.
+func orderedVolumeIDsToPVCNames(volumeIDs []string) []string {
+	names := make([]string, 0, len(volumeIDs))
+	for _, volID := range volumeIDs {
+		_, _, pvName, _ := parseManagerVolumeID(volID)
+		names = append(names, pvName)
+	}
+	return names
 }
 
 // parseManagerVolumeID is a helper to split volume IDs within the pool package.

@@ -39,4 +39,11 @@ type Client interface {
 	UpdateSnapshot(ctx context.Context, snap *v1alpha1.Snapshot) error
 	UpdateSnapshotStatus(ctx context.Context, snap *v1alpha1.Snapshot) error
 	DeleteSnapshot(ctx context.Context, name string) error
+
+	// VolumeGroupSnapshot operations
+	GetVolumeGroupSnapshot(ctx context.Context, name string) (*v1alpha1.VolumeGroupSnapshot, error)
+	CreateVolumeGroupSnapshot(ctx context.Context, vgs *v1alpha1.VolumeGroupSnapshot) error
+	UpdateVolumeGroupSnapshotStatus(ctx context.Context, vgs *v1alpha1.VolumeGroupSnapshot) error
+	DeleteVolumeGroupSnapshot(ctx context.Context, name string) error
+	ListVolumeGroupSnapshots(ctx context.Context, poolName string) ([]v1alpha1.VolumeGroupSnapshot, error)
 }

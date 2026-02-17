@@ -36,6 +36,7 @@ lint: tools
 	$(GOLANGCI_LINT) run ./...
 
 generate: tools
+	$(CONTROLLER_GEN) object paths="./api/..."
 	$(CONTROLLER_GEN) crd paths="./api/..." output:crd:dir=config/crd
 
 docker-build:

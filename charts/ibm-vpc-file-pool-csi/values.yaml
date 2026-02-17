@@ -30,6 +30,10 @@ node:
   nodeSelector: {}
   affinity: {}
 
+cloneWorker:
+  # Interval between clone worker poll cycles (Go duration string).
+  interval: 10s
+
 logLevel: 4
 
 secretProvider:

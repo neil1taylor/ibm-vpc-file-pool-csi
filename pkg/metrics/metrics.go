@@ -114,6 +114,45 @@ var (
 		},
 		[]string{"pool"},
 	)
+
+	// GroupSnapshotsTotal counts group snapshot operations by pool, operation, and status.
+	GroupSnapshotsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "vpc_file_pool_group_snapshots_total",
+			Help: "Total number of group snapshot operations",
+		},
+		[]string{"pool", "operation", "status"},
+	)
+
+	// GroupSnapshotDuration tracks the time for group snapshot operations.
+	GroupSnapshotDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "vpc_file_pool_group_snapshot_duration_seconds",
+			Help:    "Time for group snapshot operations",
+			Buckets: prometheus.ExponentialBuckets(0.01, 2, 15), // 10ms to ~163s
+		},
+		[]string{"pool", "operation"},
+	)
+
+	// GroupSnapshotMemberCount tracks the number of members per group snapshot.
+	GroupSnapshotMemberCount = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "vpc_file_pool_group_snapshot_member_count",
+			Help:    "Number of members per group snapshot",
+			Buckets: prometheus.LinearBuckets(1, 1, 20), // 1 to 20
+		},
+		[]string{"pool"},
+	)
+
+	// GroupSnapshotInconsistencyWindow tracks the inconsistency window in milliseconds.
+	GroupSnapshotInconsistencyWindow = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "vpc_file_pool_group_snapshot_inconsistency_window_ms",
+			Help:    "Inconsistency window in milliseconds between first and last copy",
+			Buckets: prometheus.ExponentialBuckets(1, 2, 20), // 1ms to ~524s
+		},
+		[]string{"pool"},
+	)
 )
 
 func init() {
@@ -130,5 +169,9 @@ func init() {
 		SnapshotDuration,
 		ClonesTotal,
 		CloneDuration,
+		GroupSnapshotsTotal,
+		GroupSnapshotDuration,
+		GroupSnapshotMemberCount,
+		GroupSnapshotInconsistencyWindow,
 	)
 }

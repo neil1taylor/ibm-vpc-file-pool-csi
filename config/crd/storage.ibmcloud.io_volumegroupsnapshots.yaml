@@ -1,0 +1,179 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: volumegroupsnapshots.storage.ibmcloud.io
+spec:
+  group: storage.ibmcloud.io
+  names:
+    kind: VolumeGroupSnapshot
+    listKind: VolumeGroupSnapshotList
+    plural: volumegroupsnapshots
+    shortNames:
+    - vgs
+    singular: volumegroupsnapshot
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.poolName
+      name: Pool
+      type: string
+    - jsonPath: .status.memberCount
+      name: Members
+      type: integer
+    - jsonPath: .status.readyCount
+      name: Ready
+      type: integer
+    - jsonPath: .status.consistencyLevel
+      name: Consistency
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: VolumeGroupSnapshot tracks a coordinated group of SubVolume snapshots.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: VolumeGroupSnapshotSpec defines the desired state of a VolumeGroupSnapshot.
+            properties:
+              copyOrder:
+                description: |-
+                  CopyOrder defines the order in which SubVolumes are copied.
+                  If empty, copies are executed in alphabetical order of source names.
+                items:
+                  type: string
+                type: array
+              failurePolicy:
+                default: Abort
+                description: |-
+                  FailurePolicy controls behavior when a member snapshot fails.
+                  "Abort" stops immediately and rolls back completed snapshots.
+                  "Continue" finishes remaining members and marks the group as PartialFailure.
+                enum:
+                - Abort
+                - Continue
+                type: string
+              poolName:
+                description: |-
+                  PoolName references the FileSharePool containing the source volumes.
+                  All source volumes must belong to this pool.
+                type: string
+              sourcePVCs:
+                description: SourcePVCs lists the SubVolume names to include in the
+                  group snapshot.
+                items:
+                  type: string
+                type: array
+            required:
+            - failurePolicy
+            - poolName
+            type: object
+          status:
+            description: VolumeGroupSnapshotStatus defines the observed state of a
+              VolumeGroupSnapshot.
+            properties:
+              completedAt:
+                description: CompletedAt is when the group snapshot operation finished.
+                format: date-time
+                type: string
+              consistencyLevel:
+                description: ConsistencyLevel reports the actual consistency achieved.
+                type: string
+              creationTime:
+                description: CreationTime is when the group snapshot CR was created.
+                format: date-time
+                type: string
+              failedCount:
+                description: FailedCount is the number of member snapshots that failed.
+                format: int32
+                type: integer
+              inconsistencyWindowMs:
+                description: |-
+                  InconsistencyWindowMs is the duration in milliseconds between
+                  the first and last member snapshot copy.
+                format: int64
+                type: integer
+              memberCount:
+                description: MemberCount is the total number of member snapshots.
+                format: int32
+                type: integer
+              members:
+                description: Members lists the individual snapshots in this group.
+                items:
+                  description: GroupSnapshotMember tracks the status of a single snapshot
+                    within the group.
+                  properties:
+                    error:
+                      description: Error contains the error message if this member
+                        failed.
+                      type: string
+                    phase:
+                      description: Phase is the individual snapshot state.
+                      enum:
+                      - Pending
+                      - Creating
+                      - Ready
+                      - Failed
+                      type: string
+                    snapshotName:
+                      description: SnapshotName is the name of the individual Snapshot
+                        CR created.
+                      type: string
+                    subVolumeName:
+                      description: SubVolumeName is the name of the source SubVolume.
+                      type: string
+                  required:
+                  - phase
+                  - snapshotName
+                  - subVolumeName
+                  type: object
+                type: array
+              phase:
+                description: Phase is the group snapshot lifecycle state.
+                enum:
+                - Pending
+                - InProgress
+                - Complete
+                - PartialFailure
+                - Failed
+                type: string
+              readyCount:
+                description: ReadyCount is the number of member snapshots that are
+                  ready.
+                format: int32
+                type: integer
+              startedAt:
+                description: StartedAt is when the group snapshot operation began.
+                format: date-time
+                type: string
+            required:
+            - failedCount
+            - memberCount
+            - readyCount
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

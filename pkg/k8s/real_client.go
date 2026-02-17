@@ -159,6 +159,42 @@ func (r *realClient) DeleteSnapshot(ctx context.Context, name string) error {
 	return r.client.Delete(ctx, snap)
 }
 
+// --- VolumeGroupSnapshot operations ---
+
+func (r *realClient) GetVolumeGroupSnapshot(ctx context.Context, name string) (*v1alpha1.VolumeGroupSnapshot, error) {
+	vgs := &v1alpha1.VolumeGroupSnapshot{}
+	if err := r.client.Get(ctx, types.NamespacedName{Name: name}, vgs); err != nil {
+		return nil, err
+	}
+	return vgs, nil
+}
+
+func (r *realClient) CreateVolumeGroupSnapshot(ctx context.Context, vgs *v1alpha1.VolumeGroupSnapshot) error {
+	return r.client.Create(ctx, vgs)
+}
+
+func (r *realClient) UpdateVolumeGroupSnapshotStatus(ctx context.Context, vgs *v1alpha1.VolumeGroupSnapshot) error {
+	return r.client.Status().Update(ctx, vgs)
+}
+
+func (r *realClient) DeleteVolumeGroupSnapshot(ctx context.Context, name string) error {
+	vgs := &v1alpha1.VolumeGroupSnapshot{}
+	if err := r.client.Get(ctx, types.NamespacedName{Name: name}, vgs); err != nil {
+		return err
+	}
+	return r.client.Delete(ctx, vgs)
+}
+
+func (r *realClient) ListVolumeGroupSnapshots(ctx context.Context, poolName string) ([]v1alpha1.VolumeGroupSnapshot, error) {
+	list := &v1alpha1.VolumeGroupSnapshotList{}
+	if err := r.client.List(ctx, list, client.MatchingLabels{
+		"storage.ibmcloud.io/pool": poolName,
+	}); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
 // --- ConfigMap operations ---
 
 func (r *realClient) GetConfigMapValue(ctx context.Context, namespace, name, key string) (string, error) {

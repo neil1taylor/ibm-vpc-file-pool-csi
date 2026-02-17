@@ -5,6 +5,7 @@ import (
 	"flag"
 	"os"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -26,12 +27,13 @@ var version = "dev"
 
 func main() {
 	var (
-		endpoint string
-		nodeID   string
-		mode     string
-		region   string
-		vpcID    string
-		subnetID string
+		endpoint             string
+		nodeID               string
+		mode                 string
+		region               string
+		vpcID                string
+		subnetID             string
+		cloneWorkerInterval  time.Duration
 	)
 
 	flag.StringVar(&endpoint, "endpoint", "unix:///csi/csi.sock", "CSI endpoint")
@@ -40,6 +42,7 @@ func main() {
 	flag.StringVar(&region, "region", "", "IBM Cloud region (e.g. us-south); auto-discovered from secret provider if omitted")
 	flag.StringVar(&vpcID, "vpc-id", "", "IBM Cloud VPC ID for creating file share mount targets")
 	flag.StringVar(&subnetID, "subnet-id", "", "IBM Cloud subnet ID for creating file share mount targets")
+	flag.DurationVar(&cloneWorkerInterval, "clone-worker-interval", pool.DefaultCloneWorkerInterval, "Interval between clone worker poll cycles")
 
 	klog.InitFlags(nil)
 	flag.Parse()
@@ -47,13 +50,13 @@ func main() {
 	klog.InfoS("Starting IBM VPC File Pool CSI Driver", "version", version, "mode", mode)
 
 	if mode == "controller" {
-		runController(endpoint, nodeID, region, vpcID, subnetID)
+		runController(endpoint, nodeID, region, vpcID, subnetID, cloneWorkerInterval)
 	} else {
 		runNode(endpoint, nodeID, mode)
 	}
 }
 
-func runController(endpoint, nodeID, region, vpcID, subnetID string) {
+func runController(endpoint, nodeID, region, vpcID, subnetID string, cloneWorkerInterval time.Duration) {
 	scheme := runtime.NewScheme()
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
 		klog.ErrorS(err, "Failed to add CRD types to scheme")
@@ -154,6 +157,9 @@ func runController(endpoint, nodeID, region, vpcID, subnetID string) {
 	signalCtx := ctrl.SetupSignalHandler()
 	nfsOps := pool.NewRealNFSOperations()
 	cloneWorker := pool.NewCloneWorker(k8sClient, nfsOps, stagingBasePath)
+	if cloneWorkerInterval > 0 {
+		cloneWorker.SetInterval(cloneWorkerInterval)
+	}
 	go cloneWorker.Run(signalCtx)
 
 	// mgr.Start blocks until signal or error
