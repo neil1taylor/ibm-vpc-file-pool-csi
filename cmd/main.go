@@ -27,13 +27,13 @@ var version = "dev"
 
 func main() {
 	var (
-		endpoint             string
-		nodeID               string
-		mode                 string
-		region               string
-		vpcID                string
-		subnetID             string
-		cloneWorkerInterval  time.Duration
+		endpoint            string
+		nodeID              string
+		mode                string
+		region              string
+		vpcID               string
+		subnetID            string
+		cloneWorkerInterval time.Duration
 	)
 
 	flag.StringVar(&endpoint, "endpoint", "unix:///csi/csi.sock", "CSI endpoint")
@@ -161,6 +161,10 @@ func runController(endpoint, nodeID, region, vpcID, subnetID string, cloneWorker
 		cloneWorker.SetInterval(cloneWorkerInterval)
 	}
 	go cloneWorker.Run(signalCtx)
+
+	// Start the background replication controller for cross-region DR.
+	replController := pool.NewReplicationController(k8sClient, nfsOps)
+	go replController.Run(signalCtx)
 
 	// mgr.Start blocks until signal or error
 	klog.InfoS("Starting controller-runtime manager with leader election")

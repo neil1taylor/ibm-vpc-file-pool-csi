@@ -184,7 +184,7 @@ func runPlan(args []string) error {
 	fmt.Printf("Total size:         %d GiB\n\n", plan.TotalSizeGB)
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tSIZE (GiB)\tPHASE\tSHARE ID\tPODS")
+	_, _ = fmt.Fprintln(w, "NAME\tSIZE (GiB)\tPHASE\tSHARE ID\tPODS")
 	for _, pvc := range plan.PVCs {
 		pods := "(none)"
 		if len(pvc.Pods) > 0 {
@@ -194,10 +194,10 @@ func runPlan(args []string) error {
 		if shareID == "" {
 			shareID = "(unknown)"
 		}
-		fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\n",
 			pvc.Name, pvc.SizeGB, pvc.Phase, shareID, pods)
 	}
-	w.Flush()
+	_ = w.Flush()
 
 	fmt.Printf("\nTo migrate a PVC, run:\n")
 	fmt.Printf("  kubectl migrate execute --namespace %s --pvc <PVC_NAME> --target-pool %s --target-storage-class <POOL_SC>\n",
@@ -270,16 +270,16 @@ func runStatus(args []string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "POD\tSOURCE PVC\tTARGET PVC\tPHASE\tSTARTED")
+	_, _ = fmt.Fprintln(w, "POD\tSOURCE PVC\tTARGET PVC\tPHASE\tSTARTED")
 	for _, s := range statuses {
 		started := "(pending)"
 		if s.StartTime != nil {
 			started = s.StartTime.Format("2006-01-02 15:04:05")
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
 			s.PodName, s.SourcePVC, s.TargetPVC, s.Phase, started)
 	}
-	w.Flush()
+	_ = w.Flush()
 	return nil
 }
 

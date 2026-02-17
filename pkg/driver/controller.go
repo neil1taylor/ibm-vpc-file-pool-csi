@@ -632,11 +632,11 @@ func (d *Driver) CreateVolumeGroupSnapshot(ctx context.Context, req *csi.CreateV
 	for _, member := range result.Members {
 		snapshotID := fmt.Sprintf("%s/%s/%s", member.PoolName, member.ShareID, member.SnapshotName)
 		snapshots = append(snapshots, &csi.Snapshot{
-			SnapshotId:     snapshotID,
-			SourceVolumeId: member.SourceVolumeID,
-			SizeBytes:      member.SizeBytes,
-			CreationTime:   timestamppb.New(member.CreationTime),
-			ReadyToUse:     member.ReadyToUse,
+			SnapshotId:      snapshotID,
+			SourceVolumeId:  member.SourceVolumeID,
+			SizeBytes:       member.SizeBytes,
+			CreationTime:    timestamppb.New(member.CreationTime),
+			ReadyToUse:      member.ReadyToUse,
 			GroupSnapshotId: groupSnapshotID,
 		})
 	}

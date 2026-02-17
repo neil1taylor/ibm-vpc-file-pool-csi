@@ -153,6 +153,52 @@ var (
 		},
 		[]string{"pool"},
 	)
+
+	// ReplicationSyncsTotal counts replication sync attempts by policy, source pool, and result.
+	ReplicationSyncsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "pool_csi_replication_sync_total",
+			Help: "Total replication sync attempts",
+		},
+		[]string{"policy", "source_pool", "result"},
+	)
+
+	// ReplicationSyncDuration tracks the duration of replication cycles.
+	ReplicationSyncDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "pool_csi_replication_sync_duration_seconds",
+			Help:    "Duration of replication sync cycles",
+			Buckets: prometheus.ExponentialBuckets(1, 2, 15), // 1s to ~16384s
+		},
+		[]string{"policy", "source_pool"},
+	)
+
+	// ReplicationLagSeconds tracks the current replication lag (time since last successful sync).
+	ReplicationLagSeconds = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "pool_csi_replication_lag_seconds",
+			Help: "Current replication lag in seconds (time since last successful sync)",
+		},
+		[]string{"policy", "source_pool"},
+	)
+
+	// ReplicationConsecutiveFailures tracks the current consecutive failure count.
+	ReplicationConsecutiveFailures = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "pool_csi_replication_consecutive_failures",
+			Help: "Current consecutive failure count for replication policy",
+		},
+		[]string{"policy", "source_pool"},
+	)
+
+	// ReplicationSubVolumeCount tracks the number of SubVolumes being replicated.
+	ReplicationSubVolumeCount = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "pool_csi_replication_subvolume_count",
+			Help: "Number of SubVolumes being replicated per policy",
+		},
+		[]string{"policy", "source_pool"},
+	)
 )
 
 func init() {
@@ -173,5 +219,10 @@ func init() {
 		GroupSnapshotDuration,
 		GroupSnapshotMemberCount,
 		GroupSnapshotInconsistencyWindow,
+		ReplicationSyncsTotal,
+		ReplicationSyncDuration,
+		ReplicationLagSeconds,
+		ReplicationConsecutiveFailures,
+		ReplicationSubVolumeCount,
 	)
 }

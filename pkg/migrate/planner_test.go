@@ -22,7 +22,7 @@ func TestPlanner_Plan_FiltersByStorageClass(t *testing.T) {
 		makePVC("pvc-no-sc", "default", "", "1Gi", corev1.ClaimPending),
 	}
 
-	clientset := fake.NewSimpleClientset(objects...)
+	clientset := fake.NewSimpleClientset(objects...) //nolint:staticcheck // NewClientset requires generated apply configs
 	planner := NewPlanner(clientset)
 
 	plan, err := planner.Plan(context.Background(), "default", targetSC, "general-purpose")
@@ -51,7 +51,7 @@ func TestPlanner_Plan_FiltersByStorageClass(t *testing.T) {
 }
 
 func TestPlanner_Plan_NoPVCsFound(t *testing.T) {
-	clientset := fake.NewSimpleClientset()
+	clientset := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	planner := NewPlanner(clientset)
 
 	plan, err := planner.Plan(context.Background(), "default", "nonexistent-sc", "pool")
@@ -72,7 +72,7 @@ func TestPlanner_Plan_SizeRounding(t *testing.T) {
 		makePVC("pvc-small", "default", "sc", "500Mi", corev1.ClaimBound),
 	}
 
-	clientset := fake.NewSimpleClientset(objects...)
+	clientset := fake.NewSimpleClientset(objects...) //nolint:staticcheck // NewClientset requires generated apply configs
 	planner := NewPlanner(clientset)
 
 	plan, err := planner.Plan(context.Background(), "default", "sc", "pool")
@@ -94,7 +94,7 @@ func TestPlanner_Plan_IncludesPhase(t *testing.T) {
 		makePVC("pvc-pending", "default", "sc", "5Gi", corev1.ClaimPending),
 	}
 
-	clientset := fake.NewSimpleClientset(objects...)
+	clientset := fake.NewSimpleClientset(objects...) //nolint:staticcheck // NewClientset requires generated apply configs
 	planner := NewPlanner(clientset)
 
 	plan, err := planner.Plan(context.Background(), "default", "sc", "pool")
@@ -137,7 +137,7 @@ func TestPlanner_Plan_ShareIDFromPV(t *testing.T) {
 		},
 	}
 
-	clientset := fake.NewSimpleClientset(pvc, pv)
+	clientset := fake.NewSimpleClientset(pvc, pv) //nolint:staticcheck // NewClientset requires generated apply configs
 	planner := NewPlanner(clientset)
 
 	plan, err := planner.Plan(context.Background(), "default", "sc", "pool")
@@ -176,7 +176,7 @@ func TestPlanner_Plan_FindsPodsUsingPVC(t *testing.T) {
 		},
 	}
 
-	clientset := fake.NewSimpleClientset(pvc, pod)
+	clientset := fake.NewSimpleClientset(pvc, pod) //nolint:staticcheck // NewClientset requires generated apply configs
 	planner := NewPlanner(clientset)
 
 	plan, err := planner.Plan(context.Background(), "default", "sc", "pool")
@@ -199,7 +199,7 @@ func TestPlanner_Plan_SortsByName(t *testing.T) {
 		makePVC("mmm-pvc", "default", "sc", "1Gi", corev1.ClaimBound),
 	}
 
-	clientset := fake.NewSimpleClientset(objects...)
+	clientset := fake.NewSimpleClientset(objects...) //nolint:staticcheck // NewClientset requires generated apply configs
 	planner := NewPlanner(clientset)
 
 	plan, err := planner.Plan(context.Background(), "default", "sc", "pool")

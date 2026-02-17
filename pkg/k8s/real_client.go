@@ -226,3 +226,37 @@ func (r *realClient) GetNodeZone(ctx context.Context, nodeName string) (string, 
 
 	return "", fmt.Errorf("node %q has no zone label", nodeName)
 }
+
+// --- ReplicationPolicy operations ---
+
+func (r *realClient) GetReplicationPolicy(ctx context.Context, name string) (*v1alpha1.ReplicationPolicy, error) {
+	rp := &v1alpha1.ReplicationPolicy{}
+	if err := r.client.Get(ctx, types.NamespacedName{Name: name}, rp); err != nil {
+		return nil, err
+	}
+	return rp, nil
+}
+
+func (r *realClient) ListReplicationPolicies(ctx context.Context) ([]v1alpha1.ReplicationPolicy, error) {
+	list := &v1alpha1.ReplicationPolicyList{}
+	if err := r.client.List(ctx, list); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
+func (r *realClient) CreateReplicationPolicy(ctx context.Context, rp *v1alpha1.ReplicationPolicy) error {
+	return r.client.Create(ctx, rp)
+}
+
+func (r *realClient) UpdateReplicationPolicyStatus(ctx context.Context, rp *v1alpha1.ReplicationPolicy) error {
+	return r.client.Status().Update(ctx, rp)
+}
+
+func (r *realClient) DeleteReplicationPolicy(ctx context.Context, name string) error {
+	rp := &v1alpha1.ReplicationPolicy{}
+	if err := r.client.Get(ctx, types.NamespacedName{Name: name}, rp); err != nil {
+		return err
+	}
+	return r.client.Delete(ctx, rp)
+}

@@ -93,11 +93,11 @@ func (e *Executor) Execute(ctx context.Context, namespace, sourcePVC, targetPool
 	}
 
 	if dryRun {
-		fmt.Fprintf(e.output, "[dry-run] Would create target PVC %s/%s (size: %s, storageClass: %s)\n",
+		_, _ = fmt.Fprintf(e.output, "[dry-run] Would create target PVC %s/%s (size: %s, storageClass: %s)\n",
 			namespace, targetPVCName, storageSize.String(), targetStorageClass)
-		fmt.Fprintf(e.output, "[dry-run] Would create migration pod %s/%s\n", namespace, migrationPodName)
-		fmt.Fprintf(e.output, "[dry-run] Would rsync data from %s to %s\n", sourcePVC, targetPVCName)
-		fmt.Fprintf(e.output, "[dry-run] Source PVC would NOT be deleted\n")
+		_, _ = fmt.Fprintf(e.output, "[dry-run] Would create migration pod %s/%s\n", namespace, migrationPodName)
+		_, _ = fmt.Fprintf(e.output, "[dry-run] Would rsync data from %s to %s\n", sourcePVC, targetPVCName)
+		_, _ = fmt.Fprintf(e.output, "[dry-run] Source PVC would NOT be deleted\n")
 		return &MigrationResult{
 			SourcePVC: sourcePVC,
 			TargetPVC: targetPVCName,
@@ -109,7 +109,7 @@ func (e *Executor) Execute(ctx context.Context, namespace, sourcePVC, targetPool
 	}
 
 	// 2. Create the target PVC on the pool driver.
-	fmt.Fprintf(e.output, "Creating target PVC %s/%s (size: %s, storageClass: %s)...\n",
+	_, _ = fmt.Fprintf(e.output, "Creating target PVC %s/%s (size: %s, storageClass: %s)...\n",
 		namespace, targetPVCName, storageSize.String(), targetStorageClass)
 
 	targetPVC := &corev1.PersistentVolumeClaim{
@@ -120,8 +120,8 @@ func (e *Executor) Execute(ctx context.Context, namespace, sourcePVC, targetPool
 				LabelMigration: "true",
 			},
 			Annotations: map[string]string{
-				AnnotationSourcePVC:                sourcePVC,
-				"vpc-file-pool-csi.ibm.io/pool":    targetPool,
+				AnnotationSourcePVC:             sourcePVC,
+				"vpc-file-pool-csi.ibm.io/pool": targetPool,
 			},
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
@@ -138,21 +138,21 @@ func (e *Executor) Execute(ctx context.Context, namespace, sourcePVC, targetPool
 	_, err = e.clientset.CoreV1().PersistentVolumeClaims(namespace).Create(ctx, targetPVC, metav1.CreateOptions{})
 	if err != nil {
 		if errors.IsAlreadyExists(err) {
-			fmt.Fprintf(e.output, "Target PVC %s already exists, reusing it.\n", targetPVCName)
+			_, _ = fmt.Fprintf(e.output, "Target PVC %s already exists, reusing it.\n", targetPVCName)
 		} else {
 			return nil, fmt.Errorf("failed to create target PVC: %w", err)
 		}
 	}
 
 	// Wait for target PVC to bind.
-	fmt.Fprintf(e.output, "Waiting for target PVC to bind...\n")
+	_, _ = fmt.Fprintf(e.output, "Waiting for target PVC to bind...\n")
 	if err := e.waitForPVCBound(ctx, namespace, targetPVCName, 2*time.Minute); err != nil {
 		return nil, fmt.Errorf("target PVC did not bind: %w", err)
 	}
-	fmt.Fprintf(e.output, "Target PVC is Bound.\n")
+	_, _ = fmt.Fprintf(e.output, "Target PVC is Bound.\n")
 
 	// 3. Create the migration pod.
-	fmt.Fprintf(e.output, "Creating migration pod %s/%s...\n", namespace, migrationPodName)
+	_, _ = fmt.Fprintf(e.output, "Creating migration pod %s/%s...\n", namespace, migrationPodName)
 
 	migrationPod := BuildMigrationPod(MigrationPodSpec{
 		Name:      migrationPodName,
@@ -172,21 +172,21 @@ func (e *Executor) Execute(ctx context.Context, namespace, sourcePVC, targetPool
 	}
 
 	// 4. Wait for the pod to start running, then stream logs.
-	fmt.Fprintf(e.output, "Waiting for migration pod to start...\n")
+	_, _ = fmt.Fprintf(e.output, "Waiting for migration pod to start...\n")
 	if err := e.waitForPodRunning(ctx, namespace, migrationPodName, 5*time.Minute); err != nil {
 		// Attempt cleanup.
 		e.cleanupPod(ctx, namespace, migrationPodName)
 		return nil, fmt.Errorf("migration pod did not start: %w", err)
 	}
 
-	fmt.Fprintf(e.output, "Migration pod is running. Streaming logs:\n")
-	fmt.Fprintf(e.output, "---\n")
+	_, _ = fmt.Fprintf(e.output, "Migration pod is running. Streaming logs:\n")
+	_, _ = fmt.Fprintf(e.output, "---\n")
 
 	if err := e.streamPodLogs(ctx, namespace, migrationPodName); err != nil {
-		fmt.Fprintf(e.output, "---\n")
-		fmt.Fprintf(e.output, "Warning: failed to stream logs: %v\n", err)
+		_, _ = fmt.Fprintf(e.output, "---\n")
+		_, _ = fmt.Fprintf(e.output, "Warning: failed to stream logs: %v\n", err)
 	} else {
-		fmt.Fprintf(e.output, "---\n")
+		_, _ = fmt.Fprintf(e.output, "---\n")
 	}
 
 	// 5. Wait for pod completion.
@@ -347,11 +347,11 @@ func (e *Executor) streamPodLogs(ctx context.Context, namespace, name string) er
 	if err != nil {
 		return fmt.Errorf("failed to open log stream: %w", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	scanner := bufio.NewScanner(stream)
 	for scanner.Scan() {
-		fmt.Fprintln(e.output, scanner.Text())
+		_, _ = fmt.Fprintln(e.output, scanner.Text())
 	}
 	return scanner.Err()
 }

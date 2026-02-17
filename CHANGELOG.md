@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [v0.5.0] — 2026-02-17
+
+### Added
+
+- **Cross-region disaster recovery (Phase 4d)** — `ReplicationPolicy` CRD and background replication controller for replicating SubVolume data to a remote region's NFS pool. Configurable schedule (Go duration), label-based SubVolume selector, consecutive failure tracking with auto-pause after max retries exceeded. Per-SubVolume and per-policy replication status in CRD. Prometheus metrics: `pool_csi_replication_sync_total`, `pool_csi_replication_sync_duration_seconds`, `pool_csi_replication_lag_seconds`, `pool_csi_replication_consecutive_failures`, `pool_csi_replication_subvolume_count`. K8s client interface extended with `GetReplicationPolicy`, `ListReplicationPolicies`, `CreateReplicationPolicy`, `UpdateReplicationPolicyStatus`, `DeleteReplicationPolicy`. 20+ unit tests with race detector coverage
+
 ## [v0.4.0] — 2026-02-17
 
 ### Added
@@ -88,6 +94,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Mount target IP resolution when share has multiple mount targets across zones
 - Makefile targets for end-to-end build pipeline
 
+[v0.5.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.4.0...v0.5.0
 [v0.4.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.3.0...v0.4.0
 [v0.3.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.2.0...v0.3.0
 [v0.2.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.1.0...v0.2.0

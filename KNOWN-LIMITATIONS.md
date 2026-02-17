@@ -50,13 +50,27 @@ Explicit list of what the IBM VPC File Pool CSI Driver does not support, why, an
 
 ## Cross-Region Replication and Disaster Recovery
 
-**What:** No built-in disaster recovery or cross-region replication for pooled volumes.
+**What:** The driver includes a built-in replication controller (Phase 4d) for cross-region disaster recovery. A `ReplicationPolicy` CRD defines which SubVolumes to replicate, the destination NFS server (reachable over Transit Gateway), and a schedule interval. The controller periodically copies SubVolume data from the source pool to the destination using `cp -a` (CopyDir).
 
-**Why:** VPC file shares do not currently support cross-region replication. DR would require an external data sync mechanism.
+**How it works:** The replication controller runs as a background goroutine alongside the CSI controller. For each active `ReplicationPolicy` on schedule:
+1. Lists SubVolumes in the source pool (optionally filtered by label selector)
+2. Copies each matched SubVolume's directory to the destination NFS server
+3. Updates per-SubVolume and per-policy replication status
+4. Tracks consecutive failures and pauses the policy after exceeding `maxRetries`
 
-**Workaround:** Use application-level replication (e.g., database replication) or external tools like `rsync` with cron jobs across regions.
+**Limitations:**
+- **File-level consistency only.** Each individual file is consistent (NFS close-to-open semantics), but cross-file consistency is NOT guaranteed. See `CROSS-REGION-DR.md` for detailed consistency analysis.
+- **Not suitable for VMs, databases, or workloads requiring crash consistency.** Actively written disk images (qcow2, vmdk, raw) and databases with WALs will produce corrupted replicas. Use IBM VPC block storage replication or application-level replication for these workloads.
+- **Full directory copy on every cycle** — no incremental/delta transfer. Optimizing to true rsync with delta detection is a future enhancement.
+- **Requires pre-configured cross-region network connectivity** (Transit Gateway or VPN) and a pre-existing destination FileSharePool.
+- **Failover is manual.** Automated failover is explicitly out of scope due to limited consistency guarantees.
+- **No quiesce hooks yet.** Application-consistent replication via pre/post-sync hooks is designed in the CRD spec but not yet implemented in the controller.
 
-**Roadmap:** Phase 4d — planned for investigation in a future release.
+**Best suited for:** Static assets, model weights, log aggregation, and workloads with non-zero RPO tolerance (minutes to hours).
+
+**Workaround for unsupported workloads:** Use application-level replication (PostgreSQL streaming replication, MySQL Group Replication, etc.) or IBM VPC block storage snapshots for crash-consistent DR.
+
+**Roadmap:** Phase 4d — implemented. Future enhancements: incremental rsync, quiesce hooks, bandwidth limiting.
 
 ## statfs Reports Share-Level Stats
 

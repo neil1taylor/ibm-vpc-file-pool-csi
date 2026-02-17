@@ -266,6 +266,19 @@ func (m *mockK8sClient) DeleteVolumeGroupSnapshot(_ context.Context, _ string) e
 func (m *mockK8sClient) ListVolumeGroupSnapshots(_ context.Context, _ string) ([]v1alpha1.VolumeGroupSnapshot, error) {
 	return nil, nil
 }
+func (m *mockK8sClient) GetReplicationPolicy(_ context.Context, _ string) (*v1alpha1.ReplicationPolicy, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *mockK8sClient) ListReplicationPolicies(_ context.Context) ([]v1alpha1.ReplicationPolicy, error) {
+	return nil, nil
+}
+func (m *mockK8sClient) CreateReplicationPolicy(_ context.Context, _ *v1alpha1.ReplicationPolicy) error {
+	return nil
+}
+func (m *mockK8sClient) UpdateReplicationPolicyStatus(_ context.Context, _ *v1alpha1.ReplicationPolicy) error {
+	return nil
+}
+func (m *mockK8sClient) DeleteReplicationPolicy(_ context.Context, _ string) error { return nil }
 
 // ---------------------------------------------------------------------------
 // Test Helper

@@ -33,15 +33,15 @@ var (
 
 // SnapshotResult contains the result of a successful snapshot operation.
 type SnapshotResult struct {
-	SnapshotName    string
-	PoolName        string
-	ShareID         string
-	SnapshotPath    string
-	SourceSubPath   string
-	SizeBytes       int64
-	CreationTime    time.Time
-	ReadyToUse      bool
-	SourceVolumeID  string // CSI volume ID of the source, set during group snapshots
+	SnapshotName   string
+	PoolName       string
+	ShareID        string
+	SnapshotPath   string
+	SourceSubPath  string
+	SizeBytes      int64
+	CreationTime   time.Time
+	ReadyToUse     bool
+	SourceVolumeID string // CSI volume ID of the source, set during group snapshots
 }
 
 // GroupSnapshotRequest contains the parameters for a group snapshot.
@@ -1184,7 +1184,7 @@ func (m *Manager) CreateVolumeGroupSnapshot(ctx context.Context, req GroupSnapsh
 	}
 
 	// Resolve copy order: use CopyOrder if provided, otherwise derive from SourceVolumeIDs
-	orderedVolumeIDs := req.SourceVolumeIDs
+	var orderedVolumeIDs []string
 	if len(req.CopyOrder) > 0 {
 		orderedVolumeIDs, err = m.resolveCopyOrder(req.SourceVolumeIDs, req.CopyOrder)
 		if err != nil {
@@ -1239,7 +1239,7 @@ func (m *Manager) CreateVolumeGroupSnapshot(ctx context.Context, req GroupSnapsh
 		Status: v1alpha1.VolumeGroupSnapshotStatus{
 			Phase:        "Pending",
 			Members:      members,
-			MemberCount:  int32(len(members)),
+			MemberCount:  int32(len(members)), //nolint:gosec // safe: member count bounded by source volume list
 			CreationTime: &now,
 		},
 	}
@@ -1322,7 +1322,7 @@ func (m *Manager) CreateVolumeGroupSnapshot(ctx context.Context, req GroupSnapsh
 				completedAt := metav1.Now()
 				vgs.Status.Phase = "Failed"
 				vgs.Status.ReadyCount = 0
-				vgs.Status.FailedCount = int32(len(vgs.Status.Members))
+				vgs.Status.FailedCount = int32(len(vgs.Status.Members)) //nolint:gosec // safe: member count bounded by source volume list
 				vgs.Status.CompletedAt = &completedAt
 				vgs.Status.ConsistencyLevel = "Unknown"
 				_ = m.k8sClient.UpdateVolumeGroupSnapshotStatus(ctx, vgs)

@@ -20,17 +20,17 @@ import (
 // ---------------------------------------------------------------------------
 
 type fakeNFSOperations struct {
-	mu             sync.Mutex
-	dirs           map[string]os.FileMode
-	chowns         map[string][2]int // path → [uid, gid]
-	copies         map[string]string // dst → src
-	copyCallCount  int              // tracks total CopyDir calls
-	MkdirErr       error
-	RemoveErr      error
-	ChownErr       error
-	ChmodErr       error
-	CopyErr        error
-	CopyErrAfterN  int // if > 0, return CopyErr only after N successful copies
+	mu            sync.Mutex
+	dirs          map[string]os.FileMode
+	chowns        map[string][2]int // path → [uid, gid]
+	copies        map[string]string // dst → src
+	copyCallCount int               // tracks total CopyDir calls
+	MkdirErr      error
+	RemoveErr     error
+	ChownErr      error
+	ChmodErr      error
+	CopyErr       error
+	CopyErrAfterN int // if > 0, return CopyErr only after N successful copies
 }
 
 func newFakeNFSOperations() *fakeNFSOperations {
@@ -468,6 +468,22 @@ func (f *fakeK8sClient) groupSnapshotCount() int {
 	defer f.mu.Unlock()
 	return len(f.groupSnapshots)
 }
+
+// --- ReplicationPolicy operations (stubs) ---
+
+func (f *fakeK8sClient) GetReplicationPolicy(_ context.Context, _ string) (*v1alpha1.ReplicationPolicy, error) {
+	return nil, fmt.Errorf("not implemented in fake")
+}
+func (f *fakeK8sClient) ListReplicationPolicies(_ context.Context) ([]v1alpha1.ReplicationPolicy, error) {
+	return nil, nil
+}
+func (f *fakeK8sClient) CreateReplicationPolicy(_ context.Context, _ *v1alpha1.ReplicationPolicy) error {
+	return nil
+}
+func (f *fakeK8sClient) UpdateReplicationPolicyStatus(_ context.Context, _ *v1alpha1.ReplicationPolicy) error {
+	return nil
+}
+func (f *fakeK8sClient) DeleteReplicationPolicy(_ context.Context, _ string) error { return nil }
 
 func (f *fakeK8sClient) addSnapshot(snap *v1alpha1.Snapshot) {
 	f.mu.Lock()

@@ -28,10 +28,11 @@ import (
 var _ k8s.Client = (*fakeK8sClient)(nil)
 
 type fakeK8sClient struct {
-	mu         sync.Mutex
-	pools      map[string]*v1alpha1.FileSharePool
-	subVolumes map[string]*v1alpha1.SubVolume
-	snapshots  map[string]*v1alpha1.Snapshot
+	mu             sync.Mutex
+	pools          map[string]*v1alpha1.FileSharePool
+	subVolumes     map[string]*v1alpha1.SubVolume
+	snapshots      map[string]*v1alpha1.Snapshot
+	groupSnapshots map[string]*v1alpha1.VolumeGroupSnapshot
 
 	GetPoolErr          error
 	UpdatePoolStatusErr error
@@ -43,9 +44,10 @@ type fakeK8sClient struct {
 
 func newFakeK8sClient() *fakeK8sClient {
 	return &fakeK8sClient{
-		pools:      make(map[string]*v1alpha1.FileSharePool),
-		subVolumes: make(map[string]*v1alpha1.SubVolume),
-		snapshots:  make(map[string]*v1alpha1.Snapshot),
+		pools:          make(map[string]*v1alpha1.FileSharePool),
+		subVolumes:     make(map[string]*v1alpha1.SubVolume),
+		snapshots:      make(map[string]*v1alpha1.Snapshot),
+		groupSnapshots: make(map[string]*v1alpha1.VolumeGroupSnapshot),
 	}
 }
 
@@ -269,19 +271,74 @@ func (f *fakeK8sClient) DeleteSnapshot(_ context.Context, name string) error {
 	return nil
 }
 
-func (f *fakeK8sClient) GetVolumeGroupSnapshot(_ context.Context, _ string) (*v1alpha1.VolumeGroupSnapshot, error) {
+func (f *fakeK8sClient) GetVolumeGroupSnapshot(_ context.Context, name string) (*v1alpha1.VolumeGroupSnapshot, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	vgs, ok := f.groupSnapshots[name]
+	if !ok {
+		return nil, fmt.Errorf("volume group snapshot %q not found", name)
+	}
+	return vgs.DeepCopy(), nil
+}
+
+func (f *fakeK8sClient) CreateVolumeGroupSnapshot(_ context.Context, vgs *v1alpha1.VolumeGroupSnapshot) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, exists := f.groupSnapshots[vgs.Name]; exists {
+		return fmt.Errorf("volume group snapshot %q already exists", vgs.Name)
+	}
+	f.groupSnapshots[vgs.Name] = vgs.DeepCopy()
+	return nil
+}
+
+func (f *fakeK8sClient) UpdateVolumeGroupSnapshotStatus(_ context.Context, vgs *v1alpha1.VolumeGroupSnapshot) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	existing, ok := f.groupSnapshots[vgs.Name]
+	if !ok {
+		return fmt.Errorf("volume group snapshot %q not found", vgs.Name)
+	}
+	existing.Status = *vgs.Status.DeepCopy()
+	return nil
+}
+
+func (f *fakeK8sClient) DeleteVolumeGroupSnapshot(_ context.Context, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, exists := f.groupSnapshots[name]; !exists {
+		return fmt.Errorf("volume group snapshot %q not found", name)
+	}
+	delete(f.groupSnapshots, name)
+	return nil
+}
+
+func (f *fakeK8sClient) ListVolumeGroupSnapshots(_ context.Context, poolName string) ([]v1alpha1.VolumeGroupSnapshot, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var result []v1alpha1.VolumeGroupSnapshot
+	for _, vgs := range f.groupSnapshots {
+		if vgs.Spec.PoolName == poolName {
+			result = append(result, *vgs.DeepCopy())
+		}
+	}
+	return result, nil
+}
+
+// --- ReplicationPolicy operations (stubs) ---
+
+func (f *fakeK8sClient) GetReplicationPolicy(_ context.Context, _ string) (*v1alpha1.ReplicationPolicy, error) {
 	return nil, fmt.Errorf("not implemented in fake")
 }
-func (f *fakeK8sClient) CreateVolumeGroupSnapshot(_ context.Context, _ *v1alpha1.VolumeGroupSnapshot) error {
-	return nil
-}
-func (f *fakeK8sClient) UpdateVolumeGroupSnapshotStatus(_ context.Context, _ *v1alpha1.VolumeGroupSnapshot) error {
-	return nil
-}
-func (f *fakeK8sClient) DeleteVolumeGroupSnapshot(_ context.Context, _ string) error { return nil }
-func (f *fakeK8sClient) ListVolumeGroupSnapshots(_ context.Context, _ string) ([]v1alpha1.VolumeGroupSnapshot, error) {
+func (f *fakeK8sClient) ListReplicationPolicies(_ context.Context) ([]v1alpha1.ReplicationPolicy, error) {
 	return nil, nil
 }
+func (f *fakeK8sClient) CreateReplicationPolicy(_ context.Context, _ *v1alpha1.ReplicationPolicy) error {
+	return nil
+}
+func (f *fakeK8sClient) UpdateReplicationPolicyStatus(_ context.Context, _ *v1alpha1.ReplicationPolicy) error {
+	return nil
+}
+func (f *fakeK8sClient) DeleteReplicationPolicy(_ context.Context, _ string) error { return nil }
 
 func (f *fakeK8sClient) GetConfigMapValue(_ context.Context, _, _, _ string) (string, error) {
 	return "", fmt.Errorf("not implemented in fake")
@@ -354,20 +411,37 @@ func (f *fakeK8sClient) getSnapshot(name string) *v1alpha1.Snapshot {
 	return nil
 }
 
+func (f *fakeK8sClient) getGroupSnapshot(name string) *v1alpha1.VolumeGroupSnapshot {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if vgs, ok := f.groupSnapshots[name]; ok {
+		return vgs.DeepCopy()
+	}
+	return nil
+}
+
+func (f *fakeK8sClient) groupSnapshotCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.groupSnapshots)
+}
+
 // ---------------------------------------------------------------------------
 // Fake NFS Operations
 // ---------------------------------------------------------------------------
 
 type fakeNFSOperations struct {
-	mu        sync.Mutex
-	dirs      map[string]os.FileMode
-	chowns    map[string][2]int
-	copies    map[string]string // dst → src
-	MkdirErr  error
-	RemoveErr error
-	ChownErr  error
-	ChmodErr  error
-	CopyErr   error
+	mu            sync.Mutex
+	dirs          map[string]os.FileMode
+	chowns        map[string][2]int
+	copies        map[string]string // dst → src
+	copyCallCount int              // tracks total CopyDir calls
+	MkdirErr      error
+	RemoveErr     error
+	ChownErr      error
+	ChmodErr      error
+	CopyErr       error
+	CopyErrAfterN int // if > 0, return CopyErr only after N successful copies
 }
 
 func newFakeNFSOperations() *fakeNFSOperations {
@@ -430,8 +504,13 @@ func (f *fakeNFSOperations) Chmod(path string, mode os.FileMode) error {
 func (f *fakeNFSOperations) CopyDir(src, dst string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.copyCallCount++
 	if f.CopyErr != nil {
-		return f.CopyErr
+		if f.CopyErrAfterN > 0 && f.copyCallCount <= f.CopyErrAfterN {
+			// Allow first N copies to succeed
+		} else {
+			return f.CopyErr
+		}
 	}
 	f.copies[dst] = src
 	return nil
@@ -662,5 +741,19 @@ func createVolumeFromCloneRequestWithThreshold(pvName, poolName string, sizeGB i
 				{Segments: map[string]string{"topology.kubernetes.io/zone": "us-south-1"}},
 			},
 		},
+	}
+}
+
+func createVolumeGroupSnapshotRequest(name string, sourceVolumeIDs []string, params map[string]string) *csi.CreateVolumeGroupSnapshotRequest {
+	return &csi.CreateVolumeGroupSnapshotRequest{
+		Name:            name,
+		SourceVolumeIds: sourceVolumeIDs,
+		Parameters:      params,
+	}
+}
+
+func deleteVolumeGroupSnapshotRequest(groupSnapshotID string) *csi.DeleteVolumeGroupSnapshotRequest {
+	return &csi.DeleteVolumeGroupSnapshotRequest{
+		GroupSnapshotId: groupSnapshotID,
 	}
 }

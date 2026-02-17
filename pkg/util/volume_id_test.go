@@ -4,8 +4,8 @@ import "testing"
 
 func TestParseVolumeID_Valid(t *testing.T) {
 	tests := []struct {
-		name             string
-		id               string
+		name                          string
+		id                            string
 		wantPool, wantShare, wantName string
 	}{
 		{

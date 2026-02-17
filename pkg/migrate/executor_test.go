@@ -31,7 +31,7 @@ func TestExecutor_Execute_DryRun(t *testing.T) {
 		},
 	}
 
-	clientset := fake.NewSimpleClientset(pvc)
+	clientset := fake.NewSimpleClientset(pvc) //nolint:staticcheck // NewClientset requires generated apply configs
 	var buf bytes.Buffer
 	executor := NewExecutor(clientset, &buf)
 
@@ -63,7 +63,7 @@ func TestExecutor_Execute_DryRun(t *testing.T) {
 }
 
 func TestExecutor_Execute_PVCNotFound(t *testing.T) {
-	clientset := fake.NewSimpleClientset()
+	clientset := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	var buf bytes.Buffer
 	executor := NewExecutor(clientset, &buf)
 
@@ -94,7 +94,7 @@ func TestExecutor_Execute_PVCNotBound(t *testing.T) {
 		},
 	}
 
-	clientset := fake.NewSimpleClientset(pvc)
+	clientset := fake.NewSimpleClientset(pvc) //nolint:staticcheck // NewClientset requires generated apply configs
 	var buf bytes.Buffer
 	executor := NewExecutor(clientset, &buf)
 
@@ -108,7 +108,7 @@ func TestExecutor_Execute_PVCNotBound(t *testing.T) {
 }
 
 func TestExecutor_Status_NoMigrations(t *testing.T) {
-	clientset := fake.NewSimpleClientset()
+	clientset := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	var buf bytes.Buffer
 	executor := NewExecutor(clientset, &buf)
 
@@ -167,7 +167,7 @@ func TestExecutor_Status_FindsMigrationPods(t *testing.T) {
 		},
 	}
 
-	clientset := fake.NewSimpleClientset(pods...)
+	clientset := fake.NewSimpleClientset(pods...) //nolint:staticcheck // NewClientset requires generated apply configs
 	var buf bytes.Buffer
 	executor := NewExecutor(clientset, &buf)
 

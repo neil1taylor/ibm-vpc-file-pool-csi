@@ -46,4 +46,11 @@ type Client interface {
 	UpdateVolumeGroupSnapshotStatus(ctx context.Context, vgs *v1alpha1.VolumeGroupSnapshot) error
 	DeleteVolumeGroupSnapshot(ctx context.Context, name string) error
 	ListVolumeGroupSnapshots(ctx context.Context, poolName string) ([]v1alpha1.VolumeGroupSnapshot, error)
+
+	// ReplicationPolicy operations
+	GetReplicationPolicy(ctx context.Context, name string) (*v1alpha1.ReplicationPolicy, error)
+	ListReplicationPolicies(ctx context.Context) ([]v1alpha1.ReplicationPolicy, error)
+	CreateReplicationPolicy(ctx context.Context, rp *v1alpha1.ReplicationPolicy) error
+	UpdateReplicationPolicyStatus(ctx context.Context, rp *v1alpha1.ReplicationPolicy) error
+	DeleteReplicationPolicy(ctx context.Context, name string) error
 }

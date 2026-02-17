@@ -1,0 +1,206 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: replicationpolicies.storage.ibmcloud.io
+spec:
+  group: storage.ibmcloud.io
+  names:
+    kind: ReplicationPolicy
+    listKind: ReplicationPolicyList
+    plural: replicationpolicies
+    shortNames:
+    - rp
+    singular: replicationpolicy
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.sourcePool
+      name: Source
+      type: string
+    - jsonPath: .spec.destinationNFSServer
+      name: Dest
+      type: string
+    - jsonPath: .spec.schedule
+      name: Schedule
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.lastSyncTime
+      name: Last Sync
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ReplicationPolicy defines a replication relationship between a source pool
+          and a destination NFS server for cross-region disaster recovery.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ReplicationPolicySpec defines the desired state of a replication
+              policy.
+            properties:
+              destinationBasePath:
+                description: |-
+                  DestinationBasePath is the base path on the destination NFS server
+                  where replicated SubVolume directories are written (e.g., "/pvcs").
+                type: string
+              destinationNFSServer:
+                description: |-
+                  DestinationNFSServer is the NFS mount target IP of the destination pool,
+                  reachable over Transit Gateway or VPN.
+                type: string
+              maxRetries:
+                default: 3
+                description: MaxRetries is the number of consecutive failures before
+                  the policy is paused.
+                format: int32
+                minimum: 0
+                type: integer
+              schedule:
+                description: |-
+                  Schedule is a Go duration string controlling replication frequency.
+                  Examples: "15m" (every 15 minutes), "1h" (hourly), "6h" (every 6 hours).
+                  Parsed as time.Duration.
+                type: string
+              sourcePoolName:
+                description: SourcePoolName is the name of the FileSharePool CR on
+                  this cluster to replicate from.
+                type: string
+              subVolumeSelector:
+                description: |-
+                  SubVolumeSelector selects which SubVolumes to replicate.
+                  If nil, ALL SubVolumes in the source pool are replicated.
+                properties:
+                  matchExpressions:
+                    description: matchExpressions is a list of label selector requirements.
+                      The requirements are ANDed.
+                    items:
+                      description: |-
+                        A label selector requirement is a selector that contains values, a key, and an operator that
+                        relates the key and values.
+                      properties:
+                        key:
+                          description: key is the label key that the selector applies
+                            to.
+                          type: string
+                        operator:
+                          description: |-
+                            operator represents a key's relationship to a set of values.
+                            Valid operators are In, NotIn, Exists and DoesNotExist.
+                          type: string
+                        values:
+                          description: |-
+                            values is an array of string values. If the operator is In or NotIn,
+                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                            the values array must be empty. This array is replaced during a strategic
+                            merge patch.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      map is equivalent to an element of matchExpressions, whose key field is "key", the
+                      operator is "In", and the values array contains only "value". The requirements are ANDed.
+                    type: object
+                type: object
+                x-kubernetes-map-type: atomic
+            required:
+            - destinationBasePath
+            - destinationNFSServer
+            - maxRetries
+            - schedule
+            - sourcePoolName
+            type: object
+          status:
+            description: ReplicationPolicyStatus describes the observed state of a
+              replication policy.
+            properties:
+              consecutiveFailures:
+                description: |-
+                  ConsecutiveFailures counts sequential failed replication cycles.
+                  Resets to 0 on success.
+                format: int32
+                type: integer
+              lastError:
+                description: LastError is the error message from the most recent failure.
+                type: string
+              lastSyncDuration:
+                description: LastSyncDuration is how long the last successful sync
+                  took, as a Go duration string.
+                type: string
+              lastSyncTime:
+                description: LastSyncTime is when the last successful replication
+                  cycle completed.
+                format: date-time
+                type: string
+              phase:
+                description: Phase is the overall replication state.
+                enum:
+                - Active
+                - Paused
+                - Failed
+                type: string
+              subVolumeStatuses:
+                description: SubVolumeStatuses tracks per-SubVolume replication state.
+                items:
+                  description: SubVolumeReplicationStatus tracks the replication state
+                    of a single SubVolume.
+                  properties:
+                    bytesSynced:
+                      description: BytesSynced in the last sync for this SubVolume.
+                      format: int64
+                      type: integer
+                    lastError:
+                      description: LastError recorded for this SubVolume's last sync
+                        attempt.
+                      type: string
+                    lastSyncTime:
+                      description: LastSyncTime for this specific SubVolume.
+                      format: date-time
+                      type: string
+                    subVolumeName:
+                      description: SubVolumeName is the SubVolume CR name.
+                      type: string
+                  required:
+                  - subVolumeName
+                  type: object
+                type: array
+            required:
+            - consecutiveFailures
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

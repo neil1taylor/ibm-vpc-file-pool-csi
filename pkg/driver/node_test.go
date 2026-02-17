@@ -137,6 +137,19 @@ func (n *nodeTestK8sClient) DeleteVolumeGroupSnapshot(_ context.Context, _ strin
 func (n *nodeTestK8sClient) ListVolumeGroupSnapshots(_ context.Context, _ string) ([]v1alpha1.VolumeGroupSnapshot, error) {
 	return nil, nil
 }
+func (n *nodeTestK8sClient) GetReplicationPolicy(_ context.Context, _ string) (*v1alpha1.ReplicationPolicy, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (n *nodeTestK8sClient) ListReplicationPolicies(_ context.Context) ([]v1alpha1.ReplicationPolicy, error) {
+	return nil, nil
+}
+func (n *nodeTestK8sClient) CreateReplicationPolicy(_ context.Context, _ *v1alpha1.ReplicationPolicy) error {
+	return nil
+}
+func (n *nodeTestK8sClient) UpdateReplicationPolicyStatus(_ context.Context, _ *v1alpha1.ReplicationPolicy) error {
+	return nil
+}
+func (n *nodeTestK8sClient) DeleteReplicationPolicy(_ context.Context, _ string) error { return nil }
 
 // ---------------------------------------------------------------------------
 // NodeGetCapabilities
