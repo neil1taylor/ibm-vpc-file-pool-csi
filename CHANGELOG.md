@@ -4,17 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [v0.4.0] — 2026-02-16
+## [v0.4.0] — 2026-02-17
 
 ### Added
 
+- **Volume snapshots (Phase 4a)** — CSI `CreateSnapshot`, `DeleteSnapshot`, `ListSnapshots` with directory-level copy-based snapshots on NFS. Includes `RestoreSnapshot` for creating new volumes from snapshots. Snapshot CRD tracks phase, readiness, and size. Full idempotency, capacity tracking, and Prometheus metrics
 - **Volume cloning (Phase 4b)** — CSI `CreateVolume` with `VolumeContentSource` of type `VOLUME` creates a copy of an existing SubVolume. Dual-path design: synchronous `cp -a` for volumes under 10 GB, async background worker for larger volumes with `NodePublishVolume` gating until clone completes
 - **Background clone worker** (`pkg/pool/clone_worker.go`) — ticker-based goroutine that discovers Pending/InProgress clone SubVolumes and processes them. Handles crash recovery, concurrent dedup via `sync.Map`, partial copy cleanup on failure, and Prometheus metrics
+- **Volume group snapshots (Phase 4c)** — `CreateVolumeGroupSnapshot` and `DeleteVolumeGroupSnapshot` for coordinated multi-PVC snapshots. Sequential copy with configurable copy order, inconsistency window tracking, and Abort/Continue failure policies. VolumeGroupSnapshot CRD with per-member status tracking
 - **Share draining** — `FileSharePool.spec.drainShares` marks shares for graceful evacuation. Draining shares are excluded from new allocations. Reconciler tracks progress in `status.drainStatus` and sets `DrainComplete` condition when all SubVolumes are removed
-- **Clone CRD fields** — SubVolume `spec.sourceVolume`, `spec.sourceShareID`, `status.cloneStatus` (Pending/InProgress/Complete/Failed), `status.cloneProgress` (bytesCopied, totalBytes, timestamps), and `Cloning` phase
-- **Clone metrics** — `pool_csi_clones_total` counter and `pool_csi_clone_duration_seconds` histogram with sync/async and success/error labels
-- **`CLONE_VOLUME` CSI capability** — advertised in `ControllerGetCapabilities`
-- **Integration test suite** (`test/integration/`) — 35 tests covering pool lifecycle, concurrent allocation, capacity management, and error recovery. Wires real `pool.Manager` + `driver.Driver` + `Reconciler` with fake infrastructure
+- **PVC migration CLI** (`cmd/migrate/`) — `kubectl migrate` plugin with `plan`, `execute`, and `status` subcommands for migrating PVCs from the stock IBM VPC File CSI driver to the pool driver. Creates temporary rsync pods for data transfer with progress streaming and file count verification
+- **Integration test suite** (`test/integration/`) — 35+ tests covering pool lifecycle, concurrent allocation, capacity management, error recovery, and snapshot lifecycle. Wires real `pool.Manager` + `driver.Driver` + `Reconciler` with fake infrastructure
 - **VPC API client test coverage** — increased from 22% to 90% with 57 test functions using `httptest` servers
 - **GitHub Actions CI/CD** — `ci.yml` workflow with lint, test, build, and generate-check jobs; `release.yml` for tagged container image builds
 - **Helm validation** — `make helm-lint` and `make helm-template` targets; fixed node DaemonSet template for resources/nodeSelector/affinity
