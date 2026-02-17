@@ -4,6 +4,7 @@ import (
 	"context"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
+	storagev1 "k8s.io/api/storage/v1"
 )
 
 // Client defines the interface for Kubernetes CRD operations used by
@@ -53,4 +54,8 @@ type Client interface {
 	CreateReplicationPolicy(ctx context.Context, rp *v1alpha1.ReplicationPolicy) error
 	UpdateReplicationPolicyStatus(ctx context.Context, rp *v1alpha1.ReplicationPolicy) error
 	DeleteReplicationPolicy(ctx context.Context, name string) error
+
+	// StorageClass operations
+	GetStorageClass(ctx context.Context, name string) (*storagev1.StorageClass, error)
+	CreateStorageClass(ctx context.Context, sc *storagev1.StorageClass) error
 }

@@ -6,6 +6,7 @@ import (
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -259,4 +260,18 @@ func (r *realClient) DeleteReplicationPolicy(ctx context.Context, name string) e
 		return err
 	}
 	return r.client.Delete(ctx, rp)
+}
+
+// --- StorageClass operations ---
+
+func (r *realClient) GetStorageClass(ctx context.Context, name string) (*storagev1.StorageClass, error) {
+	sc := &storagev1.StorageClass{}
+	if err := r.client.Get(ctx, types.NamespacedName{Name: name}, sc); err != nil {
+		return nil, err
+	}
+	return sc, nil
+}
+
+func (r *realClient) CreateStorageClass(ctx context.Context, sc *storagev1.StorageClass) error {
+	return r.client.Create(ctx, sc)
 }

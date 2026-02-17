@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -70,6 +72,10 @@ func runController(endpoint, nodeID, region, vpcID, subnetID string, cloneWorker
 		klog.ErrorS(err, "Failed to add corev1 types to scheme")
 		os.Exit(1)
 	}
+	if err := storagev1.AddToScheme(scheme); err != nil {
+		klog.ErrorS(err, "Failed to add storagev1 types to scheme")
+		os.Exit(1)
+	}
 
 	restConfig := ctrl.GetConfigOrDie()
 	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
@@ -121,9 +127,27 @@ func runController(endpoint, nodeID, region, vpcID, subnetID string, cloneWorker
 
 	// Create real VPC API client using cluster credentials.
 	// Region is auto-discovered from the RIAAS endpoint if not set via flag.
-	vpcClient, err := ibmcloud.NewClient(clientset, region)
+	// Retry with backoff because the secret-provider sidecar may not be ready yet.
+	// The secret-common-lib panics (nil gRPC conn) if the sidecar isn't up, so we
+	// recover from panics and retry.
+	var vpcClient *ibmcloud.Client
+	for attempt := 1; attempt <= 30; attempt++ {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					err = fmt.Errorf("secret provider panic: %v", r)
+				}
+			}()
+			vpcClient, err = ibmcloud.NewClient(clientset, region)
+		}()
+		if err == nil {
+			break
+		}
+		klog.V(2).InfoS("Waiting for secret provider sidecar", "attempt", attempt, "err", err)
+		time.Sleep(5 * time.Second)
+	}
 	if err != nil {
-		klog.ErrorS(err, "Failed to create VPC API client", "region", region)
+		klog.ErrorS(err, "Failed to create VPC API client after retries", "region", region)
 		os.Exit(1)
 	}
 
@@ -233,6 +257,10 @@ func runNode(endpoint, nodeID, mode string) {
 	}
 	if err := corev1.AddToScheme(scheme); err != nil {
 		klog.ErrorS(err, "Failed to add corev1 types to scheme")
+		os.Exit(1)
+	}
+	if err := storagev1.AddToScheme(scheme); err != nil {
+		klog.ErrorS(err, "Failed to add storagev1 types to scheme")
 		os.Exit(1)
 	}
 

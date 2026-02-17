@@ -184,6 +184,7 @@ type AllocationResult struct {
 #### B. Asynchronous reconciliation (controller-runtime reconciler)
 
 Watches `FileSharePool` CRs and reconciles pool state:
+- Ensure a matching StorageClass exists for the pool (auto-created, with OwnerReference for GC).
 - If total allocated capacity exceeds `expandThreshold` percentage, create a new VPC file share and add it to the pool.
 - If a share is unhealthy (VPC API reports degraded), mark it as draining — no new allocations, but existing PVCs remain.
 - Periodically scan SubVolume CRs and reconcile actual share state.
@@ -285,7 +286,7 @@ See `CRD-SPEC.md` for full type definitions.
 ## Data Flow: CreateVolume
 
 ```
-1. User creates PVC with StorageClass "ibm-vpc-file-pool"
+1. User creates PVC with the pool's StorageClass (auto-created, named after pool)
        │
 2. csi-provisioner sidecar calls CreateVolume gRPC
        │
@@ -478,7 +479,7 @@ The controller ServiceAccount needs:
 - Nodes: get, list, watch (for topology)
 - Secrets: get, list, watch
 - ConfigMaps: get, list, watch
-- StorageClasses: get, list, watch
+- StorageClasses: get, list, watch, create
 - Events: create, patch
 - Leases: get, create, update (for leader election)
 - CSINode: get, list, watch

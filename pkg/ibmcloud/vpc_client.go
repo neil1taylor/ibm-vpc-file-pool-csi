@@ -191,6 +191,14 @@ func (c *Client) CreateFileShare(ctx context.Context, input CreateShareInput) (i
 		Name: core.StringPtr(input.Zone),
 	}
 
+	// Set initial owner to nobody (65534) so the CSI node driver (running as root,
+	// mapped to nobody by NFS root_squash) can create subdirectories on the share.
+	nobodyID := int64(65534)
+	sharePrototype.InitialOwner = &vpcv1.ShareInitialOwner{
+		Uid: &nobodyID,
+		Gid: &nobodyID,
+	}
+
 	if input.IOPS != nil {
 		sharePrototype.Iops = input.IOPS
 	}

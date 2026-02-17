@@ -12,6 +12,7 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud/fake"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
 	dto "github.com/prometheus/client_model/go"
+	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -139,6 +140,7 @@ type fakeK8sClient struct {
 	subVolumes     map[string]*v1alpha1.SubVolume
 	snapshots      map[string]*v1alpha1.Snapshot
 	groupSnapshots map[string]*v1alpha1.VolumeGroupSnapshot
+	storageClasses map[string]*storagev1.StorageClass
 
 	GetPoolErr          error
 	UpdatePoolStatusErr error
@@ -161,6 +163,7 @@ func newFakeK8sClient() *fakeK8sClient {
 		subVolumes:     make(map[string]*v1alpha1.SubVolume),
 		snapshots:      make(map[string]*v1alpha1.Snapshot),
 		groupSnapshots: make(map[string]*v1alpha1.VolumeGroupSnapshot),
+		storageClasses: make(map[string]*storagev1.StorageClass),
 	}
 }
 
@@ -488,6 +491,40 @@ func (f *fakeK8sClient) UpdateReplicationPolicyStatus(_ context.Context, _ *v1al
 	return nil
 }
 func (f *fakeK8sClient) DeleteReplicationPolicy(_ context.Context, _ string) error { return nil }
+
+// --- StorageClass operations ---
+
+func (f *fakeK8sClient) GetStorageClass(_ context.Context, name string) (*storagev1.StorageClass, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sc, ok := f.storageClasses[name]
+	if !ok {
+		return nil, fmt.Errorf("storageclass %q not found", name)
+	}
+	return sc.DeepCopy(), nil
+}
+
+func (f *fakeK8sClient) CreateStorageClass(_ context.Context, sc *storagev1.StorageClass) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, exists := f.storageClasses[sc.Name]; exists {
+		return fmt.Errorf("storageclass %q already exists", sc.Name)
+	}
+	f.storageClasses[sc.Name] = sc.DeepCopy()
+	return nil
+}
+
+func (f *fakeK8sClient) getStorageClass(name string) *storagev1.StorageClass {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.storageClasses[name]
+}
+
+func (f *fakeK8sClient) storageClassCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.storageClasses)
+}
 
 func (f *fakeK8sClient) addSnapshot(snap *v1alpha1.Snapshot) {
 	f.mu.Lock()

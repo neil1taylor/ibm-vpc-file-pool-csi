@@ -1207,6 +1207,144 @@ func TestReconcile_DrainExcludesFromAllocation(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// 24. StorageClass Auto-creation on Reconcile
+// ---------------------------------------------------------------------------
+
+func TestReconcile_CreatesStorageClass(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+
+	pool := newTestPool("test-pool", "spread", 1000)
+	pool.Spec.InitialShares = 0
+	pool.Spec.DefaultPermissions = "0755"
+	k.addPool(pool)
+
+	r := newReconciler(k, vpc)
+	_, err := reconcilePool(r, "test-pool")
+	if err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	sc := k.getStorageClass("test-pool")
+	if sc == nil {
+		t.Fatal("expected StorageClass 'test-pool' to be created")
+	}
+	if sc.Provisioner != ProvisionerName {
+		t.Errorf("expected provisioner %q, got %q", ProvisionerName, sc.Provisioner)
+	}
+	if sc.Parameters["pool"] != "test-pool" {
+		t.Errorf("expected pool param 'test-pool', got %q", sc.Parameters["pool"])
+	}
+	if sc.Parameters["permissions"] != "0755" {
+		t.Errorf("expected permissions '0755', got %q", sc.Parameters["permissions"])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 25. StorageClass Idempotency — Existing SC not overwritten
+// ---------------------------------------------------------------------------
+
+func TestReconcile_StorageClass_Idempotent(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+
+	pool := newTestPool("test-pool", "spread", 1000)
+	pool.Spec.InitialShares = 0
+	k.addPool(pool)
+
+	r := newReconciler(k, vpc)
+
+	// First reconcile — creates SC
+	_, err := reconcilePool(r, "test-pool")
+	if err != nil {
+		t.Fatalf("Reconcile 1 failed: %v", err)
+	}
+	if k.storageClassCount() != 1 {
+		t.Fatalf("expected 1 StorageClass after first reconcile, got %d", k.storageClassCount())
+	}
+
+	// Second reconcile — SC should not be recreated (idempotent)
+	_, err = reconcilePool(r, "test-pool")
+	if err != nil {
+		t.Fatalf("Reconcile 2 failed: %v", err)
+	}
+	if k.storageClassCount() != 1 {
+		t.Errorf("expected 1 StorageClass after second reconcile, got %d", k.storageClassCount())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 26. StorageClass Skip Annotation
+// ---------------------------------------------------------------------------
+
+func TestReconcile_StorageClass_SkipAnnotation(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+
+	pool := newTestPool("test-pool", "spread", 1000)
+	pool.Spec.InitialShares = 0
+	pool.Annotations = map[string]string{
+		SkipStorageClassAnnotation: "true",
+	}
+	k.addPool(pool)
+
+	r := newReconciler(k, vpc)
+	_, err := reconcilePool(r, "test-pool")
+	if err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	if k.storageClassCount() != 0 {
+		t.Errorf("expected 0 StorageClasses with skip annotation, got %d", k.storageClassCount())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 27. StorageClass for Tiered Pool
+// ---------------------------------------------------------------------------
+
+func TestReconcile_CreatesStorageClasses_Tiered(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+
+	pool := newTestPoolWithTiers("tiered-pool", "spread",
+		[]v1alpha1.ShareTier{
+			{Name: "standard", Profile: "dp2", ShareSizeGB: 1000, MaxShares: 5, InitialShares: 0},
+			{Name: "premium", Profile: "custom", ShareSizeGB: 500, MaxShares: 3, InitialShares: 0},
+		},
+	)
+	pool.Status.Phase = "Ready"
+	pool.Spec.InitialShares = 0
+	k.addPool(pool)
+
+	r := newReconciler(k, vpc)
+	_, err := reconcilePool(r, "tiered-pool")
+	if err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	if k.storageClassCount() != 2 {
+		t.Fatalf("expected 2 StorageClasses for tiered pool, got %d", k.storageClassCount())
+	}
+
+	standardSC := k.getStorageClass("tiered-pool-standard")
+	if standardSC == nil {
+		t.Fatal("expected StorageClass 'tiered-pool-standard'")
+	}
+	if standardSC.Parameters["tier"] != "standard" {
+		t.Errorf("expected tier 'standard', got %q", standardSC.Parameters["tier"])
+	}
+
+	premiumSC := k.getStorageClass("tiered-pool-premium")
+	if premiumSC == nil {
+		t.Fatal("expected StorageClass 'tiered-pool-premium'")
+	}
+	if premiumSC.Parameters["tier"] != "premium" {
+		t.Errorf("expected tier 'premium', got %q", premiumSC.Parameters["tier"])
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Condition Helper
 // ---------------------------------------------------------------------------
 

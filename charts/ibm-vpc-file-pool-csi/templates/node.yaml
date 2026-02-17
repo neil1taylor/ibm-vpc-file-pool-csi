@@ -7,6 +7,11 @@ metadata:
     {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
     app.kubernetes.io/component: node
 spec:
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       {{- include "ibm-vpc-file-pool-csi.selectorLabels" . | nindent 6 }}
@@ -17,6 +22,7 @@ spec:
         {{- include "ibm-vpc-file-pool-csi.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: node
     spec:
+      hostNetwork: true
       hostPID: true
       serviceAccountName: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-node
       {{- with .Values.imagePullSecrets }}
@@ -47,47 +53,32 @@ spec:
             - name: socket-dir
               mountPath: /csi
             - name: kubelet-dir
-              mountPath: /var/lib/kubelet
-              mountPropagation: Bidirectional
-            - name: staging-dir
-              mountPath: /var/lib/kubelet/plugins/vpc-file-pool.csi.ibm.io
+              mountPath: {{ .Values.node.kubeletDir }}
               mountPropagation: Bidirectional
 
         - name: node-driver-registrar
           image: {{ .Values.sidecars.registrar.image }}
           args:
             - "--csi-address=/csi/csi.sock"
-            - "--kubelet-registration-path=/var/lib/kubelet/plugins/vpc-file-pool.csi.ibm.io/csi.sock"
+            - "--kubelet-registration-path={{ .Values.node.kubeletDir }}/plugins/vpc-file-pool.csi.ibm.io/csi.sock"
           volumeMounts:
             - name: socket-dir
               mountPath: /csi
             - name: registration-dir
               mountPath: /registration
 
-        - name: liveness-probe
-          image: {{ .Values.sidecars.liveness.image }}
-          args:
-            - "--csi-address=/csi/csi.sock"
-          volumeMounts:
-            - name: socket-dir
-              mountPath: /csi
-
       volumes:
         - name: socket-dir
           hostPath:
-            path: /var/lib/kubelet/plugins/vpc-file-pool.csi.ibm.io
+            path: {{ .Values.node.kubeletDir }}/plugins/vpc-file-pool.csi.ibm.io
             type: DirectoryOrCreate
         - name: kubelet-dir
           hostPath:
-            path: /var/lib/kubelet
+            path: {{ .Values.node.kubeletDir }}
             type: Directory
-        - name: staging-dir
-          hostPath:
-            path: /var/lib/kubelet/plugins/vpc-file-pool.csi.ibm.io
-            type: DirectoryOrCreate
         - name: registration-dir
           hostPath:
-            path: /var/lib/kubelet/plugins_registry
+            path: {{ .Values.node.kubeletDir }}/plugins_registry
             type: Directory
       {{- with .Values.node.nodeSelector }}
       nodeSelector:

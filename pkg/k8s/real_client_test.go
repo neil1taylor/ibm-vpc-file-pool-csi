@@ -6,6 +6,7 @@ import (
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -19,6 +20,9 @@ func newTestScheme(t *testing.T) *runtime.Scheme {
 	}
 	if err := corev1.AddToScheme(scheme); err != nil {
 		t.Fatalf("failed to add corev1 to scheme: %v", err)
+	}
+	if err := storagev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add storagev1 to scheme: %v", err)
 	}
 	return scheme
 }
@@ -656,5 +660,66 @@ func TestGetNodeZone_NoLabel(t *testing.T) {
 	_, err := c.GetNodeZone(context.Background(), "worker-nolabel")
 	if err == nil {
 		t.Fatal("expected error for node without zone label, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// StorageClass Tests
+// ---------------------------------------------------------------------------
+
+func TestGetStorageClass_Found(t *testing.T) {
+	scheme := newTestScheme(t)
+	sc := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: "test-sc"},
+		Provisioner: "vpc-file-pool.csi.ibm.io",
+	}
+
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sc).Build()
+	c := NewClient(fc)
+
+	got, err := c.GetStorageClass(context.Background(), "test-sc")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Name != "test-sc" {
+		t.Errorf("expected name 'test-sc', got %s", got.Name)
+	}
+	if got.Provisioner != "vpc-file-pool.csi.ibm.io" {
+		t.Errorf("expected provisioner 'vpc-file-pool.csi.ibm.io', got %s", got.Provisioner)
+	}
+}
+
+func TestGetStorageClass_NotFound(t *testing.T) {
+	scheme := newTestScheme(t)
+	fc := fake.NewClientBuilder().WithScheme(scheme).Build()
+	c := NewClient(fc)
+
+	_, err := c.GetStorageClass(context.Background(), "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent StorageClass, got nil")
+	}
+}
+
+func TestCreateStorageClass(t *testing.T) {
+	scheme := newTestScheme(t)
+	fc := fake.NewClientBuilder().WithScheme(scheme).Build()
+	c := NewClient(fc)
+
+	sc := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: "new-sc"},
+		Provisioner: "vpc-file-pool.csi.ibm.io",
+		Parameters:  map[string]string{"pool": "test-pool"},
+	}
+
+	if err := c.CreateStorageClass(context.Background(), sc); err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+
+	got, err := c.GetStorageClass(context.Background(), "new-sc")
+	if err != nil {
+		t.Fatalf("get after create failed: %v", err)
+	}
+	if got.Parameters["pool"] != "test-pool" {
+		t.Errorf("expected pool param 'test-pool', got %q", got.Parameters["pool"])
 	}
 }

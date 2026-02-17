@@ -42,7 +42,8 @@ ibm-vpc-file-pool-csi/
 │   │   ├── subvolume.go               # Subdirectory operations (mkdir, rm, quota)
 │   │   ├── nfs.go                     # NFS operations interface
 │   │   ├── reconciler.go             # Controller-runtime reconciler for FileSharePool
-│   │   ├── reconciler_test.go        # Reconciler tests (26 tests)
+│   │   ├── reconciler_test.go        # Reconciler tests (30 tests)
+│   │   ├── storageclass.go          # Auto-create StorageClass from FileSharePool spec
 │   │   ├── clone_worker.go           # Async clone operation handler
 │   │   ├── clone_worker_test.go      # Clone worker tests (12 tests)
 │   │   ├── replication_controller.go # Cross-region replication controller
@@ -214,7 +215,7 @@ make test-e2e                 # E2E tests (requires live cluster, //go:build e2e
 
 ### When writing Kubernetes manifests
 - Controller runs as a Deployment (1-2 replicas, leader election)
-- Node agent runs as a DaemonSet (needs `hostNetwork: false`, `hostPID: true` — required for nsenter mount wrapper to access host mount namespace for NFS mounts)
+- Node agent runs as a DaemonSet (needs `hostNetwork: true`, `hostPID: true` — `hostNetwork` ensures NFS TCP connections persist across pod restarts; `hostPID` is required for nsenter mount wrapper to access host mount namespace)
 - Node agent needs `/var/lib/kubelet` mounted for bind-mounts
 - RBAC must cover: FileSharePool, SubVolume (get/list/watch/create/update/patch), PVs, PVCs, Secrets, ConfigMaps, Events, CSINode, CSIDriver
 

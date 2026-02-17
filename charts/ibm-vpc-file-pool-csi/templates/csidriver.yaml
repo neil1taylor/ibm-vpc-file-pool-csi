@@ -9,5 +9,5 @@ spec:
   podInfoOnMount: true
   volumeLifecycleModes:
     - Persistent
-  fsGroupPolicy: File
+  fsGroupPolicy: None
   storageCapacity: false

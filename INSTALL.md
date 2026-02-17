@@ -170,6 +170,17 @@ helm upgrade --install ibm-vpc-file-pool-csi \
 #   --set config.subnetID=<YOUR_SUBNET_ID>
 ```
 
+**ROKS note:** On Red Hat OpenShift on IBM Cloud (ROKS), the kubelet root directory is `/var/data/kubelet` (not `/var/lib/kubelet`). Set `node.kubeletDir` to match:
+
+```bash
+helm upgrade --install ibm-vpc-file-pool-csi \
+  charts/ibm-vpc-file-pool-csi/ \
+  --namespace kube-system \
+  --set image.repository=${REGISTRY}/${NAMESPACE}/vpc-file-pool-csi \
+  --set image.tag=${VERSION} \
+  --set node.kubeletDir=/var/data/kubelet
+```
+
 **Helm values reference:**
 
 | Value | Required | Default | Description |
@@ -216,8 +227,10 @@ kubectl apply -f config/deploy/csidriver.yaml
 kubectl apply -f config/deploy/controller.yaml
 kubectl apply -f config/deploy/node.yaml
 
-# 5. Install default StorageClasses
-kubectl apply -f config/deploy/storageclass.yaml
+# 5. (Optional) Install custom StorageClasses
+#    StorageClasses are auto-created when you create a FileSharePool.
+#    Only apply this if you need custom SC parameters:
+# kubectl apply -f config/deploy/storageclass.yaml
 ```
 
 ---
@@ -266,6 +279,10 @@ kubectl get filesharespool general-purpose -o yaml
 
 The pool is ready when `status.phase` is `Ready` and at least one share shows `state: stable`.
 
+**Automatic StorageClass:** When the pool reaches `Ready`, the controller automatically creates a StorageClass named after the pool (e.g., `general-purpose`). For tiered pools, one StorageClass per tier is created (e.g., `general-purpose-standard`, `general-purpose-premium`). You do not need to create StorageClasses manually.
+
+To opt out of automatic StorageClass creation, add the annotation `storage.ibmcloud.io/skip-storageclass: "true"` to the FileSharePool.
+
 ---
 
 ## Step 5: Verify the Installation
@@ -292,14 +309,14 @@ kubectl get crd replicationpolicies.storage.ibmcloud.io
 # Pool is ready
 kubectl get filesharepools
 
-# StorageClass available
-kubectl get storageclass ibm-vpc-file-pool
+# StorageClass auto-created (named after the pool)
+kubectl get storageclass general-purpose
 ```
 
 ### Smoke test with a PVC
 
 ```bash
-# Create a test PVC
+# Create a test PVC (using the auto-created StorageClass named after the pool)
 kubectl apply -f - <<'EOF'
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -309,7 +326,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteMany
-  storageClassName: ibm-vpc-file-pool
+  storageClassName: general-purpose
   resources:
     requests:
       storage: 1Gi

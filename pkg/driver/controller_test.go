@@ -11,6 +11,7 @@ import (
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -279,6 +280,13 @@ func (m *mockK8sClient) UpdateReplicationPolicyStatus(_ context.Context, _ *v1al
 	return nil
 }
 func (m *mockK8sClient) DeleteReplicationPolicy(_ context.Context, _ string) error { return nil }
+
+func (m *mockK8sClient) GetStorageClass(_ context.Context, _ string) (*storagev1.StorageClass, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (m *mockK8sClient) CreateStorageClass(_ context.Context, _ *storagev1.StorageClass) error {
+	return nil
+}
 
 // ---------------------------------------------------------------------------
 // Test Helper

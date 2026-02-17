@@ -405,9 +405,7 @@ spec:
       initialShares: 1
 ```
 
-When tiers are defined, the StorageClass `parameters` must include a `tier` key to select which
-tier to allocate from. If no tiers are defined, the top-level spec fields are used as an implicit
-default tier.
+When tiers are defined, one StorageClass per tier is auto-created (e.g., `multi-tier-pool-standard`, `multi-tier-pool-high-iops`), each with the `tier` parameter set. If creating StorageClasses manually, include a `tier` key in `parameters` to select which tier to allocate from. If no tiers are defined, the top-level spec fields are used as an implicit default tier.
 
 ### Example FileSharePool CR with DrainShares
 
@@ -438,12 +436,13 @@ is considered fully drained.
 
 ### Reconciler Behavior
 
-The FileSharePool reconciler (in `pkg/k8s/reconciler.go`) watches FileSharePool CRs and:
+The FileSharePool reconciler (in `pkg/pool/reconciler.go`) watches FileSharePool CRs and:
 
 1. On create: set `Phase: Initializing`, create `initialShares` VPC file shares, move to `Phase: Ready`.
-2. On reconcile: check allocation vs. threshold, create new shares if needed, update Status.
-3. Sets a finalizer (`storage.ibmcloud.io/pool-protection`) to prevent deletion while SubVolumes exist.
-4. On delete (finalizer): verify no SubVolumes reference this pool, then delete all VPC file shares, remove finalizer.
+2. Ensure StorageClasses: auto-create a matching StorageClass (or one per tier for tiered pools) with OwnerReference to the pool. Skipped if the `storage.ibmcloud.io/skip-storageclass: "true"` annotation is set.
+3. On reconcile: check allocation vs. threshold, create new shares if needed, update Status.
+4. Sets a finalizer (`storage.ibmcloud.io/pool-protection`) to prevent deletion while SubVolumes exist.
+5. On delete (finalizer): verify no SubVolumes reference this pool, then delete all VPC file shares, remove finalizer. Auto-created StorageClasses are garbage-collected via OwnerReference.
 
 ---
 
@@ -1173,17 +1172,49 @@ spec:
 
 ## StorageClass Parameters
 
+**Auto-creation:** When a FileSharePool reaches `Ready`, the controller automatically creates a matching StorageClass named after the pool (e.g., pool `general-purpose` gets StorageClass `general-purpose`). For tiered pools, one StorageClass per tier is created (e.g., `general-purpose-standard`, `general-purpose-premium`). Auto-created StorageClasses have an OwnerReference to the pool and are garbage-collected when the pool is deleted.
+
+To opt out, add the annotation `storage.ibmcloud.io/skip-storageclass: "true"` to the FileSharePool before creating it.
+
 The CSI driver reads these from the StorageClass `parameters` map:
 
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
 | `pool` | Yes | — | Name of the FileSharePool CR |
+| `tier` | No | — | Tier name within a tiered pool (required for tiered pools) |
 | `uid` | No | Pool default | Unix UID for the subdirectory |
 | `gid` | No | Pool default | Unix GID for the subdirectory |
 | `permissions` | No | Pool default | Unix permissions (e.g., "0755") |
 | `reclaimAction` | No | `delete` | `delete`, `retain`, or `archive` |
 
-Example:
+Example auto-created StorageClass (for a pool named `general-purpose`):
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: general-purpose
+  labels:
+    storage.ibmcloud.io/managed-by: ibm-vpc-file-pool-csi
+    storage.ibmcloud.io/pool: general-purpose
+  ownerReferences:
+    - apiVersion: storage.ibmcloud.io/v1alpha1
+      kind: FileSharePool
+      name: general-purpose
+      uid: <pool-uid>
+provisioner: vpc-file-pool.csi.ibm.io
+parameters:
+  pool: general-purpose
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+mountOptions:
+  - nfsvers=4.1
+  - soft
+  - timeo=600
+  - retrans=3
+```
+
+Example manual StorageClass (if opting out of auto-creation):
 ```yaml
 apiVersion: storage.k8s.io/v1
 kind: StorageClass

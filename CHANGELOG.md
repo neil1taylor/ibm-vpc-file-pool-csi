@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [v0.7.0] — 2026-02-17
+
+### Added
+
+- **Automatic StorageClass creation** — When a `FileSharePool` is created, the reconciler now auto-creates matching `StorageClass`(es) so users no longer need to create them manually. Non-tiered pools get one SC named after the pool; tiered pools get one SC per tier (e.g., `my-pool-standard`, `my-pool-premium`). StorageClasses include the correct provisioner, pool/tier parameters, UID/GID/permissions from pool defaults, NFS mount options (falling back to `nfsvers=4.1,soft,timeo=600,retrans=3`), and `allowVolumeExpansion: true`
+- **WaitForFirstConsumer for multi-zone pools** — Auto-created StorageClasses use `volumeBindingMode: WaitForFirstConsumer` when the pool has `accessorZones`, ensuring PVCs are scheduled to the correct zone
+- **OwnerReference GC** — Auto-created StorageClasses have an OwnerReference pointing to the FileSharePool, so they are garbage-collected when the pool is deleted
+- **Opt-out annotation** — Set `storage.ibmcloud.io/skip-storageclass: "true"` on a FileSharePool to skip automatic StorageClass creation (for users who prefer to manage their own)
+- **RBAC: StorageClass create** — Controller ClusterRole now includes `create` verb for `storageclasses` (in addition to existing `get`, `list`, `watch`)
+- **storagev1 scheme registration** — `k8s.io/api/storage/v1` types registered in both controller and node scheme for StorageClass operations
+
 ## [v0.6.0] — 2026-02-17
 
 ### Added
@@ -27,6 +38,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **VPC auto-discovery silent failure** — `mgr.GetClient()` returns a cached client whose cache is not started until `mgr.Start()`, causing ConfigMap lookups for `ibm-cloud-provider-data` (VPC ID, subnet ID) to silently fail. Pools were created without mount targets because the VPC ID and subnet ID were empty. Fixed by using the standard `kubernetes.Clientset` for pre-start ConfigMap reads instead of the controller-runtime cached client (`cmd/main.go`)
 - **CSI provisioner missing `--extra-create-metadata`** — The `csi-provisioner` sidecar was not passing PVC name and namespace to `CreateVolume` parameters, causing the `SubVolume` webhook to reject every provision request with `spec.pvcName is required`. Added the `--extra-create-metadata` flag to provisioner args in both the Helm chart template and the static deployment manifest
+- **Node DaemonSet overlapping Bidirectional mounts** — The `staging-dir` volume was a redundant hostPath mount of the same path as `kubelet-dir`'s subdirectory; both had `mountPropagation: Bidirectional`. On CRI-O (ROKS), this caused "No space left on device" errors. Removed the `staging-dir` volume entirely from both the Helm template and raw manifests
+- **Node DaemonSet missing hostNetwork** — NFS TCP connections established in the pod network namespace become stale after pod restart, causing mount failures. Added `hostNetwork: true` so NFS mounts persist across container restarts
+- **Liveness-probe port conflict with hostNetwork** — With `hostNetwork: true`, the liveness-probe sidecar binds port 9809 on the host. During rolling updates, old and new pods overlap causing "address already in use" CrashLoopBackOff. Removed the `liveness-probe` sidecar (CSI node health is better monitored via the Unix socket) and added `updateStrategy` with `maxSurge: 0` to prevent pod overlap during rolling updates
+- **CSIDriver fsGroupPolicy causing chown failures** — `fsGroupPolicy: File` causes kubelet to recursively `chown` the NFS mount. With VPC file share `root_squash` enabled, `chown` fails with "operation not permitted", causing slow or failed pod startups. Changed to `fsGroupPolicy: None`
+- **VPC file share root_squash** — VPC file shares always have `root_squash` enabled (cannot be disabled in VPC access mode), mapping UID 0 to nobody (65534). Root-owned share directories were not writable by the CSI node agent. Fixed by setting `InitialOwner{UID: 65534, GID: 65534}` on share creation so the mapped nobody user owns the root directory
+- **Secret provider panic on startup** — `secret-common-lib` panics with a nil gRPC connection dereference if the `storage-secret-sidecar` is not yet ready when the controller starts. Added panic recovery with a retry loop in `cmd/main.go` `runController()`
 
 ### Cluster Testing Validated
 
@@ -128,6 +145,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Mount target IP resolution when share has multiple mount targets across zones
 - Makefile targets for end-to-end build pipeline
 
+[v0.7.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.6.0...v0.7.0
 [v0.6.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.5.0...v0.6.0
 [v0.5.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.4.0...v0.5.0
 [v0.4.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.3.0...v0.4.0

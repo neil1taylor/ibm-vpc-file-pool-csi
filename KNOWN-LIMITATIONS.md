@@ -164,6 +164,29 @@ Monitor progress via `status.drainStatus` or the `DrainComplete` condition.
 
 **Roadmap:** No change planned — this is by design. Zone-local mount targets are a VPC networking constraint.
 
+## CDI (Containerized Data Importer) Compatibility
+
+**What:** KubeVirt's CDI `dataVolumeTemplate` mechanism does not work with the pool CSI driver. VMs that use `dataVolumeTemplate` to clone OS images from golden image sources (DataSources, VolumeSnapshots) will fail with the boot PVC stuck in `Pending`.
+
+**Why:** CDI's VolumePopulator sets a `dataSource` field (VolumeCloneSource or VolumeImportSource) on the PVC it creates. The `csi-provisioner` sidecar sees this unrecognized `dataSource` and backs off, assuming an external populator will handle provisioning. CDI's populator then cannot complete because it does not support the pool CSI driver's provisioning interface. The same conflict occurs for blank DataVolumes (`source: blank`). This affects both boot disks (OS image clones) and data disks (blank volumes) when created via `dataVolumeTemplate`.
+
+On managed ROKS/IKS clusters, CDI's golden OS images are typically stored as ODF/Ceph VolumeSnapshots. CDI knows how to clone these to other Ceph-backed StorageClasses but not to NFS-backed pool storage.
+
+**Workaround:** Bypass CDI entirely by creating regular PVCs on the pool StorageClass and populating them manually:
+
+1. Create PVCs directly (not via `dataVolumeTemplate`)
+2. For boot disks, download cloud images (qcow2) into the PVC using a simple pod:
+   ```bash
+   # Download CentOS Stream 9 cloud image into the boot PVC
+   curl -L -o /boot/disk.img \
+     https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2
+   ```
+3. Reference the PVCs in the VM spec using `persistentVolumeClaim` (not `dataVolume`)
+
+KubeVirt supports filesystem-mode PVCs for VM disks — it reads the `disk.img` file from the mounted NFS share. See `TUTORIAL.md` for a complete worked example.
+
+**Roadmap:** Could be addressed by implementing CSI VolumeSnapshot support (which would enable CDI's clone populator path), but this is not currently planned. The manual image download workaround is straightforward and avoids the CDI dependency entirely.
+
 ## VPC Account Quota
 
 **What:** IBM Cloud VPC accounts are limited to 300 file shares per account. This quota is shared with the standard IBM VPC File CSI driver.

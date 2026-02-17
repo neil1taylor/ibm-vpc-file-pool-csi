@@ -12,6 +12,7 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/util"
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
+	storagev1 "k8s.io/api/storage/v1"
 	mount "k8s.io/mount-utils"
 )
 
@@ -150,6 +151,13 @@ func (n *nodeTestK8sClient) UpdateReplicationPolicyStatus(_ context.Context, _ *
 	return nil
 }
 func (n *nodeTestK8sClient) DeleteReplicationPolicy(_ context.Context, _ string) error { return nil }
+
+func (n *nodeTestK8sClient) GetStorageClass(_ context.Context, _ string) (*storagev1.StorageClass, error) {
+	return nil, fmt.Errorf("not found")
+}
+func (n *nodeTestK8sClient) CreateStorageClass(_ context.Context, _ *storagev1.StorageClass) error {
+	return nil
+}
 
 // ---------------------------------------------------------------------------
 // NodeGetCapabilities

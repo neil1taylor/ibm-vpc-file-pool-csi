@@ -6,6 +6,11 @@ metadata:
   labels:
     app: ibm-vpc-file-pool-csi-node
 spec:
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app: ibm-vpc-file-pool-csi-node
@@ -14,6 +19,8 @@ spec:
       labels:
         app: ibm-vpc-file-pool-csi-node
     spec:
+      hostNetwork: true
+      hostPID: true
       serviceAccountName: ibm-vpc-file-pool-csi-node
       containers:
         - name: csi-node
@@ -35,9 +42,6 @@ spec:
             - name: kubelet-dir
               mountPath: /var/lib/kubelet
               mountPropagation: Bidirectional
-            - name: staging-dir
-              mountPath: /var/lib/kubelet/plugins/vpc-file-pool.csi.ibm.io
-              mountPropagation: Bidirectional
 
         - name: node-driver-registrar
           image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.12.0
@@ -50,14 +54,6 @@ spec:
             - name: registration-dir
               mountPath: /registration
 
-        - name: liveness-probe
-          image: registry.k8s.io/sig-storage/livenessprobe:v2.14.0
-          args:
-            - "--csi-address=/csi/csi.sock"
-          volumeMounts:
-            - name: socket-dir
-              mountPath: /csi
-
       volumes:
         - name: socket-dir
           hostPath:
@@ -67,10 +63,6 @@ spec:
           hostPath:
             path: /var/lib/kubelet
             type: Directory
-        - name: staging-dir
-          hostPath:
-            path: /var/lib/kubelet/plugins/vpc-file-pool.csi.ibm.io
-            type: DirectoryOrCreate
         - name: registration-dir
           hostPath:
             path: /var/lib/kubelet/plugins_registry

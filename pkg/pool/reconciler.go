@@ -75,6 +75,9 @@ func (r *FileSharePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 	}
 
+	// 2b. Ensure StorageClasses exist for this pool
+	r.ensureStorageClasses(ctx, pool)
+
 	// 3. Initial provisioning
 	if pool.Status.Phase == "" || pool.Status.Phase == "Initializing" {
 		if err := r.initialProvisioning(ctx, pool); err != nil {
@@ -319,6 +322,33 @@ func (r *FileSharePoolReconciler) ensureAccessorMountTargets(_ context.Context, 
 				"pool", pool.Name, "shareID", share.ShareID,
 				"zone", az.Zone, "server", share.MountTargetIP)
 		}
+	}
+}
+
+// ensureStorageClasses creates StorageClass(es) for the pool if they don't already exist.
+// Errors are logged but non-fatal — pool reconciliation continues regardless.
+func (r *FileSharePoolReconciler) ensureStorageClasses(ctx context.Context, pool *v1alpha1.FileSharePool) {
+	if shouldSkipStorageClass(pool) {
+		return
+	}
+
+	// API server strips TypeMeta on reads; restore it for OwnerReference.
+	pool.APIVersion = "storage.ibmcloud.io/v1alpha1"
+	pool.Kind = "FileSharePool"
+
+	for _, desired := range storageClassesForPool(pool) {
+		_, err := r.k8sClient.GetStorageClass(ctx, desired.Name)
+		if err == nil {
+			// Already exists — do not overwrite (user may have customized).
+			continue
+		}
+		if err := r.k8sClient.CreateStorageClass(ctx, desired); err != nil {
+			klog.ErrorS(err, "Failed to create StorageClass (non-fatal)",
+				"pool", pool.Name, "storageClass", desired.Name)
+			continue
+		}
+		klog.V(2).InfoS("Created StorageClass for pool",
+			"pool", pool.Name, "storageClass", desired.Name)
 	}
 }
 

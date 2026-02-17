@@ -24,6 +24,9 @@ controller:
   affinity: {}
 
 node:
+  # Kubelet root directory. Standard Kubernetes uses /var/lib/kubelet.
+  # ROKS (Red Hat OpenShift on IBM Cloud) uses /var/data/kubelet.
+  kubeletDir: /var/lib/kubelet
   resources: {}
   tolerations:
     - operator: Exists
