@@ -8,6 +8,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
@@ -99,17 +100,22 @@ func runController(endpoint, nodeID, region, vpcID, subnetID string, cloneWorker
 	}
 
 	// Auto-discover VPC config from ibm-cloud-provider-data configmap.
+	// Use clientset (not mgr.GetClient()) because the manager cache isn't started yet.
 	ctx := context.Background()
 	if vpcID == "" {
-		if v, cmErr := k8sClient.GetConfigMapValue(ctx, "kube-system", "ibm-cloud-provider-data", "vpc_id"); cmErr == nil && v != "" {
-			vpcID = v
-			klog.V(2).InfoS("Auto-discovered VPC ID", "source", "ibm-cloud-provider-data", "vpcID", vpcID)
+		if cm, cmErr := clientset.CoreV1().ConfigMaps("kube-system").Get(ctx, "ibm-cloud-provider-data", metav1.GetOptions{}); cmErr == nil {
+			if v := cm.Data["vpc_id"]; v != "" {
+				vpcID = v
+				klog.V(2).InfoS("Auto-discovered VPC ID", "source", "ibm-cloud-provider-data", "vpcID", vpcID)
+			}
 		}
 	}
 	if subnetID == "" {
-		if v, cmErr := k8sClient.GetConfigMapValue(ctx, "kube-system", "ibm-cloud-provider-data", "vpc_subnet_ids"); cmErr == nil && v != "" {
-			subnetID = strings.Split(strings.TrimSpace(v), ",")[0]
-			klog.V(2).InfoS("Auto-discovered subnet ID", "source", "ibm-cloud-provider-data", "subnetID", subnetID)
+		if cm, cmErr := clientset.CoreV1().ConfigMaps("kube-system").Get(ctx, "ibm-cloud-provider-data", metav1.GetOptions{}); cmErr == nil {
+			if v := cm.Data["vpc_subnet_ids"]; v != "" {
+				subnetID = strings.Split(strings.TrimSpace(v), ",")[0]
+				klog.V(2).InfoS("Auto-discovered subnet ID", "source", "ibm-cloud-provider-data", "subnetID", subnetID)
+			}
 		}
 	}
 
