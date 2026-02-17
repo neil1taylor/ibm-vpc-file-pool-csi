@@ -1358,6 +1358,69 @@ func findCondition(conditions []metav1.Condition, condType string) *metav1.Condi
 }
 
 // ---------------------------------------------------------------------------
+// 28. Reconcile Requeues When VPC Client Is Nil
+// ---------------------------------------------------------------------------
+
+func TestReconcile_RequeuesWhenVPCClientNil(t *testing.T) {
+	k := newFakeK8sClient()
+
+	pool := newTestPool("test-pool", "spread", 1000)
+	pool.Spec.InitialShares = 1
+	k.addPool(pool)
+
+	// Create reconciler with nil VPC client — simulates deferred init
+	r := NewFileSharePoolReconciler(k, nil)
+
+	result, err := reconcilePool(r, "test-pool")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if result.RequeueAfter != 5*time.Second {
+		t.Errorf("expected RequeueAfter=5s, got %v", result.RequeueAfter)
+	}
+
+	// Pool should not have been modified (reconciler returned early)
+	updated := k.getPool("test-pool")
+	if len(updated.Status.Shares) != 0 {
+		t.Errorf("expected no shares (reconciler skipped), got %d", len(updated.Status.Shares))
+	}
+}
+
+func TestReconcile_ProceedsAfterSetVPCClient(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+
+	pool := newTestPool("test-pool", "spread", 1000)
+	pool.Spec.InitialShares = 0
+	k.addPool(pool)
+
+	// Start with nil VPC client
+	r := NewFileSharePoolReconciler(k, nil)
+
+	// First reconcile: should requeue
+	result, err := reconcilePool(r, "test-pool")
+	if err != nil {
+		t.Fatalf("first reconcile failed: %v", err)
+	}
+	if result.RequeueAfter != 5*time.Second {
+		t.Errorf("expected RequeueAfter=5s on first reconcile, got %v", result.RequeueAfter)
+	}
+
+	// Inject the VPC client
+	r.SetVPCClient(vpc)
+
+	// Second reconcile: should proceed normally
+	result, err = reconcilePool(r, "test-pool")
+	if err != nil {
+		t.Fatalf("second reconcile failed: %v", err)
+	}
+	if result.RequeueAfter != ReconcileInterval {
+		t.Errorf("expected RequeueAfter=%v after SetVPCClient, got %v", ReconcileInterval, result.RequeueAfter)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Test Helpers
 // ---------------------------------------------------------------------------
 

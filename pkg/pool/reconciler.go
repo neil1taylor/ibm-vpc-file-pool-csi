@@ -3,6 +3,7 @@ package pool
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
@@ -32,6 +33,7 @@ type FileSharePoolReconciler struct {
 	vpcID                string
 	subnetID             string
 	defaultResourceGroup string
+	mu                   sync.Mutex
 }
 
 // NewFileSharePoolReconciler creates a new reconciler with the given dependencies.
@@ -44,13 +46,30 @@ func NewFileSharePoolReconciler(k8sClient k8s.Client, vpcClient ibmcloud.VPCFile
 
 // SetVPCConfig sets the VPC ID, subnet ID, and default resource group used when creating shares.
 func (r *FileSharePoolReconciler) SetVPCConfig(vpcID, subnetID, defaultResourceGroup string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.vpcID = vpcID
 	r.subnetID = subnetID
 	r.defaultResourceGroup = defaultResourceGroup
 }
 
+// SetVPCClient replaces the VPC client after deferred initialization.
+func (r *FileSharePoolReconciler) SetVPCClient(client ibmcloud.VPCFileClient) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.vpcClient = client
+}
+
 // Reconcile performs a single reconciliation pass for a FileSharePool.
 func (r *FileSharePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	r.mu.Lock()
+	vpcReady := r.vpcClient != nil
+	r.mu.Unlock()
+	if !vpcReady {
+		klog.V(2).InfoS("VPC client not yet initialized, requeuing", "pool", req.Name)
+		return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+
 	// 1. Fetch pool
 	pool, err := r.k8sClient.GetFileSharePool(ctx, req.Name)
 	if err != nil {

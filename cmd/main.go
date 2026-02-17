@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	ctrlwebhook "sigs.k8s.io/controller-runtime/pkg/webhook"
 
@@ -77,12 +79,19 @@ func runController(endpoint, nodeID, region, vpcID, subnetID string, cloneWorker
 		os.Exit(1)
 	}
 
+	// readyCh is closed once the VPC client is initialized. It gates:
+	// - CSI controller methods (return Unavailable until ready)
+	// - /readyz health check (returns 503 until ready)
+	// - Probe() identity RPC (returns Ready=false until ready)
+	readyCh := make(chan struct{})
+
 	restConfig := ctrl.GetConfigOrDie()
 	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme:                  scheme,
 		LeaderElection:          true,
 		LeaderElectionID:        "ibm-vpc-file-pool-csi-leader",
 		LeaderElectionNamespace: "kube-system",
+		HealthProbeBindAddress:  ":8081",
 		Metrics: metricsserver.Options{
 			BindAddress: ":8080",
 		},
@@ -93,6 +102,23 @@ func runController(endpoint, nodeID, region, vpcID, subnetID string, cloneWorker
 	})
 	if err != nil {
 		klog.ErrorS(err, "Failed to create controller-runtime manager")
+		os.Exit(1)
+	}
+
+	// Register health checks.
+	if err := mgr.AddHealthzCheck("ping", healthz.Ping); err != nil {
+		klog.ErrorS(err, "Failed to register healthz check")
+		os.Exit(1)
+	}
+	if err := mgr.AddReadyzCheck("vpc-client", func(_ *http.Request) error {
+		select {
+		case <-readyCh:
+			return nil
+		default:
+			return fmt.Errorf("VPC client not yet initialized")
+		}
+	}); err != nil {
+		klog.ErrorS(err, "Failed to register readyz check")
 		os.Exit(1)
 	}
 
@@ -125,37 +151,9 @@ func runController(endpoint, nodeID, region, vpcID, subnetID string, cloneWorker
 		}
 	}
 
-	// Create real VPC API client using cluster credentials.
-	// Region is auto-discovered from the RIAAS endpoint if not set via flag.
-	// Retry with backoff because the secret-provider sidecar may not be ready yet.
-	// The secret-common-lib panics (nil gRPC conn) if the sidecar isn't up, so we
-	// recover from panics and retry.
-	var vpcClient *ibmcloud.Client
-	for attempt := 1; attempt <= 30; attempt++ {
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					err = fmt.Errorf("secret provider panic: %v", r)
-				}
-			}()
-			vpcClient, err = ibmcloud.NewClient(clientset, region)
-		}()
-		if err == nil {
-			break
-		}
-		klog.V(2).InfoS("Waiting for secret provider sidecar", "attempt", attempt, "err", err)
-		time.Sleep(5 * time.Second)
-	}
-	if err != nil {
-		klog.ErrorS(err, "Failed to create VPC API client after retries", "region", region)
-		os.Exit(1)
-	}
-
-	// Get default resource group from secret provider for pools that don't specify one.
-	defaultResourceGroup := vpcClient.ResourceGroupID()
-
-	reconciler := pool.NewFileSharePoolReconciler(k8sClient, vpcClient)
-	reconciler.SetVPCConfig(vpcID, subnetID, defaultResourceGroup)
+	// Create reconciler and pool manager with nil VPC client — will be set
+	// once the secret-provider sidecar is ready.
+	reconciler := pool.NewFileSharePoolReconciler(k8sClient, nil)
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		klog.ErrorS(err, "Failed to set up reconciler")
 		os.Exit(1)
@@ -196,10 +194,10 @@ func runController(endpoint, nodeID, region, vpcID, subnetID string, cloneWorker
 
 	stagingBasePath := "/var/lib/kubelet/plugins/vpc-file-pool.csi.ibm.io/staging"
 
-	poolManager := pool.NewManager(k8sClient, vpcClient, nil, stagingBasePath)
-	poolManager.SetDefaultResourceGroup(defaultResourceGroup)
+	poolManager := pool.NewManager(k8sClient, nil, nil, stagingBasePath)
 
-	// Run CSI gRPC server in a goroutine
+	// Run CSI gRPC server in a goroutine — serves immediately, but controller
+	// methods return Unavailable until readyCh is closed.
 	d, err := driver.NewDriver(driver.Config{
 		Name:        driver.DriverName,
 		Version:     version,
@@ -208,6 +206,7 @@ func runController(endpoint, nodeID, region, vpcID, subnetID string, cloneWorker
 		Mode:        "controller",
 		K8sClient:   k8sClient,
 		PoolManager: poolManager,
+		Ready:       readyCh,
 	})
 	if err != nil {
 		klog.ErrorS(err, "Failed to create driver")
@@ -219,6 +218,44 @@ func runController(endpoint, nodeID, region, vpcID, subnetID string, cloneWorker
 			klog.ErrorS(err, "CSI gRPC server failed")
 			os.Exit(1)
 		}
+	}()
+
+	// Initialize VPC client in the background. The secret-provider sidecar may
+	// take up to 150s to become ready. This goroutine retries until it succeeds,
+	// then injects the client into the reconciler and pool manager and signals
+	// readiness by closing readyCh.
+	go func() {
+		var vpcClient *ibmcloud.Client
+		var initErr error
+		for attempt := 1; attempt <= 30; attempt++ {
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						initErr = fmt.Errorf("secret provider panic: %v", r)
+					}
+				}()
+				vpcClient, initErr = ibmcloud.NewClient(clientset, region)
+			}()
+			if initErr == nil {
+				break
+			}
+			klog.V(2).InfoS("Waiting for secret provider sidecar", "attempt", attempt, "err", initErr)
+			time.Sleep(5 * time.Second)
+		}
+		if initErr != nil {
+			klog.ErrorS(initErr, "Failed to create VPC API client after retries — controller will not become ready", "region", region)
+			return
+		}
+
+		defaultResourceGroup := vpcClient.ResourceGroupID()
+
+		poolManager.SetVPCClient(vpcClient)
+		poolManager.SetDefaultResourceGroup(defaultResourceGroup)
+		reconciler.SetVPCClient(vpcClient)
+		reconciler.SetVPCConfig(vpcID, subnetID, defaultResourceGroup)
+
+		close(readyCh)
+		klog.InfoS("VPC client initialized, controller is ready")
 	}()
 
 	// Start the background clone worker for async volume clones.

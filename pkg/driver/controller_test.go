@@ -292,6 +292,13 @@ func (m *mockK8sClient) CreateStorageClass(_ context.Context, _ *storagev1.Stora
 // Test Helper
 // ---------------------------------------------------------------------------
 
+// closedChan returns a pre-closed channel for tests that need a ready driver.
+func closedChan() <-chan struct{} {
+	ch := make(chan struct{})
+	close(ch)
+	return ch
+}
+
 func newTestDriver(pm pool.PoolManager, k8s *mockK8sClient) *Driver {
 	d := &Driver{
 		name:        DriverName,
@@ -299,6 +306,22 @@ func newTestDriver(pm pool.PoolManager, k8s *mockK8sClient) *Driver {
 		nodeID:      "test-node",
 		mode:        "controller",
 		poolManager: pm,
+		ready:       closedChan(),
+	}
+	if k8s != nil {
+		d.k8sClient = k8s
+	}
+	return d
+}
+
+func newTestDriverNotReady(pm pool.PoolManager, k8s *mockK8sClient) *Driver {
+	d := &Driver{
+		name:        DriverName,
+		version:     "test",
+		nodeID:      "test-node",
+		mode:        "controller",
+		poolManager: pm,
+		ready:       make(chan struct{}), // never closed
 	}
 	if k8s != nil {
 		d.k8sClient = k8s
@@ -2090,5 +2113,108 @@ func TestGetVolumeGroupSnapshot_Success(t *testing.T) {
 	}
 	if len(gs.Snapshots) != 2 {
 		t.Errorf("expected 2 snapshots, got %d", len(gs.Snapshots))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Readiness Guard Tests — not-ready driver returns Unavailable
+// ---------------------------------------------------------------------------
+
+func TestReadinessGuard_CreateVolume(t *testing.T) {
+	d := newTestDriverNotReady(&mockPoolManager{}, nil)
+	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name:       "pvc-test",
+		Parameters: map[string]string{"pool": "test"},
+	})
+	assertGRPCCode(t, err, codes.Unavailable)
+}
+
+func TestReadinessGuard_DeleteVolume(t *testing.T) {
+	d := newTestDriverNotReady(&mockPoolManager{}, nil)
+	_, err := d.DeleteVolume(context.Background(), &csi.DeleteVolumeRequest{
+		VolumeId: "pool/share/pvc",
+	})
+	assertGRPCCode(t, err, codes.Unavailable)
+}
+
+func TestReadinessGuard_ControllerExpandVolume(t *testing.T) {
+	d := newTestDriverNotReady(&mockPoolManager{}, nil)
+	_, err := d.ControllerExpandVolume(context.Background(), &csi.ControllerExpandVolumeRequest{
+		VolumeId: "pool/share/pvc",
+	})
+	assertGRPCCode(t, err, codes.Unavailable)
+}
+
+func TestReadinessGuard_CreateSnapshot(t *testing.T) {
+	d := newTestDriverNotReady(&mockPoolManager{}, nil)
+	_, err := d.CreateSnapshot(context.Background(), &csi.CreateSnapshotRequest{
+		Name:           "snap",
+		SourceVolumeId: "pool/share/pvc",
+	})
+	assertGRPCCode(t, err, codes.Unavailable)
+}
+
+func TestReadinessGuard_DeleteSnapshot(t *testing.T) {
+	d := newTestDriverNotReady(&mockPoolManager{}, nil)
+	_, err := d.DeleteSnapshot(context.Background(), &csi.DeleteSnapshotRequest{
+		SnapshotId: "pool/share/snap",
+	})
+	assertGRPCCode(t, err, codes.Unavailable)
+}
+
+func TestReadinessGuard_ListSnapshots(t *testing.T) {
+	d := newTestDriverNotReady(&mockPoolManager{}, nil)
+	_, err := d.ListSnapshots(context.Background(), &csi.ListSnapshotsRequest{
+		SourceVolumeId: "pool/share/pvc",
+	})
+	assertGRPCCode(t, err, codes.Unavailable)
+}
+
+func TestReadinessGuard_CreateVolumeGroupSnapshot(t *testing.T) {
+	d := newTestDriverNotReady(&mockPoolManager{}, nil)
+	_, err := d.CreateVolumeGroupSnapshot(context.Background(), &csi.CreateVolumeGroupSnapshotRequest{
+		Name:            "group",
+		SourceVolumeIds: []string{"pool/share/pvc"},
+	})
+	assertGRPCCode(t, err, codes.Unavailable)
+}
+
+func TestReadinessGuard_DeleteVolumeGroupSnapshot(t *testing.T) {
+	d := newTestDriverNotReady(&mockPoolManager{}, nil)
+	_, err := d.DeleteVolumeGroupSnapshot(context.Background(), &csi.DeleteVolumeGroupSnapshotRequest{
+		GroupSnapshotId: "pool/group",
+	})
+	assertGRPCCode(t, err, codes.Unavailable)
+}
+
+func TestReadinessGuard_GetVolumeGroupSnapshot(t *testing.T) {
+	d := newTestDriverNotReady(&mockPoolManager{}, nil)
+	_, err := d.GetVolumeGroupSnapshot(context.Background(), &csi.GetVolumeGroupSnapshotRequest{
+		GroupSnapshotId: "pool/group",
+	})
+	assertGRPCCode(t, err, codes.Unavailable)
+}
+
+func TestReadinessGuard_ControllerGetCapabilities_AlwaysWorks(t *testing.T) {
+	d := newTestDriverNotReady(&mockPoolManager{}, nil)
+	resp, err := d.ControllerGetCapabilities(context.Background(), &csi.ControllerGetCapabilitiesRequest{})
+	if err != nil {
+		t.Fatalf("ControllerGetCapabilities should work even when not ready: %v", err)
+	}
+	if len(resp.GetCapabilities()) == 0 {
+		t.Error("expected capabilities")
+	}
+}
+
+func TestReadinessGuard_ValidateVolumeCapabilities_AlwaysWorks(t *testing.T) {
+	d := newTestDriverNotReady(&mockPoolManager{}, nil)
+	_, err := d.ValidateVolumeCapabilities(context.Background(), &csi.ValidateVolumeCapabilitiesRequest{
+		VolumeId: "pool/share/pvc",
+		VolumeCapabilities: []*csi.VolumeCapability{
+			{AccessMode: &csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ValidateVolumeCapabilities should work even when not ready: %v", err)
 	}
 }

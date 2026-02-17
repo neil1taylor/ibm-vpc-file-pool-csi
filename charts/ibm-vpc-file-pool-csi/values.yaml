@@ -18,6 +18,7 @@ config:
 
 controller:
   replicas: 1
+  healthPort: 8081
   resources: {}
   tolerations: []
   nodeSelector: {}

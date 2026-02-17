@@ -147,6 +147,13 @@ func (m *Manager) SetDefaultResourceGroup(rg string) {
 	m.defaultResourceGroup = rg
 }
 
+// SetVPCClient replaces the VPC client after deferred initialization.
+func (m *Manager) SetVPCClient(client ibmcloud.VPCFileClient) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.vpcClient = client
+}
+
 // NewManager creates a new pool manager with the given dependencies.
 func NewManager(k8sClient k8s.Client, vpcClient ibmcloud.VPCFileClient, nfsOps NFSOperations, stagingBasePath string) *Manager {
 	return &Manager{

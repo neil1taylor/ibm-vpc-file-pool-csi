@@ -31,6 +31,9 @@ func (d *Driver) ControllerGetCapabilities(_ context.Context, _ *csi.ControllerG
 
 // CreateVolume allocates a subdirectory on a pooled VPC file share.
 func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
+	if !d.isReady() {
+		return nil, status.Error(codes.Unavailable, "driver is initializing")
+	}
 	if req.GetName() == "" {
 		return nil, status.Error(codes.InvalidArgument, "volume name is required")
 	}
@@ -171,6 +174,9 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 
 // DeleteVolume removes a subdirectory allocation.
 func (d *Driver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) (*csi.DeleteVolumeResponse, error) {
+	if !d.isReady() {
+		return nil, status.Error(codes.Unavailable, "driver is initializing")
+	}
 	volumeID := req.GetVolumeId()
 	if volumeID == "" {
 		return nil, status.Error(codes.InvalidArgument, "volume ID is required")
@@ -195,6 +201,9 @@ func (d *Driver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest)
 
 // ControllerExpandVolume updates the allocation size for an existing SubVolume.
 func (d *Driver) ControllerExpandVolume(ctx context.Context, req *csi.ControllerExpandVolumeRequest) (*csi.ControllerExpandVolumeResponse, error) {
+	if !d.isReady() {
+		return nil, status.Error(codes.Unavailable, "driver is initializing")
+	}
 	volumeID := req.GetVolumeId()
 	if volumeID == "" {
 		return nil, status.Error(codes.InvalidArgument, "volume ID is required")
@@ -418,6 +427,9 @@ func (d *Driver) createVolumeFromClone(ctx context.Context, req *csi.CreateVolum
 
 // CreateSnapshot creates a directory-level copy of a SubVolume.
 func (d *Driver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotRequest) (*csi.CreateSnapshotResponse, error) {
+	if !d.isReady() {
+		return nil, status.Error(codes.Unavailable, "driver is initializing")
+	}
 	if req.GetName() == "" {
 		return nil, status.Error(codes.InvalidArgument, "snapshot name is required")
 	}
@@ -455,6 +467,9 @@ func (d *Driver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotRequ
 
 // DeleteSnapshot removes a snapshot directory and its CR.
 func (d *Driver) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotRequest) (*csi.DeleteSnapshotResponse, error) {
+	if !d.isReady() {
+		return nil, status.Error(codes.Unavailable, "driver is initializing")
+	}
 	snapshotID := req.GetSnapshotId()
 	if snapshotID == "" {
 		return nil, status.Error(codes.InvalidArgument, "snapshot ID is required")
@@ -479,6 +494,9 @@ func (d *Driver) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotRequ
 
 // ListSnapshots lists snapshots with optional filtering.
 func (d *Driver) ListSnapshots(ctx context.Context, req *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
+	if !d.isReady() {
+		return nil, status.Error(codes.Unavailable, "driver is initializing")
+	}
 	// Single snapshot lookup by ID
 	if req.GetSnapshotId() != "" {
 		poolName, shareID, snapshotName, err := parseVolumeID(req.GetSnapshotId())
@@ -565,6 +583,9 @@ func (d *Driver) ListSnapshots(ctx context.Context, req *csi.ListSnapshotsReques
 
 // CreateVolumeGroupSnapshot creates coordinated snapshots for multiple volumes.
 func (d *Driver) CreateVolumeGroupSnapshot(ctx context.Context, req *csi.CreateVolumeGroupSnapshotRequest) (*csi.CreateVolumeGroupSnapshotResponse, error) {
+	if !d.isReady() {
+		return nil, status.Error(codes.Unavailable, "driver is initializing")
+	}
 	if req.GetName() == "" {
 		return nil, status.Error(codes.InvalidArgument, "group snapshot name is required")
 	}
@@ -659,6 +680,9 @@ func (d *Driver) CreateVolumeGroupSnapshot(ctx context.Context, req *csi.CreateV
 
 // DeleteVolumeGroupSnapshot deletes a group snapshot and all its member snapshots.
 func (d *Driver) DeleteVolumeGroupSnapshot(ctx context.Context, req *csi.DeleteVolumeGroupSnapshotRequest) (*csi.DeleteVolumeGroupSnapshotResponse, error) {
+	if !d.isReady() {
+		return nil, status.Error(codes.Unavailable, "driver is initializing")
+	}
 	groupSnapshotID := req.GetGroupSnapshotId()
 	if groupSnapshotID == "" {
 		return nil, status.Error(codes.InvalidArgument, "group snapshot ID is required")
@@ -682,6 +706,9 @@ func (d *Driver) DeleteVolumeGroupSnapshot(ctx context.Context, req *csi.DeleteV
 
 // GetVolumeGroupSnapshot fetches group snapshot details from the Kubernetes API.
 func (d *Driver) GetVolumeGroupSnapshot(ctx context.Context, req *csi.GetVolumeGroupSnapshotRequest) (*csi.GetVolumeGroupSnapshotResponse, error) {
+	if !d.isReady() {
+		return nil, status.Error(codes.Unavailable, "driver is initializing")
+	}
 	groupSnapshotID := req.GetGroupSnapshotId()
 	if groupSnapshotID == "" {
 		return nil, status.Error(codes.InvalidArgument, "group snapshot ID is required")

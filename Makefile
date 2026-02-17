@@ -39,8 +39,10 @@ generate: tools
 	$(CONTROLLER_GEN) object paths="./api/..."
 	$(CONTROLLER_GEN) crd paths="./api/..." output:crd:dir=config/crd
 
+CONTAINER_ENGINE := $(shell command -v docker 2>/dev/null || command -v podman 2>/dev/null)
+
 docker-build:
-	docker build -t $(IMAGE_NAME):$(VERSION) .
+	$(CONTAINER_ENGINE) build -t $(IMAGE_NAME):$(VERSION) .
 
 install-crds:
 	kubectl apply -f config/crd/

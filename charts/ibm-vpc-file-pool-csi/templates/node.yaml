@@ -45,6 +45,17 @@ spec:
                   fieldPath: spec.nodeName
           securityContext:
             privileged: true
+          startupProbe:
+            exec:
+              command: [test, -S, /csi/csi.sock]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 18
+          livenessProbe:
+            exec:
+              command: [test, -S, /csi/csi.sock]
+            periodSeconds: 30
+            failureThreshold: 3
           {{- with .Values.node.resources }}
           resources:
             {{- toYaml . | nindent 12 }}

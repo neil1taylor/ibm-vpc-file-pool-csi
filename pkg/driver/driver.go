@@ -31,6 +31,7 @@ type Config struct {
 	Mounter     mount.Interface
 	K8sClient   k8s.Client
 	PoolManager pool.PoolManager
+	Ready       <-chan struct{} // Closed when VPC client is initialized; nil = always ready
 }
 
 // Driver implements the CSI Identity, Controller, and Node services.
@@ -48,6 +49,7 @@ type Driver struct {
 	k8sClient    k8s.Client
 	mounter      mount.Interface
 	mountCache   *util.MountCache
+	ready        <-chan struct{}
 	nodeZone     string
 	nodeZoneOnce sync.Once
 }
@@ -57,6 +59,14 @@ func NewDriver(cfg Config) (*Driver, error) {
 	mounter := cfg.Mounter
 	if mounter == nil {
 		mounter = mount.New("")
+	}
+
+	ready := cfg.Ready
+	if ready == nil {
+		// nil means always ready (node mode, tests)
+		ch := make(chan struct{})
+		close(ch)
+		ready = ch
 	}
 
 	return &Driver{
@@ -69,7 +79,18 @@ func NewDriver(cfg Config) (*Driver, error) {
 		k8sClient:   cfg.K8sClient,
 		mounter:     mounter,
 		mountCache:  util.NewMountCache(),
+		ready:       ready,
 	}, nil
+}
+
+// isReady returns true if the driver has completed initialization.
+func (d *Driver) isReady() bool {
+	select {
+	case <-d.ready:
+		return true
+	default:
+		return false
+	}
 }
 
 // Run starts the gRPC server and registers CSI services based on mode.

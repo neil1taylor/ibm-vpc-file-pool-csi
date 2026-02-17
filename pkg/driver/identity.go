@@ -4,6 +4,7 @@ import (
 	"context"
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // GetPluginInfo returns the driver name and version.
@@ -39,5 +40,7 @@ func (d *Driver) GetPluginCapabilities(_ context.Context, _ *csi.GetPluginCapabi
 
 // Probe checks that the driver is healthy and ready.
 func (d *Driver) Probe(_ context.Context, _ *csi.ProbeRequest) (*csi.ProbeResponse, error) {
-	return &csi.ProbeResponse{}, nil
+	return &csi.ProbeResponse{
+		Ready: &wrapperspb.BoolValue{Value: d.isReady()},
+	}, nil
 }
