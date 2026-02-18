@@ -29,7 +29,10 @@ Settings for the CSI controller Deployment (runs the Pool Manager and CSI contro
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `controller.replicas` | int | `1` | Number of controller replicas. Only 1 is active (leader election) |
-| `controller.resources` | object | `{}` | CPU/memory resource requests and limits |
+| `controller.healthPort` | int | `8081` | Port for `/healthz` and `/readyz` endpoints |
+| `controller.resources.requests.cpu` | string | `50m` | Controller CPU request |
+| `controller.resources.requests.memory` | string | `128Mi` | Controller memory request |
+| `controller.resources.limits.memory` | string | `512Mi` | Controller memory limit |
 | `controller.tolerations` | list | `[]` | Tolerations for controller pod scheduling |
 | `controller.nodeSelector` | object | `{}` | Node selector for controller pod placement |
 | `controller.affinity` | object | `{}` | Affinity rules for controller pod scheduling |
@@ -40,8 +43,13 @@ Settings for the CSI node agent DaemonSet (runs on every worker node).
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `node.hostPID` | bool | `true` | Enable hostPID for node agent pods. Required for nsenter mount wrapper to access host mount namespace for NFS mounts |
+| `node.kubeletDir` | string | `/var/lib/kubelet` | Kubelet root directory. Set to `/var/data/kubelet` on ROKS |
+| `node.resources.requests.cpu` | string | `50m` | Node agent CPU request |
+| `node.resources.requests.memory` | string | `64Mi` | Node agent memory request |
+| `node.resources.limits.memory` | string | `256Mi` | Node agent memory limit |
 | `node.tolerations` | list | `[{operator: Exists}]` | Tolerations for node agent pods. Default tolerates all taints so the agent runs on every node |
+| `node.nodeSelector` | object | `{}` | Node selector for node agent pod placement |
+| `node.affinity` | object | `{}` | Affinity rules for node agent pod scheduling |
 
 ## Logging
 
@@ -58,16 +66,28 @@ Controls how the IBM Cloud API key is injected into the controller.
 | `secretProvider.managed` | bool | `true` | Use the storage-secret-sidecar for automatic API key injection (managed ROKS/IKS). Set to `false` for self-managed clusters |
 | `secretProvider.sidecar.image` | string | `icr.io/obs/armada-storage-secret:v1.2.75` | Container image for the storage-secret-sidecar |
 
+## Clone Worker
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `cloneWorker.interval` | string | `10s` | Background clone worker poll interval (Go duration) |
+
 ## Sidecars
 
-Standard CSI sidecar container images. Update these when upgrading Kubernetes CSI components.
+Standard CSI sidecar container images and resources. Update images when upgrading Kubernetes CSI components. All sidecars have default resource requests/limits; override per-sidecar via `sidecars.<name>.resources`.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `sidecars.provisioner.image` | string | `registry.k8s.io/sig-storage/csi-provisioner:v5.1.0` | CSI external-provisioner image |
+| `sidecars.provisioner.resources` | object | `{requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}` | Provisioner resource requests/limits |
 | `sidecars.resizer.image` | string | `registry.k8s.io/sig-storage/csi-resizer:v1.12.0` | CSI external-resizer image |
+| `sidecars.resizer.resources` | object | `{requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}` | Resizer resource requests/limits |
+| `sidecars.snapshotter.image` | string | `registry.k8s.io/sig-storage/csi-snapshotter:v8.2.0` | CSI external-snapshotter image |
+| `sidecars.snapshotter.resources` | object | `{requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 128Mi}}` | Snapshotter resource requests/limits |
 | `sidecars.registrar.image` | string | `registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.12.0` | CSI node-driver-registrar image |
+| `sidecars.registrar.resources` | object | `{requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}` | Registrar resource requests/limits |
 | `sidecars.liveness.image` | string | `registry.k8s.io/sig-storage/livenessprobe:v2.14.0` | CSI liveness probe image |
+| `sidecars.liveness.resources` | object | `{requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}` | Liveness probe resource requests/limits |
 
 ## Metrics
 

@@ -146,13 +146,15 @@ Monitor progress via `status.drainStatus` or the `DrainComplete` condition.
 
 ## Hard NFS Mounts
 
-**What:** Deliberately not supported. The driver enforces `soft` NFS mounts.
+**What:** The driver defaults to `soft` NFS mounts. Custom mount flags from the StorageClass are merged with the safe defaults (`nfsvers=4.1,soft,timeo=600,retrans=3`), so `soft` is always present unless the StorageClass explicitly includes `hard`.
 
 **Why:** Hard NFS mounts cause pods to hang indefinitely if the NFS server becomes unreachable. With pooled storage, a single unresponsive share could freeze many pods simultaneously. Soft mounts return errors after the retry timeout, allowing applications to handle failures gracefully.
 
-**Workaround:** None — this is a deliberate safety decision. Configure `timeo` and `retrans` mount options to adjust timeout behavior. The defaults (`timeo=600,retrans=3`) provide a 60-second timeout with 3 retries.
+**Override:** If your workload requires `hard` mounts (e.g., applications that must not see transient I/O errors), add `hard` to the StorageClass `mountOptions`. This will replace the `soft` default. Use with caution — a VPC file share outage will cause all pods using hard-mounted shares to hang until the share recovers.
 
-**Roadmap:** No change planned.
+**Safe customization:** Adding options like `noatime`, `rsize=1048576`, or `timeo=300` to the StorageClass will merge with the defaults without removing `soft`. Only `hard` explicitly replaces `soft`.
+
+**Roadmap:** No change planned — `soft` remains the recommended and default setting.
 
 ## Cross-Zone Node Failover
 

@@ -865,11 +865,14 @@ func (d *Driver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRe
     // 3. Build NFS mount source
     source := fmt.Sprintf("%s:%s", server, sharePath)
 
-    // 4. Mount options (from StorageClass mountOptions + defaults)
-    mountOptions := []string{"nfsvers=4.1", "soft", "timeo=600", "retrans=3"}
-    if opts := req.GetVolumeCapability().GetMount().GetMountFlags(); len(opts) > 0 {
-        mountOptions = opts
-    }
+    // 4. Mount options — merge custom flags with safe NFS defaults.
+    //    Custom flags override defaults with the same key (e.g. "timeo=300"
+    //    overrides "timeo=600"). The "soft" default is always preserved unless
+    //    "hard" is explicitly specified.
+    mountOptions := mergeNFSMountOptions(
+        []string{"nfsvers=4.1", "soft", "timeo=600", "retrans=3"},
+        req.GetVolumeCapability().GetMount().GetMountFlags(),
+    )
 
     // 5. Create staging directory if needed
     if err := os.MkdirAll(stagingPath, 0750); err != nil {
@@ -1198,6 +1201,7 @@ The controller and node run from the same binary but with different flags:
 - `--node-id=<hostname>` — node identifier (from downward API)
 - `--vpc-id=<vpc-id>` — VPC ID for mount target creation (controller mode)
 - `--subnet-id=<subnet-id>` — Subnet ID for mount target creation (controller mode)
+- `--kubelet-dir=/var/lib/kubelet` — Kubelet root directory; set to `/var/data/kubelet` on ROKS (controller mode, used for staging path construction)
 
 ---
 
@@ -1236,6 +1240,13 @@ containers:
       - "--csi-address=/csi/csi.sock"
       - "--leader-election"
       - "--leader-election-namespace=kube-system"
+      - "--timeout=300s"           # Long timeout for VPC API calls (30-90s)
+      - "--http-endpoint=:9810"
+    livenessProbe:
+      httpGet:
+        path: /healthz/leader-election
+        port: 9810
+      periodSeconds: 30
     volumeMounts:
       - name: socket-dir
         mountPath: /csi
@@ -1246,7 +1257,14 @@ containers:
       - "--csi-address=/csi/csi.sock"
       - "--leader-election"
       - "--leader-election-namespace=kube-system"
+      - "--timeout=300s"           # Long timeout for VPC API calls (30-90s)
       - "--enable-volume-group-snapshots=true"
+      - "--http-endpoint=:9811"
+    livenessProbe:
+      httpGet:
+        path: /healthz/leader-election
+        port: 9811
+      periodSeconds: 30
     volumeMounts:
       - name: socket-dir
         mountPath: /csi
@@ -1263,6 +1281,7 @@ containers:
 ### Node DaemonSet
 
 ```yaml
+hostNetwork: true               # Required for NFS mount persistence across container restarts
 hostPID: true                   # Required for nsenter mount wrapper (NFS mounts via host namespace)
 containers:
   - name: csi-node
@@ -1278,14 +1297,25 @@ containers:
             fieldPath: spec.nodeName
     securityContext:
       privileged: true    # Required for mount operations
+    startupProbe:
+      exec:
+        command: [test, -S, /csi/csi.sock]
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      failureThreshold: 18
+    readinessProbe:
+      exec:
+        command: [test, -S, /csi/csi.sock]
+      periodSeconds: 10
+    livenessProbe:
+      exec:
+        command: [test, -S, /csi/csi.sock]
+      periodSeconds: 30
     volumeMounts:
       - name: socket-dir
         mountPath: /csi
       - name: kubelet-dir
-        mountPath: /var/lib/kubelet
-        mountPropagation: Bidirectional
-      - name: staging-dir
-        mountPath: /var/lib/kubelet/plugins/vpc-file-pool.csi.ibm.io
+        mountPath: /var/lib/kubelet   # Use node.kubeletDir value
         mountPropagation: Bidirectional
 
   - name: node-driver-registrar
@@ -1293,17 +1323,15 @@ containers:
     args:
       - "--csi-address=/csi/csi.sock"
       - "--kubelet-registration-path=/var/lib/kubelet/plugins/vpc-file-pool.csi.ibm.io/csi.sock"
+      - "--http-endpoint=:9809"
+    livenessProbe:
+      httpGet:
+        path: /healthz
+        port: 9809
+      periodSeconds: 30
     volumeMounts:
       - name: socket-dir
         mountPath: /csi
       - name: registration-dir
         mountPath: /registration
-
-  - name: liveness-probe
-    image: registry.k8s.io/sig-storage/livenessprobe:v2.14.0
-    args:
-      - "--csi-address=/csi/csi.sock"
-    volumeMounts:
-      - name: socket-dir
-        mountPath: /csi
 ```

@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [v0.8.0] — 2026-02-18
+
+### Fixed
+
+- **Hardcoded staging path ignores kubeletDir** — The controller's `stagingBasePath` was hardcoded to `/var/lib/kubelet/...` even when `node.kubeletDir` was set to `/var/data/kubelet` for ROKS. Added `--kubelet-dir` flag to the controller binary and wired it through the Helm chart so the staging path matches the node DaemonSet's kubelet directory
+- **Mount flags override replaces safe NFS defaults** — Custom mount flags from the StorageClass completely replaced the safe defaults (`soft`, `timeo=600`, `retrans=3`). A user adding `noatime` would lose `soft` mount protection. Changed to merge custom flags with defaults: same-key options are overridden (e.g., `timeo=300` replaces `timeo=600`), and `soft` is always preserved unless `hard` is explicitly specified
+- **No resource requests/limits on any container** — All 8 containers ran with zero resource requests/limits (BestEffort QoS). Added sensible defaults: controller 50m/128Mi (512Mi limit), node 50m/64Mi (256Mi limit), sidecars 10m/32Mi (128Mi limit), registrar/liveness 10m/16Mi (64Mi limit)
+- **No probes on sidecar containers** — Added liveness probes to all CSI sidecars (provisioner, resizer, snapshotter, liveness-probe, secret-sidecar) and the node-driver-registrar using their `--http-endpoint` health check support
+- **No readiness probe on node main container** — Added readiness probe (socket existence check) so the node is not marked Ready before the CSI driver is initialized
+- **csi-resizer and csi-snapshotter missing `--timeout`** — Only the provisioner had `--timeout=300s`. Added the same 300s timeout to the resizer and snapshotter to accommodate VPC API calls that take 30-90s
+- **Duplicate ConfigMap fetch** — Two separate API calls for the same `ibm-cloud-provider-data` ConfigMap during auto-discovery. Consolidated into a single fetch
+- **Webhook cert volume permissions** — The `webhook-certs` secret volume defaulted to `0644`, exposing TLS private keys to all containers in the pod. Set `defaultMode: 0400`
+
 ## [v0.7.0] — 2026-02-17
 
 ### Added
@@ -145,6 +158,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Mount target IP resolution when share has multiple mount targets across zones
 - Makefile targets for end-to-end build pipeline
 
+[v0.8.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.7.0...v0.8.0
 [v0.7.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.6.0...v0.7.0
 [v0.6.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.5.0...v0.6.0
 [v0.5.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.4.0...v0.5.0

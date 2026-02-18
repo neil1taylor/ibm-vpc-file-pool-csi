@@ -238,14 +238,14 @@ The nsenter wrapper at `/usr/local/bin/mount` routes NFS mounts through `nsenter
 
 **Cause:** If the NFS mount was configured with `hard` instead of `soft`, the kernel retries indefinitely when the NFS server is unreachable.
 
-**Fix:** This driver always uses `soft` mounts to prevent this exact scenario. If you see this:
+**Fix:** The driver defaults to `soft` mounts to prevent this scenario. Custom mount flags from the StorageClass are merged with the safe defaults, so `soft` is always present unless the StorageClass explicitly includes `hard`. If you see this:
 
-1. Verify the StorageClass `mountOptions` include `soft`:
+1. Verify the StorageClass `mountOptions` do not include `hard`:
 ```bash
 kubectl get storageclass <sc-name> -o jsonpath='{.mountOptions}'
 ```
 
-2. If `hard` was specified, update the StorageClass and recreate affected PVCs
+2. If `hard` was specified, update the StorageClass to remove it (or replace with `soft`) and recreate affected PVCs
 3. For immediate relief, force-delete the stuck pod:
 ```bash
 kubectl delete pod <pod-name> --force --grace-period=0

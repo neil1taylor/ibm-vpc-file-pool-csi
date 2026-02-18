@@ -28,7 +28,8 @@ The IBM VPC File Pool CSI Driver incorporates several security properties by des
 - **Leader election** — the controller uses controller-runtime leader election to prevent concurrent instances from corrupting pool state. Only one controller actively reconciles at a time.
 - **Path validation** — all subdirectory operations validate paths against `^/pvcs/pvc-[a-f0-9-]{36}$` and reject directory traversal attempts (`..`, symlinks outside the share root). This prevents a malicious PVC name from escaping the share directory.
 - **No secrets in logs** — API keys, tokens, and credentials are never logged. Share IDs, mount target IPs, and pool names are logged for debugging.
-- **Soft NFS mounts** — mount options enforce `soft,timeo=600,retrans=3`. Hard mounts are deliberately not supported because they cause pods to hang indefinitely on NFS server failures.
+- **Soft NFS mounts by default** — mount options default to `soft,timeo=600,retrans=3`. Custom StorageClass mount flags are merged with (not replaced by) these safe defaults, so `soft` is always present unless explicitly overridden with `hard`. This prevents accidental removal of the `soft` safety net.
+- **Webhook cert isolation** — webhook TLS certificate secret volumes use `defaultMode: 0400`, restricting private key access to the owner (the controller container).
 - **RBAC least-privilege** — the controller ServiceAccount has only the permissions required to watch/update FileSharePool and SubVolume CRs, read ConfigMaps for VPC config, and manage PV/PVC objects. The node agent ServiceAccount is further restricted to node-level operations.
 - **Secret isolation** — on managed ROKS/IKS clusters, IBM Cloud API keys are injected by the `storage-secret-sidecar` and never stored in user-accessible ConfigMaps or PVC annotations.
 

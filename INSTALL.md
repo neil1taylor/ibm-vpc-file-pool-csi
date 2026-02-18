@@ -290,11 +290,9 @@ helm upgrade --install ibm-vpc-file-pool-csi \
 | `secret.name` | No | `ibm-vpc-file-pool-csi-secret` | Name of the API key secret |
 | `secret.namespace` | No | `kube-system` | Namespace of the API key secret |
 | `controller.replicas` | No | `1` | Controller replicas (leader-elected) |
-| `controller.resources.requests.cpu` | No | `100m` | Controller CPU request |
-| `controller.resources.requests.memory` | No | `128Mi` | Controller memory request |
+| `controller.resources` | No | `{requests: {cpu: 50m, memory: 128Mi}, limits: {memory: 512Mi}}` | Controller CPU/memory resource requests and limits |
 | `node.kubeletDir` | No | `/var/lib/kubelet` | Kubelet root directory. Set to `/var/data/kubelet` on ROKS |
-| `node.resources.requests.cpu` | No | `50m` | Node agent CPU request |
-| `node.resources.requests.memory` | No | `64Mi` | Node agent memory request |
+| `node.resources` | No | `{requests: {cpu: 50m, memory: 64Mi}, limits: {memory: 256Mi}}` | Node agent CPU/memory resource requests and limits |
 | `logLevel` | No | `4` | klog verbosity (2=normal, 4=detailed, 6=trace) |
 | `webhook.enabled` | No | `true` | Enable validating admission webhooks |
 | `webhook.port` | No | `9443` | Webhook server port |
