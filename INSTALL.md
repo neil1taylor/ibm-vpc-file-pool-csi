@@ -8,6 +8,18 @@ This CSI driver takes a different approach: it creates a **pool** of large VPC f
 
 A **CSI driver** (Container Storage Interface) is a plugin that teaches Kubernetes how to provision and mount a specific type of storage. This one teaches Kubernetes how to use IBM VPC file shares in a pooled way.
 
+## Installation Overview
+
+The end-to-end process from source code to a working driver on your cluster:
+
+1. **`make build`** — compile the Go source code into a binary
+2. **`docker build` / `podman build`** — package the binary into a container image
+3. **`docker push` / `podman push`** — upload the image to a container registry so your cluster can pull it
+4. **`helm upgrade --install`** — deploy the driver onto the cluster (creates controller, node agents, RBAC, etc.)
+5. **`make test-e2e`** — run automated tests against the live driver to verify everything works
+
+Each step is covered in detail below.
+
 ---
 
 ## Prerequisites
@@ -462,6 +474,28 @@ kubectl delete pvc test-pool-pvc
 ```
 
 If the PVC binds and the pod writes successfully, the installation is complete.
+
+### Automated end-to-end tests
+
+Instead of (or in addition to) the manual smoke test above, you can run the automated **e2e tests**. These are test scripts that live in `test/e2e/` and do the same thing — create pools, PVCs, and pods, then verify everything works — but automatically and with more thorough checks.
+
+The tests run on your workstation using `go test`, but they talk to the cluster remotely via your kubeconfig. The driver must already be deployed on the cluster (Steps 1-4 above) — the tests don't install it, they just exercise it.
+
+```bash
+# Set required environment variables — these tell the tests which zone
+# and subnet to use when creating pools
+export E2E_HOME_ZONE=us-south-1           # Your worker node zone
+export E2E_ACCESSOR_ZONE=us-south-2       # A second zone for cross-zone tests
+export E2E_ACCESSOR_SUBNET_ID=<subnet-id> # Subnet ID in the accessor zone
+
+# Run the tests (compiles and runs test/e2e/*.go from your laptop)
+make test-e2e
+```
+
+The tests create resources with an `e2e-` prefix and clean them up automatically when done. Two scenarios are tested:
+
+- **BasicPool** — creates a single-zone pool, provisions a PVC, mounts it in a pod, verifies it works
+- **CrossZone** — creates a pool with accessor zones, verifies multi-zone NFS access
 
 ---
 

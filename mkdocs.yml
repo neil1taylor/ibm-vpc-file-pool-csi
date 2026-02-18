@@ -66,10 +66,11 @@ nav:
       - Performance Tuning: PERFORMANCE-TUNING.md
       - Known Limitations: KNOWN-LIMITATIONS.md
   - Architecture:
+      - Overview: OVERVIEW.md
       - System Design: ARCHITECTURE.md
       - Consistency Model: CONSISTENCY-MODEL.md
-      - VPC Networking: vpc-networking.md
-      - VM Disk Formats: vm-disk-formats.md
+      - VPC Networking: VPC-NETWORKING.md
+      - VM Disk Formats: VM-DISK-FORMATS.md
       - CRD Specification: CRD-SPEC.md
       - CSI Interface: CSI-INTERFACE.md
       - IBM VPC API: IBM-VPC-API.md
