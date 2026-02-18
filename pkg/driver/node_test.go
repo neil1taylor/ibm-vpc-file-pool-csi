@@ -321,6 +321,70 @@ func TestNodeStageVolume_CustomMountFlags(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// mergeNFSMountOptions unit tests
+// ---------------------------------------------------------------------------
+
+func TestMergeNFSMountOptions(t *testing.T) {
+	defaults := []string{"nfsvers=4.1", "soft", "timeo=600", "retrans=3"}
+
+	tests := []struct {
+		name     string
+		custom   []string
+		expected []string
+	}{
+		{
+			name:     "no custom flags returns defaults",
+			custom:   nil,
+			expected: []string{"nfsvers=4.1", "soft", "timeo=600", "retrans=3"},
+		},
+		{
+			name:     "empty custom flags returns defaults",
+			custom:   []string{},
+			expected: []string{"nfsvers=4.1", "soft", "timeo=600", "retrans=3"},
+		},
+		{
+			name:     "custom noatime merged with defaults",
+			custom:   []string{"noatime"},
+			expected: []string{"nfsvers=4.1", "soft", "timeo=600", "retrans=3", "noatime"},
+		},
+		{
+			name:     "custom overrides timeo",
+			custom:   []string{"timeo=300"},
+			expected: []string{"nfsvers=4.1", "soft", "timeo=300", "retrans=3"},
+		},
+		{
+			name:     "hard replaces soft",
+			custom:   []string{"hard"},
+			expected: []string{"nfsvers=4.1", "timeo=600", "retrans=3", "hard"},
+		},
+		{
+			name:     "hard with rsize merges correctly",
+			custom:   []string{"hard", "rsize=1048576"},
+			expected: []string{"nfsvers=4.1", "timeo=600", "retrans=3", "hard", "rsize=1048576"},
+		},
+		{
+			name:     "soft is preserved when not overridden with hard",
+			custom:   []string{"rsize=1048576", "wsize=1048576"},
+			expected: []string{"nfsvers=4.1", "soft", "timeo=600", "retrans=3", "rsize=1048576", "wsize=1048576"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := mergeNFSMountOptions(defaults, tt.custom)
+			if len(result) != len(tt.expected) {
+				t.Fatalf("expected %v, got %v", tt.expected, result)
+			}
+			for i, opt := range result {
+				if opt != tt.expected[i] {
+					t.Errorf("option[%d]: expected %q, got %q (full: %v)", i, tt.expected[i], opt, result)
+				}
+			}
+		})
+	}
+}
+
 func TestNodeStageVolume_Idempotent(t *testing.T) {
 	fakeMounter := mount.NewFakeMounter(nil)
 	cache := util.NewMountCache()

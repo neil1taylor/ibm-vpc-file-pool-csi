@@ -51,6 +51,11 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 10
             failureThreshold: 18
+          readinessProbe:
+            exec:
+              command: [test, -S, /csi/csi.sock]
+            periodSeconds: 10
+            failureThreshold: 3
           livenessProbe:
             exec:
               command: [test, -S, /csi/csi.sock]
@@ -72,6 +77,17 @@ spec:
           args:
             - "--csi-address=/csi/csi.sock"
             - "--kubelet-registration-path={{ .Values.node.kubeletDir }}/plugins/vpc-file-pool.csi.ibm.io/csi.sock"
+            - "--http-endpoint=:9809"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 9809
+            periodSeconds: 30
+            failureThreshold: 3
+          {{- with .Values.sidecars.registrar.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: socket-dir
               mountPath: /csi

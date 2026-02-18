@@ -40,6 +40,7 @@ spec:
             {{- if .Values.config.subnetID }}
             - "--subnet-id={{ .Values.config.subnetID }}"
             {{- end }}
+            - "--kubelet-dir={{ .Values.node.kubeletDir }}"
             {{- if .Values.cloneWorker.interval }}
             - "--clone-worker-interval={{ .Values.cloneWorker.interval }}"
             {{- end }}
@@ -117,6 +118,17 @@ spec:
             - "--leader-election-namespace={{ .Release.Namespace }}"
             - "--timeout=300s"
             - "--retry-interval-start=5s"
+            - "--http-endpoint=:9809"
+          livenessProbe:
+            httpGet:
+              path: /healthz/leader-election
+              port: 9809
+            periodSeconds: 30
+            failureThreshold: 3
+          {{- with .Values.sidecars.provisioner.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: socket-dir
               mountPath: /csi
@@ -127,6 +139,18 @@ spec:
             - "--csi-address=/csi/csi.sock"
             - "--leader-election"
             - "--leader-election-namespace={{ .Release.Namespace }}"
+            - "--timeout=300s"
+            - "--http-endpoint=:9810"
+          livenessProbe:
+            httpGet:
+              path: /healthz/leader-election
+              port: 9810
+            periodSeconds: 30
+            failureThreshold: 3
+          {{- with .Values.sidecars.resizer.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: socket-dir
               mountPath: /csi
@@ -137,6 +161,18 @@ spec:
             - "--csi-address=/csi/csi.sock"
             - "--leader-election"
             - "--leader-election-namespace={{ .Release.Namespace }}"
+            - "--timeout=300s"
+            - "--http-endpoint=:9811"
+          livenessProbe:
+            httpGet:
+              path: /healthz/leader-election
+              port: 9811
+            periodSeconds: 30
+            failureThreshold: 3
+          {{- with .Values.sidecars.snapshotter.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: socket-dir
               mountPath: /csi
@@ -145,6 +181,10 @@ spec:
           image: {{ .Values.sidecars.liveness.image }}
           args:
             - "--csi-address=/csi/csi.sock"
+          {{- with .Values.sidecars.liveness.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: socket-dir
               mountPath: /csi
@@ -157,6 +197,12 @@ spec:
           env:
             - name: ENDPOINT
               value: "unix:/sidecardir/providerfile.sock"
+          livenessProbe:
+            exec:
+              command: [test, -S, /sidecardir/providerfile.sock]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
           volumeMounts:
             - name: socket-dir
               mountPath: /sidecardir
@@ -174,6 +220,7 @@ spec:
         - name: webhook-certs
           secret:
             secretName: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-webhook-certs
+            defaultMode: 0400
         {{- end }}
         {{- if .Values.secretProvider.managed }}
         - name: customer-auth

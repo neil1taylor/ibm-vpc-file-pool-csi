@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -41,6 +42,7 @@ func main() {
 		region              string
 		vpcID               string
 		subnetID            string
+		kubeletDir          string
 		cloneWorkerInterval time.Duration
 	)
 
@@ -50,6 +52,7 @@ func main() {
 	flag.StringVar(&region, "region", "", "IBM Cloud region (e.g. us-south); auto-discovered from secret provider if omitted")
 	flag.StringVar(&vpcID, "vpc-id", "", "IBM Cloud VPC ID for creating file share mount targets")
 	flag.StringVar(&subnetID, "subnet-id", "", "IBM Cloud subnet ID for creating file share mount targets")
+	flag.StringVar(&kubeletDir, "kubelet-dir", "/var/lib/kubelet", "Kubelet root directory (ROKS uses /var/data/kubelet)")
 	flag.DurationVar(&cloneWorkerInterval, "clone-worker-interval", pool.DefaultCloneWorkerInterval, "Interval between clone worker poll cycles")
 
 	klog.InitFlags(nil)
@@ -58,13 +61,13 @@ func main() {
 	klog.InfoS("Starting IBM VPC File Pool CSI Driver", "version", version, "mode", mode)
 
 	if mode == "controller" {
-		runController(endpoint, nodeID, region, vpcID, subnetID, cloneWorkerInterval)
+		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, cloneWorkerInterval)
 	} else {
 		runNode(endpoint, nodeID, mode)
 	}
 }
 
-func runController(endpoint, nodeID, region, vpcID, subnetID string, cloneWorkerInterval time.Duration) {
+func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string, cloneWorkerInterval time.Duration) {
 	scheme := runtime.NewScheme()
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
 		klog.ErrorS(err, "Failed to add CRD types to scheme")
@@ -134,19 +137,19 @@ func runController(endpoint, nodeID, region, vpcID, subnetID string, cloneWorker
 	// Auto-discover VPC config from ibm-cloud-provider-data configmap.
 	// Use clientset (not mgr.GetClient()) because the manager cache isn't started yet.
 	ctx := context.Background()
-	if vpcID == "" {
+	if vpcID == "" || subnetID == "" {
 		if cm, cmErr := clientset.CoreV1().ConfigMaps("kube-system").Get(ctx, "ibm-cloud-provider-data", metav1.GetOptions{}); cmErr == nil {
-			if v := cm.Data["vpc_id"]; v != "" {
-				vpcID = v
-				klog.V(2).InfoS("Auto-discovered VPC ID", "source", "ibm-cloud-provider-data", "vpcID", vpcID)
+			if vpcID == "" {
+				if v := cm.Data["vpc_id"]; v != "" {
+					vpcID = v
+					klog.V(2).InfoS("Auto-discovered VPC ID", "source", "ibm-cloud-provider-data", "vpcID", vpcID)
+				}
 			}
-		}
-	}
-	if subnetID == "" {
-		if cm, cmErr := clientset.CoreV1().ConfigMaps("kube-system").Get(ctx, "ibm-cloud-provider-data", metav1.GetOptions{}); cmErr == nil {
-			if v := cm.Data["vpc_subnet_ids"]; v != "" {
-				subnetID = strings.Split(strings.TrimSpace(v), ",")[0]
-				klog.V(2).InfoS("Auto-discovered subnet ID", "source", "ibm-cloud-provider-data", "subnetID", subnetID)
+			if subnetID == "" {
+				if v := cm.Data["vpc_subnet_ids"]; v != "" {
+					subnetID = strings.Split(strings.TrimSpace(v), ",")[0]
+					klog.V(2).InfoS("Auto-discovered subnet ID", "source", "ibm-cloud-provider-data", "subnetID", subnetID)
+				}
 			}
 		}
 	}
@@ -192,7 +195,7 @@ func runController(endpoint, nodeID, region, vpcID, subnetID string, cloneWorker
 	}
 	klog.V(2).InfoS("Registered validating webhooks for all CRD types")
 
-	stagingBasePath := "/var/lib/kubelet/plugins/vpc-file-pool.csi.ibm.io/staging"
+	stagingBasePath := filepath.Join(kubeletDir, "plugins/vpc-file-pool.csi.ibm.io/staging")
 
 	poolManager := pool.NewManager(k8sClient, nil, nil, stagingBasePath)
 

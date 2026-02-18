@@ -19,7 +19,12 @@ config:
 controller:
   replicas: 1
   healthPort: 8081
-  resources: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
   tolerations: []
   nodeSelector: {}
   affinity: {}
@@ -28,7 +33,12 @@ node:
   # Kubelet root directory. Standard Kubernetes uses /var/lib/kubelet.
   # ROKS (Red Hat OpenShift on IBM Cloud) uses /var/data/kubelet.
   kubeletDir: /var/lib/kubelet
-  resources: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
   tolerations:
     - operator: Exists
   nodeSelector: {}
@@ -63,14 +73,44 @@ secretProvider:
 sidecars:
   provisioner:
     image: registry.k8s.io/sig-storage/csi-provisioner:v5.1.0
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 128Mi
   resizer:
     image: registry.k8s.io/sig-storage/csi-resizer:v1.12.0
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 128Mi
   snapshotter:
     image: registry.k8s.io/sig-storage/csi-snapshotter:v8.2.0
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 128Mi
   registrar:
     image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.12.0
+    resources:
+      requests:
+        cpu: 10m
+        memory: 16Mi
+      limits:
+        memory: 64Mi
   liveness:
     image: registry.k8s.io/sig-storage/livenessprobe:v2.14.0
+    resources:
+      requests:
+        cpu: 10m
+        memory: 16Mi
+      limits:
+        memory: 64Mi
 
 metrics:
   port: 8080

@@ -59,10 +59,10 @@ func (d *Driver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRe
 
 	source := fmt.Sprintf("%s:%s", server, sharePath)
 
-	mountOptions := []string{"nfsvers=4.1", "soft", "timeo=600", "retrans=3"}
-	if opts := req.GetVolumeCapability().GetMount().GetMountFlags(); len(opts) > 0 {
-		mountOptions = opts
-	}
+	mountOptions := mergeNFSMountOptions(
+		[]string{"nfsvers=4.1", "soft", "timeo=600", "retrans=3"},
+		req.GetVolumeCapability().GetMount().GetMountFlags(),
+	)
 
 	if err := os.MkdirAll(stagingPath, 0750); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create staging dir: %v", err)
@@ -300,6 +300,61 @@ func dirUsageBytes(root string) (int64, error) {
 		return nil
 	})
 	return total, err
+}
+
+// mergeNFSMountOptions merges custom mount flags with safe NFS defaults.
+// Custom flags override defaults with the same key (e.g. "timeo=300" overrides
+// "timeo=600"). The "soft" default is always preserved unless the custom flags
+// explicitly include "hard".
+func mergeNFSMountOptions(defaults, custom []string) []string {
+	if len(custom) == 0 {
+		return defaults
+	}
+
+	// optKey extracts the key portion of a mount option (before '=').
+	optKey := func(opt string) string {
+		for i, c := range opt {
+			if c == '=' {
+				return opt[:i]
+			}
+		}
+		return opt
+	}
+
+	// Build a map of default options keyed by their prefix.
+	merged := make(map[string]string, len(defaults)+len(custom))
+	order := make([]string, 0, len(defaults)+len(custom))
+	for _, opt := range defaults {
+		key := optKey(opt)
+		merged[key] = opt
+		order = append(order, key)
+	}
+
+	// Apply custom options, overriding defaults with the same key.
+	hasHard := false
+	for _, opt := range custom {
+		key := optKey(opt)
+		if key == "hard" {
+			hasHard = true
+		}
+		if _, exists := merged[key]; !exists {
+			order = append(order, key)
+		}
+		merged[key] = opt
+	}
+
+	// If "hard" was explicitly specified, remove "soft" (they're mutually exclusive).
+	if hasHard {
+		delete(merged, "soft")
+	}
+
+	result := make([]string, 0, len(merged))
+	for _, key := range order {
+		if opt, ok := merged[key]; ok {
+			result = append(result, opt)
+		}
+	}
+	return result
 }
 
 // NodeGetInfo returns the node ID and accessible topology (zone).
