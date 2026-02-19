@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"syscall"
 )
 
 // NFSOperations wraps filesystem calls for testability.
@@ -12,6 +13,7 @@ import (
 // Tests use FakeNFSOperations (in test files).
 type NFSOperations interface {
 	MkdirAll(path string, perm os.FileMode) error
+	MkdirAsUser(path string, perm os.FileMode, uid, gid uint32) error
 	RemoveAll(path string) error
 	Stat(path string) (os.FileInfo, error)
 	Chown(path string, uid, gid int) error
@@ -29,6 +31,25 @@ func NewRealNFSOperations() NFSOperations {
 
 func (r *realNFSOperations) MkdirAll(path string, perm os.FileMode) error {
 	return os.MkdirAll(path, perm)
+}
+
+// MkdirAsUser creates a directory by spawning mkdir as the specified UID/GID.
+// This bypasses NFS root_squash: the mkdir process runs as the target user,
+// so the directory is created already owned by that user on the NFS server.
+func (r *realNFSOperations) MkdirAsUser(path string, perm os.FileMode, uid, gid uint32) error {
+	cmd := exec.Command("mkdir", "-p", path)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Credential: &syscall.Credential{Uid: uid, Gid: gid},
+	}
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("mkdir -p %s as uid=%d gid=%d: %w (output: %s)", path, uid, gid, err, string(output))
+	}
+	// mkdir -p mode is affected by umask; set exact permissions with chmod.
+	if err := os.Chmod(path, perm); err != nil {
+		return fmt.Errorf("chmod %s: %w", path, err)
+	}
+	return nil
 }
 
 func (r *realNFSOperations) RemoveAll(path string) error {

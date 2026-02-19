@@ -462,6 +462,13 @@ func (f *fakeNFSOperations) MkdirAll(path string, perm os.FileMode) error {
 	return nil
 }
 
+func (f *fakeNFSOperations) MkdirAsUser(path string, perm os.FileMode, uid, gid uint32) error {
+	if err := f.MkdirAll(path, perm); err != nil {
+		return err
+	}
+	return f.Chown(path, int(uid), int(gid))
+}
+
 func (f *fakeNFSOperations) RemoveAll(path string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -189,6 +189,53 @@ KubeVirt supports filesystem-mode PVCs for VM disks — it reads the `disk.img` 
 
 **Roadmap:** Could be addressed by implementing CSI VolumeSnapshot support (which would enable CDI's clone populator path), but this is not currently planned. The manual image download workaround is straightforward and avoids the CDI dependency entirely.
 
+## KubeVirt NFS Permissions (root_squash)
+
+**What:** KubeVirt's virt-handler calls `chown(mountDir, 107, 107)` on every filesystem-mode PVC mount. IBM Cloud VPC file shares enforce NFS `root_squash` — root (UID 0) is mapped to nobody (UID 65534), and nobody cannot chown files to a different user. Without mitigation, VMs fail with `preparing host-disks failed: chown ... operation not permitted`.
+
+**Why:** There is no option to disable `root_squash` on VPC file shares in security-group (VPC access) mode. However, virt-handler's `OwnershipManager` checks `stat.Uid == 107` and **skips chown** if the directory is already owned by the target UID.
+
+**Fix:** The CSI driver creates PVC subdirectories as the target UID instead of root. When `defaultUID` is set on the FileSharePool, the CSI node agent spawns `mkdir` with `setuid` to the target user. Since NFS `root_squash` only squashes UID 0, UID 107 passes through and creates directories already owned by 107 on the NFS server. virt-handler sees the correct ownership and skips chown.
+
+Configure the FileSharePool for KubeVirt:
+```yaml
+spec:
+  defaultPermissions: "0777"
+  defaultUID: 107
+  defaultGID: 107
+```
+
+For boot disk images, run the image downloader pod as UID 107 so that `disk.img` is also created with the correct ownership:
+```yaml
+securityContext:
+  runAsUser: 107
+  runAsGroup: 107
+  fsGroup: 107
+```
+
+**Requires:** OpenShift Virtualization 4.17+ (KubeVirt v1.5+). [KubeVirt PR #15037](https://github.com/kubevirt/kubevirt/pull/15037) (merged July 2025, backported to v1.5/v1.6) changed virt-launcher to skip chown on pre-existing files. On older versions, virt-launcher unconditionally chowns the mount point, which fails under root_squash regardless of file ownership.
+
+**Roadmap:** Fixed in the CSI driver. The `defaultUID`/`defaultGID` approach works around the VPC platform constraint (mandatory root_squash) by creating directories as the target user. See `TUTORIAL.md` for a worked example.
+
+## NFS Encryption in Transit
+
+**What:** IBM Cloud VPC File Storage supports optional encryption in transit (IPsec) for NFS connections, but this feature is **not available** on bare metal servers or RHCOS-based virtual server instances.
+
+**Why:** IBM Cloud's encryption in transit implementation uses IPsec between the compute host and the file share mount target. This mechanism is not supported on:
+
+- **Bare metal servers** — IPsec for file shares is not available on VPC bare metal.
+- **RHCOS-based virtual server instances** — Red Hat Enterprise Linux CoreOS (used by ROKS/OpenShift worker nodes) is explicitly unsupported.
+- **Only supported on** regular VPC virtual server instances running non-RHCOS Linux distributions.
+
+Since ROKS worker nodes run RHCOS, encryption in transit cannot be enabled for this driver on ROKS clusters. NFS traffic travels unencrypted within the VPC network.
+
+**Mitigations:**
+- Data at rest is always encrypted (provider-managed or customer-managed keys via Key Protect / HPCS).
+- VPC network traffic is isolated to your VPC — it does not traverse the public internet.
+- Use VPC security groups to restrict NFS traffic (TCP 2049) to only your worker node subnets (see `SECURITY.md` hardening checklist).
+
+**Roadmap:** No change planned — this is an IBM Cloud platform limitation. Monitor the [VPC file storage documentation](https://cloud.ibm.com/docs/vpc?topic=vpc-file-storage-vpc-eit) for updates to supported compute types.
+
 ## VPC Account Quota
 
 **What:** IBM Cloud VPC accounts are limited to 300 file shares per account. This quota is shared with the standard IBM VPC File CSI driver.

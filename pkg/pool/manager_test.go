@@ -52,6 +52,13 @@ func (f *fakeNFSOperations) MkdirAll(path string, perm os.FileMode) error {
 	return nil
 }
 
+func (f *fakeNFSOperations) MkdirAsUser(path string, perm os.FileMode, uid, gid uint32) error {
+	if err := f.MkdirAll(path, perm); err != nil {
+		return err
+	}
+	return f.Chown(path, int(uid), int(gid))
+}
+
 func (f *fakeNFSOperations) RemoveAll(path string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1399,6 +1406,46 @@ func TestCreateSubDirectory_WithUIDGID(t *testing.T) {
 	}
 	if got := nfs.dirs[expectedPath]; got != 0750 {
 		t.Errorf("expected mode 0750, got %o", got)
+	}
+}
+
+func TestCreateSubDirectory_MkdirAsUser_NonRootUID(t *testing.T) {
+	nfs := newFakeNFSOperations()
+	uid := int64(107)
+	gid := int64(107)
+
+	err := createSubDirectory(nfs, "/mnt/staging", "/pvcs/"+testPVName, &uid, &gid, "0777")
+	if err != nil {
+		t.Fatalf("createSubDirectory failed: %v", err)
+	}
+
+	expectedPath := "/mnt/staging/pvcs/" + testPVName
+	if !nfs.exists(expectedPath) {
+		t.Error("expected directory to be created")
+	}
+	// MkdirAsUser delegates to MkdirAll + Chown in the fake, so both should be recorded.
+	if got := nfs.chowns[expectedPath]; got != [2]int{107, 107} {
+		t.Errorf("expected chown(107, 107), got %v", got)
+	}
+}
+
+func TestCreateSubDirectory_MkdirAsUser_UIDZeroFallsBack(t *testing.T) {
+	nfs := newFakeNFSOperations()
+	uid := int64(0)
+	gid := int64(0)
+
+	err := createSubDirectory(nfs, "/mnt/staging", "/pvcs/"+testPVName, &uid, &gid, "0755")
+	if err != nil {
+		t.Fatalf("createSubDirectory failed: %v", err)
+	}
+
+	expectedPath := "/mnt/staging/pvcs/" + testPVName
+	if !nfs.exists(expectedPath) {
+		t.Error("expected directory to be created")
+	}
+	// UID 0 should use the fallback path (MkdirAll + Chown), not MkdirAsUser.
+	if got := nfs.chowns[expectedPath]; got != [2]int{0, 0} {
+		t.Errorf("expected chown(0, 0), got %v", got)
 	}
 }
 

@@ -25,6 +25,20 @@ func createSubDirectory(nfsOps NFSOperations, basePath, subPath string, uid, gid
 		perm = os.FileMode(parsed)
 	}
 
+	// When a non-root UID is specified, create the directory as that user.
+	// This bypasses NFS root_squash: the directory is owned by the target
+	// UID on the NFS server, so consumers (e.g. KubeVirt) don't need chown.
+	if uid != nil && *uid > 0 {
+		gidVal := uint32(0)
+		if gid != nil {
+			gidVal = uint32(*gid) //nolint:gosec // gid is validated by caller
+		}
+		if err := nfsOps.MkdirAsUser(fullPath, perm, uint32(*uid), gidVal); err != nil { //nolint:gosec // uid is validated > 0
+			return fmt.Errorf("mkdirAsUser %s: %w", fullPath, err)
+		}
+		return nil
+	}
+
 	if err := nfsOps.MkdirAll(fullPath, perm); err != nil {
 		return fmt.Errorf("mkdir %s: %w", fullPath, err)
 	}

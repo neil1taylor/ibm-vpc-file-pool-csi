@@ -27,11 +27,8 @@ oc get csidriver vpc-file-pool.csi.ibm.io
 ## Step 1: Clean Up Any Previous Test Resources
 
 ```bash
-# Delete leftover test pods, PVCs, and VMs from earlier testing
-oc delete pod pool-test-writer pool-data-reader --ignore-not-found
-oc delete pvc vm-shared-data vm-shared-data-2 --ignore-not-found
-oc delete vm pool-test-vm --ignore-not-found
-oc delete dv pool-test-vm-boot pool-test-vm-data --ignore-not-found
+# Delete the tutorial namespace (removes all PVCs, pods, VMs inside it)
+oc delete namespace pool-tutorial --ignore-not-found
 
 # Delete any existing test pool (WARNING: deletes underlying VPC file share)
 # Replace the pool name with whatever you used previously
@@ -43,16 +40,24 @@ ibmcloud is shares
 
 ---
 
-## Step 2: Create a FileSharePool
+## Step 2: Set Up Variables and Namespace
 
 Choose a name for your pool. The controller automatically creates a StorageClass named after the pool when it reaches `Ready`.
 
 ```bash
 # Set your pool name — used throughout the tutorial
 export POOL_NAME=my-pool
+
+# Create a namespace for tutorial resources
+export TUTORIAL_NS=pool-tutorial
+oc create namespace ${TUTORIAL_NS}
 ```
 
 Use `ibmcloud is shares` to see existing VPC file shares before creating the pool.
+
+---
+
+## Step 3: Create a FileSharePool
 
 ```bash
 cat <<EOF | oc apply -f -
@@ -70,6 +75,9 @@ spec:
   autoExpand: true
   expandThresholdPercent: 80
   allocationStrategy: spread
+  defaultPermissions: "0777"
+  defaultUID: 107
+  defaultGID: 107
 EOF
 ```
 
@@ -79,6 +87,8 @@ EOF
 - Each share is 100 GB; up to 3 shares allowed
 - 1 share is created immediately
 - Auto-expands when 80% of capacity is allocated
+- `defaultPermissions: "0777"` — required for KubeVirt VMs (see [KubeVirt NFS Permissions](#kubevirt-nfs-permissions) below)
+- `defaultUID: 107` / `defaultGID: 107` — the CSI driver creates PVC subdirectories as UID 107 (QEMU user), bypassing NFS root_squash so virt-handler skips chown
 
 Watch the pool initialize (takes 30-90 seconds for VPC share creation):
 
@@ -97,7 +107,7 @@ Use `ibmcloud is shares` to see the new VPC file share that was created.
 
 ---
 
-## Step 3: Verify the Auto-Created StorageClass
+## Step 4: Verify the Auto-Created StorageClass
 
 When a FileSharePool reaches `Ready`, the controller **automatically creates** a matching StorageClass. You do not need to create one manually.
 
@@ -141,7 +151,7 @@ EOF
 
 ---
 
-## Step 4: Inspect the Pool via Kubernetes
+## Step 5: Inspect the Pool via Kubernetes
 
 ```bash
 # Summary view
@@ -165,9 +175,9 @@ Copy the **shareID** from the output — you'll use it in the next step.
 
 ---
 
-## Step 5: Verify the VPC File Share via IBM Cloud CLI
+## Step 6: Verify the VPC File Share via IBM Cloud CLI
 
-Use the share ID from Step 4 (replace `<SHARE_ID>` with your actual one):
+Use the share ID from Step 5 (replace `<SHARE_ID>` with your actual one):
 
 ```bash
 # List all file shares in the account
@@ -203,17 +213,17 @@ This is the NFS server that worker nodes connect to when pods use PVCs from this
 
 ---
 
-## Step 6: Test PVC Provisioning with a Simple Pod
+## Step 7: Test PVC Provisioning with a Simple Pod
 
 Create a PVC and a pod to verify NFS storage works end-to-end:
 
 ```bash
-cat <<'EOF' | oc apply -f -
+cat <<EOF | oc apply -f -
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: vm-shared-data
-  namespace: default
+  namespace: ${TUTORIAL_NS}
 spec:
   accessModes:
     - ReadWriteMany
@@ -226,7 +236,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: pool-test-writer
-  namespace: default
+  namespace: ${TUTORIAL_NS}
 spec:
   containers:
     - name: writer
@@ -245,12 +255,12 @@ EOF
 Watch the PVC bind and pod start:
 
 ```bash
-oc get pvc vm-shared-data -w
+oc get pvc vm-shared-data -n ${TUTORIAL_NS} -w
 # Should show STATUS=Bound within seconds
 
-oc get pod pool-test-writer -w
+oc get pod pool-test-writer -n ${TUTORIAL_NS} -w
 # Wait for STATUS=Running, then:
-oc logs pool-test-writer
+oc logs pool-test-writer -n ${TUTORIAL_NS}
 ```
 
 Expected output:
@@ -269,26 +279,26 @@ oc get filesharepools
 Clean up the test pod (keep the PVC for now):
 
 ```bash
-oc delete pod pool-test-writer
+oc delete pod pool-test-writer -n ${TUTORIAL_NS}
 ```
 
 ---
 
-## Step 7: Create a VM with a Pool-Backed Data Disk
+## Step 8: Create a VM with a Pool-Backed Data Disk
 
 Create a KubeVirt VM with **both disks entirely on NFS pool storage**. This is a 3-part process: create PVCs, download the OS image, then create the VM.
 
 > **Note:** We bypass CDI's `dataVolumeTemplate` because CDI's VolumePopulator mechanism conflicts with our CSI provisioner. Instead, we create regular PVCs on the pool and download the OS image directly.
 
-### Step 7a: Create the Boot and Data PVCs
+### Step 8a: Create the Boot and Data PVCs
 
 ```bash
-cat <<'EOF' | oc apply -f -
+cat <<EOF | oc apply -f -
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: pool-test-vm-boot
-  namespace: default
+  namespace: ${TUTORIAL_NS}
 spec:
   accessModes:
     - ReadWriteMany
@@ -301,7 +311,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: pool-test-vm-data
-  namespace: default
+  namespace: ${TUTORIAL_NS}
 spec:
   accessModes:
     - ReadWriteMany
@@ -315,26 +325,36 @@ EOF
 Both PVCs should bind immediately:
 
 ```bash
-oc get pvc pool-test-vm-boot pool-test-vm-data
+oc get pvc pool-test-vm-boot pool-test-vm-data -n ${TUTORIAL_NS}
 # Both should show STATUS=Bound, STORAGECLASS=${POOL_NAME}
 ```
 
-### Step 7b: Download the OS Image to the Boot PVC
+### Step 8b: Download the OS Image to the Boot PVC
 
-KubeVirt expects a disk image file named `disk.img` in a filesystem-mode PVC. Run a pod that downloads the CentOS Stream 9 cloud image:
+KubeVirt expects a disk image file named `disk.img` in a filesystem-mode PVC. The pod runs as **UID 107** (the QEMU user) so that `disk.img` is owned by the correct user — VPC file shares enforce NFS root_squash, which prevents virt-launcher from chowning files at runtime (see [KubeVirt NFS Permissions](#kubevirt-nfs-permissions)):
 
 ```bash
-cat <<'EOF' | oc apply -f -
+cat <<EOF | oc apply -f -
 apiVersion: v1
 kind: Pod
 metadata:
   name: image-downloader
-  namespace: default
+  namespace: ${TUTORIAL_NS}
 spec:
   restartPolicy: Never
+  securityContext:
+    runAsUser: 107
+    runAsGroup: 107
+    fsGroup: 107
+    seccompProfile:
+      type: RuntimeDefault
   containers:
     - name: downloader
       image: registry.access.redhat.com/ubi9/ubi-minimal
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
       command:
         - sh
         - -c
@@ -354,41 +374,43 @@ spec:
 EOF
 ```
 
-Wait for the download to complete (~1 GB, takes 1-3 minutes depending on bandwidth):
+Wait for the download to complete (~1.8 GB, takes 1-3 minutes depending on bandwidth):
 
 ```bash
 # Watch pod status
-oc get pod image-downloader -w
+oc get pod image-downloader -n ${TUTORIAL_NS} -w
 
 # Check progress (while running)
-oc logs image-downloader -f
+oc logs image-downloader -n ${TUTORIAL_NS} -f
 
 # When STATUS=Completed, verify the image
-oc logs image-downloader
+oc logs image-downloader -n ${TUTORIAL_NS}
 ```
 
 Expected output:
 ```
 Downloading CentOS Stream 9 cloud image...
--rw-r--r--. 1 root root 1.2G ... /boot/disk.img
+-rw-r--r--. 1 99 99 1.8G ... /boot/disk.img
 Done!
 ```
+
+> **Note:** The file shows UID 99 (not 107) because VPC NFS maps non-root UIDs to the anonymous user. This is fine — virt-launcher's UID 107 is mapped to the same anonymous UID, so it retains read/write access.
 
 Clean up the downloader pod:
 
 ```bash
-oc delete pod image-downloader
+oc delete pod image-downloader -n ${TUTORIAL_NS}
 ```
 
-### Step 7c: Create the VM
+### Step 8c: Create the VM
 
 ```bash
-cat <<'EOF' | oc apply -f -
+cat <<EOF | oc apply -f -
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
 metadata:
   name: pool-test-vm
-  namespace: default
+  namespace: ${TUTORIAL_NS}
 spec:
   instancetype:
     kind: virtualmachineclusterinstancetype
@@ -435,7 +457,7 @@ EOF
 ```
 
 **What this creates:**
-- **Boot disk** (`rootdisk`): CentOS Stream 9 image on the NFS pool (downloaded in Step 7b)
+- **Boot disk** (`rootdisk`): CentOS Stream 9 image on the NFS pool (downloaded in Step 8b)
 - **Data disk** (`datadisk`): 10 Gi blank disk on the NFS pool
 - **Both disks on NFS** — no ODF/Ceph dependency, no CDI dependency
 - **Instance type**: `u1.medium` (1 vCPU, 4 Gi RAM)
@@ -443,33 +465,33 @@ EOF
 
 ---
 
-## Step 8: Wait for the VM to Start
+## Step 9: Wait for the VM to Start
 
 ```bash
 # Watch VM status
-oc get vm pool-test-vm -w
+oc get vm pool-test-vm -n ${TUTORIAL_NS} -w
 
 # Watch the VMI (VirtualMachineInstance) start
-oc get vmi pool-test-vm -w
+oc get vmi pool-test-vm -n ${TUTORIAL_NS} -w
 ```
 
 Both PVCs are already provisioned, so the VM should start quickly (30-60 seconds):
 
 ```bash
 # Verify both PVCs are Bound on ${POOL_NAME}
-oc get pvc pool-test-vm-boot pool-test-vm-data
+oc get pvc pool-test-vm-boot pool-test-vm-data -n ${TUTORIAL_NS}
 ```
 
 Wait until `VM STATUS` shows `Running` and `VMI PHASE` shows `Running`.
 
 ---
 
-## Step 9: Access the VM and Use the Data Disk
+## Step 10: Access the VM and Use the Data Disk
 
 Connect to the VM console:
 
 ```bash
-virtctl console pool-test-vm
+virtctl console pool-test-vm -n ${TUTORIAL_NS}
 ```
 
 Login with `centos` / `pooltest123`, then:
@@ -495,14 +517,14 @@ Press `Ctrl+]` to exit the console.
 
 ---
 
-## Step 10: Verify Pool State After Allocations
+## Step 11: Verify Pool State After Allocations
 
-Both the manually created PVC (Step 6) and the VM's data disk PVC should appear:
+Both the manually created PVC (Step 7) and the VM's data disk PVC should appear:
 
 ```bash
 # Pool shows total allocated capacity and PVC count
 oc get filesharepools
-# Expected: ALLOCATED=20 (10 from Step 6 + 10 from VM), PVCS=2
+# Expected: ALLOCATED=20 (10 from Step 7 + 10 from VM), PVCS=2
 
 # Both SubVolumes point to the same underlying VPC file share
 oc get subvolumes -o wide
@@ -516,15 +538,15 @@ This demonstrates the pooling model: **2 PVCs share 1 VPC file share**, saving V
 
 ---
 
-## Step 11: Create a Second Manual PVC to See Capacity Grow
+## Step 12: Create a Second Manual PVC to See Capacity Grow
 
 ```bash
-cat <<'EOF' | oc apply -f -
+cat <<EOF | oc apply -f -
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: vm-shared-data-2
-  namespace: default
+  namespace: ${TUTORIAL_NS}
 spec:
   accessModes:
     - ReadWriteMany
@@ -535,7 +557,7 @@ spec:
 EOF
 
 # Check it bound
-oc get pvc vm-shared-data-2
+oc get pvc vm-shared-data-2 -n ${TUTORIAL_NS}
 
 # Pool now shows 40 GB allocated, 3 PVCs — all on the same single VPC share
 oc get filesharepools
@@ -549,27 +571,18 @@ oc get subvolumes -o wide
 ## Cleanup
 
 ```bash
-# 1. Delete the VM
-oc delete vm pool-test-vm
+# 1. Delete the tutorial namespace — removes all PVCs, pods, and VMs inside it
+oc delete namespace ${TUTORIAL_NS}
 
-# 2. Delete all PVCs (boot disk, data disk, manual test PVCs)
-oc delete pvc pool-test-vm-boot pool-test-vm-data vm-shared-data vm-shared-data-2 --ignore-not-found
-
-# 3. Delete test pods
-oc delete pod pool-test-writer pool-data-reader --ignore-not-found
-
-# 4. Delete downloader pod if still around
-oc delete pod image-downloader --ignore-not-found
-
-# 5. Verify pool capacity is reclaimed
+# 2. Verify pool capacity is reclaimed
 oc get filesharepools
 # Expected: ALLOCATED=0, PVCS=0
 
-# 6. (Optional) Delete the pool — this deletes the VPC file share
+# 3. (Optional) Delete the pool — this deletes the VPC file share
 oc delete filesharepool ${POOL_NAME}
 ibmcloud is shares  # Verify share is gone
 
-# 7. (Optional) Delete the StorageClass — auto-deleted with the pool (OwnerReference),
+# 4. (Optional) Delete the StorageClass — auto-deleted with the pool (OwnerReference),
 #    but if you created one manually:
 # oc delete sc ${POOL_NAME}
 ```
@@ -590,6 +603,26 @@ ibmcloud is shares  # Verify share is gone
 | Controller logs | `oc logs -n kube-system -l app.kubernetes.io/component=controller -c csi-controller --tail=50` |
 | Node agent logs | `oc logs -n kube-system -l app.kubernetes.io/component=node -c csi-node --tail=50` |
 | Webhook test | `echo '{"apiVersion":"storage.ibmcloud.io/v1alpha1","kind":"FileSharePool","metadata":{"name":"bad"},"spec":{}}' \| oc apply -f -` |
+
+---
+
+## KubeVirt NFS Permissions
+
+KubeVirt's virt-handler calls `chown(mountDir, 107, 107)` on every filesystem-mode PVC mount. IBM Cloud VPC file shares enforce NFS `root_squash` (cannot be disabled), which maps root (UID 0) to nobody (UID 65534) and blocks all chown operations. Without mitigation, VMs fail with:
+
+```
+preparing host-disks failed: chown /proc/self/fd/26: operation not permitted
+```
+
+The CSI driver solves this with two pool settings:
+
+1. **`defaultUID: 107` / `defaultGID: 107` on the pool** — the CSI node agent creates PVC subdirectories by spawning `mkdir` as UID 107 (using `setuid`). Since NFS root_squash only affects UID 0, the directory is created already owned by UID 107 on the NFS server. When virt-handler checks `stat.Uid == 107`, it finds the directory already owned correctly and **skips chown entirely**.
+2. **`defaultPermissions: "0777"` on the pool** — ensures the QEMU user (UID 107) can access subdirectories.
+3. **Image downloader runs as UID 107** — `disk.img` is created with the correct ownership from the start, so virt-launcher doesn't need to chown it.
+
+KubeVirt [PR #15037](https://github.com/kubevirt/kubevirt/pull/15037) (merged July 2025, backported to v1.5/v1.6) made virt-launcher skip chown on pre-existing files. OpenShift Virtualization 4.17+ includes this fix. On older versions, VMs on NFS with root_squash may not start regardless of these workarounds.
+
+See also: [Known Limitations — KubeVirt NFS Permissions](KNOWN-LIMITATIONS.md#kubevirt-nfs-permissions-root_squash).
 
 ---
 

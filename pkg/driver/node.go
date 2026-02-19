@@ -125,10 +125,7 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 				perm = os.FileMode(parsed)
 			}
 		}
-		if err := os.MkdirAll(sourcePath, perm); err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to create subdirectory %s: %v", subDir, err)
-		}
-		// Set ownership if specified
+		// Parse ownership
 		uidVal, gidVal := -1, -1
 		if u := req.GetVolumeContext()["uid"]; u != "" {
 			if v, err := strconv.Atoi(u); err == nil {
@@ -140,12 +137,27 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 				gidVal = v
 			}
 		}
-		if uidVal >= 0 || gidVal >= 0 {
-			if err := os.Chown(sourcePath, uidVal, gidVal); err != nil {
-				klog.ErrorS(err, "Failed to chown subdirectory", "path", sourcePath)
+
+		if uidVal > 0 {
+			// Create directory as the target user to bypass NFS root_squash.
+			gidU := uint32(0)
+			if gidVal > 0 {
+				gidU = uint32(gidVal) //nolint:gosec // gid validated > 0
+			}
+			if err := mkdirAsUserFunc(sourcePath, perm, uint32(uidVal), gidU); err != nil { //nolint:gosec // uid validated > 0
+				return nil, status.Errorf(codes.Internal, "failed to create subdirectory %s as uid %d: %v", subDir, uidVal, err)
+			}
+		} else {
+			if err := os.MkdirAll(sourcePath, perm); err != nil {
+				return nil, status.Errorf(codes.Internal, "failed to create subdirectory %s: %v", subDir, err)
+			}
+			if uidVal >= 0 || gidVal >= 0 {
+				if err := os.Chown(sourcePath, uidVal, gidVal); err != nil {
+					klog.ErrorS(err, "Failed to chown subdirectory", "path", sourcePath)
+				}
 			}
 		}
-		klog.V(2).InfoS("Created subdirectory on NFS share", "path", sourcePath, "perm", perm)
+		klog.V(2).InfoS("Created subdirectory on NFS share", "path", sourcePath, "perm", perm, "uid", uidVal, "gid", gidVal)
 	}
 
 	if err := os.MkdirAll(targetPath, 0750); err != nil {

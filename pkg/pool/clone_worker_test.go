@@ -623,11 +623,12 @@ type slowFakeNFSOperations struct {
 	copyCount *atomic.Int32
 }
 
-func (s *slowFakeNFSOperations) MkdirAll(_ string, _ os.FileMode) error { return nil }
-func (s *slowFakeNFSOperations) RemoveAll(_ string) error               { return nil }
-func (s *slowFakeNFSOperations) Stat(_ string) (os.FileInfo, error)     { return nil, nil }
-func (s *slowFakeNFSOperations) Chown(_ string, _, _ int) error         { return nil }
-func (s *slowFakeNFSOperations) Chmod(_ string, _ os.FileMode) error    { return nil }
+func (s *slowFakeNFSOperations) MkdirAll(_ string, _ os.FileMode) error                 { return nil }
+func (s *slowFakeNFSOperations) MkdirAsUser(_ string, _ os.FileMode, _, _ uint32) error { return nil }
+func (s *slowFakeNFSOperations) RemoveAll(_ string) error                               { return nil }
+func (s *slowFakeNFSOperations) Stat(_ string) (os.FileInfo, error)                     { return nil, nil }
+func (s *slowFakeNFSOperations) Chown(_ string, _, _ int) error                         { return nil }
+func (s *slowFakeNFSOperations) Chmod(_ string, _ os.FileMode) error                    { return nil }
 
 func (s *slowFakeNFSOperations) CopyDir(_, _ string) error {
 	s.copyCount.Add(1)
