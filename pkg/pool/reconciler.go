@@ -270,7 +270,7 @@ func (r *FileSharePoolReconciler) healthCheck(ctx context.Context, pool *v1alpha
 				}
 			}
 			// Backfill MountTargets from all discovered mount targets
-			if len(info.MountTargets) > 0 && len(share.MountTargets) < len(info.MountTargets) {
+			if len(info.MountTargets) > 0 {
 				existing := make(map[string]bool)
 				for _, mt := range share.MountTargets {
 					existing[mt.MountTargetID] = true
@@ -281,7 +281,14 @@ func (r *FileSharePoolReconciler) healthCheck(ctx context.Context, pool *v1alpha
 							Zone:          share.Zone, // will be corrected by ensureAccessorMountTargets
 							MountTargetID: mt.ID,
 							MountTargetIP: mt.IPAddress,
+							ExportPath:    mt.ExportPath,
 						})
+					}
+				}
+				// Backfill export path on existing zone mount targets
+				for i := range share.MountTargets {
+					if share.MountTargets[i].ExportPath == "" && share.ExportPath != "" {
+						share.MountTargets[i].ExportPath = share.ExportPath
 					}
 				}
 			}
