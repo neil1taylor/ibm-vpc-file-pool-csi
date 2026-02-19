@@ -76,8 +76,6 @@ spec:
   expandThresholdPercent: 80
   allocationStrategy: spread
   defaultPermissions: "0777"
-  defaultUID: 107
-  defaultGID: 107
 EOF
 ```
 
@@ -87,8 +85,7 @@ EOF
 - Each share is 100 GB; up to 3 shares allowed
 - 1 share is created immediately
 - Auto-expands when 80% of capacity is allocated
-- `defaultPermissions: "0777"` — required for KubeVirt VMs (see [KubeVirt NFS Permissions](#kubevirt-nfs-permissions) below)
-- `defaultUID: 107` / `defaultGID: 107` — the CSI driver creates PVC subdirectories as UID 107 (QEMU user), bypassing NFS root_squash so virt-handler skips chown
+- `defaultPermissions: "0777"` — ensures all pods can read/write PVC subdirectories regardless of UID (required because VPC NFS uses `sec=null` anonymous auth)
 
 Watch the pool initialize (takes 30-90 seconds for VPC share creation):
 
@@ -286,7 +283,9 @@ oc delete pod pool-test-writer -n ${TUTORIAL_NS}
 
 ## Step 8: Create a VM with a Pool-Backed Data Disk
 
-Create a KubeVirt VM with **both disks entirely on NFS pool storage**. This is a 3-part process: create PVCs, download the OS image, then create the VM.
+> **Known Incompatibility:** KubeVirt VMs using filesystem-mode PVCs from VPC NFS file shares **do not work** due to VPC NFS using `sec=null` (anonymous auth), which prevents the `chown` that virt-handler requires. See [KubeVirt NFS Permissions](#kubevirt-nfs-permissions-known-incompatibility) and [Known Limitations](KNOWN-LIMITATIONS.md#kubevirt-nfs-permissions-secnull) for details. Use VPC Block Storage or ODF/Ceph for VM disks instead.
+
+The steps below demonstrate creating PVCs and downloading an OS image onto NFS pool storage. Non-VM workloads (pods, deployments) work correctly.
 
 > **Note:** We bypass CDI's `dataVolumeTemplate` because CDI's VolumePopulator mechanism conflicts with our CSI provisioner. Instead, we create regular PVCs on the pool and download the OS image directly.
 
@@ -331,7 +330,7 @@ oc get pvc pool-test-vm-boot pool-test-vm-data -n ${TUTORIAL_NS}
 
 ### Step 8b: Download the OS Image to the Boot PVC
 
-KubeVirt expects a disk image file named `disk.img` in a filesystem-mode PVC. The pod runs as **UID 107** (the QEMU user) so that `disk.img` is owned by the correct user — VPC file shares enforce NFS root_squash, which prevents virt-launcher from chowning files at runtime (see [KubeVirt NFS Permissions](#kubevirt-nfs-permissions)):
+KubeVirt expects a disk image file named `disk.img` in a filesystem-mode PVC. The pod runs as a non-root user (UID 107, the QEMU user). On VPC NFS with `sec=null`, file ownership is always UID 99 regardless of the pod's UID, but read/write access works because the pool uses `defaultPermissions: "0777"`:
 
 ```bash
 cat <<EOF | oc apply -f -
@@ -606,23 +605,24 @@ ibmcloud is shares  # Verify share is gone
 
 ---
 
-## KubeVirt NFS Permissions
+## KubeVirt NFS Permissions (Known Incompatibility)
 
-KubeVirt's virt-handler calls `chown(mountDir, 107, 107)` on every filesystem-mode PVC mount. IBM Cloud VPC file shares enforce NFS `root_squash` (cannot be disabled), which maps root (UID 0) to nobody (UID 65534) and blocks all chown operations. Without mitigation, VMs fail with:
+**KubeVirt VMs using filesystem-mode PVCs from VPC NFS file shares do not currently work.** VMs fail with:
 
 ```
 preparing host-disks failed: chown /proc/self/fd/26: operation not permitted
 ```
 
-The CSI driver solves this with two pool settings:
+**Root cause:** VPC file shares in security-group (VPC access) mode mount with `sec=null` (no NFS authentication). All operations are anonymous — file ownership is always UID 99:99, and `chown` fails for ALL UIDs including root. KubeVirt's virt-handler unconditionally calls `chown(mountDir, 107, 107)` on every filesystem-mode PVC, and there is no KubeVirt feature gate or annotation to skip this.
 
-1. **`defaultUID: 107` / `defaultGID: 107` on the pool** — the CSI node agent creates PVC subdirectories by spawning `mkdir` as UID 107 (using `setuid`). Since NFS root_squash only affects UID 0, the directory is created already owned by UID 107 on the NFS server. When virt-handler checks `stat.Uid == 107`, it finds the directory already owned correctly and **skips chown entirely**.
-2. **`defaultPermissions: "0777"` on the pool** — ensures the QEMU user (UID 107) can access subdirectories.
-3. **Image downloader runs as UID 107** — `disk.img` is created with the correct ownership from the start, so virt-launcher doesn't need to chown it.
+**Non-VM workloads are unaffected.** Regular pods work correctly because the CSI driver sets directory permissions to 0777, and NFS `sec=null` allows all read/write operations regardless of client UID.
 
-KubeVirt [PR #15037](https://github.com/kubevirt/kubevirt/pull/15037) (merged July 2025, backported to v1.5/v1.6) made virt-launcher skip chown on pre-existing files. OpenShift Virtualization 4.17+ includes this fix. On older versions, VMs on NFS with root_squash may not start regardless of these workarounds.
+**Alternatives for VM disks:**
+- Use **VPC Block Storage** (block-mode PVCs bypass the HostDisk chown path entirely)
+- Use **OpenShift Data Foundation (ODF)** / Ceph RBD for VM storage
+- Use the NFS pool driver for non-VM workloads (application data, shared storage)
 
-See also: [Known Limitations — KubeVirt NFS Permissions](KNOWN-LIMITATIONS.md#kubevirt-nfs-permissions-root_squash).
+See [Known Limitations — KubeVirt NFS Permissions](KNOWN-LIMITATIONS.md#kubevirt-nfs-permissions-secnull) for full details.
 
 ---
 

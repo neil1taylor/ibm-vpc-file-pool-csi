@@ -37,6 +37,10 @@ The IBM VPC File Pool CSI Driver incorporates several security properties by des
 
 When deploying in production, consider the following hardening measures:
 
+### NFS Encryption in Transit
+
+IBM Cloud VPC File Storage offers optional encryption in transit (IPsec), but it is **not supported** on bare metal servers or RHCOS-based instances (including ROKS worker nodes). NFS traffic within the VPC is unencrypted. Rely on VPC network isolation and security groups to protect NFS traffic. See `KNOWN-LIMITATIONS.md` for details.
+
 ### Network Policies
 
 Restrict NFS traffic to only the worker nodes and VPC file share mount targets:

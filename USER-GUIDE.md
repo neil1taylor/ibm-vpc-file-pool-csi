@@ -85,8 +85,8 @@ spec:
   expandThresholdPercent: 80
   allocationStrategy: spread
   defaultPermissions: "0755"
-  defaultUID: 1000
-  defaultGID: 1000
+  defaultUID: 1000    # Best-effort on VPC NFS (sec=null ignores chown)
+  defaultGID: 1000    # Best-effort on VPC NFS (sec=null ignores chown)
   # Authentication is handled globally via secret-common-lib (no secretRef needed)
   mountOptions:
     - nfsvers=4.1
@@ -307,8 +307,8 @@ mountOptions:
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
 | `pool` | Yes | — | Name of the `FileSharePool` CR to allocate from |
-| `uid` | No | Pool's `defaultUID` | Unix UID owner for the subdirectory |
-| `gid` | No | Pool's `defaultGID` | Unix GID owner for the subdirectory |
+| `uid` | No | Pool's `defaultUID` | Unix UID owner for the subdirectory (best-effort: VPC NFS `sec=null` ignores chown) |
+| `gid` | No | Pool's `defaultGID` | Unix GID owner for the subdirectory (best-effort: VPC NFS `sec=null` ignores chown) |
 | `permissions` | No | Pool's `defaultPermissions` | Unix permissions (e.g., `"0755"`) |
 | `reclaimAction` | No | `delete` | What happens to the subdirectory on PVC deletion: `delete` (remove it), `retain` (leave it), `archive` (move to `.archived/`) |
 

@@ -138,24 +138,19 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 			}
 		}
 
-		if uidVal > 0 {
-			// Create directory as the target user to bypass NFS root_squash.
-			gidU := uint32(0)
-			if gidVal > 0 {
-				gidU = uint32(gidVal) //nolint:gosec // gid validated > 0
+		if err := os.MkdirAll(sourcePath, perm); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to create subdirectory %s: %v", subDir, err)
+		}
+		// Chown is best-effort: VPC NFS uses sec=null (anonymous auth) which
+		// rejects all ownership changes. Log and continue.
+		if uidVal >= 0 || gidVal >= 0 {
+			if err := os.Chown(sourcePath, uidVal, gidVal); err != nil {
+				klog.V(4).InfoS("Chown failed (expected on VPC NFS with sec=null)", "path", sourcePath, "uid", uidVal, "gid", gidVal, "error", err)
 			}
-			if err := mkdirAsUserFunc(sourcePath, perm, uint32(uidVal), gidU); err != nil { //nolint:gosec // uid validated > 0
-				return nil, status.Errorf(codes.Internal, "failed to create subdirectory %s as uid %d: %v", subDir, uidVal, err)
-			}
-		} else {
-			if err := os.MkdirAll(sourcePath, perm); err != nil {
-				return nil, status.Errorf(codes.Internal, "failed to create subdirectory %s: %v", subDir, err)
-			}
-			if uidVal >= 0 || gidVal >= 0 {
-				if err := os.Chown(sourcePath, uidVal, gidVal); err != nil {
-					klog.ErrorS(err, "Failed to chown subdirectory", "path", sourcePath)
-				}
-			}
+		}
+		// Ensure exact permissions regardless of umask.
+		if err := os.Chmod(sourcePath, perm); err != nil {
+			klog.ErrorS(err, "Failed to chmod subdirectory", "path", sourcePath, "perm", perm)
 		}
 		klog.V(2).InfoS("Created subdirectory on NFS share", "path", sourcePath, "perm", perm, "uid", uidVal, "gid", gidVal)
 	}

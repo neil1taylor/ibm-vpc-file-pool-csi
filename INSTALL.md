@@ -358,8 +358,8 @@ spec:
   expandThresholdPercent: 80          # Trigger expansion at 80% allocated
   allocationStrategy: spread          # Distribute PVCs evenly across shares
   defaultPermissions: "0755"
-  defaultUID: 1000
-  defaultGID: 1000
+  defaultUID: 1000                    # Best-effort on VPC NFS (sec=null ignores chown)
+  defaultGID: 1000                    # Best-effort on VPC NFS (sec=null ignores chown)
   resourceGroup: "your-resource-group-id"
   tags:
     - "env:production"

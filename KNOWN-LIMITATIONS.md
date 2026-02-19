@@ -189,33 +189,28 @@ KubeVirt supports filesystem-mode PVCs for VM disks — it reads the `disk.img` 
 
 **Roadmap:** Could be addressed by implementing CSI VolumeSnapshot support (which would enable CDI's clone populator path), but this is not currently planned. The manual image download workaround is straightforward and avoids the CDI dependency entirely.
 
-## KubeVirt NFS Permissions (root_squash)
+## KubeVirt NFS Permissions (sec=null)
 
-**What:** KubeVirt's virt-handler calls `chown(mountDir, 107, 107)` on every filesystem-mode PVC mount. IBM Cloud VPC file shares enforce NFS `root_squash` — root (UID 0) is mapped to nobody (UID 65534), and nobody cannot chown files to a different user. Without mitigation, VMs fail with `preparing host-disks failed: chown ... operation not permitted`.
+**What:** KubeVirt VMs using filesystem-mode PVCs from VPC NFS file shares **do not work**. VMs fail with `preparing host-disks failed: chown ... operation not permitted`.
 
-**Why:** There is no option to disable `root_squash` on VPC file shares in security-group (VPC access) mode. However, virt-handler's `OwnershipManager` checks `stat.Uid == 107` and **skips chown** if the directory is already owned by the target UID.
+**Why:** Two independent issues combine to make this incompatible:
 
-**Fix:** The CSI driver creates PVC subdirectories as the target UID instead of root. When `defaultUID` is set on the FileSharePool, the CSI node agent spawns `mkdir` with `setuid` to the target user. Since NFS `root_squash` only squashes UID 0, UID 107 passes through and creates directories already owned by 107 on the NFS server. virt-handler sees the correct ownership and skips chown.
+1. **VPC NFS uses `sec=null` (no authentication).** All NFS operations are anonymous — files are always owned by UID 99:99 (the NFS server's anonymous identity). `chown` fails for ALL UIDs, including root. There is no way to change file ownership on VPC NFS file shares in security-group (VPC access) mode.
 
-Configure the FileSharePool for KubeVirt:
-```yaml
-spec:
-  defaultPermissions: "0777"
-  defaultUID: 107
-  defaultGID: 107
-```
+2. **KubeVirt's virt-handler unconditionally chowns HostDisk directories to UID 107:107** (the QEMU user). There is no KubeVirt feature gate, annotation, or configuration to disable this. [KubeVirt PR #15037](https://github.com/kubevirt/kubevirt/pull/15037) (CVE-2025-64324, merged July 2025) partially addresses this by skipping chown on pre-existing `disk.img` files, but (a) it may still chown the directory, and (b) the cherry-pick has not yet reached all OpenShift Virtualization releases (confirmed absent in OCV 4.20.3).
 
-For boot disk images, run the image downloader pod as UID 107 so that `disk.img` is also created with the correct ownership:
-```yaml
-securityContext:
-  runAsUser: 107
-  runAsGroup: 107
-  fsGroup: 107
-```
+**NFS authentication detail:** VPC file shares in security-group mode mount with `sec=null` (visible via `mount | grep nfs`). This means the NFS client sends no UID/GID credentials. The server performs all operations as the anonymous user (UID 99 on the server). Even setting `initial_owner: {uid: 65534, gid: 65534}` on the share only affects the root directory — subdirectory ownership is always 99:99. The `defaultUID`/`defaultGID` fields on FileSharePool have no effect because `chown` cannot succeed on this NFS configuration.
 
-**Requires:** OpenShift Virtualization 4.17+ (KubeVirt v1.5+). [KubeVirt PR #15037](https://github.com/kubevirt/kubevirt/pull/15037) (merged July 2025, backported to v1.5/v1.6) changed virt-launcher to skip chown on pre-existing files. On older versions, virt-launcher unconditionally chowns the mount point, which fails under root_squash regardless of file ownership.
+**Non-VM workloads are unaffected.** Regular pods (including those running as non-root UIDs) work correctly because the CSI driver sets directory permissions to 0777, and NFS `sec=null` allows all operations regardless of client UID. Only KubeVirt's virt-handler ownership management is broken.
 
-**Roadmap:** Fixed in the CSI driver. The `defaultUID`/`defaultGID` approach works around the VPC platform constraint (mandatory root_squash) by creating directories as the target user. See `TUTORIAL.md` for a worked example.
+**Workaround:** Use a different storage backend for KubeVirt VM disks:
+- **VPC Block Storage** with the standard IBM VPC Block CSI driver (supports block-mode PVCs, which bypass virt-handler's HostDisk path entirely)
+- **OpenShift Data Foundation (ODF)** / Ceph RBD (supports `fsGroup` and proper ownership management)
+- Use the NFS pool driver for non-VM workloads (application data, model weights, shared storage)
+
+**Roadmap:** Blocked on two platform changes:
+1. IBM Cloud VPC supporting `sec=sys` (AUTH_UNIX) on file share mounts, which would allow proper UID-based ownership
+2. KubeVirt making HostDisk chown non-fatal or skippable for NFS storage
 
 ## NFS Encryption in Transit
 

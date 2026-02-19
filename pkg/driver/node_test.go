@@ -661,7 +661,7 @@ func TestNodePublishVolume_SubDirNotExist_CreatesIt(t *testing.T) {
 	}
 }
 
-func TestNodePublishVolume_SubDirNotExist_MkdirAsUser(t *testing.T) {
+func TestNodePublishVolume_SubDirNotExist_WithUID(t *testing.T) {
 	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil, nil)
 
 	tmpDir := resolvedTempDir(t)
@@ -671,19 +671,6 @@ func TestNodePublishVolume_SubDirNotExist_MkdirAsUser(t *testing.T) {
 	}
 
 	targetPath := filepath.Join(tmpDir, "target")
-
-	// Override mkdirAsUserFunc to capture the call and use os.MkdirAll instead
-	// (real setuid doesn't work in tests without root).
-	var calledUID, calledGID uint32
-	var calledPath string
-	origFunc := mkdirAsUserFunc
-	mkdirAsUserFunc = func(path string, perm os.FileMode, uid, gid uint32) error {
-		calledPath = path
-		calledUID = uid
-		calledGID = gid
-		return os.MkdirAll(path, perm)
-	}
-	t.Cleanup(func() { mkdirAsUserFunc = origFunc })
 
 	_, err := d.NodePublishVolume(context.Background(), &csi.NodePublishVolumeRequest{
 		VolumeId:          "pool/share/pvc",
@@ -701,12 +688,17 @@ func TestNodePublishVolume_SubDirNotExist_MkdirAsUser(t *testing.T) {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 
-	expectedPath := filepath.Join(stagingPath, testSubDir)
-	if calledPath != expectedPath {
-		t.Errorf("mkdirAsUserFunc called with path %q, want %q", calledPath, expectedPath)
+	// Directory should be created with correct permissions (chown is best-effort).
+	subDirPath := filepath.Join(stagingPath, testSubDir)
+	info, err := os.Stat(subDirPath)
+	if err != nil {
+		t.Fatalf("expected subdirectory to exist: %v", err)
 	}
-	if calledUID != 107 || calledGID != 107 {
-		t.Errorf("mkdirAsUserFunc called with uid=%d gid=%d, want uid=107 gid=107", calledUID, calledGID)
+	if !info.IsDir() {
+		t.Fatalf("expected %s to be a directory", subDirPath)
+	}
+	if info.Mode().Perm() != 0777 {
+		t.Errorf("expected permissions 0777, got %o", info.Mode().Perm())
 	}
 }
 

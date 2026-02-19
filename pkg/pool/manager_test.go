@@ -1409,7 +1409,7 @@ func TestCreateSubDirectory_WithUIDGID(t *testing.T) {
 	}
 }
 
-func TestCreateSubDirectory_MkdirAsUser_NonRootUID(t *testing.T) {
+func TestCreateSubDirectory_WithUID_ChownBestEffort(t *testing.T) {
 	nfs := newFakeNFSOperations()
 	uid := int64(107)
 	gid := int64(107)
@@ -1423,13 +1423,13 @@ func TestCreateSubDirectory_MkdirAsUser_NonRootUID(t *testing.T) {
 	if !nfs.exists(expectedPath) {
 		t.Error("expected directory to be created")
 	}
-	// MkdirAsUser delegates to MkdirAll + Chown in the fake, so both should be recorded.
+	// Chown is attempted as best-effort (won't fail the operation on VPC NFS).
 	if got := nfs.chowns[expectedPath]; got != [2]int{107, 107} {
 		t.Errorf("expected chown(107, 107), got %v", got)
 	}
 }
 
-func TestCreateSubDirectory_MkdirAsUser_UIDZeroFallsBack(t *testing.T) {
+func TestCreateSubDirectory_UIDZero_StillChowns(t *testing.T) {
 	nfs := newFakeNFSOperations()
 	uid := int64(0)
 	gid := int64(0)
@@ -1443,20 +1443,25 @@ func TestCreateSubDirectory_MkdirAsUser_UIDZeroFallsBack(t *testing.T) {
 	if !nfs.exists(expectedPath) {
 		t.Error("expected directory to be created")
 	}
-	// UID 0 should use the fallback path (MkdirAll + Chown), not MkdirAsUser.
 	if got := nfs.chowns[expectedPath]; got != [2]int{0, 0} {
 		t.Errorf("expected chown(0, 0), got %v", got)
 	}
 }
 
-func TestCreateSubDirectory_ChownFails(t *testing.T) {
+func TestCreateSubDirectory_ChownFails_BestEffort(t *testing.T) {
 	nfs := newFakeNFSOperations()
 	nfs.ChownErr = errors.New("chown failed")
 	uid := int64(1000)
 
+	// Chown failure should NOT fail the operation (best-effort on VPC NFS).
 	err := createSubDirectory(nfs, "/mnt/staging", "/pvcs/"+testPVName, &uid, nil, "")
-	if err == nil {
-		t.Fatal("expected error when chown fails")
+	if err != nil {
+		t.Fatalf("expected no error (chown is best-effort), got: %v", err)
+	}
+
+	expectedPath := "/mnt/staging/pvcs/" + testPVName
+	if !nfs.exists(expectedPath) {
+		t.Error("expected directory to be created despite chown failure")
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/util"
+	"k8s.io/klog/v2"
 )
 
 // createSubDirectory creates a PVC subdirectory on an NFS share.
@@ -25,24 +26,13 @@ func createSubDirectory(nfsOps NFSOperations, basePath, subPath string, uid, gid
 		perm = os.FileMode(parsed)
 	}
 
-	// When a non-root UID is specified, create the directory as that user.
-	// This bypasses NFS root_squash: the directory is owned by the target
-	// UID on the NFS server, so consumers (e.g. KubeVirt) don't need chown.
-	if uid != nil && *uid > 0 {
-		gidVal := uint32(0)
-		if gid != nil {
-			gidVal = uint32(*gid) //nolint:gosec // gid is validated by caller
-		}
-		if err := nfsOps.MkdirAsUser(fullPath, perm, uint32(*uid), gidVal); err != nil { //nolint:gosec // uid is validated > 0
-			return fmt.Errorf("mkdirAsUser %s: %w", fullPath, err)
-		}
-		return nil
-	}
-
 	if err := nfsOps.MkdirAll(fullPath, perm); err != nil {
 		return fmt.Errorf("mkdir %s: %w", fullPath, err)
 	}
 
+	// Chown is best-effort: VPC NFS uses sec=null (anonymous auth) which
+	// rejects all ownership changes. Log a warning and continue — the
+	// directory permissions (e.g. 0777) are sufficient for access.
 	if uid != nil || gid != nil {
 		uidVal := -1
 		gidVal := -1
@@ -53,7 +43,8 @@ func createSubDirectory(nfsOps NFSOperations, basePath, subPath string, uid, gid
 			gidVal = int(*gid)
 		}
 		if err := nfsOps.Chown(fullPath, uidVal, gidVal); err != nil {
-			return fmt.Errorf("chown %s: %w", fullPath, err)
+			klog.V(4).InfoS("Chown failed (expected on VPC NFS with sec=null)",
+				"path", fullPath, "uid", uidVal, "gid", gidVal, "error", err)
 		}
 	}
 

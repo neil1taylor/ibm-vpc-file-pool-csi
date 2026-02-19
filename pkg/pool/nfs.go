@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 )
 
@@ -36,16 +37,31 @@ func (r *realNFSOperations) MkdirAll(path string, perm os.FileMode) error {
 // MkdirAsUser creates a directory by spawning mkdir as the specified UID/GID.
 // This bypasses NFS root_squash: the mkdir process runs as the target user,
 // so the directory is created already owned by that user on the NFS server.
+//
+// The parent directory must already exist and be writable by the target user.
+// Callers should create the parent as root before calling this method.
+// We use plain "mkdir" (not "mkdir -p") because the setuid process cannot
+// traverse root-owned parent directories (e.g. the kubelet plugin tree).
 func (r *realNFSOperations) MkdirAsUser(path string, perm os.FileMode, uid, gid uint32) error {
-	cmd := exec.Command("mkdir", "-p", path)
+	// Ensure the parent exists (as root — this is a local/NFS path we can traverse).
+	// On NFS with root_squash, root maps to 65534 and umask may reduce 0777 to 0755,
+	// so we explicitly chmod after mkdir to ensure the target user can write.
+	parent := filepath.Dir(path)
+	if err := os.MkdirAll(parent, 0777); err != nil {
+		return fmt.Errorf("mkdir parent %s: %w", parent, err)
+	}
+	if err := os.Chmod(parent, 0777); err != nil {
+		return fmt.Errorf("chmod parent %s: %w", parent, err)
+	}
+	cmd := exec.Command("mkdir", path)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Credential: &syscall.Credential{Uid: uid, Gid: gid},
 	}
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("mkdir -p %s as uid=%d gid=%d: %w (output: %s)", path, uid, gid, err, string(output))
+		return fmt.Errorf("mkdir %s as uid=%d gid=%d: %w (output: %s)", path, uid, gid, err, string(output))
 	}
-	// mkdir -p mode is affected by umask; set exact permissions with chmod.
+	// mkdir mode is affected by umask; set exact permissions with chmod.
 	if err := os.Chmod(path, perm); err != nil {
 		return fmt.Errorf("chmod %s: %w", path, err)
 	}
