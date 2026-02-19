@@ -87,6 +87,16 @@ test/          → Integration and e2e tests (unit tests live next to code)
 - Fake mounter: `k8s.io/mount-utils/fake`
 - Coverage targets: `pkg/pool/` 85%, `pkg/driver/` 75%, `pkg/ibmcloud/` 60%, `pkg/util/` 90%
 
+## VPC NFS Platform Constraints
+
+VPC file shares in security-group (VPC access) mode mount with `sec=null` (no NFS authentication). This has major implications:
+
+- **All operations are anonymous** — file ownership is always UID 99:99 regardless of client UID
+- **`chown` always fails** — for ALL UIDs including root, even `chown 99:99` fails. The `defaultUID`/`defaultGID` pool fields trigger a best-effort chown that is silently ignored on VPC NFS
+- **`defaultPermissions` is the only access control** — set to `"0777"` for shared access since UID-based ownership cannot be enforced
+- **KubeVirt VMs are incompatible** — virt-handler unconditionally chowns filesystem-mode PVC mounts to UID 107, which always fails. No workaround exists. See `KNOWN-LIMITATIONS.md` for details
+- **Do not attempt setuid/MkdirAsUser approaches** — non-root UIDs cannot traverse the kubelet directory tree (`/var/data/kubelet/plugins/` is mode 0750), and `sec=null` ignores client UIDs anyway
+
 ## Critical Safety Rules
 
 - **Path validation required** before any mkdir/rm — validate against `^/pvcs/pvc-[a-f0-9-]{36}$` pattern and check for traversal
