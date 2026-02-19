@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **ExportPath fields in CRDs** — `PoolShareStatus.ExportPath`, `ZoneMountTarget.ExportPath`, and `SubVolumeSpec.ShareExportPath` fields to persist the NFS export path for each share. Backward-compatible: empty value defaults to `"/"`
 - **Export path backfill in health checks** — Existing shares without an export path are automatically backfilled during the reconciler's periodic health check, enabling seamless upgrade from older versions
+- **Configurable registrar health port** — The node-driver-registrar's `--http-endpoint` port is now configurable via `node.registrarHealthPort` (default 9809). Avoids conflicts with the stock IBM VPC file CSI driver (port 9808) or other hostNetwork services
 
 ## [v0.8.0] — 2026-02-18
 

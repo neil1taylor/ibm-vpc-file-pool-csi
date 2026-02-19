@@ -33,6 +33,10 @@ node:
   # Kubelet root directory. Standard Kubernetes uses /var/lib/kubelet.
   # ROKS (Red Hat OpenShift on IBM Cloud) uses /var/data/kubelet.
   kubeletDir: /var/lib/kubelet
+  # Port for the node-driver-registrar health endpoint.
+  # Must not conflict with other hostNetwork services on the node.
+  # Stock IBM VPC file CSI uses 9808; we default to 9809.
+  registrarHealthPort: 9809
   resources:
     requests:
       cpu: 50m
