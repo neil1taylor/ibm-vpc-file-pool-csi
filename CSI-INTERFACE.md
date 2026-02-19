@@ -192,11 +192,11 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
     volumeID := fmt.Sprintf("%s/%s/%s", poolName, result.ShareID, req.GetName())
 
     volCtx := map[string]string{
-        "server":  result.MountTargetIP,
-        "share":   result.SharePath,
-        "subDir":  result.SubPath,
-        "pool":    poolName,
-        "shareID": result.ShareID,
+        "server":  result.MountTargetIP,           // NFS server IP or FQDN
+        "share":   result.SharePath,               // NFS export path (e.g. "/share_abc123")
+        "subDir":  result.SubPath,                 // Subdirectory path within the export
+        "pool":    poolName,                       // Pool name
+        "shareID": result.ShareID,                 // VPC share ID
     }
     if result.Permissions != "" {
         volCtx["permissions"] = result.Permissions

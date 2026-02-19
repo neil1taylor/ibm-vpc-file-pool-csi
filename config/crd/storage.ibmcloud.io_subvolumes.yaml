@@ -95,12 +95,17 @@ spec:
                 format: int64
                 minimum: 1
                 type: integer
+              shareExportPath:
+                description: |-
+                  ShareExportPath is the NFS export path for the share.
+                  VPC access mode uses per-share export paths under a shared FQDN.
+                type: string
               shareID:
                 description: ShareID is the VPC file share ID hosting this SubVolume.
                 type: string
               shareMountTargetIP:
                 description: |-
-                  ShareMountTargetIP is the NFS mount target IP.
+                  ShareMountTargetIP is the NFS mount target IP or FQDN.
                   Denormalized here for fast lookups during NodePublishVolume.
                 type: string
               sourceShareID:

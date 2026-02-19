@@ -269,6 +269,11 @@ type PoolShareStatus struct {
     // MountTargetID is the VPC mount target resource ID.
     MountTargetID string `json:"mountTargetID"`
 
+    // ExportPath is the NFS export path for this share (e.g. "/share_abc123").
+    // VPC access mode shares use a per-share export path under a shared FQDN.
+    // +optional
+    ExportPath string `json:"exportPath,omitempty"`
+
     // TotalGB is the provisioned size of this share.
     TotalGB int64 `json:"totalGB"`
 
@@ -308,6 +313,10 @@ type ZoneMountTarget struct {
 
     // MountTargetIP is the NFS server IP in this zone.
     MountTargetIP string `json:"mountTargetIP"`
+
+    // ExportPath is the NFS export path for this zone's mount target.
+    // +optional
+    ExportPath string `json:"exportPath,omitempty"`
 }
 ```
 
@@ -486,10 +495,15 @@ type SubVolumeSpec struct {
     // +kubebuilder:validation:Required
     ShareID string `json:"shareID"`
 
-    // ShareMountTargetIP is the NFS mount target IP.
+    // ShareMountTargetIP is the NFS mount target IP or FQDN.
     // Denormalized here for fast lookups during NodePublishVolume.
     // +kubebuilder:validation:Required
     ShareMountTargetIP string `json:"shareMountTargetIP"`
+
+    // ShareExportPath is the NFS export path for the share.
+    // VPC access mode uses per-share export paths under a shared FQDN.
+    // +optional
+    ShareExportPath string `json:"shareExportPath,omitempty"`
 
     // SubPath is the subdirectory path within the share (e.g., "/pvcs/pvc-abc123").
     // +kubebuilder:validation:Required

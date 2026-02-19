@@ -121,7 +121,7 @@ type AllocationResult struct {
 	ShareID         string
 	MountTargetIP   string
 	SubPath         string // e.g., "/pvcs/pvc-abc123"
-	SharePath       string // e.g., "/" (the NFS export root)
+	SharePath       string // NFS export path (e.g., "/share_abc123" for VPC access mode)
 	UID             *int64
 	GID             *int64
 	Permissions     string
@@ -194,11 +194,15 @@ func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (_ *Alloc
 	existing, err := m.k8sClient.GetSubVolume(ctx, req.PVName)
 	if err == nil && existing != nil {
 		klog.V(2).InfoS("Idempotent allocation: SubVolume already exists", "pvName", req.PVName)
+		sharePath := existing.Spec.ShareExportPath
+		if sharePath == "" {
+			sharePath = "/"
+		}
 		return &AllocationResult{
 			ShareID:       existing.Spec.ShareID,
 			MountTargetIP: existing.Spec.ShareMountTargetIP,
 			SubPath:       existing.Spec.SubPath,
-			SharePath:     "/",
+			SharePath:     sharePath,
 			UID:           existing.Spec.UID,
 			GID:           existing.Spec.GID,
 			Permissions:   existing.Spec.Permissions,
@@ -246,6 +250,7 @@ func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (_ *Alloc
 			PoolName:           req.PoolName,
 			ShareID:            share.ShareID,
 			ShareMountTargetIP: share.MountTargetIP,
+			ShareExportPath:    share.ExportPath,
 			SubPath:            subPath,
 			RequestedGB:        req.RequestedGB,
 			PVName:             req.PVName,
@@ -292,11 +297,15 @@ func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (_ *Alloc
 		"requestedGB", req.RequestedGB,
 	)
 
+	sharePath := share.ExportPath
+	if sharePath == "" {
+		sharePath = "/"
+	}
 	result := &AllocationResult{
 		ShareID:       share.ShareID,
 		MountTargetIP: share.MountTargetIP,
 		SubPath:       subPath,
-		SharePath:     "/",
+		SharePath:     sharePath,
 		UID:           uid,
 		GID:           gid,
 		Permissions:   perms,
@@ -813,11 +822,15 @@ func (m *Manager) RestoreSnapshot(ctx context.Context, snapshotName string, req 
 	existing, err := m.k8sClient.GetSubVolume(ctx, req.PVName)
 	if err == nil && existing != nil {
 		klog.V(2).InfoS("Idempotent restore: SubVolume already exists", "pvName", req.PVName)
+		sharePath := existing.Spec.ShareExportPath
+		if sharePath == "" {
+			sharePath = "/"
+		}
 		return &AllocationResult{
 			ShareID:       existing.Spec.ShareID,
 			MountTargetIP: existing.Spec.ShareMountTargetIP,
 			SubPath:       existing.Spec.SubPath,
-			SharePath:     "/",
+			SharePath:     sharePath,
 			UID:           existing.Spec.UID,
 			GID:           existing.Spec.GID,
 			Permissions:   existing.Spec.Permissions,
@@ -880,6 +893,7 @@ func (m *Manager) RestoreSnapshot(ctx context.Context, snapshotName string, req 
 			PoolName:           req.PoolName,
 			ShareID:            share.ShareID,
 			ShareMountTargetIP: share.MountTargetIP,
+			ShareExportPath:    share.ExportPath,
 			SubPath:            subPath,
 			RequestedGB:        req.RequestedGB,
 			PVName:             req.PVName,
@@ -919,11 +933,15 @@ func (m *Manager) RestoreSnapshot(ctx context.Context, snapshotName string, req 
 		"shareID", share.ShareID,
 	)
 
+	sharePath := share.ExportPath
+	if sharePath == "" {
+		sharePath = "/"
+	}
 	return &AllocationResult{
 		ShareID:       share.ShareID,
 		MountTargetIP: share.MountTargetIP,
 		SubPath:       subPath,
-		SharePath:     "/",
+		SharePath:     sharePath,
 		UID:           uid,
 		GID:           gid,
 		Permissions:   perms,
@@ -954,11 +972,15 @@ func (m *Manager) CloneVolume(ctx context.Context, sourceVolumeID string, req Al
 			return nil, fmt.Errorf("clone previously failed for %s: %s",
 				req.PVName, existing.Status.CloneProgress.Error)
 		}
+		sharePath := existing.Spec.ShareExportPath
+		if sharePath == "" {
+			sharePath = "/"
+		}
 		return &AllocationResult{
 			ShareID:       existing.Spec.ShareID,
 			MountTargetIP: existing.Spec.ShareMountTargetIP,
 			SubPath:       existing.Spec.SubPath,
-			SharePath:     "/",
+			SharePath:     sharePath,
 			UID:           existing.Spec.UID,
 			GID:           existing.Spec.GID,
 			Permissions:   existing.Spec.Permissions,
@@ -1040,6 +1062,7 @@ func (m *Manager) CloneVolume(ctx context.Context, sourceVolumeID string, req Al
 				PoolName:           req.PoolName,
 				ShareID:            share.ShareID,
 				ShareMountTargetIP: share.MountTargetIP,
+				ShareExportPath:    share.ExportPath,
 				SubPath:            subPath,
 				RequestedGB:        req.RequestedGB,
 				PVName:             req.PVName,
@@ -1088,6 +1111,7 @@ func (m *Manager) CloneVolume(ctx context.Context, sourceVolumeID string, req Al
 				PoolName:           req.PoolName,
 				ShareID:            share.ShareID,
 				ShareMountTargetIP: share.MountTargetIP,
+				ShareExportPath:    share.ExportPath,
 				SubPath:            subPath,
 				RequestedGB:        req.RequestedGB,
 				PVName:             req.PVName,
@@ -1135,11 +1159,15 @@ func (m *Manager) CloneVolume(ctx context.Context, sourceVolumeID string, req Al
 		"requestedGB", req.RequestedGB,
 	)
 
+	sharePath := share.ExportPath
+	if sharePath == "" {
+		sharePath = "/"
+	}
 	return &AllocationResult{
 		ShareID:       share.ShareID,
 		MountTargetIP: share.MountTargetIP,
 		SubPath:       subPath,
-		SharePath:     "/",
+		SharePath:     sharePath,
 		UID:           uid,
 		GID:           gid,
 		Permissions:   perms,

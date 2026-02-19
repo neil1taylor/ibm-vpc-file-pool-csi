@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [v0.9.0] — 2026-02-19
+
+### Fixed
+
+- **NFS mount used server root instead of share export path** — VPC access mode shares all resolve to the same FQDN; individual shares are differentiated by their NFS export path (e.g., `server:/share_abc123`). The driver was mounting `server:/` (the NFS server root, owned by UID 99, mode 0711), causing `permission denied` when creating subdirectories. Fixed by parsing the export path from the VPC API's `MountPath` field and propagating it through `MountTargetInfo` → `PoolShareStatus` → `SubVolumeSpec` → `AllocationResult` → PV volume context → NFS mount command
+- **Export path lost during mount target IP polling** — When `CreateFileShare` polled for the mount target IP to become available, it copied the IP address but discarded the export path. Fixed to copy both fields
+
+### Added
+
+- **ExportPath fields in CRDs** — `PoolShareStatus.ExportPath`, `ZoneMountTarget.ExportPath`, and `SubVolumeSpec.ShareExportPath` fields to persist the NFS export path for each share. Backward-compatible: empty value defaults to `"/"`
+- **Export path backfill in health checks** — Existing shares without an export path are automatically backfilled during the reconciler's periodic health check, enabling seamless upgrade from older versions
+
 ## [v0.8.0] — 2026-02-18
 
 ### Fixed

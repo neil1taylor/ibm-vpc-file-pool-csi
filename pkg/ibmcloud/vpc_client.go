@@ -280,8 +280,9 @@ func (c *Client) CreateFileShare(ctx context.Context, input CreateShareInput) (i
 			}
 			if mtInfo.IPAddress != "" {
 				shareInfo.MountTargets[0].IPAddress = mtInfo.IPAddress
+				shareInfo.MountTargets[0].ExportPath = mtInfo.ExportPath
 				klog.V(4).InfoS("Mount target IP now available",
-					"shareID", *share.ID, "ip", mtInfo.IPAddress)
+					"shareID", *share.ID, "ip", mtInfo.IPAddress, "exportPath", mtInfo.ExportPath)
 				break
 			}
 		}
@@ -570,13 +571,15 @@ func (c *Client) getMountTarget(ctx context.Context, shareID, mtID string) (*Mou
 		Name: *mt.Name,
 	}
 
-	// Extract NFS server address.
-	// security_group mode: IP is in PrimaryIP.Address
-	// vpc mode: server is in MountPath (format "server:/path")
+	// Extract NFS server address and export path.
+	// security_group mode: IP is in PrimaryIP.Address, export path defaults to "/"
+	// vpc mode: server and path are in MountPath (format "server:/export_path")
 	if mt.PrimaryIP != nil && mt.PrimaryIP.Address != nil {
 		info.IPAddress = *mt.PrimaryIP.Address
+		info.ExportPath = "/"
 	} else if mt.MountPath != nil && *mt.MountPath != "" {
 		info.IPAddress = parseMountPathServer(*mt.MountPath)
+		info.ExportPath = parseMountPathExport(*mt.MountPath)
 	}
 
 	return info, nil

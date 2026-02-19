@@ -372,12 +372,18 @@ spec:
                       description: CreatedAt is when the share was created.
                       format: date-time
                       type: string
+                    exportPath:
+                      description: |-
+                        ExportPath is the NFS export path for this share (e.g. "/share_abc123").
+                        VPC access mode shares use a per-share export path under a shared FQDN.
+                      type: string
                     mountTargetID:
                       description: MountTargetID is the VPC mount target resource
                         ID.
                       type: string
                     mountTargetIP:
-                      description: MountTargetIP is the NFS server IP for this share.
+                      description: MountTargetIP is the NFS server IP or FQDN for
+                        this share.
                       type: string
                     mountTargets:
                       description: |-
@@ -387,13 +393,17 @@ spec:
                         description: ZoneMountTarget records a mount target created
                           in a specific zone.
                         properties:
+                          exportPath:
+                            description: ExportPath is the NFS export path for this
+                              zone's mount target.
+                            type: string
                           mountTargetID:
                             description: MountTargetID is the VPC mount target resource
                               ID.
                             type: string
                           mountTargetIP:
-                            description: MountTargetIP is the NFS server IP in this
-                              zone.
+                            description: MountTargetIP is the NFS server IP or FQDN
+                              in this zone.
                             type: string
                           zone:
                             description: Zone is the VPC availability zone of this

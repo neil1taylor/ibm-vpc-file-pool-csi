@@ -32,10 +32,15 @@ type SubVolumeSpec struct {
 	// +kubebuilder:validation:Required
 	ShareID string `json:"shareID"`
 
-	// ShareMountTargetIP is the NFS mount target IP.
+	// ShareMountTargetIP is the NFS mount target IP or FQDN.
 	// Denormalized here for fast lookups during NodePublishVolume.
 	// +kubebuilder:validation:Required
 	ShareMountTargetIP string `json:"shareMountTargetIP"`
+
+	// ShareExportPath is the NFS export path for the share.
+	// VPC access mode uses per-share export paths under a shared FQDN.
+	// +optional
+	ShareExportPath string `json:"shareExportPath,omitempty"`
 
 	// SubPath is the subdirectory path within the share (e.g., "/pvcs/pvc-abc123").
 	// +kubebuilder:validation:Required

@@ -64,7 +64,8 @@ type CreateMountTargetInput struct {
 
 // MountTargetInfo contains metadata about a VPC file share mount target.
 type MountTargetInfo struct {
-	ID        string
-	Name      string
-	IPAddress string // NFS server IP to mount
+	ID         string
+	Name       string
+	IPAddress  string // NFS server IP or FQDN
+	ExportPath string // NFS export path (e.g. "/share_abc123"); empty defaults to "/"
 }

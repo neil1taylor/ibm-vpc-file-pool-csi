@@ -70,6 +70,21 @@ func parseMountPathServer(mountPath string) string {
 	return mountPath[:idx]
 }
 
+// parseMountPathExport extracts the export path from an NFS mount path.
+// The mount path format is "server:/export_path".
+// Returns "/" if the format is unrecognized or the path is empty.
+func parseMountPathExport(mountPath string) string {
+	idx := strings.Index(mountPath, ":/")
+	if idx <= 0 {
+		return "/"
+	}
+	path := mountPath[idx+1:] // includes leading "/"
+	if path == "" {
+		return "/"
+	}
+	return path
+}
+
 // parseStartFromURL extracts the "start" query parameter from a pagination URL.
 // Returns nil if the URL is invalid or the parameter is absent.
 func parseStartFromURL(href string) *string {

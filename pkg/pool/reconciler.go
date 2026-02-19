@@ -255,12 +255,19 @@ func (r *FileSharePoolReconciler) healthCheck(ctx context.Context, pool *v1alpha
 				klog.V(2).InfoS("Share transitioned to stable",
 					"shareID", share.ShareID, "pool", pool.Name)
 			}
-			// Backfill mount target IP if missing (regardless of previous state)
-			if share.MountTargetIP == "" && len(info.MountTargets) > 0 {
-				share.MountTargetIP = info.MountTargets[0].IPAddress
-				share.MountTargetID = info.MountTargets[0].ID
-				klog.V(2).InfoS("Backfilled mount target IP",
-					"shareID", share.ShareID, "ip", share.MountTargetIP)
+			// Backfill mount target IP and export path if missing
+			if len(info.MountTargets) > 0 {
+				if share.MountTargetIP == "" {
+					share.MountTargetIP = info.MountTargets[0].IPAddress
+					share.MountTargetID = info.MountTargets[0].ID
+					klog.V(2).InfoS("Backfilled mount target IP",
+						"shareID", share.ShareID, "ip", share.MountTargetIP)
+				}
+				if share.ExportPath == "" && info.MountTargets[0].ExportPath != "" {
+					share.ExportPath = info.MountTargets[0].ExportPath
+					klog.V(2).InfoS("Backfilled export path",
+						"shareID", share.ShareID, "exportPath", share.ExportPath)
+				}
 			}
 			// Backfill MountTargets from all discovered mount targets
 			if len(info.MountTargets) > 0 && len(share.MountTargets) < len(info.MountTargets) {
@@ -314,6 +321,7 @@ func (r *FileSharePoolReconciler) ensureAccessorMountTargets(_ context.Context, 
 					Zone:          share.Zone,
 					MountTargetID: share.MountTargetID,
 					MountTargetIP: share.MountTargetIP,
+					ExportPath:    share.ExportPath,
 				},
 			}
 		}
@@ -335,6 +343,7 @@ func (r *FileSharePoolReconciler) ensureAccessorMountTargets(_ context.Context, 
 				Zone:          az.Zone,
 				MountTargetID: share.MountTargetID,
 				MountTargetIP: share.MountTargetIP,
+				ExportPath:    share.ExportPath,
 			})
 
 			klog.V(2).InfoS("Added accessor zone to mount targets (same VPC FQDN)",
@@ -624,9 +633,13 @@ func (r *FileSharePoolReconciler) createPoolShare(ctx context.Context, pool *v1a
 
 	mountTargetIP := ""
 	mountTargetID := ""
+	exportPath := "/"
 	if len(shareInfo.MountTargets) > 0 {
 		mountTargetIP = shareInfo.MountTargets[0].IPAddress
 		mountTargetID = shareInfo.MountTargets[0].ID
+		if shareInfo.MountTargets[0].ExportPath != "" {
+			exportPath = shareInfo.MountTargets[0].ExportPath
+		}
 	}
 
 	state := "creating"
@@ -642,6 +655,7 @@ func (r *FileSharePoolReconciler) createPoolShare(ctx context.Context, pool *v1a
 				Zone:          shareInfo.Zone,
 				MountTargetID: mountTargetID,
 				MountTargetIP: mountTargetIP,
+				ExportPath:    exportPath,
 			},
 		}
 	}
@@ -652,6 +666,7 @@ func (r *FileSharePoolReconciler) createPoolShare(ctx context.Context, pool *v1a
 		ShareName:     shareInfo.Name,
 		MountTargetIP: mountTargetIP,
 		MountTargetID: mountTargetID,
+		ExportPath:    exportPath,
 		TotalGB:       shareInfo.SizeGB,
 		AllocatedGB:   0,
 		PVCCount:      0,

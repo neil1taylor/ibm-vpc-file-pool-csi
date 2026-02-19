@@ -33,7 +33,7 @@ var (
 const (
 	poolReadyTimeout = 3 * time.Minute
 	pvcBoundTimeout  = 60 * time.Second
-	podReadyTimeout  = 2 * time.Minute
+	podReadyTimeout  = 5 * time.Minute
 	pollInterval     = 2 * time.Second
 )
 

@@ -418,10 +418,11 @@ type ShareInfo struct {
 }
 
 type MountTargetInfo struct {
-    ID        string
-    Name      string
-    IPAddress string    // This is the NFS server IP to mount
-    Zone      string    // VPC zone of this mount target (for cross-zone support)
+    ID         string
+    Name       string
+    IPAddress  string    // NFS server IP or FQDN
+    ExportPath string    // NFS export path (e.g. "/share_abc123"); empty defaults to "/"
+    Zone       string    // VPC zone of this mount target (for cross-zone support)
 }
 
 func (c *Client) GetFileShare(ctx context.Context, shareID string) (*ShareInfo, error) {

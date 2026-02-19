@@ -167,6 +167,26 @@ ibmcloud is subnet <subnet-id> --output json | jq '.network_acl'
 
 ---
 
+### Permission denied creating subdirectory (mkdir .../pvcs: permission denied)
+
+**Symptom:** Pod stuck in `ContainerCreating` with event `MountVolume.SetUp failed ... mkdir .../globalmount/pvcs: permission denied`.
+
+**Cause (pre-v0.9.0):** The driver was mounting the NFS server root (`server:/`) instead of the share-specific export path (`server:/share_abc123`). In VPC access mode, all shares resolve to the same FQDN — the export path differentiates them. The NFS server root is owned by UID 99, mode 0711, so the CSI node (mapped to UID 65534 by root_squash) cannot create directories there.
+
+**Fix:** Upgrade to v0.9.0+. The driver now correctly parses and uses the export path from the VPC API's `MountPath` field. Existing shares are automatically backfilled during health checks.
+
+**Verification:**
+```bash
+# Check the PV volume context — "share" should NOT be "/"
+kubectl get pv <pv-name> -o jsonpath='{.spec.csi.volumeAttributes.share}'
+# Should output something like: /7a5c6b10_6c24_48a5_9eff_d58978cabd4b
+
+# Check the pool share status
+kubectl get filesharepool <pool-name> -o jsonpath='{.status.shares[0].exportPath}'
+```
+
+---
+
 ### Permission denied on mount
 
 **Symptom:** Pod starts but gets `permission denied` when writing to the volume.

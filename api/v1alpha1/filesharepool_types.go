@@ -145,8 +145,12 @@ type ZoneMountTarget struct {
 	// MountTargetID is the VPC mount target resource ID.
 	MountTargetID string `json:"mountTargetID"`
 
-	// MountTargetIP is the NFS server IP in this zone.
+	// MountTargetIP is the NFS server IP or FQDN in this zone.
 	MountTargetIP string `json:"mountTargetIP"`
+
+	// ExportPath is the NFS export path for this zone's mount target.
+	// +optional
+	ExportPath string `json:"exportPath,omitempty"`
 }
 
 // ShareTier defines the VPC share configuration for a performance tier within the pool.
@@ -278,11 +282,16 @@ type PoolShareStatus struct {
 	// ShareName is the VPC file share name.
 	ShareName string `json:"shareName"`
 
-	// MountTargetIP is the NFS server IP for this share.
+	// MountTargetIP is the NFS server IP or FQDN for this share.
 	MountTargetIP string `json:"mountTargetIP"`
 
 	// MountTargetID is the VPC mount target resource ID.
 	MountTargetID string `json:"mountTargetID"`
+
+	// ExportPath is the NFS export path for this share (e.g. "/share_abc123").
+	// VPC access mode shares use a per-share export path under a shared FQDN.
+	// +optional
+	ExportPath string `json:"exportPath,omitempty"`
 
 	// TotalGB is the provisioned size of this share.
 	TotalGB int64 `json:"totalGB"`

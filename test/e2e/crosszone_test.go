@@ -17,6 +17,9 @@ import (
 // DNS resolves to zone-optimal IPs automatically. Both zones share the same
 // FQDN/IP in pool status.
 func TestCrossZonePool(t *testing.T) {
+	if homeZone == accessorZone {
+		t.Skip("Skipping cross-zone test: home and accessor zones are the same (single-zone cluster)")
+	}
 	ctx := context.Background()
 
 	poolName := resourceName("xzone")
