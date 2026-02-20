@@ -132,6 +132,37 @@ On managed clusters (ROKS/IKS), the `storage-secret-store` secret is maintained 
 
 ---
 
+## VM Issues
+
+### VM shows "No bootable device"
+
+**Symptom:** VM starts and reaches `Running` status, but the console shows "No bootable device" or a UEFI shell instead of booting the OS.
+
+**Cause:** The boot disk image is in **qcow2 format** instead of raw. KubeVirt passes filesystem-PVC images to QEMU with `"driver":"file"` (raw protocol, no qcow2 format layer). QEMU reads the qcow2 headers (`QFI\xfb` magic) as raw MBR/GPT data and finds no valid boot sector.
+
+This happens when cloud images (distributed as qcow2) are downloaded directly to the PVC without converting to raw — which is what CDI does automatically.
+
+**Diagnosis:**
+```bash
+# Check the disk format from the virt-launcher pod
+LAUNCHER=$(kubectl get pods -n <namespace> -l kubevirt.io/domain=<vm-name> -o name)
+kubectl exec -n <namespace> ${LAUNCHER} -c compute -- \
+  dd if=/var/run/kubevirt-private/vmi-disks/rootdisk/disk.img bs=1 count=4 2>/dev/null | od -A x -t x1
+# If output shows: 51 46 49 fb → qcow2 format (QFI magic). Should be raw.
+```
+
+**Fix:** Stop the VM, re-run the image downloader pod with qcow2→raw conversion, then restart:
+```bash
+virtctl stop <vm-name> -n <namespace>
+# Run a pod with qemu-img to convert (see TUTORIAL.md Step 8b):
+# qemu-img convert -f qcow2 -O raw /boot/disk.qcow2 /boot/disk.img
+virtctl start <vm-name> -n <namespace>
+```
+
+See [TUTORIAL.md](TUTORIAL.md) Step 8b and [VM-DISK-FORMATS.md](VM-DISK-FORMATS.md) for details.
+
+---
+
 ## Mount Issues
 
 ### NFS mount failed

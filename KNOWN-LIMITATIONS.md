@@ -177,13 +177,19 @@ On managed ROKS/IKS clusters, CDI's golden OS images are typically stored as ODF
 **Workaround:** Bypass CDI entirely by creating regular PVCs on the pool StorageClass and populating them manually:
 
 1. Create PVCs directly (not via `dataVolumeTemplate`)
-2. For boot disks, download cloud images (qcow2) into the PVC using a simple pod:
+2. For boot disks, download cloud images and **convert from qcow2 to raw format** using a pod with `qemu-img`:
    ```bash
-   # Download CentOS Stream 9 cloud image into the boot PVC
-   curl -L -o /boot/disk.img \
+   # Download and convert CentOS Stream 9 cloud image to raw format
+   dnf install -y qemu-img
+   curl -L -o /boot/disk.qcow2 \
      https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2
+   qemu-img convert -f qcow2 -O raw /boot/disk.qcow2 /boot/disk.img
+   rm /boot/disk.qcow2
+   chmod 0666 /boot/disk.img
    ```
 3. Reference the PVCs in the VM spec using `persistentVolumeClaim` (not `dataVolume`)
+
+> **Important:** KubeVirt requires **raw format** disk images for filesystem-mode PVCs. It passes them to QEMU with `"driver":"file"` (no qcow2 format layer). If you download a qcow2 image without converting to raw, the VM will show "No bootable device" because QEMU reads the qcow2 headers as raw data. CDI handles this conversion automatically — since we bypass CDI, we must convert manually.
 
 KubeVirt supports filesystem-mode PVCs for VM disks — it reads the `disk.img` file from the mounted NFS share. See `TUTORIAL.md` for a complete worked example.
 
@@ -205,13 +211,7 @@ spec:
   defaultGID: 107
 ```
 
-For boot disk images, run the image downloader pod as UID 107 so that `disk.img` is created with the correct ownership:
-```yaml
-securityContext:
-  runAsUser: 107
-  runAsGroup: 107
-  fsGroup: 107
-```
+For boot disk images, the downloader pod must convert qcow2 to raw format (see [CDI Compatibility](#cdi-containerized-data-importer-compatibility) above). Use `quay.io/centos/centos:stream9` which provides `qemu-img` via `dnf install`. The pod runs as root to install packages; due to NFS root_squash the raw file is created as UID 65534. Use `chmod 0666` so the QEMU user (UID 107) can read and write the image.
 
 **Note:** If mounting with custom StorageClass `mountOptions`, always include `sec=sys`. Omitting it causes NFS to negotiate `sec=null`, breaking chown and KubeVirt.
 

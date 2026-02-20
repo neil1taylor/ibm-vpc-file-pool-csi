@@ -331,7 +331,7 @@ oc get pvc pool-test-vm-boot pool-test-vm-data -n ${TUTORIAL_NS}
 
 ### Step 8b: Download the OS Image to the Boot PVC
 
-KubeVirt expects a disk image file named `disk.img` in a filesystem-mode PVC. The pod runs as UID 107 (the QEMU user) so the downloaded file is owned by 107:107, matching what virt-handler expects:
+KubeVirt expects a **raw format** disk image named `disk.img` in a filesystem-mode PVC. Cloud images are distributed as qcow2, so we must convert to raw — this is what CDI does automatically, but since we bypass CDI, we do it manually:
 
 ```bash
 cat <<EOF | oc apply -f -
@@ -342,27 +342,23 @@ metadata:
   namespace: ${TUTORIAL_NS}
 spec:
   restartPolicy: Never
-  securityContext:
-    runAsUser: 107
-    runAsGroup: 107
-    fsGroup: 107
-    seccompProfile:
-      type: RuntimeDefault
   containers:
     - name: downloader
-      image: registry.access.redhat.com/ubi9/ubi-minimal
-      securityContext:
-        allowPrivilegeEscalation: false
-        capabilities:
-          drop: ["ALL"]
+      image: quay.io/centos/centos:stream9
       command:
         - sh
         - -c
         - |
+          dnf install -y qemu-img
           echo "Downloading CentOS Stream 9 cloud image..."
-          curl -L -o /boot/disk.img \
+          curl -L -o /boot/disk.qcow2 \
             https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2
+          echo "Converting qcow2 to raw format..."
+          qemu-img convert -f qcow2 -O raw /boot/disk.qcow2 /boot/disk.img
+          rm /boot/disk.qcow2
+          chmod 0666 /boot/disk.img
           ls -lh /boot/disk.img
+          qemu-img info /boot/disk.img
           echo "Done!"
       volumeMounts:
         - name: boot-disk
@@ -374,7 +370,7 @@ spec:
 EOF
 ```
 
-Wait for the download to complete (~1.8 GB, takes 1-3 minutes depending on bandwidth):
+Wait for the download and conversion to complete (~1.8 GB download + conversion, takes 2-5 minutes):
 
 ```bash
 # Watch pod status
@@ -390,11 +386,17 @@ oc logs image-downloader -n ${TUTORIAL_NS}
 Expected output:
 ```
 Downloading CentOS Stream 9 cloud image...
--rw-r--r--. 1 107 107 1.8G ... /boot/disk.img
+Converting qcow2 to raw format...
+-rw-rw-rw-. 1 nobody nobody 2.0G ... /boot/disk.img
+file format: raw
+virtual size: 2 GiB (2147483648)
+disk size: 1.8 GiB
 Done!
 ```
 
-> **Note:** The file is owned by UID 107 because the pod runs as `runAsUser: 107` and the driver mounts with `sec=sys`, which preserves Unix UID/GID ownership on NFS.
+> **Note:** The pod runs as root (needed to install `qemu-img`). Due to NFS `root_squash`, files are created as UID 65534 (nobody). We `chmod 0666` so the QEMU user (UID 107) can read and write the image. KubeVirt's pre-start expansion will resize the raw image to fill the PVC capacity.
+>
+> **Why raw format?** KubeVirt passes filesystem-PVC disk images to QEMU with `"driver":"file"` (no qcow2 format layer). If the image is qcow2, QEMU reads the qcow2 headers as raw data and finds no valid boot sector — resulting in "No bootable device."
 
 Clean up the downloader pod:
 

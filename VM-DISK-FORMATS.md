@@ -80,9 +80,26 @@ CDI handles:
 - Conversion to raw
 - Writing to the PVC's filesystem as `disk.img`
 
+### Manual Import (Bypassing CDI)
+
+When bypassing CDI (required for the pool CSI driver — see [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md#cdi-containerized-data-importer-compatibility)), you must convert qcow2 to raw manually:
+
+```bash
+# Use a container with qemu-img (e.g., quay.io/centos/centos:stream9)
+dnf install -y qemu-img
+curl -L -o /boot/disk.qcow2 <cloud-image-url>
+qemu-img convert -f qcow2 -O raw /boot/disk.qcow2 /boot/disk.img
+rm /boot/disk.qcow2
+chmod 0666 /boot/disk.img
+```
+
+**If you skip the conversion**, QEMU receives the qcow2 file via `"driver":"file"` (raw protocol) and reads the qcow2 headers as raw MBR/GPT data. The VM boots to "No bootable device."
+
+See [TUTORIAL.md](TUTORIAL.md) Step 8b for a complete worked example.
+
 ### Runtime
 
-At runtime, QEMU opens `disk.img` with `format=raw` and uses the NFS-mounted filesystem directly. No format conversion happens during VM operation.
+At runtime, QEMU opens `disk.img` with `format=raw` (via `"driver":"file"` blockdev) and uses the NFS-mounted filesystem directly. No format conversion happens during VM operation. KubeVirt's pre-start expansion resizes the raw image to fill the PVC capacity.
 
 ## Disk Format by Virtualization Platform
 
