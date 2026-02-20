@@ -30,9 +30,8 @@ func createSubDirectory(nfsOps NFSOperations, basePath, subPath string, uid, gid
 		return fmt.Errorf("mkdir %s: %w", fullPath, err)
 	}
 
-	// Chown is best-effort: VPC NFS uses sec=null (anonymous auth) which
-	// rejects all ownership changes. Log a warning and continue — the
-	// directory permissions (e.g. 0777) are sufficient for access.
+	// Chown is best-effort: works with sec=sys (the default), but kept
+	// non-fatal for resilience if custom mount options omit sec=sys.
 	if uid != nil || gid != nil {
 		uidVal := -1
 		gidVal := -1
@@ -43,7 +42,7 @@ func createSubDirectory(nfsOps NFSOperations, basePath, subPath string, uid, gid
 			gidVal = int(*gid)
 		}
 		if err := nfsOps.Chown(fullPath, uidVal, gidVal); err != nil {
-			klog.V(4).InfoS("Chown failed (expected on VPC NFS with sec=null)",
+			klog.V(4).InfoS("Chown failed (best-effort)",
 				"path", fullPath, "uid", uidVal, "gid", gidVal, "error", err)
 		}
 	}

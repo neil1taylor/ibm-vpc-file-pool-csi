@@ -60,7 +60,7 @@ func (d *Driver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRe
 	source := fmt.Sprintf("%s:%s", server, sharePath)
 
 	mountOptions := mergeNFSMountOptions(
-		[]string{"nfsvers=4.1", "soft", "timeo=600", "retrans=3"},
+		[]string{"nfsvers=4.1", "soft", "timeo=600", "retrans=3", "sec=sys"},
 		req.GetVolumeCapability().GetMount().GetMountFlags(),
 	)
 
@@ -141,11 +141,11 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 		if err := os.MkdirAll(sourcePath, perm); err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to create subdirectory %s: %v", subDir, err)
 		}
-		// Chown is best-effort: VPC NFS uses sec=null (anonymous auth) which
-		// rejects all ownership changes. Log and continue.
+		// Chown is best-effort: works with sec=sys (the default), but kept
+		// non-fatal for resilience if custom mount options omit sec=sys.
 		if uidVal >= 0 || gidVal >= 0 {
 			if err := os.Chown(sourcePath, uidVal, gidVal); err != nil {
-				klog.V(4).InfoS("Chown failed (expected on VPC NFS with sec=null)", "path", sourcePath, "uid", uidVal, "gid", gidVal, "error", err)
+				klog.V(4).InfoS("Chown failed (best-effort)", "path", sourcePath, "uid", uidVal, "gid", gidVal, "error", err)
 			}
 		}
 		// Ensure exact permissions regardless of umask.

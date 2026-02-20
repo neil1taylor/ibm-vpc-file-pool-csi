@@ -89,13 +89,10 @@ test/          → Integration and e2e tests (unit tests live next to code)
 
 ## VPC NFS Platform Constraints
 
-VPC file shares in security-group (VPC access) mode mount with `sec=null` (no NFS authentication). This has major implications:
-
-- **All operations are anonymous** — file ownership is always UID 99:99 regardless of client UID
-- **`chown` always fails** — for ALL UIDs including root, even `chown 99:99` fails. The `defaultUID`/`defaultGID` pool fields trigger a best-effort chown that is silently ignored on VPC NFS
-- **`defaultPermissions` is the only access control** — set to `"0777"` for shared access since UID-based ownership cannot be enforced
-- **KubeVirt VMs are incompatible** — virt-handler unconditionally chowns filesystem-mode PVC mounts to UID 107, which always fails. No workaround exists. See `KNOWN-LIMITATIONS.md` for details
-- **Do not attempt setuid/MkdirAsUser approaches** — non-root UIDs cannot traverse the kubelet directory tree (`/var/data/kubelet/plugins/` is mode 0750), and `sec=null` ignores client UIDs anyway
+- **`sec=sys` required** — VPC file shares default-negotiate to `sec=null` (anonymous auth) unless the client explicitly requests `sec=sys`. Without `sec=sys`, all files are owned by UID 99, chown fails for all UIDs, and KubeVirt VMs cannot start. The driver includes `sec=sys` in its default NFS mount options (matching the stock IBM VPC File CSI driver)
+- **NFS root_squash is always enabled** — root (UID 0) maps to nobody (UID 65534). The driver sets `initial_owner: {uid: 65534, gid: 65534}` on share creation so the mapped root can manage the share root
+- **KubeVirt requires `defaultUID: 107`** — virt-handler chowns PVC mount directories to UID 107 (QEMU). With `sec=sys`, chown works and `defaultUID: 107` ensures directories are pre-owned correctly
+- **Do not use setuid/MkdirAsUser approaches** — non-root UIDs cannot traverse the kubelet directory tree (`/var/data/kubelet/plugins/` is mode 0750). Create directories as root and chown afterwards
 
 ## Critical Safety Rules
 

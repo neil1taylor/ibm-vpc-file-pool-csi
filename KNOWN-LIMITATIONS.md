@@ -189,28 +189,33 @@ KubeVirt supports filesystem-mode PVCs for VM disks — it reads the `disk.img` 
 
 **Roadmap:** Could be addressed by implementing CSI VolumeSnapshot support (which would enable CDI's clone populator path), but this is not currently planned. The manual image download workaround is straightforward and avoids the CDI dependency entirely.
 
-## KubeVirt NFS Permissions (sec=null)
+## KubeVirt NFS Permissions (root_squash)
 
-**What:** KubeVirt VMs using filesystem-mode PVCs from VPC NFS file shares **do not work**. VMs fail with `preparing host-disks failed: chown ... operation not permitted`.
+**What:** KubeVirt's virt-handler calls `chown(mountDir, 107, 107)` on every filesystem-mode PVC mount. IBM Cloud VPC file shares enforce NFS `root_squash` — root (UID 0) is mapped to nobody (UID 65534). Without `sec=sys`, the NFS mount defaults to `sec=null` (anonymous auth) where chown fails for all UIDs and VMs cannot start.
 
-**Why:** Two independent issues combine to make this incompatible:
+**Why:** VPC file shares in security-group mode default-negotiate to `sec=null` unless the client explicitly requests `sec=sys` (AUTH_UNIX). With `sec=null`, all operations are anonymous (UID 99), chown is impossible, and virt-handler fails with `preparing host-disks failed: chown ... operation not permitted`.
 
-1. **VPC NFS uses `sec=null` (no authentication).** All NFS operations are anonymous — files are always owned by UID 99:99 (the NFS server's anonymous identity). `chown` fails for ALL UIDs, including root. There is no way to change file ownership on VPC NFS file shares in security-group (VPC access) mode.
+**Fix:** The CSI driver mounts with `sec=sys` in its default NFS mount options (matching the stock IBM VPC File CSI driver). With `sec=sys`, standard Unix UID/GID credentials are sent in NFS RPCs, root_squash maps only UID 0, and chown works for non-root UIDs.
 
-2. **KubeVirt's virt-handler unconditionally chowns HostDisk directories to UID 107:107** (the QEMU user). There is no KubeVirt feature gate, annotation, or configuration to disable this. [KubeVirt PR #15037](https://github.com/kubevirt/kubevirt/pull/15037) (CVE-2025-64324, merged July 2025) partially addresses this by skipping chown on pre-existing `disk.img` files, but (a) it may still chown the directory, and (b) the cherry-pick has not yet reached all OpenShift Virtualization releases (confirmed absent in OCV 4.20.3).
+Configure the FileSharePool for KubeVirt:
+```yaml
+spec:
+  defaultPermissions: "0777"
+  defaultUID: 107
+  defaultGID: 107
+```
 
-**NFS authentication detail:** VPC file shares in security-group mode mount with `sec=null` (visible via `mount | grep nfs`). This means the NFS client sends no UID/GID credentials. The server performs all operations as the anonymous user (UID 99 on the server). Even setting `initial_owner: {uid: 65534, gid: 65534}` on the share only affects the root directory — subdirectory ownership is always 99:99. The `defaultUID`/`defaultGID` fields on FileSharePool have no effect because `chown` cannot succeed on this NFS configuration.
+For boot disk images, run the image downloader pod as UID 107 so that `disk.img` is created with the correct ownership:
+```yaml
+securityContext:
+  runAsUser: 107
+  runAsGroup: 107
+  fsGroup: 107
+```
 
-**Non-VM workloads are unaffected.** Regular pods (including those running as non-root UIDs) work correctly because the CSI driver sets directory permissions to 0777, and NFS `sec=null` allows all operations regardless of client UID. Only KubeVirt's virt-handler ownership management is broken.
+**Note:** If mounting with custom StorageClass `mountOptions`, always include `sec=sys`. Omitting it causes NFS to negotiate `sec=null`, breaking chown and KubeVirt.
 
-**Workaround:** Use a different storage backend for KubeVirt VM disks:
-- **VPC Block Storage** with the standard IBM VPC Block CSI driver (supports block-mode PVCs, which bypass virt-handler's HostDisk path entirely)
-- **OpenShift Data Foundation (ODF)** / Ceph RBD (supports `fsGroup` and proper ownership management)
-- Use the NFS pool driver for non-VM workloads (application data, model weights, shared storage)
-
-**Roadmap:** Blocked on two platform changes:
-1. IBM Cloud VPC supporting `sec=sys` (AUTH_UNIX) on file share mounts, which would allow proper UID-based ownership
-2. KubeVirt making HostDisk chown non-fatal or skippable for NFS storage
+**Roadmap:** Fixed in v0.10.0. See `TUTORIAL.md` for a complete worked example.
 
 ## NFS Encryption in Transit
 
