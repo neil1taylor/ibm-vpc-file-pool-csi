@@ -137,6 +137,51 @@ spec:
                 maximum: 95
                 minimum: 50
                 type: integer
+              goldenImages:
+                description: |-
+                  GoldenImages configures automatic golden image synchronization.
+                  When enabled, the controller discovers OS images from CDI DataImportCrons
+                  and maintains ready-to-clone golden image PVCs in target namespaces.
+                  Not needed when the pool StorageClass is the cluster default (CDI handles natively).
+                properties:
+                  converterImage:
+                    default: quay.io/centos/centos:stream9
+                    description: ConverterImage is the container image used for qcow2-to-raw
+                      conversion jobs.
+                    type: string
+                  enabled:
+                    description: Enabled activates the golden image syncer for this
+                      pool.
+                    type: boolean
+                  imageFilter:
+                    description: |-
+                      ImageFilter limits syncing to images whose names contain one of these substrings.
+                      Empty means sync all discovered images.
+                    items:
+                      type: string
+                    type: array
+                  pvcSizeGB:
+                    default: 15
+                    description: PVCSizeGB is the size of golden image PVCs in GB.
+                    format: int64
+                    minimum: 5
+                    type: integer
+                  refreshInterval:
+                    default: 24h
+                    description: RefreshInterval is how often the syncer checks for
+                      new images (e.g. "24h", "1h").
+                    type: string
+                  targetNamespaces:
+                    description: TargetNamespaces lists namespaces where golden image
+                      PVCs and Templates are created.
+                    items:
+                      type: string
+                    minItems: 1
+                    type: array
+                required:
+                - enabled
+                - targetNamespaces
+                type: object
               initialShares:
                 default: 1
                 description: InitialShares is the number of shares to pre-create when
@@ -340,6 +385,61 @@ spec:
                   - drained
                   - remainingSubVolumes
                   - shareID
+                  type: object
+                type: array
+              goldenImages:
+                description: GoldenImages tracks golden image sync state.
+                items:
+                  description: GoldenImageStatus tracks the sync state for a single
+                    golden image.
+                  properties:
+                    name:
+                      description: Name is the image identifier (e.g. "centos-stream9").
+                      type: string
+                    namespaces:
+                      description: Namespaces tracks per-namespace sync state.
+                      items:
+                        description: GoldenImageNamespaceStatus tracks the sync state
+                          for a golden image in a single namespace.
+                        properties:
+                          lastSyncTime:
+                            description: LastSyncTime is when this image was last
+                              synced.
+                            format: date-time
+                            type: string
+                          message:
+                            description: Message is a human-readable status message.
+                            type: string
+                          namespace:
+                            description: Namespace is the target namespace.
+                            type: string
+                          phase:
+                            description: 'Phase is the sync state: Pending, Syncing,
+                              Ready, Failed.'
+                            enum:
+                            - Pending
+                            - Syncing
+                            - Ready
+                            - Failed
+                            type: string
+                          pvcName:
+                            description: PVCName is the name of the golden image PVC.
+                            type: string
+                          templateName:
+                            description: TemplateName is the name of the OpenShift
+                              VM Template.
+                            type: string
+                        required:
+                        - namespace
+                        - phase
+                        type: object
+                      type: array
+                    sourceURL:
+                      description: SourceURL is the container registry URL for this
+                        image.
+                      type: string
+                  required:
+                  - name
                   type: object
                 type: array
               lastReconcileTime:

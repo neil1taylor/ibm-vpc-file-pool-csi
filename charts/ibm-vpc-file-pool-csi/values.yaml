@@ -52,6 +52,10 @@ cloneWorker:
   # Interval between clone worker poll cycles (Go duration string).
   interval: 10s
 
+goldenImageSyncer:
+  # Interval between golden image syncer poll cycles (Go duration string).
+  interval: 1h
+
 webhook:
   # Enable validating admission webhooks for CRD resources.
   enabled: true

@@ -7,7 +7,9 @@ import (
 )
 
 // selectShare picks a share from the pool based on the allocation strategy.
-// Only shares in "stable" state with a matching tier are considered.
+// Only shares in "stable" state with a matching tier and a populated mount
+// target IP are considered. Shares without a mount target IP would produce
+// PVs with an empty NFS server, causing mount failures.
 // Spread: pick the share with the most free space.
 // Binpack: pick the share with the least free space that still fits.
 func selectShare(strategy string, shares []v1alpha1.PoolShareStatus, requestedGB int64, tier string) (*v1alpha1.PoolShareStatus, error) {
@@ -16,6 +18,9 @@ func selectShare(strategy string, shares []v1alpha1.PoolShareStatus, requestedGB
 
 	for i := range shares {
 		if shares[i].State != "stable" {
+			continue
+		}
+		if shares[i].MountTargetIP == "" {
 			continue
 		}
 		if shares[i].Tier != tier {
@@ -53,9 +58,9 @@ func selectShare(strategy string, shares []v1alpha1.PoolShareStatus, requestedGB
 // It prefers the source's share when it has sufficient capacity; otherwise
 // it falls back to the normal selectShare algorithm.
 func selectShareForClone(strategy string, shares []v1alpha1.PoolShareStatus, requestedGB int64, tier string, sourceShareID string) (*v1alpha1.PoolShareStatus, error) {
-	// 1. Check if source share has capacity
+	// 1. Check if source share has capacity (must also have mount target IP)
 	for i := range shares {
-		if shares[i].ShareID == sourceShareID && shares[i].State == "stable" && shares[i].Tier == tier {
+		if shares[i].ShareID == sourceShareID && shares[i].State == "stable" && shares[i].MountTargetIP != "" && shares[i].Tier == tier {
 			freeGB := shares[i].TotalGB - shares[i].AllocatedGB
 			if freeGB >= requestedGB {
 				return &shares[i], nil

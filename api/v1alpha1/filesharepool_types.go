@@ -123,6 +123,84 @@ type FileSharePoolSpec struct {
 	// Once all SubVolumes are removed from a draining share, it is considered fully drained.
 	// +optional
 	DrainShares []string `json:"drainShares,omitempty"`
+
+	// GoldenImages configures automatic golden image synchronization.
+	// When enabled, the controller discovers OS images from CDI DataImportCrons
+	// and maintains ready-to-clone golden image PVCs in target namespaces.
+	// Not needed when the pool StorageClass is the cluster default (CDI handles natively).
+	// +optional
+	GoldenImages *GoldenImageConfig `json:"goldenImages,omitempty"`
+}
+
+// GoldenImageConfig configures automatic golden image synchronization for KubeVirt.
+type GoldenImageConfig struct {
+	// Enabled activates the golden image syncer for this pool.
+	Enabled bool `json:"enabled"`
+
+	// TargetNamespaces lists namespaces where golden image PVCs and Templates are created.
+	// +kubebuilder:validation:MinItems=1
+	TargetNamespaces []string `json:"targetNamespaces"`
+
+	// ImageFilter limits syncing to images whose names contain one of these substrings.
+	// Empty means sync all discovered images.
+	// +optional
+	ImageFilter []string `json:"imageFilter,omitempty"`
+
+	// RefreshInterval is how often the syncer checks for new images (e.g. "24h", "1h").
+	// +kubebuilder:default="24h"
+	// +optional
+	RefreshInterval string `json:"refreshInterval,omitempty"`
+
+	// ConverterImage is the container image used for qcow2-to-raw conversion jobs.
+	// +kubebuilder:default="quay.io/centos/centos:stream9"
+	// +optional
+	ConverterImage string `json:"converterImage,omitempty"`
+
+	// PVCSizeGB is the size of golden image PVCs in GB.
+	// +kubebuilder:validation:Minimum=5
+	// +kubebuilder:default=15
+	// +optional
+	PVCSizeGB int64 `json:"pvcSizeGB,omitempty"`
+}
+
+// GoldenImageStatus tracks the sync state for a single golden image.
+type GoldenImageStatus struct {
+	// Name is the image identifier (e.g. "centos-stream9").
+	Name string `json:"name"`
+
+	// SourceURL is the container registry URL for this image.
+	// +optional
+	SourceURL string `json:"sourceURL,omitempty"`
+
+	// Namespaces tracks per-namespace sync state.
+	// +optional
+	Namespaces []GoldenImageNamespaceStatus `json:"namespaces,omitempty"`
+}
+
+// GoldenImageNamespaceStatus tracks the sync state for a golden image in a single namespace.
+type GoldenImageNamespaceStatus struct {
+	// Namespace is the target namespace.
+	Namespace string `json:"namespace"`
+
+	// Phase is the sync state: Pending, Syncing, Ready, Failed.
+	// +kubebuilder:validation:Enum=Pending;Syncing;Ready;Failed
+	Phase string `json:"phase"`
+
+	// PVCName is the name of the golden image PVC.
+	// +optional
+	PVCName string `json:"pvcName,omitempty"`
+
+	// TemplateName is the name of the OpenShift VM Template.
+	// +optional
+	TemplateName string `json:"templateName,omitempty"`
+
+	// LastSyncTime is when this image was last synced.
+	// +optional
+	LastSyncTime *metav1.Time `json:"lastSyncTime,omitempty"`
+
+	// Message is a human-readable status message.
+	// +optional
+	Message string `json:"message,omitempty"`
 }
 
 // AccessorZone defines a zone where pool shares should have additional mount targets.
@@ -245,6 +323,10 @@ type FileSharePoolStatus struct {
 
 	// TotalPVCCount is the total number of active SubVolumes across all shares.
 	TotalPVCCount int32 `json:"totalPVCCount"`
+
+	// GoldenImages tracks golden image sync state.
+	// +optional
+	GoldenImages []GoldenImageStatus `json:"goldenImages,omitempty"`
 
 	// DrainStatus tracks the progress of share draining operations.
 	// +optional

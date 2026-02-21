@@ -65,6 +65,9 @@ func (n *nodeTestK8sClient) GetNodeZone(_ context.Context, _ string) (string, er
 func (n *nodeTestK8sClient) GetFileSharePool(_ context.Context, _ string) (*v1alpha1.FileSharePool, error) {
 	return nil, fmt.Errorf("not implemented")
 }
+func (n *nodeTestK8sClient) ListFileSharePools(_ context.Context) ([]v1alpha1.FileSharePool, error) {
+	return nil, nil
+}
 func (n *nodeTestK8sClient) UpdateFileSharePoolStatus(_ context.Context, _ *v1alpha1.FileSharePool) error {
 	return nil
 }

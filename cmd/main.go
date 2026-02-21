@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -43,7 +44,8 @@ func main() {
 		vpcID               string
 		subnetID            string
 		kubeletDir          string
-		cloneWorkerInterval time.Duration
+		cloneWorkerInterval      time.Duration
+		goldenImageSyncInterval  time.Duration
 	)
 
 	flag.StringVar(&endpoint, "endpoint", "unix:///csi/csi.sock", "CSI endpoint")
@@ -54,6 +56,7 @@ func main() {
 	flag.StringVar(&subnetID, "subnet-id", "", "IBM Cloud subnet ID for creating file share mount targets")
 	flag.StringVar(&kubeletDir, "kubelet-dir", "/var/lib/kubelet", "Kubelet root directory (ROKS uses /var/data/kubelet)")
 	flag.DurationVar(&cloneWorkerInterval, "clone-worker-interval", pool.DefaultCloneWorkerInterval, "Interval between clone worker poll cycles")
+	flag.DurationVar(&goldenImageSyncInterval, "golden-image-sync-interval", pool.DefaultGoldenImageInterval, "Interval between golden image syncer poll cycles")
 
 	klog.InitFlags(nil)
 	flag.Parse()
@@ -61,13 +64,13 @@ func main() {
 	klog.InfoS("Starting IBM VPC File Pool CSI Driver", "version", version, "mode", mode)
 
 	if mode == "controller" {
-		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, cloneWorkerInterval)
+		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, cloneWorkerInterval, goldenImageSyncInterval)
 	} else {
 		runNode(endpoint, nodeID, mode)
 	}
 }
 
-func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string, cloneWorkerInterval time.Duration) {
+func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string, cloneWorkerInterval, goldenImageSyncInterval time.Duration) {
 	scheme := runtime.NewScheme()
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
 		klog.ErrorS(err, "Failed to add CRD types to scheme")
@@ -79,6 +82,10 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 	}
 	if err := storagev1.AddToScheme(scheme); err != nil {
 		klog.ErrorS(err, "Failed to add storagev1 types to scheme")
+		os.Exit(1)
+	}
+	if err := batchv1.AddToScheme(scheme); err != nil {
+		klog.ErrorS(err, "Failed to add batchv1 types to scheme")
 		os.Exit(1)
 	}
 
@@ -271,6 +278,13 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 		cloneWorker.SetInterval(cloneWorkerInterval)
 	}
 	go cloneWorker.Run(signalCtx)
+
+	// Start the background golden image syncer for KubeVirt VM templates.
+	goldenImageSyncer := pool.NewGoldenImageSyncer(k8sClient, mgr.GetClient())
+	if goldenImageSyncInterval > 0 {
+		goldenImageSyncer.SetInterval(goldenImageSyncInterval)
+	}
+	go goldenImageSyncer.Run(signalCtx)
 
 	// Start the background replication controller for cross-region DR.
 	replController := pool.NewReplicationController(k8sClient, nfsOps)

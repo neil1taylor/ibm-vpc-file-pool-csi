@@ -41,7 +41,7 @@ rules:
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
-    verbs: ["get", "list", "watch", "update", "patch"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: [""]
     resources: ["persistentvolumeclaims/status"]
     verbs: ["patch"]
@@ -73,6 +73,22 @@ rules:
   - apiGroups: ["storage.k8s.io"]
     resources: ["storageclasses"]
     verbs: ["get", "list", "watch", "create"]
+  # CDI StorageProfile access (optional — only used when CDI/KubeVirt is installed)
+  - apiGroups: ["cdi.kubevirt.io"]
+    resources: ["storageprofiles"]
+    verbs: ["get", "patch"]
+  # CDI DataImportCrons and DataSources (golden image discovery)
+  - apiGroups: ["cdi.kubevirt.io"]
+    resources: ["dataimportcrons", "datasources"]
+    verbs: ["get", "list", "watch", "create"]
+  # Jobs for golden image conversion
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  # OpenShift Templates for VM catalog
+  - apiGroups: ["template.openshift.io"]
+    resources: ["templates"]
+    verbs: ["get", "list", "create", "update", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

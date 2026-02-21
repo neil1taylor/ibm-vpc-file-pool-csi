@@ -180,3 +180,13 @@ func (f *FakeVPCClient) SetShareState(id string, state string) {
 		info.LifecycleState = state
 	}
 }
+
+// ClearMountTargets removes all mount targets from a share.
+// Used to simulate shares created without a VPC mount target.
+func (f *FakeVPCClient) ClearMountTargets(id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if info, ok := f.shares[id]; ok {
+		info.MountTargets = nil
+	}
+}

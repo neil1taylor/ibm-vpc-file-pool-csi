@@ -193,7 +193,14 @@ On managed ROKS/IKS clusters, CDI's golden OS images are typically stored as ODF
 
 KubeVirt supports filesystem-mode PVCs for VM disks — it reads the `disk.img` file from the mounted NFS share. See `TUTORIAL.md` for a complete worked example.
 
-**Roadmap:** Could be addressed by implementing CSI VolumeSnapshot support (which would enable CDI's clone populator path), but this is not currently planned. The manual image download workaround is straightforward and avoids the CDI dependency entirely.
+**StorageProfile:** The controller automatically patches CDI's `StorageProfile` CR for each pool StorageClass, setting `claimPropertySets: [{accessModes: ["ReadWriteMany"], volumeMode: Filesystem}]` and `cloneStrategy: copy`. The `copy` strategy enables CDI's host-assisted cloning path, which is required because CDI's default snapshot-based cloning does not work with the pool CSI driver. The patching is non-destructive (only sets fields if empty) and non-fatal (errors are logged but don't block reconciliation). CDI detection is cached — if CDI is not installed, the check runs once and is skipped on subsequent reconciles.
+
+**Golden Image Automation:** The driver includes a golden image syncer that automates OS image provisioning for KubeVirt. Two modes are supported:
+
+1. **Native CDI mode** (recommended): Make the pool StorageClass the cluster default. CDI then imports, snapshots, and clones golden images on pool storage natively.
+2. **Custom syncer mode**: When another SC is the default, enable `spec.goldenImages` on the FileSharePool. The controller discovers CDI `DataImportCron` images, downloads OCI images from container registries, decompresses gzip-compressed OCI layers, converts qcow2 to raw format, and writes `disk.img` to golden PVCs. It also creates CDI `DataSource` CRs (for the InstanceTypes catalog tab) and OpenShift `Template` CRs (for the Templates catalog tab).
+
+See `GOLDEN-IMAGE-WORKFLOW.md` for setup instructions.
 
 ## KubeVirt NFS Permissions (root_squash)
 
@@ -215,7 +222,7 @@ For boot disk images, the downloader pod must convert qcow2 to raw format (see [
 
 **Note:** If mounting with custom StorageClass `mountOptions`, always include `sec=sys`. Omitting it causes NFS to negotiate `sec=null`, breaking chown and KubeVirt.
 
-**Roadmap:** Fixed in v0.10.0. See `TUTORIAL.md` for a complete worked example.
+**Roadmap:** Fixed in v0.10.0 (`sec=sys` mount option). See `TUTORIAL.md` for a complete worked example.
 
 ## NFS Encryption in Transit
 

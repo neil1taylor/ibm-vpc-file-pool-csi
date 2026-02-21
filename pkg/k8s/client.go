@@ -12,6 +12,7 @@ import (
 type Client interface {
 	// FileSharePool operations
 	GetFileSharePool(ctx context.Context, name string) (*v1alpha1.FileSharePool, error)
+	ListFileSharePools(ctx context.Context) ([]v1alpha1.FileSharePool, error)
 	UpdateFileSharePoolStatus(ctx context.Context, pool *v1alpha1.FileSharePool) error
 	UpdateFileSharePool(ctx context.Context, pool *v1alpha1.FileSharePool) error
 

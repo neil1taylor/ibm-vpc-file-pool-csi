@@ -2,6 +2,7 @@ package pool
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -11,9 +12,13 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud/fake"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
 	dto "github.com/prometheus/client_model/go"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func newReconciler(k8s *fakeK8sClient, vpc *fake.FakeVPCClient) *FileSharePoolReconciler {
@@ -1417,6 +1422,464 @@ func TestReconcile_ProceedsAfterSetVPCClient(t *testing.T) {
 	}
 	if result.RequeueAfter != ReconcileInterval {
 		t.Errorf("expected RequeueAfter=%v after SetVPCClient, got %v", ReconcileInterval, result.RequeueAfter)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 29. CDI Detection — No REST Mapper (CDI Absent)
+// ---------------------------------------------------------------------------
+
+func TestCdiAvailable_NoRESTMapper(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	r := newReconciler(k, vpc)
+
+	// restMapper is nil (no SetupWithManager) → CDI not available
+	if r.cdiAvailable() {
+		t.Error("expected cdiAvailable()=false when restMapper is nil")
+	}
+	// Result should be cached
+	if !r.cdiChecked {
+		t.Error("expected cdiChecked=true after first call")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 30. CDI Detection — CRD Present
+// ---------------------------------------------------------------------------
+
+func TestCdiAvailable_CRDPresent(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	r := newReconciler(k, vpc)
+
+	r.restMapper = newFakeRESTMapper(true)
+
+	if !r.cdiAvailable() {
+		t.Error("expected cdiAvailable()=true when CRD is present")
+	}
+	if !r.cdiInstalled {
+		t.Error("expected cdiInstalled=true")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 31. CDI Detection — CRD Absent
+// ---------------------------------------------------------------------------
+
+func TestCdiAvailable_CRDAbsent(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	r := newReconciler(k, vpc)
+
+	r.restMapper = newFakeRESTMapper(false)
+
+	if r.cdiAvailable() {
+		t.Error("expected cdiAvailable()=false when CRD is absent")
+	}
+	if r.cdiInstalled {
+		t.Error("expected cdiInstalled=false")
+	}
+	// Should be cached — second call returns same result
+	if r.cdiAvailable() {
+		t.Error("expected cached result to remain false")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 32. ensureStorageProfiles — Patches Empty StorageProfile
+// ---------------------------------------------------------------------------
+
+func TestEnsureStorageProfiles_PatchesEmptyProfile(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	r := newReconciler(k, vpc)
+
+	fakeClient := newFakeDirectClient()
+	r.directClient = fakeClient
+	r.restMapper = newFakeRESTMapper(true)
+
+	// Create a StorageProfile with empty spec (CDI auto-created it)
+	fakeClient.addStorageProfile("test-pool", nil)
+
+	pool := newTestPool("test-pool", "spread", 1000)
+	pool.Spec.InitialShares = 0
+	k.addPool(pool)
+
+	r.ensureStorageProfiles(context.Background(), pool)
+
+	// Verify claimPropertySets was patched
+	sp := fakeClient.getStorageProfile("test-pool")
+	if sp == nil {
+		t.Fatal("expected StorageProfile to exist")
+	}
+
+	cps, found, _ := unstructured.NestedSlice(sp.Object, "spec", "claimPropertySets")
+	if !found || len(cps) == 0 {
+		t.Fatal("expected claimPropertySets to be patched")
+	}
+
+	entry := cps[0].(map[string]interface{})
+	modes := entry["accessModes"].([]interface{})
+	if len(modes) != 1 || modes[0].(string) != "ReadWriteMany" {
+		t.Errorf("expected accessModes=[ReadWriteMany], got %v", modes)
+	}
+	volMode := entry["volumeMode"].(string)
+	if volMode != "Filesystem" {
+		t.Errorf("expected volumeMode=Filesystem, got %s", volMode)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 33. ensureStorageProfiles — Skips Already-Populated Profile
+// ---------------------------------------------------------------------------
+
+func TestEnsureStorageProfiles_SkipsPopulatedProfile(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	r := newReconciler(k, vpc)
+
+	fakeClient := newFakeDirectClient()
+	r.directClient = fakeClient
+	r.restMapper = newFakeRESTMapper(true)
+
+	// Create a StorageProfile with existing claimPropertySets
+	existingCPS := []interface{}{
+		map[string]interface{}{
+			"accessModes": []interface{}{"ReadWriteOnce"},
+			"volumeMode":  "Block",
+		},
+	}
+	fakeClient.addStorageProfile("test-pool", existingCPS)
+
+	pool := newTestPool("test-pool", "spread", 1000)
+	pool.Spec.InitialShares = 0
+	k.addPool(pool)
+
+	r.ensureStorageProfiles(context.Background(), pool)
+
+	// Verify claimPropertySets was NOT overwritten
+	sp := fakeClient.getStorageProfile("test-pool")
+	cps, _, _ := unstructured.NestedSlice(sp.Object, "spec", "claimPropertySets")
+	if len(cps) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(cps))
+	}
+	entry := cps[0].(map[string]interface{})
+	modes := entry["accessModes"].([]interface{})
+	if modes[0].(string) != "ReadWriteOnce" {
+		t.Errorf("expected original accessMode ReadWriteOnce preserved, got %v", modes[0])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 34. ensureStorageProfiles — Skips When CDI Not Installed
+// ---------------------------------------------------------------------------
+
+func TestEnsureStorageProfiles_SkipsNoCDI(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	r := newReconciler(k, vpc)
+
+	fakeClient := newFakeDirectClient()
+	r.directClient = fakeClient
+	r.restMapper = newFakeRESTMapper(false) // CDI absent
+
+	pool := newTestPool("test-pool", "spread", 1000)
+	pool.Spec.InitialShares = 0
+	k.addPool(pool)
+
+	r.ensureStorageProfiles(context.Background(), pool)
+
+	// No StorageProfile operations should have occurred
+	if fakeClient.getCalls != 0 {
+		t.Errorf("expected 0 Get calls when CDI absent, got %d", fakeClient.getCalls)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 35. ensureStorageProfiles — Skips With Skip Annotation
+// ---------------------------------------------------------------------------
+
+func TestEnsureStorageProfiles_SkipsAnnotation(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	r := newReconciler(k, vpc)
+
+	fakeClient := newFakeDirectClient()
+	r.directClient = fakeClient
+	r.restMapper = newFakeRESTMapper(true)
+
+	pool := newTestPool("test-pool", "spread", 1000)
+	pool.Spec.InitialShares = 0
+	pool.Annotations = map[string]string{
+		SkipStorageClassAnnotation: "true",
+	}
+	k.addPool(pool)
+
+	r.ensureStorageProfiles(context.Background(), pool)
+
+	if fakeClient.getCalls != 0 {
+		t.Errorf("expected 0 Get calls with skip annotation, got %d", fakeClient.getCalls)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 36. ensureStorageProfiles — Tiered Pool Patches All Profiles
+// ---------------------------------------------------------------------------
+
+func TestEnsureStorageProfiles_TieredPool(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	r := newReconciler(k, vpc)
+
+	fakeClient := newFakeDirectClient()
+	r.directClient = fakeClient
+	r.restMapper = newFakeRESTMapper(true)
+
+	fakeClient.addStorageProfile("tiered-pool-standard", nil)
+	fakeClient.addStorageProfile("tiered-pool-premium", nil)
+
+	pool := newTestPoolWithTiers("tiered-pool", "spread",
+		[]v1alpha1.ShareTier{
+			{Name: "standard", Profile: "dp2", ShareSizeGB: 1000, MaxShares: 5, InitialShares: 0},
+			{Name: "premium", Profile: "custom", ShareSizeGB: 500, MaxShares: 3, InitialShares: 0},
+		},
+	)
+	pool.Status.Phase = "Ready"
+	pool.Spec.InitialShares = 0
+	k.addPool(pool)
+
+	r.ensureStorageProfiles(context.Background(), pool)
+
+	// Both profiles should be patched
+	for _, name := range []string{"tiered-pool-standard", "tiered-pool-premium"} {
+		sp := fakeClient.getStorageProfile(name)
+		if sp == nil {
+			t.Errorf("expected StorageProfile %q to exist", name)
+			continue
+		}
+		cps, found, _ := unstructured.NestedSlice(sp.Object, "spec", "claimPropertySets")
+		if !found || len(cps) == 0 {
+			t.Errorf("expected claimPropertySets patched on %q", name)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test Helpers — Fake REST Mapper
+// ---------------------------------------------------------------------------
+
+// fakeRESTMapper implements meta.RESTMapper and controls whether the
+// CDI StorageProfile CRD appears to be installed.
+type fakeRESTMapper struct {
+	hasCDI bool
+}
+
+func newFakeRESTMapper(hasCDI bool) *fakeRESTMapper {
+	return &fakeRESTMapper{hasCDI: hasCDI}
+}
+
+func (m *fakeRESTMapper) KindFor(resource schema.GroupVersionResource) (schema.GroupVersionKind, error) {
+	if m.hasCDI && resource.Group == "cdi.kubevirt.io" && resource.Resource == "storageprofiles" {
+		return schema.GroupVersionKind{
+			Group:   "cdi.kubevirt.io",
+			Version: "v1beta1",
+			Kind:    "StorageProfile",
+		}, nil
+	}
+	return schema.GroupVersionKind{}, &meta.NoResourceMatchError{PartialResource: resource}
+}
+
+func (m *fakeRESTMapper) KindsFor(schema.GroupVersionResource) ([]schema.GroupVersionKind, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (m *fakeRESTMapper) ResourceFor(schema.GroupVersionResource) (schema.GroupVersionResource, error) {
+	return schema.GroupVersionResource{}, fmt.Errorf("not implemented")
+}
+
+func (m *fakeRESTMapper) ResourcesFor(schema.GroupVersionResource) ([]schema.GroupVersionResource, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (m *fakeRESTMapper) RESTMapping(schema.GroupKind, ...string) (*meta.RESTMapping, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (m *fakeRESTMapper) RESTMappings(schema.GroupKind, ...string) ([]*meta.RESTMapping, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (m *fakeRESTMapper) ResourceSingularizer(string) (string, error) {
+	return "", fmt.Errorf("not implemented")
+}
+
+// ---------------------------------------------------------------------------
+// Test Helpers — Fake Direct Client (for unstructured operations)
+// ---------------------------------------------------------------------------
+
+// fakeDirectClient implements client.Client minimally for StorageProfile
+// get/patch testing. Only Get and Patch are implemented.
+type fakeDirectClient struct {
+	profiles map[string]*unstructured.Unstructured
+	getCalls int
+}
+
+func newFakeDirectClient() *fakeDirectClient {
+	return &fakeDirectClient{
+		profiles: make(map[string]*unstructured.Unstructured),
+	}
+}
+
+func (c *fakeDirectClient) addStorageProfile(name string, claimPropertySets []interface{}) {
+	sp := &unstructured.Unstructured{}
+	sp.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "cdi.kubevirt.io",
+		Version: "v1beta1",
+		Kind:    "StorageProfile",
+	})
+	sp.SetName(name)
+	if claimPropertySets != nil {
+		_ = unstructured.SetNestedSlice(sp.Object, claimPropertySets, "spec", "claimPropertySets")
+	} else {
+		// Ensure spec exists but claimPropertySets is absent
+		_ = unstructured.SetNestedMap(sp.Object, map[string]interface{}{}, "spec")
+	}
+	c.profiles[name] = sp
+}
+
+func (c *fakeDirectClient) getStorageProfile(name string) *unstructured.Unstructured {
+	return c.profiles[name]
+}
+
+func (c *fakeDirectClient) Get(_ context.Context, key client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+	c.getCalls++
+	sp, ok := c.profiles[key.Name]
+	if !ok {
+		return fmt.Errorf("storageprofile %q not found", key.Name)
+	}
+	u, ok := obj.(*unstructured.Unstructured)
+	if !ok {
+		return fmt.Errorf("unexpected object type")
+	}
+	sp.DeepCopyInto(u)
+	return nil
+}
+
+func (c *fakeDirectClient) Patch(_ context.Context, obj client.Object, patch client.Patch, _ ...client.PatchOption) error {
+	u, ok := obj.(*unstructured.Unstructured)
+	if !ok {
+		return fmt.Errorf("unexpected object type")
+	}
+	name := u.GetName()
+	sp, ok := c.profiles[name]
+	if !ok {
+		return fmt.Errorf("storageprofile %q not found", name)
+	}
+
+	// Apply the merge patch by decoding and merging
+	patchData, err := patch.Data(obj)
+	if err != nil {
+		return err
+	}
+
+	// Simple merge: decode the patch JSON and set claimPropertySets
+	var patchMap map[string]interface{}
+	if err := json.Unmarshal(patchData, &patchMap); err != nil {
+		return err
+	}
+	if specPatch, ok := patchMap["spec"].(map[string]interface{}); ok {
+		if cps, ok := specPatch["claimPropertySets"]; ok {
+			_ = unstructured.SetNestedField(sp.Object, cps, "spec", "claimPropertySets")
+		}
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// HealthCheck: mount target recovery for shares without mount targets
+// ---------------------------------------------------------------------------
+
+func TestReconcile_HealthCheck_CreatesMissingMountTarget(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+
+	// Create a share on the VPC side, then remove its mount targets to simulate
+	// a share created before VPC config was available.
+	shareInfo, _ := vpc.CreateFileShare(context.Background(), ibmcloudInput("test-pool", 1000))
+	vpc.ClearMountTargets(shareInfo.ID)
+
+	// Pool status records the share as stable but with no mount target info.
+	pool := newTestPool("test-pool", "spread", 1000,
+		v1alpha1.PoolShareStatus{
+			ShareID:       shareInfo.ID,
+			ShareName:     shareInfo.Name,
+			MountTargetIP: "",
+			MountTargetID: "",
+			ExportPath:    "",
+			TotalGB:       1000,
+			State:         "stable",
+			Zone:          "us-south-1",
+		},
+	)
+	pool.Spec.InitialShares = 1
+	k.addPool(pool)
+
+	r := newReconciler(k, vpc)
+	r.vpcID = "vpc-test-001"
+
+	_, err := reconcilePool(r, "test-pool")
+	if err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	updated := k.getPool("test-pool")
+	share := updated.Status.Shares[0]
+	if share.MountTargetIP == "" {
+		t.Error("expected MountTargetIP to be populated after mount target recovery")
+	}
+	if share.MountTargetID == "" {
+		t.Error("expected MountTargetID to be populated after mount target recovery")
+	}
+	if len(share.MountTargets) == 0 {
+		t.Error("expected MountTargets to be populated after mount target recovery")
+	}
+	if vpc.CreateMountTargetCalls != 1 {
+		t.Errorf("expected 1 CreateShareMountTarget call, got %d", vpc.CreateMountTargetCalls)
+	}
+}
+
+func TestReconcile_HealthCheck_SkipsMountTargetRecoveryWhenNoVPCID(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+
+	shareInfo, _ := vpc.CreateFileShare(context.Background(), ibmcloudInput("test-pool", 1000))
+	vpc.ClearMountTargets(shareInfo.ID)
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		v1alpha1.PoolShareStatus{
+			ShareID:       shareInfo.ID,
+			ShareName:     shareInfo.Name,
+			MountTargetIP: "",
+			TotalGB:       1000,
+			State:         "stable",
+			Zone:          "us-south-1",
+		},
+	)
+	pool.Spec.InitialShares = 1
+	k.addPool(pool)
+
+	r := newReconciler(k, vpc)
+	// r.vpcID is empty — VPC config not yet set
+
+	_, err := reconcilePool(r, "test-pool")
+	if err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	// Should not attempt to create mount target without VPC ID
+	if vpc.CreateMountTargetCalls != 0 {
+		t.Errorf("expected 0 CreateShareMountTarget calls without vpcID, got %d", vpc.CreateMountTargetCalls)
 	}
 }
 

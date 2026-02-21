@@ -32,6 +32,14 @@ func (r *realClient) GetFileSharePool(ctx context.Context, name string) (*v1alph
 	return pool, nil
 }
 
+func (r *realClient) ListFileSharePools(ctx context.Context) ([]v1alpha1.FileSharePool, error) {
+	list := &v1alpha1.FileSharePoolList{}
+	if err := r.client.List(ctx, list); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
 func (r *realClient) UpdateFileSharePoolStatus(ctx context.Context, pool *v1alpha1.FileSharePool) error {
 	return r.client.Status().Update(ctx, pool)
 }

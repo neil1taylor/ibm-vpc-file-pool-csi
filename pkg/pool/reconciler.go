@@ -2,6 +2,7 @@ package pool
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -10,11 +11,23 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/k8s"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
+
+// unstructuredClient is a minimal interface for get/patch operations on
+// unstructured objects. Satisfied by client.Client from controller-runtime.
+type unstructuredClient interface {
+	Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error
+	Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.PatchOption) error
+}
 
 const (
 	// FinalizerName protects FileSharePool resources from premature deletion.
@@ -34,6 +47,13 @@ type FileSharePoolReconciler struct {
 	subnetID             string
 	defaultResourceGroup string
 	mu                   sync.Mutex
+
+	// directClient and restMapper are set by SetupWithManager for
+	// unstructured operations (e.g. CDI StorageProfile patching).
+	directClient unstructuredClient
+	restMapper   meta.RESTMapper
+	cdiChecked   bool
+	cdiInstalled bool
 }
 
 // NewFileSharePoolReconciler creates a new reconciler with the given dependencies.
@@ -96,6 +116,9 @@ func (r *FileSharePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	// 2b. Ensure StorageClasses exist for this pool
 	r.ensureStorageClasses(ctx, pool)
+
+	// 2c. Ensure CDI StorageProfiles have claimPropertySets (KubeVirt)
+	r.ensureStorageProfiles(ctx, pool)
 
 	// 3. Initial provisioning
 	if pool.Status.Phase == "" || pool.Status.Phase == "Initializing" {
@@ -301,6 +324,49 @@ func (r *FileSharePoolReconciler) healthCheck(ctx context.Context, pool *v1alpha
 		case "pending":
 			if share.State != "creating" {
 				share.State = "creating"
+			}
+		}
+
+		// Recovery: if the share is stable but has no mount target IP, the share
+		// may have been created before VPC config was available (no inline mount
+		// target), or the mount target's MountPath never populated. Create a mount
+		// target if none exist on the VPC side.
+		if share.State == "stable" && share.MountTargetIP == "" {
+			if len(info.MountTargets) == 0 && r.vpcID != "" {
+				klog.InfoS("Stable share has no mount targets — creating one",
+					"pool", pool.Name, "shareID", share.ShareID)
+				mtInput := ibmcloud.CreateMountTargetInput{
+					Name:             share.ShareName + "-mt",
+					VPCId:            r.vpcID,
+					EncryptInTransit: pool.Spec.EncryptionInTransit,
+				}
+				mtInfo, mtErr := r.vpcClient.CreateShareMountTarget(ctx, share.ShareID, mtInput)
+				if mtErr != nil {
+					klog.ErrorS(mtErr, "Failed to create mount target for share — "+
+						"share may use security_group access mode (incompatible with VPC mount targets). "+
+						"Mark share as draining to prevent allocations.",
+						"shareID", share.ShareID)
+					share.State = "draining"
+				} else {
+					share.MountTargetIP = mtInfo.IPAddress
+					share.MountTargetID = mtInfo.ID
+					share.ExportPath = mtInfo.ExportPath
+					share.MountTargets = []v1alpha1.ZoneMountTarget{
+						{
+							Zone:          share.Zone,
+							MountTargetID: mtInfo.ID,
+							MountTargetIP: mtInfo.IPAddress,
+							ExportPath:    mtInfo.ExportPath,
+						},
+					}
+					klog.InfoS("Created mount target for share",
+						"shareID", share.ShareID, "ip", mtInfo.IPAddress,
+						"exportPath", mtInfo.ExportPath)
+				}
+			} else if len(info.MountTargets) > 0 {
+				klog.V(2).InfoS("Share has mount targets but IP not yet populated — will retry",
+					"shareID", share.ShareID,
+					"mountTargetCount", len(info.MountTargets))
 			}
 		}
 	}
@@ -802,8 +868,131 @@ func (r *FileSharePoolReconciler) updateConditions(pool *v1alpha1.FileSharePool)
 	}
 }
 
+// cdiAvailable checks whether CDI's StorageProfile CRD is installed on the
+// cluster. The result is cached for the lifetime of the controller.
+func (r *FileSharePoolReconciler) cdiAvailable() bool {
+	if r.cdiChecked {
+		return r.cdiInstalled
+	}
+	r.cdiChecked = true
+	if r.restMapper == nil {
+		return false
+	}
+	gvr := schema.GroupVersionResource{
+		Group:    "cdi.kubevirt.io",
+		Version:  "v1beta1",
+		Resource: "storageprofiles",
+	}
+	_, err := r.restMapper.KindFor(gvr)
+	r.cdiInstalled = err == nil
+	if r.cdiInstalled {
+		klog.V(2).InfoS("CDI detected — will auto-patch StorageProfiles")
+	} else {
+		klog.V(4).InfoS("CDI not detected — skipping StorageProfile patching")
+	}
+	return r.cdiInstalled
+}
+
+// ensureStorageProfiles patches CDI StorageProfile CRs for this pool's
+// StorageClasses, setting claimPropertySets if empty. This enables the
+// OpenShift Virtualization UI to auto-select access modes for our driver.
+// Errors are logged but non-fatal — pool reconciliation continues regardless.
+func (r *FileSharePoolReconciler) ensureStorageProfiles(ctx context.Context, pool *v1alpha1.FileSharePool) {
+	if shouldSkipStorageClass(pool) {
+		return
+	}
+	if !r.cdiAvailable() {
+		return
+	}
+	for _, sc := range storageClassesForPool(pool) {
+		r.patchStorageProfile(ctx, sc.Name)
+	}
+}
+
+// storageProfileGVR is the GroupVersionResource for CDI StorageProfiles.
+var storageProfileGVR = schema.GroupVersionResource{
+	Group:    "cdi.kubevirt.io",
+	Version:  "v1beta1",
+	Resource: "storageprofiles",
+}
+
+// patchStorageProfile patches the CDI StorageProfile with the given name,
+// setting spec.claimPropertySets and spec.cloneStrategy if not already set.
+// claimPropertySets enables the Virtualization UI to auto-select access modes.
+// cloneStrategy "copy" forces host-assisted cloning — CDI's snapshot-based
+// cloning does not work with our CSI driver.
+func (r *FileSharePoolReconciler) patchStorageProfile(ctx context.Context, name string) {
+	if r.directClient == nil {
+		return
+	}
+
+	// Fetch the existing StorageProfile.
+	sp := &unstructured.Unstructured{}
+	sp.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "cdi.kubevirt.io",
+		Version: "v1beta1",
+		Kind:    "StorageProfile",
+	})
+	if err := r.directClient.Get(ctx, types.NamespacedName{Name: name}, sp); err != nil {
+		klog.V(4).InfoS("StorageProfile not found (CDI may not have created it yet)",
+			"storageProfile", name, "err", err)
+		return
+	}
+
+	// Build a merge patch for fields that need setting.
+	needsPatch := false
+	patchMap := map[string]interface{}{"spec": map[string]interface{}{}}
+	specPatch := patchMap["spec"].(map[string]interface{})
+
+	// Check if claimPropertySets is already populated.
+	spec, _, _ := unstructured.NestedMap(sp.Object, "spec")
+	if spec == nil || spec["claimPropertySets"] == nil {
+		specPatch["claimPropertySets"] = []interface{}{
+			map[string]interface{}{
+				"accessModes": []interface{}{"ReadWriteMany"},
+				"volumeMode":  "Filesystem",
+			},
+		}
+		needsPatch = true
+	} else if cps, ok := spec["claimPropertySets"].([]interface{}); ok && len(cps) == 0 {
+		specPatch["claimPropertySets"] = []interface{}{
+			map[string]interface{}{
+				"accessModes": []interface{}{"ReadWriteMany"},
+				"volumeMode":  "Filesystem",
+			},
+		}
+		needsPatch = true
+	}
+
+	// Ensure cloneStrategy is "copy" — CDI's snapshot clone doesn't work with our driver.
+	if spec == nil || spec["cloneStrategy"] != "copy" {
+		specPatch["cloneStrategy"] = "copy"
+		needsPatch = true
+	}
+
+	if !needsPatch {
+		klog.V(4).InfoS("StorageProfile already has claimPropertySets and cloneStrategy — skipping",
+			"storageProfile", name)
+		return
+	}
+
+	patchBytes, _ := json.Marshal(patchMap)
+	patchObj := client.RawPatch(types.MergePatchType, patchBytes)
+	if err := r.directClient.Patch(ctx, sp, patchObj); err != nil {
+		klog.ErrorS(err, "Failed to patch StorageProfile (non-fatal)",
+			"storageProfile", name)
+		return
+	}
+	klog.V(2).InfoS("Patched StorageProfile",
+		"storageProfile", name,
+		"claimPropertySets", "ReadWriteMany/Filesystem",
+		"cloneStrategy", "copy")
+}
+
 // SetupWithManager registers the reconciler with a controller-runtime Manager.
 func (r *FileSharePoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	r.directClient = mgr.GetClient()
+	r.restMapper = mgr.GetRESTMapper()
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.FileSharePool{}).
 		Named("filesharepool").

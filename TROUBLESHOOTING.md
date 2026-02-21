@@ -163,6 +163,101 @@ See [TUTORIAL.md](TUTORIAL.md) Step 8b and [VM-DISK-FORMATS.md](VM-DISK-FORMATS.
 
 ---
 
+### OpenShift Virtualization UI: "no accessMode specified in StorageProfile"
+
+**Symptom:** When creating a VM through the OpenShift Virtualization UI using the `ibm-vpc-file-pool` StorageClass, the UI shows:
+> "no accessMode specified in StorageProfile ibm-vpc-file-pool"
+
+**Cause:** KubeVirt's CDI auto-creates a `StorageProfile` CR for each StorageClass. For known CSI drivers, CDI auto-populates `claimPropertySets` (access modes + volume mode). For our custom driver, CDI can't determine the correct settings, so the field is empty and the UI doesn't know what access mode to use.
+
+**Automatic fix (v0.11.0+):** The controller detects CDI at startup and automatically patches the StorageProfile with `claimPropertySets: [{accessModes: ["ReadWriteMany"], volumeMode: Filesystem}]` during reconciliation. No manual step required.
+
+**Manual workaround (pre-v0.11.0):**
+```bash
+kubectl patch storageprofile ibm-vpc-file-pool --type merge \
+  -p '{"spec":{"claimPropertySets":[{"accessModes":["ReadWriteMany"],"volumeMode":"Filesystem"}]}}'
+```
+
+**Verification:**
+```bash
+kubectl get storageprofile ibm-vpc-file-pool -o jsonpath='{.spec.claimPropertySets}'
+# Should output: [{"accessModes":["ReadWriteMany"],"volumeMode":"Filesystem"}]
+```
+
+---
+
+### OpenShift Virtualization UI: "no accessMode specified in StorageProfile" (other StorageClasses)
+
+**Symptom:** When creating a VM that references a non-pool StorageClass (e.g. `ibmc-vpc-file-1000-iops`, `ibmc-vpc-file-5-iops`), the UI shows:
+> "no accessMode specified in StorageProfile ibmc-vpc-file-1000-iops"
+
+**Cause:** CDI creates a StorageProfile for every StorageClass, but can't auto-detect access modes for all CSI drivers. The stock IBM VPC File CSI StorageClasses may also be missing `claimPropertySets`.
+
+**Note:** The pool CSI controller only auto-patches StorageProfiles for its own pool StorageClasses. Third-party or stock StorageClasses must be patched manually.
+
+**Fix:**
+```bash
+# Patch the stock IBM VPC File CSI StorageProfiles
+kubectl patch storageprofile ibmc-vpc-file-1000-iops --type merge \
+  -p '{"spec":{"claimPropertySets":[{"accessModes":["ReadWriteMany"],"volumeMode":"Filesystem"}]}}'
+
+# Repeat for other stock StorageClasses as needed
+kubectl patch storageprofile ibmc-vpc-file-5-iops --type merge \
+  -p '{"spec":{"claimPropertySets":[{"accessModes":["ReadWriteMany"],"volumeMode":"Filesystem"}]}}'
+```
+
+**Verification:**
+```bash
+kubectl get storageprofile <name> -o jsonpath='{.spec.claimPropertySets}'
+# Should output: [{"accessModes":["ReadWriteMany"],"volumeMode":"Filesystem"}]
+```
+
+---
+
+## Share Issues
+
+### Share has no mount target IP
+
+**Symptom:** A share in pool status shows `ipAddress: null` or empty `mountTargetIP`. PVCs allocated to this share have PVs with an empty `server` field, causing NFS mount failures.
+
+**Cause:** The share was created before VPC auto-discovery completed (vpcID was empty), so no inline mount target was created during `CreateFileShare`. VPC may have defaulted the share to `security_group` access mode.
+
+**Automatic recovery (v0.11.0+):** The reconciler detects stable shares with no mount target IP and attempts to create one. If mount target creation fails (e.g., the share uses security_group access mode, which is incompatible with VPC mount targets), the share is automatically marked as `draining` to prevent new allocations.
+
+**Manual check:**
+```bash
+# Find shares with empty mount target IP
+kubectl get fsp <pool-name> -o jsonpath='{range .status.shares[*]}{.shareID}{"\t"}{.mountTargetIP}{"\t"}{.state}{"\n"}{end}'
+
+# Check VPC share access mode
+ibmcloud is share <share-id> --output json | jq '.access_control_mode'
+# "vpc" = VPC access mode (can have VPC mount targets)
+# "security_group" = security group mode (incompatible with VPC mount targets)
+```
+
+**If the share is in security_group mode:** It cannot be recovered. The reconciler marks it as `draining`. Existing PVCs on this share must be recreated on a healthy share. Delete the affected PVCs and let the CSI provisioner reallocate them.
+
+---
+
+### PV has empty NFS server field
+
+**Symptom:** Pod stuck in `ContainerCreating` with mount error. The PV's `spec.csi.volumeAttributes.server` is empty.
+
+**Cause (pre-v0.11.0):** `selectShare` did not filter by `MountTargetIP`. A share with no mount target was selected for allocation.
+
+**Fix:** Upgrade to v0.11.0+ (adds the mount target IP guard). For existing broken PVs, delete the PVC and recreate it — the new allocation will only pick shares with populated mount target IPs.
+
+```bash
+# Check if a PV has an empty server
+kubectl get pv <pv-name> -o jsonpath='{.spec.csi.volumeAttributes.server}'
+
+# If empty, delete and recreate the PVC
+kubectl delete pvc <pvc-name> -n <namespace>
+# Recreate the PVC YAML — the new allocation picks a healthy share
+```
+
+---
+
 ## Mount Issues
 
 ### NFS mount failed

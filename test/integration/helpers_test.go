@@ -64,6 +64,16 @@ func (f *fakeK8sClient) GetFileSharePool(_ context.Context, name string) (*v1alp
 	return p.DeepCopy(), nil
 }
 
+func (f *fakeK8sClient) ListFileSharePools(_ context.Context) ([]v1alpha1.FileSharePool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var result []v1alpha1.FileSharePool
+	for _, p := range f.pools {
+		result = append(result, *p.DeepCopy())
+	}
+	return result, nil
+}
+
 func (f *fakeK8sClient) UpdateFileSharePoolStatus(_ context.Context, pool *v1alpha1.FileSharePool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

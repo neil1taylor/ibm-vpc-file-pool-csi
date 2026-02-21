@@ -4,6 +4,36 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [v0.11.0] — 2026-02-21
+
+### Added
+
+- **Golden image syncer for KubeVirt one-click VM creation** — Background worker discovers CDI `DataImportCron` resources and provisions ready-to-boot golden image PVCs on pool storage. Two modes: native CDI (pool SC is default) and custom syncer (pool SC is not default). Custom syncer creates converter Jobs that download OCI images from container registries (e.g., `quay.io/containerdisks/`), decompress gzip-compressed OCI layers, detect qcow2 vs raw format, convert to raw, and write `disk.img` to golden PVCs. Creates `DataSource` CRs for InstanceTypes tab and OpenShift `Template` CRs for the VM catalog
+- **`GoldenImageConfig` in FileSharePool spec** — `spec.goldenImages` configures target namespaces, image filters, converter image, and PVC size for the golden image syncer
+- **`GoldenImageStatus` in FileSharePool status** — `status.goldenImages` tracks per-image, per-namespace sync state (Pending/Syncing/Ready/Failed)
+- **Mount target recovery in health check** — When a stable share has no mount target IP and no VPC mount targets, the reconciler attempts to create one. If creation fails (e.g., share uses `security_group` access mode incompatible with VPC mount targets), the share is marked as `draining` to prevent further allocations
+- **`selectShare` mount target IP guard** — Share selection for both normal allocations and clones now skips shares with empty `MountTargetIP`, preventing PVs with empty NFS server fields that cause mount failures
+- **RBAC for CDI, Jobs, and Templates** — ClusterRole extended with `cdi.kubevirt.io` (dataimportcrons, datasources), `batch/jobs` (create/delete), and `template.openshift.io/templates` (CRUD)
+
+### Fixed
+
+- **Shares without mount targets selected for allocation** — `selectShare` did not filter by `MountTargetIP`. Shares created before VPC config was available (no inline mount target) could be selected, producing PVs with an empty `server` field. Fixed by adding `MountTargetIP == ""` check to both `selectShare` and `selectShareForClone`
+- **No recovery for shares missing mount targets** — Stable shares with no mount target IP were stuck permanently. Added health check recovery that creates a mount target or marks the share as draining if creation fails
+- **Golden image converter OOMKilled on large images** — Converter Jobs wrote decompressed OCI layers to staging emptyDir (tmpfs, backed by pod memory). Large images (2+ GB decompressed) caused OOMKill at the 2Gi memory limit. Fixed by decompressing directly to the NFS PVC mount (`/data/`) instead of staging
+- **Golden image converter produced gzip files instead of raw disk images** — OCI image layers are gzip-compressed. `qemu-img info` doesn't understand gzip and reported "raw" format, so the script copied the gzip file as-is. VMs failed with "timed out waiting for domain to be defined". Fixed by adding `file` + `gunzip` decompression step before format detection
+
+## [v0.10.0] — 2026-02-20
+
+### Added
+
+- **CDI `StorageProfile` auto-patching with `cloneStrategy: copy`** — The controller patches CDI's StorageProfile for pool StorageClasses with `claimPropertySets` (accessModes, volumeMode) and `cloneStrategy: copy` (host-assisted cloning). CDI's default snapshot-based cloning does not work with the pool CSI driver; `copy` mode uses CDI's built-in host-assisted clone path
+- **NFS `sec=sys` default mount option** — Added `sec=sys` to the driver's default NFS mount options. VPC file shares default-negotiate to `sec=null` (anonymous auth) unless the client explicitly requests `sec=sys`. Without it, all files are UID 99, chown fails, and KubeVirt VMs cannot start
+
+### Fixed
+
+- **KubeVirt VMs fail to start: chown operation not permitted** — VPC file shares negotiate `sec=null` by default, making all files anonymous (UID 99) and chown impossible. virt-handler's `chown(107, 107)` failed. Fixed by adding `sec=sys` to default mount options, enabling standard Unix UID/GID auth where chown works for non-root UIDs
+- **CDI clones fail between StorageClasses** — CDI's default clone strategy uses VolumeSnapshots, which fails when cloning between different CSI drivers. Set `cloneStrategy: copy` in the StorageProfile to use host-assisted cloning
+
 ## [v0.9.0] — 2026-02-19
 
 ### Fixed
@@ -171,6 +201,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Mount target IP resolution when share has multiple mount targets across zones
 - Makefile targets for end-to-end build pipeline
 
+[v0.11.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.10.0...v0.11.0
+[v0.10.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.9.0...v0.10.0
+[v0.9.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.8.0...v0.9.0
 [v0.8.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.7.0...v0.8.0
 [v0.7.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.6.0...v0.7.0
 [v0.6.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.5.0...v0.6.0

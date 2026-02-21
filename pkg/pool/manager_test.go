@@ -187,6 +187,16 @@ func (f *fakeK8sClient) GetFileSharePool(_ context.Context, name string) (*v1alp
 	return p.DeepCopy(), nil
 }
 
+func (f *fakeK8sClient) ListFileSharePools(_ context.Context) ([]v1alpha1.FileSharePool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var result []v1alpha1.FileSharePool
+	for _, p := range f.pools {
+		result = append(result, *p.DeepCopy())
+	}
+	return result, nil
+}
+
 func (f *fakeK8sClient) UpdateFileSharePoolStatus(_ context.Context, pool *v1alpha1.FileSharePool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -2132,6 +2142,33 @@ func TestSelectShare_AllDraining_Exhausted(t *testing.T) {
 	_, err := selectShare("spread", shares, 10, "")
 	if !errors.Is(err, ErrPoolExhausted) {
 		t.Fatalf("expected ErrPoolExhausted when all shares are draining, got: %v", err)
+	}
+}
+
+func TestSelectShare_SkipsEmptyMountTargetIP(t *testing.T) {
+	shares := []v1alpha1.PoolShareStatus{
+		{ShareID: "s1", ShareName: "s1", TotalGB: 1000, AllocatedGB: 0, State: "stable", MountTargetIP: ""},
+		newStableShare("s2", "s2", 1000, 500, 3),
+	}
+
+	got, err := selectShare("spread", shares, 10, "")
+	if err != nil {
+		t.Fatalf("selectShare failed: %v", err)
+	}
+	if got.ShareID != "s2" {
+		t.Errorf("expected s2 (has mount target IP), got %s", got.ShareID)
+	}
+}
+
+func TestSelectShare_AllEmptyMountTargetIP_Exhausted(t *testing.T) {
+	shares := []v1alpha1.PoolShareStatus{
+		{ShareID: "s1", ShareName: "s1", TotalGB: 1000, AllocatedGB: 0, State: "stable", MountTargetIP: ""},
+		{ShareID: "s2", ShareName: "s2", TotalGB: 1000, AllocatedGB: 0, State: "stable", MountTargetIP: ""},
+	}
+
+	_, err := selectShare("spread", shares, 10, "")
+	if !errors.Is(err, ErrPoolExhausted) {
+		t.Fatalf("expected ErrPoolExhausted when all shares have no mount target IP, got: %v", err)
 	}
 }
 
