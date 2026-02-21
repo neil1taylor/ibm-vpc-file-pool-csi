@@ -259,15 +259,7 @@ func (s *GoldenImageSyncer) syncImageInNamespace(
 		}
 	}
 
-	// 3. Ensure CDI DataSource in openshift-virtualization-os-images (the standard
-	// location for bootable volumes, visible globally in the InstanceTypes tab).
-	// The DataSource references the PVC in the target namespace.
-	if err := s.ensureDataSource(ctx, "openshift-virtualization-os-images", ns, img.Name, pvcName, poolName); err != nil {
-		klog.V(4).ErrorS(err, "Failed to ensure DataSource", "image", img.Name)
-		// Non-fatal — DataSource is for InstanceTypes UI only.
-	}
-
-	// 4. Ensure OpenShift Template (for Template catalog tab).
+	// 3. Ensure OpenShift Template (for Template catalog tab).
 	if err := s.ensureTemplate(ctx, ns, img.Name, templateName, poolName, scName, pvcName); err != nil {
 		status.Phase = "Failed"
 		status.Message = fmt.Sprintf("Template: %v", err)
@@ -283,8 +275,6 @@ func (s *GoldenImageSyncer) syncImageInNamespace(
 
 // ensureGoldenPVC creates the golden image PVC if it doesn't exist.
 // Returns true if the PVC already has the "ready" annotation (disk.img populated).
-// Note: instancetype labels are NOT set on PVCs — DataSources in
-// openshift-virtualization-os-images are the proper mechanism for bootable volumes.
 func (s *GoldenImageSyncer) ensureGoldenPVC(
 	ctx context.Context,
 	ns, pvcName, imageName, poolName, scName string,
@@ -330,80 +320,6 @@ func (s *GoldenImageSyncer) ensureGoldenPVC(
 
 	klog.V(2).InfoS("Created golden image PVC", "namespace", ns, "pvc", pvcName, "pool", poolName)
 	return false, nil
-}
-
-// osPreference returns the VirtualMachineClusterPreference name for a given image.
-func osPreference(imageName string) string {
-	name := cleanImageName(imageName)
-	// Map to known preference names (dots not dashes).
-	name = strings.ReplaceAll(name, "-", ".")
-	// Handle known mappings: "centos.stream9" → "centos.stream9", "fedora" → "fedora"
-	return name
-}
-
-// ensureDataSource creates a CDI DataSource that makes the golden PVC appear
-// as a bootable volume in the InstanceTypes tab of the Virtualization console.
-// dsNamespace is where the DataSource is created (typically openshift-virtualization-os-images).
-// pvcNamespace is where the golden PVC lives (the pool's target namespace).
-func (s *GoldenImageSyncer) ensureDataSource(ctx context.Context, dsNamespace, pvcNamespace, imageName, pvcName, poolName string) error {
-	cleanName := cleanImageName(imageName)
-	preference := osPreference(imageName)
-
-	ds := &unstructured.Unstructured{}
-	ds.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   "cdi.kubevirt.io",
-		Version: "v1beta1",
-		Kind:    "DataSource",
-	})
-
-	// Use a pool-specific name to avoid colliding with CDI's own DataSources.
-	dsName := cleanName + "-nfs-pool"
-	err := s.directClient.Get(ctx, types.NamespacedName{Namespace: dsNamespace, Name: dsName}, ds)
-	if err == nil {
-		return nil // DataSource already exists
-	}
-	if !errors.IsNotFound(err) && !isNoMatchError(err) {
-		return fmt.Errorf("getting datasource %s/%s: %w", dsNamespace, dsName, err)
-	}
-
-	newDS := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "cdi.kubevirt.io/v1beta1",
-			"kind":       "DataSource",
-			"metadata": map[string]interface{}{
-				"name":      dsName,
-				"namespace": dsNamespace,
-				"labels": map[string]interface{}{
-					"instancetype.kubevirt.io/default-instancetype": "u1.medium",
-					"instancetype.kubevirt.io/default-preference":   preference,
-					goldenImageLabel: "true",
-					goldenPoolLabel:  poolName,
-				},
-			},
-			"spec": map[string]interface{}{
-				"source": map[string]interface{}{
-					"pvc": map[string]interface{}{
-						"name":      pvcName,
-						"namespace": pvcNamespace,
-					},
-				},
-			},
-		},
-	}
-
-	if err := s.directClient.Create(ctx, newDS); err != nil {
-		if errors.IsAlreadyExists(err) {
-			return nil
-		}
-		if isNoMatchError(err) {
-			klog.V(4).InfoS("CDI DataSource API not available, skipping", "namespace", dsNamespace)
-			return nil
-		}
-		return fmt.Errorf("creating datasource %s/%s: %w", dsNamespace, dsName, err)
-	}
-
-	klog.V(2).InfoS("Created golden image DataSource", "namespace", dsNamespace, "datasource", dsName, "pvcNamespace", pvcNamespace, "pvc", pvcName)
-	return nil
 }
 
 // ensureConverterJob creates or checks the converter Job for a golden image.

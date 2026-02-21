@@ -77,10 +77,10 @@ rules:
   - apiGroups: ["cdi.kubevirt.io"]
     resources: ["storageprofiles"]
     verbs: ["get", "patch"]
-  # CDI DataImportCrons and DataSources (golden image discovery)
+  # CDI DataImportCrons (golden image discovery)
   - apiGroups: ["cdi.kubevirt.io"]
-    resources: ["dataimportcrons", "datasources"]
-    verbs: ["get", "list", "watch", "create"]
+    resources: ["dataimportcrons"]
+    verbs: ["get", "list", "watch"]
   # Jobs for golden image conversion
   - apiGroups: ["batch"]
     resources: ["jobs"]
