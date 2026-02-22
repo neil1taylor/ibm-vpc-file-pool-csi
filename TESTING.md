@@ -499,6 +499,132 @@ All files use `//go:build e2e` — `make test` never runs them.
 | `test/e2e/basic_test.go` | `TestBasicPool` — pool with no accessor zones, verifies no `server.<zone>` keys |
 | `test/e2e/crosszone_test.go` | `TestCrossZonePool` — pool with accessor zones, verifies mount targets in both zones and `server.<zone>` keys in PV. `TestCrossZonePool_CRDValidation` — CRD schema validation |
 
+### VM Clone E2E Test
+
+`test/e2e/test-vm-clone.sh` validates the full syncer-driven KubeVirt golden image clone pipeline. The test creates a pool with `goldenImages.enabled=true` and lets the golden image syncer handle image discovery from CDI DataImportCrons, PVC creation, qcow2-to-raw converter Jobs, and OpenShift Template creation. It then creates a VM from the syncer-generated template, verifies the CSI clone Job completes, and checks VM boot with connectivity tests.
+
+```bash
+# Via make
+make test-vm
+
+# With options
+./test/e2e/test-vm-clone.sh --zone eu-de-1 --keep
+
+# Available flags
+#   --keep          Don't clean up on success
+#   --namespace NS  Override namespace (default: e2e-vm-test)
+#   --pool POOL     Override pool name (default: e2e-vm-pool)
+#   --zone ZONE     Override zone (default: eu-de-1)
+#   --image FILTER  Override image filter (default: centos-stream-9)
+#   --timeout SECS  Override total timeout (default: 900)
+```
+
+Requires: ROKS cluster with OpenShift Virtualization + CDI installed, `oc`, `virtctl`, `kubectl`, `jq`. Takes approximately 13-14 minutes.
+
+**Stage flow (11 stages):**
+
+| Stage | Description | Timeout |
+|-------|-------------|---------|
+| 1. check_prerequisites | oc, virtctl, cluster auth, OCV, CDI, CRDs | — |
+| 2. cleanup_previous | Idempotent delete of prior run resources | 60s |
+| 3. create_namespace | Create test namespace | — |
+| 4. create_pool | StorageClass + FileSharePool with goldenImages.enabled | — |
+| 5. wait_pool_ready | Poll Phase=Ready | 180s |
+| 6. wait_golden_images_ready | Syncer creates PVCs + converter Jobs + templates | 900s |
+| 7. pick_ready_image | Find first ready template in namespace | — |
+| 8. create_vm_from_template | `oc process` template, apply VM + PVCs | — |
+| 9. wait_clone_complete | Poll SubVolume cloneStatus=Complete | 300s |
+| 10. wait_vm_running | Poll VMI Phase=Running + Ready=True | 180s |
+| 11. verify_vm_connectivity | virtctl console + guest agent (best-effort) | 30s |
+
+Automatic diagnostic collection on failure: pool YAML + goldenImages status, SubVolumes, PVC status, clone/converter Job logs, controller/node agent logs, VM events.
+
+### Cleanup
+
+The test script handles cleanup automatically in two places:
+
+- **Before the test (Stage 2):** Runs a hardened cleanup to remove leftover resources from a previous run.
+- **After the test (EXIT trap):** Runs the same cleanup on both success and failure, unless `--keep` is specified.
+
+If you use `--keep`, ctrl-C out of a run, or the script crashes, you need to clean up manually.
+
+#### Why Order Matters
+
+Resources have dependencies that must be deleted in sequence:
+
+1. **Syncer first** — if you delete PVCs while the syncer is enabled, it re-creates them immediately.
+2. **VMs before PVCs** — virt-launcher pods hold PVC mounts; PVCs can't delete while mounted.
+3. **PVCs before SubVolumes** — the CSI driver cascades PVC deletion to SubVolume deletion. Deleting SubVolumes first orphans PVCs.
+4. **Pool last** — the pool has a finalizer that blocks deletion while SubVolumes still reference its shares.
+
+#### Manual Cleanup
+
+```bash
+POOL=e2e-vm-pool
+NS=e2e-vm-test
+
+# Step 1: Disable golden image syncer (stops it re-creating PVCs)
+oc patch filesharepools.storage.ibmcloud.io $POOL \
+    --type=merge -p '{"spec":{"goldenImages":{"enabled":false}}}'
+
+# Step 2: Delete workloads (VMs, Jobs, pods, PVCs, templates)
+oc delete vm --all -n $NS --timeout=30s
+oc delete jobs --all -n $NS --timeout=30s
+oc delete pods --all -n $NS --force --grace-period=0
+oc delete pvc --all -n $NS --timeout=60s
+oc delete templates --all -n $NS
+
+# Step 3: Grace period for CSI to cascade SubVolume deletes
+sleep 5
+
+# Step 4: Force-clean orphan SubVolumes (clear finalizers if needed)
+for sv in $(oc get subvolumes.storage.ibmcloud.io \
+    -l storage.ibmcloud.io/pool=$POOL -o name); do
+    oc patch "$sv" --type=merge -p '{"metadata":{"finalizers":null}}'
+done
+oc delete subvolumes.storage.ibmcloud.io \
+    -l storage.ibmcloud.io/pool=$POOL
+
+# Step 5: Delete pool-owned PVs
+oc delete pv -l storage.ibmcloud.io/clone-temp=true
+oc get pv -o json | jq -r "
+    .items[]
+    | select(.spec.csi.driver == \"vpc-file-pool.csi.ibm.io\")
+    | select(.spec.csi.volumeAttributes.pool == \"$POOL\")
+    | .metadata.name" | xargs -r oc delete pv
+
+# Step 6: Delete pool (force-remove finalizer if stuck)
+oc delete filesharepools.storage.ibmcloud.io $POOL --timeout=30s || {
+    oc patch filesharepools.storage.ibmcloud.io $POOL \
+        --type=merge -p '{"metadata":{"finalizers":null}}'
+    oc delete filesharepools.storage.ibmcloud.io $POOL
+}
+
+# Step 7: Delete StorageClass
+oc delete storageclass $POOL
+
+# Step 8: Delete namespace
+oc delete namespace $NS --timeout=60s
+```
+
+#### Stuck Namespace Recovery
+
+If the namespace is stuck in `Terminating` after 60 seconds, PVC or SubVolume finalizers are likely blocking deletion. Clear them:
+
+```bash
+# Clear PVC finalizers
+for pvc in $(oc get pvc -n $NS -o name); do
+    oc patch "$pvc" -n $NS --type=merge \
+        -p '{"metadata":{"finalizers":null}}'
+done
+
+# Clear SubVolume finalizers
+for sv in $(oc get subvolumes.storage.ibmcloud.io -n $NS -o name); do
+    oc patch "$sv" -n $NS --type=merge \
+        -p '{"metadata":{"finalizers":null}}'
+done
+```
+
 ### Key Design Decisions
 
 - **Standard `testing.T`** — no Ginkgo/Gomega, matches project conventions

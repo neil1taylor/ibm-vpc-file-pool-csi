@@ -26,17 +26,45 @@ oc get csidriver vpc-file-pool.csi.ibm.io
 
 ## Step 1: Clean Up Any Previous Test Resources
 
+Resources must be deleted in the right order — VMs hold PVC mounts, PVCs cascade to SubVolume deletes, and pools have finalizers that block deletion while SubVolumes exist.
+
 ```bash
-# Delete the tutorial namespace (removes all PVCs, pods, VMs inside it)
-oc delete namespace pool-tutorial --ignore-not-found
+POOL_NAME=my-pool
+TUTORIAL_NS=pool-tutorial
 
-# Delete any existing test pool (WARNING: deletes underlying VPC file share)
-# Replace the pool name with whatever you used previously
-oc delete filesharepool --all --ignore-not-found
+# 1. Delete VMs first (releases PVC mounts)
+oc delete vm --all -n ${TUTORIAL_NS} --timeout=30s --ignore-not-found
 
-# Wait for shares to be deleted
+# 2. Delete pods, PVCs, and other resources
+oc delete pods --all -n ${TUTORIAL_NS} --force --grace-period=0 --ignore-not-found
+oc delete pvc --all -n ${TUTORIAL_NS} --timeout=60s --ignore-not-found
+
+# 3. Grace period for CSI to cascade SubVolume deletes
+sleep 5
+
+# 4. Force-clean orphan SubVolumes (if CSI cascade didn't finish)
+for sv in $(oc get subvolumes.storage.ibmcloud.io \
+    -l storage.ibmcloud.io/pool=${POOL_NAME} -o name 2>/dev/null); do
+    oc patch "$sv" --type=merge -p '{"metadata":{"finalizers":null}}'
+done
+oc delete subvolumes.storage.ibmcloud.io \
+    -l storage.ibmcloud.io/pool=${POOL_NAME} --ignore-not-found
+
+# 5. Delete pool (force-remove finalizer if stuck)
+oc delete filesharepool ${POOL_NAME} --timeout=60s --ignore-not-found || {
+    oc patch filesharepools.storage.ibmcloud.io ${POOL_NAME} \
+        --type=merge -p '{"metadata":{"finalizers":null}}'
+    oc delete filesharepool ${POOL_NAME} --ignore-not-found
+}
+
+# 6. Delete namespace
+oc delete namespace ${TUTORIAL_NS} --timeout=60s --ignore-not-found
+
+# 7. Verify VPC shares are being deleted
 ibmcloud is shares
 ```
+
+> **Stuck namespace?** If the namespace is stuck in `Terminating` for more than 60 seconds, clear PVC and SubVolume finalizers — see [Stuck Namespace Recovery](#stuck-namespace-recovery) below.
 
 ---
 
@@ -572,22 +600,96 @@ oc get subvolumes -o wide
 
 ## Cleanup
 
-```bash
-# 1. Delete the tutorial namespace — removes all PVCs, pods, and VMs inside it
-oc delete namespace ${TUTORIAL_NS}
+Resources must be deleted in dependency order. Deleting the namespace alone can leave orphan SubVolumes and a stuck pool.
 
-# 2. Verify pool capacity is reclaimed
+### Full Cleanup
+
+```bash
+# 1. Delete VMs (releases PVC mounts so PVCs can delete)
+oc delete vm --all -n ${TUTORIAL_NS} --timeout=30s
+
+# 2. Wait for VMIs to terminate
+for i in $(seq 1 15); do
+    oc get vmi -n ${TUTORIAL_NS} -o name 2>/dev/null | grep -q . || break
+    sleep 2
+done
+
+# 3. Delete pods and PVCs
+oc delete pods --all -n ${TUTORIAL_NS} --force --grace-period=0
+oc delete pvc --all -n ${TUTORIAL_NS} --timeout=60s
+
+# 4. Grace period for CSI to cascade SubVolume deletes
+sleep 5
+
+# 5. Force-clean orphan SubVolumes (clear finalizers if CSI cascade didn't finish)
+for sv in $(oc get subvolumes.storage.ibmcloud.io \
+    -l storage.ibmcloud.io/pool=${POOL_NAME} -o name 2>/dev/null); do
+    oc patch "$sv" --type=merge -p '{"metadata":{"finalizers":null}}'
+done
+oc delete subvolumes.storage.ibmcloud.io \
+    -l storage.ibmcloud.io/pool=${POOL_NAME} --ignore-not-found
+
+# 6. Delete pool-owned PVs
+oc get pv -o json | jq -r "
+    .items[]
+    | select(.spec.csi.driver == \"vpc-file-pool.csi.ibm.io\")
+    | select(.spec.csi.volumeAttributes.pool == \"${POOL_NAME}\")
+    | .metadata.name" | xargs -r oc delete pv
+
+# 7. Delete pool (force-remove finalizer if stuck)
+oc delete filesharepool ${POOL_NAME} --timeout=60s || {
+    oc patch filesharepools.storage.ibmcloud.io ${POOL_NAME} \
+        --type=merge -p '{"metadata":{"finalizers":null}}'
+    oc delete filesharepool ${POOL_NAME}
+}
+
+# 8. Delete StorageClass (auto-deleted with pool via OwnerReference,
+#    but delete manually if you created one yourself)
+# oc delete sc ${POOL_NAME}
+
+# 9. Delete namespace
+oc delete namespace ${TUTORIAL_NS} --timeout=60s
+
+# 10. Verify VPC shares are being deleted
+ibmcloud is shares
+```
+
+### Keep the Pool, Delete Only Workloads
+
+If you want to keep the pool for another round of testing:
+
+```bash
+# Delete VMs and pods
+oc delete vm --all -n ${TUTORIAL_NS} --timeout=30s
+oc delete pods --all -n ${TUTORIAL_NS} --force --grace-period=0
+
+# Delete PVCs (CSI cascades SubVolume deletes)
+oc delete pvc --all -n ${TUTORIAL_NS} --timeout=60s
+
+# Verify capacity is reclaimed
 oc get filesharepools
 # Expected: ALLOCATED=0, PVCS=0
-
-# 3. (Optional) Delete the pool — this deletes the VPC file share
-oc delete filesharepool ${POOL_NAME}
-ibmcloud is shares  # Verify share is gone
-
-# 4. (Optional) Delete the StorageClass — auto-deleted with the pool (OwnerReference),
-#    but if you created one manually:
-# oc delete sc ${POOL_NAME}
 ```
+
+### Stuck Namespace Recovery
+
+If the namespace is stuck in `Terminating`, PVC or SubVolume finalizers are blocking deletion. Clear them:
+
+```bash
+# Clear PVC finalizers
+for pvc in $(oc get pvc -n ${TUTORIAL_NS} -o name 2>/dev/null); do
+    oc patch "$pvc" -n ${TUTORIAL_NS} --type=merge \
+        -p '{"metadata":{"finalizers":null}}'
+done
+
+# Clear SubVolume finalizers
+for sv in $(oc get subvolumes.storage.ibmcloud.io -n ${TUTORIAL_NS} -o name 2>/dev/null); do
+    oc patch "$sv" -n ${TUTORIAL_NS} --type=merge \
+        -p '{"metadata":{"finalizers":null}}'
+done
+```
+
+The namespace should delete within a few seconds after clearing finalizers.
 
 ---
 

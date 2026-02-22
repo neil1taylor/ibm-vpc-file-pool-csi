@@ -2,6 +2,20 @@
 
 This document explains how to configure golden OS images for one-click VM creation from the OpenShift Virtualization UI or CLI.
 
+## Concepts
+
+The OpenShift Virtualization catalog offers two ways to create a VM, each backed by a different Kubernetes resource:
+
+| | DataSource (Image) | Template |
+|---|---|---|
+| **What it is** | A pointer to a bootable disk image (PVC or VolumeSnapshot) | A complete VM blueprint (CPU, memory, disks, network, cloud-init) |
+| **Catalog tab** | **InstanceTypes** — user picks an image + an instance type (CPU/RAM preset) | **Templates** — user clicks and gets a fully configured VM |
+| **API** | `cdi.kubevirt.io/v1beta1 DataSource` | `template.openshift.io/v1 Template` |
+| **Flexibility** | High — any image can be paired with any instance type | Low — opinionated, ready-to-go |
+| **Use case** | Power users who want to choose their own sizing | Quick-start VMs with sensible defaults |
+
+The golden image syncer creates **both** so that pool-backed images appear in both catalog tabs.
+
 ## Background
 
 CDI (Containerized Data Importer) manages golden OS images for OpenShift Virtualization. On clusters where the default StorageClass is ODF/Ceph, CDI imports and snapshots golden images on Ceph. These Ceph-backed golden images cannot be cloned to NFS pool storage, which causes the "Create VM" UI flow to fail with `UnrecognizedDataSourceKind`.
@@ -140,6 +154,32 @@ oc process centos-stream9-nfs-pool -n pool-tutorial \
   -p CLOUD_USER_PASSWORD=mypassword \
   | oc apply -n pool-tutorial -f -
 ```
+
+## Testing
+
+The E2E VM clone test validates the full syncer-driven golden image pipeline:
+
+```bash
+# Run the test (requires ROKS + OpenShift Virtualization + CDI)
+make test-vm
+
+# With options
+./test/e2e/test-vm-clone.sh --zone eu-de-1 --keep
+
+# Available flags
+#   --keep          Don't clean up on success
+#   --namespace NS  Override namespace (default: e2e-vm-test)
+#   --pool POOL     Override pool name (default: e2e-vm-pool)
+#   --zone ZONE     Override zone (default: eu-de-1)
+#   --image FILTER  Override image filter (default: centos-stream-9)
+#   --timeout SECS  Override total timeout (default: 900)
+```
+
+The test creates a pool with `goldenImages.enabled=true` and lets the syncer handle image discovery, PVC creation, converter Jobs, and template creation. It then creates a VM from the syncer-generated template, waits for the CSI clone Job to complete, and verifies the VM boots with connectivity checks.
+
+Runtime: ~13-14 minutes.
+
+The test handles cleanup automatically (before and after), but if you use `--keep` or the script crashes, see [TESTING.md — Manual Cleanup](TESTING.md#cleanup) for the 8-step teardown procedure and stuck-namespace recovery.
 
 ## Troubleshooting
 
