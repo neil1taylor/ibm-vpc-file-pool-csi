@@ -557,6 +557,16 @@ func TestReconcile_EmitsPrometheusGauges(t *testing.T) {
 	k := newFakeK8sClient()
 	vpc := fake.NewFakeVPCClient()
 
+	// Register shares in VPC so health check finds them.
+	vpc.AddShare(&ibmcloud.ShareInfo{
+		ID: "share-1", Name: "s1", LifecycleState: "stable", SizeGB: 1000,
+		MountTargets: []ibmcloud.MountTargetInfo{{ID: "mt-1", IPAddress: "10.0.0.1"}},
+	})
+	vpc.AddShare(&ibmcloud.ShareInfo{
+		ID: "share-2", Name: "s2", LifecycleState: "stable", SizeGB: 2000,
+		MountTargets: []ibmcloud.MountTargetInfo{{ID: "mt-2", IPAddress: "10.0.0.2"}},
+	})
+
 	pool := newTestPool("gauge-pool", "spread", 1000,
 		newStableShare("share-1", "s1", 1000, 0, 0),
 		newStableShare("share-2", "s2", 2000, 0, 0),
@@ -1880,6 +1890,65 @@ func TestReconcile_HealthCheck_SkipsMountTargetRecoveryWhenNoVPCID(t *testing.T)
 	// Should not attempt to create mount target without VPC ID
 	if vpc.CreateMountTargetCalls != 0 {
 		t.Errorf("expected 0 CreateShareMountTarget calls without vpcID, got %d", vpc.CreateMountTargetCalls)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Health Check: Deleted VPC Share Removed From Pool
+// ---------------------------------------------------------------------------
+
+func TestReconcile_HealthCheck_DeletedShareRemovedFromPool(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+
+	// Register only share-1 in VPC; share-2 is "deleted" (not found).
+	vpc.AddShare(&ibmcloud.ShareInfo{
+		ID: "share-1", Name: "s1", LifecycleState: "stable", SizeGB: 1000,
+		MountTargets: []ibmcloud.MountTargetInfo{{ID: "mt-1", IPAddress: "10.0.0.1"}},
+	})
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 50, 1),
+		newStableShare("share-2", "s2", 1000, 0, 0), // no PVCs, not in VPC
+	)
+	pool.Spec.InitialShares = 2
+	k.addPool(pool)
+
+	r := newReconciler(k, vpc)
+	_, err := reconcilePool(r, "test-pool")
+	if err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	updated := k.getPool("test-pool")
+	if len(updated.Status.Shares) != 1 {
+		t.Fatalf("expected 1 share after cleanup, got %d", len(updated.Status.Shares))
+	}
+	if updated.Status.Shares[0].ShareID != "share-1" {
+		t.Errorf("expected remaining share to be share-1, got %q", updated.Status.Shares[0].ShareID)
+	}
+}
+
+func TestReconcile_HealthCheck_DeletedShareWithPVCsKept(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+
+	// Neither share exists in VPC, but share-1 has PVCs.
+	pool := newTestPool("test-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 50, 2), // has PVCs — must be kept
+	)
+	pool.Spec.InitialShares = 1
+	k.addPool(pool)
+
+	r := newReconciler(k, vpc)
+	_, err := reconcilePool(r, "test-pool")
+	if err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	updated := k.getPool("test-pool")
+	if len(updated.Status.Shares) != 1 {
+		t.Fatalf("expected 1 share (kept because it has PVCs), got %d", len(updated.Status.Shares))
 	}
 }
 

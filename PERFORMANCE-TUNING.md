@@ -518,6 +518,50 @@ These ranges are for IBM VPC File Storage with the `dp2` profile, measured in-zo
 4. **Test with multiple jobs** (`--numjobs=4`) to measure concurrency limits
 5. **Compare with stock CSI** — run the same fio test on a dedicated 1:1 PVC to establish the NFS baseline; the pool CSI should match since it uses the same NFS shares
 
+### Benchmark Pool Setup
+
+Benchmarks need a share large enough to provide representative IOPS. The dp2 profile scales IOPS with share size, so a small share gives misleading results:
+
+| Share Size | dp2 IOPS | Suitable for Benchmarking? |
+|-----------|---------|---------------------------|
+| 100 GB | ~100 | No — IOPS floor, not representative of production |
+| 500 GB | ~1,500 | Minimal — only for quick smoke tests |
+| **2 TB** | **~6,000** | **Recommended — matches typical production size** |
+| 4 TB | ~12,000 | Use if testing high-IOPS or KubeVirt VM workloads |
+
+Create a dedicated benchmark pool with a single share and no auto-expansion to keep it simple and avoid burning VPC quota:
+
+```yaml
+apiVersion: storage.ibmcloud.io/v1alpha1
+kind: FileSharePool
+metadata:
+  name: bench-pool
+spec:
+  zone: us-south-1          # Match your worker node zone
+  profile: dp2
+  shareSizeGB: 2000          # 2 TB — gives ~6,000 IOPS baseline
+  maxShares: 1
+  initialShares: 1
+  autoExpand: false
+  allocationStrategy: spread
+  defaultUID: 1000
+  defaultGID: 1000
+  defaultPermissions: "0755"
+```
+
+```bash
+# Create the benchmark pool
+kubectl apply -f bench-pool.yaml
+kubectl get filesharepools bench-pool -w    # Wait for Phase: Ready (~60s)
+```
+
+Delete the pool when benchmarking is complete to free the VPC share quota:
+
+```bash
+kubectl delete pvc bench-pvc -n default
+kubectl delete filesharespool bench-pool
+```
+
 ### Benchmark PVC Setup
 
 ```bash
@@ -531,7 +575,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: ibm-vpc-file-pool
+  storageClassName: bench-pool
   resources:
     requests:
       storage: 100Gi

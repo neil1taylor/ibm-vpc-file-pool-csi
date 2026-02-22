@@ -179,85 +179,36 @@ This is the same consistency level as `rsync` against a live NFS mount.
 
 ## Architecture
 
-The core challenge is that `cp -a` of a large SubVolume can take minutes, but the CSI `CreateVolume` call should not block the provisioner indefinitely. The design uses a dual-path approach: synchronous for small volumes, asynchronous for large ones.
+The core challenge is that `cp -a` of a large SubVolume can take minutes, but the CSI `CreateVolume` call should not block the provisioner indefinitely. Additionally, the controller pod has no NFS filesystem access — it cannot mount shares directly. All clones therefore use the **asynchronous Job-based path**: `CreateVolume` returns immediately after recording the intent, and a Kubernetes Job performs the actual data copy.
 
-### Sync vs Async Decision
+### Job-Based Clone Worker
+
+All clone operations use the same asynchronous Job-based workflow, regardless of volume size:
 
 ```
 CreateVolume with VolumeContentSource (clone)
        │
-       ├── Source size <= syncThreshold (default 10 GB)?
-       │       │
-       │       ├── YES: Synchronous path
-       │       │   - cp -a during CreateVolume
-       │       │   - Block until copy completes
-       │       │   - Return success with clone ready
-       │       │
-       │       └── NO: Asynchronous path
-       │           - Create SubVolume CR with cloneStatus=Pending
-       │           - Return success immediately
-       │           - Background goroutine performs cp -a
-       │           - SubVolume CR updated: Pending -> InProgress -> Complete
-       │           - NodeStageVolume waits for cloneStatus=Complete
-       │
-       └── configurable via StorageClass parameter: cloneSyncThresholdGB
-```
-
-The threshold is configurable per StorageClass:
-
-```yaml
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: ibm-vpc-file-pool
-provisioner: vpc-file-pool.csi.ibm.io
-parameters:
-  pool: general-purpose
-  cloneSyncThresholdGB: "10"    # Volumes <= 10 GB clone synchronously (default)
-```
-
-### Synchronous Path (Small Volumes)
-
-For SubVolumes at or below the threshold, cloning happens inline during `CreateVolume`:
-
-```
-CreateVolume (clone, source <= 10 GB)
-  │
-  ├── 1. Validate source SubVolume exists
-  ├── 2. Select target share
-  ├── 3. cp -a from source subdir to target subdir
-  │      (blocks for seconds to ~1 minute)
-  ├── 4. Create SubVolume CR (phase=Bound, cloneStatus=Complete)
-  ├── 5. Update pool capacity tracking
-  └── 6. Return CreateVolumeResponse
-```
-
-The synchronous path is simple and predictable. The csi-provisioner has a configurable timeout (default 300s in our deployment), which is sufficient for copies up to ~10 GB on VPC file shares (~100-200 MB/s throughput).
-
-### Asynchronous Path (Large Volumes)
-
-For SubVolumes above the threshold, `CreateVolume` returns immediately and the copy runs in a background goroutine:
-
-```
-CreateVolume (clone, source > 10 GB)
-  │
-  ├── 1. Validate source SubVolume exists
-  ├── 2. Select target share
-  ├── 3. Create SubVolume CR (phase=Creating, cloneStatus=Pending)
-  ├── 4. Update pool capacity tracking
-  ├── 5. Launch background clone goroutine
-  └── 6. Return CreateVolumeResponse immediately
-         │
-         │  (background)
-         │
-         ├── 7. Update SubVolume CR: cloneStatus=InProgress
-         ├── 8. cp -a from source to target
-         │      (may take minutes for hundreds of GB)
-         ├── 9. On success:
-         │      SubVolume CR: cloneStatus=Complete, phase=Bound
-         └── 10. On failure:
-                SubVolume CR: cloneStatus=Failed, phase=Failed
-                Clean up partial target directory
+       ├── 1. Validate source SubVolume exists
+       ├── 2. Select target share (prefer source share)
+       ├── 3. Create SubVolume CR (phase=Cloning, cloneStatus=Pending)
+       ├── 4. Update pool capacity tracking
+       └── 5. Return CreateVolumeResponse immediately
+              │
+              │  (CloneWorker background loop, every 10s)
+              │
+              ├── 6. Detect SubVolume with cloneStatus=Pending
+              ├── 7. Transition to cloneStatus=InProgress
+              ├── 8. Create temp NFS PV (mounts target share root)
+              ├── 9. Create temp PVC (bound to temp PV)
+              ├── 10. Create clone Job:
+              │       - Mounts source PVC read-only at /source
+              │       - Mounts temp PVC (share root) at /target-share
+              │       - Runs: cp -a /source/. /target-share/<subPath>/
+              │       - chown + chmod to match SubVolume UID/GID/perms
+              ├── 11. Poll Job status until succeeded or failed
+              ├── 12. On success: cloneStatus=Complete, phase=Bound
+              ├── 13. On failure: cloneStatus=Failed, phase=Failed
+              └── 14. Cleanup temp PV, PVC, and Job
 
   Later, when pod is scheduled:
 
@@ -275,6 +226,27 @@ NodePublishVolume
 
 The node agent gates pod access on clone completion. Kubelet retries `NodePublishVolume` with exponential backoff, so the pod simply waits until the clone finishes. This is the same pattern used by CSI drivers that support asynchronous volume provisioning.
 
+### Why Jobs Instead of In-Process Copy
+
+The controller pod runs as a Deployment with no NFS mounts. It cannot directly execute `cp -a` against share filesystems. The Job-based approach:
+
+1. **Works without controller NFS access** — the Job pod mounts the share via a temp NFS PV/PVC.
+2. **Survives controller restarts** — Jobs are Kubernetes-managed; the CloneWorker re-discovers in-progress clones on startup.
+3. **Observable** — `kubectl get jobs` and `kubectl logs` provide standard debugging.
+4. **Resource-isolated** — clone CPU/memory usage does not affect the controller.
+
+### Temporary Clone Resources
+
+Each clone operation creates three temporary resources, all labeled `storage.ibmcloud.io/clone-temp=true`:
+
+| Resource | Name Pattern | Purpose |
+|----------|-------------|---------|
+| PV | `clone-tgt-<subvolume>` | NFS mount to target share root |
+| PVC | `clone-tgt-<subvolume>` | Binds to the temp PV |
+| Job | `clone-<subvolume>` | Runs `cp -a` + chown/chmod |
+
+All three are cleaned up after the clone completes (success or failure). Jobs have `ttlSecondsAfterFinished: 600` as a safety net.
+
 ### Architecture Diagram
 
 ```
@@ -285,27 +257,25 @@ The node agent gates pod access on clone completion. Kubelet retries `NodePublis
 │       │                                                               │
 │       ├── Parse source volume ID                                     │
 │       ├── Fetch source SubVolume CR                                  │
+│       ├── Select target share                                        │
+│       ├── Create SubVolume CR (cloneStatus=Pending)                  │
+│       └── Return CreateVolumeResponse immediately                    │
+│                                                                       │
+└───────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────┐
+│                       Clone Worker (background)                       │
+│                                                                       │
+│   Polls every 10s for SubVolumes with cloneStatus=Pending/InProgress │
 │       │                                                               │
-│       ├── source.RequestedGB <= syncThreshold?                       │
-│       │       │                                                       │
-│       │   ┌───┴───┐                                                  │
-│       │   │ YES   │  Sync path: cp -a, create CR, return            │
-│       │   └───────┘                                                  │
-│       │       │                                                       │
-│       │   ┌───┴───┐                                                  │
-│       │   │  NO   │  Async path: create CR (Pending), return        │
-│       │   └───┬───┘                                                  │
-│       │       │                                                       │
-│       │       ▼                                                       │
-│       │   Background Clone Worker                                    │
-│       │       │                                                       │
-│       │       ├── Update CR: cloneStatus=InProgress                  │
-│       │       ├── cp -a source → target                              │
-│       │       └── Update CR: cloneStatus=Complete or Failed          │
-│       │                                                               │
-└───────┼───────────────────────────────────────────────────────────────┘
-        │
-        ▼
+│       ├── Create temp NFS PV + PVC for target share                  │
+│       ├── Create clone Job (cp -a + chown)                           │
+│       ├── Poll Job until succeeded/failed                            │
+│       ├── Update SubVolume: Complete or Failed                       │
+│       └── Cleanup temp resources                                     │
+│                                                                       │
+└───────────────────────────────────────────────────────────────────────┘
+
 ┌──────────────────────────────────────────────────────────────────────┐
 │                          CSI Node Agent                               │
 │                                                                       │

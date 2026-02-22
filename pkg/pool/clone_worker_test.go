@@ -2,21 +2,32 @@ package pool
 
 import (
 	"context"
-	"errors"
-	"os"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
 	dto "github.com/prometheus/client_model/go"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 // ---------------------------------------------------------------------------
 // Test Helpers
 // ---------------------------------------------------------------------------
+
+func newCloneTestScheme() *runtime.Scheme {
+	s := runtime.NewScheme()
+	_ = corev1.AddToScheme(s)
+	_ = batchv1.AddToScheme(s)
+	_ = v1alpha1.AddToScheme(s)
+	return s
+}
 
 // newPendingClone creates a SubVolume CR representing an async clone with cloneStatus=Pending.
 func newPendingClone(pvName, poolName, shareID, sourceVolume string, requestedGB int64) *v1alpha1.SubVolume {
@@ -34,6 +45,7 @@ func newPendingClone(pvName, poolName, shareID, sourceVolume string, requestedGB
 			PoolName:           poolName,
 			ShareID:            shareID,
 			ShareMountTargetIP: "10.240.0.1",
+			ShareExportPath:    "/share_abc123",
 			SubPath:            "/pvcs/" + pvName,
 			RequestedGB:        requestedGB,
 			PVName:             pvName,
@@ -54,8 +66,7 @@ func newPendingClone(pvName, poolName, shareID, sourceVolume string, requestedGB
 	}
 }
 
-// newInProgressClone creates a SubVolume CR representing a clone in InProgress state
-// (simulates a crash recovery scenario).
+// newInProgressClone creates a SubVolume CR representing a clone in InProgress state.
 func newInProgressClone(pvName, poolName, shareID, sourceVolume string, requestedGB int64) *v1alpha1.SubVolume {
 	sv := newPendingClone(pvName, poolName, shareID, sourceVolume, requestedGB)
 	sv.Status.CloneStatus = "InProgress"
@@ -64,15 +75,14 @@ func newInProgressClone(pvName, poolName, shareID, sourceVolume string, requeste
 	return sv
 }
 
-func newCloneWorkerForTest(k8s *fakeK8sClient, nfs *fakeNFSOperations) *CloneWorker {
-	w := NewCloneWorker(k8s, nfs, "/mnt/staging")
+func newCloneWorkerForTest(k8s *fakeK8sClient, dc client.Client) *CloneWorker {
+	w := NewCloneWorker(k8s, dc, DefaultCloneImage)
 	w.SetInterval(50 * time.Millisecond)
 	return w
 }
 
 // waitForCloneStatus polls the fake k8s client until the SubVolume has the expected
-// clone status or the timeout expires. Uses the thread-safe GetSubVolume interface
-// method (which returns a DeepCopy) to avoid races with the clone worker goroutine.
+// clone status or the timeout expires.
 func waitForCloneStatus(t *testing.T, k *fakeK8sClient, svName, expectedStatus string, timeout time.Duration) {
 	t.Helper()
 	deadline := time.After(timeout)
@@ -105,19 +115,81 @@ func readCloneCounterValue(pool, status string) float64 {
 	return getCounterValue(&m)
 }
 
+// simulateJobSucceeded marks the clone Job as succeeded in the fake client.
+func simulateJobSucceeded(t *testing.T, dc client.Client, svName, namespace string) {
+	t.Helper()
+	ctx := context.Background()
+	jobName := cloneJobName(svName)
+
+	// Poll until the Job exists.
+	deadline := time.After(3 * time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for clone Job %s/%s to be created", namespace, jobName)
+		case <-ticker.C:
+			job := &batchv1.Job{}
+			if err := dc.Get(ctx, types.NamespacedName{Namespace: namespace, Name: jobName}, job); err == nil {
+				// Job found — mark it as succeeded.
+				job.Status.Succeeded = 1
+				if err := dc.Status().Update(ctx, job); err != nil {
+					t.Fatalf("failed to update Job status: %v", err)
+				}
+				return
+			}
+		}
+	}
+}
+
+// simulateJobFailed marks the clone Job as failed in the fake client.
+func simulateJobFailed(t *testing.T, dc client.Client, svName, namespace string) {
+	t.Helper()
+	ctx := context.Background()
+	jobName := cloneJobName(svName)
+
+	deadline := time.After(3 * time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for clone Job %s/%s to be created", namespace, jobName)
+		case <-ticker.C:
+			job := &batchv1.Job{}
+			if err := dc.Get(ctx, types.NamespacedName{Namespace: namespace, Name: jobName}, job); err == nil {
+				// Job found — mark it as failed (backoffLimit+1 = 4).
+				job.Status.Failed = 4
+				if err := dc.Status().Update(ctx, job); err != nil {
+					t.Fatalf("failed to update Job status: %v", err)
+				}
+				return
+			}
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-func TestCloneWorker_PendingCloneCompletesSuccessfully(t *testing.T) {
+func TestCloneWorker_CreatesJobForPendingClone(t *testing.T) {
 	k := newFakeK8sClient()
-	nfs := newFakeNFSOperations()
+	dc := fakeclient.NewClientBuilder().WithScheme(newCloneTestScheme()).
+		WithStatusSubresource(&batchv1.Job{}).
+		Build()
 
 	// Set up source SubVolume.
 	source := newTestSubVolume(
 		"pvc-11111111-1111-1111-1111-111111111111",
 		"test-pool", "share-1", 5,
 	)
+	source.Spec.PVCName = "source-pvc"
+	source.Spec.PVCNamespace = "default"
+	source.Spec.ShareExportPath = "/share_abc123"
 	k.addSubVolume(source)
 
 	// Set up pending clone SubVolume.
@@ -129,15 +201,18 @@ func TestCloneWorker_PendingCloneCompletesSuccessfully(t *testing.T) {
 	)
 	k.addSubVolume(clone)
 
-	w := newCloneWorkerForTest(k, nfs)
+	w := newCloneWorkerForTest(k, dc)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	go w.Run(ctx)
 
+	// Simulate Job success.
+	simulateJobSucceeded(t, dc, "pvc-22222222-2222-2222-2222-222222222222", "default")
+
 	// Wait for clone to complete.
-	waitForCloneStatus(t, k, "pvc-22222222-2222-2222-2222-222222222222", "Complete", 3*time.Second)
+	waitForCloneStatus(t, k, "pvc-22222222-2222-2222-2222-222222222222", "Complete", 5*time.Second)
 
 	// Verify the SubVolume status.
 	sv, _ := k.GetSubVolume(context.Background(), "pvc-22222222-2222-2222-2222-222222222222")
@@ -151,52 +226,82 @@ func TestCloneWorker_PendingCloneCompletesSuccessfully(t *testing.T) {
 		t.Errorf("expected BytesCopied=%d, got %d",
 			sv.Status.CloneProgress.TotalBytes, sv.Status.CloneProgress.BytesCopied)
 	}
-	if sv.Status.CloneProgress.StartedAt == nil {
-		t.Error("expected StartedAt to be set")
-	}
 	if sv.Status.CloneProgress.CompletedAt == nil {
 		t.Error("expected CompletedAt to be set")
 	}
-
-	// Verify NFS copy was performed.
-	if nfs.copyCount() != 1 {
-		t.Errorf("expected 1 NFS copy, got %d", nfs.copyCount())
-	}
 }
 
-func TestCloneWorker_PendingCloneFails(t *testing.T) {
+func TestCloneWorker_CompletesWhenJobSucceeds(t *testing.T) {
 	k := newFakeK8sClient()
-	nfs := newFakeNFSOperations()
-	nfs.CopyErr = errors.New("NFS write error: disk full")
+	dc := fakeclient.NewClientBuilder().WithScheme(newCloneTestScheme()).
+		WithStatusSubresource(&batchv1.Job{}).
+		Build()
 
-	// Set up source SubVolume.
 	source := newTestSubVolume(
 		"pvc-11111111-1111-1111-1111-111111111111",
-		"test-pool", "share-1", 20,
+		"test-pool", "share-1", 5,
 	)
+	source.Spec.PVCName = "source-pvc"
+	source.Spec.PVCNamespace = "default"
 	k.addSubVolume(source)
 
-	// Set up pending clone SubVolume.
 	clone := newPendingClone(
 		"pvc-33333333-3333-3333-3333-333333333333",
 		"test-pool", "share-1",
 		"pvc-11111111-1111-1111-1111-111111111111",
-		20,
+		5,
 	)
 	k.addSubVolume(clone)
 
-	w := newCloneWorkerForTest(k, nfs)
+	w := newCloneWorkerForTest(k, dc)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	go w.Run(ctx)
 
-	// Wait for clone to fail.
-	waitForCloneStatus(t, k, "pvc-33333333-3333-3333-3333-333333333333", "Failed", 3*time.Second)
+	simulateJobSucceeded(t, dc, "pvc-33333333-3333-3333-3333-333333333333", "default")
+	waitForCloneStatus(t, k, "pvc-33333333-3333-3333-3333-333333333333", "Complete", 5*time.Second)
 
-	// Verify the SubVolume status.
 	sv, _ := k.GetSubVolume(context.Background(), "pvc-33333333-3333-3333-3333-333333333333")
+	if sv.Status.Phase != "Bound" {
+		t.Errorf("expected phase Bound, got %s", sv.Status.Phase)
+	}
+}
+
+func TestCloneWorker_FailsWhenJobFails(t *testing.T) {
+	k := newFakeK8sClient()
+	dc := fakeclient.NewClientBuilder().WithScheme(newCloneTestScheme()).
+		WithStatusSubresource(&batchv1.Job{}).
+		Build()
+
+	source := newTestSubVolume(
+		"pvc-11111111-1111-1111-1111-111111111111",
+		"test-pool", "share-1", 5,
+	)
+	source.Spec.PVCName = "source-pvc"
+	source.Spec.PVCNamespace = "default"
+	k.addSubVolume(source)
+
+	clone := newPendingClone(
+		"pvc-44444444-4444-4444-4444-444444444444",
+		"test-pool", "share-1",
+		"pvc-11111111-1111-1111-1111-111111111111",
+		5,
+	)
+	k.addSubVolume(clone)
+
+	w := newCloneWorkerForTest(k, dc)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go w.Run(ctx)
+
+	simulateJobFailed(t, dc, "pvc-44444444-4444-4444-4444-444444444444", "default")
+	waitForCloneStatus(t, k, "pvc-44444444-4444-4444-4444-444444444444", "Failed", 5*time.Second)
+
+	sv, _ := k.GetSubVolume(context.Background(), "pvc-44444444-4444-4444-4444-444444444444")
 	if sv.Status.Phase != "Failed" {
 		t.Errorf("expected phase Failed, got %s", sv.Status.Phase)
 	}
@@ -204,22 +309,299 @@ func TestCloneWorker_PendingCloneFails(t *testing.T) {
 		t.Fatal("expected CloneProgress to be set")
 	}
 	if sv.Status.CloneProgress.Error == "" {
-		t.Error("expected clone error message to be set")
+		t.Error("expected error message to be set")
 	}
-	if sv.Status.CloneProgress.CompletedAt == nil {
-		t.Error("expected CompletedAt to be set even on failure")
+}
+
+func TestCloneWorker_CleansUpTempResources(t *testing.T) {
+	k := newFakeK8sClient()
+	dc := fakeclient.NewClientBuilder().WithScheme(newCloneTestScheme()).
+		WithStatusSubresource(&batchv1.Job{}).
+		Build()
+
+	source := newTestSubVolume(
+		"pvc-11111111-1111-1111-1111-111111111111",
+		"test-pool", "share-1", 5,
+	)
+	source.Spec.PVCName = "source-pvc"
+	source.Spec.PVCNamespace = "default"
+	k.addSubVolume(source)
+
+	svName := "pvc-55555555-5555-5555-5555-555555555555"
+	clone := newPendingClone(svName, "test-pool", "share-1",
+		"pvc-11111111-1111-1111-1111-111111111111", 5)
+	k.addSubVolume(clone)
+
+	w := newCloneWorkerForTest(k, dc)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go w.Run(ctx)
+
+	simulateJobSucceeded(t, dc, svName, "default")
+	waitForCloneStatus(t, k, svName, "Complete", 5*time.Second)
+
+	// Give cleanup a moment.
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify temp PV was deleted.
+	pv := &corev1.PersistentVolume{}
+	err := dc.Get(ctx, types.NamespacedName{Name: clonePVName(svName)}, pv)
+	if err == nil {
+		t.Error("expected temp PV to be deleted after completion")
+	}
+
+	// Verify temp PVC was deleted.
+	pvc := &corev1.PersistentVolumeClaim{}
+	err = dc.Get(ctx, types.NamespacedName{Namespace: "default", Name: clonePVCName(svName)}, pvc)
+	if err == nil {
+		t.Error("expected temp PVC to be deleted after completion")
+	}
+
+	// Verify Job was deleted.
+	job := &batchv1.Job{}
+	err = dc.Get(ctx, types.NamespacedName{Namespace: "default", Name: cloneJobName(svName)}, job)
+	if err == nil {
+		t.Error("expected clone Job to be deleted after completion")
+	}
+}
+
+func TestCloneWorker_IdempotentJobCreation(t *testing.T) {
+	k := newFakeK8sClient()
+	dc := fakeclient.NewClientBuilder().WithScheme(newCloneTestScheme()).
+		WithStatusSubresource(&batchv1.Job{}).
+		Build()
+
+	source := newTestSubVolume(
+		"pvc-11111111-1111-1111-1111-111111111111",
+		"test-pool", "share-1", 5,
+	)
+	source.Spec.PVCName = "source-pvc"
+	source.Spec.PVCNamespace = "default"
+	k.addSubVolume(source)
+
+	svName := "pvc-66666666-6666-6666-6666-666666666666"
+	clone := newPendingClone(svName, "test-pool", "share-1",
+		"pvc-11111111-1111-1111-1111-111111111111", 5)
+	k.addSubVolume(clone)
+
+	w := newCloneWorkerForTest(k, dc)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go w.Run(ctx)
+
+	// Wait for Job to be created.
+	deadline := time.After(3 * time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for Job creation")
+		case <-ticker.C:
+			job := &batchv1.Job{}
+			if err := dc.Get(ctx, types.NamespacedName{Namespace: "default", Name: cloneJobName(svName)}, job); err == nil {
+				goto found
+			}
+		}
+	}
+found:
+
+	// Run several more ticks — should not create a duplicate.
+	time.Sleep(200 * time.Millisecond)
+
+	// List all Jobs to verify only one exists.
+	jobList := &batchv1.JobList{}
+	if err := dc.List(ctx, jobList, client.InNamespace("default")); err != nil {
+		t.Fatalf("failed to list Jobs: %v", err)
+	}
+	cloneJobs := 0
+	for _, j := range jobList.Items {
+		if j.Labels[cloneTempLabel] == "true" {
+			cloneJobs++
+		}
+	}
+	if cloneJobs != 1 {
+		t.Errorf("expected exactly 1 clone Job, got %d", cloneJobs)
+	}
+
+	// Now mark it succeeded to clean up.
+	cancel()
+}
+
+func TestCloneWorker_JobMountOptions(t *testing.T) {
+	k := newFakeK8sClient()
+	dc := fakeclient.NewClientBuilder().WithScheme(newCloneTestScheme()).
+		WithStatusSubresource(&batchv1.Job{}).
+		Build()
+
+	source := newTestSubVolume(
+		"pvc-11111111-1111-1111-1111-111111111111",
+		"test-pool", "share-1", 5,
+	)
+	source.Spec.PVCName = "source-pvc"
+	source.Spec.PVCNamespace = "default"
+	source.Spec.ShareExportPath = "/share_abc123"
+	k.addSubVolume(source)
+
+	svName := "pvc-77777777-7777-7777-7777-777777777777"
+	clone := newPendingClone(svName, "test-pool", "share-1",
+		"pvc-11111111-1111-1111-1111-111111111111", 5)
+	k.addSubVolume(clone)
+
+	w := newCloneWorkerForTest(k, dc)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go w.Run(ctx)
+
+	// Wait for PV to be created.
+	var pv corev1.PersistentVolume
+	deadline := time.After(3 * time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for PV creation")
+		case <-ticker.C:
+			if err := dc.Get(ctx, types.NamespacedName{Name: clonePVName(svName)}, &pv); err == nil {
+				goto foundPV
+			}
+		}
+	}
+foundPV:
+
+	// Verify NFS mount options include sec=sys.
+	hasSec := false
+	for _, opt := range pv.Spec.MountOptions {
+		if opt == "sec=sys" {
+			hasSec = true
+			break
+		}
+	}
+	if !hasSec {
+		t.Errorf("expected PV mountOptions to include sec=sys, got %v", pv.Spec.MountOptions)
+	}
+
+	// Verify NFS server and path.
+	if pv.Spec.NFS == nil {
+		t.Fatal("expected NFS volume source")
+	}
+	if pv.Spec.NFS.Server != "10.240.0.1" {
+		t.Errorf("expected NFS server 10.240.0.1, got %s", pv.Spec.NFS.Server)
+	}
+	if pv.Spec.NFS.Path != "/share_abc123" {
+		t.Errorf("expected NFS path /share_abc123, got %s", pv.Spec.NFS.Path)
+	}
+}
+
+func TestCloneWorker_JobSetsOwnership(t *testing.T) {
+	k := newFakeK8sClient()
+	dc := fakeclient.NewClientBuilder().WithScheme(newCloneTestScheme()).
+		WithStatusSubresource(&batchv1.Job{}).
+		Build()
+
+	source := newTestSubVolume(
+		"pvc-11111111-1111-1111-1111-111111111111",
+		"test-pool", "share-1", 5,
+	)
+	source.Spec.PVCName = "source-pvc"
+	source.Spec.PVCNamespace = "default"
+	k.addSubVolume(source)
+
+	svName := "pvc-88888888-8888-8888-8888-888888888888"
+	clone := newPendingClone(svName, "test-pool", "share-1",
+		"pvc-11111111-1111-1111-1111-111111111111", 5)
+	uid := int64(107)
+	gid := int64(107)
+	clone.Spec.UID = &uid
+	clone.Spec.GID = &gid
+	clone.Spec.Permissions = "0777"
+	k.addSubVolume(clone)
+
+	w := newCloneWorkerForTest(k, dc)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go w.Run(ctx)
+
+	// Wait for Job to be created.
+	var job batchv1.Job
+	deadline := time.After(3 * time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for Job creation")
+		case <-ticker.C:
+			if err := dc.Get(ctx, types.NamespacedName{Namespace: "default", Name: cloneJobName(svName)}, &job); err == nil {
+				goto foundJob
+			}
+		}
+	}
+foundJob:
+
+	// Verify the script contains chown and chmod with correct values.
+	script := job.Spec.Template.Spec.Containers[0].Command[2]
+	if !containsStr(script, "chown -R 107:107") {
+		t.Errorf("expected script to contain chown 107:107, got:\n%s", script)
+	}
+	if !containsStr(script, "chmod 0777") {
+		t.Errorf("expected script to contain chmod 0777, got:\n%s", script)
+	}
+}
+
+func TestCloneWorker_SourceNotFoundFails(t *testing.T) {
+	k := newFakeK8sClient()
+	dc := fakeclient.NewClientBuilder().WithScheme(newCloneTestScheme()).
+		WithStatusSubresource(&batchv1.Job{}).
+		Build()
+
+	// Set up a pending clone whose source does not exist.
+	clone := newPendingClone(
+		"pvc-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+		"test-pool", "share-1",
+		"pvc-nonexist-0000-0000-0000-000000000000",
+		5,
+	)
+	k.addSubVolume(clone)
+
+	w := newCloneWorkerForTest(k, dc)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go w.Run(ctx)
+
+	waitForCloneStatus(t, k, "pvc-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "Failed", 3*time.Second)
+
+	sv, _ := k.GetSubVolume(context.Background(), "pvc-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	if sv.Status.CloneProgress == nil {
+		t.Fatal("expected CloneProgress to be set")
+	}
+	if sv.Status.CloneProgress.Error == "" {
+		t.Error("expected error message about source not found")
 	}
 }
 
 func TestCloneWorker_SkipsCompleteClones(t *testing.T) {
 	k := newFakeK8sClient()
-	nfs := newFakeNFSOperations()
+	dc := fakeclient.NewClientBuilder().WithScheme(newCloneTestScheme()).
+		WithStatusSubresource(&batchv1.Job{}).
+		Build()
 
 	// Set up a completed clone SubVolume.
 	now := metav1.Now()
 	completedClone := &v1alpha1.SubVolume{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "pvc-44444444-4444-4444-4444-444444444444",
+			Name: "pvc-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
 			Labels: map[string]string{
 				"storage.ibmcloud.io/pool":         "test-pool",
 				"storage.ibmcloud.io/share-id":     "share-1",
@@ -230,9 +612,9 @@ func TestCloneWorker_SkipsCompleteClones(t *testing.T) {
 			PoolName:           "test-pool",
 			ShareID:            "share-1",
 			ShareMountTargetIP: "10.240.0.1",
-			SubPath:            "/pvcs/pvc-44444444-4444-4444-4444-444444444444",
+			SubPath:            "/pvcs/pvc-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
 			RequestedGB:        5,
-			PVName:             "pvc-44444444-4444-4444-4444-444444444444",
+			PVName:             "pvc-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
 			PVCName:            "my-clone",
 			PVCNamespace:       "default",
 			ReclaimPolicy:      "Delete",
@@ -253,194 +635,35 @@ func TestCloneWorker_SkipsCompleteClones(t *testing.T) {
 	}
 	k.addSubVolume(completedClone)
 
-	w := newCloneWorkerForTest(k, nfs)
+	w := newCloneWorkerForTest(k, dc)
 
-	// Run processOnce directly and verify no copies happen.
+	// Run processOnce directly and verify no Jobs are created.
 	w.processOnce(context.Background())
 
 	// Give a moment for any goroutines to run.
 	time.Sleep(100 * time.Millisecond)
 
-	if nfs.copyCount() != 0 {
-		t.Errorf("expected 0 NFS copies for complete clone, got %d", nfs.copyCount())
+	// No Jobs should have been created.
+	jobList := &batchv1.JobList{}
+	if err := dc.List(context.Background(), jobList, client.InNamespace("default")); err != nil {
+		t.Fatalf("failed to list jobs: %v", err)
+	}
+	if len(jobList.Items) != 0 {
+		t.Errorf("expected 0 Jobs for complete clone, got %d", len(jobList.Items))
 	}
 
 	// Status should remain unchanged.
-	sv, _ := k.GetSubVolume(context.Background(), "pvc-44444444-4444-4444-4444-444444444444")
+	sv, _ := k.GetSubVolume(context.Background(), "pvc-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
 	if sv.Status.CloneStatus != "Complete" {
 		t.Errorf("expected cloneStatus to remain Complete, got %s", sv.Status.CloneStatus)
 	}
 }
 
-func TestCloneWorker_RetriesInProgressClones(t *testing.T) {
-	k := newFakeK8sClient()
-	nfs := newFakeNFSOperations()
-
-	// Set up source SubVolume.
-	source := newTestSubVolume(
-		"pvc-11111111-1111-1111-1111-111111111111",
-		"test-pool", "share-1", 50,
-	)
-	k.addSubVolume(source)
-
-	// Set up an InProgress clone (simulating crash recovery).
-	clone := newInProgressClone(
-		"pvc-55555555-5555-5555-5555-555555555555",
-		"test-pool", "share-1",
-		"pvc-11111111-1111-1111-1111-111111111111",
-		50,
-	)
-	k.addSubVolume(clone)
-
-	w := newCloneWorkerForTest(k, nfs)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go w.Run(ctx)
-
-	// Wait for clone to complete (it should retry the InProgress clone).
-	waitForCloneStatus(t, k, "pvc-55555555-5555-5555-5555-555555555555", "Complete", 3*time.Second)
-
-	sv, _ := k.GetSubVolume(context.Background(), "pvc-55555555-5555-5555-5555-555555555555")
-	if sv.Status.Phase != "Bound" {
-		t.Errorf("expected phase Bound after retry, got %s", sv.Status.Phase)
-	}
-	if nfs.copyCount() != 1 {
-		t.Errorf("expected 1 NFS copy for retried clone, got %d", nfs.copyCount())
-	}
-}
-
-func TestCloneWorker_ConcurrentPendingClones(t *testing.T) {
-	k := newFakeK8sClient()
-	nfs := newFakeNFSOperations()
-
-	// Set up source SubVolume.
-	source := newTestSubVolume(
-		"pvc-11111111-1111-1111-1111-111111111111",
-		"test-pool", "share-1", 10,
-	)
-	k.addSubVolume(source)
-
-	// Create two pending clones.
-	clone1 := newPendingClone(
-		"pvc-66666666-6666-6666-6666-666666666666",
-		"test-pool", "share-1",
-		"pvc-11111111-1111-1111-1111-111111111111",
-		10,
-	)
-	k.addSubVolume(clone1)
-
-	clone2 := newPendingClone(
-		"pvc-77777777-7777-7777-7777-777777777777",
-		"test-pool", "share-1",
-		"pvc-11111111-1111-1111-1111-111111111111",
-		10,
-	)
-	k.addSubVolume(clone2)
-
-	w := newCloneWorkerForTest(k, nfs)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go w.Run(ctx)
-
-	// Wait for both clones to complete.
-	waitForCloneStatus(t, k, "pvc-66666666-6666-6666-6666-666666666666", "Complete", 3*time.Second)
-	waitForCloneStatus(t, k, "pvc-77777777-7777-7777-7777-777777777777", "Complete", 3*time.Second)
-
-	// Both should have been copied.
-	if nfs.copyCount() != 2 {
-		t.Errorf("expected 2 NFS copies for concurrent clones, got %d", nfs.copyCount())
-	}
-}
-
-func TestCloneWorker_MetricsRecorded(t *testing.T) {
-	k := newFakeK8sClient()
-	nfs := newFakeNFSOperations()
-
-	// Reset metrics for a clean test.
-	metrics.ClonesTotal.Reset()
-	metrics.CloneDuration.Reset()
-
-	// Set up source SubVolume.
-	source := newTestSubVolume(
-		"pvc-11111111-1111-1111-1111-111111111111",
-		"test-pool", "share-1", 5,
-	)
-	k.addSubVolume(source)
-
-	// Set up pending clone.
-	clone := newPendingClone(
-		"pvc-88888888-8888-8888-8888-888888888888",
-		"test-pool", "share-1",
-		"pvc-11111111-1111-1111-1111-111111111111",
-		5,
-	)
-	k.addSubVolume(clone)
-
-	w := newCloneWorkerForTest(k, nfs)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go w.Run(ctx)
-
-	waitForCloneStatus(t, k, "pvc-88888888-8888-8888-8888-888888888888", "Complete", 3*time.Second)
-
-	// Check success metric.
-	val := readCloneCounterValue("test-pool", "async_success")
-	if val < 1.0 {
-		t.Errorf("expected ClonesTotal(async_success) >= 1, got %f", val)
-	}
-}
-
-func TestCloneWorker_MetricsRecordedOnFailure(t *testing.T) {
-	k := newFakeK8sClient()
-	nfs := newFakeNFSOperations()
-	nfs.CopyErr = errors.New("simulated NFS error")
-
-	// Reset metrics for a clean test.
-	metrics.ClonesTotal.Reset()
-
-	// Set up source SubVolume.
-	source := newTestSubVolume(
-		"pvc-11111111-1111-1111-1111-111111111111",
-		"test-pool", "share-1", 5,
-	)
-	k.addSubVolume(source)
-
-	// Set up pending clone.
-	clone := newPendingClone(
-		"pvc-99999999-9999-9999-9999-999999999999",
-		"test-pool", "share-1",
-		"pvc-11111111-1111-1111-1111-111111111111",
-		5,
-	)
-	k.addSubVolume(clone)
-
-	w := newCloneWorkerForTest(k, nfs)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go w.Run(ctx)
-
-	waitForCloneStatus(t, k, "pvc-99999999-9999-9999-9999-999999999999", "Failed", 3*time.Second)
-
-	// Check error metric.
-	val := readCloneCounterValue("test-pool", "async_error")
-	if val < 1.0 {
-		t.Errorf("expected ClonesTotal(async_error) >= 1, got %f", val)
-	}
-}
-
 func TestCloneWorker_GracefulShutdown(t *testing.T) {
 	k := newFakeK8sClient()
-	nfs := newFakeNFSOperations()
+	dc := fakeclient.NewClientBuilder().WithScheme(newCloneTestScheme()).Build()
 
-	w := newCloneWorkerForTest(k, nfs)
+	w := newCloneWorkerForTest(k, dc)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -453,10 +676,8 @@ func TestCloneWorker_GracefulShutdown(t *testing.T) {
 	// Let it run for a bit.
 	time.Sleep(100 * time.Millisecond)
 
-	// Cancel the context.
 	cancel()
 
-	// The worker should stop promptly.
 	select {
 	case <-done:
 		// Good, worker stopped.
@@ -465,93 +686,23 @@ func TestCloneWorker_GracefulShutdown(t *testing.T) {
 	}
 }
 
-func TestCloneWorker_SourceNotFoundFails(t *testing.T) {
+func TestCloneWorker_MetricsRecorded(t *testing.T) {
 	k := newFakeK8sClient()
-	nfs := newFakeNFSOperations()
+	dc := fakeclient.NewClientBuilder().WithScheme(newCloneTestScheme()).
+		WithStatusSubresource(&batchv1.Job{}).
+		Build()
 
-	// Set up a pending clone whose source does not exist.
-	clone := newPendingClone(
-		"pvc-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-		"test-pool", "share-1",
-		"pvc-nonexist-0000-0000-0000-000000000000",
-		5,
-	)
-	k.addSubVolume(clone)
+	metrics.ClonesTotal.Reset()
+	metrics.CloneDuration.Reset()
 
-	w := newCloneWorkerForTest(k, nfs)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go w.Run(ctx)
-
-	waitForCloneStatus(t, k, "pvc-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "Failed", 3*time.Second)
-
-	sv, _ := k.GetSubVolume(context.Background(), "pvc-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-	if sv.Status.CloneProgress == nil {
-		t.Fatal("expected CloneProgress to be set")
-	}
-	if sv.Status.CloneProgress.Error == "" {
-		t.Error("expected error message about source not found")
-	}
-}
-
-func TestCloneWorker_DoesNotProcessSameCloneTwice(t *testing.T) {
-	k := newFakeK8sClient()
-
-	// Use a slow NFS fake to simulate a long copy.
-	var copyCount atomic.Int32
-	slowNFS := &slowFakeNFSOperations{
-		delay:     200 * time.Millisecond,
-		copyCount: &copyCount,
-	}
-
-	// Set up source SubVolume.
 	source := newTestSubVolume(
 		"pvc-11111111-1111-1111-1111-111111111111",
 		"test-pool", "share-1", 5,
 	)
+	source.Spec.PVCName = "source-pvc"
+	source.Spec.PVCNamespace = "default"
 	k.addSubVolume(source)
 
-	// Set up a single pending clone.
-	clone := newPendingClone(
-		"pvc-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
-		"test-pool", "share-1",
-		"pvc-11111111-1111-1111-1111-111111111111",
-		5,
-	)
-	k.addSubVolume(clone)
-
-	w := NewCloneWorker(k, slowNFS, "/mnt/staging")
-	w.SetInterval(50 * time.Millisecond) // polls faster than the copy takes
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go w.Run(ctx)
-
-	waitForCloneStatus(t, k, "pvc-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "Complete", 5*time.Second)
-
-	// The copy should have been performed exactly once, even though the ticker
-	// fired multiple times during the copy.
-	count := copyCount.Load()
-	if count != 1 {
-		t.Errorf("expected exactly 1 copy, got %d (concurrent duplicate detected)", count)
-	}
-}
-
-func TestCloneWorker_ProcessOnceDirectCall(t *testing.T) {
-	k := newFakeK8sClient()
-	nfs := newFakeNFSOperations()
-
-	// Set up source SubVolume.
-	source := newTestSubVolume(
-		"pvc-11111111-1111-1111-1111-111111111111",
-		"test-pool", "share-1", 5,
-	)
-	k.addSubVolume(source)
-
-	// Set up pending clone.
 	clone := newPendingClone(
 		"pvc-cccccccc-cccc-cccc-cccc-cccccccccccc",
 		"test-pool", "share-1",
@@ -560,32 +711,38 @@ func TestCloneWorker_ProcessOnceDirectCall(t *testing.T) {
 	)
 	k.addSubVolume(clone)
 
-	w := newCloneWorkerForTest(k, nfs)
+	w := newCloneWorkerForTest(k, dc)
 
-	// Call processOnce directly (not via Run loop).
-	w.processOnce(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	// Wait for the spawned goroutine to complete.
-	waitForCloneStatus(t, k, "pvc-cccccccc-cccc-cccc-cccc-cccccccccccc", "Complete", 3*time.Second)
+	go w.Run(ctx)
 
-	if nfs.copyCount() != 1 {
-		t.Errorf("expected 1 NFS copy, got %d", nfs.copyCount())
+	simulateJobSucceeded(t, dc, "pvc-cccccccc-cccc-cccc-cccc-cccccccccccc", "default")
+	waitForCloneStatus(t, k, "pvc-cccccccc-cccc-cccc-cccc-cccccccccccc", "Complete", 5*time.Second)
+
+	val := readCloneCounterValue("test-pool", "async_success")
+	if val < 1.0 {
+		t.Errorf("expected ClonesTotal(async_success) >= 1, got %f", val)
 	}
 }
 
-func TestCloneWorker_CleansUpPartialCopyOnFailure(t *testing.T) {
+func TestCloneWorker_MetricsRecordedOnFailure(t *testing.T) {
 	k := newFakeK8sClient()
-	nfs := newFakeNFSOperations()
-	nfs.CopyErr = errors.New("NFS write error: connection reset")
+	dc := fakeclient.NewClientBuilder().WithScheme(newCloneTestScheme()).
+		WithStatusSubresource(&batchv1.Job{}).
+		Build()
 
-	// Set up source SubVolume.
+	metrics.ClonesTotal.Reset()
+
 	source := newTestSubVolume(
 		"pvc-11111111-1111-1111-1111-111111111111",
 		"test-pool", "share-1", 5,
 	)
+	source.Spec.PVCName = "source-pvc"
+	source.Spec.PVCNamespace = "default"
 	k.addSubVolume(source)
 
-	// Set up pending clone.
 	clone := newPendingClone(
 		"pvc-dddddddd-dddd-dddd-dddd-dddddddddddd",
 		"test-pool", "share-1",
@@ -594,48 +751,32 @@ func TestCloneWorker_CleansUpPartialCopyOnFailure(t *testing.T) {
 	)
 	k.addSubVolume(clone)
 
-	// Pre-create the destination directory to simulate a partial copy that will be cleaned up.
-	nfs.mu.Lock()
-	nfs.dirs["/mnt/staging/pvcs/pvc-dddddddd-dddd-dddd-dddd-dddddddddddd"] = 0755
-	nfs.mu.Unlock()
-
-	w := newCloneWorkerForTest(k, nfs)
+	w := newCloneWorkerForTest(k, dc)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	go w.Run(ctx)
 
-	waitForCloneStatus(t, k, "pvc-dddddddd-dddd-dddd-dddd-dddddddddddd", "Failed", 3*time.Second)
+	simulateJobFailed(t, dc, "pvc-dddddddd-dddd-dddd-dddd-dddddddddddd", "default")
+	waitForCloneStatus(t, k, "pvc-dddddddd-dddd-dddd-dddd-dddddddddddd", "Failed", 5*time.Second)
 
-	// Verify the partial directory was cleaned up (RemoveAll was called).
-	if nfs.exists("/mnt/staging/pvcs/pvc-dddddddd-dddd-dddd-dddd-dddddddddddd") {
-		t.Error("expected partial clone directory to be cleaned up after failure")
+	val := readCloneCounterValue("test-pool", "async_error")
+	if val < 1.0 {
+		t.Errorf("expected ClonesTotal(async_error) >= 1, got %f", val)
 	}
 }
 
-// ---------------------------------------------------------------------------
-// slowFakeNFSOperations — adds a configurable delay to CopyDir
-// ---------------------------------------------------------------------------
-
-type slowFakeNFSOperations struct {
-	delay     time.Duration
-	copyCount *atomic.Int32
+// containsStr is a simple string search helper for tests.
+func containsStr(s, substr string) bool {
+	return len(s) >= len(substr) && searchStr(s, substr)
 }
 
-func (s *slowFakeNFSOperations) MkdirAll(_ string, _ os.FileMode) error                 { return nil }
-func (s *slowFakeNFSOperations) MkdirAsUser(_ string, _ os.FileMode, _, _ uint32) error { return nil }
-func (s *slowFakeNFSOperations) RemoveAll(_ string) error                               { return nil }
-func (s *slowFakeNFSOperations) Stat(_ string) (os.FileInfo, error)                     { return nil, nil }
-func (s *slowFakeNFSOperations) Chown(_ string, _, _ int) error                         { return nil }
-func (s *slowFakeNFSOperations) Chmod(_ string, _ os.FileMode) error                    { return nil }
-
-func (s *slowFakeNFSOperations) CopyDir(_, _ string) error {
-	s.copyCount.Add(1)
-	time.Sleep(s.delay)
-	return nil
-}
-
-func (s *slowFakeNFSOperations) SyncDir(_ context.Context, _, _ string) error {
-	return s.CopyDir("", "")
+func searchStr(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

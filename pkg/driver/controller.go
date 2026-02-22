@@ -103,6 +103,8 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 			return nil, status.Errorf(codes.NotFound, "pool %q not found", poolName)
 		case errors.Is(err, pool.ErrPoolExhausted):
 			return nil, status.Errorf(codes.ResourceExhausted, "pool %q has no available capacity", poolName)
+		case errors.Is(err, pool.ErrPoolExpanding):
+			return nil, status.Errorf(codes.Unavailable, "pool %q is expanding, retry shortly", poolName)
 		case errors.Is(err, pool.ErrShareCreationPending):
 			return nil, status.Errorf(codes.Unavailable, "pool %q is expanding, retry shortly", poolName)
 		default:
@@ -389,6 +391,8 @@ func (d *Driver) createVolumeFromClone(ctx context.Context, req *csi.CreateVolum
 			return nil, status.Errorf(codes.NotFound, "source volume not found")
 		case errors.Is(err, pool.ErrPoolExhausted):
 			return nil, status.Errorf(codes.ResourceExhausted, "pool %q has no available capacity", poolName)
+		case errors.Is(err, pool.ErrPoolExpanding):
+			return nil, status.Errorf(codes.Unavailable, "pool %q is expanding, retry shortly", poolName)
 		default:
 			return nil, status.Errorf(codes.Internal, "clone failed: %v", err)
 		}

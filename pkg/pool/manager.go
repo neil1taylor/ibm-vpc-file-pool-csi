@@ -20,6 +20,7 @@ import (
 var (
 	ErrPoolNotFound              = errors.New("pool not found")
 	ErrPoolExhausted             = errors.New("pool has no available capacity")
+	ErrPoolExpanding             = errors.New("pool is expanding, retry shortly")
 	ErrShareCreationPending      = errors.New("share creation is in progress")
 	ErrSubVolumeNotFound         = errors.New("subvolume not found")
 	ErrInsufficientShareCapacity = errors.New("share does not have enough remaining capacity")
@@ -220,6 +221,12 @@ func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (_ *Alloc
 		// 6. Auto-expand: create a new share if allowed
 		share, err = m.tryAutoExpand(ctx, pool, req.RequestedGB, req.Tier)
 		if err != nil {
+			// Persist pool status even on error — tryAutoExpand may have appended
+			// a new share (state=creating) that the reconciler needs to see in order
+			// to create a mount target and promote the share to stable.
+			if updateErr := m.k8sClient.UpdateFileSharePoolStatus(ctx, pool); updateErr != nil {
+				klog.ErrorS(updateErr, "Failed to update pool status after auto-expand", "pool", req.PoolName)
+			}
 			return nil, err
 		}
 	} else if err != nil {
@@ -495,9 +502,21 @@ func (m *Manager) tryAutoExpand(ctx context.Context, pool *v1alpha1.FileSharePoo
 
 	mountTargetIP := ""
 	mountTargetID := ""
+	exportPath := ""
 	if len(shareInfo.MountTargets) > 0 {
 		mountTargetIP = shareInfo.MountTargets[0].IPAddress
 		mountTargetID = shareInfo.MountTargets[0].ID
+		exportPath = shareInfo.MountTargets[0].ExportPath
+	}
+
+	// Determine the initial state. If the mount target IP is not yet available,
+	// mark the share as "creating" so selectShare won't pick it up. The
+	// reconciler's health check will backfill the IP and promote to "stable".
+	state := "stable"
+	if mountTargetIP == "" {
+		state = "creating"
+		klog.V(2).InfoS("New share has no mount target IP yet — marked as creating",
+			"shareID", shareInfo.ID, "shareName", shareInfo.Name)
 	}
 
 	now := metav1.Now()
@@ -506,10 +525,11 @@ func (m *Manager) tryAutoExpand(ctx context.Context, pool *v1alpha1.FileSharePoo
 		ShareName:     shareInfo.Name,
 		MountTargetIP: mountTargetIP,
 		MountTargetID: mountTargetID,
+		ExportPath:    exportPath,
 		TotalGB:       shareInfo.SizeGB,
 		AllocatedGB:   0,
 		PVCCount:      0,
-		State:         "stable",
+		State:         state,
 		Tier:          tier,
 		Zone:          shareInfo.Zone,
 		CreatedAt:     &now,
@@ -518,6 +538,14 @@ func (m *Manager) tryAutoExpand(ctx context.Context, pool *v1alpha1.FileSharePoo
 	pool.Status.Shares = append(pool.Status.Shares, newShare)
 	pool.Status.ShareCount = int32(len(pool.Status.Shares)) //nolint:gosec // safe: MaxShares capped at 100
 	pool.Status.TotalCapacityGB += shareInfo.SizeGB
+
+	// If the share doesn't have a mount target IP, don't return it for
+	// immediate allocation. Return ErrPoolExpanding so the CSI provisioner
+	// retries. The reconciler will promote the share to "stable" once the
+	// mount target IP is available.
+	if mountTargetIP == "" {
+		return nil, ErrPoolExpanding
+	}
 
 	return &newShare, nil
 }
@@ -1026,9 +1054,10 @@ func (m *Manager) CloneVolume(ctx context.Context, sourceVolumeID string, req Al
 	}
 
 	// 6. Determine sync vs async
-	isSameShare := share.ShareID == sourceSV.Spec.ShareID
-	isSmallEnough := sourceSV.Spec.RequestedGB <= syncThresholdGB
-	doSync := isSameShare && isSmallEnough && m.nfsOps != nil
+	// Sync clones disabled: controller pod has no NFS access.
+	// All clones go through the async Job-based clone worker.
+	doSync := false
+	_ = syncThresholdGB // keep the constant referenced
 
 	subPath := fmt.Sprintf("/pvcs/%s", req.PVName)
 	uid, gid, perms := m.resolvePermissions(req, pool)

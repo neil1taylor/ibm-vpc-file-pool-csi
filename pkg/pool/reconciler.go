@@ -3,6 +3,7 @@ package pool
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -172,6 +173,16 @@ func (r *FileSharePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// 9. Set LastReconcileTime
 	pool.Status.LastReconcileTime = timeNow()
 
+	// 9b. Preserve GoldenImages status written by the golden image syncer.
+	// The syncer runs independently and writes pool.Status.GoldenImages.
+	// Without this, the reconciler's full status update clobbers it.
+	if pool.Status.GoldenImages == nil {
+		freshPool, err := r.k8sClient.GetFileSharePool(ctx, pool.Name)
+		if err == nil && freshPool.Status.GoldenImages != nil {
+			pool.Status.GoldenImages = freshPool.Status.GoldenImages
+		}
+	}
+
 	// 10. Persist
 	if err := r.k8sClient.UpdateFileSharePoolStatus(ctx, pool); err != nil {
 		klog.ErrorS(err, "Failed to update pool status", "pool", pool.Name)
@@ -262,11 +273,20 @@ func (r *FileSharePoolReconciler) initialProvisioning(ctx context.Context, pool 
 
 // healthCheck queries VPC for each share's current state and updates pool status accordingly.
 func (r *FileSharePoolReconciler) healthCheck(ctx context.Context, pool *v1alpha1.FileSharePool) {
-	for i := range pool.Status.Shares {
+	// Iterate backwards so we can safely remove entries.
+	for i := len(pool.Status.Shares) - 1; i >= 0; i-- {
 		share := &pool.Status.Shares[i]
 
 		info, err := r.vpcClient.GetFileShare(ctx, share.ShareID)
 		if err != nil {
+			if errors.Is(err, ibmcloud.ErrShareNotFound) && share.PVCCount == 0 {
+				klog.InfoS("VPC share deleted and has no PVCs — removing from pool status",
+					"shareID", share.ShareID, "shareName", share.ShareName)
+				pool.Status.Shares = append(pool.Status.Shares[:i], pool.Status.Shares[i+1:]...)
+				pool.Status.ShareCount = int32(len(pool.Status.Shares)) //nolint:gosec // safe: MaxShares capped at 100
+				pool.Status.TotalCapacityGB -= share.TotalGB
+				continue
+			}
 			klog.ErrorS(err, "Health check failed for share", "shareID", share.ShareID)
 			continue
 		}
@@ -342,11 +362,12 @@ func (r *FileSharePoolReconciler) healthCheck(ctx context.Context, pool *v1alpha
 				}
 				mtInfo, mtErr := r.vpcClient.CreateShareMountTarget(ctx, share.ShareID, mtInput)
 				if mtErr != nil {
-					klog.ErrorS(mtErr, "Failed to create mount target for share — "+
-						"share may use security_group access mode (incompatible with VPC mount targets). "+
-						"Mark share as draining to prevent allocations.",
+					klog.ErrorS(mtErr, "Failed to create mount target for share — will retry next reconcile",
 						"shareID", share.ShareID)
-					share.State = "draining"
+					// Don't mark as draining — transient VPC errors are common.
+					// The next reconcile will retry. If the share truly can't have
+					// a mount target, it will fail repeatedly but won't block the
+					// pool from using other shares.
 				} else {
 					share.MountTargetIP = mtInfo.IPAddress
 					share.MountTargetID = mtInfo.ID

@@ -344,7 +344,17 @@ func (s *GoldenImageSyncer) ensureConverterJob(
 			return true, nil
 		}
 		if existing.Status.Failed > 0 && existing.Status.Active == 0 {
-			return false, fmt.Errorf("converter job %s/%s failed", ns, jobName)
+			// Delete the failed job so the next sync cycle recreates it.
+			klog.V(2).InfoS("Deleting failed converter job for retry",
+				"namespace", ns, "job", jobName)
+			propagation := metav1.DeletePropagationBackground
+			if delErr := s.directClient.Delete(ctx, existing, &client.DeleteOptions{
+				PropagationPolicy: &propagation,
+			}); delErr != nil && !errors.IsNotFound(delErr) {
+				klog.ErrorS(delErr, "Failed to delete failed converter job",
+					"namespace", ns, "job", jobName)
+			}
+			return false, fmt.Errorf("converter job %s/%s failed (deleted for retry)", ns, jobName)
 		}
 		return false, nil // still running
 	}

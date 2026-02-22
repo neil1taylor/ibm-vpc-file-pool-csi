@@ -269,11 +269,11 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 	}()
 
 	// Start the background clone worker for async volume clones.
-	// It uses real NFS operations to perform the actual cp -a copies.
+	// It creates Kubernetes Jobs to perform cp -a (controller pod has no NFS access).
 	// The signal context ensures graceful shutdown alongside the manager.
 	signalCtx := ctrl.SetupSignalHandler()
 	nfsOps := pool.NewRealNFSOperations()
-	cloneWorker := pool.NewCloneWorker(k8sClient, nfsOps, stagingBasePath)
+	cloneWorker := pool.NewCloneWorker(k8sClient, mgr.GetClient(), pool.DefaultCloneImage)
 	if cloneWorkerInterval > 0 {
 		cloneWorker.SetInterval(cloneWorkerInterval)
 	}

@@ -7,7 +7,7 @@ GOBIN := $(shell go env GOPATH)/bin
 GOLANGCI_LINT := $(GOBIN)/golangci-lint
 CONTROLLER_GEN := $(GOBIN)/controller-gen
 
-.PHONY: build build-migrate test test-integration test-e2e test-coverage vet lint generate docker-build \
+.PHONY: build build-migrate test test-integration test-e2e test-vm test-coverage vet lint generate docker-build \
         install-crds deploy helm-install helm-lint helm-template run-local tools clean
 
 build:
@@ -24,6 +24,9 @@ test-integration:
 
 test-e2e:
 	go test ./test/e2e/ -v -tags e2e -timeout 10m -count=1
+
+test-vm:
+	bash test/e2e/test-vm-clone.sh
 
 test-coverage:
 	go test ./... -v -race -coverprofile=coverage.out

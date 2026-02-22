@@ -2787,7 +2787,7 @@ func TestCreateSnapshot_MetricsIncremented(t *testing.T) {
 // CloneVolume Tests
 // ---------------------------------------------------------------------------
 
-func TestCloneVolume_SyncPath(t *testing.T) {
+func TestCloneVolume_SyncDisabled_AlwaysAsync(t *testing.T) {
 	k := newFakeK8sClient()
 	vpc := fake.NewFakeVPCClient()
 	nfs := newFakeNFSOperations()
@@ -2797,7 +2797,7 @@ func TestCloneVolume_SyncPath(t *testing.T) {
 	)
 	k.addPool(pool)
 
-	// Source SubVolume: 5 GB on share-1
+	// Source SubVolume: 5 GB on share-1 (small, same share — would have been sync before)
 	source := newTestSubVolume("pvc-aaaa1111-2222-3333-4444-555566667777", "test-pool", "share-1", 5)
 	k.addSubVolume(source)
 
@@ -2812,7 +2812,7 @@ func TestCloneVolume_SyncPath(t *testing.T) {
 			PoolName:     "test-pool",
 			RequestedGB:  5,
 		},
-		10, // syncThreshold = 10 GB
+		10, // syncThreshold = 10 GB (ignored — sync always disabled)
 	)
 	if err != nil {
 		t.Fatalf("CloneVolume failed: %v", err)
@@ -2823,21 +2823,21 @@ func TestCloneVolume_SyncPath(t *testing.T) {
 		t.Errorf("expected share-1 (same share), got %s", result.ShareID)
 	}
 
-	// CopyDir should have been called (sync path)
-	if nfs.copyCount() != 1 {
-		t.Errorf("expected 1 copy, got %d", nfs.copyCount())
+	// CopyDir should NOT have been called (sync disabled, all clones are async)
+	if nfs.copyCount() != 0 {
+		t.Errorf("expected 0 copies (sync disabled), got %d", nfs.copyCount())
 	}
 
-	// SubVolume CR should exist with cloneStatus=Complete
+	// SubVolume CR should exist with cloneStatus=Pending (async path)
 	sv := k.getSubVolume(testPVName)
 	if sv == nil {
 		t.Fatal("SubVolume CR not created")
 	}
-	if sv.Status.CloneStatus != "Complete" {
-		t.Errorf("expected cloneStatus=Complete, got %q", sv.Status.CloneStatus)
+	if sv.Status.CloneStatus != "Pending" {
+		t.Errorf("expected cloneStatus=Pending, got %q", sv.Status.CloneStatus)
 	}
-	if sv.Status.Phase != "Bound" {
-		t.Errorf("expected phase=Bound, got %q", sv.Status.Phase)
+	if sv.Status.Phase != "Cloning" {
+		t.Errorf("expected phase=Cloning, got %q", sv.Status.Phase)
 	}
 	if sv.Spec.SourceVolume != "pvc-aaaa1111-2222-3333-4444-555566667777" {
 		t.Errorf("expected sourceVolume set, got %q", sv.Spec.SourceVolume)
@@ -3128,7 +3128,7 @@ func TestCloneVolume_Idempotent(t *testing.T) {
 	}
 }
 
-func TestCloneVolume_CopyFailure(t *testing.T) {
+func TestCloneVolume_SyncDisabled_NoNFSCopyAttempted(t *testing.T) {
 	k := newFakeK8sClient()
 	vpc := fake.NewFakeVPCClient()
 	nfs := newFakeNFSOperations()
@@ -3144,7 +3144,9 @@ func TestCloneVolume_CopyFailure(t *testing.T) {
 
 	mgr := newManagerForTest(k, vpc, nfs)
 
-	_, err := mgr.CloneVolume(context.Background(),
+	// With sync disabled, CloneVolume should succeed even with NFS errors
+	// because it goes async (no copy attempted in the hot path).
+	result, err := mgr.CloneVolume(context.Background(),
 		"test-pool/share-1/pvc-aaaa1111-2222-3333-4444-555566667777",
 		AllocationRequest{
 			PVName:       testPVName,
@@ -3156,16 +3158,25 @@ func TestCloneVolume_CopyFailure(t *testing.T) {
 		10,
 	)
 
-	if err == nil {
-		t.Fatal("expected error for copy failure")
+	if err != nil {
+		t.Fatalf("expected no error (sync disabled, async path), got: %v", err)
 	}
-	if !contains(err.Error(), "clone copy") {
-		t.Errorf("expected 'clone copy' in error, got: %v", err)
+	if result.ShareID != "share-1" {
+		t.Errorf("expected share-1, got %s", result.ShareID)
 	}
 
-	// No SubVolume should be created after copy failure
-	if k.subVolumeCount() != 1 { // only the source exists
-		t.Errorf("expected 1 SubVolume (source only), got %d", k.subVolumeCount())
+	// No NFS copy should have been attempted.
+	if nfs.copyCount() != 0 {
+		t.Errorf("expected 0 copies (sync disabled), got %d", nfs.copyCount())
+	}
+
+	// SubVolume should exist with Pending status (async).
+	sv := k.getSubVolume(testPVName)
+	if sv == nil {
+		t.Fatal("SubVolume CR not created")
+	}
+	if sv.Status.CloneStatus != "Pending" {
+		t.Errorf("expected cloneStatus=Pending (async), got %q", sv.Status.CloneStatus)
 	}
 }
 

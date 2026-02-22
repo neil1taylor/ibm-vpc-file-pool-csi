@@ -181,6 +181,14 @@ func (f *FakeVPCClient) SetShareState(id string, state string) {
 	}
 }
 
+// AddShare inserts a share directly by ID. Used by tests that need shares
+// with specific IDs to exist in VPC (e.g., health check tests).
+func (f *FakeVPCClient) AddShare(info *ibmcloud.ShareInfo) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.shares[info.ID] = info
+}
+
 // ClearMountTargets removes all mount targets from a share.
 // Used to simulate shares created without a VPC mount target.
 func (f *FakeVPCClient) ClearMountTargets(id string) {
