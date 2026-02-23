@@ -1,6 +1,6 @@
 BINARY_NAME := vpc-file-pool-csi
-IMAGE_NAME := icr.io/ibm-vpc-file-pool-csi/driver
-CONSOLE_PLUGIN_IMAGE := icr.io/ibm-vpc-file-pool-csi/console-plugin
+IMAGE_NAME := de.icr.io/ibm-vpc-file-pool-csi/driver
+CONSOLE_PLUGIN_IMAGE := de.icr.io/ibm-vpc-file-pool-csi/console-plugin
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 GOLANGCI_LINT_VERSION := v2.1.6
 CONTROLLER_GEN_VERSION := v0.20.1
@@ -11,7 +11,8 @@ CONTROLLER_GEN := $(GOBIN)/controller-gen
 .PHONY: build build-migrate test test-integration test-e2e test-vm test-coverage vet lint generate docker-build \
         install-crds deploy helm-install helm-lint helm-template run-local tools clean \
         console-plugin-install console-plugin-build console-plugin-dev console-plugin-lint \
-        console-plugin-test console-plugin-docker-build
+        console-plugin-test console-plugin-docker-build \
+        console-plugin-test-e2e console-plugin-test-e2e-setup
 
 build:
 	CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$(VERSION)" -o bin/$(BINARY_NAME) ./cmd/
@@ -108,3 +109,9 @@ console-plugin-test: console-plugin-install
 
 console-plugin-docker-build:
 	$(CONTAINER_ENGINE) build -t $(CONSOLE_PLUGIN_IMAGE):$(VERSION) console-plugin/
+
+console-plugin-test-e2e-setup: console-plugin-install
+	cd console-plugin && yarn test:e2e:setup
+
+console-plugin-test-e2e: console-plugin-install
+	cd console-plugin && yarn test:e2e

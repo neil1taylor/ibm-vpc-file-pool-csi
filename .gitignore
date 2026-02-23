@@ -31,6 +31,12 @@ console-plugin/dist-extracted/
 # Diagnostics
 must-gather.local.*/
 
+# Playwright E2E test artifacts
+console-plugin/storageState.json
+console-plugin/integration-tests/storageState.json
+console-plugin/test-results/
+console-plugin/playwright-report/
+
 # Claude Code
 .claude/
 migrate
