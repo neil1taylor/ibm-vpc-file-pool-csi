@@ -91,6 +91,10 @@ rules:
   - apiGroups: ["image.openshift.io"]
     resources: ["imagestreams"]
     verbs: ["get"]
+  # ImageStream layers (required to grant system:image-puller via RoleBinding)
+  - apiGroups: ["", "image.openshift.io"]
+    resources: ["imagestreams/layers"]
+    verbs: ["get"]
   # RoleBindings for image-puller access (converter Jobs pulling from internal registry)
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["rolebindings"]
