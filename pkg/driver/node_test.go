@@ -13,6 +13,7 @@ import (
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	storagev1 "k8s.io/api/storage/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	mount "k8s.io/mount-utils"
 )
 
@@ -1350,6 +1351,9 @@ func TestNodePublishVolume_CloneInProgress(t *testing.T) {
 		zone: "us-south-1",
 		subVolumes: map[string]*v1alpha1.SubVolume{
 			pvName: {
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{"storage.ibmcloud.io/clone-source": "pvc-source"},
+				},
 				Spec: v1alpha1.SubVolumeSpec{
 					SourceVolume: "pvc-source",
 				},
@@ -1387,6 +1391,9 @@ func TestNodePublishVolume_ClonePending(t *testing.T) {
 		zone: "us-south-1",
 		subVolumes: map[string]*v1alpha1.SubVolume{
 			pvName: {
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{"storage.ibmcloud.io/clone-source": "pvc-source"},
+				},
 				Spec: v1alpha1.SubVolumeSpec{
 					SourceVolume: "pvc-source",
 				},
@@ -1424,6 +1431,9 @@ func TestNodePublishVolume_CloneFailed(t *testing.T) {
 		zone: "us-south-1",
 		subVolumes: map[string]*v1alpha1.SubVolume{
 			pvName: {
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{"storage.ibmcloud.io/clone-source": "pvc-source"},
+				},
 				Spec: v1alpha1.SubVolumeSpec{
 					SourceVolume: "pvc-source",
 				},
@@ -1464,6 +1474,9 @@ func TestNodePublishVolume_CloneComplete(t *testing.T) {
 		zone: "us-south-1",
 		subVolumes: map[string]*v1alpha1.SubVolume{
 			pvName: {
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{"storage.ibmcloud.io/clone-source": "pvc-source"},
+				},
 				Spec: v1alpha1.SubVolumeSpec{
 					SourceVolume: "pvc-source",
 				},
@@ -1499,6 +1512,48 @@ func TestNodePublishVolume_CloneComplete(t *testing.T) {
 	if resp == nil {
 		t.Fatal("expected non-nil response")
 	}
+}
+
+func TestNodePublishVolume_CloneStatusEmpty(t *testing.T) {
+	// Regression: clone source label is set at allocation time, but clone worker
+	// hasn't processed it yet so CloneStatus is empty. The gate must still block.
+	pvName := "pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"
+	k := &nodeTestK8sClient{
+		zone: "us-south-1",
+		subVolumes: map[string]*v1alpha1.SubVolume{
+			pvName: {
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{"storage.ibmcloud.io/clone-source": "pvc-source"},
+				},
+				Spec: v1alpha1.SubVolumeSpec{
+					SourceVolume: "pvc-source",
+				},
+				Status: v1alpha1.SubVolumeStatus{
+					Phase: "Bound",
+					// CloneStatus deliberately empty — clone worker hasn't set it yet
+				},
+			},
+		},
+	}
+	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil, k)
+
+	tmpDir := resolvedTempDir(t)
+	stagingPath := filepath.Join(tmpDir, "staging")
+	subDirPath := filepath.Join(stagingPath, "/pvcs/"+pvName)
+	if err := os.MkdirAll(subDirPath, 0750); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	_, err := d.NodePublishVolume(context.Background(), &csi.NodePublishVolumeRequest{
+		VolumeId:          fmt.Sprintf("pool/share/%s", pvName),
+		StagingTargetPath: stagingPath,
+		TargetPath:        filepath.Join(tmpDir, "target"),
+		VolumeContext: map[string]string{
+			"subDir": "/pvcs/" + pvName,
+		},
+	})
+
+	assertGRPCCode(t, err, codes.Unavailable)
 }
 
 func TestNodePublishVolume_NonClone(t *testing.T) {

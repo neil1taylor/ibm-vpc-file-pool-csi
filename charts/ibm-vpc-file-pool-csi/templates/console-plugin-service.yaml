@@ -1,0 +1,22 @@
+{{- if .Values.consolePlugin.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-console-plugin
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: console-plugin
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-console-plugin-cert
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "ibm-vpc-file-pool-csi.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: console-plugin
+  ports:
+    - name: https
+      port: {{ .Values.consolePlugin.port }}
+      targetPort: https
+      protocol: TCP
+{{- end }}

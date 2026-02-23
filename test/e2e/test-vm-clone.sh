@@ -22,6 +22,7 @@ POOL_NAME="${POOL_NAME:-e2e-vm-pool}"
 ZONE="${ZONE:-eu-de-1}"
 IMAGE_FILTER="${IMAGE_FILTER:-centos-stream9}"
 SHARE_SIZE_GB="${SHARE_SIZE_GB:-300}"
+SHARE_IOPS="${SHARE_IOPS:-}"
 TOTAL_TIMEOUT="${TOTAL_TIMEOUT:-1200}"
 
 KEEP=false
@@ -461,6 +462,7 @@ spec:
   zone: ${ZONE}
   profile: dp2
   shareSizeGB: ${SHARE_SIZE_GB}
+$( [ -n "${SHARE_IOPS}" ] && echo "  iops: ${SHARE_IOPS}" )
   maxShares: 2
   initialShares: 1
   autoExpand: true

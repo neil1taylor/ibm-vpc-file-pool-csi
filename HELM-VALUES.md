@@ -2,6 +2,13 @@
 
 Complete reference for all configurable parameters in the `ibm-vpc-file-pool-csi` Helm chart.
 
+## General
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `nameOverride` | string | `""` | Override the chart name used in resource names |
+| `fullnameOverride` | string | `""` | Override the full resource name prefix |
+
 ## Image
 
 | Parameter | Type | Default | Description |
@@ -43,7 +50,8 @@ Settings for the CSI node agent DaemonSet (runs on every worker node).
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `node.kubeletDir` | string | `/var/lib/kubelet` | Kubelet root directory. Set to `/var/data/kubelet` on ROKS |
+| `node.kubeletDir` | string | `/var/data/kubelet` | Kubelet root directory. ROKS/IKS uses `/var/data/kubelet` (the real path). Standard Kubernetes uses `/var/lib/kubelet` |
+| `node.registrarHealthPort` | int | `9809` | Port for the node-driver-registrar health endpoint. Must not conflict with other hostNetwork services. Stock IBM VPC file CSI uses 9808 |
 | `node.resources.requests.cpu` | string | `50m` | Node agent CPU request |
 | `node.resources.requests.memory` | string | `64Mi` | Node agent memory request |
 | `node.resources.limits.memory` | string | `256Mi` | Node agent memory limit |
@@ -71,6 +79,30 @@ Controls how the IBM Cloud API key is injected into the controller.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `cloneWorker.interval` | string | `10s` | Background clone worker poll interval (Go duration) |
+
+## Golden Image Syncer
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `goldenImageSyncer.interval` | string | `5m` | Background golden image syncer poll interval (Go duration). Controls how often the syncer checks for new CDI DataImportCrons and updates golden images |
+
+## Webhook
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `webhook.enabled` | bool | `true` | Enable validating admission webhooks for CRD resources |
+| `webhook.port` | int | `9443` | Webhook server port |
+| `webhook.certProvider` | string | `cert-manager` | Certificate provisioning method: `cert-manager` (auto-provisions via cert-manager) or `manual` (you create the TLS secret) |
+| `webhook.certManager.issuerKind` | string | `Issuer` | cert-manager issuer kind. Only used when `certProvider=cert-manager` |
+| `webhook.certManager.issuerName` | string | `""` | cert-manager issuer name. Leave empty to create a self-signed Issuer automatically |
+
+## Volume Snapshot Class
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `volumeSnapshotClass.create` | bool | `true` | Create a VolumeSnapshotClass resource |
+| `volumeSnapshotClass.name` | string | `ibm-vpc-file-pool` | VolumeSnapshotClass name |
+| `volumeSnapshotClass.deletionPolicy` | string | `Delete` | Snapshot deletion policy (`Delete` or `Retain`) |
 
 ## Sidecars
 
@@ -116,6 +148,29 @@ Configuration for the default StorageClass created by the chart.
 | `storageClass.volumeBindingMode` | string | `Immediate` | Volume binding mode (`Immediate` or `WaitForFirstConsumer`) |
 | `storageClass.allowVolumeExpansion` | bool | `true` | Allow PVC resize requests |
 | `storageClass.mountOptions` | list | `[nfsvers=4.1, soft, timeo=600, retrans=3]` | NFS mount options. Do not change `soft` to `hard` — see [Known Limitations](KNOWN-LIMITATIONS.md) |
+
+## Console Plugin
+
+OpenShift Console dynamic plugin for visual pool management. Requires OpenShift 4.14+ with the ConsolePlugin v1 API. Disabled by default.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `consolePlugin.enabled` | bool | `false` | Enable the OpenShift Console dynamic plugin |
+| `consolePlugin.image.repository` | string | `icr.io/ibm-vpc-file-pool-csi/console-plugin` | Plugin container image repository |
+| `consolePlugin.image.tag` | string | `latest` | Plugin image tag |
+| `consolePlugin.replicas` | int | `2` | Number of plugin pod replicas |
+| `consolePlugin.port` | int | `9443` | HTTPS port for the plugin Service. TLS certs are auto-provisioned by the OpenShift service-ca operator |
+| `consolePlugin.resources.requests.cpu` | string | `10m` | CPU request |
+| `consolePlugin.resources.requests.memory` | string | `50Mi` | Memory request |
+| `consolePlugin.resources.limits.memory` | string | `128Mi` | Memory limit |
+
+After installing with `consolePlugin.enabled=true`, register the plugin with the OpenShift console:
+
+```bash
+oc patch console.operator.openshift.io cluster \
+  --patch '{"spec":{"plugins":["ibm-vpc-file-pool-csi"]}}' \
+  --type=merge
+```
 
 ## Example Overrides
 
@@ -167,6 +222,27 @@ Then create a Secret with the IBM Cloud API key:
 kubectl create secret generic ibm-cloud-credentials \
   --namespace kube-system \
   --from-literal=api-key=<your-api-key>
+```
+
+### Console Plugin
+
+Enable the OpenShift Console dynamic plugin:
+
+```yaml
+consolePlugin:
+  enabled: true
+  image:
+    repository: icr.io/ibm-vpc-file-pool-csi/console-plugin
+    tag: v0.12.0
+  replicas: 2
+```
+
+After install, register the plugin:
+
+```bash
+oc patch console.operator.openshift.io cluster \
+  --patch '{"spec":{"plugins":["ibm-vpc-file-pool-csi"]}}' \
+  --type=merge
 ```
 
 ### Custom Metrics

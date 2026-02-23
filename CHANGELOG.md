@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [v0.13.0] — 2026-02-22
+
+### Changed
+
+- **Console plugin: single tabbed navigation** — Replaced 7 sidebar nav items with one "IBM VPC File Pools" entry that opens a tabbed interface (Overview, Pools, SubVolumes, Snapshots, Group Snapshots, Replication, Monitoring). Detail and create pages render standalone without tabs. Reduced `console-extensions.json` from 26 entries to 3 and `exposedModules` from 16 to 1. Internal routing handled by `VPCFilePoolsPage` with `React.lazy` code-splitting
+- **Console plugin: create buttons route to custom forms** — Replaced `ListPageCreate` (which generates YAML editor URLs) with `ListPageCreateLink` using `to` prop in FileSharePoolListPage, SubVolumeListPage, VolumeGroupSnapshotListPage, and ReplicationPolicyListPage. SnapshotListPage was already correct
+- **Console plugin: PF6 table column widths** — Replaced PF5 `pf-m-width-XX` classes with inline `style: { width: 'XX%' }` in all 5 list pages. Updated actions column from `pf-v5-c-table__action` to `pf-v6-c-table__action`
+
+### Added
+
+- **CDI DataSource creation for InstanceTypes catalog** — Re-added DataSource creation to the golden image syncer. DataSources are created in `openshift-virtualization-os-images` with `-nfs-pool` suffix to avoid collisions with CDI's own DataSources. Includes `instancetype.kubevirt.io/default-instancetype` and `default-preference` labels so pool-backed golden images appear in the Virtualization > Catalog > InstanceTypes tab with correct sizing defaults. Cross-namespace `spec.source.pvc` points to the golden PVC in the target namespace. DataSource creation is non-fatal — template-based VM creation continues to work without DataSources
+- **Console plugin: monitoring tab** — Dedicated Monitoring tab with time range selector (1h/6h/24h/7d), 4 stat cards (allocation rate, P95 latency, VPC API health, replication status), and 4 time-series charts (allocation rate, P95 latency, VPC API call rate by status, replication lag). Uses new `usePrometheusRange` hook for Prometheus range queries
+- **Console plugin: IOPS column in pool table** — Displays `spec.iops` for custom profiles or calculates from profile (dp2 = 100 IOPS/GB)
+- **Console plugin: `TimeSeriesChart` component** — Reusable chart wrapping PatternFly `@patternfly/react-charts` with area and line chart types, Voronoi tooltips, and automatic tick formatting
+
+## [v0.12.0] — 2026-02-22
+
+### Added
+
+- **OpenShift Console dynamic plugin** — React/TypeScript plugin for visual pool management in the OpenShift web console. Dashboard with capacity gauges and share status, CRUD views for all 5 CRDs (FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, ReplicationPolicy), 6-step FileSharePool creation wizard, and Prometheus metrics panels. Gated by `consolePlugin.enabled` (default `false`). Requires OpenShift 4.14+
+- **Helm chart templates for console plugin** — Deployment, Service, ConfigMap, and ConsolePlugin CR templates, all gated by `consolePlugin.enabled`
+- **6 new `console-plugin-*` Makefile targets** — `console-plugin-install`, `console-plugin-build`, `console-plugin-dev`, `console-plugin-lint`, `console-plugin-test`, `console-plugin-docker-build`
+
 ## [v0.11.0] — 2026-02-21
 
 ### Added
@@ -201,6 +224,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Mount target IP resolution when share has multiple mount targets across zones
 - Makefile targets for end-to-end build pipeline
 
+[v0.13.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.12.0...v0.13.0
+[v0.12.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.11.0...v0.12.0
 [v0.11.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.10.0...v0.11.0
 [v0.10.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.9.0...v0.10.0
 [v0.9.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.8.0...v0.9.0

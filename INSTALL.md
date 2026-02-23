@@ -497,6 +497,55 @@ The tests create resources with an `e2e-` prefix and clean them up automatically
 
 ---
 
+## OpenShift Console Plugin (Optional)
+
+The driver includes an OpenShift Console dynamic plugin that provides a visual dashboard for managing file share pools, SubVolumes, snapshots, and replication policies directly from the OpenShift web console.
+
+### Prerequisites
+
+- OpenShift 4.14+ with the ConsolePlugin v1 API
+- The CSI driver must already be installed (Steps 1-4 above)
+
+### Enable the Console Plugin
+
+Add the `consolePlugin.enabled` flag during Helm install or upgrade:
+
+```bash
+helm upgrade --install ibm-vpc-file-pool-csi \
+  charts/ibm-vpc-file-pool-csi/ \
+  --namespace kube-system \
+  --set image.repository=${REGISTRY}/${NAMESPACE}/vpc-file-pool-csi \
+  --set image.tag=${VERSION} \
+  --set consolePlugin.enabled=true
+```
+
+This deploys the plugin as a separate Deployment with its own Service. TLS certificates are auto-provisioned by the OpenShift service-ca operator (no cert-manager dependency for the plugin).
+
+### Register the Plugin
+
+After install, register the plugin with the OpenShift console:
+
+```bash
+oc patch console.operator.openshift.io cluster \
+  --patch '{"spec":{"plugins":["ibm-vpc-file-pool-csi"]}}' \
+  --type=merge
+```
+
+### Verify
+
+Navigate to **Admin → VPC File Pools** in the OpenShift console. You should see the pool dashboard with capacity gauges and share status.
+
+### Building the Plugin Image
+
+If building from source:
+
+```bash
+make console-plugin-docker-build
+# Pushes as: icr.io/ibm-vpc-file-pool-csi/console-plugin:$(VERSION)
+```
+
+---
+
 ## Upgrading
 
 **Why is upgrading safe?** The CSI driver runs as pods, but the actual NFS mounts are handled by the Linux kernel on each node. When the driver pods restart during an upgrade, existing mounts are unaffected — your applications keep reading and writing without interruption.

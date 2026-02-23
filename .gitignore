@@ -23,6 +23,14 @@ Thumbs.db
 # MkDocs build output
 site/
 
+# Console plugin build artifacts
+console-plugin/node_modules/
+console-plugin/dist/
+console-plugin/dist-extracted/
+
+# Diagnostics
+must-gather.local.*/
+
 # Claude Code
 .claude/
 migrate

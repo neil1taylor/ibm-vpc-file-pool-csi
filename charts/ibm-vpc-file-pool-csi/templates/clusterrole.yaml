@@ -81,10 +81,22 @@ rules:
   - apiGroups: ["cdi.kubevirt.io"]
     resources: ["dataimportcrons"]
     verbs: ["get", "list", "watch"]
+  # CDI DataSources (InstanceTypes catalog visibility)
+  - apiGroups: ["cdi.kubevirt.io"]
+    resources: ["datasources"]
+    verbs: ["get", "create"]
   # Jobs for golden image conversion
   - apiGroups: ["batch"]
     resources: ["jobs"]
     verbs: ["get", "list", "watch", "create", "delete"]
+  # OpenShift ImageStreams (resolving golden image sources for RHEL)
+  - apiGroups: ["image.openshift.io"]
+    resources: ["imagestreams"]
+    verbs: ["get"]
+  # RoleBindings for image-puller access (converter Jobs pulling from internal registry)
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "create"]
   # OpenShift Templates for VM catalog
   - apiGroups: ["template.openshift.io"]
     resources: ["templates"]
@@ -115,6 +127,10 @@ rules:
   # Node read access (for zone detection)
   - apiGroups: [""]
     resources: ["nodes"]
+    verbs: ["get"]
+  # SubVolume read access (for clone gate in NodePublishVolume and per-PVC stats)
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["subvolumes"]
     verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

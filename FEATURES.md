@@ -62,7 +62,7 @@ Dual-mode cloning with automatic strategy selection based on volume size.
 - **Crash recovery** — The clone worker recovers incomplete clones on restart by scanning for SubVolumes in Pending/InProgress state.
 - **Progress tracking** — CloneProgress tracks BytesCopied, TotalBytes, StartedAt, CompletedAt, and Error.
 
-### Volume Group Snapshots — Planned
+### Volume Group Snapshots — Beta
 
 Multi-PVC coordinated snapshots for application-consistent backups.
 
@@ -73,7 +73,7 @@ Multi-PVC coordinated snapshots for application-consistent backups.
 - **Pre/post-snapshot hooks** — Exec and HTTP webhook hooks via the hook orchestrator for application quiescing.
 - **Validating webhook** — Ensures VolumeGroupSnapshot CRs have poolName and sourcePVCs.
 
-### Cross-Region Replication — Planned
+### Cross-Region Replication — Beta
 
 rsync-based disaster recovery with configurable sync schedules.
 
@@ -170,7 +170,7 @@ Production-ready packaging for ROKS clusters.
 - **cert-manager webhook TLS** — Admission webhooks use cert-manager for automatic certificate provisioning and rotation.
 - **hostNetwork for NFS persistence** — Node DaemonSet runs with `hostNetwork: true` so NFS TCP connections survive container restarts.
 
-### Migration — Planned
+### Migration — Beta
 
 CLI tool for migrating PVCs from the stock IBM VPC File CSI driver.
 
@@ -180,14 +180,28 @@ CLI tool for migrating PVCs from the stock IBM VPC File CSI driver.
 - **Dry-run mode** — Preview migration plan without making changes.
 - **Idempotent and resumable** — Safe to re-run after interruption.
 
-### Golden Image Syncer — Planned
+### OpenShift Console Integration — Beta
+
+Visual management of file share pools through the OpenShift Console.
+
+- **Dynamic console plugin** — Registers as an OpenShift ConsolePlugin (v1 API, requires OpenShift 4.14+). Gated by `consolePlugin.enabled` in the Helm chart (default `false`).
+- **Single tabbed navigation** — One "IBM VPC File Pools" item under Storage in the console sidebar opens a tabbed interface (Overview, Pools, SubVolumes, Snapshots, Group Snapshots, Replication, Monitoring). Detail and create pages render standalone without tabs.
+- **Pool dashboard** — Overview tab showing all FileSharePools with status, capacity gauges, share count, SubVolume count, and recent activity table.
+- **CRUD for all 5 CRDs** — List, detail, create, edit, and delete views for FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, and ReplicationPolicy resources. Create buttons route to custom form wizards (not the YAML editor).
+- **FileSharePool creation wizard** — 6-step guided wizard for creating pools: zone/profile selection, capacity configuration, allocation strategy, directory ownership, golden image config, and review.
+- **IOPS column in pool table** — Displays custom IOPS or calculated IOPS from profile (dp2 = 100 IOPS/GB).
+- **Monitoring tab** — Dedicated metrics page with time range selector (1h/6h/24h/7d), stat cards (allocation rate, P95 latency, VPC API health, replication status), and time-series charts (allocation rate, latency, API call rate by status, replication lag).
+- **Prometheus metrics panels** — Stat cards and time-series charts using the driver's 21+ Prometheus metrics with `usePrometheusRange` hook for range queries.
+- **TLS via service-ca** — Plugin Service uses OpenShift's service-ca operator for automatic TLS certificate provisioning (no cert-manager dependency).
+
+### Golden Image Syncer — Beta
 
 VM image caching for KubeVirt workloads.
 
 - **CDI DataImportCron discovery** — Finds golden images defined by CDI DataImportCrons and syncs them to target namespaces.
 - **qcow2-to-raw conversion** — Runs a converter pod (centos:stream9 with `qemu-img`) to produce raw disk images compatible with KubeVirt filesystem PVCs.
 - **Configurable refresh interval** — Default 24-hour sync cycle. Per-pool configuration via `GoldenImageConfig` in the FileSharePool spec.
-- **No DataSource creation** — Avoids CDI catalog duplicates by not creating DataSource objects.
+- **CDI DataSource creation** — Creates DataSource CRs in `openshift-virtualization-os-images` with `-nfs-pool` suffix for InstanceTypes catalog visibility. Cross-namespace PVC reference points to the golden PVC in the target namespace.
 - **Per-namespace status** — Tracks sync phase (Pending, Syncing, Ready, Failed) per target namespace.
 
 ---
@@ -209,7 +223,7 @@ How this driver compares to the two most common alternatives for NFS-based Kuber
 | ExpandVolume | ✅ (pool-level) | ✅ (share-level) | ❌ |
 | Volume snapshots | ✅ (directory copy) | ❌ | ❌ |
 | Volume clones | ✅ (sync + async) | ❌ | ❌ |
-| Volume group snapshots | ✅ (planned) | ❌ | ❌ |
+| Volume group snapshots | ✅ (beta) | ❌ | ❌ |
 | Clone status gate | ✅ | — | — |
 | **NFS** | | | |
 | `sec=sys` enforcement | ✅ | ✅ | ❌ |
@@ -228,7 +242,7 @@ How this driver compares to the two most common alternatives for NFS-based Kuber
 | Crash recovery | ✅ (CRD state) | ✅ | ❌ |
 | Share health monitoring | ✅ | ❌ | — |
 | Share draining | ✅ | — | — |
-| Cross-region replication | ✅ (planned) | ❌ | ❌ |
+| Cross-region replication | ✅ (beta) | ❌ | ❌ |
 | Leader election | ✅ | ✅ | ✅ |
 | **Platform** | | | |
 | IBM VPC API integration | ✅ | ✅ | ❌ |
@@ -242,13 +256,14 @@ How this driver compares to the two most common alternatives for NFS-based Kuber
 | **Observability** | | | |
 | Prometheus metrics | ✅ (21+ metrics) | ✅ | ❌ |
 | Structured logging (klog) | ✅ | ✅ | ✅ |
+| OpenShift Console plugin | ✅ (beta) | ❌ | ❌ |
 | **Deployment** | | | |
 | Helm chart | ✅ | ✅ | ✅ |
 | RBAC minimal permissions | ✅ | ✅ | ✅ |
 | Validating webhooks | ✅ (beta) | ❌ | ❌ |
 | UBI9 container image | ✅ | ✅ | ❌ |
 | cert-manager TLS | ✅ | ❌ | ❌ |
-| Migration from stock driver | ✅ (planned) | — | — |
+| Migration from stock driver | ✅ (beta) | — | — |
 
 ¹ K8s NFS CSI requires a pre-existing NFS server; provisioning time depends on the NFS server setup, not the CSI driver.
 

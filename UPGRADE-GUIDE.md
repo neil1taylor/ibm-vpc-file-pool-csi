@@ -41,6 +41,7 @@ Before upgrading, complete every item:
 | v0.6.0–v0.8.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+ |
 | v0.9.0–v0.10.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+ |
 | v0.11.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
+| v0.12.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 
 ---
 
@@ -119,6 +120,33 @@ kubectl get crd filesharepools.storage.ibmcloud.io -o json | \
 ---
 
 ## Version-Specific Upgrade Notes
+
+### Upgrading to v0.12.0 (from v0.11.0)
+
+**New feature:** OpenShift Console dynamic plugin for visual pool management.
+
+**No CRD changes.** No RBAC changes. No data migration required.
+
+**Console plugin is opt-in.** The plugin is disabled by default (`consolePlugin.enabled: false`). To enable:
+
+```bash
+helm upgrade ibm-vpc-file-pool-csi charts/ibm-vpc-file-pool-csi/ \
+  --namespace kube-system \
+  --set consolePlugin.enabled=true \
+  --reuse-values
+```
+
+After upgrade, register the plugin with the console:
+
+```bash
+oc patch console.operator.openshift.io cluster \
+  --patch '{"spec":{"plugins":["ibm-vpc-file-pool-csi"]}}' \
+  --type=merge
+```
+
+**Requires OpenShift 4.14+** with the ConsolePlugin v1 API. Non-OpenShift clusters can skip this — no impact on existing functionality.
+
+---
 
 ### Upgrading to v0.11.0 (from v0.10.0)
 

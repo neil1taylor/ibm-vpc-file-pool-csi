@@ -89,25 +89,35 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 		return nil, status.Errorf(codes.InvalidArgument, "invalid subDir path: %s", subDir)
 	}
 
-	// Check if this is a clone that is still in progress
+	// Check if this is a clone that is still in progress.
+	// The clone source label is set at allocation time, but CloneStatus may not
+	// be set yet when the clone worker hasn't processed it. We must block in
+	// both cases to prevent mounting an empty directory before the clone completes.
 	if d.k8sClient != nil {
 		_, _, pvName, parseErr := parseVolumeID(req.GetVolumeId())
 		if parseErr == nil {
 			sv, svErr := d.k8sClient.GetSubVolume(ctx, pvName)
-			if svErr == nil && sv.Status.CloneStatus != "" {
-				switch sv.Status.CloneStatus {
-				case "Complete":
-					// Clone is done, proceed with normal mount
-				case "Failed":
-					errMsg := "clone failed"
-					if sv.Status.CloneProgress != nil && sv.Status.CloneProgress.Error != "" {
-						errMsg = sv.Status.CloneProgress.Error
+			if svErr == nil {
+				isClone := sv.Labels["storage.ibmcloud.io/clone-source"] != ""
+				cloneStatus := sv.Status.CloneStatus
+
+				if isClone {
+					switch cloneStatus {
+					case "Complete":
+						// Clone is done, proceed with normal mount
+					case "Failed":
+						errMsg := "clone failed"
+						if sv.Status.CloneProgress != nil && sv.Status.CloneProgress.Error != "" {
+							errMsg = sv.Status.CloneProgress.Error
+						}
+						return nil, status.Errorf(codes.Internal, "clone failed: %s", errMsg)
+					default:
+						// Pending, InProgress, or empty (not yet processed by clone worker)
+						klog.V(4).InfoS("Clone gate: blocking mount until clone completes",
+							"subVolume", pvName, "cloneStatus", cloneStatus)
+						return nil, status.Errorf(codes.Unavailable,
+							"clone is %s, not ready for mount (retry later)", cloneStatus)
 					}
-					return nil, status.Errorf(codes.Internal, "clone failed: %s", errMsg)
-				default:
-					// Pending or InProgress -- tell kubelet to retry
-					return nil, status.Errorf(codes.Unavailable,
-						"clone is %s, not ready for mount (retry later)", sv.Status.CloneStatus)
 				}
 			}
 		}

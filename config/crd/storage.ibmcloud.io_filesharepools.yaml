@@ -402,6 +402,10 @@ spec:
                         description: GoldenImageNamespaceStatus tracks the sync state
                           for a golden image in a single namespace.
                         properties:
+                          dataSourceName:
+                            description: DataSourceName is the CDI DataSource for
+                              the InstanceTypes catalog.
+                            type: string
                           lastSyncTime:
                             description: LastSyncTime is when this image was last
                               synced.

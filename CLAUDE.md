@@ -86,6 +86,14 @@ make deploy             # Apply CRDs + RBAC + manifests to cluster
 make helm-install       # Helm chart installation
 make test-e2e           # E2E tests (requires live ROKS cluster + env vars)
 make run-local          # Run controller locally in dry-run mode
+
+# Console Plugin (React/TypeScript — OpenShift Console dynamic plugin)
+make console-plugin-install       # yarn install --frozen-lockfile
+make console-plugin-build         # Production build (yarn build)
+make console-plugin-dev           # Development server (yarn dev)
+make console-plugin-lint          # Lint TypeScript/React code
+make console-plugin-test          # Run plugin unit tests
+make console-plugin-docker-build  # Container image for the console plugin
 ```
 
 Run a single test: `go test ./pkg/pool/ -v -race -run TestPoolManager_Allocate`
@@ -131,6 +139,7 @@ pkg/migrate/       → PVC migration logic
 api/v1alpha1/      → CRD Go types and generated code
 config/            → Kubernetes manifests (CRDs, RBAC, deployments, webhooks)
 charts/            → Helm chart
+console-plugin/    → OpenShift Console dynamic plugin (React/TypeScript)
 test/              → Integration and e2e tests (unit tests live next to code)
 ```
 

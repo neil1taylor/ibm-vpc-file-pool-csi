@@ -1,0 +1,23 @@
+[
+  {
+    "type": "console.navigation/href",
+    "properties": {
+      "id": "vpc-file-pools",
+      "name": "IBM VPC File Pools",
+      "href": "/vpc-file-pools",
+      "perspective": "admin",
+      "section": "storage",
+      "insertAfter": "persistentvolumes"
+    }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "exact": false,
+      "path": "/vpc-file-pools",
+      "component": {
+        "$codeRef": "VPCFilePoolsPage"
+      }
+    }
+  }
+]

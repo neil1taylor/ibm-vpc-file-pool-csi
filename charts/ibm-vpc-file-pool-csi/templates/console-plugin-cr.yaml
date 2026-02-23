@@ -1,0 +1,19 @@
+{{- if .Values.consolePlugin.enabled }}
+apiVersion: console.openshift.io/v1
+kind: ConsolePlugin
+metadata:
+  name: ibm-vpc-file-pool-csi
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+spec:
+  displayName: IBM VPC File Pool CSI
+  backend:
+    type: Service
+    service:
+      name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-console-plugin
+      namespace: {{ .Release.Namespace }}
+      port: {{ .Values.consolePlugin.port }}
+      basePath: /
+  i18n:
+    loadType: Preload
+{{- end }}

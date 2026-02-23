@@ -30,9 +30,13 @@ controller:
   affinity: {}
 
 node:
-  # Kubelet root directory. Standard Kubernetes uses /var/lib/kubelet.
-  # ROKS (Red Hat OpenShift on IBM Cloud) uses /var/data/kubelet.
-  kubeletDir: /var/lib/kubelet
+  # Kubelet root directory. ROKS/IKS uses /var/data/kubelet (the real path).
+  # /var/lib/kubelet is a symlink on ROKS, but kubelet sends CSI RPCs with
+  # the resolved real path. The container mountPath MUST match the path
+  # kubelet uses, otherwise NFS mounts created by the CSI driver won't
+  # propagate to the host via Bidirectional mount propagation.
+  # Standard (non-IBM) Kubernetes clusters use /var/lib/kubelet.
+  kubeletDir: /var/data/kubelet
   # Port for the node-driver-registrar health endpoint.
   # Must not conflict with other hostNetwork services on the node.
   # Stock IBM VPC file CSI uses 9808; we default to 9809.
@@ -148,3 +152,21 @@ storageClass:
     - soft
     - timeo=600
     - retrans=3
+
+consolePlugin:
+  # Enable the OpenShift Console dynamic plugin for visual pool management.
+  # Requires OpenShift 4.14+ with ConsolePlugin v1 API.
+  enabled: false
+  image:
+    repository: icr.io/ibm-vpc-file-pool-csi/console-plugin
+    tag: latest
+  replicas: 2
+  # HTTPS port for the plugin Service. TLS certs are auto-provisioned
+  # by the OpenShift service-ca operator.
+  port: 9443
+  resources:
+    requests:
+      cpu: 10m
+      memory: 50Mi
+    limits:
+      memory: 128Mi

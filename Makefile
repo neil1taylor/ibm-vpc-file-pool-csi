@@ -1,5 +1,6 @@
 BINARY_NAME := vpc-file-pool-csi
 IMAGE_NAME := icr.io/ibm-vpc-file-pool-csi/driver
+CONSOLE_PLUGIN_IMAGE := icr.io/ibm-vpc-file-pool-csi/console-plugin
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 GOLANGCI_LINT_VERSION := v2.1.6
 CONTROLLER_GEN_VERSION := v0.20.1
@@ -8,7 +9,9 @@ GOLANGCI_LINT := $(GOBIN)/golangci-lint
 CONTROLLER_GEN := $(GOBIN)/controller-gen
 
 .PHONY: build build-migrate test test-integration test-e2e test-vm test-coverage vet lint generate docker-build \
-        install-crds deploy helm-install helm-lint helm-template run-local tools clean
+        install-crds deploy helm-install helm-lint helm-template run-local tools clean \
+        console-plugin-install console-plugin-build console-plugin-dev console-plugin-lint \
+        console-plugin-test console-plugin-docker-build
 
 build:
 	CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$(VERSION)" -o bin/$(BINARY_NAME) ./cmd/
@@ -68,6 +71,8 @@ helm-template:
 	@echo "Unmanaged secret provider: OK"
 	helm template test-release charts/ibm-vpc-file-pool-csi/ --set volumeSnapshotClass.create=false --set storageClass.create=false > /dev/null
 	@echo "Disabled optional resources: OK"
+	helm template test-release charts/ibm-vpc-file-pool-csi/ --set consolePlugin.enabled=true > /dev/null
+	@echo "Console plugin enabled: OK"
 	@echo "All Helm template checks passed."
 
 helm-install:
@@ -83,3 +88,23 @@ tools:
 
 clean:
 	rm -rf bin/ coverage.out coverage.html
+
+# ── Console Plugin ──
+
+console-plugin-install:
+	cd console-plugin && yarn install --frozen-lockfile
+
+console-plugin-build: console-plugin-install
+	cd console-plugin && yarn build
+
+console-plugin-dev: console-plugin-install
+	cd console-plugin && yarn dev
+
+console-plugin-lint: console-plugin-install
+	cd console-plugin && yarn lint
+
+console-plugin-test: console-plugin-install
+	cd console-plugin && yarn test
+
+console-plugin-docker-build:
+	$(CONTAINER_ENGINE) build -t $(CONSOLE_PLUGIN_IMAGE):$(VERSION) console-plugin/

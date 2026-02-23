@@ -194,6 +194,10 @@ type GoldenImageNamespaceStatus struct {
 	// +optional
 	TemplateName string `json:"templateName,omitempty"`
 
+	// DataSourceName is the CDI DataSource for the InstanceTypes catalog.
+	// +optional
+	DataSourceName string `json:"dataSourceName,omitempty"`
+
 	// LastSyncTime is when this image was last synced.
 	// +optional
 	LastSyncTime *metav1.Time `json:"lastSyncTime,omitempty"`

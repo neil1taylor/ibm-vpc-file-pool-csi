@@ -1,0 +1,68 @@
+{{- if .Values.consolePlugin.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-console-plugin
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: console-plugin
+spec:
+  replicas: {{ .Values.consolePlugin.replicas }}
+  selector:
+    matchLabels:
+      {{- include "ibm-vpc-file-pool-csi.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: console-plugin
+  template:
+    metadata:
+      labels:
+        {{- include "ibm-vpc-file-pool-csi.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: console-plugin
+    spec:
+      containers:
+        - name: console-plugin
+          image: "{{ .Values.consolePlugin.image.repository }}:{{ .Values.consolePlugin.image.tag }}"
+          imagePullPolicy: {{ .Values.consolePlugin.image.pullPolicy | default .Values.image.pullPolicy }}
+          ports:
+            - name: https
+              containerPort: {{ .Values.consolePlugin.port }}
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: https
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: https
+              scheme: HTTPS
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          volumeMounts:
+            - name: console-serving-cert
+              mountPath: /var/cert
+              readOnly: true
+            - name: nginx-conf
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+              readOnly: true
+          {{- with .Values.consolePlugin.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: console-serving-cert
+          secret:
+            secretName: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-console-plugin-cert
+            defaultMode: 0440
+        - name: nginx-conf
+          configMap:
+            name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-console-plugin
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

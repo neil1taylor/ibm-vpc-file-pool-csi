@@ -2,6 +2,7 @@ package pool
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -674,7 +675,7 @@ func TestSyncImageInNamespace_EndToEnd(t *testing.T) {
 		},
 	}
 
-	// Register Template GVK.
+	// Register Template and DataSource GVKs.
 	scheme := newTestScheme()
 	scheme.AddKnownTypeWithName(
 		schema.GroupVersionKind{Group: "template.openshift.io", Version: "v1", Kind: "Template"},
@@ -682,6 +683,14 @@ func TestSyncImageInNamespace_EndToEnd(t *testing.T) {
 	)
 	scheme.AddKnownTypeWithName(
 		schema.GroupVersionKind{Group: "template.openshift.io", Version: "v1", Kind: "TemplateList"},
+		&unstructured.UnstructuredList{},
+	)
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "cdi.kubevirt.io", Version: "v1beta1", Kind: "DataSource"},
+		&unstructured.Unstructured{},
+	)
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "cdi.kubevirt.io", Version: "v1beta1", Kind: "DataSourceList"},
 		&unstructured.UnstructuredList{},
 	)
 
@@ -705,5 +714,503 @@ func TestSyncImageInNamespace_EndToEnd(t *testing.T) {
 	}
 	if status.TemplateName != "centos-stream9-nfs-pool" {
 		t.Errorf("expected template name centos-stream9-nfs-pool, got %s", status.TemplateName)
+	}
+	if status.DataSourceName != "centos-stream9-nfs-pool" {
+		t.Errorf("expected DataSource name centos-stream9-nfs-pool, got %s", status.DataSourceName)
+	}
+}
+
+func TestOsPreference(t *testing.T) {
+	tests := []struct {
+		cleanName string
+		want      string
+	}{
+		{"centos-stream9", "centos.stream9"},
+		{"centos-stream10", "centos.stream10"},
+		{"fedora-40", "fedora.40"},
+		{"rhel-9", "rhel.9"},
+		{"ubuntu-22.04", "ubuntu.22.04"},
+		{"windows-2022", "windows.2022"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.cleanName, func(t *testing.T) {
+			got := osPreference(tt.cleanName)
+			if got != tt.want {
+				t.Errorf("osPreference(%q) = %q, want %q", tt.cleanName, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEnsureDataSource_Creates(t *testing.T) {
+	scheme := newTestScheme()
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "cdi.kubevirt.io", Version: "v1beta1", Kind: "DataSource"},
+		&unstructured.Unstructured{},
+	)
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "cdi.kubevirt.io", Version: "v1beta1", Kind: "DataSourceList"},
+		&unstructured.UnstructuredList{},
+	)
+
+	directClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		Build()
+	fk := newFakeK8sClient()
+
+	syncer := NewGoldenImageSyncer(fk, directClient)
+	dsName, err := syncer.ensureDataSource(context.Background(),
+		"centos-stream9", "my-pool", "golden-centos-stream9", "test-ns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dsName != "centos-stream9-nfs-pool" {
+		t.Errorf("expected DataSource name centos-stream9-nfs-pool, got %s", dsName)
+	}
+
+	// Verify DataSource was created.
+	ds := &unstructured.Unstructured{}
+	ds.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "cdi.kubevirt.io", Version: "v1beta1", Kind: "DataSource",
+	})
+	if err := directClient.Get(context.Background(), types.NamespacedName{
+		Namespace: "openshift-virtualization-os-images", Name: "centos-stream9-nfs-pool",
+	}, ds); err != nil {
+		t.Fatalf("expected DataSource to exist: %v", err)
+	}
+
+	labels := ds.GetLabels()
+	if labels["instancetype.kubevirt.io/default-instancetype"] != "u1.medium" {
+		t.Error("expected default-instancetype label")
+	}
+	if labels["instancetype.kubevirt.io/default-preference"] != "centos.stream9" {
+		t.Errorf("expected default-preference centos.stream9, got %s", labels["instancetype.kubevirt.io/default-preference"])
+	}
+	if labels["app.kubernetes.io/part-of"] != "hyperconverged-cluster" {
+		t.Error("expected hyperconverged-cluster part-of label")
+	}
+	if labels[goldenImageLabel] != "true" {
+		t.Error("expected golden-image label")
+	}
+	if labels[goldenPoolLabel] != "my-pool" {
+		t.Error("expected pool label")
+	}
+
+	// Verify PVC reference.
+	pvcName, _, _ := unstructured.NestedString(ds.Object, "spec", "source", "pvc", "name")
+	pvcNS, _, _ := unstructured.NestedString(ds.Object, "spec", "source", "pvc", "namespace")
+	if pvcName != "golden-centos-stream9" {
+		t.Errorf("expected PVC name golden-centos-stream9, got %s", pvcName)
+	}
+	if pvcNS != "test-ns" {
+		t.Errorf("expected PVC namespace test-ns, got %s", pvcNS)
+	}
+}
+
+func TestEnsureDataSource_SkipsExisting(t *testing.T) {
+	existingDS := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "cdi.kubevirt.io/v1beta1",
+			"kind":       "DataSource",
+			"metadata": map[string]interface{}{
+				"name":      "centos-stream9-nfs-pool",
+				"namespace": "openshift-virtualization-os-images",
+			},
+			"spec": map[string]interface{}{
+				"source": map[string]interface{}{
+					"pvc": map[string]interface{}{
+						"name":      "golden-centos-stream9",
+						"namespace": "test-ns",
+					},
+				},
+			},
+		},
+	}
+
+	scheme := newTestScheme()
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "cdi.kubevirt.io", Version: "v1beta1", Kind: "DataSource"},
+		&unstructured.Unstructured{},
+	)
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "cdi.kubevirt.io", Version: "v1beta1", Kind: "DataSourceList"},
+		&unstructured.UnstructuredList{},
+	)
+
+	directClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(existingDS).
+		Build()
+	fk := newFakeK8sClient()
+
+	syncer := NewGoldenImageSyncer(fk, directClient)
+	dsName, err := syncer.ensureDataSource(context.Background(),
+		"centos-stream9", "my-pool", "golden-centos-stream9", "test-ns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dsName != "centos-stream9-nfs-pool" {
+		t.Errorf("expected DataSource name centos-stream9-nfs-pool, got %s", dsName)
+	}
+}
+
+func TestEnsureDataSource_NoCDI(t *testing.T) {
+	// No DataSource GVK registered — should gracefully return without error.
+	directClient := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		Build()
+	fk := newFakeK8sClient()
+
+	syncer := NewGoldenImageSyncer(fk, directClient)
+	dsName, err := syncer.ensureDataSource(context.Background(),
+		"centos-stream9", "my-pool", "golden-centos-stream9", "test-ns")
+	if err != nil {
+		t.Fatalf("expected nil error when CDI not installed, got: %v", err)
+	}
+	if dsName != "centos-stream9-nfs-pool" {
+		t.Errorf("expected DataSource name centos-stream9-nfs-pool, got %s", dsName)
+	}
+}
+
+// --- ImageStream support tests ---
+
+func newDataImportCronWithImageStream(name, imageStreamName string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "cdi.kubevirt.io/v1beta1",
+			"kind":       "DataImportCron",
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": "openshift-virtualization-os-images",
+			},
+			"spec": map[string]interface{}{
+				"template": map[string]interface{}{
+					"spec": map[string]interface{}{
+						"source": map[string]interface{}{
+							"registry": map[string]interface{}{
+								"imageStream": imageStreamName,
+								"pullMethod":  "node",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func newImageStream(name, dockerImageRepository string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "image.openshift.io/v1",
+			"kind":       "ImageStream",
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": "openshift-virtualization-os-images",
+			},
+			"status": map[string]interface{}{
+				"dockerImageRepository": dockerImageRepository,
+			},
+		},
+	}
+}
+
+func TestDiscoverImages_ResolvesImageStream(t *testing.T) {
+	// RHEL DataImportCron uses imageStream instead of url
+	dic := newDataImportCronWithImageStream("rhel9-image-cron", "rhel9-guest")
+	is := newImageStream("rhel9-guest",
+		"image-registry.openshift-image-registry.svc:5000/openshift-virtualization-os-images/rhel9-guest")
+
+	scheme := newTestScheme()
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "cdi.kubevirt.io", Version: "v1beta1", Kind: "DataImportCron"},
+		&unstructured.Unstructured{},
+	)
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "cdi.kubevirt.io", Version: "v1beta1", Kind: "DataImportCronList"},
+		&unstructured.UnstructuredList{},
+	)
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "image.openshift.io", Version: "v1", Kind: "ImageStream"},
+		&unstructured.Unstructured{},
+	)
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "image.openshift.io", Version: "v1", Kind: "ImageStreamList"},
+		&unstructured.UnstructuredList{},
+	)
+
+	directClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(dic, is).
+		Build()
+	fk := newFakeK8sClient()
+
+	syncer := NewGoldenImageSyncer(fk, directClient)
+	images, err := syncer.discoverImages(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(images) != 1 {
+		t.Fatalf("expected 1 image, got %d", len(images))
+	}
+	if images[0].Name != "rhel9-image-cron" {
+		t.Errorf("expected rhel9-image-cron, got %s", images[0].Name)
+	}
+	expectedURL := "docker://image-registry.openshift-image-registry.svc:5000/openshift-virtualization-os-images/rhel9-guest:latest"
+	if images[0].RegistryURL != expectedURL {
+		t.Errorf("expected URL %s, got %s", expectedURL, images[0].RegistryURL)
+	}
+}
+
+func TestDiscoverImages_MixedURLAndImageStream(t *testing.T) {
+	// Mix of URL-based (centos) and ImageStream-based (rhel) DataImportCrons
+	dicURL := newDataImportCron("centos-stream9", "docker://quay.io/containerdisks/centos-stream:9")
+	dicIS := newDataImportCronWithImageStream("rhel9-image-cron", "rhel9-guest")
+	is := newImageStream("rhel9-guest",
+		"image-registry.openshift-image-registry.svc:5000/openshift-virtualization-os-images/rhel9-guest")
+
+	scheme := newTestScheme()
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "cdi.kubevirt.io", Version: "v1beta1", Kind: "DataImportCron"},
+		&unstructured.Unstructured{},
+	)
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "cdi.kubevirt.io", Version: "v1beta1", Kind: "DataImportCronList"},
+		&unstructured.UnstructuredList{},
+	)
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "image.openshift.io", Version: "v1", Kind: "ImageStream"},
+		&unstructured.Unstructured{},
+	)
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "image.openshift.io", Version: "v1", Kind: "ImageStreamList"},
+		&unstructured.UnstructuredList{},
+	)
+
+	directClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(dicURL, dicIS, is).
+		Build()
+	fk := newFakeK8sClient()
+
+	syncer := NewGoldenImageSyncer(fk, directClient)
+	images, err := syncer.discoverImages(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(images) != 2 {
+		t.Fatalf("expected 2 images, got %d", len(images))
+	}
+
+	found := map[string]bool{}
+	for _, img := range images {
+		found[img.Name] = true
+	}
+	if !found["centos-stream9"] {
+		t.Error("expected centos-stream9 in results")
+	}
+	if !found["rhel9-image-cron"] {
+		t.Error("expected rhel9-image-cron in results")
+	}
+}
+
+func TestDiscoverImages_ImageStreamNotFound(t *testing.T) {
+	// DataImportCron references an ImageStream that doesn't exist — should skip gracefully
+	dic := newDataImportCronWithImageStream("rhel9-image-cron", "rhel9-guest")
+
+	scheme := newTestScheme()
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "cdi.kubevirt.io", Version: "v1beta1", Kind: "DataImportCron"},
+		&unstructured.Unstructured{},
+	)
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "cdi.kubevirt.io", Version: "v1beta1", Kind: "DataImportCronList"},
+		&unstructured.UnstructuredList{},
+	)
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "image.openshift.io", Version: "v1", Kind: "ImageStream"},
+		&unstructured.Unstructured{},
+	)
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "image.openshift.io", Version: "v1", Kind: "ImageStreamList"},
+		&unstructured.UnstructuredList{},
+	)
+
+	directClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(dic).
+		Build()
+	fk := newFakeK8sClient()
+
+	syncer := NewGoldenImageSyncer(fk, directClient)
+	images, err := syncer.discoverImages(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(images) != 0 {
+		t.Errorf("expected 0 images when ImageStream not found, got %d", len(images))
+	}
+}
+
+func TestEnsureImagePullerRoleBinding_Creates(t *testing.T) {
+	scheme := newTestScheme()
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "RoleBinding"},
+		&unstructured.Unstructured{},
+	)
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "RoleBindingList"},
+		&unstructured.UnstructuredList{},
+	)
+
+	directClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		Build()
+	fk := newFakeK8sClient()
+
+	syncer := NewGoldenImageSyncer(fk, directClient)
+	err := syncer.ensureImagePullerRoleBinding(context.Background(), "latest-test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify RoleBinding was created.
+	rb := &unstructured.Unstructured{}
+	rb.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "RoleBinding",
+	})
+	if err := directClient.Get(context.Background(), types.NamespacedName{
+		Namespace: "openshift-virtualization-os-images",
+		Name:      "pool-csi-image-puller-latest-test",
+	}, rb); err != nil {
+		t.Fatalf("expected RoleBinding to exist: %v", err)
+	}
+
+	// Verify roleRef
+	roleRefName, _, _ := unstructured.NestedString(rb.Object, "roleRef", "name")
+	if roleRefName != "system:image-puller" {
+		t.Errorf("expected roleRef name system:image-puller, got %s", roleRefName)
+	}
+
+	// Verify subject
+	subjects, _, _ := unstructured.NestedSlice(rb.Object, "subjects")
+	if len(subjects) != 1 {
+		t.Fatalf("expected 1 subject, got %d", len(subjects))
+	}
+	subj := subjects[0].(map[string]interface{})
+	if subj["name"] != "system:serviceaccounts:latest-test" {
+		t.Errorf("expected subject name system:serviceaccounts:latest-test, got %s", subj["name"])
+	}
+}
+
+func TestEnsureImagePullerRoleBinding_SkipsExisting(t *testing.T) {
+	existingRB := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "rbac.authorization.k8s.io/v1",
+			"kind":       "RoleBinding",
+			"metadata": map[string]interface{}{
+				"name":      "pool-csi-image-puller-latest-test",
+				"namespace": "openshift-virtualization-os-images",
+			},
+			"roleRef": map[string]interface{}{
+				"apiGroup": "rbac.authorization.k8s.io",
+				"kind":     "ClusterRole",
+				"name":     "system:image-puller",
+			},
+		},
+	}
+
+	scheme := newTestScheme()
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "RoleBinding"},
+		&unstructured.Unstructured{},
+	)
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "RoleBindingList"},
+		&unstructured.UnstructuredList{},
+	)
+
+	directClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(existingRB).
+		Build()
+	fk := newFakeK8sClient()
+
+	syncer := NewGoldenImageSyncer(fk, directClient)
+	err := syncer.ensureImagePullerRoleBinding(context.Background(), "latest-test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestIsInternalRegistryURL(t *testing.T) {
+	tests := []struct {
+		url      string
+		expected bool
+	}{
+		{"docker://image-registry.openshift-image-registry.svc:5000/ns/img:latest", true},
+		{"docker://quay.io/containerdisks/centos-stream:9", false},
+		{"docker://registry.redhat.io/rhel9/rhel-guest-image:latest", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.url, func(t *testing.T) {
+			if got := isInternalRegistryURL(tt.url); got != tt.expected {
+				t.Errorf("isInternalRegistryURL(%q) = %v, want %v", tt.url, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestConverterScript_InternalRegistryAuth(t *testing.T) {
+	// Verify that the converter script includes auth handling for internal registry URLs.
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "golden-rhel9",
+			Namespace: "test-ns",
+			Labels:    map[string]string{goldenImageLabel: "true"},
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("15Gi")},
+			},
+		},
+	}
+	directClient := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithObjects(pvc).
+		Build()
+	fk := newFakeK8sClient()
+
+	syncer := NewGoldenImageSyncer(fk, directClient)
+	internalURL := "docker://image-registry.openshift-image-registry.svc:5000/openshift-virtualization-os-images/rhel9-guest:latest"
+	img := goldenImageInfo{Name: "rhel9", RegistryURL: internalURL}
+
+	done, err := syncer.ensureConverterJob(context.Background(), "test-ns", img, "my-pool", "golden-rhel9", "quay.io/centos/centos:stream9", 15)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if done {
+		t.Error("expected job to not be done on creation")
+	}
+
+	// Verify Job was created with internal registry auth in the script.
+	job := &batchv1.Job{}
+	if err := directClient.Get(context.Background(), types.NamespacedName{
+		Namespace: "test-ns", Name: "golden-convert-rhel9",
+	}, job); err != nil {
+		t.Fatalf("expected job to exist: %v", err)
+	}
+
+	script := job.Spec.Template.Spec.Containers[0].Command[2]
+	if !strings.Contains(script, "image-registry.openshift-image-registry.svc") {
+		t.Error("expected script to contain internal registry URL")
+	}
+	if !strings.Contains(script, "serviceaccount/token") {
+		t.Error("expected script to contain SA token auth logic")
+	}
+	if !strings.Contains(script, "--authfile") {
+		t.Error("expected script to contain --authfile flag")
 	}
 }

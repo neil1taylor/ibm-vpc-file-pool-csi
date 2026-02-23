@@ -63,8 +63,21 @@ func (s *GoldenImageSyncer) SetInterval(d time.Duration) {
 }
 
 // Run starts the golden image syncer loop. It blocks until the context is cancelled.
+// It runs one cycle after a short startup delay, then every interval thereafter.
 func (s *GoldenImageSyncer) Run(ctx context.Context) {
 	klog.V(2).InfoS("Golden image syncer started", "interval", s.interval)
+
+	// Wait briefly for the controller-runtime cache to be populated before the first cycle.
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(30 * time.Second):
+	}
+
+	// Run immediately after startup delay so golden images are created as soon as the pool is ready,
+	// rather than waiting for the full interval to elapse.
+	s.processOnce(ctx)
+
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
 
@@ -151,6 +164,24 @@ func (s *GoldenImageSyncer) syncPool(ctx context.Context, pool *v1alpha1.FileSha
 		pvcSizeGB = defaultPVCSizeGB
 	}
 
+	// If any image uses the internal registry (ImageStream source), ensure the
+	// image-puller RoleBinding exists so converter Jobs can pull images.
+	hasInternalRegistry := false
+	for _, img := range images {
+		if isInternalRegistryURL(img.RegistryURL) {
+			hasInternalRegistry = true
+			break
+		}
+	}
+	if hasInternalRegistry {
+		for _, ns := range cfg.TargetNamespaces {
+			if err := s.ensureImagePullerRoleBinding(ctx, ns); err != nil {
+				klog.ErrorS(err, "Failed to ensure image-puller RoleBinding",
+					"pool", pool.Name, "namespace", ns)
+			}
+		}
+	}
+
 	// Determine the StorageClass name for this pool.
 	scName := pool.Name
 
@@ -168,9 +199,16 @@ func (s *GoldenImageSyncer) syncPool(ctx context.Context, pool *v1alpha1.FileSha
 		statusList = append(statusList, imgStatus)
 	}
 
-	// Update pool status.
-	pool.Status.GoldenImages = statusList
-	if err := s.k8sClient.UpdateFileSharePoolStatus(ctx, pool); err != nil {
+	// Re-read the pool to get the latest resourceVersion before updating status.
+	// The reconciler may have updated the pool concurrently, causing a conflict
+	// if we use the stale version we read at the start of the sync cycle.
+	freshPool, err := s.k8sClient.GetFileSharePool(ctx, pool.Name)
+	if err != nil {
+		klog.ErrorS(err, "Failed to re-read pool for status update", "pool", pool.Name)
+		return
+	}
+	freshPool.Status.GoldenImages = statusList
+	if err := s.k8sClient.UpdateFileSharePoolStatus(ctx, freshPool); err != nil {
 		klog.ErrorS(err, "Failed to update pool golden image status", "pool", pool.Name)
 	}
 }
@@ -197,9 +235,13 @@ func (s *GoldenImageSyncer) discoverImages(ctx context.Context, imageFilter []st
 		url, found, err := unstructured.NestedString(dic.Object,
 			"spec", "template", "spec", "source", "registry", "url")
 		if err != nil || !found || url == "" {
-			klog.V(6).InfoS("Skipping DataImportCron without registry URL",
-				"name", name)
-			continue
+			// Check for ImageStream-based source (RHEL images use this instead of direct URLs)
+			url = s.resolveImageStreamURL(ctx, dic, name)
+			if url == "" {
+				klog.V(6).InfoS("Skipping DataImportCron without registry URL or imageStream",
+					"name", name)
+				continue
+			}
 		}
 
 		if len(imageFilter) > 0 && !matchesFilter(name, imageFilter) {
@@ -214,6 +256,100 @@ func (s *GoldenImageSyncer) discoverImages(ctx context.Context, imageFilter []st
 
 	klog.V(4).InfoS("Discovered golden images", "count", len(images))
 	return images, nil
+}
+
+// resolveImageStreamURL looks up an ImageStream reference from a DataImportCron
+// and returns the internal registry URL. RHEL DataImportCrons use imageStream
+// references instead of direct URLs. Returns empty string if not applicable.
+func (s *GoldenImageSyncer) resolveImageStreamURL(ctx context.Context, dic unstructured.Unstructured, name string) string {
+	isName, isFound, _ := unstructured.NestedString(dic.Object,
+		"spec", "template", "spec", "source", "registry", "imageStream")
+	if !isFound || isName == "" {
+		return ""
+	}
+
+	is := &unstructured.Unstructured{}
+	is.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "image.openshift.io", Version: "v1", Kind: "ImageStream",
+	})
+	if err := s.directClient.Get(ctx, types.NamespacedName{
+		Namespace: "openshift-virtualization-os-images", Name: isName,
+	}, is); err != nil {
+		klog.V(4).InfoS("Could not look up ImageStream for DataImportCron",
+			"dataimportcron", name, "imagestream", isName, "error", err)
+		return ""
+	}
+
+	repo, _, _ := unstructured.NestedString(is.Object, "status", "dockerImageRepository")
+	if repo == "" {
+		klog.V(4).InfoS("ImageStream has no dockerImageRepository",
+			"dataimportcron", name, "imagestream", isName)
+		return ""
+	}
+
+	url := "docker://" + repo + ":latest"
+	klog.V(4).InfoS("Resolved ImageStream to internal registry URL",
+		"dataimportcron", name, "imagestream", isName, "url", url)
+	return url
+}
+
+// ensureImagePullerRoleBinding creates a RoleBinding in openshift-virtualization-os-images
+// that grants system:image-puller to all service accounts in the target namespace.
+// This allows converter Jobs to pull images from the internal registry.
+func (s *GoldenImageSyncer) ensureImagePullerRoleBinding(ctx context.Context, targetNS string) error {
+	rbName := fmt.Sprintf("pool-csi-image-puller-%s", targetNS)
+	rbNamespace := "openshift-virtualization-os-images"
+
+	rb := &unstructured.Unstructured{}
+	rb.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "RoleBinding",
+	})
+
+	// Check if it already exists.
+	err := s.directClient.Get(ctx, types.NamespacedName{Namespace: rbNamespace, Name: rbName}, rb)
+	if err == nil {
+		return nil // already exists
+	}
+	if !errors.IsNotFound(err) {
+		return fmt.Errorf("checking RoleBinding %s/%s: %w", rbNamespace, rbName, err)
+	}
+
+	newRB := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "rbac.authorization.k8s.io/v1",
+			"kind":       "RoleBinding",
+			"metadata": map[string]interface{}{
+				"name":      rbName,
+				"namespace": rbNamespace,
+				"labels": map[string]interface{}{
+					goldenImageLabel: "true",
+				},
+			},
+			"roleRef": map[string]interface{}{
+				"apiGroup": "rbac.authorization.k8s.io",
+				"kind":     "ClusterRole",
+				"name":     "system:image-puller",
+			},
+			"subjects": []interface{}{
+				map[string]interface{}{
+					"kind":      "Group",
+					"apiGroup":  "rbac.authorization.k8s.io",
+					"name":      fmt.Sprintf("system:serviceaccounts:%s", targetNS),
+				},
+			},
+		},
+	}
+
+	if err := s.directClient.Create(ctx, newRB); err != nil {
+		if errors.IsAlreadyExists(err) {
+			return nil
+		}
+		return fmt.Errorf("creating RoleBinding %s/%s: %w", rbNamespace, rbName, err)
+	}
+
+	klog.V(2).InfoS("Created image-puller RoleBinding for converter Jobs",
+		"rolebinding", rbName, "namespace", rbNamespace, "targetNamespace", targetNS)
+	return nil
 }
 
 // syncImageInNamespace ensures the golden PVC, converter Job, and Template
@@ -259,7 +395,15 @@ func (s *GoldenImageSyncer) syncImageInNamespace(
 		}
 	}
 
-	// 3. Ensure OpenShift Template (for Template catalog tab).
+	// 3. Ensure CDI DataSource (for InstanceTypes catalog tab).
+	// Non-fatal — DataSource is for UI catalog only; template cloning still works via PVC dataSource.
+	dsName, dsErr := s.ensureDataSource(ctx, img.Name, poolName, pvcName, ns)
+	if dsErr != nil {
+		klog.ErrorS(dsErr, "Failed to create DataSource (non-fatal)", "image", img.Name, "pool", poolName)
+	}
+	status.DataSourceName = dsName
+
+	// 4. Ensure OpenShift Template (for Template catalog tab).
 	if err := s.ensureTemplate(ctx, ns, img.Name, templateName, poolName, scName, pvcName); err != nil {
 		status.Phase = "Failed"
 		status.Message = fmt.Sprintf("Template: %v", err)
@@ -372,28 +516,79 @@ func (s *GoldenImageSyncer) ensureConverterJob(
 
 	script := fmt.Sprintf(`set -euo pipefail
 echo "Installing tools..."
-dnf install -y skopeo qemu-img jq file
+dnf install -y skopeo qemu-img jq file tar
 
-echo "Downloading OCI image from %s..."
+REGISTRY_URL="%s"
+echo "Downloading OCI image from $REGISTRY_URL..."
 mkdir -p /staging/oci
-skopeo copy %s dir:/staging/oci
+
+# If pulling from the internal OpenShift registry, configure auth using the SA token.
+SKOPEO_AUTH=""
+if echo "$REGISTRY_URL" | grep -q "image-registry.openshift-image-registry.svc"; then
+  echo "Detected internal registry, configuring auth..."
+  TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+  AUTH_B64=$(printf 'serviceaccount:%%s' "$TOKEN" | base64 -w0)
+  REGISTRY_HOST=$(echo "$REGISTRY_URL" | sed 's|docker://||' | cut -d/ -f1)
+  printf '{"auths":{"%%s":{"auth":"%%s"}}}' "$REGISTRY_HOST" "$AUTH_B64" > /tmp/auth.json
+  SKOPEO_AUTH="--authfile=/tmp/auth.json --src-tls-verify=false"
+fi
+
+skopeo copy $SKOPEO_AUTH $REGISTRY_URL dir:/staging/oci
 
 echo "Extracting disk layer..."
 MANIFEST=/staging/oci/manifest.json
 LAYER=$(jq -r '.layers[-1].digest' "$MANIFEST" | cut -d: -f2)
 LAYER_FILE="/staging/oci/$LAYER"
 
-# OCI layers are gzip-compressed. Decompress directly to NFS PVC (/data)
-# to avoid using staging emptyDir memory for the full decompressed image.
+# OCI layers are gzip-compressed tar archives containing the container filesystem.
+# For containerdisks, the disk image is at disk/disk.img inside the tar.
+# Decompress directly to NFS PVC (/data) to avoid OOM on emptyDir (tmpfs).
 echo "Processing OCI layer..."
-DISK_RAW="/data/disk-layer.raw"
+LAYER_EXTRACTED="/data/disk-layer.raw"
 if file "$LAYER_FILE" | grep -q gzip; then
   echo "Decompressing gzip layer directly to PVC..."
-  gunzip -c "$LAYER_FILE" > "$DISK_RAW"
+  gunzip -c "$LAYER_FILE" > "$LAYER_EXTRACTED"
   rm -f "$LAYER_FILE"
 else
   echo "Layer is not compressed, moving..."
-  mv "$LAYER_FILE" "$DISK_RAW"
+  mv "$LAYER_FILE" "$LAYER_EXTRACTED"
+fi
+
+# OCI layers are tar archives. Extract the disk image from inside.
+DISK_RAW="/data/disk-extracted.raw"
+if file "$LAYER_EXTRACTED" | grep -q "tar archive"; then
+  echo "OCI layer is a tar archive, extracting disk image..."
+  # containerdisks store the image at disk/disk.img inside the tar
+  tar xf "$LAYER_EXTRACTED" -C /data/ --strip-components=0 2>/dev/null || true
+  if [ -f /data/disk/disk.img ]; then
+    mv /data/disk/disk.img "$DISK_RAW"
+    rm -rf /data/disk
+  else
+    # Fallback: find the largest file in the tar
+    echo "disk/disk.img not found in tar, searching for disk image..."
+    LARGEST=$(tar tf "$LAYER_EXTRACTED" | while read f; do
+      tar xf "$LAYER_EXTRACTED" -O "$f" 2>/dev/null | wc -c | tr -d ' '
+    done | sort -rn | head -1)
+    # Just extract everything and find the largest regular file
+    mkdir -p /data/tar-tmp
+    tar xf "$LAYER_EXTRACTED" -C /data/tar-tmp 2>/dev/null || true
+    DISK_FILE=$(find /data/tar-tmp -type f -name "*.img" -o -name "*.raw" -o -name "*.qcow2" | head -1)
+    if [ -z "$DISK_FILE" ]; then
+      DISK_FILE=$(find /data/tar-tmp -type f -printf '%%s %%p\n' 2>/dev/null | sort -rn | head -1 | awk '{print $2}')
+    fi
+    if [ -n "$DISK_FILE" ]; then
+      mv "$DISK_FILE" "$DISK_RAW"
+    else
+      echo "ERROR: Could not find disk image in tar archive"
+      tar tf "$LAYER_EXTRACTED" | head -20
+      exit 1
+    fi
+    rm -rf /data/tar-tmp
+  fi
+  rm -f "$LAYER_EXTRACTED"
+else
+  echo "Layer is not a tar archive, treating as disk image directly..."
+  mv "$LAYER_EXTRACTED" "$DISK_RAW"
 fi
 
 echo "Detecting image format..."
@@ -414,12 +609,22 @@ else
 fi
 chmod 0666 /data/disk.img
 
+# Ensure the MBR has the bootable/active flag set on partition 1.
+# Cloud images with GPT often have a "protective MBR" where no partition
+# is marked active (boot indicator = 0x00). SeaBIOS requires at least one
+# active partition to boot. Setting byte at offset 446 (first partition
+# entry's status byte) to 0x80 makes the disk bootable by both BIOS and
+# UEFI firmware. This is safe for MBR disks too.
+echo "Setting MBR active/bootable flag..."
+printf '\x80' | dd of=/data/disk.img bs=1 seek=446 count=1 conv=notrunc 2>&1
+
 echo "Cleaning up staging..."
 rm -rf /staging/oci
 
 echo "Golden image ready."
 ls -la /data/disk.img
-`, img.RegistryURL, img.RegistryURL)
+file /data/disk.img
+`, img.RegistryURL)
 
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
@@ -806,6 +1011,86 @@ func buildVMTemplate(imageName, templateName, ns, poolName, scName, goldenPVCNam
 	return tmpl
 }
 
+// osPreference maps a clean image name to a VirtualMachineClusterPreference name.
+// CDI DataSources use dot-separated names (e.g., "centos.stream9") as preference
+// identifiers for the InstanceTypes catalog.
+func osPreference(cleanName string) string {
+	return strings.ReplaceAll(cleanName, "-", ".")
+}
+
+// ensureDataSource creates a CDI DataSource in openshift-virtualization-os-images
+// so that pool-backed golden images appear in the InstanceTypes catalog tab.
+// The DataSource points cross-namespace to the golden PVC in the target namespace.
+func (s *GoldenImageSyncer) ensureDataSource(
+	ctx context.Context,
+	imageName, poolName, goldenPVCName, targetNamespace string,
+) (string, error) {
+	cleanName := cleanImageName(imageName)
+	dsName := fmt.Sprintf("%s-nfs-pool", cleanName)
+	dsNamespace := "openshift-virtualization-os-images"
+
+	ds := &unstructured.Unstructured{}
+	ds.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "cdi.kubevirt.io",
+		Version: "v1beta1",
+		Kind:    "DataSource",
+	})
+
+	err := s.directClient.Get(ctx, types.NamespacedName{Namespace: dsNamespace, Name: dsName}, ds)
+	if err == nil {
+		return dsName, nil // already exists
+	}
+	if !errors.IsNotFound(err) && !isNoMatchError(err) {
+		return dsName, fmt.Errorf("getting DataSource %s/%s: %w", dsNamespace, dsName, err)
+	}
+
+	preference := osPreference(cleanName)
+
+	newDS := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "cdi.kubevirt.io/v1beta1",
+			"kind":       "DataSource",
+			"metadata": map[string]interface{}{
+				"name":      dsName,
+				"namespace": dsNamespace,
+				"labels": map[string]interface{}{
+					"instancetype.kubevirt.io/default-instancetype": "u1.medium",
+					"instancetype.kubevirt.io/default-preference":   preference,
+					"app.kubernetes.io/part-of":                     "hyperconverged-cluster",
+					goldenImageLabel:                                "true",
+					goldenPoolLabel:                                 poolName,
+					goldenNameLabel:                                 imageName,
+				},
+			},
+			"spec": map[string]interface{}{
+				"source": map[string]interface{}{
+					"pvc": map[string]interface{}{
+						"name":      goldenPVCName,
+						"namespace": targetNamespace,
+					},
+				},
+			},
+		},
+	}
+
+	if err := s.directClient.Create(ctx, newDS); err != nil {
+		if errors.IsAlreadyExists(err) {
+			return dsName, nil
+		}
+		if isNoMatchError(err) {
+			klog.V(4).InfoS("DataSource API not available, skipping DataSource creation",
+				"datasource", dsName)
+			return dsName, nil
+		}
+		return dsName, fmt.Errorf("creating DataSource %s/%s: %w", dsNamespace, dsName, err)
+	}
+
+	klog.V(2).InfoS("Created CDI DataSource for InstanceTypes catalog",
+		"datasource", dsName, "namespace", dsNamespace, "pool", poolName,
+		"pvc", goldenPVCName, "pvcNamespace", targetNamespace)
+	return dsName, nil
+}
+
 // matchesFilter checks if a name matches any of the filter substrings.
 func matchesFilter(name string, filters []string) bool {
 	for _, f := range filters {
@@ -814,6 +1099,11 @@ func matchesFilter(name string, filters []string) bool {
 		}
 	}
 	return false
+}
+
+// isInternalRegistryURL returns true if the URL points to the OpenShift internal registry.
+func isInternalRegistryURL(url string) bool {
+	return strings.Contains(url, "image-registry.openshift-image-registry.svc")
 }
 
 func int64Ptr(v int64) *int64 { return &v }

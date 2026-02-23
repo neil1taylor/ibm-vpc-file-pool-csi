@@ -156,6 +156,44 @@ type FileSharePoolSpec struct {
     // Once all SubVolumes are removed from a draining share, it is considered fully drained.
     // +optional
     DrainShares []string `json:"drainShares,omitempty"`
+
+    // GoldenImages configures automatic golden image synchronization.
+    // When enabled, the controller discovers OS images from CDI DataImportCrons
+    // and maintains ready-to-clone golden image PVCs in target namespaces.
+    // Not needed when the pool StorageClass is the cluster default (CDI handles natively).
+    // +optional
+    GoldenImages *GoldenImageConfig `json:"goldenImages,omitempty"`
+}
+
+// GoldenImageConfig configures automatic golden image synchronization for KubeVirt.
+type GoldenImageConfig struct {
+    // Enabled activates the golden image syncer for this pool.
+    Enabled bool `json:"enabled"`
+
+    // TargetNamespaces lists namespaces where golden image PVCs and Templates are created.
+    // +kubebuilder:validation:MinItems=1
+    TargetNamespaces []string `json:"targetNamespaces"`
+
+    // ImageFilter limits syncing to images whose names contain one of these substrings.
+    // Empty means sync all discovered images.
+    // +optional
+    ImageFilter []string `json:"imageFilter,omitempty"`
+
+    // RefreshInterval is how often the syncer checks for new images (e.g. "24h", "1h").
+    // +kubebuilder:default="24h"
+    // +optional
+    RefreshInterval string `json:"refreshInterval,omitempty"`
+
+    // ConverterImage is the container image used for qcow2-to-raw conversion jobs.
+    // +kubebuilder:default="quay.io/centos/centos:stream9"
+    // +optional
+    ConverterImage string `json:"converterImage,omitempty"`
+
+    // PVCSizeGB is the size of golden image PVCs in GB.
+    // +kubebuilder:validation:Minimum=5
+    // +kubebuilder:default=15
+    // +optional
+    PVCSizeGB int64 `json:"pvcSizeGB,omitempty"`
 }
 
 // AccessorZone defines a zone where pool shares should have additional mount targets.
@@ -231,6 +269,10 @@ type FileSharePoolStatus struct {
     // +optional
     DrainStatus []ShareDrainStatus `json:"drainStatus,omitempty"`
 
+    // GoldenImages tracks the sync state for golden images managed by this pool.
+    // +optional
+    GoldenImages []GoldenImageStatus `json:"goldenImages,omitempty"`
+
     // Conditions follows the standard Kubernetes conditions pattern.
     // +optional
     Conditions []metav1.Condition `json:"conditions,omitempty"`
@@ -238,6 +280,42 @@ type FileSharePoolStatus struct {
     // LastReconcileTime is when the pool was last reconciled.
     // +optional
     LastReconcileTime *metav1.Time `json:"lastReconcileTime,omitempty"`
+}
+
+// GoldenImageStatus tracks the sync state for a single golden image.
+type GoldenImageStatus struct {
+    // Name is the image identifier (e.g. "centos-stream9").
+    Name string `json:"name"`
+
+    // SourceURL is the container registry URL for this image.
+    // +optional
+    SourceURL string `json:"sourceURL,omitempty"`
+
+    // Namespaces tracks per-namespace sync state.
+    // +optional
+    Namespaces []GoldenImageNamespaceStatus `json:"namespaces,omitempty"`
+}
+
+// GoldenImageNamespaceStatus tracks the sync state for a golden image in a single namespace.
+type GoldenImageNamespaceStatus struct {
+    // Namespace is the target namespace.
+    Namespace string `json:"namespace"`
+
+    // Phase is the sync state: Pending, Syncing, Ready, Failed.
+    // +kubebuilder:validation:Enum=Pending;Syncing;Ready;Failed
+    Phase string `json:"phase"`
+
+    // PVCName is the name of the golden image PVC.
+    // +optional
+    PVCName string `json:"pvcName,omitempty"`
+
+    // TemplateName is the name of the OpenShift VM Template.
+    // +optional
+    TemplateName string `json:"templateName,omitempty"`
+
+    // LastSyncTime is when this image was last synced.
+    // +optional
+    LastSyncTime *metav1.Time `json:"lastSyncTime,omitempty"`
 }
 
 // ShareDrainStatus tracks the draining progress for a single share.
@@ -415,6 +493,43 @@ spec:
 ```
 
 When tiers are defined, one StorageClass per tier is auto-created (e.g., `multi-tier-pool-standard`, `multi-tier-pool-high-iops`), each with the `tier` parameter set. If creating StorageClasses manually, include a `tier` key in `parameters` to select which tier to allocate from. If no tiers are defined, the top-level spec fields are used as an implicit default tier.
+
+### Example FileSharePool CR with Golden Images
+
+```yaml
+apiVersion: storage.ibmcloud.io/v1alpha1
+kind: FileSharePool
+metadata:
+  name: kubevirt-pool
+spec:
+  zone: eu-de-1
+  profile: dp2
+  shareSizeGB: 500
+  iops: 10000
+  maxShares: 5
+  initialShares: 1
+  autoExpand: true
+  expandThresholdPercent: 80
+  allocationStrategy: spread
+  defaultPermissions: "0777"
+  defaultUID: 107
+  defaultGID: 107
+  goldenImages:
+    enabled: true
+    targetNamespaces:
+      - kubevirt-vms
+    imageFilter:
+      - fedora
+      - centos-stream9
+    refreshInterval: "24h"
+    converterImage: "quay.io/centos/centos:stream9"
+    pvcSizeGB: 15
+```
+
+When `goldenImages.enabled` is `true`, the golden image syncer discovers CDI DataImportCrons
+matching the filter, creates golden PVCs on the pool's StorageClass, runs converter Jobs
+(download + qcow2-to-raw conversion), and creates OpenShift VM Templates. Status is tracked
+in `status.goldenImages`.
 
 ### Example FileSharePool CR with DrainShares
 
@@ -892,6 +1007,14 @@ type VolumeGroupSnapshotSpec struct {
     // +kubebuilder:validation:Enum=Abort;Continue
     // +kubebuilder:default=Abort
     FailurePolicy string `json:"failurePolicy"`
+
+    // PreSnapshotHooks are hooks executed before the group snapshot operation begins.
+    // +optional
+    PreSnapshotHooks []Hook `json:"preSnapshotHooks,omitempty"`
+
+    // PostSnapshotHooks are hooks executed after the group snapshot operation completes.
+    // +optional
+    PostSnapshotHooks []Hook `json:"postSnapshotHooks,omitempty"`
 }
 
 // VolumeGroupSnapshotStatus defines the observed state of a VolumeGroupSnapshot.
@@ -931,6 +1054,10 @@ type VolumeGroupSnapshotStatus struct {
     // CreationTime is when the group snapshot CR was created.
     // +optional
     CreationTime *metav1.Time `json:"creationTime,omitempty"`
+
+    // HookResults records the outcomes of pre/post hook executions.
+    // +optional
+    HookResults []HookResult `json:"hookResults,omitempty"`
 }
 
 // GroupSnapshotMember tracks the status of a single snapshot within the group.
@@ -1075,6 +1202,20 @@ type ReplicationPolicySpec struct {
     // +kubebuilder:validation:Minimum=0
     // +kubebuilder:default=3
     MaxRetries int32 `json:"maxRetries"`
+
+    // IncrementalSync enables rsync-based incremental replication instead of full copy.
+    // When true (default), only changed files are transferred.
+    // +kubebuilder:default=true
+    // +optional
+    IncrementalSync *bool `json:"incrementalSync,omitempty"`
+
+    // PreSyncHooks are hooks executed before each replication sync cycle.
+    // +optional
+    PreSyncHooks []Hook `json:"preSyncHooks,omitempty"`
+
+    // PostSyncHooks are hooks executed after each replication sync cycle.
+    // +optional
+    PostSyncHooks []Hook `json:"postSyncHooks,omitempty"`
 }
 
 // ReplicationPolicyStatus describes the observed state of a replication policy.
