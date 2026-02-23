@@ -19,6 +19,7 @@ interface TimeSeriesChartProps {
   range: TimeRange;
   yLabel: string;
   chartType?: 'area' | 'line';
+  emptyMessage?: string;
 }
 
 function formatTimestamp(epoch: number): string {
@@ -50,6 +51,7 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
   range,
   yLabel,
   chartType = 'area',
+  emptyMessage = 'No data available',
 }) => {
   const { series, loading, error } = usePrometheusRange(query, range);
 
@@ -67,7 +69,7 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
     return (
       <Bullseye>
         <span style={{ color: 'var(--pf-v6-global--Color--200)' }}>
-          {error || 'No data available'}
+          {error || emptyMessage}
         </span>
       </Bullseye>
     );

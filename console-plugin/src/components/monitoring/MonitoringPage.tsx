@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk';
 import {
   PageSection,
@@ -12,34 +12,51 @@ import {
   ToggleGroup,
   ToggleGroupItem,
   Label,
+  Alert,
   DescriptionList,
   DescriptionListGroup,
   DescriptionListTerm,
   DescriptionListDescription,
+  ExpandableSection,
+  Bullseye,
+  Divider,
 } from '@patternfly/react-core';
-import { FileSharePoolModel } from '../../models';
-import { FileSharePool } from '../../types';
-import { usePoolMetrics } from '../../utils/use-pool-metrics';
+import { FileSharePoolModel, ReplicationPolicyModel } from '../../models';
+import { FileSharePool, ReplicationPolicy } from '../../types';
+import { usePoolMetrics, checkPrometheusConnection } from '../../utils/use-pool-metrics';
 import { TIME_RANGES, TimeRange } from '../../utils/use-pool-metrics';
 import { METRICS } from '../../constants';
 import TimeSeriesChart from './TimeSeriesChart';
-
-/** Format seconds to human-readable ms string. */
-const formatLatencyMs = (seconds: number): string => {
-  if (seconds === 0) return '-';
-  const ms = seconds * 1000;
-  if (ms < 1) return '<1 ms';
-  return `${ms.toFixed(0)} ms`;
-};
+import CapacityDonut from '../dashboard/CapacityDonut';
+import CapacityBar from '../common/CapacityBar';
 
 const MonitoringPage: React.FC = () => {
   const [range, setRange] = useState<TimeRange>(TIME_RANGES[0]);
+  const [connStatus, setConnStatus] = useState<{
+    connected: boolean;
+    hasMetrics: boolean;
+    error?: string;
+  } | null>(null);
+  const [allocationExpanded, setAllocationExpanded] = useState(false);
+
+  useEffect(() => {
+    checkPrometheusConnection().then(setConnStatus);
+  }, []);
 
   const [pools] = useK8sWatchResource<FileSharePool[]>({
     groupVersionKind: {
       group: FileSharePoolModel.apiGroup,
       version: FileSharePoolModel.apiVersion,
       kind: FileSharePoolModel.kind,
+    },
+    isList: true,
+  });
+
+  const [replicationPolicies] = useK8sWatchResource<ReplicationPolicy[]>({
+    groupVersionKind: {
+      group: ReplicationPolicyModel.apiGroup,
+      version: ReplicationPolicyModel.apiVersion,
+      kind: ReplicationPolicyModel.kind,
     },
     isList: true,
   });
@@ -51,15 +68,14 @@ const MonitoringPage: React.FC = () => {
 
   const { metrics: poolMetrics, aggregate } = usePoolMetrics(poolNames);
 
-  // Compute stat card values
-  const allocationRate = Object.values(poolMetrics).reduce(
-    (sum, m) => sum + m.allocationRate1h,
-    0,
-  );
-  const maxLatency = Math.max(
-    ...Object.values(poolMetrics).map((m) => m.p95LatencySeconds),
-    0,
-  );
+  // Computed aggregate values
+  const totalCapacity = Object.values(poolMetrics).reduce((s, m) => s + m.capacityGB, 0);
+  const totalAllocated = Object.values(poolMetrics).reduce((s, m) => s + m.allocatedGB, 0);
+  const totalPVCs = Object.values(poolMetrics).reduce((s, m) => s + m.pvcCount, 0);
+  const totalShares = Object.values(poolMetrics).reduce((s, m) => s + m.shareCount, 0);
+  const utilizationPct = totalCapacity > 0 ? Math.round((totalAllocated / totalCapacity) * 100) : 0;
+  const freeGB = Math.max(0, totalCapacity - totalAllocated);
+
   const apiErrorPct =
     aggregate.apiCallRate5m > 0
       ? Math.round(
@@ -70,9 +86,11 @@ const MonitoringPage: React.FC = () => {
     aggregate.replicationConsecutiveFailures,
   ).filter((c) => c > 0).length;
 
+  const hasReplication = (replicationPolicies || []).length > 0;
+
   return (
     <PageSection>
-      {/* Time range selector */}
+      {/* A. Time range selector */}
       <Split hasGutter style={{ marginBottom: 16 }}>
         <SplitItem isFilled />
         <SplitItem>
@@ -89,59 +107,145 @@ const MonitoringPage: React.FC = () => {
         </SplitItem>
       </Split>
 
-      {/* Stat cards */}
+      {/* Diagnostic banner */}
+      {connStatus && !connStatus.hasMetrics && (
+        <Alert
+          variant="warning"
+          title="Monitoring data unavailable"
+          isInline
+          style={{ marginBottom: 16 }}
+        >
+          {!connStatus.connected ? (
+            <>
+              Cannot reach Prometheus. Ensure{' '}
+              <a
+                href="/monitoring/targets"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                user workload monitoring
+              </a>{' '}
+              is enabled on this cluster.
+              {connStatus.error && (
+                <div style={{ marginTop: 4, fontSize: '0.85em', opacity: 0.8 }}>
+                  Error: {connStatus.error}
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              No CSI driver metrics found in Prometheus. Enable the ServiceMonitor:
+              <code style={{ display: 'block', marginTop: 8 }}>
+                helm upgrade ibm-vpc-file-pool-csi ... --set metrics.serviceMonitor.enabled=true
+              </code>
+            </>
+          )}
+        </Alert>
+      )}
+
+      {/* B. Pool Capacity Overview */}
+      <Card style={{ marginBottom: 16 }}>
+        <CardTitle>Pool Capacity Overview</CardTitle>
+        <CardBody>
+          <Grid hasGutter>
+            <GridItem sm={12} md={4} lg={3}>
+              <Bullseye>
+                <CapacityDonut used={totalAllocated} total={totalCapacity} unit="GB" />
+              </Bullseye>
+            </GridItem>
+            <GridItem sm={12} md={8} lg={9}>
+              {poolNames.length === 0 ? (
+                <Bullseye>
+                  <span style={{ color: 'var(--pf-v6-global--Color--200)' }}>
+                    No pools found
+                  </span>
+                </Bullseye>
+              ) : (
+                poolNames.map((name) => {
+                  const m = poolMetrics[name];
+                  if (!m) return null;
+                  return (
+                    <div key={name} style={{ marginBottom: 12 }}>
+                      <CapacityBar
+                        allocated={m.allocatedGB}
+                        total={m.capacityGB}
+                        title={`${name}: ${m.allocatedGB} / ${m.capacityGB} GB`}
+                      />
+                      <span
+                        style={{
+                          fontSize: '0.85em',
+                          color: 'var(--pf-v6-global--Color--200)',
+                          marginLeft: 4,
+                        }}
+                      >
+                        {m.pvcCount} PVCs &middot; {m.shareCount} shares
+                      </span>
+                    </div>
+                  );
+                })
+              )}
+            </GridItem>
+          </Grid>
+        </CardBody>
+      </Card>
+
+      {/* C. Stat cards */}
       <Grid hasGutter style={{ marginBottom: 16 }}>
         <GridItem sm={12} md={6} lg={3}>
           <Card isFullHeight>
-            <CardTitle>Allocation Rate</CardTitle>
+            <CardTitle>Total PVCs</CardTitle>
             <CardBody>
               <span style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>
-                {allocationRate.toFixed(1)}
+                {totalPVCs}
               </span>
-              <span
+              <div
                 style={{
-                  marginLeft: 4,
                   color: 'var(--pf-v6-global--Color--200)',
+                  fontSize: '0.85em',
                 }}
               >
-                /hr
-              </span>
+                across {totalShares} shares
+              </div>
             </CardBody>
           </Card>
         </GridItem>
 
         <GridItem sm={12} md={6} lg={3}>
           <Card isFullHeight>
-            <CardTitle>P95 Latency</CardTitle>
+            <CardTitle>Utilization</CardTitle>
             <CardBody>
               <Split hasGutter>
                 <SplitItem>
                   <span style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>
-                    {formatLatencyMs(maxLatency)}
+                    {utilizationPct}%
                   </span>
                 </SplitItem>
                 <SplitItem>
                   <Label
                     color={
-                      maxLatency === 0
-                        ? 'grey'
-                        : maxLatency * 1000 < 100
-                          ? 'green'
-                          : maxLatency * 1000 < 500
-                            ? 'orange'
-                            : 'red'
+                      utilizationPct >= 90
+                        ? 'red'
+                        : utilizationPct >= 75
+                          ? 'orange'
+                          : 'green'
                     }
                   >
-                    {maxLatency === 0
-                      ? '-'
-                      : maxLatency * 1000 < 100
-                        ? 'Good'
-                        : maxLatency * 1000 < 500
-                          ? 'Elevated'
-                          : 'High'}
+                    {utilizationPct >= 90
+                      ? 'Critical'
+                      : utilizationPct >= 75
+                        ? 'Warning'
+                        : 'Healthy'}
                   </Label>
                 </SplitItem>
               </Split>
+              <div
+                style={{
+                  color: 'var(--pf-v6-global--Color--200)',
+                  fontSize: '0.85em',
+                }}
+              >
+                {freeGB} GB free
+              </div>
             </CardBody>
           </Card>
         </GridItem>
@@ -203,16 +307,16 @@ const MonitoringPage: React.FC = () => {
         </GridItem>
       </Grid>
 
-      {/* Time-series charts */}
-      <Grid hasGutter>
+      {/* D. Time-series charts (always-populated) */}
+      <Grid hasGutter style={{ marginBottom: 16 }}>
         <GridItem sm={12} md={6}>
           <Card>
-            <CardTitle>Allocation Rate Over Time</CardTitle>
+            <CardTitle>Capacity Utilization Over Time</CardTitle>
             <CardBody>
               <TimeSeriesChart
-                query={`sum(rate(${METRICS.ALLOCATIONS_TOTAL}[5m])) * 3600`}
+                query={`(${METRICS.POOL_ALLOCATED_GB} / (${METRICS.POOL_CAPACITY_GB} > 0)) * 100`}
                 range={range}
-                yLabel="alloc/hr"
+                yLabel="%"
                 chartType="area"
               />
             </CardBody>
@@ -221,12 +325,12 @@ const MonitoringPage: React.FC = () => {
 
         <GridItem sm={12} md={6}>
           <Card>
-            <CardTitle>P95 Latency Over Time</CardTitle>
+            <CardTitle>PVC Count Over Time</CardTitle>
             <CardBody>
               <TimeSeriesChart
-                query={`histogram_quantile(0.95, sum(rate(${METRICS.ALLOCATION_DURATION}[5m])) by (le)) * 1000`}
+                query={`sum(${METRICS.POOL_PVC_COUNT}) by (pool)`}
                 range={range}
-                yLabel="ms"
+                yLabel="PVCs"
                 chartType="line"
               />
             </CardBody>
@@ -249,18 +353,97 @@ const MonitoringPage: React.FC = () => {
 
         <GridItem sm={12} md={6}>
           <Card>
-            <CardTitle>Replication Lag</CardTitle>
+            <CardTitle>VPC API P95 Latency</CardTitle>
             <CardBody>
               <TimeSeriesChart
-                query={METRICS.REPLICATION_LAG}
+                query={`histogram_quantile(0.95, sum(rate(${METRICS.VPC_API_CALL_DURATION}[5m])) by (le)) * 1000`}
                 range={range}
-                yLabel="seconds"
+                yLabel="ms"
                 chartType="line"
               />
             </CardBody>
           </Card>
         </GridItem>
       </Grid>
+
+      {/* E. Allocation Activity (expandable) */}
+      <div style={{ marginBottom: 16 }}>
+        <ExpandableSection
+          toggleText={allocationExpanded ? 'Hide Allocation Activity' : 'Show Allocation Activity'}
+          onToggle={(_event, isExpanded) => setAllocationExpanded(isExpanded)}
+          isExpanded={allocationExpanded}
+        >
+          <Grid hasGutter style={{ marginTop: 8 }}>
+            <GridItem sm={12} md={6}>
+              <Card>
+                <CardTitle>Allocation Rate Over Time</CardTitle>
+                <CardBody>
+                  <TimeSeriesChart
+                    query={`sum(rate(${METRICS.ALLOCATIONS_TOTAL}[5m])) * 3600`}
+                    range={range}
+                    yLabel="alloc/hr"
+                    chartType="area"
+                    emptyMessage="No allocation events in this time range"
+                  />
+                </CardBody>
+              </Card>
+            </GridItem>
+
+            <GridItem sm={12} md={6}>
+              <Card>
+                <CardTitle>P95 Allocation Latency Over Time</CardTitle>
+                <CardBody>
+                  <TimeSeriesChart
+                    query={`histogram_quantile(0.95, sum(rate(${METRICS.ALLOCATION_DURATION}[5m])) by (le)) * 1000`}
+                    range={range}
+                    yLabel="ms"
+                    chartType="line"
+                    emptyMessage="No allocation latency data in this time range"
+                  />
+                </CardBody>
+              </Card>
+            </GridItem>
+          </Grid>
+        </ExpandableSection>
+      </div>
+
+      {/* F. Replication (conditional) */}
+      {hasReplication && (
+        <>
+          <Divider style={{ marginBottom: 16 }} />
+          <Grid hasGutter>
+            <GridItem sm={12} md={6}>
+              <Card>
+                <CardTitle>Replication Lag</CardTitle>
+                <CardBody>
+                  <TimeSeriesChart
+                    query={METRICS.REPLICATION_LAG}
+                    range={range}
+                    yLabel="seconds"
+                    chartType="line"
+                    emptyMessage="No replication lag data available"
+                  />
+                </CardBody>
+              </Card>
+            </GridItem>
+
+            <GridItem sm={12} md={6}>
+              <Card>
+                <CardTitle>Replication Sync Rate</CardTitle>
+                <CardBody>
+                  <TimeSeriesChart
+                    query={`sum by (result) (rate(${METRICS.REPLICATION_SYNC_TOTAL}[5m])) * 60`}
+                    range={range}
+                    yLabel="syncs/min"
+                    chartType="area"
+                    emptyMessage="No replication sync data available"
+                  />
+                </CardBody>
+              </Card>
+            </GridItem>
+          </Grid>
+        </>
+      )}
     </PageSection>
   );
 };
