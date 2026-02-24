@@ -1,6 +1,9 @@
 package metrics
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"github.com/prometheus/client_golang/prometheus"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
+)
 
 var (
 	// AllocationsTotal counts subvolume allocations and deallocations by pool and status.
@@ -202,7 +205,7 @@ var (
 )
 
 func init() {
-	prometheus.MustRegister(
+	ctrlmetrics.Registry.MustRegister(
 		AllocationsTotal,
 		AllocationDuration,
 		PoolCapacityGB,

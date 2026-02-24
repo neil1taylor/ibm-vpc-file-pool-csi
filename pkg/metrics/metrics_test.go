@@ -5,6 +5,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
 func TestAllocationsTotal_Increment(t *testing.T) {
@@ -107,8 +108,12 @@ func TestSnapshotDuration_Observe(t *testing.T) {
 }
 
 func TestAllCollectorsRegistered(t *testing.T) {
-	// Gather all registered metrics and check our 10 are present.
-	families, err := prometheus.DefaultGatherer.Gather()
+	// Gather from controller-runtime's registry (where init() registers them).
+	gatherer, ok := ctrlmetrics.Registry.(prometheus.Gatherer)
+	if !ok {
+		t.Fatal("controller-runtime metrics.Registry does not implement prometheus.Gatherer")
+	}
+	families, err := gatherer.Gather()
 	if err != nil {
 		t.Fatalf("failed to gather metrics: %v", err)
 	}
