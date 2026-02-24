@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [v0.13.1] — 2026-02-24
+
+### Changed
+- Replace VirtualizedTable with PatternFly composable Table in all 5 list pages (fixes rows not rendering in tabbed layout)
+- Register Prometheus metrics with controller-runtime registry instead of default prometheus registry
+- Update image registry references from `icr.io` to `de.icr.io` (Frankfurt regional registry)
+
+### Added
+- `InlineCapacityBar` component for compact capacity display in table cells
+- `checkPrometheusConnection()` diagnostic helper in use-pool-metrics.ts
+- Subtitle descriptions on Dashboard and Monitoring pages
+- Webpack content hash in chunk filenames to prevent stale cache errors
+- Playwright E2E tests for console plugin UI
+- Client-side column sorting on all 5 list pages (PF6 composable sort pattern)
+
+### Fixed
+- VirtualizedTable body rows not rendering inside tabbed layout (replaced with PF Table)
+
+### Removed
+- `table-layout.css` (dead code after VirtualizedTable removal)
+
 ## [v0.13.0] — 2026-02-22
 
 ### Changed
@@ -224,6 +245,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Mount target IP resolution when share has multiple mount targets across zones
 - Makefile targets for end-to-end build pipeline
 
+[v0.13.1]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.13.0...v0.13.1
 [v0.13.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.12.0...v0.13.0
 [v0.12.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.11.0...v0.12.0
 [v0.11.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.10.0...v0.11.0
