@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   useK8sWatchResource,
   ListPageHeader,
@@ -14,6 +14,7 @@ import {
   Thead,
   Tr,
   Th,
+  ThProps,
   Td,
   Tbody,
   ActionsColumn,
@@ -68,6 +69,8 @@ const VolumeGroupSnapshotRow: React.FC<{
 
 const VolumeGroupSnapshotListPage: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [activeSortIndex, setActiveSortIndex] = useState<number | undefined>(undefined);
+  const [activeSortDirection, setActiveSortDirection] = useState<'asc' | 'desc' | undefined>(undefined);
 
   const [snapshots, loaded, loadError] = useK8sWatchResource<VolumeGroupSnapshot[]>({
     groupVersionKind: {
@@ -79,6 +82,37 @@ const VolumeGroupSnapshotListPage: React.FC = () => {
   });
 
   const [data, filteredData, onFilterChange] = useListPageFilter(snapshots);
+
+  const getSortableRowValues = (snap: VolumeGroupSnapshot): (string | number)[] => [
+    snap.metadata?.name || '',                                            // 0 Name
+    snap.spec?.poolName || '',                                            // 1 Pool
+    snap.status?.memberCount ?? 0,                                        // 2 Members
+    snap.status?.readyCount ?? 0,                                         // 3 Ready
+    snap.status?.phase || '',                                             // 4 Phase
+    new Date(snap.metadata?.creationTimestamp || 0).getTime(),            // 5 Age
+  ];
+
+  const sortedData = useMemo(() => {
+    if (activeSortIndex == null || activeSortDirection == null) return filteredData;
+    return [...filteredData].sort((a, b) => {
+      const aVal = getSortableRowValues(a)[activeSortIndex];
+      const bVal = getSortableRowValues(b)[activeSortIndex];
+      if (typeof aVal === 'number' && typeof bVal === 'number') {
+        return activeSortDirection === 'asc' ? aVal - bVal : bVal - aVal;
+      }
+      const result = String(aVal).localeCompare(String(bVal));
+      return activeSortDirection === 'asc' ? result : -result;
+    });
+  }, [filteredData, activeSortIndex, activeSortDirection]);
+
+  const getSortParams = (columnIndex: number): ThProps['sort'] => ({
+    sortBy: { index: activeSortIndex, direction: activeSortDirection },
+    onSort: (_event, index, direction) => {
+      setActiveSortIndex(index);
+      setActiveSortDirection(direction);
+    },
+    columnIndex,
+  });
 
   return (
     <>
@@ -118,17 +152,17 @@ const VolumeGroupSnapshotListPage: React.FC = () => {
           <Table aria-label="Volume Group Snapshots" variant="compact">
             <Thead>
               <Tr>
-                <Th>Name</Th>
-                <Th>Pool</Th>
-                <Th>Members</Th>
-                <Th>Ready</Th>
-                <Th>Phase</Th>
-                <Th>Age</Th>
+                <Th sort={getSortParams(0)}>Name</Th>
+                <Th sort={getSortParams(1)}>Pool</Th>
+                <Th sort={getSortParams(2)}>Members</Th>
+                <Th sort={getSortParams(3)}>Ready</Th>
+                <Th sort={getSortParams(4)}>Phase</Th>
+                <Th sort={getSortParams(5)}>Age</Th>
                 <Th></Th>
               </Tr>
             </Thead>
             <Tbody>
-              {filteredData.map((snap) => (
+              {sortedData.map((snap) => (
                 <VolumeGroupSnapshotRow
                   key={snap.metadata?.uid || snap.metadata?.name}
                   snap={snap}

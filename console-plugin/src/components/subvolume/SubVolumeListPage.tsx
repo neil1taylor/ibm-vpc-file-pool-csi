@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   useK8sWatchResource,
   ListPageHeader,
@@ -14,6 +14,7 @@ import {
   Thead,
   Tr,
   Th,
+  ThProps,
   Td,
   Tbody,
   ActionsColumn,
@@ -97,6 +98,8 @@ const SubVolumeRow: React.FC<{
 
 const SubVolumeListPage: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [activeSortIndex, setActiveSortIndex] = useState<number | undefined>(undefined);
+  const [activeSortDirection, setActiveSortDirection] = useState<'asc' | 'desc' | undefined>(undefined);
 
   const [subVolumes, loaded, loadError] = useK8sWatchResource<SubVolume[]>({
     groupVersionKind: {
@@ -108,6 +111,39 @@ const SubVolumeListPage: React.FC = () => {
   });
 
   const [data, filteredData, onFilterChange] = useListPageFilter(subVolumes);
+
+  const getSortableRowValues = (sv: SubVolume): (string | number)[] => [
+    sv.metadata?.name || '',                                              // 0 Name
+    sv.spec?.poolName || '',                                              // 1 Pool
+    sv.spec?.pvcNamespace && sv.spec?.pvcName
+      ? `${sv.spec.pvcNamespace}/${sv.spec.pvcName}` : '',               // 2 PVC
+    sv.spec?.requestedGB ?? 0,                                            // 3 Size
+    sv.status?.phase || '',                                               // 4 Phase
+    sv.status?.cloneStatus || '',                                         // 5 Clone Status
+    new Date(sv.metadata?.creationTimestamp || 0).getTime(),              // 6 Age
+  ];
+
+  const sortedData = useMemo(() => {
+    if (activeSortIndex == null || activeSortDirection == null) return filteredData;
+    return [...filteredData].sort((a, b) => {
+      const aVal = getSortableRowValues(a)[activeSortIndex];
+      const bVal = getSortableRowValues(b)[activeSortIndex];
+      if (typeof aVal === 'number' && typeof bVal === 'number') {
+        return activeSortDirection === 'asc' ? aVal - bVal : bVal - aVal;
+      }
+      const result = String(aVal).localeCompare(String(bVal));
+      return activeSortDirection === 'asc' ? result : -result;
+    });
+  }, [filteredData, activeSortIndex, activeSortDirection]);
+
+  const getSortParams = (columnIndex: number): ThProps['sort'] => ({
+    sortBy: { index: activeSortIndex, direction: activeSortDirection },
+    onSort: (_event, index, direction) => {
+      setActiveSortIndex(index);
+      setActiveSortDirection(direction);
+    },
+    columnIndex,
+  });
 
   return (
     <>
@@ -147,18 +183,18 @@ const SubVolumeListPage: React.FC = () => {
           <Table aria-label="SubVolumes" variant="compact">
             <Thead>
               <Tr>
-                <Th>Name</Th>
-                <Th>Pool</Th>
-                <Th>PVC</Th>
-                <Th>Size</Th>
-                <Th>Phase</Th>
-                <Th>Clone Status</Th>
-                <Th>Age</Th>
+                <Th sort={getSortParams(0)}>Name</Th>
+                <Th sort={getSortParams(1)}>Pool</Th>
+                <Th sort={getSortParams(2)}>PVC</Th>
+                <Th sort={getSortParams(3)}>Size</Th>
+                <Th sort={getSortParams(4)}>Phase</Th>
+                <Th sort={getSortParams(5)}>Clone Status</Th>
+                <Th sort={getSortParams(6)}>Age</Th>
                 <Th></Th>
               </Tr>
             </Thead>
             <Tbody>
-              {filteredData.map((sv) => (
+              {sortedData.map((sv) => (
                 <SubVolumeRow
                   key={sv.metadata?.uid || sv.metadata?.name}
                   sv={sv}

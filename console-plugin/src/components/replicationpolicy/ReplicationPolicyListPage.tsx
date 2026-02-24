@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   useK8sWatchResource,
   k8sUpdate,
@@ -15,6 +15,7 @@ import {
   Thead,
   Tr,
   Th,
+  ThProps,
   Td,
   Tbody,
   ActionsColumn,
@@ -94,6 +95,8 @@ const ReplicationPolicyRow: React.FC<{
 
 const ReplicationPolicyListPage: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [activeSortIndex, setActiveSortIndex] = useState<number | undefined>(undefined);
+  const [activeSortDirection, setActiveSortDirection] = useState<'asc' | 'desc' | undefined>(undefined);
 
   const [policies, loaded, loadError] = useK8sWatchResource<ReplicationPolicy[]>({
     groupVersionKind: {
@@ -105,6 +108,37 @@ const ReplicationPolicyListPage: React.FC = () => {
   });
 
   const [data, filteredData, onFilterChange] = useListPageFilter(policies);
+
+  const getSortableRowValues = (policy: ReplicationPolicy): (string | number)[] => [
+    policy.metadata?.name || '',                                          // 0 Name
+    policy.spec?.sourcePoolName || '',                                    // 1 Source Pool
+    policy.spec?.schedule || '',                                          // 2 Schedule
+    policy.status?.phase || '',                                           // 3 Phase
+    new Date(policy.status?.lastSyncTime || 0).getTime(),                // 4 Last Sync
+    policy.status?.consecutiveFailures ?? 0,                              // 5 Failures
+  ];
+
+  const sortedData = useMemo(() => {
+    if (activeSortIndex == null || activeSortDirection == null) return filteredData;
+    return [...filteredData].sort((a, b) => {
+      const aVal = getSortableRowValues(a)[activeSortIndex];
+      const bVal = getSortableRowValues(b)[activeSortIndex];
+      if (typeof aVal === 'number' && typeof bVal === 'number') {
+        return activeSortDirection === 'asc' ? aVal - bVal : bVal - aVal;
+      }
+      const result = String(aVal).localeCompare(String(bVal));
+      return activeSortDirection === 'asc' ? result : -result;
+    });
+  }, [filteredData, activeSortIndex, activeSortDirection]);
+
+  const getSortParams = (columnIndex: number): ThProps['sort'] => ({
+    sortBy: { index: activeSortIndex, direction: activeSortDirection },
+    onSort: (_event, index, direction) => {
+      setActiveSortIndex(index);
+      setActiveSortDirection(direction);
+    },
+    columnIndex,
+  });
 
   return (
     <>
@@ -144,18 +178,18 @@ const ReplicationPolicyListPage: React.FC = () => {
           <Table aria-label="Replication Policies" variant="compact">
             <Thead>
               <Tr>
-                <Th>Name</Th>
-                <Th>Source Pool</Th>
+                <Th sort={getSortParams(0)}>Name</Th>
+                <Th sort={getSortParams(1)}>Source Pool</Th>
                 <Th>Destination</Th>
-                <Th>Schedule</Th>
-                <Th>Phase</Th>
-                <Th>Last Sync</Th>
-                <Th>Failures</Th>
+                <Th sort={getSortParams(2)}>Schedule</Th>
+                <Th sort={getSortParams(3)}>Phase</Th>
+                <Th sort={getSortParams(4)}>Last Sync</Th>
+                <Th sort={getSortParams(5)}>Failures</Th>
                 <Th></Th>
               </Tr>
             </Thead>
             <Tbody>
-              {filteredData.map((policy) => (
+              {sortedData.map((policy) => (
                 <ReplicationPolicyRow
                   key={policy.metadata?.uid || policy.metadata?.name}
                   policy={policy}

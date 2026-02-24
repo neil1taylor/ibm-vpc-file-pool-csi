@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   useK8sWatchResource,
   ListPageHeader,
@@ -14,6 +14,7 @@ import {
   Thead,
   Tr,
   Th,
+  ThProps,
   Td,
   Tbody,
   ActionsColumn,
@@ -85,8 +86,17 @@ const FileSharePoolRow: React.FC<{
   );
 };
 
+/** Extract numeric IOPS value for sorting. */
+function getIOPSNumber(pool: FileSharePool): number {
+  if (pool.spec?.iops != null && pool.spec.iops > 0) return pool.spec.iops;
+  if (pool.spec?.profile === 'dp2' && pool.spec?.shareSizeGB) return pool.spec.shareSizeGB * 100;
+  return 0;
+}
+
 const FileSharePoolListPage: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [activeSortIndex, setActiveSortIndex] = useState<number | undefined>(undefined);
+  const [activeSortDirection, setActiveSortDirection] = useState<'asc' | 'desc' | undefined>(undefined);
 
   const [pools, loaded, loadError] = useK8sWatchResource<FileSharePool[]>({
     groupVersionKind: {
@@ -98,6 +108,40 @@ const FileSharePoolListPage: React.FC = () => {
   });
 
   const [data, filteredData, onFilterChange] = useListPageFilter(pools);
+
+  const getSortableRowValues = (pool: FileSharePool): (string | number)[] => [
+    pool.metadata?.name || '',                              // 0 Name
+    pool.spec?.zone || '',                                  // 1 Zone
+    pool.spec?.profile || '',                               // 2 Profile
+    getIOPSNumber(pool),                                    // 3 IOPS
+    pool.status?.shareCount ?? 0,                           // 4 Shares
+    0,                                                      // 5 Capacity (not sortable)
+    pool.status?.totalPVCCount ?? 0,                        // 6 PVCs
+    pool.status?.phase || '',                               // 7 Phase
+    new Date(pool.metadata?.creationTimestamp || 0).getTime(), // 8 Age
+  ];
+
+  const sortedData = useMemo(() => {
+    if (activeSortIndex == null || activeSortDirection == null) return filteredData;
+    return [...filteredData].sort((a, b) => {
+      const aVal = getSortableRowValues(a)[activeSortIndex];
+      const bVal = getSortableRowValues(b)[activeSortIndex];
+      if (typeof aVal === 'number' && typeof bVal === 'number') {
+        return activeSortDirection === 'asc' ? aVal - bVal : bVal - aVal;
+      }
+      const result = String(aVal).localeCompare(String(bVal));
+      return activeSortDirection === 'asc' ? result : -result;
+    });
+  }, [filteredData, activeSortIndex, activeSortDirection]);
+
+  const getSortParams = (columnIndex: number): ThProps['sort'] => ({
+    sortBy: { index: activeSortIndex, direction: activeSortDirection },
+    onSort: (_event, index, direction) => {
+      setActiveSortIndex(index);
+      setActiveSortDirection(direction);
+    },
+    columnIndex,
+  });
 
   return (
     <>
@@ -137,20 +181,20 @@ const FileSharePoolListPage: React.FC = () => {
           <Table aria-label="File Share Pools" variant="compact">
             <Thead>
               <Tr>
-                <Th>Name</Th>
-                <Th>Zone</Th>
-                <Th>Profile</Th>
-                <Th>IOPS</Th>
-                <Th>Shares</Th>
+                <Th sort={getSortParams(0)}>Name</Th>
+                <Th sort={getSortParams(1)}>Zone</Th>
+                <Th sort={getSortParams(2)}>Profile</Th>
+                <Th sort={getSortParams(3)}>IOPS</Th>
+                <Th sort={getSortParams(4)}>Shares</Th>
                 <Th>Capacity</Th>
-                <Th>PVCs</Th>
-                <Th>Phase</Th>
-                <Th>Age</Th>
+                <Th sort={getSortParams(6)}>PVCs</Th>
+                <Th sort={getSortParams(7)}>Phase</Th>
+                <Th sort={getSortParams(8)}>Age</Th>
                 <Th></Th>
               </Tr>
             </Thead>
             <Tbody>
-              {filteredData.map((pool) => (
+              {sortedData.map((pool) => (
                 <FileSharePoolRow
                   key={pool.metadata?.uid || pool.metadata?.name}
                   pool={pool}
