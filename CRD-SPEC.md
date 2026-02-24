@@ -1155,7 +1155,7 @@ import (
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=rp
-// +kubebuilder:printcolumn:name="Source",type=string,JSONPath=`.spec.sourcePool`
+// +kubebuilder:printcolumn:name="Source",type=string,JSONPath=`.spec.sourcePoolName`
 // +kubebuilder:printcolumn:name="Dest",type=string,JSONPath=`.spec.destinationNFSServer`
 // +kubebuilder:printcolumn:name="Schedule",type=string,JSONPath=`.spec.schedule`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
@@ -1209,14 +1209,6 @@ type ReplicationPolicySpec struct {
     // +optional
     IncrementalSync *bool `json:"incrementalSync,omitempty"`
 
-    // PreSyncHooks are hooks executed before each replication sync cycle.
-    // +optional
-    PreSyncHooks []Hook `json:"preSyncHooks,omitempty"`
-
-    // PostSyncHooks are hooks executed after each replication sync cycle.
-    // +optional
-    PostSyncHooks []Hook `json:"postSyncHooks,omitempty"`
-
     // BandwidthLimitMbps caps rsync transfer rate to avoid saturating
     // the cross-region link. 0 = unlimited.
     // +kubebuilder:validation:Minimum=0
@@ -1237,6 +1229,14 @@ type ReplicationPolicySpec struct {
     // Security: --daemon, --server, --rsh, and --rsync-path flags are blocked by validation.
     // +optional
     RsyncOptions []string `json:"rsyncOptions,omitempty"`
+
+    // PreSyncHooks are hooks executed before each replication sync cycle.
+    // +optional
+    PreSyncHooks []Hook `json:"preSyncHooks,omitempty"`
+
+    // PostSyncHooks are hooks executed after each replication sync cycle.
+    // +optional
+    PostSyncHooks []Hook `json:"postSyncHooks,omitempty"`
 }
 
 // ReplicationPolicyStatus describes the observed state of a replication policy.

@@ -79,8 +79,12 @@ rsync-based disaster recovery with configurable sync schedules.
 
 - **Schedule-based sync** — ReplicationPolicy CR defines sync interval (e.g., `15m`, `1h`, `6h`) as a duration string.
 - **Per-SubVolume incremental sync** — Optional label selector filters which SubVolumes replicate. Incremental mode (default) uses rsync for efficient delta transfer.
+- **Bandwidth limiting and parallel syncs** — `bandwidthLimitMbps` caps rsync throughput; `maxParallelSyncs` controls concurrent SubVolume syncs with a semaphore-gated worker pool.
+- **Extra rsync options** — `rsyncOptions` field passes additional rsync flags (e.g., `--compress`, `--checksum`). Dangerous flags (`--daemon`, `--server`, `--rsh`, `--rsync-path`) are blocked by the webhook.
 - **Retry with backoff** — Configurable max retries (default 3). Policy pauses on consecutive failures.
 - **Pre/post-sync hooks** — Exec and HTTP hooks for application quiescing before sync and notification after.
+- **Metadata sidecar** — Writes `.subvolume-metadata.json` alongside each replicated SubVolume directory, enabling the failover CLI to reconstruct resources without querying the source cluster.
+- **Failover CLI** — `kubectl failover` plugin with `plan` (scan destination NFS, compute RPO), `execute` (create SubVolume CRs, PVs, PVCs on DR cluster), and `status` (report PVC binding) subcommands. Supports `--dry-run` and is idempotent.
 - **Status tracking** — Per-policy LastSyncTime and LastSyncDuration. Per-SubVolume sync state with BytesSynced and LastError.
 - **Destination config** — NFS server IP and base path for the remote region's pool.
 - **Prometheus metrics** — Dedicated metrics for sync total, duration, lag, failures, and SubVolume count.

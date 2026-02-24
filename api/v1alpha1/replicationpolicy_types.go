@@ -7,7 +7,7 @@ import (
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=rp
-// +kubebuilder:printcolumn:name="Source",type=string,JSONPath=`.spec.sourcePool`
+// +kubebuilder:printcolumn:name="Source",type=string,JSONPath=`.spec.sourcePoolName`
 // +kubebuilder:printcolumn:name="Dest",type=string,JSONPath=`.spec.destinationNFSServer`
 // +kubebuilder:printcolumn:name="Schedule",type=string,JSONPath=`.spec.schedule`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`

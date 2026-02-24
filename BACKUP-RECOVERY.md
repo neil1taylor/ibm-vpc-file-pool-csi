@@ -383,13 +383,30 @@ kubectl debug node/<dr-node> -it --image=busybox -- sh -c \
 
 ### Failover Procedure
 
-Failover is manual by design (see [CROSS-REGION-DR.md](CROSS-REGION-DR.md) for why):
+Failover is manual by design (see [CROSS-REGION-DR.md](CROSS-REGION-DR.md) for why). Use the `kubectl failover` CLI plugin for structured DR promotion:
 
-1. **Stop replication** on the source cluster to prevent partial syncs
-2. **Verify last sync time** — data on the DR cluster is consistent to this point
-3. **Deploy workloads** on the DR cluster using the DR pool's StorageClass
-4. **Create PVCs** that reference the replicated data
-5. **Update DNS/load balancer** to point to the DR cluster
+```bash
+# 1. Stop replication on the source cluster to prevent partial syncs
+
+# 2. Review what will be failed over and check RPO
+kubectl failover plan --nfs-mount-path /repl/dst/10.245.3.8
+
+# 3. Dry-run to preview resources that will be created
+kubectl failover execute --nfs-mount-path /repl/dst/10.245.3.8 \
+  --dr-pool dr-production --dr-share-ip 10.245.3.8 --dry-run
+
+# 4. Execute failover — creates SubVolume CRs, PVs, and PVCs on the DR cluster
+kubectl failover execute --nfs-mount-path /repl/dst/10.245.3.8 \
+  --dr-pool dr-production --dr-share-ip 10.245.3.8
+
+# 5. Verify PVC binding
+kubectl failover status
+
+# 6. Deploy workloads on the DR cluster
+# 7. Update DNS/load balancer to point to the DR cluster
+```
+
+See [CROSS-REGION-DR.md — Failover CLI](CROSS-REGION-DR.md#failover-cli) for full flag reference and details.
 
 ---
 

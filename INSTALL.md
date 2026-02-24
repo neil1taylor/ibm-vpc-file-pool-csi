@@ -287,18 +287,18 @@ helm upgrade --install ibm-vpc-file-pool-csi \
 | `config.vpcID` | No | Auto-discovered | VPC ID where shares will be created. Auto-discovered from the `ibm-cloud-provider-data` ConfigMap on managed clusters |
 | `config.subnetID` | No | Auto-discovered | Subnet ID for NFS mount targets. Auto-discovered from `ibm-cloud-provider-data` on managed clusters (uses first subnet) |
 | `config.resourceGroupID` | No | Auto-discovered | Resource group for billing. Auto-discovered from the secret provider on managed clusters |
-| `secret.name` | No | `ibm-vpc-file-pool-csi-secret` | Name of the API key secret |
-| `secret.namespace` | No | `kube-system` | Namespace of the API key secret |
 | `controller.replicas` | No | `1` | Controller replicas (leader-elected) |
 | `controller.resources` | No | `{requests: {cpu: 50m, memory: 128Mi}, limits: {memory: 512Mi}}` | Controller CPU/memory resource requests and limits |
-| `node.kubeletDir` | No | `/var/lib/kubelet` | Kubelet root directory. Set to `/var/data/kubelet` on ROKS |
+| `node.kubeletDir` | No | `/var/data/kubelet` | Kubelet root directory. ROKS uses `/var/data/kubelet` (the Helm default). The Go binary default is `/var/lib/kubelet` for raw manifest deployments |
 | `node.resources` | No | `{requests: {cpu: 50m, memory: 64Mi}, limits: {memory: 256Mi}}` | Node agent CPU/memory resource requests and limits |
 | `logLevel` | No | `4` | klog verbosity (2=normal, 4=detailed, 6=trace) |
 | `webhook.enabled` | No | `true` | Enable validating admission webhooks |
 | `webhook.port` | No | `9443` | Webhook server port |
 | `webhook.certProvider` | No | `cert-manager` | TLS certificate provider: `cert-manager` or `manual` |
 | `cloneWorker.interval` | No | `10s` | Background clone worker poll interval |
+| `goldenImageSyncer.interval` | No | `5m` | Golden image syncer poll interval |
 | `secretProvider.managed` | No | `true` | Enable managed secret provider sidecar (ROKS/IKS) |
+| `secretProvider.sidecar.image` | No | `icr.io/obs/armada-storage-secret:v1.2.75` | Secret provider sidecar container image |
 
 ### Option B: Raw Manifests
 
@@ -331,6 +331,20 @@ kubectl apply -f config/deploy/node.yaml
 #    Only apply this if you need custom SC parameters:
 # kubectl apply -f config/deploy/storageclass.yaml
 ```
+
+**CLI flags reference** (for raw manifest deployments — these map to Helm values above):
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--endpoint` | `unix:///csi/csi.sock` | CSI gRPC endpoint |
+| `--node-id` | (required) | Kubernetes node name |
+| `--mode` | `controller` | `controller` or `node` |
+| `--region` | Auto-discovered | IBM Cloud region |
+| `--vpc-id` | Auto-discovered | VPC ID for mount targets |
+| `--subnet-id` | Auto-discovered | Subnet ID for mount targets |
+| `--kubelet-dir` | `/var/lib/kubelet` | Kubelet root directory (ROKS: use `/var/data/kubelet`) |
+| `--clone-worker-interval` | `10s` | Clone worker poll interval |
+| `--golden-image-sync-interval` | `5m` | Golden image syncer poll interval |
 
 ---
 
