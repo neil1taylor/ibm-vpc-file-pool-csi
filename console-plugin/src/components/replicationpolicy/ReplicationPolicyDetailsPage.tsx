@@ -155,6 +155,8 @@ const ReplicationPolicyDetailsPage: React.FC = () => {
     }
   };
 
+  const isReceiverMode = !!spec.destinationEndpoint;
+
   const renderOverview = () => (
     <Card>
       <CardTitle>Overview</CardTitle>
@@ -165,11 +167,45 @@ const ReplicationPolicyDetailsPage: React.FC = () => {
             <DescriptionListDescription>{spec.sourcePoolName}</DescriptionListDescription>
           </DescriptionListGroup>
           <DescriptionListGroup>
-            <DescriptionListTerm>Destination NFS Server</DescriptionListTerm>
+            <DescriptionListTerm>Replication Mode</DescriptionListTerm>
             <DescriptionListDescription>
-              <code>{spec.destinationNFSServer}</code>
+              <Label color={isReceiverMode ? 'blue' : 'green'}>
+                {isReceiverMode ? 'Driver-to-Driver' : 'Direct NFS'}
+              </Label>
             </DescriptionListDescription>
           </DescriptionListGroup>
+          {isReceiverMode && (
+            <>
+              <DescriptionListGroup>
+                <DescriptionListTerm>Receiver Endpoint</DescriptionListTerm>
+                <DescriptionListDescription>
+                  <code>{spec.destinationEndpoint}</code>
+                </DescriptionListDescription>
+              </DescriptionListGroup>
+              <DescriptionListGroup>
+                <DescriptionListTerm>Auth Secret</DescriptionListTerm>
+                <DescriptionListDescription>
+                  <code>{spec.destinationAuthSecretRef}</code>
+                </DescriptionListDescription>
+              </DescriptionListGroup>
+            </>
+          )}
+          {!isReceiverMode && (
+            <>
+              <DescriptionListGroup>
+                <DescriptionListTerm>Destination NFS Server</DescriptionListTerm>
+                <DescriptionListDescription>
+                  <code>{spec.destinationNFSServer}</code>
+                </DescriptionListDescription>
+              </DescriptionListGroup>
+              <DescriptionListGroup>
+                <DescriptionListTerm>Destination Export Path</DescriptionListTerm>
+                <DescriptionListDescription>
+                  <code>{spec.destinationExportPath || '/'}</code>
+                </DescriptionListDescription>
+              </DescriptionListGroup>
+            </>
+          )}
           <DescriptionListGroup>
             <DescriptionListTerm>Destination Base Path</DescriptionListTerm>
             <DescriptionListDescription>
@@ -184,34 +220,40 @@ const ReplicationPolicyDetailsPage: React.FC = () => {
             <DescriptionListTerm>Max Retries</DescriptionListTerm>
             <DescriptionListDescription>{spec.maxRetries}</DescriptionListDescription>
           </DescriptionListGroup>
-          <DescriptionListGroup>
-            <DescriptionListTerm>Incremental Sync</DescriptionListTerm>
-            <DescriptionListDescription>
-              <Label color={spec.incrementalSync !== false ? 'green' : 'grey'}>
-                {spec.incrementalSync !== false ? 'Enabled' : 'Disabled'}
-              </Label>
-            </DescriptionListDescription>
-          </DescriptionListGroup>
-          <DescriptionListGroup>
-            <DescriptionListTerm>Bandwidth Limit</DescriptionListTerm>
-            <DescriptionListDescription>
-              {spec.bandwidthLimitMbps ? `${spec.bandwidthLimitMbps} Mbps` : 'Unlimited'}
-            </DescriptionListDescription>
-          </DescriptionListGroup>
+          {!isReceiverMode && (
+            <>
+              <DescriptionListGroup>
+                <DescriptionListTerm>Incremental Sync</DescriptionListTerm>
+                <DescriptionListDescription>
+                  <Label color={spec.incrementalSync !== false ? 'green' : 'grey'}>
+                    {spec.incrementalSync !== false ? 'Enabled' : 'Disabled'}
+                  </Label>
+                </DescriptionListDescription>
+              </DescriptionListGroup>
+              <DescriptionListGroup>
+                <DescriptionListTerm>Bandwidth Limit</DescriptionListTerm>
+                <DescriptionListDescription>
+                  {spec.bandwidthLimitMbps ? `${spec.bandwidthLimitMbps} Mbps` : 'Unlimited'}
+                </DescriptionListDescription>
+              </DescriptionListGroup>
+            </>
+          )}
           <DescriptionListGroup>
             <DescriptionListTerm>Max Parallel Syncs</DescriptionListTerm>
             <DescriptionListDescription>
               {spec.maxParallelSyncs ?? 1}
             </DescriptionListDescription>
           </DescriptionListGroup>
-          <DescriptionListGroup>
-            <DescriptionListTerm>Rsync Options</DescriptionListTerm>
-            <DescriptionListDescription>
-              {spec.rsyncOptions && spec.rsyncOptions.length > 0
-                ? <code>{spec.rsyncOptions.join(' ')}</code>
-                : '-'}
-            </DescriptionListDescription>
-          </DescriptionListGroup>
+          {!isReceiverMode && (
+            <DescriptionListGroup>
+              <DescriptionListTerm>Rsync Options</DescriptionListTerm>
+              <DescriptionListDescription>
+                {spec.rsyncOptions && spec.rsyncOptions.length > 0
+                  ? <code>{spec.rsyncOptions.join(' ')}</code>
+                  : '-'}
+              </DescriptionListDescription>
+            </DescriptionListGroup>
+          )}
           <DescriptionListGroup>
             <DescriptionListTerm>SubVolume Selector</DescriptionListTerm>
             <DescriptionListDescription>

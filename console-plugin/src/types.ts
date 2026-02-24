@@ -226,6 +226,7 @@ export interface ReplicationPolicy extends K8sResourceCommon {
 export interface ReplicationPolicySpec {
   sourcePoolName: string;
   destinationNFSServer: string;
+  destinationExportPath?: string;
   destinationBasePath: string;
   schedule: string;
   subVolumeSelector?: LabelSelector;
@@ -236,6 +237,10 @@ export interface ReplicationPolicySpec {
   rsyncOptions?: string[];
   preSyncHooks?: Hook[];
   postSyncHooks?: Hook[];
+  /** HTTPS URL of the replication receiver on the destination cluster. When set, uses driver-to-driver mode. */
+  destinationEndpoint?: string;
+  /** Secret name in kube-system containing a "token" key for receiver auth. Required when destinationEndpoint is set. */
+  destinationAuthSecretRef?: string;
 }
 
 export interface ReplicationPolicyStatus {

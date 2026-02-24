@@ -162,3 +162,108 @@ func TestReplicationPolicyValidator_Delete(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+// --- Driver-to-driver (receiver) mode tests ---
+
+func validReceiverModePolicy() *v1alpha1.ReplicationPolicy {
+	return &v1alpha1.ReplicationPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "repl-receiver"},
+		Spec: v1alpha1.ReplicationPolicySpec{
+			SourcePoolName:           "test-pool",
+			DestinationEndpoint:      "https://repl-receiver.apps.cluster.example.com",
+			DestinationAuthSecretRef: "replication-auth",
+			DestinationBasePath:      "/pvcs",
+			Schedule:                 "15m",
+			MaxRetries:               3,
+		},
+	}
+}
+
+func TestReplicationPolicyValidator_Create_ReceiverMode_Valid(t *testing.T) {
+	v := &ReplicationPolicyValidator{}
+	_, err := v.ValidateCreate(context.Background(), validReceiverModePolicy())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestReplicationPolicyValidator_Create_ReceiverMode_MissingAuthSecret(t *testing.T) {
+	v := &ReplicationPolicyValidator{}
+	rp := validReceiverModePolicy()
+	rp.Spec.DestinationAuthSecretRef = ""
+	_, err := v.ValidateCreate(context.Background(), rp)
+	if err == nil {
+		t.Fatal("expected error for missing auth secret in receiver mode")
+	}
+	if expected := "destinationAuthSecretRef is required"; !contains(err.Error(), expected) {
+		t.Errorf("error = %q, want it to contain %q", err.Error(), expected)
+	}
+}
+
+func TestReplicationPolicyValidator_Create_ReceiverMode_HTTPEndpoint(t *testing.T) {
+	v := &ReplicationPolicyValidator{}
+	rp := validReceiverModePolicy()
+	rp.Spec.DestinationEndpoint = "http://insecure.example.com"
+	_, err := v.ValidateCreate(context.Background(), rp)
+	if err == nil {
+		t.Fatal("expected error for HTTP endpoint (not HTTPS)")
+	}
+	if expected := "must use HTTPS"; !contains(err.Error(), expected) {
+		t.Errorf("error = %q, want it to contain %q", err.Error(), expected)
+	}
+}
+
+func TestReplicationPolicyValidator_Create_ReceiverMode_InvalidURL(t *testing.T) {
+	v := &ReplicationPolicyValidator{}
+	rp := validReceiverModePolicy()
+	rp.Spec.DestinationEndpoint = "://invalid"
+	_, err := v.ValidateCreate(context.Background(), rp)
+	if err == nil {
+		t.Fatal("expected error for invalid URL")
+	}
+}
+
+func TestReplicationPolicyValidator_Create_ReceiverMode_NeitherEndpointNorNFS(t *testing.T) {
+	v := &ReplicationPolicyValidator{}
+	rp := validReceiverModePolicy()
+	rp.Spec.DestinationEndpoint = ""
+	rp.Spec.DestinationNFSServer = ""
+	_, err := v.ValidateCreate(context.Background(), rp)
+	if err == nil {
+		t.Fatal("expected error when neither endpoint nor NFS server is set")
+	}
+}
+
+func TestReplicationPolicyValidator_Create_ReceiverMode_SkipsRsyncValidation(t *testing.T) {
+	v := &ReplicationPolicyValidator{}
+	rp := validReceiverModePolicy()
+	// Rsync options should be ignored in receiver mode, even blocked ones.
+	rp.Spec.RsyncOptions = []string{"--daemon"}
+	_, err := v.ValidateCreate(context.Background(), rp)
+	if err != nil {
+		t.Fatalf("unexpected error: receiver mode should skip rsync validation, got %v", err)
+	}
+}
+
+func TestReplicationPolicyValidator_Create_DirectNFS_MissingServer(t *testing.T) {
+	v := &ReplicationPolicyValidator{}
+	rp := validReplicationPolicy()
+	rp.Spec.DestinationNFSServer = ""
+	_, err := v.ValidateCreate(context.Background(), rp)
+	if err == nil {
+		t.Fatal("expected error for missing NFS server in direct mode")
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && containsString(s, substr)
+}
+
+func containsString(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}

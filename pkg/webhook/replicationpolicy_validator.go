@@ -3,6 +3,7 @@ package webhook
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -37,9 +38,29 @@ func validateReplicationPolicySpec(spec *v1alpha1.ReplicationPolicySpec) error {
 	if spec.SourcePoolName == "" {
 		return fmt.Errorf("spec.sourcePoolName is required")
 	}
-	if spec.DestinationNFSServer == "" {
-		return fmt.Errorf("spec.destinationNFSServer is required")
+
+	// Determine mode: driver-to-driver (receiver) or direct NFS.
+	isReceiverMode := spec.DestinationEndpoint != ""
+
+	if isReceiverMode {
+		// Receiver mode: validate endpoint URL and auth secret.
+		u, err := url.Parse(spec.DestinationEndpoint)
+		if err != nil {
+			return fmt.Errorf("spec.destinationEndpoint is not a valid URL: %v", err)
+		}
+		if u.Scheme != "https" {
+			return fmt.Errorf("spec.destinationEndpoint must use HTTPS, got %q", u.Scheme)
+		}
+		if spec.DestinationAuthSecretRef == "" {
+			return fmt.Errorf("spec.destinationAuthSecretRef is required when destinationEndpoint is set")
+		}
+	} else {
+		// Direct NFS mode: require NFS server.
+		if spec.DestinationNFSServer == "" {
+			return fmt.Errorf("spec.destinationNFSServer is required")
+		}
 	}
+
 	if spec.DestinationBasePath == "" {
 		return fmt.Errorf("spec.destinationBasePath is required")
 	}
@@ -58,10 +79,13 @@ func validateReplicationPolicySpec(spec *v1alpha1.ReplicationPolicySpec) error {
 	if spec.MaxParallelSyncs < 0 {
 		return fmt.Errorf("spec.maxParallelSyncs must be >= 0, got %d", spec.MaxParallelSyncs)
 	}
-	for _, opt := range spec.RsyncOptions {
-		for _, blocked := range rsyncBlocklist {
-			if opt == blocked || strings.HasPrefix(opt, blocked+"=") {
-				return fmt.Errorf("spec.rsyncOptions contains disallowed flag %q", opt)
+	// Rsync options only apply to direct NFS mode.
+	if !isReceiverMode {
+		for _, opt := range spec.RsyncOptions {
+			for _, blocked := range rsyncBlocklist {
+				if opt == blocked || strings.HasPrefix(opt, blocked+"=") {
+					return fmt.Errorf("spec.rsyncOptions contains disallowed flag %q", opt)
+				}
 			}
 		}
 	}

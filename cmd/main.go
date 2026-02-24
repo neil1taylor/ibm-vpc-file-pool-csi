@@ -30,6 +30,7 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/k8s"
 	_ "github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics" // Register Prometheus collectors via init()
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/pool"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/replication"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/webhook"
 )
 
@@ -46,11 +47,25 @@ func main() {
 		kubeletDir          string
 		cloneWorkerInterval      time.Duration
 		goldenImageSyncInterval  time.Duration
+
+		// Receiver mode flags.
+		receiverBasePath      string
+		receiverAuthTokenFile string
+		receiverListenAddr    string
+
+		// Sync-client mode flags.
+		receiverEndpoint string
+		authTokenFile    string
+		sourcePath       string
+		destBasePath     string
+		subPath          string
+		subvolumeName    string
+		metadataJSON     string
 	)
 
 	flag.StringVar(&endpoint, "endpoint", "unix:///csi/csi.sock", "CSI endpoint")
 	flag.StringVar(&nodeID, "node-id", "", "Node ID")
-	flag.StringVar(&mode, "mode", "controller", "Driver mode: controller or node")
+	flag.StringVar(&mode, "mode", "controller", "Driver mode: controller, node, receiver, or sync-client")
 	flag.StringVar(&region, "region", "", "IBM Cloud region (e.g. us-south); auto-discovered from secret provider if omitted")
 	flag.StringVar(&vpcID, "vpc-id", "", "IBM Cloud VPC ID for creating file share mount targets")
 	flag.StringVar(&subnetID, "subnet-id", "", "IBM Cloud subnet ID for creating file share mount targets")
@@ -58,14 +73,33 @@ func main() {
 	flag.DurationVar(&cloneWorkerInterval, "clone-worker-interval", pool.DefaultCloneWorkerInterval, "Interval between clone worker poll cycles")
 	flag.DurationVar(&goldenImageSyncInterval, "golden-image-sync-interval", pool.DefaultGoldenImageInterval, "Interval between golden image syncer poll cycles")
 
+	// Receiver flags.
+	flag.StringVar(&receiverBasePath, "receiver-base-path", "/data", "NFS mount point inside receiver container")
+	flag.StringVar(&receiverAuthTokenFile, "receiver-auth-token-file", "/etc/replication/token", "Path to file containing bearer token for receiver auth")
+	flag.StringVar(&receiverListenAddr, "receiver-listen-addr", ":8443", "HTTP listen address for receiver")
+
+	// Sync-client flags.
+	flag.StringVar(&receiverEndpoint, "receiver-endpoint", "", "Destination receiver URL for sync-client mode")
+	flag.StringVar(&authTokenFile, "auth-token-file", "/etc/replication/token", "Path to file containing bearer token for sync-client auth")
+	flag.StringVar(&sourcePath, "source-path", "", "Mounted source NFS path for sync-client mode")
+	flag.StringVar(&destBasePath, "dest-base-path", "", "Destination base path for sync-client mode")
+	flag.StringVar(&subPath, "sub-path", "", "SubVolume sub path for sync-client mode")
+	flag.StringVar(&subvolumeName, "subvolume-name", "", "SubVolume CR name for sync-client mode")
+	flag.StringVar(&metadataJSON, "metadata-json", "", "Serialized SubVolumeMetadata JSON for sync-client mode")
+
 	klog.InitFlags(nil)
 	flag.Parse()
 
 	klog.InfoS("Starting IBM VPC File Pool CSI Driver", "version", version, "mode", mode)
 
-	if mode == "controller" {
+	switch mode {
+	case "controller":
 		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, cloneWorkerInterval, goldenImageSyncInterval)
-	} else {
+	case "receiver":
+		runReceiver(receiverBasePath, receiverAuthTokenFile, receiverListenAddr)
+	case "sync-client":
+		runSyncClient(receiverEndpoint, authTokenFile, sourcePath, destBasePath, subPath, subvolumeName, metadataJSON)
+	default:
 		runNode(endpoint, nodeID, mode)
 	}
 }
@@ -287,7 +321,7 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 	go goldenImageSyncer.Run(signalCtx)
 
 	// Start the background replication controller for cross-region DR.
-	replController := pool.NewReplicationController(k8sClient, nfsOps)
+	replController := pool.NewReplicationController(k8sClient, mgr.GetClient(), nfsOps)
 	hookOrchestrator := hooks.NewOrchestrator(
 		hooks.NewExecHook(clientset, restConfig),
 		hooks.NewHTTPHook(nil),
@@ -301,6 +335,75 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 		klog.ErrorS(err, "Controller manager failed")
 		os.Exit(1)
 	}
+}
+
+func runReceiver(basePath, authTokenFile, listenAddr string) {
+	// Read auth token from file.
+	tokenBytes, err := os.ReadFile(authTokenFile)
+	if err != nil {
+		klog.ErrorS(err, "Failed to read receiver auth token file", "path", authTokenFile)
+		os.Exit(1)
+	}
+	token := strings.TrimSpace(string(tokenBytes))
+	if token == "" {
+		klog.ErrorS(nil, "Receiver auth token file is empty", "path", authTokenFile)
+		os.Exit(1)
+	}
+
+	receiver := replication.NewReceiver(basePath, token, listenAddr)
+
+	signalCtx := ctrl.SetupSignalHandler()
+	klog.InfoS("Starting replication receiver", "basePath", basePath, "listenAddr", listenAddr)
+	if err := receiver.Start(signalCtx); err != nil {
+		klog.ErrorS(err, "Replication receiver failed")
+		os.Exit(1)
+	}
+}
+
+func runSyncClient(endpoint, authTokenFile, sourcePath, destBasePath, subPath, svName, metadataJSON string) {
+	if endpoint == "" {
+		klog.ErrorS(nil, "receiver-endpoint is required for sync-client mode")
+		os.Exit(1)
+	}
+	if sourcePath == "" || destBasePath == "" || subPath == "" || svName == "" {
+		klog.ErrorS(nil, "source-path, dest-base-path, sub-path, and subvolume-name are required for sync-client mode")
+		os.Exit(1)
+	}
+
+	// Read auth token from file.
+	tokenBytes, err := os.ReadFile(authTokenFile)
+	if err != nil {
+		klog.ErrorS(err, "Failed to read auth token file", "path", authTokenFile)
+		os.Exit(1)
+	}
+	token := strings.TrimSpace(string(tokenBytes))
+	if token == "" {
+		klog.ErrorS(nil, "Auth token file is empty", "path", authTokenFile)
+		os.Exit(1)
+	}
+
+	client := replication.NewSyncClient(endpoint, token)
+
+	var metadata []byte
+	if metadataJSON != "" {
+		metadata = []byte(metadataJSON)
+	}
+
+	ctx := context.Background()
+	klog.InfoS("Starting sync-client",
+		"endpoint", endpoint,
+		"sourcePath", sourcePath,
+		"destBasePath", destBasePath,
+		"subPath", subPath,
+		"subVolume", svName,
+	)
+
+	if err := client.SyncSubVolume(ctx, sourcePath, destBasePath, subPath, svName, metadata); err != nil {
+		klog.ErrorS(err, "Sync-client failed")
+		os.Exit(1)
+	}
+
+	klog.InfoS("Sync-client completed successfully", "subVolume", svName)
 }
 
 func runNode(endpoint, nodeID, mode string) {

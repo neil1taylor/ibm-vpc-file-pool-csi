@@ -1,0 +1,113 @@
+{{- if .Values.replicationReceiver.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-replication-receiver
+  namespace: kube-system
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: replication-receiver
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "ibm-vpc-file-pool-csi.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: replication-receiver
+  template:
+    metadata:
+      labels:
+        {{- include "ibm-vpc-file-pool-csi.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: replication-receiver
+    spec:
+      serviceAccountName: {{ include "ibm-vpc-file-pool-csi.fullname" . }}
+      containers:
+        - name: receiver
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --mode=receiver
+            - --receiver-base-path=/data
+            - --receiver-auth-token-file=/etc/replication/token
+            - --receiver-listen-addr=:8443
+            - -v={{ .Values.logLevel }}
+          ports:
+            - name: http
+              containerPort: 8443
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.replicationReceiver.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: auth-token
+              mountPath: /etc/replication
+              readOnly: true
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.replicationReceiver.pvcName }}
+        - name: auth-token
+          secret:
+            secretName: {{ .Values.replicationReceiver.authSecretName }}
+      {{- with .Values.controller.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controller.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-replication-receiver
+  namespace: kube-system
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: replication-receiver
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8443
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "ibm-vpc-file-pool-csi.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: replication-receiver
+---
+{{- if .Capabilities.APIVersions.Has "route.openshift.io/v1" }}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-replication-receiver
+  namespace: kube-system
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: replication-receiver
+  annotations:
+    haproxy.router.openshift.io/timeout: "3600s"
+spec:
+  to:
+    kind: Service
+    name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-replication-receiver
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: None
+{{- end }}
+{{- end }}

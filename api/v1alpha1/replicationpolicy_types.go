@@ -34,6 +34,13 @@ type ReplicationPolicySpec struct {
 	// +kubebuilder:validation:Required
 	DestinationNFSServer string `json:"destinationNFSServer"`
 
+	// DestinationExportPath is the NFS export path on the destination server.
+	// For VPC access-mode shares, this differentiates shares under a shared FQDN.
+	// Defaults to "/" if not specified.
+	// +kubebuilder:default="/"
+	// +optional
+	DestinationExportPath string `json:"destinationExportPath,omitempty"`
+
 	// DestinationBasePath is the base path on the destination NFS server
 	// where replicated SubVolume directories are written (e.g., "/pvcs").
 	// +kubebuilder:validation:Required
@@ -76,8 +83,21 @@ type ReplicationPolicySpec struct {
 
 	// RsyncOptions are extra rsync flags appended after the base flags (-a --delete).
 	// Dangerous flags (--daemon, --server, --rsh, --rsync-path) are rejected by the webhook.
+	// Only applies to direct NFS mode (not driver-to-driver mode).
 	// +optional
 	RsyncOptions []string `json:"rsyncOptions,omitempty"`
+
+	// DestinationEndpoint is the HTTPS URL of the replication receiver service
+	// on the destination cluster (e.g., "https://repl-receiver.apps.cluster.example.com").
+	// When set, the controller uses driver-to-driver mode instead of direct NFS.
+	// +optional
+	DestinationEndpoint string `json:"destinationEndpoint,omitempty"`
+
+	// DestinationAuthSecretRef is the name of a Secret in kube-system containing
+	// a "token" key with the bearer token for authenticating to the receiver.
+	// Required when DestinationEndpoint is set.
+	// +optional
+	DestinationAuthSecretRef string `json:"destinationAuthSecretRef,omitempty"`
 
 	// PreSyncHooks are hooks executed before each replication sync cycle.
 	// +optional

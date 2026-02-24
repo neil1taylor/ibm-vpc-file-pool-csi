@@ -53,15 +53,21 @@ const ReplicationPolicyCreatePage: React.FC = () => {
   const history = useHistory();
 
   const [name, setName] = useState('');
+  const [replicationMode, setReplicationMode] = useState<'direct' | 'driver-to-driver'>('direct');
   const [sourcePoolName, setSourcePoolName] = useState('');
   const [destinationNFSServer, setDestinationNFSServer] = useState('');
+  const [destinationExportPath, setDestinationExportPath] = useState('/');
   const [destinationBasePath, setDestinationBasePath] = useState('/pvcs');
+  const [destinationEndpoint, setDestinationEndpoint] = useState('');
+  const [destinationAuthSecretRef, setDestinationAuthSecretRef] = useState('');
   const [schedule, setSchedule] = useState('15m');
   const [maxRetries, setMaxRetries] = useState(3);
   const [incrementalSync, setIncrementalSync] = useState(true);
   const [bandwidthLimitMbps, setBandwidthLimitMbps] = useState(0);
   const [maxParallelSyncs, setMaxParallelSyncs] = useState(1);
   const [rsyncOptions, setRsyncOptions] = useState('');
+
+  const isDriverToDriver = replicationMode === 'driver-to-driver';
 
   // Label selector as key-value pairs
   const [labelPairs, setLabelPairs] = useState<Array<{ key: string; value: string }>>([]);
@@ -97,9 +103,11 @@ const ReplicationPolicyCreatePage: React.FC = () => {
   const isValid =
     name.length > 0 &&
     sourcePoolName.length > 0 &&
-    destinationNFSServer.length > 0 &&
     destinationBasePath.length > 0 &&
-    schedule.length > 0;
+    schedule.length > 0 &&
+    (isDriverToDriver
+      ? destinationEndpoint.length > 0 && destinationAuthSecretRef.length > 0
+      : destinationNFSServer.length > 0);
 
   const handleCreate = async () => {
     setError('');
@@ -107,14 +115,17 @@ const ReplicationPolicyCreatePage: React.FC = () => {
     try {
       const spec: ReplicationPolicySpec = {
         sourcePoolName,
-        destinationNFSServer,
+        destinationNFSServer: isDriverToDriver ? '' : destinationNFSServer,
+        destinationExportPath: isDriverToDriver ? undefined : (destinationExportPath !== '/' ? destinationExportPath : undefined),
         destinationBasePath,
         schedule,
         maxRetries,
-        incrementalSync,
-        bandwidthLimitMbps: bandwidthLimitMbps > 0 ? bandwidthLimitMbps : undefined,
+        incrementalSync: isDriverToDriver ? undefined : incrementalSync,
+        bandwidthLimitMbps: isDriverToDriver ? undefined : (bandwidthLimitMbps > 0 ? bandwidthLimitMbps : undefined),
         maxParallelSyncs: maxParallelSyncs > 1 ? maxParallelSyncs : undefined,
-        rsyncOptions: rsyncOptions.trim() ? rsyncOptions.trim().split('\n').filter(Boolean) : undefined,
+        rsyncOptions: isDriverToDriver ? undefined : (rsyncOptions.trim() ? rsyncOptions.trim().split('\n').filter(Boolean) : undefined),
+        destinationEndpoint: isDriverToDriver ? destinationEndpoint : undefined,
+        destinationAuthSecretRef: isDriverToDriver ? destinationAuthSecretRef : undefined,
       };
 
       if (labelPairs.length > 0) {
@@ -214,31 +225,121 @@ const ReplicationPolicyCreatePage: React.FC = () => {
 
         <StackItem>
           <FieldPopover
-            fieldId="rp-dest-server"
-            label="Destination NFS Server"
-            description="Hostname or IP of the remote NFS server for replication. This is typically a VPC file share mount target IP in the disaster recovery region."
+            fieldId="rp-mode"
+            label="Replication Mode"
+            description="Direct NFS mounts both source and destination shares in a Job (single-region or Transit Gateway). Driver-to-Driver uploads data via HTTPS to a receiver on the destination cluster (cross-region)."
             isRequired
           >
-            <TextInput
-              id="rp-dest-server"
-              value={destinationNFSServer}
-              onChange={(_event, value) => setDestinationNFSServer(value)}
-              isRequired
-              placeholder="10.240.0.50"
-            />
-            <FormHelperText>
-              <HelperText>
-                <HelperTextItem>Hostname or IP of the destination NFS server</HelperTextItem>
-              </HelperText>
-            </FormHelperText>
+            <FormSelect
+              id="rp-mode"
+              value={replicationMode}
+              onChange={(_event, value) => setReplicationMode(value as 'direct' | 'driver-to-driver')}
+            >
+              <FormSelectOption value="direct" label="Direct NFS" />
+              <FormSelectOption value="driver-to-driver" label="Driver-to-Driver (cross-region)" />
+            </FormSelect>
           </FieldPopover>
         </StackItem>
+
+        {!isDriverToDriver && (
+          <>
+            <StackItem>
+              <FieldPopover
+                fieldId="rp-dest-server"
+                label="Destination NFS Server"
+                description="Hostname or IP of the remote NFS server for replication. This is typically a VPC file share mount target IP in the disaster recovery region."
+                isRequired
+              >
+                <TextInput
+                  id="rp-dest-server"
+                  value={destinationNFSServer}
+                  onChange={(_event, value) => setDestinationNFSServer(value)}
+                  isRequired
+                  placeholder="10.240.0.50"
+                />
+                <FormHelperText>
+                  <HelperText>
+                    <HelperTextItem>Hostname or IP of the destination NFS server</HelperTextItem>
+                  </HelperText>
+                </FormHelperText>
+              </FieldPopover>
+            </StackItem>
+
+            <StackItem>
+              <FieldPopover
+                fieldId="rp-dest-export-path"
+                label="Destination Export Path"
+                description="NFS export path on the destination server. For VPC access-mode shares, this differentiates shares under a shared FQDN. Defaults to '/' if not specified."
+              >
+                <TextInput
+                  id="rp-dest-export-path"
+                  value={destinationExportPath}
+                  onChange={(_event, value) => setDestinationExportPath(value)}
+                  placeholder="/"
+                />
+                <FormHelperText>
+                  <HelperText>
+                    <HelperTextItem>NFS export path (e.g. /share_abc123). Defaults to /</HelperTextItem>
+                  </HelperText>
+                </FormHelperText>
+              </FieldPopover>
+            </StackItem>
+          </>
+        )}
+
+        {isDriverToDriver && (
+          <>
+            <StackItem>
+              <FieldPopover
+                fieldId="rp-dest-endpoint"
+                label="Receiver Endpoint"
+                description="HTTPS URL of the replication receiver service on the destination cluster. This is typically an OpenShift Route URL."
+                isRequired
+              >
+                <TextInput
+                  id="rp-dest-endpoint"
+                  value={destinationEndpoint}
+                  onChange={(_event, value) => setDestinationEndpoint(value)}
+                  isRequired
+                  placeholder="https://repl-receiver.apps.cluster.example.com"
+                />
+                <FormHelperText>
+                  <HelperText>
+                    <HelperTextItem>HTTPS URL of the receiver on the destination cluster</HelperTextItem>
+                  </HelperText>
+                </FormHelperText>
+              </FieldPopover>
+            </StackItem>
+
+            <StackItem>
+              <FieldPopover
+                fieldId="rp-dest-auth-secret"
+                label="Auth Secret Name"
+                description="Name of a Secret in kube-system containing a 'token' key with the bearer token for authenticating to the receiver."
+                isRequired
+              >
+                <TextInput
+                  id="rp-dest-auth-secret"
+                  value={destinationAuthSecretRef}
+                  onChange={(_event, value) => setDestinationAuthSecretRef(value)}
+                  isRequired
+                  placeholder="replication-auth"
+                />
+                <FormHelperText>
+                  <HelperText>
+                    <HelperTextItem>Secret name with bearer token for receiver authentication</HelperTextItem>
+                  </HelperText>
+                </FormHelperText>
+              </FieldPopover>
+            </StackItem>
+          </>
+        )}
 
         <StackItem>
           <FieldPopover
             fieldId="rp-dest-path"
             label="Destination Base Path"
-            description="Base path on the destination NFS server where replicated data will be stored. SubVolume directories are created under this path."
+            description="Base path on the destination where replicated data will be stored. SubVolume directories are created under this path."
             isRequired
           >
             <TextInput
@@ -250,7 +351,7 @@ const ReplicationPolicyCreatePage: React.FC = () => {
             />
             <FormHelperText>
               <HelperText>
-                <HelperTextItem>Base path on the destination NFS server</HelperTextItem>
+                <HelperTextItem>Base path on the destination</HelperTextItem>
               </HelperText>
             </FormHelperText>
           </FieldPopover>
@@ -298,47 +399,51 @@ const ReplicationPolicyCreatePage: React.FC = () => {
           </FieldPopover>
         </StackItem>
 
-        <StackItem>
-          <FieldPopover
-            fieldId="rp-incremental"
-            label="Incremental Sync"
-            description="Use rsync delta transfer to only sync changed blocks. Much faster than full copies for subsequent syncs. Disable only if you need byte-exact copies every time."
-          >
-            <Switch
-              id="rp-incremental"
-              label="Incremental sync (rsync delta transfer)"
-              isChecked={incrementalSync}
-              onChange={(_event, checked) => setIncrementalSync(checked)}
-            />
-          </FieldPopover>
-        </StackItem>
+        {!isDriverToDriver && (
+          <StackItem>
+            <FieldPopover
+              fieldId="rp-incremental"
+              label="Incremental Sync"
+              description="Use rsync delta transfer to only sync changed blocks. Much faster than full copies for subsequent syncs. Disable only if you need byte-exact copies every time."
+            >
+              <Switch
+                id="rp-incremental"
+                label="Incremental sync (rsync delta transfer)"
+                isChecked={incrementalSync}
+                onChange={(_event, checked) => setIncrementalSync(checked)}
+              />
+            </FieldPopover>
+          </StackItem>
+        )}
 
-        <StackItem>
-          <FieldPopover
-            fieldId="rp-bandwidth"
-            label="Bandwidth Limit (Mbps)"
-            description="Limit rsync bandwidth in megabits per second. Only applies when incremental sync is enabled. 0 means no limit."
-          >
-            <NumberInput
-              id="rp-bandwidth"
-              value={bandwidthLimitMbps}
-              min={0}
-              max={10000}
-              onMinus={() => setBandwidthLimitMbps(Math.max(0, bandwidthLimitMbps - 10))}
-              onPlus={() => setBandwidthLimitMbps(Math.min(10000, bandwidthLimitMbps + 10))}
-              onChange={(event) => {
-                const val = parseInt((event.target as HTMLInputElement).value, 10);
-                if (!isNaN(val)) setBandwidthLimitMbps(val);
-              }}
-              isDisabled={!incrementalSync}
-            />
-            <FormHelperText>
-              <HelperText>
-                <HelperTextItem>0 = unlimited. Only applies with incremental sync.</HelperTextItem>
-              </HelperText>
-            </FormHelperText>
-          </FieldPopover>
-        </StackItem>
+        {!isDriverToDriver && (
+          <StackItem>
+            <FieldPopover
+              fieldId="rp-bandwidth"
+              label="Bandwidth Limit (Mbps)"
+              description="Limit rsync bandwidth in megabits per second. Only applies when incremental sync is enabled. 0 means no limit."
+            >
+              <NumberInput
+                id="rp-bandwidth"
+                value={bandwidthLimitMbps}
+                min={0}
+                max={10000}
+                onMinus={() => setBandwidthLimitMbps(Math.max(0, bandwidthLimitMbps - 10))}
+                onPlus={() => setBandwidthLimitMbps(Math.min(10000, bandwidthLimitMbps + 10))}
+                onChange={(event) => {
+                  const val = parseInt((event.target as HTMLInputElement).value, 10);
+                  if (!isNaN(val)) setBandwidthLimitMbps(val);
+                }}
+                isDisabled={!incrementalSync}
+              />
+              <FormHelperText>
+                <HelperText>
+                  <HelperTextItem>0 = unlimited. Only applies with incremental sync.</HelperTextItem>
+                </HelperText>
+              </FormHelperText>
+            </FieldPopover>
+          </StackItem>
+        )}
 
         <StackItem>
           <FieldPopover
@@ -361,27 +466,29 @@ const ReplicationPolicyCreatePage: React.FC = () => {
           </FieldPopover>
         </StackItem>
 
-        <StackItem>
-          <FieldPopover
-            fieldId="rp-rsync-options"
-            label="Rsync Options"
-            description="Extra rsync flags, one per line. These are appended after the base flags (-a --delete). Dangerous flags like --daemon, --server, --rsh, --rsync-path are rejected."
-          >
-            <TextArea
-              id="rp-rsync-options"
-              value={rsyncOptions}
-              onChange={(_event, value) => setRsyncOptions(value)}
-              placeholder="--compress&#10;--checksum"
-              rows={3}
-              isDisabled={!incrementalSync}
-            />
-            <FormHelperText>
-              <HelperText>
-                <HelperTextItem>One flag per line. Only applies with incremental sync.</HelperTextItem>
-              </HelperText>
-            </FormHelperText>
-          </FieldPopover>
-        </StackItem>
+        {!isDriverToDriver && (
+          <StackItem>
+            <FieldPopover
+              fieldId="rp-rsync-options"
+              label="Rsync Options"
+              description="Extra rsync flags, one per line. These are appended after the base flags (-a --delete). Dangerous flags like --daemon, --server, --rsh, --rsync-path are rejected."
+            >
+              <TextArea
+                id="rp-rsync-options"
+                value={rsyncOptions}
+                onChange={(_event, value) => setRsyncOptions(value)}
+                placeholder="--compress&#10;--checksum"
+                rows={3}
+                isDisabled={!incrementalSync}
+              />
+              <FormHelperText>
+                <HelperText>
+                  <HelperTextItem>One flag per line. Only applies with incremental sync.</HelperTextItem>
+                </HelperText>
+              </FormHelperText>
+            </FieldPopover>
+          </StackItem>
+        )}
 
         <StackItem>
           <FieldPopover

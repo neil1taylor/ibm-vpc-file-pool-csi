@@ -153,6 +153,26 @@ storageClass:
     - timeo=600
     - retrans=3
 
+replicationReceiver:
+  # Enable the replication receiver for driver-to-driver cross-region replication.
+  # Deploy this on the DESTINATION cluster. Source cluster Jobs upload data via HTTPS.
+  enabled: false
+  # PVC name for the destination NFS share (must be pre-created).
+  pvcName: ""
+  # Secret name containing a "token" key for bearer token authentication.
+  authSecretName: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+replication:
+  # Override the container image used for replication Jobs.
+  # When empty, receiver-mode Jobs use the driver image; direct-NFS Jobs use CentOS.
+  image: ""
+
 consolePlugin:
   # Enable the OpenShift Console dynamic plugin for visual pool management.
   # Requires OpenShift 4.14+ with ConsolePlugin v1 API.
