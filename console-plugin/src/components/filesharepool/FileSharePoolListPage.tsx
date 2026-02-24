@@ -6,74 +6,26 @@ import {
   ListPageCreateLink,
   ListPageFilter,
   useListPageFilter,
-  VirtualizedTable,
-  TableColumn,
-  RowProps,
-  TableData,
   Timestamp,
 } from '@openshift-console/dynamic-plugin-sdk';
 import { Link } from 'react-router-dom';
-import { ActionsColumn, IAction } from '@patternfly/react-table';
+import {
+  Table,
+  Thead,
+  Tr,
+  Th,
+  Td,
+  Tbody,
+  ActionsColumn,
+  IAction,
+} from '@patternfly/react-table';
+import { Bullseye, Spinner } from '@patternfly/react-core';
 import { FileSharePoolModel } from '../../models';
 import { FileSharePool } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
-import '../common/table-layout.css';
-import CapacityBar from '../common/CapacityBar';
+import InlineCapacityBar from '../common/InlineCapacityBar';
 import DeleteModal from '../common/DeleteModal';
 import { ROUTES } from '../../constants';
-
-const columns: TableColumn<FileSharePool>[] = [
-  {
-    title: 'Name',
-    id: 'name',
-    props: { style: { width: '18%' } },
-  },
-  {
-    title: 'Zone',
-    id: 'zone',
-    props: { style: { width: '8%' } },
-  },
-  {
-    title: 'Profile',
-    id: 'profile',
-    props: { style: { width: '8%' } },
-  },
-  {
-    title: 'IOPS',
-    id: 'iops',
-    props: { style: { width: '8%' } },
-  },
-  {
-    title: 'Shares',
-    id: 'shares',
-    props: { style: { width: '5%' } },
-  },
-  {
-    title: 'Capacity',
-    id: 'capacity',
-    props: { style: { width: '18%' } },
-  },
-  {
-    title: 'PVCs',
-    id: 'pvcs',
-    props: { style: { width: '5%' } },
-  },
-  {
-    title: 'Phase',
-    id: 'phase',
-    props: { style: { width: '10%' } },
-  },
-  {
-    title: 'Age',
-    id: 'age',
-    props: { style: { width: '10%' } },
-  },
-  {
-    title: '',
-    id: 'actions',
-    props: { className: 'pf-v6-c-table__action' },
-  },
-];
 
 /** Calculate IOPS display: use spec.iops if set, otherwise derive from profile. */
 function getIOPS(pool: FileSharePool): string {
@@ -87,13 +39,11 @@ function getIOPS(pool: FileSharePool): string {
   return '-';
 }
 
-const FileSharePoolRow: React.FC<RowProps<FileSharePool>> = ({
-  obj,
-  activeColumnIDs,
-}) => {
-  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-
-  const name = obj.metadata?.name || '';
+const FileSharePoolRow: React.FC<{
+  pool: FileSharePool;
+  onDelete: (name: string) => void;
+}> = ({ pool, onDelete }) => {
+  const name = pool.metadata?.name || '';
   const detailPath = ROUTES.POOL_DETAIL.replace(':name', name);
 
   const rowActions: IAction[] = [
@@ -102,63 +52,42 @@ const FileSharePoolRow: React.FC<RowProps<FileSharePool>> = ({
     },
     {
       title: 'Delete',
-      onClick: () => setDeleteModalOpen(true),
+      onClick: () => onDelete(name),
     },
   ];
 
   return (
-    <>
-      <TableData id="name" activeColumnIDs={activeColumnIDs}>
-        <Link to={detailPath}>{name}</Link>
-      </TableData>
-      <TableData id="zone" activeColumnIDs={activeColumnIDs}>
-        {obj.spec?.zone || '-'}
-      </TableData>
-      <TableData id="profile" activeColumnIDs={activeColumnIDs}>
-        {obj.spec?.profile || '-'}
-      </TableData>
-      <TableData id="iops" activeColumnIDs={activeColumnIDs}>
-        {getIOPS(obj)}
-      </TableData>
-      <TableData id="shares" activeColumnIDs={activeColumnIDs}>
-        {obj.status?.shareCount ?? 0}
-      </TableData>
-      <TableData id="capacity" activeColumnIDs={activeColumnIDs}>
-        <CapacityBar
-          allocated={obj.status?.totalAllocatedGB ?? 0}
-          total={obj.status?.totalCapacityGB ?? 0}
+    <Tr>
+      <Td dataLabel="Name"><Link to={detailPath}>{name}</Link></Td>
+      <Td dataLabel="Zone">{pool.spec?.zone || '-'}</Td>
+      <Td dataLabel="Profile">{pool.spec?.profile || '-'}</Td>
+      <Td dataLabel="IOPS">{getIOPS(pool)}</Td>
+      <Td dataLabel="Shares">{pool.status?.shareCount ?? 0}</Td>
+      <Td dataLabel="Capacity">
+        <InlineCapacityBar
+          allocated={pool.status?.totalAllocatedGB ?? 0}
+          total={pool.status?.totalCapacityGB ?? 0}
         />
-      </TableData>
-      <TableData id="pvcs" activeColumnIDs={activeColumnIDs}>
-        {obj.status?.totalPVCCount ?? 0}
-      </TableData>
-      <TableData id="phase" activeColumnIDs={activeColumnIDs}>
-        <PhaseStatus phase={obj.status?.phase} />
-      </TableData>
-      <TableData id="age" activeColumnIDs={activeColumnIDs}>
-        {obj.metadata?.creationTimestamp ? (
-          <Timestamp timestamp={obj.metadata.creationTimestamp} />
+      </Td>
+      <Td dataLabel="PVCs">{pool.status?.totalPVCCount ?? 0}</Td>
+      <Td dataLabel="Phase"><PhaseStatus phase={pool.status?.phase} /></Td>
+      <Td dataLabel="Age">
+        {pool.metadata?.creationTimestamp ? (
+          <Timestamp timestamp={pool.metadata.creationTimestamp} />
         ) : (
           '-'
         )}
-      </TableData>
-      <TableData id="actions" activeColumnIDs={activeColumnIDs}>
+      </Td>
+      <Td isActionCell>
         <ActionsColumn items={rowActions} />
-      </TableData>
-      <DeleteModal
-        isOpen={deleteModalOpen}
-        resourceName={name}
-        resourceKind="FileSharePool"
-        model={FileSharePoolModel}
-        onClose={() => setDeleteModalOpen(false)}
-        onDeleted={() => setDeleteModalOpen(false)}
-        requireConfirmation
-      />
-    </>
+      </Td>
+    </Tr>
   );
 };
 
 const FileSharePoolListPage: React.FC = () => {
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+
   const [pools, loaded, loadError] = useK8sWatchResource<FileSharePool[]>({
     groupVersionKind: {
       group: FileSharePoolModel.apiGroup,
@@ -180,23 +109,69 @@ const FileSharePoolListPage: React.FC = () => {
           Create FileSharePool
         </ListPageCreateLink>
       </ListPageHeader>
+      <p style={{ padding: '0 24px', color: 'var(--pf-t--global--color--subtle)', margin: '0 0 8px 0' }}>
+        Pools group multiple VPC file shares into a single managed unit. The pool manager automatically provisions, expands, and balances shares across availability zones.
+      </p>
       <ListPageBody>
         <ListPageFilter
           data={data}
           loaded={loaded}
           onFilterChange={onFilterChange}
         />
-        <div className="vpc-file-pool-fixed-table">
-          <VirtualizedTable<FileSharePool>
-            data={filteredData}
-            unfilteredData={data}
-            loaded={loaded}
-            loadError={loadError}
-            columns={columns}
-            Row={FileSharePoolRow}
-          />
-        </div>
+        {!loaded && (
+          <Bullseye style={{ padding: '48px 0' }}>
+            <Spinner size="xl" />
+          </Bullseye>
+        )}
+        {loadError && (
+          <div style={{ padding: '24px', color: 'var(--pf-t--global--color--status--danger--default)' }}>
+            Error loading FileSharePools
+          </div>
+        )}
+        {loaded && !loadError && filteredData.length === 0 && (
+          <Bullseye style={{ padding: '48px 0', color: 'var(--pf-t--global--color--subtle)' }}>
+            No FileSharePools found
+          </Bullseye>
+        )}
+        {loaded && filteredData.length > 0 && (
+          <Table aria-label="File Share Pools" variant="compact">
+            <Thead>
+              <Tr>
+                <Th>Name</Th>
+                <Th>Zone</Th>
+                <Th>Profile</Th>
+                <Th>IOPS</Th>
+                <Th>Shares</Th>
+                <Th>Capacity</Th>
+                <Th>PVCs</Th>
+                <Th>Phase</Th>
+                <Th>Age</Th>
+                <Th></Th>
+              </Tr>
+            </Thead>
+            <Tbody>
+              {filteredData.map((pool) => (
+                <FileSharePoolRow
+                  key={pool.metadata?.uid || pool.metadata?.name}
+                  pool={pool}
+                  onDelete={setDeleteTarget}
+                />
+              ))}
+            </Tbody>
+          </Table>
+        )}
       </ListPageBody>
+      {deleteTarget && (
+        <DeleteModal
+          isOpen={!!deleteTarget}
+          resourceName={deleteTarget}
+          resourceKind="FileSharePool"
+          model={FileSharePoolModel}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={() => setDeleteTarget(null)}
+          requireConfirmation
+        />
+      )}
     </>
   );
 };

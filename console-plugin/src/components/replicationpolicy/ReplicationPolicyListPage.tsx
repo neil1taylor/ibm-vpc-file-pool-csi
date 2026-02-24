@@ -7,78 +7,38 @@ import {
   ListPageCreateLink,
   ListPageFilter,
   useListPageFilter,
-  VirtualizedTable,
-  TableColumn,
-  RowProps,
-  TableData,
   Timestamp,
 } from '@openshift-console/dynamic-plugin-sdk';
 import { Link } from 'react-router-dom';
-import { ActionsColumn, IAction } from '@patternfly/react-table';
+import {
+  Table,
+  Thead,
+  Tr,
+  Th,
+  Td,
+  Tbody,
+  ActionsColumn,
+  IAction,
+} from '@patternfly/react-table';
+import { Bullseye, Spinner } from '@patternfly/react-core';
 import { ReplicationPolicyModel } from '../../models';
 import { ReplicationPolicy } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
-import '../common/table-layout.css';
 import DeleteModal from '../common/DeleteModal';
 import { formatAge } from '../../utils/resource-helpers';
 import { ROUTES } from '../../constants';
 
-const columns: TableColumn<ReplicationPolicy>[] = [
-  {
-    title: 'Name',
-    id: 'name',
-    props: { style: { width: '15%' } },
-  },
-  {
-    title: 'Source Pool',
-    id: 'sourcePool',
-    props: { style: { width: '15%' } },
-  },
-  {
-    title: 'Destination',
-    id: 'destination',
-    props: { style: { width: '15%' } },
-  },
-  {
-    title: 'Schedule',
-    id: 'schedule',
-    props: { style: { width: '10%' } },
-  },
-  {
-    title: 'Phase',
-    id: 'phase',
-    props: { style: { width: '10%' } },
-  },
-  {
-    title: 'Last Sync',
-    id: 'lastSync',
-    props: { style: { width: '10%' } },
-  },
-  {
-    title: 'Failures',
-    id: 'failures',
-    props: { style: { width: '5%' } },
-  },
-  {
-    title: '',
-    id: 'actions',
-    props: { className: 'pf-v6-c-table__action' },
-  },
-];
-
-const ReplicationPolicyRow: React.FC<RowProps<ReplicationPolicy>> = ({
-  obj,
-  activeColumnIDs,
-}) => {
-  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-
-  const name = obj.metadata?.name || '';
+const ReplicationPolicyRow: React.FC<{
+  policy: ReplicationPolicy;
+  onDelete: (name: string) => void;
+}> = ({ policy, onDelete }) => {
+  const name = policy.metadata?.name || '';
   const detailPath = ROUTES.REPLICATION_DETAIL.replace(':name', name);
-  const currentPhase = obj.status?.phase || '';
+  const currentPhase = policy.status?.phase || '';
   const isPaused = currentPhase === 'Paused';
 
   const handlePauseResume = async () => {
-    const annotations = { ...(obj.metadata?.annotations || {}) };
+    const annotations = { ...(policy.metadata?.annotations || {}) };
     if (isPaused) {
       delete annotations['storage.ibmcloud.io/paused'];
     } else {
@@ -86,9 +46,9 @@ const ReplicationPolicyRow: React.FC<RowProps<ReplicationPolicy>> = ({
     }
 
     const updated: ReplicationPolicy = {
-      ...obj,
+      ...policy,
       metadata: {
-        ...obj.metadata,
+        ...policy.metadata,
         annotations,
       },
     };
@@ -110,49 +70,31 @@ const ReplicationPolicyRow: React.FC<RowProps<ReplicationPolicy>> = ({
     },
     {
       title: 'Delete',
-      onClick: () => setDeleteModalOpen(true),
+      onClick: () => onDelete(name),
     },
   ];
 
   return (
-    <>
-      <TableData id="name" activeColumnIDs={activeColumnIDs}>
-        <Link to={detailPath}>{name}</Link>
-      </TableData>
-      <TableData id="sourcePool" activeColumnIDs={activeColumnIDs}>
-        {obj.spec?.sourcePoolName || '-'}
-      </TableData>
-      <TableData id="destination" activeColumnIDs={activeColumnIDs}>
-        <code>{obj.spec?.destinationNFSServer || '-'}:{obj.spec?.destinationBasePath || '/pvcs'}</code>
-      </TableData>
-      <TableData id="schedule" activeColumnIDs={activeColumnIDs}>
-        {obj.spec?.schedule || '-'}
-      </TableData>
-      <TableData id="phase" activeColumnIDs={activeColumnIDs}>
-        <PhaseStatus phase={obj.status?.phase} />
-      </TableData>
-      <TableData id="lastSync" activeColumnIDs={activeColumnIDs}>
-        {formatAge(obj.status?.lastSyncTime)}
-      </TableData>
-      <TableData id="failures" activeColumnIDs={activeColumnIDs}>
-        {obj.status?.consecutiveFailures ?? 0}
-      </TableData>
-      <TableData id="actions" activeColumnIDs={activeColumnIDs}>
+    <Tr>
+      <Td dataLabel="Name"><Link to={detailPath}>{name}</Link></Td>
+      <Td dataLabel="Source Pool">{policy.spec?.sourcePoolName || '-'}</Td>
+      <Td dataLabel="Destination">
+        <code>{policy.spec?.destinationNFSServer || '-'}:{policy.spec?.destinationBasePath || '/pvcs'}</code>
+      </Td>
+      <Td dataLabel="Schedule">{policy.spec?.schedule || '-'}</Td>
+      <Td dataLabel="Phase"><PhaseStatus phase={policy.status?.phase} /></Td>
+      <Td dataLabel="Last Sync">{formatAge(policy.status?.lastSyncTime)}</Td>
+      <Td dataLabel="Failures">{policy.status?.consecutiveFailures ?? 0}</Td>
+      <Td isActionCell>
         <ActionsColumn items={rowActions} />
-      </TableData>
-      <DeleteModal
-        isOpen={deleteModalOpen}
-        resourceName={name}
-        resourceKind="ReplicationPolicy"
-        model={ReplicationPolicyModel}
-        onClose={() => setDeleteModalOpen(false)}
-        onDeleted={() => setDeleteModalOpen(false)}
-      />
-    </>
+      </Td>
+    </Tr>
   );
 };
 
 const ReplicationPolicyListPage: React.FC = () => {
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+
   const [policies, loaded, loadError] = useK8sWatchResource<ReplicationPolicy[]>({
     groupVersionKind: {
       group: ReplicationPolicyModel.apiGroup,
@@ -174,23 +116,66 @@ const ReplicationPolicyListPage: React.FC = () => {
           Create ReplicationPolicy
         </ListPageCreateLink>
       </ListPageHeader>
+      <p style={{ padding: '0 24px', color: 'var(--pf-t--global--color--subtle)', margin: '0 0 8px 0' }}>
+        Replication Policies define cross-region disaster recovery by syncing SubVolume data from a source pool to a destination pool on a configurable schedule.
+      </p>
       <ListPageBody>
         <ListPageFilter
           data={data}
           loaded={loaded}
           onFilterChange={onFilterChange}
         />
-        <div className="vpc-file-pool-fixed-table">
-          <VirtualizedTable<ReplicationPolicy>
-            data={filteredData}
-            unfilteredData={data}
-            loaded={loaded}
-            loadError={loadError}
-            columns={columns}
-            Row={ReplicationPolicyRow}
-          />
-        </div>
+        {!loaded && (
+          <Bullseye style={{ padding: '48px 0' }}>
+            <Spinner size="xl" />
+          </Bullseye>
+        )}
+        {loadError && (
+          <div style={{ padding: '24px', color: 'var(--pf-t--global--color--status--danger--default)' }}>
+            Error loading ReplicationPolicies
+          </div>
+        )}
+        {loaded && !loadError && filteredData.length === 0 && (
+          <Bullseye style={{ padding: '48px 0', color: 'var(--pf-t--global--color--subtle)' }}>
+            No ReplicationPolicies found
+          </Bullseye>
+        )}
+        {loaded && filteredData.length > 0 && (
+          <Table aria-label="Replication Policies" variant="compact">
+            <Thead>
+              <Tr>
+                <Th>Name</Th>
+                <Th>Source Pool</Th>
+                <Th>Destination</Th>
+                <Th>Schedule</Th>
+                <Th>Phase</Th>
+                <Th>Last Sync</Th>
+                <Th>Failures</Th>
+                <Th></Th>
+              </Tr>
+            </Thead>
+            <Tbody>
+              {filteredData.map((policy) => (
+                <ReplicationPolicyRow
+                  key={policy.metadata?.uid || policy.metadata?.name}
+                  policy={policy}
+                  onDelete={setDeleteTarget}
+                />
+              ))}
+            </Tbody>
+          </Table>
+        )}
       </ListPageBody>
+      {deleteTarget && (
+        <DeleteModal
+          isOpen={!!deleteTarget}
+          resourceName={deleteTarget}
+          resourceKind="ReplicationPolicy"
+          model={ReplicationPolicyModel}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={() => setDeleteTarget(null)}
+        />
+      )}
     </>
   );
 };

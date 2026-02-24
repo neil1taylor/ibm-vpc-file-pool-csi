@@ -6,69 +6,31 @@ import {
   ListPageCreateLink,
   ListPageFilter,
   useListPageFilter,
-  VirtualizedTable,
-  TableColumn,
-  RowProps,
-  TableData,
   Timestamp,
 } from '@openshift-console/dynamic-plugin-sdk';
 import { Link } from 'react-router-dom';
-import { ActionsColumn, IAction } from '@patternfly/react-table';
-import { Label } from '@patternfly/react-core';
+import {
+  Table,
+  Thead,
+  Tr,
+  Th,
+  Td,
+  Tbody,
+  ActionsColumn,
+  IAction,
+} from '@patternfly/react-table';
+import { Bullseye, Spinner, Label } from '@patternfly/react-core';
 import { SnapshotModel } from '../../models';
 import { Snapshot } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
-import '../common/table-layout.css';
 import DeleteModal from '../common/DeleteModal';
 import { ROUTES } from '../../constants';
 
-const columns: TableColumn<Snapshot>[] = [
-  {
-    title: 'Name',
-    id: 'name',
-    props: { style: { width: '15%' } },
-  },
-  {
-    title: 'Pool',
-    id: 'pool',
-    props: { style: { width: '10%' } },
-  },
-  {
-    title: 'Source SubVolume',
-    id: 'sourceSubVolume',
-    props: { style: { width: '15%' } },
-  },
-  {
-    title: 'Size',
-    id: 'size',
-    props: { style: { width: '10%' } },
-  },
-  {
-    title: 'Phase',
-    id: 'phase',
-    props: { style: { width: '10%' } },
-  },
-  {
-    title: 'Ready',
-    id: 'ready',
-    props: { style: { width: '10%' } },
-  },
-  {
-    title: 'Age',
-    id: 'age',
-    props: { style: { width: '10%' } },
-  },
-  {
-    title: '',
-    id: 'actions',
-    props: { className: 'pf-v6-c-table__action' },
-  },
-];
-
-const SnapshotRow: React.FC<RowProps<Snapshot>> = ({ obj, activeColumnIDs }) => {
-  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-
-  const name = obj.metadata?.name || '';
+const SnapshotRow: React.FC<{
+  snap: Snapshot;
+  onDelete: (name: string) => void;
+}> = ({ snap, onDelete }) => {
+  const name = snap.metadata?.name || '';
   const detailPath = ROUTES.SNAPSHOT_DETAIL.replace(':name', name);
 
   const rowActions: IAction[] = [
@@ -77,55 +39,41 @@ const SnapshotRow: React.FC<RowProps<Snapshot>> = ({ obj, activeColumnIDs }) => 
     },
     {
       title: 'Delete',
-      onClick: () => setDeleteModalOpen(true),
+      onClick: () => onDelete(name),
     },
   ];
 
   return (
-    <>
-      <TableData id="name" activeColumnIDs={activeColumnIDs}>
-        <Link to={detailPath}>{name}</Link>
-      </TableData>
-      <TableData id="pool" activeColumnIDs={activeColumnIDs}>
-        {obj.spec?.poolName || '-'}
-      </TableData>
-      <TableData id="sourceSubVolume" activeColumnIDs={activeColumnIDs}>
-        {obj.spec?.sourceSubVolume || '-'}
-      </TableData>
-      <TableData id="size" activeColumnIDs={activeColumnIDs}>
-        {obj.spec?.sizeGB != null ? `${obj.spec.sizeGB} GB` : '-'}
-      </TableData>
-      <TableData id="phase" activeColumnIDs={activeColumnIDs}>
-        <PhaseStatus phase={obj.status?.phase} />
-      </TableData>
-      <TableData id="ready" activeColumnIDs={activeColumnIDs}>
-        <Label color={obj.status?.readyToUse ? 'green' : 'grey'}>
-          {obj.status?.readyToUse ? 'True' : 'False'}
+    <Tr>
+      <Td dataLabel="Name"><Link to={detailPath}>{name}</Link></Td>
+      <Td dataLabel="Pool">{snap.spec?.poolName || '-'}</Td>
+      <Td dataLabel="Source SubVolume">{snap.spec?.sourceSubVolume || '-'}</Td>
+      <Td dataLabel="Size">
+        {snap.spec?.sizeGB != null ? `${snap.spec.sizeGB} GB` : '-'}
+      </Td>
+      <Td dataLabel="Phase"><PhaseStatus phase={snap.status?.phase} /></Td>
+      <Td dataLabel="Ready">
+        <Label color={snap.status?.readyToUse ? 'green' : 'grey'}>
+          {snap.status?.readyToUse ? 'True' : 'False'}
         </Label>
-      </TableData>
-      <TableData id="age" activeColumnIDs={activeColumnIDs}>
-        {obj.metadata?.creationTimestamp ? (
-          <Timestamp timestamp={obj.metadata.creationTimestamp} />
+      </Td>
+      <Td dataLabel="Age">
+        {snap.metadata?.creationTimestamp ? (
+          <Timestamp timestamp={snap.metadata.creationTimestamp} />
         ) : (
           '-'
         )}
-      </TableData>
-      <TableData id="actions" activeColumnIDs={activeColumnIDs}>
+      </Td>
+      <Td isActionCell>
         <ActionsColumn items={rowActions} />
-      </TableData>
-      <DeleteModal
-        isOpen={deleteModalOpen}
-        resourceName={name}
-        resourceKind="Snapshot"
-        model={SnapshotModel}
-        onClose={() => setDeleteModalOpen(false)}
-        onDeleted={() => setDeleteModalOpen(false)}
-      />
-    </>
+      </Td>
+    </Tr>
   );
 };
 
 const SnapshotListPage: React.FC = () => {
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+
   const [snapshots, loaded, loadError] = useK8sWatchResource<Snapshot[]>({
     groupVersionKind: {
       group: SnapshotModel.apiGroup,
@@ -147,23 +95,66 @@ const SnapshotListPage: React.FC = () => {
           Create Snapshot
         </ListPageCreateLink>
       </ListPageHeader>
+      <p style={{ padding: '0 24px', color: 'var(--pf-t--global--color--subtle)', margin: '0 0 8px 0' }}>
+        Snapshots capture point-in-time copies of SubVolume data for backup and recovery.
+      </p>
       <ListPageBody>
         <ListPageFilter
           data={data}
           loaded={loaded}
           onFilterChange={onFilterChange}
         />
-        <div className="vpc-file-pool-fixed-table">
-          <VirtualizedTable<Snapshot>
-            data={filteredData}
-            unfilteredData={data}
-            loaded={loaded}
-            loadError={loadError}
-            columns={columns}
-            Row={SnapshotRow}
-          />
-        </div>
+        {!loaded && (
+          <Bullseye style={{ padding: '48px 0' }}>
+            <Spinner size="xl" />
+          </Bullseye>
+        )}
+        {loadError && (
+          <div style={{ padding: '24px', color: 'var(--pf-t--global--color--status--danger--default)' }}>
+            Error loading Snapshots
+          </div>
+        )}
+        {loaded && !loadError && filteredData.length === 0 && (
+          <Bullseye style={{ padding: '48px 0', color: 'var(--pf-t--global--color--subtle)' }}>
+            No Snapshots found
+          </Bullseye>
+        )}
+        {loaded && filteredData.length > 0 && (
+          <Table aria-label="Snapshots" variant="compact">
+            <Thead>
+              <Tr>
+                <Th>Name</Th>
+                <Th>Pool</Th>
+                <Th>Source SubVolume</Th>
+                <Th>Size</Th>
+                <Th>Phase</Th>
+                <Th>Ready</Th>
+                <Th>Age</Th>
+                <Th></Th>
+              </Tr>
+            </Thead>
+            <Tbody>
+              {filteredData.map((snap) => (
+                <SnapshotRow
+                  key={snap.metadata?.uid || snap.metadata?.name}
+                  snap={snap}
+                  onDelete={setDeleteTarget}
+                />
+              ))}
+            </Tbody>
+          </Table>
+        )}
       </ListPageBody>
+      {deleteTarget && (
+        <DeleteModal
+          isOpen={!!deleteTarget}
+          resourceName={deleteTarget}
+          resourceKind="Snapshot"
+          model={SnapshotModel}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={() => setDeleteTarget(null)}
+        />
+      )}
     </>
   );
 };
