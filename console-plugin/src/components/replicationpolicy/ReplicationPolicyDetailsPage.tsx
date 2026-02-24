@@ -193,6 +193,26 @@ const ReplicationPolicyDetailsPage: React.FC = () => {
             </DescriptionListDescription>
           </DescriptionListGroup>
           <DescriptionListGroup>
+            <DescriptionListTerm>Bandwidth Limit</DescriptionListTerm>
+            <DescriptionListDescription>
+              {spec.bandwidthLimitMbps ? `${spec.bandwidthLimitMbps} Mbps` : 'Unlimited'}
+            </DescriptionListDescription>
+          </DescriptionListGroup>
+          <DescriptionListGroup>
+            <DescriptionListTerm>Max Parallel Syncs</DescriptionListTerm>
+            <DescriptionListDescription>
+              {spec.maxParallelSyncs ?? 1}
+            </DescriptionListDescription>
+          </DescriptionListGroup>
+          <DescriptionListGroup>
+            <DescriptionListTerm>Rsync Options</DescriptionListTerm>
+            <DescriptionListDescription>
+              {spec.rsyncOptions && spec.rsyncOptions.length > 0
+                ? <code>{spec.rsyncOptions.join(' ')}</code>
+                : '-'}
+            </DescriptionListDescription>
+          </DescriptionListGroup>
+          <DescriptionListGroup>
             <DescriptionListTerm>SubVolume Selector</DescriptionListTerm>
             <DescriptionListDescription>
               {spec.subVolumeSelector?.matchLabels

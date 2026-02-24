@@ -231,6 +231,9 @@ export interface ReplicationPolicySpec {
   subVolumeSelector?: LabelSelector;
   maxRetries: number;
   incrementalSync?: boolean;
+  bandwidthLimitMbps?: number;
+  maxParallelSyncs?: number;
+  rsyncOptions?: string[];
   preSyncHooks?: Hook[];
   postSyncHooks?: Hook[];
 }

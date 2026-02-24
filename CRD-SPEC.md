@@ -1216,6 +1216,27 @@ type ReplicationPolicySpec struct {
     // PostSyncHooks are hooks executed after each replication sync cycle.
     // +optional
     PostSyncHooks []Hook `json:"postSyncHooks,omitempty"`
+
+    // BandwidthLimitMbps caps rsync transfer rate to avoid saturating
+    // the cross-region link. 0 = unlimited.
+    // +kubebuilder:validation:Minimum=0
+    // +kubebuilder:default=0
+    // +optional
+    BandwidthLimitMbps int32 `json:"bandwidthLimitMbps"`
+
+    // MaxParallelSyncs controls how many SubVolumes are rsynced concurrently.
+    // Higher values reduce total sync time but increase network and CPU load.
+    // The controller uses a semaphore-gated worker pool internally.
+    // +kubebuilder:validation:Minimum=1
+    // +kubebuilder:default=1
+    // +optional
+    MaxParallelSyncs int32 `json:"maxParallelSyncs"`
+
+    // RsyncOptions allows passing extra rsync flags to customize transfer behavior.
+    // These are appended to the default flags ["-a", "--delete", "--partial", "--timeout=300"].
+    // Security: --daemon, --server, --rsh, and --rsync-path flags are blocked by validation.
+    // +optional
+    RsyncOptions []string `json:"rsyncOptions,omitempty"`
 }
 
 // ReplicationPolicyStatus describes the observed state of a replication policy.
@@ -1277,6 +1298,9 @@ spec:
   destinationBasePath: /pvcs
   schedule: "15m"                                        # Replicate every 15 minutes
   maxRetries: 3
+  bandwidthLimitMbps: 500                                # Cap at 500 Mbps
+  maxParallelSyncs: 4                                    # Sync 4 SubVolumes concurrently
+  rsyncOptions: ["--compress", "--checksum"]             # Extra rsync flags
   subVolumeSelector:                                     # Only replicate labeled SubVolumes
     matchLabels:
       app.kubernetes.io/part-of: critical-app

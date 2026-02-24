@@ -535,12 +535,15 @@ type fakeNFSOperations struct {
 	chowns        map[string][2]int
 	copies        map[string]string // dst → src
 	copyCallCount int              // tracks total CopyDir calls
+	files         map[string][]byte // path → data (for WriteFile/ReadFile)
 	MkdirErr      error
 	RemoveErr     error
 	ChownErr      error
 	ChmodErr      error
 	CopyErr       error
 	CopyErrAfterN int // if > 0, return CopyErr only after N successful copies
+	SyncErr       error
+	WriteFileErr  error
 }
 
 func newFakeNFSOperations() *fakeNFSOperations {
@@ -548,6 +551,7 @@ func newFakeNFSOperations() *fakeNFSOperations {
 		dirs:   make(map[string]os.FileMode),
 		chowns: make(map[string][2]int),
 		copies: make(map[string]string),
+		files:  make(map[string][]byte),
 	}
 }
 
@@ -622,8 +626,35 @@ func (f *fakeNFSOperations) CopyDir(src, dst string) error {
 	return nil
 }
 
-func (f *fakeNFSOperations) SyncDir(_ context.Context, src, dst string) error {
+func (f *fakeNFSOperations) SyncDir(ctx context.Context, src, dst string) error {
+	return f.SyncDirWithOptions(ctx, src, dst, pool.SyncOptions{})
+}
+
+func (f *fakeNFSOperations) SyncDirWithOptions(_ context.Context, src, dst string, _ pool.SyncOptions) error {
+	if f.SyncErr != nil {
+		return f.SyncErr
+	}
 	return f.CopyDir(src, dst)
+}
+
+func (f *fakeNFSOperations) WriteFile(path string, data []byte, _ os.FileMode) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.WriteFileErr != nil {
+		return f.WriteFileErr
+	}
+	f.files[path] = append([]byte(nil), data...)
+	return nil
+}
+
+func (f *fakeNFSOperations) ReadFile(path string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	data, ok := f.files[path]
+	if !ok {
+		return nil, os.ErrNotExist
+	}
+	return append([]byte(nil), data...), nil
 }
 
 func (f *fakeNFSOperations) copyCount() int {

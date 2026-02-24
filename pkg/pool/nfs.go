@@ -9,6 +9,14 @@ import (
 	"syscall"
 )
 
+// SyncOptions controls rsync behavior for SyncDirWithOptions.
+type SyncOptions struct {
+	// BandwidthLimitKBps limits rsync bandwidth in kilobytes per second. 0 means no limit.
+	BandwidthLimitKBps int32
+	// ExtraArgs are additional rsync flags appended after the base flags.
+	ExtraArgs []string
+}
+
 // NFSOperations wraps filesystem calls for testability.
 // The real implementation delegates to os.* functions.
 // Tests use FakeNFSOperations (in test files).
@@ -21,6 +29,9 @@ type NFSOperations interface {
 	Chmod(path string, mode os.FileMode) error
 	CopyDir(src, dst string) error
 	SyncDir(ctx context.Context, src, dst string) error
+	SyncDirWithOptions(ctx context.Context, src, dst string, opts SyncOptions) error
+	WriteFile(path string, data []byte, perm os.FileMode) error
+	ReadFile(path string) ([]byte, error)
 }
 
 type realNFSOperations struct{}
@@ -94,10 +105,29 @@ func (r *realNFSOperations) CopyDir(src, dst string) error {
 }
 
 func (r *realNFSOperations) SyncDir(ctx context.Context, src, dst string) error {
-	cmd := exec.CommandContext(ctx, "rsync", "-a", "--delete", src+"/", dst+"/")
+	return r.SyncDirWithOptions(ctx, src, dst, SyncOptions{})
+}
+
+func (r *realNFSOperations) SyncDirWithOptions(ctx context.Context, src, dst string, opts SyncOptions) error {
+	args := []string{"-a", "--delete"}
+	if opts.BandwidthLimitKBps > 0 {
+		args = append(args, fmt.Sprintf("--bwlimit=%d", opts.BandwidthLimitKBps))
+	}
+	args = append(args, opts.ExtraArgs...)
+	args = append(args, src+"/", dst+"/")
+
+	cmd := exec.CommandContext(ctx, "rsync", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("rsync %s/ %s/: %w (output: %s)", src, dst, err, string(output))
 	}
 	return nil
+}
+
+func (r *realNFSOperations) WriteFile(path string, data []byte, perm os.FileMode) error {
+	return os.WriteFile(path, data, perm)
+}
+
+func (r *realNFSOperations) ReadFile(path string) ([]byte, error) {
+	return os.ReadFile(path)
 }

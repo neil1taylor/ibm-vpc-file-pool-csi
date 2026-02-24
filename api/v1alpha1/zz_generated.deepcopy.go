@@ -482,6 +482,11 @@ func (in *ReplicationPolicySpec) DeepCopyInto(out *ReplicationPolicySpec) {
 		*out = new(bool)
 		**out = **in
 	}
+	if in.RsyncOptions != nil {
+		in, out := &in.RsyncOptions, &out.RsyncOptions
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.PreSyncHooks != nil {
 		in, out := &in.PreSyncHooks, &out.PreSyncHooks
 		*out = make([]Hook, len(*in))

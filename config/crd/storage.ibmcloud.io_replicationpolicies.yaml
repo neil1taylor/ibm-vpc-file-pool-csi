@@ -60,6 +60,14 @@ spec:
             description: ReplicationPolicySpec defines the desired state of a replication
               policy.
             properties:
+              bandwidthLimitMbps:
+                default: 0
+                description: |-
+                  BandwidthLimitMbps limits rsync bandwidth in megabits per second.
+                  Only applies when IncrementalSync is true. 0 means no limit.
+                format: int32
+                minimum: 0
+                type: integer
               destinationBasePath:
                 description: |-
                   DestinationBasePath is the base path on the destination NFS server
@@ -76,6 +84,13 @@ spec:
                   IncrementalSync enables rsync-based incremental replication instead of full copy.
                   When true (default), only changed files are transferred.
                 type: boolean
+              maxParallelSyncs:
+                default: 1
+                description: MaxParallelSyncs controls how many SubVolumes are synced
+                  concurrently.
+                format: int32
+                minimum: 1
+                type: integer
               maxRetries:
                 default: 3
                 description: MaxRetries is the number of consecutive failures before
@@ -272,6 +287,13 @@ spec:
                   - name
                   - type
                   type: object
+                type: array
+              rsyncOptions:
+                description: |-
+                  RsyncOptions are extra rsync flags appended after the base flags (-a --delete).
+                  Dangerous flags (--daemon, --server, --rsh, --rsync-path) are rejected by the webhook.
+                items:
+                  type: string
                 type: array
               schedule:
                 description: |-

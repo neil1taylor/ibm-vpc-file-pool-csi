@@ -175,16 +175,48 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 		}
 	}
 
-	// 3. Sync each matched SubVolume.
+	// 3. Sync each matched SubVolume (with optional parallelism).
+	maxParallel := policy.Spec.MaxParallelSyncs
+	if maxParallel <= 0 {
+		maxParallel = 1
+	}
+
 	var svStatuses []v1alpha1.SubVolumeReplicationStatus
 	var syncErrors []string
 
-	for _, sv := range matched {
-		svStatus := rc.syncSubVolume(ctx, policy, &sv)
-		svStatuses = append(svStatuses, svStatus)
-		if svStatus.LastError != "" {
-			syncErrors = append(syncErrors, fmt.Sprintf("%s: %s", sv.Name, svStatus.LastError))
+	if maxParallel == 1 {
+		// Sequential — no goroutine overhead.
+		for _, sv := range matched {
+			svStatus := rc.syncSubVolume(ctx, policy, &sv)
+			svStatuses = append(svStatuses, svStatus)
+			if svStatus.LastError != "" {
+				syncErrors = append(syncErrors, fmt.Sprintf("%s: %s", sv.Name, svStatus.LastError))
+			}
 		}
+	} else {
+		// Parallel with semaphore.
+		svStatuses = make([]v1alpha1.SubVolumeReplicationStatus, len(matched))
+		sem := make(chan struct{}, maxParallel)
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+
+		for i, sv := range matched {
+			wg.Add(1)
+			go func(idx int, sv v1alpha1.SubVolume) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+
+				svStatus := rc.syncSubVolume(ctx, policy, &sv)
+				svStatuses[idx] = svStatus
+				if svStatus.LastError != "" {
+					mu.Lock()
+					syncErrors = append(syncErrors, fmt.Sprintf("%s: %s", sv.Name, svStatus.LastError))
+					mu.Unlock()
+				}
+			}(i, sv)
+		}
+		wg.Wait()
 	}
 
 	// 4. Update policy status.
@@ -239,26 +271,13 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 
 // syncSubVolume syncs a single SubVolume to the destination.
 // It copies from the SubVolume's subPath to the destination base path.
+// Uses rsync (SyncDirWithOptions) when IncrementalSync is true (default),
+// and CopyDir when IncrementalSync is explicitly false.
 func (rc *ReplicationController) syncSubVolume(ctx context.Context, policy *v1alpha1.ReplicationPolicy, sv *v1alpha1.SubVolume) v1alpha1.SubVolumeReplicationStatus {
-	_ = ctx // reserved for future use (e.g., context-based cancellation of long copies)
-
 	now := metav1.NewTime(rc.nowFunc())
 	status := v1alpha1.SubVolumeReplicationStatus{
 		SubVolumeName: sv.Name,
 	}
-
-	// Source path: the SubVolume's NFS path (the share mount target + subPath).
-	// For the replication controller, we construct:
-	//   source: <shareMountTargetIP>:<subPath>  (in practice, the NFS mount is already done)
-	// For simplicity, we use the destination NFS server + base path for the destination,
-	// and the source share mount target IP for the source.
-	// The actual paths on the filesystem are:
-	//   source: /pvcs/<pvc-name> (on source NFS mount)
-	//   dest:   /pvcs/<pvc-name> (on destination NFS mount)
-	//
-	// Since CopyDir works with local paths, we construct the paths using the
-	// mount target IPs as path prefixes. In a real deployment, the NFS shares
-	// are mounted at well-known paths; here we use a simple convention.
 
 	srcPath := fmt.Sprintf("/repl/src/%s%s", sv.Spec.ShareMountTargetIP, sv.Spec.SubPath)
 	dstPath := fmt.Sprintf("/repl/dst/%s%s", policy.Spec.DestinationNFSServer, sv.Spec.SubPath)
@@ -270,14 +289,49 @@ func (rc *ReplicationController) syncSubVolume(ctx context.Context, policy *v1al
 		return status
 	}
 
-	// Copy data from source to destination.
-	if err := rc.nfsOps.CopyDir(srcPath, dstPath); err != nil {
-		status.LastError = fmt.Sprintf("copy: %v", err)
-		return status
+	// Determine sync method: incremental (rsync) vs full copy.
+	// nil IncrementalSync is treated as true (default).
+	useIncremental := policy.Spec.IncrementalSync == nil || *policy.Spec.IncrementalSync
+
+	if useIncremental {
+		opts := SyncOptions{
+			// Convert Mbps to KBps: 1 Mbps = 125 KBps (1000*1000/8/1000).
+			BandwidthLimitKBps: policy.Spec.BandwidthLimitMbps * 125,
+			ExtraArgs:          policy.Spec.RsyncOptions,
+		}
+		if err := rc.nfsOps.SyncDirWithOptions(ctx, srcPath, dstPath, opts); err != nil {
+			status.LastError = fmt.Sprintf("sync: %v", err)
+			return status
+		}
+	} else {
+		if err := rc.nfsOps.CopyDir(srcPath, dstPath); err != nil {
+			status.LastError = fmt.Sprintf("copy: %v", err)
+			return status
+		}
 	}
+
+	// Write metadata sidecar (best-effort, does not fail the sync).
+	rc.writeMetadataSidecar(dstPath, policy, sv)
 
 	status.LastSyncTime = &now
 	return status
+}
+
+// writeMetadataSidecar writes a .subvolume-metadata.json file alongside the
+// replicated SubVolume data. This is best-effort: failures are logged but do
+// not fail the sync.
+func (rc *ReplicationController) writeMetadataSidecar(dstPath string, policy *v1alpha1.ReplicationPolicy, sv *v1alpha1.SubVolume) {
+	meta := &SubVolumeMetadata{
+		SubVolumeName:     sv.Name,
+		Spec:              sv.Spec,
+		Labels:            sv.Labels,
+		LastSyncTime:      rc.nowFunc(),
+		ReplicationPolicy: policy.Name,
+	}
+	if err := writeMetadata(rc.nfsOps, dstPath, meta); err != nil {
+		klog.V(4).InfoS("Failed to write metadata sidecar (non-fatal)",
+			"subVolume", sv.Name, "dstPath", dstPath, "error", err)
+	}
 }
 
 // handleFailure updates the policy status for a failed replication cycle.

@@ -102,6 +102,59 @@ func TestReplicationPolicyValidator_Create_ValidSchedules(t *testing.T) {
 	}
 }
 
+func TestReplicationPolicyValidator_Create_NegativeBandwidth(t *testing.T) {
+	v := &ReplicationPolicyValidator{}
+	rp := validReplicationPolicy()
+	rp.Spec.BandwidthLimitMbps = -1
+	_, err := v.ValidateCreate(context.Background(), rp)
+	if err == nil {
+		t.Fatal("expected error for negative bandwidthLimitMbps")
+	}
+}
+
+func TestReplicationPolicyValidator_Create_ValidBandwidth(t *testing.T) {
+	v := &ReplicationPolicyValidator{}
+	rp := validReplicationPolicy()
+	rp.Spec.BandwidthLimitMbps = 100
+	_, err := v.ValidateCreate(context.Background(), rp)
+	if err != nil {
+		t.Fatalf("unexpected error for valid bandwidth: %v", err)
+	}
+}
+
+func TestReplicationPolicyValidator_Create_NegativeMaxParallelSyncs(t *testing.T) {
+	v := &ReplicationPolicyValidator{}
+	rp := validReplicationPolicy()
+	rp.Spec.MaxParallelSyncs = -1
+	_, err := v.ValidateCreate(context.Background(), rp)
+	if err == nil {
+		t.Fatal("expected error for negative maxParallelSyncs")
+	}
+}
+
+func TestReplicationPolicyValidator_Create_DisallowedRsyncOption(t *testing.T) {
+	v := &ReplicationPolicyValidator{}
+	blockedOpts := []string{"--daemon", "--server", "--rsh", "--rsync-path", "--rsh=ssh"}
+	for _, opt := range blockedOpts {
+		rp := validReplicationPolicy()
+		rp.Spec.RsyncOptions = []string{opt}
+		_, err := v.ValidateCreate(context.Background(), rp)
+		if err == nil {
+			t.Fatalf("expected error for disallowed rsync option %q", opt)
+		}
+	}
+}
+
+func TestReplicationPolicyValidator_Create_ValidRsyncOptions(t *testing.T) {
+	v := &ReplicationPolicyValidator{}
+	rp := validReplicationPolicy()
+	rp.Spec.RsyncOptions = []string{"--compress", "--checksum", "--progress"}
+	_, err := v.ValidateCreate(context.Background(), rp)
+	if err != nil {
+		t.Fatalf("unexpected error for valid rsync options: %v", err)
+	}
+}
+
 func TestReplicationPolicyValidator_Delete(t *testing.T) {
 	v := &ReplicationPolicyValidator{}
 	_, err := v.ValidateDelete(context.Background(), validReplicationPolicy())

@@ -61,6 +61,24 @@ type ReplicationPolicySpec struct {
 	// +optional
 	IncrementalSync *bool `json:"incrementalSync,omitempty"`
 
+	// BandwidthLimitMbps limits rsync bandwidth in megabits per second.
+	// Only applies when IncrementalSync is true. 0 means no limit.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:default=0
+	// +optional
+	BandwidthLimitMbps int32 `json:"bandwidthLimitMbps,omitempty"`
+
+	// MaxParallelSyncs controls how many SubVolumes are synced concurrently.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default=1
+	// +optional
+	MaxParallelSyncs int32 `json:"maxParallelSyncs,omitempty"`
+
+	// RsyncOptions are extra rsync flags appended after the base flags (-a --delete).
+	// Dangerous flags (--daemon, --server, --rsh, --rsync-path) are rejected by the webhook.
+	// +optional
+	RsyncOptions []string `json:"rsyncOptions,omitempty"`
+
 	// PreSyncHooks are hooks executed before each replication sync cycle.
 	// +optional
 	PreSyncHooks []Hook `json:"preSyncHooks,omitempty"`

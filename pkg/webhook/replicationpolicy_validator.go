@@ -3,6 +3,7 @@ package webhook
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
@@ -29,6 +30,9 @@ func (v *ReplicationPolicyValidator) ValidateDelete(_ context.Context, _ *v1alph
 	return nil, nil
 }
 
+// rsyncBlocklist contains rsync flags that are rejected for security reasons.
+var rsyncBlocklist = []string{"--daemon", "--server", "--rsh", "--rsync-path"}
+
 func validateReplicationPolicySpec(spec *v1alpha1.ReplicationPolicySpec) error {
 	if spec.SourcePoolName == "" {
 		return fmt.Errorf("spec.sourcePoolName is required")
@@ -47,6 +51,19 @@ func validateReplicationPolicySpec(spec *v1alpha1.ReplicationPolicySpec) error {
 	}
 	if spec.MaxRetries < 0 {
 		return fmt.Errorf("spec.maxRetries must be >= 0, got %d", spec.MaxRetries)
+	}
+	if spec.BandwidthLimitMbps < 0 {
+		return fmt.Errorf("spec.bandwidthLimitMbps must be >= 0, got %d", spec.BandwidthLimitMbps)
+	}
+	if spec.MaxParallelSyncs < 0 {
+		return fmt.Errorf("spec.maxParallelSyncs must be >= 0, got %d", spec.MaxParallelSyncs)
+	}
+	for _, opt := range spec.RsyncOptions {
+		for _, blocked := range rsyncBlocklist {
+			if opt == blocked || strings.HasPrefix(opt, blocked+"=") {
+				return fmt.Errorf("spec.rsyncOptions contains disallowed flag %q", opt)
+			}
+		}
 	}
 	return nil
 }

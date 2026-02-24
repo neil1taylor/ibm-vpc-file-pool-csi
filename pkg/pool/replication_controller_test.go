@@ -3,6 +3,7 @@ package pool
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -908,6 +909,315 @@ func TestFilterSubVolumes(t *testing.T) {
 				t.Errorf("filterSubVolumes() returned %d items, want %d", len(got), tt.wantLen)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1 & 2 Tests: IncrementalSync, BandwidthLimit, Parallel Syncs, Metadata
+// ---------------------------------------------------------------------------
+
+func TestReplicationController_IncrementalSyncDefault(t *testing.T) {
+	// nil IncrementalSync → uses SyncDirWithOptions (rsync).
+	k := newReplFakeK8sClient()
+	nfs := newFakeNFSOperations()
+
+	sv1 := newTestSubVolume("pvc-11111111-1111-1111-1111-111111111111", "prod-pool", "share-1", 10)
+	k.addSubVolume(sv1)
+
+	policy := newTestReplicationPolicy("inc-default", "prod-pool", "1ms")
+	policy.Spec.IncrementalSync = nil // nil → treated as true
+	k.addPolicy(policy)
+
+	rc := newReplController(k, nfs)
+	rc.processOnce(context.Background())
+
+	rp := k.getPolicy("inc-default")
+	if rp.Status.LastSyncTime == nil {
+		t.Fatal("expected sync to complete")
+	}
+	// SyncDirWithOptions should have been called (not just CopyDir).
+	if nfs.getSyncCallCount() < 1 {
+		t.Errorf("expected SyncDirWithOptions to be called, got %d calls", nfs.getSyncCallCount())
+	}
+}
+
+func TestReplicationController_IncrementalSyncFalse(t *testing.T) {
+	// IncrementalSync=false → uses CopyDir.
+	k := newReplFakeK8sClient()
+	nfs := newFakeNFSOperations()
+
+	sv1 := newTestSubVolume("pvc-11111111-1111-1111-1111-111111111111", "prod-pool", "share-1", 10)
+	k.addSubVolume(sv1)
+
+	policy := newTestReplicationPolicy("inc-false", "prod-pool", "1ms")
+	f := false
+	policy.Spec.IncrementalSync = &f
+	k.addPolicy(policy)
+
+	rc := newReplController(k, nfs)
+	rc.processOnce(context.Background())
+
+	rp := k.getPolicy("inc-false")
+	if rp.Status.LastSyncTime == nil {
+		t.Fatal("expected sync to complete")
+	}
+	// SyncDirWithOptions should NOT have been called.
+	if nfs.getSyncCallCount() != 0 {
+		t.Errorf("expected SyncDirWithOptions NOT to be called when IncrementalSync=false, got %d calls", nfs.getSyncCallCount())
+	}
+	// CopyDir should have been called instead.
+	if nfs.copyCount() < 1 {
+		t.Errorf("expected CopyDir to be called when IncrementalSync=false, got %d calls", nfs.copyCount())
+	}
+}
+
+func TestReplicationController_BandwidthLimit(t *testing.T) {
+	// Verify Mbps→KBps conversion flows through to SyncOptions.
+	k := newReplFakeK8sClient()
+	nfs := newFakeNFSOperations()
+
+	sv1 := newTestSubVolume("pvc-11111111-1111-1111-1111-111111111111", "prod-pool", "share-1", 10)
+	k.addSubVolume(sv1)
+
+	policy := newTestReplicationPolicy("bw-limit", "prod-pool", "1ms")
+	policy.Spec.BandwidthLimitMbps = 100 // 100 Mbps = 12500 KBps
+	k.addPolicy(policy)
+
+	rc := newReplController(k, nfs)
+	rc.processOnce(context.Background())
+
+	opts := nfs.getLastSyncOpts()
+	if opts.BandwidthLimitKBps != 12500 {
+		t.Errorf("expected BandwidthLimitKBps=12500 (100*125), got %d", opts.BandwidthLimitKBps)
+	}
+}
+
+func TestReplicationController_RsyncOptions(t *testing.T) {
+	// Verify extra rsync args flow through to SyncOptions.
+	k := newReplFakeK8sClient()
+	nfs := newFakeNFSOperations()
+
+	sv1 := newTestSubVolume("pvc-11111111-1111-1111-1111-111111111111", "prod-pool", "share-1", 10)
+	k.addSubVolume(sv1)
+
+	policy := newTestReplicationPolicy("rsync-opts", "prod-pool", "1ms")
+	policy.Spec.RsyncOptions = []string{"--compress", "--checksum"}
+	k.addPolicy(policy)
+
+	rc := newReplController(k, nfs)
+	rc.processOnce(context.Background())
+
+	opts := nfs.getLastSyncOpts()
+	if len(opts.ExtraArgs) != 2 || opts.ExtraArgs[0] != "--compress" || opts.ExtraArgs[1] != "--checksum" {
+		t.Errorf("expected ExtraArgs=[--compress --checksum], got %v", opts.ExtraArgs)
+	}
+}
+
+func TestReplicationController_ParallelSyncs(t *testing.T) {
+	// With MaxParallelSyncs=3 and 5 SubVolumes, all 5 should sync successfully.
+	k := newReplFakeK8sClient()
+	nfs := newFakeNFSOperations()
+
+	for i := 0; i < 5; i++ {
+		name := fmt.Sprintf("pvc-%08d-0000-0000-0000-%012d", i, i)
+		sv := newTestSubVolume(name, "prod-pool", "share-1", 10)
+		k.addSubVolume(sv)
+	}
+
+	policy := newTestReplicationPolicy("parallel", "prod-pool", "1ms")
+	policy.Spec.MaxParallelSyncs = 3
+	k.addPolicy(policy)
+
+	rc := newReplController(k, nfs)
+	rc.processOnce(context.Background())
+
+	rp := k.getPolicy("parallel")
+	if rp.Status.LastSyncTime == nil {
+		t.Fatal("expected sync to complete")
+	}
+	if len(rp.Status.SubVolumeStatuses) != 5 {
+		t.Fatalf("expected 5 SubVolume statuses, got %d", len(rp.Status.SubVolumeStatuses))
+	}
+	for _, svs := range rp.Status.SubVolumeStatuses {
+		if svs.LastError != "" {
+			t.Errorf("unexpected error for SubVolume %q: %s", svs.SubVolumeName, svs.LastError)
+		}
+	}
+}
+
+func TestReplicationController_ParallelPartialFailure(t *testing.T) {
+	// With parallel syncs, some SubVolumes fail and are reported correctly.
+	k := newReplFakeK8sClient()
+	nfs := newFakeNFSOperations()
+	nfs.SyncErr = errors.New("simulated rsync failure")
+
+	for i := 0; i < 3; i++ {
+		name := fmt.Sprintf("pvc-%08d-0000-0000-0000-%012d", i, i)
+		sv := newTestSubVolume(name, "prod-pool", "share-1", 10)
+		k.addSubVolume(sv)
+	}
+
+	policy := newTestReplicationPolicy("parallel-fail", "prod-pool", "1ms")
+	policy.Spec.MaxParallelSyncs = 2
+	k.addPolicy(policy)
+
+	rc := newReplController(k, nfs)
+	rc.processOnce(context.Background())
+
+	rp := k.getPolicy("parallel-fail")
+	if rp.Status.ConsecutiveFailures < 1 {
+		t.Errorf("expected at least 1 consecutive failure, got %d", rp.Status.ConsecutiveFailures)
+	}
+	// SubVolume statuses should still be present with errors.
+	if len(rp.Status.SubVolumeStatuses) != 3 {
+		t.Fatalf("expected 3 SubVolume statuses, got %d", len(rp.Status.SubVolumeStatuses))
+	}
+	for _, svs := range rp.Status.SubVolumeStatuses {
+		if svs.LastError == "" {
+			t.Errorf("expected error for SubVolume %q", svs.SubVolumeName)
+		}
+	}
+}
+
+func TestReplicationController_SyncDirFailure(t *testing.T) {
+	// SyncErr injected → sync fails.
+	k := newReplFakeK8sClient()
+	nfs := newFakeNFSOperations()
+	nfs.SyncErr = errors.New("rsync transport error")
+
+	sv1 := newTestSubVolume("pvc-11111111-1111-1111-1111-111111111111", "prod-pool", "share-1", 10)
+	k.addSubVolume(sv1)
+
+	policy := newTestReplicationPolicy("sync-fail", "prod-pool", "1ms")
+	k.addPolicy(policy)
+
+	rc := newReplController(k, nfs)
+	rc.processOnce(context.Background())
+
+	rp := k.getPolicy("sync-fail")
+	if rp.Status.ConsecutiveFailures < 1 {
+		t.Errorf("expected at least 1 consecutive failure, got %d", rp.Status.ConsecutiveFailures)
+	}
+	if rp.Status.LastError == "" {
+		t.Error("expected LastError to be set")
+	}
+}
+
+func TestReplicationController_WritesMetadataSidecar(t *testing.T) {
+	k := newReplFakeK8sClient()
+	nfs := newFakeNFSOperations()
+
+	sv1 := newTestSubVolume("pvc-11111111-1111-1111-1111-111111111111", "prod-pool", "share-1", 10)
+	k.addSubVolume(sv1)
+
+	policy := newTestReplicationPolicy("meta-write", "prod-pool", "1ms")
+	k.addPolicy(policy)
+
+	rc := newReplController(k, nfs)
+	rc.processOnce(context.Background())
+
+	// Verify metadata file was written.
+	metaPath := "/repl/dst/10.245.3.8/pvcs/pvc-11111111-1111-1111-1111-111111111111/.subvolume-metadata.json"
+	data, ok := nfs.getFile(metaPath)
+	if !ok {
+		t.Fatalf("expected metadata file at %s", metaPath)
+	}
+	if len(data) == 0 {
+		t.Fatal("metadata file is empty")
+	}
+
+	// Verify it round-trips.
+	meta, err := readMetadata(nfs, "/repl/dst/10.245.3.8/pvcs/pvc-11111111-1111-1111-1111-111111111111")
+	if err != nil {
+		t.Fatalf("readMetadata failed: %v", err)
+	}
+	if meta.SubVolumeName != "pvc-11111111-1111-1111-1111-111111111111" {
+		t.Errorf("expected SubVolumeName pvc-111..., got %s", meta.SubVolumeName)
+	}
+	if meta.ReplicationPolicy != "meta-write" {
+		t.Errorf("expected ReplicationPolicy meta-write, got %s", meta.ReplicationPolicy)
+	}
+	if meta.Spec.PoolName != "prod-pool" {
+		t.Errorf("expected Spec.PoolName prod-pool, got %s", meta.Spec.PoolName)
+	}
+}
+
+func TestReplicationController_MetadataRoundTrip(t *testing.T) {
+	nfs := newFakeNFSOperations()
+	// Ensure parent dir exists for WriteFile.
+	meta := &SubVolumeMetadata{
+		SubVolumeName: "pvc-test",
+		Spec: v1alpha1.SubVolumeSpec{
+			PoolName:           "test-pool",
+			ShareID:            "share-123",
+			ShareMountTargetIP: "10.0.0.1",
+			SubPath:            "/pvcs/pvc-test",
+			RequestedGB:        50,
+			PVName:             "pv-test",
+			PVCName:            "my-pvc",
+			PVCNamespace:       "default",
+			ReclaimPolicy:      "Delete",
+		},
+		Labels:            map[string]string{"app": "web", "env": "prod"},
+		ReplicationPolicy: "my-policy",
+	}
+
+	if err := writeMetadata(nfs, "/tmp/test", meta); err != nil {
+		t.Fatalf("writeMetadata failed: %v", err)
+	}
+
+	got, err := readMetadata(nfs, "/tmp/test")
+	if err != nil {
+		t.Fatalf("readMetadata failed: %v", err)
+	}
+
+	if got.SubVolumeName != meta.SubVolumeName {
+		t.Errorf("SubVolumeName: got %q, want %q", got.SubVolumeName, meta.SubVolumeName)
+	}
+	if got.Spec.PoolName != meta.Spec.PoolName {
+		t.Errorf("Spec.PoolName: got %q, want %q", got.Spec.PoolName, meta.Spec.PoolName)
+	}
+	if got.Spec.ShareID != meta.Spec.ShareID {
+		t.Errorf("Spec.ShareID: got %q, want %q", got.Spec.ShareID, meta.Spec.ShareID)
+	}
+	if got.Spec.PVCName != meta.Spec.PVCName {
+		t.Errorf("Spec.PVCName: got %q, want %q", got.Spec.PVCName, meta.Spec.PVCName)
+	}
+	if got.Spec.PVCNamespace != meta.Spec.PVCNamespace {
+		t.Errorf("Spec.PVCNamespace: got %q, want %q", got.Spec.PVCNamespace, meta.Spec.PVCNamespace)
+	}
+	if got.Spec.RequestedGB != meta.Spec.RequestedGB {
+		t.Errorf("Spec.RequestedGB: got %d, want %d", got.Spec.RequestedGB, meta.Spec.RequestedGB)
+	}
+	if got.Labels["app"] != "web" || got.Labels["env"] != "prod" {
+		t.Errorf("Labels mismatch: got %v", got.Labels)
+	}
+	if got.ReplicationPolicy != meta.ReplicationPolicy {
+		t.Errorf("ReplicationPolicy: got %q, want %q", got.ReplicationPolicy, meta.ReplicationPolicy)
+	}
+}
+
+func TestReplicationController_MetadataWriteFailureNonFatal(t *testing.T) {
+	// WriteFile error does not fail the sync.
+	k := newReplFakeK8sClient()
+	nfs := newFakeNFSOperations()
+	nfs.WriteFileErr = errors.New("disk full")
+
+	sv1 := newTestSubVolume("pvc-11111111-1111-1111-1111-111111111111", "prod-pool", "share-1", 10)
+	k.addSubVolume(sv1)
+
+	policy := newTestReplicationPolicy("meta-fail", "prod-pool", "1ms")
+	k.addPolicy(policy)
+
+	rc := newReplController(k, nfs)
+	rc.processOnce(context.Background())
+
+	rp := k.getPolicy("meta-fail")
+	if rp.Status.LastSyncTime == nil {
+		t.Fatal("expected sync to complete despite metadata write failure")
+	}
+	if rp.Status.ConsecutiveFailures != 0 {
+		t.Errorf("expected 0 failures (metadata write is non-fatal), got %d", rp.Status.ConsecutiveFailures)
 	}
 }
 

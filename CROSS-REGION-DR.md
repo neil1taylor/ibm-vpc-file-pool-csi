@@ -401,6 +401,13 @@ type ReplicationPolicySpec struct {
     // +kubebuilder:default=0
     BandwidthLimitMbps int32 `json:"bandwidthLimitMbps"`
 
+    // MaxParallelSyncs controls how many SubVolumes are rsynced concurrently.
+    // Higher values reduce total sync time but increase network and CPU load.
+    // The controller uses a semaphore-gated worker pool internally.
+    // +kubebuilder:validation:Minimum=1
+    // +kubebuilder:default=1
+    MaxParallelSyncs int32 `json:"maxParallelSyncs"`
+
     // QuiesceHooks define optional pre-sync and post-sync commands to run
     // in application pods for application-consistent replication.
     // +optional
@@ -598,6 +605,7 @@ spec:
     matchLabels:
       replication: enabled              # Only replicate SubVolumes with this label
   bandwidthLimitMbps: 500
+  maxParallelSyncs: 4                   # Sync up to 4 SubVolumes concurrently
   quiesceHooks:
     preSync:
       podSelector:
@@ -952,11 +960,124 @@ The "Unsupported Workload Types" section of this document would shrink dramatica
 ## Open Questions
 
 1. **Share mapping management:** The current design requires manual `shareMappings` in the ReplicationPolicy. Should the replication controller auto-discover destination shares by querying the destination cluster's VPC API? This adds complexity but reduces operator toil.
+   > **Deferred to post-GA.** Manual `DestinationNFSServer` is simpler for beta.
 
 2. **SubVolume CR replication:** Currently, the controller replicates data but not SubVolume CRs. On failover, the operator must create SubVolume CRs on the DR cluster. Should the controller also replicate SubVolume CRs (as dormant/standby objects)?
+   > **Resolved** -- metadata sidecar (`.subvolume-metadata.json`) written alongside each replicated SubVolume. See [Metadata Sidecar](#metadata-sidecar) section below.
 
 3. **Multi-cluster CRD federation:** If both clusters run the pool CSI driver, how do we avoid SubVolume name conflicts? The DR cluster should probably have its own SubVolume CRs with a `replica: true` label to distinguish them from locally-created SubVolumes.
+   > **Resolved** -- failover CLI adds `storage.ibmcloud.io/failover-source` label to DR SubVolumes. See [Failover CLI](#failover-cli) section below.
 
 4. **Rsync transport:** Should rsync run over NFS mounts (simpler, uses Transit Gateway) or over SSH (adds authentication complexity but enables compression)? The current design uses NFS mounts for simplicity.
+   > **Resolved** -- NFS-mount-based rsync (no SSH tunnel needed). The replication controller mounts both source and destination shares via NFS over Transit Gateway and runs rsync locally between the two mount points.
 
 5. **Parallel rsync:** For pools with many SubVolumes, should the controller run multiple rsync processes in parallel? This reduces total sync time but increases network and CPU load. A `maxParallelSyncs` spec field could control this.
+   > **Resolved** -- `maxParallelSyncs` field with semaphore-gated worker pool. The controller spawns up to `maxParallelSyncs` concurrent rsync processes, each syncing one SubVolume. Defaults to 1 (sequential) for safety.
+
+---
+
+## Metadata Sidecar
+
+Each replication cycle writes a `.subvolume-metadata.json` file alongside the replicated data in every SubVolume directory on the destination. This eliminates the need to replicate SubVolume CRs directly to the DR cluster and provides all the information the failover CLI needs to reconstruct SubVolume CRs on the destination.
+
+### File Location
+
+```
+/pvcs/pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab/
+  ├── .subvolume-metadata.json    ← metadata sidecar
+  ├── data/
+  └── config/
+```
+
+### Contents
+
+```json
+{
+  "subVolumeName": "pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab",
+  "sourcePool": "production",
+  "sourceCluster": "us-south-roks-1",
+  "capacityGB": 10,
+  "labels": {
+    "app.kubernetes.io/part-of": "critical-app",
+    "replication": "enabled"
+  },
+  "annotations": {
+    "storage.ibmcloud.io/tier": "standard"
+  },
+  "uid": 107,
+  "gid": 107,
+  "permissions": "0777",
+  "lastSyncTime": "2026-02-24T10:15:00Z"
+}
+```
+
+The metadata sidecar is written atomically (write to a temp file then rename) to avoid partial reads during failover. It is updated on every successful sync cycle for the SubVolume. The replication controller reads SubVolume CR spec and labels from the source cluster and serializes them into the JSON file.
+
+---
+
+## Failover CLI
+
+The `kubectl failover` CLI plugin provides a structured workflow for promoting DR-replicated data to live PVCs on the destination cluster. It reads the `.subvolume-metadata.json` sidecar files to reconstruct SubVolume CRs without requiring cross-cluster API access.
+
+### Commands
+
+#### `kubectl failover plan`
+
+Dry-run that scans the destination NFS mount for `.subvolume-metadata.json` files and reports what SubVolumes would be created on the DR cluster.
+
+```bash
+kubectl failover plan \
+  --destination-nfs-server 10.241.5.10 \
+  --destination-base-path /pvcs \
+  --target-pool dr-production
+
+# Output:
+# PLAN: 3 SubVolumes found on destination
+#   pvc-a1b2c3d4-... (10 GB, last sync: 2m ago)  → will create SubVolume + PV + PVC
+#   pvc-b2c3d4e5-... (25 GB, last sync: 2m ago)  → will create SubVolume + PV + PVC
+#   pvc-c3d4e5f6-... (5 GB, last sync: 17m ago)   → will create SubVolume + PV + PVC [STALE]
+# No changes made (dry-run).
+```
+
+#### `kubectl failover execute`
+
+Creates SubVolume CRs, PVs, and PVCs on the DR cluster based on the metadata sidecar files. Each created SubVolume is labeled with `storage.ibmcloud.io/failover-source: <source-cluster>` to distinguish it from locally-created SubVolumes and avoid name conflicts.
+
+```bash
+kubectl failover execute \
+  --destination-nfs-server 10.241.5.10 \
+  --destination-base-path /pvcs \
+  --target-pool dr-production \
+  --namespace production
+
+# Output:
+# EXECUTE: Creating resources for 3 SubVolumes...
+#   pvc-a1b2c3d4-... SubVolume created, PV created, PVC created
+#   pvc-b2c3d4e5-... SubVolume created, PV created, PVC created
+#   pvc-c3d4e5f6-... SubVolume created, PV created, PVC created
+# Failover complete. 3 PVCs ready in namespace "production".
+```
+
+#### `kubectl failover status`
+
+Reports the state of a previous failover operation, including which SubVolumes were promoted and their current PVC binding status.
+
+```bash
+kubectl failover status --namespace production
+
+# Output:
+# FAILOVER STATUS (namespace: production)
+#   pvc-a1b2c3d4-... PVC Bound, Pod Running
+#   pvc-b2c3d4e5-... PVC Bound, Pod Pending
+#   pvc-c3d4e5f6-... PVC Bound, Pod Running
+# Source cluster: us-south-roks-1
+# Failover time: 2026-02-24T10:20:00Z
+```
+
+### Labels Applied
+
+| Label | Value | Purpose |
+|-------|-------|---------|
+| `storage.ibmcloud.io/failover-source` | Source cluster name | Distinguishes DR SubVolumes from local ones |
+| `storage.ibmcloud.io/failover-time` | RFC 3339 timestamp | Records when the failover was executed |
+| `storage.ibmcloud.io/original-pool` | Source pool name | Tracks which source pool the data came from |

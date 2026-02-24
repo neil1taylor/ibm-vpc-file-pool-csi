@@ -59,6 +59,9 @@ const ReplicationPolicyCreatePage: React.FC = () => {
   const [schedule, setSchedule] = useState('15m');
   const [maxRetries, setMaxRetries] = useState(3);
   const [incrementalSync, setIncrementalSync] = useState(true);
+  const [bandwidthLimitMbps, setBandwidthLimitMbps] = useState(0);
+  const [maxParallelSyncs, setMaxParallelSyncs] = useState(1);
+  const [rsyncOptions, setRsyncOptions] = useState('');
 
   // Label selector as key-value pairs
   const [labelPairs, setLabelPairs] = useState<Array<{ key: string; value: string }>>([]);
@@ -109,6 +112,9 @@ const ReplicationPolicyCreatePage: React.FC = () => {
         schedule,
         maxRetries,
         incrementalSync,
+        bandwidthLimitMbps: bandwidthLimitMbps > 0 ? bandwidthLimitMbps : undefined,
+        maxParallelSyncs: maxParallelSyncs > 1 ? maxParallelSyncs : undefined,
+        rsyncOptions: rsyncOptions.trim() ? rsyncOptions.trim().split('\n').filter(Boolean) : undefined,
       };
 
       if (labelPairs.length > 0) {
@@ -304,6 +310,76 @@ const ReplicationPolicyCreatePage: React.FC = () => {
               isChecked={incrementalSync}
               onChange={(_event, checked) => setIncrementalSync(checked)}
             />
+          </FieldPopover>
+        </StackItem>
+
+        <StackItem>
+          <FieldPopover
+            fieldId="rp-bandwidth"
+            label="Bandwidth Limit (Mbps)"
+            description="Limit rsync bandwidth in megabits per second. Only applies when incremental sync is enabled. 0 means no limit."
+          >
+            <NumberInput
+              id="rp-bandwidth"
+              value={bandwidthLimitMbps}
+              min={0}
+              max={10000}
+              onMinus={() => setBandwidthLimitMbps(Math.max(0, bandwidthLimitMbps - 10))}
+              onPlus={() => setBandwidthLimitMbps(Math.min(10000, bandwidthLimitMbps + 10))}
+              onChange={(event) => {
+                const val = parseInt((event.target as HTMLInputElement).value, 10);
+                if (!isNaN(val)) setBandwidthLimitMbps(val);
+              }}
+              isDisabled={!incrementalSync}
+            />
+            <FormHelperText>
+              <HelperText>
+                <HelperTextItem>0 = unlimited. Only applies with incremental sync.</HelperTextItem>
+              </HelperText>
+            </FormHelperText>
+          </FieldPopover>
+        </StackItem>
+
+        <StackItem>
+          <FieldPopover
+            fieldId="rp-parallel"
+            label="Max Parallel Syncs"
+            description="How many SubVolumes to sync concurrently. Higher values reduce total sync time but increase NFS and network load."
+          >
+            <NumberInput
+              id="rp-parallel"
+              value={maxParallelSyncs}
+              min={1}
+              max={32}
+              onMinus={() => setMaxParallelSyncs(Math.max(1, maxParallelSyncs - 1))}
+              onPlus={() => setMaxParallelSyncs(Math.min(32, maxParallelSyncs + 1))}
+              onChange={(event) => {
+                const val = parseInt((event.target as HTMLInputElement).value, 10);
+                if (!isNaN(val)) setMaxParallelSyncs(val);
+              }}
+            />
+          </FieldPopover>
+        </StackItem>
+
+        <StackItem>
+          <FieldPopover
+            fieldId="rp-rsync-options"
+            label="Rsync Options"
+            description="Extra rsync flags, one per line. These are appended after the base flags (-a --delete). Dangerous flags like --daemon, --server, --rsh, --rsync-path are rejected."
+          >
+            <TextArea
+              id="rp-rsync-options"
+              value={rsyncOptions}
+              onChange={(_event, value) => setRsyncOptions(value)}
+              placeholder="--compress&#10;--checksum"
+              rows={3}
+              isDisabled={!incrementalSync}
+            />
+            <FormHelperText>
+              <HelperText>
+                <HelperTextItem>One flag per line. Only applies with incremental sync.</HelperTextItem>
+              </HelperText>
+            </FormHelperText>
           </FieldPopover>
         </StackItem>
 
