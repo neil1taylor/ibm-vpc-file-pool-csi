@@ -17,6 +17,7 @@ import (
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -33,6 +34,8 @@ type fakeK8sClient struct {
 	subVolumes     map[string]*v1alpha1.SubVolume
 	snapshots      map[string]*v1alpha1.Snapshot
 	groupSnapshots map[string]*v1alpha1.VolumeGroupSnapshot
+	policies       map[string]*v1alpha1.ReplicationPolicy
+	storageClasses map[string]*storagev1.StorageClass
 
 	GetPoolErr          error
 	UpdatePoolStatusErr error
@@ -40,6 +43,7 @@ type fakeK8sClient struct {
 	CreateSubVolumeErr  error
 	UpdateSubVolumeErr  error
 	DeleteSubVolumeErr  error
+	ListPoliciesErr     error
 }
 
 func newFakeK8sClient() *fakeK8sClient {
@@ -48,6 +52,8 @@ func newFakeK8sClient() *fakeK8sClient {
 		subVolumes:     make(map[string]*v1alpha1.SubVolume),
 		snapshots:      make(map[string]*v1alpha1.Snapshot),
 		groupSnapshots: make(map[string]*v1alpha1.VolumeGroupSnapshot),
+		policies:       make(map[string]*v1alpha1.ReplicationPolicy),
+		storageClasses: make(map[string]*storagev1.StorageClass),
 	}
 }
 
@@ -334,21 +340,83 @@ func (f *fakeK8sClient) ListVolumeGroupSnapshots(_ context.Context, poolName str
 	return result, nil
 }
 
-// --- ReplicationPolicy operations (stubs) ---
+// --- ReplicationPolicy operations ---
 
-func (f *fakeK8sClient) GetReplicationPolicy(_ context.Context, _ string) (*v1alpha1.ReplicationPolicy, error) {
-	return nil, fmt.Errorf("not implemented in fake")
+func (f *fakeK8sClient) GetReplicationPolicy(_ context.Context, name string) (*v1alpha1.ReplicationPolicy, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	rp, ok := f.policies[name]
+	if !ok {
+		return nil, fmt.Errorf("replication policy %q not found", name)
+	}
+	return rp.DeepCopy(), nil
 }
+
 func (f *fakeK8sClient) ListReplicationPolicies(_ context.Context) ([]v1alpha1.ReplicationPolicy, error) {
-	return nil, nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.ListPoliciesErr != nil {
+		return nil, f.ListPoliciesErr
+	}
+	var result []v1alpha1.ReplicationPolicy
+	for _, rp := range f.policies {
+		result = append(result, *rp.DeepCopy())
+	}
+	return result, nil
 }
-func (f *fakeK8sClient) CreateReplicationPolicy(_ context.Context, _ *v1alpha1.ReplicationPolicy) error {
+
+func (f *fakeK8sClient) CreateReplicationPolicy(_ context.Context, rp *v1alpha1.ReplicationPolicy) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, exists := f.policies[rp.Name]; exists {
+		return fmt.Errorf("replication policy %q already exists", rp.Name)
+	}
+	f.policies[rp.Name] = rp.DeepCopy()
 	return nil
 }
-func (f *fakeK8sClient) UpdateReplicationPolicyStatus(_ context.Context, _ *v1alpha1.ReplicationPolicy) error {
+
+func (f *fakeK8sClient) UpdateReplicationPolicyStatus(_ context.Context, rp *v1alpha1.ReplicationPolicy) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	existing, ok := f.policies[rp.Name]
+	if !ok {
+		return fmt.Errorf("replication policy %q not found", rp.Name)
+	}
+	existing.Status = *rp.Status.DeepCopy()
 	return nil
 }
-func (f *fakeK8sClient) DeleteReplicationPolicy(_ context.Context, _ string) error { return nil }
+
+func (f *fakeK8sClient) DeleteReplicationPolicy(_ context.Context, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, exists := f.policies[name]; !exists {
+		return fmt.Errorf("replication policy %q not found", name)
+	}
+	delete(f.policies, name)
+	return nil
+}
+
+// --- StorageClass operations ---
+
+func (f *fakeK8sClient) GetStorageClass(_ context.Context, name string) (*storagev1.StorageClass, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sc, ok := f.storageClasses[name]
+	if !ok {
+		return nil, fmt.Errorf("storageclass %q not found", name)
+	}
+	return sc.DeepCopy(), nil
+}
+
+func (f *fakeK8sClient) CreateStorageClass(_ context.Context, sc *storagev1.StorageClass) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, exists := f.storageClasses[sc.Name]; exists {
+		return fmt.Errorf("storageclass %q already exists", sc.Name)
+	}
+	f.storageClasses[sc.Name] = sc.DeepCopy()
+	return nil
+}
 
 func (f *fakeK8sClient) GetConfigMapValue(_ context.Context, _, _, _ string) (string, error) {
 	return "", fmt.Errorf("not implemented in fake")
@@ -434,6 +502,27 @@ func (f *fakeK8sClient) groupSnapshotCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.groupSnapshots)
+}
+
+func (f *fakeK8sClient) addPolicy(rp *v1alpha1.ReplicationPolicy) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.policies[rp.Name] = rp.DeepCopy()
+}
+
+func (f *fakeK8sClient) getPolicy(name string) *v1alpha1.ReplicationPolicy {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if rp, ok := f.policies[name]; ok {
+		return rp.DeepCopy()
+	}
+	return nil
+}
+
+func (f *fakeK8sClient) policyCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.policies)
 }
 
 // ---------------------------------------------------------------------------
@@ -541,6 +630,12 @@ func (f *fakeNFSOperations) copyCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.copies)
+}
+
+func (f *fakeNFSOperations) totalCopyCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.copyCallCount
 }
 
 func (f *fakeNFSOperations) dirCount() int {

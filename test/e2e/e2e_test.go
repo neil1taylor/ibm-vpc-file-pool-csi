@@ -140,6 +140,16 @@ func cleanup() {
 		}
 	}
 
+	// Delete ReplicationPolicy resources before pools
+	var policies v1alpha1.ReplicationPolicyList
+	if err := k8sClient.List(ctx, &policies); err == nil {
+		for i := range policies.Items {
+			if isE2EResource(policies.Items[i].Name) {
+				_ = k8sClient.Delete(ctx, &policies.Items[i])
+			}
+		}
+	}
+
 	// Wait for SubVolumes to be cleaned up
 	time.Sleep(10 * time.Second)
 
