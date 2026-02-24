@@ -29,7 +29,7 @@ import DeleteModal from '../common/DeleteModal';
 import { ROUTES } from '../../constants';
 
 /** Calculate IOPS display: use spec.iops if set, otherwise derive from profile. */
-function getIOPS(pool: FileSharePool): string {
+export function getIOPS(pool: FileSharePool): string {
   if (pool.spec?.iops != null && pool.spec.iops > 0) {
     return pool.spec.iops.toLocaleString();
   }
@@ -87,7 +87,7 @@ const FileSharePoolRow: React.FC<{
 };
 
 /** Extract numeric IOPS value for sorting. */
-function getIOPSNumber(pool: FileSharePool): number {
+export function getIOPSNumber(pool: FileSharePool): number {
   if (pool.spec?.iops != null && pool.spec.iops > 0) return pool.spec.iops;
   if (pool.spec?.profile === 'dp2' && pool.spec?.shareSizeGB) return pool.spec.shareSizeGB * 100;
   return 0;

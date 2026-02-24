@@ -27,6 +27,7 @@ site/
 console-plugin/node_modules/
 console-plugin/dist/
 console-plugin/dist-extracted/
+console-plugin/coverage/
 
 # Diagnostics
 must-gather.local.*/

@@ -33,7 +33,7 @@ import { usePoolMetrics } from '../../utils/use-pool-metrics';
 import { ROUTES } from '../../constants';
 
 /** Format seconds to human-readable ms string. */
-const formatLatencyMs = (seconds: number): string => {
+export const formatLatencyMs = (seconds: number): string => {
   if (seconds === 0) return '-';
   const ms = seconds * 1000;
   if (ms < 1) return '<1 ms';
@@ -41,7 +41,7 @@ const formatLatencyMs = (seconds: number): string => {
 };
 
 /** Color code for latency values. */
-const latencyColor = (seconds: number): 'green' | 'gold' | 'red' | 'grey' => {
+export const latencyColor = (seconds: number): 'green' | 'gold' | 'red' | 'grey' => {
   if (seconds === 0) return 'grey';
   const ms = seconds * 1000;
   if (ms < 100) return 'green';

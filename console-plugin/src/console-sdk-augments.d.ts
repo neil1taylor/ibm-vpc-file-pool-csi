@@ -20,5 +20,6 @@ declare module '@openshift-console/dynamic-plugin-sdk' {
   export const TableData: React.FC<React.PropsWithChildren<TableDataProps>>;
   export const ListPageCreate: React.FC<React.PropsWithChildren<ListPageCreateProps>>;
   export const ListPageCreateLink: React.FC<React.PropsWithChildren<ListPageCreateLinkProps>>;
+  // eslint-disable-next-line @typescript-eslint/ban-types
   export const ListPageBody: React.FC<React.PropsWithChildren<{}>>;
 }
