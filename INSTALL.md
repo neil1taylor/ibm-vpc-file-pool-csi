@@ -541,7 +541,7 @@ If building from source:
 
 ```bash
 make console-plugin-docker-build
-# Pushes as: icr.io/ibm-vpc-file-pool-csi/console-plugin:$(VERSION)
+# Pushes as: de.icr.io/ibm-vpc-file-pool-csi/console-plugin:$(VERSION)
 ```
 
 ---

@@ -81,7 +81,7 @@ Pin container image tags to digests in production Helm values to prevent supply-
 
 ```yaml
 image:
-  repository: icr.io/ibm-vpc-file-pool-csi/driver
+  repository: de.icr.io/ibm-vpc-file-pool-csi/driver
   tag: v0.2.0@sha256:<digest>
 ```
 

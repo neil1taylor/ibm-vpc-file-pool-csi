@@ -508,7 +508,7 @@ Use UBI (Universal Base Image) for Red Hat / OpenShift compatibility.
 
 ```makefile
 BINARY_NAME := vpc-file-pool-csi
-IMAGE_NAME := icr.io/ibm-vpc-file-pool-csi/driver
+IMAGE_NAME := de.icr.io/ibm-vpc-file-pool-csi/driver
 VERSION := $(shell git describe --tags --always --dirty)
 
 .PHONY: build test lint docker-build generate install-crds deploy

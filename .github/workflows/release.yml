@@ -42,5 +42,5 @@ jobs:
           context: .
           push: true  # Requires REGISTRY_USERNAME and REGISTRY_PASSWORD secrets
           tags: |
-            icr.io/ibm-vpc-file-pool-csi/driver:${{ steps.version.outputs.VERSION }}
-            icr.io/ibm-vpc-file-pool-csi/driver:latest
+            de.icr.io/ibm-vpc-file-pool-csi/driver:${{ steps.version.outputs.VERSION }}
+            de.icr.io/ibm-vpc-file-pool-csi/driver:latest

@@ -18,7 +18,7 @@ spec:
       serviceAccountName: ibm-vpc-file-pool-csi-controller
       containers:
         - name: csi-controller
-          image: icr.io/ibm-vpc-file-pool-csi/driver:latest
+          image: de.icr.io/ibm-vpc-file-pool-csi/driver:latest
           args:
             - "--mode=controller"
             - "--endpoint=unix:///csi/csi.sock"

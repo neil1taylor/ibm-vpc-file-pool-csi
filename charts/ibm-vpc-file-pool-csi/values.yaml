@@ -2,7 +2,7 @@ nameOverride: ""
 fullnameOverride: ""
 
 image:
-  repository: icr.io/ibm-vpc-file-pool-csi/driver
+  repository: de.icr.io/ibm-vpc-file-pool-csi/driver
   tag: latest
   pullPolicy: IfNotPresent
 
@@ -158,7 +158,7 @@ consolePlugin:
   # Requires OpenShift 4.14+ with ConsolePlugin v1 API.
   enabled: false
   image:
-    repository: icr.io/ibm-vpc-file-pool-csi/console-plugin
+    repository: de.icr.io/ibm-vpc-file-pool-csi/console-plugin
     tag: latest
   replicas: 2
   # HTTPS port for the plugin Service. TLS certs are auto-provisioned

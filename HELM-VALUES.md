@@ -13,7 +13,7 @@ Complete reference for all configurable parameters in the `ibm-vpc-file-pool-csi
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `image.repository` | string | `icr.io/ibm-vpc-file-pool-csi/driver` | Container image repository for the CSI driver |
+| `image.repository` | string | `de.icr.io/ibm-vpc-file-pool-csi/driver` | Container image repository for the CSI driver |
 | `image.tag` | string | `latest` | Image tag. Pin to a specific version or digest in production |
 | `image.pullPolicy` | string | `IfNotPresent` | Image pull policy (`Always`, `IfNotPresent`, `Never`) |
 | `imagePullSecrets` | list | `[]` | List of image pull secret names for private registries |
@@ -156,7 +156,7 @@ OpenShift Console dynamic plugin for visual pool management. Requires OpenShift 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `consolePlugin.enabled` | bool | `false` | Enable the OpenShift Console dynamic plugin |
-| `consolePlugin.image.repository` | string | `icr.io/ibm-vpc-file-pool-csi/console-plugin` | Plugin container image repository |
+| `consolePlugin.image.repository` | string | `de.icr.io/ibm-vpc-file-pool-csi/console-plugin` | Plugin container image repository |
 | `consolePlugin.image.tag` | string | `latest` | Plugin image tag |
 | `consolePlugin.replicas` | int | `2` | Number of plugin pod replicas |
 | `consolePlugin.port` | int | `9443` | HTTPS port for the plugin Service. TLS certs are auto-provisioned by the OpenShift service-ca operator |
@@ -232,7 +232,7 @@ Enable the OpenShift Console dynamic plugin:
 consolePlugin:
   enabled: true
   image:
-    repository: icr.io/ibm-vpc-file-pool-csi/console-plugin
+    repository: de.icr.io/ibm-vpc-file-pool-csi/console-plugin
     tag: v0.12.0
   replicas: 2
 ```

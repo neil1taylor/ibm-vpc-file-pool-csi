@@ -24,7 +24,7 @@ spec:
       serviceAccountName: ibm-vpc-file-pool-csi-node
       containers:
         - name: csi-node
-          image: icr.io/ibm-vpc-file-pool-csi/driver:latest
+          image: de.icr.io/ibm-vpc-file-pool-csi/driver:latest
           args:
             - "--mode=node"
             - "--endpoint=unix:///csi/csi.sock"
