@@ -145,6 +145,11 @@ const DashboardPage: React.FC = () => {
   return (
     <PageSection>
       <Stack hasGutter>
+        <StackItem>
+          <p style={{ color: 'var(--pf-t--global--color--subtle)', margin: 0 }}>
+            Overview of all VPC file share pools, capacity utilization, performance metrics, and recent activity.
+          </p>
+        </StackItem>
         {/* Row 1: Stat Cards */}
         <StackItem>
           <Grid hasGutter>

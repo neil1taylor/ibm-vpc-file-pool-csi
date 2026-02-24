@@ -8,8 +8,8 @@ const config = {
   entry: {},
   output: {
     path: path.resolve(__dirname, 'dist'),
-    filename: '[name]-bundle.js',
-    chunkFilename: '[name]-chunk.js',
+    filename: '[name]-bundle.[contenthash:8].js',
+    chunkFilename: '[name]-chunk.[contenthash:8].js',
   },
   resolve: {
     extensions: ['.ts', '.tsx', '.js', '.jsx'],

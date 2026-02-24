@@ -47,16 +47,35 @@ interface MetricsState {
 }
 
 async function queryPrometheus(query: string): Promise<PrometheusResult[]> {
+  const resp = (await consoleFetchJSON(
+    `${PROMETHEUS_BASE}/query?query=${encodeURIComponent(query)}`,
+  )) as PrometheusQueryResponse;
+  if (resp.status === 'success') {
+    return resp.data.result;
+  }
+  throw new Error(`Prometheus query returned status: ${resp.status}`);
+}
+
+export async function checkPrometheusConnection(): Promise<{
+  connected: boolean;
+  hasMetrics: boolean;
+  error?: string;
+}> {
   try {
     const resp = (await consoleFetchJSON(
-      `${PROMETHEUS_BASE}/query?query=${encodeURIComponent(query)}`,
+      `${PROMETHEUS_BASE}/query?query=up`,
     )) as PrometheusQueryResponse;
-    if (resp.status === 'success') {
-      return resp.data.result;
+    if (resp.status !== 'success') {
+      return { connected: false, hasMetrics: false, error: 'Prometheus returned non-success status' };
     }
-    return [];
-  } catch {
-    return [];
+    // Check if our specific metrics exist
+    const metricsResp = (await consoleFetchJSON(
+      `${PROMETHEUS_BASE}/query?query=${encodeURIComponent(METRICS.POOL_CAPACITY_GB)}`,
+    )) as PrometheusQueryResponse;
+    const hasMetrics = metricsResp.status === 'success' && metricsResp.data.result.length > 0;
+    return { connected: true, hasMetrics };
+  } catch (err) {
+    return { connected: false, hasMetrics: false, error: err instanceof Error ? err.message : 'Connection failed' };
   }
 }
 

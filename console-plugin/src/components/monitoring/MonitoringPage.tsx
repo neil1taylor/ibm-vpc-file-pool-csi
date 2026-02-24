@@ -90,6 +90,9 @@ const MonitoringPage: React.FC = () => {
 
   return (
     <PageSection>
+      <p style={{ color: 'var(--pf-t--global--color--subtle)', margin: '0 0 8px 0' }}>
+        Prometheus metrics for pool capacity, allocation performance, VPC API health, and replication status.
+      </p>
       {/* A. Time range selector */}
       <Split hasGutter style={{ marginBottom: 16 }}>
         <SplitItem isFilled />
