@@ -254,7 +254,11 @@ func (s *GoldenImageSyncer) discoverImages(ctx context.Context, imageFilter []st
 		})
 	}
 
-	klog.V(4).InfoS("Discovered golden images", "count", len(images))
+	names := make([]string, len(images))
+	for i, img := range images {
+		names[i] = img.Name
+	}
+	klog.V(2).InfoS("Discovered golden images", "count", len(images), "images", names)
 	return images, nil
 }
 
@@ -275,7 +279,7 @@ func (s *GoldenImageSyncer) resolveImageStreamURL(ctx context.Context, dic unstr
 	if err := s.directClient.Get(ctx, types.NamespacedName{
 		Namespace: "openshift-virtualization-os-images", Name: isName,
 	}, is); err != nil {
-		klog.V(4).InfoS("Could not look up ImageStream for DataImportCron",
+		klog.V(2).InfoS("Could not look up ImageStream for DataImportCron",
 			"dataimportcron", name, "imagestream", isName, "error", err)
 		return ""
 	}
