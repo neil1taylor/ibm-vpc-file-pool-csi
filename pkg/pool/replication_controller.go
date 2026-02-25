@@ -55,8 +55,12 @@ type ReplicationController struct {
 	nfsOps       NFSOperations
 	orchestrator *hooks.Orchestrator
 
-	// replicationImage is the container image used for replication Jobs.
+	// replicationImage is the container image used for direct-NFS replication Jobs (rsync).
 	replicationImage string
+
+	// driverImage is the container image used for receiver-mode sync-client Jobs.
+	// Must contain the driver binary with --mode=sync-client support.
+	driverImage string
 
 	// interval is the poll interval for checking replication policies.
 	interval time.Duration
@@ -87,10 +91,17 @@ func (rc *ReplicationController) SetOrchestrator(orch *hooks.Orchestrator) {
 	rc.orchestrator = orch
 }
 
-// SetReplicationImage overrides the default container image for replication Jobs.
+// SetReplicationImage overrides the default container image for direct-NFS replication Jobs.
 func (rc *ReplicationController) SetReplicationImage(image string) {
 	if image != "" {
 		rc.replicationImage = image
+	}
+}
+
+// SetDriverImage sets the driver image used for receiver-mode sync-client Jobs.
+func (rc *ReplicationController) SetDriverImage(image string) {
+	if image != "" {
+		rc.driverImage = image
 	}
 }
 
@@ -132,8 +143,34 @@ func (rc *ReplicationController) processOnce(ctx context.Context) {
 	for i := range policies {
 		policy := &policies[i]
 
-		// Skip paused or failed policies.
-		if policy.Status.Phase == "Paused" || policy.Status.Phase == "Failed" {
+		// Handle pause/resume via annotation.
+		annotationPaused := policy.Annotations["storage.ibmcloud.io/paused"] == "true"
+
+		if annotationPaused {
+			// Pause requested — update status if needed and skip.
+			if policy.Status.Phase != "Paused" {
+				policy.Status.Phase = "Paused"
+				if err := rc.k8sClient.UpdateReplicationPolicyStatus(ctx, policy); err != nil {
+					klog.ErrorS(err, "Failed to update policy phase to Paused", "policy", policy.Name)
+				} else {
+					klog.V(2).InfoS("Paused replication policy", "policy", policy.Name)
+				}
+			}
+			continue
+		}
+
+		// Resume: annotation removed but status still Paused.
+		if policy.Status.Phase == "Paused" {
+			policy.Status.Phase = "Active"
+			if err := rc.k8sClient.UpdateReplicationPolicyStatus(ctx, policy); err != nil {
+				klog.ErrorS(err, "Failed to resume policy", "policy", policy.Name)
+			} else {
+				klog.V(2).InfoS("Resumed replication policy", "policy", policy.Name)
+			}
+		}
+
+		// Skip failed policies.
+		if policy.Status.Phase == "Failed" {
 			continue
 		}
 
@@ -543,7 +580,7 @@ func (rc *ReplicationController) ensureReceiverModeJob(ctx context.Context, poli
 					Containers: []corev1.Container{
 						{
 							Name:  "sync-client",
-							Image: rc.replicationImage,
+							Image: rc.driverImage,
 							Args: []string{
 								"--mode=sync-client",
 								"--receiver-endpoint=" + policy.Spec.DestinationEndpoint,
@@ -606,7 +643,7 @@ func (rc *ReplicationController) ensureReceiverModeJob(ctx context.Context, poli
 		"job", jobName,
 		"policy", policyName,
 		"subVolume", sv.Name,
-		"image", rc.replicationImage,
+		"image", rc.driverImage,
 		"endpoint", policy.Spec.DestinationEndpoint,
 	)
 	return nil

@@ -31,8 +31,9 @@ type ReplicationPolicySpec struct {
 
 	// DestinationNFSServer is the NFS mount target IP of the destination pool,
 	// reachable over Transit Gateway or VPN.
-	// +kubebuilder:validation:Required
-	DestinationNFSServer string `json:"destinationNFSServer"`
+	// Required for direct NFS mode; omit when using driver-to-driver mode (DestinationEndpoint).
+	// +optional
+	DestinationNFSServer string `json:"destinationNFSServer,omitempty"`
 
 	// DestinationExportPath is the NFS export path on the destination server.
 	// For VPC access-mode shares, this differentiates shares under a shared FQDN.

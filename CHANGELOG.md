@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [v0.13.2] — 2026-02-25
+
+### Fixed
+- Receiver Helm template: use controller ServiceAccount (with imagePullSecrets) instead of nonexistent base SA
+- ReplicationPolicy CRD: make `destinationNFSServer` optional for driver-to-driver mode (was incorrectly required at OpenAPI level)
+- Receiver-mode sync-client Jobs: use driver image instead of CentOS (CentOS lacks the `--mode=sync-client` binary)
+- Pause test for SkipsPausedPolicy: set annotation alongside status.Phase
+
+### Added
+- `--driver-image` CLI flag and Helm wiring so the controller passes its own image to receiver-mode sync-client Jobs
+- Annotation-based pause/resume for ReplicationPolicy: `storage.ibmcloud.io/paused=true` pauses, removing it resumes
+- `SetDriverImage()` method on ReplicationController for receiver-mode Job image selection
+- `destinationEndpoint` and `destinationAuthSecretRef` fields documented in CRD-SPEC.md
+- Replication Receiver and Replication sections in HELM-VALUES.md
+
+### Changed
+- Replication controller pause logic: annotation is the source of truth for user-initiated pause; status.Phase is derived
+
 ## [v0.13.1] — 2026-02-24
 
 ### Changed

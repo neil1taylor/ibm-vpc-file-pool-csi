@@ -42,7 +42,11 @@ done
 
 # 3. Replication health (if DR is configured)
 kubectl get replicationpolicies -o custom-columns=\
-'NAME:.metadata.name,LAST_SYNC:.status.lastSyncTime,LAG:.status.lagSeconds,FAILURES:.status.consecutiveFailures,PAUSED:.status.paused'
+'NAME:.metadata.name,SOURCE:.spec.sourcePoolName,SCHEDULE:.spec.schedule,PHASE:.status.phase,LAST_SYNC:.status.lastSyncTime,FAILURES:.status.consecutiveFailures'
+
+# 4. Pause/resume replication (if needed)
+# Pause:  kubectl annotate replicationpolicy <name> storage.ibmcloud.io/paused=true
+# Resume: kubectl annotate replicationpolicy <name> storage.ibmcloud.io/paused-
 ```
 
 ### Monthly

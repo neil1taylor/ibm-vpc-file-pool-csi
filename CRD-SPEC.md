@@ -1179,8 +1179,16 @@ type ReplicationPolicySpec struct {
 
     // DestinationNFSServer is the NFS mount target IP of the destination pool,
     // reachable over Transit Gateway or VPN.
-    // +kubebuilder:validation:Required
-    DestinationNFSServer string `json:"destinationNFSServer"`
+    // Required for direct NFS mode; omit when using driver-to-driver mode (DestinationEndpoint).
+    // +optional
+    DestinationNFSServer string `json:"destinationNFSServer,omitempty"`
+
+    // DestinationExportPath is the NFS export path on the destination server.
+    // For VPC access-mode shares, this differentiates shares under a shared FQDN.
+    // Defaults to "/" if not specified.
+    // +kubebuilder:default="/"
+    // +optional
+    DestinationExportPath string `json:"destinationExportPath,omitempty"`
 
     // DestinationBasePath is the base path on the destination NFS server
     // where replicated SubVolume directories are written (e.g., "/pvcs").
@@ -1227,8 +1235,21 @@ type ReplicationPolicySpec struct {
     // RsyncOptions allows passing extra rsync flags to customize transfer behavior.
     // These are appended to the default flags ["-a", "--delete", "--partial", "--timeout=300"].
     // Security: --daemon, --server, --rsh, and --rsync-path flags are blocked by validation.
+    // Only applies to direct NFS mode (not driver-to-driver mode).
     // +optional
     RsyncOptions []string `json:"rsyncOptions,omitempty"`
+
+    // DestinationEndpoint is the HTTPS URL of the replication receiver service
+    // on the destination cluster (e.g., "https://repl-receiver.apps.cluster.example.com").
+    // When set, the controller uses driver-to-driver mode instead of direct NFS.
+    // +optional
+    DestinationEndpoint string `json:"destinationEndpoint,omitempty"`
+
+    // DestinationAuthSecretRef is the name of a Secret in kube-system containing
+    // a "token" key with the bearer token for authenticating to the receiver.
+    // Required when DestinationEndpoint is set.
+    // +optional
+    DestinationAuthSecretRef string `json:"destinationAuthSecretRef,omitempty"`
 
     // PreSyncHooks are hooks executed before each replication sync cycle.
     // +optional
@@ -1334,11 +1355,41 @@ spec:
   # subVolumeSelector omitted — all SubVolumes in the pool are replicated
 ```
 
+### Example ReplicationPolicy CR Using Driver-to-Driver Mode
+
+Driver-to-driver mode streams data over HTTPS to a receiver service on the destination cluster,
+eliminating the need for direct NFS connectivity between regions.
+
+```yaml
+apiVersion: storage.ibmcloud.io/v1alpha1
+kind: ReplicationPolicy
+metadata:
+  name: dr-driver-to-driver
+spec:
+  sourcePoolName: general-purpose
+  destinationEndpoint: "https://repl-receiver-kube-system.apps.dr-cluster.example.com"
+  destinationAuthSecretRef: replication-auth          # Secret in kube-system with "token" key
+  destinationBasePath: /pvcs
+  schedule: "2m"
+  maxRetries: 3
+  maxParallelSyncs: 2
+```
+
 ### ReplicationPolicy Lifecycle
 
 1. **Active**: The policy is operating normally. Replication cycles run on the configured `schedule`.
-2. **Paused**: Replication has been paused after `maxRetries` consecutive failures. Manual intervention is required to fix the issue and reset the policy.
+2. **Paused**: Replication has been paused — either manually via the `storage.ibmcloud.io/paused=true` annotation, or automatically after `maxRetries` consecutive failures. Remove the annotation to resume.
 3. **Failed**: A permanent failure has occurred (e.g., destination unreachable after all retries).
+
+### Pause/Resume via Annotation
+
+```bash
+# Pause replication (controller stops creating new sync Jobs)
+kubectl annotate replicationpolicy <name> storage.ibmcloud.io/paused=true
+
+# Resume replication (controller resumes sync cycles)
+kubectl annotate replicationpolicy <name> storage.ibmcloud.io/paused-
+```
 
 ### Replication Behavior
 

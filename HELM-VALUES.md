@@ -86,6 +86,27 @@ Controls how the IBM Cloud API key is injected into the controller.
 |-----------|------|---------|-------------|
 | `goldenImageSyncer.interval` | string | `5m` | Background golden image syncer poll interval (Go duration). Controls how often the syncer checks for new CDI DataImportCrons and updates golden images |
 
+## Replication Receiver
+
+Configuration for the driver-to-driver cross-region replication receiver. Deploy this on the **destination** cluster. Source cluster sync-client Jobs upload data via HTTPS.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `replicationReceiver.enabled` | bool | `false` | Enable the replication receiver Deployment, Service, and Route |
+| `replicationReceiver.pvcName` | string | `""` | Pre-created PVC name for the destination NFS mount |
+| `replicationReceiver.authSecretName` | string | `""` | Secret name containing a `token` key for bearer token authentication |
+| `replicationReceiver.resources.requests.cpu` | string | `100m` | Receiver CPU request |
+| `replicationReceiver.resources.requests.memory` | string | `256Mi` | Receiver memory request |
+| `replicationReceiver.resources.limits.memory` | string | `512Mi` | Receiver memory limit |
+
+## Replication
+
+Controller-side replication Job configuration.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `replication.image` | string | `""` | Override container image for replication Jobs. When empty, the driver image is used for receiver-mode (sync-client) Jobs; CentOS Stream 9 is used for direct-NFS (rsync) Jobs |
+
 ## Webhook
 
 | Parameter | Type | Default | Description |

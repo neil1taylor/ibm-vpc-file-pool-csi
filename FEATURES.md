@@ -75,18 +75,21 @@ Multi-PVC coordinated snapshots for application-consistent backups.
 
 ### Cross-Region Replication — Beta
 
-rsync-based disaster recovery with configurable sync schedules.
+Disaster recovery with configurable sync schedules. Two replication modes are supported.
 
+- **Direct NFS mode** — rsync-based replication between source and destination NFS shares mounted over Transit Gateway or VPN. Uses incremental delta transfer for efficiency.
+- **Driver-to-driver mode** — HTTPS-based replication from sync-client Jobs on the source cluster to a receiver service on the destination cluster. Streams tar archives over HTTPS with bearer token auth. No cross-region NFS connectivity required.
 - **Schedule-based sync** — ReplicationPolicy CR defines sync interval (e.g., `15m`, `1h`, `6h`) as a duration string.
-- **Per-SubVolume incremental sync** — Optional label selector filters which SubVolumes replicate. Incremental mode (default) uses rsync for efficient delta transfer.
-- **Bandwidth limiting and parallel syncs** — `bandwidthLimitMbps` caps rsync throughput; `maxParallelSyncs` controls concurrent SubVolume syncs with a semaphore-gated worker pool.
-- **Extra rsync options** — `rsyncOptions` field passes additional rsync flags (e.g., `--compress`, `--checksum`). Dangerous flags (`--daemon`, `--server`, `--rsh`, `--rsync-path`) are blocked by the webhook.
+- **Per-SubVolume incremental sync** — Optional label selector filters which SubVolumes replicate. Incremental mode (default) uses rsync for efficient delta transfer (direct NFS mode).
+- **Bandwidth limiting and parallel syncs** — `bandwidthLimitMbps` caps rsync throughput (direct NFS mode); `maxParallelSyncs` controls concurrent SubVolume syncs in both modes.
+- **Extra rsync options** — `rsyncOptions` field passes additional rsync flags (e.g., `--compress`, `--checksum`). Dangerous flags (`--daemon`, `--server`, `--rsh`, `--rsync-path`) are blocked by the webhook. Only applies to direct NFS mode.
 - **Retry with backoff** — Configurable max retries (default 3). Policy pauses on consecutive failures.
+- **Pause/resume via annotation** — Annotate a ReplicationPolicy with `storage.ibmcloud.io/paused=true` to pause; remove the annotation to resume. The controller updates `status.phase` accordingly.
 - **Pre/post-sync hooks** — Exec and HTTP hooks for application quiescing before sync and notification after.
 - **Metadata sidecar** — Writes `.subvolume-metadata.json` alongside each replicated SubVolume directory, enabling the failover CLI to reconstruct resources without querying the source cluster.
 - **Failover CLI** — `kubectl failover` plugin with `plan` (scan destination NFS, compute RPO), `execute` (create SubVolume CRs, PVs, PVCs on DR cluster), and `status` (report PVC binding) subcommands. Supports `--dry-run` and is idempotent.
 - **Status tracking** — Per-policy LastSyncTime and LastSyncDuration. Per-SubVolume sync state with BytesSynced and LastError.
-- **Destination config** — NFS server IP and base path for the remote region's pool.
+- **Destination config** — NFS server IP and base path (direct NFS mode), or HTTPS receiver endpoint with bearer token auth (driver-to-driver mode).
 - **Prometheus metrics** — Dedicated metrics for sync total, duration, lag, failures, and SubVolume count.
 
 ### NFS & Mount Management — GA

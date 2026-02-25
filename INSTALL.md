@@ -338,13 +338,14 @@ kubectl apply -f config/deploy/node.yaml
 |------|---------|-------------|
 | `--endpoint` | `unix:///csi/csi.sock` | CSI gRPC endpoint |
 | `--node-id` | (required) | Kubernetes node name |
-| `--mode` | `controller` | `controller` or `node` |
+| `--mode` | `controller` | `controller`, `node`, `receiver`, or `sync-client` |
 | `--region` | Auto-discovered | IBM Cloud region |
 | `--vpc-id` | Auto-discovered | VPC ID for mount targets |
 | `--subnet-id` | Auto-discovered | Subnet ID for mount targets |
 | `--kubelet-dir` | `/var/lib/kubelet` | Kubelet root directory (ROKS: use `/var/data/kubelet`) |
 | `--clone-worker-interval` | `10s` | Clone worker poll interval |
 | `--golden-image-sync-interval` | `5m` | Golden image syncer poll interval |
+| `--driver-image` | `""` | Driver container image for receiver-mode sync-client Jobs (auto-set by Helm) |
 
 ---
 

@@ -654,6 +654,7 @@ func TestReplicationController_SkipsPausedPolicy(t *testing.T) {
 
 	policy := newTestReplicationPolicy("paused-policy", "prod-pool", "1ms")
 	policy.Status.Phase = "Paused"
+	policy.Annotations = map[string]string{"storage.ibmcloud.io/paused": "true"}
 	k.addPolicy(policy)
 
 	rc := newReplController(k, dc, nfs)
@@ -1594,7 +1595,7 @@ func TestReplicationController_ReceiverMode_JobHasSyncClientArgs(t *testing.T) {
 	k.addPolicy(policy)
 
 	rc := newReplController(k, dc, nfs)
-	rc.SetReplicationImage("de.icr.io/ibm-vpc-file-pool-csi/driver:latest")
+	rc.SetDriverImage("de.icr.io/ibm-vpc-file-pool-csi/driver:latest")
 
 	ctx := context.Background()
 	rc.processOnce(ctx)

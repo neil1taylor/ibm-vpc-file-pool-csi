@@ -53,6 +53,9 @@ func main() {
 		receiverAuthTokenFile string
 		receiverListenAddr    string
 
+		// Replication controller flags.
+		driverImage string
+
 		// Sync-client mode flags.
 		receiverEndpoint string
 		authTokenFile    string
@@ -72,6 +75,9 @@ func main() {
 	flag.StringVar(&kubeletDir, "kubelet-dir", "/var/lib/kubelet", "Kubelet root directory (ROKS uses /var/data/kubelet)")
 	flag.DurationVar(&cloneWorkerInterval, "clone-worker-interval", pool.DefaultCloneWorkerInterval, "Interval between clone worker poll cycles")
 	flag.DurationVar(&goldenImageSyncInterval, "golden-image-sync-interval", pool.DefaultGoldenImageInterval, "Interval between golden image syncer poll cycles")
+
+	// Replication controller flags.
+	flag.StringVar(&driverImage, "driver-image", "", "Driver container image for receiver-mode sync-client Jobs")
 
 	// Receiver flags.
 	flag.StringVar(&receiverBasePath, "receiver-base-path", "/data", "NFS mount point inside receiver container")
@@ -94,7 +100,7 @@ func main() {
 
 	switch mode {
 	case "controller":
-		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, cloneWorkerInterval, goldenImageSyncInterval)
+		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, cloneWorkerInterval, goldenImageSyncInterval, driverImage)
 	case "receiver":
 		runReceiver(receiverBasePath, receiverAuthTokenFile, receiverListenAddr)
 	case "sync-client":
@@ -104,7 +110,7 @@ func main() {
 	}
 }
 
-func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string, cloneWorkerInterval, goldenImageSyncInterval time.Duration) {
+func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string, cloneWorkerInterval, goldenImageSyncInterval time.Duration, driverImage string) {
 	scheme := runtime.NewScheme()
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
 		klog.ErrorS(err, "Failed to add CRD types to scheme")
@@ -327,6 +333,7 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 		hooks.NewHTTPHook(nil),
 	)
 	replController.SetOrchestrator(hookOrchestrator)
+	replController.SetDriverImage(driverImage)
 	go replController.Run(signalCtx)
 
 	// mgr.Start blocks until signal or error

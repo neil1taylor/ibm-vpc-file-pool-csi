@@ -240,10 +240,10 @@ Replication cycle with quiesce:
 
 ### Design Principles
 
-1. **Replication runs outside the CSI hot path.** The replication controller is a separate Deployment. It never touches CreateVolume, DeleteVolume, or node mount operations.
+1. **Replication runs outside the CSI hot path.** The replication controller is a background goroutine in the controller pod. It never touches CreateVolume, DeleteVolume, or node mount operations.
 2. **All state in CRDs.** ReplicationPolicy CRs define what to replicate. Status fields track progress, RPO, and errors.
-3. **Replication is pull or push over rsync.** The controller mounts source and destination shares (or uses an rsync daemon) and copies data. No custom data plane.
-4. **Fail open.** If replication fails, the source cluster is unaffected. Replication errors are surfaced as CRD conditions and Prometheus metrics, never as PVC failures.
+3. **Two replication modes.** *Direct NFS mode*: rsync between NFS-mounted source and destination shares over Transit Gateway. *Driver-to-driver mode*: sync-client Jobs tar-stream data over HTTPS to a receiver service on the destination cluster — no cross-region NFS connectivity needed.
+4. **Fail open.** If replication fails, the source cluster is unaffected. Replication errors are surfaced as CRD status and Prometheus metrics, never as PVC failures.
 5. **Per-SubVolume granularity.** Each SubVolume (PVC subdirectory) is replicated independently. The operator chooses which SubVolumes to replicate via label selectors.
 
 ### Component Diagram
@@ -253,56 +253,56 @@ Replication cycle with quiesce:
 │                     Source Cluster (Primary)                         │
 │                                                                     │
 │  ┌──────────────────────┐   ┌──────────────────────────────────┐   │
-│  │ CSI Controller       │   │ Replication Controller            │   │
-│  │ (unchanged)          │   │ (NEW — separate Deployment)       │   │
+│  │ CSI Controller Pod   │   │ Replication Controller (goroutine)│   │
 │  │                      │   │                                    │   │
-│  │ CreateVolume         │   │  ┌─────────────────────────────┐  │   │
-│  │ DeleteVolume         │   │  │ For each ReplicationPolicy: │  │   │
-│  │ Pool Manager         │   │  │                             │  │   │
-│  └──────────────────────┘   │  │ 1. List matching SubVolumes │  │   │
-│                             │  │ 2. Mount source share (NFS) │  │   │
-│  ┌──────────────────────┐   │  │ 3. rsync to dest share      │  │   │
-│  │ FileSharePool CRs    │   │  │ 4. Update status (RPO, lag) │  │   │
-│  │ SubVolume CRs        │   │  └─────────────────────────────┘  │   │
-│  │ ReplicationPolicy CRs│   │                                    │   │
-│  └──────────────────────┘   └──────────────────────────────────┘   │
-│            │                          │                              │
-│            │                          │ rsync over NFS / SSH         │
-└────────────┼──────────────────────────┼─────────────────────────────┘
-             │                          │
-             │         Transit Gateway  │
-             │                          │
-┌────────────┼──────────────────────────┼─────────────────────────────┐
-│            │                          ▼                              │
-│            │                 ┌──────────────────────┐               │
-│            │                 │ Destination Pool      │               │
-│            │                 │ (DR FileSharePool)    │               │
-│            │                 │                       │               │
-│            │                 │ Shares receive rsync  │               │
-│            │                 │ data into matching    │               │
-│            │                 │ subdirectories        │               │
-│            │                 └──────────────────────┘               │
-│            │                                                        │
-│            │            Destination Cluster (DR)                     │
+│  │ CreateVolume         │   │  For each ReplicationPolicy:       │   │
+│  │ DeleteVolume         │   │  1. List matching SubVolumes       │   │
+│  │ Pool Manager         │   │  2. Create K8s Jobs per SubVolume  │   │
+│  └──────────────────────┘   │  3. Update status on completion    │   │
+│                             └──────────────────────────────────┘   │
+│  ┌──────────────────────┐          │                                │
+│  │ FileSharePool CRs    │          │ Creates Jobs:                  │
+│  │ SubVolume CRs        │          │                                │
+│  │ ReplicationPolicy CRs│   ┌──────┴─────────────────────────────┐ │
+│  └──────────────────────┘   │ Direct NFS:  rsync Job (CentOS)    │ │
+│                             │ Driver-to-Driver: sync-client Job   │ │
+│                             │   (driver image, tar over HTTPS)    │ │
+│                             └──────┬─────────────────────────────┘ │
+│                                    │                                │
+└────────────────────────────────────┼───────────────────────────────┘
+                                     │
+           Direct NFS: rsync over    │  Driver-to-Driver: HTTPS PUT
+           Transit Gateway/VPN       │  via OpenShift Route
+                                     │
+┌────────────────────────────────────┼───────────────────────────────┐
+│                                    ▼                                │
+│     ┌──────────────────────────────────────────────────────┐       │
+│     │ Direct NFS mode:    Destination NFS share (mounted)  │       │
+│     │ Driver-to-Driver:   Replication Receiver service     │       │
+│     │                     (extracts tar, writes metadata)  │       │
+│     └──────────────────────────────────────────────────────┘       │
+│                                                                     │
+│                    Destination Cluster (DR)                          │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Replication Controller
 
-The replication controller is a standalone Deployment (1 replica with leader election) that:
+The replication controller is a background goroutine in the CSI controller pod (with leader election) that:
 
-1. Watches `ReplicationPolicy` CRs.
+1. Polls `ReplicationPolicy` CRs every 30 seconds.
 2. For each policy, resolves the source `FileSharePool` and its SubVolumes (filtered by label selector).
-3. On each replication cycle (per cron schedule):
-   a. Mounts the source share(s) read-only via NFS.
-   b. Mounts the destination share(s) read-write via NFS (cross-region, over Transit Gateway).
-   c. Runs rsync for each matching SubVolume subdirectory.
-   d. Records completion time, bytes transferred, and duration in the ReplicationPolicy status.
-4. Exposes Prometheus metrics for replication lag, RPO, transfer rate, and error counts.
+3. Determines the replication mode based on the policy spec:
+   - **Direct NFS mode** (`destinationNFSServer` set): Creates rsync Jobs that mount both source and destination NFS shares.
+   - **Driver-to-driver mode** (`destinationEndpoint` set): Creates sync-client Jobs that tar-stream source data to the HTTPS receiver on the destination cluster.
+4. On each replication cycle, creates Kubernetes Jobs (up to `maxParallelSyncs` concurrent) for each SubVolume.
+5. Records completion time, bytes transferred, and duration in the ReplicationPolicy status.
+6. Exposes Prometheus metrics for replication lag, RPO, transfer rate, and error counts.
+7. Supports pause/resume via the `storage.ibmcloud.io/paused` annotation.
 
 The controller does NOT:
 - Create or delete VPC file shares (the destination pool must already exist).
-- Create or delete SubVolume CRs on the destination (SubVolumes on the DR cluster are managed by the DR cluster's own pool manager if/when failover occurs).
+- Create or delete SubVolume CRs on the destination (the failover CLI handles this).
 - Interfere with the CSI controller or node agent in any way.
 
 ### Replication Data Flow
