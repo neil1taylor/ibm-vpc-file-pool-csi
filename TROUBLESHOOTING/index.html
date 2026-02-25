@@ -1,0 +1,3415 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A Kubernetes CSI driver that pools multiple PVCs as subdirectories within shared VPC file shares">
+      
+      
+      
+        <link rel="canonical" href="https://neil1taylor.github.io/ibm-vpc-file-pool-csi/TROUBLESHOOTING/">
+      
+      
+        <link rel="prev" href="../HELM-VALUES/">
+      
+      
+        <link rel="next" href="../PERFORMANCE-TUNING/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.3">
+    
+    
+      
+        <title>Troubleshooting - IBM VPC File Pool CSI Driver</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#troubleshooting-guide-ibm-vpc-file-pool-csi-driver" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="IBM VPC File Pool CSI Driver" class="md-header__button md-logo" aria-label="IBM VPC File Pool CSI Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            IBM VPC File Pool CSI Driver
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Troubleshooting
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/neil1taylor/ibm-vpc-file-pool-csi" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neil1taylor/ibm-vpc-file-pool-csi
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../INSTALL/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
+          
+  
+  
+  Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../OVERVIEW/" class="md-tabs__link">
+          
+  
+  
+  Architecture
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../VOLUME-CLONING/" class="md-tabs__link">
+          
+  
+  
+  Design (Phase 4)
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../CONTRIBUTING/" class="md-tabs__link">
+          
+  
+  
+  Development
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../examples/" class="md-tabs__link">
+          
+  
+  
+  Examples
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="IBM VPC File Pool CSI Driver" class="md-nav__button md-logo" aria-label="IBM VPC File Pool CSI Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    IBM VPC File Pool CSI Driver
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/neil1taylor/ibm-vpc-file-pool-csi" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neil1taylor/ibm-vpc-file-pool-csi
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../INSTALL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../USER-GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../HELM-VALUES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Helm Values Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#quick-diagnostic-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick Diagnostic Checklist
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pvc-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PVC Issues
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="PVC Issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pvc-pending-pool-not-found" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PVC Pending: "pool not found"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pvc-pending-pool-has-no-available-capacity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PVC Pending: "pool has no available capacity"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pvc-pending-pool-is-expanding-retry-shortly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PVC Pending: "pool is expanding, retry shortly"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pvc-pending-tier-not-found" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PVC Pending: "tier not found"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pvc-pending-vpc-api-authentication-failed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PVC Pending: "VPC API authentication failed"
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#vm-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        VM Issues
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="VM Issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#vm-shows-no-bootable-device" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        VM shows "No bootable device"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#openshift-virtualization-ui-no-accessmode-specified-in-storageprofile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OpenShift Virtualization UI: "no accessMode specified in StorageProfile"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#openshift-virtualization-ui-no-accessmode-specified-in-storageprofile-other-storageclasses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OpenShift Virtualization UI: "no accessMode specified in StorageProfile" (other StorageClasses)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#share-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Share Issues
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Share Issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#share-has-no-mount-target-ip" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Share has no mount target IP
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pv-has-empty-nfs-server-field" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PV has empty NFS server field
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mount-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mount Issues
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Mount Issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#nfs-mount-failed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NFS mount failed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#permission-denied-creating-subdirectory-mkdir-pvcs-permission-denied" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Permission denied creating subdirectory (mkdir .../pvcs: permission denied)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#permission-denied-on-mount" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Permission denied on mount
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stale-nfs-mount-after-share-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stale NFS mount after share recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nfs-mount-fails-with-nsenternamespace-errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NFS mount fails with nsenter/namespace errors
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mount-stuck-pod-hangs-on-io" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mount stuck — pod hangs on I/O
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pool-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pool Issues
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Pool Issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pool-stuck-in-initializing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pool stuck in Initializing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pool-in-degraded-phase" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pool in Degraded phase
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pool-expanding-timeout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pool Expanding timeout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pool-full-maxshares-reached" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pool Full — maxShares reached
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pool-deletion-blocked-by-active-subvolumes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pool deletion blocked by active SubVolumes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#controller-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Controller Issues
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Controller Issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#controller-crashloopbackoff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Controller CrashLoopBackOff
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#leader-election-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Leader election issues
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#csi-sidecar-connectivity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CSI sidecar connectivity
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Issues
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Data Issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cross-pvc-data-visibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cross-PVC data visibility
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orphaned-subvolume-crs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Orphaned SubVolume CRs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orphaned-subdirectories-on-nfs-shares" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Orphaned subdirectories on NFS shares
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#vpc-api-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        VPC API Issues
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="VPC API Issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#403-forbidden-iam-permissions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        403 Forbidden (IAM permissions)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#quota-exceeded-300-shares" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quota exceeded (300 shares)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rate-limiting-429-too-many-requests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rate limiting (429 Too Many Requests)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#metrics-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Metrics Issues
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Metrics Issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#prometheus-not-scraping-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prometheus not scraping metrics
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stale-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stale metrics
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#log-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Log Reference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Log Reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#klog-v-levels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        klog V-levels
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#enabling-verbose-logging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enabling verbose logging
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#log-filtering-tips" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Log filtering tips
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#getting-help" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Getting Help
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../PERFORMANCE-TUNING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance Tuning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../KNOWN-LIMITATIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Known Limitations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../OVERVIEW/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONSISTENCY-MODEL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Consistency Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VPC-NETWORKING.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VPC Networking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VM-DISK-FORMATS.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VM Disk Formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CRD-SPEC/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CRD Specification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CSI-INTERFACE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CSI Interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../IBM-VPC-API/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    IBM VPC API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../API-KEY-SETUP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Key Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design (Phase 4)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Design (Phase 4)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VOLUME-CLONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Volume Cloning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VOLUME-GROUP-SNAPSHOTS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Volume Group Snapshots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CROSS-REGION-DR/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cross-Region DR
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CODING-GUIDELINES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coding Guidelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TESTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Examples
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#quick-diagnostic-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick Diagnostic Checklist
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pvc-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PVC Issues
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="PVC Issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pvc-pending-pool-not-found" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PVC Pending: "pool not found"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pvc-pending-pool-has-no-available-capacity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PVC Pending: "pool has no available capacity"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pvc-pending-pool-is-expanding-retry-shortly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PVC Pending: "pool is expanding, retry shortly"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pvc-pending-tier-not-found" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PVC Pending: "tier not found"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pvc-pending-vpc-api-authentication-failed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PVC Pending: "VPC API authentication failed"
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#vm-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        VM Issues
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="VM Issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#vm-shows-no-bootable-device" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        VM shows "No bootable device"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#openshift-virtualization-ui-no-accessmode-specified-in-storageprofile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OpenShift Virtualization UI: "no accessMode specified in StorageProfile"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#openshift-virtualization-ui-no-accessmode-specified-in-storageprofile-other-storageclasses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OpenShift Virtualization UI: "no accessMode specified in StorageProfile" (other StorageClasses)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#share-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Share Issues
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Share Issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#share-has-no-mount-target-ip" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Share has no mount target IP
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pv-has-empty-nfs-server-field" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PV has empty NFS server field
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mount-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mount Issues
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Mount Issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#nfs-mount-failed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NFS mount failed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#permission-denied-creating-subdirectory-mkdir-pvcs-permission-denied" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Permission denied creating subdirectory (mkdir .../pvcs: permission denied)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#permission-denied-on-mount" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Permission denied on mount
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stale-nfs-mount-after-share-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stale NFS mount after share recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nfs-mount-fails-with-nsenternamespace-errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NFS mount fails with nsenter/namespace errors
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mount-stuck-pod-hangs-on-io" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mount stuck — pod hangs on I/O
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pool-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pool Issues
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Pool Issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pool-stuck-in-initializing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pool stuck in Initializing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pool-in-degraded-phase" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pool in Degraded phase
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pool-expanding-timeout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pool Expanding timeout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pool-full-maxshares-reached" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pool Full — maxShares reached
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pool-deletion-blocked-by-active-subvolumes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pool deletion blocked by active SubVolumes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#controller-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Controller Issues
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Controller Issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#controller-crashloopbackoff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Controller CrashLoopBackOff
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#leader-election-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Leader election issues
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#csi-sidecar-connectivity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CSI sidecar connectivity
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Issues
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Data Issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cross-pvc-data-visibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cross-PVC data visibility
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orphaned-subvolume-crs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Orphaned SubVolume CRs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orphaned-subdirectories-on-nfs-shares" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Orphaned subdirectories on NFS shares
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#vpc-api-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        VPC API Issues
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="VPC API Issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#403-forbidden-iam-permissions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        403 Forbidden (IAM permissions)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#quota-exceeded-300-shares" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quota exceeded (300 shares)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rate-limiting-429-too-many-requests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rate limiting (429 Too Many Requests)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#metrics-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Metrics Issues
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Metrics Issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#prometheus-not-scraping-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prometheus not scraping metrics
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stale-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stale metrics
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#log-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Log Reference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Log Reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#klog-v-levels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        klog V-levels
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#enabling-verbose-logging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enabling verbose logging
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#log-filtering-tips" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Log filtering tips
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#getting-help" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Getting Help
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="troubleshooting-guide-ibm-vpc-file-pool-csi-driver">Troubleshooting Guide — IBM VPC File Pool CSI Driver<a class="headerlink" href="#troubleshooting-guide-ibm-vpc-file-pool-csi-driver" title="Permanent link">&para;</a></h1>
+<h2 id="quick-diagnostic-checklist">Quick Diagnostic Checklist<a class="headerlink" href="#quick-diagnostic-checklist" title="Permanent link">&para;</a></h2>
+<p>Run these five commands first when investigating any issue:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># 1. Are the driver pods running?</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>vpc-file-pool-csi-controller
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>kubectl<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>vpc-file-pool-csi-node
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># 2. What state are the pools in?</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>kubectl<span class="w"> </span>get<span class="w"> </span>filesharepools
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="c1"># 3. What does the PVC say?</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>kubectl<span class="w"> </span>describe<span class="w"> </span>pvc<span class="w"> </span>&lt;pvc-name&gt;
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="c1"># 4. Controller logs (last 100 lines)</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>vpc-file-pool-csi-controller<span class="w"> </span>-c<span class="w"> </span>csi-controller<span class="w"> </span>--tail<span class="o">=</span><span class="m">100</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="c1"># 5. Node agent logs on the affected node</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="nv">NODE</span><span class="o">=</span><span class="k">$(</span>kubectl<span class="w"> </span>get<span class="w"> </span>pod<span class="w"> </span>&lt;pod-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.nodeName}&#39;</span><span class="k">)</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>vpc-file-pool-csi-node<span class="w"> </span>--field-selector<span class="w"> </span>spec.nodeName<span class="o">=</span><span class="si">${</span><span class="nv">NODE</span><span class="si">}</span><span class="w"> </span>-c<span class="w"> </span>csi-node<span class="w"> </span>--tail<span class="o">=</span><span class="m">100</span>
+</code></pre></div>
+<hr />
+<h2 id="pvc-issues">PVC Issues<a class="headerlink" href="#pvc-issues" title="Permanent link">&para;</a></h2>
+<h3 id="pvc-pending-pool-not-found">PVC Pending: "pool not found"<a class="headerlink" href="#pvc-pending-pool-not-found" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> PVC stays in <code>Pending</code> with event message <code>pool "xyz" not found</code>.</p>
+<p><strong>Cause:</strong> The <code>pool</code> parameter in the StorageClass doesn't match any <code>FileSharePool</code> CR name.</p>
+<p><strong>Fix:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># List available pools</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>filesharepools
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Check the StorageClass pool parameter</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>kubectl<span class="w"> </span>get<span class="w"> </span>storageclass<span class="w"> </span>&lt;sc-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.parameters.pool}&#39;</span>
+</code></pre></div></p>
+<p>Ensure the pool name in the StorageClass's <code>parameters.pool</code> exactly matches the <code>metadata.name</code> of a <code>FileSharePool</code> CR. Names are case-sensitive.</p>
+<hr />
+<h3 id="pvc-pending-pool-has-no-available-capacity">PVC Pending: "pool has no available capacity"<a class="headerlink" href="#pvc-pending-pool-has-no-available-capacity" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> PVC stays in <code>Pending</code> with event message <code>pool has no available capacity</code>.</p>
+<p><strong>Cause:</strong> All shares in the pool are fully allocated and the pool cannot auto-expand (either <code>autoExpand: false</code> or <code>maxShares</code> reached).</p>
+<p><strong>Fix:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Check pool utilization</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>filesharepools
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>kubectl<span class="w"> </span>get<span class="w"> </span>filesharespool<span class="w"> </span>&lt;pool-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.totalAllocatedGB}/{.status.totalCapacityGB}&#39;</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="c1"># Option 1: Increase maxShares to allow more shares</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>kubectl<span class="w"> </span>patch<span class="w"> </span>filesharespool<span class="w"> </span>&lt;pool-name&gt;<span class="w"> </span>--type<span class="w"> </span>merge<span class="w"> </span>-p<span class="w"> </span><span class="s1">&#39;{&quot;spec&quot;:{&quot;maxShares&quot;:20}}&#39;</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="c1"># Option 2: Increase share size (triggers VPC API call, takes 30-90s)</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>kubectl<span class="w"> </span>patch<span class="w"> </span>filesharespool<span class="w"> </span>&lt;pool-name&gt;<span class="w"> </span>--type<span class="w"> </span>merge<span class="w"> </span>-p<span class="w"> </span><span class="s1">&#39;{&quot;spec&quot;:{&quot;shareSizeGB&quot;:4000}}&#39;</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="c1"># Option 3: Delete unused PVCs to free capacity</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>kubectl<span class="w"> </span>get<span class="w"> </span>subvolumes<span class="w"> </span>-l<span class="w"> </span>storage.ibmcloud.io/pool<span class="o">=</span>&lt;pool-name&gt;<span class="w"> </span>-o<span class="w"> </span>wide
+</code></pre></div></p>
+<hr />
+<h3 id="pvc-pending-pool-is-expanding-retry-shortly">PVC Pending: "pool is expanding, retry shortly"<a class="headerlink" href="#pvc-pending-pool-is-expanding-retry-shortly" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> PVC stays in <code>Pending</code> with event message <code>pool is expanding, retry shortly</code>.</p>
+<p><strong>Cause:</strong> A new VPC file share is being created. This is normal — VPC share creation takes 30-90 seconds. The PVC will bind once the share becomes stable.</p>
+<p><strong>Fix:</strong> Wait 2-3 minutes. If still pending after 5 minutes, check controller logs:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>vpc-file-pool-csi-controller<span class="w"> </span>-c<span class="w"> </span>csi-controller<span class="w"> </span>--tail<span class="o">=</span><span class="m">100</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-i<span class="w"> </span><span class="s2">&quot;error\|fail\|share&quot;</span>
+</code></pre></div>
+<p>Common sub-causes for prolonged expansion:
+- VPC API rate limiting (429 responses) — the controller retries automatically
+- VPC file share quota exceeded (300 shares per account) — see <a href="#vpc-api-issues">VPC API Issues</a>
+- Invalid profile or zone in the pool spec</p>
+<hr />
+<h3 id="pvc-pending-tier-not-found">PVC Pending: "tier not found"<a class="headerlink" href="#pvc-pending-tier-not-found" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> PVC stays in <code>Pending</code> with event message referencing an unknown tier.</p>
+<p><strong>Cause:</strong> The StorageClass references a <code>tier</code> parameter that doesn't match any tier defined in the pool's <code>spec.tiers</code> list.</p>
+<p><strong>Fix:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Check available tiers in the pool</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>filesharespool<span class="w"> </span>&lt;pool-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.tiers[*].name}&#39;</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># Check the StorageClass tier parameter</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>kubectl<span class="w"> </span>get<span class="w"> </span>storageclass<span class="w"> </span>&lt;sc-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.parameters.tier}&#39;</span>
+</code></pre></div></p>
+<p>Ensure the tier name in the StorageClass matches a tier defined in the <code>FileSharePool</code> spec.</p>
+<hr />
+<h3 id="pvc-pending-vpc-api-authentication-failed">PVC Pending: "VPC API authentication failed"<a class="headerlink" href="#pvc-pending-vpc-api-authentication-failed" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> PVC stays in <code>Pending</code> and controller logs show <code>authentication failed</code> or <code>401 Unauthorized</code>.</p>
+<p><strong>Cause:</strong> The API key secret is missing, invalid, or expired.</p>
+<p><strong>Fix:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># Verify the secret exists</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>secret<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>storage-secret-store
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>kubectl<span class="w"> </span>get<span class="w"> </span>secret<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>ibm-cloud-credentials
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="c1"># Verify the configmap exists</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>kubectl<span class="w"> </span>get<span class="w"> </span>configmap<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>ibm-cloud-provider-data
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="c1"># Test the API key (if you have access to it)</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>ibmcloud<span class="w"> </span>login<span class="w"> </span>--apikey<span class="w"> </span>&lt;key&gt;<span class="w"> </span>--no-region
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>ibmcloud<span class="w"> </span>is<span class="w"> </span>shares<span class="w"> </span>--output<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>length
+</code></pre></div></p>
+<p>On managed clusters (ROKS/IKS), the <code>storage-secret-store</code> secret is maintained by the platform. If it's missing, contact IBM Cloud support. On self-managed clusters, recreate the secret per the instructions in <a href="../API-KEY-SETUP/">API-KEY-SETUP.md</a>.</p>
+<hr />
+<h2 id="vm-issues">VM Issues<a class="headerlink" href="#vm-issues" title="Permanent link">&para;</a></h2>
+<h3 id="vm-shows-no-bootable-device">VM shows "No bootable device"<a class="headerlink" href="#vm-shows-no-bootable-device" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> VM starts and reaches <code>Running</code> status, but the console shows "No bootable device" or a UEFI shell instead of booting the OS.</p>
+<p><strong>Cause:</strong> The boot disk image is in <strong>qcow2 format</strong> instead of raw. KubeVirt passes filesystem-PVC images to QEMU with <code>"driver":"file"</code> (raw protocol, no qcow2 format layer). QEMU reads the qcow2 headers (<code>QFI\xfb</code> magic) as raw MBR/GPT data and finds no valid boot sector.</p>
+<p>This happens when cloud images (distributed as qcow2) are downloaded directly to the PVC without converting to raw — which is what CDI does automatically.</p>
+<p><strong>Diagnosis:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># Check the disk format from the virt-launcher pod</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nv">LAUNCHER</span><span class="o">=</span><span class="k">$(</span>kubectl<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-n<span class="w"> </span>&lt;namespace&gt;<span class="w"> </span>-l<span class="w"> </span>kubevirt.io/domain<span class="o">=</span>&lt;vm-name&gt;<span class="w"> </span>-o<span class="w"> </span>name<span class="k">)</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>kubectl<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-n<span class="w"> </span>&lt;namespace&gt;<span class="w"> </span><span class="si">${</span><span class="nv">LAUNCHER</span><span class="si">}</span><span class="w"> </span>-c<span class="w"> </span>compute<span class="w"> </span>--<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">  </span>dd<span class="w"> </span><span class="k">if</span><span class="o">=</span>/var/run/kubevirt-private/vmi-disks/rootdisk/disk.img<span class="w"> </span><span class="nv">bs</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="nv">count</span><span class="o">=</span><span class="m">4</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="p">|</span><span class="w"> </span>od<span class="w"> </span>-A<span class="w"> </span>x<span class="w"> </span>-t<span class="w"> </span>x1
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="c1"># If output shows: 51 46 49 fb → qcow2 format (QFI magic). Should be raw.</span>
+</code></pre></div></p>
+<p><strong>Fix:</strong> Stop the VM, re-run the image downloader pod with qcow2→raw conversion, then restart:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>virtctl<span class="w"> </span>stop<span class="w"> </span>&lt;vm-name&gt;<span class="w"> </span>-n<span class="w"> </span>&lt;namespace&gt;
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="c1"># Run a pod with qemu-img to convert (see TUTORIAL.md Step 8b):</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="c1"># qemu-img convert -f qcow2 -O raw /boot/disk.qcow2 /boot/disk.img</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>virtctl<span class="w"> </span>start<span class="w"> </span>&lt;vm-name&gt;<span class="w"> </span>-n<span class="w"> </span>&lt;namespace&gt;
+</code></pre></div></p>
+<p>See <a href="TUTORIAL.md">TUTORIAL.md</a> Step 8b and <a href="VM-DISK-FORMATS.md">VM-DISK-FORMATS.md</a> for details.</p>
+<hr />
+<h3 id="openshift-virtualization-ui-no-accessmode-specified-in-storageprofile">OpenShift Virtualization UI: "no accessMode specified in StorageProfile"<a class="headerlink" href="#openshift-virtualization-ui-no-accessmode-specified-in-storageprofile" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> When creating a VM through the OpenShift Virtualization UI using the <code>ibm-vpc-file-pool</code> StorageClass, the UI shows:</p>
+<blockquote>
+<p>"no accessMode specified in StorageProfile ibm-vpc-file-pool"</p>
+</blockquote>
+<p><strong>Cause:</strong> KubeVirt's CDI auto-creates a <code>StorageProfile</code> CR for each StorageClass. For known CSI drivers, CDI auto-populates <code>claimPropertySets</code> (access modes + volume mode). For our custom driver, CDI can't determine the correct settings, so the field is empty and the UI doesn't know what access mode to use.</p>
+<p><strong>Automatic fix (v0.11.0+):</strong> The controller detects CDI at startup and automatically patches the StorageProfile with <code>claimPropertySets: [{accessModes: ["ReadWriteMany"], volumeMode: Filesystem}]</code> during reconciliation. No manual step required.</p>
+<p><strong>Manual workaround (pre-v0.11.0):</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>kubectl<span class="w"> </span>patch<span class="w"> </span>storageprofile<span class="w"> </span>ibm-vpc-file-pool<span class="w"> </span>--type<span class="w"> </span>merge<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span>-p<span class="w"> </span><span class="s1">&#39;{&quot;spec&quot;:{&quot;claimPropertySets&quot;:[{&quot;accessModes&quot;:[&quot;ReadWriteMany&quot;],&quot;volumeMode&quot;:&quot;Filesystem&quot;}]}}&#39;</span>
+</code></pre></div></p>
+<p><strong>Verification:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>kubectl<span class="w"> </span>get<span class="w"> </span>storageprofile<span class="w"> </span>ibm-vpc-file-pool<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.claimPropertySets}&#39;</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="c1"># Should output: [{&quot;accessModes&quot;:[&quot;ReadWriteMany&quot;],&quot;volumeMode&quot;:&quot;Filesystem&quot;}]</span>
+</code></pre></div></p>
+<hr />
+<h3 id="openshift-virtualization-ui-no-accessmode-specified-in-storageprofile-other-storageclasses">OpenShift Virtualization UI: "no accessMode specified in StorageProfile" (other StorageClasses)<a class="headerlink" href="#openshift-virtualization-ui-no-accessmode-specified-in-storageprofile-other-storageclasses" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> When creating a VM that references a non-pool StorageClass (e.g. <code>ibmc-vpc-file-1000-iops</code>, <code>ibmc-vpc-file-5-iops</code>), the UI shows:</p>
+<blockquote>
+<p>"no accessMode specified in StorageProfile ibmc-vpc-file-1000-iops"</p>
+</blockquote>
+<p><strong>Cause:</strong> CDI creates a StorageProfile for every StorageClass, but can't auto-detect access modes for all CSI drivers. The stock IBM VPC File CSI StorageClasses may also be missing <code>claimPropertySets</code>.</p>
+<p><strong>Note:</strong> The pool CSI controller only auto-patches StorageProfiles for its own pool StorageClasses. Third-party or stock StorageClasses must be patched manually.</p>
+<p><strong>Fix:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Patch the stock IBM VPC File CSI StorageProfiles</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>kubectl<span class="w"> </span>patch<span class="w"> </span>storageprofile<span class="w"> </span>ibmc-vpc-file-1000-iops<span class="w"> </span>--type<span class="w"> </span>merge<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">  </span>-p<span class="w"> </span><span class="s1">&#39;{&quot;spec&quot;:{&quot;claimPropertySets&quot;:[{&quot;accessModes&quot;:[&quot;ReadWriteMany&quot;],&quot;volumeMode&quot;:&quot;Filesystem&quot;}]}}&#39;</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="c1"># Repeat for other stock StorageClasses as needed</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>kubectl<span class="w"> </span>patch<span class="w"> </span>storageprofile<span class="w"> </span>ibmc-vpc-file-5-iops<span class="w"> </span>--type<span class="w"> </span>merge<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="w">  </span>-p<span class="w"> </span><span class="s1">&#39;{&quot;spec&quot;:{&quot;claimPropertySets&quot;:[{&quot;accessModes&quot;:[&quot;ReadWriteMany&quot;],&quot;volumeMode&quot;:&quot;Filesystem&quot;}]}}&#39;</span>
+</code></pre></div></p>
+<p><strong>Verification:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>kubectl<span class="w"> </span>get<span class="w"> </span>storageprofile<span class="w"> </span>&lt;name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.claimPropertySets}&#39;</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="c1"># Should output: [{&quot;accessModes&quot;:[&quot;ReadWriteMany&quot;],&quot;volumeMode&quot;:&quot;Filesystem&quot;}]</span>
+</code></pre></div></p>
+<hr />
+<h2 id="share-issues">Share Issues<a class="headerlink" href="#share-issues" title="Permanent link">&para;</a></h2>
+<h3 id="share-has-no-mount-target-ip">Share has no mount target IP<a class="headerlink" href="#share-has-no-mount-target-ip" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> A share in pool status shows <code>ipAddress: null</code> or empty <code>mountTargetIP</code>. PVCs allocated to this share have PVs with an empty <code>server</code> field, causing NFS mount failures.</p>
+<p><strong>Cause:</strong> The share was created before VPC auto-discovery completed (vpcID was empty), so no inline mount target was created during <code>CreateFileShare</code>. VPC may have defaulted the share to <code>security_group</code> access mode.</p>
+<p><strong>Automatic recovery (v0.11.0+):</strong> The reconciler detects stable shares with no mount target IP and attempts to create one. If mount target creation fails (e.g., the share uses security_group access mode, which is incompatible with VPC mount targets), the share is automatically marked as <code>draining</code> to prevent new allocations.</p>
+<p><strong>Manual check:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># Find shares with empty mount target IP</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>fsp<span class="w"> </span>&lt;pool-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .status.shares[*]}{.shareID}{&quot;\t&quot;}{.mountTargetIP}{&quot;\t&quot;}{.state}{&quot;\n&quot;}{end}&#39;</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="c1"># Check VPC share access mode</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>ibmcloud<span class="w"> </span>is<span class="w"> </span>share<span class="w"> </span>&lt;share-id&gt;<span class="w"> </span>--output<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;.access_control_mode&#39;</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="c1"># &quot;vpc&quot; = VPC access mode (can have VPC mount targets)</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="c1"># &quot;security_group&quot; = security group mode (incompatible with VPC mount targets)</span>
+</code></pre></div></p>
+<p><strong>If the share is in security_group mode:</strong> It cannot be recovered. The reconciler marks it as <code>draining</code>. Existing PVCs on this share must be recreated on a healthy share. Delete the affected PVCs and let the CSI provisioner reallocate them.</p>
+<hr />
+<h3 id="pv-has-empty-nfs-server-field">PV has empty NFS server field<a class="headerlink" href="#pv-has-empty-nfs-server-field" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> Pod stuck in <code>ContainerCreating</code> with mount error. The PV's <code>spec.csi.volumeAttributes.server</code> is empty.</p>
+<p><strong>Cause (pre-v0.11.0):</strong> <code>selectShare</code> did not filter by <code>MountTargetIP</code>. A share with no mount target was selected for allocation.</p>
+<p><strong>Fix:</strong> Upgrade to v0.11.0+ (adds the mount target IP guard). For existing broken PVs, delete the PVC and recreate it — the new allocation will only pick shares with populated mount target IPs.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># Check if a PV has an empty server</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>pv<span class="w"> </span>&lt;pv-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.csi.volumeAttributes.server}&#39;</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="c1"># If empty, delete and recreate the PVC</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>kubectl<span class="w"> </span>delete<span class="w"> </span>pvc<span class="w"> </span>&lt;pvc-name&gt;<span class="w"> </span>-n<span class="w"> </span>&lt;namespace&gt;
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="c1"># Recreate the PVC YAML — the new allocation picks a healthy share</span>
+</code></pre></div>
+<hr />
+<h2 id="mount-issues">Mount Issues<a class="headerlink" href="#mount-issues" title="Permanent link">&para;</a></h2>
+<h3 id="nfs-mount-failed">NFS mount failed<a class="headerlink" href="#nfs-mount-failed" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> Pod stuck in <code>ContainerCreating</code> with event <code>MountVolume.SetUp failed: mount failed: exit status 32</code>.</p>
+<p><strong>Cause:</strong> The node agent cannot mount the NFS share. Almost always a networking issue.</p>
+<p><strong>Fix:</strong></p>
+<ol>
+<li>
+<p><strong>Check security groups</strong> — TCP port 2049 must be allowed between worker nodes and VPC file share mount targets:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1"># Find the security group attached to your worker nodes</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>ibmcloud<span class="w"> </span>ks<span class="w"> </span>worker<span class="w"> </span>ls<span class="w"> </span>--cluster<span class="w"> </span>&lt;cluster-name&gt;<span class="w"> </span>--output<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;.[0].networkInterfaces[0].securityGroups&#39;</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="c1"># Check rules on that security group</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>ibmcloud<span class="w"> </span>is<span class="w"> </span>security-group-rules<span class="w"> </span>&lt;sg-id&gt;<span class="w"> </span>--output<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;.[] | select(.port_min &lt;= 2049 and .port_max &gt;= 2049)&#39;</span>
+</code></pre></div></p>
+</li>
+<li>
+<p><strong>Test connectivity from the node</strong>:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># Get the mount target IP for the share</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>subvolume<span class="w"> </span>&lt;pvc-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.mountTargetIP}&#39;</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="c1"># Debug from the worker node</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>kubectl<span class="w"> </span>debug<span class="w"> </span>node/&lt;node-name&gt;<span class="w"> </span>-it<span class="w"> </span>--image<span class="o">=</span>busybox<span class="w"> </span>--<span class="w"> </span>sh<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;nc -zv &lt;mount-target-ip&gt; 2049&quot;</span>
+</code></pre></div></p>
+</li>
+<li>
+<p><strong>Check VPC network ACLs</strong> — subnet-level ACLs can also block NFS traffic:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>ibmcloud<span class="w"> </span>is<span class="w"> </span>subnet<span class="w"> </span>&lt;subnet-id&gt;<span class="w"> </span>--output<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;.network_acl&#39;</span>
+</code></pre></div></p>
+</li>
+</ol>
+<hr />
+<h3 id="permission-denied-creating-subdirectory-mkdir-pvcs-permission-denied">Permission denied creating subdirectory (mkdir .../pvcs: permission denied)<a class="headerlink" href="#permission-denied-creating-subdirectory-mkdir-pvcs-permission-denied" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> Pod stuck in <code>ContainerCreating</code> with event <code>MountVolume.SetUp failed ... mkdir .../globalmount/pvcs: permission denied</code>.</p>
+<p><strong>Cause (pre-v0.9.0):</strong> The driver was mounting the NFS server root (<code>server:/</code>) instead of the share-specific export path (<code>server:/share_abc123</code>). In VPC access mode, all shares resolve to the same FQDN — the export path differentiates them. The NFS server root is owned by UID 99, mode 0711, so the CSI node (mapped to UID 65534 by root_squash) cannot create directories there.</p>
+<p><strong>Fix:</strong> Upgrade to v0.9.0+. The driver now correctly parses and uses the export path from the VPC API's <code>MountPath</code> field. Existing shares are automatically backfilled during health checks.</p>
+<p><strong>Verification:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># Check the PV volume context — &quot;share&quot; should NOT be &quot;/&quot;</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>pv<span class="w"> </span>&lt;pv-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.csi.volumeAttributes.share}&#39;</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="c1"># Should output something like: /7a5c6b10_6c24_48a5_9eff_d58978cabd4b</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="c1"># Check the pool share status</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a>kubectl<span class="w"> </span>get<span class="w"> </span>filesharepool<span class="w"> </span>&lt;pool-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.shares[0].exportPath}&#39;</span>
+</code></pre></div></p>
+<hr />
+<h3 id="permission-denied-on-mount">Permission denied on mount<a class="headerlink" href="#permission-denied-on-mount" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> Pod starts but gets <code>permission denied</code> when writing to the volume.</p>
+<p><strong>Cause:</strong> The UID/GID in the pod's <code>securityContext</code> doesn't match the subdirectory ownership set by the StorageClass.</p>
+<p><strong>Fix:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="c1"># Check what UID/GID the subdirectory was created with</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>subvolume<span class="w"> </span>&lt;pvc-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;uid={.spec.uid} gid={.spec.gid}&#39;</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="c1"># Check the pod&#39;s security context</span>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>kubectl<span class="w"> </span>get<span class="w"> </span>pod<span class="w"> </span>&lt;pod-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.containers[0].securityContext}&#39;</span>
+</code></pre></div></p>
+<p>Solutions:
+- Set <code>runAsUser</code>/<code>runAsGroup</code> in the pod spec to match the StorageClass <code>uid</code>/<code>gid</code>
+- Use <code>fsGroup</code> in the pod's security context to have Kubernetes chown the mount
+- Create a StorageClass with <code>uid</code> and <code>gid</code> matching your application's requirements</p>
+<hr />
+<h3 id="stale-nfs-mount-after-share-recovery">Stale NFS mount after share recovery<a class="headerlink" href="#stale-nfs-mount-after-share-recovery" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> Pod gets <code>Stale file handle</code> errors after a VPC file share was temporarily unavailable.</p>
+<p><strong>Cause:</strong> The NFS client kernel handle is stale. Since the driver uses <code>soft</code> mount options, the mount should eventually time out, but the kernel can cache the stale handle.</p>
+<p><strong>Fix:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="c1"># Identify the node where the pod runs</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="nv">NODE</span><span class="o">=</span><span class="k">$(</span>kubectl<span class="w"> </span>get<span class="w"> </span>pod<span class="w"> </span>&lt;pod-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.nodeName}&#39;</span><span class="k">)</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="c1"># Check the node agent logs for the mount state</span>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>vpc-file-pool-csi-node<span class="w"> </span>--field-selector<span class="w"> </span>spec.nodeName<span class="o">=</span><span class="si">${</span><span class="nv">NODE</span><span class="si">}</span><span class="w"> </span>-c<span class="w"> </span>csi-node<span class="w"> </span>--tail<span class="o">=</span><span class="m">50</span>
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a>
+<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a><span class="c1"># The simplest fix is to delete the pod — the kubelet will re-mount on restart</span>
+<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a>kubectl<span class="w"> </span>delete<span class="w"> </span>pod<span class="w"> </span>&lt;pod-name&gt;
+</code></pre></div></p>
+<p>If many pods on the same node are affected, the node agent will detect the stale mount during the next staging operation and remount.</p>
+<hr />
+<h3 id="nfs-mount-fails-with-nsenternamespace-errors">NFS mount fails with nsenter/namespace errors<a class="headerlink" href="#nfs-mount-fails-with-nsenternamespace-errors" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> Pod stuck in <code>ContainerCreating</code> and node agent logs show errors related to <code>nsenter</code>, <code>mount namespace</code>, or <code>/proc/1/ns/mnt</code>.</p>
+<p><strong>Cause:</strong> The node DaemonSet is not running with <code>hostPID: true</code>, so the nsenter mount wrapper cannot access the host's mount namespace via <code>/proc/1</code>.</p>
+<p><strong>Fix:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="c1"># Verify hostPID is enabled on the DaemonSet</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>daemonset<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>ibm-vpc-file-pool-csi-node<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.template.spec.hostPID}&#39;</span>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="c1"># Should output: true</span>
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a>
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="c1"># If false, patch it:</span>
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a>kubectl<span class="w"> </span>patch<span class="w"> </span>daemonset<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>ibm-vpc-file-pool-csi-node<span class="w"> </span>--type<span class="w"> </span>merge<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a><span class="w">  </span>-p<span class="w"> </span><span class="s1">&#39;{&quot;spec&quot;:{&quot;template&quot;:{&quot;spec&quot;:{&quot;hostPID&quot;:true}}}}&#39;</span>
+</code></pre></div></p>
+<p>The nsenter wrapper at <code>/usr/local/bin/mount</code> routes NFS mounts through <code>nsenter --mount=/proc/1/ns/mnt --root=/proc/1/root</code> (host namespace) and bind mounts through the container's local <code>/usr/bin/mount</code>.</p>
+<hr />
+<h3 id="mount-stuck-pod-hangs-on-io">Mount stuck — pod hangs on I/O<a class="headerlink" href="#mount-stuck-pod-hangs-on-io" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> Pod hangs indefinitely on file operations. <code>kubectl exec</code> into the pod also hangs.</p>
+<p><strong>Cause:</strong> If the NFS mount was configured with <code>hard</code> instead of <code>soft</code>, the kernel retries indefinitely when the NFS server is unreachable.</p>
+<p><strong>Fix:</strong> The driver defaults to <code>soft</code> mounts to prevent this scenario. Custom mount flags from the StorageClass are merged with the safe defaults, so <code>soft</code> is always present unless the StorageClass explicitly includes <code>hard</code>. If you see this:</p>
+<ol>
+<li>
+<p>Verify the StorageClass <code>mountOptions</code> do not include <code>hard</code>:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>kubectl<span class="w"> </span>get<span class="w"> </span>storageclass<span class="w"> </span>&lt;sc-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.mountOptions}&#39;</span>
+</code></pre></div></p>
+</li>
+<li>
+<p>If <code>hard</code> was specified, update the StorageClass to remove it (or replace with <code>soft</code>) and recreate affected PVCs</p>
+</li>
+<li>For immediate relief, force-delete the stuck pod:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>kubectl<span class="w"> </span>delete<span class="w"> </span>pod<span class="w"> </span>&lt;pod-name&gt;<span class="w"> </span>--force<span class="w"> </span>--grace-period<span class="o">=</span><span class="m">0</span>
+</code></pre></div></li>
+</ol>
+<hr />
+<h2 id="pool-issues">Pool Issues<a class="headerlink" href="#pool-issues" title="Permanent link">&para;</a></h2>
+<h3 id="pool-stuck-in-initializing">Pool stuck in Initializing<a class="headerlink" href="#pool-stuck-in-initializing" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> <code>kubectl get filesharepools</code> shows phase <code>Initializing</code> for more than 5 minutes.</p>
+<p><strong>Cause:</strong> The initial VPC file share creation is failing.</p>
+<p><strong>Fix:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="c1"># Check pool events</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>kubectl<span class="w"> </span>describe<span class="w"> </span>filesharespool<span class="w"> </span>&lt;pool-name&gt;
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a>
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="c1"># Check controller logs for VPC API errors</span>
+<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a>kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>vpc-file-pool-csi-controller<span class="w"> </span>-c<span class="w"> </span>csi-controller<span class="w"> </span>--tail<span class="o">=</span><span class="m">100</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-i<span class="w"> </span><span class="s2">&quot;error\|fail&quot;</span>
+</code></pre></div></p>
+<p>Common causes:
+| Log Message | Cause | Fix |
+|-------------|-------|-----|
+| <code>authentication failed</code> | Invalid API key | See <a href="#pvc-pending-vpc-api-authentication-failed">PVC Pending: "VPC API authentication failed"</a> |
+| <code>quota exceeded</code> | 300 share account limit | Delete unused shares in VPC console or via <code>ibmcloud is shares</code> |
+| <code>zone not found</code> | Invalid zone in pool spec | Verify zone matches your worker nodes: <code>kubectl get nodes -o jsonpath='{.items[*].metadata.labels.topology\.kubernetes\.io/zone}'</code> |
+| <code>profile not found</code> | Invalid storage profile | Use <code>ibmcloud is share-profiles</code> to list valid profiles |
+| <code>security group</code> or <code>2049</code> | NFS port blocked | Add TCP 2049 inbound rule to worker node security groups |</p>
+<hr />
+<h3 id="pool-in-degraded-phase">Pool in Degraded phase<a class="headerlink" href="#pool-in-degraded-phase" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> <code>kubectl get filesharepools</code> shows phase <code>Degraded</code>.</p>
+<p><strong>Cause:</strong> One or more VPC file shares in the pool are unhealthy (the VPC API reports their lifecycle state as something other than <code>stable</code>).</p>
+<p><strong>Fix:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="c1"># Identify the unhealthy share(s)</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>filesharespool<span class="w"> </span>&lt;pool-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .status.shares[*]}{.shareID}{&quot;\t&quot;}{.state}{&quot;\n&quot;}{end}&#39;</span>
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a>
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="c1"># Check the share in VPC</span>
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a>ibmcloud<span class="w"> </span>is<span class="w"> </span>share<span class="w"> </span>&lt;share-id&gt;<span class="w"> </span>--output<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;{lifecycle_state, health_state, health_reasons}&#39;</span>
+</code></pre></div></p>
+<p>The pool manager automatically stops allocating new PVCs to degraded shares. Existing PVCs on the share continue to work if the NFS mount is still functional. Once the VPC API reports the share as <code>stable</code> again, the pool phase returns to <code>Ready</code>.</p>
+<p>If the share is permanently failed, the pool manager will eventually need to migrate affected SubVolumes. This is currently a manual process — delete the affected SubVolumes and let the PVCs rebind.</p>
+<hr />
+<h3 id="pool-expanding-timeout">Pool Expanding timeout<a class="headerlink" href="#pool-expanding-timeout" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> Pool stays in <code>Expanding</code> phase for more than 10 minutes.</p>
+<p><strong>Cause:</strong> A new VPC file share is being created but the creation is taking longer than expected, or the VPC API call failed silently.</p>
+<p><strong>Fix:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="c1"># Check controller logs for the expansion status</span>
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a>kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>vpc-file-pool-csi-controller<span class="w"> </span>-c<span class="w"> </span>csi-controller<span class="w"> </span>--tail<span class="o">=</span><span class="m">200</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-i<span class="w"> </span><span class="s2">&quot;expand\|share\|create&quot;</span>
+<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a>
+<a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="c1"># Check if the share was created in VPC but not yet detected</span>
+<a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a>ibmcloud<span class="w"> </span>is<span class="w"> </span>shares<span class="w"> </span>--output<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;.[] | select(.name | contains(&quot;&lt;pool-name&gt;&quot;))&#39;</span>
+</code></pre></div></p>
+<p>The controller retries share creation automatically. If it's stuck, check VPC API quotas and rate limits.</p>
+<hr />
+<h3 id="pool-full-maxshares-reached">Pool Full — maxShares reached<a class="headerlink" href="#pool-full-maxshares-reached" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> Pool phase is <code>Full</code>. New PVCs fail with <code>pool has no available capacity</code>.</p>
+<p><strong>Cause:</strong> The pool has created the maximum number of shares (<code>maxShares</code>) and all are fully allocated.</p>
+<p><strong>Options:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="c1"># Option 1: Increase maxShares (check your VPC quota first)</span>
+<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a>ibmcloud<span class="w"> </span>is<span class="w"> </span>shares<span class="w"> </span>--output<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>length<span class="w">  </span><span class="c1"># Current total shares</span>
+<a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a>kubectl<span class="w"> </span>patch<span class="w"> </span>filesharespool<span class="w"> </span>&lt;pool-name&gt;<span class="w"> </span>--type<span class="w"> </span>merge<span class="w"> </span>-p<span class="w"> </span><span class="s1">&#39;{&quot;spec&quot;:{&quot;maxShares&quot;:20}}&#39;</span>
+<a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a>
+<a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a><span class="c1"># Option 2: Increase share size (existing shares grow)</span>
+<a id="__codelineno-26-6" name="__codelineno-26-6" href="#__codelineno-26-6"></a>kubectl<span class="w"> </span>patch<span class="w"> </span>filesharespool<span class="w"> </span>&lt;pool-name&gt;<span class="w"> </span>--type<span class="w"> </span>merge<span class="w"> </span>-p<span class="w"> </span><span class="s1">&#39;{&quot;spec&quot;:{&quot;shareSizeGB&quot;:4000}}&#39;</span>
+<a id="__codelineno-26-7" name="__codelineno-26-7" href="#__codelineno-26-7"></a>
+<a id="__codelineno-26-8" name="__codelineno-26-8" href="#__codelineno-26-8"></a><span class="c1"># Option 3: Identify and remove unused PVCs</span>
+<a id="__codelineno-26-9" name="__codelineno-26-9" href="#__codelineno-26-9"></a>kubectl<span class="w"> </span>get<span class="w"> </span>subvolumes<span class="w"> </span>-l<span class="w"> </span>storage.ibmcloud.io/pool<span class="o">=</span>&lt;pool-name&gt;<span class="w"> </span>--sort-by<span class="o">=</span>.metadata.creationTimestamp
+</code></pre></div></p>
+<hr />
+<h3 id="pool-deletion-blocked-by-active-subvolumes">Pool deletion blocked by active SubVolumes<a class="headerlink" href="#pool-deletion-blocked-by-active-subvolumes" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> <code>kubectl delete filesharespool &lt;name&gt;</code> hangs or the pool stays in <code>Terminating</code>.</p>
+<p><strong>Cause:</strong> The pool has a finalizer that prevents deletion while SubVolumes still reference its shares.</p>
+<p><strong>Fix:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="c1"># List SubVolumes in the pool</span>
+<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>subvolumes<span class="w"> </span>-l<span class="w"> </span>storage.ibmcloud.io/pool<span class="o">=</span>&lt;pool-name&gt;
+<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a>
+<a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a><span class="c1"># Delete all PVCs backed by this pool first</span>
+<a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a>kubectl<span class="w"> </span>delete<span class="w"> </span>pvc<span class="w"> </span>-l<span class="w"> </span><span class="nv">storageClassName</span><span class="o">=</span>&lt;sc-name&gt;<span class="w"> </span>--all-namespaces
+<a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a>
+<a id="__codelineno-27-7" name="__codelineno-27-7" href="#__codelineno-27-7"></a><span class="c1"># Wait for SubVolumes to be cleaned up</span>
+<a id="__codelineno-27-8" name="__codelineno-27-8" href="#__codelineno-27-8"></a>kubectl<span class="w"> </span>get<span class="w"> </span>subvolumes<span class="w"> </span>-l<span class="w"> </span>storage.ibmcloud.io/pool<span class="o">=</span>&lt;pool-name&gt;<span class="w"> </span>-w
+<a id="__codelineno-27-9" name="__codelineno-27-9" href="#__codelineno-27-9"></a>
+<a id="__codelineno-27-10" name="__codelineno-27-10" href="#__codelineno-27-10"></a><span class="c1"># Then retry pool deletion</span>
+<a id="__codelineno-27-11" name="__codelineno-27-11" href="#__codelineno-27-11"></a>kubectl<span class="w"> </span>delete<span class="w"> </span>filesharespool<span class="w"> </span>&lt;pool-name&gt;
+</code></pre></div></p>
+<p>If SubVolumes are stuck in a finalizer loop, check the controller logs for errors during cleanup.</p>
+<hr />
+<h2 id="controller-issues">Controller Issues<a class="headerlink" href="#controller-issues" title="Permanent link">&para;</a></h2>
+<h3 id="controller-crashloopbackoff">Controller CrashLoopBackOff<a class="headerlink" href="#controller-crashloopbackoff" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> Controller pod is in <code>CrashLoopBackOff</code>.</p>
+<p><strong>Fix:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="c1"># Check the previous crash logs</span>
+<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a>kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>&lt;controller-pod&gt;<span class="w"> </span>-c<span class="w"> </span>csi-controller<span class="w"> </span>--previous
+<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a>
+<a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a><span class="c1"># Check all containers in the pod</span>
+<a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a>kubectl<span class="w"> </span>describe<span class="w"> </span>pod<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>&lt;controller-pod&gt;
+</code></pre></div></p>
+<p>Common causes:</p>
+<table>
+<thead>
+<tr>
+<th>Log Message</th>
+<th>Cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>failed to load credentials</code></td>
+<td>Missing API key secret</td>
+<td>Verify <code>storage-secret-store</code> or <code>ibm-cloud-credentials</code> secret exists in <code>kube-system</code></td>
+</tr>
+<tr>
+<td><code>dial unix /var/lib/csi/sockets/...</code></td>
+<td>CSI socket not ready</td>
+<td>Restart the pod; check that volumes are mounted correctly</td>
+</tr>
+<tr>
+<td><code>panic: assignment to entry in nil map</code></td>
+<td>Bug in initialization</td>
+<td>File an issue with full stack trace</td>
+</tr>
+<tr>
+<td><code>OOMKilled</code></td>
+<td>Insufficient memory</td>
+<td>Increase controller memory limit in Helm values or deployment manifest</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="leader-election-issues">Leader election issues<a class="headerlink" href="#leader-election-issues" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> Multiple controller replicas running but no PVCs being processed.</p>
+<p><strong>Cause:</strong> Leader election failed or is stuck. Only the leader processes requests.</p>
+<p><strong>Fix:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="c1"># Check which pod holds the leader lease</span>
+<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>lease<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>vpc-file-pool-csi-leader<span class="w"> </span>-o<span class="w"> </span>yaml
+<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a>
+<a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a><span class="c1"># Check controller logs for leader election messages</span>
+<a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a>kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>vpc-file-pool-csi-controller<span class="w"> </span>-c<span class="w"> </span>csi-controller<span class="w"> </span>--tail<span class="o">=</span><span class="m">50</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-i<span class="w"> </span><span class="s2">&quot;leader&quot;</span>
+</code></pre></div></p>
+<p>If the leader lease is held by a dead pod, delete the lease to force re-election:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>kubectl<span class="w"> </span>delete<span class="w"> </span>lease<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>vpc-file-pool-csi-leader
+</code></pre></div></p>
+<hr />
+<h3 id="csi-sidecar-connectivity">CSI sidecar connectivity<a class="headerlink" href="#csi-sidecar-connectivity" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> PVCs stay in <code>Pending</code> with no events from the provisioner.</p>
+<p><strong>Cause:</strong> The CSI provisioner sidecar can't communicate with the driver's gRPC socket.</p>
+<p><strong>Fix:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="c1"># Check sidecar logs</span>
+<a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a>kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>&lt;controller-pod&gt;<span class="w"> </span>-c<span class="w"> </span>csi-provisioner<span class="w"> </span>--tail<span class="o">=</span><span class="m">50</span>
+<a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a>
+<a id="__codelineno-31-4" name="__codelineno-31-4" href="#__codelineno-31-4"></a><span class="c1"># Verify the CSI driver is registered</span>
+<a id="__codelineno-31-5" name="__codelineno-31-5" href="#__codelineno-31-5"></a>kubectl<span class="w"> </span>get<span class="w"> </span>csidriver<span class="w"> </span>vpc-file-pool.csi.ibm.io
+<a id="__codelineno-31-6" name="__codelineno-31-6" href="#__codelineno-31-6"></a>
+<a id="__codelineno-31-7" name="__codelineno-31-7" href="#__codelineno-31-7"></a><span class="c1"># Check all containers are running in the controller pod</span>
+<a id="__codelineno-31-8" name="__codelineno-31-8" href="#__codelineno-31-8"></a>kubectl<span class="w"> </span>get<span class="w"> </span>pod<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>&lt;controller-pod&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .status.containerStatuses[*]}{.name}{&quot;\t&quot;}{.ready}{&quot;\n&quot;}{end}&#39;</span>
+</code></pre></div></p>
+<hr />
+<h2 id="data-issues">Data Issues<a class="headerlink" href="#data-issues" title="Permanent link">&para;</a></h2>
+<h3 id="cross-pvc-data-visibility">Cross-PVC data visibility<a class="headerlink" href="#cross-pvc-data-visibility" title="Permanent link">&para;</a></h3>
+<p><strong>Concern:</strong> Can pods access data from other PVCs on the same share?</p>
+<p><strong>Answer:</strong> No, under normal operation. Each PVC is bind-mounted at its own subdirectory (<code>/pvcs/pvc-&lt;uuid&gt;</code>). The kernel enforces bind-mount boundaries — a process cannot traverse above the mount point.</p>
+<p><strong>However:</strong> A privileged pod (<code>privileged: true</code>) with host filesystem access could theoretically access the NFS staging mount and see all subdirectories. Mitigations:
+- Use <code>PodSecurityAdmission</code> (Kubernetes) or <code>SecurityContextConstraints</code> (OpenShift) to prevent privileged pods in tenant namespaces
+- Use separate pools for workloads with different trust levels
+- Use the <code>spread</code> allocation strategy to minimize how many PVCs share a single share</p>
+<hr />
+<h3 id="orphaned-subvolume-crs">Orphaned SubVolume CRs<a class="headerlink" href="#orphaned-subvolume-crs" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> <code>kubectl get subvolumes</code> shows SubVolume CRs whose corresponding PVC no longer exists.</p>
+<p><strong>Cause:</strong> The PVC deletion event was missed by the controller (e.g., controller was down during deletion), or the <code>DeleteVolume</code> gRPC call failed.</p>
+<p><strong>Fix:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="c1"># Find orphaned SubVolumes (SubVolume exists but PVC doesn&#39;t)</span>
+<a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a><span class="k">for</span><span class="w"> </span>sv<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="k">$(</span>kubectl<span class="w"> </span>get<span class="w"> </span>subvolumes<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.items[*].metadata.name}&#39;</span><span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a><span class="w">  </span><span class="nv">ns</span><span class="o">=</span><span class="k">$(</span>kubectl<span class="w"> </span>get<span class="w"> </span>subvolume<span class="w"> </span><span class="nv">$sv</span><span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.pvcNamespace}&#39;</span><span class="k">)</span>
+<a id="__codelineno-32-4" name="__codelineno-32-4" href="#__codelineno-32-4"></a><span class="w">  </span><span class="nv">pvc</span><span class="o">=</span><span class="k">$(</span>kubectl<span class="w"> </span>get<span class="w"> </span>subvolume<span class="w"> </span><span class="nv">$sv</span><span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.pvcName}&#39;</span><span class="k">)</span>
+<a id="__codelineno-32-5" name="__codelineno-32-5" href="#__codelineno-32-5"></a><span class="w">  </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span>kubectl<span class="w"> </span>get<span class="w"> </span>pvc<span class="w"> </span>-n<span class="w"> </span><span class="nv">$ns</span><span class="w"> </span><span class="nv">$pvc</span><span class="w"> </span><span class="p">&amp;</span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<a id="__codelineno-32-6" name="__codelineno-32-6" href="#__codelineno-32-6"></a><span class="w">    </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;Orphaned: </span><span class="nv">$sv</span><span class="s2"> (PVC </span><span class="nv">$ns</span><span class="s2">/</span><span class="nv">$pvc</span><span class="s2"> not found)&quot;</span>
+<a id="__codelineno-32-7" name="__codelineno-32-7" href="#__codelineno-32-7"></a><span class="w">  </span><span class="k">fi</span>
+<a id="__codelineno-32-8" name="__codelineno-32-8" href="#__codelineno-32-8"></a><span class="k">done</span>
+<a id="__codelineno-32-9" name="__codelineno-32-9" href="#__codelineno-32-9"></a>
+<a id="__codelineno-32-10" name="__codelineno-32-10" href="#__codelineno-32-10"></a><span class="c1"># Delete orphaned SubVolumes (this frees pool capacity but does NOT delete the subdirectory data)</span>
+<a id="__codelineno-32-11" name="__codelineno-32-11" href="#__codelineno-32-11"></a>kubectl<span class="w"> </span>delete<span class="w"> </span>subvolume<span class="w"> </span>&lt;name&gt;
+<a id="__codelineno-32-12" name="__codelineno-32-12" href="#__codelineno-32-12"></a>
+<a id="__codelineno-32-13" name="__codelineno-32-13" href="#__codelineno-32-13"></a><span class="c1"># To also clean up the subdirectory data, note the share and path before deleting:</span>
+<a id="__codelineno-32-14" name="__codelineno-32-14" href="#__codelineno-32-14"></a>kubectl<span class="w"> </span>get<span class="w"> </span>subvolume<span class="w"> </span>&lt;name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;Share: {.spec.shareID}, Path: {.spec.subPath}&#39;</span>
+</code></pre></div></p>
+<hr />
+<h3 id="orphaned-subdirectories-on-nfs-shares">Orphaned subdirectories on NFS shares<a class="headerlink" href="#orphaned-subdirectories-on-nfs-shares" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> Subdirectories exist on the NFS share but no corresponding SubVolume or PVC exists.</p>
+<p><strong>Cause:</strong> The SubVolume CR was deleted (perhaps manually) but the subdirectory cleanup failed or was skipped.</p>
+<p><strong>Detection:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a><span class="c1"># Mount the share and list subdirectories (from a debug pod)</span>
+<a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a>kubectl<span class="w"> </span>debug<span class="w"> </span>node/&lt;node-name&gt;<span class="w"> </span>-it<span class="w"> </span>--image<span class="o">=</span>busybox<span class="w"> </span>--<span class="w"> </span>sh
+<a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a>ls<span class="w"> </span>/var/lib/kubelet/plugins/vpc-file-pool.csi.ibm.io/staging/&lt;share-id&gt;/pvcs/
+<a id="__codelineno-33-4" name="__codelineno-33-4" href="#__codelineno-33-4"></a>
+<a id="__codelineno-33-5" name="__codelineno-33-5" href="#__codelineno-33-5"></a><span class="c1"># Compare with known SubVolumes</span>
+<a id="__codelineno-33-6" name="__codelineno-33-6" href="#__codelineno-33-6"></a>kubectl<span class="w"> </span>get<span class="w"> </span>subvolumes<span class="w"> </span>-l<span class="w"> </span>storage.ibmcloud.io/share-id<span class="o">=</span>&lt;share-id&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.items[*].spec.subPath}&#39;</span>
+</code></pre></div></p>
+<p><strong>Cleanup:</strong> Orphaned subdirectories consume share capacity but don't affect pool tracking (the pool counts capacity from SubVolume CRs, not filesystem usage). To reclaim space, delete the orphaned directories from a debug pod or via direct NFS access.</p>
+<hr />
+<h2 id="vpc-api-issues">VPC API Issues<a class="headerlink" href="#vpc-api-issues" title="Permanent link">&para;</a></h2>
+<h3 id="403-forbidden-iam-permissions">403 Forbidden (IAM permissions)<a class="headerlink" href="#403-forbidden-iam-permissions" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> Controller logs show <code>403 Forbidden</code> or <code>not authorized</code> from VPC API calls.</p>
+<p><strong>Cause:</strong> The API key's IAM role doesn't have sufficient VPC Infrastructure permissions.</p>
+<p><strong>Fix:</strong></p>
+<p>Required IAM roles:
+- <strong>VPC Infrastructure Services: Editor</strong> — minimum for creating/managing file shares
+- <strong>VPC Infrastructure Services: Administrator</strong> — needed if managing security groups</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a><span class="c1"># Check the service ID&#39;s policies</span>
+<a id="__codelineno-34-2" name="__codelineno-34-2" href="#__codelineno-34-2"></a>ibmcloud<span class="w"> </span>iam<span class="w"> </span>service-policies<span class="w"> </span>&lt;service-id&gt;
+<a id="__codelineno-34-3" name="__codelineno-34-3" href="#__codelineno-34-3"></a>
+<a id="__codelineno-34-4" name="__codelineno-34-4" href="#__codelineno-34-4"></a><span class="c1"># Add Editor role for VPC Infrastructure</span>
+<a id="__codelineno-34-5" name="__codelineno-34-5" href="#__codelineno-34-5"></a>ibmcloud<span class="w"> </span>iam<span class="w"> </span>service-policy-create<span class="w"> </span>&lt;service-id&gt;<span class="w"> </span>--roles<span class="w"> </span>Editor<span class="w"> </span>--service-name<span class="w"> </span>is
+</code></pre></div>
+<hr />
+<h3 id="quota-exceeded-300-shares">Quota exceeded (300 shares)<a class="headerlink" href="#quota-exceeded-300-shares" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> Controller logs show <code>quota exceeded</code> or <code>shares_per_account limit reached</code>.</p>
+<p><strong>Cause:</strong> VPC accounts have a default limit of 300 file shares. This includes shares from all sources (pool CSI, stock CSI, manually created).</p>
+<p><strong>Fix:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a><span class="c1"># Check current share count</span>
+<a id="__codelineno-35-2" name="__codelineno-35-2" href="#__codelineno-35-2"></a>ibmcloud<span class="w"> </span>is<span class="w"> </span>shares<span class="w"> </span>--output<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>length
+<a id="__codelineno-35-3" name="__codelineno-35-3" href="#__codelineno-35-3"></a>
+<a id="__codelineno-35-4" name="__codelineno-35-4" href="#__codelineno-35-4"></a><span class="c1"># List shares to find candidates for cleanup</span>
+<a id="__codelineno-35-5" name="__codelineno-35-5" href="#__codelineno-35-5"></a>ibmcloud<span class="w"> </span>is<span class="w"> </span>shares<span class="w"> </span>--output<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;.[] | {name, id, size, created_at, lifecycle_state}&#39;</span>
+<a id="__codelineno-35-6" name="__codelineno-35-6" href="#__codelineno-35-6"></a>
+<a id="__codelineno-35-7" name="__codelineno-35-7" href="#__codelineno-35-7"></a><span class="c1"># Delete unused shares</span>
+<a id="__codelineno-35-8" name="__codelineno-35-8" href="#__codelineno-35-8"></a>ibmcloud<span class="w"> </span>is<span class="w"> </span>share-delete<span class="w"> </span>&lt;share-id&gt;<span class="w"> </span>--force
+</code></pre></div></p>
+<p>To request a quota increase, open an IBM Cloud support ticket.</p>
+<p><strong>Prevention:</strong> Budget your 300-share quota across pools. If you have 3 pools with <code>maxShares: 10</code> each, that's 30 shares for the pool CSI. Leave room for the stock CSI driver and any manually created shares.</p>
+<hr />
+<h3 id="rate-limiting-429-too-many-requests">Rate limiting (429 Too Many Requests)<a class="headerlink" href="#rate-limiting-429-too-many-requests" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> Controller logs show <code>429</code> responses or <code>rate limit exceeded</code> from VPC API calls.</p>
+<p><strong>Cause:</strong> The VPC API has per-account rate limits. Multiple controllers or frequent reconciliation can hit these limits.</p>
+<p><strong>Fix:</strong> The driver includes built-in rate limiting and automatic retry with exponential backoff. If you're still hitting limits:</p>
+<ol>
+<li>Check if other VPC API consumers are using the same account (Terraform, other controllers)</li>
+<li>Reduce the number of pools or increase the reconciliation interval</li>
+<li>Set <code>initialShares</code> high enough to avoid burst creation during initial setup</li>
+</ol>
+<hr />
+<h2 id="metrics-issues">Metrics Issues<a class="headerlink" href="#metrics-issues" title="Permanent link">&para;</a></h2>
+<h3 id="prometheus-not-scraping-metrics">Prometheus not scraping metrics<a class="headerlink" href="#prometheus-not-scraping-metrics" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> No <code>vpc_file_pool_*</code> metrics in Prometheus.</p>
+<p><strong>Fix:</strong></p>
+<ol>
+<li>
+<p><strong>Verify the metrics endpoint is up:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a>kubectl<span class="w"> </span>port-forward<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>svc/vpc-file-pool-csi-controller<span class="w"> </span><span class="m">8080</span>:8080
+<a id="__codelineno-36-2" name="__codelineno-36-2" href="#__codelineno-36-2"></a>curl<span class="w"> </span>http://localhost:8080/metrics<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>vpc_file_pool
+</code></pre></div></p>
+</li>
+<li>
+<p><strong>Check ServiceMonitor</strong> (if using Prometheus Operator):
+<div class="highlight"><pre><span></span><code><a id="__codelineno-37-1" name="__codelineno-37-1" href="#__codelineno-37-1"></a>kubectl<span class="w"> </span>get<span class="w"> </span>servicemonitor<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>vpc-file-pool-csi
+</code></pre></div></p>
+</li>
+<li>
+<p><strong>Check Prometheus targets</strong> — look for the controller's metrics endpoint in the Prometheus UI under Status &gt; Targets</p>
+</li>
+<li>
+<p><strong>Manual scrape config</strong> (if not using Prometheus Operator):
+<div class="highlight"><pre><span></span><code><a id="__codelineno-38-1" name="__codelineno-38-1" href="#__codelineno-38-1"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">job_name</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;vpc-file-pool-csi&#39;</span>
+<a id="__codelineno-38-2" name="__codelineno-38-2" href="#__codelineno-38-2"></a><span class="w">  </span><span class="nt">kubernetes_sd_configs</span><span class="p">:</span>
+<a id="__codelineno-38-3" name="__codelineno-38-3" href="#__codelineno-38-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pod</span>
+<a id="__codelineno-38-4" name="__codelineno-38-4" href="#__codelineno-38-4"></a><span class="w">      </span><span class="nt">namespaces</span><span class="p">:</span>
+<a id="__codelineno-38-5" name="__codelineno-38-5" href="#__codelineno-38-5"></a><span class="w">        </span><span class="nt">names</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&#39;kube-system&#39;</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-38-6" name="__codelineno-38-6" href="#__codelineno-38-6"></a><span class="w">  </span><span class="nt">relabel_configs</span><span class="p">:</span>
+<a id="__codelineno-38-7" name="__codelineno-38-7" href="#__codelineno-38-7"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source_labels</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">__meta_kubernetes_pod_label_app</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-38-8" name="__codelineno-38-8" href="#__codelineno-38-8"></a><span class="w">      </span><span class="nt">regex</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vpc-file-pool-csi-controller</span>
+<a id="__codelineno-38-9" name="__codelineno-38-9" href="#__codelineno-38-9"></a><span class="w">      </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">keep</span>
+<a id="__codelineno-38-10" name="__codelineno-38-10" href="#__codelineno-38-10"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source_labels</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">__meta_kubernetes_pod_container_port_number</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-38-11" name="__codelineno-38-11" href="#__codelineno-38-11"></a><span class="w">      </span><span class="nt">regex</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;8080&quot;</span>
+<a id="__codelineno-38-12" name="__codelineno-38-12" href="#__codelineno-38-12"></a><span class="w">      </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">keep</span>
+</code></pre></div></p>
+</li>
+</ol>
+<hr />
+<h3 id="stale-metrics">Stale metrics<a class="headerlink" href="#stale-metrics" title="Permanent link">&para;</a></h3>
+<p><strong>Symptom:</strong> Metrics show values that don't match reality (e.g., <code>vpc_file_pool_pvc_count</code> disagrees with <code>kubectl get subvolumes | wc -l</code>).</p>
+<p><strong>Cause:</strong> Metrics are updated during the reconciliation loop. If reconciliation is paused or failing, metrics become stale.</p>
+<p><strong>Fix:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-39-1" name="__codelineno-39-1" href="#__codelineno-39-1"></a><span class="c1"># Check the last reconciliation time</span>
+<a id="__codelineno-39-2" name="__codelineno-39-2" href="#__codelineno-39-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>filesharespool<span class="w"> </span>&lt;pool-name&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.lastReconcileTime}&#39;</span>
+<a id="__codelineno-39-3" name="__codelineno-39-3" href="#__codelineno-39-3"></a>
+<a id="__codelineno-39-4" name="__codelineno-39-4" href="#__codelineno-39-4"></a><span class="c1"># Force reconciliation by annotating the pool</span>
+<a id="__codelineno-39-5" name="__codelineno-39-5" href="#__codelineno-39-5"></a>kubectl<span class="w"> </span>annotate<span class="w"> </span>filesharespool<span class="w"> </span>&lt;pool-name&gt;<span class="w"> </span>reconcile-trigger<span class="o">=</span><span class="k">$(</span>date<span class="w"> </span>+%s<span class="k">)</span><span class="w"> </span>--overwrite
+</code></pre></div></p>
+<hr />
+<h2 id="log-reference">Log Reference<a class="headerlink" href="#log-reference" title="Permanent link">&para;</a></h2>
+<h3 id="klog-v-levels">klog V-levels<a class="headerlink" href="#klog-v-levels" title="Permanent link">&para;</a></h3>
+<p>The driver uses <code>klog/v2</code> structured logging. Control verbosity with the <code>--v</code> flag or Helm value <code>logLevel</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Level</th>
+<th>What It Logs</th>
+<th>When to Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>V(0)</code></td>
+<td>Errors and critical warnings</td>
+<td>Always on (default)</td>
+</tr>
+<tr>
+<td><code>V(2)</code></td>
+<td>Normal operations: share selected, subdir created, PVC allocated</td>
+<td>Default for production</td>
+</tr>
+<tr>
+<td><code>V(4)</code></td>
+<td>Detailed: full request/response, capacity calculations, share scoring</td>
+<td>Debugging allocation issues</td>
+</tr>
+<tr>
+<td><code>V(6)</code></td>
+<td>Trace: function entry/exit, lock acquisition, every API call</td>
+<td>Debugging timing/concurrency</td>
+</tr>
+</tbody>
+</table>
+<h3 id="enabling-verbose-logging">Enabling verbose logging<a class="headerlink" href="#enabling-verbose-logging" title="Permanent link">&para;</a></h3>
+<p><strong>Helm:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-40-1" name="__codelineno-40-1" href="#__codelineno-40-1"></a>helm<span class="w"> </span>upgrade<span class="w"> </span>ibm-vpc-file-pool-csi<span class="w"> </span>charts/ibm-vpc-file-pool-csi/<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-40-2" name="__codelineno-40-2" href="#__codelineno-40-2"></a><span class="w">  </span>--namespace<span class="w"> </span>kube-system<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-40-3" name="__codelineno-40-3" href="#__codelineno-40-3"></a><span class="w">  </span>--set<span class="w"> </span><span class="nv">logLevel</span><span class="o">=</span><span class="m">4</span>
+</code></pre></div></p>
+<p><strong>Raw manifests:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-41-1" name="__codelineno-41-1" href="#__codelineno-41-1"></a><span class="c1"># Edit the controller deployment</span>
+<a id="__codelineno-41-2" name="__codelineno-41-2" href="#__codelineno-41-2"></a>kubectl<span class="w"> </span>edit<span class="w"> </span>deployment<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>vpc-file-pool-csi-controller
+<a id="__codelineno-41-3" name="__codelineno-41-3" href="#__codelineno-41-3"></a><span class="c1"># Add --v=4 to the container args</span>
+</code></pre></div></p>
+<p><strong>Temporarily (no restart):</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-42-1" name="__codelineno-42-1" href="#__codelineno-42-1"></a><span class="c1"># Not supported — klog doesn&#39;t support runtime level changes.</span>
+<a id="__codelineno-42-2" name="__codelineno-42-2" href="#__codelineno-42-2"></a><span class="c1"># You must restart the pod with the new --v flag.</span>
+</code></pre></div></p>
+<h3 id="log-filtering-tips">Log filtering tips<a class="headerlink" href="#log-filtering-tips" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-43-1" name="__codelineno-43-1" href="#__codelineno-43-1"></a><span class="c1"># Allocation events</span>
+<a id="__codelineno-43-2" name="__codelineno-43-2" href="#__codelineno-43-2"></a>kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>vpc-file-pool-csi-controller<span class="w"> </span>-c<span class="w"> </span>csi-controller<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span><span class="s2">&quot;Allocated\|Deallocated&quot;</span>
+<a id="__codelineno-43-3" name="__codelineno-43-3" href="#__codelineno-43-3"></a>
+<a id="__codelineno-43-4" name="__codelineno-43-4" href="#__codelineno-43-4"></a><span class="c1"># VPC API calls</span>
+<a id="__codelineno-43-5" name="__codelineno-43-5" href="#__codelineno-43-5"></a>kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>vpc-file-pool-csi-controller<span class="w"> </span>-c<span class="w"> </span>csi-controller<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span><span class="s2">&quot;vpc\|api\|share&quot;</span>
+<a id="__codelineno-43-6" name="__codelineno-43-6" href="#__codelineno-43-6"></a>
+<a id="__codelineno-43-7" name="__codelineno-43-7" href="#__codelineno-43-7"></a><span class="c1"># Errors only</span>
+<a id="__codelineno-43-8" name="__codelineno-43-8" href="#__codelineno-43-8"></a>kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>vpc-file-pool-csi-controller<span class="w"> </span>-c<span class="w"> </span>csi-controller<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-i<span class="w"> </span><span class="s2">&quot;error\|fail\|panic&quot;</span>
+<a id="__codelineno-43-9" name="__codelineno-43-9" href="#__codelineno-43-9"></a>
+<a id="__codelineno-43-10" name="__codelineno-43-10" href="#__codelineno-43-10"></a><span class="c1"># Specific PVC</span>
+<a id="__codelineno-43-11" name="__codelineno-43-11" href="#__codelineno-43-11"></a>kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>vpc-file-pool-csi-controller<span class="w"> </span>-c<span class="w"> </span>csi-controller<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span><span class="s2">&quot;pvc-&lt;uuid&gt;&quot;</span>
+<a id="__codelineno-43-12" name="__codelineno-43-12" href="#__codelineno-43-12"></a>
+<a id="__codelineno-43-13" name="__codelineno-43-13" href="#__codelineno-43-13"></a><span class="c1"># Node mount operations</span>
+<a id="__codelineno-43-14" name="__codelineno-43-14" href="#__codelineno-43-14"></a>kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>vpc-file-pool-csi-node<span class="w"> </span>-c<span class="w"> </span>csi-node<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span><span class="s2">&quot;mount\|stage\|publish&quot;</span>
+</code></pre></div>
+<hr />
+<h2 id="getting-help">Getting Help<a class="headerlink" href="#getting-help" title="Permanent link">&para;</a></h2>
+<p>If you can't resolve the issue:</p>
+<ol>
+<li>
+<p>Collect diagnostics:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-44-1" name="__codelineno-44-1" href="#__codelineno-44-1"></a><span class="c1"># Save to a file for sharing</span>
+<a id="__codelineno-44-2" name="__codelineno-44-2" href="#__codelineno-44-2"></a><span class="o">{</span>
+<a id="__codelineno-44-3" name="__codelineno-44-3" href="#__codelineno-44-3"></a><span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;=== Driver version ===&quot;</span>
+<a id="__codelineno-44-4" name="__codelineno-44-4" href="#__codelineno-44-4"></a><span class="w">  </span>kubectl<span class="w"> </span>get<span class="w"> </span>deployment<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>vpc-file-pool-csi-controller<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.template.spec.containers[0].image}&#39;</span>
+<a id="__codelineno-44-5" name="__codelineno-44-5" href="#__codelineno-44-5"></a><span class="w">  </span><span class="nb">echo</span>
+<a id="__codelineno-44-6" name="__codelineno-44-6" href="#__codelineno-44-6"></a><span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;=== Cluster version ===&quot;</span>
+<a id="__codelineno-44-7" name="__codelineno-44-7" href="#__codelineno-44-7"></a><span class="w">  </span>kubectl<span class="w"> </span>version<span class="w"> </span>--short
+<a id="__codelineno-44-8" name="__codelineno-44-8" href="#__codelineno-44-8"></a><span class="w">  </span><span class="nb">echo</span>
+<a id="__codelineno-44-9" name="__codelineno-44-9" href="#__codelineno-44-9"></a><span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;=== Pool status ===&quot;</span>
+<a id="__codelineno-44-10" name="__codelineno-44-10" href="#__codelineno-44-10"></a><span class="w">  </span>kubectl<span class="w"> </span>get<span class="w"> </span>filesharepools<span class="w"> </span>-o<span class="w"> </span>yaml
+<a id="__codelineno-44-11" name="__codelineno-44-11" href="#__codelineno-44-11"></a><span class="w">  </span><span class="nb">echo</span>
+<a id="__codelineno-44-12" name="__codelineno-44-12" href="#__codelineno-44-12"></a><span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;=== SubVolumes ===&quot;</span>
+<a id="__codelineno-44-13" name="__codelineno-44-13" href="#__codelineno-44-13"></a><span class="w">  </span>kubectl<span class="w"> </span>get<span class="w"> </span>subvolumes<span class="w"> </span>-o<span class="w"> </span>wide
+<a id="__codelineno-44-14" name="__codelineno-44-14" href="#__codelineno-44-14"></a><span class="w">  </span><span class="nb">echo</span>
+<a id="__codelineno-44-15" name="__codelineno-44-15" href="#__codelineno-44-15"></a><span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;=== Controller logs (last 200 lines) ===&quot;</span>
+<a id="__codelineno-44-16" name="__codelineno-44-16" href="#__codelineno-44-16"></a><span class="w">  </span>kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>vpc-file-pool-csi-controller<span class="w"> </span>-c<span class="w"> </span>csi-controller<span class="w"> </span>--tail<span class="o">=</span><span class="m">200</span>
+<a id="__codelineno-44-17" name="__codelineno-44-17" href="#__codelineno-44-17"></a><span class="w">  </span><span class="nb">echo</span>
+<a id="__codelineno-44-18" name="__codelineno-44-18" href="#__codelineno-44-18"></a><span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;=== Node agent logs (last 100 lines per node) ===&quot;</span>
+<a id="__codelineno-44-19" name="__codelineno-44-19" href="#__codelineno-44-19"></a><span class="w">  </span>kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>vpc-file-pool-csi-node<span class="w"> </span>-c<span class="w"> </span>csi-node<span class="w"> </span>--tail<span class="o">=</span><span class="m">100</span>
+<a id="__codelineno-44-20" name="__codelineno-44-20" href="#__codelineno-44-20"></a><span class="o">}</span><span class="w"> </span>&gt;<span class="w"> </span>csi-diagnostics.txt
+</code></pre></div></p>
+</li>
+<li>
+<p>Open a GitHub issue with:</p>
+</li>
+<li>Cluster type (IKS/ROKS) and version</li>
+<li>Driver version (image tag)</li>
+<li>The <code>csi-diagnostics.txt</code> output (redact any sensitive info)</li>
+<li>Steps to reproduce</li>
+</ol>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "navigation.instant", "search.suggest", "search.highlight", "content.code.copy", "content.tabs.link"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

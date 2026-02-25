@@ -1,0 +1,14 @@
+# ReadWriteMany PVC — multiple pods across nodes can read and write simultaneously.
+# This is the natural mode for NFS-backed pool storage.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shared-data
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ibm-vpc-file-pool
+  resources:
+    requests:
+      storage: 50Gi

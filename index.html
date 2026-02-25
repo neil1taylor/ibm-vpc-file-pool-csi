@@ -1,0 +1,2930 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A Kubernetes CSI driver that pools multiple PVCs as subdirectories within shared VPC file shares">
+      
+      
+      
+        <link rel="canonical" href="https://neil1taylor.github.io/ibm-vpc-file-pool-csi/">
+      
+      
+      
+        <link rel="next" href="INSTALL/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.3">
+    
+    
+      
+        <title>IBM VPC File Pool CSI Driver</title>
+      
+    
+    
+      <link rel="stylesheet" href="assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="stylesheets/extra.css">
+    
+    <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#ibm-vpc-file-pool-csi-driver" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="." title="IBM VPC File Pool CSI Driver" class="md-header__button md-logo" aria-label="IBM VPC File Pool CSI Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            IBM VPC File Pool CSI Driver
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Home
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/neil1taylor/ibm-vpc-file-pool-csi" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neil1taylor/ibm-vpc-file-pool-csi
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="INSTALL/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="TROUBLESHOOTING/" class="md-tabs__link">
+          
+  
+  
+  Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="OVERVIEW/" class="md-tabs__link">
+          
+  
+  
+  Architecture
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="VOLUME-CLONING/" class="md-tabs__link">
+          
+  
+  
+  Design (Phase 4)
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="CONTRIBUTING/" class="md-tabs__link">
+          
+  
+  
+  Development
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="examples/" class="md-tabs__link">
+          
+  
+  
+  Examples
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="." title="IBM VPC File Pool CSI Driver" class="md-nav__button md-logo" aria-label="IBM VPC File Pool CSI Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    IBM VPC File Pool CSI Driver
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/neil1taylor/ibm-vpc-file-pool-csi" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neil1taylor/ibm-vpc-file-pool-csi
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="." class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why-pooling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why Pooling?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How It Works
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#crds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CRDs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#glossary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Glossary
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Glossary">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#core-concepts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Core Concepts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ibm-cloud-vpc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        IBM Cloud VPC
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nfs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NFS
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#csi-container-storage-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CSI (Container Storage Interface)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kubevirt-openshift-virtualization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        KubeVirt / OpenShift Virtualization
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kubernetes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kubernetes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#getting-started" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Getting Started
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Getting Started">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#installation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Installation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#create-a-pool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Create a Pool
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#use-a-pvc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Use a PVC
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#development" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Development
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Development">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#test-coverage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test Coverage
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Documentation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#getting-started_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Getting Started
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration Reference
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#architecture-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture &amp; Design
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#platform-specific" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Platform-Specific
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#development_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Development
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#release" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#license" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        License
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="INSTALL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="USER-GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="HELM-VALUES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Helm Values Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="TROUBLESHOOTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="PERFORMANCE-TUNING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance Tuning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="KNOWN-LIMITATIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Known Limitations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="OVERVIEW/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="CONSISTENCY-MODEL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Consistency Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="VPC-NETWORKING.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VPC Networking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="VM-DISK-FORMATS.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VM Disk Formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="CRD-SPEC/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CRD Specification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="CSI-INTERFACE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CSI Interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="IBM-VPC-API/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    IBM VPC API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="API-KEY-SETUP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Key Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design (Phase 4)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Design (Phase 4)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="VOLUME-CLONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Volume Cloning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="VOLUME-GROUP-SNAPSHOTS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Volume Group Snapshots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="CROSS-REGION-DR/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cross-Region DR
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="CODING-GUIDELINES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coding Guidelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="TESTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Examples
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why-pooling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why Pooling?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How It Works
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#crds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CRDs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#glossary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Glossary
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Glossary">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#core-concepts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Core Concepts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ibm-cloud-vpc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        IBM Cloud VPC
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nfs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NFS
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#csi-container-storage-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CSI (Container Storage Interface)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kubevirt-openshift-virtualization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        KubeVirt / OpenShift Virtualization
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kubernetes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kubernetes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#getting-started" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Getting Started
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Getting Started">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#installation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Installation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#create-a-pool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Create a Pool
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#use-a-pvc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Use a PVC
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#development" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Development
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Development">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#test-coverage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test Coverage
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Documentation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#getting-started_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Getting Started
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration Reference
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#architecture-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture &amp; Design
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#platform-specific" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Platform-Specific
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#development_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Development
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#release" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#license" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        License
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="ibm-vpc-file-pool-csi-driver">IBM VPC File Pool CSI Driver<a class="headerlink" href="#ibm-vpc-file-pool-csi-driver" title="Permanent link">&para;</a></h1>
+<p>A Kubernetes <a href="https://kubernetes-csi.github.io/docs/">CSI</a> driver that pools multiple PVCs as subdirectories within shared IBM Cloud VPC file shares, instead of the traditional 1:1 PVC-to-share mapping.</p>
+<h2 id="why-pooling">Why Pooling?<a class="headerlink" href="#why-pooling" title="Permanent link">&para;</a></h2>
+<p>The standard IBM VPC file CSI driver creates one VPC file share per PVC — a 1:1 mapping. That hits three walls fast:</p>
+<ul>
+<li><strong>Quota</strong> — VPC accounts cap at 300 file shares. A busy cluster with lots of small PVCs burns through that quickly.</li>
+<li><strong>Speed</strong> — Creating a VPC file share takes 30-90 seconds. Pods sit waiting for storage.</li>
+<li><strong>Cost</strong> — Each share has a 10 GB minimum and its own billing line. Hundreds of tiny PVCs mean hundreds of minimums.</li>
+</ul>
+<p>Pooling flips the model: pre-provision a few large shares, then hand out subdirectories within them. Creating a subdirectory is instant, shares nothing with the VPC API, and lets many PVCs share the capacity of a single share. Think of it like a VMware datastore — one NFS export holds many volumes.</p>
+<h2 id="how-it-works">How It Works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
+<p>Traditional CSI drivers create one VPC file share per PVC. This driver takes a different approach: a <strong>FileSharePool</strong> CR defines a pool of VPC file shares, and each PVC gets a subdirectory on an existing share.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>VPC File Share (1 TB)
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── /pvcs/pvc-aaa...    ← PVC-1 (10 GB quota)
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── /pvcs/pvc-bbb...    ← PVC-2 (50 GB quota)
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>└── /pvcs/pvc-ccc...    ← PVC-3 (20 GB quota)
+</code></pre></div>
+<p>This reduces VPC API calls, speeds up PVC provisioning (mkdir vs. 30-90s share creation), and lowers cost by consolidating storage.</p>
+<h2 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Workload Pod
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    │ bind-mount /data
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    ▼
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>CSI Node Agent (DaemonSet)
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    │ NFS mount per share, bind-mount per PVC
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    │
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>CSI Controller (Deployment)
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    │ CreateVolume / DeleteVolume
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    ▼
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>Pool Manager
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>    │ share selection (spread/binpack), mkdir, capacity tracking
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>    ▼
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>IBM VPC Client ──► VPC File Share API
+</code></pre></div>
+<p><strong>Key components:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Location</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CSI Controller</td>
+<td><code>pkg/driver/controller.go</code></td>
+<td>gRPC handlers for volume lifecycle</td>
+</tr>
+<tr>
+<td>CSI Node Agent</td>
+<td><code>pkg/driver/node.go</code></td>
+<td>NFS mount + bind-mount into pods</td>
+</tr>
+<tr>
+<td>Pool Manager</td>
+<td><code>pkg/pool/manager.go</code></td>
+<td>Core brain: allocation, deallocation, expansion, snapshots, clones</td>
+</tr>
+<tr>
+<td>Share Selection</td>
+<td><code>pkg/pool/share.go</code></td>
+<td>Spread (most free) or binpack (least free) strategy</td>
+</tr>
+<tr>
+<td>Clone Worker</td>
+<td><code>pkg/pool/clone_worker.go</code></td>
+<td>Async clone operations for large volumes</td>
+</tr>
+<tr>
+<td>Replication Controller</td>
+<td><code>pkg/pool/replication_controller.go</code></td>
+<td>Cross-region disaster recovery with incremental rsync</td>
+</tr>
+<tr>
+<td>Hook Orchestrator</td>
+<td><code>pkg/hooks/</code></td>
+<td>Lifecycle hooks (exec + HTTP) for replication and group snapshots</td>
+</tr>
+<tr>
+<td>Admission Webhooks</td>
+<td><code>pkg/webhook/</code></td>
+<td>Validating webhooks for all CRD types</td>
+</tr>
+<tr>
+<td>Migration CLI</td>
+<td><code>pkg/migrate/</code></td>
+<td>Migrate PVCs from stock IBM CSI driver</td>
+</tr>
+<tr>
+<td>IBM VPC Client</td>
+<td><code>pkg/ibmcloud/client.go</code></td>
+<td>Thin wrapper around VPC file share API</td>
+</tr>
+<tr>
+<td>CRD Types</td>
+<td><code>api/v1alpha1/</code></td>
+<td>FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, ReplicationPolicy, Hook</td>
+</tr>
+</tbody>
+</table>
+<h2 id="crds">CRDs<a class="headerlink" href="#crds" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>FileSharePool</strong> (cluster-scoped) — defines a pool of VPC file shares with allocation strategy, auto-expansion, and capacity limits</li>
+<li><strong>SubVolume</strong> (cluster-scoped) — tracks individual PVC allocations: which share, subdirectory path, requested size, and clone/snapshot state</li>
+<li><strong>Snapshot</strong> (cluster-scoped) — tracks point-in-time directory copies of SubVolumes</li>
+<li><strong>VolumeGroupSnapshot</strong> (cluster-scoped) — coordinates multi-PVC consistent snapshots with pre/post-snapshot lifecycle hooks</li>
+<li><strong>ReplicationPolicy</strong> (cluster-scoped) — defines cross-region replication relationships between pools with pre/post-sync lifecycle hooks and incremental rsync</li>
+</ul>
+<h2 id="glossary">Glossary<a class="headerlink" href="#glossary" title="Permanent link">&para;</a></h2>
+<h3 id="core-concepts">Core Concepts<a class="headerlink" href="#core-concepts" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Term</th>
+<th>Definition</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Pool</strong> (FileSharePool)</td>
+<td>A group of VPC file shares managed as a unit, defined by a FileSharePool CR</td>
+</tr>
+<tr>
+<td><strong>Share</strong> (VPC File Share)</td>
+<td>An NFS-exported block of cloud storage created via the IBM VPC API; each pool contains one or more shares</td>
+</tr>
+<tr>
+<td><strong>SubVolume</strong></td>
+<td>A subdirectory on a share that backs a single PVC, tracked by a SubVolume CR</td>
+</tr>
+<tr>
+<td><strong>Subdirectory</strong></td>
+<td>The physical directory on the NFS share (e.g., <code>/pvcs/pvc-abc123</code>), created by the node agent during publish</td>
+</tr>
+<tr>
+<td><strong>Mount Target</strong></td>
+<td>The VPC-managed NFS endpoint (IP address) used to mount a share on worker nodes</td>
+</tr>
+<tr>
+<td><strong>Allocation</strong></td>
+<td>The process of selecting a share, recording a SubVolume CR, and creating a subdirectory for a new PVC</td>
+</tr>
+<tr>
+<td><strong>Staging</strong></td>
+<td>Per-node NFS mount of a share at a staging directory; done once per share per node</td>
+</tr>
+<tr>
+<td><strong>Tier</strong></td>
+<td>A named performance level within a pool (e.g., "standard", "premium"), each with its own VPC profile, share size, and StorageClass</td>
+</tr>
+<tr>
+<td><strong>Spread</strong></td>
+<td>Allocation strategy that places each new PVC on the share with the most free capacity, distributing PVCs evenly across shares</td>
+</tr>
+<tr>
+<td><strong>Binpack</strong></td>
+<td>Allocation strategy that places each new PVC on the share with the least free capacity that still fits, filling shares sequentially</td>
+</tr>
+<tr>
+<td><strong>Draining</strong></td>
+<td>Share state where no new PVCs are allocated but existing PVCs continue to work; used to decommission a share gracefully</td>
+</tr>
+<tr>
+<td><strong>Expanding</strong></td>
+<td>Pool state when a new VPC file share is being created because utilization crossed the <code>expandThresholdPercent</code> threshold</td>
+</tr>
+<tr>
+<td><strong>Golden Image</strong></td>
+<td>A pre-configured VM boot disk image (e.g., CentOS, Fedora) provisioned on pool storage for rapid VM creation via cloning</td>
+</tr>
+<tr>
+<td><strong>Clone Worker</strong></td>
+<td>Background goroutine that copies data for large (&gt;10 GB) volume clones asynchronously, allowing <code>CreateVolume</code> to return immediately</td>
+</tr>
+<tr>
+<td><strong>Hook Orchestrator</strong></td>
+<td>Component that executes lifecycle hooks (exec commands or HTTP webhooks) before/after replication syncs and group snapshots</td>
+</tr>
+<tr>
+<td><strong>Incremental Sync</strong></td>
+<td>rsync-based replication that transfers only changed files between source and destination, instead of full directory copies</td>
+</tr>
+</tbody>
+</table>
+<h3 id="ibm-cloud-vpc">IBM Cloud VPC<a class="headerlink" href="#ibm-cloud-vpc" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Term</th>
+<th>Definition</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>dp2</strong></td>
+<td>The default VPC file share profile; IOPS scale automatically with share size (e.g., 2 TB = ~6,000 IOPS)</td>
+</tr>
+<tr>
+<td><strong>Custom Profile</strong></td>
+<td>A VPC file share profile where you specify a fixed IOPS value independent of the dp2 auto-scaling formula</td>
+</tr>
+<tr>
+<td><strong>IOPS</strong></td>
+<td>I/O Operations Per Second; the performance budget for a share, shared by all PVCs on that share</td>
+</tr>
+<tr>
+<td><strong>VPC Access Mode</strong></td>
+<td>File share access control mode where shares are exported under a shared FQDN and differentiated by their NFS export path</td>
+</tr>
+<tr>
+<td><strong>Security Group Mode</strong></td>
+<td>Alternative file share access control mode using VPC security groups; incompatible with VPC mount targets</td>
+</tr>
+<tr>
+<td><strong>root_squash</strong></td>
+<td>NFS server mapping of root (UID 0) to nobody (UID 65534); always enabled on VPC file shares, cannot be disabled</td>
+</tr>
+<tr>
+<td><strong>initial_owner</strong></td>
+<td>VPC API parameter setting the UID/GID ownership of the share's root directory at creation time</td>
+</tr>
+<tr>
+<td><strong>Transit Gateway</strong></td>
+<td>IBM Cloud service connecting VPCs across regions over the private backbone; required for cross-region replication</td>
+</tr>
+</tbody>
+</table>
+<h3 id="nfs">NFS<a class="headerlink" href="#nfs" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Term</th>
+<th>Definition</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>NFSv4.1</strong></td>
+<td>Network File System protocol version 4.1; adds session trunking and directory delegation over v4.0. Required by VPC file shares.</td>
+</tr>
+<tr>
+<td><strong>sec=sys</strong></td>
+<td>NFS security flavor using standard Unix UID/GID credentials (AUTH_UNIX); required for <code>chown</code> to work on VPC shares</td>
+</tr>
+<tr>
+<td><strong>sec=null</strong></td>
+<td>NFS security flavor using anonymous authentication; VPC shares negotiate this by default, making all files UID 99</td>
+</tr>
+<tr>
+<td><strong>soft mount</strong></td>
+<td>NFS mount option that returns I/O errors after a timeout; prevents pods from hanging when the NFS server is unreachable</td>
+</tr>
+<tr>
+<td><strong>hard mount</strong></td>
+<td>NFS mount option that retries I/O indefinitely until the server responds; can cause pods to hang permanently</td>
+</tr>
+<tr>
+<td><strong>timeo</strong></td>
+<td>NFS mount option: timeout per RPC attempt in deciseconds (default 600 = 60 seconds)</td>
+</tr>
+<tr>
+<td><strong>retrans</strong></td>
+<td>NFS mount option: number of RPC retransmissions before a soft mount returns an error (default 3)</td>
+</tr>
+<tr>
+<td><strong>rsize / wsize</strong></td>
+<td>NFS mount options controlling read/write buffer sizes in bytes (typically negotiated to 1 MB)</td>
+</tr>
+<tr>
+<td><strong>close-to-open</strong></td>
+<td>NFS consistency model: changes to a file become visible to other clients only after the writer calls <code>close()</code> and the reader calls <code>open()</code></td>
+</tr>
+<tr>
+<td><strong>bind-mount</strong></td>
+<td>Linux mount operation that makes a directory accessible at a second mount point; used to expose individual subdirectories into pod paths</td>
+</tr>
+</tbody>
+</table>
+<h3 id="csi-container-storage-interface">CSI (Container Storage Interface)<a class="headerlink" href="#csi-container-storage-interface" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Term</th>
+<th>Definition</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Provisioner</strong></td>
+<td>The CSI driver identifier in a StorageClass (e.g., <code>vpc-file-pool.csi.ibm.io</code>); determines which driver handles PVC requests</td>
+</tr>
+<tr>
+<td><strong>Sidecars</strong></td>
+<td>Standard Kubernetes CSI helper containers (csi-provisioner, csi-resizer, csi-snapshotter, liveness-probe, node-driver-registrar) that translate Kubernetes events into CSI gRPC calls</td>
+</tr>
+<tr>
+<td><strong>NodeStageVolume</strong></td>
+<td>CSI RPC that mounts the entire NFS share to a staging directory on the node; called once per share per node</td>
+</tr>
+<tr>
+<td><strong>NodePublishVolume</strong></td>
+<td>CSI RPC that bind-mounts a SubVolume's subdirectory from the staging path into the pod's volume path</td>
+</tr>
+<tr>
+<td><strong>VolumeContentSource</strong></td>
+<td>Field in <code>CreateVolume</code> indicating the new volume should be populated from an existing snapshot or volume (clone)</td>
+</tr>
+<tr>
+<td><strong>fsGroupPolicy</strong></td>
+<td>CSI driver spec field controlling whether kubelet recursively <code>chown</code>s mounts to the pod's <code>fsGroup</code>; set to <code>None</code> to avoid failures with root_squash</td>
+</tr>
+<tr>
+<td><strong>StorageClass</strong></td>
+<td>Kubernetes resource that maps PVCs to a provisioner and its parameters (pool name, tier, UID/GID, mount options)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="kubevirt-openshift-virtualization">KubeVirt / OpenShift Virtualization<a class="headerlink" href="#kubevirt-openshift-virtualization" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Term</th>
+<th>Definition</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>CDI</strong></td>
+<td>Containerized Data Importer — KubeVirt component that imports, clones, and uploads VM disk images into PVCs</td>
+</tr>
+<tr>
+<td><strong>DataImportCron</strong></td>
+<td>CDI resource that periodically imports OS images from a registry into golden image PVCs on a schedule</td>
+</tr>
+<tr>
+<td><strong>DataSource</strong></td>
+<td>CDI resource pointing to a bootable disk PVC; appears in the OpenShift Virtualization <strong>InstanceTypes</strong> catalog tab</td>
+</tr>
+<tr>
+<td><strong>DataVolume</strong></td>
+<td>CDI resource that combines PVC creation with data import/clone in a single object; incompatible with the pool CSI driver</td>
+</tr>
+<tr>
+<td><strong>VolumePopulator</strong></td>
+<td>Kubernetes mechanism CDI uses to populate PVCs; sets a <code>dataSource</code> that the pool CSI provisioner does not recognize</td>
+</tr>
+<tr>
+<td><strong>StorageProfile</strong></td>
+<td>CDI resource auto-created per StorageClass; defines access modes, volume mode, and clone strategy for CDI operations</td>
+</tr>
+<tr>
+<td><strong>Template</strong></td>
+<td>OpenShift resource defining a complete VM blueprint (CPU, memory, disks, network); appears in the <strong>Templates</strong> catalog tab</td>
+</tr>
+<tr>
+<td><strong>InstanceType</strong></td>
+<td>KubeVirt resource defining a CPU/RAM preset; paired with a DataSource (image) to create a VM from the InstanceTypes tab</td>
+</tr>
+<tr>
+<td><strong>virt-handler</strong></td>
+<td>KubeVirt DaemonSet component on each node that manages VM lifecycle; calls <code>chown(107, 107)</code> on filesystem-mode PVC mount directories</td>
+</tr>
+<tr>
+<td><strong>virt-launcher</strong></td>
+<td>KubeVirt pod that runs the QEMU process for a single VM</td>
+</tr>
+<tr>
+<td><strong>QEMU</strong></td>
+<td>Open-source machine emulator used by KubeVirt to run VMs; requires raw format disk images for filesystem-mode PVCs</td>
+</tr>
+<tr>
+<td><strong>qcow2</strong></td>
+<td>QEMU Copy-On-Write disk image format; cloud images are distributed as qcow2 but must be converted to raw for KubeVirt filesystem PVCs</td>
+</tr>
+</tbody>
+</table>
+<h3 id="kubernetes">Kubernetes<a class="headerlink" href="#kubernetes" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Term</th>
+<th>Definition</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Finalizer</strong></td>
+<td>Kubernetes metadata that prevents a resource from being deleted until a controller removes it; used on pools to block deletion while SubVolumes exist</td>
+</tr>
+<tr>
+<td><strong>Leader Election</strong></td>
+<td>Pattern ensuring only one controller replica actively reconciles at a time; prevents concurrent pool state corruption</td>
+</tr>
+<tr>
+<td><strong>OwnerReference</strong></td>
+<td>Kubernetes metadata linking a child resource to its parent; enables automatic garbage collection (e.g., auto-created StorageClasses deleted with their pool)</td>
+</tr>
+<tr>
+<td><strong>Admission Webhook</strong></td>
+<td>Kubernetes extension that validates or mutates resources on create/update; the driver uses validating webhooks on all CRD types</td>
+</tr>
+<tr>
+<td><strong>SCC</strong> (SecurityContextConstraints)</td>
+<td>OpenShift resource controlling pod security permissions; the node agent requires the <code>privileged</code> SCC (standard for CSI drivers)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="getting-started">Getting Started<a class="headerlink" href="#getting-started" title="Permanent link">&para;</a></h2>
+<h3 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Kubernetes 1.28+</li>
+<li>IBM Cloud VPC infrastructure</li>
+<li><code>kubectl</code> and <code>helm</code> (v3)</li>
+</ul>
+<h3 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Apply CRDs</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>make<span class="w"> </span>deploy
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># Or install via Helm</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>make<span class="w"> </span>helm-install
+</code></pre></div>
+<p>See <a href="INSTALL/">INSTALL.md</a> for full setup instructions including IBM Cloud API key configuration.</p>
+<h3 id="create-a-pool">Create a Pool<a class="headerlink" href="#create-a-pool" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">storage.ibmcloud.io/v1alpha1</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">FileSharePool</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-pool</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">  </span><span class="nt">zone</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">us-south-1</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">  </span><span class="nt">profile</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dp2</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">  </span><span class="nt">shareSizeGB</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1000</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">  </span><span class="nt">maxShares</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">  </span><span class="nt">autoExpand</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="w">  </span><span class="nt">allocationStrategy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">spread</span>
+</code></pre></div>
+<h3 id="use-a-pvc">Use a PVC<a class="headerlink" href="#use-a-pvc" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">PersistentVolumeClaim</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-app-data</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">  </span><span class="nt">accessModes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">ReadWriteMany</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">  </span><span class="nt">storageClassName</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ibm-vpc-file-pool</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">  </span><span class="nt">resources</span><span class="p">:</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">    </span><span class="nt">requests</span><span class="p">:</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">      </span><span class="nt">storage</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10Gi</span>
+</code></pre></div>
+<h2 id="development">Development<a class="headerlink" href="#development" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>make<span class="w"> </span>build<span class="w">          </span><span class="c1"># Build binary</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>make<span class="w"> </span><span class="nb">test</span><span class="w">           </span><span class="c1"># Unit tests with race detector</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>make<span class="w"> </span>test-coverage<span class="w">  </span><span class="c1"># Tests with coverage report</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>make<span class="w"> </span>test-vm<span class="w">        </span><span class="c1"># VM clone E2E test (requires ROKS + OCV)</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>make<span class="w"> </span>lint<span class="w">           </span><span class="c1"># golangci-lint</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>make<span class="w"> </span>generate<span class="w">       </span><span class="c1"># Regenerate CRD types and DeepCopy</span>
+</code></pre></div>
+<p>Run a single test:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>go<span class="w"> </span><span class="nb">test</span><span class="w"> </span>./pkg/pool/<span class="w"> </span>-v<span class="w"> </span>-race<span class="w"> </span>-run<span class="w"> </span>TestAllocate_SpreadStrategy
+</code></pre></div>
+<h3 id="test-coverage">Test Coverage<a class="headerlink" href="#test-coverage" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Package</th>
+<th>Coverage</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pkg/pool/</code></td>
+<td>89.2%</td>
+</tr>
+<tr>
+<td><code>pkg/util/</code></td>
+<td>88.0%</td>
+</tr>
+<tr>
+<td><code>pkg/driver/</code></td>
+<td>81.2%</td>
+</tr>
+<tr>
+<td><code>pkg/ibmcloud/fake/</code></td>
+<td>100%</td>
+</tr>
+<tr>
+<td><code>pkg/migrate/</code></td>
+<td>78.5%</td>
+</tr>
+<tr>
+<td><code>test/integration/</code></td>
+<td>— (integration)</td>
+</tr>
+</tbody>
+</table>
+<p>510+ tests total, all passing with <code>-race</code>.</p>
+<h2 id="documentation">Documentation<a class="headerlink" href="#documentation" title="Permanent link">&para;</a></h2>
+<h3 id="getting-started_1">Getting Started<a class="headerlink" href="#getting-started_1" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Document</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="INSTALL/">INSTALL.md</a></td>
+<td>Build, deploy, and Helm chart</td>
+</tr>
+<tr>
+<td><a href="USER-GUIDE/">USER-GUIDE.md</a></td>
+<td>End-user guide: pools, PVCs, snapshots, clones</td>
+</tr>
+<tr>
+<td><a href="FAQ.md">FAQ.md</a></td>
+<td>Frequently asked questions</td>
+</tr>
+<tr>
+<td><a href="examples/">examples/</a></td>
+<td>Ready-to-use YAML examples</td>
+</tr>
+</tbody>
+</table>
+<h3 id="operations">Operations<a class="headerlink" href="#operations" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Document</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="UPGRADE-GUIDE.md">UPGRADE-GUIDE.md</a></td>
+<td>Version upgrade procedures and compatibility matrix</td>
+</tr>
+<tr>
+<td><a href="DAY2-OPERATIONS.md">DAY2-OPERATIONS.md</a></td>
+<td>Production runbook: health checks, draining, failover</td>
+</tr>
+<tr>
+<td><a href="MONITORING.md">MONITORING.md</a></td>
+<td>Metrics reference, alerting rules, Grafana dashboard</td>
+</tr>
+<tr>
+<td><a href="CAPACITY-PLANNING.md">CAPACITY-PLANNING.md</a></td>
+<td>Sizing guidance, cost estimation, example configurations</td>
+</tr>
+<tr>
+<td><a href="BACKUP-RECOVERY.md">BACKUP-RECOVERY.md</a></td>
+<td>Snapshot scheduling, DR setup, recovery runbooks</td>
+</tr>
+<tr>
+<td><a href="TROUBLESHOOTING/">TROUBLESHOOTING.md</a></td>
+<td>Comprehensive troubleshooting guide</td>
+</tr>
+<tr>
+<td><a href="PERFORMANCE-TUNING/">PERFORMANCE-TUNING.md</a></td>
+<td>NFS tuning, IOPS planning, benchmarking</td>
+</tr>
+</tbody>
+</table>
+<h3 id="configuration-reference">Configuration Reference<a class="headerlink" href="#configuration-reference" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Document</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="HELM-VALUES/">HELM-VALUES.md</a></td>
+<td>Complete Helm chart values reference</td>
+</tr>
+<tr>
+<td><a href="CRD-SPEC/">CRD-SPEC.md</a></td>
+<td>FileSharePool and SubVolume CRD definitions</td>
+</tr>
+<tr>
+<td><a href="API-KEY-SETUP/">API-KEY-SETUP.md</a></td>
+<td>Authentication via secret-common-lib</td>
+</tr>
+</tbody>
+</table>
+<h3 id="architecture-design">Architecture &amp; Design<a class="headerlink" href="#architecture-design" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Document</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="FEATURES.md">FEATURES.md</a></td>
+<td>Complete feature catalog with comparison table</td>
+</tr>
+<tr>
+<td><a href="ARCHITECTURE/">ARCHITECTURE.md</a></td>
+<td>System design and data flows</td>
+</tr>
+<tr>
+<td><a href="CSI-INTERFACE/">CSI-INTERFACE.md</a></td>
+<td>CSI gRPC method implementations</td>
+</tr>
+<tr>
+<td><a href="IBM-VPC-API/">IBM-VPC-API.md</a></td>
+<td>VPC API client wrapper design</td>
+</tr>
+<tr>
+<td><a href="CONSISTENCY-MODEL/">CONSISTENCY-MODEL.md</a></td>
+<td>NFS consistency guarantees and limitations</td>
+</tr>
+<tr>
+<td><a href="VOLUME-CLONING/">VOLUME-CLONING.md</a></td>
+<td>Volume cloning design and usage</td>
+</tr>
+<tr>
+<td><a href="VOLUME-GROUP-SNAPSHOTS/">VOLUME-GROUP-SNAPSHOTS.md</a></td>
+<td>Multi-PVC coordinated snapshots</td>
+</tr>
+<tr>
+<td><a href="CROSS-REGION-DR/">CROSS-REGION-DR.md</a></td>
+<td>Cross-region disaster recovery</td>
+</tr>
+</tbody>
+</table>
+<h3 id="platform-specific">Platform-Specific<a class="headerlink" href="#platform-specific" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Document</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="VPC-NETWORKING.md">VPC-NETWORKING.md</a></td>
+<td>VPC network configuration for NFS</td>
+</tr>
+<tr>
+<td><a href="VM-DISK-FORMATS.md">VM-DISK-FORMATS.md</a></td>
+<td>KubeVirt disk image format requirements</td>
+</tr>
+<tr>
+<td><a href="GOLDEN-IMAGE-WORKFLOW.md">GOLDEN-IMAGE-WORKFLOW.md</a></td>
+<td>Automated VM golden image provisioning</td>
+</tr>
+<tr>
+<td><a href="KNOWN-LIMITATIONS/">KNOWN-LIMITATIONS.md</a></td>
+<td>Known limitations and workarounds</td>
+</tr>
+<tr>
+<td><a href="SECURITY.md">SECURITY.md</a></td>
+<td>Security policy and hardening guide</td>
+</tr>
+</tbody>
+</table>
+<h3 id="development_1">Development<a class="headerlink" href="#development_1" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Document</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="CODING-GUIDELINES/">CODING-GUIDELINES.md</a></td>
+<td>Go conventions and patterns</td>
+</tr>
+<tr>
+<td><a href="TESTING/">TESTING.md</a></td>
+<td>Testing strategy and coverage targets</td>
+</tr>
+<tr>
+<td><a href="CONTRIBUTING/">CONTRIBUTING.md</a></td>
+<td>Developer guide and contribution process</td>
+</tr>
+</tbody>
+</table>
+<h3 id="release">Release<a class="headerlink" href="#release" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Document</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="CHANGELOG/">CHANGELOG.md</a></td>
+<td>Version history and release notes</td>
+</tr>
+</tbody>
+</table>
+<h2 id="license">License<a class="headerlink" href="#license" title="Permanent link">&para;</a></h2>
+<p><a href="LICENSE">Apache License 2.0</a></p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": ".", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "navigation.instant", "search.suggest", "search.highlight", "content.code.copy", "content.tabs.link"], "search": "assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

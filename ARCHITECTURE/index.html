@@ -1,0 +1,2681 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A Kubernetes CSI driver that pools multiple PVCs as subdirectories within shared VPC file shares">
+      
+      
+      
+        <link rel="canonical" href="https://neil1taylor.github.io/ibm-vpc-file-pool-csi/ARCHITECTURE/">
+      
+      
+        <link rel="prev" href="../OVERVIEW/">
+      
+      
+        <link rel="next" href="../CONSISTENCY-MODEL/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.3">
+    
+    
+      
+        <title>System Design - IBM VPC File Pool CSI Driver</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#architecture-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="IBM VPC File Pool CSI Driver" class="md-header__button md-logo" aria-label="IBM VPC File Pool CSI Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            IBM VPC File Pool CSI Driver
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              System Design
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/neil1taylor/ibm-vpc-file-pool-csi" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neil1taylor/ibm-vpc-file-pool-csi
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../INSTALL/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../TROUBLESHOOTING/" class="md-tabs__link">
+          
+  
+  
+  Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../OVERVIEW/" class="md-tabs__link">
+          
+  
+  
+  Architecture
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../VOLUME-CLONING/" class="md-tabs__link">
+          
+  
+  
+  Design (Phase 4)
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../CONTRIBUTING/" class="md-tabs__link">
+          
+  
+  
+  Development
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../examples/" class="md-tabs__link">
+          
+  
+  
+  Examples
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="IBM VPC File Pool CSI Driver" class="md-nav__button md-logo" aria-label="IBM VPC File Pool CSI Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    IBM VPC File Pool CSI Driver
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/neil1taylor/ibm-vpc-file-pool-csi" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neil1taylor/ibm-vpc-file-pool-csi
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../INSTALL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../USER-GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../HELM-VALUES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Helm Values Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TROUBLESHOOTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../PERFORMANCE-TUNING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance Tuning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../KNOWN-LIMITATIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Known Limitations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../OVERVIEW/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Design
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#system-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        System Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#components" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Components
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Components">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-csi-controller-deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. CSI Controller (Deployment)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-csi-node-agent-daemonset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. CSI Node Agent (DaemonSet)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-pool-manager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Pool Manager
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Pool Manager">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-synchronous-allocation-called-from-csi-controller" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A. Synchronous allocation (called from CSI Controller)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b-asynchronous-reconciliation-controller-runtime-reconciler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        B. Asynchronous reconciliation (controller-runtime reconciler)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-ibm-vpc-client" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. IBM VPC Client
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-clone-worker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Clone Worker
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-replication-controller" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Replication Controller
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-migration-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Migration CLI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8-hook-orchestrator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Hook Orchestrator
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#9-admission-webhooks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Admission Webhooks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#10-crd-controllers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. CRD Controllers
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-flow-createvolume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Flow: CreateVolume
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-flow-deletevolume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Flow: DeleteVolume
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-flow-pool-reconciliation-background" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Flow: Pool Reconciliation (Background)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-flow-createsnapshot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Flow: CreateSnapshot
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-flow-clonevolume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Flow: CloneVolume
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#volume-id-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Volume ID Format
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security Model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Security Model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rbac" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RBAC
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#secrets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secrets
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nfs-security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NFS Security
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pod-isolation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pod Isolation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#failure-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failure Modes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONSISTENCY-MODEL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Consistency Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VPC-NETWORKING.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VPC Networking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VM-DISK-FORMATS.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VM Disk Formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CRD-SPEC/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CRD Specification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CSI-INTERFACE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CSI Interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../IBM-VPC-API/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    IBM VPC API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../API-KEY-SETUP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Key Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design (Phase 4)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Design (Phase 4)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VOLUME-CLONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Volume Cloning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VOLUME-GROUP-SNAPSHOTS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Volume Group Snapshots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CROSS-REGION-DR/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cross-Region DR
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CODING-GUIDELINES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coding Guidelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TESTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Examples
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#system-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        System Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#components" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Components
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Components">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-csi-controller-deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. CSI Controller (Deployment)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-csi-node-agent-daemonset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. CSI Node Agent (DaemonSet)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-pool-manager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Pool Manager
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Pool Manager">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-synchronous-allocation-called-from-csi-controller" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A. Synchronous allocation (called from CSI Controller)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b-asynchronous-reconciliation-controller-runtime-reconciler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        B. Asynchronous reconciliation (controller-runtime reconciler)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-ibm-vpc-client" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. IBM VPC Client
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-clone-worker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Clone Worker
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-replication-controller" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Replication Controller
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-migration-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Migration CLI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8-hook-orchestrator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Hook Orchestrator
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#9-admission-webhooks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Admission Webhooks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#10-crd-controllers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. CRD Controllers
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-flow-createvolume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Flow: CreateVolume
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-flow-deletevolume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Flow: DeleteVolume
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-flow-pool-reconciliation-background" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Flow: Pool Reconciliation (Background)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-flow-createsnapshot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Flow: CreateSnapshot
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-flow-clonevolume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Flow: CloneVolume
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#volume-id-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Volume ID Format
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security Model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Security Model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rbac" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RBAC
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#secrets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secrets
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nfs-security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NFS Security
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pod-isolation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pod Isolation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#failure-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failure Modes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="architecture-reference">Architecture Reference<a class="headerlink" href="#architecture-reference" title="Permanent link">&para;</a></h1>
+<h2 id="system-overview">System Overview<a class="headerlink" href="#system-overview" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>┌──────────────────────────────────────────────────────────────────────┐
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>│                        Kubernetes Cluster                            │
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│                                                                      │
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│  ┌─────────────┐    PVC     ┌──────────────────────────────────┐    │
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│  │  Workload   │──created──▶│       CSI Controller Pod          │    │
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│  │   Pod       │            │                                    │    │
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│  │             │            │  ┌────────────────┐                │    │
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│  │  /data ◄───bind-mount───│──│  CSI Controller │                │    │
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>│  │             │            │  │  (gRPC server)  │                │    │
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>│  └─────────────┘            │  └───────┬────────┘                │    │
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>│        ▲                    │          │ Allocate()              │    │
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>│        │                    │  ┌───────▼────────┐                │    │
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>│        │                    │  │  Pool Manager   │                │    │
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>│  ┌─────┴───────┐            │  │                 │                │    │
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>│  │  CSI Node   │            │  │  - Pick share   │                │    │
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>│  │  Agent      │            │  │  - Record CR    │                │    │
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>│  │  (DaemonSet)│            │  │  - Track alloc  │                │    │
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>│  │             │            │  │  - Auto-expand  │                │    │
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>│  │  NFS mount  │            │  └───────┬────────┘                │    │
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>│  │  + bind     │            │          │                          │    │
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>│  └─────────────┘            │  ┌───────▼────────┐                │    │
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>│                             │  │  IBM VPC Client │                │    │
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>│                             │  │  (share CRUD)   │                │    │
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>│                             │  └───────┬────────┘                │    │
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>│                             └──────────┼────────────────────────┘    │
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>│                                        │                              │
+<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>└────────────────────────────────────────┼──────────────────────────────┘
+<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>                                         │ HTTPS (VPC API)
+<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>                                         ▼
+<a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a>                              ┌─────────────────────┐
+<a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>                              │  IBM Cloud VPC API   │
+<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a>                              │  File Share Service  │
+<a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a>                              └──────────┬──────────┘
+<a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a>                                         │
+<a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a>                                         ▼
+<a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a>                              ┌─────────────────────┐
+<a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a>                              │  VPC File Shares     │
+<a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a>                              │  (NFS exports)       │
+<a id="__codelineno-0-39" name="__codelineno-0-39" href="#__codelineno-0-39"></a>                              │                      │
+<a id="__codelineno-0-40" name="__codelineno-0-40" href="#__codelineno-0-40"></a>                              │  ┌────────────────┐  │
+<a id="__codelineno-0-41" name="__codelineno-0-41" href="#__codelineno-0-41"></a>                              │  │ Share pool-1-a │  │
+<a id="__codelineno-0-42" name="__codelineno-0-42" href="#__codelineno-0-42"></a>                              │  │ /pvcs/pvc-aaa  │  │
+<a id="__codelineno-0-43" name="__codelineno-0-43" href="#__codelineno-0-43"></a>                              │  │ /pvcs/pvc-bbb  │  │
+<a id="__codelineno-0-44" name="__codelineno-0-44" href="#__codelineno-0-44"></a>                              │  │ /pvcs/pvc-ccc  │  │
+<a id="__codelineno-0-45" name="__codelineno-0-45" href="#__codelineno-0-45"></a>                              │  └────────────────┘  │
+<a id="__codelineno-0-46" name="__codelineno-0-46" href="#__codelineno-0-46"></a>                              │  ┌────────────────┐  │
+<a id="__codelineno-0-47" name="__codelineno-0-47" href="#__codelineno-0-47"></a>                              │  │ Share pool-1-b │  │
+<a id="__codelineno-0-48" name="__codelineno-0-48" href="#__codelineno-0-48"></a>                              │  │ /pvcs/pvc-ddd  │  │
+<a id="__codelineno-0-49" name="__codelineno-0-49" href="#__codelineno-0-49"></a>                              │  │ /pvcs/pvc-eee  │  │
+<a id="__codelineno-0-50" name="__codelineno-0-50" href="#__codelineno-0-50"></a>                              │  └────────────────┘  │
+<a id="__codelineno-0-51" name="__codelineno-0-51" href="#__codelineno-0-51"></a>                              └─────────────────────┘
+</code></pre></div>
+<h2 id="components">Components<a class="headerlink" href="#components" title="Permanent link">&para;</a></h2>
+<h3 id="1-csi-controller-deployment">1. CSI Controller (Deployment)<a class="headerlink" href="#1-csi-controller-deployment" title="Permanent link">&para;</a></h3>
+<p>The gRPC server that implements CSI Controller RPCs. Runs as a Deployment with 1–2 replicas using leader election.</p>
+<p><strong>Responsibilities:</strong>
+- Receive <code>CreateVolume</code> / <code>DeleteVolume</code> / <code>ControllerExpandVolume</code> calls from the Kubernetes CSI sidecar containers.
+- Delegate to the Pool Manager for allocation decisions.
+- Return volume info (NFS server IP, share path, subdir path) to the kubelet via the CSI protocol.</p>
+<p><strong>Sidecar containers</strong> (standard CSI sidecars, deployed alongside the controller):
+- <code>csi-provisioner</code> — watches PVCs, calls CreateVolume/DeleteVolume
+- <code>csi-resizer</code> — watches PVC size changes, calls ControllerExpandVolume
+- <code>liveness-probe</code> — health checks</p>
+<p><strong>Does NOT:</strong>
+- Mount anything.
+- Call IBM VPC API directly (goes through Pool Manager → IBM VPC Client).
+- Create VPC file shares in the CreateVolume hot path.</p>
+<h3 id="2-csi-node-agent-daemonset">2. CSI Node Agent (DaemonSet)<a class="headerlink" href="#2-csi-node-agent-daemonset" title="Permanent link">&para;</a></h3>
+<p>Runs on every worker node. Implements CSI Node RPCs.</p>
+<p><strong>Responsibilities:</strong>
+- <code>NodeStageVolume</code>: Mount the VPC file share (NFS) to a staging directory on the node. If the share is already mounted (another PVC on the same share), reuse the existing mount.
+- <code>NodePublishVolume</code>: Create the subdirectory on the share if it does not already exist (with uid/gid/permissions from VolumeContext), then bind-mount it into the pod's volume path.
+- <code>NodeUnpublishVolume</code>: Unmount the bind-mount from the pod path.
+- <code>NodeUnstageVolume</code>: Unmount the NFS share from the staging directory (only when no more PVCs reference it on this node).
+- <code>NodeGetVolumeStats</code>: Return capacity/usage stats for the subdirectory (via <code>du</code> or <code>statfs</code>).</p>
+<p><strong>Mount caching strategy:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Node filesystem:
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  /var/lib/kubelet/plugins/vpc-file-pool.csi.ibm.io/staging/
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    └── {share-id}/                    ← NFS mount of the whole share
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>        └── pvcs/
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>            ├── pvc-aaa/              ← subdirectory for PVC aaa
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>            ├── pvc-bbb/              ← subdirectory for PVC bbb
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>            └── pvc-ccc/              ← subdirectory for PVC ccc
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>  /var/lib/kubelet/pods/{pod-uid}/volumes/kubernetes.io~csi/{pv-name}/mount/
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>    └── (bind mount of /staging/{share-id}/pvcs/pvc-aaa/)
+</code></pre></div>
+<p>The node agent maintains an in-memory reference count per share mount. When the last PVC using a share on that node is unpublished, the NFS mount is unmounted.</p>
+<p><strong>NFS mount via nsenter wrapper:</strong></p>
+<p>The node agent container includes a <code>/usr/local/bin/mount</code> wrapper that routes NFS mounts through the host's mount namespace using <code>nsenter --mount=/proc/1/ns/mnt --root=/proc/1/root</code>. Bind mounts use the container's local <code>/usr/bin/mount</code>. This requires <code>hostPID: true</code> on the DaemonSet so <code>/proc/1</code> refers to the host's PID 1.</p>
+<p><strong>Cross-zone server selection:</strong></p>
+<p>When volumeContext contains <code>server.&lt;zone&gt;</code> keys (from pools with accessor zones), the node agent selects the IP matching its own zone (<code>topology.kubernetes.io/zone</code> label). This ensures NFS traffic stays within the zone for lower latency. Falls back to the default <code>server</code> key if no zone match is found.</p>
+<h3 id="3-pool-manager">3. Pool Manager<a class="headerlink" href="#3-pool-manager" title="Permanent link">&para;</a></h3>
+<p>The core logic component. Runs within the controller pod but is architecturally distinct.</p>
+<p><strong>Two modes of operation:</strong></p>
+<h4 id="a-synchronous-allocation-called-from-csi-controller">A. Synchronous allocation (called from CSI Controller)<a class="headerlink" href="#a-synchronous-allocation-called-from-csi-controller" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kd">type</span><span class="w"> </span><span class="nx">PoolManager</span><span class="w"> </span><span class="kd">interface</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">    </span><span class="c1">// Allocate finds a share with room, records the SubVolume CR, and returns</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="c1">// the share&#39;s mount info. Subdirectory creation is deferred to NodePublishVolume.</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">    </span><span class="nx">Allocate</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">req</span><span class="w"> </span><span class="nx">AllocationRequest</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="o">*</span><span class="nx">AllocationResult</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">    </span><span class="c1">// Deallocate deletes the SubVolume CR and updates pool tracking.</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">    </span><span class="c1">// Does not remove the subdirectory on the NFS share (nfsOps is nil in controller mode).</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">    </span><span class="nx">Deallocate</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">subVolumeName</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">    </span><span class="c1">// Expand updates the allocation size for an existing SubVolume.</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">    </span><span class="nx">Expand</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">subVolumeName</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">newSizeGB</span><span class="w"> </span><span class="kt">int64</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">    </span><span class="c1">// CreateSnapshot creates a directory-level copy of a SubVolume.</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="w">    </span><span class="nx">CreateSnapshot</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">snapshotName</span><span class="p">,</span><span class="w"> </span><span class="nx">sourceVolumeID</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">params</span><span class="w"> </span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="o">*</span><span class="nx">SnapshotResult</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="w">    </span><span class="c1">// DeleteSnapshot removes a snapshot directory and its CR.</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="w">    </span><span class="nx">DeleteSnapshot</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">snapshotName</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="w">    </span><span class="c1">// ListSnapshots lists snapshots, optionally filtered by source volume.</span>
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a><span class="w">    </span><span class="nx">ListSnapshots</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">sourceVolumeID</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">([]</span><span class="nx">SnapshotResult</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span>
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a><span class="w">    </span><span class="c1">// RestoreSnapshot creates a new SubVolume from a snapshot.</span>
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a><span class="w">    </span><span class="nx">RestoreSnapshot</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">snapshotName</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">req</span><span class="w"> </span><span class="nx">AllocationRequest</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="o">*</span><span class="nx">AllocationResult</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span>
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a><span class="w">    </span><span class="c1">// CloneVolume creates a new SubVolume that is a copy of an existing one.</span>
+<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a><span class="w">    </span><span class="c1">// For small volumes (below syncThreshold), the copy completes before returning.</span>
+<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a><span class="w">    </span><span class="c1">// For large volumes, the copy runs asynchronously.</span>
+<a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a><span class="w">    </span><span class="nx">CloneVolume</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">sourceVolumeID</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">req</span><span class="w"> </span><span class="nx">AllocationRequest</span><span class="p">,</span><span class="w"> </span><span class="nx">syncThresholdGB</span><span class="w"> </span><span class="kt">int64</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="o">*</span><span class="nx">AllocationResult</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span>
+<a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a>
+<a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a><span class="w">    </span><span class="c1">// CreateVolumeGroupSnapshot creates snapshots for multiple SubVolumes in sequence.</span>
+<a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a><span class="w">    </span><span class="c1">// Does NOT execute hooks -- the CSI controller handles hook orchestration.</span>
+<a id="__codelineno-2-32" name="__codelineno-2-32" href="#__codelineno-2-32"></a><span class="w">    </span><span class="nx">CreateVolumeGroupSnapshot</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">req</span><span class="w"> </span><span class="nx">GroupSnapshotRequest</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="o">*</span><span class="nx">GroupSnapshotResult</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span>
+<a id="__codelineno-2-33" name="__codelineno-2-33" href="#__codelineno-2-33"></a>
+<a id="__codelineno-2-34" name="__codelineno-2-34" href="#__codelineno-2-34"></a><span class="w">    </span><span class="c1">// DeleteVolumeGroupSnapshot deletes all member snapshots and the group CR.</span>
+<a id="__codelineno-2-35" name="__codelineno-2-35" href="#__codelineno-2-35"></a><span class="w">    </span><span class="nx">DeleteVolumeGroupSnapshot</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">groupName</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span>
+<a id="__codelineno-2-36" name="__codelineno-2-36" href="#__codelineno-2-36"></a><span class="p">}</span>
+<a id="__codelineno-2-37" name="__codelineno-2-37" href="#__codelineno-2-37"></a>
+<a id="__codelineno-2-38" name="__codelineno-2-38" href="#__codelineno-2-38"></a><span class="kd">type</span><span class="w"> </span><span class="nx">AllocationRequest</span><span class="w"> </span><span class="kd">struct</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-2-39" name="__codelineno-2-39" href="#__codelineno-2-39"></a><span class="w">    </span><span class="nx">PVName</span><span class="w">        </span><span class="kt">string</span>
+<a id="__codelineno-2-40" name="__codelineno-2-40" href="#__codelineno-2-40"></a><span class="w">    </span><span class="nx">PVCName</span><span class="w">       </span><span class="kt">string</span>
+<a id="__codelineno-2-41" name="__codelineno-2-41" href="#__codelineno-2-41"></a><span class="w">    </span><span class="nx">PVCNamespace</span><span class="w">  </span><span class="kt">string</span>
+<a id="__codelineno-2-42" name="__codelineno-2-42" href="#__codelineno-2-42"></a><span class="w">    </span><span class="nx">PoolName</span><span class="w">      </span><span class="kt">string</span>
+<a id="__codelineno-2-43" name="__codelineno-2-43" href="#__codelineno-2-43"></a><span class="w">    </span><span class="nx">RequestedGB</span><span class="w">   </span><span class="kt">int64</span>
+<a id="__codelineno-2-44" name="__codelineno-2-44" href="#__codelineno-2-44"></a><span class="w">    </span><span class="nx">Zone</span><span class="w">          </span><span class="kt">string</span>
+<a id="__codelineno-2-45" name="__codelineno-2-45" href="#__codelineno-2-45"></a><span class="p">}</span>
+<a id="__codelineno-2-46" name="__codelineno-2-46" href="#__codelineno-2-46"></a>
+<a id="__codelineno-2-47" name="__codelineno-2-47" href="#__codelineno-2-47"></a><span class="kd">type</span><span class="w"> </span><span class="nx">AllocationResult</span><span class="w"> </span><span class="kd">struct</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-2-48" name="__codelineno-2-48" href="#__codelineno-2-48"></a><span class="w">    </span><span class="nx">ShareID</span><span class="w">         </span><span class="kt">string</span><span class="w">            </span><span class="c1">// VPC share ID</span>
+<a id="__codelineno-2-49" name="__codelineno-2-49" href="#__codelineno-2-49"></a><span class="w">    </span><span class="nx">MountTargetIP</span><span class="w">   </span><span class="kt">string</span><span class="w">            </span><span class="c1">// Primary mount target IP</span>
+<a id="__codelineno-2-50" name="__codelineno-2-50" href="#__codelineno-2-50"></a><span class="w">    </span><span class="nx">SubPath</span><span class="w">         </span><span class="kt">string</span><span class="w">            </span><span class="c1">// Subdirectory path, e.g., &quot;/pvcs/pvc-abc123&quot;</span>
+<a id="__codelineno-2-51" name="__codelineno-2-51" href="#__codelineno-2-51"></a><span class="w">    </span><span class="nx">SharePath</span><span class="w">       </span><span class="kt">string</span><span class="w">            </span><span class="c1">// NFS export root, e.g., &quot;/&quot;</span>
+<a id="__codelineno-2-52" name="__codelineno-2-52" href="#__codelineno-2-52"></a><span class="w">    </span><span class="nx">UID</span><span class="w">             </span><span class="o">*</span><span class="kt">int64</span><span class="w">            </span><span class="c1">// Unix user ID for the subdirectory</span>
+<a id="__codelineno-2-53" name="__codelineno-2-53" href="#__codelineno-2-53"></a><span class="w">    </span><span class="nx">GID</span><span class="w">             </span><span class="o">*</span><span class="kt">int64</span><span class="w">            </span><span class="c1">// Unix group ID</span>
+<a id="__codelineno-2-54" name="__codelineno-2-54" href="#__codelineno-2-54"></a><span class="w">    </span><span class="nx">Permissions</span><span class="w">     </span><span class="kt">string</span><span class="w">            </span><span class="c1">// Unix permissions string (e.g., &quot;755&quot;)</span>
+<a id="__codelineno-2-55" name="__codelineno-2-55" href="#__codelineno-2-55"></a><span class="w">    </span><span class="nx">MountTargets</span><span class="w">    </span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span><span class="w"> </span><span class="c1">// Zone -&gt; IP mapping (nil for single-zone)</span>
+<a id="__codelineno-2-56" name="__codelineno-2-56" href="#__codelineno-2-56"></a><span class="w">    </span><span class="nx">AccessibleZones</span><span class="w"> </span><span class="p">[]</span><span class="kt">string</span><span class="w">          </span><span class="c1">// All zones this volume is accessible from</span>
+<a id="__codelineno-2-57" name="__codelineno-2-57" href="#__codelineno-2-57"></a><span class="p">}</span>
+</code></pre></div>
+<h4 id="b-asynchronous-reconciliation-controller-runtime-reconciler">B. Asynchronous reconciliation (controller-runtime reconciler)<a class="headerlink" href="#b-asynchronous-reconciliation-controller-runtime-reconciler" title="Permanent link">&para;</a></h4>
+<p>Watches <code>FileSharePool</code> CRs and reconciles pool state:
+- Ensure a matching StorageClass exists for the pool (auto-created, with OwnerReference for GC).
+- If total allocated capacity exceeds <code>expandThreshold</code> percentage, create a new VPC file share and add it to the pool.
+- If a share is unhealthy (VPC API reports degraded), mark it as draining — no new allocations, but existing PVCs remain.
+- Periodically scan SubVolume CRs and reconcile actual share state.
+- Update <code>FileSharePool.Status</code> with current share inventory and capacity.</p>
+<h3 id="4-ibm-vpc-client">4. IBM VPC Client<a class="headerlink" href="#4-ibm-vpc-client" title="Permanent link">&para;</a></h3>
+<p>Thin wrapper around the <code>vpc-go-sdk</code>. Isolates all IBM Cloud API calls.</p>
+<p><strong>Operations:</strong>
+- <code>CreateFileShare(ctx, spec)</code> → share ID, mount target IP
+- <code>DeleteFileShare(ctx, shareID)</code> → error
+- <code>ExpandFileShare(ctx, shareID, newSizeGB)</code> → error
+- <code>GetFileShare(ctx, shareID)</code> → share details (state, size, IOPS, mount targets)
+- <code>ListFileShares(ctx, filters)</code> → list of shares (for discovery/reconciliation)</p>
+<p>All operations are idempotent or check-before-act. All have context-based timeouts.</p>
+<h3 id="5-clone-worker">5. Clone Worker<a class="headerlink" href="#5-clone-worker" title="Permanent link">&para;</a></h3>
+<p>Background component within the controller pod that handles asynchronous clone operations for large SubVolumes.</p>
+<p><strong>Responsibilities:</strong>
+- Process SubVolumes with <code>cloneStatus=Pending</code> or <code>cloneStatus=InProgress</code>.
+- Mount source and target shares (same-share or cross-share) and perform <code>cp -a</code> data copy.
+- Update SubVolume CR status as clone progresses: <code>Pending</code> → <code>InProgress</code> → <code>Complete</code> or <code>Failed</code>.
+- Handle crash recovery by restarting incomplete clones on controller restart.</p>
+<p><strong>Does NOT:</strong>
+- Block <code>CreateVolume</code> — the CSI controller returns immediately for async clones.
+- Allow pod access before clone completes — the node agent gates <code>NodePublishVolume</code> on <code>cloneStatus=Complete</code>.</p>
+<h3 id="6-replication-controller">6. Replication Controller<a class="headerlink" href="#6-replication-controller" title="Permanent link">&para;</a></h3>
+<p>Standalone reconciler that handles cross-region disaster recovery by copying SubVolume data between pools.</p>
+<p><strong>Responsibilities:</strong>
+- Watch <code>ReplicationPolicy</code> CRs and execute replication cycles on a configurable schedule.
+- Mount source shares (read-only) and destination shares (read-write, cross-region via Transit Gateway).
+- Copy each matching SubVolume's subdirectory from source to destination using <code>SyncDir</code> (rsync, incremental) or <code>CopyDir</code> (full copy).
+- Execute pre-sync and post-sync lifecycle hooks via the Hook Orchestrator for application-consistent replication.
+- Track replication progress, RPO, bytes transferred, and consecutive failures in <code>ReplicationPolicy.Status</code>.
+- Expose Prometheus metrics for replication lag, RPO, and error counts.</p>
+<p><strong>Does NOT:</strong>
+- Create or delete VPC file shares (destination pool must already exist).
+- Interfere with the CSI controller, node agent, or pool manager.
+- Provide crash consistency or cross-file transactional consistency (file-level consistency only, unless application quiesce hooks are configured).</p>
+<h3 id="7-migration-cli">7. Migration CLI<a class="headerlink" href="#7-migration-cli" title="Permanent link">&para;</a></h3>
+<p>Utility package (<code>pkg/migrate/</code>) for migrating PVCs from the stock IBM VPC file CSI driver to the pool-based driver.</p>
+<p><strong>Components:</strong>
+- <strong>Planner</strong> (<code>planner.go</code>) — analyzes existing PVCs and generates a migration plan.
+- <strong>Executor</strong> (<code>executor.go</code>) — executes the migration plan: creates SubVolume CRs, spawns data-copy pods, and rebinds PVCs.
+- <strong>Pod</strong> (<code>pod.go</code>) — manages ephemeral pods used for data transfer during migration.</p>
+<h3 id="8-hook-orchestrator">8. Hook Orchestrator<a class="headerlink" href="#8-hook-orchestrator" title="Permanent link">&para;</a></h3>
+<p>Sequential hook execution engine (<code>pkg/hooks/</code>) that runs pre/post lifecycle hooks for replication and group snapshot operations.</p>
+<p><strong>Responsibilities:</strong>
+- Dispatch hooks to the correct executor based on hook type (<code>exec</code> or <code>http</code>).
+- <code>ExecHook</code>: Find pods via Kubernetes label selector and execute commands via the pod exec API (SPDY remote command).
+- <code>HTTPHook</code>: Send HTTP requests (GET/POST/PUT) with custom headers to webhook endpoints and validate 2xx responses.
+- Enforce per-hook timeouts via context deadlines (default 30 seconds).
+- Respect <code>OnError</code> policy: <code>Abort</code> stops the operation on hook failure, <code>Continue</code> logs and proceeds.
+- Collect <code>HookResult</code> records with success/failure, timing, and truncated output for CRD status.</p>
+<p><strong>Wired into:</strong>
+- Replication Controller — pre/post-sync hooks for application-consistent DR replication.
+- VolumeGroupSnapshot — pre/post-snapshot hooks for coordinated multi-PVC snapshots.</p>
+<h3 id="9-admission-webhooks">9. Admission Webhooks<a class="headerlink" href="#9-admission-webhooks" title="Permanent link">&para;</a></h3>
+<p>Validating admission webhooks (<code>pkg/webhook/</code>) registered with the controller-runtime manager. Enforce CRD field constraints at admission time, rejecting invalid create/update requests before they are persisted.</p>
+<p><strong>Validators:</strong>
+- <code>FileSharePoolValidator</code> — field ranges, required fields, immutable zone/profile on update.
+- <code>SubVolumeValidator</code> — required fields, subPath regex validation with path traversal protection.
+- <code>ReplicationPolicyValidator</code> — required fields, Go duration parsing for schedule, maxRetries range.
+- <code>SnapshotValidator</code> — required sourceSubVolume and poolName.
+- <code>VolumeGroupSnapshotValidator</code> — required fields, failurePolicy enum validation.</p>
+<h3 id="10-crd-controllers">10. CRD Controllers<a class="headerlink" href="#10-crd-controllers" title="Permanent link">&para;</a></h3>
+<p>Six CRD types, managed by controller-runtime:</p>
+<ul>
+<li><strong>FileSharePool</strong> — defines a pool of VPC file shares; reconciler ensures the pool has enough capacity.</li>
+<li><strong>SubVolume</strong> — tracks a single PVC's allocation: which share, subdirectory path, requested size, and clone/snapshot state.</li>
+<li><strong>Snapshot</strong> — tracks a point-in-time directory copy of a SubVolume, stored under <code>/pvcs/.snapshots/</code>.</li>
+<li><strong>VolumeGroupSnapshot</strong> — coordinates multiple Snapshot CRs for multi-PVC consistent snapshots, with pre/post-snapshot lifecycle hooks.</li>
+<li><strong>ReplicationPolicy</strong> — defines a cross-region replication relationship between a source pool and a destination pool, with pre/post-sync lifecycle hooks and incremental rsync support.</li>
+<li><strong>Hook</strong> (embedded type) — defines a lifecycle hook with exec or HTTP execution, timeout, and on-error policy. Embedded in VolumeGroupSnapshot and ReplicationPolicy specs.</li>
+</ul>
+<p>See <code>CRD-SPEC.md</code> for full type definitions.</p>
+<h2 id="data-flow-createvolume">Data Flow: CreateVolume<a class="headerlink" href="#data-flow-createvolume" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>1. User creates PVC with the pool&#39;s StorageClass (auto-created, named after pool)
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>       │
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>2. csi-provisioner sidecar calls CreateVolume gRPC
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>       │
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>3. CSI Controller receives CreateVolume
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>       │
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>       ├─ Extract pool name from StorageClass parameters
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>       ├─ Extract requested size from PVC spec
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>       │
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>4. Call PoolManager.Allocate(ctx, request)
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>       │
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>       ├─ 4a. Read FileSharePool CR for the named pool
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>       ├─ 4b. Read all SubVolume CRs for that pool (or use cached state)
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>       ├─ 4c. Calculate per-share allocated capacity
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>       ├─ 4d. Pick a share with enough remaining capacity
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>       │       (strategy: spread or bin-pack, per pool config)
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>       │
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>       │   If no share has room:
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>       │       ├─ If pool.spec.autoExpand and shares &lt; maxShares:
+<a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a>       │       │   Create new VPC file share via IBM VPC Client (SLOW: 30-90s)
+<a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>       │       │   Wait for share to become &quot;stable&quot;
+<a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a>       │       │   Add to FileSharePool.Status.Shares
+<a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a>       │       │   Use this new share
+<a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a>       │       └─ Else: return codes.ResourceExhausted error (retriable)
+<a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a>       │
+<a id="__codelineno-3-26" name="__codelineno-3-26" href="#__codelineno-3-26"></a>       ├─ 4e. Create SubVolume CR recording the allocation
+<a id="__codelineno-3-27" name="__codelineno-3-27" href="#__codelineno-3-27"></a>       │
+<a id="__codelineno-3-28" name="__codelineno-3-28" href="#__codelineno-3-28"></a>       └─ 4f. Return AllocationResult (share IP, subpath, uid, gid, permissions)
+<a id="__codelineno-3-29" name="__codelineno-3-29" href="#__codelineno-3-29"></a>       │
+<a id="__codelineno-3-30" name="__codelineno-3-30" href="#__codelineno-3-30"></a>       │   NOTE: Subdirectory creation is deferred to NodePublishVolume on the node agent.
+<a id="__codelineno-3-31" name="__codelineno-3-31" href="#__codelineno-3-31"></a>       │   The controller does NOT create directories on the NFS share (nfsOps is nil).
+<a id="__codelineno-3-32" name="__codelineno-3-32" href="#__codelineno-3-32"></a>       │
+<a id="__codelineno-3-33" name="__codelineno-3-33" href="#__codelineno-3-33"></a>5. CSI Controller returns CreateVolumeResponse with:
+<a id="__codelineno-3-34" name="__codelineno-3-34" href="#__codelineno-3-34"></a>       - volume_id: &quot;{pool}/{share-id}/{subdir-name}&quot;
+<a id="__codelineno-3-35" name="__codelineno-3-35" href="#__codelineno-3-35"></a>       - volume_context:
+<a id="__codelineno-3-36" name="__codelineno-3-36" href="#__codelineno-3-36"></a>           server: &quot;10.240.1.5&quot;                  # Primary (home zone) IP
+<a id="__codelineno-3-37" name="__codelineno-3-37" href="#__codelineno-3-37"></a>           server.us-south-1: &quot;10.240.1.5&quot;       # Zone-keyed IPs (when accessorZones configured)
+<a id="__codelineno-3-38" name="__codelineno-3-38" href="#__codelineno-3-38"></a>           server.us-south-2: &quot;10.240.2.10&quot;      # Accessor zone IP
+<a id="__codelineno-3-39" name="__codelineno-3-39" href="#__codelineno-3-39"></a>           share: &quot;/&quot;
+<a id="__codelineno-3-40" name="__codelineno-3-40" href="#__codelineno-3-40"></a>           subDir: &quot;/pvcs/pvc-abc123&quot;
+<a id="__codelineno-3-41" name="__codelineno-3-41" href="#__codelineno-3-41"></a>           pool: &quot;general-purpose&quot;
+<a id="__codelineno-3-42" name="__codelineno-3-42" href="#__codelineno-3-42"></a>           shareID: &quot;r006-a1b2c3d4-...&quot;
+<a id="__codelineno-3-43" name="__codelineno-3-43" href="#__codelineno-3-43"></a>           permissions: &quot;0755&quot;   # optional
+<a id="__codelineno-3-44" name="__codelineno-3-44" href="#__codelineno-3-44"></a>           uid: &quot;1000&quot;           # optional
+<a id="__codelineno-3-45" name="__codelineno-3-45" href="#__codelineno-3-45"></a>           gid: &quot;1000&quot;           # optional
+<a id="__codelineno-3-46" name="__codelineno-3-46" href="#__codelineno-3-46"></a>       - accessible_topology: [zone]
+<a id="__codelineno-3-47" name="__codelineno-3-47" href="#__codelineno-3-47"></a>       │
+<a id="__codelineno-3-48" name="__codelineno-3-48" href="#__codelineno-3-48"></a>6. Kubernetes creates PV, binds it to the PVC
+<a id="__codelineno-3-49" name="__codelineno-3-49" href="#__codelineno-3-49"></a>       │
+<a id="__codelineno-3-50" name="__codelineno-3-50" href="#__codelineno-3-50"></a>7. Pod scheduled → kubelet calls NodeStageVolume + NodePublishVolume
+<a id="__codelineno-3-51" name="__codelineno-3-51" href="#__codelineno-3-51"></a>       │
+<a id="__codelineno-3-52" name="__codelineno-3-52" href="#__codelineno-3-52"></a>8. Node agent mounts share (if not cached), creates subdirectory if it
+<a id="__codelineno-3-53" name="__codelineno-3-53" href="#__codelineno-3-53"></a>       does not exist (with uid/gid/permissions from VolumeContext), then
+<a id="__codelineno-3-54" name="__codelineno-3-54" href="#__codelineno-3-54"></a>       bind-mounts subdir into pod
+</code></pre></div>
+<h2 id="data-flow-deletevolume">Data Flow: DeleteVolume<a class="headerlink" href="#data-flow-deletevolume" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>1. PVC deleted (reclaimPolicy: Delete)
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>       │
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>2. csi-provisioner calls DeleteVolume gRPC
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>       │
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>3. CSI Controller receives DeleteVolume
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>       │
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>       ├─ Parse volume_id to extract pool, share ID, subdir name
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>       │
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>4. Call PoolManager.Deallocate(ctx, subVolumeName)
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>       │
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>       ├─ 4a. Read SubVolume CR to get share details
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>       ├─ 4b. Update FileSharePool.Status (decrement allocated capacity)
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>       ├─ 4c. Delete SubVolume CR
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>       │
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>       │   NOTE: The controller does NOT remove subdirectories on the NFS share
+<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>       │   (nfsOps is nil in controller mode). Subdirectory cleanup is a future
+<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a>       │   enhancement or handled by an external garbage collection process.
+<a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a>       │
+<a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a>5. CSI Controller returns success
+</code></pre></div>
+<h2 id="data-flow-pool-reconciliation-background">Data Flow: Pool Reconciliation (Background)<a class="headerlink" href="#data-flow-pool-reconciliation-background" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Every 60 seconds (or on FileSharePool CR change):
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>1. Reconciler reads FileSharePool CR
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>       │
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>2. For each share in Status.Shares:
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>       ├─ Call IBM VPC API to verify share health
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>       ├─ If share is &quot;degraded&quot; or &quot;failed&quot;:
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>       │   Mark share as draining in Status
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>       │
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>3. Calculate total pool utilization:
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>       ├─ Sum all SubVolume allocations
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>       ├─ Compare to total pool capacity
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>       │
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>4. If utilization &gt; expandThreshold:
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>       ├─ If shares.count &lt; maxShares:
+<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>       │   Create new VPC file share (IBM VPC Client)
+<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>       │   Add to Status.Shares when share becomes &quot;stable&quot;
+<a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a>       └─ Else: emit Warning event (&quot;pool at capacity&quot;)
+<a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a>       │
+<a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a>5. Update FileSharePool.Status with current metrics
+<a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a>       │
+<a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a>6. Emit Prometheus metrics:
+<a id="__codelineno-5-23" name="__codelineno-5-23" href="#__codelineno-5-23"></a>       - pool_total_capacity_gb
+<a id="__codelineno-5-24" name="__codelineno-5-24" href="#__codelineno-5-24"></a>       - pool_allocated_capacity_gb
+<a id="__codelineno-5-25" name="__codelineno-5-25" href="#__codelineno-5-25"></a>       - pool_pvc_count
+<a id="__codelineno-5-26" name="__codelineno-5-26" href="#__codelineno-5-26"></a>       - pool_share_count
+<a id="__codelineno-5-27" name="__codelineno-5-27" href="#__codelineno-5-27"></a>       - share_allocated_capacity_gb (per share)
+<a id="__codelineno-5-28" name="__codelineno-5-28" href="#__codelineno-5-28"></a>       - share_pvc_count (per share)
+</code></pre></div>
+<h2 id="data-flow-createsnapshot">Data Flow: CreateSnapshot<a class="headerlink" href="#data-flow-createsnapshot" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>1. User creates VolumeSnapshot referencing a PVC
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>       │
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>2. csi-snapshotter sidecar calls CreateSnapshot gRPC
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>       │
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>3. CSI Controller receives CreateSnapshot
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>       │
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>       ├─ Parse source volume ID to extract pool, share ID, subdir name
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>       │
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>4. Call PoolManager.CreateSnapshot(ctx, snapshotName, sourceVolumeID, params)
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>       │
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>       ├─ 4a. Read source SubVolume CR
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>       ├─ 4b. Create snapshot directory: /pvcs/.snapshots/{snap-name}/
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>       ├─ 4c. cp -a from source subdir to snapshot directory
+<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>       ├─ 4d. Create Snapshot CR recording the snapshot metadata
+<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>       │
+<a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>5. CSI Controller returns CreateSnapshotResponse
+</code></pre></div>
+<h2 id="data-flow-clonevolume">Data Flow: CloneVolume<a class="headerlink" href="#data-flow-clonevolume" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>1. User creates PVC with dataSource referencing an existing PVC
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>       │
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>2. csi-provisioner detects dataSource, sets VolumeContentSource
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>       │
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>3. CSI Controller receives CreateVolume with VolumeContentSource.Volume
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>       │
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>4. Call PoolManager.CloneVolume(ctx, sourceVolumeID, req, syncThresholdGB)
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>       │
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>       ├─ Source size &lt;= syncThreshold?
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>       │
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>       ├─ YES (synchronous): cp -a during call, return with cloneStatus=Complete
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>       │
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>       └─ NO (asynchronous):
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>           ├─ Create SubVolume CR with cloneStatus=Pending
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>           ├─ Return immediately (pod will wait)
+<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a>           │
+<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a>           │  (background Clone Worker)
+<a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a>           ├─ Update CR: cloneStatus=InProgress
+<a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a>           ├─ cp -a from source to target
+<a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a>           └─ Update CR: cloneStatus=Complete or Failed
+<a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a>       │
+<a id="__codelineno-7-22" name="__codelineno-7-22" href="#__codelineno-7-22"></a>5. NodePublishVolume gates pod access on cloneStatus=Complete
+<a id="__codelineno-7-23" name="__codelineno-7-23" href="#__codelineno-7-23"></a>       (kubelet retries with backoff until clone finishes)
+</code></pre></div>
+<h2 id="volume-id-format">Volume ID Format<a class="headerlink" href="#volume-id-format" title="Permanent link">&para;</a></h2>
+<p>The CSI volume ID encodes everything needed to locate the subvolume:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Format: {pool-name}/{share-vpc-id}/{subdir-name}
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>Example: general-purpose/r006-a1b2c3d4-5678-90ab-cdef-1234567890ab/pvc-abc123
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>Parsing:
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>  pool-name: general-purpose
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>  share-vpc-id: r006-a1b2c3d4-5678-90ab-cdef-1234567890ab
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>  subdir-name: pvc-abc123
+</code></pre></div>
+<p>This format is:
+- Deterministic (same inputs → same ID)
+- Parseable without external lookups
+- Human-readable in <code>kubectl get pv</code> output</p>
+<h2 id="security-model">Security Model<a class="headerlink" href="#security-model" title="Permanent link">&para;</a></h2>
+<h3 id="rbac">RBAC<a class="headerlink" href="#rbac" title="Permanent link">&para;</a></h3>
+<p>The controller ServiceAccount needs:
+- FileSharePool, SubVolume: full CRUD
+- PersistentVolumes: get, list, watch, create, update, patch, delete (CSI provisioner creates PVs)
+- PersistentVolumeClaims: get, list, watch, update, patch
+- PersistentVolumeClaims/status: patch
+- Nodes: get, list, watch (for topology)
+- Secrets: get, list, watch
+- ConfigMaps: get, list, watch
+- StorageClasses: get, list, watch, create
+- Events: create, patch
+- Leases: get, create, update (for leader election)
+- CSINode: get, list, watch</p>
+<h3 id="secrets">Secrets<a class="headerlink" href="#secrets" title="Permanent link">&para;</a></h3>
+<ul>
+<li>On managed clusters (ROKS/IKS), authentication is provided by the <code>storage-secret-sidecar</code> which populates the <code>storage-secret-store</code> secret. No standalone API key secret is needed.</li>
+<li>On self-managed clusters, an IBM Cloud API key is stored in a Kubernetes Secret (<code>ibm-cloud-credentials</code>).</li>
+<li>Never logged, never included in CRD status or events.</li>
+</ul>
+<h3 id="nfs-security">NFS Security<a class="headerlink" href="#nfs-security" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Shares use VPC security group rules (TCP 2049).</li>
+<li>Mount options: <code>nfsvers=4.1,sec=sys</code> (or <code>sec=krb5p</code> if encryption-in-transit is enabled).</li>
+<li>Subdirectories created with specific UID/GID/permissions per StorageClass config.</li>
+<li>Node agent validates all paths before mount/unmount to prevent traversal attacks.</li>
+</ul>
+<h3 id="pod-isolation">Pod Isolation<a class="headerlink" href="#pod-isolation" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Pods get a bind-mount of their specific subdirectory, NOT the whole share.</li>
+<li>A pod cannot traverse above its subdirectory because the bind-mount is the filesystem root from the pod's perspective.</li>
+</ul>
+<h2 id="failure-modes">Failure Modes<a class="headerlink" href="#failure-modes" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Failure</th>
+<th>Impact</th>
+<th>Recovery</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Controller pod crash</td>
+<td>New PVCs queue; existing PVCs unaffected</td>
+<td>Pod restarts; leader election transfers</td>
+</tr>
+<tr>
+<td>Node agent crash</td>
+<td>New pod mounts fail on that node</td>
+<td>DaemonSet restarts; existing mounts survive (kernel-level)</td>
+</tr>
+<tr>
+<td>VPC file share unavailable</td>
+<td>All PVCs on that share lose access</td>
+<td>IBM HA (99.999%); pool manager marks share as draining</td>
+</tr>
+<tr>
+<td>IBM VPC API down</td>
+<td>No new shares can be created; existing PVCs unaffected</td>
+<td>Pool manager retries with backoff; allocations to existing shares still work</td>
+</tr>
+<tr>
+<td>SubVolume CR accidentally deleted</td>
+<td>Allocation tracking lost for that PVC</td>
+<td>Data still on share; operator can recreate CR from share contents</td>
+</tr>
+<tr>
+<td>FileSharePool CR deleted</td>
+<td>Pool manager stops reconciling</td>
+<td>Don't delete it; use finalizers to prevent accidental deletion</td>
+</tr>
+<tr>
+<td>Disk full on a share</td>
+<td>Writes fail for all PVCs on that share</td>
+<td>Monitoring alerts; auto-expand or manual expand</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "navigation.instant", "search.suggest", "search.highlight", "content.code.copy", "content.tabs.link"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

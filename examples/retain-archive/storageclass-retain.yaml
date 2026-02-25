@@ -1,0 +1,20 @@
+# Retain StorageClass — subdirectory data is kept on the share after PVC deletion.
+# Useful when data must be preserved for compliance or manual migration.
+# The SubVolume CR is marked as "Retained" and capacity stays allocated.
+# Clean up manually by deleting the SubVolume CR and the subdirectory.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ibm-vpc-file-pool-retain
+provisioner: vpc-file-pool.csi.ibm.io
+parameters:
+  pool: general-purpose
+  reclaimAction: retain
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+mountOptions:
+  - nfsvers=4.1
+  - soft
+  - timeo=600
+  - retrans=3

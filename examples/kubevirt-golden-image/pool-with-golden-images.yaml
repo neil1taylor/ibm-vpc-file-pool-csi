@@ -1,0 +1,33 @@
+# FileSharePool with golden image syncer enabled.
+# This configures the controller to automatically discover CDI golden images
+# and create ready-to-clone PVCs + VM Templates in the target namespaces.
+#
+# Only needed when the pool StorageClass is NOT the cluster default.
+# If the pool SC is the default, CDI handles golden images natively.
+apiVersion: storage.ibmcloud.io/v1alpha1
+kind: FileSharePool
+metadata:
+  name: general-purpose
+spec:
+  zone: us-south-1
+  profile: dp2
+  shareSizeGB: 1000
+  maxShares: 10
+  initialShares: 1
+  autoExpand: true
+  expandThresholdPercent: 80
+  allocationStrategy: spread
+  # KubeVirt requires UID 107 (QEMU) and 0777 permissions
+  defaultPermissions: "0777"
+  defaultUID: 107
+  defaultGID: 107
+  goldenImages:
+    enabled: true
+    targetNamespaces:
+      - pool-tutorial
+    # Uncomment to filter specific images:
+    # imageFilter:
+    #   - centos
+    #   - fedora
+    # converterImage: quay.io/centos/centos:stream9
+    # pvcSizeGB: 15

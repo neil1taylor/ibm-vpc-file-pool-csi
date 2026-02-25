@@ -1,0 +1,3243 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A Kubernetes CSI driver that pools multiple PVCs as subdirectories within shared VPC file shares">
+      
+      
+      
+        <link rel="canonical" href="https://neil1taylor.github.io/ibm-vpc-file-pool-csi/PERFORMANCE-TUNING/">
+      
+      
+        <link rel="prev" href="../TROUBLESHOOTING/">
+      
+      
+        <link rel="next" href="../KNOWN-LIMITATIONS/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.3">
+    
+    
+      
+        <title>Performance Tuning - IBM VPC File Pool CSI Driver</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#performance-tuning-guide-ibm-vpc-file-pool-csi-driver" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="IBM VPC File Pool CSI Driver" class="md-header__button md-logo" aria-label="IBM VPC File Pool CSI Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            IBM VPC File Pool CSI Driver
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Performance Tuning
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/neil1taylor/ibm-vpc-file-pool-csi" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neil1taylor/ibm-vpc-file-pool-csi
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../INSTALL/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../TROUBLESHOOTING/" class="md-tabs__link">
+          
+  
+  
+  Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../OVERVIEW/" class="md-tabs__link">
+          
+  
+  
+  Architecture
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../VOLUME-CLONING/" class="md-tabs__link">
+          
+  
+  
+  Design (Phase 4)
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../CONTRIBUTING/" class="md-tabs__link">
+          
+  
+  
+  Development
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../examples/" class="md-tabs__link">
+          
+  
+  
+  Examples
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="IBM VPC File Pool CSI Driver" class="md-nav__button md-logo" aria-label="IBM VPC File Pool CSI Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    IBM VPC File Pool CSI Driver
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/neil1taylor/ibm-vpc-file-pool-csi" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neil1taylor/ibm-vpc-file-pool-csi
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../INSTALL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../USER-GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../HELM-VALUES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Helm Values Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TROUBLESHOOTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance Tuning
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance Tuning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#nfs-mount-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NFS Mount Options
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="NFS Mount Options">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-soft-not-hard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why soft Not hard
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#timeo-and-retrans" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        timeo and retrans
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rsize-and-wsize" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rsize and wsize
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nfsv41" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NFSv4.1
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#encryption-in-transit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Encryption in Transit
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#share-sizing-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Share Sizing Strategy
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Share Sizing Strategy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#sizing-by-workload-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sizing by Workload Type
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pvc-density-guidelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PVC Density Guidelines
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#large-vs-small-shares" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Large vs. Small Shares
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#maxshares-budget-planning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        maxShares Budget Planning
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#allocation-strategy-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Allocation Strategy Analysis
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Allocation Strategy Analysis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#spread-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Spread Strategy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#binpack-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Binpack Strategy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#when-to-switch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When to Switch
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#monitoring-allocation-balance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Monitoring Allocation Balance
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#iops-planning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        IOPS Planning
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="IOPS Planning">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#vpc-file-storage-iops-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        VPC File Storage IOPS Model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#iops-sharing-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        IOPS Sharing Model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#noisy-neighbor-risk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Noisy Neighbor Risk
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#calculating-required-iops" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Calculating Required IOPS
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tiered-pools-for-iops-isolation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tiered Pools for IOPS Isolation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#capacity-planning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Capacity Planning
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Capacity Planning">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#expandthresholdpercent-tuning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        expandThresholdPercent Tuning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#initialshares-for-burst-workloads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        initialShares for Burst Workloads
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#monitoring-queries-for-capacity-planning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Monitoring Queries for Capacity Planning
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#node-level-optimization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Node-Level Optimization
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Node-Level Optimization">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mount-caching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mount Caching
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#worker-node-nfs-client-tuning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worker Node NFS Client Tuning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#security-group-optimization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security Group Optimization
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#node-count-and-share-fanout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Node Count and Share Fanout
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#benchmarking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmarking
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Benchmarking">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fio-pod-for-sequential-io" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        fio Pod for Sequential I/O
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fio-pod-for-random-io" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        fio Pod for Random I/O
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#expected-performance-ranges" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Expected Performance Ranges
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#interpreting-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Interpreting Results
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#benchmarking-tips" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmarking Tips
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#benchmark-pool-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmark Pool Setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#benchmark-pvc-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmark PVC Setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../KNOWN-LIMITATIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Known Limitations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../OVERVIEW/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONSISTENCY-MODEL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Consistency Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VPC-NETWORKING.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VPC Networking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VM-DISK-FORMATS.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VM Disk Formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CRD-SPEC/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CRD Specification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CSI-INTERFACE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CSI Interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../IBM-VPC-API/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    IBM VPC API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../API-KEY-SETUP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Key Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design (Phase 4)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Design (Phase 4)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VOLUME-CLONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Volume Cloning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VOLUME-GROUP-SNAPSHOTS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Volume Group Snapshots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CROSS-REGION-DR/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cross-Region DR
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CODING-GUIDELINES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coding Guidelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TESTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Examples
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#nfs-mount-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NFS Mount Options
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="NFS Mount Options">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-soft-not-hard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why soft Not hard
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#timeo-and-retrans" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        timeo and retrans
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rsize-and-wsize" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rsize and wsize
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nfsv41" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NFSv4.1
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#encryption-in-transit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Encryption in Transit
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#share-sizing-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Share Sizing Strategy
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Share Sizing Strategy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#sizing-by-workload-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sizing by Workload Type
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pvc-density-guidelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PVC Density Guidelines
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#large-vs-small-shares" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Large vs. Small Shares
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#maxshares-budget-planning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        maxShares Budget Planning
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#allocation-strategy-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Allocation Strategy Analysis
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Allocation Strategy Analysis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#spread-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Spread Strategy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#binpack-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Binpack Strategy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#when-to-switch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When to Switch
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#monitoring-allocation-balance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Monitoring Allocation Balance
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#iops-planning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        IOPS Planning
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="IOPS Planning">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#vpc-file-storage-iops-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        VPC File Storage IOPS Model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#iops-sharing-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        IOPS Sharing Model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#noisy-neighbor-risk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Noisy Neighbor Risk
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#calculating-required-iops" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Calculating Required IOPS
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tiered-pools-for-iops-isolation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tiered Pools for IOPS Isolation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#capacity-planning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Capacity Planning
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Capacity Planning">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#expandthresholdpercent-tuning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        expandThresholdPercent Tuning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#initialshares-for-burst-workloads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        initialShares for Burst Workloads
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#monitoring-queries-for-capacity-planning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Monitoring Queries for Capacity Planning
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#node-level-optimization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Node-Level Optimization
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Node-Level Optimization">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mount-caching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mount Caching
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#worker-node-nfs-client-tuning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worker Node NFS Client Tuning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#security-group-optimization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security Group Optimization
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#node-count-and-share-fanout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Node Count and Share Fanout
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#benchmarking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmarking
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Benchmarking">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fio-pod-for-sequential-io" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        fio Pod for Sequential I/O
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fio-pod-for-random-io" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        fio Pod for Random I/O
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#expected-performance-ranges" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Expected Performance Ranges
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#interpreting-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Interpreting Results
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#benchmarking-tips" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmarking Tips
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#benchmark-pool-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmark Pool Setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#benchmark-pvc-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmark PVC Setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="performance-tuning-guide-ibm-vpc-file-pool-csi-driver">Performance Tuning Guide — IBM VPC File Pool CSI Driver<a class="headerlink" href="#performance-tuning-guide-ibm-vpc-file-pool-csi-driver" title="Permanent link">&para;</a></h1>
+<p>This guide covers NFS mount optimization, share sizing, allocation strategies, IOPS planning, capacity management, and benchmarking for the pool CSI driver.</p>
+<hr />
+<h2 id="nfs-mount-options">NFS Mount Options<a class="headerlink" href="#nfs-mount-options" title="Permanent link">&para;</a></h2>
+<h3 id="why-soft-not-hard">Why <code>soft</code> Not <code>hard</code><a class="headerlink" href="#why-soft-not-hard" title="Permanent link">&para;</a></h3>
+<p>The driver defaults to <code>soft</code> NFS mounts. This is a deliberate safety choice:</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Behavior</th>
+<th>Risk</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>hard</code></td>
+<td>Retries NFS operations indefinitely until the server responds</td>
+<td>Pods hang forever if the NFS server is unreachable. <code>kubectl exec</code>, <code>kubectl logs</code>, and even <code>kubectl delete pod</code> can all block. The only fix is a node reboot.</td>
+</tr>
+<tr>
+<td><code>soft</code></td>
+<td>Returns an error after <code>timeo × retrans</code> timeout</td>
+<td>Pods get I/O errors, but remain responsive. The application can handle the error, and the pod can be deleted and rescheduled.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Always use <code>soft</code> for pool-based storage.</strong> A single NFS share serves many PVCs — a hard-mount hang on one share blocks every pod on that node that uses that share.</p>
+<h3 id="timeo-and-retrans">timeo and retrans<a class="headerlink" href="#timeo-and-retrans" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">mountOptions</span><span class="p">:</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">soft</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">timeo=600</span><span class="w">     </span><span class="c1"># 60 seconds (in deciseconds) per NFS RPC attempt</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">retrans=3</span><span class="w">     </span><span class="c1"># Retry 3 times before returning error</span>
+</code></pre></div>
+<ul>
+<li><strong>Total timeout:</strong> <code>timeo × retrans = 600 × 3 = 1800 deciseconds = 180 seconds</code></li>
+<li>For latency-sensitive workloads, lower <code>timeo</code> to 100 (10 seconds) with <code>retrans=5</code></li>
+<li>For batch/background workloads, keep the defaults — they handle transient NFS blips without spurious errors</li>
+</ul>
+<h3 id="rsize-and-wsize">rsize and wsize<a class="headerlink" href="#rsize-and-wsize" title="Permanent link">&para;</a></h3>
+<p>The NFS read/write buffer sizes default to negotiation between client and server. On IBM VPC File Storage, the server typically negotiates 1 MB (1048576 bytes).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">mountOptions</span><span class="p">:</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">rsize=1048576</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">wsize=1048576</span>
+</code></pre></div>
+<p>Explicitly setting these is usually unnecessary, but can help if:
+- You see unexpectedly low throughput on large sequential reads/writes
+- Your workload does many small random I/Os (smaller buffers like 32768 can reduce latency)</p>
+<h3 id="nfsv41">NFSv4.1<a class="headerlink" href="#nfsv41" title="Permanent link">&para;</a></h3>
+<p>Always use NFSv4.1:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">mountOptions</span><span class="p">:</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nfsvers=4.1</span>
+</code></pre></div>
+<p>NFSv4.1 adds:
+- <strong>Session trunking</strong> — multiple TCP connections for higher throughput
+- <strong>Directory delegation</strong> — reduces round trips for metadata operations
+- <strong>pNFS support</strong> — parallel data access (if the server supports it)</p>
+<p>IBM VPC File Storage supports NFSv4.1 natively. Do not use NFSv3 — it lacks these features and requires additional ports (portmapper, mountd).</p>
+<h3 id="encryption-in-transit">Encryption in Transit<a class="headerlink" href="#encryption-in-transit" title="Permanent link">&para;</a></h3>
+<p>IBM VPC File Storage supports NFS over TLS (encryption in transit). Enable it in the pool spec or mount options:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">mountOptions</span><span class="p">:</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nfsvers=4.1</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sec=sys</span><span class="w">          </span><span class="c1"># Default: no encryption (fastest)</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span><span class="c1"># - sec=krb5p      # Kerberos with privacy (encrypted) — requires setup</span>
+</code></pre></div>
+<p><strong>Throughput impact:</strong> Encryption in transit reduces throughput by approximately 20-30% due to TLS overhead. Use it when:
+- Data traverses untrusted network segments
+- Compliance requirements mandate encryption in transit
+- The workload is not throughput-sensitive</p>
+<p>For most in-VPC workloads, <code>sec=sys</code> is sufficient — VPC network traffic is already isolated at the hypervisor level.</p>
+<hr />
+<h2 id="share-sizing-strategy">Share Sizing Strategy<a class="headerlink" href="#share-sizing-strategy" title="Permanent link">&para;</a></h2>
+<h3 id="sizing-by-workload-type">Sizing by Workload Type<a class="headerlink" href="#sizing-by-workload-type" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Workload</th>
+<th>Share Size</th>
+<th>PVC Size (typical)</th>
+<th>PVCs per Share</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>General (configs, logs, small apps)</td>
+<td>1000-2000 GB</td>
+<td>1-10 GB</td>
+<td>100-2000</td>
+<td>Most common. Optimize for PVC count.</td>
+</tr>
+<tr>
+<td>Databases, analytics</td>
+<td>2000-4000 GB</td>
+<td>50-500 GB</td>
+<td>4-80</td>
+<td>Fewer, larger PVCs. Consider IOPS isolation.</td>
+</tr>
+<tr>
+<td>CI/CD ephemeral</td>
+<td>500-1000 GB</td>
+<td>1-5 GB</td>
+<td>100-1000</td>
+<td>High churn. Use <code>binpack</code> to consolidate.</td>
+</tr>
+<tr>
+<td>ML/AI training data</td>
+<td>4000-16000 GB</td>
+<td>500-4000 GB</td>
+<td>1-30</td>
+<td>Large datasets. Maximize throughput.</td>
+</tr>
+<tr>
+<td>Shared team storage</td>
+<td>4000+ GB</td>
+<td>N/A (1 large PVC)</td>
+<td>1-10</td>
+<td>Few large PVCs shared via RWX.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="pvc-density-guidelines">PVC Density Guidelines<a class="headerlink" href="#pvc-density-guidelines" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Target 50-200 PVCs per share</strong> for general workloads. This keeps metadata operations fast and limits blast radius.</li>
+<li><strong>Under 50 PVCs per share</strong> for database workloads where IOPS isolation matters.</li>
+<li><strong>Over 200 PVCs per share</strong> is fine for configs and logs where individual PVCs do minimal I/O.</li>
+</ul>
+<h3 id="large-vs-small-shares">Large vs. Small Shares<a class="headerlink" href="#large-vs-small-shares" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Approach</th>
+<th>Pros</th>
+<th>Cons</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Fewer large shares (4+ TB)</td>
+<td>Fewer VPC quota entries, less management overhead, more room for growth</td>
+<td>Higher blast radius (share failure affects more PVCs), longer share creation time</td>
+</tr>
+<tr>
+<td>Many small shares (500 GB-1 TB)</td>
+<td>Lower blast radius, faster creation, finer-grained capacity control</td>
+<td>Uses more VPC quota, more management overhead</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Recommendation:</strong> Start with 2 TB shares. This balances quota efficiency with blast radius. Increase to 4+ TB only if you're hitting the 300-share quota limit.</p>
+<h3 id="maxshares-budget-planning">maxShares Budget Planning<a class="headerlink" href="#maxshares-budget-planning" title="Permanent link">&para;</a></h3>
+<p>VPC accounts have a 300 file share quota. Budget across all consumers:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Total VPC shares available:     300
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>Stock IBM CSI driver shares:   - 50  (existing 1:1 PVCs)
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>Manually created shares:       - 10
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>Safety buffer:                 - 40
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>Available for pool CSI:         200
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>Pool allocations:
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>  general-purpose (maxShares):   50
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>  high-iops (maxShares):         20
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>  ci-cd (maxShares):             30
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>  Total pool CSI:               100  (within budget)
+</code></pre></div>
+<p>Check your current usage: <code>ibmcloud is shares --output json | jq length</code></p>
+<hr />
+<h2 id="allocation-strategy-analysis">Allocation Strategy Analysis<a class="headerlink" href="#allocation-strategy-analysis" title="Permanent link">&para;</a></h2>
+<p>The pool manager supports two share selection strategies: <code>spread</code> and <code>binpack</code>. The strategy is set per pool in <code>spec.allocationStrategy</code>.</p>
+<h3 id="spread-strategy">Spread Strategy<a class="headerlink" href="#spread-strategy" title="Permanent link">&para;</a></h3>
+<p><strong>How it works:</strong> When a new PVC is allocated, the manager selects the share with the most free capacity. PVCs are distributed evenly across all shares.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Share-1: [PVC-1] [PVC-4] [PVC-7]     ← 30% used
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>Share-2: [PVC-2] [PVC-5] [PVC-8]     ← 30% used
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>Share-3: [PVC-3] [PVC-6] [PVC-9]     ← 30% used
+</code></pre></div>
+<p><strong>Pros:</strong>
+- Lower blast radius — if one share fails, only ~1/N of PVCs are affected
+- More even IOPS distribution across shares
+- Better for long-lived workloads</p>
+<p><strong>Cons:</strong>
+- More shares used at any given time
+- Auto-expansion triggers earlier (all shares fill up together)</p>
+<h3 id="binpack-strategy">Binpack Strategy<a class="headerlink" href="#binpack-strategy" title="Permanent link">&para;</a></h3>
+<p><strong>How it works:</strong> When a new PVC is allocated, the manager selects the share with the least free capacity that still fits the request. Shares are filled sequentially.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Share-1: [PVC-1] [PVC-2] [PVC-3] [PVC-4] [PVC-5]  ← 90% used
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>Share-2: [PVC-6] [PVC-7]                             ← 25% used
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>Share-3: (empty)                                      ← 0% used
+</code></pre></div>
+<p><strong>Pros:</strong>
+- Fewer shares in active use — saves VPC quota
+- Easier to drain and decommission individual shares
+- Better for ephemeral/CI workloads with high churn</p>
+<p><strong>Cons:</strong>
+- Higher blast radius — one share holds most of the PVCs
+- IOPS contention on the active share
+- If the active share fails, many PVCs are affected</p>
+<h3 id="when-to-switch">When to Switch<a class="headerlink" href="#when-to-switch" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Signal</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Hitting 300-share quota</td>
+<td>Switch to <code>binpack</code> to consolidate</td>
+</tr>
+<tr>
+<td>Share failure affected too many PVCs</td>
+<td>Switch to <code>spread</code> for isolation</td>
+</tr>
+<tr>
+<td>CI/CD workloads with short PVC lifetimes</td>
+<td>Use <code>binpack</code> — shares naturally drain</td>
+</tr>
+<tr>
+<td>Production databases</td>
+<td>Use <code>spread</code> — isolate blast radius</td>
+</tr>
+<tr>
+<td>Mixed workloads</td>
+<td>Create separate pools: <code>spread</code> for prod, <code>binpack</code> for CI</td>
+</tr>
+</tbody>
+</table>
+<h3 id="monitoring-allocation-balance">Monitoring Allocation Balance<a class="headerlink" href="#monitoring-allocation-balance" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># Share utilization variance (high variance = uneven, low = evenly spread)</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="k">stddev</span><span class="w"> </span><span class="k">by</span><span class="w"> </span><span class="o">(</span><span class="nv">pool</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="nv">vpc_file_pool_share_allocated_gb</span><span class="o">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="k">avg</span><span class="w"> </span><span class="k">by</span><span class="w"> </span><span class="o">(</span><span class="nv">pool</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="nv">vpc_file_pool_share_allocated_gb</span><span class="o">)</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="c1"># PVC count per share (should be roughly equal for spread)</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="nv">vpc_file_pool_share_pvc_count</span>
+</code></pre></div>
+<hr />
+<h2 id="iops-planning">IOPS Planning<a class="headerlink" href="#iops-planning" title="Permanent link">&para;</a></h2>
+<h3 id="vpc-file-storage-iops-model">VPC File Storage IOPS Model<a class="headerlink" href="#vpc-file-storage-iops-model" title="Permanent link">&para;</a></h3>
+<p>IBM VPC file shares use the <code>dp2</code> profile by default, which provides IOPS based on share size:</p>
+<table>
+<thead>
+<tr>
+<th>Share Size</th>
+<th>Base IOPS (dp2)</th>
+<th>Max IOPS (custom)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>10-39 GB</td>
+<td>100</td>
+<td>1000</td>
+</tr>
+<tr>
+<td>40-79 GB</td>
+<td>100</td>
+<td>2000</td>
+</tr>
+<tr>
+<td>80-99 GB</td>
+<td>100</td>
+<td>4000</td>
+</tr>
+<tr>
+<td>100-499 GB</td>
+<td>100-1000</td>
+<td>6000</td>
+</tr>
+<tr>
+<td>500-999 GB</td>
+<td>500-3000</td>
+<td>10000</td>
+</tr>
+<tr>
+<td>1000-1999 GB</td>
+<td>1000-6000</td>
+<td>20000</td>
+</tr>
+<tr>
+<td>2000-3999 GB</td>
+<td>2000-12000</td>
+<td>40000</td>
+</tr>
+<tr>
+<td>4000-7999 GB</td>
+<td>4000-24000</td>
+<td>48000</td>
+</tr>
+<tr>
+<td>8000-15999 GB</td>
+<td>8000-48000</td>
+<td>48000</td>
+</tr>
+<tr>
+<td>16000-32000 GB</td>
+<td>16000-96000</td>
+<td>96000</td>
+</tr>
+</tbody>
+</table>
+<h3 id="iops-sharing-model">IOPS Sharing Model<a class="headerlink" href="#iops-sharing-model" title="Permanent link">&para;</a></h3>
+<p>All PVCs on a share compete for the share's total IOPS. There is no per-PVC IOPS isolation.</p>
+<p><strong>Example:</strong> A 2 TB <code>dp2</code> share provides ~6000 IOPS. If 100 PVCs are on that share, each PVC gets an average of 60 IOPS — enough for configs and logs, but not enough for a database.</p>
+<h3 id="noisy-neighbor-risk">Noisy Neighbor Risk<a class="headerlink" href="#noisy-neighbor-risk" title="Permanent link">&para;</a></h3>
+<p>One PVC doing heavy sequential I/O can starve other PVCs on the same share.</p>
+<p><strong>Mitigations:</strong>
+1. <strong>Tiered pools:</strong> Create separate pools for different IOPS requirements
+2. <strong>Spread strategy:</strong> Distributes PVCs more evenly, reducing per-share contention
+3. <strong>Dedicated shares:</strong> For truly IOPS-sensitive workloads, use the stock IBM CSI driver (1:1 PVC-to-share)</p>
+<h3 id="calculating-required-iops">Calculating Required IOPS<a class="headerlink" href="#calculating-required-iops" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Total IOPS needed = Sum of (PVC_count × avg_IOPS_per_PVC)
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>Example:
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>  50 app configs at 5 IOPS each     =   250 IOPS
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>  20 logging PVCs at 50 IOPS each   = 1,000 IOPS
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>  5 database PVCs at 500 IOPS each  = 2,500 IOPS
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>  Total                              = 3,750 IOPS
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>→ A 2 TB dp2 share (6,000 IOPS) handles this with headroom
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>→ Put database PVCs on a separate high-IOPS pool for isolation
+</code></pre></div>
+<h3 id="tiered-pools-for-iops-isolation">Tiered Pools for IOPS Isolation<a class="headerlink" href="#tiered-pools-for-iops-isolation" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># Standard pool — general workloads</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">storage.ibmcloud.io/v1alpha1</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">FileSharePool</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">standard-pool</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="w">  </span><span class="nt">profile</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dp2</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="w">  </span><span class="nt">shareSizeGB</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2000</span><span class="w">          </span><span class="c1"># ~6,000 IOPS per share</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="w">  </span><span class="nt">allocationStrategy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">spread</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="w">  </span><span class="c1"># ...</span>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="nn">---</span>
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a><span class="c1"># High-IOPS pool — databases, analytics</span>
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">storage.ibmcloud.io/v1alpha1</span>
+<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">FileSharePool</span>
+<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">high-iops-pool</span>
+<a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a><span class="w">  </span><span class="nt">profile</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dp2</span>
+<a id="__codelineno-9-20" name="__codelineno-9-20" href="#__codelineno-9-20"></a><span class="w">  </span><span class="nt">shareSizeGB</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4000</span><span class="w">          </span><span class="c1"># ~12,000 IOPS per share</span>
+<a id="__codelineno-9-21" name="__codelineno-9-21" href="#__codelineno-9-21"></a><span class="w">  </span><span class="nt">iops</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">24000</span><span class="w">                </span><span class="c1"># Custom IOPS (costs more)</span>
+<a id="__codelineno-9-22" name="__codelineno-9-22" href="#__codelineno-9-22"></a><span class="w">  </span><span class="nt">maxShares</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5</span><span class="w">               </span><span class="c1"># Limit quota usage</span>
+<a id="__codelineno-9-23" name="__codelineno-9-23" href="#__codelineno-9-23"></a><span class="w">  </span><span class="nt">allocationStrategy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">spread</span>
+<a id="__codelineno-9-24" name="__codelineno-9-24" href="#__codelineno-9-24"></a><span class="w">  </span><span class="c1"># ...</span>
+</code></pre></div>
+<p>See <code>examples/tiered/</code> for complete examples.</p>
+<hr />
+<h2 id="capacity-planning">Capacity Planning<a class="headerlink" href="#capacity-planning" title="Permanent link">&para;</a></h2>
+<h3 id="expandthresholdpercent-tuning">expandThresholdPercent Tuning<a class="headerlink" href="#expandthresholdpercent-tuning" title="Permanent link">&para;</a></h3>
+<p>This setting controls when the pool manager creates a new VPC file share. The tradeoff is safety vs. cost:</p>
+<table>
+<thead>
+<tr>
+<th>Threshold</th>
+<th>Behavior</th>
+<th>Tradeoff</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>60%</td>
+<td>New share created when 60% allocated</td>
+<td>Safer: more buffer for burst workloads. More expensive: shares sit partially empty.</td>
+</tr>
+<tr>
+<td>80% (default)</td>
+<td>New share created when 80% allocated</td>
+<td>Balanced: enough buffer for typical growth (30-90s to create a share).</td>
+</tr>
+<tr>
+<td>95%</td>
+<td>New share created when 95% allocated</td>
+<td>Cheaper: shares are well-utilized. Riskier: PVCs may fail if burst exceeds the 5% buffer during share creation.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Recommendation:</strong>
+- <strong>80%</strong> for production workloads with steady growth
+- <strong>70%</strong> for workloads with unpredictable bursts (CI/CD, batch jobs)
+- <strong>90%</strong> for stable workloads where PVC creation rate is slow and predictable</p>
+<h3 id="initialshares-for-burst-workloads">initialShares for Burst Workloads<a class="headerlink" href="#initialshares-for-burst-workloads" title="Permanent link">&para;</a></h3>
+<p>If you deploy many PVCs at once (e.g., a batch job that creates 50 PVCs), set <code>initialShares</code> high enough to absorb the burst without triggering expansion:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="nt">initialShares</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span><span class="w">            </span><span class="c1"># Pre-create 3 shares</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">  </span><span class="nt">shareSizeGB</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2000</span><span class="w">           </span><span class="c1"># 6 TB total capacity from the start</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">  </span><span class="nt">autoExpand</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">  </span><span class="nt">expandThresholdPercent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">80</span>
+</code></pre></div>
+<p><strong>Math:</strong> If each PVC requests 10 GB and you expect an initial burst of 200 PVCs:
+- Total burst: 200 × 10 GB = 2000 GB
+- At 80% threshold, each 2 TB share absorbs ~1600 GB
+- You need <code>initialShares: 2</code> minimum (1600 × 2 = 3200 GB &gt; 2000 GB)
+- Use <code>initialShares: 3</code> for safety</p>
+<h3 id="monitoring-queries-for-capacity-planning">Monitoring Queries for Capacity Planning<a class="headerlink" href="#monitoring-queries-for-capacity-planning" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># Current pool utilization (should stay below expandThresholdPercent)</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="nv">vpc_file_pool_allocated_gb</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="nv">vpc_file_pool_capacity_gb</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">100</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="c1"># Allocation rate (PVCs per hour) — use for growth projection</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="kr">rate</span><span class="o">(</span><span class="nv">vpc_file_pool_allocations_total</span><span class="p">{</span><span class="nl">status</span><span class="o">=</span><span class="p">&quot;</span><span class="s">success</span><span class="p">&quot;}[</span><span class="s">1h</span><span class="p">]</span><span class="o">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">3600</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="c1"># Projected time to full (hours) at current allocation rate</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="o">(</span><span class="nv">vpc_file_pool_capacity_gb</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="nv">vpc_file_pool_allocated_gb</span><span class="o">)</span>
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="o">/</span><span class="w"> </span><span class="o">(</span><span class="kr">rate</span><span class="o">(</span><span class="nv">vpc_file_pool_allocated_gb</span><span class="p">[</span><span class="s">1h</span><span class="p">]</span><span class="o">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">3600</span><span class="o">)</span>
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="c1"># Share creation rate (should be rare — &lt;1 per hour in steady state)</span>
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a><span class="kr">rate</span><span class="o">(</span><span class="nv">vpc_file_pool_api_calls_total</span><span class="p">{</span><span class="nl">operation</span><span class="o">=</span><span class="p">&quot;</span><span class="s">create_share</span><span class="p">&quot;}[</span><span class="s">1h</span><span class="p">]</span><span class="o">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">3600</span>
+</code></pre></div>
+<hr />
+<h2 id="node-level-optimization">Node-Level Optimization<a class="headerlink" href="#node-level-optimization" title="Permanent link">&para;</a></h2>
+<h3 id="mount-caching">Mount Caching<a class="headerlink" href="#mount-caching" title="Permanent link">&para;</a></h3>
+<p>The CSI node agent maintains one NFS mount per share per node. Multiple PVCs on the same share reuse this single NFS mount via bind-mounts. This means:</p>
+<ul>
+<li><strong>First PVC on a node</strong> from a given share: NFS mount (1-2 seconds)</li>
+<li><strong>Subsequent PVCs on the same node</strong> from the same share: bind-mount only (~10 ms)</li>
+</ul>
+<p>This is why the <code>spread</code> strategy can increase mount latency on large clusters — more shares means more NFS mounts per node. With <code>binpack</code>, a single share serves many PVCs, and most nodes only need one NFS mount.</p>
+<h3 id="worker-node-nfs-client-tuning">Worker Node NFS Client Tuning<a class="headerlink" href="#worker-node-nfs-client-tuning" title="Permanent link">&para;</a></h3>
+<p>For high-throughput workloads, increase the NFS client's TCP slot table on worker nodes:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># Check current value (default is 2)</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>cat<span class="w"> </span>/proc/sys/sunrpc/tcp_slot_table_entries
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="c1"># Increase to 128 for higher concurrency (requires remount to take effect)</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="nb">echo</span><span class="w"> </span><span class="m">128</span><span class="w"> </span>&gt;<span class="w"> </span>/proc/sys/sunrpc/tcp_slot_table_entries
+</code></pre></div>
+<p>This allows more concurrent NFS RPC calls per mount, which improves throughput for workloads with many parallel readers/writers.</p>
+<p><strong>On ROKS/IKS:</strong> Worker node tuning requires a DaemonSet with privileged access to modify sysctl settings. Example:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">apps/v1</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">DaemonSet</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nfs-tuning</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kube-system</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="w">  </span><span class="nt">selector</span><span class="p">:</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="w">    </span><span class="nt">matchLabels</span><span class="p">:</span>
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="w">      </span><span class="nt">app</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nfs-tuning</span>
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="w">  </span><span class="nt">template</span><span class="p">:</span>
+<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="w">    </span><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a><span class="w">      </span><span class="nt">labels</span><span class="p">:</span>
+<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a><span class="w">        </span><span class="nt">app</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nfs-tuning</span>
+<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a><span class="w">    </span><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a><span class="w">      </span><span class="nt">hostPID</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a><span class="w">      </span><span class="nt">containers</span><span class="p">:</span>
+<a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tuner</span>
+<a id="__codelineno-13-18" name="__codelineno-13-18" href="#__codelineno-13-18"></a><span class="w">          </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">busybox:latest</span>
+<a id="__codelineno-13-19" name="__codelineno-13-19" href="#__codelineno-13-19"></a><span class="w">          </span><span class="nt">command</span><span class="p">:</span>
+<a id="__codelineno-13-20" name="__codelineno-13-20" href="#__codelineno-13-20"></a><span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sh</span>
+<a id="__codelineno-13-21" name="__codelineno-13-21" href="#__codelineno-13-21"></a><span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">-c</span>
+<a id="__codelineno-13-22" name="__codelineno-13-22" href="#__codelineno-13-22"></a><span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">|</span>
+<a id="__codelineno-13-23" name="__codelineno-13-23" href="#__codelineno-13-23"></a><span class="w">              </span><span class="no">sysctl -w sunrpc.tcp_slot_table_entries=128</span>
+<a id="__codelineno-13-24" name="__codelineno-13-24" href="#__codelineno-13-24"></a><span class="w">              </span><span class="no">sleep infinity</span>
+<a id="__codelineno-13-25" name="__codelineno-13-25" href="#__codelineno-13-25"></a><span class="w">          </span><span class="nt">securityContext</span><span class="p">:</span>
+<a id="__codelineno-13-26" name="__codelineno-13-26" href="#__codelineno-13-26"></a><span class="w">            </span><span class="nt">privileged</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</code></pre></div>
+<h3 id="security-group-optimization">Security Group Optimization<a class="headerlink" href="#security-group-optimization" title="Permanent link">&para;</a></h3>
+<p>Each worker node connects to NFS shares via the mount target IP. The VPC security group must allow:</p>
+<table>
+<thead>
+<tr>
+<th>Direction</th>
+<th>Protocol</th>
+<th>Port</th>
+<th>Source/Destination</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Outbound</td>
+<td>TCP</td>
+<td>2049</td>
+<td>Mount target IPs (or 0.0.0.0/0 within VPC)</td>
+</tr>
+<tr>
+<td>Inbound</td>
+<td>TCP</td>
+<td>2049</td>
+<td>Mount target IPs (for NFS callbacks)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Tip:</strong> If you have many shares, create a single security group rule with the VPC CIDR (e.g., <code>10.240.0.0/16</code>) instead of individual IPs. This avoids hitting the security group rule limit (50 rules per group).</p>
+<h3 id="node-count-and-share-fanout">Node Count and Share Fanout<a class="headerlink" href="#node-count-and-share-fanout" title="Permanent link">&para;</a></h3>
+<p>Each share can have up to 64 mount targets. Each node that accesses a share creates one NFS connection to the mount target. Consider the math:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>Nodes: 20
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>Shares per pool: 5
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>Strategy: spread
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>Each node potentially mounts all 5 shares = 100 mount target connections total
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>Each share has 20 node connections (well under the 64 limit)
+</code></pre></div>
+<p>With <code>binpack</code>, most PVCs are on 1-2 shares, so most nodes only connect to 1-2 mount targets — fewer connections, less NFS server overhead.</p>
+<hr />
+<h2 id="benchmarking">Benchmarking<a class="headerlink" href="#benchmarking" title="Permanent link">&para;</a></h2>
+<h3 id="fio-pod-for-sequential-io">fio Pod for Sequential I/O<a class="headerlink" href="#fio-pod-for-sequential-io" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Pod</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">fio-sequential</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="w">  </span><span class="nt">containers</span><span class="p">:</span>
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">fio</span>
+<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nixery.dev/fio</span>
+<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a><span class="w">      </span><span class="nt">command</span><span class="p">:</span>
+<a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">fio</span>
+<a id="__codelineno-15-12" name="__codelineno-15-12" href="#__codelineno-15-12"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--name=seqwrite</span>
+<a id="__codelineno-15-13" name="__codelineno-15-13" href="#__codelineno-15-13"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--rw=write</span>
+<a id="__codelineno-15-14" name="__codelineno-15-14" href="#__codelineno-15-14"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--bs=1M</span>
+<a id="__codelineno-15-15" name="__codelineno-15-15" href="#__codelineno-15-15"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--size=1G</span>
+<a id="__codelineno-15-16" name="__codelineno-15-16" href="#__codelineno-15-16"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--numjobs=1</span>
+<a id="__codelineno-15-17" name="__codelineno-15-17" href="#__codelineno-15-17"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--time_based</span>
+<a id="__codelineno-15-18" name="__codelineno-15-18" href="#__codelineno-15-18"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--runtime=60</span>
+<a id="__codelineno-15-19" name="__codelineno-15-19" href="#__codelineno-15-19"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--group_reporting</span>
+<a id="__codelineno-15-20" name="__codelineno-15-20" href="#__codelineno-15-20"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--filename=/data/testfile</span>
+<a id="__codelineno-15-21" name="__codelineno-15-21" href="#__codelineno-15-21"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--output-format=json</span>
+<a id="__codelineno-15-22" name="__codelineno-15-22" href="#__codelineno-15-22"></a><span class="w">      </span><span class="nt">volumeMounts</span><span class="p">:</span>
+<a id="__codelineno-15-23" name="__codelineno-15-23" href="#__codelineno-15-23"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">data</span>
+<a id="__codelineno-15-24" name="__codelineno-15-24" href="#__codelineno-15-24"></a><span class="w">          </span><span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data</span>
+<a id="__codelineno-15-25" name="__codelineno-15-25" href="#__codelineno-15-25"></a><span class="w">      </span><span class="nt">securityContext</span><span class="p">:</span>
+<a id="__codelineno-15-26" name="__codelineno-15-26" href="#__codelineno-15-26"></a><span class="w">        </span><span class="nt">runAsUser</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1000</span>
+<a id="__codelineno-15-27" name="__codelineno-15-27" href="#__codelineno-15-27"></a><span class="w">        </span><span class="nt">runAsGroup</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1000</span>
+<a id="__codelineno-15-28" name="__codelineno-15-28" href="#__codelineno-15-28"></a><span class="w">  </span><span class="nt">restartPolicy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Never</span>
+<a id="__codelineno-15-29" name="__codelineno-15-29" href="#__codelineno-15-29"></a><span class="w">  </span><span class="nt">volumes</span><span class="p">:</span>
+<a id="__codelineno-15-30" name="__codelineno-15-30" href="#__codelineno-15-30"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">data</span>
+<a id="__codelineno-15-31" name="__codelineno-15-31" href="#__codelineno-15-31"></a><span class="w">      </span><span class="nt">persistentVolumeClaim</span><span class="p">:</span>
+<a id="__codelineno-15-32" name="__codelineno-15-32" href="#__codelineno-15-32"></a><span class="w">        </span><span class="nt">claimName</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bench-pvc</span>
+</code></pre></div>
+<h3 id="fio-pod-for-random-io">fio Pod for Random I/O<a class="headerlink" href="#fio-pod-for-random-io" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Pod</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">fio-random</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="w">  </span><span class="nt">containers</span><span class="p">:</span>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">fio</span>
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nixery.dev/fio</span>
+<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="w">      </span><span class="nt">command</span><span class="p">:</span>
+<a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">fio</span>
+<a id="__codelineno-16-12" name="__codelineno-16-12" href="#__codelineno-16-12"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--name=randread</span>
+<a id="__codelineno-16-13" name="__codelineno-16-13" href="#__codelineno-16-13"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--rw=randread</span>
+<a id="__codelineno-16-14" name="__codelineno-16-14" href="#__codelineno-16-14"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--bs=4K</span>
+<a id="__codelineno-16-15" name="__codelineno-16-15" href="#__codelineno-16-15"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--size=1G</span>
+<a id="__codelineno-16-16" name="__codelineno-16-16" href="#__codelineno-16-16"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--numjobs=4</span>
+<a id="__codelineno-16-17" name="__codelineno-16-17" href="#__codelineno-16-17"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--time_based</span>
+<a id="__codelineno-16-18" name="__codelineno-16-18" href="#__codelineno-16-18"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--runtime=60</span>
+<a id="__codelineno-16-19" name="__codelineno-16-19" href="#__codelineno-16-19"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--group_reporting</span>
+<a id="__codelineno-16-20" name="__codelineno-16-20" href="#__codelineno-16-20"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--iodepth=32</span>
+<a id="__codelineno-16-21" name="__codelineno-16-21" href="#__codelineno-16-21"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--filename=/data/testfile</span>
+<a id="__codelineno-16-22" name="__codelineno-16-22" href="#__codelineno-16-22"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--output-format=json</span>
+<a id="__codelineno-16-23" name="__codelineno-16-23" href="#__codelineno-16-23"></a><span class="w">      </span><span class="nt">volumeMounts</span><span class="p">:</span>
+<a id="__codelineno-16-24" name="__codelineno-16-24" href="#__codelineno-16-24"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">data</span>
+<a id="__codelineno-16-25" name="__codelineno-16-25" href="#__codelineno-16-25"></a><span class="w">          </span><span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data</span>
+<a id="__codelineno-16-26" name="__codelineno-16-26" href="#__codelineno-16-26"></a><span class="w">      </span><span class="nt">securityContext</span><span class="p">:</span>
+<a id="__codelineno-16-27" name="__codelineno-16-27" href="#__codelineno-16-27"></a><span class="w">        </span><span class="nt">runAsUser</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1000</span>
+<a id="__codelineno-16-28" name="__codelineno-16-28" href="#__codelineno-16-28"></a><span class="w">        </span><span class="nt">runAsGroup</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1000</span>
+<a id="__codelineno-16-29" name="__codelineno-16-29" href="#__codelineno-16-29"></a><span class="w">  </span><span class="nt">restartPolicy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Never</span>
+<a id="__codelineno-16-30" name="__codelineno-16-30" href="#__codelineno-16-30"></a><span class="w">  </span><span class="nt">volumes</span><span class="p">:</span>
+<a id="__codelineno-16-31" name="__codelineno-16-31" href="#__codelineno-16-31"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">data</span>
+<a id="__codelineno-16-32" name="__codelineno-16-32" href="#__codelineno-16-32"></a><span class="w">      </span><span class="nt">persistentVolumeClaim</span><span class="p">:</span>
+<a id="__codelineno-16-33" name="__codelineno-16-33" href="#__codelineno-16-33"></a><span class="w">        </span><span class="nt">claimName</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bench-pvc</span>
+</code></pre></div>
+<h3 id="expected-performance-ranges">Expected Performance Ranges<a class="headerlink" href="#expected-performance-ranges" title="Permanent link">&para;</a></h3>
+<p>These ranges are for IBM VPC File Storage with the <code>dp2</code> profile, measured in-zone (same AZ as the share):</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Expected Range</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Sequential read (1M blocks)</td>
+<td>100-500 MB/s</td>
+<td>Depends on share size and IOPS profile</td>
+</tr>
+<tr>
+<td>Sequential write (1M blocks)</td>
+<td>100-400 MB/s</td>
+<td>Slightly lower than read due to NFS write semantics</td>
+</tr>
+<tr>
+<td>Random read IOPS (4K blocks)</td>
+<td>1000-48000</td>
+<td>Depends on share IOPS allocation</td>
+</tr>
+<tr>
+<td>Random write IOPS (4K blocks)</td>
+<td>1000-48000</td>
+<td>Similar to random read</td>
+</tr>
+<tr>
+<td>Latency (random 4K read)</td>
+<td>1-5 ms</td>
+<td>In-zone latency; cross-zone adds 1-3 ms</td>
+</tr>
+<tr>
+<td>Metadata ops (create/stat/delete)</td>
+<td>1000-5000 ops/s</td>
+<td>NFS metadata operations per mount</td>
+</tr>
+</tbody>
+</table>
+<h3 id="interpreting-results">Interpreting Results<a class="headerlink" href="#interpreting-results" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Below expected range:</strong> Check security group rules, node NFS client settings, and share IOPS allocation</li>
+<li><strong>High latency variance:</strong> May indicate noisy neighbors on the same share — check PVC count and IOPS usage per share</li>
+<li><strong>Throughput plateau:</strong> You may be hitting the share's IOPS limit — check <code>ibmcloud is share &lt;id&gt;</code> for current IOPS</li>
+</ul>
+<h3 id="benchmarking-tips">Benchmarking Tips<a class="headerlink" href="#benchmarking-tips" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Warm up the mount</strong> before benchmarking — the first I/O after mount is slower due to NFS connection setup</li>
+<li><strong>Test with realistic block sizes</strong> — 4K for databases, 1M for log/backup workloads</li>
+<li><strong>Run from the same zone</strong> as the share — cross-zone adds 1-3 ms latency</li>
+<li><strong>Test with multiple jobs</strong> (<code>--numjobs=4</code>) to measure concurrency limits</li>
+<li><strong>Compare with stock CSI</strong> — run the same fio test on a dedicated 1:1 PVC to establish the NFS baseline; the pool CSI should match since it uses the same NFS shares</li>
+</ol>
+<h3 id="benchmark-pool-setup">Benchmark Pool Setup<a class="headerlink" href="#benchmark-pool-setup" title="Permanent link">&para;</a></h3>
+<p>Benchmarks need a share large enough to provide representative IOPS. The dp2 profile scales IOPS with share size, so a small share gives misleading results:</p>
+<table>
+<thead>
+<tr>
+<th>Share Size</th>
+<th>dp2 IOPS</th>
+<th>Suitable for Benchmarking?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>100 GB</td>
+<td>~100</td>
+<td>No — IOPS floor, not representative of production</td>
+</tr>
+<tr>
+<td>500 GB</td>
+<td>~1,500</td>
+<td>Minimal — only for quick smoke tests</td>
+</tr>
+<tr>
+<td><strong>2 TB</strong></td>
+<td><strong>~6,000</strong></td>
+<td><strong>Recommended — matches typical production size</strong></td>
+</tr>
+<tr>
+<td>4 TB</td>
+<td>~12,000</td>
+<td>Use if testing high-IOPS or KubeVirt VM workloads</td>
+</tr>
+</tbody>
+</table>
+<p>Create a dedicated benchmark pool with a single share and no auto-expansion to keep it simple and avoid burning VPC quota:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">storage.ibmcloud.io/v1alpha1</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">FileSharePool</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bench-pool</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="w">  </span><span class="nt">zone</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">us-south-1</span><span class="w">          </span><span class="c1"># Match your worker node zone</span>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="w">  </span><span class="nt">profile</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dp2</span>
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="w">  </span><span class="nt">shareSizeGB</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2000</span><span class="w">          </span><span class="c1"># 2 TB — gives ~6,000 IOPS baseline</span>
+<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a><span class="w">  </span><span class="nt">maxShares</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a><span class="w">  </span><span class="nt">initialShares</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a><span class="w">  </span><span class="nt">autoExpand</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a><span class="w">  </span><span class="nt">allocationStrategy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">spread</span>
+<a id="__codelineno-17-13" name="__codelineno-17-13" href="#__codelineno-17-13"></a><span class="w">  </span><span class="nt">defaultUID</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1000</span>
+<a id="__codelineno-17-14" name="__codelineno-17-14" href="#__codelineno-17-14"></a><span class="w">  </span><span class="nt">defaultGID</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1000</span>
+<a id="__codelineno-17-15" name="__codelineno-17-15" href="#__codelineno-17-15"></a><span class="w">  </span><span class="nt">defaultPermissions</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;0755&quot;</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="c1"># Create the benchmark pool</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>bench-pool.yaml
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>kubectl<span class="w"> </span>get<span class="w"> </span>filesharepools<span class="w"> </span>bench-pool<span class="w"> </span>-w<span class="w">    </span><span class="c1"># Wait for Phase: Ready (~60s)</span>
+</code></pre></div>
+<p>Delete the pool when benchmarking is complete to free the VPC share quota:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>kubectl<span class="w"> </span>delete<span class="w"> </span>pvc<span class="w"> </span>bench-pvc<span class="w"> </span>-n<span class="w"> </span>default
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>kubectl<span class="w"> </span>delete<span class="w"> </span>filesharespool<span class="w"> </span>bench-pool
+</code></pre></div>
+<h3 id="benchmark-pvc-setup">Benchmark PVC Setup<a class="headerlink" href="#benchmark-pvc-setup" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="c1"># Create a PVC for benchmarking</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="s">apiVersion: v1</span>
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="s">kind: PersistentVolumeClaim</span>
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="s">metadata:</span>
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="s">  name: bench-pvc</span>
+<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a><span class="s">  namespace: default</span>
+<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a><span class="s">spec:</span>
+<a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a><span class="s">  accessModes:</span>
+<a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a><span class="s">    - ReadWriteOnce</span>
+<a id="__codelineno-20-11" name="__codelineno-20-11" href="#__codelineno-20-11"></a><span class="s">  storageClassName: bench-pool</span>
+<a id="__codelineno-20-12" name="__codelineno-20-12" href="#__codelineno-20-12"></a><span class="s">  resources:</span>
+<a id="__codelineno-20-13" name="__codelineno-20-13" href="#__codelineno-20-13"></a><span class="s">    requests:</span>
+<a id="__codelineno-20-14" name="__codelineno-20-14" href="#__codelineno-20-14"></a><span class="s">      storage: 100Gi</span>
+<a id="__codelineno-20-15" name="__codelineno-20-15" href="#__codelineno-20-15"></a><span class="s">EOF</span>
+<a id="__codelineno-20-16" name="__codelineno-20-16" href="#__codelineno-20-16"></a>
+<a id="__codelineno-20-17" name="__codelineno-20-17" href="#__codelineno-20-17"></a><span class="c1"># Wait for binding</span>
+<a id="__codelineno-20-18" name="__codelineno-20-18" href="#__codelineno-20-18"></a>kubectl<span class="w"> </span>get<span class="w"> </span>pvc<span class="w"> </span>bench-pvc<span class="w"> </span>-w
+<a id="__codelineno-20-19" name="__codelineno-20-19" href="#__codelineno-20-19"></a>
+<a id="__codelineno-20-20" name="__codelineno-20-20" href="#__codelineno-20-20"></a><span class="c1"># Run the benchmark</span>
+<a id="__codelineno-20-21" name="__codelineno-20-21" href="#__codelineno-20-21"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>fio-sequential.yaml
+<a id="__codelineno-20-22" name="__codelineno-20-22" href="#__codelineno-20-22"></a>kubectl<span class="w"> </span>logs<span class="w"> </span>fio-sequential<span class="w"> </span>--follow
+<a id="__codelineno-20-23" name="__codelineno-20-23" href="#__codelineno-20-23"></a>
+<a id="__codelineno-20-24" name="__codelineno-20-24" href="#__codelineno-20-24"></a><span class="c1"># Clean up</span>
+<a id="__codelineno-20-25" name="__codelineno-20-25" href="#__codelineno-20-25"></a>kubectl<span class="w"> </span>delete<span class="w"> </span>pod<span class="w"> </span>fio-sequential<span class="w"> </span>fio-random
+<a id="__codelineno-20-26" name="__codelineno-20-26" href="#__codelineno-20-26"></a>kubectl<span class="w"> </span>delete<span class="w"> </span>pvc<span class="w"> </span>bench-pvc
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "navigation.instant", "search.suggest", "search.highlight", "content.code.copy", "content.tabs.link"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
