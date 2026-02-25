@@ -346,6 +346,9 @@ kubectl apply -f config/deploy/node.yaml
 | `--clone-worker-interval` | `10s` | Clone worker poll interval |
 | `--golden-image-sync-interval` | `5m` | Golden image syncer poll interval |
 | `--driver-image` | `""` | Driver container image for receiver-mode sync-client Jobs (auto-set by Helm) |
+| `--receiver-tls-cert-file` | `""` | TLS certificate file for receiver HTTPS. Empty = plain HTTP |
+| `--receiver-tls-key-file` | `""` | TLS private key file for receiver HTTPS. Empty = plain HTTP |
+| `--ca-cert-file` | `""` | CA certificate file for verifying receiver TLS cert (sync-client mode). Empty = system trust store |
 
 ---
 

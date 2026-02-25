@@ -124,18 +124,28 @@ kubectl get crd filesharepools.storage.ibmcloud.io -o json | \
 
 ### Upgrading to v0.13.2 (from v0.13.1)
 
-**Fixes:** Receiver Helm template ServiceAccount, ReplicationPolicy CRD validation, sync-client Job image selection.
+**Fixes:** Receiver Helm template ServiceAccount, ReplicationPolicy CRD validation, sync-client Job image selection, receiver path-doubling bug, scheduling fairness for parallel syncs.
 
 **CRD changes (additive):**
 - `ReplicationPolicy.spec.destinationNFSServer` is now optional at the OpenAPI level (was incorrectly required, blocking driver-to-driver mode)
+- New field: `ReplicationPolicy.spec.destinationCACertSecretRef` — references a Secret containing a `ca.crt` key for verifying the receiver's TLS certificate (required for self-signed certs)
 
 **Action required:**
 1. Apply updated CRDs: `kubectl apply -f config/crd/`
 2. Upgrade controller — now passes `--driver-image` to receiver-mode sync-client Jobs automatically
+3. If using driver-to-driver mode with TLS: create a Secret with the receiver's CA cert and set `destinationCACertSecretRef` on the ReplicationPolicy
 
 **New features:**
+- **Receiver TLS support** — native HTTPS on the replication receiver via cert-manager. Enable with `replicationReceiver.tls.enabled=true` in Helm values. Creates a self-signed Issuer and Certificate automatically. OpenShift Route switches to passthrough TLS termination
 - `--driver-image` CLI flag and Helm wiring for receiver-mode sync-client Jobs
+- New CLI flags: `--receiver-tls-cert-file`, `--receiver-tls-key-file` (receiver), `--ca-cert-file` (sync-client)
 - Annotation-based pause/resume: `storage.ibmcloud.io/paused=true` on a ReplicationPolicy pauses replication; removing it resumes
+- Scheduling fairness: SubVolumes sorted by last-sync-time (oldest first) to prevent starvation under `maxParallelSyncs` limits
+- BytesWritten tracking: sync-client Jobs report bytes transferred via termination log; recorded in `SubVolumeReplicationStatus.bytesSynced`
+
+**Bug fixes:**
+- Receiver path-doubling: when `subPath` already included the `basePath` prefix (e.g., `/pvcs/pvc-xxx`), the receiver would double it (e.g., `/data/pvcs/pvcs/pvc-xxx`). Now strips the prefix automatically
+- Sync-client Jobs now mount the CA cert Secret when `destinationCACertSecretRef` is set, enabling TLS verification for self-signed receiver certificates
 
 ---
 

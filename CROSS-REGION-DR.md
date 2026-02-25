@@ -305,6 +305,65 @@ The controller does NOT:
 - Create or delete SubVolume CRs on the destination (the failover CLI handles this).
 - Interfere with the CSI controller or node agent in any way.
 
+### TLS Configuration (Driver-to-Driver Mode)
+
+When using driver-to-driver mode, the receiver service accepts HTTPS uploads from sync-client Jobs. TLS secures data in transit between clusters and authenticates the receiver endpoint.
+
+**Receiver TLS (destination cluster):**
+
+The receiver supports native TLS via cert-manager. Enable it in Helm values:
+
+```yaml
+replicationReceiver:
+  enabled: true
+  pvcName: replication-receiver-data
+  authSecretName: replication-auth
+  tls:
+    enabled: true                    # Enables HTTPS on the receiver
+    additionalDNSNames: []           # Extra SANs (optional)
+    certManager:
+      issuerKind: Issuer             # Issuer or ClusterIssuer
+      issuerName: ""                 # Empty = auto-create self-signed Issuer
+```
+
+When `tls.enabled=true`:
+- A self-signed cert-manager `Issuer` and `Certificate` are created in kube-system
+- The Certificate includes SANs for the Service FQDN and the OpenShift Route hostname
+- The OpenShift Route switches to `termination: passthrough` (TLS terminates at the receiver, not the router)
+- Health probes use HTTPS instead of HTTP
+
+**CA certificate verification (source cluster):**
+
+When the receiver uses a self-signed certificate, sync-client Jobs need the CA cert to verify the connection. Configure this on the ReplicationPolicy:
+
+```yaml
+apiVersion: storage.ibmcloud.io/v1alpha1
+kind: ReplicationPolicy
+metadata:
+  name: cross-region-dr
+spec:
+  sourcePoolName: production
+  destinationEndpoint: "https://repl-receiver-kube-system.apps.dr-cluster.example.com"
+  destinationAuthSecretRef: replication-auth-dr       # Bearer token Secret
+  destinationCACertSecretRef: repl-receiver-ca        # CA cert Secret
+  destinationBasePath: /pvcs
+  schedule: "15m"
+```
+
+The `destinationCACertSecretRef` references a Secret in kube-system containing the CA certificate under the `ca.crt` key. Extract it from the destination cluster's cert-manager Certificate:
+
+```bash
+# On the destination cluster: extract the CA cert
+kubectl get secret repl-receiver-tls -n kube-system \
+  -o jsonpath='{.data.ca\.crt}' | base64 -d > ca.crt
+
+# On the source cluster: create the CA cert Secret
+kubectl create secret generic repl-receiver-ca \
+  -n kube-system --from-file=ca.crt=ca.crt
+```
+
+The replication controller mounts this Secret into sync-client Job pods and passes `--ca-cert-file` to the sync-client binary, which creates an HTTPS client with a custom CA trust pool.
+
 ### Replication Data Flow
 
 ```

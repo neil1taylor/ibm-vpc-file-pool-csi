@@ -1251,6 +1251,12 @@ type ReplicationPolicySpec struct {
     // +optional
     DestinationAuthSecretRef string `json:"destinationAuthSecretRef,omitempty"`
 
+    // DestinationCACertSecretRef is the name of a Secret in kube-system containing
+    // a "ca.crt" key with the CA certificate for verifying the receiver's TLS cert.
+    // Required when the receiver uses a self-signed certificate.
+    // +optional
+    DestinationCACertSecretRef string `json:"destinationCACertSecretRef,omitempty"`
+
     // PreSyncHooks are hooks executed before each replication sync cycle.
     // +optional
     PreSyncHooks []Hook `json:"preSyncHooks,omitempty"`
