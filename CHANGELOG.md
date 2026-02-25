@@ -263,6 +263,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Mount target IP resolution when share has multiple mount targets across zones
 - Makefile targets for end-to-end build pipeline
 
+[v0.13.2]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.13.1...v0.13.2
 [v0.13.1]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.13.0...v0.13.1
 [v0.13.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.12.0...v0.13.0
 [v0.12.0]: https://github.com/IBM/ibm-vpc-file-pool-csi/compare/v0.11.0...v0.12.0

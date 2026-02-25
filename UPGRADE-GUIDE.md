@@ -42,6 +42,7 @@ Before upgrading, complete every item:
 | v0.9.0–v0.10.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+ |
 | v0.11.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.12.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
+| v0.13.0–v0.13.2 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 
 ---
 
@@ -120,6 +121,57 @@ kubectl get crd filesharepools.storage.ibmcloud.io -o json | \
 ---
 
 ## Version-Specific Upgrade Notes
+
+### Upgrading to v0.13.2 (from v0.13.1)
+
+**Fixes:** Receiver Helm template ServiceAccount, ReplicationPolicy CRD validation, sync-client Job image selection.
+
+**CRD changes (additive):**
+- `ReplicationPolicy.spec.destinationNFSServer` is now optional at the OpenAPI level (was incorrectly required, blocking driver-to-driver mode)
+
+**Action required:**
+1. Apply updated CRDs: `kubectl apply -f config/crd/`
+2. Upgrade controller — now passes `--driver-image` to receiver-mode sync-client Jobs automatically
+
+**New features:**
+- `--driver-image` CLI flag and Helm wiring for receiver-mode sync-client Jobs
+- Annotation-based pause/resume: `storage.ibmcloud.io/paused=true` on a ReplicationPolicy pauses replication; removing it resumes
+
+---
+
+### Upgrading to v0.13.1 (from v0.13.0)
+
+**Fixes:** Console plugin table rows not rendering in tabbed layout.
+
+**No CRD changes.** No RBAC changes. No data migration required.
+
+**Action required:**
+1. Upgrade controller — metrics now register with controller-runtime registry (fixes scraping when using Prometheus Operator)
+2. Update image references from `icr.io` to `de.icr.io` (Frankfurt regional registry) if using explicit image tags
+
+**Console plugin changes:**
+- Replaced VirtualizedTable with PatternFly composable Table in all 5 list pages
+- Added client-side column sorting on all list pages
+
+---
+
+### Upgrading to v0.13.0 (from v0.12.0)
+
+**New features:** Console plugin tabbed navigation, CDI DataSource creation for InstanceTypes catalog, monitoring tab with Prometheus charts.
+
+**No CRD changes.** No RBAC changes. No data migration required.
+
+**Action required:**
+1. Upgrade controller — golden image syncer now creates DataSource CRs in `openshift-virtualization-os-images` for InstanceTypes catalog visibility
+2. If using the console plugin, the UI now uses a single tabbed interface instead of 7 sidebar items
+
+**Console plugin changes (if enabled):**
+- Single "IBM VPC File Pools" sidebar entry with tabbed interface (Overview, Pools, SubVolumes, Snapshots, Group Snapshots, Replication, Monitoring)
+- New Monitoring tab with time-series charts and stat cards
+- IOPS column in pool table
+- Create buttons now route to custom form wizards instead of YAML editor
+
+---
 
 ### Upgrading to v0.12.0 (from v0.11.0)
 

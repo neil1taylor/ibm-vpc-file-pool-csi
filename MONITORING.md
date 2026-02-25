@@ -8,7 +8,7 @@ Complete metrics reference, alerting rules, and dashboard templates for operatin
 
 The controller exposes Prometheus metrics on `:8080/metrics`. All metrics use the `vpc_file_pool_` or `pool_csi_` prefix and follow the [Prometheus naming conventions](https://prometheus.io/docs/practices/naming/).
 
-The driver emits 21 metrics across five categories:
+The driver emits 21 metrics across six categories:
 
 | Category | Metrics | Purpose |
 |----------|---------|---------|

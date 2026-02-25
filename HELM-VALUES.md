@@ -98,6 +98,10 @@ Configuration for the driver-to-driver cross-region replication receiver. Deploy
 | `replicationReceiver.resources.requests.cpu` | string | `100m` | Receiver CPU request |
 | `replicationReceiver.resources.requests.memory` | string | `256Mi` | Receiver memory request |
 | `replicationReceiver.resources.limits.memory` | string | `512Mi` | Receiver memory limit |
+| `replicationReceiver.tls.enabled` | bool | `false` | Enable native TLS on the receiver (certificates provisioned by cert-manager) |
+| `replicationReceiver.tls.additionalDNSNames` | list | `[]` | Extra DNS SANs for the receiver TLS certificate (e.g., custom ingress hostnames). On OpenShift, the Route hostname is added automatically |
+| `replicationReceiver.tls.certManager.issuerKind` | string | `Issuer` | cert-manager issuer kind: `Issuer` (namespace-scoped) or `ClusterIssuer` |
+| `replicationReceiver.tls.certManager.issuerName` | string | `""` | cert-manager issuer name. Leave empty to create a self-signed Issuer automatically |
 
 ## Replication
 
