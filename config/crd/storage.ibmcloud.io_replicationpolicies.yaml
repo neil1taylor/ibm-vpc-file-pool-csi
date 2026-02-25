@@ -79,6 +79,12 @@ spec:
                   DestinationBasePath is the base path on the destination NFS server
                   where replicated SubVolume directories are written (e.g., "/pvcs").
                 type: string
+              destinationCACertSecretRef:
+                description: |-
+                  DestinationCACertSecretRef is the name of a Secret in kube-system containing
+                  a "ca.crt" key with the CA certificate for verifying the receiver's TLS cert.
+                  Required when the receiver uses a self-signed certificate.
+                type: string
               destinationEndpoint:
                 description: |-
                   DestinationEndpoint is the HTTPS URL of the replication receiver service

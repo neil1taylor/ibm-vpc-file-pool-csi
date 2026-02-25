@@ -3,8 +3,15 @@ package replication
 import (
 	"archive/tar"
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"io"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func createTestReceiver(t *testing.T) (*Receiver, string) {
@@ -531,6 +539,92 @@ func TestResolveDestPath(t *testing.T) {
 	}
 }
 
+// TestResolveDestPath_PathDoubling verifies that subPath with basePath prefix
+// doesn't result in doubled path segments (Fix 1: /data/pvcs/pvcs/pvc-xxx).
+func TestResolveDestPath_PathDoubling(t *testing.T) {
+	r := &Receiver{basePath: "/data"}
+
+	tests := []struct {
+		name     string
+		base     string
+		sub      string
+		wantPath string
+	}{
+		{
+			name:     "subPath already includes basePath prefix",
+			base:     "/pvcs",
+			sub:      "/pvcs/pvc-12345678-1234-1234-1234-123456789abc",
+			wantPath: "/data/pvcs/pvc-12345678-1234-1234-1234-123456789abc",
+		},
+		{
+			name:     "subPath without basePath prefix (no doubling)",
+			base:     "/pvcs",
+			sub:      "pvc-12345678-1234-1234-1234-123456789abc",
+			wantPath: "/data/pvcs/pvc-12345678-1234-1234-1234-123456789abc",
+		},
+		{
+			name:     "basePath with trailing slash",
+			base:     "/pvcs/",
+			sub:      "/pvcs/pvc-12345678-1234-1234-1234-123456789abc",
+			wantPath: "/data/pvcs/pvc-12345678-1234-1234-1234-123456789abc",
+		},
+		{
+			name:     "different basePath and subPath",
+			base:     "/volumes",
+			sub:      "/pvcs/pvc-12345678-1234-1234-1234-123456789abc",
+			wantPath: "/data/volumes/pvcs/pvc-12345678-1234-1234-1234-123456789abc",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := r.resolveDestPath(tt.base, tt.sub)
+			if err != nil {
+				t.Fatalf("resolveDestPath(%q, %q) unexpected error: %v", tt.base, tt.sub, err)
+			}
+			if got != tt.wantPath {
+				t.Errorf("resolveDestPath(%q, %q) = %q, want %q", tt.base, tt.sub, got, tt.wantPath)
+			}
+		})
+	}
+}
+
+// TestReceiver_Sync_PathDoubling_E2E verifies data lands at /pvcs/pvc-xxx
+// (not /pvcs/pvcs/pvc-xxx) when subPath already includes the basePath prefix.
+func TestReceiver_Sync_PathDoubling_E2E(t *testing.T) {
+	r, basePath := createTestReceiver(t)
+
+	tarData := createTarStream(t, map[string]string{
+		"disk.img": "fake disk image content",
+	})
+
+	// Simulate what the sync-client sends: subPath = sv.Spec.SubPath = "/pvcs/pvc-xxx"
+	svName := "pvc-12345678-1234-1234-1234-123456789abc"
+	req := httptest.NewRequest(http.MethodPut,
+		"/api/v1/sync/"+svName+"?basePath=/pvcs&subPath=/pvcs/"+svName,
+		tarData)
+	req.Header.Set("Authorization", "Bearer test-token-123")
+	w := httptest.NewRecorder()
+
+	r.handleSync(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify data is at /pvcs/pvc-xxx (NOT /pvcs/pvcs/pvc-xxx).
+	correctPath := filepath.Join(basePath, "pvcs", svName, "disk.img")
+	if _, err := os.Stat(correctPath); err != nil {
+		t.Errorf("expected file at %s: %v", correctPath, err)
+	}
+
+	// Verify the doubled path does NOT exist.
+	doubledPath := filepath.Join(basePath, "pvcs", "pvcs", svName, "disk.img")
+	if _, err := os.Stat(doubledPath); err == nil {
+		t.Errorf("path doubling detected: file exists at %s (should not)", doubledPath)
+	}
+}
+
 // TestReceiver_ResponseJSON verifies the sync response contains valid JSON.
 func TestReceiver_ResponseJSON(t *testing.T) {
 	r, _ := createTestReceiver(t)
@@ -581,6 +675,99 @@ func TestReceiver_Metadata_TooLarge(t *testing.T) {
 	if w.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("expected 413 for too-large metadata, got %d: %s", w.Code, w.Body.String())
 	}
+}
+
+// TestReceiver_TLS_Integration verifies the receiver serves HTTPS with TLS.
+func TestReceiver_TLS_Integration(t *testing.T) {
+	basePath := t.TempDir()
+	r := NewReceiver(basePath, "tls-token", ":0")
+
+	// Use httptest.NewUnstartedServer with StartTLS for a proper TLS test.
+	tlsServer := httptest.NewUnstartedServer(r.httpServer.Handler)
+	tlsServer.StartTLS()
+	defer tlsServer.Close()
+
+	// Create client trusting the test server's cert.
+	tlsClient := tlsServer.Client()
+
+	// Health check over HTTPS.
+	resp, err := tlsClient.Get(tlsServer.URL + "/api/v1/health")
+	if err != nil {
+		t.Fatalf("HTTPS health check failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	// Upload tar over HTTPS.
+	tarData := createTarStream(t, map[string]string{"tls-file.txt": "encrypted content"})
+	svName := "pvc-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	syncReq, _ := http.NewRequest(http.MethodPut,
+		tlsServer.URL+"/api/v1/sync/"+svName+"?basePath=/pvcs&subPath="+svName,
+		tarData)
+	syncReq.Header.Set("Authorization", "Bearer tls-token")
+	syncResp, err := tlsClient.Do(syncReq)
+	if err != nil {
+		t.Fatalf("HTTPS sync request failed: %v", err)
+	}
+	syncResp.Body.Close()
+	if syncResp.StatusCode != http.StatusOK {
+		t.Fatalf("sync expected 200, got %d", syncResp.StatusCode)
+	}
+
+	// Verify file was extracted.
+	content, err := os.ReadFile(filepath.Join(basePath, "pvcs", svName, "tls-file.txt"))
+	if err != nil {
+		t.Fatalf("reading extracted file: %v", err)
+	}
+	if string(content) != "encrypted content" {
+		t.Errorf("content = %q, want %q", string(content), "encrypted content")
+	}
+}
+
+// TestReceiver_SetTLS_Fields verifies SetTLS sets the struct fields correctly.
+func TestReceiver_SetTLS_Fields(t *testing.T) {
+	r := NewReceiver("/data", "token", ":8443")
+	if r.tlsCertFile != "" || r.tlsKeyFile != "" {
+		t.Error("expected empty TLS fields initially")
+	}
+
+	r.SetTLS("/certs/tls.crt", "/certs/tls.key")
+	if r.tlsCertFile != "/certs/tls.crt" {
+		t.Errorf("tlsCertFile = %q, want /certs/tls.crt", r.tlsCertFile)
+	}
+	if r.tlsKeyFile != "/certs/tls.key" {
+		t.Errorf("tlsKeyFile = %q, want /certs/tls.key", r.tlsKeyFile)
+	}
+}
+
+// generateSelfSignedCert creates a self-signed certificate PEM for testing.
+func generateSelfSignedCert(t *testing.T) (certPEM, keyPEM []byte) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generating key: %v", err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "test"},
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames:     []string{"localhost"},
+		IsCA:         true,
+		BasicConstraintsValid: true,
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("creating cert: %v", err)
+	}
+	certPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	keyDER, _ := x509.MarshalECPrivateKey(key)
+	keyPEM = pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+	return certPEM, keyPEM
 }
 
 // Receiver integration test with httptest.Server.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -25,8 +26,9 @@ const (
 	// DefaultReplicationInterval is how often the replication controller checks for work.
 	DefaultReplicationInterval = 30 * time.Second
 
-	// DefaultReplicationImage is the container image used for replication Jobs.
-	// The driver image includes rsync; fall back to CentOS Stream 9 which has rsync.
+	// DefaultReplicationImage is the fallback container image for replication Jobs.
+	// In practice, main.go overrides this with the driver image (which includes rsync).
+	// This default is only used if SetReplicationImage() is not called.
 	DefaultReplicationImage = "quay.io/centos/centos:stream9"
 
 	// replTempLabel marks temporary resources created by the replication controller.
@@ -67,7 +69,13 @@ type ReplicationController struct {
 
 	// lastSyncTimes tracks the last time each policy was synced, keyed by policy name.
 	lastSyncTimes map[string]time.Time
-	mu            sync.Mutex
+
+	// lastSubVolumeSyncTimes tracks the last time each SubVolume was synced,
+	// keyed by "policyName/svName". Used to prevent scheduling starvation
+	// by sorting SubVolumes oldest-first when parallelism limits apply.
+	lastSubVolumeSyncTimes map[string]time.Time
+
+	mu sync.Mutex
 
 	// nowFunc is used for time operations (injectable for tests).
 	nowFunc func() time.Time
@@ -76,13 +84,14 @@ type ReplicationController struct {
 // NewReplicationController creates a new replication controller.
 func NewReplicationController(k8sClient k8s.Client, directClient client.Client, nfsOps NFSOperations) *ReplicationController {
 	return &ReplicationController{
-		k8sClient:        k8sClient,
-		directClient:     directClient,
-		nfsOps:           nfsOps,
-		replicationImage: DefaultReplicationImage,
-		interval:         DefaultReplicationInterval,
-		lastSyncTimes:    make(map[string]time.Time),
-		nowFunc:          time.Now,
+		k8sClient:              k8sClient,
+		directClient:           directClient,
+		nfsOps:                 nfsOps,
+		replicationImage:       DefaultReplicationImage,
+		interval:               DefaultReplicationInterval,
+		lastSyncTimes:          make(map[string]time.Time),
+		lastSubVolumeSyncTimes: make(map[string]time.Time),
+		nowFunc:                time.Now,
 	}
 }
 
@@ -211,6 +220,27 @@ func (rc *ReplicationController) recordSyncTime(policyName string) {
 	rc.lastSyncTimes[policyName] = rc.nowFunc()
 }
 
+// recordSubVolumeSyncTime records the current time as the last sync time for a SubVolume.
+func (rc *ReplicationController) recordSubVolumeSyncTime(policyName, svName string) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	rc.lastSubVolumeSyncTimes[policyName+"/"+svName] = rc.nowFunc()
+}
+
+// sortByLastSyncTime sorts SubVolumes by their last sync time (oldest first).
+// SubVolumes that have never been synced sort first (zero time).
+func (rc *ReplicationController) sortByLastSyncTime(policyName string, svs []v1alpha1.SubVolume) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	sort.SliceStable(svs, func(i, j int) bool {
+		keyI := policyName + "/" + svs[i].Name
+		keyJ := policyName + "/" + svs[j].Name
+		tI := rc.lastSubVolumeSyncTimes[keyI]
+		tJ := rc.lastSubVolumeSyncTimes[keyJ]
+		return tI.Before(tJ)
+	})
+}
+
 // processPolicy runs a poll-based replication cycle for the given policy.
 // On each tick, for each SubVolume:
 //   - If no Job exists → create PV/PVC/Job
@@ -245,6 +275,10 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 	// 2. Filter by selector if specified.
 	matched := filterSubVolumes(subVolumes, policy.Spec.SubVolumeSelector)
 
+	// Sort matched SubVolumes by last sync time (oldest first) to prevent
+	// scheduling starvation when maxParallelSyncs < total SubVolumes.
+	rc.sortByLastSyncTime(policyName, matched)
+
 	// Update SubVolume count metric.
 	metrics.ReplicationSubVolumeCount.WithLabelValues(policyName, sourcePool).Set(float64(len(matched)))
 
@@ -271,7 +305,7 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 		svCopy := sv
 
 		// Check if a Job already exists for this SubVolume.
-		done, succeeded, checkErr := rc.checkReplicationJob(ctx, policyName, svCopy.Name)
+		done, succeeded, bytesWritten, checkErr := rc.checkReplicationJob(ctx, policyName, svCopy.Name)
 		if checkErr != nil {
 			klog.ErrorS(checkErr, "Failed to check replication Job status",
 				"policy", policyName, "subVolume", svCopy.Name)
@@ -287,10 +321,15 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 			if succeeded {
 				// Job succeeded — record success and cleanup.
 				now := metav1.NewTime(rc.nowFunc())
-				svStatuses = append(svStatuses, v1alpha1.SubVolumeReplicationStatus{
+				svStatus := v1alpha1.SubVolumeReplicationStatus{
 					SubVolumeName: svCopy.Name,
 					LastSyncTime:  &now,
-				})
+				}
+				if bytesWritten > 0 {
+					svStatus.BytesSynced = &bytesWritten
+				}
+				svStatuses = append(svStatuses, svStatus)
+				rc.recordSubVolumeSyncTime(policyName, svCopy.Name)
 				rc.cleanupReplicationResources(ctx, policy, svCopy.Name)
 			} else {
 				// Job failed.
@@ -365,8 +404,23 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 	}
 
 	if !allComplete {
-		// Some Jobs still running or deferred — don't count as a completed cycle.
-		// Update SubVolume statuses for visibility but don't update sync time or metrics.
+		// Some Jobs still running or deferred — don't count as a fully completed cycle.
+		// However, update LastSyncTime incrementally if any SubVolumes succeeded,
+		// so the policy status reflects progress rather than staying permanently empty.
+		anySucceeded := false
+		for _, svs := range svStatuses {
+			if svs.LastSyncTime != nil && svs.LastError == "" {
+				anySucceeded = true
+				break
+			}
+		}
+		if anySucceeded {
+			now := metav1.NewTime(rc.nowFunc())
+			policy.Status.LastSyncTime = &now
+			policy.Status.LastSyncDuration = duration.String()
+			policy.Status.ConsecutiveFailures = 0
+			policy.Status.LastError = ""
+		}
 		policy.Status.SubVolumeStatuses = svStatuses
 		if err := rc.k8sClient.UpdateReplicationPolicyStatus(ctx, policy); err != nil {
 			klog.ErrorS(err, "Failed to update policy status (cycle in progress)", "policy", policyName)
@@ -551,6 +605,60 @@ func (rc *ReplicationController) ensureReceiverModeJob(ctx context.Context, poli
 
 	srcPVCName := replSourcePVCName(policyName, sv.Name)
 
+	containerArgs := []string{
+		"--mode=sync-client",
+		"--receiver-endpoint=" + policy.Spec.DestinationEndpoint,
+		"--auth-token-file=/etc/replication/token",
+		"--source-path=/source",
+		"--dest-base-path=" + destBasePath,
+		"--sub-path=" + subPath,
+		"--subvolume-name=" + sv.Name,
+		"--metadata-json=" + string(metaJSON),
+	}
+
+	volumeMounts := []corev1.VolumeMount{
+		{Name: "source", MountPath: "/source", ReadOnly: true},
+		{Name: "auth-token", MountPath: "/etc/replication", ReadOnly: true},
+	}
+
+	volumes := []corev1.Volume{
+		{
+			Name: "source",
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: srcPVCName,
+					ReadOnly:  true,
+				},
+			},
+		},
+		{
+			Name: "auth-token",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: policy.Spec.DestinationAuthSecretRef,
+				},
+			},
+		},
+	}
+
+	// Mount CA certificate for TLS verification if configured.
+	if policy.Spec.DestinationCACertSecretRef != "" {
+		containerArgs = append(containerArgs, "--ca-cert-file=/etc/replication-ca/ca.crt")
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      "ca-cert",
+			MountPath: "/etc/replication-ca",
+			ReadOnly:  true,
+		})
+		volumes = append(volumes, corev1.Volume{
+			Name: "ca-cert",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: policy.Spec.DestinationCACertSecretRef,
+				},
+			},
+		})
+	}
+
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
@@ -581,16 +689,7 @@ func (rc *ReplicationController) ensureReceiverModeJob(ctx context.Context, poli
 						{
 							Name:  "sync-client",
 							Image: rc.driverImage,
-							Args: []string{
-								"--mode=sync-client",
-								"--receiver-endpoint=" + policy.Spec.DestinationEndpoint,
-								"--auth-token-file=/etc/replication/token",
-								"--source-path=/source",
-								"--dest-base-path=" + destBasePath,
-								"--sub-path=" + subPath,
-								"--subvolume-name=" + sv.Name,
-								"--metadata-json=" + string(metaJSON),
-							},
+							Args:  containerArgs,
 							Resources: corev1.ResourceRequirements{
 								Requests: corev1.ResourceList{
 									corev1.ResourceCPU:    resource.MustParse("100m"),
@@ -601,31 +700,10 @@ func (rc *ReplicationController) ensureReceiverModeJob(ctx context.Context, poli
 									corev1.ResourceMemory: resource.MustParse("512Mi"),
 								},
 							},
-							VolumeMounts: []corev1.VolumeMount{
-								{Name: "source", MountPath: "/source", ReadOnly: true},
-								{Name: "auth-token", MountPath: "/etc/replication", ReadOnly: true},
-							},
+							VolumeMounts: volumeMounts,
 						},
 					},
-					Volumes: []corev1.Volume{
-						{
-							Name: "source",
-							VolumeSource: corev1.VolumeSource{
-								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-									ClaimName: srcPVCName,
-									ReadOnly:  true,
-								},
-							},
-						},
-						{
-							Name: "auth-token",
-							VolumeSource: corev1.VolumeSource{
-								Secret: &corev1.SecretVolumeSource{
-									SecretName: policy.Spec.DestinationAuthSecretRef,
-								},
-							},
-						},
-					},
+					Volumes: volumes,
 				},
 			},
 		},
@@ -1007,8 +1085,9 @@ echo "Replication complete."
 }
 
 // checkReplicationJob checks the status of a replication Job.
-// Returns (done, succeeded, error). If done=false, the Job is still running or doesn't exist.
-func (rc *ReplicationController) checkReplicationJob(ctx context.Context, policyName, svName string) (bool, bool, error) {
+// Returns (done, succeeded, bytesWritten, error). If done=false, the Job is still running or doesn't exist.
+// bytesWritten is parsed from the pod's termination message (only for receiver-mode Jobs).
+func (rc *ReplicationController) checkReplicationJob(ctx context.Context, policyName, svName string) (bool, bool, int64, error) {
 	jobName := replJobName(policyName, svName)
 
 	job := &batchv1.Job{}
@@ -1018,13 +1097,14 @@ func (rc *ReplicationController) checkReplicationJob(ctx context.Context, policy
 	}, job)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			return false, false, nil // no Job yet
+			return false, false, 0, nil // no Job yet
 		}
-		return false, false, fmt.Errorf("getting replication Job %s/%s: %w", replJobNamespace, jobName, err)
+		return false, false, 0, fmt.Errorf("getting replication Job %s/%s: %w", replJobNamespace, jobName, err)
 	}
 
 	if job.Status.Succeeded > 0 {
-		return true, true, nil
+		bytesWritten := rc.readBytesWrittenFromJob(ctx, job)
+		return true, true, bytesWritten, nil
 	}
 
 	// Check if all retries exhausted.
@@ -1033,10 +1113,37 @@ func (rc *ReplicationController) checkReplicationJob(ctx context.Context, policy
 		backoffLimit = *job.Spec.BackoffLimit
 	}
 	if job.Status.Failed >= backoffLimit+1 {
-		return true, false, nil
+		return true, false, 0, nil
 	}
 
-	return false, false, nil // still running
+	return false, false, 0, nil // still running
+}
+
+// readBytesWrittenFromJob reads the bytesWritten value from the completed pod's
+// termination message. The sync-client writes JSON to /dev/termination-log.
+func (rc *ReplicationController) readBytesWrittenFromJob(ctx context.Context, job *batchv1.Job) int64 {
+	// List pods for this Job.
+	podList := &corev1.PodList{}
+	labels := job.Spec.Template.Labels
+	matchLabels := client.MatchingLabels(labels)
+	if err := rc.directClient.List(ctx, podList, matchLabels, client.InNamespace(job.Namespace)); err != nil {
+		klog.V(4).InfoS("Could not list pods for replication Job", "job", job.Name, "err", err)
+		return 0
+	}
+
+	for _, pod := range podList.Items {
+		for _, cs := range pod.Status.ContainerStatuses {
+			if cs.State.Terminated != nil && cs.State.Terminated.Message != "" {
+				var msg struct {
+					BytesWritten int64 `json:"bytesWritten"`
+				}
+				if err := json.Unmarshal([]byte(cs.State.Terminated.Message), &msg); err == nil && msg.BytesWritten > 0 {
+					return msg.BytesWritten
+				}
+			}
+		}
+	}
+	return 0
 }
 
 // cleanupReplicationResources deletes the temporary PV, PVC, and Job for a replication sync.

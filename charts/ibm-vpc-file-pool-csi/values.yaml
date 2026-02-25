@@ -167,6 +167,18 @@ replicationReceiver:
       memory: 256Mi
     limits:
       memory: 512Mi
+  # TLS configuration for the receiver HTTPS endpoint.
+  tls:
+    # Enable native TLS on the receiver (certificates provisioned by cert-manager).
+    enabled: false
+    # Extra DNS SANs for the receiver TLS certificate (e.g. custom ingress hostnames).
+    # On OpenShift, the Route hostname is added automatically via cluster ingress lookup.
+    additionalDNSNames: []
+    certManager:
+      # Issuer kind: "Issuer" (namespace-scoped) or "ClusterIssuer".
+      issuerKind: Issuer
+      # Issuer name. Empty = create a self-signed Issuer automatically.
+      issuerName: ""
 
 replication:
   # Override the container image used for replication Jobs.

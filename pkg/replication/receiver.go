@@ -43,6 +43,8 @@ type Receiver struct {
 	httpServer    *http.Server
 	maxFileCount  int
 	maxTotalBytes int64
+	tlsCertFile   string
+	tlsKeyFile    string
 }
 
 // NewReceiver creates a new replication receiver HTTP server.
@@ -81,9 +83,16 @@ func (r *Receiver) SetMaxTotalBytes(n int64) {
 	r.maxTotalBytes = n
 }
 
+// SetTLS configures the receiver to use TLS with the given certificate and key files.
+func (r *Receiver) SetTLS(certFile, keyFile string) {
+	r.tlsCertFile = certFile
+	r.tlsKeyFile = keyFile
+}
+
 // Start starts the HTTP server. Blocks until the server stops.
 func (r *Receiver) Start(ctx context.Context) error {
-	klog.InfoS("Replication receiver starting", "addr", r.httpServer.Addr, "basePath", r.basePath)
+	tlsEnabled := r.tlsCertFile != "" && r.tlsKeyFile != ""
+	klog.InfoS("Replication receiver starting", "addr", r.httpServer.Addr, "basePath", r.basePath, "tls", tlsEnabled)
 
 	// Shut down gracefully when context is cancelled.
 	go func() {
@@ -95,7 +104,13 @@ func (r *Receiver) Start(ctx context.Context) error {
 		}
 	}()
 
-	if err := r.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	var err error
+	if tlsEnabled {
+		err = r.httpServer.ListenAndServeTLS(r.tlsCertFile, r.tlsKeyFile)
+	} else {
+		err = r.httpServer.ListenAndServe()
+	}
+	if err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("receiver listen: %w", err)
 	}
 	return nil
@@ -309,6 +324,15 @@ func (r *Receiver) resolveDestPath(basePath, subPath string) (string, error) {
 	// Check for traversal.
 	if strings.Contains(basePath, "..") || strings.Contains(subPath, "..") {
 		return "", fmt.Errorf("path traversal not allowed")
+	}
+
+	// Strip basePath prefix from subPath if present to prevent path doubling.
+	// The sync-client sends subPath = sv.Spec.SubPath which already includes
+	// the basePath prefix (e.g. "/pvcs/pvc-xxx"). Without this, we'd get
+	// /data/pvcs/pvcs/pvc-xxx instead of /data/pvcs/pvc-xxx.
+	trimmedBase := strings.TrimRight(basePath, "/")
+	if strings.HasPrefix(subPath, trimmedBase+"/") {
+		subPath = strings.TrimPrefix(subPath, trimmedBase)
 	}
 
 	destDir := filepath.Join(r.basePath, basePath, subPath)

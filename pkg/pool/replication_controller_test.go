@@ -1880,3 +1880,391 @@ func TestReplicationController_MetadataRoundTrip(t *testing.T) {
 		t.Errorf("ReplicationPolicy: got %q, want %q", got.ReplicationPolicy, meta.ReplicationPolicy)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Fix 2: Scheduling starvation tests
+// ---------------------------------------------------------------------------
+
+func TestReplicationController_SchedulingFairness(t *testing.T) {
+	// With maxParallelSyncs=1 and 3 SubVolumes, each SubVolume should
+	// eventually get synced, not just the first one every cycle.
+	k := newReplFakeK8sClient()
+	dc := newReplFakeDirectClient()
+	nfs := newFakeNFSOperations()
+
+	sv1 := newTestSubVolume("pvc-11111111-1111-1111-1111-111111111111", "prod-pool", "share-1", 10)
+	sv2 := newTestSubVolume("pvc-22222222-2222-2222-2222-222222222222", "prod-pool", "share-1", 5)
+	sv3 := newTestSubVolume("pvc-33333333-3333-3333-3333-333333333333", "prod-pool", "share-1", 8)
+	k.addSubVolume(sv1)
+	k.addSubVolume(sv2)
+	k.addSubVolume(sv3)
+
+	policy := newTestReplicationPolicy("fairness", "prod-pool", "1ms")
+	policy.Spec.MaxParallelSyncs = 1 // Only 1 Job at a time.
+	k.addPolicy(policy)
+
+	rc := newReplController(k, dc, nfs)
+
+	ctx := context.Background()
+
+	// Track which SubVolumes had Jobs created.
+	synced := map[string]bool{}
+
+	// Run multiple cycles. Each cycle: process → simulate success → next.
+	for cycle := 0; cycle < 6; cycle++ {
+		// Force isDue.
+		rc.mu.Lock()
+		delete(rc.lastSyncTimes, "fairness")
+		rc.mu.Unlock()
+
+		rc.processOnce(ctx)
+
+		// Find which Job was created (or is running) this cycle.
+		for _, svName := range []string{
+			"pvc-11111111-1111-1111-1111-111111111111",
+			"pvc-22222222-2222-2222-2222-222222222222",
+			"pvc-33333333-3333-3333-3333-333333333333",
+		} {
+			jobName := replJobName("fairness", svName)
+			job := &batchv1.Job{}
+			if err := dc.Get(ctx, types.NamespacedName{
+				Namespace: replJobNamespace,
+				Name:      jobName,
+			}, job); err == nil {
+				synced[svName] = true
+				// Simulate success.
+				job.Status.Succeeded = 1
+				if err := dc.Status().Update(ctx, job); err != nil {
+					t.Fatalf("failed to update Job status: %v", err)
+				}
+			}
+		}
+
+		// Let the controller pick up the succeeded Job.
+		rc.mu.Lock()
+		delete(rc.lastSyncTimes, "fairness")
+		rc.mu.Unlock()
+		rc.processOnce(ctx)
+	}
+
+	// All 3 SubVolumes should have been synced at least once.
+	for _, svName := range []string{
+		"pvc-11111111-1111-1111-1111-111111111111",
+		"pvc-22222222-2222-2222-2222-222222222222",
+		"pvc-33333333-3333-3333-3333-333333333333",
+	} {
+		if !synced[svName] {
+			t.Errorf("SubVolume %s was never synced (scheduling starvation)", svName)
+		}
+	}
+}
+
+func TestReplicationController_SortByLastSyncTime(t *testing.T) {
+	k := newReplFakeK8sClient()
+	dc := newReplFakeDirectClient()
+	nfs := newFakeNFSOperations()
+	rc := newReplController(k, dc, nfs)
+
+	now := time.Date(2026, 2, 25, 12, 0, 0, 0, time.UTC)
+	rc.SetNowFunc(func() time.Time { return now })
+
+	// Record sync times: sv2 synced recently, sv1 synced a while ago, sv3 never.
+	rc.mu.Lock()
+	rc.lastSubVolumeSyncTimes["test-policy/pvc-11111111-1111-1111-1111-111111111111"] = now.Add(-10 * time.Minute)
+	rc.lastSubVolumeSyncTimes["test-policy/pvc-22222222-2222-2222-2222-222222222222"] = now.Add(-1 * time.Minute)
+	rc.mu.Unlock()
+
+	svs := []v1alpha1.SubVolume{
+		{ObjectMeta: metav1.ObjectMeta{Name: "pvc-11111111-1111-1111-1111-111111111111"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "pvc-22222222-2222-2222-2222-222222222222"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "pvc-33333333-3333-3333-3333-333333333333"}},
+	}
+
+	rc.sortByLastSyncTime("test-policy", svs)
+
+	// Expected order: sv3 (never synced, zero time) → sv1 (10m ago) → sv2 (1m ago)
+	if svs[0].Name != "pvc-33333333-3333-3333-3333-333333333333" {
+		t.Errorf("expected sv3 first (never synced), got %s", svs[0].Name)
+	}
+	if svs[1].Name != "pvc-11111111-1111-1111-1111-111111111111" {
+		t.Errorf("expected sv1 second (synced 10m ago), got %s", svs[1].Name)
+	}
+	if svs[2].Name != "pvc-22222222-2222-2222-2222-222222222222" {
+		t.Errorf("expected sv2 last (synced 1m ago), got %s", svs[2].Name)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Fix 3: Policy-level status incremental update tests
+// ---------------------------------------------------------------------------
+
+func TestReplicationController_PolicyStatusUpdatedIncrementally(t *testing.T) {
+	// With maxParallelSyncs=1 and 2 SubVolumes, the first cycle will complete
+	// 1 Job and defer 1. Policy LastSyncTime should still be set.
+	k := newReplFakeK8sClient()
+	dc := newReplFakeDirectClient()
+	nfs := newFakeNFSOperations()
+
+	sv1 := newTestSubVolume("pvc-11111111-1111-1111-1111-111111111111", "prod-pool", "share-1", 10)
+	sv2 := newTestSubVolume("pvc-22222222-2222-2222-2222-222222222222", "prod-pool", "share-1", 5)
+	k.addSubVolume(sv1)
+	k.addSubVolume(sv2)
+
+	policy := newTestReplicationPolicy("inc-status", "prod-pool", "1ms")
+	policy.Spec.MaxParallelSyncs = 1
+	k.addPolicy(policy)
+
+	rc := newReplController(k, dc, nfs)
+
+	ctx := context.Background()
+
+	// Cycle 1: creates a Job for one SubVolume, defers the other.
+	rc.processOnce(ctx)
+
+	// Find which SubVolume got the Job and simulate success.
+	for _, svName := range []string{
+		"pvc-11111111-1111-1111-1111-111111111111",
+		"pvc-22222222-2222-2222-2222-222222222222",
+	} {
+		jobName := replJobName("inc-status", svName)
+		job := &batchv1.Job{}
+		if err := dc.Get(ctx, types.NamespacedName{
+			Namespace: replJobNamespace,
+			Name:      jobName,
+		}, job); err == nil {
+			job.Status.Succeeded = 1
+			if err := dc.Status().Update(ctx, job); err != nil {
+				t.Fatalf("failed to update Job status: %v", err)
+			}
+		}
+	}
+
+	// Cycle 2: picks up the succeeded Job + defers the remaining one.
+	rc.mu.Lock()
+	delete(rc.lastSyncTimes, "inc-status")
+	rc.mu.Unlock()
+	rc.processOnce(ctx)
+
+	// Even though not all SubVolumes are complete, LastSyncTime should be set.
+	rp := k.getPolicy("inc-status")
+	if rp.Status.LastSyncTime == nil {
+		t.Fatal("expected LastSyncTime to be set incrementally when some SVs succeeded")
+	}
+	if rp.Status.ConsecutiveFailures != 0 {
+		t.Errorf("expected 0 consecutive failures, got %d", rp.Status.ConsecutiveFailures)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Fix 4: BytesSynced wiring tests
+// ---------------------------------------------------------------------------
+
+func TestReplicationController_BytesSyncedFromTerminationMessage(t *testing.T) {
+	k := newReplFakeK8sClient()
+	dc := newReplFakeDirectClient()
+	nfs := newFakeNFSOperations()
+
+	sv1 := newTestSubVolume("pvc-11111111-1111-1111-1111-111111111111", "prod-pool", "share-1", 10)
+	k.addSubVolume(sv1)
+
+	policy := newTestReceiverModePolicy("bytes-test", "prod-pool", "1ms")
+	k.addPolicy(policy)
+
+	rc := newReplController(k, dc, nfs)
+
+	ctx := context.Background()
+	rc.processOnce(ctx)
+
+	// Mark Job as succeeded.
+	jobName := replJobName("bytes-test", "pvc-11111111-1111-1111-1111-111111111111")
+	job := &batchv1.Job{}
+	if err := dc.Get(ctx, types.NamespacedName{Namespace: replJobNamespace, Name: jobName}, job); err != nil {
+		t.Fatalf("expected Job to be created: %v", err)
+	}
+	job.Status.Succeeded = 1
+	if err := dc.Status().Update(ctx, job); err != nil {
+		t.Fatalf("failed to update Job status: %v", err)
+	}
+
+	// Create a pod matching the Job's labels with a termination message.
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      jobName + "-pod",
+			Namespace: replJobNamespace,
+			Labels:    job.Spec.Template.Labels,
+		},
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name: "sync-client",
+					State: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{
+							ExitCode: 0,
+							Message:  `{"bytesWritten":2097152}`,
+						},
+					},
+				},
+			},
+		},
+	}
+	if err := dc.Create(ctx, pod); err != nil {
+		t.Fatalf("failed to create pod: %v", err)
+	}
+
+	// Process again to pick up succeeded Job.
+	rc.mu.Lock()
+	delete(rc.lastSyncTimes, "bytes-test")
+	rc.mu.Unlock()
+	rc.processOnce(ctx)
+
+	rp := k.getPolicy("bytes-test")
+	if rp.Status.LastSyncTime == nil {
+		t.Fatal("expected LastSyncTime to be set")
+	}
+
+	// Check that BytesSynced was recorded in the SubVolume status.
+	found := false
+	for _, svs := range rp.Status.SubVolumeStatuses {
+		if svs.SubVolumeName == "pvc-11111111-1111-1111-1111-111111111111" {
+			found = true
+			if svs.BytesSynced == nil {
+				t.Error("expected BytesSynced to be set")
+			} else if *svs.BytesSynced != 2097152 {
+				t.Errorf("BytesSynced = %d, want 2097152", *svs.BytesSynced)
+			}
+		}
+	}
+	if !found {
+		t.Error("SubVolume status not found in policy")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TLS / CA cert mounting tests
+// ---------------------------------------------------------------------------
+
+func TestReplicationController_ReceiverMode_CACertMounting(t *testing.T) {
+	k := newReplFakeK8sClient()
+	dc := newReplFakeDirectClient()
+	nfs := newFakeNFSOperations()
+
+	sv1 := newTestSubVolume("pvc-11111111-1111-1111-1111-111111111111", "prod-pool", "share-1", 10)
+	sv1.Spec.ShareMountTargetIP = "10.240.0.1"
+	sv1.Spec.ShareExportPath = "/share_abc123"
+	k.addSubVolume(sv1)
+
+	policy := newTestReceiverModePolicy("ca-cert-test", "prod-pool", "1ms")
+	policy.Spec.DestinationCACertSecretRef = "my-receiver-certs"
+	k.addPolicy(policy)
+
+	rc := newReplController(k, dc, nfs)
+	rc.SetDriverImage("de.icr.io/ibm-vpc-file-pool-csi/driver:latest")
+
+	ctx := context.Background()
+	rc.processOnce(ctx)
+
+	jobName := replJobName("ca-cert-test", "pvc-11111111-1111-1111-1111-111111111111")
+	job := &batchv1.Job{}
+	if err := dc.Get(ctx, types.NamespacedName{Namespace: replJobNamespace, Name: jobName}, job); err != nil {
+		t.Fatalf("expected Job to be created: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+
+	// Verify --ca-cert-file arg is present.
+	foundCACertArg := false
+	for _, arg := range container.Args {
+		if arg == "--ca-cert-file=/etc/replication-ca/ca.crt" {
+			foundCACertArg = true
+			break
+		}
+	}
+	if !foundCACertArg {
+		t.Errorf("expected --ca-cert-file arg in container args: %v", container.Args)
+	}
+
+	// Verify ca-cert volume mount is present.
+	foundCACertMount := false
+	for _, vm := range container.VolumeMounts {
+		if vm.Name == "ca-cert" && vm.MountPath == "/etc/replication-ca" && vm.ReadOnly {
+			foundCACertMount = true
+			break
+		}
+	}
+	if !foundCACertMount {
+		t.Errorf("expected ca-cert volume mount at /etc/replication-ca: %v", container.VolumeMounts)
+	}
+
+	// Verify ca-cert volume is present with correct secret name.
+	foundCACertVol := false
+	for _, vol := range job.Spec.Template.Spec.Volumes {
+		if vol.Name == "ca-cert" && vol.Secret != nil && vol.Secret.SecretName == "my-receiver-certs" {
+			foundCACertVol = true
+			break
+		}
+	}
+	if !foundCACertVol {
+		t.Errorf("expected ca-cert volume with secret 'my-receiver-certs': %v", job.Spec.Template.Spec.Volumes)
+	}
+
+	// Verify total counts: 3 volumes (source, auth-token, ca-cert), 3 mounts.
+	if len(container.VolumeMounts) != 3 {
+		t.Errorf("expected 3 volume mounts, got %d", len(container.VolumeMounts))
+	}
+	if len(job.Spec.Template.Spec.Volumes) != 3 {
+		t.Errorf("expected 3 volumes, got %d", len(job.Spec.Template.Spec.Volumes))
+	}
+}
+
+func TestReplicationController_ReceiverMode_NoCACert(t *testing.T) {
+	k := newReplFakeK8sClient()
+	dc := newReplFakeDirectClient()
+	nfs := newFakeNFSOperations()
+
+	sv1 := newTestSubVolume("pvc-11111111-1111-1111-1111-111111111111", "prod-pool", "share-1", 10)
+	sv1.Spec.ShareMountTargetIP = "10.240.0.1"
+	sv1.Spec.ShareExportPath = "/share_abc123"
+	k.addSubVolume(sv1)
+
+	// Policy WITHOUT DestinationCACertSecretRef.
+	policy := newTestReceiverModePolicy("no-ca-test", "prod-pool", "1ms")
+	k.addPolicy(policy)
+
+	rc := newReplController(k, dc, nfs)
+	rc.SetDriverImage("de.icr.io/ibm-vpc-file-pool-csi/driver:latest")
+
+	ctx := context.Background()
+	rc.processOnce(ctx)
+
+	jobName := replJobName("no-ca-test", "pvc-11111111-1111-1111-1111-111111111111")
+	job := &batchv1.Job{}
+	if err := dc.Get(ctx, types.NamespacedName{Namespace: replJobNamespace, Name: jobName}, job); err != nil {
+		t.Fatalf("expected Job to be created: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+
+	// Verify NO --ca-cert-file arg.
+	for _, arg := range container.Args {
+		if containsSubstring(arg, "--ca-cert-file") {
+			t.Errorf("unexpected --ca-cert-file arg without DestinationCACertSecretRef: %v", container.Args)
+			break
+		}
+	}
+
+	// Verify NO ca-cert volume mount.
+	for _, vm := range container.VolumeMounts {
+		if vm.Name == "ca-cert" {
+			t.Error("unexpected ca-cert volume mount without DestinationCACertSecretRef")
+			break
+		}
+	}
+
+	// Verify 2 volumes (source, auth-token only).
+	if len(container.VolumeMounts) != 2 {
+		t.Errorf("expected 2 volume mounts, got %d", len(container.VolumeMounts))
+	}
+	if len(job.Spec.Template.Spec.Volumes) != 2 {
+		t.Errorf("expected 2 volumes, got %d", len(job.Spec.Template.Spec.Volumes))
+	}
+}

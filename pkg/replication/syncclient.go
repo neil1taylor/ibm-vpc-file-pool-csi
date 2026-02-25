@@ -3,6 +3,9 @@ package replication
 import (
 	"archive/tar"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,31 +33,56 @@ func NewSyncClient(endpoint, authToken string) *SyncClient {
 	}
 }
 
+// NewSyncClientWithCA creates a new sync client that trusts the given CA certificate
+// for verifying the receiver's TLS certificate. Use this when the receiver uses a
+// self-signed certificate provisioned by cert-manager.
+func NewSyncClientWithCA(endpoint, authToken string, caCertPEM []byte) *SyncClient {
+	c := &SyncClient{
+		endpoint:  strings.TrimRight(endpoint, "/"),
+		authToken: authToken,
+	}
+	if len(caCertPEM) > 0 {
+		pool := x509.NewCertPool()
+		pool.AppendCertsFromPEM(caCertPEM)
+		c.httpClient = &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{RootCAs: pool},
+			},
+		}
+	} else {
+		c.httpClient = &http.Client{}
+	}
+	return c
+}
+
 // SetHTTPClient overrides the default HTTP client. Useful for tests.
 func (c *SyncClient) SetHTTPClient(client *http.Client) {
 	c.httpClient = client
 }
 
 // SyncSubVolume uploads the SubVolume directory as a tar stream and then
-// uploads the metadata JSON to the receiver.
-func (c *SyncClient) SyncSubVolume(ctx context.Context, sourcePath, destBasePath, subPath, svName string, metadata []byte) error {
+// uploads the metadata JSON to the receiver. Returns bytesWritten from the
+// receiver's response and any error.
+func (c *SyncClient) SyncSubVolume(ctx context.Context, sourcePath, destBasePath, subPath, svName string, metadata []byte) (int64, error) {
 	// 1. Upload tar stream.
-	if err := c.uploadTar(ctx, sourcePath, subPath, destBasePath, svName); err != nil {
-		return fmt.Errorf("upload tar: %w", err)
+	bytesWritten, err := c.uploadTar(ctx, sourcePath, subPath, destBasePath, svName)
+	if err != nil {
+		return 0, fmt.Errorf("upload tar: %w", err)
 	}
 
 	// 2. Upload metadata.
 	if len(metadata) > 0 {
 		if err := c.uploadMetadata(ctx, destBasePath, subPath, svName, metadata); err != nil {
-			return fmt.Errorf("upload metadata: %w", err)
+			return bytesWritten, fmt.Errorf("upload metadata: %w", err)
 		}
 	}
 
-	return nil
+	return bytesWritten, nil
 }
 
 // uploadTar creates a tar stream of the source directory and uploads it to the receiver.
-func (c *SyncClient) uploadTar(ctx context.Context, sourcePath, subPath, destBasePath, svName string) error {
+// Returns the bytesWritten reported by the receiver and any error.
+func (c *SyncClient) uploadTar(ctx context.Context, sourcePath, subPath, destBasePath, svName string) (int64, error) {
 	sourceDir := filepath.Join(sourcePath, subPath)
 
 	// Use a pipe so we stream the tar directly without buffering in memory.
@@ -135,7 +163,7 @@ func (c *SyncClient) uploadTar(ctx context.Context, sourcePath, subPath, destBas
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, syncURL, pr)
 	if err != nil {
 		pr.Close()
-		return fmt.Errorf("creating sync request: %w", err)
+		return 0, fmt.Errorf("creating sync request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.authToken)
 	req.Header.Set("Content-Type", "application/x-tar")
@@ -147,17 +175,26 @@ func (c *SyncClient) uploadTar(ctx context.Context, sourcePath, subPath, destBas
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("sync request failed: %w", err)
+		return 0, fmt.Errorf("sync request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return fmt.Errorf("sync request returned %d: %s", resp.StatusCode, string(body))
+		return 0, fmt.Errorf("sync request returned %d: %s", resp.StatusCode, string(body))
 	}
 
-	klog.V(2).InfoS("Tar upload complete", "subVolume", svName)
-	return nil
+	// Parse receiver response to extract bytesWritten.
+	var syncResp struct {
+		BytesWritten int64 `json:"bytesWritten"`
+	}
+	if decErr := json.NewDecoder(resp.Body).Decode(&syncResp); decErr != nil {
+		// Non-fatal: older receivers may not return JSON or the field.
+		klog.V(4).InfoS("Could not parse receiver response", "subVolume", svName, "err", decErr)
+	}
+
+	klog.V(2).InfoS("Tar upload complete", "subVolume", svName, "bytesWritten", syncResp.BytesWritten)
+	return syncResp.BytesWritten, nil
 }
 
 // uploadMetadata uploads metadata JSON to the receiver.

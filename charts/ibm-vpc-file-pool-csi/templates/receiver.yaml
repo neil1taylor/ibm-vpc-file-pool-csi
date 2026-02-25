@@ -33,6 +33,10 @@ spec:
             - --receiver-base-path=/data
             - --receiver-auth-token-file=/etc/replication/token
             - --receiver-listen-addr=:8443
+            {{- if .Values.replicationReceiver.tls.enabled }}
+            - --receiver-tls-cert-file=/etc/receiver-certs/tls.crt
+            - --receiver-tls-key-file=/etc/receiver-certs/tls.key
+            {{- end }}
             - -v={{ .Values.logLevel }}
           ports:
             - name: http
@@ -42,12 +46,18 @@ spec:
             httpGet:
               path: /api/v1/health
               port: http
+              {{- if .Values.replicationReceiver.tls.enabled }}
+              scheme: HTTPS
+              {{- end }}
             initialDelaySeconds: 10
             periodSeconds: 30
           readinessProbe:
             httpGet:
               path: /api/v1/health
               port: http
+              {{- if .Values.replicationReceiver.tls.enabled }}
+              scheme: HTTPS
+              {{- end }}
             initialDelaySeconds: 5
             periodSeconds: 10
           resources:
@@ -58,6 +68,11 @@ spec:
             - name: auth-token
               mountPath: /etc/replication
               readOnly: true
+            {{- if .Values.replicationReceiver.tls.enabled }}
+            - name: receiver-certs
+              mountPath: /etc/receiver-certs
+              readOnly: true
+            {{- end }}
       volumes:
         - name: data
           persistentVolumeClaim:
@@ -65,6 +80,11 @@ spec:
         - name: auth-token
           secret:
             secretName: {{ .Values.replicationReceiver.authSecretName }}
+        {{- if .Values.replicationReceiver.tls.enabled }}
+        - name: receiver-certs
+          secret:
+            secretName: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-receiver-certs
+        {{- end }}
       {{- with .Values.controller.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
@@ -111,7 +131,48 @@ spec:
   port:
     targetPort: http
   tls:
+    {{- if .Values.replicationReceiver.tls.enabled }}
+    termination: passthrough
+    {{- else }}
     termination: edge
     insecureEdgeTerminationPolicy: None
+    {{- end }}
+{{- end }}
+{{- if .Values.replicationReceiver.tls.enabled }}
+---
+{{- if not .Values.replicationReceiver.tls.certManager.issuerName }}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-receiver-selfsigned
+  namespace: kube-system
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+{{- end }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-receiver
+  namespace: kube-system
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+spec:
+  secretName: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-receiver-certs
+  dnsNames:
+    - {{ include "ibm-vpc-file-pool-csi.fullname" . }}-replication-receiver.kube-system.svc
+    - {{ include "ibm-vpc-file-pool-csi.fullname" . }}-replication-receiver.kube-system.svc.cluster.local
+    {{- $ingressCfg := (lookup "config.openshift.io/v1" "Ingress" "" "cluster") }}
+    {{- if $ingressCfg }}
+    - {{ include "ibm-vpc-file-pool-csi.fullname" . }}-replication-receiver-kube-system.{{ $ingressCfg.spec.domain }}
+    {{- end }}
+    {{- with .Values.replicationReceiver.tls.additionalDNSNames }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  issuerRef:
+    kind: {{ default "Issuer" .Values.replicationReceiver.tls.certManager.issuerKind }}
+    name: {{ default (printf "%s-receiver-selfsigned" (include "ibm-vpc-file-pool-csi.fullname" .)) .Values.replicationReceiver.tls.certManager.issuerName }}
 {{- end }}
 {{- end }}

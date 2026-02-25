@@ -52,6 +52,8 @@ func main() {
 		receiverBasePath      string
 		receiverAuthTokenFile string
 		receiverListenAddr    string
+		receiverTLSCertFile   string
+		receiverTLSKeyFile    string
 
 		// Replication controller flags.
 		driverImage string
@@ -59,6 +61,7 @@ func main() {
 		// Sync-client mode flags.
 		receiverEndpoint string
 		authTokenFile    string
+		caCertFile       string
 		sourcePath       string
 		destBasePath     string
 		subPath          string
@@ -83,10 +86,13 @@ func main() {
 	flag.StringVar(&receiverBasePath, "receiver-base-path", "/data", "NFS mount point inside receiver container")
 	flag.StringVar(&receiverAuthTokenFile, "receiver-auth-token-file", "/etc/replication/token", "Path to file containing bearer token for receiver auth")
 	flag.StringVar(&receiverListenAddr, "receiver-listen-addr", ":8443", "HTTP listen address for receiver")
+	flag.StringVar(&receiverTLSCertFile, "receiver-tls-cert-file", "", "TLS certificate file for receiver HTTPS (empty = plain HTTP)")
+	flag.StringVar(&receiverTLSKeyFile, "receiver-tls-key-file", "", "TLS private key file for receiver HTTPS (empty = plain HTTP)")
 
 	// Sync-client flags.
 	flag.StringVar(&receiverEndpoint, "receiver-endpoint", "", "Destination receiver URL for sync-client mode")
 	flag.StringVar(&authTokenFile, "auth-token-file", "/etc/replication/token", "Path to file containing bearer token for sync-client auth")
+	flag.StringVar(&caCertFile, "ca-cert-file", "", "CA certificate file for verifying receiver TLS cert (empty = system trust store)")
 	flag.StringVar(&sourcePath, "source-path", "", "Mounted source NFS path for sync-client mode")
 	flag.StringVar(&destBasePath, "dest-base-path", "", "Destination base path for sync-client mode")
 	flag.StringVar(&subPath, "sub-path", "", "SubVolume sub path for sync-client mode")
@@ -102,9 +108,9 @@ func main() {
 	case "controller":
 		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, cloneWorkerInterval, goldenImageSyncInterval, driverImage)
 	case "receiver":
-		runReceiver(receiverBasePath, receiverAuthTokenFile, receiverListenAddr)
+		runReceiver(receiverBasePath, receiverAuthTokenFile, receiverListenAddr, receiverTLSCertFile, receiverTLSKeyFile)
 	case "sync-client":
-		runSyncClient(receiverEndpoint, authTokenFile, sourcePath, destBasePath, subPath, subvolumeName, metadataJSON)
+		runSyncClient(receiverEndpoint, authTokenFile, sourcePath, destBasePath, subPath, subvolumeName, metadataJSON, caCertFile)
 	default:
 		runNode(endpoint, nodeID, mode)
 	}
@@ -334,6 +340,7 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 	)
 	replController.SetOrchestrator(hookOrchestrator)
 	replController.SetDriverImage(driverImage)
+	replController.SetReplicationImage(driverImage)
 	go replController.Run(signalCtx)
 
 	// mgr.Start blocks until signal or error
@@ -344,7 +351,7 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 	}
 }
 
-func runReceiver(basePath, authTokenFile, listenAddr string) {
+func runReceiver(basePath, authTokenFile, listenAddr, tlsCertFile, tlsKeyFile string) {
 	// Read auth token from file.
 	tokenBytes, err := os.ReadFile(authTokenFile)
 	if err != nil {
@@ -358,16 +365,19 @@ func runReceiver(basePath, authTokenFile, listenAddr string) {
 	}
 
 	receiver := replication.NewReceiver(basePath, token, listenAddr)
+	if tlsCertFile != "" && tlsKeyFile != "" {
+		receiver.SetTLS(tlsCertFile, tlsKeyFile)
+	}
 
 	signalCtx := ctrl.SetupSignalHandler()
-	klog.InfoS("Starting replication receiver", "basePath", basePath, "listenAddr", listenAddr)
+	klog.InfoS("Starting replication receiver", "basePath", basePath, "listenAddr", listenAddr, "tls", tlsCertFile != "")
 	if err := receiver.Start(signalCtx); err != nil {
 		klog.ErrorS(err, "Replication receiver failed")
 		os.Exit(1)
 	}
 }
 
-func runSyncClient(endpoint, authTokenFile, sourcePath, destBasePath, subPath, svName, metadataJSON string) {
+func runSyncClient(endpoint, authTokenFile, sourcePath, destBasePath, subPath, svName, metadataJSON, caCertFile string) {
 	if endpoint == "" {
 		klog.ErrorS(nil, "receiver-endpoint is required for sync-client mode")
 		os.Exit(1)
@@ -389,7 +399,18 @@ func runSyncClient(endpoint, authTokenFile, sourcePath, destBasePath, subPath, s
 		os.Exit(1)
 	}
 
-	client := replication.NewSyncClient(endpoint, token)
+	var client *replication.SyncClient
+	if caCertFile != "" {
+		caCertPEM, readErr := os.ReadFile(caCertFile)
+		if readErr != nil {
+			klog.ErrorS(readErr, "Failed to read CA cert file", "path", caCertFile)
+			os.Exit(1)
+		}
+		client = replication.NewSyncClientWithCA(endpoint, token, caCertPEM)
+		klog.V(2).InfoS("Using custom CA certificate for receiver TLS", "caCertFile", caCertFile)
+	} else {
+		client = replication.NewSyncClient(endpoint, token)
+	}
 
 	var metadata []byte
 	if metadataJSON != "" {
@@ -405,12 +426,17 @@ func runSyncClient(endpoint, authTokenFile, sourcePath, destBasePath, subPath, s
 		"subVolume", svName,
 	)
 
-	if err := client.SyncSubVolume(ctx, sourcePath, destBasePath, subPath, svName, metadata); err != nil {
+	bytesWritten, err := client.SyncSubVolume(ctx, sourcePath, destBasePath, subPath, svName, metadata)
+	if err != nil {
 		klog.ErrorS(err, "Sync-client failed")
 		os.Exit(1)
 	}
 
-	klog.InfoS("Sync-client completed successfully", "subVolume", svName)
+	klog.InfoS("Sync-client completed successfully", "subVolume", svName, "bytesWritten", bytesWritten)
+
+	// Write bytesWritten to termination-log so the replication controller can
+	// read it from the completed pod's container status.
+	_ = os.WriteFile("/dev/termination-log", []byte(fmt.Sprintf(`{"bytesWritten":%d}`, bytesWritten)), 0644)
 }
 
 func runNode(endpoint, nodeID, mode string) {
