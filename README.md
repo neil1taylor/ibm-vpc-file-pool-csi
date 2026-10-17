@@ -290,6 +290,7 @@ go test ./pkg/pool/ -v -race -run TestAllocate_SpreadStrategy
 | [VM-DISK-FORMATS.md](VM-DISK-FORMATS.md) | KubeVirt disk image format requirements |
 | [GOLDEN-IMAGE-WORKFLOW.md](GOLDEN-IMAGE-WORKFLOW.md) | Automated VM golden image provisioning |
 | [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md) | Known limitations and workarounds |
+| [STOCK-DRIVER-VIRT-FINDINGS.md](STOCK-DRIVER-VIRT-FINDINGS.md) | Reported issues with the stock IBM VPC File CSI driver and OpenShift Virtualization |
 | [SECURITY.md](SECURITY.md) | Security policy and hardening guide |
 
 ### Development
