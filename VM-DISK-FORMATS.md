@@ -119,13 +119,13 @@ VM boot disks are typically larger and have different I/O patterns than applicat
 | Workload | Typical PVC Size | I/O Pattern | IOPS Profile |
 |----------|-----------------|-------------|-------------|
 | App container | 1-50 GB | Sequential or light random | `dp2` (standard) |
-| VM boot disk | 40-200 GB | Heavy random (OS activity) | `dp2` or `custom` (higher IOPS) |
-| VM data disk | 100-1000 GB | Depends on workload | `custom` recommended |
+| VM boot disk | 40-200 GB | Heavy random (OS activity) | `dp2` with a higher `spec.iops` |
+| VM data disk | 100-1000 GB | Depends on workload | `dp2` with `spec.iops` set |
 
 When creating pools for VM workloads, consider:
 
 - **Larger share sizes** — fewer VMs fit per share due to larger disk images
-- **Higher IOPS profiles** — VM boot disks generate more random I/O than typical container workloads
+- **Higher IOPS** — VM boot disks generate more random I/O than typical container workloads. Set `spec.iops` on the pool; higher IOPS costs more
 - **Dedicated pools** — separate VM pools from application pools to avoid I/O contention
 
 ```yaml
@@ -135,7 +135,7 @@ metadata:
   name: vm-boot-disks
 spec:
   zone: us-south-1
-  profile: custom
+  profile: dp2
   iops: 10000
   shareSizeGB: 1000
   maxShares: 10

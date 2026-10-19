@@ -11,7 +11,7 @@ Use this to determine your pool configuration:
 ```
 1. What workload type?
    ├── General (configs, logs, small apps) ──→ Profile: dp2, Share: 1-2 TB, Strategy: spread
-   ├── Database / analytics ──→ Profile: dp2 or custom, Share: 2-4 TB, Strategy: spread
+   ├── Database / analytics ──→ Profile: dp2 (set spec.iops), Share: 2-4 TB, Strategy: spread
    ├── CI/CD ephemeral ──→ Profile: dp2, Share: 500 GB-1 TB, Strategy: binpack
    ├── ML/AI training ──→ Profile: dp2, Share: 4-16 TB, Strategy: spread
    └── KubeVirt VMs ──→ Profile: dp2, Share: 2-4 TB, Strategy: spread, UID: 107
@@ -22,9 +22,9 @@ Use this to determine your pool configuration:
    └── Multiple teams, different trust levels ──→ Separate pools per trust boundary
 
 3. How many zones?
-   ├── Single zone ──→ 1 pool
-   ├── Multi-zone, shared data ──→ 1 pool with accessorZones
-   └── Multi-zone, zone-isolated data ──→ 1 pool per zone
+   ├── Pods in one zone ──→ 1 pool in that zone
+   ├── Pods in many zones, shared data ──→ 1 pool (its one mount target serves every zone)
+   └── Zone-isolated data ──→ 1 pool per zone
 
 4. Need DR?
    ├── No ──→ Done
@@ -40,7 +40,7 @@ Create separate pools for each distinct combination of:
 | Dimension | When to Separate | Example |
 |-----------|-----------------|---------|
 | **Trust boundary** | Different teams that should not share NFS storage | `team-a-pool`, `team-b-pool` |
-| **Performance tier** | Workloads needing different IOPS levels | `standard-pool` (dp2), `high-iops-pool` (custom) |
+| **Performance tier** | Workloads needing different IOPS levels | `standard-pool` (dp2), `high-iops-pool` (dp2 with a higher `spec.iops`) |
 | **Zone** | Zone-local data residency requirements | `us-south-1-pool`, `us-south-2-pool` |
 | **Lifecycle** | Different retention or backup policies | `persistent-pool`, `ephemeral-pool` |
 | **Workload class** | VMs need different UID/GID than app workloads | `app-pool` (UID 1000), `vm-pool` (UID 107) |
@@ -77,35 +77,31 @@ See [PERFORMANCE-TUNING.md — Share Sizing Strategy](PERFORMANCE-TUNING.md#shar
 
 ## IOPS Tier Selection
 
-### dp2 (Default)
+### dp2 (the only profile)
 
-The `dp2` profile scales IOPS with share size. Use for most workloads.
+`dp2` is the only profile VPC file shares offer. It accepts 100 to 96,000 IOPS and 10 to 32,000 GB per share. If you do not set `spec.iops`, the VPC gives each share 100 IOPS, whatever its size. IOPS does not grow with share size, so set `spec.iops` for any workload that needs more.
 
-| Share Size | IOPS (dp2) | Good For |
-|-----------|-----------|----------|
-| 1 TB | 1,000 - 6,000 | General workloads, configs, logs |
-| 2 TB | 2,000 - 12,000 | Mixed workloads, moderate databases |
-| 4 TB | 4,000 - 24,000 | Heavy workloads, analytics |
+The VPC limits the maximum IOPS by share size and refuses values out of range. For example, 10,000 IOPS needs a share of at least 500 GB, and a 300 GB share allowed about 6,000. For the exact limits, see IBM's [About file storage for VPC](https://cloud.ibm.com/docs/vpc?topic=vpc-file-storage-profiles).
 
-### Custom IOPS
+### Setting IOPS
 
-Use custom profiles when you need more IOPS than `dp2` provides at a given size, or when cost-optimizing by specifying lower IOPS than the default.
+Set `spec.iops` when you need more than 100 IOPS per share. Higher IOPS costs more.
 
 ```yaml
 spec:
   profile: dp2
   shareSizeGB: 2000
-  iops: 24000        # Custom IOPS override (costs more)
+  iops: 24000        # IOPS per share (costs more)
 ```
 
-### When to Use Custom IOPS
+### When to Set Higher IOPS
 
 | Scenario | Recommendation |
 |----------|---------------|
-| PVCs mostly idle (configs, static assets) | dp2 default — don't pay for unused IOPS |
-| Mixed workloads with occasional bursts | dp2 default — burst IOPS handles peaks |
-| Database PVCs with sustained random I/O | Custom IOPS at 2-4x dp2 default |
-| ML training with sequential large reads | dp2 default — throughput is more relevant than IOPS |
+| PVCs mostly idle (configs, static assets) | Leave `spec.iops` unset — don't pay for unused IOPS |
+| Mixed workloads | Set `spec.iops` for the busiest expected load; there is no burst IOPS |
+| Database PVCs with sustained random I/O | Set a high `spec.iops` |
+| ML training with sequential large reads | Leave `spec.iops` unset — throughput is more relevant than IOPS |
 
 See [PERFORMANCE-TUNING.md — IOPS Planning](PERFORMANCE-TUNING.md#iops-planning) for the full IOPS table and calculation examples.
 
@@ -249,7 +245,6 @@ The savings increase as PVC sizes decrease below the 10 GB VPC minimum.
 | Factor | Impact |
 |--------|--------|
 | Share IOPS profile | Higher IOPS = higher cost per GB |
-| Cross-zone mount targets | Each accessor zone mount target adds minor cost |
 | Snapshot storage | Snapshots consume share capacity (billed) |
 | Replication storage | DR destination pool is billed separately |
 
@@ -300,11 +295,6 @@ spec:
   defaultUID: 1000
   defaultGID: 1000
   defaultPermissions: "0755"
-  accessorZones:
-    - zone: us-south-2
-      subnetID: "0717-xxxx"
-    - zone: us-south-3
-      subnetID: "0727-yyyy"
 ---
 # CI/CD ephemeral pool
 apiVersion: storage.ibmcloud.io/v1alpha1
@@ -347,11 +337,6 @@ spec:
   defaultUID: 1000
   defaultGID: 1000
   defaultPermissions: "0755"
-  accessorZones:
-    - zone: us-south-2
-      subnetID: "0717-xxxx"
-    - zone: us-south-3
-      subnetID: "0727-yyyy"
 ---
 # High-IOPS databases
 apiVersion: storage.ibmcloud.io/v1alpha1
@@ -425,7 +410,7 @@ spec:
 
 ## See Also
 
-- [PERFORMANCE-TUNING.md](PERFORMANCE-TUNING.md) — Raw performance data, NFS tuning, IOPS tables, benchmarking
+- [PERFORMANCE-TUNING.md](PERFORMANCE-TUNING.md) — NFS tuning, IOPS planning, benchmarking
 - [USER-GUIDE.md](USER-GUIDE.md) — Pool creation and management
 - [MONITORING.md](MONITORING.md) — Capacity metrics and alerting
 - [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md) — VPC quota and platform constraints

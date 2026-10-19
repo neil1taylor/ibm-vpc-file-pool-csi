@@ -32,7 +32,7 @@ type FileSharePoolSpec struct {
 	// +kubebuilder:validation:Pattern=`^[a-z]{2}-[a-z]+-\d+$`
 	Zone string `json:"zone"`
 
-	// Profile is the VPC file storage profile (e.g., "dp2", "custom").
+	// Profile is the VPC file share profile. "dp2" is the only one VPC offers.
 	// +kubebuilder:validation:Required
 	Profile string `json:"profile"`
 
@@ -42,7 +42,7 @@ type FileSharePoolSpec struct {
 	// +kubebuilder:default=1000
 	ShareSizeGB int64 `json:"shareSizeGB"`
 
-	// IOPS is the IOPS allocation per share. Only used with custom profiles.
+	// IOPS is the IOPS per share. If unset, the VPC chooses it (100 for dp2).
 	// +kubebuilder:validation:Minimum=100
 	// +optional
 	IOPS *int64 `json:"iops,omitempty"`
@@ -249,7 +249,7 @@ type ShareTier struct {
 	// +kubebuilder:validation:Pattern=`^[a-z0-9-]+$`
 	Name string `json:"name"`
 
-	// Profile is the VPC file storage profile (e.g., "dp2", "custom").
+	// Profile is the VPC file share profile. "dp2" is the only one VPC offers.
 	// +kubebuilder:validation:Required
 	Profile string `json:"profile"`
 
@@ -258,7 +258,7 @@ type ShareTier struct {
 	// +kubebuilder:validation:Maximum=32000
 	ShareSizeGB int64 `json:"shareSizeGB"`
 
-	// IOPS is the IOPS allocation per share. Only used with custom profiles.
+	// IOPS is the IOPS per share. If unset, the VPC chooses it (100 for dp2).
 	// +optional
 	IOPS *int64 `json:"iops,omitempty"`
 

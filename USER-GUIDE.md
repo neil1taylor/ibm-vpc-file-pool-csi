@@ -114,10 +114,10 @@ general-purpose   us-south-1   dp2      1       2000      0          0     Ready
 
 | Workload Type | Suggested Profile | Share Size | IOPS | Strategy |
 |---------------|-------------------|------------|------|----------|
-| General workloads (configs, logs, small apps) | dp2 | 1000-2000 GB | default | spread |
-| Databases, analytics | dp2 | 2000-4000 GB | custom (high) | spread |
-| CI/CD ephemeral volumes | dp2 | 500-1000 GB | default | binpack |
-| Shared team storage | dp2 | 4000+ GB | default | spread |
+| General workloads (configs, logs, small apps) | dp2 | 1000-2000 GB | 1,000 | spread |
+| Databases, analytics | dp2 | 2000-4000 GB | set `spec.iops` (higher) | spread |
+| CI/CD ephemeral volumes | dp2 | 500-1000 GB | unset (100) | binpack |
+| Shared team storage | dp2 | 4000+ GB | 1,000 or more | spread |
 
 Rules of thumb:
 - **shareSizeGB** should be large enough to hold 50-200 PVCs without needing a new share. If most PVCs are 1-5 GB, a 1 TB share gives you 200-1000 PVCs per share.
@@ -137,41 +137,11 @@ kubectl get filesharespool general-purpose -o yaml
 
 The status section shows each share's ID, mount target IP, total/allocated capacity, PVC count, and health state.
 
-### Multi-Zone Pools
+### Multi-Zone Clusters
 
-VPC file shares are zonal, but the driver supports **cross-zone accessor bindings** to make shares accessible from multiple zones with zone-local NFS IPs.
+Each pool lives in one zone (`spec.zone`), and all its shares are created in that zone. In security group access mode, each share has one mount target in that zone, and pods in every zone can mount it. A single pool therefore serves a cluster that spans zones. IBM documents cross-zone mounting for security group mode; this project has not yet tested it on a multi-zone cluster. The `accessorZones` field is optional and not used.
 
-#### Option A: Cross-Zone Pool (Recommended for Multi-Zone Clusters)
-
-A single pool with `accessorZones` creates mount targets in additional zones:
-
-```yaml
-apiVersion: storage.ibmcloud.io/v1alpha1
-kind: FileSharePool
-metadata:
-  name: general-purpose
-spec:
-  zone: us-south-1                    # Home zone — shares created here
-  profile: dp2
-  shareSizeGB: 2000
-  maxShares: 10
-  initialShares: 1
-  autoExpand: true
-  expandThresholdPercent: 80
-  allocationStrategy: spread
-  defaultPermissions: "0755"
-  accessorZones:                       # Nodes in these zones get zone-local IPs
-    - zone: us-south-2
-      subnetID: "0717-xxxx-yyyy"
-    - zone: us-south-3
-      subnetID: "0727-aaaa-bbbb"
-```
-
-Nodes in `us-south-2` mount via the accessor mount target IP in their zone, avoiding cross-zone NFS traffic. The PV volumeAttributes include `server.us-south-1`, `server.us-south-2`, etc.
-
-#### Option B: One Pool Per Zone
-
-Alternatively, create separate pools per zone:
+Cross-zone traffic adds latency. To keep data and traffic in one zone, create one pool per zone:
 
 ```yaml
 # pool-south-1.yaml
@@ -708,7 +678,7 @@ Currently, quotas are advisory (soft enforcement). The driver tracks allocated v
 There's no hard limit in the driver. The practical limits are the share's total capacity and the NFS server's ability to handle concurrent connections. In testing, hundreds of PVCs per share work well. If you're running thousands, monitor NFS connection counts and consider spreading across more shares (use the `spread` allocation strategy).
 
 **Q: Can I use this across multiple availability zones?**
-Yes. Add `accessorZones` to your `FileSharePool` spec — the driver creates mount targets in each accessor zone so nodes get zone-local NFS IPs. This avoids cross-zone NFS traffic. See [Multi-Zone Pools](#multi-zone-pools) for details. Alternatively, create one pool per zone with separate StorageClasses.
+Yes. One pool serves pods in every zone through the share's single mount target, which sits in the pool's zone. This has not yet been tested on a multi-zone cluster. Cross-zone traffic adds latency. To avoid it, create one pool per zone with separate StorageClasses. See [Multi-Zone Clusters](#multi-zone-clusters).
 
 **Q: Does this work with IBM Cloud Satellite?**
 This driver targets IBM Cloud VPC infrastructure specifically (it uses the VPC API to create file shares). For Satellite locations with their own storage backends, the community `csi-driver-nfs` may be more appropriate since it works with any existing NFS server.

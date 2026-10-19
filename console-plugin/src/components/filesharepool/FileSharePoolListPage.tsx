@@ -149,7 +149,7 @@ const FileSharePoolListPage: React.FC = () => {
         </ListPageCreateLink>
       </ListPageHeader>
       <p style={{ padding: '0 24px', color: 'var(--pf-t--global--color--subtle)', margin: '0 0 8px 0' }}>
-        Pools group multiple VPC file shares into a single managed unit. The pool manager automatically provisions, expands, and balances shares across availability zones.
+        Pools group multiple VPC file shares in one zone into a single managed unit. The pool manager creates the shares, adds shares when auto-expand is on, and places each new volume on a share by the pool&apos;s allocation strategy.
       </p>
       <ListPageBody>
         <ListPageFilter
