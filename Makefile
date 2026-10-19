@@ -8,7 +8,7 @@ GOBIN := $(shell go env GOPATH)/bin
 GOLANGCI_LINT := $(GOBIN)/golangci-lint
 CONTROLLER_GEN := $(GOBIN)/controller-gen
 
-.PHONY: build build-migrate build-failover test test-scripts test-integration test-e2e test-vm test-coverage vet lint generate docker-build \
+.PHONY: build build-migrate build-failover test test-scripts test-integration test-e2e test-release test-vm test-coverage vet lint generate docker-build \
         install-crds deploy helm-install helm-lint helm-template run-local tools clean \
         console-plugin-install console-plugin-build console-plugin-dev console-plugin-lint \
         console-plugin-test console-plugin-docker-build \
@@ -29,6 +29,7 @@ test:
 test-scripts:
 	bash test/chart/test-webhook-certs.sh
 	bash test/chart/test-servicemonitor.sh
+	bash test/release/test-runner.sh
 	bash test/e2e/lib/test-detect-zone.sh
 
 test-integration:
@@ -36,6 +37,10 @@ test-integration:
 
 test-e2e:
 	go test ./test/e2e/ -v -tags e2e -timeout 10m -count=1
+
+test-release:
+	@test -n "$(CLUSTER)" || { echo "usage: make test-release CLUSTER=<name> [VERSION=<tag>]"; exit 2; }
+	bash test/release/remote.sh start $(CLUSTER) $(VERSION)
 
 test-vm:
 	bash test/e2e/test-vm-clone.sh

@@ -43,7 +43,9 @@ Explicit list of what the IBM VPC File Pool CSI Driver does not support, why, an
 
 **Workaround:** For applications requiring point-in-time consistency across volumes, quiesce writes at the application level before triggering the group snapshot.
 
-**Roadmap:** Phase 4c — complete.
+**Not working on ROVS (tested 19 Oct 2026, ROVS 4.21):** nothing calls these RPCs. The chart runs `csi-snapshotter` without group snapshots turned on, and that sidecar only knows the upstream `groupsnapshot.storage.k8s.io` API. OpenShift has its own `groupsnapshot.storage.openshift.io` API, and only on clusters with a non-default feature set. See GitHub issue #14.
+
+**Roadmap:** Phase 4c code is complete; making it reachable on OpenShift is issue #14.
 
 ## Cross-Region Replication and Disaster Recovery
 

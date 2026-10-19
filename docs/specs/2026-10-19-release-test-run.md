@@ -23,7 +23,9 @@ After you update the driver on a cluster, one command checks every feature, thro
 
 No end-to-end test exists for: volume expansion, auto-expand, snapshots and restore, group snapshots, clones of plain volumes, share draining, webhooks, metrics, golden images, real replication, VM live migration, the PVC migration tool, or controller and node restarts.
 
-Found while writing this spec: rovslab has the group snapshot API under OpenShift's name, `groupsnapshot.storage.openshift.io/v1beta1`. The console plugin looks only for `groupsnapshot.storage.k8s.io`, so on ROVS it wrongly says that group snapshots are not available. The run's group snapshot stage will find this, and the fix goes in the first PR.
+Found while writing this spec: group snapshots do not work on ROVS. The driver's snapshot sidecar runs without group snapshots, and it only knows the upstream API. rovslab has OpenShift's own copy, `groupsnapshot.storage.openshift.io/v1beta1`, and only because its feature set is not the default. The fix is tracked in GitHub issue #14. Until then, the group snapshot stage reports SKIP with this reason.
+
+Testing between regions is a separate script, written later. This run tests replication within one cluster only.
 
 ## Design
 
@@ -129,7 +131,7 @@ These figures are estimates from today's runs, not measurements of the full run.
 ## Decisions I made for you
 
 - The run uses the cluster's own VMs for "VSI" tests. A VPC VSI outside the cluster cannot use this driver.
-- Replication is tested between two pools on rovslab. No second cluster exists in this account, so cross-region replication is not tested. Say if you want a second cluster for this; it would cost a cluster.
+- Replication is tested between two pools on rovslab. Testing between regions is a second script (your decision, 19 Oct).
 - Speed tests use 3,000 IOPS shares and compare with IBM's own 3,000 IOPS class. That is the most useful comparison for the money.
 - A slower speed result is a warning, not a failure.
 - The run executes on the build server, never on the laptop.
