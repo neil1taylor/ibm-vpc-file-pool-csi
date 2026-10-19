@@ -6,7 +6,7 @@ Date: 2026-10-19. Status: draft for review.
 
 The driver creates pools, serves volumes and boots a cloned VM on a ROVS cluster (`rovslab-prod-eude`), and on new ROKS clusters. No pool on the old access mode loses data when IBM ends support for it on 6 May 2027. Every problem found on the way is fixed in this repo.
 
-"Done" means the VM clone test passes on `rovslab-prod-eude`, CI is green on `main`, and the docs describe what the driver does now.
+"Done" means the VM clone test passes on `rovslab-prod-eude`, the console plugin shows real pools there, CI is green on `main`, and the docs describe what the driver does now.
 
 ## What we found
 
@@ -28,6 +28,7 @@ Measured on `rovslab-prod-eude` (ROVS 4.21.31, 3 bare metal workers in `eu-de-3`
 | 12 | `webhook.certProvider=manual` never sets the CA bundle on the webhook config, so every API call to the webhook fails TLS. With `webhook.enabled=false`, the controller still starts the webhook server, which needs certificates. *Found by reading the code; not yet run.* | Both documented alternatives to cert-manager are likely broken. |
 | 13 | The `/deploy` skill assumes Docker and does not set the pull secret or the certificate option. | Following it on this Mac and on ROVS fails. |
 | 14 | `VPC-NETWORKING.md`, the tutorials and the E2E script describe only ROKS and VPC access mode. | The docs describe a setup that no longer works. |
+| 15 | The OpenShift console plugin (`console-plugin/`) has never been built, deployed or tested on ROVS. It is off by default, and its image is not in this account's registry. | Unknown whether pool management in the web console works. |
 
 Already fixed and merged in PR #3: webhook certificates through the OpenShift service CA, the trusted profile and pull secret install steps, and x86 image builds.
 
@@ -59,6 +60,14 @@ IBM's procedure needs every client to unmount the share first. A conversion ther
 - From now until May 2027, a pool that still has VPC-mode shares shows a warning condition and a metric. Then an alert can fire.
 - A runbook in `DAY2-OPERATIONS.md` gives the order of steps, how long each one takes, and how to check each result.
 
+### Console plugin (fixes 15)
+
+- Build and push the plugin image for x86, the same way as the driver image.
+- Turn it on in the rovslab install (`consolePlugin.enabled=true`), with the same pull secret.
+- Check each tab against real objects: the dashboard, pools, volumes, snapshots, group snapshots, replication policies and monitoring. Each tab must show what `oc get` shows, and the create and edit forms must make valid objects.
+- Show the new pool states from this spec: `Degraded`, the cause of an unusable share, and the warning for VPC-mode shares that must be migrated.
+- Make the plugin's own lint and unit tests run in CI, if they do not already.
+
 ### Housekeeping (fixes 8–14)
 
 - Fix all 34 lint errors properly. For example, return close errors where they matter, not `_ =` everywhere. Make the integration tests compile and pass.
@@ -77,21 +86,23 @@ Every change starts with a failing test. Unit tests use the fake VPC client. The
 2. Run the VM clone test with the zone read from the nodes. A cloned CentOS Stream VM boots to a login prompt, checked on the VNC screen and not only on the serial console.
 3. Create a pool whose share cannot get a mount target, for example with a security group ID that does not exist. The pool shows `Degraded` and does not grow.
 4. Make a VPC-mode share by hand if the API still allows it for a short test. If not, cover the conversion with fakes only, and say so in the PR.
-5. CI is green on the PR, with Lint, Test and Build all passing.
+5. The console plugin loads in the rovslab web console. Each tab shows the same objects as `oc get`, checked by screenshot.
+6. CI is green on the PR, with Lint, Test and Build all passing.
 
 ## Order of work
 
 1. CI fixes (8), so that each later PR shows its own failures.
 2. Security group mode and the mount path (1, 2, 3, 6), together with pool health (4, 5), as one PR. Then the VM clone test on rovslab.
 3. Housekeeping (9–14).
-4. Migration (7).
+4. Console plugin (15), after step 2, so it can show the new pool states.
+5. Migration (7).
 
 Each step is a separate PR that is merged before the next one starts.
 
 ## Cost
 
 - Each run of the VM clone test creates one 500 GB, 10,000 IOPS share for about 15 minutes. The test then deletes it.
-- The work is about 4 PRs. Step 2 is the largest. The migration step depends on whether the API still allows VPC-mode test shares.
+- The work is about 5 PRs. Step 2 is the largest. The migration step depends on whether the API still allows VPC-mode test shares.
 
 ## Decisions I made for you
 
@@ -103,3 +114,4 @@ Each step is a separate PR that is merged before the next one starts.
 - I fix the CI failures first, so each later PR has a clean signal.
 - The 34 lint errors get real fixes, not blanket "ignore the error" lines.
 - The fixes found by reading code (problem 12) are tested on the cluster before I call them fixed.
+- The console plugin is in scope. It is tested after the security group change, because it must show the new pool states.
