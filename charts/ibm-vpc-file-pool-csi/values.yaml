@@ -65,8 +65,10 @@ webhook:
   enabled: true
   # Webhook server port (must match the Service targetPort).
   port: 9443
-  # Certificate provisioning method: "cert-manager" or "manual".
+  # Certificate provisioning method: "cert-manager", "openshift" or "manual".
   # cert-manager: auto-provisions TLS certs via cert-manager (must be installed).
+  # openshift: uses the built-in OpenShift service CA. No extra operator needed.
+  #   Use this on ROKS and ROVS clusters that do not have cert-manager.
   # manual: you must create the TLS secret yourself before deploying.
   certProvider: cert-manager
   # cert-manager issuer configuration (only used when certProvider=cert-manager).

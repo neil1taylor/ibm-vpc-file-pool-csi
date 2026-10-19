@@ -7,6 +7,10 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+  {{- if eq .Values.webhook.certProvider "openshift" }}
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-webhook-certs
+  {{- end }}
 spec:
   ports:
     - name: https
@@ -26,6 +30,8 @@ metadata:
   annotations:
     {{- if eq .Values.webhook.certProvider "cert-manager" }}
     cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "ibm-vpc-file-pool-csi.fullname" . }}-webhook
+    {{- else if eq .Values.webhook.certProvider "openshift" }}
+    service.beta.openshift.io/inject-cabundle: "true"
     {{- end }}
 webhooks:
   - name: validate-filesharepool.storage.ibmcloud.io
