@@ -464,6 +464,46 @@ Integration tests are fully deterministic and fast (no I/O, no network). They ru
 
 ---
 
+## Release Test Run
+
+One command checks the driver on a live cluster after a release update, and writes a pass or fail report. It runs on the build server, so the laptop can sleep. The design is in `docs/specs/2026-10-19-release-test-run.md`.
+
+```bash
+make test-release CLUSTER=rovslab-prod-eude VERSION=v0.9.0-45-gabc1234   # start; prints the run ID
+bash test/release/remote.sh report <run ID>                                # copy back and print the report
+```
+
+To run it from the current machine instead, with your own kubeconfig: `bash test/release/run.sh --cluster <name> [--stages 01,02]`. Set `RT_VPC_TOKEN` to an IAM token so that the VPC checks can run.
+
+**Stages so far:**
+
+| Stage | Proves |
+|---|---|
+| `01-preflight` | Controller and node agents ready, expected version, CRDs installed, webhook refuses a bad pool, no leftovers from an earlier run |
+| `02-pool` | A pool reaches `Ready`; its share uses security group access mode and its mount target is in the pool's zone (read from the VPC API); its StorageClass exists; a pool with a missing security group says why and makes no share |
+| `03-volumes` | Pods on two workers share a volume; owner and mode follow the pool; deleting the claim removes the PV, the SubVolume and the directory on the share |
+
+**Rules for every stage:**
+- A stage file in `test/release/stages/` defines `run` and `cleanup`.
+- It records each result with `check`, `skip` or `not_checked`.
+- A failed check does not stop the stage, and a failed stage does not stop the run.
+- `cleanup` always runs, also after a timeout.
+- Every object the run makes is named `rt-<run ID>-...` and labelled `release-test-run=<run ID>`. The final sweep deletes them, and then checks that nothing is left on the cluster or in the VPC.
+- The run refuses to start if the current cluster is not the one you named.
+- `make test-scripts` tests the runner itself, with fake stages and no cluster.
+
+**One-time setup for the VPC checks.** On the build server, the VPC checks get a token from the server's metadata service through a read-only trusted profile, so no key is stored. Run these commands once:
+
+```bash
+CRN=$(ibmcloud is instance pool-csi-build --output json | jq -r .crn)
+ibmcloud iam trusted-profile-create pool-csi-build-vpc-reader -d "Read-only VPC access for the release test run"
+ibmcloud iam trusted-profile-policy-create pool-csi-build-vpc-reader --roles Viewer --service-name is --resource-group-name rovslab-prod-eude-rg
+ibmcloud iam trusted-profile-link-create pool-csi-build-vpc-reader --name pool-csi-build --cr-type VSI --link-crn "$CRN"
+ibmcloud is instance-update pool-csi-build --metadata-service true
+```
+
+Undo: `ibmcloud iam trusted-profile-delete pool-csi-build-vpc-reader -f` and `ibmcloud is instance-update pool-csi-build --metadata-service false`. Without this setup, the VPC checks report "not checked" and the rest of the run still works.
+
 ## E2E Tests
 
 End-to-end tests run against a real ROKS or ROVS cluster with live VPC file shares. They validate the full CreateVolume -> PVC Bound -> Pod mount flow.
@@ -514,7 +554,7 @@ make test-vm
 #   --keep          Don't clean up on success
 #   --namespace NS  Override namespace (default: e2e-vm-test)
 #   --pool POOL     Override pool name (default: e2e-vm-pool)
-#   --zone ZONE     Override zone (default: eu-de-1)
+#   --zone ZONE     Override zone (default: the zone with the most workers)
 #   --image FILTER  Override image filter (default: centos-stream-9)
 #   --timeout SECS  Override total timeout (default: 900)
 ```
