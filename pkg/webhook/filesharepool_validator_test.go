@@ -168,3 +168,32 @@ func TestFileSharePoolValidator_Delete(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+// The node agent silently falls back to its default when the permissions
+// string is not octal, so the webhook must refuse it up front.
+func TestFileSharePoolValidator_Create_DefaultPermissions(t *testing.T) {
+	tests := []struct {
+		perms   string
+		wantErr bool
+	}{
+		{"", false},
+		{"0755", false},
+		{"0777", false},
+		{"755", false},
+		{"2775", false},
+		{"not-octal", true},
+		{"0789", true},
+		{"17777", true},
+		{"-755", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.perms, func(t *testing.T) {
+			pool := validFileSharePool()
+			pool.Spec.DefaultPermissions = tt.perms
+			_, err := (&FileSharePoolValidator{}).ValidateCreate(context.Background(), pool)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("defaultPermissions %q: err = %v, wantErr %v", tt.perms, err, tt.wantErr)
+			}
+		})
+	}
+}

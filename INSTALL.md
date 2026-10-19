@@ -63,6 +63,8 @@ If you prefer to manage webhook TLS certificates manually, set `webhook.certProv
 
 The chart refuses to render in manual mode without `webhook.caBundle`.
 
+When you switch between certificate modes on a running install, delete the old `<release>-ibm-vpc-file-pool-csi-webhook-certs` Secret first. For about a minute after the switch, until the controller reloads the new certificate, requests to the webhooks fail with `x509: certificate signed by unknown authority`, and creating or changing the driver's resources is refused. Seen on rovslab-prod-eude, 2026-10-19.
+
 To disable webhooks entirely, set `webhook.enabled=false`. The controller then serves no webhooks and needs no certificate. Invalid custom resources are then accepted without checks.
 
 ### Tooling
@@ -568,9 +570,10 @@ This deploys the plugin as a separate Deployment with its own Service. TLS certi
 After install, register the plugin with the OpenShift console:
 
 ```bash
-oc patch console.operator.openshift.io cluster \
-  --patch '{"spec":{"plugins":["ibm-vpc-file-pool-csi"]}}' \
-  --type=merge
+# Adds this plugin to the list and keeps the other plugins enabled.
+# (A merge patch with a "plugins" list would replace the whole list.)
+oc patch console.operator.openshift.io cluster --type=json \
+  -p '[{"op":"add","path":"/spec/plugins/-","value":"ibm-vpc-file-pool-csi"}]'
 ```
 
 ### Verify

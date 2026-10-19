@@ -3,6 +3,7 @@ package webhook
 import (
 	"context"
 	"fmt"
+	"regexp"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"k8s.io/klog/v2"
@@ -63,5 +64,11 @@ func validateFileSharePoolSpec(spec *v1alpha1.FileSharePoolSpec) error {
 	if spec.AllocationStrategy != "" && spec.AllocationStrategy != "spread" && spec.AllocationStrategy != "binpack" {
 		return fmt.Errorf("spec.allocationStrategy must be 'spread' or 'binpack', got %q", spec.AllocationStrategy)
 	}
+	if spec.DefaultPermissions != "" && !octalMode.MatchString(spec.DefaultPermissions) {
+		return fmt.Errorf("spec.defaultPermissions must be an octal mode such as \"0755\", got %q", spec.DefaultPermissions)
+	}
 	return nil
 }
+
+// octalMode matches a Unix file mode in octal, with an optional leading zero.
+var octalMode = regexp.MustCompile(`^0?[0-7]{3,4}$`)

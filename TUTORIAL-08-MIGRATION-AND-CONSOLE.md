@@ -391,9 +391,10 @@ helm upgrade ibm-vpc-file-pool-csi charts/ibm-vpc-file-pool-csi \
 Enable the plugin in the OpenShift Console operator:
 
 ```bash
-oc patch console.operator.openshift.io cluster \
-  --patch '{"spec":{"plugins":["ibm-vpc-file-pool-csi"]}}' \
-  --type=merge
+# Adds this plugin to the list and keeps the other plugins enabled.
+# (A merge patch with a "plugins" list would replace the whole list.)
+oc patch console.operator.openshift.io cluster --type=json \
+  -p '[{"op":"add","path":"/spec/plugins/-","value":"ibm-vpc-file-pool-csi"}]'
 ```
 
 ### Verify
@@ -513,9 +514,10 @@ ibmcloud is shares
 
 > **Note:** The console plugin remains enabled after cleanup. To disable it:
 > ```bash
-> oc patch console.operator.openshift.io cluster \
->   --patch '{"spec":{"plugins":[]}}' \
->   --type=merge
+> # Removes only this plugin; the other plugins stay enabled.
+> i=$(oc get console.operator.openshift.io cluster -o json | jq '.spec.plugins | index("ibm-vpc-file-pool-csi")')
+> oc patch console.operator.openshift.io cluster --type=json \
+>   -p "[{\"op\":\"remove\",\"path\":\"/spec/plugins/$i\"}]"
 > helm upgrade ibm-vpc-file-pool-csi charts/ibm-vpc-file-pool-csi \
 >   -n kube-system \
 >   --reuse-values \
@@ -534,10 +536,10 @@ ibmcloud is shares
 | Migrate PVC | `kubectl migrate execute --namespace <ns> --pvc <name> --target-pool <pool> --target-storage-class <sc>` |
 | Migration status | `kubectl migrate status --namespace <ns>` |
 | Enable console plugin | `helm upgrade ... --set consolePlugin.enabled=true` |
-| Register plugin | `oc patch console.operator.openshift.io cluster --patch '{"spec":{"plugins":["ibm-vpc-file-pool-csi"]}}' --type=merge` |
+| Register plugin | `oc patch console.operator.openshift.io cluster --type=json -p '[{"op":"add","path":"/spec/plugins/-","value":"ibm-vpc-file-pool-csi"}]'` |
 | Check plugin status | `oc get consoleplugin ibm-vpc-file-pool-csi` |
 | Plugin pods | `oc get pods -n kube-system -l app.kubernetes.io/component=console-plugin` |
-| Disable plugin | `oc patch console.operator.openshift.io cluster --patch '{"spec":{"plugins":[]}}' --type=merge` |
+| Disable plugin | Remove only this entry from `spec.plugins` (see the note above); never set the list to `[]`, which disables every plugin |
 
 ---
 
