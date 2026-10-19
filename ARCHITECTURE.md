@@ -200,6 +200,10 @@ Thin wrapper around the `vpc-go-sdk`. Isolates all IBM Cloud API calls.
 - `ExpandFileShare(ctx, shareID, newSizeGB)` → error
 - `GetFileShare(ctx, shareID)` → share details (state, size, IOPS, mount targets)
 - `ListFileShares(ctx, filters)` → list of shares (for discovery/reconciliation)
+- `CreateShareMountTarget(ctx, shareID, input)` → mount target for a share that has none
+- `GetSubnetZone(ctx, subnetID)` and `FindSecurityGroupID(ctx, vpcID, name)` → the subnet and security group for a mount target
+
+Shares use security group access mode: each share has one mount target, with a network interface in the worker subnet of the pool's zone.
 
 All operations are idempotent or check-before-act. All have context-based timeouts.
 

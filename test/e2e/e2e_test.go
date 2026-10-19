@@ -20,13 +20,13 @@ import (
 
 // Test configuration parsed from environment variables.
 var (
-	homeZone          string
-	accessorZone      string
-	accessorSubnetID  string
-	resourceGroupID   string
-	testNamespace     string
-	k8sClient         client.Client
-	testRunID         string // unique suffix for resource names
+	homeZone         string
+	accessorZone     string
+	accessorSubnetID string
+	resourceGroupID  string
+	testNamespace    string
+	k8sClient        client.Client
+	testRunID        string // unique suffix for resource names
 )
 
 // Timeouts for e2e operations.

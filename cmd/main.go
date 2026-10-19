@@ -74,7 +74,7 @@ func main() {
 	flag.StringVar(&mode, "mode", "controller", "Driver mode: controller, node, receiver, or sync-client")
 	flag.StringVar(&region, "region", "", "IBM Cloud region (e.g. us-south); auto-discovered from secret provider if omitted")
 	flag.StringVar(&vpcID, "vpc-id", "", "IBM Cloud VPC ID for creating file share mount targets")
-	flag.StringVar(&subnetID, "subnet-id", "", "IBM Cloud subnet ID for creating file share mount targets")
+	flag.StringVar(&subnetID, "subnet-id", "", "Comma-separated IBM Cloud worker subnet IDs; each share's mount target goes in the one in the pool's zone")
 	flag.StringVar(&kubeletDir, "kubelet-dir", "/var/lib/kubelet", "Kubelet root directory (ROKS uses /var/data/kubelet)")
 	flag.DurationVar(&cloneWorkerInterval, "clone-worker-interval", pool.DefaultCloneWorkerInterval, "Interval between clone worker poll cycles")
 	flag.DurationVar(&goldenImageSyncInterval, "golden-image-sync-interval", pool.DefaultGoldenImageInterval, "Interval between golden image syncer poll cycles")
@@ -187,25 +187,9 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 		os.Exit(1)
 	}
 
-	// Auto-discover VPC config from ibm-cloud-provider-data configmap.
-	// Use clientset (not mgr.GetClient()) because the manager cache isn't started yet.
 	ctx := context.Background()
-	if vpcID == "" || subnetID == "" {
-		if cm, cmErr := clientset.CoreV1().ConfigMaps("kube-system").Get(ctx, "ibm-cloud-provider-data", metav1.GetOptions{}); cmErr == nil {
-			if vpcID == "" {
-				if v := cm.Data["vpc_id"]; v != "" {
-					vpcID = v
-					klog.V(2).InfoS("Auto-discovered VPC ID", "source", "ibm-cloud-provider-data", "vpcID", vpcID)
-				}
-			}
-			if subnetID == "" {
-				if v := cm.Data["vpc_subnet_ids"]; v != "" {
-					subnetID = strings.Split(strings.TrimSpace(v), ",")[0]
-					klog.V(2).InfoS("Auto-discovered subnet ID", "source", "ibm-cloud-provider-data", "subnetID", subnetID)
-				}
-			}
-		}
-	}
+	netCfg := discoverNetworkConfig(ctx, clientset, vpcID, subnetID)
+	network := pool.NewShareNetwork(netCfg.vpcID, netCfg.subnetIDs, netCfg.clusterID)
 
 	// Create reconciler and pool manager with nil VPC client — will be set
 	// once the secret-provider sidecar is ready.
@@ -307,8 +291,9 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 
 		poolManager.SetVPCClient(vpcClient)
 		poolManager.SetDefaultResourceGroup(defaultResourceGroup)
+		poolManager.SetShareNetwork(network)
 		reconciler.SetVPCClient(vpcClient)
-		reconciler.SetVPCConfig(vpcID, subnetID, defaultResourceGroup)
+		reconciler.SetVPCConfig(network, defaultResourceGroup)
 
 		close(readyCh)
 		klog.InfoS("VPC client initialized, controller is ready")
@@ -484,4 +469,46 @@ func runNode(endpoint, nodeID, mode string) {
 		klog.ErrorS(err, "Driver failed")
 		os.Exit(1)
 	}
+}
+
+// networkConfig is the cluster network that share mount targets join.
+type networkConfig struct {
+	vpcID     string
+	subnetIDs []string
+	clusterID string
+}
+
+// discoverNetworkConfig fills in the VPC ID and worker subnets from the
+// ibm-cloud-provider-data configmap unless the flags set them, and the cluster
+// ID from the cluster-info configmap. Both configmaps exist on ROKS and ROVS.
+// Uses the clientset (not the manager client) because the manager cache is not
+// started yet.
+func discoverNetworkConfig(ctx context.Context, clientset kubernetes.Interface, vpcID, subnetIDs string) networkConfig {
+	if vpcID == "" || subnetIDs == "" {
+		if cm, err := clientset.CoreV1().ConfigMaps("kube-system").Get(ctx, "ibm-cloud-provider-data", metav1.GetOptions{}); err == nil {
+			if vpcID == "" {
+				vpcID = cm.Data["vpc_id"]
+			}
+			if subnetIDs == "" {
+				subnetIDs = cm.Data["vpc_subnet_ids"]
+			}
+		} else {
+			klog.ErrorS(err, "Cannot read ibm-cloud-provider-data; set --vpc-id and --subnet-id")
+		}
+	}
+
+	cfg := networkConfig{vpcID: vpcID}
+	for _, id := range strings.Split(subnetIDs, ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			cfg.subnetIDs = append(cfg.subnetIDs, id)
+		}
+	}
+	if cm, err := clientset.CoreV1().ConfigMaps("kube-system").Get(ctx, "cluster-info", metav1.GetOptions{}); err == nil {
+		cfg.clusterID = cm.Data["cluster_id"]
+	} else {
+		klog.ErrorS(err, "Cannot read cluster-info; pools must set securityGroupIDs")
+	}
+
+	klog.V(2).InfoS("Share network", "vpcID", cfg.vpcID, "subnetIDs", cfg.subnetIDs, "clusterID", cfg.clusterID)
+	return cfg
 }

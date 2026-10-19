@@ -22,7 +22,9 @@ import (
 )
 
 func newReconciler(k8s *fakeK8sClient, vpc *fake.FakeVPCClient) *FileSharePoolReconciler {
-	return NewFileSharePoolReconciler(k8s, vpc)
+	r := NewFileSharePoolReconciler(k8s, vpc)
+	r.SetVPCConfig(testNetwork(vpc), "")
+	return r
 }
 
 func reconcilePool(r *FileSharePoolReconciler, name string) (ctrl.Result, error) {
@@ -752,7 +754,7 @@ func TestReconcile_EnsureAccessorMountTargets(t *testing.T) {
 	k.addPool(pool)
 
 	r := newReconciler(k, vpc)
-	r.SetVPCConfig("vpc-1", "subnet-1", "rg-1")
+	r.SetVPCConfig(testNetwork(vpc), "rg-1")
 	_, err := reconcilePool(r, "test-pool")
 	if err != nil {
 		t.Fatalf("Reconcile failed: %v", err)
@@ -807,7 +809,7 @@ func TestReconcile_EnsureAccessorMountTargets_AlreadyExists(t *testing.T) {
 	k.addPool(pool)
 
 	r := newReconciler(k, vpc)
-	r.SetVPCConfig("vpc-1", "subnet-1", "rg-1")
+	r.SetVPCConfig(testNetwork(vpc), "rg-1")
 	_, err := reconcilePool(r, "test-pool")
 	if err != nil {
 		t.Fatalf("Reconcile failed: %v", err)
@@ -840,7 +842,7 @@ func TestReconcile_EnsureAccessorMountTargets_SkipsCreatingShares(t *testing.T) 
 	k.addPool(pool)
 
 	r := newReconciler(k, vpc)
-	r.SetVPCConfig("vpc-1", "subnet-1", "rg-1")
+	r.SetVPCConfig(testNetwork(vpc), "rg-1")
 	_, err := reconcilePool(r, "test-pool")
 	if err != nil {
 		t.Fatalf("Reconcile failed: %v", err)
@@ -1015,7 +1017,7 @@ func TestReconcile_DrainRequests_ProgressTracking(t *testing.T) {
 	vpc := fake.NewFakeVPCClient()
 
 	shareInfo1, _ := vpc.CreateFileShare(context.Background(), ibmcloudInput("test-pool", 1000))
-	shareInfo2, _ := vpc.CreateFileShare(context.Background(), ibmcloud.CreateShareInput{
+	shareInfo2, _ := vpc.CreateFileShare(context.Background(), ibmcloud.CreateShareInput{SubnetID: "subnet-us-south-1",
 		Name: "test-pool-share-2", Zone: "us-south-1", Profile: "dp2", SizeGB: 1000,
 	})
 
@@ -1842,7 +1844,6 @@ func TestReconcile_HealthCheck_CreatesMissingMountTarget(t *testing.T) {
 	k.addPool(pool)
 
 	r := newReconciler(k, vpc)
-	r.vpcID = "vpc-test-001"
 
 	_, err := reconcilePool(r, "test-pool")
 	if err != nil {
@@ -1865,7 +1866,7 @@ func TestReconcile_HealthCheck_CreatesMissingMountTarget(t *testing.T) {
 	}
 }
 
-func TestReconcile_HealthCheck_SkipsMountTargetRecoveryWhenNoVPCID(t *testing.T) {
+func TestReconcile_HealthCheck_SkipsMountTargetRecoveryWhenNoNetwork(t *testing.T) {
 	k := newFakeK8sClient()
 	vpc := fake.NewFakeVPCClient()
 
@@ -1885,17 +1886,16 @@ func TestReconcile_HealthCheck_SkipsMountTargetRecoveryWhenNoVPCID(t *testing.T)
 	pool.Spec.InitialShares = 1
 	k.addPool(pool)
 
-	r := newReconciler(k, vpc)
-	// r.vpcID is empty — VPC config not yet set
+	r := NewFileSharePoolReconciler(k, vpc) // cluster network not yet set
 
 	_, err := reconcilePool(r, "test-pool")
 	if err != nil {
 		t.Fatalf("Reconcile failed: %v", err)
 	}
 
-	// Should not attempt to create mount target without VPC ID
+	// Should not attempt to create mount target without the cluster network
 	if vpc.CreateMountTargetCalls != 0 {
-		t.Errorf("expected 0 CreateShareMountTarget calls without vpcID, got %d", vpc.CreateMountTargetCalls)
+		t.Errorf("expected 0 CreateShareMountTarget calls without a network, got %d", vpc.CreateMountTargetCalls)
 	}
 }
 
@@ -1964,9 +1964,10 @@ func TestReconcile_HealthCheck_DeletedShareWithPVCsKept(t *testing.T) {
 
 func ibmcloudInput(poolName string, sizeGB int64) ibmcloud.CreateShareInput {
 	return ibmcloud.CreateShareInput{
-		Name:    fmt.Sprintf("%s-share-1", poolName),
-		Zone:    "us-south-1",
-		Profile: "dp2",
-		SizeGB:  sizeGB,
+		Name:     fmt.Sprintf("%s-share-1", poolName),
+		Zone:     "us-south-1",
+		Profile:  "dp2",
+		SizeGB:   sizeGB,
+		SubnetID: "subnet-us-south-1",
 	}
 }

@@ -24,9 +24,13 @@ type VPCFileClient interface {
 	DeleteFileShare(ctx context.Context, shareID string) error
 	ListFileShares(ctx context.Context, resourceGroupID string, tags []string) ([]*ShareInfo, error)
 	CreateShareMountTarget(ctx context.Context, shareID string, input CreateMountTargetInput) (*MountTargetInfo, error)
+	GetSubnetZone(ctx context.Context, subnetID string) (string, error)
+	FindSecurityGroupID(ctx context.Context, vpcID, name string) (string, error)
 }
 
 // CreateShareInput contains the parameters for creating a new VPC file share.
+// The share is created in security group access mode with one mount target,
+// whose virtual network interface is placed in SubnetID with SecurityGroupIDs.
 type CreateShareInput struct {
 	Name             string
 	Zone             string
@@ -36,7 +40,6 @@ type CreateShareInput struct {
 	ResourceGroupID  string
 	Tags             []string
 	EncryptInTransit bool
-	VPCId            string
 	SubnetID         string
 	SecurityGroupIDs []string
 }
@@ -57,8 +60,8 @@ type ShareInfo struct {
 // CreateMountTargetInput contains the parameters for creating a mount target on an existing share.
 type CreateMountTargetInput struct {
 	Name             string
-	VPCId            string
 	SubnetID         string
+	SecurityGroupIDs []string
 	EncryptInTransit bool
 }
 
@@ -66,6 +69,6 @@ type CreateMountTargetInput struct {
 type MountTargetInfo struct {
 	ID         string
 	Name       string
-	IPAddress  string // NFS server IP or FQDN
-	ExportPath string // NFS export path (e.g. "/share_abc123"); empty defaults to "/"
+	IPAddress  string // NFS server IP or FQDN; empty until the mount path is known
+	ExportPath string // NFS export path (e.g. "/share_abc123"); empty until the mount path is known
 }

@@ -213,25 +213,15 @@ func (c *Client) CreateFileShare(ctx context.Context, input CreateShareInput) (i
 		sharePrototype.UserTags = input.Tags
 	}
 
-	// Inline mount target for NFS access.
-	if input.VPCId != "" {
-		transitEncryption := "none"
-		if input.EncryptInTransit {
-			transitEncryption = "user_managed"
-		}
-
-		// VPC access mode: one mount target per VPC. The mount path contains a
-		// FQDN that the VPC DNS resolves to zone-optimal IPs automatically,
-		// enabling cross-zone access without additional mount targets.
-		// Note: VPC API allows only one mount target per VPC per share.
-		mountTarget := &vpcv1.ShareMountTargetPrototype{
-			Name:              core.StringPtr(input.Name + "-mt"),
-			VPC:               &vpcv1.VPCIdentityByID{ID: core.StringPtr(input.VPCId)},
-			AccessProtocol:    core.StringPtr("nfs4"),
-			TransitEncryption: core.StringPtr(transitEncryption),
-		}
-
-		sharePrototype.MountTargets = []vpcv1.ShareMountTargetPrototypeIntf{mountTarget}
+	// One inline mount target in security group access mode. IBM ended new
+	// VPC-mode mount targets (HTTP 501), so a share must never be created
+	// without a subnet for its virtual network interface.
+	if input.SubnetID == "" {
+		return nil, fmt.Errorf("create share %q: subnet ID is required for the mount target", input.Name)
+	}
+	sharePrototype.AccessControlMode = core.StringPtr("security_group")
+	sharePrototype.MountTargets = []vpcv1.ShareMountTargetPrototypeIntf{
+		securityGroupMountTarget(input.Name+"-mt", input.SubnetID, input.SecurityGroupIDs, input.EncryptInTransit, input.ResourceGroupID),
 	}
 
 	createOpts := c.vpcService.NewCreateShareOptions(sharePrototype)
@@ -261,38 +251,15 @@ func (c *Client) CreateFileShare(ctx context.Context, input CreateShareInput) (i
 		return nil, fmt.Errorf("share %s did not become stable: %w", *share.ID, err)
 	}
 
-	// VPC mode mount targets may not have MountPath populated immediately
-	// after the share reaches stable. Poll until at least one mount target
-	// has an IP address so the caller can record it in pool status.
-	if len(shareInfo.MountTargets) > 0 && shareInfo.MountTargets[0].IPAddress == "" {
-		klog.V(4).InfoS("Mount target IP not yet available, polling",
-			"shareID", *share.ID, "mountTargetID", shareInfo.MountTargets[0].ID)
-		deadline := time.Now().Add(2 * time.Minute)
-		for time.Now().Before(deadline) {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(c.pollInterval):
-			}
-			mtInfo, mtErr := c.getMountTarget(ctx, *share.ID, shareInfo.MountTargets[0].ID)
-			if mtErr != nil {
-				continue
-			}
-			if mtInfo.IPAddress != "" {
-				shareInfo.MountTargets[0].IPAddress = mtInfo.IPAddress
-				shareInfo.MountTargets[0].ExportPath = mtInfo.ExportPath
-				klog.V(4).InfoS("Mount target IP now available",
-					"shareID", *share.ID, "ip", mtInfo.IPAddress, "exportPath", mtInfo.ExportPath)
-				break
-			}
-		}
+	if err := c.waitForMountPath(ctx, shareInfo); err != nil {
+		return nil, err
 	}
 
 	return shareInfo, nil
 }
 
-// CreateShareMountTarget creates an additional mount target on an existing share.
-// This is used to add accessor zone mount targets for cross-zone access.
+// CreateShareMountTarget creates a security group mount target on an existing
+// share. The reconciler uses it to recover a share that has no mount target.
 func (c *Client) CreateShareMountTarget(ctx context.Context, shareID string, input CreateMountTargetInput) (_ *MountTargetInfo, retErr error) {
 	start := time.Now()
 	defer func() { recordAPIMetrics("create_mount_target", start, retErr) }()
@@ -301,17 +268,10 @@ func (c *Client) CreateShareMountTarget(ctx context.Context, shareID string, inp
 		return nil, err
 	}
 
-	transitEncryption := "none"
-	if input.EncryptInTransit {
-		transitEncryption = "user_managed"
+	if input.SubnetID == "" {
+		return nil, fmt.Errorf("create mount target %q: subnet ID is required", input.Name)
 	}
-
-	mtPrototype := &vpcv1.ShareMountTargetPrototype{
-		Name:              core.StringPtr(input.Name),
-		VPC:               &vpcv1.VPCIdentityByID{ID: core.StringPtr(input.VPCId)},
-		AccessProtocol:    core.StringPtr("nfs4"),
-		TransitEncryption: core.StringPtr(transitEncryption),
-	}
+	mtPrototype := securityGroupMountTarget(input.Name, input.SubnetID, input.SecurityGroupIDs, input.EncryptInTransit, "")
 
 	opts := c.vpcService.NewCreateShareMountTargetOptions(shareID, mtPrototype)
 	mt, response, err := c.vpcService.CreateShareMountTargetWithContext(ctx, opts)
@@ -571,13 +531,11 @@ func (c *Client) getMountTarget(ctx context.Context, shareID, mtID string) (*Mou
 		Name: *mt.Name,
 	}
 
-	// Extract NFS server address and export path.
-	// security_group mode: IP is in PrimaryIP.Address, export path defaults to "/"
-	// vpc mode: server and path are in MountPath (format "server:/export_path")
-	if mt.PrimaryIP != nil && mt.PrimaryIP.Address != nil {
-		info.IPAddress = *mt.PrimaryIP.Address
-		info.ExportPath = "/"
-	} else if mt.MountPath != nil && *mt.MountPath != "" {
+	// The NFS server and export path both come from MountPath
+	// ("server:/export_path") in every access mode. The export is share-specific,
+	// so a mount target without a MountPath is not usable yet, even if its
+	// virtual network interface already has an IP address.
+	if mt.MountPath != nil && *mt.MountPath != "" {
 		info.IPAddress = parseMountPathServer(*mt.MountPath)
 		info.ExportPath = parseMountPathExport(*mt.MountPath)
 	}
@@ -614,29 +572,130 @@ func (c *Client) getShareByName(ctx context.Context, name string) (*ShareInfo, e
 		return nil, err
 	}
 
-	// Poll for mount target IP if needed (same logic as fresh creation).
-	if len(shareInfo.MountTargets) > 0 && shareInfo.MountTargets[0].IPAddress == "" {
-		deadline := time.Now().Add(2 * time.Minute)
-		for time.Now().Before(deadline) {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(c.pollInterval):
-			}
-			mtInfo, mtErr := c.getMountTarget(ctx, shareID, shareInfo.MountTargets[0].ID)
-			if mtErr != nil {
-				continue
-			}
-			if mtInfo.IPAddress != "" {
-				shareInfo.MountTargets[0].IPAddress = mtInfo.IPAddress
-				break
-			}
-		}
+	if err := c.waitForMountPath(ctx, shareInfo); err != nil {
+		return nil, err
 	}
 
 	klog.V(2).InfoS("Adopted existing share", "name", name, "id", shareID,
 		"state", shareInfo.LifecycleState)
 	return shareInfo, nil
+}
+
+// waitForMountPath polls the share's first mount target until its mount path
+// is known, then copies the server and export path into shareInfo. A share
+// may reach "stable" before its mount target does. If the mount path is still
+// unknown after two minutes, shareInfo is left without it and the reconciler's
+// health check fills it in later.
+func (c *Client) waitForMountPath(ctx context.Context, shareInfo *ShareInfo) error {
+	if len(shareInfo.MountTargets) == 0 || shareInfo.MountTargets[0].IPAddress != "" {
+		return nil
+	}
+	mt := &shareInfo.MountTargets[0]
+	klog.V(4).InfoS("Mount path not yet available, polling", "shareID", shareInfo.ID, "mountTargetID", mt.ID)
+	deadline := time.Now().Add(2 * time.Minute)
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(c.pollInterval):
+		}
+		mtInfo, err := c.getMountTarget(ctx, shareInfo.ID, mt.ID)
+		if err != nil {
+			continue
+		}
+		if mtInfo.IPAddress != "" {
+			mt.IPAddress = mtInfo.IPAddress
+			mt.ExportPath = mtInfo.ExportPath
+			klog.V(4).InfoS("Mount path now available",
+				"shareID", shareInfo.ID, "ip", mt.IPAddress, "exportPath", mt.ExportPath)
+			return nil
+		}
+	}
+	return nil
+}
+
+// securityGroupMountTarget builds a mount target prototype whose virtual
+// network interface is placed in subnetID and protected by securityGroupIDs.
+func securityGroupMountTarget(name, subnetID string, securityGroupIDs []string, encryptInTransit bool, resourceGroupID string) *vpcv1.ShareMountTargetPrototype {
+	transitEncryption := "none"
+	if encryptInTransit {
+		transitEncryption = "user_managed"
+	}
+	vni := &vpcv1.ShareMountTargetVirtualNetworkInterfacePrototype{
+		Name:   core.StringPtr(name + "-vni"),
+		Subnet: &vpcv1.SubnetIdentityByID{ID: core.StringPtr(subnetID)},
+	}
+	for _, id := range securityGroupIDs {
+		vni.SecurityGroups = append(vni.SecurityGroups, &vpcv1.SecurityGroupIdentityByID{ID: core.StringPtr(id)})
+	}
+	if resourceGroupID != "" {
+		vni.ResourceGroup = &vpcv1.ResourceGroupIdentityByID{ID: core.StringPtr(resourceGroupID)}
+	}
+	return &vpcv1.ShareMountTargetPrototype{
+		Name:                    core.StringPtr(name),
+		VirtualNetworkInterface: vni,
+		AccessProtocol:          core.StringPtr("nfs4"),
+		TransitEncryption:       core.StringPtr(transitEncryption),
+	}
+}
+
+// GetSubnetZone returns the zone name of a VPC subnet.
+func (c *Client) GetSubnetZone(ctx context.Context, subnetID string) (_ string, retErr error) {
+	start := time.Now()
+	defer func() { recordAPIMetrics("get_subnet", start, retErr) }()
+
+	if err := c.withAuth(ctx, "GetSubnet"); err != nil {
+		return "", err
+	}
+	subnet, response, err := c.vpcService.GetSubnetWithContext(ctx, c.vpcService.NewGetSubnetOptions(subnetID))
+	if err != nil {
+		statusCode := 0
+		if response != nil {
+			statusCode = response.StatusCode
+		}
+		return "", fmt.Errorf("get subnet %s: %w", subnetID, mapHTTPError(statusCode, err))
+	}
+	if subnet.Zone == nil || subnet.Zone.Name == nil {
+		return "", fmt.Errorf("subnet %s has no zone", subnetID)
+	}
+	return *subnet.Zone.Name, nil
+}
+
+// FindSecurityGroupID returns the ID of the security group with the given name
+// in the given VPC. Security group names are unique within a VPC.
+func (c *Client) FindSecurityGroupID(ctx context.Context, vpcID, name string) (_ string, retErr error) {
+	start := time.Now()
+	defer func() { recordAPIMetrics("list_security_groups", start, retErr) }()
+
+	opts := c.vpcService.NewListSecurityGroupsOptions()
+	opts.SetVPCID(vpcID)
+	for {
+		if err := c.withAuth(ctx, "ListSecurityGroups"); err != nil {
+			return "", err
+		}
+		result, response, err := c.vpcService.ListSecurityGroupsWithContext(ctx, opts)
+		if err != nil {
+			statusCode := 0
+			if response != nil {
+				statusCode = response.StatusCode
+			}
+			return "", fmt.Errorf("list security groups in VPC %s: %w", vpcID, mapHTTPError(statusCode, err))
+		}
+		for _, sg := range result.SecurityGroups {
+			if sg.Name != nil && *sg.Name == name && sg.ID != nil {
+				return *sg.ID, nil
+			}
+		}
+		if result.Next == nil || result.Next.Href == nil {
+			break
+		}
+		next := parseStartFromURL(*result.Next.Href)
+		if next == nil {
+			break
+		}
+		opts.Start = next
+	}
+	return "", fmt.Errorf("security group %q not found in VPC %s", name, vpcID)
 }
 
 // shareToInfo converts a VPC SDK Share to our ShareInfo type.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +23,7 @@ var (
 	ErrPoolExhausted             = errors.New("pool has no available capacity")
 	ErrPoolExpanding             = errors.New("pool is expanding, retry shortly")
 	ErrShareCreationPending      = errors.New("share creation is in progress")
+	ErrNoUsableShare             = errors.New("pool has shares without a usable mount target")
 	ErrSubVolumeNotFound         = errors.New("subvolume not found")
 	ErrInsufficientShareCapacity = errors.New("share does not have enough remaining capacity")
 	ErrSnapshotNotFound          = errors.New("snapshot not found")
@@ -138,6 +140,7 @@ type Manager struct {
 	nfsOps               NFSOperations
 	stagingBasePath      string
 	defaultResourceGroup string
+	network              *ShareNetwork
 }
 
 // Verify Manager implements PoolManager at compile time.
@@ -146,6 +149,13 @@ var _ PoolManager = (*Manager)(nil)
 // SetDefaultResourceGroup sets the fallback resource group used when the pool spec doesn't specify one.
 func (m *Manager) SetDefaultResourceGroup(rg string) {
 	m.defaultResourceGroup = rg
+}
+
+// SetShareNetwork sets the cluster network that auto-expanded shares join.
+func (m *Manager) SetShareNetwork(network *ShareNetwork) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.network = network
 }
 
 // SetVPCClient replaces the VPC client after deferred initialization.
@@ -452,9 +462,21 @@ func (m *Manager) tryAutoExpand(ctx context.Context, pool *v1alpha1.FileSharePoo
 		return nil, ErrPoolExhausted
 	}
 
-	profile, sizeGB, iops, maxShares, _, err := pool.Spec.TierConfig(tier)
+	_, sizeGB, _, maxShares, _, err := pool.Spec.TierConfig(tier)
 	if err != nil {
 		return nil, err
+	}
+
+	// Grow only when the ready shares are full. A share that is still being
+	// created, or that has no mount target, will add capacity without a new
+	// share; creating more would only add cost.
+	for _, s := range pool.Status.Shares {
+		if s.Tier == tier && s.State == "creating" {
+			return nil, ErrPoolExpanding
+		}
+	}
+	if ids := sharesWithoutMountTarget(pool.Status.Shares, tier); len(ids) > 0 {
+		return nil, fmt.Errorf("%w: %s", ErrNoUsableShare, strings.Join(ids, ", "))
 	}
 
 	// Count shares in this tier
@@ -474,25 +496,9 @@ func (m *Manager) tryAutoExpand(ctx context.Context, pool *v1alpha1.FileSharePoo
 
 	klog.V(2).InfoS("Auto-expanding pool", "pool", pool.Name, "tier", tier, "currentShares", len(pool.Status.Shares))
 
-	resourceGroup := pool.Spec.ResourceGroup
-	if resourceGroup == "" {
-		resourceGroup = m.defaultResourceGroup
-	}
-
-	shareName := fmt.Sprintf("%s-share-%d", pool.Name, len(pool.Status.Shares)+1)
-	if tier != "" {
-		shareName = fmt.Sprintf("%s-%s-share-%d", pool.Name, tier, tierShareCount+1)
-	}
-
-	input := ibmcloud.CreateShareInput{
-		Name:             shareName,
-		Zone:             pool.Spec.Zone,
-		Profile:          profile,
-		SizeGB:           sizeGB,
-		IOPS:             iops,
-		ResourceGroupID:  resourceGroup,
-		Tags:             pool.Spec.Tags,
-		EncryptInTransit: pool.Spec.EncryptionInTransit,
+	input, err := newShareInput(ctx, m.vpcClient, m.network, pool, tier, m.defaultResourceGroup)
+	if err != nil {
+		return nil, err
 	}
 
 	shareInfo, err := m.vpcClient.CreateFileShare(ctx, input)
@@ -500,50 +506,16 @@ func (m *Manager) tryAutoExpand(ctx context.Context, pool *v1alpha1.FileSharePoo
 		return nil, fmt.Errorf("create VPC share: %w", err)
 	}
 
-	mountTargetIP := ""
-	mountTargetID := ""
-	exportPath := ""
-	if len(shareInfo.MountTargets) > 0 {
-		mountTargetIP = shareInfo.MountTargets[0].IPAddress
-		mountTargetID = shareInfo.MountTargets[0].ID
-		exportPath = shareInfo.MountTargets[0].ExportPath
-	}
-
-	// Determine the initial state. If the mount target IP is not yet available,
-	// mark the share as "creating" so selectShare won't pick it up. The
-	// reconciler's health check will backfill the IP and promote to "stable".
-	state := "stable"
-	if mountTargetIP == "" {
-		state = "creating"
-		klog.V(2).InfoS("New share has no mount target IP yet — marked as creating",
-			"shareID", shareInfo.ID, "shareName", shareInfo.Name)
-	}
-
-	now := metav1.Now()
-	newShare := v1alpha1.PoolShareStatus{
-		ShareID:       shareInfo.ID,
-		ShareName:     shareInfo.Name,
-		MountTargetIP: mountTargetIP,
-		MountTargetID: mountTargetID,
-		ExportPath:    exportPath,
-		TotalGB:       shareInfo.SizeGB,
-		AllocatedGB:   0,
-		PVCCount:      0,
-		State:         state,
-		Tier:          tier,
-		Zone:          shareInfo.Zone,
-		CreatedAt:     &now,
-	}
-
+	newShare := newPoolShareStatus(shareInfo, tier)
 	pool.Status.Shares = append(pool.Status.Shares, newShare)
 	pool.Status.ShareCount = int32(len(pool.Status.Shares)) //nolint:gosec // safe: MaxShares capped at 100
 	pool.Status.TotalCapacityGB += shareInfo.SizeGB
 
-	// If the share doesn't have a mount target IP, don't return it for
-	// immediate allocation. Return ErrPoolExpanding so the CSI provisioner
-	// retries. The reconciler will promote the share to "stable" once the
-	// mount target IP is available.
-	if mountTargetIP == "" {
+	// If the share is not ready, don't return it for immediate allocation.
+	// Return ErrPoolExpanding so the CSI provisioner retries. The reconciler's
+	// health check fills in the mount target once the VPC reports it.
+	if !shareReady(newShare) {
+		klog.V(2).InfoS("New share is not ready yet", "shareID", shareInfo.ID, "shareName", shareInfo.Name)
 		return nil, ErrPoolExpanding
 	}
 

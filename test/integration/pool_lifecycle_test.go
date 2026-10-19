@@ -367,7 +367,7 @@ func TestPoolLifecycle_ReconcilerThenAllocateThenReconcileMetrics(t *testing.T) 
 	h.k8sClient.addPool(pool)
 
 	// Also create the share in VPC so reconciler health check can find it
-	h.vpcClient.CreateFileShare(ctx, ibmcloud.CreateShareInput{
+	h.vpcClient.CreateFileShare(ctx, ibmcloud.CreateShareInput{SubnetID: "subnet-us-south-1",
 		Name:    "s1",
 		Zone:    "us-south-1",
 		Profile: "dp2",
@@ -451,7 +451,7 @@ func TestPoolLifecycle_DeletionBlockedBySubVolumes(t *testing.T) {
 	}
 
 	// Create VPC share so reconciler can delete it
-	h.vpcClient.CreateFileShare(ctx, ibmcloud.CreateShareInput{
+	h.vpcClient.CreateFileShare(ctx, ibmcloud.CreateShareInput{SubnetID: "subnet-us-south-1",
 		Name:    "s1",
 		Zone:    "us-south-1",
 		Profile: "dp2",
@@ -502,6 +502,6 @@ func csiExpandRequest(volumeID string, sizeGB int64) csi.ControllerExpandVolumeR
 
 func newPoolReconciler(h *testHarness) *pool.FileSharePoolReconciler {
 	r := pool.NewFileSharePoolReconciler(h.k8sClient, h.vpcClient)
-	r.SetVPCConfig("vpc-1", "subnet-1", "rg-1")
+	r.SetVPCConfig(pool.NewShareNetwork("vpc-1", []string{"subnet-1"}, "test-cluster"), "rg-1")
 	return r
 }

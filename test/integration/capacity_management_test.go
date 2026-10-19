@@ -199,7 +199,7 @@ func TestCapacity_ProactiveExpansionViaReconciler(t *testing.T) {
 	h.k8sClient.addPool(pool)
 
 	// Create the share in VPC so health check works
-	h.vpcClient.CreateFileShare(ctx, ibmcloud.CreateShareInput{
+	h.vpcClient.CreateFileShare(ctx, ibmcloud.CreateShareInput{SubnetID: "subnet-us-south-1",
 		Name:    "s1",
 		Zone:    "us-south-1",
 		Profile: "dp2",
@@ -254,7 +254,7 @@ func TestCapacity_ProactiveExpansionNotTriggeredBelowThreshold(t *testing.T) {
 	pool.Spec.InitialShares = 1
 	h.k8sClient.addPool(pool)
 
-	h.vpcClient.CreateFileShare(ctx, ibmcloud.CreateShareInput{
+	h.vpcClient.CreateFileShare(ctx, ibmcloud.CreateShareInput{SubnetID: "subnet-us-south-1",
 		Name:    "s1",
 		Zone:    "us-south-1",
 		Profile: "dp2",
@@ -415,7 +415,7 @@ func TestCapacity_MetricsReconciliationCorrectsDrift(t *testing.T) {
 	h.k8sClient.addPool(pool)
 
 	// Create VPC share for health check
-	h.vpcClient.CreateFileShare(ctx, ibmcloud.CreateShareInput{
+	h.vpcClient.CreateFileShare(ctx, ibmcloud.CreateShareInput{SubnetID: "subnet-us-south-1",
 		Name:    "s1",
 		Zone:    "us-south-1",
 		Profile: "dp2",
@@ -530,4 +530,3 @@ func TestCapacity_TierBasedAutoExpand(t *testing.T) {
 		t.Errorf("expected 1 premium share (unchanged), got %d", premiumShareCount)
 	}
 }
-

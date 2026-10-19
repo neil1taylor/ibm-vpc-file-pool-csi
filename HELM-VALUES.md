@@ -26,7 +26,7 @@ VPC infrastructure configuration. On managed ROKS/IKS clusters, all four values 
 |-----------|------|---------|-------------|
 | `config.region` | string | `""` | IBM Cloud region (e.g., `us-south`). Auto-discovered from secret provider endpoint |
 | `config.vpcID` | string | `""` | VPC ID. Auto-discovered from `ibm-cloud-provider-data` ConfigMap |
-| `config.subnetID` | string | `""` | Subnet ID for mount targets. Auto-discovered from `ibm-cloud-provider-data` ConfigMap |
+| `config.subnetID` | string | `""` | Worker subnet IDs for mount targets, comma-separated. Each share's mount target goes in the subnet in the pool's zone. Auto-discovered from `ibm-cloud-provider-data` ConfigMap |
 | `config.resourceGroupID` | string | `""` | Resource group ID for VPC file share creation |
 
 ## Controller

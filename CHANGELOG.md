@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **Shares use security group access mode.** IBM has deprecated VPC access mode (End of Support 6 May 2027), and the VPC API now refuses new VPC-mode mount targets with HTTP 501, so the driver could not create usable storage on a new cluster. Each share now gets one mount target with a virtual network interface in the worker subnet of the pool's zone, protected by the cluster security group `kube-<cluster ID>`.
+- The controller reads every subnet in `vpc_subnet_ids` (and `--subnet-id` accepts a comma-separated list) and picks the one in each pool's zone. It used to take the first subnet, whatever its zone.
+- A pool is `Ready` only when at least one share is stable and has a mount target address. Otherwise it is `Degraded`, and the `SharesReady` condition (reason `NoMountTarget`) names the shares. Pools do not add shares while a share is still being created or has no mount target.
+- `accessorZones[].subnetID` is now optional and not used: one mount target in the home zone serves every zone.
+
+### Added
+- `FileSharePool.spec.securityGroupIDs`: use these security groups for the pool's mount targets instead of the cluster group.
+
 ### Security
 - Replication receiver: a tar upload could write files outside the destination volume through a symlink (a sibling directory whose name starts with the destination's name, or a symlinked parent directory). All writes now go through `os.Root`, and symlink targets are checked against the parent's real location.
 
@@ -14,6 +23,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `CreateVolume` returned success for a volume whose clone had failed. It now returns an error with the clone failure.
 - Sync client: a CA bundle with no usable certificate was ignored silently; `NewSyncClientWithCA` now returns an error. The client requires TLS 1.2 or later.
 - Concurrent uploads to the same destination are serialized.
+- Security group mount targets were recorded with the export path `/` instead of the share's own export, so every NFS mount would have failed.
+- Shares created by auto-expansion had no mount target, because that path passed no network details. All share creation now goes through one function.
+- Adopting an existing share after a retry did not record its export path.
+- Restoring a volume from a snapshot while the pool was growing failed with `Internal`; it now returns a retriable `Unavailable`, the same as a new volume or a clone.
 - `.golangci.yml` used v1 keys under `version: "2"`, so its settings were ignored. All lint findings are fixed, and the integration tests compile and pass again.
 
 ## [v0.13.2] — 2026-02-25

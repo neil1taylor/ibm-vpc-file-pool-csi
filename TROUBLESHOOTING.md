@@ -220,22 +220,24 @@ kubectl get storageprofile <name> -o jsonpath='{.spec.claimPropertySets}'
 
 **Symptom:** A share in pool status shows `ipAddress: null` or empty `mountTargetIP`. PVCs allocated to this share have PVs with an empty `server` field, causing NFS mount failures.
 
-**Cause:** The share was created before VPC auto-discovery completed (vpcID was empty), so no inline mount target was created during `CreateFileShare`. VPC may have defaulted the share to `security_group` access mode.
+**Cause:** The share's mount target was never created, failed, or does not yet have a mount path. Before this release, shares created by auto-expansion had no mount target at all. The pool shows phase `Degraded`, and its `SharesReady` condition has reason `NoMountTarget` and names the shares. Volume requests get a retriable error and the pool does not add shares.
 
-**Automatic recovery (v0.11.0+):** The reconciler detects stable shares with no mount target IP and attempts to create one. If mount target creation fails (e.g., the share uses security_group access mode, which is incompatible with VPC mount targets), the share is automatically marked as `draining` to prevent new allocations.
+**Automatic recovery:** The reconciler finds stable shares with no mount target and creates one in security group access mode, in the worker subnet of the pool's zone. If that fails, it tries again on the next reconcile and logs `Failed to create mount target for share`.
 
 **Manual check:**
 ```bash
-# Find shares with empty mount target IP
-kubectl get fsp <pool-name> -o jsonpath='{range .status.shares[*]}{.shareID}{"\t"}{.mountTargetIP}{"\t"}{.state}{"\n"}{end}'
+# Shares and their mount target addresses
+kubectl get fsp <pool-name> -o jsonpath='{range .status.shares[*]}{.shareID}{"\t"}{.mountTargetIP}{"\t"}{.exportPath}{"\t"}{.state}{"\n"}{end}'
+kubectl get fsp <pool-name> -o jsonpath='{.status.conditions[?(@.type=="SharesReady")].message}'
 
-# Check VPC share access mode
-ibmcloud is share <share-id> --output json | jq '.access_control_mode'
-# "vpc" = VPC access mode (can have VPC mount targets)
-# "security_group" = security group mode (incompatible with VPC mount targets)
+# The share's access mode and mount targets
+ibmcloud is share <share-id> --output json | jq '.access_control_mode, .mount_targets'
 ```
 
-**If the share is in security_group mode:** It cannot be recovered. The reconciler marks it as `draining`. Existing PVCs on this share must be recreated on a healthy share. Delete the affected PVCs and let the CSI provisioner reallocate them.
+**Common causes of a failed mount target:**
+- No worker subnet in the pool's zone. The controller log says `no cluster subnet in the pool's zone`. Set `spec.zone` to a zone that has workers.
+- The cluster security group cannot be found (`security group "kube-<id>" not found`). Set `spec.securityGroupIDs` on the pool.
+- The share uses **VPC access mode** (`access_control_mode` is `vpc`). IBM no longer allows new VPC-mode mount targets. The share must be converted to security group mode.
 
 ---
 
@@ -297,7 +299,7 @@ ibmcloud is subnet <subnet-id> --output json | jq '.network_acl'
 
 **Symptom:** Pod stuck in `ContainerCreating` with event `MountVolume.SetUp failed ... mkdir .../globalmount/pvcs: permission denied`.
 
-**Cause (pre-v0.9.0):** The driver was mounting the NFS server root (`server:/`) instead of the share-specific export path (`server:/share_abc123`). In VPC access mode, all shares resolve to the same FQDN — the export path differentiates them. The NFS server root is owned by UID 99, mode 0711, so the CSI node (mapped to UID 65534 by root_squash) cannot create directories there.
+**Cause (pre-v0.9.0, and security group mode before this release):** The driver was mounting the NFS server root (`server:/`) instead of the share-specific export path (`server:/share_abc123`). The export path is specific to each share in both access modes. The NFS server root is owned by UID 99, mode 0711, so the CSI node (mapped to UID 65534 by root_squash) cannot create directories there.
 
 **Fix:** Upgrade to v0.9.0+. The driver now correctly parses and uses the export path from the VPC API's `MountPath` field. Existing shares are automatically backfilled during health checks.
 

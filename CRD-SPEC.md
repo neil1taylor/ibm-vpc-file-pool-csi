@@ -134,6 +134,12 @@ type FileSharePoolSpec struct {
     // +optional
     Tags []string `json:"tags,omitempty"`
 
+    // SecurityGroupIDs are the VPC security groups for each share's mount target.
+    // When empty, the driver uses the cluster's own security group,
+    // kube-<cluster ID>, which already lets every worker reach NFS.
+    // +optional
+    SecurityGroupIDs []string `json:"securityGroupIDs,omitempty"`
+
     // MountOptions are additional NFS mount options applied by the node agent.
     // +optional
     MountOptions []string `json:"mountOptions,omitempty"`
@@ -203,7 +209,8 @@ type AccessorZone struct {
     // +kubebuilder:validation:Pattern=`^[a-z]{2}-[a-z]+-\d+$`
     Zone string `json:"zone"`
 
-    // SubnetID is the VPC subnet in the accessor zone for mount target IP allocation.
+    // SubnetID is not used. Shares use security group access mode, and one mount
+    // target in the home zone serves every zone. Kept so existing pools still apply.
     // +kubebuilder:validation:Required
     SubnetID string `json:"subnetID"`
 }
@@ -456,7 +463,7 @@ spec:
       subnetID: "0727-aaaa-bbbb"     # Subnet in us-south-3
 ```
 
-When a share is created, mount targets are provisioned in the home zone and all accessor zones.
+When a share is created, it gets one mount target, in the home zone. Nodes in the accessor zones mount it across zones, and the pool status records its address for each accessor zone. The `subnetID` of an accessor zone is not used.
 The PV volumeAttributes include zone-keyed server IPs: `server.us-south-1`, `server.us-south-2`, etc.
 The node agent selects the IP matching its own zone for NFS mounts.
 

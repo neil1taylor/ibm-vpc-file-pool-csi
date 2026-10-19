@@ -12,9 +12,11 @@ import (
 // FakeVPCClient implements ibmcloud.VPCFileClient entirely in memory.
 // Tests can inspect and manipulate its internal state.
 type FakeVPCClient struct {
-	mu     sync.Mutex
-	shares map[string]*ibmcloud.ShareInfo
-	nextID int
+	mu             sync.Mutex
+	shares         map[string]*ibmcloud.ShareInfo
+	nextID         int
+	subnetZones    map[string]string // subnet ID -> zone
+	securityGroups map[string]string // security group name -> ID
 
 	// Test hooks — set these to inject failures.
 	CreateErr            error
@@ -29,6 +31,12 @@ type FakeVPCClient struct {
 	ExpandCalls            int
 	DeleteCalls            int
 	CreateMountTargetCalls int
+	GetSubnetZoneCalls     int
+	FindSecurityGroupCalls int
+
+	// Last inputs, for assertions on the mount target network.
+	LastCreateInput      ibmcloud.CreateShareInput
+	LastMountTargetInput ibmcloud.CreateMountTargetInput
 }
 
 // Verify the fake implements the interface at compile time.
@@ -37,7 +45,9 @@ var _ ibmcloud.VPCFileClient = (*FakeVPCClient)(nil)
 // NewFakeVPCClient creates a new in-memory fake VPC client.
 func NewFakeVPCClient() *FakeVPCClient {
 	return &FakeVPCClient{
-		shares: make(map[string]*ibmcloud.ShareInfo),
+		shares:         make(map[string]*ibmcloud.ShareInfo),
+		subnetZones:    make(map[string]string),
+		securityGroups: make(map[string]string),
 	}
 }
 
@@ -45,9 +55,13 @@ func (f *FakeVPCClient) CreateFileShare(_ context.Context, input ibmcloud.Create
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.CreateCalls++
+	f.LastCreateInput = input
 
 	if f.CreateErr != nil {
 		return nil, f.CreateErr
+	}
+	if input.SubnetID == "" {
+		return nil, fmt.Errorf("create share %q: subnet ID is required for the mount target", input.Name)
 	}
 
 	f.nextID++
@@ -63,9 +77,10 @@ func (f *FakeVPCClient) CreateFileShare(_ context.Context, input ibmcloud.Create
 		Zone:           input.Zone,
 		MountTargets: []ibmcloud.MountTargetInfo{
 			{
-				ID:        id + "-mt",
-				Name:      input.Name + "-mt",
-				IPAddress: fmt.Sprintf("10.240.0.%d", f.nextID),
+				ID:         id + "-mt",
+				Name:       input.Name + "-mt",
+				IPAddress:  fmt.Sprintf("10.240.0.%d", f.nextID),
+				ExportPath: "/" + id,
 			},
 		},
 		CreatedAt: time.Now(),
@@ -125,6 +140,7 @@ func (f *FakeVPCClient) CreateShareMountTarget(_ context.Context, shareID string
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.CreateMountTargetCalls++
+	f.LastMountTargetInput = input
 
 	if f.CreateMountTargetErr != nil {
 		return nil, f.CreateMountTargetErr
@@ -137,13 +153,52 @@ func (f *FakeVPCClient) CreateShareMountTarget(_ context.Context, shareID string
 
 	f.nextID++
 	mt := ibmcloud.MountTargetInfo{
-		ID:        fmt.Sprintf("%s-mt-%d", shareID, f.nextID),
-		Name:      input.Name,
-		IPAddress: fmt.Sprintf("10.240.%d.%d", f.nextID, len(info.MountTargets)+1),
+		ID:         fmt.Sprintf("%s-mt-%d", shareID, f.nextID),
+		Name:       input.Name,
+		IPAddress:  fmt.Sprintf("10.240.%d.%d", f.nextID, len(info.MountTargets)+1),
+		ExportPath: "/" + shareID,
 	}
 
 	info.MountTargets = append(info.MountTargets, mt)
 	return &mt, nil
+}
+
+func (f *FakeVPCClient) GetSubnetZone(_ context.Context, subnetID string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.GetSubnetZoneCalls++
+
+	zone, ok := f.subnetZones[subnetID]
+	if !ok {
+		return "", fmt.Errorf("get subnet %s: %w", subnetID, ibmcloud.ErrShareNotFound)
+	}
+	return zone, nil
+}
+
+func (f *FakeVPCClient) FindSecurityGroupID(_ context.Context, vpcID, name string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.FindSecurityGroupCalls++
+
+	id, ok := f.securityGroups[name]
+	if !ok {
+		return "", fmt.Errorf("security group %q not found in VPC %s", name, vpcID)
+	}
+	return id, nil
+}
+
+// SetSubnetZone registers a subnet and its zone.
+func (f *FakeVPCClient) SetSubnetZone(subnetID, zone string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.subnetZones[subnetID] = zone
+}
+
+// AddSecurityGroup registers a security group by name.
+func (f *FakeVPCClient) AddSecurityGroup(name, id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.securityGroups[name] = id
 }
 
 func (f *FakeVPCClient) ListFileShares(_ context.Context, _ string, _ []string) ([]*ibmcloud.ShareInfo, error) {

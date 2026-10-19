@@ -74,15 +74,15 @@ spec:
                     have additional mount targets.
                   properties:
                     subnetID:
-                      description: SubnetID is the VPC subnet in the accessor zone
-                        to create mount targets in.
+                      description: |-
+                        SubnetID is not used. Shares use security group access mode, and one mount
+                        target in the home zone serves every zone. Kept so existing pools still apply.
                       type: string
                     zone:
                       description: Zone is the VPC availability zone (e.g., "us-south-2").
                       pattern: ^[a-z]{2}-[a-z]+-\d+$
                       type: string
                   required:
-                  - subnetID
                   - zone
                   type: object
                 type: array
@@ -217,6 +217,14 @@ spec:
                 description: ResourceGroup is the IBM Cloud resource group ID for
                   created shares.
                 type: string
+              securityGroupIDs:
+                description: |-
+                  SecurityGroupIDs are the VPC security groups for each share's mount target.
+                  When empty, the driver uses the cluster's own security group,
+                  kube-<cluster ID>, which already lets every worker reach NFS.
+                items:
+                  type: string
+                type: array
               shareSizeGB:
                 default: 1000
                 description: ShareSizeGB is the size in GB for each share created

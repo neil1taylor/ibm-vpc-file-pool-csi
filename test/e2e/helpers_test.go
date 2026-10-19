@@ -11,10 +11,10 @@ import (
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	storagev1 "k8s.io/api/storage/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -34,15 +34,15 @@ func buildPool(name string, accessorZones []v1alpha1.AccessorZone) *v1alpha1.Fil
 			Name: name,
 		},
 		Spec: v1alpha1.FileSharePoolSpec{
-			Zone:                  homeZone,
-			Profile:               "dp2",
-			ShareSizeGB:           100,
-			MaxShares:             2,
-			InitialShares:         1,
-			AutoExpand:            true,
+			Zone:                   homeZone,
+			Profile:                "dp2",
+			ShareSizeGB:            100,
+			MaxShares:              2,
+			InitialShares:          1,
+			AutoExpand:             true,
 			ExpandThresholdPercent: 80,
-			AllocationStrategy:    "spread",
-			DefaultPermissions:    "0755",
+			AllocationStrategy:     "spread",
+			DefaultPermissions:     "0755",
 		},
 	}
 	if resourceGroupID != "" {

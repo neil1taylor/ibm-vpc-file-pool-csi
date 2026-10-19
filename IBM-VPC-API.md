@@ -231,124 +231,67 @@ Called by the Pool Manager when a new share is needed in a pool.
 
 **This is a SLOW operation (30-90+ seconds).** Never call this in the CSI CreateVolume hot path.
 
+Every share is created in **security group access mode** with one inline mount target. IBM ended new VPC-mode mount targets: the API returns HTTP 501 `shares_not_implemented` for them (seen in eu-de, October 2026), and VPC access mode reaches End of Support on 6 May 2027.
+
 ```go
 type CreateShareInput struct {
-    Name              string
-    Zone              string
-    Profile           string
-    SizeGB            int64
-    IOPS              *int64
-    ResourceGroupID   string
-    Tags              []string
-    EncryptInTransit  bool
-    VPCId             string     // needed for mount target
-    SubnetID          string     // needed for mount target
-    SecurityGroupIDs  []string   // must allow TCP 2049
-    AccessorZones     []AccessorZoneInput  // additional zones for cross-zone mount targets
-}
-
-type AccessorZoneInput struct {
-    Zone     string   // VPC availability zone (e.g., "us-south-2")
-    SubnetID string   // Subnet in the accessor zone for mount target IP
+    Name             string
+    Zone             string
+    Profile          string
+    SizeGB           int64
+    IOPS             *int64
+    ResourceGroupID  string
+    Tags             []string
+    EncryptInTransit bool
+    SubnetID         string   // worker subnet in Zone; required
+    SecurityGroupIDs []string // groups on the mount target's network interface
 }
 
 func (c *Client) CreateFileShare(ctx context.Context, input CreateShareInput) (*ShareInfo, error) {
-    // 1. Build the share prototype
-    shareProfile := &vpcv1.ShareProfileIdentityByName{
-        Name: core.StringPtr(input.Profile),
+    // ... profile, zone, size, IOPS, resource group, tags, initial owner 65534 ...
+
+    if input.SubnetID == "" {
+        return nil, fmt.Errorf("create share %q: subnet ID is required for the mount target", input.Name)
     }
-
-    zone := &vpcv1.ZoneIdentityByName{
-        Name: core.StringPtr(input.Zone),
-    }
-
-    sharePrototype := &vpcv1.SharePrototypeShareBySize{
-        Name:    core.StringPtr(input.Name),
-        Profile: shareProfile,
-        Zone:    zone,
-        Size:    core.Int64Ptr(input.SizeGB),
-    }
-
-    // Optional: custom IOPS
-    if input.IOPS != nil {
-        sharePrototype.Iops = input.IOPS
-    }
-
-    // Resource group
-    if input.ResourceGroupID != "" {
-        sharePrototype.ResourceGroup = &vpcv1.ResourceGroupIdentityByID{
-            ID: core.StringPtr(input.ResourceGroupID),
-        }
-    }
-
-    // Tags
-    if len(input.Tags) > 0 {
-        sharePrototype.UserTags = input.Tags
-    }
-
-    // Encryption in transit
-    if input.EncryptInTransit {
-        // Requires the share to support it; set via mount target
-    }
-
-    // Mount target (needed for NFS access)
-    // Create a mount target in the same VPC/subnet as the cluster workers
-    mountTargetPrototype := &vpcv1.ShareMountTargetPrototypeShareMountTargetByAccessControlModeSecurityGroup{
-        Name: core.StringPtr(input.Name + "-mt"),
-        VPC:  &vpcv1.VPCIdentityByID{ID: core.StringPtr(input.VPCId)},
-        // Subnet determines the IP address for NFS mount
-        PrimaryIPPrototype: &vpcv1.ShareMountTargetIPPrototypeReservedIPPrototypeShareMountTargetContext{
-            Subnet: &vpcv1.SubnetIdentityByID{ID: core.StringPtr(input.SubnetID)},
-        },
-    }
-
-    // Note: The actual API may vary. Check the vpc-go-sdk version for exact types.
-    // The pattern is: create share with inline mount target.
-
+    sharePrototype.AccessControlMode = core.StringPtr("security_group")
     sharePrototype.MountTargets = []vpcv1.ShareMountTargetPrototypeIntf{
-        mountTargetPrototype,
+        // A virtual network interface (VNI) in SubnetID, protected by SecurityGroupIDs.
+        securityGroupMountTarget(input.Name+"-mt", input.SubnetID, input.SecurityGroupIDs,
+            input.EncryptInTransit, input.ResourceGroupID),
     }
 
-    // 2. Create accessor mount targets (cross-zone support)
-    for _, az := range input.AccessorZones {
-        azMT := &vpcv1.ShareMountTargetPrototypeShareMountTargetByAccessControlModeSecurityGroup{
-            Name: core.StringPtr(input.Name + "-mt-" + az.Zone),
-            VPC:  &vpcv1.VPCIdentityByID{ID: core.StringPtr(input.VPCId)},
-            PrimaryIPPrototype: &vpcv1.ShareMountTargetIPPrototypeReservedIPPrototypeShareMountTargetContext{
-                Subnet: &vpcv1.SubnetIdentityByID{ID: core.StringPtr(az.SubnetID)},
-            },
-        }
-        sharePrototype.MountTargets = append(sharePrototype.MountTargets, azMT)
-    }
-
-    // 3. Create the share
-    createOpts := c.vpcService.NewCreateShareOptions(sharePrototype)
-    share, response, err := c.vpcService.CreateShareWithContext(ctx, createOpts)
-    if err != nil {
-        // Idempotency: if the share already exists (e.g., status update conflict caused retry),
-        // look it up by name and return it instead of failing.
-        if response != nil && response.StatusCode == 400 && strings.Contains(err.Error(), "already exists") {
-            return c.getShareByName(ctx, input.Name)
-        }
-        return nil, fmt.Errorf("VPC API CreateShare failed (HTTP %d): %w", response.StatusCode, err)
-    }
-
-    // 3. Wait for share to become "stable"
-    shareInfo, err := c.waitForShareStable(ctx, *share.ID, 5*time.Minute)
-    if err != nil {
-        return nil, fmt.Errorf("share %s did not become stable: %w", *share.ID, err)
-    }
-
-    return shareInfo, nil
+    // Create (adopting an existing share of the same name on HTTP 400 "already exists"),
+    // wait for "stable", then poll until the mount target's mount_path is known.
 }
 ```
 
-### Create Share Mount Target (for Accessor Zones)
+The NFS server and the export path both come from the mount target's `mount_path`, for example `10.250.0.18:/83ad9ea6_1be6_...`. The export path is specific to the share; it is never `/`. A mount target that has an IP address but no `mount_path` yet is not usable, and the driver leaves its address empty until the path appears.
 
-Called by the reconciler to add mount targets in accessor zones after share creation.
+### Create Share Mount Target
+
+Called by the reconciler to give a mount target to a stable share that has none. It uses the same subnet and security groups as a new share.
 
 ```go
+type CreateMountTargetInput struct {
+    Name             string
+    SubnetID         string
+    SecurityGroupIDs []string
+    EncryptInTransit bool
+}
+
 func (c *Client) CreateShareMountTarget(ctx context.Context, shareID string, input CreateMountTargetInput) (*MountTargetInfo, error)
+```
+
+### Subnet Zone and Cluster Security Group
+
+```go
+// GetSubnetZone returns the zone of a subnet. The pool manager calls it for each
+// worker subnet once, and picks the subnet in the pool's zone.
+func (c *Client) GetSubnetZone(ctx context.Context, subnetID string) (string, error)
+
+// FindSecurityGroupID returns the ID of the named security group in a VPC.
+// The pool manager uses it to find the cluster group, kube-<cluster ID>.
+func (c *Client) FindSecurityGroupID(ctx context.Context, vpcID, name string) (string, error)
 ```
 
 ### getShareByName (Internal — Idempotent Share Lookup)
@@ -573,6 +516,9 @@ type VPCFileClient interface {
     ExpandFileShare(ctx context.Context, shareID string, newSizeGB int64) error
     DeleteFileShare(ctx context.Context, shareID string) error
     ListFileShares(ctx context.Context, resourceGroupID string, tags []string) ([]*ShareInfo, error)
+    CreateShareMountTarget(ctx context.Context, shareID string, input CreateMountTargetInput) (*MountTargetInfo, error)
+    GetSubnetZone(ctx context.Context, subnetID string) (string, error)
+    FindSecurityGroupID(ctx context.Context, vpcID, name string) (string, error)
 }
 
 // Verify the real client implements the interface
@@ -684,8 +630,8 @@ The IBM VPC client reads configuration from the cluster's existing secrets and c
 | **VPC API endpoint** | secret-common-lib `GetRIAASEndpoint()` or derived from zone | Supports private endpoints automatically |
 | **Resource group ID** | secret-common-lib `GetResourceGroupID()` or `FileSharePool.spec.resourceGroup` | Pool spec overrides if set |
 | `region` | Derived from FileSharePool.spec.zone (e.g., "us-south" from "us-south-1") | VPC API region |
-| `vpcID` | ConfigMap `ibm-cloud-provider-data` key `vpcID` | VPC where shares and mount targets are created |
-| `subnetID` | ConfigMap `ibm-cloud-provider-data` key `subnetID` | Subnet for NFS mount target IPs |
-| `securityGroupIDs` | Worker node security groups (auto-discovered or configured) | Must allow TCP 2049 |
+| `vpcID` | `--vpc-id`, or ConfigMap `kube-system/ibm-cloud-provider-data` key `vpc_id` | VPC where shares and mount targets are created |
+| `subnetIDs` | `--subnet-id` (comma-separated), or ConfigMap `ibm-cloud-provider-data` key `vpc_subnet_ids` | Worker subnets. Each mount target goes in the one in the pool's zone |
+| `securityGroupIDs` | `FileSharePool.spec.securityGroupIDs`, or the cluster group `kube-<cluster_id>` (ConfigMap `kube-system/cluster-info` key `cluster_id`) | The cluster group already allows all traffic between workers and the mount target |
 
 The client should be created once per FileSharePool (since different pools could be in different regions), cached by the Pool Manager. Token refresh is handled by `secret-common-lib` — the client calls `refreshToken()` before each API operation.

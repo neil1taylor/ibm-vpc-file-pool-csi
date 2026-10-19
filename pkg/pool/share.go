@@ -6,10 +6,27 @@ import (
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 )
 
+// shareReady reports whether a share can serve volumes: the VPC reports it
+// stable and its mount target's NFS address is known. A share without a mount
+// target address would produce PVs with an empty NFS server.
+func shareReady(s v1alpha1.PoolShareStatus) bool {
+	return s.State == "stable" && s.MountTargetIP != ""
+}
+
+// sharesWithoutMountTarget returns the IDs of stable shares in the tier that
+// have no usable mount target yet.
+func sharesWithoutMountTarget(shares []v1alpha1.PoolShareStatus, tier string) []string {
+	var ids []string
+	for _, s := range shares {
+		if s.Tier == tier && s.State == "stable" && s.MountTargetIP == "" {
+			ids = append(ids, s.ShareID)
+		}
+	}
+	return ids
+}
+
 // selectShare picks a share from the pool based on the allocation strategy.
-// Only shares in "stable" state with a matching tier and a populated mount
-// target IP are considered. Shares without a mount target IP would produce
-// PVs with an empty NFS server, causing mount failures.
+// Only ready shares (see shareReady) with a matching tier are considered.
 // Spread: pick the share with the most free space.
 // Binpack: pick the share with the least free space that still fits.
 func selectShare(strategy string, shares []v1alpha1.PoolShareStatus, requestedGB int64, tier string) (*v1alpha1.PoolShareStatus, error) {
@@ -17,13 +34,7 @@ func selectShare(strategy string, shares []v1alpha1.PoolShareStatus, requestedGB
 	var bestFree int64
 
 	for i := range shares {
-		if shares[i].State != "stable" {
-			continue
-		}
-		if shares[i].MountTargetIP == "" {
-			continue
-		}
-		if shares[i].Tier != tier {
+		if !shareReady(shares[i]) || shares[i].Tier != tier {
 			continue
 		}
 		freeGB := shares[i].TotalGB - shares[i].AllocatedGB

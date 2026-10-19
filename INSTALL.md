@@ -299,7 +299,7 @@ helm upgrade --install ibm-vpc-file-pool-csi \
 | `imagePullSecrets` | No | `[]` | Image pull secrets for private registries. On managed ROKS/IKS, set to `[{name: all-icr-io}]` |
 | `config.region` | No | Auto-discovered | IBM Cloud region (e.g., `us-south`). Auto-discovered from the secret provider RIAAS endpoint on managed ROKS/IKS clusters |
 | `config.vpcID` | No | Auto-discovered | VPC ID where shares will be created. Auto-discovered from the `ibm-cloud-provider-data` ConfigMap on managed clusters |
-| `config.subnetID` | No | Auto-discovered | Subnet ID for NFS mount targets. Auto-discovered from `ibm-cloud-provider-data` on managed clusters (uses first subnet) |
+| `config.subnetID` | No | Auto-discovered | Worker subnet IDs for NFS mount targets, comma-separated. Auto-discovered from `ibm-cloud-provider-data` on managed clusters. Each share's mount target goes in the subnet in the pool's zone |
 | `config.resourceGroupID` | No | Auto-discovered | Resource group for billing. Auto-discovered from the secret provider on managed clusters |
 | `controller.replicas` | No | `1` | Controller replicas (leader-elected) |
 | `controller.resources` | No | `{requests: {cpu: 50m, memory: 128Mi}, limits: {memory: 512Mi}}` | Controller CPU/memory resource requests and limits |
@@ -355,7 +355,7 @@ kubectl apply -f config/deploy/node.yaml
 | `--mode` | `controller` | `controller`, `node`, `receiver`, or `sync-client` |
 | `--region` | Auto-discovered | IBM Cloud region |
 | `--vpc-id` | Auto-discovered | VPC ID for mount targets |
-| `--subnet-id` | Auto-discovered | Subnet ID for mount targets |
+| `--subnet-id` | Auto-discovered | Worker subnet IDs for mount targets, comma-separated; the controller uses the one in each pool's zone |
 | `--kubelet-dir` | `/var/lib/kubelet` | Kubelet root directory (ROKS: use `/var/data/kubelet`) |
 | `--clone-worker-interval` | `10s` | Clone worker poll interval |
 | `--golden-image-sync-interval` | `5m` | Golden image syncer poll interval |
