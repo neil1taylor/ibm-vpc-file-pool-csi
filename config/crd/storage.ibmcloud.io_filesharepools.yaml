@@ -190,8 +190,8 @@ spec:
                 minimum: 0
                 type: integer
               iops:
-                description: IOPS is the IOPS allocation per share. Only used with
-                  custom profiles.
+                description: IOPS is the IOPS per share. If unset, the VPC chooses
+                  it (100 for dp2).
                 format: int64
                 minimum: 100
                 type: integer
@@ -210,8 +210,8 @@ spec:
                   type: string
                 type: array
               profile:
-                description: Profile is the VPC file storage profile (e.g., "dp2",
-                  "custom").
+                description: Profile is the VPC file share profile. "dp2" is the only
+                  one VPC offers.
                 type: string
               resourceGroup:
                 description: ResourceGroup is the IBM Cloud resource group ID for
@@ -255,8 +255,8 @@ spec:
                       minimum: 0
                       type: integer
                     iops:
-                      description: IOPS is the IOPS allocation per share. Only used
-                        with custom profiles.
+                      description: IOPS is the IOPS per share. If unset, the VPC chooses
+                        it (100 for dp2).
                       format: int64
                       type: integer
                     maxShares:
@@ -272,8 +272,8 @@ spec:
                       pattern: ^[a-z0-9-]+$
                       type: string
                     profile:
-                      description: Profile is the VPC file storage profile (e.g.,
-                        "dp2", "custom").
+                      description: Profile is the VPC file share profile. "dp2" is
+                        the only one VPC offers.
                       type: string
                     shareSizeGB:
                       description: ShareSizeGB is the size in GB for shares in this

@@ -24,6 +24,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Replication receiver: a tar upload could write files outside the destination volume through a symlink (a sibling directory whose name starts with the destination's name, or a symlinked parent directory). All writes now go through `os.Root`, and symlink targets are checked against the parent's real location.
 
 ### Fixed
+- The console plugin's pool create page offered a `custom` profile, which VPC file shares do not have, so such a pool never got a share. It also said `dp2` gives 100 IOPS per GB; the VPC gives 100 IOPS per share unless you set the IOPS. The page now offers only `dp2`, and the IOPS field works with it (0 lets the VPC choose). The Standard and KubeVirt presets now set 1,000 and 3,000 IOPS; the High-IOPS preset uses `dp2`.
+- The Pools page said the pool manager balances shares across availability zones. A pool is in one zone, and volumes are never moved between shares. The text now says what the pool manager does.
 - The pool controller reconciled each pool every 1 to 2 seconds instead of every 60 seconds, because its own status write started the next pass. Each pass calls the VPC API. On rovslab, one pool made about 30 VPC calls a minute.
 - The console plugin showed IOPS as 100 per GB when a pool sets no IOPS. The VPC chooses the IOPS in that case (a 100 GB dp2 share got 100, not 10,000), so the plugin now shows "VPC default".
 - The console plugin's pages are now in the Storage menu of the Virtualization perspective too.

@@ -8,7 +8,7 @@ For cluster administrators, the driver manages pool lifecycle automatically — 
 
 For workload teams, the driver is invisible: they create standard PVCs and the CSI sidecar routes requests to the pool manager. PVC creation completes in under a second. Volume snapshots, clones, and group snapshots work through the standard CSI interfaces. KubeVirt users get first-class support with correct directory ownership and raw disk image handling.
 
-The driver is purpose-built for IBM Cloud ROKS and ROVS clusters running on VPC infrastructure. It integrates with the VPC file share API, supports multi-zone mount targets, and authenticates through the same `secret-common-lib` used by the stock IBM CSI drivers.
+The driver is purpose-built for IBM Cloud ROKS and ROVS clusters running on VPC infrastructure. It integrates with the VPC file share API, creates one mount target per share that serves pods in every zone, and authenticates through the same `secret-common-lib` used by the stock IBM CSI drivers.
 
 ### Maturity Legend
 
@@ -99,7 +99,7 @@ Efficient NFS mount handling with security enforcement.
 - **Bind-mount publishing** — NodePublishVolume bind-mounts the SubVolume's subdirectory from the staged NFS mount into the pod's volume path.
 - **`sec=sys` enforcement** — All NFS mounts include `sec=sys` to ensure proper UID/GID authentication. Without it, VPC shares negotiate `sec=null` and all files appear as UID 99.
 - **Soft mount defaults** — Mount options `nfsvers=4.1,soft,timeo=600,retrans=3` prevent pods from hanging on NFS failures.
-- **Cross-zone mount target selection** — Shares track mount target IPs per zone. Nodes automatically select the local zone's IP when available.
+- **Mount target address** — Each share has one mount target, in the pool's zone. Nodes in every zone mount it.
 - **Path traversal validation** — All subdirectory paths validated against `^/pvcs/pvc-[a-f0-9-]{36}$` before any filesystem operation.
 
 ### KubeVirt Integration — Beta
@@ -116,7 +116,7 @@ First-class support for running virtual machines on pooled storage.
 Multiple independent pools with per-tier storage profiles.
 
 - **Multiple pools per cluster** — Each FileSharePool CR is independent with its own shares, capacity, and allocation strategy.
-- **Tiered storage** — Pools can define multiple ShareTiers, each with a distinct VPC profile (IOPS), share size, and max share count.
+- **Tiered storage** — Pools can define multiple ShareTiers, each with a distinct IOPS value, share size, and max share count.
 - **Auto-generated StorageClasses** — Non-tiered pools generate one StorageClass (`{pool-name}`). Tiered pools generate one per tier (`{pool-name}-{tier-name}`). Skip with the `storage.ibmcloud.io/skip-storageclass` annotation.
 - **Tier-aware allocation** — CreateVolume requests pass the tier name via StorageClass parameters. Share selection filters to the requested tier.
 - **Resource group & tag support** — Shares can be tagged with VPC resource group and user-defined tags for cost tracking.
@@ -137,7 +137,7 @@ Automated pool management with health monitoring and safe shutdown.
 Thin wrapper around the VPC file share API with operational guardrails.
 
 - **VPC file share CRUD** — Create, get, list, delete shares with idempotent retry. All operations use context-based timeouts.
-- **Mount target management** — Creates mount targets per zone. Tracks IP addresses for cross-zone access.
+- **Mount target management** — Creates one mount target per share, in the pool's zone. Tracks its IP address.
 - **API rate limiting** — 5 requests/second default to stay within VPC API limits.
 - **`secret-common-lib` authentication** — API key and pod identity auth via the same library used by the stock IBM CSI drivers. Runs as a sidecar with panic recovery.
 - **Config auto-discovery** — Reads cluster zone, resource group, and VPC ID from standard IBM Cloud ConfigMaps.
@@ -195,7 +195,7 @@ Visual management of file share pools through the OpenShift Console.
 - **Pool dashboard** — Overview tab showing all FileSharePools with status, capacity gauges, share count, SubVolume count, and recent activity table.
 - **CRUD for all 5 CRDs** — List, detail, create, edit, and delete views for FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, and ReplicationPolicy resources. Create buttons route to custom form wizards (not the YAML editor).
 - **FileSharePool creation wizard** — 6-step guided wizard for creating pools: zone/profile selection, capacity configuration, allocation strategy, directory ownership, golden image config, and review.
-- **IOPS column in pool table** — Displays custom IOPS or calculated IOPS from profile (dp2 = 100 IOPS/GB).
+- **IOPS column in pool table** — Displays `spec.iops`, or "VPC default" when it is not set.
 - **Monitoring tab** — Dedicated metrics page with time range selector (1h/6h/24h/7d), stat cards (allocation rate, P95 latency, VPC API health, replication status), and time-series charts (allocation rate, latency, API call rate by status, replication lag).
 - **Prometheus metrics panels** — Stat cards and time-series charts using the driver's 21+ Prometheus metrics with `usePrometheusRange` hook for range queries.
 - **TLS via service-ca** — Plugin Service uses OpenShift's service-ca operator for automatic TLS certificate provisioning (no cert-manager dependency).
@@ -235,7 +235,7 @@ How this driver compares to the two most common alternatives for NFS-based Kuber
 | `sec=sys` enforcement | ✅ | ✅ | ❌ |
 | Mount caching (per-share) | ✅ | — | ❌ |
 | Soft mount defaults | ✅ | ✅ | Configurable |
-| Cross-zone mount targets | ✅ | ✅ | — |
+| One mount target serves every zone | ✅ | ✅ | — |
 | Bind-mount subdirectories | ✅ | ❌ | ❌ |
 | **Capacity Management** | | | |
 | Per-PVC quota tracking | ✅ | ❌ (share-level) | ❌ |

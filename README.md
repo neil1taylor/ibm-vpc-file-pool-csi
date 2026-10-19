@@ -94,8 +94,7 @@ IBM VPC Client ──► VPC File Share API
 
 | Term | Definition |
 |------|-----------|
-| **dp2** | The default VPC file share profile; IOPS scale automatically with share size (e.g., 2 TB = ~6,000 IOPS) |
-| **Custom Profile** | A VPC file share profile where you specify a fixed IOPS value independent of the dp2 auto-scaling formula |
+| **dp2** | The only VPC file share profile. IOPS range from 100 to 96,000; if `spec.iops` is not set, each share gets 100 IOPS whatever its size |
 | **IOPS** | I/O Operations Per Second; the performance budget for a share, shared by all PVCs on that share |
 | **VPC Access Mode** | File share access control mode where shares are exported under a shared FQDN and differentiated by their NFS export path |
 | **Security Group Mode** | Alternative file share access control mode using VPC security groups; incompatible with VPC mount targets |
