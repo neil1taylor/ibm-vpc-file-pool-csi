@@ -201,9 +201,10 @@ helm upgrade ibm-vpc-file-pool-csi charts/ibm-vpc-file-pool-csi/ \
 After upgrade, register the plugin with the console:
 
 ```bash
-oc patch console.operator.openshift.io cluster \
-  --patch '{"spec":{"plugins":["ibm-vpc-file-pool-csi"]}}' \
-  --type=merge
+# Adds this plugin to the list and keeps the other plugins enabled.
+# (A merge patch with a "plugins" list would replace the whole list.)
+oc patch console.operator.openshift.io cluster --type=json \
+  -p '[{"op":"add","path":"/spec/plugins/-","value":"ibm-vpc-file-pool-csi"}]'
 ```
 
 **Requires OpenShift 4.14+** with the ConsolePlugin v1 API. Non-OpenShift clusters can skip this — no impact on existing functionality.

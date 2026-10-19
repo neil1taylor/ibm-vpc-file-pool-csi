@@ -193,9 +193,10 @@ OpenShift Console dynamic plugin for visual pool management. Requires OpenShift 
 After installing with `consolePlugin.enabled=true`, register the plugin with the OpenShift console:
 
 ```bash
-oc patch console.operator.openshift.io cluster \
-  --patch '{"spec":{"plugins":["ibm-vpc-file-pool-csi"]}}' \
-  --type=merge
+# Adds this plugin to the list and keeps the other plugins enabled.
+# (A merge patch with a "plugins" list would replace the whole list.)
+oc patch console.operator.openshift.io cluster --type=json \
+  -p '[{"op":"add","path":"/spec/plugins/-","value":"ibm-vpc-file-pool-csi"}]'
 ```
 
 ## Example Overrides
@@ -266,9 +267,10 @@ consolePlugin:
 After install, register the plugin:
 
 ```bash
-oc patch console.operator.openshift.io cluster \
-  --patch '{"spec":{"plugins":["ibm-vpc-file-pool-csi"]}}' \
-  --type=merge
+# Adds this plugin to the list and keeps the other plugins enabled.
+# (A merge patch with a "plugins" list would replace the whole list.)
+oc patch console.operator.openshift.io cluster --type=json \
+  -p '[{"op":"add","path":"/spec/plugins/-","value":"ibm-vpc-file-pool-csi"}]'
 ```
 
 ### Custom Metrics

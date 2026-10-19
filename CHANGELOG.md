@@ -69,6 +69,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 - VirtualizedTable body rows not rendering inside tabbed layout (replaced with PF Table)
 
+### Fixed (found while testing on ROVS)
+- The install docs told you to turn on the console plugin with a merge patch of `spec.plugins`, which replaces the whole list: on a cluster with other plugins (Virtualization, ODF, Networking) it turned them off, and the "disable" command turned off every plugin. The docs now add and remove only this plugin.
+- `docker build` worked but `podman build` failed: the Dockerfile used the short image name `golang:1.25`. It now names `docker.io/library/golang:1.25`.
+- The webhook accepted any `defaultPermissions` string; the node agent then silently used its default. The webhook now requires an octal mode such as `0755`.
+- The `/deploy` skill's SSH calls failed in zsh; it now uses a shell function, and builds the console plugin image too.
+
 ### Console plugin
 - **The create pages for volumes, snapshots and group snapshots made records with no data.** They created the driver's own SubVolume, Snapshot and VolumeGroupSnapshot records, which nothing acts on, so a "snapshot" made in the console held nothing. They now create a PersistentVolumeClaim, a VolumeSnapshot, or a Kubernetes VolumeGroupSnapshot, which the driver serves. The group snapshot page says so when the cluster has no group snapshot API.
 - Latency charts queried histograms by their base name and always showed no data; they now use the `_bucket` series. Per-pool replication lag matched a `pool` label that the metrics do not have; it now uses `source_pool`.

@@ -21,7 +21,7 @@ cluster's own subnet, with no floating IP. Reach it over the client VPN.
 | SSH | `ssh -i ~/.ssh/pool-csi-build -o IdentitiesOnly=yes ubuntu@10.250.0.46` |
 | Tools | podman, Go 1.25, make, helm, oc, golangci-lint (from cloud-init) |
 
-If the instance is stopped, start it: `ibmcloud is instance-start pool-csi-build`.
+If the instance is stopped, start it: `ibmcloud is instance-start pool-csi-build`. Stop it when the work is done.
 If SSH times out, check the VPN route first (see the `vpn-route-overlap-rovslab` memory),
 not the security group.
 
@@ -40,9 +40,11 @@ Send the working tree (committed or not) and build. `make docker-build` stamps t
 
 ```bash
 TAG=${TAG:-$(git describe --tags --always --dirty)}
-SSH="ssh -i ~/.ssh/pool-csi-build -o IdentitiesOnly=yes ubuntu@10.250.0.46"
-git ls-files -co --exclude-standard -z | xargs -0 tar -czf - | $SSH 'rm -rf ~/src && mkdir ~/src && tar -xzf - -C ~/src'
-$SSH "cd ~/src && make docker-build CONTAINER_ENGINE=podman VERSION=$TAG"
+build() { ssh -q -i ~/.ssh/pool-csi-build -o IdentitiesOnly=yes ubuntu@10.250.0.46 "$@"; }   # a function works in bash and zsh
+git ls-files -co --exclude-standard -z | xargs -0 tar -czf - | build 'rm -rf ~/src && mkdir ~/src && tar -xzf - -C ~/src'
+build "cd ~/src && make docker-build CONTAINER_ENGINE=podman VERSION=$TAG"
+# Console plugin image, when it changed:
+build "cd ~/src && make console-plugin-docker-build CONTAINER_ENGINE=podman VERSION=$TAG"
 ```
 
 ### 3. Push the image
@@ -51,8 +53,8 @@ Log in with a short-lived IAM token, so no credential is stored on the server:
 
 ```bash
 ibmcloud iam oauth-tokens --output json | jq -r '.iam_token' | sed 's/^Bearer //' \
-  | $SSH 'podman login -u iambearer --password-stdin de.icr.io'
-$SSH "podman push de.icr.io/ibm-vpc-file-pool-csi/driver:$TAG"
+  | build 'podman login -u iambearer --password-stdin de.icr.io'
+build "podman push de.icr.io/ibm-vpc-file-pool-csi/driver:$TAG; podman logout de.icr.io"
 ```
 
 ### 4. Apply CRD updates
@@ -66,12 +68,12 @@ make install-crds
 ```bash
 helm upgrade --install ibm-vpc-file-pool-csi charts/ibm-vpc-file-pool-csi/ \
   --namespace kube-system \
-  --reuse-values \
+  --reset-then-reuse-values \
   --set image.tag=$TAG \
   --set image.pullPolicy=Always
 ```
 
-`--reuse-values` keeps the earlier settings. On a first install, also set:
+`--reset-then-reuse-values` keeps the earlier settings and picks up defaults for new chart values. On a first install, also set:
 
 - `imagePullSecrets[0].name=all-icr-io`
 - `webhook.certProvider=openshift` on ROKS and ROVS (no cert-manager there)
