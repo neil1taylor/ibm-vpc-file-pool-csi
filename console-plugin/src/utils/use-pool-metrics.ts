@@ -1,6 +1,7 @@
 import { consoleFetchJSON } from '@openshift-console/dynamic-plugin-sdk';
 import { useEffect, useState, useCallback } from 'react';
 import { METRICS } from '../constants';
+import { metricQueries } from './metric-queries';
 
 const PROMETHEUS_BASE = '/api/prometheus/api/v1';
 
@@ -79,9 +80,9 @@ export async function checkPrometheusConnection(): Promise<{
   }
 }
 
-function resultToNumber(results: PrometheusResult[], pool?: string): number {
+function resultToNumber(results: PrometheusResult[], pool?: string, label = 'pool'): number {
   const match = pool
-    ? results.find((r) => r.metric.pool === pool)
+    ? results.find((r) => r.metric[label] === pool)
     : results[0];
   return match ? parseFloat(match.value[1]) : 0;
 }
@@ -133,15 +134,15 @@ export function usePoolMetrics(poolNames: string[], refreshInterval = 30000): Me
         queryPrometheus(METRICS.POOL_SHARE_COUNT),
         queryPrometheus(METRICS.POOL_PVC_COUNT),
         queryPrometheus(`rate(${METRICS.ALLOCATIONS_TOTAL}[1h])`),
-        queryPrometheus(`histogram_quantile(0.95, rate(${METRICS.ALLOCATION_DURATION}[5m]))`),
+        queryPrometheus(metricQueries.allocationP95ByPool),
         queryPrometheus(METRICS.REPLICATION_LAG),
         // Aggregate metrics
         queryPrometheus(`sum(rate(${METRICS.VPC_API_CALLS_TOTAL}[5m]))`),
         queryPrometheus(`sum(rate(${METRICS.VPC_API_CALLS_TOTAL}{status="error"}[5m]))`),
-        queryPrometheus(`histogram_quantile(0.95, sum(rate(${METRICS.VPC_API_CALL_DURATION}[5m])) by (le))`),
+        queryPrometheus(metricQueries.apiP95),
         queryPrometheus(METRICS.SNAPSHOTS_TOTAL),
         queryPrometheus(METRICS.CLONES_TOTAL),
-        queryPrometheus(`histogram_quantile(0.5, rate(${METRICS.CLONE_DURATION}[1h]))`),
+        queryPrometheus(metricQueries.cloneMedian),
         queryPrometheus(METRICS.GROUP_SNAPSHOTS_TOTAL),
         queryPrometheus(`sum(rate(${METRICS.REPLICATION_SYNC_TOTAL}[5m]))`),
         queryPrometheus(METRICS.REPLICATION_CONSECUTIVE_FAILURES),
@@ -156,7 +157,7 @@ export function usePoolMetrics(poolNames: string[], refreshInterval = 30000): Me
           pvcCount: resultToNumber(pvcs, pool),
           allocationRate1h: resultToNumber(rate, pool),
           p95LatencySeconds: resultToNumber(latency, pool),
-          replicationLagSeconds: resultToNumber(lag, pool),
+          replicationLagSeconds: resultToNumber(lag, pool, 'source_pool'),
         };
       }
 

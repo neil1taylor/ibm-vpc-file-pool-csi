@@ -21,7 +21,7 @@ import {
   IAction,
 } from '@patternfly/react-table';
 import { Bullseye, Spinner } from '@patternfly/react-core';
-import { VolumeGroupSnapshotModel } from '../../models';
+import { VolumeGroupSnapshotModel, KubeVolumeGroupSnapshotModel } from '../../models';
 import { VolumeGroupSnapshot } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
 import DeleteModal from '../common/DeleteModal';
@@ -119,13 +119,13 @@ const VolumeGroupSnapshotListPage: React.FC = () => {
       <ListPageHeader title="Volume Group Snapshots">
         <ListPageCreateLink
           to={ROUTES.GROUP_SNAPSHOT_CREATE}
-          createAccessReview={{ groupVersionKind: { group: VolumeGroupSnapshotModel.apiGroup!, version: VolumeGroupSnapshotModel.apiVersion, kind: VolumeGroupSnapshotModel.kind } }}
+          createAccessReview={{ groupVersionKind: { group: KubeVolumeGroupSnapshotModel.apiGroup!, version: KubeVolumeGroupSnapshotModel.apiVersion, kind: KubeVolumeGroupSnapshotModel.kind } }}
         >
-          Create VolumeGroupSnapshot
+          Create group snapshot
         </ListPageCreateLink>
       </ListPageHeader>
       <p style={{ padding: '0 24px', color: 'var(--pf-t--global--color--subtle)', margin: '0 0 8px 0' }}>
-        Group Snapshots capture consistent point-in-time copies of multiple SubVolumes within a pool in a single coordinated operation.
+        These are records written by the driver. This list is read-only: to take a group snapshot, create a VolumeGroupSnapshot.
       </p>
       <ListPageBody>
         <ListPageFilter

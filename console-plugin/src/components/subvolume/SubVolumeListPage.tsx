@@ -21,7 +21,7 @@ import {
   IAction,
 } from '@patternfly/react-table';
 import { Bullseye, Spinner } from '@patternfly/react-core';
-import { SubVolumeModel } from '../../models';
+import { SubVolumeModel, PersistentVolumeClaimModel } from '../../models';
 import { SubVolume } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
 import DeleteModal from '../common/DeleteModal';
@@ -40,7 +40,7 @@ const SubVolumeRow: React.FC<{
     },
     {
       title: (
-        <Link to={`${ROUTES.SNAPSHOT_CREATE}?source=${encodeURIComponent(name)}`}>
+        <Link to={`${ROUTES.SNAPSHOT_CREATE}?namespace=${encodeURIComponent(sv.spec.pvcNamespace)}&pvc=${encodeURIComponent(sv.spec.pvcName)}`}>
           Create Snapshot
         </Link>
       ),
@@ -150,13 +150,13 @@ const SubVolumeListPage: React.FC = () => {
       <ListPageHeader title="SubVolumes">
         <ListPageCreateLink
           to={ROUTES.SUBVOLUME_CREATE}
-          createAccessReview={{ groupVersionKind: { group: SubVolumeModel.apiGroup!, version: SubVolumeModel.apiVersion, kind: SubVolumeModel.kind } }}
+          createAccessReview={{ groupVersionKind: { version: PersistentVolumeClaimModel.apiVersion, kind: PersistentVolumeClaimModel.kind } }}
         >
-          Create SubVolume
+          Create volume (PVC)
         </ListPageCreateLink>
       </ListPageHeader>
       <p style={{ padding: '0 24px', color: 'var(--pf-t--global--color--subtle)', margin: '0 0 8px 0' }}>
-        SubVolumes are subdirectories within pool shares, each backing a single PVC. They are created automatically when a PVC is provisioned by the CSI driver.
+        SubVolumes are records of the volumes the driver has created, one per PVC. This list is read-only: to add a volume, create a PVC.
       </p>
       <ListPageBody>
         <ListPageFilter

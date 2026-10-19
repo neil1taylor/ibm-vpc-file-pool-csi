@@ -69,6 +69,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 - VirtualizedTable body rows not rendering inside tabbed layout (replaced with PF Table)
 
+### Console plugin
+- **The create pages for volumes, snapshots and group snapshots made records with no data.** They created the driver's own SubVolume, Snapshot and VolumeGroupSnapshot records, which nothing acts on, so a "snapshot" made in the console held nothing. They now create a PersistentVolumeClaim, a VolumeSnapshot, or a Kubernetes VolumeGroupSnapshot, which the driver serves. The group snapshot page says so when the cluster has no group snapshot API.
+- Latency charts queried histograms by their base name and always showed no data; they now use the `_bucket` series. Per-pool replication lag matched a `pool` label that the metrics do not have; it now uses `source_pool`.
+- A pool that is not Ready shows the reason in the list, on its page and on the dashboard. A share without a mount target shows "No mount target" instead of a green "stable".
+- The pool form can set `securityGroupIDs`; replication policies can set `destinationCACertSecretRef`.
+- The plugin image builds on Node.js 22 and nginx 1.24 (Node.js 18 and nginx 1.20 are out of support). CI lints, tests and builds the plugin and its image.
+
 ### Removed
 - `table-layout.css` (dead code after VirtualizedTable removal)
 

@@ -1,5 +1,5 @@
 # Stage 1: Build the plugin
-FROM registry.access.redhat.com/ubi9/nodejs-18:latest AS build
+FROM registry.access.redhat.com/ubi9/nodejs-22:latest AS build
 
 USER 0
 WORKDIR /opt/app-root/src
@@ -11,7 +11,7 @@ COPY . .
 RUN yarn build
 
 # Stage 2: Serve with nginx
-FROM registry.access.redhat.com/ubi9/nginx-120:latest
+FROM registry.access.redhat.com/ubi9/nginx-124:latest
 
 USER 0
 

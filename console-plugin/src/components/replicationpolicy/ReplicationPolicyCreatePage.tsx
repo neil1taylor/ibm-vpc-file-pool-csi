@@ -40,6 +40,7 @@ import { ROUTES } from '../../constants';
 import FieldPopover from '../common/FieldPopover';
 import SchedulePresets from '../common/SchedulePresets';
 import HookEditor from '../common/HookEditor';
+import { destinationSpecFields } from '../../utils/replication-helpers';
 
 const SCHEDULE_PRESETS = [
   { label: '5m', value: '5m' },
@@ -60,6 +61,7 @@ const ReplicationPolicyCreatePage: React.FC = () => {
   const [destinationBasePath, setDestinationBasePath] = useState('/pvcs');
   const [destinationEndpoint, setDestinationEndpoint] = useState('');
   const [destinationAuthSecretRef, setDestinationAuthSecretRef] = useState('');
+  const [destinationCACertSecretRef, setDestinationCACertSecretRef] = useState('');
   const [schedule, setSchedule] = useState('15m');
   const [maxRetries, setMaxRetries] = useState(3);
   const [incrementalSync, setIncrementalSync] = useState(true);
@@ -115,7 +117,6 @@ const ReplicationPolicyCreatePage: React.FC = () => {
     try {
       const spec: ReplicationPolicySpec = {
         sourcePoolName,
-        destinationNFSServer: isDriverToDriver ? '' : destinationNFSServer,
         destinationExportPath: isDriverToDriver ? undefined : (destinationExportPath !== '/' ? destinationExportPath : undefined),
         destinationBasePath,
         schedule,
@@ -124,8 +125,13 @@ const ReplicationPolicyCreatePage: React.FC = () => {
         bandwidthLimitMbps: isDriverToDriver ? undefined : (bandwidthLimitMbps > 0 ? bandwidthLimitMbps : undefined),
         maxParallelSyncs: maxParallelSyncs > 1 ? maxParallelSyncs : undefined,
         rsyncOptions: isDriverToDriver ? undefined : (rsyncOptions.trim() ? rsyncOptions.trim().split('\n').filter(Boolean) : undefined),
-        destinationEndpoint: isDriverToDriver ? destinationEndpoint : undefined,
-        destinationAuthSecretRef: isDriverToDriver ? destinationAuthSecretRef : undefined,
+        ...destinationSpecFields({
+          isDriverToDriver,
+          nfsServer: destinationNFSServer,
+          endpoint: destinationEndpoint,
+          authSecretRef: destinationAuthSecretRef,
+          caCertSecretRef: destinationCACertSecretRef,
+        }),
       };
 
       if (labelPairs.length > 0) {
@@ -328,6 +334,26 @@ const ReplicationPolicyCreatePage: React.FC = () => {
                 <FormHelperText>
                   <HelperText>
                     <HelperTextItem>Secret name with bearer token for receiver authentication</HelperTextItem>
+                  </HelperText>
+                </FormHelperText>
+              </FieldPopover>
+            </StackItem>
+
+            <StackItem>
+              <FieldPopover
+                fieldId="rp-dest-ca-secret"
+                label="CA Certificate Secret"
+                description="Name of a Secret in kube-system with a 'ca.crt' key. The driver uses it to trust the receiver's certificate."
+              >
+                <TextInput
+                  id="rp-dest-ca-secret"
+                  value={destinationCACertSecretRef}
+                  onChange={(_event, value) => setDestinationCACertSecretRef(value)}
+                  placeholder="replication-receiver-ca"
+                />
+                <FormHelperText>
+                  <HelperText>
+                    <HelperTextItem>Secret in kube-system with key ca.crt; needed when the receiver uses a self-signed certificate.</HelperTextItem>
                   </HelperText>
                 </FormHelperText>
               </FieldPopover>

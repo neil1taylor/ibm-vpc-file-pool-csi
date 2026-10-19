@@ -21,7 +21,7 @@ import {
   IAction,
 } from '@patternfly/react-table';
 import { Bullseye, Spinner, Label } from '@patternfly/react-core';
-import { SnapshotModel } from '../../models';
+import { SnapshotModel, VolumeSnapshotModel } from '../../models';
 import { Snapshot } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
 import DeleteModal from '../common/DeleteModal';
@@ -125,13 +125,13 @@ const SnapshotListPage: React.FC = () => {
       <ListPageHeader title="Snapshots">
         <ListPageCreateLink
           to={ROUTES.SNAPSHOT_CREATE}
-          createAccessReview={{ groupVersionKind: { group: SnapshotModel.apiGroup!, version: SnapshotModel.apiVersion, kind: SnapshotModel.kind } }}
+          createAccessReview={{ groupVersionKind: { group: VolumeSnapshotModel.apiGroup!, version: VolumeSnapshotModel.apiVersion, kind: VolumeSnapshotModel.kind } }}
         >
-          Create Snapshot
+          Create snapshot
         </ListPageCreateLink>
       </ListPageHeader>
       <p style={{ padding: '0 24px', color: 'var(--pf-t--global--color--subtle)', margin: '0 0 8px 0' }}>
-        Snapshots capture point-in-time copies of SubVolume data for backup and recovery.
+        These are records written by the driver. This list is read-only: to take a snapshot, create a VolumeSnapshot.
       </p>
       <ListPageBody>
         <ListPageFilter

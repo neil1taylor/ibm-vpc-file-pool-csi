@@ -188,6 +188,16 @@ const ReplicationPolicyDetailsPage: React.FC = () => {
                   <code>{spec.destinationAuthSecretRef}</code>
                 </DescriptionListDescription>
               </DescriptionListGroup>
+              <DescriptionListGroup>
+                <DescriptionListTerm>CA Certificate Secret</DescriptionListTerm>
+                <DescriptionListDescription>
+                  {spec.destinationCACertSecretRef ? (
+                    <code>{spec.destinationCACertSecretRef}</code>
+                  ) : (
+                    'None (system trust store)'
+                  )}
+                </DescriptionListDescription>
+              </DescriptionListGroup>
             </>
           )}
           {!isReceiverMode && (

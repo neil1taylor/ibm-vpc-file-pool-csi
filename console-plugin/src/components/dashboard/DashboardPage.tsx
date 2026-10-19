@@ -26,6 +26,7 @@ import { Table, Thead, Tr, Th, Tbody, Td } from '@patternfly/react-table';
 import { FileSharePoolModel, SubVolumeModel, ReplicationPolicyModel } from '../../models';
 import { FileSharePool, SubVolume, ReplicationPolicy } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
+import PoolPhase from '../common/PoolPhase';
 import CapacityBar from '../common/CapacityBar';
 import CapacityDonut from './CapacityDonut';
 import { utilizationPercent, formatAge } from '../../utils/resource-helpers';
@@ -231,6 +232,14 @@ const DashboardPage: React.FC = () => {
                       )}
                     </SplitItem>
                   </Split>
+                  {alertPools.map((p) => (
+                    <div key={p.metadata?.name} style={{ marginTop: 8 }}>
+                      <Link to={ROUTES.POOL_DETAIL.replace(':name', p.metadata?.name || '')}>
+                        {p.metadata?.name}
+                      </Link>{' '}
+                      <PoolPhase pool={p} />
+                    </div>
+                  ))}
                 </CardBody>
               </Card>
             </GridItem>

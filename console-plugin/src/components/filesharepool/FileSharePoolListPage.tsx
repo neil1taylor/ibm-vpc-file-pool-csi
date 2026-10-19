@@ -23,7 +23,7 @@ import {
 import { Bullseye, Spinner } from '@patternfly/react-core';
 import { FileSharePoolModel } from '../../models';
 import { FileSharePool } from '../../types';
-import PhaseStatus from '../common/PhaseStatus';
+import PoolPhase from '../common/PoolPhase';
 import InlineCapacityBar from '../common/InlineCapacityBar';
 import DeleteModal from '../common/DeleteModal';
 import { ROUTES } from '../../constants';
@@ -71,7 +71,7 @@ const FileSharePoolRow: React.FC<{
         />
       </Td>
       <Td dataLabel="PVCs">{pool.status?.totalPVCCount ?? 0}</Td>
-      <Td dataLabel="Phase"><PhaseStatus phase={pool.status?.phase} /></Td>
+      <Td dataLabel="Phase"><PoolPhase pool={pool} /></Td>
       <Td dataLabel="Age">
         {pool.metadata?.creationTimestamp ? (
           <Timestamp timestamp={pool.metadata.creationTimestamp} />
