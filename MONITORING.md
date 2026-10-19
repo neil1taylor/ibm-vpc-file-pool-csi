@@ -25,39 +25,23 @@ The driver emits 21 metrics across six categories:
 
 ### Prometheus Operator (ServiceMonitor)
 
-If your cluster runs the Prometheus Operator (standard on OpenShift), create a `ServiceMonitor`:
+The Helm chart creates a `ServiceMonitor` for the controller when the cluster has the Prometheus Operator API (`monitoring.coreos.com/v1`). OpenShift has it. To turn it off, set `metrics.serviceMonitor.enabled=false`.
 
-```yaml
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: vpc-file-pool-csi
-  namespace: kube-system
-  labels:
-    app: vpc-file-pool-csi-controller
-spec:
-  selector:
-    matchLabels:
-      app: vpc-file-pool-csi-controller
-  endpoints:
-    - port: metrics
-      interval: 30s
-      path: /metrics
-  namespaceSelector:
-    matchNames:
-      - kube-system
-```
+The console plugin's charts read these metrics. Without the `ServiceMonitor`, they show no data.
 
 ### OpenShift User Workload Monitoring
 
-On OpenShift clusters with user workload monitoring enabled:
+On OpenShift, user workload monitoring must be on for Prometheus to read the `ServiceMonitor` in `kube-system`:
 
 ```bash
-# Verify user workload monitoring is enabled
-kubectl get configmap cluster-monitoring-config -n openshift-monitoring -o yaml
+oc -n openshift-monitoring get configmap cluster-monitoring-config -o yaml | grep enableUserWorkload
+```
 
-# The ServiceMonitor above works automatically if user workload monitoring
-# is configured to scrape the kube-system namespace
+Check that Prometheus scrapes the controller (tested on ROVS 4.21):
+
+```bash
+oc -n openshift-user-workload-monitoring exec -c prometheus prometheus-user-workload-0 -- \
+  curl -s 'http://localhost:9090/api/v1/query?query=vpc_file_pool_share_count'
 ```
 
 ### Manual Scrape Config (prometheus.yml)

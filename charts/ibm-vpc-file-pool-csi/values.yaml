@@ -132,7 +132,9 @@ sidecars:
 metrics:
   port: 8080
   serviceMonitor:
-    enabled: false
+    # Created only when the cluster has the Prometheus Operator API
+    # (OpenShift has it). The console plugin's charts read these metrics.
+    enabled: true
     interval: 30s
   alerts:
     enabled: false

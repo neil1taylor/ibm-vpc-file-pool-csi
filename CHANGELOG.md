@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The controller reads every subnet in `vpc_subnet_ids` (and `--subnet-id` accepts a comma-separated list) and picks the one in each pool's zone. It used to take the first subnet, whatever its zone.
 - A pool is `Ready` only when at least one share is stable and has a mount target address. Otherwise it is `Degraded`, and the `SharesReady` condition (reason `NoMountTarget`) names the shares. Pools do not add shares while a share is still being created or has no mount target.
 - `accessorZones[].subnetID` is now optional and not used: one mount target in the home zone serves every zone.
+- `metrics.serviceMonitor.enabled` is now `true` by default. The chart creates the ServiceMonitor only when the cluster has the Prometheus Operator API, so installs on other clusters still work.
 
 ### Added
 - `webhook.caBundle` Helm value for `webhook.certProvider=manual`; the render fails without it. Controller flags `--enable-webhooks` and `--webhook-port`, set by the chart from `webhook.enabled` and `webhook.port`.
@@ -23,6 +24,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Replication receiver: a tar upload could write files outside the destination volume through a symlink (a sibling directory whose name starts with the destination's name, or a symlinked parent directory). All writes now go through `os.Root`, and symlink targets are checked against the parent's real location.
 
 ### Fixed
+- The pool controller reconciled each pool every 1 to 2 seconds instead of every 60 seconds, because its own status write started the next pass. Each pass calls the VPC API. On rovslab, one pool made about 30 VPC calls a minute.
+- The console plugin showed IOPS as 100 per GB when a pool sets no IOPS. The VPC chooses the IOPS in that case (a 100 GB dp2 share got 100, not 10,000), so the plugin now shows "VPC default".
+- The console plugin's pages are now in the Storage menu of the Virtualization perspective too.
 - Replication policies paused after `maxRetries` were resumed on the next cycle and kept creating Jobs. The automatic pause now sets the `storage.ibmcloud.io/paused` annotation; removing it resumes the policy and resets the failure count.
 - `CreateVolume` returned success for a volume whose clone had failed. It now returns an error with the clone failure.
 - Sync client: a CA bundle with no usable certificate was ignored silently; `NewSyncClientWithCA` now returns an error. The client requires TLS 1.2 or later.

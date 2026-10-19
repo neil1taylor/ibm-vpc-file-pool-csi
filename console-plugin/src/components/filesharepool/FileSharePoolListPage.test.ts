@@ -28,14 +28,10 @@ describe('getIOPS', () => {
     expect(getIOPS(pool)).toBe('5,000');
   });
 
-  it('derives IOPS from dp2 profile (100 IOPS/GB)', () => {
+  // Without spec.iops the VPC chooses the IOPS; a 100 GB dp2 share got 100 IOPS, not 10,000.
+  it('shows the VPC default when spec.iops is not set', () => {
     const pool = makePool({ profile: 'dp2', shareSizeGB: 300 });
-    expect(getIOPS(pool)).toBe('30,000');
-  });
-
-  it('returns "-" for non-dp2 profile without explicit iops', () => {
-    const pool = makePool({ profile: 'custom', iops: undefined });
-    expect(getIOPS(pool)).toBe('-');
+    expect(getIOPS(pool)).toBe('VPC default');
   });
 
   it('prefers explicit iops over dp2 derivation', () => {
@@ -43,9 +39,9 @@ describe('getIOPS', () => {
     expect(getIOPS(pool)).toBe('3,000');
   });
 
-  it('returns "-" when iops is 0', () => {
-    const pool = makePool({ iops: 0, profile: 'custom' });
-    expect(getIOPS(pool)).toBe('-');
+  it('shows the VPC default when iops is 0', () => {
+    const pool = makePool({ iops: 0 });
+    expect(getIOPS(pool)).toBe('VPC default');
   });
 });
 
@@ -55,13 +51,8 @@ describe('getIOPSNumber', () => {
     expect(getIOPSNumber(pool)).toBe(5000);
   });
 
-  it('derives IOPS from dp2 profile for sorting', () => {
+  it('returns 0 when spec.iops is not set', () => {
     const pool = makePool({ profile: 'dp2', shareSizeGB: 300 });
-    expect(getIOPSNumber(pool)).toBe(30000);
-  });
-
-  it('returns 0 for non-dp2 profile without explicit iops', () => {
-    const pool = makePool({ profile: 'custom', iops: undefined });
     expect(getIOPSNumber(pool)).toBe(0);
   });
 
