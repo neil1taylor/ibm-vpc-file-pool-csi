@@ -28,6 +28,7 @@ test:
 
 test-scripts:
 	bash test/chart/test-webhook-certs.sh
+	bash test/chart/test-servicemonitor.sh
 	bash test/e2e/lib/test-detect-zone.sh
 
 test-integration:

@@ -154,7 +154,7 @@ Prometheus metrics and alerting configuration.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `metrics.port` | int | `8080` | Port for the `/metrics` endpoint |
-| `metrics.serviceMonitor.enabled` | bool | `false` | Create a Prometheus ServiceMonitor resource |
+| `metrics.serviceMonitor.enabled` | bool | `true` | Create a Prometheus ServiceMonitor. The chart creates it only when the cluster has the `monitoring.coreos.com/v1` API. The console plugin's charts need it |
 | `metrics.serviceMonitor.interval` | string | `30s` | Scrape interval for the ServiceMonitor |
 | `metrics.alerts.enabled` | bool | `false` | Create PrometheusRule alert resources |
 | `metrics.alerts.utilizationWarning` | int | `80` | Pool utilization percentage that triggers a warning alert |

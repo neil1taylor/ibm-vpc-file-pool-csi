@@ -20,7 +20,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
@@ -952,9 +954,20 @@ func (r *FileSharePoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.directClient = mgr.GetClient()
 	r.restMapper = mgr.GetRESTMapper()
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&v1alpha1.FileSharePool{}).
+		For(&v1alpha1.FileSharePool{}, builder.WithPredicates(poolEventFilter())).
 		Named("filesharepool").
 		Complete(r)
+}
+
+// poolEventFilter passes spec, label and annotation changes and drops
+// status-only updates. Reconcile writes status on every pass, so without this
+// filter each pass starts the next one at once instead of after ReconcileInterval.
+func poolEventFilter() predicate.Predicate {
+	return predicate.Or(
+		predicate.GenerationChangedPredicate{},
+		predicate.LabelChangedPredicate{},
+		predicate.AnnotationChangedPredicate{},
+	)
 }
 
 // Finalizer helpers

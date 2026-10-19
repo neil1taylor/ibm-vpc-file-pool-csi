@@ -28,16 +28,12 @@ import InlineCapacityBar from '../common/InlineCapacityBar';
 import DeleteModal from '../common/DeleteModal';
 import { ROUTES } from '../../constants';
 
-/** Calculate IOPS display: use spec.iops if set, otherwise derive from profile. */
+/** IOPS display: spec.iops if set; otherwise the VPC chooses the IOPS when it creates the share. */
 export function getIOPS(pool: FileSharePool): string {
   if (pool.spec?.iops != null && pool.spec.iops > 0) {
     return pool.spec.iops.toLocaleString();
   }
-  // dp2 profile: 100 IOPS/GB
-  if (pool.spec?.profile === 'dp2' && pool.spec?.shareSizeGB) {
-    return `${(pool.spec.shareSizeGB * 100).toLocaleString()}`;
-  }
-  return '-';
+  return 'VPC default';
 }
 
 const FileSharePoolRow: React.FC<{
@@ -89,7 +85,6 @@ const FileSharePoolRow: React.FC<{
 /** Extract numeric IOPS value for sorting. */
 export function getIOPSNumber(pool: FileSharePool): number {
   if (pool.spec?.iops != null && pool.spec.iops > 0) return pool.spec.iops;
-  if (pool.spec?.profile === 'dp2' && pool.spec?.shareSizeGB) return pool.spec.shareSizeGB * 100;
   return 0;
 }
 

@@ -44,6 +44,7 @@ import ConditionsTable from '../common/ConditionsTable';
 import { formatAge } from '../../utils/resource-helpers';
 import { usePoolMetrics } from '../../utils/use-pool-metrics';
 import { ROUTES } from '../../constants';
+import { getIOPS } from './FileSharePoolListPage';
 import DeleteModal from '../common/DeleteModal';
 import YAMLEditorFallback from '../common/YAMLEditorFallback';
 
@@ -140,7 +141,7 @@ const FileSharePoolDetailsPage: React.FC = () => {
               </DescriptionListGroup>
               <DescriptionListGroup>
                 <DescriptionListTerm>IOPS</DescriptionListTerm>
-                <DescriptionListDescription>{spec.iops ?? '-'}</DescriptionListDescription>
+                <DescriptionListDescription>{getIOPS(pool)}</DescriptionListDescription>
               </DescriptionListGroup>
               <DescriptionListGroup>
                 <DescriptionListTerm>Max Shares</DescriptionListTerm>
