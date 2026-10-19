@@ -48,6 +48,11 @@ spec:
             - "--golden-image-sync-interval={{ .Values.goldenImageSyncer.interval }}"
             {{- end }}
             - "--driver-image={{ .Values.image.repository }}:{{ .Values.image.tag }}"
+            {{- if .Values.webhook.enabled }}
+            - "--webhook-port={{ .Values.webhook.port }}"
+            {{- else }}
+            - "--enable-webhooks=false"
+            {{- end }}
             {{- if .Values.secretProvider.managed }}
             - "--sidecarEndpoint=/csi/providerfile.sock"
             {{- end }}

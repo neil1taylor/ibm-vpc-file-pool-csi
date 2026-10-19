@@ -1,4 +1,8 @@
 {{- if .Values.webhook.enabled }}
+{{- $caBundle := "" }}
+{{- if eq .Values.webhook.certProvider "manual" }}
+{{- $caBundle = required "webhook.caBundle is required when webhook.certProvider=manual" .Values.webhook.caBundle }}
+{{- end }}
 ---
 apiVersion: v1
 kind: Service
@@ -39,6 +43,9 @@ webhooks:
     sideEffects: None
     failurePolicy: Fail
     clientConfig:
+      {{- with $caBundle }}
+      caBundle: {{ . }}
+      {{- end }}
       service:
         name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-webhook
         namespace: {{ .Release.Namespace }}
@@ -53,6 +60,9 @@ webhooks:
     sideEffects: None
     failurePolicy: Fail
     clientConfig:
+      {{- with $caBundle }}
+      caBundle: {{ . }}
+      {{- end }}
       service:
         name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-webhook
         namespace: {{ .Release.Namespace }}
@@ -67,6 +77,9 @@ webhooks:
     sideEffects: None
     failurePolicy: Fail
     clientConfig:
+      {{- with $caBundle }}
+      caBundle: {{ . }}
+      {{- end }}
       service:
         name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-webhook
         namespace: {{ .Release.Namespace }}
@@ -81,6 +94,9 @@ webhooks:
     sideEffects: None
     failurePolicy: Fail
     clientConfig:
+      {{- with $caBundle }}
+      caBundle: {{ . }}
+      {{- end }}
       service:
         name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-webhook
         namespace: {{ .Release.Namespace }}
@@ -95,6 +111,9 @@ webhooks:
     sideEffects: None
     failurePolicy: Fail
     clientConfig:
+      {{- with $caBundle }}
+      caBundle: {{ . }}
+      {{- end }}
       service:
         name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-webhook
         namespace: {{ .Release.Namespace }}

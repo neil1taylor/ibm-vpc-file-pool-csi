@@ -1059,7 +1059,7 @@ Use fake K8s client, fake VPC client, and fake NFS operations:
 
 ### E2E Tests
 
-Require a live ROKS cluster with Kubernetes 1.27+ and the `CSIVolumeGroupSnapshot` feature gate enabled:
+Require a live ROKS or ROVS cluster with Kubernetes 1.27+ and the `CSIVolumeGroupSnapshot` feature gate enabled:
 
 1. **Basic group snapshot:** Create 3 PVCs, write data to each, create group snapshot, verify all snapshot directories contain correct data.
 2. **Group restore:** Create group snapshot, delete original PVCs, restore from group snapshot, verify data integrity.

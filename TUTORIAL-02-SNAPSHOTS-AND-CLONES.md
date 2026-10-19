@@ -2,7 +2,7 @@
 
 > **Tutorial Series:** [Index](TUTORIAL.md) | [Part 1: Pool Creation](TUTORIAL-01-POOL-CREATION.md) | **Part 2** | [Part 3: Group Snapshots & Hooks](TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md) | [Part 4: Pool Configuration](TUTORIAL-04-POOL-CONFIGURATION.md) | [Part 5: Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md) | [Part 6: Replication & Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md) | [Part 7: Monitoring](TUTORIAL-07-MONITORING.md) | [Part 8: Migration & Console](TUTORIAL-08-MIGRATION-AND-CONSOLE.md)
 
-Step-by-step guide to create point-in-time snapshots, restore data from them, and clone volumes using both synchronous (small volume) and asynchronous (large volume) modes.
+Step-by-step guide to create point-in-time snapshots, restore data from them, and clone volumes. Every clone is asynchronous: a Job copies the data in the background.
 
 **Cluster:** ROKS eu-de (OpenShift Virtualization enabled)
 **Zone:** eu-de-1
@@ -493,9 +493,9 @@ oc delete pod restore-reader restore-modifier original-reader -n ${TUTORIAL_NS} 
 
 ---
 
-## Step 6: Sync Clone (Small Volume)
+## Step 6: Clone a Small Volume
 
-Cloning creates a copy of an existing PVC's data on a new PVC. For small volumes (at or below 10 GB by default), the driver performs a **synchronous clone** -- the data is copied during the `CreateVolume` CSI call, so the PVC is ready immediately when it binds.
+Cloning creates a copy of an existing PVC's data on a new PVC. The driver performs every clone **asynchronously**, however small the volume. `CreateVolume` records the clone and returns, and the clone worker runs a Kubernetes Job that copies the data. A pod that uses the clone waits until the copy is complete.
 
 Create a source PVC with test data:
 
@@ -573,10 +573,10 @@ EOF
 
 **What this does:**
 - The `dataSource` references a PVC (kind: `PersistentVolumeClaim`) with no `apiGroup` -- this tells the CSI driver to clone, not restore from snapshot
-- Because the source is 5 Gi (at or below the 10 GB sync threshold), the driver copies data synchronously during `CreateVolume`
-- The clone PVC binds immediately with all data present
+- The driver creates the SubVolume with `cloneStatus: Pending` and the clone worker copies the data with a Job
+- The clone PVC binds immediately, but a pod that mounts it waits until the copy is complete
 
-> **Note:** The sync/async threshold defaults to 10 GB and can be overridden via the StorageClass parameter `cloneSyncThresholdGB`.
+> **Note:** Earlier versions had a synchronous path for small volumes, set by the StorageClass parameter `cloneSyncThresholdGB`. It was removed. If a StorageClass still sets it, it is ignored.
 
 Wait for the clone PVC to bind:
 
@@ -636,7 +636,7 @@ Check the SubVolume to confirm the clone relationship:
 oc get subvolumes -o wide
 ```
 
-The clone's SubVolume will have `spec.sourceVolume` set to the source SubVolume name. For sync clones, the `status.phase` is `Bound` immediately (no intermediate `Cloning` phase).
+The clone's SubVolume will have `spec.sourceVolume` set to the source SubVolume name. While the copy runs, the `status.phase` is `Cloning`. It becomes `Bound` when the copy is complete.
 
 ```bash
 # Get the SubVolume name for clone-target
@@ -649,7 +649,7 @@ oc get subvolume ${SV_NAME} -o jsonpath='{.status.phase}'
 echo ""
 ```
 
-Expected: `sourceVolume` shows the source SubVolume name, `phase` shows `Bound`.
+Expected: `sourceVolume` shows the source SubVolume name. `phase` shows `Bound` once the clone is complete (the reader pod above starts only after that).
 
 Clean up verification pods:
 
@@ -659,9 +659,9 @@ oc delete pod clone-source-writer clone-reader -n ${TUTORIAL_NS} --force --grace
 
 ---
 
-## Step 7: Async Clone (Large Volume)
+## Step 7: Clone a Larger Volume and Watch Progress
 
-For volumes larger than 10 GB, the driver uses an **asynchronous clone**. The SubVolume is created immediately, but data is copied in the background by the Clone Worker. The CSI `NodePublishVolume` call blocks (returns `codes.Unavailable`) until the clone completes, so kubelet retries automatically -- the pod starts only when data is fully copied.
+Larger clones work the same way, but the copy takes longer, so it is easier to watch. The SubVolume is created immediately, but data is copied in the background by the Clone Worker. The CSI `NodePublishVolume` call blocks (returns `codes.Unavailable`) until the clone completes, so kubelet retries automatically -- the pod starts only when data is fully copied.
 
 Create a large source PVC with test data:
 
@@ -715,7 +715,7 @@ oc get pod large-writer -n ${TUTORIAL_NS} -w
 oc logs large-writer -n ${TUTORIAL_NS}
 ```
 
-Save the checksums. Now create the async clone:
+Save the checksums. Now create the clone:
 
 ```bash
 cat <<EOF | oc apply -f -
@@ -738,8 +738,8 @@ EOF
 ```
 
 **What this does:**
-- The source is 15 Gi (above the 10 GB sync threshold), so the driver creates the SubVolume and marks it for async cloning
-- The Clone Worker (background goroutine in the controller) picks up the pending clone and copies data
+- The driver creates the SubVolume and marks it for cloning
+- The Clone Worker (background goroutine in the controller) picks up the pending clone and runs a Job that copies the data
 - The SubVolume transitions through: `Cloning` phase with `cloneStatus: Pending` -> `cloneStatus: InProgress` -> `cloneStatus: Complete` -> phase `Bound`
 
 The PVC binds immediately, but watch the SubVolume's clone progress:
@@ -820,7 +820,7 @@ spec:
         - sh
         - -c
         - |
-          echo "=== Async-cloned files ==="
+          echo "=== Cloned files ==="
           ls -la /data/
           cat /data/large-test.txt
           echo ""
@@ -844,9 +844,9 @@ oc get pod large-clone-reader -n ${TUTORIAL_NS} -w
 oc logs large-clone-reader -n ${TUTORIAL_NS}
 ```
 
-**Verify:** Checksums match the source. The async clone produced a complete, independent copy.
+**Verify:** Checksums match the source. The clone is a complete, independent copy.
 
-> **How the clone gate works:** When a pod tries to mount an async-cloning PVC, the node agent's `NodePublishVolume` reads the SubVolume CR and checks `status.cloneStatus`. If the status is not `Complete`, it returns a gRPC `codes.Unavailable` error. Kubelet interprets this as a transient failure and retries with exponential backoff. Once the Clone Worker finishes and sets `cloneStatus: Complete`, the next retry succeeds and the pod starts. This ensures pods never see partially-copied data.
+> **How the clone gate works:** When a pod tries to mount a PVC that is still cloning, the node agent's `NodePublishVolume` reads the SubVolume CR and checks `status.cloneStatus`. If the status is not `Complete`, it returns a gRPC `codes.Unavailable` error. Kubelet interprets this as a transient failure and retries with exponential backoff. Once the Clone Worker finishes and sets `cloneStatus: Complete`, the next retry succeeds and the pod starts. This ensures pods never see partially-copied data.
 
 Clean up verification pods:
 
@@ -978,14 +978,11 @@ ibmcloud is shares
 | **Restore** | Create PVC with dataSource -> VolumeSnapshot | N/A (clone is already a PVC) |
 | **Pool capacity** | Snapshot consumes allocated space | Clone PVC consumes allocated space |
 
-### Sync vs Async Clone Threshold
+### How Clones Work
 
-| Volume size | Mode | Behavior |
-|------------|------|----------|
-| At or below 10 GB | Sync | Data copied during CreateVolume. PVC is ready immediately. |
-| Above 10 GB | Async | SubVolume created immediately, Clone Worker copies in background. NodePublishVolume blocks until complete. |
+Every clone is asynchronous, whatever the volume size. The SubVolume is created immediately, and the Clone Worker runs a Job that copies the data in the background. `NodePublishVolume` blocks until the copy is complete.
 
-The threshold is configurable via the StorageClass parameter `cloneSyncThresholdGB`.
+Earlier versions had a synchronous path for small volumes; it was removed. A `cloneSyncThresholdGB` StorageClass parameter is ignored if set.
 
 ---
 

@@ -48,11 +48,10 @@ type mockPoolManager struct {
 	lastRestoreSnapshotReq     pool.AllocationRequest
 
 	// Clone fields
-	cloneVolumeResult        *pool.AllocationResult
-	cloneVolumeErr           error
-	lastCloneSourceVolumeID  string
-	lastCloneReq             pool.AllocationRequest
-	lastCloneSyncThresholdGB int64
+	cloneVolumeResult       *pool.AllocationResult
+	cloneVolumeErr          error
+	lastCloneSourceVolumeID string
+	lastCloneReq            pool.AllocationRequest
 
 	// Group snapshot fields
 	createGroupSnapshotResult *pool.GroupSnapshotResult
@@ -113,10 +112,9 @@ func (m *mockPoolManager) RestoreSnapshot(_ context.Context, snapshotName string
 	return m.restoreSnapshotResult, nil
 }
 
-func (m *mockPoolManager) CloneVolume(_ context.Context, sourceVolumeID string, req pool.AllocationRequest, syncThresholdGB int64) (*pool.AllocationResult, error) {
+func (m *mockPoolManager) CloneVolume(_ context.Context, sourceVolumeID string, req pool.AllocationRequest) (*pool.AllocationResult, error) {
 	m.lastCloneSourceVolumeID = sourceVolumeID
 	m.lastCloneReq = req
-	m.lastCloneSyncThresholdGB = syncThresholdGB
 	if m.cloneVolumeErr != nil {
 		return nil, m.cloneVolumeErr
 	}
@@ -1869,47 +1867,6 @@ func TestCreateVolume_FromClone_InternalError(t *testing.T) {
 
 	assertGRPCCode(t, err, codes.Internal)
 }
-
-func TestCreateVolume_FromClone_CustomSyncThreshold(t *testing.T) {
-	pm := &mockPoolManager{
-		cloneVolumeResult: &pool.AllocationResult{
-			ShareID:       "share-1",
-			MountTargetIP: "10.240.0.1",
-			SubPath:       "/pvcs/pvc-clone",
-			SharePath:     "/",
-		},
-	}
-	d := newTestDriver(pm, nil)
-
-	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
-		Name: "pvc-clone",
-		Parameters: map[string]string{
-			"pool":                 "test-pool",
-			"cloneSyncThresholdGB": "20",
-		},
-		CapacityRange: &csi.CapacityRange{
-			RequiredBytes: gbToBytes(10),
-		},
-		VolumeContentSource: &csi.VolumeContentSource{
-			Type: &csi.VolumeContentSource_Volume{
-				Volume: &csi.VolumeContentSource_VolumeSource{
-					VolumeId: "pool/share/pvc-source",
-				},
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("CreateVolume from clone failed: %v", err)
-	}
-
-	if pm.lastCloneSyncThresholdGB != 20 {
-		t.Errorf("expected sync threshold 20, got %d", pm.lastCloneSyncThresholdGB)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Group Snapshot CSI Handler Tests
-// ---------------------------------------------------------------------------
 
 func TestCreateVolumeGroupSnapshot_MissingName(t *testing.T) {
 	pm := &mockPoolManager{}

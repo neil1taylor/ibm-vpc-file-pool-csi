@@ -8,7 +8,7 @@ For cluster administrators, the driver manages pool lifecycle automatically — 
 
 For workload teams, the driver is invisible: they create standard PVCs and the CSI sidecar routes requests to the pool manager. PVC creation completes in under a second. Volume snapshots, clones, and group snapshots work through the standard CSI interfaces. KubeVirt users get first-class support with correct directory ownership and raw disk image handling.
 
-The driver is purpose-built for IBM Cloud ROKS clusters running on VPC infrastructure. It integrates with the VPC file share API, supports multi-zone mount targets, and authenticates through the same `secret-common-lib` used by the stock IBM CSI drivers.
+The driver is purpose-built for IBM Cloud ROKS and ROVS clusters running on VPC infrastructure. It integrates with the VPC file share API, supports multi-zone mount targets, and authenticates through the same `secret-common-lib` used by the stock IBM CSI drivers.
 
 ### Maturity Legend
 
@@ -53,10 +53,9 @@ Directory-level point-in-time copies via the standard CSI snapshot interface.
 
 ### Volume Cloning — Beta
 
-Dual-mode cloning with automatic strategy selection based on volume size.
+Asynchronous, Job-based cloning for every volume size.
 
-- **Sync mode (<10 GB)** — For same-share clones under the configurable threshold, data copy completes inline before CreateVolume returns.
-- **Async mode (≥10 GB)** — For large or cross-share clones, a SubVolume CR is created with `CloneStatus=Pending` and a background clone worker processes the copy.
+- **Async copy** — CreateVolume creates a SubVolume CR with `CloneStatus=Pending` and returns. The clone worker runs a Kubernetes Job that copies the data (the controller pod has no NFS access).
 - **Same-share preference** — Clones prefer the same share as the source for speed. Falls back to cross-share when capacity requires it.
 - **Clone status gate** — NodePublishVolume returns `Unavailable` for SubVolumes with an in-progress clone, preventing pods from mounting incomplete data.
 - **Crash recovery** — The clone worker recovers incomplete clones on restart by scanning for SubVolumes in Pending/InProgress state.
@@ -169,12 +168,12 @@ Prometheus metrics and structured logging for operational visibility.
 
 ### Deployment — GA
 
-Production-ready packaging for ROKS clusters.
+Production-ready packaging for ROKS and ROVS clusters.
 
 - **Helm chart** — Full customization via `values.yaml`. Configurable image tags, resource limits, node selectors, tolerations, and all driver parameters.
-- **ROKS kubelet path handling** — ROKS uses `/var/data/kubelet` (not `/var/lib/kubelet`). The chart's `node.kubeletDir` defaults to the correct path.
+- **ROKS/ROVS kubelet path handling** — ROKS and ROVS use `/var/data/kubelet` (not `/var/lib/kubelet`). The chart's `node.kubeletDir` defaults to the correct path.
 - **UBI9-based container image** — Built on Red Hat Universal Base Image 9 for enterprise compliance.
-- **cert-manager webhook TLS** — Admission webhooks use cert-manager for automatic certificate provisioning and rotation.
+- **cert-manager webhook TLS** — Admission webhooks use cert-manager for automatic certificate provisioning and rotation. ROVS has no cert-manager; on ROKS and ROVS set `webhook.certProvider=openshift` (see [INSTALL.md — Webhook Certificates](INSTALL.md#webhook-certificates)).
 - **hostNetwork for NFS persistence** — Node DaemonSet runs with `hostNetwork: true` so NFS TCP connections survive container restarts.
 
 ### Migration — Beta
@@ -254,7 +253,7 @@ How this driver compares to the two most common alternatives for NFS-based Kuber
 | **Platform** | | | |
 | IBM VPC API integration | ✅ | ✅ | ❌ |
 | `secret-common-lib` auth | ✅ | ✅ | — |
-| ROKS kubelet path handling | ✅ | ✅ | ❌ |
+| ROKS/ROVS kubelet path handling | ✅ | ✅ | ❌ |
 | KubeVirt UID 107 support | ✅ | ❌ | ❌ |
 | Raw disk image conversion | ✅ | ❌ | ❌ |
 | Multi-tenancy / tiers | ✅ | ❌ | ❌ |

@@ -298,7 +298,7 @@ kubectl delete pod -n kube-system <node-agent-pod>
 
 ## API Key Rotation
 
-### Managed Clusters (ROKS/IKS)
+### Managed Clusters (ROKS/ROVS/IKS)
 
 On managed clusters, the `storage-secret-store` secret is maintained by the platform. API key rotation is handled automatically by the managed service.
 

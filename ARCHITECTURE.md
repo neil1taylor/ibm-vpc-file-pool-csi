@@ -147,9 +147,9 @@ type PoolManager interface {
     RestoreSnapshot(ctx context.Context, snapshotName string, req AllocationRequest) (*AllocationResult, error)
 
     // CloneVolume creates a new SubVolume that is a copy of an existing one.
-    // For small volumes (below syncThreshold), the copy completes before returning.
-    // For large volumes, the copy runs asynchronously.
-    CloneVolume(ctx context.Context, sourceVolumeID string, req AllocationRequest, syncThresholdGB int64) (*AllocationResult, error)
+    // The copy always runs asynchronously: the SubVolume CR is created with
+    // cloneStatus=Pending and the clone worker copies the data with a Job.
+    CloneVolume(ctx context.Context, sourceVolumeID string, req AllocationRequest) (*AllocationResult, error)
 
     // CreateVolumeGroupSnapshot creates snapshots for multiple SubVolumes in sequence.
     // Does NOT execute hooks -- the CSI controller handles hook orchestration.
@@ -209,16 +209,16 @@ All operations are idempotent or check-before-act. All have context-based timeou
 
 ### 5. Clone Worker
 
-Background component within the controller pod that handles asynchronous clone operations for large SubVolumes.
+Background component within the controller pod that handles every volume clone. All clones are asynchronous.
 
 **Responsibilities:**
 - Process SubVolumes with `cloneStatus=Pending` or `cloneStatus=InProgress`.
-- Mount source and target shares (same-share or cross-share) and perform `cp -a` data copy.
+- Create a Kubernetes Job that performs the `cp -a` data copy (same-share or cross-share). The controller pod has no NFS access, so the Job does the copy.
 - Update SubVolume CR status as clone progresses: `Pending` → `InProgress` → `Complete` or `Failed`.
 - Handle crash recovery by restarting incomplete clones on controller restart.
 
 **Does NOT:**
-- Block `CreateVolume` — the CSI controller returns immediately for async clones.
+- Block `CreateVolume` — the CSI controller returns immediately after recording the clone.
 - Allow pod access before clone completes — the node agent gates `NodePublishVolume` on `cloneStatus=Complete`.
 
 ### 6. Replication Controller
@@ -433,20 +433,14 @@ Every 60 seconds (or on FileSharePool CR change):
        │
 3. CSI Controller receives CreateVolume with VolumeContentSource.Volume
        │
-4. Call PoolManager.CloneVolume(ctx, sourceVolumeID, req, syncThresholdGB)
+4. Call PoolManager.CloneVolume(ctx, sourceVolumeID, req)
+       ├─ Create SubVolume CR with cloneStatus=Pending
+       └─ Return immediately (pod will wait)
        │
-       ├─ Source size <= syncThreshold?
-       │
-       ├─ YES (synchronous): cp -a during call, return with cloneStatus=Complete
-       │
-       └─ NO (asynchronous):
-           ├─ Create SubVolume CR with cloneStatus=Pending
-           ├─ Return immediately (pod will wait)
-           │
-           │  (background Clone Worker)
-           ├─ Update CR: cloneStatus=InProgress
-           ├─ cp -a from source to target
-           └─ Update CR: cloneStatus=Complete or Failed
+       │  (background Clone Worker)
+       ├─ Update CR: cloneStatus=InProgress
+       ├─ Create a Job that runs cp -a from source to target
+       └─ Update CR: cloneStatus=Complete or Failed
        │
 5. NodePublishVolume gates pod access on cloneStatus=Complete
        (kubelet retries with backoff until clone finishes)
@@ -489,7 +483,7 @@ The controller ServiceAccount needs:
 - CSINode: get, list, watch
 
 ### Secrets
-- On managed clusters (ROKS/IKS), authentication is provided by the `storage-secret-sidecar` which populates the `storage-secret-store` secret. No standalone API key secret is needed.
+- On managed clusters (ROKS/ROVS/IKS), authentication is provided by the `storage-secret-sidecar` which populates the `storage-secret-store` secret. No standalone API key secret is needed.
 - On self-managed clusters, an IBM Cloud API key is stored in a Kubernetes Secret (`ibm-cloud-credentials`).
 - Never logged, never included in CRD status or events.
 

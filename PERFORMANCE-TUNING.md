@@ -355,7 +355,7 @@ echo 128 > /proc/sys/sunrpc/tcp_slot_table_entries
 
 This allows more concurrent NFS RPC calls per mount, which improves throughput for workloads with many parallel readers/writers.
 
-**On ROKS/IKS:** Worker node tuning requires a DaemonSet with privileged access to modify sysctl settings. Example:
+**On ROKS/ROVS/IKS:** Worker node tuning requires a DaemonSet with privileged access to modify sysctl settings. Example:
 
 ```yaml
 apiVersion: apps/v1

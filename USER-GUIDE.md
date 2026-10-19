@@ -523,9 +523,7 @@ kubectl apply -f clone-pvc.yaml
 kubectl get subvolumes -l storage.ibmcloud.io/clone-source
 ```
 
-**Small volumes** (default: <= 10 GB) clone synchronously — the PVC binds immediately with data ready.
-
-**Large volumes** clone asynchronously — the PVC binds immediately but pods wait in `ContainerCreating` until the background copy completes. Monitor progress via the SubVolume CR's `cloneStatus` field.
+Every clone is asynchronous, whatever the volume size. The PVC binds immediately but pods wait in `ContainerCreating` until the background copy completes. Monitor progress via the SubVolume CR's `cloneStatus` field.
 
 ### Clone Consistency
 
@@ -695,7 +693,7 @@ UID/GID mismatch between the pod's `securityContext` and the StorageClass's `uid
 ## Frequently Asked Questions
 
 **Q: Can I use this with OpenShift?**
-Yes. The driver is fully compatible with ROKS (Red Hat OpenShift on IBM Cloud). On OpenShift, the node agent requires the `privileged` SCC, which is standard for all CSI node agents. The Helm chart includes the necessary SCC configuration.
+Yes. The driver is fully compatible with ROKS and ROVS (Red Hat OpenShift on IBM Cloud). On OpenShift, the node agent requires the `privileged` SCC, which is standard for all CSI node agents. The Helm chart includes the necessary SCC configuration.
 
 **Q: What happens if a VPC file share goes down?**
 All PVCs on that share will experience I/O errors until the share recovers. IBM VPC File Storage has 99.999% availability with HA-paired nodes, so this is extremely rare. The pool manager will detect the degraded state and stop allocating new PVCs to that share. Existing PVCs recover automatically when the share comes back.

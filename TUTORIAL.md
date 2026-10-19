@@ -11,7 +11,7 @@ Hands-on tutorials covering every major capability of the pool CSI driver. Each 
 | Part | Tutorial | What You'll Learn |
 |------|----------|-------------------|
 | 1 | [Pool Creation, PVCs, and KubeVirt VMs](TUTORIAL-01-POOL-CREATION.md) | Create a pool, provision PVCs, launch a VM with NFS-backed boot and data disks |
-| 2 | [Snapshots and Clones](TUTORIAL-02-SNAPSHOTS-AND-CLONES.md) | Point-in-time snapshots, restore from snapshot, sync clones (<10 GB) and async clones (>10 GB) |
+| 2 | [Snapshots and Clones](TUTORIAL-02-SNAPSHOTS-AND-CLONES.md) | Point-in-time snapshots, restore from snapshot, clones (asynchronous, Job-based) |
 | 3 | [Group Snapshots and Hooks](TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md) | Coordinated multi-PVC snapshots, exec and HTTP lifecycle hooks, failure policies |
 | 4 | [Pool Configuration](TUTORIAL-04-POOL-CONFIGURATION.md) | Multi-tier pools, spread vs binpack strategies, auto-expansion, share draining |
 | 5 | [Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md) | CDI native mode and custom syncer for automatic KubeVirt golden image provisioning |
@@ -42,7 +42,7 @@ Parts 2-8 are independent of each other — pick whichever is relevant to your u
 
 Every tutorial assumes:
 
-1. **ROKS cluster** with OpenShift Virtualization enabled (for VM tutorials)
+1. **ROKS or ROVS cluster** with OpenShift Virtualization enabled (for VM tutorials)
 2. **CSI driver deployed** — controller and node pods running:
    ```bash
    oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi

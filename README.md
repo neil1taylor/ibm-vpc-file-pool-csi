@@ -51,7 +51,7 @@ IBM VPC Client ──► VPC File Share API
 | CSI Node Agent | `pkg/driver/node.go` | NFS mount + bind-mount into pods |
 | Pool Manager | `pkg/pool/manager.go` | Core brain: allocation, deallocation, expansion, snapshots, clones |
 | Share Selection | `pkg/pool/share.go` | Spread (most free) or binpack (least free) strategy |
-| Clone Worker | `pkg/pool/clone_worker.go` | Async clone operations for large volumes |
+| Clone Worker | `pkg/pool/clone_worker.go` | Async clone operations |
 | Replication Controller | `pkg/pool/replication_controller.go` | Cross-region disaster recovery with incremental rsync |
 | Hook Orchestrator | `pkg/hooks/` | Lifecycle hooks (exec + HTTP) for replication and group snapshots |
 | Admission Webhooks | `pkg/webhook/` | Validating webhooks for all CRD types |
@@ -86,7 +86,7 @@ IBM VPC Client ──► VPC File Share API
 | **Draining** | Share state where no new PVCs are allocated but existing PVCs continue to work; used to decommission a share gracefully |
 | **Expanding** | Pool state when a new VPC file share is being created because utilization crossed the `expandThresholdPercent` threshold |
 | **Golden Image** | A pre-configured VM boot disk image (e.g., CentOS, Fedora) provisioned on pool storage for rapid VM creation via cloning |
-| **Clone Worker** | Background goroutine that copies data for large (>10 GB) volume clones asynchronously, allowing `CreateVolume` to return immediately |
+| **Clone Worker** | Background goroutine that copies data for volume clones asynchronously with a Kubernetes Job, allowing `CreateVolume` to return immediately |
 | **Hook Orchestrator** | Component that executes lifecycle hooks (exec commands or HTTP webhooks) before/after replication syncs and group snapshots |
 | **Incremental Sync** | rsync-based replication that transfers only changed files between source and destination, instead of full directory copies |
 
@@ -214,7 +214,7 @@ spec:
 make build          # Build binary
 make test           # Unit tests with race detector
 make test-coverage  # Tests with coverage report
-make test-vm        # VM clone E2E test (requires ROKS + OCV)
+make test-vm        # VM clone E2E test (requires ROKS or ROVS + OCV)
 make lint           # golangci-lint
 make generate       # Regenerate CRD types and DeepCopy
 ```

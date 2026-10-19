@@ -85,7 +85,7 @@ All NFS traffic stays within the VPC private network. No traffic traverses the p
 
 ## VPC Configuration Sources
 
-The driver discovers VPC configuration from secrets and ConfigMaps that already exist on managed ROKS/IKS clusters:
+The driver discovers VPC configuration from secrets and ConfigMaps that already exist on managed ROKS/ROVS/IKS clusters:
 
 | Config | Source | Example |
 |--------|--------|---------|
@@ -106,7 +106,7 @@ The driver prefers **private endpoints** so VPC API traffic stays on the IBM Clo
 | 2nd | `https://{region}.iaas.cloud.ibm.com/v1` | Clusters with public endpoints |
 | 3rd | Constructed from region name | Fallback |
 
-On managed ROKS/IKS clusters with private service endpoints enabled, all VPC API calls stay within the IBM network.
+On managed ROKS/ROVS/IKS clusters with private service endpoints enabled, all VPC API calls stay within the IBM network.
 
 ## Security Group Requirements
 

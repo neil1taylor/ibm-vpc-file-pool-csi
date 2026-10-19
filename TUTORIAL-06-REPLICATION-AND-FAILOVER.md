@@ -11,7 +11,7 @@ Step-by-step guide to setting up cross-region disaster recovery replication betw
 
 ## Prerequisites
 
-You need **two** ROKS clusters with the CSI driver deployed (source and destination). For a single-cluster walkthrough, you can use the same cluster for both roles.
+You need **two** ROKS or ROVS clusters with the CSI driver deployed (source and destination). For a single-cluster walkthrough, you can use the same cluster for both roles.
 
 Verify the CSI driver is running on the **source** cluster:
 

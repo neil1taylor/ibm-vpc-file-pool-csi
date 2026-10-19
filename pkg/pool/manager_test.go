@@ -11,6 +11,7 @@ import (
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud/fake"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
+	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -2856,7 +2857,6 @@ func TestCloneVolume_SyncDisabled_AlwaysAsync(t *testing.T) {
 			PoolName:     "test-pool",
 			RequestedGB:  5,
 		},
-		10, // syncThreshold = 10 GB (ignored — sync always disabled)
 	)
 	if err != nil {
 		t.Fatalf("CloneVolume failed: %v", err)
@@ -2916,7 +2916,6 @@ func TestCloneVolume_AsyncPath(t *testing.T) {
 			PoolName:     "test-pool",
 			RequestedGB:  20,
 		},
-		10, // syncThreshold = 10 GB (source is 20 GB, so async)
 	)
 	if err != nil {
 		t.Fatalf("CloneVolume failed: %v", err)
@@ -2969,7 +2968,6 @@ func TestCloneVolume_SameShare(t *testing.T) {
 			PoolName:     "test-pool",
 			RequestedGB:  5,
 		},
-		10,
 	)
 	if err != nil {
 		t.Fatalf("CloneVolume failed: %v", err)
@@ -3007,7 +3005,6 @@ func TestCloneVolume_CrossShare(t *testing.T) {
 			PoolName:     "test-pool",
 			RequestedGB:  10,
 		},
-		10,
 	)
 	if err != nil {
 		t.Fatalf("CloneVolume failed: %v", err)
@@ -3049,7 +3046,6 @@ func TestCloneVolume_SourceNotFound(t *testing.T) {
 			PoolName:     "test-pool",
 			RequestedGB:  5,
 		},
-		10,
 	)
 
 	if !errors.Is(err, ErrSourceNotFound) {
@@ -3083,7 +3079,6 @@ func TestCloneVolume_InsufficientCapacity(t *testing.T) {
 			PoolName:     "test-pool",
 			RequestedGB:  5,
 		},
-		10,
 	)
 
 	if !errors.Is(err, ErrPoolExhausted) {
@@ -3115,7 +3110,6 @@ func TestCloneVolume_SizeTooSmall(t *testing.T) {
 			PoolName:     "test-pool",
 			RequestedGB:  10, // less than source's 50 GB
 		},
-		10,
 	)
 
 	if err == nil {
@@ -3156,7 +3150,6 @@ func TestCloneVolume_Idempotent(t *testing.T) {
 			PoolName:     "test-pool",
 			RequestedGB:  5,
 		},
-		10,
 	)
 	if err != nil {
 		t.Fatalf("idempotent CloneVolume failed: %v", err)
@@ -3199,7 +3192,6 @@ func TestCloneVolume_SyncDisabled_NoNFSCopyAttempted(t *testing.T) {
 			PoolName:     "test-pool",
 			RequestedGB:  5,
 		},
-		10,
 	)
 
 	if err != nil {
@@ -3248,7 +3240,6 @@ func TestCloneVolume_UpdatesPoolCapacity(t *testing.T) {
 			PoolName:     "test-pool",
 			RequestedGB:  5,
 		},
-		10,
 	)
 	if err != nil {
 		t.Fatalf("CloneVolume failed: %v", err)
@@ -3700,4 +3691,28 @@ func searchString(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// The clone duration metric measures the copy, which the clone worker does.
+// Accepting the clone request must not record a duration of a few milliseconds.
+func TestCloneVolume_DoesNotRecordCloneDuration(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	k.addPool(newTestPool("dur-pool", "spread", 1000, newStableShare("share-1", "s1", 1000, 100, 1)))
+	k.addSubVolume(newTestSubVolume("pvc-aaaa1111-2222-3333-4444-555566667777", "dur-pool", "share-1", 5))
+	metrics.CloneDuration.Reset()
+
+	_, err := newManagerForTest(k, vpc, newFakeNFSOperations()).CloneVolume(context.Background(),
+		"dur-pool/share-1/pvc-aaaa1111-2222-3333-4444-555566667777",
+		AllocationRequest{PVName: testPVName, PVCName: "c", PVCNamespace: "default", PoolName: "dur-pool", RequestedGB: 5},
+	)
+	if err != nil {
+		t.Fatalf("CloneVolume failed: %v", err)
+	}
+	series := make(chan prometheus.Metric, 10)
+	metrics.CloneDuration.Collect(series)
+	close(series)
+	if n := len(series); n != 0 {
+		t.Errorf("clone duration series = %d, want 0 before the copy runs", n)
+	}
 }

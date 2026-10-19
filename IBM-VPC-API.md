@@ -13,7 +13,7 @@ go get github.com/IBM/vpc-go-sdk@latest
 
 ## Authentication — Using secret-common-lib
 
-**We reuse the same authentication infrastructure as the stock IBM CSI drivers.** This means our driver works out of the box on any ROKS/IKS cluster — no separate API key setup required.
+**We reuse the same authentication infrastructure as the stock IBM CSI drivers.** This means our driver works out of the box on any ROKS/ROVS/IKS cluster — no separate API key setup required.
 
 Import the shared library:
 ```bash
@@ -22,7 +22,7 @@ go get github.com/IBM/secret-common-lib@latest
 
 ### How It Works
 
-IBM's `secret-common-lib` reads credentials from Kubernetes secrets that already exist on managed ROKS/IKS clusters. It supports two authentication methods:
+IBM's `secret-common-lib` reads credentials from Kubernetes secrets that already exist on managed ROKS/ROVS/IKS clusters. It supports two authentication methods:
 
 1. **API key** — `IBMCLOUD_AUTHTYPE=iam` + `IBMCLOUD_APIKEY` (traditional)
 2. **Pod identity / Trusted profiles** — `IBMCLOUD_AUTHTYPE=pod-identity` + `IBMCLOUD_PROFILEID` (no long-lived keys)
@@ -35,7 +35,7 @@ The library checks credentials in this order:
 1. `ibm-cloud-credentials` secret (key: `ibm-credentials.env`) — **preferred**
 2. `storage-secret-store` secret (key: `slclient.toml`) — **legacy fallback**
 
-On managed ROKS/IKS clusters, `storage-secret-store` is pre-populated by the add-on system. The `ibm-cloud-credentials` secret is the newer format and supports pod identity.
+On managed ROKS/ROVS/IKS clusters, `storage-secret-store` is pre-populated by the add-on system. The `ibm-cloud-credentials` secret is the newer format and supports pod identity.
 
 ### Kubernetes Secrets Format
 
@@ -75,10 +75,10 @@ The library and our driver also read these ConfigMaps (pre-populated on managed 
 
 | Mode | `IKS_ENABLED` env | How It Works |
 |------|-------------------|--------------|
-| **Managed** (ROKS/IKS) | `true` | Sidecar container watches secrets, auto-refreshes tokens via projected service account token, LRU cache for multi-secret support |
+| **Managed** (ROKS/ROVS/IKS) | `true` | Sidecar container watches secrets, auto-refreshes tokens via projected service account token, LRU cache for multi-secret support |
 | **Unmanaged** (self-managed OCP/K8s) | `false` | Reads secret directly in-process, no auto-refresh, pod restart required on key rotation |
 
-On ROKS/IKS clusters, use managed mode. On self-managed clusters, use unmanaged mode.
+On ROKS/ROVS/IKS clusters, use managed mode. On self-managed clusters, use unmanaged mode.
 
 ### Client Initialization
 
@@ -626,7 +626,7 @@ The IBM VPC client reads configuration from the cluster's existing secrets and c
 
 | Config | Source | Description |
 |--------|--------|-------------|
-| **IAM credentials** | `ibm-cloud-credentials` or `storage-secret-store` secret (via secret-common-lib) | API key or pod identity — already present on managed ROKS/IKS clusters |
+| **IAM credentials** | `ibm-cloud-credentials` or `storage-secret-store` secret (via secret-common-lib) | API key or pod identity — already present on managed ROKS/ROVS/IKS clusters |
 | **VPC API endpoint** | secret-common-lib `GetRIAASEndpoint()` or derived from zone | Supports private endpoints automatically |
 | **Resource group ID** | secret-common-lib `GetResourceGroupID()` or `FileSharePool.spec.resourceGroup` | Pool spec overrides if set |
 | `region` | Derived from FileSharePool.spec.zone (e.g., "us-south" from "us-south-1") | VPC API region |

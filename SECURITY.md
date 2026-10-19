@@ -31,7 +31,7 @@ The IBM VPC File Pool CSI Driver incorporates several security properties by des
 - **Soft NFS mounts by default** — mount options default to `soft,timeo=600,retrans=3`. Custom StorageClass mount flags are merged with (not replaced by) these safe defaults, so `soft` is always present unless explicitly overridden with `hard`. This prevents accidental removal of the `soft` safety net.
 - **Webhook cert isolation** — webhook TLS certificate secret volumes use `defaultMode: 0400`, restricting private key access to the owner (the controller container).
 - **RBAC least-privilege** — the controller ServiceAccount has only the permissions required to watch/update FileSharePool and SubVolume CRs, read ConfigMaps for VPC config, and manage PV/PVC objects. The node agent ServiceAccount is further restricted to node-level operations.
-- **Secret isolation** — on managed ROKS/IKS clusters, IBM Cloud API keys are injected by the `storage-secret-sidecar` and never stored in user-accessible ConfigMaps or PVC annotations.
+- **Secret isolation** — on managed ROKS/ROVS/IKS clusters, IBM Cloud API keys are injected by the `storage-secret-sidecar` and never stored in user-accessible ConfigMaps or PVC annotations.
 
 ## Hardening Checklist
 
@@ -39,7 +39,7 @@ When deploying in production, consider the following hardening measures:
 
 ### NFS Encryption in Transit
 
-IBM Cloud VPC File Storage offers optional encryption in transit (IPsec), but it is **not supported** on bare metal servers or RHCOS-based instances (including ROKS worker nodes). NFS traffic within the VPC is unencrypted. Rely on VPC network isolation and security groups to protect NFS traffic. See `KNOWN-LIMITATIONS.md` for details.
+IBM Cloud VPC File Storage offers optional encryption in transit (IPsec), but it is **not supported** on bare metal servers or RHCOS-based instances (including ROKS and ROVS worker nodes). NFS traffic within the VPC is unencrypted. Rely on VPC network isolation and security groups to protect NFS traffic. See `KNOWN-LIMITATIONS.md` for details.
 
 ### Network Policies
 

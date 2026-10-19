@@ -228,8 +228,8 @@ make test-e2e                 # E2E tests (requires live cluster, //go:build e2e
 
 ### When implementing volume cloning (Phase 4b)
 - Read `VOLUME-CLONING.md` first
-- Clones use `PoolManager.CloneVolume()` — sync for small volumes, async for large
-- The clone worker (`pkg/pool/clone_worker.go`) handles async clones in the background
+- Clones use `PoolManager.CloneVolume()` — always async
+- The clone worker (`pkg/pool/clone_worker.go`) handles clones in the background (it creates a copy Job)
 - NodePublishVolume gates pod access on `cloneStatus=Complete` — pods wait until clone finishes
 - Share selection prefers the source share when it has capacity (same-share clone is faster)
 

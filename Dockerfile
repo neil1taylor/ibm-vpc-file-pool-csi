@@ -6,7 +6,9 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /vpc-file-pool-csi ./cmd/
+# VERSION is stamped into the binary and logged at startup; `make docker-build` sets it.
+ARG VERSION=dev
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.version=${VERSION}" -o /vpc-file-pool-csi ./cmd/
 
 # Runtime stage
 FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
