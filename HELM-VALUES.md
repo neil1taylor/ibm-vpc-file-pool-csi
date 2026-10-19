@@ -117,7 +117,7 @@ Controller-side replication Job configuration.
 |-----------|------|---------|-------------|
 | `webhook.enabled` | bool | `true` | Enable validating admission webhooks for CRD resources |
 | `webhook.port` | int | `9443` | Webhook server port |
-| `webhook.certProvider` | string | `cert-manager` | Certificate provisioning method: `cert-manager` (auto-provisions via cert-manager) or `manual` (you create the TLS secret) |
+| `webhook.certProvider` | string | `cert-manager` | Certificate provisioning method: `cert-manager` (auto-provisions via cert-manager), `openshift` (uses the built-in OpenShift service CA; no extra operator) or `manual` (you create the TLS secret) |
 | `webhook.certManager.issuerKind` | string | `Issuer` | cert-manager issuer kind. Only used when `certProvider=cert-manager` |
 | `webhook.certManager.issuerName` | string | `""` | cert-manager issuer name. Leave empty to create a self-signed Issuer automatically |
 

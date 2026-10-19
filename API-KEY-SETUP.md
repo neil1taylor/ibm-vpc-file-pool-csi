@@ -31,7 +31,36 @@ kubectl get configmap ibm-cloud-provider-data -n kube-system
 kubectl get configmap ibm-cloud-cluster-info -n kube-system
 ```
 
-If `storage-secret-store` exists, the driver will work. That's it.
+If `storage-secret-store` exists and holds an API key, the driver will work. That's it.
+
+### Clusters That Use a Trusted Profile (ROKS or ROVS)
+
+Some managed clusters do not store an API key. They log in to IBM Cloud with a cluster trusted profile instead. A trusted profile trusts only the Kubernetes service accounts linked to it, which by default are the stock IBM file CSI driver's accounts. The driver then fails to start, and the `storage-secret-sidecar` container logs:
+
+```
+Error fetching iam token using trusted profile ... Selected trusted profile not eligible.
+```
+
+To fix it, link the driver's controller service account to the cluster's trusted profile:
+
+```bash
+# Find the profile: it has links for ibm-vpc-file-controller-sa
+ibmcloud iam trusted-profiles
+ibmcloud iam trusted-profile-links <profile-id>
+
+# Link the driver's controller service account
+ibmcloud iam trusted-profile-link-create <profile-id> \
+  --name link-ibm-vpc-file-pool-csi-controller \
+  --cr-type ROKS_SA \
+  --link-crn crn:v1:bluemix:public:containers-kubernetes:<region>:a/<account-id>:<cluster-id>:: \
+  --link-namespace kube-system \
+  --link-name ibm-vpc-file-pool-csi-controller
+
+# Restart the controller
+kubectl rollout restart deployment/ibm-vpc-file-pool-csi-controller -n kube-system
+```
+
+Copy the `--link-crn` value from the existing `ibm-vpc-file-controller-sa` link. The driver then has the same access as the stock file driver. Check that the profile has at least the permissions in [Minimum IAM Permissions](#minimum-iam-permissions).
 
 ### How It Works on Managed Clusters
 

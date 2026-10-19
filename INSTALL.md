@@ -39,9 +39,13 @@ Each step is covered in detail below.
 - A VPC with at least one subnet in the target availability zone
 - Security groups on worker nodes must allow **TCP port 2049** (NFS) inbound and outbound — this is the port that NFS (Network File System) uses to share files over the network
 
-### cert-manager (for Admission Webhooks)
+### Webhook Certificates
 
-The driver uses **admission webhooks** — these are Kubernetes guards that validate your configuration before accepting it (e.g., rejecting a FileSharePool with an invalid zone). Webhooks require TLS certificates for secure communication. [cert-manager](https://cert-manager.io/) automates certificate creation:
+The driver uses **admission webhooks** — these are Kubernetes guards that validate your configuration before accepting it (e.g., rejecting a FileSharePool with an invalid zone). Webhooks require TLS certificates for secure communication.
+
+**On OpenShift (ROKS or ROVS), the simplest choice is the built-in service CA.** Set `webhook.certProvider=openshift`. It needs no extra operator. ROVS clusters do not include cert-manager.
+
+To use [cert-manager](https://cert-manager.io/) instead (the chart default):
 
 ```bash
 # Install cert-manager if not already present
@@ -262,6 +266,16 @@ helm upgrade --install ibm-vpc-file-pool-csi \
 kubectl get secret all-icr-io -n kube-system
 ```
 
+On some clusters, including ROVS, `all-icr-io` exists only in the `default` namespace. Copy it into `kube-system`:
+
+```bash
+kubectl get secret all-icr-io -n default -o json \
+  | jq 'del(.metadata.namespace,.metadata.uid,.metadata.resourceVersion,.metadata.creationTimestamp,.metadata.managedFields,.metadata.ownerReferences)' \
+  | kubectl apply -n kube-system -f -
+```
+
+**ROVS note:** Red Hat OpenShift Virtualization Service (ROVS) clusters have the same kubelet path as ROKS. They do not include cert-manager, so set `webhook.certProvider=openshift`. If the cluster logs in to IBM Cloud with a trusted profile, link the driver's service account to it first. See [API-KEY-SETUP.md](API-KEY-SETUP.md#clusters-that-use-a-trusted-profile-roks-or-rovs).
+
 **ROKS note:** On Red Hat OpenShift on IBM Cloud (ROKS), the kubelet root directory is `/var/data/kubelet` (not the standard `/var/lib/kubelet`). The kubelet is the agent on each node that manages pods — the CSI node agent needs to know where it stores volume data. Add `node.kubeletDir`:
 
 ```bash
@@ -294,7 +308,7 @@ helm upgrade --install ibm-vpc-file-pool-csi \
 | `logLevel` | No | `4` | klog verbosity (2=normal, 4=detailed, 6=trace) |
 | `webhook.enabled` | No | `true` | Enable validating admission webhooks |
 | `webhook.port` | No | `9443` | Webhook server port |
-| `webhook.certProvider` | No | `cert-manager` | TLS certificate provider: `cert-manager` or `manual` |
+| `webhook.certProvider` | No | `cert-manager` | TLS certificate provider: `cert-manager`, `openshift` or `manual` |
 | `cloneWorker.interval` | No | `10s` | Background clone worker poll interval |
 | `goldenImageSyncer.interval` | No | `5m` | Golden image syncer poll interval |
 | `secretProvider.managed` | No | `true` | Enable managed secret provider sidecar (ROKS/IKS) |

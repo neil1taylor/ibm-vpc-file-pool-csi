@@ -52,7 +52,7 @@ generate: tools
 CONTAINER_ENGINE := $(shell command -v docker 2>/dev/null || command -v podman 2>/dev/null)
 
 docker-build:
-	$(CONTAINER_ENGINE) build -t $(IMAGE_NAME):$(VERSION) .
+	$(CONTAINER_ENGINE) build --platform linux/amd64 -t $(IMAGE_NAME):$(VERSION) .
 
 install-crds:
 	kubectl apply -f config/crd/
@@ -111,7 +111,7 @@ console-plugin-test: console-plugin-install
 	cd console-plugin && yarn test
 
 console-plugin-docker-build:
-	$(CONTAINER_ENGINE) build -t $(CONSOLE_PLUGIN_IMAGE):$(VERSION) console-plugin/
+	$(CONTAINER_ENGINE) build --platform linux/amd64 -t $(CONSOLE_PLUGIN_IMAGE):$(VERSION) console-plugin/
 
 console-plugin-test-e2e-setup: console-plugin-install
 	cd console-plugin && yarn test:e2e:setup
