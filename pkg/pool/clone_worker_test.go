@@ -66,15 +66,6 @@ func newPendingClone(pvName, poolName, shareID, sourceVolume string, requestedGB
 	}
 }
 
-// newInProgressClone creates a SubVolume CR representing a clone in InProgress state.
-func newInProgressClone(pvName, poolName, shareID, sourceVolume string, requestedGB int64) *v1alpha1.SubVolume {
-	sv := newPendingClone(pvName, poolName, shareID, sourceVolume, requestedGB)
-	sv.Status.CloneStatus = "InProgress"
-	now := metav1.Now()
-	sv.Status.CloneProgress.StartedAt = &now
-	return sv
-}
-
 func newCloneWorkerForTest(k8s *fakeK8sClient, dc client.Client) *CloneWorker {
 	w := NewCloneWorker(k8s, dc, DefaultCloneImage)
 	w.SetInterval(50 * time.Millisecond)

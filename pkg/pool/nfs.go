@@ -58,10 +58,10 @@ func (r *realNFSOperations) MkdirAsUser(path string, perm os.FileMode, uid, gid 
 	// On NFS with root_squash, root maps to 65534 and umask may reduce 0777 to 0755,
 	// so we explicitly chmod after mkdir to ensure the target user can write.
 	parent := filepath.Dir(path)
-	if err := os.MkdirAll(parent, 0777); err != nil {
+	if err := os.MkdirAll(parent, 0777); err != nil { //nolint:gosec // G301: 0777 is deliberate, root_squash maps root to nobody and the target user must write here
 		return fmt.Errorf("mkdir parent %s: %w", parent, err)
 	}
-	if err := os.Chmod(parent, 0777); err != nil {
+	if err := os.Chmod(parent, 0777); err != nil { //nolint:gosec // G302: 0777 is deliberate, see MkdirAll above
 		return fmt.Errorf("chmod parent %s: %w", parent, err)
 	}
 	cmd := exec.Command("mkdir", path)
@@ -129,5 +129,5 @@ func (r *realNFSOperations) WriteFile(path string, data []byte, perm os.FileMode
 }
 
 func (r *realNFSOperations) ReadFile(path string) ([]byte, error) {
-	return os.ReadFile(path)
+	return os.ReadFile(path) //nolint:gosec // G304: the only caller builds the path from a directory listing under the NFS mount
 }

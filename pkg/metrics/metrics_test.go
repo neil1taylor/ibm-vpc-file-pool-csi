@@ -8,6 +8,18 @@ import (
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
+// writeObserver writes the current state of a histogram observer into m.
+func writeObserver(t *testing.T, o prometheus.Observer, m *dto.Metric) {
+	t.Helper()
+	pm, ok := o.(prometheus.Metric)
+	if !ok {
+		t.Fatalf("observer %T is not a prometheus.Metric", o)
+	}
+	if err := pm.Write(m); err != nil {
+		t.Fatalf("failed to write metric: %v", err)
+	}
+}
+
 func TestAllocationsTotal_Increment(t *testing.T) {
 	AllocationsTotal.WithLabelValues("test-pool", "success").Inc()
 
@@ -24,9 +36,7 @@ func TestAllocationDuration_Observe(t *testing.T) {
 	AllocationDuration.WithLabelValues("test-pool").Observe(0.5)
 
 	var m dto.Metric
-	if err := AllocationDuration.WithLabelValues("test-pool").(prometheus.Metric).Write(&m); err != nil {
-		t.Fatalf("failed to write metric: %v", err)
-	}
+	writeObserver(t, AllocationDuration.WithLabelValues("test-pool"), &m)
 	if m.Histogram == nil || *m.Histogram.SampleCount < 1 {
 		t.Error("expected histogram sample count to be at least 1")
 	}
@@ -75,9 +85,7 @@ func TestVPCAPICallDuration_Observe(t *testing.T) {
 	VPCAPICallDuration.WithLabelValues("create_share").Observe(1.5)
 
 	var m dto.Metric
-	if err := VPCAPICallDuration.WithLabelValues("create_share").(prometheus.Metric).Write(&m); err != nil {
-		t.Fatalf("failed to write metric: %v", err)
-	}
+	writeObserver(t, VPCAPICallDuration.WithLabelValues("create_share"), &m)
 	if m.Histogram == nil || *m.Histogram.SampleCount < 1 {
 		t.Error("expected histogram sample count to be at least 1")
 	}
@@ -99,9 +107,7 @@ func TestSnapshotDuration_Observe(t *testing.T) {
 	SnapshotDuration.WithLabelValues("test-pool", "create").Observe(0.5)
 
 	var m dto.Metric
-	if err := SnapshotDuration.WithLabelValues("test-pool", "create").(prometheus.Metric).Write(&m); err != nil {
-		t.Fatalf("failed to write metric: %v", err)
-	}
+	writeObserver(t, SnapshotDuration.WithLabelValues("test-pool", "create"), &m)
 	if m.Histogram == nil || *m.Histogram.SampleCount < 1 {
 		t.Error("expected histogram sample count to be at least 1")
 	}

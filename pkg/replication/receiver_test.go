@@ -3,15 +3,8 @@ package replication
 import (
 	"archive/tar"
 	"bytes"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
-	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/json"
-	"encoding/pem"
 	"io"
-	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,7 +12,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 )
 
 func createTestReceiver(t *testing.T) (*Receiver, string) {
@@ -207,9 +199,15 @@ func TestReceiver_Sync_PathTraversalInTar(t *testing.T) {
 		Mode: 0644,
 		Size: 4,
 	}
-	tw.WriteHeader(hdr)
-	tw.Write([]byte("evil"))
-	tw.Close()
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte("evil")); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	req := httptest.NewRequest(http.MethodPut,
 		"/api/v1/sync/pvc-12345678-1234-1234-1234-123456789abc?basePath=/pvcs&subPath=pvc-12345678-1234-1234-1234-123456789abc",
@@ -234,9 +232,15 @@ func TestReceiver_Sync_AbsolutePathInTar(t *testing.T) {
 		Mode: 0644,
 		Size: 4,
 	}
-	tw.WriteHeader(hdr)
-	tw.Write([]byte("evil"))
-	tw.Close()
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte("evil")); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	req := httptest.NewRequest(http.MethodPut,
 		"/api/v1/sync/pvc-12345678-1234-1234-1234-123456789abc?basePath=/pvcs&subPath=pvc-12345678-1234-1234-1234-123456789abc",
@@ -695,7 +699,7 @@ func TestReceiver_TLS_Integration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HTTPS health check failed: %v", err)
 	}
-	resp.Body.Close()
+	closeBody(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
@@ -711,7 +715,7 @@ func TestReceiver_TLS_Integration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HTTPS sync request failed: %v", err)
 	}
-	syncResp.Body.Close()
+	closeBody(syncResp.Body)
 	if syncResp.StatusCode != http.StatusOK {
 		t.Fatalf("sync expected 200, got %d", syncResp.StatusCode)
 	}
@@ -742,34 +746,6 @@ func TestReceiver_SetTLS_Fields(t *testing.T) {
 	}
 }
 
-// generateSelfSignedCert creates a self-signed certificate PEM for testing.
-func generateSelfSignedCert(t *testing.T) (certPEM, keyPEM []byte) {
-	t.Helper()
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatalf("generating key: %v", err)
-	}
-	tmpl := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{CommonName: "test"},
-		NotBefore:    time.Now(),
-		NotAfter:     time.Now().Add(time.Hour),
-		KeyUsage:     x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		DNSNames:     []string{"localhost"},
-		IsCA:         true,
-		BasicConstraintsValid: true,
-	}
-	certDER, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
-	if err != nil {
-		t.Fatalf("creating cert: %v", err)
-	}
-	certPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
-	keyDER, _ := x509.MarshalECPrivateKey(key)
-	keyPEM = pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
-	return certPEM, keyPEM
-}
-
 // Receiver integration test with httptest.Server.
 func TestReceiver_Integration(t *testing.T) {
 	basePath := t.TempDir()
@@ -783,7 +759,7 @@ func TestReceiver_Integration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("health check request failed: %v", err)
 	}
-	resp.Body.Close()
+	closeBody(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("health check expected 200, got %d", resp.StatusCode)
 	}
@@ -803,7 +779,7 @@ func TestReceiver_Integration(t *testing.T) {
 		t.Fatalf("sync request failed: %v", err)
 	}
 	syncBody, _ := io.ReadAll(syncResp.Body)
-	syncResp.Body.Close()
+	closeBody(syncResp.Body)
 	if syncResp.StatusCode != http.StatusOK {
 		t.Fatalf("sync expected 200, got %d: %s", syncResp.StatusCode, string(syncBody))
 	}
@@ -818,7 +794,7 @@ func TestReceiver_Integration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("metadata request failed: %v", err)
 	}
-	metaResp.Body.Close()
+	closeBody(metaResp.Body)
 	if metaResp.StatusCode != http.StatusOK {
 		t.Fatalf("metadata expected 200, got %d", metaResp.StatusCode)
 	}
@@ -839,5 +815,78 @@ func TestReceiver_Integration(t *testing.T) {
 	}
 	if !strings.Contains(string(metaContent), svName) {
 		t.Errorf("metadata doesn't contain SubVolume name")
+	}
+}
+
+// writeTarEntries builds a tar archive from the given headers. Regular files get
+// their Name as content.
+func writeTarEntries(t *testing.T, headers []*tar.Header) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for _, h := range headers {
+		if h.Typeflag == tar.TypeReg {
+			h.Size = int64(len(h.Name))
+		}
+		if err := tw.WriteHeader(h); err != nil {
+			t.Fatalf("write header %s: %v", h.Name, err)
+		}
+		if h.Typeflag == tar.TypeReg {
+			if _, err := tw.Write([]byte(h.Name)); err != nil {
+				t.Fatalf("write body %s: %v", h.Name, err)
+			}
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar: %v", err)
+	}
+	return &buf
+}
+
+func TestExtractTar_SymlinkEscapes(t *testing.T) {
+	tests := []struct {
+		name    string
+		entries []*tar.Header
+		escaped string // path relative to the parent of destDir that must not exist
+	}{
+		{
+			name: "symlink to a sibling directory whose name starts with the dest name",
+			entries: []*tar.Header{
+				{Name: "l", Typeflag: tar.TypeSymlink, Linkname: "../dest-evil", Mode: 0777},
+				{Name: "l/pwn", Typeflag: tar.TypeReg, Mode: 0644},
+			},
+			escaped: "dest-evil/pwn",
+		},
+		{
+			name: "symlink created through a symlinked parent directory",
+			entries: []*tar.Header{
+				{Name: "here", Typeflag: tar.TypeSymlink, Linkname: ".", Mode: 0777},
+				{Name: "here/up", Typeflag: tar.TypeSymlink, Linkname: "../outside", Mode: 0777},
+				{Name: "here/up/pwn", Typeflag: tar.TypeReg, Mode: 0644},
+			},
+			escaped: "outside/pwn",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parent := t.TempDir()
+			destDir := filepath.Join(parent, "dest")
+			for _, d := range []string{destDir, filepath.Join(parent, "dest-evil"), filepath.Join(parent, "outside")} {
+				if err := os.MkdirAll(d, 0750); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			r := NewReceiver(parent, "token", ":0")
+			_, _, err := r.extractTar(writeTarEntries(t, tt.entries), destDir)
+
+			if err == nil {
+				t.Errorf("expected an error for an entry that escapes the dest dir")
+			}
+			if _, statErr := os.Lstat(filepath.Join(parent, tt.escaped)); statErr == nil {
+				t.Errorf("file was written outside the dest dir: %s", tt.escaped)
+			}
+		})
 	}
 }

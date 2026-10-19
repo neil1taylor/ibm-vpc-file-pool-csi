@@ -1097,7 +1097,10 @@ func TestEnsureImagePullerRoleBinding_Creates(t *testing.T) {
 	if len(subjects) != 1 {
 		t.Fatalf("expected 1 subject, got %d", len(subjects))
 	}
-	subj := subjects[0].(map[string]interface{})
+	subj, ok := subjects[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected subject to be a map, got %T", subjects[0])
+	}
 	if subj["name"] != "system:serviceaccounts:latest-test" {
 		t.Errorf("expected subject name system:serviceaccounts:latest-test, got %s", subj["name"])
 	}

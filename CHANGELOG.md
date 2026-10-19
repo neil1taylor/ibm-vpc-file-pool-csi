@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Security
+- Replication receiver: a tar upload could write files outside the destination volume through a symlink (a sibling directory whose name starts with the destination's name, or a symlinked parent directory). All writes now go through `os.Root`, and symlink targets are checked against the parent's real location.
+
+### Fixed
+- Replication policies paused after `maxRetries` were resumed on the next cycle and kept creating Jobs. The automatic pause now sets the `storage.ibmcloud.io/paused` annotation; removing it resumes the policy and resets the failure count.
+- `CreateVolume` returned success for a volume whose clone had failed. It now returns an error with the clone failure.
+- Sync client: a CA bundle with no usable certificate was ignored silently; `NewSyncClientWithCA` now returns an error. The client requires TLS 1.2 or later.
+- Concurrent uploads to the same destination are serialized.
+- `.golangci.yml` used v1 keys under `version: "2"`, so its settings were ignored. All lint findings are fixed, and the integration tests compile and pass again.
+
 ## [v0.13.2] — 2026-02-25
 
 ### Fixed

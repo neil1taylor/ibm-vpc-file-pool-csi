@@ -146,7 +146,7 @@ func (e *Executor) Execute(ctx context.Context, namespace, sourcePVC, targetPool
 
 	// Wait for target PVC to bind.
 	_, _ = fmt.Fprintf(e.output, "Waiting for target PVC to bind...\n")
-	if err := e.waitForPVCBound(ctx, namespace, targetPVCName, 2*time.Minute); err != nil {
+	if err = e.waitForPVCBound(ctx, namespace, targetPVCName, 2*time.Minute); err != nil {
 		return nil, fmt.Errorf("target PVC did not bind: %w", err)
 	}
 	_, _ = fmt.Fprintf(e.output, "Target PVC is Bound.\n")
@@ -173,7 +173,7 @@ func (e *Executor) Execute(ctx context.Context, namespace, sourcePVC, targetPool
 
 	// 4. Wait for the pod to start running, then stream logs.
 	_, _ = fmt.Fprintf(e.output, "Waiting for migration pod to start...\n")
-	if err := e.waitForPodRunning(ctx, namespace, migrationPodName, 5*time.Minute); err != nil {
+	if err = e.waitForPodRunning(ctx, namespace, migrationPodName, 5*time.Minute); err != nil {
 		// Attempt cleanup.
 		e.cleanupPod(ctx, namespace, migrationPodName)
 		return nil, fmt.Errorf("migration pod did not start: %w", err)
@@ -182,7 +182,7 @@ func (e *Executor) Execute(ctx context.Context, namespace, sourcePVC, targetPool
 	_, _ = fmt.Fprintf(e.output, "Migration pod is running. Streaming logs:\n")
 	_, _ = fmt.Fprintf(e.output, "---\n")
 
-	if err := e.streamPodLogs(ctx, namespace, migrationPodName); err != nil {
+	if err = e.streamPodLogs(ctx, namespace, migrationPodName); err != nil {
 		_, _ = fmt.Fprintf(e.output, "---\n")
 		_, _ = fmt.Fprintf(e.output, "Warning: failed to stream logs: %v\n", err)
 	} else {

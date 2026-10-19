@@ -54,7 +54,12 @@ func (h *HTTPHook) Execute(ctx context.Context, hook v1alpha1.Hook) (*v1alpha1.H
 		duration := time.Since(start)
 		return newHookResult(hook.Name, "", false, fmt.Sprintf("HTTP %s %s: %v", method, spec.URL, err), start, duration), err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		// The response has been read by then, so a close error cannot change the result.
+		if cerr := resp.Body.Close(); cerr != nil {
+			klog.V(4).InfoS("Failed to close hook response body", "err", cerr)
+		}
+	}()
 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 	duration := time.Since(start)

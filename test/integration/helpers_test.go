@@ -375,6 +375,18 @@ func (f *fakeK8sClient) CreateReplicationPolicy(_ context.Context, rp *v1alpha1.
 	return nil
 }
 
+func (f *fakeK8sClient) UpdateReplicationPolicy(_ context.Context, rp *v1alpha1.ReplicationPolicy) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	existing, ok := f.policies[rp.Name]
+	if !ok {
+		return fmt.Errorf("replication policy %q not found", rp.Name)
+	}
+	existing.ObjectMeta = *rp.ObjectMeta.DeepCopy()
+	existing.Spec = *rp.Spec.DeepCopy()
+	return nil
+}
+
 func (f *fakeK8sClient) UpdateReplicationPolicyStatus(_ context.Context, rp *v1alpha1.ReplicationPolicy) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -661,12 +673,6 @@ func (f *fakeNFSOperations) copyCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.copies)
-}
-
-func (f *fakeNFSOperations) totalCopyCount() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.copyCallCount
 }
 
 func (f *fakeNFSOperations) dirCount() int {

@@ -655,7 +655,7 @@ func (m *Manager) CreateSnapshot(ctx context.Context, snapshotName, sourceVolume
 		}
 		// Get just the .snapshots parent dir
 		snapshotsParent := snapshotsDir[:len(snapshotsDir)-len("/snap-placeholder")]
-		if err := m.nfsOps.MkdirAll(snapshotsParent, 0755); err != nil {
+		if err = m.nfsOps.MkdirAll(snapshotsParent, 0755); err != nil {
 			return nil, fmt.Errorf("create snapshots dir: %w", err)
 		}
 
@@ -759,17 +759,17 @@ func (m *Manager) DeleteSnapshot(ctx context.Context, snapshotName string) (retE
 
 	// 2. Remove snapshot directory
 	if m.nfsOps != nil {
-		fullPath, err := util.SafeJoinSnapshot(m.stagingBasePath, snap.Spec.SnapshotPath)
-		if err != nil {
-			return fmt.Errorf("invalid snapshot path: %w", err)
+		fullPath, pathErr := util.SafeJoinSnapshot(m.stagingBasePath, snap.Spec.SnapshotPath)
+		if pathErr != nil {
+			return fmt.Errorf("invalid snapshot path: %w", pathErr)
 		}
-		if err := m.nfsOps.RemoveAll(fullPath); err != nil {
+		if err = m.nfsOps.RemoveAll(fullPath); err != nil {
 			return fmt.Errorf("remove snapshot dir: %w", err)
 		}
 	}
 
 	// 3. Delete Snapshot CR
-	if err := m.k8sClient.DeleteSnapshot(ctx, snapshotName); err != nil {
+	if err = m.k8sClient.DeleteSnapshot(ctx, snapshotName); err != nil {
 		return fmt.Errorf("delete Snapshot CR: %w", err)
 	}
 

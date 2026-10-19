@@ -175,8 +175,8 @@ func (s *GoldenImageSyncer) syncPool(ctx context.Context, pool *v1alpha1.FileSha
 	}
 	if hasInternalRegistry {
 		for _, ns := range cfg.TargetNamespaces {
-			if err := s.ensureImagePullerRoleBinding(ctx, ns); err != nil {
-				klog.ErrorS(err, "Failed to ensure image-puller RoleBinding",
+			if rbErr := s.ensureImagePullerRoleBinding(ctx, ns); rbErr != nil {
+				klog.ErrorS(rbErr, "Failed to ensure image-puller RoleBinding",
 					"pool", pool.Name, "namespace", ns)
 			}
 		}
@@ -336,9 +336,9 @@ func (s *GoldenImageSyncer) ensureImagePullerRoleBinding(ctx context.Context, ta
 			},
 			"subjects": []interface{}{
 				map[string]interface{}{
-					"kind":      "Group",
-					"apiGroup":  "rbac.authorization.k8s.io",
-					"name":      fmt.Sprintf("system:serviceaccounts:%s", targetNS),
+					"kind":     "Group",
+					"apiGroup": "rbac.authorization.k8s.io",
+					"name":     fmt.Sprintf("system:serviceaccounts:%s", targetNS),
 				},
 			},
 		},
@@ -841,29 +841,29 @@ func buildVMTemplate(imageName, templateName, ns, poolName, scName, goldenPVCNam
 				"name":      templateName,
 				"namespace": ns,
 				"labels": map[string]interface{}{
-					"template.kubevirt.io/type":                         "base",
-					"template.kubevirt.io/version":                      "v1alpha1",
-					"template.kubevirt.io/architecture":                 "amd64",
-					"os.template.kubevirt.io/" + osLabelKey:             "true",
-					"flavor.template.kubevirt.io/medium":                "true",
-					"workload.template.kubevirt.io/server":              "true",
-					goldenImageLabel:                                    "true",
-					goldenPoolLabel:                                     poolName,
-					goldenNameLabel:                                     imageName,
+					"template.kubevirt.io/type":             "base",
+					"template.kubevirt.io/version":          "v1alpha1",
+					"template.kubevirt.io/architecture":     "amd64",
+					"os.template.kubevirt.io/" + osLabelKey: "true",
+					"flavor.template.kubevirt.io/medium":    "true",
+					"workload.template.kubevirt.io/server":  "true",
+					goldenImageLabel:                        "true",
+					goldenPoolLabel:                         poolName,
+					goldenNameLabel:                         imageName,
 				},
 				"annotations": map[string]interface{}{
-					"description":                                        fmt.Sprintf("%s VM with boot disk on IBM VPC NFS pool storage (%s). Clone from golden image for fast provisioning.", displayName, poolName),
-					"openshift.io/display-name":                          fmt.Sprintf("%s Server (NFS Pool: %s)", displayName, poolName),
-					"openshift.io/provider-display-name":                 "IBM VPC File Pool CSI",
-					"iconClass":                                          iconClass,
-					"tags":                                               "kubevirt,virtualmachine,linux," + osLabelKey,
-					"template.kubevirt.io/provider":                      "IBM VPC File Pool CSI",
-					"template.kubevirt.io/provider-url":                  "https://github.com/IBM/ibm-vpc-file-pool-csi",
-					"template.kubevirt.io/provider-support-level":        "Community",
-					"template.kubevirt.io/version":                       "v1alpha1",
-					"name.os.template.kubevirt.io/" + osLabelKey:         displayName,
-					"defaults.template.kubevirt.io/disk":                 "boot-disk",
-					"template.openshift.io/bindable":                     "false",
+					"description":                                 fmt.Sprintf("%s VM with boot disk on IBM VPC NFS pool storage (%s). Clone from golden image for fast provisioning.", displayName, poolName),
+					"openshift.io/display-name":                   fmt.Sprintf("%s Server (NFS Pool: %s)", displayName, poolName),
+					"openshift.io/provider-display-name":          "IBM VPC File Pool CSI",
+					"iconClass":                                   iconClass,
+					"tags":                                        "kubevirt,virtualmachine,linux," + osLabelKey,
+					"template.kubevirt.io/provider":               "IBM VPC File Pool CSI",
+					"template.kubevirt.io/provider-url":           "https://github.com/IBM/ibm-vpc-file-pool-csi",
+					"template.kubevirt.io/provider-support-level": "Community",
+					"template.kubevirt.io/version":                "v1alpha1",
+					"name.os.template.kubevirt.io/" + osLabelKey:  displayName,
+					"defaults.template.kubevirt.io/disk":          "boot-disk",
+					"template.openshift.io/bindable":              "false",
 					"openshift.kubevirt.io/pronounceable-suffix-for-name-expression": "true",
 				},
 			},
@@ -937,9 +937,9 @@ func buildVMTemplate(imageName, templateName, ns, poolName, scName, goldenPVCNam
 					"metadata": map[string]interface{}{
 						"name": "${NAME}",
 						"labels": map[string]interface{}{
-							"app":                      "${NAME}",
-							"vm.kubevirt.io/name":      "${NAME}",
-							goldenPoolLabel:             poolName,
+							"app":                 "${NAME}",
+							"vm.kubevirt.io/name": "${NAME}",
+							goldenPoolLabel:       poolName,
 						},
 					},
 					"spec": map[string]interface{}{
@@ -955,7 +955,7 @@ func buildVMTemplate(imageName, templateName, ns, poolName, scName, goldenPVCNam
 									"cpu": map[string]interface{}{
 										"cores":   int64(1),
 										"sockets": int64(1),
-										"threads":  int64(1),
+										"threads": int64(1),
 									},
 									"resources": map[string]interface{}{
 										"requests": map[string]interface{}{
@@ -1001,7 +1001,7 @@ func buildVMTemplate(imageName, templateName, ns, poolName, scName, goldenPVCNam
 									map[string]interface{}{
 										"name": "cloudinit",
 										"cloudInitNoCloud": map[string]interface{}{
-											"userData": fmt.Sprintf("#cloud-config\npassword: ${CLOUD_USER_PASSWORD}\nchpasswd:\n  expire: false\nssh_pwauth: true\n"),
+											"userData": "#cloud-config\npassword: ${CLOUD_USER_PASSWORD}\nchpasswd:\n  expire: false\nssh_pwauth: true\n",
 										},
 									},
 								},

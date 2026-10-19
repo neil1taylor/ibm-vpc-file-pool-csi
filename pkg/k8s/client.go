@@ -53,6 +53,7 @@ type Client interface {
 	GetReplicationPolicy(ctx context.Context, name string) (*v1alpha1.ReplicationPolicy, error)
 	ListReplicationPolicies(ctx context.Context) ([]v1alpha1.ReplicationPolicy, error)
 	CreateReplicationPolicy(ctx context.Context, rp *v1alpha1.ReplicationPolicy) error
+	UpdateReplicationPolicy(ctx context.Context, rp *v1alpha1.ReplicationPolicy) error
 	UpdateReplicationPolicyStatus(ctx context.Context, rp *v1alpha1.ReplicationPolicy) error
 	DeleteReplicationPolicy(ctx context.Context, name string) error
 

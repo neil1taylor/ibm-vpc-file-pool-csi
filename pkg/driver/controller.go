@@ -55,6 +55,14 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 	if d.k8sClient != nil {
 		existing, err := d.k8sClient.GetSubVolume(ctx, req.GetName())
 		if err == nil && existing != nil {
+			// A failed clone has no usable data; do not report it as a volume.
+			if existing.Status.CloneStatus == "Failed" {
+				errMsg := "clone failed"
+				if existing.Status.CloneProgress != nil && existing.Status.CloneProgress.Error != "" {
+					errMsg = existing.Status.CloneProgress.Error
+				}
+				return nil, status.Errorf(codes.Internal, "clone previously failed for %s: %s", req.GetName(), errMsg)
+			}
 			return &csi.CreateVolumeResponse{
 				Volume: subVolumeToCSIVolume(existing),
 			}, nil

@@ -153,13 +153,6 @@ func buildClient(kubeconfig string) (client.Client, error) {
 	return c, nil
 }
 
-func flagOrDefault(flags map[string]string, key, defaultVal string) string {
-	if v, ok := flags[key]; ok && v != "" {
-		return v
-	}
-	return defaultVal
-}
-
 func runPlan(args []string) error {
 	flags := parseFlags(args)
 	nfsMountPath := flags["nfs-mount-path"]

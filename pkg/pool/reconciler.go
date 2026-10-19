@@ -104,7 +104,7 @@ func (r *FileSharePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 	if !hasFinalizer(pool) {
 		addFinalizer(pool)
-		if err := r.k8sClient.UpdateFileSharePool(ctx, pool); err != nil {
+		if err = r.k8sClient.UpdateFileSharePool(ctx, pool); err != nil {
 			klog.ErrorS(err, "Failed to add finalizer", "pool", pool.Name)
 			return reconcile.Result{}, err
 		}
@@ -123,7 +123,7 @@ func (r *FileSharePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	// 3. Initial provisioning
 	if pool.Status.Phase == "" || pool.Status.Phase == "Initializing" {
-		if err := r.initialProvisioning(ctx, pool); err != nil {
+		if err = r.initialProvisioning(ctx, pool); err != nil {
 			klog.ErrorS(err, "Initial provisioning failed, will retry", "pool", pool.Name)
 			pool.Status.Phase = "Initializing"
 			r.setCondition(pool, "SharesReady", metav1.ConditionFalse, "ProvisioningFailed", err.Error())
@@ -138,7 +138,7 @@ func (r *FileSharePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		// would try to create the same share name again and get HTTP 400.
 		pool.Status.Phase = "Expanding"
 		pool.Status.LastReconcileTime = timeNow()
-		if err := r.k8sClient.UpdateFileSharePoolStatus(ctx, pool); err != nil {
+		if err = r.k8sClient.UpdateFileSharePoolStatus(ctx, pool); err != nil {
 			klog.ErrorS(err, "Failed to persist post-provisioning status", "pool", pool.Name)
 			return reconcile.Result{}, err
 		}
@@ -930,13 +930,6 @@ func (r *FileSharePoolReconciler) ensureStorageProfiles(ctx context.Context, poo
 	}
 }
 
-// storageProfileGVR is the GroupVersionResource for CDI StorageProfiles.
-var storageProfileGVR = schema.GroupVersionResource{
-	Group:    "cdi.kubevirt.io",
-	Version:  "v1beta1",
-	Resource: "storageprofiles",
-}
-
 // patchStorageProfile patches the CDI StorageProfile with the given name,
 // setting spec.claimPropertySets and spec.cloneStrategy if not already set.
 // claimPropertySets enables the Virtualization UI to auto-select access modes.
@@ -962,8 +955,8 @@ func (r *FileSharePoolReconciler) patchStorageProfile(ctx context.Context, name 
 
 	// Build a merge patch for fields that need setting.
 	needsPatch := false
-	patchMap := map[string]interface{}{"spec": map[string]interface{}{}}
-	specPatch := patchMap["spec"].(map[string]interface{})
+	specPatch := map[string]interface{}{}
+	patchMap := map[string]interface{}{"spec": specPatch}
 
 	// Check if claimPropertySets is already populated.
 	spec, _, _ := unstructured.NestedMap(sp.Object, "spec")
