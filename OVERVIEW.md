@@ -88,7 +88,7 @@ These run inside the controller pod but handle specialized tasks:
 | Component | What it does | More detail |
 |-----------|-------------|-------------|
 | **IBM VPC Client** | Thin wrapper around the VPC file share API. All VPC calls go through here. | [IBM VPC API](IBM-VPC-API.md) |
-| **Clone Worker** | Copies data for volume clones in the background. Small clones finish inline; large ones run async. | [Volume Cloning](VOLUME-CLONING.md) |
+| **Clone Worker** | Copies data for volume clones in the background. Every clone runs async, in a Kubernetes Job. | [Volume Cloning](VOLUME-CLONING.md) |
 | **Replication Controller** | Cross-region disaster recovery — rsyncs SubVolume data between pools on a schedule. | [Cross-Region DR](CROSS-REGION-DR.md) |
 | **Hook Orchestrator** | Runs pre/post lifecycle hooks (exec commands in pods, or HTTP webhooks) for replication and group snapshots. | [Architecture > Hook Orchestrator](ARCHITECTURE.md#8-hook-orchestrator) |
 | **Admission Webhooks** | Validates CRD fields at admission time so bad configs are rejected immediately. | [Architecture > Admission Webhooks](ARCHITECTURE.md#9-admission-webhooks) |

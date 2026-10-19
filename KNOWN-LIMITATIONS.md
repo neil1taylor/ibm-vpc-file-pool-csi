@@ -14,10 +14,7 @@ Explicit list of what the IBM VPC File Pool CSI Driver does not support, why, an
 
 ## Snapshots and Clones
 
-**What:** Volume snapshots (`VolumeSnapshot`) and volume cloning (`dataSource` in PVC) are implemented via directory-level copies on the NFS share. Snapshots are created using `cp -a` from the source subdirectory to a `.snapshots/` directory on the same share. Clones use a similar copy mechanism with two paths:
-
-- **Synchronous clones:** For small volumes (configurable threshold, default 10 GB) on the same share, the copy completes inline during `CreateVolume`.
-- **Asynchronous clones:** For large volumes or cross-share clones, the SubVolume CR is created with `cloneStatus=Pending` and the background worker completes the copy. `NodePublishVolume` gates mount until the clone is `Complete`.
+**What:** Volume snapshots (`VolumeSnapshot`) and volume cloning (`dataSource` in PVC) are implemented via directory-level copies on the NFS share. Snapshots are created using `cp -a` from the source subdirectory to a `.snapshots/` directory on the same share. Clones use a similar copy mechanism, and every clone is asynchronous: the SubVolume CR is created with `cloneStatus=Pending`, and the clone worker runs a Kubernetes Job that completes the copy. `NodePublishVolume` gates mount until the clone is `Complete`.
 
 **Limitations:**
 - Snapshots and clones are not instantaneous — they are full data copies proportional to the source volume size.
@@ -231,10 +228,10 @@ For boot disk images, the downloader pod must convert qcow2 to raw format (see [
 **Why:** IBM Cloud's encryption in transit implementation uses IPsec between the compute host and the file share mount target. This mechanism is not supported on:
 
 - **Bare metal servers** — IPsec for file shares is not available on VPC bare metal.
-- **RHCOS-based virtual server instances** — Red Hat Enterprise Linux CoreOS (used by ROKS/OpenShift worker nodes) is explicitly unsupported.
+- **RHCOS-based virtual server instances** — Red Hat Enterprise Linux CoreOS (used by ROKS, ROVS and other OpenShift worker nodes) is explicitly unsupported.
 - **Only supported on** regular VPC virtual server instances running non-RHCOS Linux distributions.
 
-Since ROKS worker nodes run RHCOS, encryption in transit cannot be enabled for this driver on ROKS clusters. NFS traffic travels unencrypted within the VPC network.
+Since ROKS and ROVS worker nodes run RHCOS, encryption in transit cannot be enabled for this driver on ROKS or ROVS clusters. NFS traffic travels unencrypted within the VPC network.
 
 **Mitigations:**
 - Data at rest is always encrypted (provider-managed or customer-managed keys via Key Protect / HPCS).

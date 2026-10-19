@@ -270,7 +270,7 @@ oc patch console.operator.openshift.io cluster \
 2. Upgrade controller — now includes `--kubelet-dir` flag wired through Helm
 3. Upgrade node DaemonSet — gains resource limits, probes, and readiness checks
 
-**ROKS users:** Verify `node.kubeletDir` is set to `/var/data/kubelet` in your Helm values. The controller's staging path now respects this setting.
+**ROKS and ROVS users:** Verify `node.kubeletDir` is set to `/var/data/kubelet` in your Helm values. The controller's staging path now respects this setting.
 
 ---
 
@@ -297,7 +297,7 @@ kubectl annotate filesharespool <pool-name> storage.ibmcloud.io/skip-storageclas
 **New features:** Validating admission webhooks, lifecycle hooks, incremental rsync.
 
 **Prerequisites:**
-- cert-manager v1.12+ must be installed (for webhook TLS certificates)
+- cert-manager v1.12+ must be installed (for webhook TLS certificates). ROVS has no cert-manager; on ROKS and ROVS you can set `webhook.certProvider=openshift` instead (see [INSTALL.md — Webhook Certificates](INSTALL.md#webhook-certificates))
 
 **CRD changes (additive):**
 - `ReplicationPolicy.spec.preSyncHooks` / `postSyncHooks` — new hook fields

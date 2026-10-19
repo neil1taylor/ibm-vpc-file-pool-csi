@@ -309,21 +309,11 @@ func (d *Driver) createVolumeFromSnapshot(ctx context.Context, req *csi.CreateVo
 
 #### CreateVolume from Clone
 
-When `VolumeContentSource` contains a volume reference, the controller delegates to `poolManager.CloneVolume`. The clone behavior depends on the source volume size relative to a configurable threshold:
-
-- **Small volumes** (below `cloneSyncThresholdGB`, default 10 GB): The directory copy completes synchronously before CreateVolume returns.
-- **Large volumes** (at or above the threshold): The SubVolume CR is created with `cloneStatus=Pending` and a background worker copies the data asynchronously. The node agent gates the mount until the clone completes (see [NodePublishVolume Clone Gate](#nodepublishvolume-clone-gate)).
+When `VolumeContentSource` contains a volume reference, the controller delegates to `poolManager.CloneVolume`. Every clone is asynchronous. The SubVolume CR is created with `cloneStatus=Pending` and CreateVolume returns. The clone worker then creates a Kubernetes Job that copies the data, because the controller pod has no NFS access. The node agent gates the mount until the clone completes (see [NodePublishVolume Clone Gate](#nodepublishvolume-clone-gate)).
 
 ```go
 func (d *Driver) createVolumeFromClone(ctx context.Context, req *csi.CreateVolumeRequest, sourceVolumeID, poolName string, requiredGB int64, zone string) (*csi.CreateVolumeResponse, error) {
     params := req.GetParameters()
-
-    syncThreshold := int64(10) // default 10 GB
-    if t := params["cloneSyncThresholdGB"]; t != "" {
-        if parsed, err := strconv.ParseInt(t, 10, 64); err == nil {
-            syncThreshold = parsed
-        }
-    }
 
     allocReq := pool.AllocationRequest{
         PVName:       req.GetName(),
@@ -338,7 +328,7 @@ func (d *Driver) createVolumeFromClone(ctx context.Context, req *csi.CreateVolum
         Permissions:  params["permissions"],
     }
 
-    result, err := d.poolManager.CloneVolume(ctx, sourceVolumeID, allocReq, syncThreshold)
+    result, err := d.poolManager.CloneVolume(ctx, sourceVolumeID, allocReq)
     if err != nil {
         switch {
         case errors.Is(err, pool.ErrSourceNotFound):
@@ -369,11 +359,7 @@ func (d *Driver) createVolumeFromClone(ctx context.Context, req *csi.CreateVolum
 }
 ```
 
-**StorageClass parameters for cloning:**
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `cloneSyncThresholdGB` | `10` | Volumes smaller than this are cloned synchronously; larger ones use the async background worker |
+**StorageClass parameters for cloning:** none. Earlier versions had a synchronous path for small volumes, controlled by `cloneSyncThresholdGB`; it was removed because the controller has no NFS access. If a StorageClass still sets `cloneSyncThresholdGB`, it is ignored.
 
 **Error mapping:**
 
@@ -1201,7 +1187,7 @@ The controller and node run from the same binary but with different flags:
 - `--node-id=<hostname>` — node identifier (from downward API)
 - `--vpc-id=<vpc-id>` — VPC ID for mount target creation (controller mode)
 - `--subnet-id=<subnet-id>` — Subnet ID for mount target creation (controller mode)
-- `--kubelet-dir=/var/lib/kubelet` — Kubelet root directory; set to `/var/data/kubelet` on ROKS (controller mode, used for staging path construction)
+- `--kubelet-dir=/var/lib/kubelet` — Kubelet root directory; set to `/var/data/kubelet` on ROKS or ROVS (controller mode, used for staging path construction)
 
 ---
 

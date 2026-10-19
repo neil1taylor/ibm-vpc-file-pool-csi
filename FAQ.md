@@ -14,7 +14,7 @@ The stock driver creates one VPC file share per PVC (1:1 mapping). This driver p
 
 Yes. The pool driver uses provisioner name `vpc-file-pool.csi.ibm.io` while the stock driver uses `vpc.file.csi.ibm.io`. They run independently with separate StorageClasses. Use the stock driver for workloads needing dedicated IOPS isolation (e.g., databases), and the pool driver for everything else. See [USER-GUIDE.md — Coexistence](USER-GUIDE.md#coexistence-with-the-stock-ibm-csi-driver).
 
-### Does this work on OpenShift (ROKS)?
+### Does this work on OpenShift (ROKS or ROVS)?
 
 Yes, fully supported. The driver is tested on ROKS 4.14 through 4.17. The node agent requires the `privileged` SCC (standard for CSI drivers), and the Helm chart includes the necessary configuration. See [USER-GUIDE.md — Compatibility Matrix](USER-GUIDE.md#compatibility-matrix).
 
@@ -88,7 +88,7 @@ Under normal operation, no. Each PVC is bind-mounted at its own subdirectory, an
 
 ### Is NFS traffic encrypted?
 
-NFS traffic is not encrypted in transit on ROKS clusters because IBM Cloud's encryption-in-transit (IPsec) is not supported on RHCOS-based worker nodes. VPC network traffic is already isolated at the hypervisor level, and data at rest is always encrypted (provider-managed or customer-managed keys). See [KNOWN-LIMITATIONS.md — NFS Encryption in Transit](KNOWN-LIMITATIONS.md#nfs-encryption-in-transit) and [SECURITY.md](SECURITY.md).
+NFS traffic is not encrypted in transit on ROKS or ROVS clusters because IBM Cloud's encryption-in-transit (IPsec) is not supported on RHCOS-based worker nodes. VPC network traffic is already isolated at the hypervisor level, and data at rest is always encrypted (provider-managed or customer-managed keys). See [KNOWN-LIMITATIONS.md — NFS Encryption in Transit](KNOWN-LIMITATIONS.md#nfs-encryption-in-transit) and [SECURITY.md](SECURITY.md).
 
 ---
 

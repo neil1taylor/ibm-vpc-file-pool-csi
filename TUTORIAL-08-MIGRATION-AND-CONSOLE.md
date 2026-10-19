@@ -568,7 +568,7 @@ This concludes the 8-part tutorial series for the IBM VPC File Pool CSI Driver. 
 | Part | Tutorial | What You Learned |
 |------|----------|------------------|
 | 1 | [Pool Creation, PVCs, and KubeVirt VMs](TUTORIAL-01-POOL-CREATION.md) | Created a pool, provisioned PVCs, launched a VM with NFS-backed disks |
-| 2 | [Snapshots and Clones](TUTORIAL-02-SNAPSHOTS-AND-CLONES.md) | Point-in-time snapshots, restore from snapshot, sync and async clones |
+| 2 | [Snapshots and Clones](TUTORIAL-02-SNAPSHOTS-AND-CLONES.md) | Point-in-time snapshots, restore from snapshot, clones |
 | 3 | [Group Snapshots and Hooks](TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md) | Coordinated multi-PVC snapshots with exec and HTTP lifecycle hooks |
 | 4 | [Pool Configuration](TUTORIAL-04-POOL-CONFIGURATION.md) | Multi-tier pools, allocation strategies, auto-expansion, share draining |
 | 5 | [Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md) | Automatic KubeVirt golden image provisioning from CDI and OCI sources |

@@ -370,13 +370,6 @@ func (d *Driver) createVolumeFromSnapshot(ctx context.Context, req *csi.CreateVo
 func (d *Driver) createVolumeFromClone(ctx context.Context, req *csi.CreateVolumeRequest, sourceVolumeID, poolName string, requiredGB int64, zone string) (*csi.CreateVolumeResponse, error) {
 	params := req.GetParameters()
 
-	syncThreshold := int64(10) // default 10 GB
-	if t := params["cloneSyncThresholdGB"]; t != "" {
-		if parsed, err := strconv.ParseInt(t, 10, 64); err == nil {
-			syncThreshold = parsed
-		}
-	}
-
 	allocReq := pool.AllocationRequest{
 		PVName:       req.GetName(),
 		PVCName:      params["csi.storage.k8s.io/pvc/name"],
@@ -390,7 +383,7 @@ func (d *Driver) createVolumeFromClone(ctx context.Context, req *csi.CreateVolum
 		Permissions:  params["permissions"],
 	}
 
-	result, err := d.poolManager.CloneVolume(ctx, sourceVolumeID, allocReq, syncThreshold)
+	result, err := d.poolManager.CloneVolume(ctx, sourceVolumeID, allocReq)
 	if err != nil {
 		if poolErr := poolCapacityError(poolName, err); poolErr != nil {
 			return nil, poolErr

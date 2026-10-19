@@ -32,7 +32,7 @@ jobs:
       - name: Log in to container registry
         uses: docker/login-action@v3
         with:
-          registry: icr.io
+          registry: de.icr.io
           username: ${{ secrets.REGISTRY_USERNAME }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
 
@@ -40,6 +40,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          platforms: linux/amd64
+          build-args: VERSION=${{ steps.version.outputs.VERSION }}
           push: true  # Requires REGISTRY_USERNAME and REGISTRY_PASSWORD secrets
           tags: |
             de.icr.io/ibm-vpc-file-pool-csi/driver:${{ steps.version.outputs.VERSION }}

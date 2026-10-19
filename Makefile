@@ -8,7 +8,7 @@ GOBIN := $(shell go env GOPATH)/bin
 GOLANGCI_LINT := $(GOBIN)/golangci-lint
 CONTROLLER_GEN := $(GOBIN)/controller-gen
 
-.PHONY: build build-migrate build-failover test test-integration test-e2e test-vm test-coverage vet lint generate docker-build \
+.PHONY: build build-migrate build-failover test test-scripts test-integration test-e2e test-vm test-coverage vet lint generate docker-build \
         install-crds deploy helm-install helm-lint helm-template run-local tools clean \
         console-plugin-install console-plugin-build console-plugin-dev console-plugin-lint \
         console-plugin-test console-plugin-docker-build \
@@ -25,6 +25,10 @@ build-failover:
 
 test:
 	go test ./... -v -race -count=1
+
+test-scripts:
+	bash test/chart/test-webhook-certs.sh
+	bash test/e2e/lib/test-detect-zone.sh
 
 test-integration:
 	go test ./test/integration/ -v -race -count=1 -tags=integration
@@ -52,7 +56,7 @@ generate: tools
 CONTAINER_ENGINE := $(shell command -v docker 2>/dev/null || command -v podman 2>/dev/null)
 
 docker-build:
-	$(CONTAINER_ENGINE) build --platform linux/amd64 -t $(IMAGE_NAME):$(VERSION) .
+	$(CONTAINER_ENGINE) build --platform linux/amd64 --build-arg VERSION=$(VERSION) -t $(IMAGE_NAME):$(VERSION) .
 
 install-crds:
 	kubectl apply -f config/crd/

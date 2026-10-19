@@ -26,7 +26,7 @@ Each step is covered in detail below.
 
 ### Cluster Requirements
 
-- **IBM Cloud Kubernetes Service (IKS)** or **Red Hat OpenShift on IBM Cloud (ROKS)**, version 1.28+
+- **IBM Cloud Kubernetes Service (IKS)** or **Red Hat OpenShift on IBM Cloud (ROKS or ROVS)**, version 1.28+
 - **VPC Gen2 networking** (Classic infrastructure is not supported)
 - Worker nodes with `topology.kubernetes.io/zone` and `topology.kubernetes.io/region` labels (set automatically by IBM Cloud — you don't need to do anything)
 
@@ -55,7 +55,15 @@ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/do
 kubectl get pods -n cert-manager
 ```
 
-If you prefer to manage webhook TLS certificates manually, set `webhook.certProvider=manual` in the Helm values and populate the `ibm-vpc-file-pool-csi-webhook-certs` Secret yourself. To disable webhooks entirely, set `webhook.enabled=false`.
+If you prefer to manage webhook TLS certificates manually, set `webhook.certProvider=manual`. Create the Secret `<release>-ibm-vpc-file-pool-csi-webhook-certs` (keys `tls.crt` and `tls.key`, for the DNS name `<release>-ibm-vpc-file-pool-csi-webhook.<namespace>.svc`) before you install, and set `webhook.caBundle` to the base64-encoded PEM of the CA that signed it:
+
+```bash
+--set webhook.certProvider=manual --set webhook.caBundle="$(base64 < ca.crt | tr -d '\n')"
+```
+
+The chart refuses to render in manual mode without `webhook.caBundle`.
+
+To disable webhooks entirely, set `webhook.enabled=false`. The controller then serves no webhooks and needs no certificate. Invalid custom resources are then accepted without checks.
 
 ### Tooling
 
@@ -167,7 +175,7 @@ docker push default-route-openshift-image-registry.apps.<cluster>/kube-system/vp
 
 The driver uses `secret-common-lib` to authenticate — the same library used by the stock IBM CSI drivers. This means it reads credentials from secrets that already exist on your cluster.
 
-### Managed Clusters (ROKS / IKS) — Nothing to Do
+### Managed Clusters (ROKS / ROVS / IKS) — Nothing to Do
 
 On managed clusters, IBM Cloud automatically creates and maintains the credentials for you. Just verify they exist:
 
@@ -260,7 +268,7 @@ helm upgrade --install ibm-vpc-file-pool-csi \
 - A **CSIDriver** object — registers the driver with Kubernetes so it knows to route storage requests to it
 - A **StorageClass** — tells Kubernetes "when someone asks for storage of this type, use this CSI driver"
 
-**Image pull secrets:** Your cluster nodes need permission to download the driver image from IBM Cloud Container Registry. Managed ROKS/IKS clusters have a pre-configured secret called `all-icr-io` that handles this. Without it, pods fail to start with an `unauthorized` / `ErrImagePull` error. Verify it exists:
+**Image pull secrets:** Your cluster nodes need permission to download the driver image from IBM Cloud Container Registry. Managed ROKS/ROVS/IKS clusters have a pre-configured secret called `all-icr-io` that handles this. Without it, pods fail to start with an `unauthorized` / `ErrImagePull` error. Verify it exists:
 
 ```bash
 kubectl get secret all-icr-io -n kube-system
@@ -296,14 +304,14 @@ helm upgrade --install ibm-vpc-file-pool-csi \
 | `image.repository` | Yes | — | Container image registry path |
 | `image.tag` | Yes | — | Image tag |
 | `image.pullPolicy` | No | `IfNotPresent` | Image pull policy (`Always` recommended during iterative testing) |
-| `imagePullSecrets` | No | `[]` | Image pull secrets for private registries. On managed ROKS/IKS, set to `[{name: all-icr-io}]` |
-| `config.region` | No | Auto-discovered | IBM Cloud region (e.g., `us-south`). Auto-discovered from the secret provider RIAAS endpoint on managed ROKS/IKS clusters |
+| `imagePullSecrets` | No | `[]` | Image pull secrets for private registries. On managed ROKS/ROVS/IKS, set to `[{name: all-icr-io}]` |
+| `config.region` | No | Auto-discovered | IBM Cloud region (e.g., `us-south`). Auto-discovered from the secret provider RIAAS endpoint on managed ROKS/ROVS/IKS clusters |
 | `config.vpcID` | No | Auto-discovered | VPC ID where shares will be created. Auto-discovered from the `ibm-cloud-provider-data` ConfigMap on managed clusters |
 | `config.subnetID` | No | Auto-discovered | Worker subnet IDs for NFS mount targets, comma-separated. Auto-discovered from `ibm-cloud-provider-data` on managed clusters. Each share's mount target goes in the subnet in the pool's zone |
 | `config.resourceGroupID` | No | Auto-discovered | Resource group for billing. Auto-discovered from the secret provider on managed clusters |
 | `controller.replicas` | No | `1` | Controller replicas (leader-elected) |
 | `controller.resources` | No | `{requests: {cpu: 50m, memory: 128Mi}, limits: {memory: 512Mi}}` | Controller CPU/memory resource requests and limits |
-| `node.kubeletDir` | No | `/var/data/kubelet` | Kubelet root directory. ROKS uses `/var/data/kubelet` (the Helm default). The Go binary default is `/var/lib/kubelet` for raw manifest deployments |
+| `node.kubeletDir` | No | `/var/data/kubelet` | Kubelet root directory. ROKS and ROVS use `/var/data/kubelet` (the Helm default). The Go binary default is `/var/lib/kubelet` for raw manifest deployments |
 | `node.resources` | No | `{requests: {cpu: 50m, memory: 64Mi}, limits: {memory: 256Mi}}` | Node agent CPU/memory resource requests and limits |
 | `logLevel` | No | `4` | klog verbosity (2=normal, 4=detailed, 6=trace) |
 | `webhook.enabled` | No | `true` | Enable validating admission webhooks |
@@ -311,7 +319,7 @@ helm upgrade --install ibm-vpc-file-pool-csi \
 | `webhook.certProvider` | No | `cert-manager` | TLS certificate provider: `cert-manager`, `openshift` or `manual` |
 | `cloneWorker.interval` | No | `10s` | Background clone worker poll interval |
 | `goldenImageSyncer.interval` | No | `5m` | Golden image syncer poll interval |
-| `secretProvider.managed` | No | `true` | Enable managed secret provider sidecar (ROKS/IKS) |
+| `secretProvider.managed` | No | `true` | Enable managed secret provider sidecar (ROKS/ROVS/IKS) |
 | `secretProvider.sidecar.image` | No | `icr.io/obs/armada-storage-secret:v1.2.75` | Secret provider sidecar container image |
 
 ### Option B: Raw Manifests
@@ -356,10 +364,12 @@ kubectl apply -f config/deploy/node.yaml
 | `--region` | Auto-discovered | IBM Cloud region |
 | `--vpc-id` | Auto-discovered | VPC ID for mount targets |
 | `--subnet-id` | Auto-discovered | Worker subnet IDs for mount targets, comma-separated; the controller uses the one in each pool's zone |
-| `--kubelet-dir` | `/var/lib/kubelet` | Kubelet root directory (ROKS: use `/var/data/kubelet`) |
+| `--kubelet-dir` | `/var/lib/kubelet` | Kubelet root directory (ROKS/ROVS: use `/var/data/kubelet`) |
 | `--clone-worker-interval` | `10s` | Clone worker poll interval |
 | `--golden-image-sync-interval` | `5m` | Golden image syncer poll interval |
 | `--driver-image` | `""` | Driver container image for receiver-mode sync-client Jobs (auto-set by Helm) |
+| `--enable-webhooks` | `true` | Serve the validating admission webhooks. Helm sets `false` when `webhook.enabled=false` |
+| `--webhook-port` | `9443` | Port of the admission webhook server. Helm sets it from `webhook.port` |
 | `--receiver-tls-cert-file` | `""` | TLS certificate file for receiver HTTPS. Empty = plain HTTP |
 | `--receiver-tls-key-file` | `""` | TLS private key file for receiver HTTPS. Empty = plain HTTP |
 | `--ca-cert-file` | `""` | CA certificate file for verifying receiver TLS cert (sync-client mode). Empty = system trust store |

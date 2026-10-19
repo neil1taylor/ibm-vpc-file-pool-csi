@@ -7,9 +7,10 @@
 #
 # Usage:
 #   make test-vm
+#   ./test/e2e/test-vm-clone.sh --keep            # zone read from the worker nodes
 #   ./test/e2e/test-vm-clone.sh --zone eu-de-1 --keep
 #
-# Requires: ROKS cluster with OpenShift Virtualization + CDI, oc, virtctl, kubectl, jq.
+# Requires: ROKS or ROVS cluster with OpenShift Virtualization + CDI, oc, virtctl, kubectl, jq.
 
 set -euo pipefail
 
@@ -19,7 +20,7 @@ set -euo pipefail
 
 NAMESPACE="${NAMESPACE:-e2e-vm-test}"
 POOL_NAME="${POOL_NAME:-e2e-vm-pool}"
-ZONE="${ZONE:-eu-de-1}"
+ZONE="${ZONE:-}"   # empty: the zone with the most worker nodes
 IMAGE_FILTER="${IMAGE_FILTER:-centos-stream9}"
 SHARE_SIZE_GB="${SHARE_SIZE_GB:-500}"
 SHARE_IOPS="${SHARE_IOPS:-10000}"
@@ -55,6 +56,13 @@ while [[ $# -gt 0 ]]; do
         *) echo "Unknown flag: $1"; exit 1 ;;
     esac
 done
+
+# shellcheck source=lib/zone.sh
+source "$(dirname "$0")/lib/zone.sh"
+if [[ -z "$ZONE" ]]; then
+    ZONE="$(detect_zone)"
+    echo "Zone not given; using ${ZONE}, the zone with the most worker nodes"
+fi
 
 ###############################################################################
 # Helpers

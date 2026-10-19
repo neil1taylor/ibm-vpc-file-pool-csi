@@ -274,7 +274,7 @@ histogram_quantile(0.95, rate(vpc_file_pool_api_call_duration_seconds_bucket[5m]
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
 | `vpc_file_pool_clones_total` | Counter | `pool`, `status` | Clone operations by outcome |
-| `vpc_file_pool_clone_duration_seconds` | Histogram | `pool` | Sync clone duration |
+| `vpc_file_pool_clone_duration_seconds` | Histogram | `pool` | Time from the clone worker picking up a clone to the end of its copy Job |
 
 ### Group Snapshot Metrics (4 metrics)
 

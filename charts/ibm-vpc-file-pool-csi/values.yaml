@@ -69,8 +69,11 @@ webhook:
   # cert-manager: auto-provisions TLS certs via cert-manager (must be installed).
   # openshift: uses the built-in OpenShift service CA. No extra operator needed.
   #   Use this on ROKS and ROVS clusters that do not have cert-manager.
-  # manual: you must create the TLS secret yourself before deploying.
+  # manual: you must create the TLS secret <release>-ibm-vpc-file-pool-csi-webhook-certs
+  #   yourself before deploying, and set caBundle to the base64-encoded CA that signed it.
   certProvider: cert-manager
+  # Base64-encoded PEM CA bundle for the webhook config. Required when certProvider=manual.
+  caBundle: ""
   # cert-manager issuer configuration (only used when certProvider=cert-manager).
   certManager:
     # Use a self-signed issuer by default.

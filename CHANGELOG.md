@@ -13,6 +13,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `accessorZones[].subnetID` is now optional and not used: one mount target in the home zone serves every zone.
 
 ### Added
+- `webhook.caBundle` Helm value for `webhook.certProvider=manual`; the render fails without it. Controller flags `--enable-webhooks` and `--webhook-port`, set by the chart from `webhook.enabled` and `webhook.port`.
+- The E2E VM clone test reads the zone from the worker nodes when `--zone` is not given.
+- CI runs the chart and script tests (`make test-scripts`).
+- The project skills in `.claude/skills/` are now in the repository.
 - `FileSharePool.spec.securityGroupIDs`: use these security groups for the pool's mount targets instead of the cluster group.
 
 ### Security

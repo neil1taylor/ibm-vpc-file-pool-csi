@@ -92,10 +92,10 @@ type PoolManager interface {
 	RestoreSnapshot(ctx context.Context, snapshotName string, req AllocationRequest) (*AllocationResult, error)
 
 	// CloneVolume creates a new SubVolume that is a copy of an existing one.
-	// For small volumes (below syncThreshold), the copy completes before returning.
-	// For large volumes, the copy runs asynchronously -- the SubVolume CR is
-	// created with cloneStatus=Pending and the background worker completes the copy.
-	CloneVolume(ctx context.Context, sourceVolumeID string, req AllocationRequest, syncThresholdGB int64) (*AllocationResult, error)
+	// The SubVolume CR is created with cloneStatus=Pending, and the clone
+	// worker copies the data in a Job, because the controller pod has no NFS
+	// access. The node agent will not mount the volume until the copy is done.
+	CloneVolume(ctx context.Context, sourceVolumeID string, req AllocationRequest) (*AllocationResult, error)
 
 	// CreateVolumeGroupSnapshot creates snapshots for multiple SubVolumes in sequence.
 	// Does NOT execute hooks -- the CSI controller handles hook orchestration.
@@ -948,17 +948,13 @@ func (m *Manager) RestoreSnapshot(ctx context.Context, snapshotName string, req 
 	}, nil
 }
 
-func (m *Manager) CloneVolume(ctx context.Context, sourceVolumeID string, req AllocationRequest, syncThresholdGB int64) (_ *AllocationResult, retErr error) {
-	start := time.Now()
+func (m *Manager) CloneVolume(ctx context.Context, sourceVolumeID string, req AllocationRequest) (_ *AllocationResult, retErr error) {
 	defer func() {
 		status := "success"
 		if retErr != nil {
 			status = "error"
 		}
 		metrics.ClonesTotal.WithLabelValues(req.PoolName, status).Inc()
-		if status == "success" {
-			metrics.CloneDuration.WithLabelValues(req.PoolName).Observe(time.Since(start).Seconds())
-		}
 	}()
 
 	m.mu.Lock()
@@ -1025,124 +1021,55 @@ func (m *Manager) CloneVolume(ctx context.Context, sourceVolumeID string, req Al
 		return nil, err
 	}
 
-	// 6. Determine sync vs async
-	// Sync clones disabled: controller pod has no NFS access.
-	// All clones go through the async Job-based clone worker.
-	doSync := false
-	_ = syncThresholdGB // keep the constant referenced
-
+	// 6. Create the SubVolume CR as Pending. The clone worker copies the data
+	// in a Job, because the controller pod has no NFS access.
 	subPath := fmt.Sprintf("/pvcs/%s", req.PVName)
 	uid, gid, perms := m.resolvePermissions(req, pool)
 	now := metav1.Now()
 
-	if doSync {
-		// 6a. Synchronous clone: copy data first, then create CR as Complete
-		srcPath, err := util.SafeJoin(m.stagingBasePath, sourceSV.Spec.SubPath)
-		if err != nil {
-			return nil, fmt.Errorf("invalid source path: %w", err)
-		}
-		dstPath, err := util.SafeJoin(m.stagingBasePath, subPath)
-		if err != nil {
-			return nil, fmt.Errorf("invalid destination path: %w", err)
-		}
-		if err := m.nfsOps.CopyDir(srcPath, dstPath); err != nil {
-			return nil, fmt.Errorf("clone copy: %w", err)
-		}
+	sv := &v1alpha1.SubVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: req.PVName,
+			Labels: map[string]string{
+				"storage.ibmcloud.io/pool":         req.PoolName,
+				"storage.ibmcloud.io/share-id":     share.ShareID,
+				"storage.ibmcloud.io/clone-source": pvName,
+			},
+		},
+		Spec: v1alpha1.SubVolumeSpec{
+			PoolName:           req.PoolName,
+			ShareID:            share.ShareID,
+			ShareMountTargetIP: share.MountTargetIP,
+			ShareExportPath:    share.ExportPath,
+			SubPath:            subPath,
+			RequestedGB:        req.RequestedGB,
+			PVName:             req.PVName,
+			PVCName:            req.PVCName,
+			PVCNamespace:       req.PVCNamespace,
+			UID:                uid,
+			GID:                gid,
+			Permissions:        perms,
+			ReclaimPolicy:      "Delete",
+			SourceVolume:       pvName,
+			SourceShareID:      sourceSV.Spec.ShareID,
+		},
+		Status: v1alpha1.SubVolumeStatus{
+			Phase:       "Cloning",
+			CloneStatus: "Pending",
+			CloneProgress: &v1alpha1.CloneProgress{
+				TotalBytes: sourceSV.Spec.RequestedGB * (1 << 30),
+			},
+			CreatedAt: &now,
+		},
+	}
 
-		completedAt := metav1.Now()
-		sv := &v1alpha1.SubVolume{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: req.PVName,
-				Labels: map[string]string{
-					"storage.ibmcloud.io/pool":         req.PoolName,
-					"storage.ibmcloud.io/share-id":     share.ShareID,
-					"storage.ibmcloud.io/clone-source": pvName,
-				},
-			},
-			Spec: v1alpha1.SubVolumeSpec{
-				PoolName:           req.PoolName,
-				ShareID:            share.ShareID,
-				ShareMountTargetIP: share.MountTargetIP,
-				ShareExportPath:    share.ExportPath,
-				SubPath:            subPath,
-				RequestedGB:        req.RequestedGB,
-				PVName:             req.PVName,
-				PVCName:            req.PVCName,
-				PVCNamespace:       req.PVCNamespace,
-				UID:                uid,
-				GID:                gid,
-				Permissions:        perms,
-				ReclaimPolicy:      "Delete",
-				SourceVolume:       pvName,
-				SourceShareID:      sourceSV.Spec.ShareID,
-			},
-			Status: v1alpha1.SubVolumeStatus{
-				Phase:       "Bound",
-				CloneStatus: "Complete",
-				CloneProgress: &v1alpha1.CloneProgress{
-					BytesCopied: sourceSV.Spec.RequestedGB * (1 << 30),
-					TotalBytes:  sourceSV.Spec.RequestedGB * (1 << 30),
-					StartedAt:   &now,
-					CompletedAt: &completedAt,
-				},
-				CreatedAt: &now,
-			},
-		}
-
-		desiredStatus := sv.Status
-		if err := m.k8sClient.CreateSubVolume(ctx, sv); err != nil {
-			return nil, fmt.Errorf("create SubVolume CR: %w", err)
-		}
-		sv.Status = desiredStatus
-		if err := m.k8sClient.UpdateSubVolumeStatus(ctx, sv); err != nil {
-			klog.ErrorS(err, "Failed to update SubVolume status after sync clone", "pvName", req.PVName)
-		}
-	} else {
-		// 6b. Asynchronous clone: create CR as Pending, return immediately
-		sv := &v1alpha1.SubVolume{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: req.PVName,
-				Labels: map[string]string{
-					"storage.ibmcloud.io/pool":         req.PoolName,
-					"storage.ibmcloud.io/share-id":     share.ShareID,
-					"storage.ibmcloud.io/clone-source": pvName,
-				},
-			},
-			Spec: v1alpha1.SubVolumeSpec{
-				PoolName:           req.PoolName,
-				ShareID:            share.ShareID,
-				ShareMountTargetIP: share.MountTargetIP,
-				ShareExportPath:    share.ExportPath,
-				SubPath:            subPath,
-				RequestedGB:        req.RequestedGB,
-				PVName:             req.PVName,
-				PVCName:            req.PVCName,
-				PVCNamespace:       req.PVCNamespace,
-				UID:                uid,
-				GID:                gid,
-				Permissions:        perms,
-				ReclaimPolicy:      "Delete",
-				SourceVolume:       pvName,
-				SourceShareID:      sourceSV.Spec.ShareID,
-			},
-			Status: v1alpha1.SubVolumeStatus{
-				Phase:       "Cloning",
-				CloneStatus: "Pending",
-				CloneProgress: &v1alpha1.CloneProgress{
-					TotalBytes: sourceSV.Spec.RequestedGB * (1 << 30),
-				},
-				CreatedAt: &now,
-			},
-		}
-
-		desiredStatus := sv.Status
-		if err := m.k8sClient.CreateSubVolume(ctx, sv); err != nil {
-			return nil, fmt.Errorf("create SubVolume CR: %w", err)
-		}
-		sv.Status = desiredStatus
-		if err := m.k8sClient.UpdateSubVolumeStatus(ctx, sv); err != nil {
-			klog.ErrorS(err, "Failed to update SubVolume status for async clone", "pvName", req.PVName)
-		}
+	desiredStatus := sv.Status
+	if err := m.k8sClient.CreateSubVolume(ctx, sv); err != nil {
+		return nil, fmt.Errorf("create SubVolume CR: %w", err)
+	}
+	sv.Status = desiredStatus
+	if err := m.k8sClient.UpdateSubVolumeStatus(ctx, sv); err != nil {
+		klog.ErrorS(err, "Failed to update SubVolume status for async clone", "pvName", req.PVName)
 	}
 
 	// 7. Update pool capacity tracking
@@ -1156,7 +1083,6 @@ func (m *Manager) CloneVolume(ctx context.Context, sourceVolumeID string, req Al
 		"source", pvName,
 		"pool", req.PoolName,
 		"shareID", share.ShareID,
-		"sync", doSync,
 		"requestedGB", req.RequestedGB,
 	)
 

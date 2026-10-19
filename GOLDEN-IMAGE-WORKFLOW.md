@@ -160,7 +160,7 @@ oc process centos-stream9-nfs-pool -n pool-tutorial \
 The E2E VM clone test validates the full syncer-driven golden image pipeline:
 
 ```bash
-# Run the test (requires ROKS + OpenShift Virtualization + CDI)
+# Run the test (requires ROKS or ROVS + OpenShift Virtualization + CDI)
 make test-vm
 
 # With options

@@ -20,7 +20,7 @@ Complete reference for all configurable parameters in the `ibm-vpc-file-pool-csi
 
 ## Config
 
-VPC infrastructure configuration. On managed ROKS/IKS clusters, all four values are auto-discovered. Only set these for self-managed clusters or to override auto-discovery.
+VPC infrastructure configuration. On managed ROKS/ROVS/IKS clusters, all four values are auto-discovered. Only set these for self-managed clusters or to override auto-discovery.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -50,7 +50,7 @@ Settings for the CSI node agent DaemonSet (runs on every worker node).
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `node.kubeletDir` | string | `/var/data/kubelet` | Kubelet root directory. ROKS/IKS uses `/var/data/kubelet` (the real path). Standard Kubernetes uses `/var/lib/kubelet` |
+| `node.kubeletDir` | string | `/var/data/kubelet` | Kubelet root directory. ROKS/ROVS/IKS uses `/var/data/kubelet` (the real path). Standard Kubernetes uses `/var/lib/kubelet` |
 | `node.registrarHealthPort` | int | `9809` | Port for the node-driver-registrar health endpoint. Must not conflict with other hostNetwork services. Stock IBM VPC file CSI uses 9808 |
 | `node.resources.requests.cpu` | string | `50m` | Node agent CPU request |
 | `node.resources.requests.memory` | string | `64Mi` | Node agent memory request |
@@ -71,7 +71,7 @@ Controls how the IBM Cloud API key is injected into the controller.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `secretProvider.managed` | bool | `true` | Use the storage-secret-sidecar for automatic API key injection (managed ROKS/IKS). Set to `false` for self-managed clusters |
+| `secretProvider.managed` | bool | `true` | Use the storage-secret-sidecar for automatic API key injection (managed ROKS/ROVS/IKS). Set to `false` for self-managed clusters |
 | `secretProvider.sidecar.image` | string | `icr.io/obs/armada-storage-secret:v1.2.75` | Container image for the storage-secret-sidecar |
 
 ## Clone Worker
@@ -117,7 +117,8 @@ Controller-side replication Job configuration.
 |-----------|------|---------|-------------|
 | `webhook.enabled` | bool | `true` | Enable validating admission webhooks for CRD resources |
 | `webhook.port` | int | `9443` | Webhook server port |
-| `webhook.certProvider` | string | `cert-manager` | Certificate provisioning method: `cert-manager` (auto-provisions via cert-manager), `openshift` (uses the built-in OpenShift service CA; no extra operator) or `manual` (you create the TLS secret) |
+| `webhook.certProvider` | string | `cert-manager` | Certificate provisioning method: `cert-manager` (auto-provisions via cert-manager), `openshift` (uses the built-in OpenShift service CA; no extra operator) or `manual` (you create the TLS secret and set `webhook.caBundle`) |
+| `webhook.caBundle` | string | `""` | Base64-encoded PEM CA bundle for the webhook configuration. Required when `certProvider=manual` |
 | `webhook.certManager.issuerKind` | string | `Issuer` | cert-manager issuer kind. Only used when `certProvider=cert-manager` |
 | `webhook.certManager.issuerName` | string | `""` | cert-manager issuer name. Leave empty to create a self-signed Issuer automatically |
 

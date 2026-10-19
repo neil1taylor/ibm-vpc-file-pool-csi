@@ -189,7 +189,7 @@ Keep the first line under 72 characters. Add a body for non-trivial changes.
 ### Bug Reports
 
 Include:
-- Cluster type and version (IKS/ROKS, Kubernetes version)
+- Cluster type and version (IKS/ROKS/ROVS, Kubernetes version)
 - Driver version (container image tag)
 - Steps to reproduce
 - Expected vs. actual behavior

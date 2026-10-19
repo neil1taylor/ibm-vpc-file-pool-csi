@@ -4,7 +4,7 @@
 
 ```
                     ┌─────────┐
-                    │  E2E    │  Real ROKS cluster + real VPC shares
+                    │  E2E    │  Real ROKS or ROVS cluster + real VPC shares
                     │  Tests  │  `make test-e2e` (requires live cluster)
                    ─┼─────────┼─
                   / │ Integr. │ \  Fake-based: fakeK8sClient, fake VPC,
@@ -32,7 +32,7 @@
 | Unit | `pkg/ibmcloud/vpc_client_test.go` | 68 | httptest servers, fakeSecretProvider |
 | Unit | `pkg/migrate/` | 22 | In-memory fakes |
 | Integration | `test/integration/` | 82 | Full stack with fakes (fakeK8sClient, fake VPC, fakeNFSOperations) |
-| E2E | `test/e2e/` | 4 | Real ROKS cluster, real VPC shares |
+| E2E | `test/e2e/` | 4 | Real ROKS or ROVS cluster, real VPC shares |
 | **Total** | | **429+** | |
 
 ---
@@ -376,7 +376,7 @@ go tool cover -func=coverage.out
 | `make test` | `go test ./... -v -race -count=1` (unit tests only) |
 | `make test-integration` | `go test ./test/integration/ -v -race -count=1 -tags=integration` |
 | `make test-coverage` | Unit tests with coverage report |
-| `make test-e2e` | E2E tests (requires live ROKS cluster + env vars) |
+| `make test-e2e` | E2E tests (requires live ROKS or ROVS cluster + env vars) |
 
 ### Coverage Targets
 
@@ -446,7 +446,7 @@ All integration tests use **in-memory fakes** — no Docker, no NFS server, no K
 | `concurrent_allocation_test.go` | 6 | Parallel CreateVolume, race condition safety, capacity correctness |
 | `error_recovery_test.go` | 14 | NFS failures, K8s client errors, VPC API errors, partial failure recovery |
 | `snapshot_lifecycle_test.go` | 14 | Create/delete/list/restore snapshots, idempotency, error mapping |
-| `clone_lifecycle_test.go` | 14 | Sync/async clones, same-share/cross-share, threshold-based routing, error handling |
+| `clone_lifecycle_test.go` | 14 | Async clones, same-share/cross-share, error handling |
 | `clone_worker_test.go` | 7 | End-to-end async clone processing through pool manager + clone worker |
 | `group_snapshot_test.go` | 8 | Create/delete group snapshots, abort/continue policies, partial failures |
 
@@ -466,7 +466,7 @@ Integration tests are fully deterministic and fast (no I/O, no network). They ru
 
 ## E2E Tests
 
-End-to-end tests run against a real ROKS cluster with live VPC file shares. They validate the full CreateVolume -> PVC Bound -> Pod mount flow.
+End-to-end tests run against a real ROKS or ROVS cluster with live VPC file shares. They validate the full CreateVolume -> PVC Bound -> Pod mount flow.
 
 ### Running E2E Tests
 
@@ -519,7 +519,7 @@ make test-vm
 #   --timeout SECS  Override total timeout (default: 900)
 ```
 
-Requires: ROKS cluster with OpenShift Virtualization + CDI installed, `oc`, `virtctl`, `kubectl`, `jq`. Takes approximately 13-14 minutes.
+Requires: ROKS or ROVS cluster with OpenShift Virtualization + CDI installed, `oc`, `virtctl`, `kubectl`, `jq`. Takes approximately 13-14 minutes.
 
 **Stage flow (11 stages):**
 

@@ -47,6 +47,7 @@ func main() {
 		kubeletDir              string
 		cloneWorkerInterval     time.Duration
 		goldenImageSyncInterval time.Duration
+		webhooks                webhookOptions
 
 		// Receiver mode flags.
 		receiverBasePath      string
@@ -81,6 +82,8 @@ func main() {
 
 	// Replication controller flags.
 	flag.StringVar(&driverImage, "driver-image", "", "Driver container image for receiver-mode sync-client Jobs")
+	flag.BoolVar(&webhooks.enabled, "enable-webhooks", true, "Serve the validating admission webhooks (needs a serving certificate)")
+	flag.IntVar(&webhooks.port, "webhook-port", 9443, "Port of the admission webhook server")
 
 	// Receiver flags.
 	flag.StringVar(&receiverBasePath, "receiver-base-path", "/data", "NFS mount point inside receiver container")
@@ -106,7 +109,7 @@ func main() {
 
 	switch mode {
 	case "controller":
-		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, cloneWorkerInterval, goldenImageSyncInterval, driverImage)
+		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, cloneWorkerInterval, goldenImageSyncInterval, driverImage, webhooks)
 	case "receiver":
 		runReceiver(receiverBasePath, receiverAuthTokenFile, receiverListenAddr, receiverTLSCertFile, receiverTLSKeyFile)
 	case "sync-client":
@@ -116,7 +119,13 @@ func main() {
 	}
 }
 
-func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string, cloneWorkerInterval, goldenImageSyncInterval time.Duration, driverImage string) {
+// webhookOptions configures the admission webhook server.
+type webhookOptions struct {
+	enabled bool
+	port    int
+}
+
+func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string, cloneWorkerInterval, goldenImageSyncInterval time.Duration, driverImage string, webhooks webhookOptions) {
 	scheme := runtime.NewScheme()
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
 		klog.ErrorS(err, "Failed to add CRD types to scheme")
@@ -152,7 +161,7 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 			BindAddress: ":8080",
 		},
 		WebhookServer: ctrlwebhook.NewServer(ctrlwebhook.Options{
-			Port:    9443,
+			Port:    webhooks.port,
 			CertDir: "/tmp/k8s-webhook-server/serving-certs",
 		}),
 	})
@@ -199,38 +208,18 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 		os.Exit(1)
 	}
 
-	// Register validating webhooks for CRD resources.
-	if err = ctrl.NewWebhookManagedBy(mgr, &v1alpha1.FileSharePool{}).
-		WithValidator(&webhook.FileSharePoolValidator{}).
-		Complete(); err != nil {
-		klog.ErrorS(err, "Failed to register FileSharePool webhook")
-		os.Exit(1)
+	// Register validating webhooks for CRD resources. The manager starts the
+	// webhook server only when a webhook is registered, so with webhooks
+	// disabled the controller needs no serving certificate.
+	if webhooks.enabled {
+		if err = registerWebhooks(mgr); err != nil {
+			klog.ErrorS(err, "Failed to register webhooks")
+			os.Exit(1)
+		}
+		klog.V(2).InfoS("Registered validating webhooks for all CRD types", "port", webhooks.port)
+	} else {
+		klog.InfoS("Admission webhooks disabled")
 	}
-	if err = ctrl.NewWebhookManagedBy(mgr, &v1alpha1.SubVolume{}).
-		WithValidator(&webhook.SubVolumeValidator{}).
-		Complete(); err != nil {
-		klog.ErrorS(err, "Failed to register SubVolume webhook")
-		os.Exit(1)
-	}
-	if err = ctrl.NewWebhookManagedBy(mgr, &v1alpha1.ReplicationPolicy{}).
-		WithValidator(&webhook.ReplicationPolicyValidator{}).
-		Complete(); err != nil {
-		klog.ErrorS(err, "Failed to register ReplicationPolicy webhook")
-		os.Exit(1)
-	}
-	if err = ctrl.NewWebhookManagedBy(mgr, &v1alpha1.Snapshot{}).
-		WithValidator(&webhook.SnapshotValidator{}).
-		Complete(); err != nil {
-		klog.ErrorS(err, "Failed to register Snapshot webhook")
-		os.Exit(1)
-	}
-	if err = ctrl.NewWebhookManagedBy(mgr, &v1alpha1.VolumeGroupSnapshot{}).
-		WithValidator(&webhook.VolumeGroupSnapshotValidator{}).
-		Complete(); err != nil {
-		klog.ErrorS(err, "Failed to register VolumeGroupSnapshot webhook")
-		os.Exit(1)
-	}
-	klog.V(2).InfoS("Registered validating webhooks for all CRD types")
 
 	stagingBasePath := filepath.Join(kubeletDir, "plugins/vpc-file-pool.csi.ibm.io/staging")
 
@@ -511,4 +500,29 @@ func discoverNetworkConfig(ctx context.Context, clientset kubernetes.Interface, 
 
 	klog.V(2).InfoS("Share network", "vpcID", cfg.vpcID, "subnetIDs", cfg.subnetIDs, "clusterID", cfg.clusterID)
 	return cfg
+}
+
+// registerWebhooks registers the validating webhook for each CRD type.
+func registerWebhooks(mgr ctrl.Manager) error {
+	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.FileSharePool{}).
+		WithValidator(&webhook.FileSharePoolValidator{}).Complete(); err != nil {
+		return fmt.Errorf("register FileSharePool webhook: %w", err)
+	}
+	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.SubVolume{}).
+		WithValidator(&webhook.SubVolumeValidator{}).Complete(); err != nil {
+		return fmt.Errorf("register SubVolume webhook: %w", err)
+	}
+	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.ReplicationPolicy{}).
+		WithValidator(&webhook.ReplicationPolicyValidator{}).Complete(); err != nil {
+		return fmt.Errorf("register ReplicationPolicy webhook: %w", err)
+	}
+	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.Snapshot{}).
+		WithValidator(&webhook.SnapshotValidator{}).Complete(); err != nil {
+		return fmt.Errorf("register Snapshot webhook: %w", err)
+	}
+	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.VolumeGroupSnapshot{}).
+		WithValidator(&webhook.VolumeGroupSnapshotValidator{}).Complete(); err != nil {
+		return fmt.Errorf("register VolumeGroupSnapshot webhook: %w", err)
+	}
+	return nil
 }

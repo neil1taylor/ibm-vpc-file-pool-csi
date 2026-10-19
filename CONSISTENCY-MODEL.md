@@ -170,8 +170,7 @@ Application-consistent (with quiesce hooks):
 | Feature | File-Level | Cross-File | Crash | App (with hooks) |
 |---------|:----------:|:----------:|:-----:|:----------------:|
 | Snapshot (Phase 4a) | Yes | No | No | N/A |
-| Clone -- sync (Phase 4b) | Yes | No | No | N/A |
-| Clone -- async (Phase 4b) | Yes | No | No | N/A |
+| Clone (Phase 4b, always async) | Yes | No | No | N/A |
 | Group Snapshot (Phase 4c) | Yes (per member) | No (across members) | No | Yes (with hooks) |
 | DR Replication (Phase 4d+5) | Yes | No | No | Yes (with hooks) |
 
@@ -374,8 +373,7 @@ Phase 4a: Snapshot
 
 Phase 4b: Clone
   Snapshot concept + copy to new writable location.
-  Sync path (small): cp -a inline during CreateVolume.
-  Async path (large): cp -a in background, node agent gates mount.
+  cp -a runs in a Kubernetes Job (async), node agent gates mount.
 
       /pvcs/pvc-aaa/  ──cp -a──>  /pvcs/pvc-bbb/
       (source)                     (clone, fully independent)

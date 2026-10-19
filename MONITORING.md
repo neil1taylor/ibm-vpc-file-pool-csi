@@ -146,8 +146,8 @@ kill %1
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `vpc_file_pool_clones_total` | Counter | `pool`, `status` | Clone operations by outcome. |
-| `vpc_file_pool_clone_duration_seconds` | Histogram | `pool` | Time for synchronous clone operations. Async clones are tracked via SubVolume CR status. |
+| `vpc_file_pool_clones_total` | Counter | `pool`, `status` | Clone operations by outcome. `status`: `success`, `error` (request accepted or rejected by the controller), `async_success`, `async_error` (copy Job finished). |
+| `vpc_file_pool_clone_duration_seconds` | Histogram | `pool` | Time from the clone worker picking up a clone to the end of its copy Job. |
 
 ### Group Snapshot Metrics
 

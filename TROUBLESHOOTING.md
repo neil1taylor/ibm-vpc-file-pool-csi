@@ -128,7 +128,7 @@ ibmcloud login --apikey <key> --no-region
 ibmcloud is shares --output json | jq length
 ```
 
-On managed clusters (ROKS/IKS), the `storage-secret-store` secret is maintained by the platform. If it's missing, contact IBM Cloud support. On self-managed clusters, recreate the secret per the instructions in [API-KEY-SETUP.md](API-KEY-SETUP.md).
+On managed clusters (ROKS/ROVS/IKS), the `storage-secret-store` secret is maintained by the platform. If it's missing, contact IBM Cloud support. On self-managed clusters, recreate the secret per the instructions in [API-KEY-SETUP.md](API-KEY-SETUP.md).
 
 ---
 
@@ -847,7 +847,7 @@ If you can't resolve the issue:
 ```
 
 2. Open a GitHub issue with:
-   - Cluster type (IKS/ROKS) and version
+   - Cluster type (IKS/ROKS/ROVS) and version
    - Driver version (image tag)
    - The `csi-diagnostics.txt` output (redact any sensitive info)
    - Steps to reproduce

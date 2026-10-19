@@ -108,11 +108,11 @@ var (
 		[]string{"pool", "status"},
 	)
 
-	// CloneDuration tracks the time for synchronous clone operations.
+	// CloneDuration tracks the time from the clone worker picking up a clone to the end of its copy Job.
 	CloneDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "vpc_file_pool_clone_duration_seconds",
-			Help:    "Time for synchronous clone operations",
+			Help:    "Time from the clone worker picking up a clone to the end of its copy Job",
 			Buckets: prometheus.ExponentialBuckets(0.01, 2, 15), // 10ms to ~163s
 		},
 		[]string{"pool"},

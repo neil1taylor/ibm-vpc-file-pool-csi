@@ -512,7 +512,7 @@ See the [DR Failover Procedure](#failover-procedure) section above.
 ## See Also
 
 - [USER-GUIDE.md](USER-GUIDE.md) — Snapshot, clone, and group snapshot usage
-- [VOLUME-CLONING.md](VOLUME-CLONING.md) — Clone design and sync/async modes
+- [VOLUME-CLONING.md](VOLUME-CLONING.md) — Clone design (asynchronous, Job-based)
 - [VOLUME-GROUP-SNAPSHOTS.md](VOLUME-GROUP-SNAPSHOTS.md) — Group snapshot consistency model
 - [CROSS-REGION-DR.md](CROSS-REGION-DR.md) — Replication architecture and constraints
 - [CONSISTENCY-MODEL.md](CONSISTENCY-MODEL.md) — NFS consistency guarantees
