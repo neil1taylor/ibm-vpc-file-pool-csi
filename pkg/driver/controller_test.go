@@ -2221,3 +2221,49 @@ func TestCreateVolume_Idempotent_FailedCloneIsAnError(t *testing.T) {
 		t.Errorf("expected the clone error in the message, got %v", err)
 	}
 }
+
+// A retried CreateVolume must return the same mount details as the first call,
+// because the provisioner may build the PV from the retry's response.
+func TestCreateVolume_Idempotent_ReturnsFullVolumeContext(t *testing.T) {
+	k := newMockK8sClient()
+	uid, gid := int64(107), int64(107)
+	k.subVolumes["pvc-existing"] = &v1alpha1.SubVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: "pvc-existing"},
+		Spec: v1alpha1.SubVolumeSpec{
+			PoolName:           "test-pool",
+			ShareID:            "share-1",
+			ShareMountTargetIP: "10.250.0.48",
+			ShareExportPath:    "/f15f1a9d_4ce6_460b_ae8d_31d025a4ef27",
+			SubPath:            "/pvcs/pvc-existing",
+			RequestedGB:        10,
+			PVName:             "pvc-existing",
+			UID:                &uid,
+			GID:                &gid,
+			Permissions:        "0777",
+		},
+	}
+	d := newTestDriver(&mockPoolManager{}, k)
+
+	resp, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name:          "pvc-existing",
+		Parameters:    map[string]string{"pool": "test-pool"},
+		CapacityRange: &csi.CapacityRange{RequiredBytes: gbToBytes(10)},
+	})
+	if err != nil {
+		t.Fatalf("idempotent CreateVolume failed: %v", err)
+	}
+
+	want := map[string]string{
+		"server":      "10.250.0.48",
+		"share":       "/f15f1a9d_4ce6_460b_ae8d_31d025a4ef27",
+		"subDir":      "/pvcs/pvc-existing",
+		"permissions": "0777",
+		"uid":         "107",
+		"gid":         "107",
+	}
+	for key, value := range want {
+		if got := resp.GetVolume().VolumeContext[key]; got != value {
+			t.Errorf("VolumeContext[%q] = %q, want %q", key, got, value)
+		}
+	}
+}

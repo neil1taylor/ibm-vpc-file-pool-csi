@@ -30,7 +30,7 @@ Every file share in a pool belongs to the same VPC. Cross-VPC sharing is not sup
 
 ## Mount Target Access Mode
 
-The driver creates every share in **security group access mode**. IBM has deprecated VPC access mode: it reaches End of Support on 6 May 2027, and the API already refuses new VPC-mode mount targets with HTTP 501 `shares_not_implemented` (seen in `eu-de-1` and `eu-de-3`, October 2026). A share that still uses VPC access mode must be converted; see the migration runbook in `DAY2-OPERATIONS.md` when it is published.
+The driver creates every share in **security group access mode**. IBM has deprecated VPC access mode: it reaches End of Support on 6 May 2027, and the API already refuses new VPC-mode mount targets with HTTP 501 `shares_not_implemented` (seen in `eu-de-1` and `eu-de-3`, October 2026).
 
 In security group mode, the mount target has a **virtual network interface (VNI)**. A VNI is a network port with its own IP address in one subnet. Security groups on the VNI control which clients can reach NFS.
 
