@@ -276,16 +276,26 @@ func (d *Driver) ValidateVolumeCapabilities(_ context.Context, req *csi.Validate
 // subVolumeToCSIVolume converts a SubVolume CR to a CSI Volume for idempotent responses.
 func subVolumeToCSIVolume(sv *v1alpha1.SubVolume) *csi.Volume {
 	volumeID := fmt.Sprintf("%s/%s/%s", sv.Spec.PoolName, sv.Spec.ShareID, sv.Spec.PVName)
+	volCtx := map[string]string{
+		"server":  sv.Spec.ShareMountTargetIP,
+		"share":   sv.Spec.ShareExportPath,
+		"subDir":  sv.Spec.SubPath,
+		"pool":    sv.Spec.PoolName,
+		"shareID": sv.Spec.ShareID,
+	}
+	if sv.Spec.Permissions != "" {
+		volCtx["permissions"] = sv.Spec.Permissions
+	}
+	if sv.Spec.UID != nil {
+		volCtx["uid"] = strconv.FormatInt(*sv.Spec.UID, 10)
+	}
+	if sv.Spec.GID != nil {
+		volCtx["gid"] = strconv.FormatInt(*sv.Spec.GID, 10)
+	}
 	return &csi.Volume{
 		VolumeId:      volumeID,
 		CapacityBytes: sv.Spec.RequestedGB * (1 << 30),
-		VolumeContext: map[string]string{
-			"server":  sv.Spec.ShareMountTargetIP,
-			"share":   "/",
-			"subDir":  sv.Spec.SubPath,
-			"pool":    sv.Spec.PoolName,
-			"shareID": sv.Spec.ShareID,
-		},
+		VolumeContext: volCtx,
 	}
 }
 
