@@ -55,3 +55,70 @@ export const ReplicationPolicyModel: K8sModel = {
   labelPlural: 'ReplicationPolicies',
   namespaced: false,
 };
+
+// ── Standard Kubernetes kinds used by the create pages ──
+
+export const PersistentVolumeClaimModel: K8sModel = {
+  apiVersion: 'v1',
+  kind: 'PersistentVolumeClaim',
+  plural: 'persistentvolumeclaims',
+  abbr: 'PVC',
+  label: 'PersistentVolumeClaim',
+  labelPlural: 'PersistentVolumeClaims',
+  namespaced: true,
+};
+
+export const StorageClassModel: K8sModel = {
+  apiGroup: 'storage.k8s.io',
+  apiVersion: 'v1',
+  kind: 'StorageClass',
+  plural: 'storageclasses',
+  abbr: 'SC',
+  label: 'StorageClass',
+  labelPlural: 'StorageClasses',
+  namespaced: false,
+};
+
+export const VolumeSnapshotModel: K8sModel = {
+  apiGroup: 'snapshot.storage.k8s.io',
+  apiVersion: 'v1',
+  kind: 'VolumeSnapshot',
+  plural: 'volumesnapshots',
+  abbr: 'VS',
+  label: 'VolumeSnapshot',
+  labelPlural: 'VolumeSnapshots',
+  namespaced: true,
+};
+
+export const VolumeSnapshotClassModel: K8sModel = {
+  apiGroup: 'snapshot.storage.k8s.io',
+  apiVersion: 'v1',
+  kind: 'VolumeSnapshotClass',
+  plural: 'volumesnapshotclasses',
+  abbr: 'VSC',
+  label: 'VolumeSnapshotClass',
+  labelPlural: 'VolumeSnapshotClasses',
+  namespaced: false,
+};
+
+export const KubeVolumeGroupSnapshotModel: K8sModel = {
+  apiGroup: 'groupsnapshot.storage.k8s.io',
+  apiVersion: 'v1beta1',
+  kind: 'VolumeGroupSnapshot',
+  plural: 'volumegroupsnapshots',
+  abbr: 'VGS',
+  label: 'VolumeGroupSnapshot',
+  labelPlural: 'VolumeGroupSnapshots',
+  namespaced: true,
+};
+
+export const VolumeGroupSnapshotClassModel: K8sModel = {
+  apiGroup: 'groupsnapshot.storage.k8s.io',
+  apiVersion: 'v1beta1',
+  kind: 'VolumeGroupSnapshotClass',
+  plural: 'volumegroupsnapshotclasses',
+  abbr: 'VGSC',
+  label: 'VolumeGroupSnapshotClass',
+  labelPlural: 'VolumeGroupSnapshotClasses',
+  namespaced: false,
+};

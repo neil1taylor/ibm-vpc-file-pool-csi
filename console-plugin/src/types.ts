@@ -24,6 +24,7 @@ export interface FileSharePoolSpec {
   resourceGroup?: string;
   tags?: string[];
   mountOptions?: string[];
+  securityGroupIDs?: string[];
   accessorZones?: AccessorZone[];
   tiers?: ShareTier[];
   drainShares?: string[];
@@ -41,7 +42,7 @@ export interface GoldenImageConfig {
 
 export interface AccessorZone {
   zone: string;
-  subnetID: string;
+  subnetID?: string;
 }
 
 export interface ShareTier {
@@ -225,7 +226,7 @@ export interface ReplicationPolicy extends K8sResourceCommon {
 
 export interface ReplicationPolicySpec {
   sourcePoolName: string;
-  destinationNFSServer: string;
+  destinationNFSServer?: string;
   destinationExportPath?: string;
   destinationBasePath: string;
   schedule: string;
@@ -241,6 +242,8 @@ export interface ReplicationPolicySpec {
   destinationEndpoint?: string;
   /** Secret name in kube-system containing a "token" key for receiver auth. Required when destinationEndpoint is set. */
   destinationAuthSecretRef?: string;
+  /** Secret name in kube-system with a "ca.crt" key. Used in driver-to-driver mode when the receiver has a self-signed certificate. */
+  destinationCACertSecretRef?: string;
 }
 
 export interface ReplicationPolicyStatus {

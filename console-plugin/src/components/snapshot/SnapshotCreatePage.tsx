@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { k8sCreate, useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk';
 import { useHistory, useLocation } from 'react-router-dom';
 import {
@@ -9,135 +9,98 @@ import {
   HelperText,
   HelperTextItem,
   TextInput,
-  NumberInput,
   FormSelect,
   FormSelectOption,
   ActionGroup,
   Button,
   Stack,
   StackItem,
-  Card,
-  CardBody,
-  Split,
-  SplitItem,
-  Label,
 } from '@patternfly/react-core';
-import { SnapshotModel, SubVolumeModel } from '../../models';
-import { Snapshot, SubVolume } from '../../types';
+import {
+  PersistentVolumeClaimModel,
+  StorageClassModel,
+  VolumeSnapshotClassModel,
+  VolumeSnapshotModel,
+} from '../../models';
 import { ROUTES } from '../../constants';
+import {
+  DriverClass,
+  PersistentVolumeClaim,
+  StorageClass,
+  buildVolumeSnapshot,
+  errorMessage,
+  findClassByDriver,
+  isValidK8sName,
+  poolPVCs,
+  volumeSnapshotPath,
+} from '../../utils/k8s-objects';
 import FieldPopover from '../common/FieldPopover';
+
+const watch = (model: { apiGroup?: string; apiVersion: string; kind: string }) => ({
+  groupVersionKind: { group: model.apiGroup, version: model.apiVersion, kind: model.kind },
+  isList: true,
+});
 
 const SnapshotCreatePage: React.FC = () => {
   const history = useHistory();
   const location = useLocation();
 
-  const queryParams = new URLSearchParams(location.search);
-  const sourceParam = queryParams.get('source') || '';
+  const params = new URLSearchParams(location.search);
+  const presetSource =
+    params.get('namespace') && params.get('pvc') ? `${params.get('namespace')}/${params.get('pvc')}` : '';
 
   const [name, setName] = useState('');
-  const [sourceSubVolume, setSourceSubVolume] = useState(sourceParam);
-  const [poolName, setPoolName] = useState('');
-  const [sizeGB, setSizeGB] = useState(0);
-  const [poolAutoFilled, setPoolAutoFilled] = useState(false);
-
+  const [source, setSource] = useState(presetSource);
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
 
-  const [subVolumes, svLoaded] = useK8sWatchResource<SubVolume[]>({
-    groupVersionKind: {
-      group: SubVolumeModel.apiGroup,
-      version: SubVolumeModel.apiVersion,
-      kind: SubVolumeModel.kind,
-    },
-    isList: true,
-  });
+  const [pvcs, pvcsLoaded] = useK8sWatchResource<PersistentVolumeClaim[]>(watch(PersistentVolumeClaimModel));
+  const [storageClasses] = useK8sWatchResource<StorageClass[]>(watch(StorageClassModel));
+  const [snapshotClasses, classesLoaded] = useK8sWatchResource<DriverClass[]>(watch(VolumeSnapshotClassModel));
 
-  const boundSubVolumes = (subVolumes || []).filter(
-    (sv) => sv.status?.phase === 'Bound',
-  );
+  const sources = poolPVCs(pvcs || [], storageClasses || []);
+  const snapshotClass = findClassByDriver(snapshotClasses || []);
+  const noClass = classesLoaded && !snapshotClass;
+  const [namespace, pvcName] = source.split('/');
 
-  // Auto-fill fields when the selected subvolume changes
-  useEffect(() => {
-    if (!sourceSubVolume || !svLoaded) return;
-
-    const sv = boundSubVolumes.find(
-      (s) => s.metadata?.name === sourceSubVolume,
-    );
-    if (sv) {
-      setPoolName(sv.spec.poolName);
-      setPoolAutoFilled(true);
-      setSizeGB(sv.spec.requestedGB);
-    } else {
-      setPoolName('');
-      setPoolAutoFilled(false);
-      setSizeGB(0);
-    }
-  }, [sourceSubVolume, svLoaded, subVolumes]);
+  const isValid = isValidK8sName(name) && source.length > 0 && !!snapshotClass;
 
   const handleCreate = async () => {
+    if (!snapshotClass) return;
     setError('');
     setCreating(true);
-
-    const selectedSV = boundSubVolumes.find(
-      (sv) => sv.metadata?.name === sourceSubVolume,
-    );
-
-    if (!selectedSV) {
-      setError('Selected SubVolume not found or not in Bound phase.');
-      setCreating(false);
-      return;
-    }
-
-    const snapshotPath = `/pvcs/.snapshots/${name}`;
-
-    const resource: Snapshot = {
-      apiVersion: 'storage.ibmcloud.io/v1alpha1',
-      kind: 'Snapshot',
-      metadata: { name },
-      spec: {
-        sourceSubVolume,
-        poolName: selectedSV.spec.poolName,
-        shareID: selectedSV.spec.shareID,
-        shareMountTargetIP: selectedSV.spec.shareMountTargetIP,
-        snapshotPath,
-        sourceSubPath: selectedSV.spec.subPath,
-        sizeGB,
-      },
-    };
-
     try {
-      await k8sCreate({ model: SnapshotModel, data: resource });
-      history.push(ROUTES.SNAPSHOT_DETAIL.replace(':name', name));
+      await k8sCreate({
+        model: VolumeSnapshotModel,
+        data: buildVolumeSnapshot({
+          namespace,
+          name,
+          pvcName,
+          className: snapshotClass.metadata?.name || '',
+        }),
+      });
+      history.push(volumeSnapshotPath(namespace, name));
     } catch (err: unknown) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : typeof err === 'object' && err !== null && 'message' in err
-            ? String((err as { message: unknown }).message)
-            : 'Failed to create Snapshot';
-      setError(message);
+      setError(errorMessage(err, 'Failed to create snapshot'));
     } finally {
       setCreating(false);
     }
   };
 
-  const isValid =
-    name.length > 0 &&
-    sourceSubVolume.length > 0 &&
-    poolName.length > 0 &&
-    sizeGB > 0;
-
-  // Find the selected SubVolume for the info card
-  const selectedSV = boundSubVolumes.find(
-    (sv) => sv.metadata?.name === sourceSubVolume,
-  );
-
   return (
     <PageSection variant="default">
       <Title headingLevel="h1" style={{ marginBottom: '1rem' }}>
-        Create Snapshot
+        Create snapshot
       </Title>
       <Stack hasGutter>
+        {noClass && (
+          <StackItem>
+            <Alert variant="warning" title="No snapshot class for this driver" isInline>
+              No VolumeSnapshotClass uses the driver vpc-file-pool.csi.ibm.io. Create one before taking snapshots.
+            </Alert>
+          </StackItem>
+        )}
+
         {error && (
           <StackItem>
             <Alert variant="danger" title="Creation failed" isInline>
@@ -148,9 +111,31 @@ const SnapshotCreatePage: React.FC = () => {
 
         <StackItem>
           <FieldPopover
+            fieldId="snap-source"
+            label="Source volume"
+            description="The PersistentVolumeClaim to snapshot. Only claims whose storage class uses this driver are shown. The snapshot is created in the same namespace."
+            isRequired
+          >
+            <FormSelect
+              id="snap-source"
+              value={source}
+              onChange={(_event, value) => setSource(value)}
+              isDisabled={!pvcsLoaded}
+            >
+              <FormSelectOption value="" label="-- Select a volume --" isDisabled />
+              {sources.map((p) => {
+                const key = `${p.metadata?.namespace}/${p.metadata?.name}`;
+                return <FormSelectOption key={key} value={key} label={key} />;
+              })}
+            </FormSelect>
+          </FieldPopover>
+        </StackItem>
+
+        <StackItem>
+          <FieldPopover
             fieldId="snap-name"
             label="Name"
-            description="Unique name for this snapshot. Used as the directory name under /pvcs/.snapshots/ on the NFS share."
+            description="The name of the VolumeSnapshot."
             isRequired
           >
             <TextInput
@@ -158,129 +143,12 @@ const SnapshotCreatePage: React.FC = () => {
               value={name}
               onChange={(_event, value) => setName(value)}
               isRequired
+              validated={name.length === 0 || isValidK8sName(name) ? 'default' : 'error'}
               placeholder="my-snapshot"
             />
             <FormHelperText>
               <HelperText>
-                <HelperTextItem>Unique name for this snapshot</HelperTextItem>
-              </HelperText>
-            </FormHelperText>
-          </FieldPopover>
-        </StackItem>
-
-        <StackItem>
-          <FieldPopover
-            fieldId="snap-source"
-            label="Source SubVolume"
-            description="The SubVolume to snapshot. Only Bound SubVolumes are available for snapshotting. Selecting a SubVolume auto-fills the pool name and size estimate."
-            isRequired
-          >
-            <FormSelect
-              id="snap-source"
-              value={sourceSubVolume}
-              onChange={(_event, value) => setSourceSubVolume(value)}
-              isDisabled={!svLoaded}
-            >
-              <FormSelectOption value="" label="-- Select a SubVolume --" isDisabled />
-              {boundSubVolumes.map((sv) => {
-                const svName = sv.metadata?.name || '';
-                const phase = sv.status?.phase || '';
-                return (
-                  <FormSelectOption
-                    key={svName}
-                    value={svName}
-                    label={`${svName} (${sv.spec.poolName}, ${sv.spec.requestedGB} GB, ${phase})`}
-                  />
-                );
-              })}
-            </FormSelect>
-            <FormHelperText>
-              <HelperText>
-                <HelperTextItem>SubVolume to snapshot (only Bound subvolumes are shown)</HelperTextItem>
-              </HelperText>
-            </FormHelperText>
-          </FieldPopover>
-        </StackItem>
-
-        {/* Source SubVolume info card */}
-        {selectedSV && (
-          <StackItem>
-            <Card isCompact variant="secondary">
-              <CardBody>
-                <Split hasGutter>
-                  <SplitItem>
-                    <Label isCompact>Pool: {selectedSV.spec.poolName}</Label>
-                  </SplitItem>
-                  <SplitItem>
-                    <Label isCompact>Size: {selectedSV.spec.requestedGB} GB</Label>
-                  </SplitItem>
-                  <SplitItem>
-                    <Label isCompact>
-                      PVC: {selectedSV.spec.pvcNamespace}/{selectedSV.spec.pvcName}
-                    </Label>
-                  </SplitItem>
-                  {selectedSV.spec.shareID && (
-                    <SplitItem>
-                      <Label isCompact color="blue">
-                        Share: {selectedSV.spec.shareID.slice(0, 12)}...
-                      </Label>
-                    </SplitItem>
-                  )}
-                </Split>
-              </CardBody>
-            </Card>
-          </StackItem>
-        )}
-
-        <StackItem>
-          <FieldPopover
-            fieldId="snap-pool"
-            label="Pool Name"
-            description="Pool that owns the source SubVolume. Auto-filled when you select a SubVolume."
-            isRequired
-          >
-            <TextInput
-              id="snap-pool"
-              value={poolName}
-              onChange={(_event, value) => setPoolName(value)}
-              isDisabled={poolAutoFilled}
-              isRequired
-            />
-            <FormHelperText>
-              <HelperText>
-                <HelperTextItem>
-                  {poolAutoFilled ? 'Auto-filled from selected SubVolume' : 'Pool that owns the source SubVolume'}
-                </HelperTextItem>
-              </HelperText>
-            </FormHelperText>
-          </FieldPopover>
-        </StackItem>
-
-        <StackItem>
-          <FieldPopover
-            fieldId="snap-size"
-            label="Size (GB)"
-            description="Snapshot size estimate in GB. Auto-filled from the source SubVolume's requested size. Actual snapshot size depends on data written."
-            isRequired
-          >
-            <NumberInput
-              id="snap-size"
-              value={sizeGB}
-              min={1}
-              onMinus={() => setSizeGB(Math.max(1, sizeGB - 1))}
-              onPlus={() => setSizeGB(sizeGB + 1)}
-              onChange={(event) => {
-                const val = parseInt((event.target as HTMLInputElement).value, 10);
-                if (!isNaN(val)) setSizeGB(val);
-              }}
-            />
-            <FormHelperText>
-              <HelperText>
-                <HelperTextItem>
-                  {selectedSV
-                    ? `Auto-filled from source (${selectedSV.spec.requestedGB} GB)`
-                    : 'Snapshot size in GB'}
-                </HelperTextItem>
+                <HelperTextItem>Lower-case letters, digits and dashes</HelperTextItem>
               </HelperText>
             </FormHelperText>
           </FieldPopover>
@@ -288,15 +156,10 @@ const SnapshotCreatePage: React.FC = () => {
 
         <StackItem>
           <ActionGroup>
-            <Button
-              variant="primary"
-              onClick={handleCreate}
-              isDisabled={creating || !isValid}
-              isLoading={creating}
-            >
+            <Button variant="primary" onClick={handleCreate} isDisabled={creating || !isValid} isLoading={creating}>
               Create
             </Button>
-            <Button variant="link" onClick={() => history.goBack()} isDisabled={creating}>
+            <Button variant="link" onClick={() => history.push(ROUTES.SNAPSHOTS)} isDisabled={creating}>
               Cancel
             </Button>
           </ActionGroup>

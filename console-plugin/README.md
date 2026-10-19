@@ -74,7 +74,9 @@ console-plugin/
 │   │   │   ├── FieldPopover.tsx          #   Field info popover
 │   │   │   ├── HookEditor.tsx            #   Lifecycle hook editor
 │   │   │   ├── PhaseStatus.tsx           #   Phase badge (Ready/Degraded/...)
+│   │   │   ├── PoolPhase.tsx             #   Pool phase with the reason it is not Ready
 │   │   │   ├── SchedulePresets.tsx       #   Cron schedule picker
+│   │   │   ├── ShareStatus.tsx           #   Share health label
 │   │   │   └── YAMLEditorFallback.tsx    #   YAML editor wrapper
 │   │   ├── dashboard/                    # Dashboard overview
 │   │   │   ├── DashboardPage.tsx
@@ -83,15 +85,15 @@ console-plugin/
 │   │   │   ├── FileSharePoolListPage.tsx
 │   │   │   ├── FileSharePoolDetailsPage.tsx
 │   │   │   └── FileSharePoolCreatePage.tsx
-│   │   ├── subvolume/                    # SubVolume CRUD
+│   │   ├── subvolume/                    # Volumes (SubVolume records; create makes a PVC)
 │   │   │   ├── SubVolumeListPage.tsx
 │   │   │   ├── SubVolumeDetailsPage.tsx
 │   │   │   └── SubVolumeCreatePage.tsx
-│   │   ├── snapshot/                     # Snapshot CRUD
+│   │   ├── snapshot/                     # Snapshots (Snapshot records; create makes a VolumeSnapshot)
 │   │   │   ├── SnapshotListPage.tsx
 │   │   │   ├── SnapshotDetailsPage.tsx
 │   │   │   └── SnapshotCreatePage.tsx
-│   │   ├── volumegroupsnapshot/          # VolumeGroupSnapshot CRUD
+│   │   ├── volumegroupsnapshot/          # Group snapshots (create makes a VolumeGroupSnapshot)
 │   │   │   ├── VolumeGroupSnapshotListPage.tsx
 │   │   │   ├── VolumeGroupSnapshotDetailsPage.tsx
 │   │   │   └── VolumeGroupSnapshotCreatePage.tsx
@@ -103,7 +105,11 @@ console-plugin/
 │   │       ├── MonitoringPage.tsx
 │   │       └── TimeSeriesChart.tsx
 │   └── utils/
-│       ├── resource-helpers.ts           # K8s object helpers
+│       ├── resource-helpers.ts           # Formatting and phase colours
+│       ├── pool-helpers.ts               # Share health, phase reason, usable shares
+│       ├── k8s-objects.ts                # PVC / VolumeSnapshot / VolumeGroupSnapshot builders
+│       ├── replication-helpers.ts        # Replication destination fields
+│       ├── metric-queries.ts             # Prometheus query strings
 │       └── use-pool-metrics.ts           # Prometheus query hook
 ├── integration-tests/
 │   ├── playwright.config.ts              # Playwright config
@@ -122,11 +128,22 @@ console-plugin/
 ├── webpack.config.ts
 ├── nginx.conf                            # NGINX config for prod container
 ├── Dockerfile                            # Multi-arch image
-├── Dockerfile.amd64                      # AMD64-only image
 └── start-console.sh                      # Local dev helper
 ```
 
 ---
+
+## Creating Volumes and Snapshots
+
+The SubVolume, Snapshot and VolumeGroupSnapshot lists show records the driver writes while it serves
+CSI calls. They are read-only views. Creating one by hand would not create any data, so the create
+buttons make the standard Kubernetes objects instead:
+
+| Button | Creates | Notes |
+|--------|---------|-------|
+| Create volume (PVC) | `PersistentVolumeClaim` (ReadWriteMany) | Storage class is the pool name, or `<pool>-<tier>` for a tiered pool. Only pools with a stable share that has a mount target are offered. |
+| Create snapshot | `VolumeSnapshot` | Source is a PVC from a storage class this driver provisions. The `VolumeSnapshotClass` is found by driver (`vpc-file-pool.csi.ibm.io`), not by name. |
+| Create group snapshot | `VolumeGroupSnapshot` (`groupsnapshot.storage.k8s.io/v1beta1`) | Selects PVCs by label. If the cluster has no group snapshot API, the page says so and offers no form. |
 
 ## Local Development
 

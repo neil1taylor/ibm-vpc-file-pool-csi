@@ -7,7 +7,6 @@ import {
   ListPageCreateLink,
   ListPageFilter,
   useListPageFilter,
-  Timestamp,
 } from '@openshift-console/dynamic-plugin-sdk';
 import { Link } from 'react-router-dom';
 import {
@@ -27,6 +26,7 @@ import { ReplicationPolicy } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
 import DeleteModal from '../common/DeleteModal';
 import { formatAge } from '../../utils/resource-helpers';
+import { replicationDestination } from '../../utils/replication-helpers';
 import { ROUTES } from '../../constants';
 
 const ReplicationPolicyRow: React.FC<{
@@ -80,7 +80,7 @@ const ReplicationPolicyRow: React.FC<{
       <Td dataLabel="Name"><Link to={detailPath}>{name}</Link></Td>
       <Td dataLabel="Source Pool">{policy.spec?.sourcePoolName || '-'}</Td>
       <Td dataLabel="Destination">
-        <code>{policy.spec?.destinationNFSServer || '-'}:{policy.spec?.destinationBasePath || '/pvcs'}</code>
+        <code>{replicationDestination(policy.spec)}</code>
       </Td>
       <Td dataLabel="Schedule">{policy.spec?.schedule || '-'}</Td>
       <Td dataLabel="Phase"><PhaseStatus phase={policy.status?.phase} /></Td>

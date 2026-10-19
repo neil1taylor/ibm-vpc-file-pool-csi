@@ -26,6 +26,7 @@ import { FileSharePool, ReplicationPolicy } from '../../types';
 import { usePoolMetrics, checkPrometheusConnection } from '../../utils/use-pool-metrics';
 import { TIME_RANGES, TimeRange } from '../../utils/use-pool-metrics';
 import { METRICS } from '../../constants';
+import { metricQueries } from '../../utils/metric-queries';
 import TimeSeriesChart from './TimeSeriesChart';
 import CapacityDonut from '../dashboard/CapacityDonut';
 import CapacityBar from '../common/CapacityBar';
@@ -359,7 +360,7 @@ const MonitoringPage: React.FC = () => {
             <CardTitle>VPC API P95 Latency</CardTitle>
             <CardBody>
               <TimeSeriesChart
-                query={`histogram_quantile(0.95, sum(rate(${METRICS.VPC_API_CALL_DURATION}[5m])) by (le)) * 1000`}
+                query={metricQueries.apiP95Ms}
                 range={range}
                 yLabel="ms"
                 chartType="line"
@@ -397,7 +398,7 @@ const MonitoringPage: React.FC = () => {
                 <CardTitle>P95 Allocation Latency Over Time</CardTitle>
                 <CardBody>
                   <TimeSeriesChart
-                    query={`histogram_quantile(0.95, sum(rate(${METRICS.ALLOCATION_DURATION}[5m])) by (le)) * 1000`}
+                    query={metricQueries.allocationP95Ms}
                     range={range}
                     yLabel="ms"
                     chartType="line"

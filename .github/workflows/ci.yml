@@ -99,6 +99,10 @@ jobs:
       - name: Build
         run: yarn build
 
+      - name: Build container image
+        working-directory: .
+        run: make console-plugin-docker-build
+
   build:
     name: Build
     runs-on: ubuntu-latest

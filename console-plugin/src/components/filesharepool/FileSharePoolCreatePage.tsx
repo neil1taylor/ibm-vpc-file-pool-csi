@@ -37,6 +37,7 @@ import {
 import { FileSharePoolModel } from '../../models';
 import { FileSharePool, FileSharePoolSpec, GoldenImageConfig } from '../../types';
 import { ROUTES } from '../../constants';
+import { parseSecurityGroupIDs } from '../../utils/pool-helpers';
 import FieldPopover from '../common/FieldPopover';
 import YAMLEditorFallback from '../common/YAMLEditorFallback';
 
@@ -129,6 +130,7 @@ interface FormState {
   defaultGID: string;
   encryptionInTransit: boolean;
   resourceGroup: string;
+  securityGroupIDs: string;
   tags: string;
   mountOptions: string;
   goldenImagesEnabled: boolean;
@@ -155,6 +157,7 @@ const initialFormState: FormState = {
   defaultGID: '',
   encryptionInTransit: false,
   resourceGroup: '',
+  securityGroupIDs: '',
   tags: '',
   mountOptions: '',
   goldenImagesEnabled: false,
@@ -202,6 +205,9 @@ const buildResource = (form: FormState): FileSharePool => {
   if (form.resourceGroup.trim()) {
     spec.resourceGroup = form.resourceGroup.trim();
   }
+
+  const securityGroupIDs = parseSecurityGroupIDs(form.securityGroupIDs);
+  if (securityGroupIDs.length > 0) spec.securityGroupIDs = securityGroupIDs;
 
   const tags = parseLines(form.tags);
   if (tags.length > 0) spec.tags = tags;
@@ -331,8 +337,8 @@ const FileSharePoolCreatePage: React.FC = () => {
     setForm((prev) => ({ ...prev, [key]: value }));
 
   React.useEffect(() => {
-    if (zonesLoaded && discoveredZones.length > 0 && form.zone === '') {
-      set('zone', discoveredZones[0]);
+    if (zonesLoaded && discoveredZones.length > 0) {
+      setForm((prev) => (prev.zone === '' ? { ...prev, zone: discoveredZones[0] } : prev));
     }
   }, [zonesLoaded, discoveredZones]);
 
@@ -863,6 +869,27 @@ const FileSharePoolCreatePage: React.FC = () => {
           <FormHelperText>
             <HelperText>
               <HelperTextItem>Optional VPC resource group ID</HelperTextItem>
+            </HelperText>
+          </FormHelperText>
+        </FieldPopover>
+      </StackItem>
+
+      <StackItem>
+        <FieldPopover
+          fieldId="fsp-security-groups"
+          label="Security Groups"
+          description="VPC security group IDs attached to the share mount targets. They must allow NFS (TCP 2049) from the worker nodes. One ID per line, or comma-separated."
+        >
+          <TextArea
+            id="fsp-security-groups"
+            value={form.securityGroupIDs}
+            onChange={(_event, value) => set('securityGroupIDs', value)}
+            rows={3}
+            placeholder={"r010-1111-2222\nr010-3333-4444"}
+          />
+          <FormHelperText>
+            <HelperText>
+              <HelperTextItem>Leave empty to use the cluster security group.</HelperTextItem>
             </HelperText>
           </FormHelperText>
         </FieldPopover>

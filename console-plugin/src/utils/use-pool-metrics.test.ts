@@ -145,3 +145,32 @@ describe('usePoolMetrics', () => {
     clearIntervalSpy.mockRestore();
   });
 });
+
+describe('usePoolMetrics replication lag', () => {
+  it('matches replication lag to a pool by the source_pool label', async () => {
+    mockFetch.mockImplementation(async (url: string) => {
+      const result = url.includes('replication_lag_seconds')
+        ? [{ metric: { policy: 'p1', source_pool: 'pool-a' }, value: [0, '42'] as [number, string] }]
+        : [];
+      return { status: 'success', data: { resultType: 'vector', result } };
+    });
+
+    const { result } = renderHook(() => usePoolMetrics(['pool-a', 'pool-b'], 60000));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.metrics['pool-a'].replicationLagSeconds).toBe(42);
+    expect(result.current.metrics['pool-b'].replicationLagSeconds).toBe(0);
+  });
+
+  it('queries latency from _bucket series', async () => {
+    mockFetch.mockImplementation(async () => ({
+      status: 'success',
+      data: { resultType: 'vector', result: [] },
+    }));
+    renderHook(() => usePoolMetrics(['pool-a'], 60000));
+    await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+    const urls = mockFetch.mock.calls.map((c) => decodeURIComponent(c[0] as string));
+    expect(urls.some((u) => u.includes('allocation_duration_seconds_bucket'))).toBe(true);
+    expect(urls.some((u) => /_seconds\[/.test(u))).toBe(false);
+  });
+});

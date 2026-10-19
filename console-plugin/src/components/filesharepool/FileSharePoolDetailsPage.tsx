@@ -37,6 +37,8 @@ import {
 import { FileSharePoolModel } from '../../models';
 import { FileSharePool } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
+import PoolPhase from '../common/PoolPhase';
+import ShareStatus from '../common/ShareStatus';
 import CapacityBar from '../common/CapacityBar';
 import ConditionsTable from '../common/ConditionsTable';
 import { formatAge } from '../../utils/resource-helpers';
@@ -201,6 +203,16 @@ const FileSharePoolDetailsPage: React.FC = () => {
                 </DescriptionListDescription>
               </DescriptionListGroup>
               <DescriptionListGroup>
+                <DescriptionListTerm>Security Groups</DescriptionListTerm>
+                <DescriptionListDescription>
+                  {spec.securityGroupIDs && spec.securityGroupIDs.length > 0
+                    ? spec.securityGroupIDs.map((id) => (
+                        <div key={id}><code>{id}</code></div>
+                      ))
+                    : 'Cluster default'}
+                </DescriptionListDescription>
+              </DescriptionListGroup>
+              <DescriptionListGroup>
                 <DescriptionListTerm>Tags</DescriptionListTerm>
                 <DescriptionListDescription>
                   {spec.tags && spec.tags.length > 0
@@ -232,7 +244,7 @@ const FileSharePoolDetailsPage: React.FC = () => {
               <DescriptionListGroup>
                 <DescriptionListTerm>Phase</DescriptionListTerm>
                 <DescriptionListDescription>
-                  <PhaseStatus phase={status?.phase} />
+                  <PoolPhase pool={pool} />
                 </DescriptionListDescription>
               </DescriptionListGroup>
               <DescriptionListGroup>
@@ -305,7 +317,7 @@ const FileSharePoolDetailsPage: React.FC = () => {
               </Td>
               <Td>{share.zone}</Td>
               <Td>
-                <PhaseStatus phase={share.state} />
+                <ShareStatus share={share} />
               </Td>
               <Td>
                 <CapacityBar
@@ -443,7 +455,7 @@ const FileSharePoolDetailsPage: React.FC = () => {
                         {share.pvcCount} PVCs
                       </SplitItem>
                       <SplitItem>
-                        <PhaseStatus phase={share.state} />
+                        <ShareStatus share={share} />
                       </SplitItem>
                     </Split>
                   </StackItem>
