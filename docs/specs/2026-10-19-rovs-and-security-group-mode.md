@@ -28,6 +28,7 @@ Measured on `rovslab-prod-eude` (ROVS 4.21.31, 3 bare metal workers in `eu-de-3`
 | 12 | `webhook.certProvider=manual` never sets the CA bundle on the webhook config, so every API call to the webhook fails TLS. With `webhook.enabled=false`, the controller still starts the webhook server, which needs certificates. *Found by reading the code; not yet run.* | Both documented alternatives to cert-manager are likely broken. |
 | 13 | The `/deploy` skill assumes Docker and does not set the pull secret or the certificate option. | Following it on this Mac and on ROVS fails. |
 | 14 | `VPC-NETWORKING.md`, the tutorials and the E2E script describe only ROKS and VPC access mode. | The docs describe a setup that no longer works. |
+| 16 | Clones of small volumes were meant to copy at once, inside the create call. That path is switched off in code, because the controller cannot reach NFS. Every clone now runs as a background Job. The unused path and its size setting are still in the code, and `VOLUME-CLONING.md` and `CLAUDE.md` still describe it. | The docs promise a fast path that does not exist, and the dead code misleads anyone who reads it. |
 | 15 | The OpenShift console plugin (`console-plugin/`) has never been built, deployed or tested on ROVS. It is off by default, and its image is not in this account's registry. | Unknown whether pool management in the web console works. |
 
 Already fixed and merged in PR #3: webhook certificates through the OpenShift service CA, the trusted profile and pull secret install steps, and x86 image builds.
@@ -68,7 +69,7 @@ IBM's procedure needs every client to unmount the share first. A conversion ther
 - Show the new pool states from this spec: `Degraded`, the cause of an unusable share, and the warning for VPC-mode shares that must be migrated.
 - Make the plugin's own lint and unit tests run in CI, if they do not already.
 
-### Housekeeping (fixes 8–14)
+### Housekeeping (fixes 8–14, 16)
 
 - Fix all 34 lint errors properly. For example, return close errors where they matter, not `_ =` everywhere. Make the integration tests compile and pass.
 - E2E script: read the zone from the worker nodes when `--zone` is not given.
@@ -76,6 +77,7 @@ IBM's procedure needs every client to unmount the share first. A conversion ther
 - Log CSI probes at a detailed level, `V(6)`, not at `V(4)`.
 - Webhooks: `manual` mode takes the CA bundle from a chart value. With `webhook.enabled=false`, the controller registers no webhooks. Run both on rovslab, not only in tests.
 - `/deploy` skill: use podman or Docker, set the pull secret, and use `webhook.certProvider=openshift` on OpenShift.
+- Clones: delete the unused synchronous path and its size setting, and correct `VOLUME-CLONING.md` and `CLAUDE.md` to say that every clone runs as a Job.
 - Docs: `VPC-NETWORKING.md` describes security group mode; ROKS-only wording becomes "ROKS or ROVS" where both are true; record what this spec changes in `CHANGELOG.md` and `FEATURES.md`.
 
 ## How we prove it
@@ -93,7 +95,7 @@ Every change starts with a failing test. Unit tests use the fake VPC client. The
 
 1. CI fixes (8), so that each later PR shows its own failures.
 2. Security group mode and the mount path (1, 2, 3, 6), together with pool health (4, 5), as one PR. Then the VM clone test on rovslab.
-3. Housekeeping (9–14).
+3. Housekeeping (9–14, 16).
 4. Console plugin (15), after step 2, so it can show the new pool states.
 5. Migration (7).
 
