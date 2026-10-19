@@ -443,7 +443,7 @@ func (c *Client) DeleteFileShare(ctx context.Context, shareID string) (retErr er
 	}
 
 	// Delete the share.
-	if err := c.withAuth(ctx, "DeleteFileShare"); err != nil {
+	if err = c.withAuth(ctx, "DeleteFileShare"); err != nil {
 		return err
 	}
 	deleteOpts := c.vpcService.NewDeleteShareOptions(shareID)

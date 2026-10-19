@@ -37,8 +37,8 @@ type fakeNFSOperations struct {
 	WriteFileErr  error
 
 	// Sync tracking for replication tests
-	syncCallCount  int
-	lastSyncOpts   SyncOptions
+	syncCallCount int
+	lastSyncOpts  SyncOptions
 }
 
 func newFakeNFSOperations() *fakeNFSOperations {
@@ -155,25 +155,6 @@ func (f *fakeNFSOperations) ReadFile(path string) ([]byte, error) {
 		return nil, os.ErrNotExist
 	}
 	return append([]byte(nil), data...), nil
-}
-
-func (f *fakeNFSOperations) getSyncCallCount() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.syncCallCount
-}
-
-func (f *fakeNFSOperations) getLastSyncOpts() SyncOptions {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.lastSyncOpts
-}
-
-func (f *fakeNFSOperations) getFile(path string) ([]byte, bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	data, ok := f.files[path]
-	return data, ok
 }
 
 func (f *fakeNFSOperations) copyCount() int {
@@ -560,6 +541,9 @@ func (f *fakeK8sClient) ListReplicationPolicies(_ context.Context) ([]v1alpha1.R
 	return nil, nil
 }
 func (f *fakeK8sClient) CreateReplicationPolicy(_ context.Context, _ *v1alpha1.ReplicationPolicy) error {
+	return nil
+}
+func (f *fakeK8sClient) UpdateReplicationPolicy(_ context.Context, _ *v1alpha1.ReplicationPolicy) error {
 	return nil
 }
 func (f *fakeK8sClient) UpdateReplicationPolicyStatus(_ context.Context, _ *v1alpha1.ReplicationPolicy) error {

@@ -35,24 +35,27 @@ func NewSyncClient(endpoint, authToken string) *SyncClient {
 
 // NewSyncClientWithCA creates a new sync client that trusts the given CA certificate
 // for verifying the receiver's TLS certificate. Use this when the receiver uses a
-// self-signed certificate provisioned by cert-manager.
-func NewSyncClientWithCA(endpoint, authToken string, caCertPEM []byte) *SyncClient {
+// self-signed certificate provisioned by cert-manager. It returns an error if
+// caCertPEM is not empty but holds no usable certificate.
+func NewSyncClientWithCA(endpoint, authToken string, caCertPEM []byte) (*SyncClient, error) {
 	c := &SyncClient{
 		endpoint:  strings.TrimRight(endpoint, "/"),
 		authToken: authToken,
 	}
 	if len(caCertPEM) > 0 {
 		pool := x509.NewCertPool()
-		pool.AppendCertsFromPEM(caCertPEM)
+		if !pool.AppendCertsFromPEM(caCertPEM) {
+			return nil, fmt.Errorf("CA bundle contains no usable PEM certificate")
+		}
 		c.httpClient = &http.Client{
 			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{RootCAs: pool},
+				TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12},
 			},
 		}
 	} else {
 		c.httpClient = &http.Client{}
 	}
-	return c
+	return c, nil
 }
 
 // SetHTTPClient overrides the default HTTP client. Useful for tests.
@@ -129,26 +132,29 @@ func (c *SyncClient) uploadTar(ctx context.Context, sourcePath, subPath, destBas
 
 			// Write file content for regular files.
 			if info.Mode().IsRegular() {
-				f, err := os.Open(path)
+				f, err := os.Open(path) //nolint:gosec // G304: path comes from walking sourceDir
 				if err != nil {
 					return fmt.Errorf("opening file %s: %w", path, err)
 				}
-				defer f.Close()
-				if _, err := io.Copy(tw, f); err != nil {
-					return fmt.Errorf("copying file %s to tar: %w", relPath, err)
+				_, copyErr := io.Copy(tw, f)
+				closeErr := f.Close()
+				if copyErr != nil {
+					return fmt.Errorf("copying file %s to tar: %w", relPath, copyErr)
+				}
+				if closeErr != nil {
+					return fmt.Errorf("closing file %s: %w", path, closeErr)
 				}
 			}
 
 			return nil
 		})
 
+		// CloseWithError on a pipe writer always returns nil.
 		closeErr := tw.Close()
 		if walkErr != nil {
-			pw.CloseWithError(walkErr)
-		} else if closeErr != nil {
-			pw.CloseWithError(closeErr)
+			_ = pw.CloseWithError(walkErr)
 		} else {
-			pw.Close()
+			_ = pw.CloseWithError(closeErr)
 		}
 	}()
 
@@ -162,7 +168,7 @@ func (c *SyncClient) uploadTar(ctx context.Context, sourcePath, subPath, destBas
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, syncURL, pr)
 	if err != nil {
-		pr.Close()
+		_ = pr.Close() // a pipe reader's Close always returns nil
 		return 0, fmt.Errorf("creating sync request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.authToken)
@@ -177,7 +183,7 @@ func (c *SyncClient) uploadTar(ctx context.Context, sourcePath, subPath, destBas
 	if err != nil {
 		return 0, fmt.Errorf("sync request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer closeBody(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
@@ -217,7 +223,7 @@ func (c *SyncClient) uploadMetadata(ctx context.Context, destBasePath, subPath, 
 	if err != nil {
 		return fmt.Errorf("metadata request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer closeBody(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
@@ -226,4 +232,12 @@ func (c *SyncClient) uploadMetadata(ctx context.Context, destBasePath, subPath, 
 
 	klog.V(2).InfoS("Metadata upload complete", "subVolume", svName)
 	return nil
+}
+
+// closeBody closes an HTTP response body. The response has been read by then,
+// so a close error cannot change the result; it is logged.
+func closeBody(body io.Closer) {
+	if err := body.Close(); err != nil {
+		klog.V(4).InfoS("Failed to close response body", "err", err)
+	}
 }

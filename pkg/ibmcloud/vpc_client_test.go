@@ -1160,7 +1160,7 @@ func TestCreateFileShare_WithEncryptInTransit(t *testing.T) {
 		var reqBody map[string]interface{}
 		_ = json.NewDecoder(r.Body).Decode(&reqBody)
 		if mts, ok := reqBody["mount_targets"].([]interface{}); ok && len(mts) > 0 {
-			mt := mts[0].(map[string]interface{})
+			mt, _ := mts[0].(map[string]interface{})
 			if mt["transit_encryption"] != "user_managed" {
 				writeJSON(w, http.StatusBadRequest, nil)
 				return

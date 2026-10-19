@@ -12,13 +12,13 @@ func validFileSharePool() *v1alpha1.FileSharePool {
 	return &v1alpha1.FileSharePool{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-pool"},
 		Spec: v1alpha1.FileSharePoolSpec{
-			Zone:                  "us-south-1",
-			Profile:               "dp2",
-			ShareSizeGB:           1000,
-			MaxShares:             10,
-			InitialShares:         1,
+			Zone:                   "us-south-1",
+			Profile:                "dp2",
+			ShareSizeGB:            1000,
+			MaxShares:              10,
+			InitialShares:          1,
 			ExpandThresholdPercent: 80,
-			AllocationStrategy:    "spread",
+			AllocationStrategy:     "spread",
 		},
 	}
 }

@@ -12,7 +12,9 @@ import (
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/hooks"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/pool"
+	batchv1 "k8s.io/api/batch/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // ---------------------------------------------------------------------------
@@ -68,8 +70,8 @@ func newIntegReplSubVolume(name, poolName, shareID, mountIP string) *v1alpha1.Su
 	}
 }
 
-func newIntegReplController(k *fakeK8sClient, nfs *fakeNFSOperations) *pool.ReplicationController {
-	rc := pool.NewReplicationController(k, nfs)
+func newIntegReplController(k *fakeK8sClient, dc client.Client) *pool.ReplicationController {
+	rc := pool.NewReplicationController(k, dc, newFakeNFSOperations())
 	rc.SetInterval(50 * time.Millisecond)
 	return rc
 }
@@ -176,7 +178,8 @@ func (f *fakeHookExecutor) Execute(_ context.Context, hook v1alpha1.Hook) (*v1al
 // to Active with correct SubVolumeStatuses.
 func TestReplication_FullLifecycle(t *testing.T) {
 	k := newFakeK8sClient()
-	nfs := newFakeNFSOperations()
+	dc := newFakeDirectClient()
+	jobs := startFakeJobRunner(t, dc)
 
 	sv1 := newIntegReplSubVolume("pvc-11111111-1111-1111-1111-111111111111", "repl-pool", "share-1", "10.240.0.1")
 	sv2 := newIntegReplSubVolume("pvc-22222222-2222-2222-2222-222222222222", "repl-pool", "share-1", "10.240.0.1")
@@ -184,9 +187,10 @@ func TestReplication_FullLifecycle(t *testing.T) {
 	k.addSubVolume(sv2)
 
 	policy := newIntegReplicationPolicy("lifecycle-policy", "repl-pool", "1ms")
+	policy.Spec.MaxParallelSyncs = 2 // Let both Jobs finish in the same cycle.
 	k.addPolicy(policy)
 
-	rc := newIntegReplController(k, nfs)
+	rc := newIntegReplController(k, dc)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -229,17 +233,18 @@ func TestReplication_FullLifecycle(t *testing.T) {
 		t.Errorf("expected 0 consecutive failures, got %d", rp.Status.ConsecutiveFailures)
 	}
 
-	// Verify NFS copies were performed.
-	if nfs.copyCount() < 2 {
-		t.Errorf("expected at least 2 NFS copies, got %d", nfs.copyCount())
+	// Verify a replication Job ran for each SubVolume.
+	if jobs.distinctJobCount() < 2 {
+		t.Errorf("expected at least 2 replication Jobs, got %d", jobs.distinctJobCount())
 	}
 }
 
-// TestReplication_FailureRecovery injects an NFS error, waits for failures
-// to accumulate, clears the error, and verifies the policy recovers.
+// TestReplication_FailureRecovery makes the replication Jobs fail, waits for failures
+// to accumulate, lets the Jobs succeed again, and verifies the policy recovers.
 func TestReplication_FailureRecovery(t *testing.T) {
 	k := newFakeK8sClient()
-	nfs := newFakeNFSOperations()
+	dc := newFakeDirectClient()
+	jobs := startFakeJobRunner(t, dc)
 
 	sv1 := newIntegReplSubVolume("pvc-11111111-1111-1111-1111-111111111111", "recovery-pool", "share-1", "10.240.0.1")
 	k.addSubVolume(sv1)
@@ -247,10 +252,10 @@ func TestReplication_FailureRecovery(t *testing.T) {
 	policy := newIntegReplicationPolicy("recovery-policy", "recovery-pool", "1ms")
 	k.addPolicy(policy)
 
-	// Inject NFS error.
-	nfs.CopyErr = errors.New("destination unreachable")
+	// Make every replication Job fail.
+	jobs.failAllJobs()
 
-	rc := newIntegReplController(k, nfs)
+	rc := newIntegReplController(k, dc)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -265,10 +270,8 @@ func TestReplication_FailureRecovery(t *testing.T) {
 		t.Error("expected LastError to be set during failure")
 	}
 
-	// Clear the NFS error.
-	nfs.mu.Lock()
-	nfs.CopyErr = nil
-	nfs.mu.Unlock()
+	// Let replication Jobs succeed again.
+	jobs.succeedAllJobs()
 
 	// Wait for the policy to sync successfully (LastSyncTime set, failures reset).
 	waitForIntegPolicySync(t, k, "recovery-policy", 5*time.Second)
@@ -286,8 +289,9 @@ func TestReplication_FailureRecovery(t *testing.T) {
 // policy to pause after maxRetries.
 func TestReplication_MaxRetriesPauses(t *testing.T) {
 	k := newFakeK8sClient()
-	nfs := newFakeNFSOperations()
-	nfs.CopyErr = errors.New("persistent NFS failure")
+	dc := newFakeDirectClient()
+	jobs := startFakeJobRunner(t, dc)
+	jobs.failAllJobs()
 
 	sv1 := newIntegReplSubVolume("pvc-11111111-1111-1111-1111-111111111111", "pause-pool", "share-1", "10.240.0.1")
 	k.addSubVolume(sv1)
@@ -296,7 +300,7 @@ func TestReplication_MaxRetriesPauses(t *testing.T) {
 	policy.Spec.MaxRetries = 2
 	k.addPolicy(policy)
 
-	rc := newIntegReplController(k, nfs)
+	rc := newIntegReplController(k, dc)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -311,23 +315,24 @@ func TestReplication_MaxRetriesPauses(t *testing.T) {
 		t.Errorf("expected at least 2 consecutive failures, got %d", rp.Status.ConsecutiveFailures)
 	}
 
-	// Record the total copies at this point.
-	copiesBefore := nfs.totalCopyCount()
+	// Record the total Jobs run at this point.
+	jobsBefore := jobs.jobCount()
 
 	// Let the controller run for a bit more — paused policy should not be processed.
 	time.Sleep(200 * time.Millisecond)
 
-	copiesAfter := nfs.totalCopyCount()
-	if copiesAfter != copiesBefore {
-		t.Errorf("expected no new copies after pause (before=%d, after=%d)", copiesBefore, copiesAfter)
+	jobsAfter := jobs.jobCount()
+	if jobsAfter != jobsBefore {
+		t.Errorf("expected no new Jobs after pause (before=%d, after=%d)", jobsBefore, jobsAfter)
 	}
 }
 
 // TestReplication_PreSyncHookAbort verifies that a failing pre-sync hook with
-// OnError=Abort prevents the NFS sync from executing.
+// OnError=Abort prevents any replication Job from being created.
 func TestReplication_PreSyncHookAbort(t *testing.T) {
 	k := newFakeK8sClient()
-	nfs := newFakeNFSOperations()
+	dc := newFakeDirectClient()
+	jobs := startFakeJobRunner(t, dc)
 
 	sv1 := newIntegReplSubVolume("pvc-11111111-1111-1111-1111-111111111111", "hook-pool", "share-1", "10.240.0.1")
 	k.addSubVolume(sv1)
@@ -352,7 +357,7 @@ func TestReplication_PreSyncHookAbort(t *testing.T) {
 	hookExec := &fakeHookExecutor{err: errors.New("quiesce check failed")}
 	orch := hooks.NewOrchestratorWithExecutor(hookExec)
 
-	rc := newIntegReplController(k, nfs)
+	rc := newIntegReplController(k, dc)
 	rc.SetOrchestrator(orch)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -370,9 +375,9 @@ func TestReplication_PreSyncHookAbort(t *testing.T) {
 		t.Error("expected pre-sync hook to be called at least once")
 	}
 
-	// No NFS copies should have been made (hook aborted the sync).
-	if nfs.copyCount() != 0 {
-		t.Errorf("expected 0 NFS copies after pre-sync abort, got %d", nfs.copyCount())
+	// No replication Jobs should have been created (hook aborted the sync).
+	if jobs.jobCount() != 0 {
+		t.Errorf("expected 0 replication Jobs after pre-sync abort, got %d", jobs.jobCount())
 	}
 
 	// Policy should have recorded a failure.
@@ -388,7 +393,8 @@ func TestReplication_PreSyncHookAbort(t *testing.T) {
 // with OnError=Continue does not prevent the sync from being recorded as success.
 func TestReplication_PostSyncHookContinue(t *testing.T) {
 	k := newFakeK8sClient()
-	nfs := newFakeNFSOperations()
+	dc := newFakeDirectClient()
+	jobs := startFakeJobRunner(t, dc)
 
 	sv1 := newIntegReplSubVolume("pvc-11111111-1111-1111-1111-111111111111", "hook-pool-2", "share-1", "10.240.0.1")
 	k.addSubVolume(sv1)
@@ -412,7 +418,7 @@ func TestReplication_PostSyncHookContinue(t *testing.T) {
 	hookExec := &fakeHookExecutor{err: errors.New("slack notification failed")}
 	orch := hooks.NewOrchestratorWithExecutor(hookExec)
 
-	rc := newIntegReplController(k, nfs)
+	rc := newIntegReplController(k, dc)
 	rc.SetOrchestrator(orch)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -433,9 +439,9 @@ func TestReplication_PostSyncHookContinue(t *testing.T) {
 		t.Errorf("expected 0 consecutive failures, got %d", rp.Status.ConsecutiveFailures)
 	}
 
-	// NFS copy should have been performed.
-	if nfs.copyCount() < 1 {
-		t.Errorf("expected at least 1 NFS copy, got %d", nfs.copyCount())
+	// A replication Job should have run.
+	if jobs.jobCount() < 1 {
+		t.Errorf("expected at least 1 replication Job, got %d", jobs.jobCount())
 	}
 
 	// Post-sync hook should have been called.
@@ -448,7 +454,8 @@ func TestReplication_PostSyncHookContinue(t *testing.T) {
 // pools and verifies they are processed independently.
 func TestReplication_MultiplePolicies(t *testing.T) {
 	k := newFakeK8sClient()
-	nfs := newFakeNFSOperations()
+	dc := newFakeDirectClient()
+	jobs := startFakeJobRunner(t, dc)
 
 	// SubVolumes in pool-a.
 	svA := newIntegReplSubVolume("pvc-aaaa1111-1111-1111-1111-111111111111", "pool-a", "share-a", "10.240.0.1")
@@ -462,10 +469,11 @@ func TestReplication_MultiplePolicies(t *testing.T) {
 
 	policyA := newIntegReplicationPolicy("policy-a", "pool-a", "1ms")
 	policyB := newIntegReplicationPolicy("policy-b", "pool-b", "1ms")
+	policyB.Spec.MaxParallelSyncs = 2 // Let both Jobs finish in the same cycle.
 	k.addPolicy(policyA)
 	k.addPolicy(policyB)
 
-	rc := newIntegReplController(k, nfs)
+	rc := newIntegReplController(k, dc)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -497,9 +505,9 @@ func TestReplication_MultiplePolicies(t *testing.T) {
 		t.Errorf("policy-b: expected Active, got %q", rpB.Status.Phase)
 	}
 
-	// NFS should have at least 3 total copies (1 for pool-a, 2 for pool-b).
-	if nfs.copyCount() < 3 {
-		t.Errorf("expected at least 3 NFS copies, got %d", nfs.copyCount())
+	// At least 3 distinct Jobs should have run (1 for pool-a, 2 for pool-b).
+	if jobs.distinctJobCount() < 3 {
+		t.Errorf("expected at least 3 replication Jobs, got %d", jobs.distinctJobCount())
 	}
 }
 
@@ -507,23 +515,28 @@ func TestReplication_MultiplePolicies(t *testing.T) {
 // sync, the policy records both successes and failures in SubVolumeStatuses.
 func TestReplication_PartialFailure(t *testing.T) {
 	k := newFakeK8sClient()
-	nfs := newFakeNFSOperations()
+	dc := newFakeDirectClient()
+	jobs := startFakeJobRunner(t, dc)
 
 	// Create 3 SubVolumes.
+	var svNames []string
 	for i := 1; i <= 3; i++ {
 		name := fmt.Sprintf("pvc-%08d-0000-0000-0000-000000000000", i)
 		sv := newIntegReplSubVolume(name, "partial-pool", "share-1", "10.240.0.1")
 		k.addSubVolume(sv)
+		svNames = append(svNames, name)
 	}
 
 	policy := newIntegReplicationPolicy("partial-policy", "partial-pool", "1ms")
+	policy.Spec.MaxParallelSyncs = 3 // Let all Jobs finish in the same cycle.
 	k.addPolicy(policy)
 
-	// First copy succeeds, then subsequent copies fail.
-	nfs.CopyErr = errors.New("disk full")
-	nfs.CopyErrAfterN = 1
+	// The Job for the first SubVolume succeeds, the others fail.
+	jobs.failJobsWhere(func(job *batchv1.Job) bool {
+		return job.Labels["storage.ibmcloud.io/repl-subvolume"] != svNames[0]
+	})
 
-	rc := newIntegReplController(k, nfs)
+	rc := newIntegReplController(k, dc)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -562,7 +575,8 @@ func TestReplication_PartialFailure(t *testing.T) {
 // which SubVolumes are replicated.
 func TestReplication_LabelSelector(t *testing.T) {
 	k := newFakeK8sClient()
-	nfs := newFakeNFSOperations()
+	dc := newFakeDirectClient()
+	jobs := startFakeJobRunner(t, dc)
 
 	// 3 SubVolumes, only 1 has the matching label.
 	sv1 := newIntegReplSubVolume("pvc-sel-11111111-1111-1111-1111-111111111111", "selector-pool", "share-1", "10.240.0.1")
@@ -581,7 +595,7 @@ func TestReplication_LabelSelector(t *testing.T) {
 		map[string]string{"tier": "critical"})
 	k.addPolicy(policy)
 
-	rc := newIntegReplController(k, nfs)
+	rc := newIntegReplController(k, dc)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -603,8 +617,8 @@ func TestReplication_LabelSelector(t *testing.T) {
 			rp.Status.SubVolumeStatuses[0].SubVolumeName)
 	}
 
-	// Only 1 NFS copy should have been made.
-	if nfs.copyCount() != 1 {
-		t.Errorf("expected 1 NFS copy (selector filtering), got %d", nfs.copyCount())
+	// Only 1 replication Job should have been created.
+	if jobs.distinctJobCount() != 1 {
+		t.Errorf("expected 1 replication Job (selector filtering), got %d", jobs.distinctJobCount())
 	}
 }

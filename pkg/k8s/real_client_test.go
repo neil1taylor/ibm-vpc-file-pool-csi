@@ -81,7 +81,7 @@ func TestUpdateFileSharePoolStatus(t *testing.T) {
 	got.Status.Phase = "Ready"
 	got.Status.ShareCount = 3
 
-	if err := c.UpdateFileSharePoolStatus(context.Background(), got); err != nil {
+	if err = c.UpdateFileSharePoolStatus(context.Background(), got); err != nil {
 		t.Fatalf("status update failed: %v", err)
 	}
 
@@ -113,7 +113,7 @@ func TestUpdateFileSharePool(t *testing.T) {
 	}
 	got.Finalizers = append(got.Finalizers, "storage.ibmcloud.io/pool-protection")
 
-	if err := c.UpdateFileSharePool(context.Background(), got); err != nil {
+	if err = c.UpdateFileSharePool(context.Background(), got); err != nil {
 		t.Fatalf("update failed: %v", err)
 	}
 
@@ -213,7 +213,7 @@ func TestUpdateSubVolume(t *testing.T) {
 	}
 	got.Spec.RequestedGB = 50
 
-	if err := c.UpdateSubVolume(context.Background(), got); err != nil {
+	if err = c.UpdateSubVolume(context.Background(), got); err != nil {
 		t.Fatalf("update failed: %v", err)
 	}
 
@@ -249,7 +249,7 @@ func TestUpdateSubVolumeStatus(t *testing.T) {
 	}
 	got.Status.Phase = "Bound"
 
-	if err := c.UpdateSubVolumeStatus(context.Background(), got); err != nil {
+	if err = c.UpdateSubVolumeStatus(context.Background(), got); err != nil {
 		t.Fatalf("status update failed: %v", err)
 	}
 

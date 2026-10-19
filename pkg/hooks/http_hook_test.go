@@ -18,7 +18,7 @@ func TestHTTPHook_Execute_Success(t *testing.T) {
 			t.Errorf("expected header X-Snapshot-Id=snap-123, got %s", r.Header.Get("X-Snapshot-Id"))
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"quiesced"}`))
+		writeBody(t, w, []byte(`{"status":"quiesced"}`))
 	}))
 	defer server.Close()
 
@@ -47,7 +47,7 @@ func TestHTTPHook_Execute_Success(t *testing.T) {
 func TestHTTPHook_Execute_ServerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("internal error"))
+		writeBody(t, w, []byte("internal error"))
 	}))
 	defer server.Close()
 
@@ -105,7 +105,7 @@ func TestHTTPHook_Execute_GetMethod(t *testing.T) {
 			t.Errorf("expected GET, got %s", r.Method)
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("healthy"))
+		writeBody(t, w, []byte("healthy"))
 	}))
 	defer server.Close()
 
@@ -147,5 +147,13 @@ func TestHTTPHook_Execute_ConnectionError(t *testing.T) {
 	}
 	if result.Success {
 		t.Fatal("expected failure result")
+	}
+}
+
+// writeBody writes a response body from a test handler and reports failures.
+func writeBody(t *testing.T, w http.ResponseWriter, body []byte) {
+	t.Helper()
+	if _, err := w.Write(body); err != nil {
+		t.Errorf("failed to write response body: %v", err)
 	}
 }

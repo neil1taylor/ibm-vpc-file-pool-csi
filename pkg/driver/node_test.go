@@ -151,6 +151,9 @@ func (n *nodeTestK8sClient) ListReplicationPolicies(_ context.Context) ([]v1alph
 func (n *nodeTestK8sClient) CreateReplicationPolicy(_ context.Context, _ *v1alpha1.ReplicationPolicy) error {
 	return nil
 }
+func (n *nodeTestK8sClient) UpdateReplicationPolicy(_ context.Context, _ *v1alpha1.ReplicationPolicy) error {
+	return nil
+}
 func (n *nodeTestK8sClient) UpdateReplicationPolicyStatus(_ context.Context, _ *v1alpha1.ReplicationPolicy) error {
 	return nil
 }
@@ -1135,13 +1138,13 @@ func TestDirUsageBytes(t *testing.T) {
 	}
 
 	// Add files
-	if err := os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("hello"), 0600); err != nil {
+	if err = os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("hello"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(tmpDir, "nested"), 0750); err != nil {
+	if err = os.MkdirAll(filepath.Join(tmpDir, "nested"), 0750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, "nested", "b.bin"), make([]byte, 100), 0600); err != nil {
+	if err = os.WriteFile(filepath.Join(tmpDir, "nested", "b.bin"), make([]byte, 100), 0600); err != nil {
 		t.Fatal(err)
 	}
 

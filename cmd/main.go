@@ -38,15 +38,15 @@ var version = "dev"
 
 func main() {
 	var (
-		endpoint            string
-		nodeID              string
-		mode                string
-		region              string
-		vpcID               string
-		subnetID            string
-		kubeletDir          string
-		cloneWorkerInterval      time.Duration
-		goldenImageSyncInterval  time.Duration
+		endpoint                string
+		nodeID                  string
+		mode                    string
+		region                  string
+		vpcID                   string
+		subnetID                string
+		kubeletDir              string
+		cloneWorkerInterval     time.Duration
+		goldenImageSyncInterval time.Duration
 
 		// Receiver mode flags.
 		receiverBasePath      string
@@ -162,11 +162,11 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 	}
 
 	// Register health checks.
-	if err := mgr.AddHealthzCheck("ping", healthz.Ping); err != nil {
+	if err = mgr.AddHealthzCheck("ping", healthz.Ping); err != nil {
 		klog.ErrorS(err, "Failed to register healthz check")
 		os.Exit(1)
 	}
-	if err := mgr.AddReadyzCheck("vpc-client", func(_ *http.Request) error {
+	if err = mgr.AddReadyzCheck("vpc-client", func(_ *http.Request) error {
 		select {
 		case <-readyCh:
 			return nil
@@ -210,37 +210,37 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 	// Create reconciler and pool manager with nil VPC client — will be set
 	// once the secret-provider sidecar is ready.
 	reconciler := pool.NewFileSharePoolReconciler(k8sClient, nil)
-	if err := reconciler.SetupWithManager(mgr); err != nil {
+	if err = reconciler.SetupWithManager(mgr); err != nil {
 		klog.ErrorS(err, "Failed to set up reconciler")
 		os.Exit(1)
 	}
 
 	// Register validating webhooks for CRD resources.
-	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.FileSharePool{}).
+	if err = ctrl.NewWebhookManagedBy(mgr, &v1alpha1.FileSharePool{}).
 		WithValidator(&webhook.FileSharePoolValidator{}).
 		Complete(); err != nil {
 		klog.ErrorS(err, "Failed to register FileSharePool webhook")
 		os.Exit(1)
 	}
-	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.SubVolume{}).
+	if err = ctrl.NewWebhookManagedBy(mgr, &v1alpha1.SubVolume{}).
 		WithValidator(&webhook.SubVolumeValidator{}).
 		Complete(); err != nil {
 		klog.ErrorS(err, "Failed to register SubVolume webhook")
 		os.Exit(1)
 	}
-	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.ReplicationPolicy{}).
+	if err = ctrl.NewWebhookManagedBy(mgr, &v1alpha1.ReplicationPolicy{}).
 		WithValidator(&webhook.ReplicationPolicyValidator{}).
 		Complete(); err != nil {
 		klog.ErrorS(err, "Failed to register ReplicationPolicy webhook")
 		os.Exit(1)
 	}
-	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.Snapshot{}).
+	if err = ctrl.NewWebhookManagedBy(mgr, &v1alpha1.Snapshot{}).
 		WithValidator(&webhook.SnapshotValidator{}).
 		Complete(); err != nil {
 		klog.ErrorS(err, "Failed to register Snapshot webhook")
 		os.Exit(1)
 	}
-	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.VolumeGroupSnapshot{}).
+	if err = ctrl.NewWebhookManagedBy(mgr, &v1alpha1.VolumeGroupSnapshot{}).
 		WithValidator(&webhook.VolumeGroupSnapshotValidator{}).
 		Complete(); err != nil {
 		klog.ErrorS(err, "Failed to register VolumeGroupSnapshot webhook")
@@ -353,7 +353,7 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 
 func runReceiver(basePath, authTokenFile, listenAddr, tlsCertFile, tlsKeyFile string) {
 	// Read auth token from file.
-	tokenBytes, err := os.ReadFile(authTokenFile)
+	tokenBytes, err := os.ReadFile(authTokenFile) //nolint:gosec // G304: path comes from the operator-set --auth-token-file flag
 	if err != nil {
 		klog.ErrorS(err, "Failed to read receiver auth token file", "path", authTokenFile)
 		os.Exit(1)
@@ -388,7 +388,7 @@ func runSyncClient(endpoint, authTokenFile, sourcePath, destBasePath, subPath, s
 	}
 
 	// Read auth token from file.
-	tokenBytes, err := os.ReadFile(authTokenFile)
+	tokenBytes, err := os.ReadFile(authTokenFile) //nolint:gosec // G304: path comes from the operator-set --auth-token-file flag
 	if err != nil {
 		klog.ErrorS(err, "Failed to read auth token file", "path", authTokenFile)
 		os.Exit(1)
@@ -401,12 +401,17 @@ func runSyncClient(endpoint, authTokenFile, sourcePath, destBasePath, subPath, s
 
 	var client *replication.SyncClient
 	if caCertFile != "" {
-		caCertPEM, readErr := os.ReadFile(caCertFile)
+		caCertPEM, readErr := os.ReadFile(caCertFile) //nolint:gosec // G304: path comes from the operator-set CA cert flag
 		if readErr != nil {
 			klog.ErrorS(readErr, "Failed to read CA cert file", "path", caCertFile)
 			os.Exit(1)
 		}
-		client = replication.NewSyncClientWithCA(endpoint, token, caCertPEM)
+		var caErr error
+		client, caErr = replication.NewSyncClientWithCA(endpoint, token, caCertPEM)
+		if caErr != nil {
+			klog.ErrorS(caErr, "Invalid CA cert file", "path", caCertFile)
+			os.Exit(1)
+		}
 		klog.V(2).InfoS("Using custom CA certificate for receiver TLS", "caCertFile", caCertFile)
 	} else {
 		client = replication.NewSyncClient(endpoint, token)
@@ -436,7 +441,7 @@ func runSyncClient(endpoint, authTokenFile, sourcePath, destBasePath, subPath, s
 
 	// Write bytesWritten to termination-log so the replication controller can
 	// read it from the completed pod's container status.
-	_ = os.WriteFile("/dev/termination-log", []byte(fmt.Sprintf(`{"bytesWritten":%d}`, bytesWritten)), 0644)
+	_ = os.WriteFile("/dev/termination-log", []byte(fmt.Sprintf(`{"bytesWritten":%d}`, bytesWritten)), 0o600)
 }
 
 func runNode(endpoint, nodeID, mode string) {

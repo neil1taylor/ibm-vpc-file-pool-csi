@@ -258,6 +258,10 @@ func (r *realClient) CreateReplicationPolicy(ctx context.Context, rp *v1alpha1.R
 	return r.client.Create(ctx, rp)
 }
 
+func (r *realClient) UpdateReplicationPolicy(ctx context.Context, rp *v1alpha1.ReplicationPolicy) error {
+	return r.client.Update(ctx, rp)
+}
+
 func (r *realClient) UpdateReplicationPolicyStatus(ctx context.Context, rp *v1alpha1.ReplicationPolicy) error {
 	return r.client.Status().Update(ctx, rp)
 }

@@ -1529,12 +1529,15 @@ func TestEnsureStorageProfiles_PatchesEmptyProfile(t *testing.T) {
 		t.Fatal("expected claimPropertySets to be patched")
 	}
 
-	entry := cps[0].(map[string]interface{})
-	modes := entry["accessModes"].([]interface{})
-	if len(modes) != 1 || modes[0].(string) != "ReadWriteMany" {
-		t.Errorf("expected accessModes=[ReadWriteMany], got %v", modes)
+	entry, ok := cps[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected claimPropertySets entry to be a map, got %T", cps[0])
 	}
-	volMode := entry["volumeMode"].(string)
+	modes, ok := entry["accessModes"].([]interface{})
+	if !ok || len(modes) != 1 || modes[0] != "ReadWriteMany" {
+		t.Errorf("expected accessModes=[ReadWriteMany], got %v", entry["accessModes"])
+	}
+	volMode := entry["volumeMode"]
 	if volMode != "Filesystem" {
 		t.Errorf("expected volumeMode=Filesystem, got %s", volMode)
 	}
@@ -1574,10 +1577,13 @@ func TestEnsureStorageProfiles_SkipsPopulatedProfile(t *testing.T) {
 	if len(cps) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(cps))
 	}
-	entry := cps[0].(map[string]interface{})
-	modes := entry["accessModes"].([]interface{})
-	if modes[0].(string) != "ReadWriteOnce" {
-		t.Errorf("expected original accessMode ReadWriteOnce preserved, got %v", modes[0])
+	entry, ok := cps[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected claimPropertySets entry to be a map, got %T", cps[0])
+	}
+	modes, ok := entry["accessModes"].([]interface{})
+	if !ok || len(modes) != 1 || modes[0] != "ReadWriteOnce" {
+		t.Errorf("expected original accessMode ReadWriteOnce preserved, got %v", entry["accessModes"])
 	}
 }
 

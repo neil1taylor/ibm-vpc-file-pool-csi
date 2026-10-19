@@ -6,15 +6,20 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/pool"
 	"google.golang.org/grpc/codes"
 )
 
 // ---------------------------------------------------------------------------
-// Clone Lifecycle — Synchronous (same-share, small volume)
+// Clone Lifecycle — Small volumes
+//
+// The controller pod has no NFS access, so every clone is created as Pending
+// and completed later by the clone worker, whatever its size.
 // ---------------------------------------------------------------------------
 
-func TestClone_SyncCloneHappyPath(t *testing.T) {
+func TestClone_SmallCloneHappyPath(t *testing.T) {
 	h := newTestHarness(t)
 	ctx := context.Background()
 
@@ -68,20 +73,20 @@ func TestClone_SyncCloneHappyPath(t *testing.T) {
 		t.Errorf("expected SourceShareID 'share-1', got %q", sv.Spec.SourceShareID)
 	}
 
-	// Sync clone: CloneStatus should be Complete
-	if sv.Status.CloneStatus != "Complete" {
-		t.Errorf("expected CloneStatus 'Complete' for sync clone, got %q", sv.Status.CloneStatus)
+	// Even a small clone is left for the clone worker: CloneStatus is Pending
+	if sv.Status.CloneStatus != "Pending" {
+		t.Errorf("expected CloneStatus 'Pending' for small clone, got %q", sv.Status.CloneStatus)
 	}
 	if sv.Status.CloneProgress == nil {
 		t.Fatal("expected CloneProgress to be set")
 	}
-	if sv.Status.CloneProgress.CompletedAt == nil {
-		t.Error("expected CompletedAt to be set for sync clone")
+	if sv.Status.CloneProgress.CompletedAt != nil {
+		t.Error("expected CompletedAt to be unset before the clone worker runs")
 	}
 
-	// Verify NFS copy was performed
-	if h.nfsOps.copyCount() != 1 {
-		t.Errorf("expected 1 NFS copy for sync clone, got %d", h.nfsOps.copyCount())
+	// The driver itself copies nothing
+	if h.nfsOps.copyCount() != 0 {
+		t.Errorf("expected 0 NFS copies from the driver, got %d", h.nfsOps.copyCount())
 	}
 
 	// Verify pool capacity: 5 (source) + 5 (clone) = 10
@@ -91,11 +96,11 @@ func TestClone_SyncCloneHappyPath(t *testing.T) {
 	}
 }
 
-func TestClone_SyncCloneSameShare(t *testing.T) {
+func TestClone_SmallCloneSameShare(t *testing.T) {
 	h := newTestHarness(t)
 	ctx := context.Background()
 
-	// Pool with 2 shares — verify sync clone stays on source share
+	// Pool with 2 shares — verify the clone stays on the source share
 	pool := newTestPool("clone-same", "spread", 100,
 		newStableShare("share-1", "s1", 100, 0, 0),
 		newStableShare("share-2", "s2", 100, 0, 0),
@@ -114,7 +119,7 @@ func TestClone_SyncCloneSameShare(t *testing.T) {
 	srcSV := h.k8sClient.getSubVolume(srcPV)
 	sourceShareID := srcSV.Spec.ShareID
 
-	// Clone — sync path prefers source share
+	// Clone — placement prefers the source share
 	clonePV := "pvc-b2c3d4e5-6789-0abc-def0-234567890abc"
 	_, err = h.driver.CreateVolume(ctx,
 		createVolumeFromCloneRequest(clonePV, "clone-same", 5, sourceVolumeID))
@@ -126,8 +131,8 @@ func TestClone_SyncCloneSameShare(t *testing.T) {
 	if cloneSV.Spec.ShareID != sourceShareID {
 		t.Errorf("expected clone on same share %q, got %q", sourceShareID, cloneSV.Spec.ShareID)
 	}
-	if cloneSV.Status.CloneStatus != "Complete" {
-		t.Errorf("expected sync clone (Complete), got %q", cloneSV.Status.CloneStatus)
+	if cloneSV.Status.CloneStatus != "Pending" {
+		t.Errorf("expected clone to be Pending, got %q", cloneSV.Status.CloneStatus)
 	}
 }
 
@@ -244,7 +249,7 @@ func TestClone_AsyncCloneCrossShare(t *testing.T) {
 	}
 }
 
-func TestClone_CustomSyncThreshold(t *testing.T) {
+func TestClone_CustomSyncThresholdIgnored(t *testing.T) {
 	h := newTestHarness(t)
 	ctx := context.Background()
 
@@ -261,7 +266,8 @@ func TestClone_CustomSyncThreshold(t *testing.T) {
 	}
 	sourceVolumeID := srcResp.GetVolume().VolumeId
 
-	// Clone with threshold=50 → 20 GB is under 50 GB → sync
+	// Clone with threshold=50 → 20 GB is under 50 GB, but the threshold no longer
+	// selects a synchronous path, so the clone is still Pending
 	clonePV := "pvc-b2c3d4e5-6789-0abc-def0-234567890abc"
 	_, err = h.driver.CreateVolume(ctx,
 		createVolumeFromCloneRequestWithThreshold(clonePV, "clone-thresh", 20, sourceVolumeID, 50))
@@ -270,13 +276,13 @@ func TestClone_CustomSyncThreshold(t *testing.T) {
 	}
 
 	sv := h.k8sClient.getSubVolume(clonePV)
-	if sv.Status.CloneStatus != "Complete" {
-		t.Errorf("expected sync clone (Complete) with threshold=50, got %q", sv.Status.CloneStatus)
+	if sv.Status.CloneStatus != "Pending" {
+		t.Errorf("expected CloneStatus 'Pending' with threshold=50, got %q", sv.Status.CloneStatus)
 	}
 
-	// NFS copy should have happened (sync path)
-	if h.nfsOps.copyCount() != 1 {
-		t.Errorf("expected 1 NFS copy for sync clone, got %d", h.nfsOps.copyCount())
+	// No NFS copy from the driver
+	if h.nfsOps.copyCount() != 0 {
+		t.Errorf("expected 0 NFS copies from the driver, got %d", h.nfsOps.copyCount())
 	}
 }
 
@@ -399,14 +405,16 @@ func TestClone_PoolExhausted(t *testing.T) {
 	assertGRPCCode(t, err, codes.ResourceExhausted)
 }
 
-func TestClone_CopyFailure(t *testing.T) {
+// TestClone_JobFailure verifies that when the clone Job fails, the clone is
+// marked Failed with the error recorded.
+func TestClone_JobFailure(t *testing.T) {
 	h := newTestHarness(t)
 	ctx := context.Background()
 
-	pool := newTestPool("clone-cpyerr", "spread", 100,
+	fsp := newTestPool("clone-cpyerr", "spread", 100,
 		newStableShare("share-1", "s1", 100, 0, 0),
 	)
-	h.k8sClient.addPool(pool)
+	h.k8sClient.addPool(fsp)
 
 	srcPV := "pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"
 	srcResp, err := h.driver.CreateVolume(ctx, createVolumeRequest(srcPV, "clone-cpyerr", 5))
@@ -415,42 +423,34 @@ func TestClone_CopyFailure(t *testing.T) {
 	}
 	sourceVolumeID := srcResp.GetVolume().VolumeId
 
-	// Inject CopyDir error
-	h.nfsOps.CopyErr = fmt.Errorf("NFS: I/O error during copy")
-
 	clonePV := "pvc-b2c3d4e5-6789-0abc-def0-234567890abc"
 	_, err = h.driver.CreateVolume(ctx,
 		createVolumeFromCloneRequest(clonePV, "clone-cpyerr", 5, sourceVolumeID))
-
-	assertGRPCCode(t, err, codes.Internal)
-
-	// No clone SubVolume should have been created
-	if h.k8sClient.subVolumeCount() != 1 { // only source
-		t.Errorf("expected 1 SubVolume (source only), got %d", h.k8sClient.subVolumeCount())
-	}
-
-	// Pool capacity should be only source volume
-	p := h.k8sClient.getPool("clone-cpyerr")
-	if p.Status.TotalAllocatedGB != 5 {
-		t.Errorf("expected TotalAllocatedGB=5 after copy failure, got %d", p.Status.TotalAllocatedGB)
-	}
-
-	// Clear error and retry → success
-	h.nfsOps.CopyErr = nil
-	_, err = h.driver.CreateVolume(ctx,
-		createVolumeFromCloneRequest(clonePV, "clone-cpyerr", 5, sourceVolumeID))
 	if err != nil {
-		t.Fatalf("Clone should succeed after clearing CopyErr: %v", err)
+		t.Fatalf("CreateVolume (clone) failed: %v", err)
 	}
 
-	if h.k8sClient.subVolumeCount() != 2 {
-		t.Errorf("expected 2 SubVolumes after recovery, got %d", h.k8sClient.subVolumeCount())
+	// Run the clone worker with a clone Job that fails.
+	dc := newFakeDirectClient()
+	jobs := startFakeJobRunner(t, dc)
+	jobs.failAllJobs()
+	w := pool.NewCloneWorker(h.k8sClient, dc, pool.DefaultCloneImage)
+	w.SetInterval(50 * time.Millisecond)
+
+	workerCtx, workerCancel := context.WithCancel(ctx)
+	defer workerCancel()
+	go w.Run(workerCtx)
+
+	waitForCloneStatusInteg(t, h.k8sClient, clonePV, "Failed", 5*time.Second)
+
+	sv := h.k8sClient.getSubVolume(clonePV)
+	if sv.Status.Phase != "Failed" {
+		t.Errorf("expected Phase 'Failed', got %q", sv.Status.Phase)
+	}
+	if sv.Status.CloneProgress == nil || sv.Status.CloneProgress.Error == "" {
+		t.Error("expected CloneProgress.Error to record the failure")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Clone — Capacity Tracking
-// ---------------------------------------------------------------------------
 
 func TestClone_CapacityTracking(t *testing.T) {
 	h := newTestHarness(t)
@@ -555,9 +555,12 @@ func TestClone_MultipleFromSameSource(t *testing.T) {
 		t.Errorf("expected 6 SubVolumes, got %d", h.k8sClient.subVolumeCount())
 	}
 
-	// All sync clones should have been copied
-	if h.nfsOps.copyCount() != 5 {
-		t.Errorf("expected 5 NFS copies, got %d", h.nfsOps.copyCount())
+	// All clones should be waiting for the clone worker
+	for i := 0; i < 5; i++ {
+		clonePV := fmt.Sprintf("pvc-b2c3d4e5-6789-0abc-def0-%012d", i)
+		if sv := h.k8sClient.getSubVolume(clonePV); sv.Status.CloneStatus != "Pending" {
+			t.Errorf("clone %d: expected CloneStatus 'Pending', got %q", i, sv.Status.CloneStatus)
+		}
 	}
 
 	// Capacity: 5 (source) + 5*5 (clones) = 30

@@ -45,6 +45,10 @@ const (
 
 	// replJobNamespace is the namespace where replication Jobs are created.
 	replJobNamespace = "kube-system"
+
+	// pausedAnnotation pauses a policy while it is set to "true". The controller
+	// sets it after maxRetries; a person removes it to resume.
+	pausedAnnotation = "storage.ibmcloud.io/paused"
 )
 
 // ReplicationController manages cross-region replication of SubVolume data.
@@ -153,7 +157,7 @@ func (rc *ReplicationController) processOnce(ctx context.Context) {
 		policy := &policies[i]
 
 		// Handle pause/resume via annotation.
-		annotationPaused := policy.Annotations["storage.ibmcloud.io/paused"] == "true"
+		annotationPaused := policy.Annotations[pausedAnnotation] == "true"
 
 		if annotationPaused {
 			// Pause requested — update status if needed and skip.
@@ -168,9 +172,11 @@ func (rc *ReplicationController) processOnce(ctx context.Context) {
 			continue
 		}
 
-		// Resume: annotation removed but status still Paused.
+		// Resume: annotation removed but status still Paused. Start counting
+		// failures afresh, or one new failure would pause the policy again.
 		if policy.Status.Phase == "Paused" {
 			policy.Status.Phase = "Active"
+			policy.Status.ConsecutiveFailures = 0
 			if err := rc.k8sClient.UpdateReplicationPolicyStatus(ctx, policy); err != nil {
 				klog.ErrorS(err, "Failed to resume policy", "policy", policy.Name)
 			} else {
@@ -431,11 +437,8 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 	}
 
 	// All SubVolumes processed — evaluate results.
-	// Filter out non-error statuses from syncErrors count.
-	realErrors := filterRealErrors(syncErrors)
-
-	if len(realErrors) > 0 {
-		combinedErr := fmt.Sprintf("%d/%d SubVolumes failed to sync", len(realErrors), len(matched))
+	if len(syncErrors) > 0 {
+		combinedErr := fmt.Sprintf("%d/%d SubVolumes failed to sync", len(syncErrors), len(matched))
 		rc.handleFailure(ctx, policy, combinedErr, start)
 		policy.Status.SubVolumeStatuses = svStatuses
 		if err := rc.k8sClient.UpdateReplicationPolicyStatus(ctx, policy); err != nil {
@@ -477,15 +480,6 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 		"subVolumes", len(matched),
 		"duration", duration.String(),
 	)
-}
-
-// filterRealErrors returns only errors that are actual failures (not in-progress markers).
-func filterRealErrors(errors []string) []string {
-	var real []string
-	for _, e := range errors {
-		real = append(real, e)
-	}
-	return real
 }
 
 // isReceiverMode returns true if the policy uses driver-to-driver replication.
@@ -531,7 +525,7 @@ func (rc *ReplicationController) createDirectNFSResources(ctx context.Context, p
 
 	// 5. Create the replication Job.
 	if err := rc.ensureReplicationJob(ctx, policy, sv); err != nil {
-		return fmt.Errorf("Job: %w", err)
+		return fmt.Errorf("job: %w", err)
 	}
 
 	klog.V(2).InfoS("Created replication Job",
@@ -562,7 +556,7 @@ func (rc *ReplicationController) createReceiverModeResources(ctx context.Context
 
 	// 3. Create the sync-client Job (no dest PV/PVC needed).
 	if err := rc.ensureReceiverModeJob(ctx, policy, sv); err != nil {
-		return fmt.Errorf("Job: %w", err)
+		return fmt.Errorf("job: %w", err)
 	}
 
 	klog.V(2).InfoS("Created receiver-mode replication Job",
@@ -1221,7 +1215,8 @@ func (rc *ReplicationController) handleFailure(ctx context.Context, policy *v1al
 	if maxRetries <= 0 {
 		maxRetries = 3 // default
 	}
-	if policy.Status.ConsecutiveFailures >= maxRetries {
+	autoPause := policy.Status.ConsecutiveFailures >= maxRetries
+	if autoPause {
 		policy.Status.Phase = "Paused"
 		klog.ErrorS(nil, "Replication policy paused after max retries exceeded",
 			"policy", policyName,
@@ -1232,6 +1227,19 @@ func (rc *ReplicationController) handleFailure(ctx context.Context, policy *v1al
 
 	if err := rc.k8sClient.UpdateReplicationPolicyStatus(ctx, policy); err != nil {
 		klog.ErrorS(err, "Failed to update policy status after failure", "policy", policyName)
+	}
+
+	// Set the pause annotation too, so the pause holds until a person removes
+	// it. Without it the next cycle would read the policy as resumed. This runs
+	// after the status update, because Update returns the stored status.
+	if autoPause {
+		if policy.Annotations == nil {
+			policy.Annotations = map[string]string{}
+		}
+		policy.Annotations[pausedAnnotation] = "true"
+		if err := rc.k8sClient.UpdateReplicationPolicy(ctx, policy); err != nil {
+			klog.ErrorS(err, "Failed to set pause annotation after max retries", "policy", policyName)
+		}
 	}
 
 	// Record metrics.

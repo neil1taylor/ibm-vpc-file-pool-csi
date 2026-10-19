@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -278,6 +279,9 @@ func (m *mockK8sClient) ListReplicationPolicies(_ context.Context) ([]v1alpha1.R
 	return nil, nil
 }
 func (m *mockK8sClient) CreateReplicationPolicy(_ context.Context, _ *v1alpha1.ReplicationPolicy) error {
+	return nil
+}
+func (m *mockK8sClient) UpdateReplicationPolicy(_ context.Context, _ *v1alpha1.ReplicationPolicy) error {
 	return nil
 }
 func (m *mockK8sClient) UpdateReplicationPolicyStatus(_ context.Context, _ *v1alpha1.ReplicationPolicy) error {
@@ -2220,5 +2224,43 @@ func TestReadinessGuard_ValidateVolumeCapabilities_AlwaysWorks(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("ValidateVolumeCapabilities should work even when not ready: %v", err)
+	}
+}
+
+// TestCreateVolume_Idempotent_FailedCloneIsAnError verifies that a repeated
+// CreateVolume for a volume whose clone failed reports the failure instead of
+// returning the empty volume as a success.
+func TestCreateVolume_Idempotent_FailedCloneIsAnError(t *testing.T) {
+	pm := &mockPoolManager{} // not called
+	k := newMockK8sClient()
+
+	k.subVolumes["pvc-failed-clone"] = &v1alpha1.SubVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: "pvc-failed-clone"},
+		Spec: v1alpha1.SubVolumeSpec{
+			PoolName:           "test-pool",
+			ShareID:            "share-1",
+			ShareMountTargetIP: "10.240.0.1",
+			SubPath:            "/pvcs/pvc-failed-clone",
+			RequestedGB:        10,
+			PVName:             "pvc-failed-clone",
+		},
+		Status: v1alpha1.SubVolumeStatus{
+			CloneStatus:   "Failed",
+			CloneProgress: &v1alpha1.CloneProgress{Error: "source share unreachable"},
+		},
+	}
+
+	d := newTestDriver(pm, k)
+
+	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name:          "pvc-failed-clone",
+		Parameters:    map[string]string{"pool": "test-pool"},
+		CapacityRange: &csi.CapacityRange{RequiredBytes: gbToBytes(10)},
+	})
+	if status.Code(err) != codes.Internal {
+		t.Fatalf("expected codes.Internal for a failed clone, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "source share unreachable") {
+		t.Errorf("expected the clone error in the message, got %v", err)
 	}
 }

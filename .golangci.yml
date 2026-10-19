@@ -12,11 +12,20 @@ linters:
     - unused
     - misspell
     - gosec
-linters-settings:
-  errcheck:
-    check-type-assertions: true
-  govet:
-    enable-all: true
-  gosec:
-    excludes:
-      - G104
+  settings:
+    errcheck:
+      check-type-assertions: true
+    govet:
+      enable-all: true
+      disable:
+        # Reorders struct fields to save memory; not a correctness check.
+        - fieldalignment
+    gosec:
+      excludes:
+        - G104
+  exclusions:
+    rules:
+      # File permissions and paths in test fixtures carry no risk.
+      - path: _test\.go
+        linters:
+          - gosec

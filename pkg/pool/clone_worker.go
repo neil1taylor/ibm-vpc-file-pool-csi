@@ -152,7 +152,7 @@ func (w *CloneWorker) processClone(ctx context.Context, subVolumeName string) {
 				sv.Status.CloneProgress.BytesCopied = sv.Status.CloneProgress.TotalBytes
 				sv.Status.CloneProgress.CompletedAt = &completedAt
 			}
-			if err := w.k8sClient.UpdateSubVolumeStatus(ctx, sv); err != nil {
+			if err = w.k8sClient.UpdateSubVolumeStatus(ctx, sv); err != nil {
 				klog.ErrorS(err, "Failed to update clone status to Complete", "subVolume", sv.Name)
 				return
 			}
@@ -177,7 +177,7 @@ func (w *CloneWorker) processClone(ctx context.Context, subVolumeName string) {
 	// Job exists but is still running — check again next tick.
 	jobName := cloneJobName(sv.Name)
 	existing := &batchv1.Job{}
-	if err := w.directClient.Get(ctx, types.NamespacedName{
+	if err = w.directClient.Get(ctx, types.NamespacedName{
 		Namespace: sv.Spec.PVCNamespace,
 		Name:      jobName,
 	}, existing); err == nil {
@@ -198,7 +198,7 @@ func (w *CloneWorker) processClone(ctx context.Context, subVolumeName string) {
 			}
 		}
 		sv.Status.CloneProgress.StartedAt = &now
-		if err := w.k8sClient.UpdateSubVolumeStatus(ctx, sv); err != nil {
+		if err = w.k8sClient.UpdateSubVolumeStatus(ctx, sv); err != nil {
 			klog.ErrorS(err, "Failed to update clone status to InProgress", "subVolume", sv.Name)
 			return
 		}

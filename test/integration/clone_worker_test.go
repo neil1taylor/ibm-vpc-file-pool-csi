@@ -4,13 +4,13 @@ package integration
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/pool"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // ---------------------------------------------------------------------------
@@ -165,8 +165,8 @@ func newFailedCloneSV(pvName, poolName, shareID, sourceVolume string, requestedG
 
 // newCloneWorker creates a CloneWorker wired to the integration-test fakes
 // with a fast poll interval.
-func newCloneWorker(k8s *fakeK8sClient, nfs *fakeNFSOperations) *pool.CloneWorker {
-	w := pool.NewCloneWorker(k8s, nfs, "/mnt/staging")
+func newCloneWorker(k8s *fakeK8sClient, dc client.Client) *pool.CloneWorker {
+	w := pool.NewCloneWorker(k8s, dc, pool.DefaultCloneImage)
 	w.SetInterval(50 * time.Millisecond)
 	return w
 }
@@ -202,11 +202,12 @@ func waitForCloneStatusInteg(t *testing.T, k *fakeK8sClient, svName, expectedSta
 // ---------------------------------------------------------------------------
 
 // TestCloneWorker_ProcessesPendingClone verifies that the clone worker picks
-// up a SubVolume with CloneStatus=Pending, performs the NFS copy, and
-// transitions the status to Complete with correct progress fields.
+// up a SubVolume with CloneStatus=Pending, creates and completes a clone
+// Job, and transitions the status to Complete with correct progress fields.
 func TestCloneWorker_ProcessesPendingClone(t *testing.T) {
 	k := newFakeK8sClient()
-	nfs := newFakeNFSOperations()
+	dc := newFakeDirectClient()
+	jobs := startFakeJobRunner(t, dc)
 
 	// Source SubVolume (the volume being cloned from).
 	source := newSourceSubVolume(
@@ -224,7 +225,7 @@ func TestCloneWorker_ProcessesPendingClone(t *testing.T) {
 	)
 	k.addSubVolume(clone)
 
-	w := newCloneWorker(k, nfs)
+	w := newCloneWorker(k, dc)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -256,9 +257,9 @@ func TestCloneWorker_ProcessesPendingClone(t *testing.T) {
 		t.Error("expected CompletedAt to be set")
 	}
 
-	// Verify NFS copy was performed exactly once.
-	if nfs.copyCount() != 1 {
-		t.Errorf("expected 1 NFS copy, got %d", nfs.copyCount())
+	// Verify exactly one clone Job was run.
+	if jobs.jobCount() != 1 {
+		t.Errorf("expected 1 clone Job, got %d", jobs.jobCount())
 	}
 }
 
@@ -266,7 +267,8 @@ func TestCloneWorker_ProcessesPendingClone(t *testing.T) {
 // re-copy or modify SubVolumes that already have CloneStatus=Complete.
 func TestCloneWorker_SkipsCompletedClones(t *testing.T) {
 	k := newFakeK8sClient()
-	nfs := newFakeNFSOperations()
+	dc := newFakeDirectClient()
+	jobs := startFakeJobRunner(t, dc)
 
 	// Source SubVolume.
 	source := newSourceSubVolume(
@@ -284,7 +286,7 @@ func TestCloneWorker_SkipsCompletedClones(t *testing.T) {
 	)
 	k.addSubVolume(completed)
 
-	w := newCloneWorker(k, nfs)
+	w := newCloneWorker(k, dc)
 
 	// Run the worker for several poll intervals to give it ample opportunity
 	// to (incorrectly) process the completed clone.
@@ -294,9 +296,9 @@ func TestCloneWorker_SkipsCompletedClones(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	cancel()
 
-	// No NFS copies should have been performed.
-	if nfs.copyCount() != 0 {
-		t.Errorf("expected 0 NFS copies for completed clone, got %d", nfs.copyCount())
+	// No clone Jobs should have been created.
+	if jobs.jobCount() != 0 {
+		t.Errorf("expected 0 clone Jobs for completed clone, got %d", jobs.jobCount())
 	}
 
 	// Status must remain unchanged.
@@ -312,13 +314,14 @@ func TestCloneWorker_SkipsCompletedClones(t *testing.T) {
 	}
 }
 
-// TestCloneWorker_CopyFailureMarksCloneFailed verifies that when CopyDir
-// returns an error, the clone worker marks the SubVolume as Failed with the
+// TestCloneWorker_CopyFailureMarksCloneFailed verifies that when the clone
+// Job fails, the clone worker marks the SubVolume as Failed with the
 // error message recorded in CloneProgress.
 func TestCloneWorker_CopyFailureMarksCloneFailed(t *testing.T) {
 	k := newFakeK8sClient()
-	nfs := newFakeNFSOperations()
-	nfs.CopyErr = errors.New("NFS write error: disk full")
+	dc := newFakeDirectClient()
+	jobs := startFakeJobRunner(t, dc)
+	jobs.failAllJobs()
 
 	// Source SubVolume.
 	source := newSourceSubVolume(
@@ -336,7 +339,7 @@ func TestCloneWorker_CopyFailureMarksCloneFailed(t *testing.T) {
 	)
 	k.addSubVolume(clone)
 
-	w := newCloneWorker(k, nfs)
+	w := newCloneWorker(k, dc)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -379,7 +382,8 @@ func TestCloneWorker_CopyFailureMarksCloneFailed(t *testing.T) {
 //  2. If an external actor resets the clone to Pending, the worker picks it up.
 func TestCloneWorker_RetryAfterFailure(t *testing.T) {
 	k := newFakeK8sClient()
-	nfs := newFakeNFSOperations()
+	dc := newFakeDirectClient()
+	jobs := startFakeJobRunner(t, dc)
 
 	// Source SubVolume.
 	source := newSourceSubVolume(
@@ -398,7 +402,7 @@ func TestCloneWorker_RetryAfterFailure(t *testing.T) {
 	)
 	k.addSubVolume(failed)
 
-	w := newCloneWorker(k, nfs)
+	w := newCloneWorker(k, dc)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -416,8 +420,8 @@ func TestCloneWorker_RetryAfterFailure(t *testing.T) {
 	if sv.Status.CloneStatus != "Failed" {
 		t.Fatalf("expected clone to remain Failed (worker should not retry), got %q", sv.Status.CloneStatus)
 	}
-	if nfs.copyCount() != 0 {
-		t.Errorf("expected 0 NFS copies for Failed clone, got %d", nfs.copyCount())
+	if jobs.jobCount() != 0 {
+		t.Errorf("expected 0 clone Jobs for Failed clone, got %d", jobs.jobCount())
 	}
 
 	// Simulate an external actor resetting the clone to Pending for retry.
@@ -439,8 +443,8 @@ func TestCloneWorker_RetryAfterFailure(t *testing.T) {
 	if sv.Status.Phase != "Bound" {
 		t.Errorf("expected Phase 'Bound' after retry, got %q", sv.Status.Phase)
 	}
-	if nfs.copyCount() != 1 {
-		t.Errorf("expected 1 NFS copy after retry, got %d", nfs.copyCount())
+	if jobs.jobCount() != 1 {
+		t.Errorf("expected 1 clone Job after retry, got %d", jobs.jobCount())
 	}
 }
 
@@ -448,7 +452,8 @@ func TestCloneWorker_RetryAfterFailure(t *testing.T) {
 // processes multiple pending clones concurrently and completes all of them.
 func TestCloneWorker_MultiplePendingClones(t *testing.T) {
 	k := newFakeK8sClient()
-	nfs := newFakeNFSOperations()
+	dc := newFakeDirectClient()
+	jobs := startFakeJobRunner(t, dc)
 
 	// Source SubVolume.
 	source := newSourceSubVolume(
@@ -473,7 +478,7 @@ func TestCloneWorker_MultiplePendingClones(t *testing.T) {
 		k.addSubVolume(clone)
 	}
 
-	w := newCloneWorker(k, nfs)
+	w := newCloneWorker(k, dc)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -507,9 +512,9 @@ func TestCloneWorker_MultiplePendingClones(t *testing.T) {
 		}
 	}
 
-	// Verify all 3 NFS copies were performed.
-	if nfs.copyCount() != 3 {
-		t.Errorf("expected 3 NFS copies for 3 pending clones, got %d", nfs.copyCount())
+	// Verify a clone Job ran for each of the 3 clones.
+	if jobs.jobCount() != 3 {
+		t.Errorf("expected 3 clone Jobs for 3 pending clones, got %d", jobs.jobCount())
 	}
 }
 
@@ -560,8 +565,11 @@ func TestCloneWorker_EndToEnd_AsyncCloneViaCSIDriver(t *testing.T) {
 		t.Fatalf("expected 0 NFS copies before worker runs, got %d", h.nfsOps.copyCount())
 	}
 
+	dc := newFakeDirectClient()
+	jobs := startFakeJobRunner(t, dc)
+
 	// Start the clone worker using the same fakes from the test harness.
-	w := pool.NewCloneWorker(h.k8sClient, h.nfsOps, "/mnt/staging")
+	w := pool.NewCloneWorker(h.k8sClient, dc, pool.DefaultCloneImage)
 	w.SetInterval(50 * time.Millisecond)
 
 	workerCtx, workerCancel := context.WithCancel(ctx)
@@ -584,9 +592,9 @@ func TestCloneWorker_EndToEnd_AsyncCloneViaCSIDriver(t *testing.T) {
 		t.Error("expected CompletedAt to be set")
 	}
 
-	// NFS copy should now have been performed by the worker.
-	if h.nfsOps.copyCount() != 1 {
-		t.Errorf("expected 1 NFS copy after worker completes, got %d", h.nfsOps.copyCount())
+	// The worker should have run one clone Job.
+	if jobs.jobCount() != 1 {
+		t.Errorf("expected 1 clone Job after worker completes, got %d", jobs.jobCount())
 	}
 }
 
@@ -629,7 +637,9 @@ func TestCloneWorker_EndToEnd_MultipleAsyncClonesViaCSIDriver(t *testing.T) {
 	}
 
 	// Start the clone worker.
-	w := pool.NewCloneWorker(h.k8sClient, h.nfsOps, "/mnt/staging")
+	dc := newFakeDirectClient()
+	jobs := startFakeJobRunner(t, dc)
+	w := pool.NewCloneWorker(h.k8sClient, dc, pool.DefaultCloneImage)
 	w.SetInterval(50 * time.Millisecond)
 
 	workerCtx, workerCancel := context.WithCancel(ctx)
@@ -647,7 +657,7 @@ func TestCloneWorker_EndToEnd_MultipleAsyncClonesViaCSIDriver(t *testing.T) {
 	}
 
 	// All 3 copies performed.
-	if h.nfsOps.copyCount() != 3 {
-		t.Errorf("expected 3 NFS copies, got %d", h.nfsOps.copyCount())
+	if jobs.jobCount() != 3 {
+		t.Errorf("expected 3 clone Jobs, got %d", jobs.jobCount())
 	}
 }
