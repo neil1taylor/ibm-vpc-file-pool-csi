@@ -65,7 +65,6 @@ nav:
       - Troubleshooting: TROUBLESHOOTING.md
       - Performance Tuning: PERFORMANCE-TUNING.md
       - Known Limitations: KNOWN-LIMITATIONS.md
-      - Stock Driver and Virtualization Findings: STOCK-DRIVER-VIRT-FINDINGS.md
   - Architecture:
       - Overview: OVERVIEW.md
       - System Design: ARCHITECTURE.md
