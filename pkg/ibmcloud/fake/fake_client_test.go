@@ -22,7 +22,7 @@ func TestCreateFileShare_Success(t *testing.T) {
 	c := NewFakeVPCClient()
 	ctx := context.Background()
 
-	input := ibmcloud.CreateShareInput{
+	input := ibmcloud.CreateShareInput{SubnetID: "subnet-1",
 		Name:    "test-share",
 		Zone:    "us-south-1",
 		Profile: "dp2",
@@ -71,7 +71,7 @@ func TestCreateFileShare_UniqueIDs(t *testing.T) {
 	c := NewFakeVPCClient()
 	ctx := context.Background()
 
-	input := ibmcloud.CreateShareInput{Name: "share", Zone: "us-south-1", Profile: "dp2", SizeGB: 100}
+	input := ibmcloud.CreateShareInput{SubnetID: "subnet-1", Name: "share", Zone: "us-south-1", Profile: "dp2", SizeGB: 100}
 	info1, _ := c.CreateFileShare(ctx, input)
 	info2, _ := c.CreateFileShare(ctx, input)
 
@@ -90,7 +90,7 @@ func TestCreateFileShare_Error(t *testing.T) {
 	c := NewFakeVPCClient()
 	c.CreateErr = ibmcloud.ErrShareCreationFailed
 
-	_, err := c.CreateFileShare(context.Background(), ibmcloud.CreateShareInput{})
+	_, err := c.CreateFileShare(context.Background(), ibmcloud.CreateShareInput{SubnetID: "subnet-1"})
 	if !errors.Is(err, ibmcloud.ErrShareCreationFailed) {
 		t.Errorf("err = %v, want ErrShareCreationFailed", err)
 	}
@@ -106,7 +106,7 @@ func TestGetFileShare_Success(t *testing.T) {
 	c := NewFakeVPCClient()
 	ctx := context.Background()
 
-	created, _ := c.CreateFileShare(ctx, ibmcloud.CreateShareInput{
+	created, _ := c.CreateFileShare(ctx, ibmcloud.CreateShareInput{SubnetID: "subnet-1",
 		Name: "my-share", Zone: "us-south-2", Profile: "dp2", SizeGB: 200,
 	})
 
@@ -139,7 +139,7 @@ func TestGetFileShare_InjectedError(t *testing.T) {
 	c.GetErr = ibmcloud.ErrAuthentication
 
 	// Create a share first so the not-found path isn't hit.
-	created, _ := c.CreateFileShare(context.Background(), ibmcloud.CreateShareInput{
+	created, _ := c.CreateFileShare(context.Background(), ibmcloud.CreateShareInput{SubnetID: "subnet-1",
 		Name: "s", Zone: "z", Profile: "p", SizeGB: 100,
 	})
 
@@ -153,7 +153,7 @@ func TestExpandFileShare_Success(t *testing.T) {
 	c := NewFakeVPCClient()
 	ctx := context.Background()
 
-	created, _ := c.CreateFileShare(ctx, ibmcloud.CreateShareInput{
+	created, _ := c.CreateFileShare(ctx, ibmcloud.CreateShareInput{SubnetID: "subnet-1",
 		Name: "expand-me", Zone: "us-south-1", Profile: "dp2", SizeGB: 100,
 	})
 
@@ -184,7 +184,7 @@ func TestExpandFileShare_InjectedError(t *testing.T) {
 	c := NewFakeVPCClient()
 	c.ExpandErr = ibmcloud.ErrAPIRateLimit
 
-	created, _ := c.CreateFileShare(context.Background(), ibmcloud.CreateShareInput{
+	created, _ := c.CreateFileShare(context.Background(), ibmcloud.CreateShareInput{SubnetID: "subnet-1",
 		Name: "s", Zone: "z", Profile: "p", SizeGB: 100,
 	})
 
@@ -203,7 +203,7 @@ func TestDeleteFileShare_Success(t *testing.T) {
 	c := NewFakeVPCClient()
 	ctx := context.Background()
 
-	created, _ := c.CreateFileShare(ctx, ibmcloud.CreateShareInput{
+	created, _ := c.CreateFileShare(ctx, ibmcloud.CreateShareInput{SubnetID: "subnet-1",
 		Name: "delete-me", Zone: "us-south-1", Profile: "dp2", SizeGB: 100,
 	})
 
@@ -259,9 +259,9 @@ func TestListFileShares_ReturnsAll(t *testing.T) {
 	c := NewFakeVPCClient()
 	ctx := context.Background()
 
-	_, _ = c.CreateFileShare(ctx, ibmcloud.CreateShareInput{Name: "s1", Zone: "z", Profile: "p", SizeGB: 100})
-	_, _ = c.CreateFileShare(ctx, ibmcloud.CreateShareInput{Name: "s2", Zone: "z", Profile: "p", SizeGB: 200})
-	_, _ = c.CreateFileShare(ctx, ibmcloud.CreateShareInput{Name: "s3", Zone: "z", Profile: "p", SizeGB: 300})
+	_, _ = c.CreateFileShare(ctx, ibmcloud.CreateShareInput{SubnetID: "subnet-1", Name: "s1", Zone: "z", Profile: "p", SizeGB: 100})
+	_, _ = c.CreateFileShare(ctx, ibmcloud.CreateShareInput{SubnetID: "subnet-1", Name: "s2", Zone: "z", Profile: "p", SizeGB: 200})
+	_, _ = c.CreateFileShare(ctx, ibmcloud.CreateShareInput{SubnetID: "subnet-1", Name: "s3", Zone: "z", Profile: "p", SizeGB: 300})
 
 	result, err := c.ListFileShares(ctx, "any-rg", []string{"tag1"})
 	if err != nil {
@@ -276,8 +276,8 @@ func TestListFileShares_AfterDelete(t *testing.T) {
 	c := NewFakeVPCClient()
 	ctx := context.Background()
 
-	s1, _ := c.CreateFileShare(ctx, ibmcloud.CreateShareInput{Name: "s1", Zone: "z", Profile: "p", SizeGB: 100})
-	_, _ = c.CreateFileShare(ctx, ibmcloud.CreateShareInput{Name: "s2", Zone: "z", Profile: "p", SizeGB: 200})
+	s1, _ := c.CreateFileShare(ctx, ibmcloud.CreateShareInput{SubnetID: "subnet-1", Name: "s1", Zone: "z", Profile: "p", SizeGB: 100})
+	_, _ = c.CreateFileShare(ctx, ibmcloud.CreateShareInput{SubnetID: "subnet-1", Name: "s2", Zone: "z", Profile: "p", SizeGB: 200})
 
 	_ = c.DeleteFileShare(ctx, s1.ID)
 
@@ -294,7 +294,7 @@ func TestGetShareDirect(t *testing.T) {
 	c := NewFakeVPCClient()
 	ctx := context.Background()
 
-	created, _ := c.CreateFileShare(ctx, ibmcloud.CreateShareInput{
+	created, _ := c.CreateFileShare(ctx, ibmcloud.CreateShareInput{SubnetID: "subnet-1",
 		Name: "direct", Zone: "us-south-1", Profile: "dp2", SizeGB: 100,
 	})
 
@@ -320,12 +320,12 @@ func TestShareCount(t *testing.T) {
 		t.Errorf("initial ShareCount = %d, want 0", c.ShareCount())
 	}
 
-	s1, _ := c.CreateFileShare(ctx, ibmcloud.CreateShareInput{Name: "s1", Zone: "z", Profile: "p", SizeGB: 100})
+	s1, _ := c.CreateFileShare(ctx, ibmcloud.CreateShareInput{SubnetID: "subnet-1", Name: "s1", Zone: "z", Profile: "p", SizeGB: 100})
 	if c.ShareCount() != 1 {
 		t.Errorf("ShareCount = %d, want 1", c.ShareCount())
 	}
 
-	_, _ = c.CreateFileShare(ctx, ibmcloud.CreateShareInput{Name: "s2", Zone: "z", Profile: "p", SizeGB: 100})
+	_, _ = c.CreateFileShare(ctx, ibmcloud.CreateShareInput{SubnetID: "subnet-1", Name: "s2", Zone: "z", Profile: "p", SizeGB: 100})
 	if c.ShareCount() != 2 {
 		t.Errorf("ShareCount = %d, want 2", c.ShareCount())
 	}
@@ -340,7 +340,7 @@ func TestCallCounters(t *testing.T) {
 	c := NewFakeVPCClient()
 	ctx := context.Background()
 
-	created, _ := c.CreateFileShare(ctx, ibmcloud.CreateShareInput{Name: "s", Zone: "z", Profile: "p", SizeGB: 100})
+	created, _ := c.CreateFileShare(ctx, ibmcloud.CreateShareInput{SubnetID: "subnet-1", Name: "s", Zone: "z", Profile: "p", SizeGB: 100})
 	_, _ = c.GetFileShare(ctx, created.ID)
 	_, _ = c.GetFileShare(ctx, created.ID)
 	_ = c.ExpandFileShare(ctx, created.ID, 200)

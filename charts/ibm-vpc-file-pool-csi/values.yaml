@@ -13,7 +13,7 @@ config:
   # Only set these for unmanaged clusters or to override auto-discovery.
   region: ""      # Auto-discovered from secret provider endpoint
   vpcID: ""       # Auto-discovered from ibm-cloud-provider-data configmap
-  subnetID: ""    # Auto-discovered from ibm-cloud-provider-data configmap
+  subnetID: ""    # Comma-separated worker subnets; auto-discovered from ibm-cloud-provider-data configmap
   resourceGroupID: ""
 
 controller:

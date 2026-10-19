@@ -785,7 +785,7 @@ func TestGetFileShare_Success(t *testing.T) {
 			writeJSON(w, http.StatusMethodNotAllowed, nil)
 			return
 		}
-		writeJSON(w, http.StatusOK, mountTargetJSON("mt-1", "pool-share-1-mt", "", "10.240.0.5"))
+		writeJSON(w, http.StatusOK, mountTargetJSON("mt-1", "pool-share-1-mt", "10.240.0.5:/export", "10.240.0.5"))
 	})
 
 	server := httptest.NewServer(mux)
@@ -1071,7 +1071,7 @@ func TestCreateFileShare_Success(t *testing.T) {
 			writeJSON(w, http.StatusMethodNotAllowed, nil)
 			return
 		}
-		writeJSON(w, http.StatusOK, mountTargetJSON("mt-new", "test-pool-share-mt", "", "10.240.0.10"))
+		writeJSON(w, http.StatusOK, mountTargetJSON("mt-new", "test-pool-share-mt", "10.240.0.10:/export", "10.240.0.10"))
 	})
 
 	server := httptest.NewServer(mux)
@@ -1087,7 +1087,7 @@ func TestCreateFileShare_Success(t *testing.T) {
 		SizeGB:          1000,
 		ResourceGroupID: "rg-test-123",
 		Tags:            []string{"pool:test-pool"},
-		VPCId:           "vpc-123",
+		SubnetID:        "subnet-123",
 	}
 
 	info, err := client.CreateFileShare(context.Background(), input)
@@ -1133,11 +1133,12 @@ func TestCreateFileShare_WithIOPS(t *testing.T) {
 
 	iops := int64(10000)
 	input := CreateShareInput{
-		Name:    "iops-share",
-		Zone:    "us-south-1",
-		Profile: "custom",
-		SizeGB:  500,
-		IOPS:    &iops,
+		SubnetID: "subnet-123",
+		Name:     "iops-share",
+		Zone:     "us-south-1",
+		Profile:  "custom",
+		SizeGB:   500,
+		IOPS:     &iops,
 	}
 
 	info, err := client.CreateFileShare(context.Background(), input)
@@ -1185,7 +1186,7 @@ func TestCreateFileShare_WithEncryptInTransit(t *testing.T) {
 		Zone:             "us-south-1",
 		Profile:          "dp2",
 		SizeGB:           200,
-		VPCId:            "vpc-123",
+		SubnetID:         "subnet-123",
 		EncryptInTransit: true,
 	}
 
@@ -1236,10 +1237,11 @@ func TestCreateFileShare_AlreadyExists(t *testing.T) {
 	client := newTestClient(t, svc)
 
 	input := CreateShareInput{
-		Name:    "existing-share",
-		Zone:    "us-south-1",
-		Profile: "dp2",
-		SizeGB:  500,
+		SubnetID: "subnet-123",
+		Name:     "existing-share",
+		Zone:     "us-south-1",
+		Profile:  "dp2",
+		SizeGB:   500,
 	}
 
 	info, err := client.CreateFileShare(context.Background(), input)
@@ -1275,10 +1277,11 @@ func TestCreateFileShare_APIError(t *testing.T) {
 	client := newTestClient(t, svc)
 
 	input := CreateShareInput{
-		Name:    "fail-share",
-		Zone:    "us-south-1",
-		Profile: "dp2",
-		SizeGB:  500,
+		SubnetID: "subnet-123",
+		Name:     "fail-share",
+		Zone:     "us-south-1",
+		Profile:  "dp2",
+		SizeGB:   500,
 	}
 
 	_, err := client.CreateFileShare(context.Background(), input)
@@ -1314,10 +1317,11 @@ func TestCreateFileShare_ShareNotStable(t *testing.T) {
 	client := newTestClient(t, svc)
 
 	input := CreateShareInput{
-		Name:    "pending-share",
-		Zone:    "us-south-1",
-		Profile: "dp2",
-		SizeGB:  500,
+		SubnetID: "subnet-123",
+		Name:     "pending-share",
+		Zone:     "us-south-1",
+		Profile:  "dp2",
+		SizeGB:   500,
 	}
 
 	_, err := client.CreateFileShare(context.Background(), input)
@@ -1342,10 +1346,11 @@ func TestCreateFileShare_AuthFailure(t *testing.T) {
 	}
 
 	input := CreateShareInput{
-		Name:    "auth-fail-share",
-		Zone:    "us-south-1",
-		Profile: "dp2",
-		SizeGB:  500,
+		SubnetID: "subnet-123",
+		Name:     "auth-fail-share",
+		Zone:     "us-south-1",
+		Profile:  "dp2",
+		SizeGB:   500,
 	}
 
 	_, err := client.CreateFileShare(context.Background(), input)
@@ -1454,7 +1459,7 @@ func TestDeleteFileShare_Success(t *testing.T) {
 	})
 	mux.HandleFunc("/shares/share-del/mount_targets/mt-del", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
-			writeJSON(w, http.StatusOK, mountTargetJSON("mt-del", "del-share-mt", "", "10.240.0.1"))
+			writeJSON(w, http.StatusOK, mountTargetJSON("mt-del", "del-share-mt", "10.240.0.1:/export", "10.240.0.1"))
 			return
 		}
 		if r.Method == http.MethodDelete {
@@ -1764,7 +1769,7 @@ func TestCreateShareMountTarget_Success(t *testing.T) {
 			return
 		}
 		// Return with IP populated.
-		writeJSON(w, http.StatusOK, mountTargetJSON("mt-new", "cross-zone-mt", "", "10.240.1.5"))
+		writeJSON(w, http.StatusOK, mountTargetJSON("mt-new", "cross-zone-mt", "10.240.1.5:/export", "10.240.1.5"))
 	})
 
 	server := httptest.NewServer(mux)
@@ -1774,8 +1779,8 @@ func TestCreateShareMountTarget_Success(t *testing.T) {
 	client := newTestClient(t, svc)
 
 	input := CreateMountTargetInput{
-		Name:  "cross-zone-mt",
-		VPCId: "vpc-123",
+		Name:     "cross-zone-mt",
+		SubnetID: "subnet-123",
 	}
 
 	mt, err := client.CreateShareMountTarget(context.Background(), "share-mt", input)
@@ -1800,7 +1805,7 @@ func TestCreateShareMountTarget_WithEncryption(t *testing.T) {
 		writeJSON(w, http.StatusCreated, mountTargetJSON("mt-enc", "enc-mt", "", ""))
 	})
 	mux.HandleFunc("/shares/share-enc/mount_targets/mt-enc", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, mountTargetJSON("mt-enc", "enc-mt", "", "10.240.2.1"))
+		writeJSON(w, http.StatusOK, mountTargetJSON("mt-enc", "enc-mt", "10.240.2.1:/export", "10.240.2.1"))
 	})
 
 	server := httptest.NewServer(mux)
@@ -1811,7 +1816,7 @@ func TestCreateShareMountTarget_WithEncryption(t *testing.T) {
 
 	input := CreateMountTargetInput{
 		Name:             "enc-mt",
-		VPCId:            "vpc-123",
+		SubnetID:         "subnet-123",
 		EncryptInTransit: true,
 	}
 
@@ -1841,8 +1846,8 @@ func TestCreateShareMountTarget_APIError(t *testing.T) {
 	client := newTestClient(t, svc)
 
 	input := CreateMountTargetInput{
-		Name:  "dup-mt",
-		VPCId: "vpc-123",
+		Name:     "dup-mt",
+		SubnetID: "subnet-123",
 	}
 
 	_, err := client.CreateShareMountTarget(context.Background(), "share-mt-err", input)
@@ -1860,8 +1865,8 @@ func TestCreateShareMountTarget_AuthFailure(t *testing.T) {
 	client.secretProvider = &fakeSecretProvider{tokenErr: fmt.Errorf("auth expired")}
 
 	input := CreateMountTargetInput{
-		Name:  "fail-mt",
-		VPCId: "vpc-123",
+		Name:     "fail-mt",
+		SubnetID: "subnet-123",
 	}
 
 	_, err := client.CreateShareMountTarget(context.Background(), "share-x", input)
@@ -1901,8 +1906,8 @@ func TestCreateShareMountTarget_IPPollingTimeout(t *testing.T) {
 	defer cancel()
 
 	input := CreateMountTargetInput{
-		Name:  "poll-mt",
-		VPCId: "vpc-123",
+		Name:     "poll-mt",
+		SubnetID: "subnet-123",
 	}
 
 	_, err := client.CreateShareMountTarget(ctx, "share-poll", input)
@@ -1941,8 +1946,8 @@ func TestCreateShareMountTarget_IPPollingGetError(t *testing.T) {
 	client.pollInterval = 1 * time.Millisecond
 
 	input := CreateMountTargetInput{
-		Name:  "ge-mt",
-		VPCId: "vpc-123",
+		Name:     "ge-mt",
+		SubnetID: "subnet-123",
 	}
 
 	_, err := client.CreateShareMountTarget(context.Background(), "share-ge", input)
@@ -1956,7 +1961,7 @@ func TestCreateShareMountTarget_IPPollingGetError(t *testing.T) {
 func TestGetMountTarget_PrimaryIP(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/shares/share-1/mount_targets/mt-1", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, mountTargetJSON("mt-1", "mt-name", "", "10.240.0.1"))
+		writeJSON(w, http.StatusOK, mountTargetJSON("mt-1", "mt-name", "10.240.0.1:/export", "10.240.0.1"))
 	})
 
 	server := httptest.NewServer(mux)
@@ -2110,10 +2115,10 @@ func TestGetFileShare_MultipleMountTargets(t *testing.T) {
 		writeJSON(w, http.StatusOK, body)
 	})
 	mux.HandleFunc("/shares/share-multi/mount_targets/mt-a", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, mountTargetJSON("mt-a", "mt-zone1", "", "10.240.0.1"))
+		writeJSON(w, http.StatusOK, mountTargetJSON("mt-a", "mt-zone1", "10.240.0.1:/export", "10.240.0.1"))
 	})
 	mux.HandleFunc("/shares/share-multi/mount_targets/mt-b", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, mountTargetJSON("mt-b", "mt-zone2", "", "10.240.1.1"))
+		writeJSON(w, http.StatusOK, mountTargetJSON("mt-b", "mt-zone2", "10.240.1.1:/export", "10.240.1.1"))
 	})
 
 	server := httptest.NewServer(mux)
@@ -2182,7 +2187,7 @@ func TestCreateFileShare_MountTargetIPPolling(t *testing.T) {
 			return
 		}
 		// Third call: IP available.
-		writeJSON(w, http.StatusOK, mountTargetJSON("mt-poll-ip", "poll-ip-mt", "", "10.240.0.99"))
+		writeJSON(w, http.StatusOK, mountTargetJSON("mt-poll-ip", "poll-ip-mt", "10.240.0.99:/export", "10.240.0.99"))
 	})
 
 	server := httptest.NewServer(mux)
@@ -2207,11 +2212,11 @@ func TestCreateFileShare_MountTargetIPPolling(t *testing.T) {
 	}
 
 	input := CreateShareInput{
-		Name:    "poll-ip-share",
-		Zone:    "us-south-1",
-		Profile: "dp2",
-		SizeGB:  500,
-		VPCId:   "vpc-123",
+		Name:     "poll-ip-share",
+		Zone:     "us-south-1",
+		Profile:  "dp2",
+		SizeGB:   500,
+		SubnetID: "subnet-123",
 	}
 
 	info, err := client.CreateFileShare(context.Background(), input)
@@ -2255,7 +2260,7 @@ func TestDeleteFileShare_MountTargetDeleteError(t *testing.T) {
 	})
 	mux.HandleFunc("/shares/share-mt-del-err/mount_targets/mt-del-err", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
-			writeJSON(w, http.StatusOK, mountTargetJSON("mt-del-err", "del-err-mt", "", "10.240.0.1"))
+			writeJSON(w, http.StatusOK, mountTargetJSON("mt-del-err", "del-err-mt", "10.240.0.1:/export", "10.240.0.1"))
 			return
 		}
 		if r.Method == http.MethodDelete {

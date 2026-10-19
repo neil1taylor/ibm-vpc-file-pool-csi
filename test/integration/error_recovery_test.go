@@ -257,7 +257,7 @@ func TestErrorRecovery_ReconcilerShareHealthCheck_DegradedShare(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a share in VPC
-	shareInfo, _ := h.vpcClient.CreateFileShare(ctx, ibmcloud.CreateShareInput{
+	shareInfo, _ := h.vpcClient.CreateFileShare(ctx, ibmcloud.CreateShareInput{SubnetID: "subnet-us-south-1",
 		Name:    "s1",
 		Zone:    "us-south-1",
 		Profile: "dp2",
@@ -306,7 +306,7 @@ func TestErrorRecovery_ReconcilerShareHealthCheck_CreatingBecomesStable(t *testi
 	ctx := context.Background()
 
 	// Create a share in VPC (fake returns it as "stable")
-	shareInfo, _ := h.vpcClient.CreateFileShare(ctx, ibmcloud.CreateShareInput{
+	shareInfo, _ := h.vpcClient.CreateFileShare(ctx, ibmcloud.CreateShareInput{SubnetID: "subnet-us-south-1",
 		Name:    "s1",
 		Zone:    "us-south-1",
 		Profile: "dp2",
@@ -468,7 +468,7 @@ func TestErrorRecovery_DeletionWithVPCDeleteFailure(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a share in VPC
-	shareInfo, _ := h.vpcClient.CreateFileShare(ctx, ibmcloud.CreateShareInput{
+	shareInfo, _ := h.vpcClient.CreateFileShare(ctx, ibmcloud.CreateShareInput{SubnetID: "subnet-us-south-1",
 		Name:    "s1",
 		Zone:    "us-south-1",
 		Profile: "dp2",

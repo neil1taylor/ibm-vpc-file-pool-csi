@@ -710,7 +710,9 @@ func newStableShare(id, name string, totalGB, allocatedGB int64, pvcCount int32)
 }
 
 func newManagerForTest(k8s *fakeK8sClient, vpc *fake.FakeVPCClient, nfs *fakeNFSOperations) *Manager {
-	return NewManager(k8s, vpc, nfs, "/mnt/staging")
+	m := NewManager(k8s, vpc, nfs, "/mnt/staging")
+	m.SetShareNetwork(testNetwork(vpc))
+	return m
 }
 
 // PV name that matches the regex /pvcs/pvc-[a-f0-9-]{36}

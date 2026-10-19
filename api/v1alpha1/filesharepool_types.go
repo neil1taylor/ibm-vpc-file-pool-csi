@@ -101,6 +101,12 @@ type FileSharePoolSpec struct {
 	// +optional
 	Tags []string `json:"tags,omitempty"`
 
+	// SecurityGroupIDs are the VPC security groups for each share's mount target.
+	// When empty, the driver uses the cluster's own security group,
+	// kube-<cluster ID>, which already lets every worker reach NFS.
+	// +optional
+	SecurityGroupIDs []string `json:"securityGroupIDs,omitempty"`
+
 	// MountOptions are additional NFS mount options applied by the node agent.
 	// +optional
 	MountOptions []string `json:"mountOptions,omitempty"`
@@ -214,9 +220,10 @@ type AccessorZone struct {
 	// +kubebuilder:validation:Pattern=`^[a-z]{2}-[a-z]+-\d+$`
 	Zone string `json:"zone"`
 
-	// SubnetID is the VPC subnet in the accessor zone to create mount targets in.
-	// +kubebuilder:validation:Required
-	SubnetID string `json:"subnetID"`
+	// SubnetID is not used. Shares use security group access mode, and one mount
+	// target in the home zone serves every zone. Kept so existing pools still apply.
+	// +optional
+	SubnetID string `json:"subnetID,omitempty"`
 }
 
 // ZoneMountTarget records a mount target created in a specific zone.

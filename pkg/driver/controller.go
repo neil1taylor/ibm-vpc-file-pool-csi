@@ -106,15 +106,12 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 
 	result, err := d.poolManager.Allocate(ctx, allocReq)
 	if err != nil {
+		if poolErr := poolCapacityError(poolName, err); poolErr != nil {
+			return nil, poolErr
+		}
 		switch {
 		case errors.Is(err, pool.ErrPoolNotFound):
 			return nil, status.Errorf(codes.NotFound, "pool %q not found", poolName)
-		case errors.Is(err, pool.ErrPoolExhausted):
-			return nil, status.Errorf(codes.ResourceExhausted, "pool %q has no available capacity", poolName)
-		case errors.Is(err, pool.ErrPoolExpanding):
-			return nil, status.Errorf(codes.Unavailable, "pool %q is expanding, retry shortly", poolName)
-		case errors.Is(err, pool.ErrShareCreationPending):
-			return nil, status.Errorf(codes.Unavailable, "pool %q is expanding, retry shortly", poolName)
 		default:
 			return nil, status.Errorf(codes.Internal, "allocation failed: %v", err)
 		}
@@ -327,11 +324,12 @@ func (d *Driver) createVolumeFromSnapshot(ctx context.Context, req *csi.CreateVo
 
 	result, err := d.poolManager.RestoreSnapshot(ctx, snapshotName, allocReq)
 	if err != nil {
+		if poolErr := poolCapacityError(poolName, err); poolErr != nil {
+			return nil, poolErr
+		}
 		switch {
 		case errors.Is(err, pool.ErrSnapshotNotFound):
 			return nil, status.Errorf(codes.NotFound, "snapshot %q not found", snapshotName)
-		case errors.Is(err, pool.ErrPoolExhausted):
-			return nil, status.Errorf(codes.ResourceExhausted, "pool %q has no available capacity", poolName)
 		default:
 			return nil, status.Errorf(codes.Internal, "restore snapshot failed: %v", err)
 		}
@@ -394,13 +392,12 @@ func (d *Driver) createVolumeFromClone(ctx context.Context, req *csi.CreateVolum
 
 	result, err := d.poolManager.CloneVolume(ctx, sourceVolumeID, allocReq, syncThreshold)
 	if err != nil {
+		if poolErr := poolCapacityError(poolName, err); poolErr != nil {
+			return nil, poolErr
+		}
 		switch {
 		case errors.Is(err, pool.ErrSourceNotFound):
 			return nil, status.Errorf(codes.NotFound, "source volume not found")
-		case errors.Is(err, pool.ErrPoolExhausted):
-			return nil, status.Errorf(codes.ResourceExhausted, "pool %q has no available capacity", poolName)
-		case errors.Is(err, pool.ErrPoolExpanding):
-			return nil, status.Errorf(codes.Unavailable, "pool %q is expanding, retry shortly", poolName)
 		default:
 			return nil, status.Errorf(codes.Internal, "clone failed: %v", err)
 		}
@@ -809,5 +806,22 @@ func newControllerCap(cap csi.ControllerServiceCapability_RPC_Type) *csi.Control
 				Type: cap,
 			},
 		},
+	}
+}
+
+// poolCapacityError maps the pool errors that every volume source shares (new,
+// snapshot restore, clone) to gRPC errors. It returns nil for other errors.
+// A pool that is growing, or whose shares have no mount target yet, is
+// retriable, so the provisioner tries again.
+func poolCapacityError(poolName string, err error) error {
+	switch {
+	case errors.Is(err, pool.ErrPoolExhausted):
+		return status.Errorf(codes.ResourceExhausted, "pool %q has no available capacity", poolName)
+	case errors.Is(err, pool.ErrPoolExpanding), errors.Is(err, pool.ErrShareCreationPending):
+		return status.Errorf(codes.Unavailable, "pool %q is expanding, retry shortly", poolName)
+	case errors.Is(err, pool.ErrNoUsableShare):
+		return status.Errorf(codes.Unavailable, "pool %q cannot serve volumes yet: %v", poolName, err)
+	default:
+		return nil
 	}
 }

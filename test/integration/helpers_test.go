@@ -546,7 +546,7 @@ type fakeNFSOperations struct {
 	dirs          map[string]os.FileMode
 	chowns        map[string][2]int
 	copies        map[string]string // dst → src
-	copyCallCount int              // tracks total CopyDir calls
+	copyCallCount int               // tracks total CopyDir calls
 	files         map[string][]byte // path → data (for WriteFile/ReadFile)
 	MkdirErr      error
 	RemoveErr     error
@@ -701,6 +701,9 @@ func newTestHarness(t *testing.T) *testHarness {
 	vpc := fake.NewFakeVPCClient()
 	nfs := newFakeNFSOperations()
 	mgr := pool.NewManager(k, vpc, nfs, "/mnt/staging")
+	vpc.SetSubnetZone("subnet-1", "us-south-1")
+	vpc.AddSecurityGroup("kube-test-cluster", "sg-1")
+	mgr.SetShareNetwork(pool.NewShareNetwork("vpc-1", []string{"subnet-1"}, "test-cluster"))
 
 	d, err := driver.NewDriver(driver.Config{
 		Name:        driver.DriverName,

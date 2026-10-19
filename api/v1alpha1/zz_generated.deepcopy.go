@@ -156,6 +156,11 @@ func (in *FileSharePoolSpec) DeepCopyInto(out *FileSharePoolSpec) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.SecurityGroupIDs != nil {
+		in, out := &in.SecurityGroupIDs, &out.SecurityGroupIDs
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.MountOptions != nil {
 		in, out := &in.MountOptions, &out.MountOptions
 		*out = make([]string, len(*in))

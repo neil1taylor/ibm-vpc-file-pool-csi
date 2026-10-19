@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,8 +45,7 @@ const (
 type FileSharePoolReconciler struct {
 	k8sClient            k8s.Client
 	vpcClient            ibmcloud.VPCFileClient
-	vpcID                string
-	subnetID             string
+	network              *ShareNetwork
 	defaultResourceGroup string
 	mu                   sync.Mutex
 
@@ -65,12 +65,11 @@ func NewFileSharePoolReconciler(k8sClient k8s.Client, vpcClient ibmcloud.VPCFile
 	}
 }
 
-// SetVPCConfig sets the VPC ID, subnet ID, and default resource group used when creating shares.
-func (r *FileSharePoolReconciler) SetVPCConfig(vpcID, subnetID, defaultResourceGroup string) {
+// SetVPCConfig sets the cluster network and default resource group used when creating shares.
+func (r *FileSharePoolReconciler) SetVPCConfig(network *ShareNetwork, defaultResourceGroup string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.vpcID = vpcID
-	r.subnetID = subnetID
+	r.network = network
 	r.defaultResourceGroup = defaultResourceGroup
 }
 
@@ -348,19 +347,14 @@ func (r *FileSharePoolReconciler) healthCheck(ctx context.Context, pool *v1alpha
 		}
 
 		// Recovery: if the share is stable but has no mount target IP, the share
-		// may have been created before VPC config was available (no inline mount
-		// target), or the mount target's MountPath never populated. Create a mount
-		// target if none exist on the VPC side.
+		// may have been created without a mount target, or the mount target's
+		// MountPath never populated. Create a mount target if none exist on the
+		// VPC side.
 		if share.State == "stable" && share.MountTargetIP == "" {
-			if len(info.MountTargets) == 0 && r.vpcID != "" {
+			if len(info.MountTargets) == 0 && r.network != nil {
 				klog.InfoS("Stable share has no mount targets — creating one",
 					"pool", pool.Name, "shareID", share.ShareID)
-				mtInput := ibmcloud.CreateMountTargetInput{
-					Name:             share.ShareName + "-mt",
-					VPCId:            r.vpcID,
-					EncryptInTransit: pool.Spec.EncryptionInTransit,
-				}
-				mtInfo, mtErr := r.vpcClient.CreateShareMountTarget(ctx, share.ShareID, mtInput)
+				mtInfo, mtErr := r.createMountTarget(ctx, pool, share)
 				if mtErr != nil {
 					klog.ErrorS(mtErr, "Failed to create mount target for share — will retry next reconcile",
 						"shareID", share.ShareID)
@@ -393,10 +387,25 @@ func (r *FileSharePoolReconciler) healthCheck(ctx context.Context, pool *v1alpha
 	}
 }
 
+// createMountTarget creates a security group mount target for a share that has
+// none, using the same network as a new share.
+func (r *FileSharePoolReconciler) createMountTarget(ctx context.Context, pool *v1alpha1.FileSharePool, share *v1alpha1.PoolShareStatus) (*ibmcloud.MountTargetInfo, error) {
+	subnetID, sgIDs, err := r.network.mountTargetNetwork(ctx, r.vpcClient, pool)
+	if err != nil {
+		return nil, err
+	}
+	return r.vpcClient.CreateShareMountTarget(ctx, share.ShareID, ibmcloud.CreateMountTargetInput{
+		Name:             share.ShareName + "-mt",
+		SubnetID:         subnetID,
+		SecurityGroupIDs: sgIDs,
+		EncryptInTransit: pool.Spec.EncryptionInTransit,
+	})
+}
+
 // ensureAccessorMountTargets populates MountTargets status for accessor zones.
-// VPC access mode uses a single mount target per VPC with a FQDN that the VPC
-// DNS resolves to zone-optimal IPs automatically. We record this FQDN as the
-// IP for each accessible zone so that the CSI driver can emit server.<zone> keys.
+// A share has one mount target, in its home zone, and nodes in other zones
+// mount it across zones. We record its address for each accessible zone so
+// that the CSI driver can emit server.<zone> keys.
 func (r *FileSharePoolReconciler) ensureAccessorMountTargets(_ context.Context, pool *v1alpha1.FileSharePool) {
 	if len(pool.Spec.AccessorZones) == 0 {
 		return
@@ -420,7 +429,7 @@ func (r *FileSharePoolReconciler) ensureAccessorMountTargets(_ context.Context, 
 			}
 		}
 
-		// Add accessor zones using the same VPC-mode FQDN/IP (DNS handles routing)
+		// Add accessor zones using the home-zone mount target address
 		for _, az := range pool.Spec.AccessorZones {
 			exists := false
 			for _, mt := range share.MountTargets {
@@ -440,7 +449,7 @@ func (r *FileSharePoolReconciler) ensureAccessorMountTargets(_ context.Context, 
 				ExportPath:    share.ExportPath,
 			})
 
-			klog.V(2).InfoS("Added accessor zone to mount targets (same VPC FQDN)",
+			klog.V(2).InfoS("Added accessor zone to mount targets (home-zone address)",
 				"pool", pool.Name, "shareID", share.ShareID,
 				"zone", az.Zone, "server", share.MountTargetIP)
 		}
@@ -617,9 +626,10 @@ func (r *FileSharePoolReconciler) proactiveExpansion(ctx context.Context, pool *
 		return
 	}
 
-	// Skip if any share is still creating
+	// Skip while any share is still creating or has no mount target: a new
+	// share would not add usable capacity sooner than those shares will.
 	for _, s := range pool.Status.Shares {
-		if s.State == "creating" {
+		if s.State == "creating" || (s.State == "stable" && !shareReady(s)) {
 			return
 		}
 	}
@@ -685,39 +695,9 @@ func (r *FileSharePoolReconciler) proactiveExpansion(ctx context.Context, pool *
 // createPoolShare creates a new VPC share and appends it to pool status.
 // tier is the name of the ShareTier; empty for pools without tiers.
 func (r *FileSharePoolReconciler) createPoolShare(ctx context.Context, pool *v1alpha1.FileSharePool, tier string) error {
-	profile, sizeGB, iops, _, _, err := pool.Spec.TierConfig(tier)
+	input, err := newShareInput(ctx, r.vpcClient, r.network, pool, tier, r.defaultResourceGroup)
 	if err != nil {
 		return err
-	}
-
-	resourceGroup := pool.Spec.ResourceGroup
-	if resourceGroup == "" {
-		resourceGroup = r.defaultResourceGroup
-	}
-
-	// Build share name: include tier when present
-	shareName := fmt.Sprintf("%s-share-%d", pool.Name, len(pool.Status.Shares)+1)
-	if tier != "" {
-		tierShareCount := int32(0)
-		for _, s := range pool.Status.Shares {
-			if s.Tier == tier {
-				tierShareCount++
-			}
-		}
-		shareName = fmt.Sprintf("%s-%s-share-%d", pool.Name, tier, tierShareCount+1)
-	}
-
-	input := ibmcloud.CreateShareInput{
-		Name:             shareName,
-		Zone:             pool.Spec.Zone,
-		Profile:          profile,
-		SizeGB:           sizeGB,
-		IOPS:             iops,
-		ResourceGroupID:  resourceGroup,
-		Tags:             pool.Spec.Tags,
-		EncryptInTransit: pool.Spec.EncryptionInTransit,
-		VPCId:            r.vpcID,
-		SubnetID:         r.subnetID,
 	}
 
 	shareInfo, err := r.vpcClient.CreateFileShare(ctx, input)
@@ -725,52 +705,7 @@ func (r *FileSharePoolReconciler) createPoolShare(ctx context.Context, pool *v1a
 		return fmt.Errorf("create VPC share: %w", err)
 	}
 
-	mountTargetIP := ""
-	mountTargetID := ""
-	exportPath := "/"
-	if len(shareInfo.MountTargets) > 0 {
-		mountTargetIP = shareInfo.MountTargets[0].IPAddress
-		mountTargetID = shareInfo.MountTargets[0].ID
-		if shareInfo.MountTargets[0].ExportPath != "" {
-			exportPath = shareInfo.MountTargets[0].ExportPath
-		}
-	}
-
-	state := "creating"
-	if shareInfo.LifecycleState == "stable" {
-		state = "stable"
-	}
-
-	// Build initial MountTargets slice for the home zone.
-	var mountTargets []v1alpha1.ZoneMountTarget
-	if mountTargetIP != "" {
-		mountTargets = []v1alpha1.ZoneMountTarget{
-			{
-				Zone:          shareInfo.Zone,
-				MountTargetID: mountTargetID,
-				MountTargetIP: mountTargetIP,
-				ExportPath:    exportPath,
-			},
-		}
-	}
-
-	now := metav1.Now()
-	newShare := v1alpha1.PoolShareStatus{
-		ShareID:       shareInfo.ID,
-		ShareName:     shareInfo.Name,
-		MountTargetIP: mountTargetIP,
-		MountTargetID: mountTargetID,
-		ExportPath:    exportPath,
-		TotalGB:       shareInfo.SizeGB,
-		AllocatedGB:   0,
-		PVCCount:      0,
-		State:         state,
-		Tier:          tier,
-		Zone:          shareInfo.Zone,
-		MountTargets:  mountTargets,
-		CreatedAt:     &now,
-	}
-
+	newShare := newPoolShareStatus(shareInfo, tier)
 	pool.Status.Shares = append(pool.Status.Shares, newShare)
 	pool.Status.ShareCount = int32(len(pool.Status.Shares)) //nolint:gosec // safe: MaxShares capped at 100
 	pool.Status.TotalCapacityGB += shareInfo.SizeGB
@@ -779,7 +714,7 @@ func (r *FileSharePoolReconciler) createPoolShare(ctx context.Context, pool *v1a
 		"pool", pool.Name,
 		"tier", tier,
 		"shareID", shareInfo.ID,
-		"state", state,
+		"state", newShare.State,
 	)
 
 	return nil
@@ -791,14 +726,15 @@ func determinePhase(pool *v1alpha1.FileSharePool) string {
 		return "Initializing"
 	}
 
-	hasStable := false
+	hasReady := false
 	hasDraining := false
 	hasCreating := false
 
 	for _, s := range pool.Status.Shares {
+		if shareReady(s) {
+			hasReady = true
+		}
 		switch s.State {
-		case "stable":
-			hasStable = true
 		case "draining", "degraded":
 			hasDraining = true
 		case "creating":
@@ -812,15 +748,16 @@ func determinePhase(pool *v1alpha1.FileSharePool) string {
 	if hasCreating {
 		return "Expanding"
 	}
-	if !hasStable {
-		return "Initializing"
+	if !hasReady {
+		// Every share is stable but none has a usable mount target.
+		return "Degraded"
 	}
 
 	// Check if all shares are full at max capacity
 	if int32(len(pool.Status.Shares)) >= pool.Spec.MaxShares { //nolint:gosec // safe: MaxShares capped at 100
 		allFull := true
 		for _, s := range pool.Status.Shares {
-			if s.State == "stable" && s.AllocatedGB < s.TotalGB {
+			if shareReady(s) && s.AllocatedGB < s.TotalGB {
 				allFull = false
 				break
 			}
@@ -865,16 +802,23 @@ func (r *FileSharePoolReconciler) setCondition(pool *v1alpha1.FileSharePool, con
 // updateConditions sets SharesReady and CapacityAvailable conditions.
 func (r *FileSharePoolReconciler) updateConditions(pool *v1alpha1.FileSharePool) {
 	// SharesReady
-	stableCount := 0
+	readyCount := 0
+	var noMountTarget []string
 	for _, s := range pool.Status.Shares {
-		if s.State == "stable" {
-			stableCount++
+		if shareReady(s) {
+			readyCount++
+		} else if s.State == "stable" {
+			noMountTarget = append(noMountTarget, s.ShareID)
 		}
 	}
-	if stableCount > 0 {
+	switch {
+	case readyCount > 0:
 		r.setCondition(pool, "SharesReady", metav1.ConditionTrue, "SharesAvailable",
-			fmt.Sprintf("%d shares ready", stableCount))
-	} else {
+			fmt.Sprintf("%d shares ready", readyCount))
+	case len(noMountTarget) > 0:
+		r.setCondition(pool, "SharesReady", metav1.ConditionFalse, "NoMountTarget",
+			fmt.Sprintf("No share can serve volumes: no mount target on %s", strings.Join(noMountTarget, ", ")))
+	default:
 		r.setCondition(pool, "SharesReady", metav1.ConditionFalse, "NoSharesReady",
 			"No shares in stable state")
 	}
