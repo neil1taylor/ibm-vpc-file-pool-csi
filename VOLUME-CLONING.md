@@ -230,22 +230,23 @@ The node agent gates pod access on clone completion. Kubelet retries `NodePublis
 
 The controller pod runs as a Deployment with no NFS mounts. It cannot directly execute `cp -a` against share filesystems. The Job-based approach:
 
-1. **Works without controller NFS access** — the Job pod mounts the share via a temp NFS PV/PVC.
+1. **Works without controller NFS access** — the Job pod mounts the share roots via temp NFS PVs/PVCs.
+5. **Needs no permissions in the user's namespace** — the Job runs in the driver's namespace (`kube-system`), so app namespaces need no `anyuid` grant.
 2. **Survives controller restarts** — Jobs are Kubernetes-managed; the CloneWorker re-discovers in-progress clones on startup.
 3. **Observable** — `kubectl get jobs` and `kubectl logs` provide standard debugging.
 4. **Resource-isolated** — clone CPU/memory usage does not affect the controller.
 
 ### Temporary Clone Resources
 
-Each clone operation creates three temporary resources, all labeled `storage.ibmcloud.io/clone-temp=true`:
+Each clone runs as a share data Job, the same mechanism that copies snapshots and restores. The Job and its claims are in the driver's namespace (`kube-system`); all resources carry the label `storage.ibmcloud.io/share-data-job=<job name>`:
 
 | Resource | Name Pattern | Purpose |
 |----------|-------------|---------|
-| PV | `clone-tgt-<subvolume>` | NFS mount to target share root |
-| PVC | `clone-tgt-<subvolume>` | Binds to the temp PV |
-| Job | `clone-<subvolume>` | Runs `cp -a` + chown/chmod |
+| PV | `share-data-clone-<subvolume>-s0` (and `-s1` when source and target are on different shares) | NFS mount of a share root, reclaim policy `Retain` so deleting it never touches the share |
+| PVC | same as the PV, in `kube-system` | Binds to the temp PV |
+| Job | `share-data-clone-<subvolume>` | Runs `cp -a` from the source folder to the clone's folder, then `chown -R` and `chmod` |
 
-All three are cleaned up after the clone completes (success or failure). Jobs have `ttlSecondsAfterFinished: 600` as a safety net.
+Long names are shortened with a hash. All of them are removed after the clone completes (success or failure). If the clone is deleted while its copy runs, the delete first stops the Job and waits until its pod is gone.
 
 ### Architecture Diagram
 
@@ -268,8 +269,8 @@ All three are cleaned up after the clone completes (success or failure). Jobs ha
 │                                                                       │
 │   Polls every 10s for SubVolumes with cloneStatus=Pending/InProgress │
 │       │                                                               │
-│       ├── Create temp NFS PV + PVC for target share                  │
-│       ├── Create clone Job (cp -a + chown)                           │
+│       ├── Create temp NFS PVs + PVCs for the share roots (kube-system)│
+│       ├── Create share data Job (cp -a + chown)                      │
 │       ├── Poll Job until succeeded/failed                            │
 │       ├── Update SubVolume: Complete or Failed                       │
 │       └── Cleanup temp resources                                     │
