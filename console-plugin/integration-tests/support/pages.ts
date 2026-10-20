@@ -9,6 +9,19 @@ export async function navigateTo(page: Page, path: string): Promise<void> {
     state: 'visible',
     timeout: 60_000,
   });
+  await dismissWelcomeTour(page);
+}
+
+/**
+ * Close the console's "Welcome" tour dialog if it shows. A console that cannot
+ * save user settings (a test console with a read-only token) shows it again on
+ * every page load, and it covers the page.
+ */
+export async function dismissWelcomeTour(page: Page): Promise<void> {
+  const skip = page.getByRole('button', { name: 'Skip tour' });
+  if (await skip.isVisible({ timeout: 4_000 }).catch(() => false)) {
+    await skip.click();
+  }
 }
 
 /** Assert the plugin page title is visible */
@@ -21,6 +34,7 @@ export async function expectPageTitle(page: Page, title: string): Promise<void> 
 /** Click a tab by its accessible name */
 export async function clickTab(page: Page, tabName: string): Promise<void> {
   const tab = page.getByRole('tab', { name: tabName, exact: true });
+  await dismissWelcomeTour(page);
   await tab.click();
   // Small wait for tab content to render
   await page.waitForTimeout(1_000);
