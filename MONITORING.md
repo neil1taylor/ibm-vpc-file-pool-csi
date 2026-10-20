@@ -8,7 +8,7 @@ Complete metrics reference, alerting rules, and dashboard templates for operatin
 
 The controller exposes Prometheus metrics on `:8080/metrics`. All metrics use the `vpc_file_pool_` or `pool_csi_` prefix and follow the [Prometheus naming conventions](https://prometheus.io/docs/practices/naming/).
 
-The driver emits 21 metrics across six categories:
+The driver emits 22 metrics across seven categories:
 
 | Category | Metrics | Purpose |
 |----------|---------|---------|
@@ -18,6 +18,7 @@ The driver emits 21 metrics across six categories:
 | Clones | 2 | Clone operation tracking |
 | Group Snapshots | 4 | Multi-PVC snapshot coordination |
 | Replication | 5 | Cross-region DR health |
+| CDI | 1 | CDI copy pod memory limit |
 
 ---
 
@@ -159,6 +160,12 @@ kill %1
 | `replication_lag_seconds` | < 2x the schedule interval | > 3x schedule — sync is falling behind |
 | `replication_consecutive_failures` | 0 | > 0 — check connectivity to destination NFS |
 | `replication_sync_duration_seconds` | < schedule interval | > schedule — syncs overlap, data too large |
+
+### CDI Metrics
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `vpc_file_pool_cdi_copy_limit_raised_total` | Counter | none | Times the controller raised the memory limit of CDI's copy pods (`HyperConverged` `spec.resourceRequirements.storageWorkloads`) to `cdi.copyPodMemoryLimit`. The controller also logs a warning each time. The first raise is normal. A later raise means something, such as an update of IBM's add-on, put the old value back. |
 
 ---
 

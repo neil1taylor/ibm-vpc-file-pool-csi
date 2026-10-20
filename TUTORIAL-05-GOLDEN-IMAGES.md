@@ -1,5 +1,7 @@
 # Part 5: Golden Images
 
+> **Hidden feature.** Golden images are hidden. The code is kept for possible later use, and a pool that sets `spec.goldenImages` in YAML still works. The console pool form no longer offers golden images. The recommended way to make VMs is the standard OpenShift Virtualization catalog: pick a catalog image and choose the pool's StorageClass for the boot disk. See [Create a VM with its boot disk on a pool](USER-GUIDE.md#create-a-vm-with-its-boot-disk-on-a-pool) and [CDI compatibility](KNOWN-LIMITATIONS.md#cdi-containerized-data-importer-compatibility).
+
 > **Tutorial Series:** [Index](TUTORIAL.md) | [Part 1: Pool Creation](TUTORIAL-01-POOL-CREATION.md) | [Part 2: Snapshots & Clones](TUTORIAL-02-SNAPSHOTS-AND-CLONES.md) | [Part 3: Group Snapshots & Hooks](TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md) | [Part 4: Pool Configuration](TUTORIAL-04-POOL-CONFIGURATION.md) | **Part 5** | [Part 6: Replication & Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md) | [Part 7: Monitoring](TUTORIAL-07-MONITORING.md) | [Part 8: Migration & Console](TUTORIAL-08-MIGRATION-AND-CONSOLE.md)
 
 Step-by-step guide to provisioning KubeVirt golden images on pool storage. Golden images are pre-converted, ready-to-clone OS disk images that make VM creation instant -- no image download or conversion at boot time. This tutorial covers two modes: CDI native mode (cluster-default StorageClass) and the custom syncer (pool-level configuration).

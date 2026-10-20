@@ -35,7 +35,7 @@ import {
   DescriptionListDescription,
 } from '@patternfly/react-core';
 import { FileSharePoolModel } from '../../models';
-import { FileSharePool, FileSharePoolSpec, GoldenImageConfig } from '../../types';
+import { FileSharePool, FileSharePoolSpec } from '../../types';
 import { ROUTES } from '../../constants';
 import { parseSecurityGroupIDs } from '../../utils/pool-helpers';
 import FieldPopover from '../common/FieldPopover';
@@ -68,13 +68,12 @@ export const PRESETS: Preset[] = [
       defaultUID: '',
       defaultGID: '',
       encryptionInTransit: false,
-      goldenImagesEnabled: false,
     },
   },
   {
     id: 'kubevirt',
     label: 'KubeVirt VMs',
-    description: 'Optimized for virtual machine disk storage. 2 TB shares with 3,000 IOPS, UID 107 for QEMU, 0777 permissions, golden image syncer ready.',
+    description: 'Optimized for virtual machine disk storage. 2 TB shares with 3,000 IOPS, UID 107 for QEMU, 0777 permissions. Make VMs from the standard catalog and pick this pool as the storage class.',
     values: {
       profile: 'dp2',
       shareSizeGB: 2000,
@@ -88,9 +87,6 @@ export const PRESETS: Preset[] = [
       defaultUID: '107',
       defaultGID: '107',
       encryptionInTransit: false,
-      goldenImagesEnabled: true,
-      refreshInterval: '24h',
-      pvcSizeGB: 15,
     },
   },
   {
@@ -110,7 +106,6 @@ export const PRESETS: Preset[] = [
       defaultUID: '',
       defaultGID: '',
       encryptionInTransit: true,
-      goldenImagesEnabled: false,
     },
   },
 ];
@@ -134,11 +129,6 @@ export interface FormState {
   securityGroupIDs: string;
   tags: string;
   mountOptions: string;
-  goldenImagesEnabled: boolean;
-  targetNamespaces: string;
-  imageFilter: string;
-  refreshInterval: string;
-  pvcSizeGB: number;
 }
 
 export const initialFormState: FormState = {
@@ -160,11 +150,6 @@ export const initialFormState: FormState = {
   securityGroupIDs: '',
   tags: '',
   mountOptions: '',
-  goldenImagesEnabled: false,
-  targetNamespaces: '',
-  imageFilter: '',
-  refreshInterval: '24h',
-  pvcSizeGB: 15,
 };
 
 const parseLines = (text: string): string[] =>
@@ -213,20 +198,6 @@ export const buildResource = (form: FormState): FileSharePool => {
 
   const mountOpts = parseLines(form.mountOptions);
   if (mountOpts.length > 0) spec.mountOptions = mountOpts;
-
-  if (form.goldenImagesEnabled) {
-    const goldenImages: GoldenImageConfig = {
-      enabled: true,
-      targetNamespaces: parseLines(form.targetNamespaces),
-    };
-
-    const filters = parseLines(form.imageFilter);
-    if (filters.length > 0) goldenImages.imageFilter = filters;
-    if (form.refreshInterval.trim()) goldenImages.refreshInterval = form.refreshInterval.trim();
-    if (form.pvcSizeGB >= 5) goldenImages.pvcSizeGB = form.pvcSizeGB;
-
-    spec.goldenImages = goldenImages;
-  }
 
   return {
     apiVersion: 'storage.ibmcloud.io/v1alpha1',
@@ -365,10 +336,6 @@ const FileSharePoolCreatePage: React.FC = () => {
     form.initialShares <= form.maxShares &&
     (!form.autoExpand ||
       (form.expandThresholdPercent >= 50 && form.expandThresholdPercent <= 95));
-
-  const isGoldenImagesValid =
-    !form.goldenImagesEnabled ||
-    (parseLines(form.targetNamespaces).length > 0 && form.pvcSizeGB >= 5);
 
   const handleCreate = async () => {
     setError('');
@@ -933,114 +900,6 @@ const FileSharePoolCreatePage: React.FC = () => {
     </Stack>
   );
 
-  const goldenImagesStep = (
-    <Stack hasGutter>
-      <StackItem>
-        <FieldPopover
-          fieldId="fsp-golden-enabled"
-          label="Golden Image Syncer"
-          description="Automatically discover DataImportCron resources and provision ready-to-boot VM golden images on pool storage. Converts qcow2 images to raw format for KubeVirt."
-        >
-          <Switch
-            id="fsp-golden-enabled"
-            label="Enable golden image syncer"
-            isChecked={form.goldenImagesEnabled}
-            onChange={(_event, checked) => set('goldenImagesEnabled', checked)}
-          />
-        </FieldPopover>
-      </StackItem>
-
-      {form.goldenImagesEnabled && (
-        <>
-          <StackItem>
-            <FieldPopover
-              fieldId="fsp-golden-namespaces"
-              label="Target Namespaces"
-              description="Namespaces where golden image PVCs will be created. Typically openshift-virtualization-os-images for KubeVirt. One namespace per line."
-              isRequired
-            >
-              <TextArea
-                id="fsp-golden-namespaces"
-                value={form.targetNamespaces}
-                onChange={(_event, value) => set('targetNamespaces', value)}
-                rows={3}
-                placeholder={"openshift-virtualization-os-images\ndefault"}
-              />
-              <FormHelperText>
-                <HelperText>
-                  <HelperTextItem>One namespace per line</HelperTextItem>
-                </HelperText>
-              </FormHelperText>
-            </FieldPopover>
-          </StackItem>
-
-          <StackItem>
-            <FieldPopover
-              fieldId="fsp-golden-filter"
-              label="Image Filter"
-              description="Glob patterns to filter which DataImportCron images to sync. Leave empty to sync all discovered images. Example: fedora-*, centos-stream*."
-            >
-              <TextArea
-                id="fsp-golden-filter"
-                value={form.imageFilter}
-                onChange={(_event, value) => set('imageFilter', value)}
-                rows={3}
-                placeholder={"fedora-*\ncentos-stream*"}
-              />
-              <FormHelperText>
-                <HelperText>
-                  <HelperTextItem>One filter pattern per line (optional)</HelperTextItem>
-                </HelperText>
-              </FormHelperText>
-            </FieldPopover>
-          </StackItem>
-
-          <StackItem>
-            <FieldPopover
-              fieldId="fsp-golden-interval"
-              label="Refresh Interval"
-              description="How often the syncer checks for new or updated golden images. Shorter intervals catch upstream image updates faster but increase API load."
-            >
-              <TextInput
-                id="fsp-golden-interval"
-                value={form.refreshInterval}
-                onChange={(_event, value) => set('refreshInterval', value)}
-                placeholder="24h"
-              />
-              <FormHelperText>
-                <HelperText>
-                  <HelperTextItem>Go duration, e.g. 24h, 6h, 30m</HelperTextItem>
-                </HelperText>
-              </FormHelperText>
-            </FieldPopover>
-          </StackItem>
-
-
-          <StackItem>
-            <FieldPopover
-              fieldId="fsp-golden-pvc-size"
-              label="PVC Size (GB)"
-              description="Size of each golden image PVC. Must be large enough to hold the converted raw image. Typical cloud images are 2-10 GB raw. Minimum 5 GB."
-              isRequired
-            >
-              <NumberInput
-                id="fsp-golden-pvc-size"
-                value={form.pvcSizeGB}
-                min={5}
-                onMinus={() => set('pvcSizeGB', Math.max(5, form.pvcSizeGB - 1))}
-                onPlus={() => set('pvcSizeGB', form.pvcSizeGB + 1)}
-                onChange={(event) => {
-                  const val = parseInt((event.target as HTMLInputElement).value, 10);
-                  if (!isNaN(val)) set('pvcSizeGB', val);
-                }}
-              />
-            </FieldPopover>
-          </StackItem>
-        </>
-      )}
-    </Stack>
-  );
-
   const resource = buildResource(form);
   const yamlPreview = toYAML(resource);
 
@@ -1102,14 +961,6 @@ const FileSharePoolCreatePage: React.FC = () => {
                       <Label>{form.allocationStrategy}</Label>
                     </DescriptionListDescription>
                   </DescriptionListGroup>
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>Golden Images</DescriptionListTerm>
-                    <DescriptionListDescription>
-                      <Label color={form.goldenImagesEnabled ? 'green' : 'grey'}>
-                        {form.goldenImagesEnabled ? 'Enabled' : 'Disabled'}
-                      </Label>
-                    </DescriptionListDescription>
-                  </DescriptionListGroup>
                 </DescriptionList>
               </GridItem>
             </Grid>
@@ -1126,7 +977,7 @@ const FileSharePoolCreatePage: React.FC = () => {
           <Button
             variant="primary"
             onClick={handleCreate}
-            isDisabled={creating || !isBasicValid || !isPoolSizingValid || !isGoldenImagesValid}
+            isDisabled={creating || !isBasicValid || !isPoolSizingValid}
             isLoading={creating}
           >
             Create
@@ -1170,16 +1021,9 @@ const FileSharePoolCreatePage: React.FC = () => {
           {advancedStep}
         </WizardStep>
         <WizardStep
-          name="Golden Images"
-          id="step-golden-images"
-          isDisabled={!isBasicValid || !isPoolSizingValid}
-        >
-          {goldenImagesStep}
-        </WizardStep>
-        <WizardStep
           name="Review"
           id="step-review"
-          isDisabled={!isBasicValid || !isPoolSizingValid || !isGoldenImagesValid}
+          isDisabled={!isBasicValid || !isPoolSizingValid}
           footer={{ isNextDisabled: true }}
         >
           {reviewStep}

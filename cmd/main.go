@@ -51,6 +51,7 @@ func main() {
 		kubeletDir              string
 		cloneWorkerInterval     time.Duration
 		goldenImageSyncInterval time.Duration
+		cdiCopyPodMemoryLimit   string
 		webhooks                webhookOptions
 
 		// Receiver mode flags.
@@ -87,6 +88,7 @@ func main() {
 	flag.StringVar(&kubeletDir, "kubelet-dir", "/var/lib/kubelet", "Kubelet root directory (ROKS uses /var/data/kubelet)")
 	flag.DurationVar(&cloneWorkerInterval, "clone-worker-interval", pool.DefaultCloneWorkerInterval, "Interval between clone worker poll cycles")
 	flag.DurationVar(&goldenImageSyncInterval, "golden-image-sync-interval", pool.DefaultGoldenImageInterval, "Interval between golden image syncer poll cycles")
+	flag.StringVar(&cdiCopyPodMemoryLimit, "cdi-copy-pod-memory-limit", "8Gi", "Keep the memory limit of CDI's copy pods (OpenShift Virtualization) at least this high; empty turns the check off")
 
 	// Replication controller flags.
 	flag.StringVar(&driverImage, "driver-image", "", "Driver container image for receiver-mode sync-client Jobs")
@@ -121,7 +123,7 @@ func main() {
 
 	switch mode {
 	case "controller":
-		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, cloneWorkerInterval, goldenImageSyncInterval, driverImage, webhooks)
+		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, cloneWorkerInterval, goldenImageSyncInterval, cdiCopyPodMemoryLimit, driverImage, webhooks)
 	case "receiver":
 		runReceiver(receiverBasePath, receiverAuthTokenFile, receiverListenAddr, receiverTLSCertFile, receiverTLSKeyFile)
 	case "sync-client":
@@ -139,7 +141,7 @@ type webhookOptions struct {
 	port    int
 }
 
-func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string, cloneWorkerInterval, goldenImageSyncInterval time.Duration, driverImage string, webhooks webhookOptions) {
+func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string, cloneWorkerInterval, goldenImageSyncInterval time.Duration, cdiCopyPodMemoryLimit, driverImage string, webhooks webhookOptions) {
 	scheme := runtime.NewScheme()
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
 		klog.ErrorS(err, "Failed to add CRD types to scheme")
@@ -328,6 +330,14 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 		goldenImageSyncer.SetInterval(goldenImageSyncInterval)
 	}
 	reconciler.SetGoldenImageRemover(goldenImageSyncer)
+
+	// Keep CDI's copy pods big enough to write onto NFS. Runs on the leader only.
+	if cdiCopyPodMemoryLimit != "" {
+		if err := mgr.Add(pool.NewCDILimitKeeper(shareJobClient, cdiCopyPodMemoryLimit)); err != nil {
+			klog.ErrorS(err, "Failed to add the CDI copy limit check")
+			os.Exit(1)
+		}
+	}
 	go goldenImageSyncer.Run(signalCtx)
 
 	// Start the background replication controller for cross-region DR.

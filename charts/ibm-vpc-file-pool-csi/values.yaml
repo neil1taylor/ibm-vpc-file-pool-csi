@@ -60,6 +60,13 @@ goldenImageSyncer:
   # Interval between golden image syncer poll cycles (Go duration string).
   interval: 5m
 
+cdi:
+  # The controller keeps the memory limit of CDI's copy pods (OpenShift
+  # Virtualization HyperConverged spec.resourceRequirements.storageWorkloads)
+  # at least this high. CDI's default of 600M is too small for copies onto
+  # NFS, and 2Gi failed for a 25 GB disk. Empty turns the check off.
+  copyPodMemoryLimit: 8Gi
+
 webhook:
   # Enable validating admission webhooks for CRD resources.
   enabled: true

@@ -212,6 +212,33 @@ kubectl get storageprofile <name> -o jsonpath='{.spec.claimPropertySets}'
 # Should output: [{"accessModes":["ReadWriteMany"],"volumeMode":"Filesystem"}]
 ```
 
+### CDI copy pod OOMKilled when a VM disk is copied onto a pool
+
+**Symptom:** A VM made from a catalog image with its boot disk on a pool does not start. The DataVolume keeps restarting. The CDI copy pod shows `OOMKilled`. The progress goes back to zero each time.
+
+**Cause:** CDI's copy pods have a default memory limit of 600 MB. When they write onto NFS, the file cache counts against that limit, so the pod is killed. The controller keeps the limit at least 8Gi through `HyperConverged` `spec.resourceRequirements.storageWorkloads`. The limit is too low if the check is off (`cdi.copyPodMemoryLimit` is empty), if the controller cannot patch `HyperConverged`, or if something put the old value back, such as an update of IBM's add-on on ROVS.
+
+**Check:**
+```bash
+# The limit CDI uses (should show limits.memory of 8Gi or more)
+oc get cdi -o jsonpath='{.items[0].spec.config.podResourceRequirements}'
+
+# The HyperConverged setting the controller manages
+oc get hyperconverged -n openshift-cnv kubevirt-hyperconverged \
+  -o jsonpath='{.spec.resourceRequirements.storageWorkloads}'
+
+# Did the controller raise the limit? Look for a warning in its log, and check the metric
+# vpc_file_pool_cdi_copy_limit_raised_total
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller | grep -i "CDI copy pod memory limit"
+```
+
+**Fix:**
+1. Check that `cdi.copyPodMemoryLimit` is not empty (default `8Gi`).
+2. Check the controller's ClusterRole allows `get`, `list` and `patch` on `hco.kubevirt.io` `hyperconvergeds`.
+3. The controller corrects the limit within 5 minutes. Restart the controller to make it check at once.
+4. If a raise happens again and again, something resets the value. On ROVS, IBM says the add-on cannot be modified, so ask IBM support.
+5. Delete the failed DataVolume and create the VM again. The copy starts from zero.
+
 ---
 
 ## Share Issues

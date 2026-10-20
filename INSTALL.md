@@ -321,6 +321,7 @@ helm upgrade --install ibm-vpc-file-pool-csi \
 | `webhook.certProvider` | No | `cert-manager` | TLS certificate provider: `cert-manager`, `openshift` or `manual` |
 | `cloneWorker.interval` | No | `10s` | Background clone worker poll interval |
 | `goldenImageSyncer.interval` | No | `5m` | Golden image syncer poll interval |
+| `cdi.copyPodMemoryLimit` | No | `8Gi` | Minimum memory limit for CDI's copy pods; the controller raises it in the OpenShift Virtualization settings. Empty turns this off |
 | `secretProvider.managed` | No | `true` | Enable managed secret provider sidecar (ROKS/ROVS/IKS) |
 | `secretProvider.sidecar.image` | No | `icr.io/obs/armada-storage-secret:v1.2.75` | Secret provider sidecar container image |
 
@@ -369,6 +370,7 @@ kubectl apply -f config/deploy/node.yaml
 | `--kubelet-dir` | `/var/lib/kubelet` | Kubelet root directory (ROKS/ROVS: use `/var/data/kubelet`) |
 | `--clone-worker-interval` | `10s` | Clone worker poll interval |
 | `--golden-image-sync-interval` | `5m` | Golden image syncer poll interval |
+| `--cdi-copy-pod-memory-limit` | `8Gi` | Keep the memory limit of CDI's copy pods at least this high (OpenShift Virtualization `HyperConverged`); empty turns the check off |
 | `--driver-image` | `""` | Driver container image for receiver-mode sync-client Jobs (auto-set by Helm) |
 | `--enable-webhooks` | `true` | Serve the validating admission webhooks. Helm sets `false` when `webhook.enabled=false` |
 | `--webhook-port` | `9443` | Port of the admission webhook server. Helm sets it from `webhook.port` |

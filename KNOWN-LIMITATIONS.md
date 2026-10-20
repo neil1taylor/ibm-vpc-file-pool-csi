@@ -168,24 +168,28 @@ Monitor progress via `status.drainStatus` or the `DrainComplete` condition.
 
 ## CDI (Containerized Data Importer) Compatibility
 
-**What:** CDI registry import works with the pool CSI driver. CDI host-assisted clone onto the pool from other storage ran out of memory.
+**What:** VMs come from the standard OpenShift Virtualization catalog. You pick a catalog image and choose the pool's StorageClass for the boot disk. CDI copies the image onto the pool. CDI registry import also works with the pool CSI driver.
 
 **Measured on rovslab, 20 October 2026:**
 
-- A CDI DataVolume with a registry source, on a pool StorageClass, imported CentOS Stream 9 in about 40 seconds. It imported RHEL 9 in about 2.5 minutes, with one automatic retry while the node pulled the image. VMs booted from both images, and the guest agent connected.
-- A CDI clone of the cluster's Ceph image onto a pool StorageClass failed. CDI's upload pod (memory limit 600 MB) was killed for lack of memory after about 10 seconds. It could not resume because `disk.img` already existed. The same failure was seen on 18 October and on 20 October.
+- CDI's copy pods have a default memory limit of 600 MB. A copy of RHEL 9 from Ceph onto a pool was killed for lack of memory, 3 of 3 times (also onto IBM VPC File). With a 2 GB limit it finished in 77 s.
+- A 25 GB copy from Ceph with a 2Gi limit was killed 6 times and never finished. With an 8Gi limit it finished in 134 s and the checksum matched. Memory sat at the limit, so a much larger disk is not proven.
+- A VM from the standard RHEL 9 catalog image onto a pool had its guest agent after 103 s.
+- A CDI DataVolume with a registry source, on a pool StorageClass, imported CentOS Stream 9 in about 40 seconds and RHEL 9 in about 2.5 minutes.
 
-Earlier versions of this document said that CDI is incompatible with this driver. That statement was too broad.
+Earlier versions of this document said that CDI is incompatible with this driver, and later that a copy from Ceph onto a pool still fails. Both statements are out of date.
 
-**Workaround for the clone failure:** Import the image from a registry with a DataVolume on the pool StorageClass. Do not clone from other storage onto the pool.
+**Copy pod memory limit:** The controller keeps the memory limit of CDI's copy pods at least 8Gi, through `HyperConverged` `spec.resourceRequirements.storageWorkloads` (the setting Red Hat documents). It checks at start-up and every 5 minutes. If `storageWorkloads` is not set, it sets CDI's defaults with the memory raised (limits CPU 750m and memory 8Gi, requests CPU 100m and memory 60M). If it is set, the controller changes only `limits.memory`. It never lowers a limit. Each raise logs a warning and adds 1 to `vpc_file_pool_cdi_copy_limit_raised_total`. Helm value: `cdi.copyPodMemoryLimit`.
 
-**Golden images:** The pool's golden image syncer uses CDI registry import. It makes a DataVolume `golden-<image>` in each target namespace. See [GOLDEN-IMAGE-WORKFLOW.md](GOLDEN-IMAGE-WORKFLOW.md).
+**ROVS caveat:** IBM says the virtualization add-on is pre-configured and cannot be modified, and IBM's add-on creates the `HyperConverged` object. The driver changes one field of it. After an add-on update, check the metric and the controller log for a new warning, and check the limit again (see [TROUBLESHOOTING.md](TROUBLESHOOTING.md#cdi-copy-pod-oomkilled-when-a-vm-disk-is-copied-onto-a-pool)). Where changing `HyperConverged` is not allowed, set `cdi.copyPodMemoryLimit=""`. Then catalog copies of large disks onto the pool fail.
+
+**Golden images (hidden):** The pool's golden image syncer uses CDI registry import. It is kept for possible later use, and the console pool form no longer offers it. The standard catalog is the recommended way. See [GOLDEN-IMAGE-WORKFLOW.md](GOLDEN-IMAGE-WORKFLOW.md).
 
 > **Important:** KubeVirt requires **raw format** disk images for filesystem-mode PVCs. It passes them to QEMU with `"driver":"file"` (no qcow2 format layer). If a qcow2 image is written to the PVC without conversion, the VM shows "No bootable device". CDI converts the image automatically. Convert by hand (`qemu-img convert -f qcow2 -O raw`) only if you write images to the pool yourself.
 
-**StorageProfile:** The controller automatically patches CDI's `StorageProfile` CR for each pool StorageClass, setting `claimPropertySets: [{accessModes: ["ReadWriteMany"], volumeMode: Filesystem}]` and `cloneStrategy: csi-clone`, so CDI asks the driver to make clones. CDI's snapshot clone does not work with this driver, and CDI's host-assisted copy pods (memory limit 600 MB) were killed for lack of memory when they wrote onto NFS: 3 of 3 copies on rovslab on 20 October 2026, onto a pool and onto IBM VPC File alike. The patching is non-destructive (only sets fields if empty) and non-fatal (errors are logged but don't block reconciliation). CDI detection is cached — if CDI is not installed, the check runs once and is skipped on subsequent reconciles.
+**StorageProfile:** The controller automatically patches CDI's `StorageProfile` CR for each pool StorageClass, setting `claimPropertySets: [{accessModes: ["ReadWriteMany"], volumeMode: Filesystem}]` and `cloneStrategy: csi-clone`, so CDI asks the driver to make clones. CDI's snapshot clone does not work with this driver, and CDI's host-assisted copy pods need a memory limit above their 600 MB default when they write onto NFS (see above). The patching is non-destructive (only sets fields if empty) and non-fatal (errors are logged but don't block reconciliation). CDI detection is cached — if CDI is not installed, the check runs once and is skipped on subsequent reconciles.
 
-**Golden Image Automation:** The driver includes a golden image syncer that automates OS image provisioning for KubeVirt. Two modes are supported:
+**Golden Image Automation (hidden):** The driver includes a golden image syncer that automates OS image provisioning for KubeVirt. Two modes are supported:
 
 1. **Native CDI mode**: Make the pool StorageClass the cluster default. CDI then imports and snapshots golden images on pool storage.
 2. **Custom syncer mode**: When another StorageClass is the default, enable `spec.goldenImages` on the FileSharePool. The controller discovers CDI `DataImportCron` images and imports each one with a CDI DataVolume on the pool StorageClass. It also creates CDI `DataSource` CRs (for the InstanceTypes catalog tab) and OpenShift `Template` CRs (for the Templates catalog tab). Creating a VM from the InstanceTypes tab with its boot disk on the pool is being tested.
