@@ -385,6 +385,15 @@ func (m *Manager) Deallocate(ctx context.Context, subVolumeName string) (retErr 
 	if m.shareData == nil {
 		return errShareDataNotSet
 	}
+	if sv.Status.Phase == "Creating" && sv.Labels[restoreSnapshotLabel] != "" {
+		stopped, err := m.shareData.Stop(ctx, "restore-"+sv.Name)
+		if err != nil {
+			return fmt.Errorf("stop restore copy: %w", err)
+		}
+		if !stopped {
+			return ErrOperationInProgress
+		}
+	}
 	done, err := m.shareData.RemoveDir(ctx, "rm-"+sv.Name, subVolumeShareMount(sv), sv.Spec.SubPath)
 	if err != nil {
 		klog.ErrorS(err, "Failed to remove subdirectory, retaining SubVolume CR", "subPath", sv.Spec.SubPath)
@@ -705,8 +714,9 @@ func (m *Manager) CreateSnapshot(ctx context.Context, snapshotName, sourceVolume
 
 // copySnapshotData starts or checks the copy of a snapshot's source folder.
 // When the copy has finished it marks the Snapshot CR ready. When the copy
-// fails it deletes the CR and gives back its capacity, so the next
-// CreateSnapshot call starts again.
+// Job has failed (it removes its partial folder), it deletes the CR and gives
+// back its capacity, so the next CreateSnapshot call starts again. Other
+// errors leave everything as it is.
 func (m *Manager) copySnapshotData(ctx context.Context, snap *v1alpha1.Snapshot, pool *v1alpha1.FileSharePool) error {
 	if m.shareData == nil {
 		return errShareDataNotSet
@@ -716,10 +726,13 @@ func (m *Manager) copySnapshotData(ctx context.Context, snap *v1alpha1.Snapshot,
 		return err
 	}
 	done, err := m.shareData.CopyDir(ctx, "snap-"+snap.Name, share, snap.Spec.SourceSubPath, share, snap.Spec.SnapshotPath, nil)
+	if err != nil && !errors.Is(err, ErrShareJobFailed) {
+		return fmt.Errorf("copy snapshot: %w", err)
+	}
 	if err != nil {
 		klog.ErrorS(err, "Snapshot copy failed, discarding snapshot", "snapshot", snap.Name)
 		if delErr := m.k8sClient.DeleteSnapshot(ctx, snap.Name); delErr != nil {
-			klog.ErrorS(delErr, "Failed to delete Snapshot CR after copy failure", "snapshot", snap.Name)
+			return fmt.Errorf("copy snapshot: %w (and deleting the Snapshot CR failed: %v)", err, delErr)
 		}
 		m.updateShareDeallocation(pool, snap.Spec.ShareID, snap.Spec.SizeGB)
 		if updErr := m.k8sClient.UpdateFileSharePoolStatus(ctx, pool); updErr != nil {
@@ -787,6 +800,15 @@ func (m *Manager) DeleteSnapshot(ctx context.Context, snapshotName string) (retE
 	share, err := poolShareMount(pool, snap.Spec.ShareID)
 	if err != nil {
 		return err
+	}
+	if !snap.Status.ReadyToUse {
+		stopped, err := m.shareData.Stop(ctx, "snap-"+snapshotName)
+		if err != nil {
+			return fmt.Errorf("stop snapshot copy: %w", err)
+		}
+		if !stopped {
+			return ErrOperationInProgress
+		}
 	}
 	done, err := m.shareData.RemoveDir(ctx, "rmsnap-"+snapshotName, share, snap.Spec.SnapshotPath)
 	if err != nil {
@@ -1215,6 +1237,9 @@ func (m *Manager) CreateVolumeGroupSnapshot(ctx context.Context, req GroupSnapsh
 	// and is Complete or PartialFailure, return the existing result.
 	existing, err := m.k8sClient.GetVolumeGroupSnapshot(ctx, req.GroupName)
 	if err == nil && existing != nil {
+		if existing.Status.Phase == "InProgress" {
+			return m.refreshGroupSnapshot(ctx, existing, req)
+		}
 		if existing.Status.Phase == "Complete" || existing.Status.Phase == "PartialFailure" {
 			result := &GroupSnapshotResult{
 				GroupName:             existing.Name,
@@ -1319,6 +1344,8 @@ func (m *Manager) CreateVolumeGroupSnapshot(ctx context.Context, req GroupSnapsh
 	// Create individual snapshots
 	var (
 		completedSnapshots []SnapshotResult
+		readySnapshots     []SnapshotResult
+		pendingCount       int32
 		firstCopyTime      time.Time
 		lastCopyTime       time.Time
 		failed             bool
@@ -1389,11 +1416,16 @@ func (m *Manager) CreateVolumeGroupSnapshot(ctx context.Context, req GroupSnapsh
 			continue
 		}
 
-		// Success
+		// Created; ready once its copy has finished
 		snapResult.SourceVolumeID = volID
 		completedSnapshots = append(completedSnapshots, *snapResult)
-		vgs.Status.Members[i].Phase = "Ready"
-		readyCount++
+		if snapResult.ReadyToUse {
+			readySnapshots = append(readySnapshots, *snapResult)
+			vgs.Status.Members[i].Phase = "Ready"
+			readyCount++
+		} else {
+			pendingCount++
+		}
 		_ = m.k8sClient.UpdateVolumeGroupSnapshotStatus(ctx, vgs)
 	}
 
@@ -1408,7 +1440,11 @@ func (m *Manager) CreateVolumeGroupSnapshot(ctx context.Context, req GroupSnapsh
 	finalPhase := "Complete"
 	consistencyLevel := "BestEffort"
 	readyToUse := true
-	if failed {
+	switch {
+	case pendingCount > 0:
+		finalPhase = "InProgress"
+		readyToUse = false
+	case failed:
 		finalPhase = "PartialFailure"
 		readyToUse = false
 	}
@@ -1416,7 +1452,9 @@ func (m *Manager) CreateVolumeGroupSnapshot(ctx context.Context, req GroupSnapsh
 	vgs.Status.Phase = finalPhase
 	vgs.Status.ReadyCount = readyCount
 	vgs.Status.FailedCount = failedCount
-	vgs.Status.CompletedAt = &completedAt
+	if finalPhase != "InProgress" {
+		vgs.Status.CompletedAt = &completedAt
+	}
 	vgs.Status.ConsistencyLevel = consistencyLevel
 	vgs.Status.InconsistencyWindowMs = inconsistencyMs
 	if err := m.k8sClient.UpdateVolumeGroupSnapshotStatus(ctx, vgs); err != nil {
@@ -1438,11 +1476,83 @@ func (m *Manager) CreateVolumeGroupSnapshot(ctx context.Context, req GroupSnapsh
 	return &GroupSnapshotResult{
 		GroupName:             req.GroupName,
 		PoolName:              req.PoolName,
-		Members:               completedSnapshots,
+		Members:               readySnapshots,
 		CreationTime:          now.Time,
 		ReadyToUse:            readyToUse,
 		InconsistencyWindowMs: inconsistencyMs,
 	}, nil
+}
+
+// refreshGroupSnapshot checks the members of a group whose copies were still
+// running, and completes the group once every member is ready or failed.
+func (m *Manager) refreshGroupSnapshot(ctx context.Context, vgs *v1alpha1.VolumeGroupSnapshot, req GroupSnapshotRequest) (*GroupSnapshotResult, error) {
+	volumeIDs := make(map[string]string, len(req.SourceVolumeIDs))
+	for _, volID := range req.SourceVolumeIDs {
+		if _, _, pvName, err := parseManagerVolumeID(volID); err == nil {
+			volumeIDs[pvName] = volID
+		}
+	}
+
+	var ready []SnapshotResult
+	var readyCount, failedCount, pendingCount int32
+	for i := range vgs.Status.Members {
+		member := &vgs.Status.Members[i]
+		if member.Phase == "Pending" || member.Phase == "Creating" {
+			member.Phase = "Creating"
+			snapResult, err := m.CreateSnapshot(ctx, member.SnapshotName, volumeIDs[member.SubVolumeName], req.Parameters)
+			switch {
+			case err != nil:
+				member.Phase = "Failed"
+				member.Error = err.Error()
+			case snapResult.ReadyToUse:
+				member.Phase = "Ready"
+			}
+		}
+		switch member.Phase {
+		case "Ready":
+			readyCount++
+			ready = append(ready, SnapshotResult{
+				SnapshotName:   member.SnapshotName,
+				PoolName:       vgs.Spec.PoolName,
+				ReadyToUse:     true,
+				SourceVolumeID: volumeIDs[member.SubVolumeName],
+			})
+		case "Failed":
+			failedCount++
+		default:
+			pendingCount++
+		}
+	}
+
+	vgs.Status.ReadyCount = readyCount
+	vgs.Status.FailedCount = failedCount
+	switch {
+	case pendingCount > 0:
+		vgs.Status.Phase = "InProgress"
+	case failedCount > 0:
+		vgs.Status.Phase = "PartialFailure"
+	default:
+		vgs.Status.Phase = "Complete"
+	}
+	if vgs.Status.Phase != "InProgress" {
+		completedAt := metav1.Now()
+		vgs.Status.CompletedAt = &completedAt
+	}
+	if err := m.k8sClient.UpdateVolumeGroupSnapshotStatus(ctx, vgs); err != nil {
+		klog.ErrorS(err, "Failed to update VolumeGroupSnapshot status", "group", vgs.Name)
+	}
+
+	result := &GroupSnapshotResult{
+		GroupName:             vgs.Name,
+		PoolName:              vgs.Spec.PoolName,
+		Members:               ready,
+		ReadyToUse:            vgs.Status.Phase == "Complete",
+		InconsistencyWindowMs: vgs.Status.InconsistencyWindowMs,
+	}
+	if vgs.Status.CreationTime != nil {
+		result.CreationTime = vgs.Status.CreationTime.Time
+	}
+	return result, nil
 }
 
 func (m *Manager) DeleteVolumeGroupSnapshot(ctx context.Context, groupName string) (retErr error) {

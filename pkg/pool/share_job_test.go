@@ -197,6 +197,12 @@ func TestShareJobRunner_CopyDir_SameShareMountsOnce(t *testing.T) {
 			t.Errorf("script missing %q:\n%s", want, script)
 		}
 	}
+	if !strings.Contains(script, `trap 'rm -r -f -- "/share0`+testSnapPath+`"' EXIT`) {
+		t.Errorf("a failed copy must remove its partial folder:\n%s", script)
+	}
+	if !strings.Contains(script, "trap - EXIT") {
+		t.Errorf("a finished copy must keep its folder:\n%s", script)
+	}
 	if strings.Contains(script, "chown") {
 		t.Errorf("a copy without an owner must keep the copied owners:\n%s", script)
 	}
@@ -250,5 +256,28 @@ func TestShareJobName_FitsKubernetesLimits(t *testing.T) {
 	}
 	if got := shareJobName("rm-pvc-1"); got != "share-data-rm-pvc-1" {
 		t.Errorf("short key name = %q", got)
+	}
+}
+
+func TestShareJobRunner_Stop(t *testing.T) {
+	r, c := newShareJobTestRunner()
+	ctx := context.Background()
+
+	done, err := r.Stop(ctx, "snap-1")
+	if err != nil || !done {
+		t.Fatalf("Stop() with no Job = %v, %v; want true, nil", done, err)
+	}
+
+	_, _ = r.CopyDir(ctx, "snap-1", testShareA, testVolPath, testShareA, testSnapPath, nil)
+	done, err = r.Stop(ctx, "snap-1")
+	if err != nil || done {
+		t.Fatalf("Stop() on a running Job = %v, %v; want false, nil", done, err)
+	}
+	err = c.Get(ctx, types.NamespacedName{Namespace: testDriverNS, Name: shareJobName("snap-1")}, &batchv1.Job{})
+	if !apierrors.IsNotFound(err) {
+		t.Errorf("Stop() did not delete the Job: %v", err)
+	}
+	if n := countPVs(t, c); n != 0 {
+		t.Errorf("%d share PVs left after Stop", n)
 	}
 }

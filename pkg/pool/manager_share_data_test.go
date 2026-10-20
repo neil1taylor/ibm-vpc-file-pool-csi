@@ -14,14 +14,20 @@ import (
 
 // fakeShareData applies share data calls to a fakeNFSOperations rooted at
 // base, so tests can check folders the same way for every operation. When
-// inProgress is set, calls report "not done" and change nothing.
+// inProgress is set, calls report "not done" and change nothing. A failed
+// fake copy is reported as a failed Job, like the real runner. apiErr makes
+// every call fail as if the Kubernetes API did not answer. running lists the
+// keys of Jobs that Stop must wait for.
 type fakeShareData struct {
 	mu         sync.Mutex
 	nfs        *fakeNFSOperations
 	base       string
 	inProgress bool
+	apiErr     error
+	running    map[string]bool
 	removes    []shareDataCall
 	copies     []shareDataCall
+	stops      []string
 }
 
 type shareDataCall struct {
@@ -35,8 +41,11 @@ type shareDataCall struct {
 func (f *fakeShareData) RemoveDir(_ context.Context, key string, share ShareMount, path string) (bool, error) {
 	f.mu.Lock()
 	f.removes = append(f.removes, shareDataCall{key: key, dst: share, dstPath: path})
-	inProgress := f.inProgress
+	inProgress, apiErr := f.inProgress, f.apiErr
 	f.mu.Unlock()
+	if apiErr != nil {
+		return false, apiErr
+	}
 	if inProgress {
 		return false, nil
 	}
@@ -49,15 +58,46 @@ func (f *fakeShareData) RemoveDir(_ context.Context, key string, share ShareMoun
 func (f *fakeShareData) CopyDir(_ context.Context, key string, src ShareMount, srcPath string, dst ShareMount, dstPath string, owner *Ownership) (bool, error) {
 	f.mu.Lock()
 	f.copies = append(f.copies, shareDataCall{key: key, src: src, srcPath: srcPath, dst: dst, dstPath: dstPath, owner: owner})
-	inProgress := f.inProgress
+	inProgress, apiErr := f.inProgress, f.apiErr
 	f.mu.Unlock()
+	if apiErr != nil {
+		return false, apiErr
+	}
 	if inProgress {
 		return false, nil
 	}
 	if err := f.nfs.CopyDir(f.base+srcPath, f.base+dstPath); err != nil {
-		return false, err
+		return false, fmt.Errorf("%w: %v", ErrShareJobFailed, err)
 	}
 	return true, nil
+}
+
+// Stop reports done once no Job runs for key. The first call on a running
+// key stops it; the next call sees it gone.
+func (f *fakeShareData) Stop(_ context.Context, key string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stops = append(f.stops, key)
+	if f.running[key] {
+		delete(f.running, key)
+		return false, nil
+	}
+	return true, nil
+}
+
+func (f *fakeShareData) setRunning(key string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.running == nil {
+		f.running = map[string]bool{}
+	}
+	f.running[key] = true
+}
+
+func (f *fakeShareData) removeCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.removes)
 }
 
 func (f *fakeShareData) setInProgress(v bool) {
@@ -320,5 +360,119 @@ func TestRestoreSnapshot_CopyFails_RetriesOnNextCall(t *testing.T) {
 	nfs.CopyErr = nil
 	if _, err := mgr.RestoreSnapshot(ctx, "my-snapshot", restoreRequest()); err != nil {
 		t.Fatalf("retry RestoreSnapshot: %v", err)
+	}
+}
+
+func TestDeallocate_DuringRestoreCopy_StopsCopyBeforeRemoving(t *testing.T) {
+	k, _, mgr := newShareDataTestManager(t)
+	addReadySnapshot(k)
+	sd := shareDataOf(mgr)
+	sd.setInProgress(true)
+	ctx := context.Background()
+	_, _ = mgr.RestoreSnapshot(ctx, "my-snapshot", restoreRequest())
+	sd.setInProgress(false)
+	sd.setRunning("restore-" + testRestorePVName)
+	removesBefore := sd.removeCount()
+
+	err := mgr.Deallocate(ctx, testRestorePVName)
+	if !errors.Is(err, ErrOperationInProgress) {
+		t.Fatalf("Deallocate() error = %v, want ErrOperationInProgress while the copy stops", err)
+	}
+	if sd.removeCount() != removesBefore {
+		t.Error("folder removal started while the restore copy was still running")
+	}
+
+	if err := mgr.Deallocate(ctx, testRestorePVName); err != nil {
+		t.Fatalf("Deallocate after the copy stopped: %v", err)
+	}
+	if sd.removeCount() != removesBefore+1 {
+		t.Error("folder not removed after the restore copy stopped")
+	}
+}
+
+func TestDeleteSnapshot_DuringCopy_StopsCopyBeforeRemoving(t *testing.T) {
+	k, _, mgr := newShareDataTestManager(t)
+	sd := shareDataOf(mgr)
+	sd.setInProgress(true)
+	ctx := context.Background()
+	_, _ = mgr.CreateSnapshot(ctx, "my-snapshot", "test-pool/share-1/"+testPVName, nil)
+	sd.setInProgress(false)
+	sd.setRunning("snap-my-snapshot")
+
+	err := mgr.DeleteSnapshot(ctx, "my-snapshot")
+	if !errors.Is(err, ErrOperationInProgress) {
+		t.Fatalf("DeleteSnapshot() error = %v, want ErrOperationInProgress while the copy stops", err)
+	}
+	if sd.removeCount() != 0 {
+		t.Error("folder removal started while the snapshot copy was still running")
+	}
+	if k.getSnapshot("my-snapshot") == nil {
+		t.Error("Snapshot record deleted while its copy was still running")
+	}
+
+	if err := mgr.DeleteSnapshot(ctx, "my-snapshot"); err != nil {
+		t.Fatalf("DeleteSnapshot after the copy stopped: %v", err)
+	}
+}
+
+func TestCreateSnapshot_APIErrorDuringCopy_KeepsSnapshot(t *testing.T) {
+	k, _, mgr := newShareDataTestManager(t)
+	sd := shareDataOf(mgr)
+	sd.setInProgress(true)
+	ctx := context.Background()
+	src := "test-pool/share-1/" + testPVName
+	_, _ = mgr.CreateSnapshot(ctx, "my-snapshot", src, nil)
+
+	sd.mu.Lock()
+	sd.apiErr = errors.New("connection refused")
+	sd.mu.Unlock()
+	if _, err := mgr.CreateSnapshot(ctx, "my-snapshot", src, nil); err == nil {
+		t.Fatal("CreateSnapshot hid an API error")
+	}
+	if k.getSnapshot("my-snapshot") == nil {
+		t.Error("a short API error discarded the snapshot")
+	}
+	if got := k.getPool("test-pool").Status.Shares[0].AllocatedGB; got != 110 {
+		t.Errorf("a short API error gave back the snapshot's capacity: AllocatedGB = %d, want 110", got)
+	}
+}
+
+func TestCreateVolumeGroupSnapshot_NotReadyUntilEveryCopyFinished(t *testing.T) {
+	k, _, mgr := setupGroupSnapshotTest(t)
+	sd := shareDataOf(mgr)
+	sd.setInProgress(true)
+	ctx := context.Background()
+	req := GroupSnapshotRequest{
+		GroupName: "test-group-snap",
+		PoolName:  "test-pool",
+		SourceVolumeIDs: []string{
+			"test-pool/share-1/pvc-aaaa0001-0000-0000-0000-000000000001",
+			"test-pool/share-1/pvc-aaaa0002-0000-0000-0000-000000000002",
+		},
+		FailurePolicy: "Abort",
+	}
+
+	result, err := mgr.CreateVolumeGroupSnapshot(ctx, req)
+	if err != nil {
+		t.Fatalf("CreateVolumeGroupSnapshot: %v", err)
+	}
+	if result.ReadyToUse {
+		t.Error("group reported ready before its copies finished")
+	}
+	vgs := k.getGroupSnapshot("test-group-snap")
+	if vgs.Status.Phase == "Complete" || vgs.Status.ReadyCount != 0 {
+		t.Errorf("group phase %q with %d ready members before any copy finished", vgs.Status.Phase, vgs.Status.ReadyCount)
+	}
+
+	sd.setInProgress(false)
+	result, err = mgr.CreateVolumeGroupSnapshot(ctx, req)
+	if err != nil {
+		t.Fatalf("CreateVolumeGroupSnapshot after copies: %v", err)
+	}
+	if !result.ReadyToUse || len(result.Members) != 2 {
+		t.Errorf("after copies: ReadyToUse=%v members=%d, want true and 2", result.ReadyToUse, len(result.Members))
+	}
+	if vgs := k.getGroupSnapshot("test-group-snap"); vgs.Status.Phase != "Complete" || vgs.Status.ReadyCount != 2 {
+		t.Errorf("after copies: phase %q ready %d, want Complete and 2", vgs.Status.Phase, vgs.Status.ReadyCount)
 	}
 }

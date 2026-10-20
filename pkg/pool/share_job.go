@@ -55,6 +55,9 @@ type Ownership struct {
 type ShareData interface {
 	RemoveDir(ctx context.Context, key string, share ShareMount, path string) (bool, error)
 	CopyDir(ctx context.Context, key string, src ShareMount, srcPath string, dst ShareMount, dstPath string, owner *Ownership) (bool, error)
+	// Stop ends any work running for key. It reports done=true once
+	// nothing runs for key any more.
+	Stop(ctx context.Context, key string) (bool, error)
 }
 
 // ShareJobRunner implements ShareData with Kubernetes Jobs in the driver's
@@ -104,8 +107,10 @@ func (r *ShareJobRunner) CopyDir(ctx context.Context, key string, src ShareMount
 	from := "/share0" + srcPath
 	to := dstRoot + dstPath
 
+	// If any step fails, the trap removes the partial copy.
 	var b strings.Builder
 	b.WriteString("set -eu\n")
+	fmt.Fprintf(&b, "trap 'rm -r -f -- \"%s\"' EXIT\n", to)
 	fmt.Fprintf(&b, "rm -r -f -- \"%s\"\n", to)
 	fmt.Fprintf(&b, "mkdir -p \"%s\"\n", to)
 	fmt.Fprintf(&b, "cp -a \"%s/.\" \"%s/\"\n", from, to)
@@ -117,6 +122,7 @@ func (r *ShareJobRunner) CopyDir(ctx context.Context, key string, src ShareMount
 			fmt.Fprintf(&b, "chmod %s \"%s\"\n", owner.Permissions, to)
 		}
 	}
+	b.WriteString("trap - EXIT\n")
 	return r.run(ctx, key, shares, b.String())
 }
 
@@ -284,4 +290,26 @@ func validateSharePath(path string) error {
 		return nil
 	}
 	return fmt.Errorf("path %q is not a volume or snapshot folder", path)
+}
+
+// Stop deletes the Job for key and its claims and PVs. It reports done once
+// the Job is gone.
+func (r *ShareJobRunner) Stop(ctx context.Context, key string) (bool, error) {
+	jobName := shareJobName(key)
+	err := r.client.Get(ctx, types.NamespacedName{Namespace: r.namespace, Name: jobName}, &batchv1.Job{})
+	switch {
+	case apierrors.IsNotFound(err):
+		r.cleanup(ctx, jobName, 2)
+		return true, nil
+	case err != nil:
+		return false, fmt.Errorf("get share Job %s: %w", jobName, err)
+	}
+	propagation := metav1.DeletePropagationForeground
+	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: jobName, Namespace: r.namespace}}
+	if err := r.client.Delete(ctx, job, &client.DeleteOptions{PropagationPolicy: &propagation}); err != nil && !apierrors.IsNotFound(err) {
+		return false, fmt.Errorf("stop share Job %s: %w", jobName, err)
+	}
+	r.cleanup(ctx, jobName, 2)
+	klog.V(2).InfoS("Stopping share data Job", "job", jobName, "namespace", r.namespace)
+	return false, nil
 }

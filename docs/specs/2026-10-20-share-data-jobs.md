@@ -29,6 +29,9 @@ All four data steps run as short Kubernetes Jobs, the same way volume clones alr
 - Each Job is named from the operation and the volume or snapshot name, so a retry finds the same
   Job. On success the Job, claim and volume are removed. On failure they are removed and the
   operation reports an error; the next retry starts a new Job.
+- A failed copy removes its partial folder before it ends.
+- A delete first stops a copy that is still writing into the same folder (an unfinished restore or
+  snapshot), and answers "in progress" until that copy has stopped.
 - Every path is checked against the volume or snapshot path rules before it goes into a step.
 
 ### Per operation
@@ -38,7 +41,8 @@ All four data steps run as short Kubernetes Jobs, the same way volume clones alr
   given back to the pool. The space comes back only after the data is gone.
 - **Create a snapshot:** the snapshot record is written first as not ready, and the copy Job starts.
   The CSI snapshotter calls again until the snapshot is ready. When the Job has succeeded, the record
-  is marked ready.
+  is marked ready. If the Job fails, the record is deleted and its space given back, so the next call
+  starts again. A short API error changes nothing.
 - **Restore a snapshot:** the new volume's record is written first, with phase `Creating`, so the
   chosen share keeps its reservation across retries. The copy Job copies the snapshot folder into the
   new volume folder, then sets owner and permissions. Until it succeeds, the call answers
@@ -60,8 +64,9 @@ deleted while its restore runs, the provisioner finishes the create and then del
 
 - Volume clones still run their Job in the claim's namespace. That needs the `anyuid` permission in
   every user namespace. Moving clones to share Jobs is the next change.
-- Group snapshots (issue #14) call the snapshot code in a loop and expect each copy to finish at once.
-  With this change their members are reported as not ready until copied. Issue #14 covers the fix.
+- Group snapshots still do not work on ROVS (issue #14). This change only stops the group code from
+  reporting a group as complete before its copies finish: the group stays `InProgress`, and later
+  calls check the copies again.
 
 ## Decisions I made for you
 
