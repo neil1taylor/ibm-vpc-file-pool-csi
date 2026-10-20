@@ -479,3 +479,27 @@ func TestReplicationJob_ExcludesStagingFiles(t *testing.T) {
 }
 
 func int32Ptr(v int32) *int32 { return &v }
+
+// TestVMCopy_SuccessClearsOldPolicyError verifies that a copy that finishes
+// between scheduled cycles clears the policy error of an earlier failed try.
+func TestVMCopy_SuccessClearsOldPolicyError(t *testing.T) {
+	e := newVMCopyEnv(t)
+	e.cop.startErr = errors.New("exec operation is not allowed")
+	e.tick()
+	if p := e.k.getPolicy(e.policy); !strings.Contains(p.Status.LastError, "VM disk copies failed") {
+		t.Fatalf("expected the failed start reported, got %q", p.Status.LastError)
+	}
+
+	// The next scheduled cycle starts a copy; it finishes between cycles.
+	e.cop.startErr = nil
+	e.clock = e.clock.Add(2 * time.Hour)
+	e.rc.processOnce(e.ctx)
+	e.cop.state = vmcopy.Done
+	e.tick()
+	e.succeedJobs(t)
+	e.tick()
+
+	if p := e.k.getPolicy(e.policy); p.Status.LastError != "" {
+		t.Errorf("expected the old policy error cleared after a good copy, got %q", p.Status.LastError)
+	}
+}

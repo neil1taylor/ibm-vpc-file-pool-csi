@@ -24,7 +24,7 @@ DST=$PREFIX-dst
 POLICY=$PREFIX-policy
 SSH_KEY=${SSH_KEY:?set SSH_KEY to a private key file}
 IMAGE_URL=${IMAGE_URL:-https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2}
-COPY_TIMEOUT=${COPY_TIMEOUT:-3600}
+COPY_TIMEOUT=${COPY_TIMEOUT:-5400}
 
 log() { echo "[$(date -u +%H:%M:%S)] $*"; }
 fail() { log "FAIL: $*"; exit 1; }
@@ -63,6 +63,7 @@ spec:
   zone: $(zone)
   profile: dp2
   shareSizeGB: 100
+  iops: 3000
   maxShares: 1
   initialShares: 1
   autoExpand: false

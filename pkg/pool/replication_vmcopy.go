@@ -438,6 +438,18 @@ func (rc *ReplicationController) advanceVMCopies(ctx context.Context, policy *v1
 	if synced {
 		now := metav1.NewTime(rc.nowFunc())
 		policy.Status.LastSyncTime = &now
+		// A good copy replaces the error of an earlier try, unless some
+		// volume still reports one.
+		clean := true
+		for _, s := range policy.Status.SubVolumeStatuses {
+			if s.LastError != "" {
+				clean = false
+				break
+			}
+		}
+		if clean {
+			policy.Status.LastError = ""
+		}
 	}
 	if err := rc.k8sClient.UpdateReplicationPolicyStatus(ctx, policy); err != nil {
 		klog.ErrorS(err, "Failed to update policy status for VM disk copies", "policy", policy.Name)

@@ -203,6 +203,7 @@ The part that takes the copy is one replaceable piece. When the clusters run the
    - A live migration during a copy fails, and the VM keeps running where it was. After the copy is cancelled, the migration took 8 s.
    - The speed limit counts empty disk space (above).
    - The staging file is owned by the QEMU user, and only that user can delete it.
+   - End-to-end test, 20 Oct (`test/e2e/test-vm-replication.sh`, direct NFS mode, two pools on the driver): a CentOS VM with a 20 GB root disk and a 10 GB data disk wrote a file every 0.1 s. Both disks showed the same moment and were file-system consistent. The far-site copy booted with no XFS errors, and all 1,579 files written before the freeze matched their checksums; the last one was written at the moment of the freeze. Data sent: 1.98 GB and 118 MB. The test pool's shares had 100 IOPS at first, and the copy ran at about 3 MB/s per disk; at 3000 IOPS it ran at the speed limit. So the copy time depends on the share's IOPS as well as the speed limit.
 4. **Change-only cycles and the compare pass.**
 5. **Safe apply in the other region, restore points, and failover changes.** This includes rewind to any restore point in the last 24 hours.
 6. **Test across two regions,** with a failover and a boot of a Linux VM and a Windows VM. This includes the first test of Windows freeze and thaw. Then update `CROSS-REGION-DR.md`, `FEATURES.md` and the tutorial.
