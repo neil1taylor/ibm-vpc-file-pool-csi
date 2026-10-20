@@ -157,3 +157,44 @@ func TestReplaceDiskFromStaging_MatchesQemuImg(t *testing.T) {
 	run("qemu-img", "convert", "-f", "qcow2", "-O", "raw", staging, ref)
 	run("qemu-img", "compare", "-f", "raw", "-F", "raw", disk, ref)
 }
+
+func TestApplyVMDisk(t *testing.T) {
+	src := t.TempDir()
+	dst := t.TempDir()
+	staging := filepath.Join(src, ".repl-staging-a1.qcow2")
+	disk := filepath.Join(dst, "disk.img")
+	copyTestImage(t, "v3.qcow2", staging)
+
+	if _, err := ApplyVMDisk(staging, disk); err != nil {
+		t.Fatalf("ApplyVMDisk: %v", err)
+	}
+	if _, err := os.Stat(staging); !os.IsNotExist(err) {
+		t.Errorf("expected the staging file deleted, stat err = %v", err)
+	}
+	if fi, err := os.Stat(disk); err != nil || fi.Size() != 1049088 {
+		t.Errorf("disk.img: %v, %v", fi, err)
+	}
+}
+
+func TestApplyVMDisk_KeepsStagingOnError(t *testing.T) {
+	src := t.TempDir()
+	staging := filepath.Join(src, ".repl-staging-a1.qcow2")
+	copyTestImage(t, "compressed.qcow2", staging)
+
+	if _, err := ApplyVMDisk(staging, filepath.Join(t.TempDir(), "disk.img")); err == nil {
+		t.Fatal("expected an error")
+	}
+	if _, err := os.Stat(staging); err != nil {
+		t.Errorf("expected the staging file kept for the next try, stat err = %v", err)
+	}
+}
+
+func TestApplyVMDisk_RefusesOtherFiles(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"disk.img", "repl-staging-a1.qcow2", ".repl-staging-a1.qcow2.bak", ".repl-staging-../x.qcow2"} {
+		p := filepath.Join(dir, name)
+		if _, err := ApplyVMDisk(p, filepath.Join(dir, "out.img")); err == nil || !strings.Contains(err.Error(), "staging file name") {
+			t.Errorf("ApplyVMDisk(%q) error = %v, want a refusal", name, err)
+		}
+	}
+}

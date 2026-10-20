@@ -72,11 +72,15 @@ func main() {
 		subPath          string
 		subvolumeName    string
 		metadataJSON     string
+
+		// Apply-vm-disk mode flags.
+		stagingPath string
+		diskPath    string
 	)
 
 	flag.StringVar(&endpoint, "endpoint", "unix:///csi/csi.sock", "CSI endpoint")
 	flag.StringVar(&nodeID, "node-id", "", "Node ID")
-	flag.StringVar(&mode, "mode", "controller", "Driver mode: controller, node, receiver, or sync-client")
+	flag.StringVar(&mode, "mode", "controller", "Driver mode: controller, node, receiver, sync-client, or apply-vm-disk")
 	flag.StringVar(&region, "region", "", "IBM Cloud region (e.g. us-south); auto-discovered from secret provider if omitted")
 	flag.StringVar(&vpcID, "vpc-id", "", "IBM Cloud VPC ID for creating file share mount targets")
 	flag.StringVar(&subnetID, "subnet-id", "", "Comma-separated IBM Cloud worker subnet IDs; each share's mount target goes in the one in the pool's zone")
@@ -106,6 +110,10 @@ func main() {
 	flag.StringVar(&subvolumeName, "subvolume-name", "", "SubVolume CR name for sync-client mode")
 	flag.StringVar(&metadataJSON, "metadata-json", "", "Serialized SubVolumeMetadata JSON for sync-client mode")
 
+	// Apply-vm-disk flags.
+	flag.StringVar(&stagingPath, "staging-path", "", "VM disk copy staging file for apply-vm-disk mode")
+	flag.StringVar(&diskPath, "disk-path", "", "Disk image to replace in apply-vm-disk mode")
+
 	klog.InitFlags(nil)
 	flag.Parse()
 
@@ -118,6 +126,8 @@ func main() {
 		runReceiver(receiverBasePath, receiverAuthTokenFile, receiverListenAddr, receiverTLSCertFile, receiverTLSKeyFile)
 	case "sync-client":
 		runSyncClient(receiverEndpoint, authTokenFile, sourcePath, destBasePath, subPath, subvolumeName, metadataJSON, caCertFile)
+	case "apply-vm-disk":
+		runApplyVMDisk(stagingPath, diskPath)
 	default:
 		runNode(endpoint, nodeID, mode)
 	}
@@ -538,4 +548,21 @@ func registerWebhooks(mgr ctrl.Manager) error {
 		return fmt.Errorf("register VolumeGroupSnapshot webhook: %w", err)
 	}
 	return nil
+}
+
+// runApplyVMDisk replaces a far-site VM disk with a staged copy. A replication
+// Job runs it.
+func runApplyVMDisk(stagingPath, diskPath string) {
+	if stagingPath == "" || diskPath == "" {
+		klog.ErrorS(nil, "staging-path and disk-path are required for apply-vm-disk mode")
+		os.Exit(1)
+	}
+	n, err := replication.ApplyVMDisk(stagingPath, diskPath)
+	if err != nil {
+		klog.ErrorS(err, "Failed to apply VM disk copy", "staging", stagingPath, "disk", diskPath)
+		os.Exit(1)
+	}
+	klog.InfoS("Applied VM disk copy", "disk", diskPath, "bytesWritten", n)
+	// The replication controller reads bytesWritten from the termination log.
+	_ = os.WriteFile("/dev/termination-log", []byte(fmt.Sprintf(`{"bytesWritten":%d}`, n)), 0o600)
 }

@@ -362,7 +362,7 @@ kubectl apply -f config/deploy/node.yaml
 |------|---------|-------------|
 | `--endpoint` | `unix:///csi/csi.sock` | CSI gRPC endpoint |
 | `--node-id` | (required) | Kubernetes node name |
-| `--mode` | `controller` | `controller`, `node`, `receiver`, or `sync-client` |
+| `--mode` | `controller` | `controller`, `node`, `receiver`, `sync-client`, or `apply-vm-disk` (run by replication Jobs) |
 | `--region` | Auto-discovered | IBM Cloud region |
 | `--vpc-id` | Auto-discovered | VPC ID for mount targets |
 | `--subnet-id` | Auto-discovered | Worker subnet IDs for mount targets, comma-separated; the controller uses the one in each pool's zone |
@@ -375,6 +375,8 @@ kubectl apply -f config/deploy/node.yaml
 | `--receiver-tls-cert-file` | `""` | TLS certificate file for receiver HTTPS. Empty = plain HTTP |
 | `--receiver-tls-key-file` | `""` | TLS private key file for receiver HTTPS. Empty = plain HTTP |
 | `--ca-cert-file` | `""` | CA certificate file for verifying receiver TLS cert (sync-client mode). Empty = system trust store |
+| `--staging-path` | `""` | VM disk copy staging file (apply-vm-disk mode). Set by the replication controller |
+| `--disk-path` | `""` | Disk image to replace (apply-vm-disk mode). Set by the replication controller |
 
 ---
 

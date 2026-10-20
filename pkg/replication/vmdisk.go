@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/qcow2"
 )
@@ -15,6 +16,27 @@ const newDiskSuffix = ".repl-new"
 
 // diskFileMode is the mode KubeVirt gives a disk image.
 const diskFileMode = 0o660
+
+// stagingNameRe matches the name of a staging file that pkg/vmcopy makes.
+var stagingNameRe = regexp.MustCompile(`^\.repl-staging-[a-z0-9]{1,16}\.qcow2$`)
+
+// ApplyVMDisk replaces diskPath with the full VM disk copy in stagingPath, as
+// ReplaceDiskFromStaging does, and then deletes the staging file. On error it
+// keeps the staging file. It refuses a stagingPath whose name is not a staging
+// file name, so it can never delete anything else.
+func ApplyVMDisk(stagingPath, diskPath string) (int64, error) {
+	if !stagingNameRe.MatchString(filepath.Base(stagingPath)) {
+		return 0, fmt.Errorf("%q does not have a staging file name", stagingPath)
+	}
+	n, err := ReplaceDiskFromStaging(stagingPath, diskPath)
+	if err != nil {
+		return n, err
+	}
+	if err := os.Remove(stagingPath); err != nil {
+		return n, fmt.Errorf("deleting staging file: %w", err)
+	}
+	return n, nil
+}
 
 // ReplaceDiskFromStaging writes the full VM disk copy in a qcow2 staging file
 // to diskPath as a raw disk image. It writes to a new file next to diskPath and
