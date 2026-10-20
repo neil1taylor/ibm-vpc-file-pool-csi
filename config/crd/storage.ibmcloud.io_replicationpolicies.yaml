@@ -380,6 +380,17 @@ spec:
                     type: object
                 type: object
                 x-kubernetes-map-type: atomic
+              vmCopySpeedLimitMBps:
+                default: 20
+                description: |-
+                  VMCopySpeedLimitMBps limits how fast QEMU copies each disk of a running
+                  VM, in megabytes per second. A copy slows the VM's own disk writes; at
+                  20 MB/s a VM kept 93% of its write speed in a lab test. The limit also
+                  counts empty disk space, so a full copy of a large disk takes long.
+                  0 means no limit.
+                format: int32
+                minimum: 0
+                type: integer
             required:
             - destinationBasePath
             - maxRetries
@@ -425,6 +436,25 @@ spec:
                       description: BytesSynced in the last sync for this SubVolume.
                       format: int64
                       type: integer
+                    consistency:
+                      description: |-
+                        Consistency of the last good copy of a running VM's disk.
+                        FileSystemConsistent means the guest file systems were frozen;
+                        CrashConsistent means they were not, as after a power loss.
+                      enum:
+                      - FileSystemConsistent
+                      - CrashConsistent
+                      type: string
+                    consistencyReason:
+                      description: ConsistencyReason says why a copy is only crash
+                        consistent.
+                      type: string
+                    copyMoment:
+                      description: |-
+                        CopyMoment is the moment the last good copy of a running VM's disk
+                        shows. All disks of the VM in this policy show the same moment.
+                      format: date-time
+                      type: string
                     lastError:
                       description: LastError recorded for this SubVolume's last sync
                         attempt.
@@ -436,6 +466,69 @@ spec:
                     subVolumeName:
                       description: SubVolumeName is the SubVolume CR name.
                       type: string
+                    vmCopy:
+                      description: |-
+                        VMCopy is the state of a running VM disk copy that is not finished.
+                        The controller uses it to continue the copy across cycles and restarts.
+                      properties:
+                        diskIndex:
+                          format: int32
+                          type: integer
+                        fileSystemConsistent:
+                          description: FileSystemConsistent is true if the guest was
+                            frozen for the copy.
+                          type: boolean
+                        freezeError:
+                          description: FreezeError is the freeze error, if the freeze
+                            failed.
+                          type: string
+                        id:
+                          description: ID names the copy. It is the same for all disks
+                            of one VM copy.
+                          type: string
+                        moment:
+                          description: Moment is the moment the copy shows.
+                          format: date-time
+                          type: string
+                        phase:
+                          description: |-
+                            Phase is Copying while QEMU writes the staging file, and Sending while
+                            a Job applies it at the destination.
+                          enum:
+                          - Copying
+                          - Sending
+                          type: string
+                        podName:
+                          description: |-
+                            PodName and PodUID identify the virt-launcher pod. If the pod changes,
+                            the VM restarted or moved and QEMU no longer has the copy.
+                          type: string
+                        podUID:
+                          type: string
+                        stagingFile:
+                          description: StagingFile is the staging file name in the
+                            volume's root directory.
+                          type: string
+                        vmiName:
+                          description: VMIName is the VirtualMachineInstance name.
+                          type: string
+                        volume:
+                          description: |-
+                            Volume is the pod volume name of this disk, and DiskIndex its place in
+                            the copy.
+                          type: string
+                      required:
+                      - diskIndex
+                      - fileSystemConsistent
+                      - id
+                      - moment
+                      - phase
+                      - podName
+                      - podUID
+                      - stagingFile
+                      - vmiName
+                      - volume
+                      type: object
                   required:
                   - subVolumeName
                   type: object
