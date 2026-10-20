@@ -38,7 +38,7 @@ var version = "dev"
 
 // driverNamespace is where the Helm chart installs the driver. Leader
 // election and share data Jobs use it.
-const driverNamespace = "kube-system"
+const driverNamespace = pool.DefaultDriverNamespace
 
 func main() {
 	var (
@@ -306,7 +306,7 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 	// The signal context ensures graceful shutdown alongside the manager.
 	signalCtx := ctrl.SetupSignalHandler()
 	nfsOps := pool.NewRealNFSOperations()
-	cloneWorker := pool.NewCloneWorker(k8sClient, mgr.GetClient(), pool.DefaultCloneImage)
+	cloneWorker := pool.NewCloneWorker(k8sClient, shareJobClient, pool.DefaultCloneImage)
 	if cloneWorkerInterval > 0 {
 		cloneWorker.SetInterval(cloneWorkerInterval)
 	}

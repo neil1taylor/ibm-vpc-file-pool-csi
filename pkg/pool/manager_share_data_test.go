@@ -528,3 +528,23 @@ func TestDeleteSnapshot_ReadySnapshot_StillChecksForCopy(t *testing.T) {
 		t.Fatalf("DeleteSnapshot() error = %v, want ErrOperationInProgress while a copy Job remains", err)
 	}
 }
+
+func TestDeallocate_DuringCloneCopy_StopsCopyBeforeRemoving(t *testing.T) {
+	k, _, mgr := newShareDataTestManager(t)
+	clone := newPendingClone(testRestorePVName, "test-pool", "share-1", testPVName, 10)
+	clone.Spec.ShareExportPath = "/share_one"
+	k.addSubVolume(clone)
+	sd := shareDataOf(mgr)
+	sd.setRunning("clone-" + testRestorePVName)
+
+	err := mgr.Deallocate(context.Background(), testRestorePVName)
+	if !errors.Is(err, ErrOperationInProgress) {
+		t.Fatalf("Deallocate() error = %v, want ErrOperationInProgress while the clone copy stops", err)
+	}
+	if sd.removeCount() != 0 {
+		t.Error("folder removal started while the clone copy was still running")
+	}
+	if err := mgr.Deallocate(context.Background(), testRestorePVName); err != nil {
+		t.Fatalf("Deallocate after the copy stopped: %v", err)
+	}
+}

@@ -146,11 +146,11 @@ collect_diagnostics() {
     info "--- PVs ---"
     oc get pv -o wide 2>/dev/null | head -20 || echo "(none)"
 
-    info "--- Clone Jobs in $NAMESPACE ---"
-    oc get jobs -n "$NAMESPACE" -l storage.ibmcloud.io/clone-temp=true -o wide 2>/dev/null || echo "(none)"
-    for job in $(oc get jobs -n "$NAMESPACE" -l storage.ibmcloud.io/clone-temp=true -o name 2>/dev/null); do
+    info "--- Share data Jobs in kube-system (clone copies) ---"
+    oc get jobs -n kube-system -l storage.ibmcloud.io/share-data-job -o wide 2>/dev/null || echo "(none)"
+    for job in $(oc get jobs -n kube-system -l storage.ibmcloud.io/share-data-job -o name 2>/dev/null); do
         info "Logs for $job:"
-        oc logs -n "$NAMESPACE" "$job" --tail=50 2>/dev/null || echo "(no logs)"
+        oc logs -n kube-system "$job" --tail=50 2>/dev/null || echo "(no logs)"
     done
 
     info "--- Converter Jobs in $NAMESPACE ---"
@@ -249,8 +249,9 @@ hardened_cleanup() {
     fi
 
     info "[$label] Step 5: Deleting pool-owned PVs..."
-    # Delete clone-temp PVs
-    oc delete pv -l storage.ibmcloud.io/clone-temp=true --ignore-not-found 2>/dev/null || true
+    # Delete share data Job resources (their PVs are Retain, so the shares are untouched)
+    oc delete job,pvc -n kube-system -l storage.ibmcloud.io/share-data-job --ignore-not-found 2>/dev/null || true
+    oc delete pv -l storage.ibmcloud.io/share-data-job --ignore-not-found 2>/dev/null || true
     # Delete PVs belonging to our pool's CSI driver + pool
     local pvs
     pvs=$(oc get pv -o json 2>/dev/null | jq -r '

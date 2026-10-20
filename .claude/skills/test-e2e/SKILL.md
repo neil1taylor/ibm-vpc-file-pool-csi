@@ -59,7 +59,8 @@ for pv in $(oc get pv -o json 2>/dev/null | jq -r '
     oc delete pv "$pv" --ignore-not-found --timeout=30s 2>/dev/null || true
     PV_COUNT=$((PV_COUNT + 1))
 done
-oc delete pv -l storage.ibmcloud.io/clone-temp=true --ignore-not-found 2>/dev/null || true
+oc delete job,pvc -n kube-system -l storage.ibmcloud.io/share-data-job --ignore-not-found 2>/dev/null || true
+oc delete pv -l storage.ibmcloud.io/share-data-job --ignore-not-found 2>/dev/null || true
 if (( PV_COUNT > 0 )); then echo "  Deleted $PV_COUNT pool PV(s)"; fi
 
 # 6. Delete pool (force-remove finalizer if stuck)

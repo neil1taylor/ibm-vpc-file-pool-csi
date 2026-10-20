@@ -385,10 +385,10 @@ func (m *Manager) Deallocate(ctx context.Context, subVolumeName string) (retErr 
 	if m.shareData == nil {
 		return errShareDataNotSet
 	}
-	if sv.Labels[restoreSnapshotLabel] != "" {
-		stopped, stopErr := m.shareData.Stop(ctx, "restore-"+sv.Name)
+	if copyKey := dataCopyKey(sv); copyKey != "" {
+		stopped, stopErr := m.shareData.Stop(ctx, copyKey)
 		if stopErr != nil {
-			return fmt.Errorf("stop restore copy: %w", stopErr)
+			return fmt.Errorf("stop copy into volume: %w", stopErr)
 		}
 		if !stopped {
 			return ErrOperationInProgress
@@ -1045,6 +1045,18 @@ func subVolumeAllocationResult(sv *v1alpha1.SubVolume) *AllocationResult {
 		GID:           sv.Spec.GID,
 		Permissions:   sv.Spec.Permissions,
 	}
+}
+
+// dataCopyKey names the share data Job that copies data into a restored or
+// cloned SubVolume, or returns "" for a plain volume.
+func dataCopyKey(sv *v1alpha1.SubVolume) string {
+	switch {
+	case sv.Labels[restoreSnapshotLabel] != "":
+		return "restore-" + sv.Name
+	case sv.Spec.SourceVolume != "":
+		return cloneCopyKey(sv.Name)
+	}
+	return ""
 }
 
 // subVolumeShareMount returns the NFS export that holds a SubVolume.

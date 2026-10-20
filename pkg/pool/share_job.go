@@ -21,6 +21,10 @@ import (
 )
 
 const (
+	// DefaultDriverNamespace is where the Helm chart installs the driver, and
+	// where share data Jobs run.
+	DefaultDriverNamespace = "kube-system"
+
 	// shareJobLabel marks temporary resources created for share data Jobs.
 	shareJobLabel = "storage.ibmcloud.io/share-data-job"
 
@@ -42,11 +46,13 @@ type ShareMount struct {
 	ExportPath    string
 }
 
-// Ownership is applied to the top folder of a copy. Nil fields are left as copied.
+// Ownership is applied to the top folder of a copy, or to every file in it
+// when Recursive is set. Nil fields are left as copied.
 type Ownership struct {
 	UID         *int64
 	GID         *int64
 	Permissions string
+	Recursive   bool
 }
 
 // ShareData removes and copies folders on file shares. Each call is
@@ -116,7 +122,11 @@ func (r *ShareJobRunner) CopyDir(ctx context.Context, key string, src ShareMount
 	fmt.Fprintf(&b, "cp -a \"%s/.\" \"%s/\"\n", from, to)
 	if owner != nil {
 		if owner.UID != nil && owner.GID != nil {
-			fmt.Fprintf(&b, "chown %d:%d \"%s\"\n", *owner.UID, *owner.GID, to)
+			recursive := ""
+			if owner.Recursive {
+				recursive = "-R "
+			}
+			fmt.Fprintf(&b, "chown %s%d:%d \"%s\"\n", recursive, *owner.UID, *owner.GID, to)
 		}
 		if owner.Permissions != "" {
 			fmt.Fprintf(&b, "chmod %s \"%s\"\n", owner.Permissions, to)

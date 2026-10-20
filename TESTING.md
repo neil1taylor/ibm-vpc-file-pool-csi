@@ -483,6 +483,7 @@ To run it from the current machine instead, with your own kubeconfig: `bash test
 | `02-pool` | A pool reaches `Ready`; its share uses security group access mode and its mount target is in the pool's zone (read from the VPC API); its StorageClass exists; a pool with a missing security group says why and makes no share |
 | `03-volumes` | Pods on two workers share a volume; owner and mode follow the pool; deleting the claim removes the PV, the SubVolume and the directory on the share |
 | `05-snapshots` | A snapshot becomes ready and its folder is on the share; a claim restored from it has the files as they were at snapshot time (the source is changed after the snapshot), with the pool's owner and mode; deleting the snapshot removes its folder |
+| `07-clones` | A clone in a namespace with no extra permissions has the source's files and the pool's owner and mode; a pod using it starts only after the copy; the copy leaves nothing in the app's namespace; deleting the clone removes its folder |
 
 **Rules for every stage:**
 - A stage file in `test/release/stages/` defines `run` and `cleanup`.
@@ -629,7 +630,8 @@ oc delete subvolumes.storage.ibmcloud.io \
     -l storage.ibmcloud.io/pool=$POOL
 
 # Step 5: Delete pool-owned PVs
-oc delete pv -l storage.ibmcloud.io/clone-temp=true
+oc delete job,pvc -n kube-system -l storage.ibmcloud.io/share-data-job
+oc delete pv -l storage.ibmcloud.io/share-data-job
 oc get pv -o json | jq -r "
     .items[]
     | select(.spec.csi.driver == \"vpc-file-pool.csi.ibm.io\")
