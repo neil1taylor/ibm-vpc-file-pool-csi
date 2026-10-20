@@ -84,6 +84,7 @@ Controls how the IBM Cloud API key is injected into the controller.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
+| `cdi.copyPodMemoryLimit` | string | `8Gi` | The controller keeps the memory limit of CDI's copy pods at least this high, through the OpenShift Virtualization `HyperConverged` setting `spec.resourceRequirements.storageWorkloads`. CDI's default of 600M is too small for copies onto NFS: the pod is killed. On rovslab, a 25 GB copy failed with 2Gi and finished with 8Gi. Empty turns the check off |
 | `goldenImageSyncer.interval` | string | `5m` | Background golden image syncer poll interval (Go duration). Controls how often the syncer checks for new CDI DataImportCrons and updates golden images |
 
 ## Replication Receiver

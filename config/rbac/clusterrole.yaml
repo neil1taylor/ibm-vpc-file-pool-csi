@@ -91,6 +91,10 @@ rules:
   - apiGroups: ["cdi.kubevirt.io"]
     resources: ["storageprofiles"]
     verbs: ["get", "patch"]
+  # OpenShift Virtualization settings (CDI copy pod memory limit)
+  - apiGroups: ["hco.kubevirt.io"]
+    resources: ["hyperconvergeds"]
+    verbs: ["get", "list", "patch"]
   # CDI DataImportCrons (golden image discovery)
   - apiGroups: ["cdi.kubevirt.io"]
     resources: ["dataimportcrons"]

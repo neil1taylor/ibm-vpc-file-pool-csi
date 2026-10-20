@@ -1,5 +1,7 @@
 # Golden Image Workflow for KubeVirt VMs
 
+> **Hidden feature.** Golden images are hidden. The code is kept for possible later use, and a pool that sets `spec.goldenImages` in YAML still works. The console pool form no longer offers golden images. The recommended way to make VMs is the standard OpenShift Virtualization catalog: pick a catalog image and choose the pool's StorageClass for the boot disk. See [Create a VM with its boot disk on a pool](USER-GUIDE.md#create-a-vm-with-its-boot-disk-on-a-pool) and [CDI compatibility](KNOWN-LIMITATIONS.md#cdi-containerized-data-importer-compatibility).
+
 This document explains how to configure golden OS images for one-click VM creation from the OpenShift Virtualization UI or CLI.
 
 ## Concepts

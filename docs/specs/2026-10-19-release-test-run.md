@@ -45,7 +45,7 @@ Testing between regions is a separate script, written later. This run tests repl
 
 Each line says what the stage proves, and how it checks the result itself, not the status the driver reports.
 
-1. **Pre-flight.** The driver runs the expected version (from the start-up log line). All pods are ready, and the CRDs and webhooks answer. No `rt-` leftovers exist from an earlier run.
+1. **Pre-flight.** The driver runs the expected version (from the start-up log line). All pods are ready, and the CRDs and webhooks answer. CDI's copy pod memory limit is at least 8Gi (added by `2026-10-20-cdi-copy-limit.md`). No `rt-` leftovers exist from an earlier run.
 2. **Pool.**
    - A pool reaches `Ready`.
    - Its share uses security group access mode, and its mount target is in the pool's zone (read from the VPC API).
@@ -65,13 +65,11 @@ Each line says what the stage proves, and how it checks the result itself, not t
 7. **Clones.**
    - A clone of a PVC matches its source.
    - A pod that uses the clone cannot start until the copy is done.
-8. **VMs and golden images** (stage `08-vms`, in a namespace with no extra permissions).
-   - A pool with golden images turned on gets a CentOS Stream 9 golden disk from CDI, a VM template, and a catalog entry that points at its own disk.
-   - A VM made from the template boots, and its guest agent connects.
+8. **VMs from the standard catalog** (stage `08-vms`, in a namespace with no extra permissions). Changed by `2026-10-20-cdi-copy-limit.md`: golden images are hidden, so this stage no longer tests them.
+   - A VM made from the standard catalog (CentOS Stream 9), with its boot disk on the pool, boots, and its guest agent connects.
    - The VM live-migrates to another worker without a restart and keeps running.
-   - A VM made from the catalog entry, with its boot disk on the pool, boots.
-   - Deleting the pool removes its golden disk, template and catalog entry.
-9. Merged into stage 8, because a VM needs a golden image to boot from.
+   - CDI copies 25 GB of random data from Ceph onto the pool, and the checksum matches. This re-tests CDI's copy pod memory limit on every run.
+9. Merged into stage 8. It was the golden image check; golden images are no longer tested.
 10. **Replication.** Replication runs between two pools on the same cluster, in direct NFS mode and in receiver mode. The copies at the destination match the source checksums. Pausing a policy stops new syncs.
     The VM checks below come from `2026-10-20-vm-safe-replication.md`. Each one is added when its part of that spec ships.
     - A running VM is replicated while it writes nonstop to two disks. A VM boots from the copy, and its guest agent connects. The kernel log shows no file system errors.

@@ -479,14 +479,15 @@ To run it from the current machine instead, with your own kubeconfig: `bash test
 
 | Stage | Proves |
 |---|---|
-| `01-preflight` | Controller and node agents ready, expected version, CRDs installed, webhook refuses a bad pool, no leftovers from an earlier run |
+| `01-preflight` | Controller and node agents ready, expected version, CRDs installed, webhook refuses a bad pool, CDI's copy pod memory limit is at least 8Gi, no leftovers from an earlier run |
 | `02-pool` | A pool reaches `Ready`; its share uses security group access mode and its mount target is in the pool's zone (read from the VPC API); its StorageClass exists; a pool with a missing security group says why and makes no share |
 | `03-volumes` | Pods on two workers share a volume; owner and mode follow the pool; deleting the claim removes the PV, the SubVolume and the directory on the share |
 | `04-growth` | A resized claim reports its new size, and its SubVolume and the pool count it; a pool with auto-expand above its threshold adds a usable second share (also in the VPC), stops at its share limit, and puts new volumes on the new share. A pod cannot see a claim's size: an NFS folder shows the whole share |
 | `05-snapshots` | A snapshot becomes ready and its folder is on the share; a claim restored from it has the files as they were at snapshot time (the source is changed after the snapshot), with the pool's owner and mode; deleting the snapshot removes its folder |
 | `07-clones` | A clone in a namespace with no extra permissions has the source's files and the pool's owner and mode; a pod using it starts only after the copy; the copy leaves nothing in the app's namespace; deleting the clone removes its folder |
-| `15-metrics` | Prometheus has the driver's metrics with non-zero allocation and VPC API counts; each pool reconciles about once a minute (at most 3) |
+| `08-vms` | A VM made from the standard catalog (CentOS Stream 9) with its boot disk on a pool boots and its guest agent connects; it live-migrates to another worker without a restart; CDI copies 25 GB of random data from Ceph onto the pool and the checksum matches |
 | `13-webhooks` | Bad pools, SubVolumes and replication policies are refused with a message that names the problem; a good one of each kind is accepted. All requests are server-side dry runs |
+| `15-metrics` | Prometheus has the driver's metrics with non-zero allocation and VPC API counts; each pool reconciles about once a minute (at most 3) |
 
 **Rules for every stage:**
 - A stage file in `test/release/stages/` defines `run` and `cleanup`.
