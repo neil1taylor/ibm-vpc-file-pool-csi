@@ -135,6 +135,7 @@ func TestAllCollectorsRegistered(t *testing.T) {
 		"vpc_file_pool_api_call_duration_seconds":   false,
 		"vpc_file_pool_snapshots_total":             false,
 		"vpc_file_pool_snapshot_duration_seconds":   false,
+		"vpc_file_pool_cdi_copy_limit_raised_total": false,
 	}
 
 	for _, fam := range families {

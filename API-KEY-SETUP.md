@@ -217,7 +217,7 @@ rm /tmp/ibm-credentials.env
 kubectl rollout restart deployment -n kube-system vpc-file-pool-csi-controller
 
 # 5. Verify and delete the old key
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller --tail=20
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller --tail=20
 ibmcloud iam service-api-key-delete vpc-file-pool-csi-key vpc-file-pool-csi
 ```
 
@@ -241,7 +241,7 @@ ibmcloud iam service-api-key-delete vpc-file-pool-csi-key vpc-file-pool-csi
 
 ```bash
 # Check controller logs for auth errors
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller --tail=50 | grep -i "auth\|token\|401\|403\|iam"
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller --tail=50 | grep -i "auth\|token\|401\|403\|iam"
 
 # Verify the secret exists
 kubectl get secret -n kube-system ibm-cloud-credentials storage-secret-store 2>/dev/null

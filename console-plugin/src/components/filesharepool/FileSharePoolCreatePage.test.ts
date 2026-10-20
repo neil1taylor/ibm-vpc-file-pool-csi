@@ -22,3 +22,20 @@ describe('PRESETS', () => {
     },
   );
 });
+
+// Golden images are hidden: VMs come from the standard catalog (spec
+// 2026-10-20-cdi-copy-limit). The form never turns them on.
+describe('golden images are hidden', () => {
+  it.each(PRESETS.map((p): [string, Record<string, unknown>] => [p.id, p.values]))(
+    'preset %s does not offer golden images',
+    (_id, values) => {
+      expect(Object.keys(values).some((k) => /golden|refreshInterval|pvcSizeGB/.test(k))).toBe(false);
+    },
+  );
+
+  it('a pool made by the form has no golden images', () => {
+    for (const preset of PRESETS) {
+      expect(buildResource(form(preset.values)).spec.goldenImages).toBeUndefined();
+    }
+  });
+});

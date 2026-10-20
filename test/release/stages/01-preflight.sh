@@ -61,6 +61,25 @@ no_earlier_leftovers() {
     [ -z "$left" ]
 }
 
+# to_mib QUANTITY — a Kubernetes memory quantity (8Gi, 600M, ...) in MiB.
+to_mib() {
+    awk -v q="$1" 'BEGIN {
+        n = q + 0; u = substr(q, length(n "") + 1)
+        f["Ki"] = 1/1024; f["Mi"] = 1; f["Gi"] = 1024; f["Ti"] = 1048576
+        f["K"] = 1000/1048576; f["M"] = 1e6/1048576; f["G"] = 1e9/1048576; f[""] = 1/1048576
+        printf "%d", n * f[u]
+    }'
+}
+
+# CDI's copy pods must be allowed enough memory to write onto NFS. The
+# controller keeps the limit at the Helm value cdi.copyPodMemoryLimit.
+cdi_copy_limit_ok() {
+    local want="${RT_CDI_COPY_LIMIT:-8Gi}" got
+    got=$(oc get cdi -o jsonpath='{.items[0].spec.config.podResourceRequirements.limits.memory}')
+    echo "CDI copy pod memory limit: ${got:-not set (600M)}, want at least $want"
+    [ -n "$got" ] && [ "$(to_mib "$got")" -ge "$(to_mib "$want")" ]
+}
+
 run() {
     check "controller is ready" controller_ready
     check "every node agent is ready" node_agents_ready
@@ -68,6 +87,9 @@ run() {
     check "all 5 CRDs are installed" crds_installed
     check "webhook refuses a pool with bad permissions" webhook_refuses_bad_pool
     check "no objects left from an earlier run" no_earlier_leftovers
+    if oc get crd cdis.cdi.kubevirt.io >/dev/null 2>&1; then
+        check "CDI copy pods may use enough memory for NFS" cdi_copy_limit_ok
+    fi
     if vpc_available; then
         check "VPC API can be read" vpc_get /shares?limit=1
     else
