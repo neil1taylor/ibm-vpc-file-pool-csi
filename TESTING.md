@@ -485,6 +485,7 @@ To run it from the current machine instead, with your own kubeconfig: `bash test
 | `04-growth` | A resized claim reports its new size, and its SubVolume and the pool count it; a pool with auto-expand above its threshold adds a usable second share (also in the VPC), stops at its share limit, and puts new volumes on the new share. A pod cannot see a claim's size: an NFS folder shows the whole share |
 | `05-snapshots` | A snapshot becomes ready and its folder is on the share; a claim restored from it has the files as they were at snapshot time (the source is changed after the snapshot), with the pool's owner and mode; deleting the snapshot removes its folder |
 | `07-clones` | A clone in a namespace with no extra permissions has the source's files and the pool's owner and mode; a pod using it starts only after the copy; the copy leaves nothing in the app's namespace; deleting the clone removes its folder |
+| `13-webhooks` | Bad pools, SubVolumes and replication policies are refused with a message that names the problem; a good one of each kind is accepted. All requests are server-side dry runs |
 
 **Rules for every stage:**
 - A stage file in `test/release/stages/` defines `run` and `cleanup`.
