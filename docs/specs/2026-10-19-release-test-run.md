@@ -58,7 +58,9 @@ Each line says what the stage proves, and how it checks the result itself, not t
 4. **Growth.**
    - A PVC is resized, and the pod sees the new size.
    - A small pool with auto-expand adds a second share when it fills.
-5. **Snapshots.** A VolumeSnapshot is restored to a new PVC. Its files match the source checksums.
+5. **Snapshots.**
+   - A VolumeSnapshot is restored to a new PVC. Its files match the source checksums.
+   - A snapshot of a running VM that writes nonstop is restored, and a VM boots from it. Added by `2026-10-20-vm-safe-replication.md`.
 6. **Group snapshots.** A group snapshot of two PVCs is restored. Both match. If the cluster has no group snapshot API, the stage is SKIP.
 7. **Clones.**
    - A clone of a PVC matches its source.
@@ -68,6 +70,15 @@ Each line says what the stage proves, and how it checks the result itself, not t
    - The VM then live-migrates to another worker and keeps running.
 9. **Golden images.** A pool with golden images turned on produces a bootable golden image volume.
 10. **Replication.** Replication runs between two pools on the same cluster, in direct NFS mode and in receiver mode. The copies at the destination match the source checksums. Pausing a policy stops new syncs.
+    The VM checks below come from `2026-10-20-vm-safe-replication.md`. Each one is added when its part of that spec ships.
+    - A running VM is replicated while it writes nonstop to two disks. A VM boots from the copy, and its guest agent connects. The kernel log shows no file system errors.
+    - In the copy, every file the VM logged before the freeze matches its checksum, and both disks show the same moment.
+    - The next cycle sends only changed blocks: far fewer bytes than the disk size.
+    - The source VM live-migrates. The next cycle is a compare pass, sends far fewer bytes than the disk size, and the copy still boots.
+    - The receiver is stopped in the middle of applying a copy. After it restarts, the copy boots and shows either the old or the new moment, never a mix.
+    - A stopped VM is copied with rsync, and it is still stopped afterwards.
+    - Until the new copy method ships, a running VM volume is skipped with an error, and no rsync copy is made.
+    - The guest pause and the VM slowdown during a copy are saved to `test/release/history.csv`. More than 20% worse than the last run is a warning.
 11. **Draining.** A share marked for draining gets no new volumes.
 12. **Restarts.**
     - The controller pod is deleted. A new one takes over, and every pool and volume is unchanged.
@@ -91,7 +102,14 @@ Each line says what the stage proves, and how it checks the result itself, not t
     - inside a VM disk on pool storage
 
     The pool's shares get 3,000 IOPS, the same as the baseline. Results go to `test/release/history.csv`. A result more than 20% worse than the last run is a warning, not a FAIL, because cloud storage speed varies.
-18. **Clean-up and report.**
+18. **Backup.** From `2026-10-20-vm-safe-replication.md`, added when backup ships.
+    - A backup policy takes three snapshots of a running VM and of a normal PVC, into a separate snapshot pool.
+    - The oldest and the newest snapshot are restored. The VM boots from each, and the PVC files match their checksums.
+    - With a keep count of 2, the third snapshot merges the oldest one away. The remaining snapshots still restore and boot.
+    - The newest snapshot is exported to COS and restored from COS to a new PVC. The VM boots from it.
+    - A known text string written in the VM cannot be found in any object in the bucket, which shows that the data is encrypted.
+    - The run uses its own `rt-<run id>/` prefix in one test bucket, and deletes that prefix at the end.
+19. **Clean-up and report.**
 
 ### The report
 
@@ -140,3 +158,5 @@ These figures are estimates from today's runs, not measurements of the full run.
 - Anything left behind after the run counts as a failure.
 - The run is started by hand after an update. It is not run on a schedule or from CI, because each run costs money.
 - It is written in Bash with `oc`, the same as the existing VM clone test.
+- The VM replication and backup checks test Linux VMs only. Windows freeze is tested once, in the lab test of the VM replication spec, because the run has no Windows image.
+- Object lock is not tested in the run, because locked objects cannot be cleaned up afterwards.
