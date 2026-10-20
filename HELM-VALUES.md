@@ -96,6 +96,8 @@ Configuration for the driver-to-driver cross-region replication receiver. Deploy
 | `replicationReceiver.enabled` | bool | `false` | Enable the replication receiver Deployment, Service, and Route |
 | `replicationReceiver.pvcName` | string | `""` | Pre-created PVC name for the destination NFS mount |
 | `replicationReceiver.authSecretName` | string | `""` | Secret name containing a `token` key for bearer token authentication |
+| `replicationReceiver.runAsUser` | int | `107` | User the receiver runs as. It writes destination VM disks, and KubeVirt runs QEMU as 107 |
+| `replicationReceiver.runAsGroup` | int | `107` | Group the receiver runs as |
 | `replicationReceiver.resources.requests.cpu` | string | `100m` | Receiver CPU request |
 | `replicationReceiver.resources.requests.memory` | string | `256Mi` | Receiver memory request |
 | `replicationReceiver.resources.limits.memory` | string | `512Mi` | Receiver memory limit |
