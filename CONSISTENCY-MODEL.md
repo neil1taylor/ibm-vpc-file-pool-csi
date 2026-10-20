@@ -473,4 +473,4 @@ Can the workload tolerate file-level consistency (each file
 | [Volume Group Snapshots](VOLUME-GROUP-SNAPSHOTS.md) | Consistency Model, Quiesce Hook Design |
 | [Cross-Region DR](CROSS-REGION-DR.md) | Consistency Guarantees, Unsupported Workload Types |
 | [Known Limitations](KNOWN-LIMITATIONS.md) | Snapshots and Clones, Volume Group Snapshots, Cross-Region Replication |
-| [VM Disk Formats](docs/vm-disk-formats.md) | Why Raw Not qcow2, runtime I/O patterns |
+| [VM Disk Formats](VM-DISK-FORMATS.md) | Why Raw Not qcow2, runtime I/O patterns |

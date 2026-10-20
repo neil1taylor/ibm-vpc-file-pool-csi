@@ -60,8 +60,26 @@ nav:
   - Getting Started:
       - Installation: INSTALL.md
       - User Guide: USER-GUIDE.md
+      - Tutorial: TUTORIAL.md
+      - Tutorial 1 - Pool Creation: TUTORIAL-01-POOL-CREATION.md
+      - Tutorial 2 - Snapshots and Clones: TUTORIAL-02-SNAPSHOTS-AND-CLONES.md
+      - Tutorial 3 - Group Snapshots and Hooks: TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md
+      - Tutorial 4 - Pool Configuration: TUTORIAL-04-POOL-CONFIGURATION.md
+      - Tutorial 5 - Golden Images: TUTORIAL-05-GOLDEN-IMAGES.md
+      - Tutorial 6 - Replication and Failover: TUTORIAL-06-REPLICATION-AND-FAILOVER.md
+      - Tutorial 7 - Monitoring: TUTORIAL-07-MONITORING.md
+      - Tutorial 8 - Migration and Console: TUTORIAL-08-MIGRATION-AND-CONSOLE.md
+      - Features: FEATURES.md
+      - Upgrade Guide: UPGRADE-GUIDE.md
+      - FAQ: FAQ.md
       - Helm Values Reference: HELM-VALUES.md
   - Operations:
+      - Day 2 Operations: DAY2-OPERATIONS.md
+      - Monitoring: MONITORING.md
+      - Capacity Planning: CAPACITY-PLANNING.md
+      - Backup and Recovery: BACKUP-RECOVERY.md
+      - Golden Image Workflow: GOLDEN-IMAGE-WORKFLOW.md
+      - Security: SECURITY.md
       - Troubleshooting: TROUBLESHOOTING.md
       - Performance Tuning: PERFORMANCE-TUNING.md
       - Known Limitations: KNOWN-LIMITATIONS.md
