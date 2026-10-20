@@ -10,6 +10,8 @@
 #   - every file in the writer's log (root disk) is on the data disk with the
 #     logged checksum, so both disks show the same moment
 #   - the policy status names the copy moment and its consistency
+#   - the next scheduled copy changes far less than the disk size, and both
+#     disks then have a restore point at the destination
 #
 # Usage: KUBECONFIG=... SSH_KEY=~/.ssh/key test/e2e/test-vm-replication.sh [--keep]
 # SSH_KEY is a private key whose .pub file is put in the VM for virtctl ssh.
@@ -25,6 +27,7 @@ POLICY=$PREFIX-policy
 SSH_KEY=${SSH_KEY:?set SSH_KEY to a private key file}
 IMAGE_URL=${IMAGE_URL:-https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2}
 COPY_TIMEOUT=${COPY_TIMEOUT:-5400}
+SCHEDULE=${SCHEDULE:-15m}
 
 log() { echo "[$(date -u +%H:%M:%S)] $*"; }
 fail() { log "FAIL: $*"; exit 1; }
@@ -235,7 +238,7 @@ spec:
   destinationNFSServer: "$server"
   destinationExportPath: "$export_path"
   destinationBasePath: /repl
-  schedule: 1h
+  schedule: $SCHEDULE
   maxRetries: 3
   maxParallelSyncs: 2
 YAML
@@ -250,6 +253,26 @@ log "waiting for both disks to have a good copy"
 start=$SECONDS
 wait_until "$COPY_TIMEOUT" "both disks copied" copies_done
 log "copy took $((SECONDS - start))s"
+
+# The next scheduled copy holds only changed blocks, and the destination
+# keeps the first copy as a restore point.
+first=$(oc get replicationpolicy "$POLICY" -o jsonpath='{.status.subVolumeStatuses[0].copyMoment}')
+second_done() {
+    copies_done >/dev/null &&
+        [ "$(oc get replicationpolicy "$POLICY" -o json | jq --arg f "$first" '[.status.subVolumeStatuses[] | select(.copyMoment != $f)] | length')" = 2 ]
+}
+log "waiting for the change copy (schedule $SCHEDULE)"
+start=$SECONDS
+wait_until "$COPY_TIMEOUT" "the change copy" second_done
+log "change copy done $((SECONDS - start))s after the first"
+status=$(oc get replicationpolicy "$POLICY" -o json)
+echo "$status" | jq -c '[.status.subVolumeStatuses[] | {sv: .subVolumeName[0:12], bytes: .bytesSynced, restorePoints, oldest: .oldestRestorePoint}]'
+root_pv=$(oc get pvc -n "$NS" root -o jsonpath='{.spec.volumeName}')
+root_bytes=$(echo "$status" | jq --arg sv "$root_pv" '.status.subVolumeStatuses[] | select(.subVolumeName == $sv) | .bytesSynced // 0')
+[ "$root_bytes" -lt $((2 << 30)) ] || fail "the change copy of the 20 GiB root disk changed $root_bytes bytes; expected far less"
+[ "$(echo "$status" | jq '[.status.subVolumeStatuses[] | select(.restorePoints >= 1 and .oldestRestorePoint != null)] | length')" = 2 ] ||
+    fail "expected a restore point on both disks"
+log "change copy changed $root_bytes bytes on the root disk; both disks have a restore point"
 
 status=$(oc get replicationpolicy "$POLICY" -o json)
 moments=$(echo "$status" | jq -r '[.status.subVolumeStatuses[].copyMoment] | unique | length')
