@@ -263,7 +263,7 @@ func TestVMCopy_FullCycle(t *testing.T) {
 	c := job.Spec.Template.Spec.Containers[0]
 	args := strings.Join(append(c.Command, c.Args...), " ")
 	for _, want := range []string{"--mode=apply-vm-disk",
-		"--staging-path=/source/pvcs/" + vmGuardSV1 + "/" + vmcopy.StagingPrefix + e.cop.starts[0].id + ".qcow2",
+		"--staging-path=/source/" + vmcopy.StagingPrefix + e.cop.starts[0].id + ".qcow2",
 		"--disk-path=/dest/pvcs/pvcs/" + vmGuardSV1 + "/disk.img"} {
 		if !strings.Contains(args, want) {
 			t.Errorf("apply Job command %q lacks %q", args, want)
@@ -279,6 +279,9 @@ func TestVMCopy_FullCycle(t *testing.T) {
 	for _, m := range c.VolumeMounts {
 		if m.Name == "source" && m.ReadOnly {
 			t.Error("expected the source mounted read-write, so the Job can delete the staging file")
+		}
+		if m.Name == "source" && m.SubPath != "pvcs/"+vmGuardSV1 {
+			t.Errorf("expected only the volume's folder mounted from the source share, got subPath %q", m.SubPath)
 		}
 	}
 

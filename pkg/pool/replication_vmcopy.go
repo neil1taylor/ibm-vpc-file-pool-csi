@@ -514,8 +514,10 @@ METADATA
 			corev1.ResourceMemory: resource.MustParse("256Mi"),
 		},
 	}
+	// Mount only this volume's folder from the source share, so a link in it
+	// cannot reach another volume on the same share.
 	mounts := []corev1.VolumeMount{
-		{Name: "source", MountPath: "/source"},
+		{Name: "source", MountPath: "/source", SubPath: strings.TrimPrefix(sv.Spec.SubPath, "/")},
 		{Name: "dest", MountPath: "/dest"},
 	}
 	job := &batchv1.Job{
@@ -544,7 +546,7 @@ METADATA
 						Image: rc.driverImage,
 						Command: []string{"/usr/local/bin/vpc-file-pool-csi",
 							"--mode=apply-vm-disk",
-							"--staging-path=/source" + sv.Spec.SubPath + "/" + st.StagingFile,
+							"--staging-path=/source/" + st.StagingFile,
 							"--disk-path=" + destDir + "/disk.img",
 						},
 						Resources:    resources,
