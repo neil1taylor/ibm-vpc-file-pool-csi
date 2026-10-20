@@ -1549,8 +1549,15 @@ VM disk is the moment the copy shows, not the time the copy finished.
 - A failed or skipped VM disk copy is reported in the volume's `lastError` and
   counted in the policy's `lastError`. It does not count as a failed cycle, so
   it does not pause the policy.
-- Receiver mode does not copy running VM disks yet; their volumes are skipped.
-  Hot-plugged disks are skipped too.
+- In receiver mode (`destinationEndpoint` set) the same copy is made, and a
+  `send-vm-disk` Job per disk sends it to the receiver instead of writing to
+  an NFS destination. For a full copy the Job first sends a hash of each 64 KiB
+  chunk, and the receiver answers which chunks differ from its own disk, so
+  only those cross the network. The receiver applies the copy with the same
+  undo-file method, at the destination. If the destination disk does not show
+  the moment the change copy starts from, the Job reports it, the status
+  `lastError` says so, and the next copy is a full copy.
+- Hot-plugged disks are skipped.
 - Red Hat does not support the QEMU commands this uses. See
   `docs/specs/2026-10-20-vm-safe-replication.md`.
 

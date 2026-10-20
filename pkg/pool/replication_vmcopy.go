@@ -85,7 +85,7 @@ type vmGroup struct {
 // the SubVolumes it did not handle, for the file copy path.
 func (rc *ReplicationController) processVMVolumes(ctx context.Context, policy *v1alpha1.ReplicationPolicy, svs []v1alpha1.SubVolume, allowStart bool) ([]v1alpha1.SubVolume, vmCopyResult) {
 	var res vmCopyResult
-	if rc.vmCopier == nil || isReceiverMode(policy) {
+	if rc.vmCopier == nil {
 		return svs, res
 	}
 	prev := map[string]v1alpha1.SubVolumeReplicationStatus{}
@@ -349,7 +349,7 @@ func (rc *ReplicationController) advanceVMCopy(ctx context.Context, policy *v1al
 
 	case vmCopyPhaseSending:
 		allDone := true
-		var failedNames []string
+		var failedNames, wrongBase []string
 		results := make([]replJobResult, len(g.members))
 		for i, sv := range g.members {
 			done, ok, jr, err := rc.checkReplicationJob(ctx, policy.Name, sv.Name)
@@ -369,6 +369,9 @@ func (rc *ReplicationController) advanceVMCopy(ctx context.Context, policy *v1al
 			}
 			if !ok {
 				failedNames = append(failedNames, sv.Name)
+			} else if jr.WrongBase {
+				failedNames = append(failedNames, sv.Name)
+				wrongBase = append(wrongBase, fmt.Sprintf("%s shows %s", sv.Name, jr.DiskMoment))
 			}
 			results[i] = jr
 		}
@@ -393,6 +396,11 @@ func (rc *ReplicationController) advanceVMCopy(ctx context.Context, policy *v1al
 			// The VM restarted or moved: its change lists are gone.
 			changeList = ""
 		}
+		if len(wrongBase) > 0 {
+			// A far-site disk is not where this copy starts from, so no
+			// change copy can be applied to it. The next copy is a full copy.
+			changeList = ""
+		}
 		for i, sv := range g.members {
 			rc.cleanupReplicationResources(ctx, policy, sv.Name)
 			s := vmStatus(prev, sv.Name, "")
@@ -400,6 +408,10 @@ func (rc *ReplicationController) advanceVMCopy(ctx context.Context, policy *v1al
 			if len(failedNames) > 0 {
 				s.LastError = fmt.Sprintf("apply Job failed for %s; the destination disks of this VM may now show different moments",
 					strings.Join(failedNames, ", "))
+			}
+			if len(wrongBase) > 0 {
+				s.LastError = fmt.Sprintf("the far-site disk is not at the moment of the last copy (%s); the next copy is a full copy",
+					strings.Join(wrongBase, ", "))
 			}
 			if !slices.Contains(failedNames, sv.Name) {
 				moment := st.Moment
@@ -521,6 +533,9 @@ func (rc *ReplicationController) createVMApplyResources(ctx context.Context, pol
 	if err := rc.ensureReplicationPVC(ctx, replSourcePVName(policy.Name, sv.Name), replSourcePVCName(policy.Name, sv.Name), policy.Name, sv.Name, "source"); err != nil {
 		return fmt.Errorf("source PVC: %w", err)
 	}
+	if isReceiverMode(policy) {
+		return rc.ensureVMSendJob(ctx, policy, sv, st, from)
+	}
 	if err := rc.ensureReplicationDestPV(ctx, policy, sv.Name); err != nil {
 		return fmt.Errorf("dest PV: %w", err)
 	}
@@ -528,6 +543,28 @@ func (rc *ReplicationController) createVMApplyResources(ctx context.Context, pol
 		return fmt.Errorf("dest PVC: %w", err)
 	}
 	return rc.ensureVMApplyJob(ctx, policy, sv, st, from)
+}
+
+// vmCopyJobFlags are the Job flags that name the copy: its moment, where it
+// starts from, and whether it holds the whole disk. A change copy needs a
+// destination disk with a known moment; without one the copy must be full,
+// and it is (the change list is new).
+func vmCopyJobFlags(policy *v1alpha1.ReplicationPolicy, st *v1alpha1.VMCopyState, from *metav1.Time) []string {
+	keep := int32(defaultRestorePointKeepHours)
+	if policy.Spec.RestorePointKeepHours != nil {
+		keep = *policy.Spec.RestorePointKeepHours
+	}
+	flags := []string{
+		"--to=" + st.Moment.UTC().Format(time.RFC3339Nano),
+		"--keep=" + (time.Duration(keep) * time.Hour).String(),
+	}
+	if from != nil {
+		flags = append(flags, "--from="+from.UTC().Format(time.RFC3339Nano))
+	}
+	if !st.Incremental || from == nil {
+		flags = append(flags, "--full")
+	}
+	return flags
 }
 
 // ensureVMApplyJob creates the Job that replaces the destination disk with
@@ -636,24 +673,114 @@ METADATA
 
 // vmApplyCommand is the command line of a VM disk apply Job.
 func vmApplyCommand(policy *v1alpha1.ReplicationPolicy, st *v1alpha1.VMCopyState, from *metav1.Time, destDir string) []string {
-	keep := int32(defaultRestorePointKeepHours)
-	if policy.Spec.RestorePointKeepHours != nil {
-		keep = *policy.Spec.RestorePointKeepHours
-	}
 	cmd := []string{"/usr/local/bin/vpc-file-pool-csi",
 		"--mode=apply-vm-disk",
 		"--staging-path=/source/" + st.StagingFile,
 		"--disk-path=" + destDir + "/disk.img",
-		"--to=" + st.Moment.UTC().Format(time.RFC3339Nano),
-		"--keep=" + (time.Duration(keep) * time.Hour).String(),
 	}
-	// A change copy needs a destination disk with a known moment; without
-	// one the copy must be full, and it is (the change list is new).
-	if from != nil {
-		cmd = append(cmd, "--from="+from.UTC().Format(time.RFC3339Nano))
+	return append(cmd, vmCopyJobFlags(policy, st, from)...)
+}
+
+// ensureVMSendJob creates the Job that sends the staged copy to the receiver
+// at the far site, which applies it. The Job runs as the QEMU user, so it can
+// delete the staging file. It mounts only this volume's folder from the source
+// share, and the receiver's token and CA certificate.
+func (rc *ReplicationController) ensureVMSendJob(ctx context.Context, policy *v1alpha1.ReplicationPolicy, sv *v1alpha1.SubVolume, st *v1alpha1.VMCopyState, from *metav1.Time) error {
+	jobName := replJobName(policy.Name, sv.Name)
+	existing := &batchv1.Job{}
+	if err := rc.directClient.Get(ctx, types.NamespacedName{Namespace: replJobNamespace, Name: jobName}, existing); err == nil {
+		return nil
 	}
-	if !st.Incremental || from == nil {
-		cmd = append(cmd, "--full")
+	if rc.driverImage == "" {
+		return fmt.Errorf("no driver image set for VM disk send Jobs")
 	}
-	return cmd
+	meta := &SubVolumeMetadata{
+		SubVolumeName:     sv.Name,
+		Spec:              sv.Spec,
+		Labels:            sv.Labels,
+		LastSyncTime:      st.Moment.Time,
+		ReplicationPolicy: policy.Name,
+	}
+	metaJSON, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encoding metadata: %w", err)
+	}
+
+	cmd := []string{"/usr/local/bin/vpc-file-pool-csi",
+		"--mode=send-vm-disk",
+		"--receiver-endpoint=" + policy.Spec.DestinationEndpoint,
+		"--auth-token-file=/etc/replication/token",
+		"--staging-path=/source/" + st.StagingFile,
+		"--dest-base-path=" + policy.Spec.DestinationBasePath,
+		"--sub-path=" + sv.Spec.SubPath,
+		"--subvolume-name=" + sv.Name,
+		"--vm-group=" + sv.Spec.PVCNamespace + "/" + st.VMIName,
+		"--copy-id=" + st.ID,
+		"--metadata-json=" + string(metaJSON),
+	}
+	cmd = append(cmd, vmCopyJobFlags(policy, st, from)...)
+
+	mounts := []corev1.VolumeMount{
+		{Name: "source", MountPath: "/source", SubPath: strings.TrimPrefix(sv.Spec.SubPath, "/")},
+		{Name: "auth-token", MountPath: "/etc/replication", ReadOnly: true},
+	}
+	volumes := []corev1.Volume{
+		{Name: "source", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+			ClaimName: replSourcePVCName(policy.Name, sv.Name)}}},
+		{Name: "auth-token", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
+			SecretName: policy.Spec.DestinationAuthSecretRef}}},
+	}
+	if policy.Spec.DestinationCACertSecretRef != "" {
+		cmd = append(cmd, "--ca-cert-file=/etc/replication-ca/ca.crt")
+		mounts = append(mounts, corev1.VolumeMount{Name: "ca-cert", MountPath: "/etc/replication-ca", ReadOnly: true})
+		volumes = append(volumes, corev1.Volume{Name: "ca-cert", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
+			SecretName: policy.Spec.DestinationCACertSecretRef}}})
+	}
+
+	labels := map[string]string{
+		replTempLabel:      "true",
+		replPolicyLabel:    policy.Name,
+		replSubVolumeLabel: sv.Name,
+	}
+	backoffLimit := int32(3)
+	ttl := int32(600)
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{Name: jobName, Namespace: replJobNamespace, Labels: labels},
+		Spec: batchv1.JobSpec{
+			BackoffLimit:            &backoffLimit,
+			TTLSecondsAfterFinished: &ttl,
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+				Spec: corev1.PodSpec{
+					RestartPolicy: corev1.RestartPolicyOnFailure,
+					SecurityContext: &corev1.PodSecurityContext{
+						RunAsUser:  int64Ptr(qemuUID),
+						RunAsGroup: int64Ptr(qemuUID),
+					},
+					Containers: []corev1.Container{{
+						Name:    "send",
+						Image:   rc.driverImage,
+						Command: cmd,
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("100m"),
+								corev1.ResourceMemory: resource.MustParse("128Mi"),
+							},
+							Limits: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("1"),
+								corev1.ResourceMemory: resource.MustParse("512Mi"),
+							},
+						},
+						VolumeMounts: mounts,
+					}},
+					Volumes: volumes,
+				},
+			},
+		},
+	}
+	if err := rc.directClient.Create(ctx, job); err != nil && !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("creating VM disk send Job %s/%s: %w", replJobNamespace, jobName, err)
+	}
+	klog.V(2).InfoS("Created VM disk send Job", "job", klog.KRef(replJobNamespace, jobName), "policy", policy.Name, "subVolume", sv.Name, "endpoint", policy.Spec.DestinationEndpoint)
+	return nil
 }
