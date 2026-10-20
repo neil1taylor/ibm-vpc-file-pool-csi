@@ -83,6 +83,7 @@ Disaster recovery with configurable sync schedules. Two replication modes are su
 - **Bandwidth limiting and parallel syncs** — `bandwidthLimitMbps` caps rsync throughput (direct NFS mode); `maxParallelSyncs` controls concurrent SubVolume syncs in both modes.
 - **Extra rsync options** — `rsyncOptions` field passes additional rsync flags (e.g., `--compress`, `--checksum`). Dangerous flags (`--daemon`, `--server`, `--rsh`, `--rsync-path`) are blocked by the webhook. Only applies to direct NFS mode.
 - **Retry with backoff** — Configurable max retries (default 3). Policy pauses on consecutive failures.
+- **Running VM volumes are skipped** — A file copy of a running VM disk may not boot, so the controller skips any volume that a running or starting VM uses and reports it in the policy status. Volumes of stopped VMs replicate as before.
 - **Pause/resume via annotation** — Annotate a ReplicationPolicy with `storage.ibmcloud.io/paused=true` to pause; remove the annotation to resume. The controller updates `status.phase` accordingly.
 - **Pre/post-sync hooks** — Exec and HTTP hooks for application quiescing before sync and notification after.
 - **Metadata sidecar** — Writes `.subvolume-metadata.json` alongside each replicated SubVolume directory, enabling the failover CLI to reconstruct resources without querying the source cluster.
