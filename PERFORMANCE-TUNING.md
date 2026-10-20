@@ -200,7 +200,22 @@ vpc_file_pool_share_pvc_count
 
 VPC file shares have one profile, `dp2`. It accepts 100 to 96,000 IOPS per share and 10 to 32,000 GB. If you do not set `spec.iops`, the VPC gives each share 100 IOPS, whatever its size. IOPS does not grow with share size, and there is no burst IOPS.
 
-Set `spec.iops` on the pool to get more. The driver passes it to the VPC. The VPC limits the maximum IOPS by share size and refuses values out of range. For example, 10,000 IOPS needs a share of at least 500 GB, and a 300 GB share allowed about 6,000. For the exact limits, see IBM's [About file storage for VPC](https://cloud.ibm.com/docs/vpc?topic=vpc-file-storage-profiles). Higher IOPS costs more.
+Set `spec.iops` on the pool to get more. The driver passes it to the VPC. IBM limits the IOPS by share size, and the pool's admission check refuses a pair that is out of range, with a message that names the allowed range. The limits (IBM's [File Storage for VPC profiles](https://cloud.ibm.com/docs/vpc?topic=vpc-file-storage-profiles), `dp2`):
+
+| Share size (GB) | Allowed IOPS |
+|---|---|
+| 10 - 39 | 100 - 1,000 |
+| 40 - 79 | 100 - 2,000 |
+| 80 - 99 | 100 - 4,000 |
+| 100 - 499 | 100 - 6,000 |
+| 500 - 999 | 100 - 10,000 |
+| 1,000 - 1,999 | 100 - 20,000 |
+| 2,000 - 3,999 | 200 - 40,000 |
+| 4,000 - 7,999 | 300 - 40,000 |
+| 8,000 - 15,999 | 500 - 64,000 |
+| 16,000 - 32,000 | 2,000 - 96,000 |
+
+For example, 3,000 IOPS needs a share of at least 80 GB, and 10,000 IOPS needs at least 500 GB. IBM's API does not return this table, so the driver keeps its own copy (`pkg/ibmcloud/share_profiles.go`). Higher IOPS costs more.
 
 ### IOPS Sharing Model
 

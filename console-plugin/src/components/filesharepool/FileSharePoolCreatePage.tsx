@@ -92,11 +92,11 @@ export const PRESETS: Preset[] = [
   {
     id: 'highiops',
     label: 'High-IOPS Database',
-    description: 'Maximum performance for database workloads. 48,000 IOPS per share, binpack allocation to minimize share count.',
+    description: 'Maximum performance for database workloads. 40,000 IOPS per share (the most IBM allows for a 4,000 GB share), binpack allocation to minimize share count.',
     values: {
       profile: 'dp2',
       shareSizeGB: 4000,
-      iops: 48000,
+      iops: 40000,
       maxShares: 5,
       initialShares: 2,
       autoExpand: false,

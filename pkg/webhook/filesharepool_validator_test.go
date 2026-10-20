@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
@@ -223,5 +224,52 @@ func TestFileSharePoolValidator_Create_MatchesSchemaLimits(t *testing.T) {
 				t.Errorf("ValidateCreate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func int64Ptr(v int64) *int64 { return &v }
+
+func TestFileSharePoolValidator_IOPSMatchesSize(t *testing.T) {
+	tests := []struct {
+		name    string
+		sizeGB  int64
+		iops    *int64
+		wantErr bool
+	}{
+		{"no IOPS is allowed", 100, nil, false},
+		{"3000 IOPS on 100 GB is allowed", 100, int64Ptr(3000), false},
+		{"3000 IOPS on 10 GB is refused", 10, int64Ptr(3000), true},
+		{"over the maximum for the size is refused", 100, int64Ptr(6001), true},
+		{"under the minimum for the size is refused", 2000, int64Ptr(100), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := &FileSharePoolValidator{}
+			pool := validFileSharePool()
+			pool.Spec.ShareSizeGB = tt.sizeGB
+			pool.Spec.IOPS = tt.iops
+			_, err := v.ValidateCreate(context.Background(), pool)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil && !strings.Contains(err.Error(), "spec.iops") {
+				t.Errorf("error should name spec.iops: %v", err)
+			}
+		})
+	}
+}
+
+func TestFileSharePoolValidator_TierIOPSMatchesSize(t *testing.T) {
+	v := &FileSharePoolValidator{}
+	pool := validFileSharePool()
+	pool.Spec.Tiers = []v1alpha1.ShareTier{
+		{Name: "fast", Profile: "dp2", ShareSizeGB: 10, IOPS: int64Ptr(3000), MaxShares: 1},
+	}
+	_, err := v.ValidateCreate(context.Background(), pool)
+	if err == nil {
+		t.Fatal("expected an error for a tier with 3000 IOPS on 10 GB")
+	}
+	if !strings.Contains(err.Error(), "fast") {
+		t.Errorf("error should name the tier: %v", err)
 	}
 }
