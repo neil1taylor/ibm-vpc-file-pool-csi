@@ -108,7 +108,7 @@ Each line says what the stage proves, and how it checks the result itself, not t
     - With a keep count of 2, the third snapshot merges the oldest one away. The remaining snapshots still restore and boot.
     - The newest snapshot is exported to COS and restored from COS to a new PVC. The VM boots from it.
     - A known text string written in the VM cannot be found in any object in the bucket, which shows that the data is encrypted.
-    - The driver's key cannot delete a backup that has a Governance lock. The run uses Governance, not Compliance, so its own clean-up key can still delete the test backups at the end.
+    - The driver's key cannot delete or shorten the lock of a backup. The run uses Compliance with a 1-day keep time, in a test bucket with a rule that deletes objects when their lock ends. So those objects stay for one day after the run, and are not counted as left behind.
     - The run uses its own `rt-<run id>/` prefix in one test bucket, and deletes that prefix at the end.
 19. **Clean-up and report.**
 
@@ -160,4 +160,4 @@ These figures are estimates from today's runs, not measurements of the full run.
 - The run is started by hand after an update. It is not run on a schedule or from CI, because each run costs money.
 - It is written in Bash with `oc`, the same as the existing VM clone test.
 - The VM replication and backup checks test Linux VMs only. Windows freeze is tested once, in the lab test of the VM replication spec, because the run has no Windows image.
-- Object lock is not tested in the run, because locked objects cannot be cleaned up afterwards.
+- Object lock is tested with a 1-day Compliance lock. The test bucket deletes those objects by itself the next day.
