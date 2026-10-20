@@ -477,7 +477,7 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 				"pod", klog.KRef(svCopy.Spec.PVCNamespace, vmPod))
 			skipped++
 			svStatuses = append(svStatuses, carry(svCopy.Name, fmt.Sprintf("%s %s/%s; a file copy of a running VM disk may not boot",
-					skippedRunningVMPrefix, svCopy.Spec.PVCNamespace, vmPod)))
+				skippedRunningVMPrefix, svCopy.Spec.PVCNamespace, vmPod)))
 			continue
 		}
 
