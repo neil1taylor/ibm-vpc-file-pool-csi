@@ -36,6 +36,10 @@ import (
 
 var version = "dev"
 
+// driverNamespace is where the Helm chart installs the driver. Leader
+// election and share data Jobs use it.
+const driverNamespace = "kube-system"
+
 func main() {
 	var (
 		endpoint                string
@@ -155,7 +159,7 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 		Scheme:                  scheme,
 		LeaderElection:          true,
 		LeaderElectionID:        "ibm-vpc-file-pool-csi-leader",
-		LeaderElectionNamespace: "kube-system",
+		LeaderElectionNamespace: driverNamespace,
 		HealthProbeBindAddress:  ":8081",
 		Metrics: metricsserver.Options{
 			BindAddress: ":8080",
@@ -224,6 +228,15 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 	stagingBasePath := filepath.Join(kubeletDir, "plugins/vpc-file-pool.csi.ibm.io/staging")
 
 	poolManager := pool.NewManager(k8sClient, nil, nil, stagingBasePath)
+	// The controller has no NFS access, so folder removal and copies on
+	// shares run as Jobs in the driver's namespace. The runner reads without
+	// the cache: a stale read could report a copy as stopped too early.
+	shareJobClient, err := client.New(restConfig, client.Options{Scheme: mgr.GetScheme()})
+	if err != nil {
+		klog.ErrorS(err, "Failed to create the share data Job client")
+		os.Exit(1)
+	}
+	poolManager.SetShareData(pool.NewShareJobRunner(shareJobClient, driverNamespace, pool.DefaultCloneImage))
 
 	// Run CSI gRPC server in a goroutine — serves immediately, but controller
 	// methods return Unavailable until readyCh is closed.

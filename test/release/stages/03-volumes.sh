@@ -44,18 +44,6 @@ gone() { ! oc get "$@" >/dev/null 2>&1; }
 
 # The anchor pod keeps the share mounted on its node, so the node agent can
 # show whether the deleted volume's directory is still on the share.
-dir_on_share() {
-    local node="$1" sub="$2" export_path mnt
-    export_path=$(pool_field "$BASIC" '.status.shares[0].exportPath')
-    mnt=$(share_mount_on_node "$node" "$export_path")
-    [ -n "$mnt" ] || { echo "share $export_path is not mounted on $node"; return 2; }
-    oc exec -n "$RT_DRIVER_NS" "$(node_agent_pod "$node")" -c csi-node -- test -d "$mnt$sub"
-}
-
-dir_removed() {
-    dir_on_share "$1" "$2"
-    [ $? -eq 1 ]
-}
 
 run() {
     pool_is_ready "$BASIC" || skip "needs the Ready pool from stage 02"
@@ -83,13 +71,13 @@ run() {
     pv=$(pv_of shared)
     sub=$(oc get subvolumes.storage.ibmcloud.io "$pv" -o jsonpath='{.spec.subPath}')
     check "a SubVolume records the volume in the pool" subvolume_recorded "$pv"
-    check "the volume's directory is on the share" dir_on_share "$a" "$sub"
+    check "the volume's directory is on the share" path_on_share "$BASIC" "$a" "$sub"
 
     oc delete pod -n "$NS" writer reader --wait=true --timeout=120s >/dev/null
     oc delete pvc -n "$NS" shared --wait=true --timeout=120s >/dev/null
     check "the PV is deleted" wait_until 180 5 gone pv "$pv"
     check "the SubVolume is deleted" wait_until 180 5 gone subvolumes.storage.ibmcloud.io "$pv"
-    check "the volume's directory is removed from the share" wait_until 180 10 dir_removed "$a" "$sub"
+    check "the volume's directory is removed from the share" wait_until 180 10 path_gone_from_share "$BASIC" "$a" "$sub"
 }
 
 cleanup() {

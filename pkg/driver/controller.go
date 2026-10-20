@@ -63,9 +63,13 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 				}
 				return nil, status.Errorf(codes.Internal, "clone previously failed for %s: %s", req.GetName(), errMsg)
 			}
-			return &csi.CreateVolumeResponse{
-				Volume: subVolumeToCSIVolume(existing),
-			}, nil
+			// A restore or clone goes on to the pool manager, which checks
+			// its copy and answers with the content source.
+			if req.GetVolumeContentSource() == nil {
+				return &csi.CreateVolumeResponse{
+					Volume: subVolumeToCSIVolume(existing),
+				}, nil
+			}
 		}
 	}
 
@@ -198,6 +202,9 @@ func (d *Driver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest)
 	if err != nil {
 		if errors.Is(err, pool.ErrSubVolumeNotFound) {
 			return &csi.DeleteVolumeResponse{}, nil
+		}
+		if retryErr := shareDataRetryError(err); retryErr != nil {
+			return nil, retryErr
 		}
 		return nil, status.Errorf(codes.Internal, "deallocation failed: %v", err)
 	}
@@ -336,6 +343,9 @@ func (d *Driver) createVolumeFromSnapshot(ctx context.Context, req *csi.CreateVo
 	if err != nil {
 		if poolErr := poolCapacityError(poolName, err); poolErr != nil {
 			return nil, poolErr
+		}
+		if retryErr := shareDataRetryError(err); retryErr != nil {
+			return nil, retryErr
 		}
 		switch {
 		case errors.Is(err, pool.ErrSnapshotNotFound):
@@ -496,6 +506,9 @@ func (d *Driver) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotRequ
 	if err != nil {
 		if errors.Is(err, pool.ErrSnapshotNotFound) {
 			return &csi.DeleteSnapshotResponse{}, nil
+		}
+		if retryErr := shareDataRetryError(err); retryErr != nil {
+			return nil, retryErr
 		}
 		return nil, status.Errorf(codes.Internal, "delete snapshot failed: %v", err)
 	}
@@ -827,4 +840,17 @@ func poolCapacityError(poolName string, err error) error {
 	default:
 		return nil
 	}
+}
+
+// shareDataRetryError maps share data work that is still running, or that
+// failed and will be started again, to codes the CSI sidecars retry without
+// treating the operation as finished. It returns nil for other errors.
+func shareDataRetryError(err error) error {
+	switch {
+	case errors.Is(err, pool.ErrOperationInProgress):
+		return status.Error(codes.Aborted, err.Error())
+	case errors.Is(err, pool.ErrShareJobFailed):
+		return status.Errorf(codes.Unavailable, "%v; the next retry starts it again", err)
+	}
+	return nil
 }

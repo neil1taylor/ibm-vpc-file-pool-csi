@@ -45,10 +45,10 @@ Share selection and capacity management across the pool.
 
 Directory-level point-in-time copies via the standard CSI snapshot interface.
 
-- **CreateSnapshot** — Copies the SubVolume directory to a snapshot path on the same share. Tracked by a Snapshot CR with phase and readyToUse status.
-- **DeleteSnapshot** — Removes the snapshot directory and CR. Updates pool capacity tracking.
+- **CreateSnapshot** — A Job in the driver's namespace copies the SubVolume directory to a snapshot path on the same share. The Snapshot CR reads `readyToUse: false` until the copy has finished.
+- **DeleteSnapshot** — A Job removes the snapshot directory; then the CR is deleted and the pool capacity is given back.
 - **ListSnapshots** — Lists snapshots filtered by source volume with pagination support.
-- **Restore from snapshot** — Creates a new SubVolume from a snapshot directory copy.
+- **Restore from snapshot** — A Job copies the snapshot directory into the new volume and sets the pool's owner and permissions. The claim stays Pending until the copy has finished.
 - **Validating webhook** — Ensures Snapshot CRs have required fields (sourceSubVolume, poolName).
 
 ### Volume Cloning — Beta

@@ -14,10 +14,11 @@ Explicit list of what the IBM VPC File Pool CSI Driver does not support, why, an
 
 ## Snapshots and Clones
 
-**What:** Volume snapshots (`VolumeSnapshot`) and volume cloning (`dataSource` in PVC) are implemented via directory-level copies on the NFS share. Snapshots are created using `cp -a` from the source subdirectory to a `.snapshots/` directory on the same share. Clones use a similar copy mechanism, and every clone is asynchronous: the SubVolume CR is created with `cloneStatus=Pending`, and the clone worker runs a Kubernetes Job that completes the copy. `NodePublishVolume` gates mount until the clone is `Complete`.
+**What:** Volume snapshots (`VolumeSnapshot`) and volume cloning (`dataSource` in PVC) are implemented via directory-level copies on the NFS share. The controller has no NFS access, so a Kubernetes Job in the driver's namespace does each copy: `cp -a` from the source subdirectory to a `.snapshots/` directory on the same share, and back again for a restore. A restored claim stays Pending until its copy has finished. Clones use a similar copy mechanism, and every clone is asynchronous: the SubVolume CR is created with `cloneStatus=Pending`, and the clone worker runs a Kubernetes Job that completes the copy. `NodePublishVolume` gates mount until the clone is `Complete`.
 
 **Limitations:**
 - Snapshots and clones are not instantaneous — they are full data copies proportional to the source volume size.
+- A snapshot of a volume that is being written is not one point in time: files can change while the copy runs. Stop or freeze the workload before the snapshot if you need a consistent copy.
 - Cross-share clones require the async path (no same-share optimization).
 - Per-PVC quota enforcement limitations (see above) also apply to cloned volumes.
 - No incremental or COW snapshots — each snapshot is a full copy.

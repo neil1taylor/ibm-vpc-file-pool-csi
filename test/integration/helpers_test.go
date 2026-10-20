@@ -694,6 +694,30 @@ type testHarness struct {
 	driver    *driver.Driver
 }
 
+// nfsShareData applies the pool manager's share data calls to the fake NFS
+// file system rooted at base. Every call finishes at once. A failed fake copy
+// is reported as a failed Job, like the real runner.
+type nfsShareData struct {
+	nfs  *fakeNFSOperations
+	base string
+}
+
+func (s *nfsShareData) RemoveDir(_ context.Context, _ string, _ pool.ShareMount, path string) (bool, error) {
+	if err := s.nfs.RemoveAll(s.base + path); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *nfsShareData) CopyDir(_ context.Context, _ string, _ pool.ShareMount, srcPath string, _ pool.ShareMount, dstPath string, _ *pool.Ownership) (bool, error) {
+	if err := s.nfs.CopyDir(s.base+srcPath, s.base+dstPath); err != nil {
+		return false, fmt.Errorf("%w: %v", pool.ErrShareJobFailed, err)
+	}
+	return true, nil
+}
+
+func (s *nfsShareData) Stop(context.Context, string) (bool, error) { return true, nil }
+
 func newTestHarness(t *testing.T) *testHarness {
 	t.Helper()
 
@@ -701,6 +725,7 @@ func newTestHarness(t *testing.T) *testHarness {
 	vpc := fake.NewFakeVPCClient()
 	nfs := newFakeNFSOperations()
 	mgr := pool.NewManager(k, vpc, nfs, "/mnt/staging")
+	mgr.SetShareData(&nfsShareData{nfs: nfs, base: "/mnt/staging"})
 	vpc.SetSubnetZone("subnet-1", "us-south-1")
 	vpc.AddSecurityGroup("kube-test-cluster", "sg-1")
 	mgr.SetShareNetwork(pool.NewShareNetwork("vpc-1", []string{"subnet-1"}, "test-cluster"))
