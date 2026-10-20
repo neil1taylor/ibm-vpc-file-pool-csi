@@ -106,6 +106,16 @@ type ReplicationPolicySpec struct {
 	// +optional
 	DestinationCACertSecretRef string `json:"destinationCACertSecretRef,omitempty"`
 
+	// VMCopySpeedLimitMBps limits how fast QEMU copies each disk of a running
+	// VM, in megabytes per second. A copy slows the VM's own disk writes; at
+	// 20 MB/s a VM kept 93% of its write speed in a lab test. The limit also
+	// counts empty disk space, so a full copy of a large disk takes long.
+	// 0 means no limit.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:default=20
+	// +optional
+	VMCopySpeedLimitMBps *int32 `json:"vmCopySpeedLimitMBps,omitempty"`
+
 	// PreSyncHooks are hooks executed before each replication sync cycle.
 	// +optional
 	PreSyncHooks []Hook `json:"preSyncHooks,omitempty"`
@@ -158,6 +168,64 @@ type SubVolumeReplicationStatus struct {
 	// LastError recorded for this SubVolume's last sync attempt.
 	// +optional
 	LastError string `json:"lastError,omitempty"`
+
+	// CopyMoment is the moment the last good copy of a running VM's disk
+	// shows. All disks of the VM in this policy show the same moment.
+	// +optional
+	CopyMoment *metav1.Time `json:"copyMoment,omitempty"`
+
+	// Consistency of the last good copy of a running VM's disk.
+	// FileSystemConsistent means the guest file systems were frozen;
+	// CrashConsistent means they were not, as after a power loss.
+	// +kubebuilder:validation:Enum=FileSystemConsistent;CrashConsistent
+	// +optional
+	Consistency string `json:"consistency,omitempty"`
+
+	// ConsistencyReason says why a copy is only crash consistent.
+	// +optional
+	ConsistencyReason string `json:"consistencyReason,omitempty"`
+
+	// VMCopy is the state of a running VM disk copy that is not finished.
+	// The controller uses it to continue the copy across cycles and restarts.
+	// +optional
+	VMCopy *VMCopyState `json:"vmCopy,omitempty"`
+}
+
+// VMCopyState is the state of an unfinished copy of a running VM's disk.
+type VMCopyState struct {
+	// ID names the copy. It is the same for all disks of one VM copy.
+	ID string `json:"id"`
+
+	// Phase is Copying while QEMU writes the staging file, and Sending while
+	// a Job applies it at the destination.
+	// +kubebuilder:validation:Enum=Copying;Sending
+	Phase string `json:"phase"`
+
+	// PodName and PodUID identify the virt-launcher pod. If the pod changes,
+	// the VM restarted or moved and QEMU no longer has the copy.
+	PodName string `json:"podName"`
+	PodUID  string `json:"podUID"`
+
+	// VMIName is the VirtualMachineInstance name.
+	VMIName string `json:"vmiName"`
+
+	// Volume is the pod volume name of this disk, and DiskIndex its place in
+	// the copy.
+	Volume    string `json:"volume"`
+	DiskIndex int32  `json:"diskIndex"`
+
+	// StagingFile is the staging file name in the volume's root directory.
+	StagingFile string `json:"stagingFile"`
+
+	// Moment is the moment the copy shows.
+	Moment metav1.Time `json:"moment"`
+
+	// FileSystemConsistent is true if the guest was frozen for the copy.
+	FileSystemConsistent bool `json:"fileSystemConsistent"`
+
+	// FreezeError is the freeze error, if the freeze failed.
+	// +optional
+	FreezeError string `json:"freezeError,omitempty"`
 }
 
 // +kubebuilder:object:root=true

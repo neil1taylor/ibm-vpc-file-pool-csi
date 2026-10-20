@@ -1246,6 +1246,14 @@ type ReplicationPolicySpec struct {
     // +optional
     RsyncOptions []string `json:"rsyncOptions,omitempty"`
 
+    // VMCopySpeedLimitMBps limits how fast QEMU copies each disk of a running
+    // VM, in megabytes per second. 0 means no limit. The limit also counts
+    // empty disk space. See "Running VM disks" below.
+    // +kubebuilder:validation:Minimum=0
+    // +kubebuilder:default=20
+    // +optional
+    VMCopySpeedLimitMBps *int32 `json:"vmCopySpeedLimitMBps,omitempty"`
+
     // DestinationEndpoint is the HTTPS URL of the replication receiver service
     // on the destination cluster (e.g., "https://repl-receiver.apps.cluster.example.com").
     // When set, the controller uses driver-to-driver mode instead of direct NFS.
@@ -1316,8 +1324,55 @@ type SubVolumeReplicationStatus struct {
     // LastError recorded for this SubVolume's last sync attempt.
     // +optional
     LastError string `json:"lastError,omitempty"`
+
+    // CopyMoment is the moment the last good copy of a running VM's disk shows.
+    // All disks of the VM in this policy show the same moment.
+    // +optional
+    CopyMoment *metav1.Time `json:"copyMoment,omitempty"`
+
+    // Consistency of the last good copy of a running VM's disk:
+    // FileSystemConsistent or CrashConsistent.
+    // +optional
+    Consistency string `json:"consistency,omitempty"`
+
+    // ConsistencyReason says why a copy is only crash consistent.
+    // +optional
+    ConsistencyReason string `json:"consistencyReason,omitempty"`
+
+    // VMCopy is the state of an unfinished running VM disk copy: copy ID,
+    // phase (Copying or Sending), VM pod name and UID, VMI name, pod volume
+    // name, disk index, staging file name, moment and freeze result.
+    // +optional
+    VMCopy *VMCopyState `json:"vmCopy,omitempty"`
 }
 ```
+
+### Running VM disks
+
+In direct NFS mode, the controller copies the disks of a running VM without
+stopping it. It finds the VM from the virt-launcher pod that mounts the claim.
+On a scheduled cycle it freezes the guest file systems (KubeVirt's
+virt-freezer, with a 30 s automatic thaw), makes QEMU copy all of the VM's
+disks in the policy at one moment into sparse staging files in each volume,
+and thaws the guest. Between scheduled cycles it checks the copy on every
+controller tick. When QEMU finishes, a Job per disk replaces the destination
+`disk.img` with the copy in one step and deletes the staging file. The
+`lastSyncTime` of a VM disk is the moment the copy shows, not the time the
+copy finished.
+
+- If a live migration of the VM is requested, the controller cancels the copy,
+  because QEMU cannot migrate during a copy. The next cycle starts a new copy.
+- If the VM restarts or moves during a copy, the copy is lost and the next
+  cycle starts a new one.
+- If the guest cannot freeze (no guest agent, or a freeze error), the copy is
+  crash consistent, and `consistency` and `consistencyReason` say so.
+- A failed or skipped VM disk copy is reported in the volume's `lastError` and
+  counted in the policy's `lastError`. It does not count as a failed cycle, so
+  it does not pause the policy.
+- Receiver mode does not copy running VM disks yet; their volumes are skipped.
+  Hot-plugged disks are skipped too.
+- Red Hat does not support the QEMU commands this uses. See
+  `docs/specs/2026-10-20-vm-safe-replication.md`.
 
 ### Example ReplicationPolicy CR
 

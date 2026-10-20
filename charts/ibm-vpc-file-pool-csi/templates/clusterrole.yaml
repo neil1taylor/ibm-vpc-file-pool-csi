@@ -28,6 +28,11 @@ rules:
   - apiGroups: [""]
     resources: ["pods/exec"]
     verbs: ["create"]
+  # VM moves: replication cancels a running VM disk copy when a live
+  # migration is requested, because QEMU cannot migrate during a copy.
+  - apiGroups: ["kubevirt.io"]
+    resources: ["virtualmachineinstancemigrations"]
+    verbs: ["list"]
   # VolumeSnapshot CRDs (for csi-snapshotter sidecar)
   - apiGroups: ["snapshot.storage.k8s.io"]
     resources: ["volumesnapshots", "volumesnapshotcontents", "volumesnapshotclasses"]

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -68,6 +69,10 @@ type ReplicationController struct {
 	directClient client.Client
 	nfsOps       NFSOperations
 	orchestrator *hooks.Orchestrator
+
+	// vmCopier copies the disks of running VMs. If nil, their volumes are
+	// skipped.
+	vmCopier VMCopier
 
 	// replicationImage is the container image used for direct-NFS replication Jobs (rsync).
 	replicationImage string
@@ -205,8 +210,10 @@ func (rc *ReplicationController) processOnce(ctx context.Context) {
 			continue
 		}
 
-		// Check if it's time to sync.
+		// Check if it's time to sync. Copies of running VM disks move forward
+		// on every tick.
 		if !rc.isDue(policy.Name, scheduleInterval) {
+			rc.advanceVMCopies(ctx, policy)
 			continue
 		}
 
@@ -295,6 +302,7 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 
 	// Update SubVolume count metric.
 	metrics.ReplicationSubVolumeCount.WithLabelValues(policyName, sourcePool).Set(float64(len(matched)))
+	total := len(matched)
 
 	// 2a. Run pre-sync hooks.
 	if rc.orchestrator != nil && len(policy.Spec.PreSyncHooks) > 0 {
@@ -315,6 +323,10 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 	var syncErrors []string
 	activeJobs := int32(0)
 	skipped := 0
+
+	// Disks of running VMs take the VM copy path, if it is on.
+	matched, vmRes := rc.processVMVolumes(ctx, policy, matched, true)
+	svStatuses = append(svStatuses, vmRes.statuses...)
 
 	for _, sv := range matched {
 		svCopy := sv
@@ -449,7 +461,7 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 	duration := rc.nowFunc().Sub(start)
 
 	// Check if all Jobs completed (no active or deferred).
-	allComplete := true
+	allComplete := !vmRes.inProgress
 	for _, svs := range svStatuses {
 		if svs.LastError == "sync in progress" || svs.LastError == "deferred: parallel limit" {
 			allComplete = false
@@ -486,7 +498,7 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 
 	// All SubVolumes processed — evaluate results.
 	if len(syncErrors) > 0 {
-		combinedErr := fmt.Sprintf("%d/%d SubVolumes failed to sync", len(syncErrors), len(matched))
+		combinedErr := fmt.Sprintf("%d/%d SubVolumes failed to sync", len(syncErrors), total)
 		rc.handleFailure(ctx, policy, combinedErr, start)
 		policy.Status.SubVolumeStatuses = svStatuses
 		if err := rc.k8sClient.UpdateReplicationPolicyStatus(ctx, policy); err != nil {
@@ -511,7 +523,7 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 	policy.Status.LastSyncDuration = duration.String()
 	policy.Status.SubVolumeStatuses = svStatuses
 	policy.Status.ConsecutiveFailures = 0
-	policy.Status.LastError = skippedVMError(skipped)
+	policy.Status.LastError = vmProblemsError(skipped, vmRes.failed)
 
 	if err := rc.k8sClient.UpdateReplicationPolicyStatus(ctx, policy); err != nil {
 		klog.ErrorS(err, "Failed to update policy status after successful sync", "policy", policyName)
@@ -526,49 +538,73 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 	klog.V(2).InfoS("Replication cycle completed",
 		"policy", policyName,
 		"sourcePool", sourcePool,
-		"subVolumes", len(matched),
+		"subVolumes", total,
 		"duration", duration.String(),
 	)
 }
 
 // runningVMPod returns the name of a KubeVirt pod that is running or starting
-// and mounts the SubVolume's PVC, or "" if there is none. Both the VM pod and a
-// hot-plug disk pod count, because both mean a running VM writes to the disk.
+// and mounts the SubVolume's PVC, or "" if there is none.
 func (rc *ReplicationController) runningVMPod(ctx context.Context, sv *v1alpha1.SubVolume) (string, error) {
+	pod, _, err := rc.vmPodForClaim(ctx, sv.Spec.PVCNamespace, sv.Spec.PVCName)
+	if err != nil || pod == nil {
+		return "", err
+	}
+	return pod.Name, nil
+}
+
+// vmPodForClaim returns a KubeVirt pod that is running or starting and mounts
+// the claim, and the pod's volume name for it, or nil if there is none. Both a
+// VM pod and a hot-plug disk pod count, because both mean a running VM writes
+// to the disk; a VM pod is preferred.
+func (rc *ReplicationController) vmPodForClaim(ctx context.Context, namespace, claim string) (*corev1.Pod, string, error) {
 	podList := &corev1.PodList{}
 	if err := rc.directClient.List(ctx, podList,
-		client.InNamespace(sv.Spec.PVCNamespace),
+		client.InNamespace(namespace),
 		client.HasLabels{kubevirtPodLabel},
 	); err != nil {
-		return "", fmt.Errorf("listing pods in %s: %w", sv.Spec.PVCNamespace, err)
+		return nil, "", fmt.Errorf("listing pods in %s: %w", namespace, err)
 	}
+	var found *corev1.Pod
+	var foundVol string
 	for i := range podList.Items {
 		pod := &podList.Items[i]
-		if kind := pod.Labels[kubevirtPodLabel]; kind != "virt-launcher" && kind != "hotplug-disk" {
+		kind := pod.Labels[kubevirtPodLabel]
+		if kind != "virt-launcher" && kind != "hotplug-disk" {
 			continue
 		}
 		if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
 			continue
 		}
 		for _, vol := range pod.Spec.Volumes {
-			if vol.PersistentVolumeClaim != nil && vol.PersistentVolumeClaim.ClaimName == sv.Spec.PVCName {
-				return pod.Name, nil
+			if vol.PersistentVolumeClaim == nil || vol.PersistentVolumeClaim.ClaimName != claim {
+				continue
 			}
+			if kind == "virt-launcher" {
+				return pod, vol.Name, nil
+			}
+			found, foundVol = pod, vol.Name
 		}
 	}
-	return "", nil
+	return found, foundVol, nil
 }
 
-// skippedVMError is the policy error for a cycle that skipped VM volumes.
-func skippedVMError(skipped int) string {
+// vmProblemsError is the policy error for a cycle that skipped VM volumes or
+// whose VM disk copies failed. Neither counts as a failed cycle, so neither
+// pauses the policy for its other volumes.
+func vmProblemsError(skipped, failed int) string {
+	var parts []string
 	switch skipped {
 	case 0:
-		return ""
 	case 1:
-		return "1 SubVolume skipped: in use by a running VM"
+		parts = append(parts, "1 SubVolume skipped: in use by a running VM")
 	default:
-		return fmt.Sprintf("%d SubVolumes skipped: in use by a running VM", skipped)
+		parts = append(parts, fmt.Sprintf("%d SubVolumes skipped: in use by a running VM", skipped))
 	}
+	if failed > 0 {
+		parts = append(parts, fmt.Sprintf("%d VM disk copies failed; see subVolumeStatuses", failed))
+	}
+	return strings.Join(parts, "; ")
 }
 
 // isReceiverMode returns true if the policy uses driver-to-driver replication.
@@ -1044,7 +1080,7 @@ func (rc *ReplicationController) ensureReplicationJob(ctx context.Context, polic
 		script = fmt.Sprintf(`set -euo pipefail
 echo "Replication: syncing %s -> %s%s"
 mkdir -p "/dest%s%s"
-rsync -a --delete %s %s %s "/source%s/" "/dest%s%s/"
+rsync -a --delete --exclude=/.repl-staging-* %s %s %s "/source%s/" "/dest%s%s/"
 echo "Writing metadata sidecar..."
 cat > "/dest%s%s/.subvolume-metadata.json" <<'METADATA'
 %s
@@ -1061,6 +1097,7 @@ echo "Replication complete."
 echo "Replication: copying %s -> %s%s"
 mkdir -p "/dest%s%s"
 cp -a "/source%s/." "/dest%s%s/"
+find "/dest%s%s" -maxdepth 1 -name '.repl-staging-*' -delete
 echo "Writing metadata sidecar..."
 cat > "/dest%s%s/.subvolume-metadata.json" <<'METADATA'
 %s
@@ -1069,6 +1106,7 @@ echo "Replication complete."
 `, subPath, destBasePath, subPath,
 			destBasePath, subPath,
 			subPath, destBasePath, subPath,
+			destBasePath, subPath,
 			destBasePath, subPath,
 			string(metaJSON))
 	}
