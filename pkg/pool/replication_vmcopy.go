@@ -3,17 +3,19 @@ package pool
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/vmcopy"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -26,6 +28,9 @@ import (
 const (
 	// defaultVMCopySpeedLimitMBps applies when a policy does not set one.
 	defaultVMCopySpeedLimitMBps = 20
+
+	// defaultRestorePointKeepHours applies when a policy does not set one.
+	defaultRestorePointKeepHours = 24
 
 	vmCopyPhaseCopying = "Copying"
 	vmCopyPhaseSending = "Sending"
@@ -45,6 +50,7 @@ type VMCopier interface {
 	Start(ctx context.Context, vm vmcopy.VM, volumes []string, opts vmcopy.StartOptions) (*vmcopy.Copy, error)
 	Progress(ctx context.Context, vm vmcopy.VM, cp *vmcopy.Copy) (vmcopy.State, string, error)
 	Finish(ctx context.Context, vm vmcopy.VM, cp *vmcopy.Copy, removeStaging bool) error
+	Commit(ctx context.Context, vm vmcopy.VM, cp *vmcopy.Copy) error
 	Cancel(ctx context.Context, vm vmcopy.VM, cp *vmcopy.Copy) error
 	RemoveStale(ctx context.Context, vm vmcopy.VM, volumes []string, keepBitmap string) error
 }
@@ -200,7 +206,14 @@ func (rc *ReplicationController) startVMCopy(ctx context.Context, policy *v1alph
 		}
 		return
 	}
-	if err = rc.vmCopier.RemoveStale(ctx, vm, g.volumes, ""); err != nil {
+	// The change list of the last good copy, if all disks share it.
+	base := prev[g.members[0].Name].VMChangeList
+	for _, sv := range g.members[1:] {
+		if prev[sv.Name].VMChangeList != base {
+			base = ""
+		}
+	}
+	if err = rc.vmCopier.RemoveStale(ctx, vm, g.volumes, base); err != nil {
 		fail(fmt.Sprintf("clear an earlier copy: %v", err))
 		return
 	}
@@ -210,7 +223,14 @@ func (rc *ReplicationController) startVMCopy(ctx context.Context, policy *v1alph
 		speed = int64(*policy.Spec.VMCopySpeedLimitMBps)
 	}
 	id := strconv.FormatInt(rc.nowFunc().UnixNano(), 36)
-	cp, err := rc.vmCopier.Start(ctx, vm, g.volumes, vmcopy.StartOptions{Speed: speed << 20, ID: id})
+	opts := vmcopy.StartOptions{Speed: speed << 20, ID: id, Base: base}
+	cp, err := rc.vmCopier.Start(ctx, vm, g.volumes, opts)
+	if errors.Is(err, vmcopy.ErrBaseLost) {
+		// The VM restarted or moved, so QEMU lost the change list.
+		klog.V(2).InfoS("Change list lost; making a full copy", "policy", policy.Name, "vm", klog.KRef(vm.Namespace, vm.Name), "base", base)
+		opts.Base = ""
+		cp, err = rc.vmCopier.Start(ctx, vm, g.volumes, opts)
+	}
 	if err != nil {
 		fail(fmt.Sprintf("start the VM disk copy: %v", err))
 		return
@@ -231,6 +251,9 @@ func (rc *ReplicationController) startVMCopy(ctx context.Context, policy *v1alph
 			Moment:               metav1.NewTime(cp.Moment),
 			FileSystemConsistent: cp.FileSystemConsistent,
 			FreezeError:          cp.FreezeError,
+			Bitmap:               cp.Bitmap,
+			Base:                 cp.Base,
+			Incremental:          cp.Incremental,
 		}
 		res.statuses = append(res.statuses, s)
 	}
@@ -241,7 +264,8 @@ func (rc *ReplicationController) advanceVMCopy(ctx context.Context, policy *v1al
 	st := g.states[0]
 	ns := g.members[0].Spec.PVCNamespace
 	vm := vmcopy.VM{Namespace: ns, Pod: st.PodName, Name: st.VMIName}
-	cp := &vmcopy.Copy{ID: st.ID, Moment: st.Moment.Time, FileSystemConsistent: st.FileSystemConsistent, FreezeError: st.FreezeError}
+	cp := &vmcopy.Copy{ID: st.ID, Moment: st.Moment.Time, FileSystemConsistent: st.FileSystemConsistent, FreezeError: st.FreezeError,
+		Bitmap: st.Bitmap, Base: st.Base, Incremental: st.Incremental}
 	idx := make([]int, len(g.members))
 	for i := range idx {
 		idx[i] = i
@@ -273,7 +297,7 @@ func (rc *ReplicationController) advanceVMCopy(ctx context.Context, policy *v1al
 	case vmCopyPhaseCopying:
 		pod := &corev1.Pod{}
 		err := rc.directClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: st.PodName}, pod)
-		if errors.IsNotFound(err) || (err == nil && string(pod.UID) != st.PodUID) {
+		if apierrors.IsNotFound(err) || (err == nil && string(pod.UID) != st.PodUID) {
 			end("copy lost: the VM restarted or moved during the copy; the next cycle starts a new copy", false)
 			return
 		}
@@ -311,7 +335,7 @@ func (rc *ReplicationController) advanceVMCopy(ctx context.Context, policy *v1al
 				return
 			}
 			for i, sv := range g.members {
-				if err := rc.createVMApplyResources(ctx, policy, sv, g.states[i]); err != nil {
+				if err := rc.createVMApplyResources(ctx, policy, sv, g.states[i], prev[sv.Name].CopyMoment); err != nil {
 					for _, m := range g.members {
 						rc.cleanupReplicationResources(ctx, policy, m.Name)
 					}
@@ -326,9 +350,9 @@ func (rc *ReplicationController) advanceVMCopy(ctx context.Context, policy *v1al
 	case vmCopyPhaseSending:
 		allDone := true
 		var failedNames []string
-		bytes := make([]int64, len(g.members))
+		results := make([]replJobResult, len(g.members))
 		for i, sv := range g.members {
-			done, ok, n, err := rc.checkReplicationJob(ctx, policy.Name, sv.Name)
+			done, ok, jr, err := rc.checkReplicationJob(ctx, policy.Name, sv.Name)
 			if err != nil {
 				keep(fmt.Sprintf("check apply Job: %v", err))
 				return
@@ -337,7 +361,7 @@ func (rc *ReplicationController) advanceVMCopy(ctx context.Context, policy *v1al
 				allDone = false
 				// Recreate anything that went missing; this does nothing if
 				// the Job exists.
-				if err := rc.createVMApplyResources(ctx, policy, sv, g.states[i]); err != nil {
+				if err := rc.createVMApplyResources(ctx, policy, sv, g.states[i], prev[sv.Name].CopyMoment); err != nil {
 					keep(fmt.Sprintf("create apply Job for %s: %v", sv.Name, err))
 					return
 				}
@@ -346,15 +370,33 @@ func (rc *ReplicationController) advanceVMCopy(ctx context.Context, policy *v1al
 			if !ok {
 				failedNames = append(failedNames, sv.Name)
 			}
-			bytes[i] = n
+			results[i] = jr
 		}
 		if !allDone {
 			keep("")
 			return
 		}
+		// The new change list becomes the base only when every disk of the VM
+		// holds the copy. Otherwise it is dropped, and the next copy reads
+		// the old base again, which covers every disk.
+		changeList := prev[g.members[0].Name].VMChangeList
+		if rc.sameVMPod(ctx, ns, st) {
+			if len(failedNames) == 0 {
+				if err := rc.vmCopier.Commit(ctx, vm, cp); err != nil {
+					klog.ErrorS(err, "Failed to commit VM disk copy", "vm", klog.KRef(ns, st.VMIName), "copy", st.ID)
+				}
+				changeList = st.Bitmap
+			} else if err := rc.vmCopier.Finish(ctx, vm, cp, true); err != nil {
+				klog.ErrorS(err, "Failed to drop the change list of a failed copy", "vm", klog.KRef(ns, st.VMIName), "copy", st.ID)
+			}
+		} else {
+			// The VM restarted or moved: its change lists are gone.
+			changeList = ""
+		}
 		for i, sv := range g.members {
 			rc.cleanupReplicationResources(ctx, policy, sv.Name)
 			s := vmStatus(prev, sv.Name, "")
+			s.VMChangeList = changeList
 			if len(failedNames) > 0 {
 				s.LastError = fmt.Sprintf("apply Job failed for %s; the destination disks of this VM may now show different moments",
 					strings.Join(failedNames, ", "))
@@ -367,9 +409,13 @@ func (rc *ReplicationController) advanceVMCopy(ctx context.Context, policy *v1al
 				if !st.FileSystemConsistent {
 					s.Consistency, s.ConsistencyReason = consistencyCrash, st.FreezeError
 				}
-				if bytes[i] > 0 {
-					n := bytes[i]
+				if n := results[i].BytesWritten; n > 0 {
 					s.BytesSynced = &n
+				}
+				s.RestorePoints, s.OldestRestorePoint = results[i].RestorePoints, nil
+				if o := results[i].OldestRestorePoint; o != nil {
+					t := metav1.NewTime(*o)
+					s.OldestRestorePoint = &t
 				}
 				rc.recordSubVolumeSyncTime(policy.Name, sv.Name)
 			}
@@ -379,6 +425,16 @@ func (rc *ReplicationController) advanceVMCopy(ctx context.Context, policy *v1al
 			res.failed += len(g.members)
 		}
 	}
+}
+
+// sameVMPod reports whether the VM pod of a copy still runs, so QEMU still
+// has the copy's change lists.
+func (rc *ReplicationController) sameVMPod(ctx context.Context, ns string, st *v1alpha1.VMCopyState) bool {
+	pod := &corev1.Pod{}
+	if err := rc.directClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: st.PodName}, pod); err != nil {
+		return false
+	}
+	return string(pod.UID) == st.PodUID
 }
 
 // vmMoving reports whether a live migration of the VMI is requested or running.
@@ -458,7 +514,7 @@ func (rc *ReplicationController) advanceVMCopies(ctx context.Context, policy *v1
 
 // createVMApplyResources creates the PVs, PVCs and Job that apply a staged VM
 // disk copy at the destination. Each step does nothing if its object exists.
-func (rc *ReplicationController) createVMApplyResources(ctx context.Context, policy *v1alpha1.ReplicationPolicy, sv *v1alpha1.SubVolume, st *v1alpha1.VMCopyState) error {
+func (rc *ReplicationController) createVMApplyResources(ctx context.Context, policy *v1alpha1.ReplicationPolicy, sv *v1alpha1.SubVolume, st *v1alpha1.VMCopyState, from *metav1.Time) error {
 	if err := rc.ensureReplicationSourcePV(ctx, sv, policy.Name); err != nil {
 		return fmt.Errorf("source PV: %w", err)
 	}
@@ -471,7 +527,7 @@ func (rc *ReplicationController) createVMApplyResources(ctx context.Context, pol
 	if err := rc.ensureReplicationPVC(ctx, replDestPVName(policy.Name, sv.Name), replDestPVCName(policy.Name, sv.Name), policy.Name, sv.Name, "dest"); err != nil {
 		return fmt.Errorf("dest PVC: %w", err)
 	}
-	return rc.ensureVMApplyJob(ctx, policy, sv, st)
+	return rc.ensureVMApplyJob(ctx, policy, sv, st, from)
 }
 
 // ensureVMApplyJob creates the Job that replaces the destination disk with
@@ -479,7 +535,8 @@ func (rc *ReplicationController) createVMApplyResources(ctx context.Context, pol
 // and writes the metadata file that failover reads. The main container runs
 // as the QEMU user, so it can delete the staging file and the new disk image
 // belongs to the user KubeVirt runs QEMU as.
-func (rc *ReplicationController) ensureVMApplyJob(ctx context.Context, policy *v1alpha1.ReplicationPolicy, sv *v1alpha1.SubVolume, st *v1alpha1.VMCopyState) error {
+// from is the moment the destination disk shows now, nil if it has no copy.
+func (rc *ReplicationController) ensureVMApplyJob(ctx context.Context, policy *v1alpha1.ReplicationPolicy, sv *v1alpha1.SubVolume, st *v1alpha1.VMCopyState, from *metav1.Time) error {
 	jobName := replJobName(policy.Name, sv.Name)
 	existing := &batchv1.Job{}
 	if err := rc.directClient.Get(ctx, types.NamespacedName{Namespace: replJobNamespace, Name: jobName}, existing); err == nil {
@@ -554,13 +611,9 @@ METADATA
 						VolumeMounts:    []corev1.VolumeMount{{Name: "dest", MountPath: "/dest"}},
 					}},
 					Containers: []corev1.Container{{
-						Name:  "apply",
-						Image: rc.driverImage,
-						Command: []string{"/usr/local/bin/vpc-file-pool-csi",
-							"--mode=apply-vm-disk",
-							"--staging-path=/source/" + st.StagingFile,
-							"--disk-path=" + destDir + "/disk.img",
-						},
+						Name:         "apply",
+						Image:        rc.driverImage,
+						Command:      vmApplyCommand(policy, st, from, destDir),
 						Resources:    resources,
 						VolumeMounts: mounts,
 					}},
@@ -574,9 +627,33 @@ METADATA
 			},
 		},
 	}
-	if err := rc.directClient.Create(ctx, job); err != nil && !errors.IsAlreadyExists(err) {
+	if err := rc.directClient.Create(ctx, job); err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("creating VM disk apply Job %s/%s: %w", replJobNamespace, jobName, err)
 	}
 	klog.V(2).InfoS("Created VM disk apply Job", "job", klog.KRef(replJobNamespace, jobName), "policy", policy.Name, "subVolume", sv.Name)
 	return nil
+}
+
+// vmApplyCommand is the command line of a VM disk apply Job.
+func vmApplyCommand(policy *v1alpha1.ReplicationPolicy, st *v1alpha1.VMCopyState, from *metav1.Time, destDir string) []string {
+	keep := int32(defaultRestorePointKeepHours)
+	if policy.Spec.RestorePointKeepHours != nil {
+		keep = *policy.Spec.RestorePointKeepHours
+	}
+	cmd := []string{"/usr/local/bin/vpc-file-pool-csi",
+		"--mode=apply-vm-disk",
+		"--staging-path=/source/" + st.StagingFile,
+		"--disk-path=" + destDir + "/disk.img",
+		"--to=" + st.Moment.UTC().Format(time.RFC3339Nano),
+		"--keep=" + (time.Duration(keep) * time.Hour).String(),
+	}
+	// A change copy needs a destination disk with a known moment; without
+	// one the copy must be full, and it is (the change list is new).
+	if from != nil {
+		cmd = append(cmd, "--from="+from.UTC().Format(time.RFC3339Nano))
+	}
+	if !st.Incremental || from == nil {
+		cmd = append(cmd, "--full")
+	}
+	return cmd
 }

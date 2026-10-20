@@ -397,7 +397,8 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 		}
 
 		// Check if a Job already exists for this SubVolume.
-		done, succeeded, bytesWritten, checkErr := rc.checkReplicationJob(ctx, policyName, svCopy.Name)
+		done, succeeded, jobRes, checkErr := rc.checkReplicationJob(ctx, policyName, svCopy.Name)
+		bytesWritten := jobRes.BytesWritten
 		if checkErr != nil {
 			klog.ErrorS(checkErr, "Failed to check replication Job status",
 				"policy", policyName, "subVolume", svCopy.Name)
@@ -1243,9 +1244,9 @@ echo "Replication complete."
 }
 
 // checkReplicationJob checks the status of a replication Job.
-// Returns (done, succeeded, bytesWritten, error). If done=false, the Job is still running or doesn't exist.
+// Returns (done, succeeded, result, error). If done=false, the Job is still running or doesn't exist.
 // bytesWritten is parsed from the pod's termination message (only for receiver-mode Jobs).
-func (rc *ReplicationController) checkReplicationJob(ctx context.Context, policyName, svName string) (bool, bool, int64, error) {
+func (rc *ReplicationController) checkReplicationJob(ctx context.Context, policyName, svName string) (bool, bool, replJobResult, error) {
 	jobName := replJobName(policyName, svName)
 
 	job := &batchv1.Job{}
@@ -1255,14 +1256,13 @@ func (rc *ReplicationController) checkReplicationJob(ctx context.Context, policy
 	}, job)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			return false, false, 0, nil // no Job yet
+			return false, false, replJobResult{}, nil // no Job yet
 		}
-		return false, false, 0, fmt.Errorf("getting replication Job %s/%s: %w", replJobNamespace, jobName, err)
+		return false, false, replJobResult{}, fmt.Errorf("getting replication Job %s/%s: %w", replJobNamespace, jobName, err)
 	}
 
 	if job.Status.Succeeded > 0 {
-		bytesWritten := rc.readBytesWrittenFromJob(ctx, job)
-		return true, true, bytesWritten, nil
+		return true, true, rc.readJobResult(ctx, job), nil
 	}
 
 	// Check if all retries exhausted.
@@ -1271,37 +1271,43 @@ func (rc *ReplicationController) checkReplicationJob(ctx context.Context, policy
 		backoffLimit = *job.Spec.BackoffLimit
 	}
 	if job.Status.Failed >= backoffLimit+1 {
-		return true, false, 0, nil
+		return true, false, replJobResult{}, nil
 	}
 
-	return false, false, 0, nil // still running
+	return false, false, replJobResult{}, nil // still running
 }
 
-// readBytesWrittenFromJob reads the bytesWritten value from the completed pod's
-// termination message. The sync-client writes JSON to /dev/termination-log.
-func (rc *ReplicationController) readBytesWrittenFromJob(ctx context.Context, job *batchv1.Job) int64 {
+// replJobResult is what a finished replication Job reports in its pod's
+// termination message (sync-client and apply-vm-disk modes).
+type replJobResult struct {
+	BytesWritten       int64      `json:"bytesWritten"`
+	RestorePoints      int32      `json:"restorePoints"`
+	OldestRestorePoint *time.Time `json:"oldestRestorePoint,omitempty"`
+}
+
+// readJobResult reads the result from the completed pod's termination
+// message, which the Job writes as JSON to /dev/termination-log.
+func (rc *ReplicationController) readJobResult(ctx context.Context, job *batchv1.Job) replJobResult {
 	// List pods for this Job.
 	podList := &corev1.PodList{}
 	labels := job.Spec.Template.Labels
 	matchLabels := client.MatchingLabels(labels)
 	if err := rc.directClient.List(ctx, podList, matchLabels, client.InNamespace(job.Namespace)); err != nil {
 		klog.V(4).InfoS("Could not list pods for replication Job", "job", job.Name, "err", err)
-		return 0
+		return replJobResult{}
 	}
 
 	for _, pod := range podList.Items {
 		for _, cs := range pod.Status.ContainerStatuses {
 			if cs.State.Terminated != nil && cs.State.Terminated.Message != "" {
-				var msg struct {
-					BytesWritten int64 `json:"bytesWritten"`
-				}
+				var msg replJobResult
 				if err := json.Unmarshal([]byte(cs.State.Terminated.Message), &msg); err == nil && msg.BytesWritten > 0 {
-					return msg.BytesWritten
+					return msg
 				}
 			}
 		}
 	}
-	return 0
+	return replJobResult{}
 }
 
 // cleanupReplicationResources deletes the temporary PV, PVC, and Job for a replication sync.
