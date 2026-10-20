@@ -179,7 +179,7 @@ func (r *Receiver) openVMCall(w http.ResponseWriter, req *http.Request) *vmCall 
 	}
 	// The VM that boots from a failed-over copy runs as another user and
 	// must be able to use the folder, as in direct NFS mode.
-	if err = os.Chmod(dir, 0o777); err != nil { // #nosec G302 -- see above
+	if err = os.Chmod(dir, 0o777); err != nil { //nolint:gosec // G302: see above
 		c.unlock()
 		c.fail(http.StatusInternalServerError, "failed to set the folder mode")
 		return nil
