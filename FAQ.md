@@ -68,7 +68,7 @@ Deploy an `fio` pod with a PVC from the pool and run sequential and random I/O t
 
 ### How do I set up VMs with pool storage?
 
-Configure the pool with `defaultUID: 107`, `defaultGID: 107`, and `defaultPermissions: "0777"`. Create PVCs directly (bypass CDI), download cloud images, convert from qcow2 to raw format, and reference PVCs in the VM spec using `persistentVolumeClaim`. See [KNOWN-LIMITATIONS.md — CDI Compatibility](KNOWN-LIMITATIONS.md#cdi-containerized-data-importer-compatibility) for the full workflow.
+Configure the pool with `defaultUID: 107`, `defaultGID: 107`, and `defaultPermissions: "0777"`. Import cloud images with a CDI DataVolume (registry source) on the pool StorageClass, or create PVCs directly, write raw images to them, and reference the PVCs in the VM spec using `persistentVolumeClaim`. See [KNOWN-LIMITATIONS.md — CDI Compatibility](KNOWN-LIMITATIONS.md#cdi-containerized-data-importer-compatibility) for the full workflow.
 
 ### My VM shows "No bootable device" — what's wrong?
 
@@ -76,7 +76,7 @@ The boot disk is in qcow2 format instead of raw. KubeVirt requires raw format fo
 
 ### Why doesn't CDI work with this driver?
 
-CDI's VolumePopulator mechanism is incompatible with subdirectory-based CSI provisioning. CDI sets a `dataSource` that the `csi-provisioner` doesn't recognize, causing it to back off. The driver includes a golden image syncer (v0.11.0+) that provides an alternative workflow. See [KNOWN-LIMITATIONS.md — CDI Compatibility](KNOWN-LIMITATIONS.md#cdi-containerized-data-importer-compatibility).
+It does. CDI registry import onto a pool StorageClass works, and the pool's golden image syncer uses it. A CDI host-assisted clone onto the pool from other storage (such as Ceph) ran out of memory in CDI's upload pod. See [KNOWN-LIMITATIONS.md — CDI Compatibility](KNOWN-LIMITATIONS.md#cdi-containerized-data-importer-compatibility).
 
 ---
 

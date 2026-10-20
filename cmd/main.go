@@ -327,6 +327,7 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 	if goldenImageSyncInterval > 0 {
 		goldenImageSyncer.SetInterval(goldenImageSyncInterval)
 	}
+	reconciler.SetGoldenImageRemover(goldenImageSyncer)
 	go goldenImageSyncer.Run(signalCtx)
 
 	// Start the background replication controller for cross-region DR.

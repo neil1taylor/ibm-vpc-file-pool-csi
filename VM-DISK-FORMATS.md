@@ -80,9 +80,9 @@ CDI handles:
 - Conversion to raw
 - Writing to the PVC's filesystem as `disk.img`
 
-### Manual Import (Bypassing CDI)
+### Manual Import (Without CDI)
 
-When bypassing CDI (required for the pool CSI driver — see [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md#cdi-containerized-data-importer-compatibility)), you must convert qcow2 to raw manually:
+CDI registry import works on pool StorageClasses, and the pool's golden images are made by CDI (see [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md#cdi-containerized-data-importer-compatibility)). Convert qcow2 to raw by hand only if you write images to the pool yourself:
 
 ```bash
 # Use a container with qemu-img (e.g., quay.io/centos/centos:stream9)

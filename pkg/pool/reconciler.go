@@ -57,6 +57,18 @@ type FileSharePoolReconciler struct {
 	restMapper   meta.RESTMapper
 	cdiChecked   bool
 	cdiInstalled bool
+
+	goldenImages GoldenImageRemover
+}
+
+// GoldenImageRemover deletes the golden image objects made for a pool.
+type GoldenImageRemover interface {
+	RemovePoolImages(ctx context.Context, pool *v1alpha1.FileSharePool) (bool, error)
+}
+
+// SetGoldenImageRemover sets what removes a deleted pool's golden images.
+func (r *FileSharePoolReconciler) SetGoldenImageRemover(g GoldenImageRemover) {
+	r.goldenImages = g
 }
 
 // NewFileSharePoolReconciler creates a new reconciler with the given dependencies.
@@ -195,6 +207,18 @@ func (r *FileSharePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 // handleDeletion processes a pool that has a DeletionTimestamp set.
 func (r *FileSharePoolReconciler) handleDeletion(ctx context.Context, pool *v1alpha1.FileSharePool) (ctrl.Result, error) {
+	// The pool's golden images are volumes on the pool, so they go first.
+	if r.goldenImages != nil {
+		done, err := r.goldenImages.RemovePoolImages(ctx, pool)
+		if err != nil {
+			klog.ErrorS(err, "Failed to remove golden images during deletion", "pool", pool.Name)
+			return reconcile.Result{}, err
+		}
+		if !done {
+			return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
+		}
+	}
+
 	// Check for active SubVolumes
 	subVolumes, err := r.k8sClient.ListSubVolumes(ctx, pool.Name)
 	if err != nil {
@@ -876,11 +900,15 @@ func (r *FileSharePoolReconciler) ensureStorageProfiles(ctx context.Context, poo
 	}
 }
 
+// cdiCloneStrategy is the StorageProfile clone strategy for pool StorageClasses.
+const cdiCloneStrategy = "csi-clone"
+
 // patchStorageProfile patches the CDI StorageProfile with the given name,
 // setting spec.claimPropertySets and spec.cloneStrategy if not already set.
 // claimPropertySets enables the Virtualization UI to auto-select access modes.
-// cloneStrategy "copy" forces host-assisted cloning — CDI's snapshot-based
-// cloning does not work with our CSI driver.
+// cloneStrategy "csi-clone" makes CDI ask the driver for a clone. CDI's
+// snapshot clone does not work with this driver, and CDI's host-assisted copy
+// pods run out of memory when they write onto NFS (rovslab, 20 October 2026).
 func (r *FileSharePoolReconciler) patchStorageProfile(ctx context.Context, name string) {
 	if r.directClient == nil {
 		return
@@ -924,9 +952,9 @@ func (r *FileSharePoolReconciler) patchStorageProfile(ctx context.Context, name 
 		needsPatch = true
 	}
 
-	// Ensure cloneStrategy is "copy" — CDI's snapshot clone doesn't work with our driver.
-	if spec == nil || spec["cloneStrategy"] != "copy" {
-		specPatch["cloneStrategy"] = "copy"
+	// Ensure the driver makes CDI's clones.
+	if spec == nil || spec["cloneStrategy"] != cdiCloneStrategy {
+		specPatch["cloneStrategy"] = cdiCloneStrategy
 		needsPatch = true
 	}
 
@@ -946,7 +974,7 @@ func (r *FileSharePoolReconciler) patchStorageProfile(ctx context.Context, name 
 	klog.V(2).InfoS("Patched StorageProfile",
 		"storageProfile", name,
 		"claimPropertySets", "ReadWriteMany/Filesystem",
-		"cloneStrategy", "copy")
+		"cloneStrategy", cdiCloneStrategy)
 }
 
 // SetupWithManager registers the reconciler with a controller-runtime Manager.

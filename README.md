@@ -136,8 +136,8 @@ IBM VPC Client ──► VPC File Share API
 | **CDI** | Containerized Data Importer — KubeVirt component that imports, clones, and uploads VM disk images into PVCs |
 | **DataImportCron** | CDI resource that periodically imports OS images from a registry into golden image PVCs on a schedule |
 | **DataSource** | CDI resource pointing to a bootable disk PVC; appears in the OpenShift Virtualization **InstanceTypes** catalog tab |
-| **DataVolume** | CDI resource that combines PVC creation with data import/clone in a single object; incompatible with the pool CSI driver |
-| **VolumePopulator** | Kubernetes mechanism CDI uses to populate PVCs; sets a `dataSource` that the pool CSI provisioner does not recognize |
+| **DataVolume** | CDI resource that combines PVC creation with data import/clone in a single object. The pool's golden image syncer makes one per golden image |
+| **VolumePopulator** | Kubernetes mechanism CDI uses to populate PVCs |
 | **StorageProfile** | CDI resource auto-created per StorageClass; defines access modes, volume mode, and clone strategy for CDI operations |
 | **Template** | OpenShift resource defining a complete VM blueprint (CPU, memory, disks, network); appears in the **Templates** catalog tab |
 | **InstanceType** | KubeVirt resource defining a CPU/RAM preset; paired with a DataSource (image) to create a VM from the InstanceTypes tab |

@@ -90,7 +90,6 @@ export const PRESETS: Preset[] = [
       encryptionInTransit: false,
       goldenImagesEnabled: true,
       refreshInterval: '24h',
-      converterImage: 'quay.io/centos/centos:stream9',
       pvcSizeGB: 15,
     },
   },
@@ -139,7 +138,6 @@ export interface FormState {
   targetNamespaces: string;
   imageFilter: string;
   refreshInterval: string;
-  converterImage: string;
   pvcSizeGB: number;
 }
 
@@ -166,7 +164,6 @@ export const initialFormState: FormState = {
   targetNamespaces: '',
   imageFilter: '',
   refreshInterval: '24h',
-  converterImage: 'quay.io/centos/centos:stream9',
   pvcSizeGB: 15,
 };
 
@@ -226,7 +223,6 @@ export const buildResource = (form: FormState): FileSharePool => {
     const filters = parseLines(form.imageFilter);
     if (filters.length > 0) goldenImages.imageFilter = filters;
     if (form.refreshInterval.trim()) goldenImages.refreshInterval = form.refreshInterval.trim();
-    if (form.converterImage.trim()) goldenImages.converterImage = form.converterImage.trim();
     if (form.pvcSizeGB >= 5) goldenImages.pvcSizeGB = form.pvcSizeGB;
 
     spec.goldenImages = goldenImages;
@@ -1019,25 +1015,6 @@ const FileSharePoolCreatePage: React.FC = () => {
             </FieldPopover>
           </StackItem>
 
-          <StackItem>
-            <FieldPopover
-              fieldId="fsp-golden-converter"
-              label="Converter Image"
-              description="Container image used for qcow2-to-raw conversion Jobs. Must have qemu-img installed. Default uses CentOS Stream 9 which includes qemu-img in its repos."
-            >
-              <TextInput
-                id="fsp-golden-converter"
-                value={form.converterImage}
-                onChange={(_event, value) => set('converterImage', value)}
-                placeholder="quay.io/centos/centos:stream9"
-              />
-              <FormHelperText>
-                <HelperText>
-                  <HelperTextItem>Container image used for qcow2-to-raw conversion</HelperTextItem>
-                </HelperText>
-              </FormHelperText>
-            </FieldPopover>
-          </StackItem>
 
           <StackItem>
             <FieldPopover

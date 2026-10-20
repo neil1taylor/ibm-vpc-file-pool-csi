@@ -400,7 +400,6 @@ spec:
   goldenImages:            # Auto-provision golden images for KubeVirt
     targetNamespaces:
       - openshift-virtualization-os-images
-    converterImage: quay.io/centos/centos:stream9
     pvcSize: 30Gi
 ```
 

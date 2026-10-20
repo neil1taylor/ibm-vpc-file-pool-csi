@@ -190,11 +190,6 @@ type GoldenImageConfig struct {
     // +optional
     RefreshInterval string `json:"refreshInterval,omitempty"`
 
-    // ConverterImage is the container image used for qcow2-to-raw conversion jobs.
-    // +kubebuilder:default="quay.io/centos/centos:stream9"
-    // +optional
-    ConverterImage string `json:"converterImage,omitempty"`
-
     // PVCSizeGB is the size of golden image PVCs in GB.
     // +kubebuilder:validation:Minimum=5
     // +kubebuilder:default=15
@@ -529,14 +524,13 @@ spec:
       - fedora
       - centos-stream9
     refreshInterval: "24h"
-    converterImage: "quay.io/centos/centos:stream9"
     pvcSizeGB: 15
 ```
 
 When `goldenImages.enabled` is `true`, the golden image syncer discovers CDI DataImportCrons
-matching the filter, creates golden PVCs on the pool's StorageClass, runs converter Jobs
-(download + qcow2-to-raw conversion), and creates OpenShift VM Templates. Status is tracked
-in `status.goldenImages`.
+matching the filter, creates a CDI DataVolume `golden-<image>` on the pool's StorageClass in
+each target namespace (CDI imports the image and converts it to raw), and creates a DataSource
+and an OpenShift VM Template. Status is tracked in `status.goldenImages`.
 
 ### Example FileSharePool CR with DrainShares
 
