@@ -488,6 +488,7 @@ To run it from the current machine instead, with your own kubeconfig: `bash test
 | `08-vms` | A VM made from the standard catalog (CentOS Stream 9) with its boot disk on a pool boots and its guest agent connects; it live-migrates to another worker without a restart; CDI copies 25 GB of random data from Ceph onto the pool and the checksum matches |
 | `11-draining` | A share on the drain list gets no new volumes and the pool counts the volumes left on it; taken off the list, it takes new volumes again |
 | `13-webhooks` | Bad pools, SubVolumes and replication policies are refused with a message that names the problem; a good one of each kind is accepted. All requests are server-side dry runs |
+| `14-migration` | `kubectl-migrate` copies a claim from IBM's `ibmc-vpc-file-3000-iops` class (200 Gi, the size that class needs for 3000 IOPS) into a new pool; the new claim is bound on the pool, a pod on it sees the same files (checksums match), and the source claim is unchanged. The runner builds the tool and ships it to the build server |
 | `15-metrics` | Prometheus has the driver's metrics with non-zero allocation and VPC API counts; each pool reconciles about once a minute (at most 3) |
 | `17-speed` | fio runs 5 tests of 60 s (sequential 1 MB read and write, random 4 KB read and write, 70/30 mix) on a pool volume, on IBM's `ibmc-vpc-file-3000-iops` class as the baseline, and inside a VM on a pool disk. Results go to `speed.csv` in the run folder and to `history.csv` next to the run folders; more than 20% below the last run is a NOTE |
 

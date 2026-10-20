@@ -72,7 +72,7 @@ Plan flags:
   --namespace, -n        Kubernetes namespace (default: "default")
   --storage-class        Source StorageClass name to filter PVCs (required)
   --target-pool          Target FileSharePool name (required)
-  --kubeconfig           Path to kubeconfig (default: ~/.kube/config)
+  --kubeconfig           Path to kubeconfig (default: $KUBECONFIG, then ~/.kube/config)
 
 Execute flags:
   --namespace, -n              Kubernetes namespace (default: "default")
@@ -80,11 +80,11 @@ Execute flags:
   --target-pool                Target FileSharePool name (required)
   --target-storage-class       Target StorageClass on the pool driver (required)
   --dry-run                    Print what would happen without making changes
-  --kubeconfig                 Path to kubeconfig (default: ~/.kube/config)
+  --kubeconfig                 Path to kubeconfig (default: $KUBECONFIG, then ~/.kube/config)
 
 Status flags:
   --namespace, -n        Kubernetes namespace (default: "default")
-  --kubeconfig           Path to kubeconfig (default: ~/.kube/config)
+  --kubeconfig           Path to kubeconfig (default: $KUBECONFIG, then ~/.kube/config)
 `)
 }
 
@@ -125,16 +125,25 @@ func parseFlags(args []string) map[string]string {
 }
 
 func buildClientset(kubeconfig string) (kubernetes.Interface, error) {
-	if kubeconfig == "" {
-		if home := homedir.HomeDir(); home != "" {
-			kubeconfig = filepath.Join(home, ".kube", "config")
-		}
+	// The default loading rules read the --kubeconfig flag first, then the
+	// KUBECONFIG variable, then ~/.kube/config, like kubectl does.
+	rules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfig}
+	if env := os.Getenv("KUBECONFIG"); env != "" {
+		rules.Precedence = filepath.SplitList(env)
+	} else if home := homedir.HomeDir(); home != "" {
+		rules.Precedence = []string{filepath.Join(home, ".kube", "config")}
 	}
-
-	// Try in-cluster config first if kubeconfig doesn't exist.
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	loader := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, &clientcmd.ConfigOverrides{})
+	raw, err := loader.RawConfig()
 	if err != nil {
-		return nil, fmt.Errorf("failed to build kubeconfig from %s: %w", kubeconfig, err)
+		return nil, fmt.Errorf("failed to read kubeconfig: %w", err)
+	}
+	if len(raw.Contexts) == 0 {
+		return nil, fmt.Errorf("no kubeconfig found: use --kubeconfig, set KUBECONFIG, or create ~/.kube/config")
+	}
+	config, err := loader.ClientConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to build kubeconfig: %w", err)
 	}
 
 	clientset, err := kubernetes.NewForConfig(config)

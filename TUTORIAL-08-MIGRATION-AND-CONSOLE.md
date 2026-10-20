@@ -261,7 +261,7 @@ kubectl migrate execute \
 ```
 
 **What this does:**
-- Creates a new PVC (`legacy-app-data-pool`) on the pool driver
+- Creates a new PVC (`legacy-app-data-pooled`) on the pool driver
 - Spawns a temporary migration pod that mounts both the source and target PVCs
 - Uses rsync to copy all data from the source PVC to the target PVC
 - Reports success when the copy completes
@@ -276,7 +276,7 @@ Expected output during migration:
 
 ```
 POD                              SOURCE PVC       TARGET PVC            PHASE      STARTED
-migrate-legacy-app-data-xxxxx    legacy-app-data  legacy-app-data-pool  Running    2026-02-25 10:30:15
+migrate-legacy-app-data-xxxxx    legacy-app-data  legacy-app-data-pooled  Running    2026-02-25 10:30:15
 ```
 
 Wait for the phase to show `Succeeded`:
@@ -294,9 +294,9 @@ Expected output on completion:
 
 ```
 POD                              SOURCE PVC       TARGET PVC            PHASE       STARTED
-migrate-legacy-app-data-xxxxx    legacy-app-data  legacy-app-data-pool  Succeeded   2026-02-25 10:30:15
+migrate-legacy-app-data-xxxxx    legacy-app-data  legacy-app-data-pooled  Succeeded   2026-02-25 10:30:15
 
-SUCCESS: PVC legacy-app-data migrated to legacy-app-data-pool on pool ops-pool
+SUCCESS: PVC legacy-app-data migrated to legacy-app-data-pooled on pool ops-pool
 ```
 
 ### Verify Data Integrity
@@ -330,7 +330,7 @@ spec:
   volumes:
     - name: data
       persistentVolumeClaim:
-        claimName: legacy-app-data-pool
+        claimName: legacy-app-data-pooled
 EOF
 ```
 
@@ -348,10 +348,10 @@ Verify the new PVC is on the pool:
 
 ```bash
 # New PVC is on the pool StorageClass
-oc get pvc legacy-app-data-pool -n ${TUTORIAL_NS}
+oc get pvc legacy-app-data-pooled -n ${TUTORIAL_NS}
 
 # SubVolume exists
-oc get subvolumes -o wide | grep legacy-app-data-pool
+oc get subvolumes -o wide | grep legacy-app-data-pooled
 
 # Pool shows the allocation
 oc get filesharepools ${POOL_NAME}
@@ -363,7 +363,7 @@ Clean up the migration pod and verifier:
 oc delete pod migration-verifier -n ${TUTORIAL_NS}
 ```
 
-> **Production note:** After verifying the migrated data, update your application's PVC reference from `legacy-app-data` to `legacy-app-data-pool`, then delete the original PVC to free the stock VPC file share.
+> **Production note:** After verifying the migrated data, update your application's PVC reference from `legacy-app-data` to `legacy-app-data-pooled`, then delete the original PVC to free the stock VPC file share.
 
 ---
 
