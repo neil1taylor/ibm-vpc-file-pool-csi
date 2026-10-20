@@ -149,8 +149,16 @@ kubectl get subvolumes -l storage.ibmcloud.io/share-id=<share-id> \
 #    The DrainComplete condition is set on the pool
 kubectl get fsp <pool-name> -o jsonpath='{.status.conditions}' | jq '.[] | select(.type=="DrainComplete")'
 
-# To stop draining: take the share off the list. If the VPC reports the share
-# healthy, it takes new volumes again within one reconcile (about 60 s).
+# 6. To remove the drained share: keep it on the drain list while you delete it.
+#    If it leaves the list first, it takes new volumes again within about 60 s.
+ibmcloud is share-delete <share-id> -f
+#    Wait until the share is gone from the pool status (no PVCs left, so the
+#    pool drops it), then take it off the list.
+kubectl get fsp <pool-name> -o jsonpath='{.status.shares[*].shareID}'
+kubectl patch filesharepool <pool-name> --type merge -p '{"spec":{"drainShares":[]}}'
+
+# To stop draining instead: take the share off the list. If the VPC reports the
+# share healthy, it takes new volumes again within one reconcile (about 60 s).
 kubectl patch filesharepool <pool-name> --type merge -p '{"spec":{"drainShares":[]}}'
 ```
 

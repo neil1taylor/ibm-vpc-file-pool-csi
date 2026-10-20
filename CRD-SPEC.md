@@ -557,7 +557,8 @@ spec:
 Shares listed in `drainShares` are marked with `state: draining` in the pool status and excluded
 from new allocations. The controller tracks drain progress in `status.drainStatus`. Once all
 SubVolumes have been removed from a draining share (either by deletion or migration), the share
-is considered fully drained.
+is considered fully drained. A share that is not on the list, and that the VPC reports as healthy,
+takes new volumes, so keep a share on the list until it has been deleted.
 
 ### Reconciler Behavior
 
