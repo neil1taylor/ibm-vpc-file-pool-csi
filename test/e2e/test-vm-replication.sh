@@ -313,6 +313,9 @@ log "booting the copy"
 vm_yaml copy copy-root copy-data no | oc apply -f -
 wait_until 900 "copy guest agent" agent_connected copy
 
+log "waiting for ssh on the copy"
+wait_until 300 "ssh on the copy" vssh copy true
+
 log "checking the copy"
 xfs=$(vssh copy 'sudo journalctl -k --no-pager | grep -ci "xfs.*\(corrupt\|error\)" || true')
 [ "$xfs" = 0 ] || fail "XFS errors in the copy's kernel log: $xfs"
