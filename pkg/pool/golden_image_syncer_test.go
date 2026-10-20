@@ -253,7 +253,7 @@ func TestEnsureTemplate_Creates(t *testing.T) {
 
 	syncer := NewGoldenImageSyncer(fk, directClient)
 	err := syncer.ensureTemplate(context.Background(), "test-ns", "centos-stream9",
-		"centos-stream9-nfs-pool", "my-pool", "my-pool", "golden-centos-stream9")
+		"centos-stream9-nfs-pool", "my-pool", "my-pool", "golden-centos-stream9", 15)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -371,7 +371,7 @@ func TestGoldenImageSyncer_GracefulShutdown(t *testing.T) {
 }
 
 func TestBuildVMTemplate(t *testing.T) {
-	tmpl := buildVMTemplate("centos-stream9", "centos-stream9-nfs-pool", "test-ns", "my-pool", "my-pool", "golden-centos-stream9")
+	tmpl := buildVMTemplate("centos-stream9", "centos-stream9-nfs-pool", "test-ns", "my-pool", "my-pool", "golden-centos-stream9", 15)
 
 	if tmpl.GetName() != "centos-stream9-nfs-pool" {
 		t.Errorf("expected template name centos-stream9-nfs-pool, got %s", tmpl.GetName())

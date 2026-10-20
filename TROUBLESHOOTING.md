@@ -140,7 +140,7 @@ On managed clusters (ROKS/ROVS/IKS), the `storage-secret-store` secret is mainta
 
 **Cause:** The boot disk image is in **qcow2 format** instead of raw. KubeVirt passes filesystem-PVC images to QEMU with `"driver":"file"` (raw protocol, no qcow2 format layer). QEMU reads the qcow2 headers (`QFI\xfb` magic) as raw MBR/GPT data and finds no valid boot sector.
 
-This happens when cloud images (distributed as qcow2) are downloaded directly to the PVC without converting to raw — which is what CDI does automatically.
+This happens when cloud images (distributed as qcow2) are written directly to the PVC without converting to raw. CDI converts the image automatically, and the pool's golden images are made by CDI.
 
 **Diagnosis:**
 ```bash
@@ -151,7 +151,7 @@ kubectl exec -n <namespace> ${LAUNCHER} -c compute -- \
 # If output shows: 51 46 49 fb → qcow2 format (QFI magic). Should be raw.
 ```
 
-**Fix:** Stop the VM, re-run the image downloader pod with qcow2→raw conversion, then restart:
+**Fix:** If the image came from CDI or from the pool's golden images, check the DataVolume with `kubectl describe dv`. If you wrote the image yourself, stop the VM, re-run your downloader pod with qcow2→raw conversion, then restart:
 ```bash
 virtctl stop <vm-name> -n <namespace>
 # Run a pod with qemu-img to convert (see TUTORIAL.md Step 8b):

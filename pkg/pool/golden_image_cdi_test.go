@@ -23,7 +23,7 @@ func addDataVolumeKinds(s *runtime.Scheme) {
 func goldenDataVolume(ns, name, phase string) *unstructured.Unstructured {
 	dv := labelledUnstructured(dataVolumeGVK, ns, name, goldenLabels("my-pool"))
 	_ = unstructured.SetNestedField(dv.Object, "docker://quay.io/containerdisks/centos-stream:9", "spec", "source", "registry", "url")
-	_ = unstructured.SetNestedField(dv.Object, "my-pool", "spec", "storage", "storageClassName")
+	_ = unstructured.SetNestedField(dv.Object, "my-pool", "spec", "pvc", "storageClassName")
 	if phase != "" {
 		_ = unstructured.SetNestedField(dv.Object, phase, "status", "phase")
 	}
@@ -63,16 +63,22 @@ func TestEnsureGoldenDataVolume_ImportsFromTheRegistryOntoThePool(t *testing.T) 
 	checks := map[string][2]string{
 		"registry URL":  {str("spec", "source", "registry", "url"), img.RegistryURL},
 		"pull method":   {str("spec", "source", "registry", "pullMethod"), "node"},
-		"storage class": {str("spec", "storage", "storageClassName"), "my-sc"},
-		"volume mode":   {str("spec", "storage", "volumeMode"), "Filesystem"},
-		"size":          {str("spec", "storage", "resources", "requests", "storage"), "15Gi"},
+		"storage class": {str("spec", "pvc", "storageClassName"), "my-sc"},
+		"volume mode":   {str("spec", "pvc", "volumeMode"), "Filesystem"},
+		// spec.pvc gives the claim exactly this size, so VM disks of the
+		// same size can be copied from it. spec.storage would add CDI's
+		// file system room on top.
+		"size": {str("spec", "pvc", "resources", "requests", "storage"), "15Gi"},
 	}
 	for what, got := range checks {
 		if got[0] != got[1] {
 			t.Errorf("%s = %q, want %q", what, got[0], got[1])
 		}
 	}
-	modes, _, _ := unstructured.NestedStringSlice(dv.Object, "spec", "storage", "accessModes")
+	if _, found, _ := unstructured.NestedMap(dv.Object, "spec", "storage"); found {
+		t.Error("spec.storage must not be set: CDI would make the claim bigger than the VM template's boot disk")
+	}
+	modes, _, _ := unstructured.NestedStringSlice(dv.Object, "spec", "pvc", "accessModes")
 	if len(modes) != 1 || modes[0] != "ReadWriteMany" {
 		t.Errorf("access modes = %v, want [ReadWriteMany] so VMs can live-migrate", modes)
 	}
@@ -130,4 +136,18 @@ func TestEnsureGoldenDataVolume_RefusesADataVolumeItDidNotMake(t *testing.T) {
 			t.Errorf("%s: status = %s with catalog entry %q, want Failed and no catalog entry", name, status.Phase, status.DataSourceName)
 		}
 	}
+}
+
+func TestBuildVMTemplate_BootDiskIsTheGoldenImageSize(t *testing.T) {
+	tmpl := buildVMTemplate("centos-stream9", "centos-stream9-nfs-pool", "app-a", "my-pool", "my-pool", "golden-centos-stream9", 20)
+	params, _, _ := unstructured.NestedSlice(tmpl.Object, "parameters")
+	for _, p := range params {
+		if m, ok := p.(map[string]interface{}); ok && m["name"] == "BOOT_DISK_SIZE" {
+			if m["value"] != "20Gi" {
+				t.Errorf("BOOT_DISK_SIZE default = %v, want 20Gi (a copy cannot be smaller than the golden image)", m["value"])
+			}
+			return
+		}
+	}
+	t.Fatal("no BOOT_DISK_SIZE parameter")
 }

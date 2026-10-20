@@ -2,7 +2,7 @@
 # test-vm-clone.sh — E2E test for KubeVirt VM creation via CSI clone from golden image.
 #
 # Tests the full syncer-driven pipeline: pool with goldenImages.enabled=true
-# -> syncer discovers images -> converter Jobs -> templates -> VM creation
+# -> syncer discovers images -> CDI DataVolumes -> templates -> VM creation
 # (CSI clone) -> clone Job completes -> VM boots -> virtctl connectivity.
 #
 # Usage:
@@ -153,11 +153,11 @@ collect_diagnostics() {
         oc logs -n kube-system "$job" --tail=50 2>/dev/null || echo "(no logs)"
     done
 
-    info "--- Converter Jobs in $NAMESPACE ---"
-    oc get jobs -n "$NAMESPACE" -l pool.storage.ibmcloud.io/golden-image=true -o wide 2>/dev/null || echo "(none)"
-    for job in $(oc get jobs -n "$NAMESPACE" -l pool.storage.ibmcloud.io/golden-image=true -o name 2>/dev/null); do
-        info "Logs for $job:"
-        oc logs -n "$NAMESPACE" "$job" --tail=50 2>/dev/null || echo "(no logs)"
+    info "--- Golden DataVolumes in $NAMESPACE ---"
+    oc get dv -n "$NAMESPACE" -o wide 2>/dev/null || echo "(none)"
+    for dv in $(oc get dv -n "$NAMESPACE" -o name 2>/dev/null); do
+        info "Describe $dv:"
+        oc describe "$dv" -n "$NAMESPACE" 2>/dev/null | tail -30 || echo "(no output)"
     done
 
     info "--- Templates in $NAMESPACE ---"
@@ -217,7 +217,7 @@ hardened_cleanup() {
             sleep 2
         done
 
-        # Delete Jobs (converter + clone)
+        # Delete Jobs (clone)
         oc delete jobs --all -n "$NAMESPACE" --ignore-not-found --timeout=30s 2>/dev/null || true
 
         # Force-delete any pods still stuck in Terminating
@@ -430,10 +430,7 @@ for i in $(seq 1 30); do
     sleep 2
 done
 
-# Grant anyuid SCC to default service account — converter Jobs need root (runAsUser: 0)
-# for dnf install + qemu-img. OpenShift blocks this without an explicit SCC grant.
-oc adm policy add-scc-to-user anyuid -z default -n "$NAMESPACE"
-info "Namespace $NAMESPACE created with anyuid SCC ($(stage_duration))"
+info "Namespace $NAMESPACE created ($(stage_duration))"
 
 ###############################################################################
 # Stage 4: Create StorageClass and FileSharePool with goldenImages
@@ -508,9 +505,8 @@ enter_stage "wait_golden_images_ready"
 
 info "The golden image syncer will:"
 info "  1. Discover DataImportCrons matching '$IMAGE_FILTER'"
-info "  2. Create golden PVCs on StorageClass '$SC_NAME'"
-info "  3. Run converter Jobs (download + qcow2-to-raw)"
-info "  4. Mark PVCs ready and create OpenShift Templates"
+info "  2. Create CDI DataVolumes on StorageClass '$SC_NAME' (CDI imports the images)"
+info "  3. Wait for the DataVolumes to succeed, then create OpenShift Templates"
 info "Syncer interval: 5m (first cycle may take up to 5m to start)"
 
 # Poll until the pool status shows at least one golden image in Ready phase

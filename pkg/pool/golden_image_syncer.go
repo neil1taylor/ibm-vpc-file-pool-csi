@@ -336,7 +336,7 @@ func (s *GoldenImageSyncer) syncImageInNamespace(
 	status.DataSourceName = dsName
 
 	// 4. Ensure OpenShift Template (for Template catalog tab).
-	if err := s.ensureTemplate(ctx, ns, img.Name, templateName, poolName, scName, pvcName); err != nil {
+	if err := s.ensureTemplate(ctx, ns, img.Name, templateName, poolName, scName, pvcName, pvcSizeGB); err != nil {
 		status.Phase = "Failed"
 		status.Message = fmt.Sprintf("Template: %v", err)
 		return status
@@ -365,7 +365,7 @@ func (s *GoldenImageSyncer) ensureGoldenDataVolume(
 		// Anyone who can write in the namespace could have made this
 		// DataVolume. Publish it only if it is the one this pool would make.
 		url, _, _ := unstructured.NestedString(dv.Object, "spec", "source", "registry", "url")
-		sc, _, _ := unstructured.NestedString(dv.Object, "spec", "storage", "storageClassName")
+		sc, _, _ := unstructured.NestedString(dv.Object, "spec", "pvc", "storageClassName")
 		labels := dv.GetLabels()
 		if labels[goldenImageLabel] != "true" || labels[goldenPoolLabel] != poolName || url != img.RegistryURL || sc != scName {
 			return "", fmt.Errorf("DataVolume %s/%s was not made by pool %s for %s; delete it to let the pool make it", ns, name, poolName, img.RegistryURL)
@@ -396,7 +396,9 @@ func (s *GoldenImageSyncer) ensureGoldenDataVolume(
 					"pullMethod": "node",
 				},
 			},
-			"storage": map[string]interface{}{
+			// spec.pvc, not spec.storage: the claim gets exactly sizeGB, so
+			// the template's boot disk of the same size can be copied from it.
+			"pvc": map[string]interface{}{
 				"accessModes":      []interface{}{"ReadWriteMany"},
 				"volumeMode":       "Filesystem",
 				"storageClassName": scName,
@@ -425,13 +427,15 @@ func (s *GoldenImageSyncer) ensureGoldenDataVolume(
 func (s *GoldenImageSyncer) ensureTemplate(
 	ctx context.Context,
 	ns, imageName, templateName, poolName, scName, goldenPVCName string,
+	sizeGB int64,
 ) error {
-	return s.createTemplateInNamespace(ctx, ns, imageName, templateName, poolName, scName, goldenPVCName)
+	return s.createTemplateInNamespace(ctx, ns, imageName, templateName, poolName, scName, goldenPVCName, sizeGB)
 }
 
 func (s *GoldenImageSyncer) createTemplateInNamespace(
 	ctx context.Context,
 	ns, imageName, templateName, poolName, scName, goldenPVCName string,
+	sizeGB int64,
 ) error {
 	template := &unstructured.Unstructured{}
 	template.SetGroupVersionKind(schema.GroupVersionKind{
@@ -448,7 +452,7 @@ func (s *GoldenImageSyncer) createTemplateInNamespace(
 		return fmt.Errorf("getting template %s/%s: %w", ns, templateName, err)
 	}
 
-	tmpl := buildVMTemplate(imageName, templateName, ns, poolName, scName, goldenPVCName)
+	tmpl := buildVMTemplate(imageName, templateName, ns, poolName, scName, goldenPVCName, sizeGB)
 	if err := s.directClient.Create(ctx, tmpl); err != nil {
 		if errors.IsAlreadyExists(err) {
 			return nil
@@ -513,7 +517,9 @@ func osDisplayName(imageName string) string {
 }
 
 // buildVMTemplate constructs an OpenShift Template for a golden image VM.
-func buildVMTemplate(imageName, templateName, ns, poolName, scName, goldenPVCName string) *unstructured.Unstructured {
+// The boot disk defaults to the golden image's size, because a copy cannot be
+// smaller than its source.
+func buildVMTemplate(imageName, templateName, ns, poolName, scName, goldenPVCName string, sizeGB int64) *unstructured.Unstructured {
 	osLabelKey := cleanImageName(imageName)
 	displayName := osDisplayName(imageName)
 	iconClass := osIconClass(imageName)
@@ -562,7 +568,7 @@ func buildVMTemplate(imageName, templateName, ns, poolName, scName, goldenPVCNam
 				map[string]interface{}{
 					"name":        "BOOT_DISK_SIZE",
 					"description": "Boot disk size",
-					"value":       "15Gi",
+					"value":       fmt.Sprintf("%dGi", sizeGB),
 				},
 				map[string]interface{}{
 					"name":        "DATA_DISK_SIZE",

@@ -67,9 +67,8 @@ Then test from the UI: **Virtualization > Catalog > Select OS > Create VirtualMa
 
 The controller runs a background syncer that:
 1. Discovers OS images from CDI `DataImportCron` resources
-2. Creates golden image PVCs on the pool StorageClass
-3. Runs converter Jobs to download and convert qcow2 images to raw format
-4. Creates OpenShift Templates for VM creation from the UI catalog
+2. Creates a CDI DataVolume for each image on the pool StorageClass. CDI downloads the image and converts it to raw format.
+3. Creates a DataSource and an OpenShift Template for VM creation from the UI catalog
 
 ### Configuration
 
@@ -97,8 +96,6 @@ spec:
     # imageFilter:
     #   - centos
     #   - fedora
-    # Optional: converter image (default: quay.io/centos/centos:stream9)
-    # converterImage: quay.io/centos/centos:stream9
     # Optional: golden PVC size (default: 15 GB)
     # pvcSizeGB: 15
 ```
@@ -107,33 +104,32 @@ spec:
 
 For each discovered image and each target namespace:
 
-| Resource | Where | Name | Purpose |
-|----------|-------|------|---------|
-| PVC | target namespace | `golden-{imageName}` | Holds the raw disk image |
-| Job | driver namespace (`kube-system`) | `share-data-golden-{namespace}-golden-{imageName}` (shortened with a hash when long) | Downloads, decompresses, and converts to raw. Removed when it finishes. |
-| DataSource | `openshift-virtualization-os-images` | `{imageName}-{namespace}-nfs-pool` | CDI DataSource pointing to the golden PVC (enables InstanceTypes tab) |
-| Template | target namespace | `{imageName}-nfs-pool` | OpenShift VM template for UI catalog |
+| Resource | Name | Purpose |
+|----------|------|---------|
+| DataVolume | `golden-{imageName}` | CDI imports the image from the registry onto the pool StorageClass. The source is the DataImportCron's registry URL with `pullMethod: node`. |
+| PVC | `golden-{imageName}` | Created by CDI for the DataVolume. Holds the raw disk image. |
+| DataSource | `{imageName}-{namespace}-nfs-pool` | CDI DataSource pointing to the golden PVC (enables InstanceTypes tab). One per golden claim. |
+| Template | `{imageName}-nfs-pool` | OpenShift VM template for UI catalog, in the target namespace |
 
-The converter Job runs in the driver's namespace and mounts the share directly, so the target namespaces need no `anyuid` grant.
+For images whose DataImportCron uses an ImageStream (the RHEL images), the syncer uses the external address that the ImageStream imports from. An example is `registry.redhat.io/rhel9/rhel-guest-image`.
 
-When you delete the pool, the driver deletes its golden PVCs, Templates and DataSources first, then the pool. Running converter Jobs are stopped before their PVC is deleted. The pool still waits for every other volume on it, such as VM disks, to be deleted.
+A golden image is ready when the DataVolume phase is `Succeeded`. If the phase is `Failed`, the pool status reports `Failed` and the syncer publishes no catalog entry.
 
-Two pools must not use the same target namespace: the golden PVC and Template names do not include the pool name, so the second pool reuses the first pool's objects.
+On rovslab (20 October 2026), CentOS Stream 9 imported in about 40 seconds. RHEL 9 took about 2.5 minutes, with one automatic retry while the node pulled the image. VMs booted from both, and the guest agent connected.
 
-The converter Job handles the full OCI-to-raw pipeline:
-1. Downloads OCI image from the container registry via `skopeo`
-2. Decompresses gzip-compressed OCI layers (standard OCI format)
-3. Detects disk format via `qemu-img info` (qcow2 or raw)
-4. Converts qcow2 to raw if needed, or moves raw images directly
-5. Writes `disk.img` to the golden PVC with `chmod 0666`
+Target namespaces need no extra permissions (no `anyuid` grant).
 
-Decompression writes directly to the golden PVC's folder on the share to avoid OOM — emptyDir staging (tmpfs) uses pod memory and large images exceed the memory limit.
+Two pools must not send golden images to the same namespace. The names collide. The driver does not block this.
+
+When you delete a pool, the driver first deletes its golden DataVolumes, PVCs and Templates in its target namespaces, and its DataSources. The syncer skips pools that are being deleted.
+
+> **Note:** Creating a VM from the console catalog (InstanceTypes tab) with its boot disk on the pool is being tested. It is not yet verified.
 
 ### Verification
 
 ```bash
-# Check converter Jobs
-kubectl get jobs -n pool-tutorial -l pool.storage.ibmcloud.io/golden-image=true
+# Check golden DataVolumes
+kubectl get dv -n pool-tutorial
 
 # Check golden PVCs
 kubectl get pvc -n pool-tutorial -l pool.storage.ibmcloud.io/golden-image=true
@@ -151,7 +147,7 @@ kubectl get fsp general-purpose -o jsonpath='{.status.goldenImages}' | jq .
 1. Navigate to **Virtualization > Catalog**
 2. Find the template (e.g., `centos-stream9-nfs-pool`)
 3. Click **Create VirtualMachine**
-4. The boot PVC is cloned from the golden image via CSI clone
+4. The boot PVC is cloned from the golden image via CSI clone (the console catalog path with the boot disk on the pool is being tested)
 
 **From the CLI:**
 ```bash
@@ -181,7 +177,7 @@ make test-vm
 #   --timeout SECS  Override total timeout (default: 900)
 ```
 
-The test creates a pool with `goldenImages.enabled=true` and lets the syncer handle image discovery, PVC creation, converter Jobs, and template creation. It then creates a VM from the syncer-generated template, waits for the CSI clone Job to complete, and verifies the VM boots with connectivity checks.
+The test creates a pool with `goldenImages.enabled=true` and lets the syncer handle image discovery, DataVolume creation, and template creation. It then creates a VM from the syncer-generated template, waits for the CSI clone Job to complete, and verifies the VM boots with connectivity checks.
 
 Runtime: ~13-14 minutes.
 
@@ -189,46 +185,35 @@ The test handles cleanup automatically (before and after), but if you use `--kee
 
 ## Troubleshooting
 
-### Converter Job Fails
+### Golden Image Shows Failed (DataVolume)
+
+**Symptom:** The pool status shows a golden image in phase `Failed`.
 
 ```bash
-# Check Job logs (the Job runs in the driver's namespace)
-kubectl get jobs -n kube-system -l storage.ibmcloud.io/share-data-job
-kubectl logs -n kube-system job/<job name from the list above>
+# Check the DataVolume phase
+oc get dv -n pool-tutorial
 
-# Common issues:
-# - Network access to container registry blocked
-# - dnf install fails (network or repo issues)
-# - qemu-img conversion error (corrupted download)
+# See the events and the reason
+oc describe dv golden-centos-stream9 -n pool-tutorial
 ```
 
-### Converter Job OOMKilled
-
-**Symptom:** Converter pod shows `OOMKilled` status after running for several minutes.
-
-**Cause (pre-v0.11.0):** Older converter scripts wrote decompressed OCI layers to the staging emptyDir, which uses tmpfs (pod memory). Large images (2+ GB decompressed) exceeded the 2Gi memory limit.
-
-**Fix:** Upgrade to v0.11.0+. The converter now decompresses directly to the golden PVC's folder on the share, bypassing emptyDir memory usage. If you see OOMKilled on v0.11.0+, the OCI image download itself may be too large for staging — delete the job and let the syncer recreate it.
+CDI retries some failures by itself. A DataVolume that stays `Failed` needs a retry. To retry, delete the DataVolume. The syncer makes a new one on the next cycle:
 
 ```bash
-# Check for OOMKilled
-kubectl get pods -n kube-system -l storage.ibmcloud.io/share-data-job -o jsonpath='{range .items[*]}{.metadata.name} {.status.containerStatuses[0].state}{"\n"}{end}'
-
-# Delete the failed job to trigger a retry with the current converter script
-kubectl delete job -n kube-system <job name>
+oc delete dv golden-centos-stream9 -n pool-tutorial
 ```
 
-### Converter Job Uses Old Script After Upgrade
+### DataVolume "was not made by pool"
 
-**Symptom:** After deploying a new controller version, converter jobs still run the old script.
+**Symptom:** The pool status shows `Failed` with a message like `DataVolume ns/golden-<image> was not made by pool <pool> ...; delete it to let the pool make it`.
 
-**Cause:** Jobs created by the previous controller version contain the old script. New versions only affect newly created jobs.
+**Cause:** A DataVolume named `golden-<image>` already exists in the target namespace, and the pool did not make it. It has no pool labels, or its source URL or StorageClass is different. The syncer refuses to use it, and publishes no catalog entry.
 
-**Fix:** Delete existing converter jobs and remove the `golden-ready` annotation from golden PVCs so the syncer recreates them with the updated script:
+**Fix:** Check the DataVolume. If you do not need it, delete it. The syncer then makes its own on the next cycle.
 
 ```bash
-kubectl delete jobs -n pool-tutorial -l pool.storage.ibmcloud.io/golden-image=true
-kubectl annotate pvc -n pool-tutorial -l pool.storage.ibmcloud.io/golden-image=true pool.storage.ibmcloud.io/golden-ready-
+oc get dv golden-centos-stream9 -n pool-tutorial -o yaml
+oc delete dv golden-centos-stream9 -n pool-tutorial
 ```
 
 ### PVC Stuck in Pending

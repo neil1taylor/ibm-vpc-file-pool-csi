@@ -318,7 +318,7 @@ oc delete pod pool-test-writer -n ${TUTORIAL_NS}
 
 KubeVirt VMs work with the pool CSI driver. The driver mounts NFS with `sec=sys` (matching the stock IBM VPC File CSI driver), which enables proper Unix UID/GID ownership. Configure the pool with `defaultUID: 107` and `defaultGID: 107` so subdirectories are owned by the QEMU user.
 
-> **Note:** We bypass CDI's `dataVolumeTemplate` because CDI's VolumePopulator mechanism conflicts with our CSI provisioner. Instead, we create regular PVCs on the pool and download the OS image directly.
+> **Note:** This step creates regular PVCs on the pool and downloads the OS image directly. CDI registry import also works on a pool StorageClass; see [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md#cdi-containerized-data-importer-compatibility).
 
 ### Step 8a: Create the Boot and Data PVCs
 
@@ -361,7 +361,7 @@ oc get pvc pool-test-vm-boot pool-test-vm-data -n ${TUTORIAL_NS}
 
 ### Step 8b: Download the OS Image to the Boot PVC
 
-KubeVirt expects a **raw format** disk image named `disk.img` in a filesystem-mode PVC. Cloud images are distributed as qcow2, so we must convert to raw — this is what CDI does automatically, but since we bypass CDI, we do it manually:
+KubeVirt expects a **raw format** disk image named `disk.img` in a filesystem-mode PVC. Cloud images are distributed as qcow2, so we must convert to raw — CDI does this automatically, but here we do it by hand:
 
 ```bash
 cat <<EOF | oc apply -f -
