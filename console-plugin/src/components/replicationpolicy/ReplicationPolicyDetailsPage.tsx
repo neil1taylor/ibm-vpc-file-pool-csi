@@ -33,7 +33,8 @@ import { ReplicationPolicyModel } from '../../models';
 import { ReplicationPolicy, Hook } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
 import DeleteModal from '../common/DeleteModal';
-import { formatAge, formatDuration, humanizeBytes } from '../../utils/resource-helpers';
+import VolumeStatusTable from './VolumeStatusTable';
+import { formatAge, formatDuration } from '../../utils/resource-helpers';
 import { ROUTES } from '../../constants';
 
 const renderHooksReadOnly = (hooks: Hook[] | undefined, title: string) => {
@@ -326,48 +327,7 @@ const ReplicationPolicyDetailsPage: React.FC = () => {
     </Card>
   );
 
-  const renderSyncStatuses = () => {
-    const statuses = status?.subVolumeStatuses;
-    if (!statuses || statuses.length === 0) {
-      return (
-        <Alert variant="info" title="No sync status" isInline style={{ marginTop: 16 }}>
-          No SubVolume sync statuses have been reported yet.
-        </Alert>
-      );
-    }
-
-    return (
-      <Card style={{ marginTop: 16 }}>
-        <CardTitle>Sync Status</CardTitle>
-        <CardBody>
-          <Table aria-label="SubVolume sync statuses" variant="compact">
-            <Thead>
-              <Tr>
-                <Th>SubVolume Name</Th>
-                <Th>Last Sync Time</Th>
-                <Th>Bytes Synced</Th>
-                <Th>Last Error</Th>
-              </Tr>
-            </Thead>
-            <Tbody>
-              {statuses.map((svStatus) => (
-                <Tr key={svStatus.subVolumeName}>
-                  <Td>{svStatus.subVolumeName}</Td>
-                  <Td>{svStatus.lastSyncTime ? formatAge(svStatus.lastSyncTime) : '-'}</Td>
-                  <Td>
-                    {svStatus.bytesSynced != null
-                      ? humanizeBytes(svStatus.bytesSynced)
-                      : '-'}
-                  </Td>
-                  <Td>{svStatus.lastError || '-'}</Td>
-                </Tr>
-              ))}
-            </Tbody>
-          </Table>
-        </CardBody>
-      </Card>
-    );
-  };
+  const renderSyncStatuses = () => <VolumeStatusTable statuses={status?.subVolumeStatuses} />;
 
   return (
     <>
