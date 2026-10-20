@@ -499,11 +499,10 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 	// All SubVolumes processed — evaluate results.
 	if len(syncErrors) > 0 {
 		combinedErr := fmt.Sprintf("%d/%d SubVolumes failed to sync", len(syncErrors), total)
-		rc.handleFailure(ctx, policy, combinedErr, start)
+		// Set the per-volume statuses first, so the one status write in
+		// handleFailure carries them with the failure count.
 		policy.Status.SubVolumeStatuses = svStatuses
-		if err := rc.k8sClient.UpdateReplicationPolicyStatus(ctx, policy); err != nil {
-			klog.ErrorS(err, "Failed to update policy status after partial failure", "policy", policyName)
-		}
+		rc.handleFailure(ctx, policy, combinedErr, start)
 		return
 	}
 

@@ -267,8 +267,8 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 	}
 
 	go func() {
-		if err := d.Run(); err != nil {
-			klog.ErrorS(err, "CSI gRPC server failed")
+		if runErr := d.Run(); runErr != nil {
+			klog.ErrorS(runErr, "CSI gRPC server failed")
 			os.Exit(1)
 		}
 	}()
