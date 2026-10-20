@@ -334,8 +334,8 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 
 	// Keep CDI's copy pods big enough to write onto NFS. Runs on the leader only.
 	if cdiCopyPodMemoryLimit != "" {
-		if err := mgr.Add(pool.NewCDILimitKeeper(shareJobClient, cdiCopyPodMemoryLimit)); err != nil {
-			klog.ErrorS(err, "Failed to add the CDI copy limit check")
+		if addErr := mgr.Add(pool.NewCDILimitKeeper(shareJobClient, cdiCopyPodMemoryLimit)); addErr != nil {
+			klog.ErrorS(addErr, "Failed to add the CDI copy limit check")
 			os.Exit(1)
 		}
 	}
