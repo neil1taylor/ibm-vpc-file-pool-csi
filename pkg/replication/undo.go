@@ -528,9 +528,9 @@ func (v *volume) recover() (bool, error) {
 				return rolled, err
 			}
 		case strings.HasSuffix(e.Name(), undoReady):
-			f, err := v.openDisk(os.O_RDWR)
-			if err != nil {
-				return rolled, err
+			f, oerr := v.openDisk(os.O_RDWR)
+			if oerr != nil {
+				return rolled, oerr
 			}
 			err = applyUndo(v, p, f)
 			_ = f.Close()
