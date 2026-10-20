@@ -26,7 +26,7 @@ fio_script() {
     echo "set -e"
     for t in $TESTS; do
         IFS=: read -r name rw bs depth mix <<<"$t"
-        echo "echo \"FIO $name \$(fio --name=$name --filename=$1 --size=4G --direct=1 --ioengine=libaio --rw=$rw --bs=$bs --iodepth=$depth ${mix:+--rwmixread=$mix} --runtime=60 --time_based --group_reporting --output-format=json | tr -d '\\n')\""
+        printf '%s\n' "echo \"FIO $name \$(fio --name=$name --filename=$1 --size=4G --direct=1 --ioengine=libaio --rw=$rw --bs=$bs --iodepth=$depth ${mix:+--rwmixread=$mix} --runtime=60 --time_based --group_reporting --output-format=json | tr -d '\\n')\""
     done
 }
 
