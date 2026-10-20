@@ -47,6 +47,7 @@ spec:
             {{- if .Values.goldenImageSyncer.interval }}
             - "--golden-image-sync-interval={{ .Values.goldenImageSyncer.interval }}"
             {{- end }}
+            - "--cdi-copy-pod-memory-limit={{ .Values.cdi.copyPodMemoryLimit }}"
             - "--driver-image={{ .Values.image.repository }}:{{ .Values.image.tag }}"
             {{- if .Values.webhook.enabled }}
             - "--webhook-port={{ .Values.webhook.port }}"

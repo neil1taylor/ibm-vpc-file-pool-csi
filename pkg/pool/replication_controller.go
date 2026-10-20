@@ -92,6 +92,10 @@ type ReplicationController struct {
 	// by sorting SubVolumes oldest-first when parallelism limits apply.
 	lastSubVolumeSyncTimes map[string]time.Time
 
+	// results holds, per policy, the results of volumes whose Job finished
+	// in the current cycle. See processPolicy.
+	results map[string]map[string]cycleResult
+
 	mu sync.Mutex
 
 	// nowFunc is used for time operations (injectable for tests).
@@ -108,6 +112,7 @@ func NewReplicationController(k8sClient k8s.Client, directClient client.Client, 
 		interval:               DefaultReplicationInterval,
 		lastSyncTimes:          make(map[string]time.Time),
 		lastSubVolumeSyncTimes: make(map[string]time.Time),
+		results:                make(map[string]map[string]cycleResult),
 		nowFunc:                time.Now,
 	}
 }
@@ -222,6 +227,31 @@ func (rc *ReplicationController) processOnce(ctx context.Context) {
 	}
 }
 
+// cycleResult is the result of one volume's Job in the current cycle.
+type cycleResult struct {
+	status  v1alpha1.SubVolumeReplicationStatus
+	syncErr string // "" if the copy succeeded
+}
+
+// cycleResults returns the results recorded so far in the policy's current
+// cycle. Only the controller goroutine uses it.
+func (rc *ReplicationController) cycleResults(policyName string) map[string]cycleResult {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	r := rc.results[policyName]
+	if r == nil {
+		r = make(map[string]cycleResult)
+		rc.results[policyName] = r
+	}
+	return r
+}
+
+func (rc *ReplicationController) clearCycleResults(policyName string) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	delete(rc.results, policyName)
+}
+
 // isDue returns true if the policy is due for a replication cycle.
 func (rc *ReplicationController) isDue(policyName string, interval time.Duration) bool {
 	rc.mu.Lock()
@@ -328,8 +358,43 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 	matched, vmRes := rc.processVMVolumes(ctx, policy, matched, true)
 	svStatuses = append(svStatuses, vmRes.statuses...)
 
+	// A volume whose Job finished in this cycle keeps its result, and gets no
+	// new Job, until every volume of the cycle has finished. Otherwise a
+	// cycle with all Jobs finished at once might never come, and failures
+	// would never be counted.
+	// A status keeps the volume's last good sync, so the age of the last good
+	// copy stays visible while a new copy runs or after one fails.
+	prevStatus := map[string]v1alpha1.SubVolumeReplicationStatus{}
+	for _, st := range policy.Status.SubVolumeStatuses {
+		prevStatus[st.SubVolumeName] = st
+	}
+	carry := func(name, lastError string) v1alpha1.SubVolumeReplicationStatus {
+		st := prevStatus[name]
+		st.SubVolumeName = name
+		st.LastError = lastError
+		st.VMCopy = nil
+		return st
+	}
+
+	round := rc.cycleResults(policyName)
+	finish := func(st v1alpha1.SubVolumeReplicationStatus, syncErr string) {
+		round[st.SubVolumeName] = cycleResult{status: st, syncErr: syncErr}
+		svStatuses = append(svStatuses, st)
+		if syncErr != "" {
+			syncErrors = append(syncErrors, syncErr)
+		}
+	}
+
 	for _, sv := range matched {
 		svCopy := sv
+
+		if r, ok := round[svCopy.Name]; ok {
+			svStatuses = append(svStatuses, r.status)
+			if r.syncErr != "" {
+				syncErrors = append(syncErrors, r.syncErr)
+			}
+			continue
+		}
 
 		// Check if a Job already exists for this SubVolume.
 		done, succeeded, bytesWritten, checkErr := rc.checkReplicationJob(ctx, policyName, svCopy.Name)
@@ -337,10 +402,7 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 			klog.ErrorS(checkErr, "Failed to check replication Job status",
 				"policy", policyName, "subVolume", svCopy.Name)
 			syncErrors = append(syncErrors, fmt.Sprintf("%s: check job: %v", svCopy.Name, checkErr))
-			svStatuses = append(svStatuses, v1alpha1.SubVolumeReplicationStatus{
-				SubVolumeName: svCopy.Name,
-				LastError:     fmt.Sprintf("check job: %v", checkErr),
-			})
+			svStatuses = append(svStatuses, carry(svCopy.Name, fmt.Sprintf("check job: %v", checkErr)))
 			continue
 		}
 
@@ -353,11 +415,7 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 					if vmErr != nil {
 						msg = fmt.Sprintf("check for a running VM after the copy: %v", vmErr)
 					}
-					syncErrors = append(syncErrors, fmt.Sprintf("%s: %s", svCopy.Name, msg))
-					svStatuses = append(svStatuses, v1alpha1.SubVolumeReplicationStatus{
-						SubVolumeName: svCopy.Name,
-						LastError:     msg,
-					})
+					finish(carry(svCopy.Name, msg), fmt.Sprintf("%s: %s", svCopy.Name, msg))
 					rc.cleanupReplicationResources(ctx, policy, svCopy.Name)
 					continue
 				}
@@ -370,16 +428,12 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 				if bytesWritten > 0 {
 					svStatus.BytesSynced = &bytesWritten
 				}
-				svStatuses = append(svStatuses, svStatus)
+				finish(svStatus, "")
 				rc.recordSubVolumeSyncTime(policyName, svCopy.Name)
 				rc.cleanupReplicationResources(ctx, policy, svCopy.Name)
 			} else {
 				// Job failed.
-				syncErrors = append(syncErrors, fmt.Sprintf("%s: replication Job failed", svCopy.Name))
-				svStatuses = append(svStatuses, v1alpha1.SubVolumeReplicationStatus{
-					SubVolumeName: svCopy.Name,
-					LastError:     "replication Job failed after retries",
-				})
+				finish(carry(svCopy.Name, "replication Job failed after retries"), fmt.Sprintf("%s: replication Job failed", svCopy.Name))
 				rc.cleanupReplicationResources(ctx, policy, svCopy.Name)
 			}
 			continue
@@ -396,10 +450,7 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 			activeJobs++
 			klog.V(6).InfoS("Replication Job still running",
 				"policy", policyName, "subVolume", svCopy.Name, "job", jobName)
-			svStatuses = append(svStatuses, v1alpha1.SubVolumeReplicationStatus{
-				SubVolumeName: svCopy.Name,
-				LastError:     "sync in progress",
-			})
+			svStatuses = append(svStatuses, carry(svCopy.Name, "sync in progress"))
 			continue
 		}
 
@@ -408,10 +459,7 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 			klog.V(4).InfoS("Parallel sync limit reached, deferring SubVolume",
 				"policy", policyName, "subVolume", svCopy.Name,
 				"activeJobs", activeJobs, "maxParallel", maxParallel)
-			svStatuses = append(svStatuses, v1alpha1.SubVolumeReplicationStatus{
-				SubVolumeName: svCopy.Name,
-				LastError:     "deferred: parallel limit",
-			})
+			svStatuses = append(svStatuses, carry(svCopy.Name, "deferred: parallel limit"))
 			continue
 		}
 
@@ -420,10 +468,7 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 		vmPod, vmErr := rc.runningVMPod(ctx, &svCopy)
 		if vmErr != nil {
 			syncErrors = append(syncErrors, fmt.Sprintf("%s: check for a running VM: %v", svCopy.Name, vmErr))
-			svStatuses = append(svStatuses, v1alpha1.SubVolumeReplicationStatus{
-				SubVolumeName: svCopy.Name,
-				LastError:     fmt.Sprintf("check for a running VM: %v", vmErr),
-			})
+			svStatuses = append(svStatuses, carry(svCopy.Name, fmt.Sprintf("check for a running VM: %v", vmErr)))
 			continue
 		}
 		if vmPod != "" {
@@ -431,30 +476,21 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 				"policy", policyName, "subVolume", svCopy.Name,
 				"pod", klog.KRef(svCopy.Spec.PVCNamespace, vmPod))
 			skipped++
-			svStatuses = append(svStatuses, v1alpha1.SubVolumeReplicationStatus{
-				SubVolumeName: svCopy.Name,
-				LastError: fmt.Sprintf("%s %s/%s; a file copy of a running VM disk may not boot",
-					skippedRunningVMPrefix, svCopy.Spec.PVCNamespace, vmPod),
-			})
+			svStatuses = append(svStatuses, carry(svCopy.Name, fmt.Sprintf("%s %s/%s; a file copy of a running VM disk may not boot",
+				skippedRunningVMPrefix, svCopy.Spec.PVCNamespace, vmPod)))
 			continue
 		}
 
 		// Create PV/PVC/Job for this SubVolume.
 		if createErr := rc.createReplicationResources(ctx, policy, &svCopy); createErr != nil {
 			syncErrors = append(syncErrors, fmt.Sprintf("%s: create resources: %v", svCopy.Name, createErr))
-			svStatuses = append(svStatuses, v1alpha1.SubVolumeReplicationStatus{
-				SubVolumeName: svCopy.Name,
-				LastError:     fmt.Sprintf("create resources: %v", createErr),
-			})
+			svStatuses = append(svStatuses, carry(svCopy.Name, fmt.Sprintf("create resources: %v", createErr)))
 			rc.cleanupReplicationResources(ctx, policy, svCopy.Name)
 			continue
 		}
 
 		activeJobs++
-		svStatuses = append(svStatuses, v1alpha1.SubVolumeReplicationStatus{
-			SubVolumeName: svCopy.Name,
-			LastError:     "sync in progress",
-		})
+		svStatuses = append(svStatuses, carry(svCopy.Name, "sync in progress"))
 	}
 
 	// 4. Update policy status.
@@ -496,7 +532,9 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 		return
 	}
 
-	// All SubVolumes processed — evaluate results.
+	// All SubVolumes processed — evaluate results. The next cycle starts
+	// afresh.
+	rc.clearCycleResults(policyName)
 	if len(syncErrors) > 0 {
 		combinedErr := fmt.Sprintf("%d/%d SubVolumes failed to sync", len(syncErrors), total)
 		// Set the per-volume statuses first, so the one status write in

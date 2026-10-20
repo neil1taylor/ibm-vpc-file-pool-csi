@@ -202,6 +202,15 @@ var (
 		},
 		[]string{"policy", "source_pool"},
 	)
+
+	// CDICopyLimitRaisedTotal counts how often the controller raised CDI's
+	// copy pod memory limit. More than one raise means something resets it.
+	CDICopyLimitRaisedTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "vpc_file_pool_cdi_copy_limit_raised_total",
+			Help: "Times the controller raised the CDI copy pod memory limit",
+		},
+	)
 )
 
 func init() {
@@ -227,5 +236,6 @@ func init() {
 		ReplicationLagSeconds,
 		ReplicationConsecutiveFailures,
 		ReplicationSubVolumeCount,
+		CDICopyLimitRaisedTotal,
 	)
 }

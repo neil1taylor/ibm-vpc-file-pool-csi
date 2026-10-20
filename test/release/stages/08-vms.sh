@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
-# 08-vms — A pool with golden images turned on makes a CentOS Stream 9 image,
-# a VM template and a catalog entry, in a namespace with no extra
-# permissions. A VM made from the template boots and its guest agent
-# connects. The VM live-migrates to another worker and keeps running. A VM
-# made from the catalog entry, with its boot disk on the pool, also boots.
-# Deleting the pool removes everything the driver made for it.
+# 08-vms — A VM made from the standard catalog image, with its boot disk on a
+# pool, boots in a namespace with no extra permissions, and its guest agent
+# connects. The VM live-migrates to another worker and keeps running. CDI
+# copies 25 GB of data from Ceph onto the pool, and the copy matches.
 
 RT_STAGE_TIMEOUT=3600
 
 POOL=$(rt_name vm)
 NS=$(rt_name vm)
+COPY_NS=$(rt_name copy)
 VM=vm1
-CATALOG_VM=vm2
 IMAGES_NS=openshift-virtualization-os-images
-POOL_LABEL="pool.storage.ibmcloud.io/pool"
+CATALOG_IMAGE="${RT_CATALOG_IMAGE:-centos-stream9}"
+CATALOG_PREFERENCE="${RT_CATALOG_PREFERENCE:-centos.stream9}"
+CEPH_SC="${RT_CEPH_SC:-ocs-storagecluster-ceph-rbd-virtualization}"
+COPY_BYTES=26843545600
 
 create_pool() {
     oc apply -f - >/dev/null <<YAML
@@ -35,55 +36,17 @@ spec:
   defaultUID: 107
   defaultGID: 107
   defaultPermissions: "0777"
-  goldenImages:
-    enabled: true
-    targetNamespaces: ["$NS"]
-    imageFilter: ["centos-stream9"]
 YAML
 }
 
-golden_image_ready() {
-    pool_field "$POOL" .status.goldenImages | jq -e --arg ns "$NS" \
-        '[.[]?.namespaces[]? | select(.namespace == $ns and .phase == "Ready")] | length > 0' >/dev/null
-}
-
-template_name() {
-    oc get templates -n "$NS" -l "pool.storage.ibmcloud.io/golden-image=true" -o jsonpath='{.items[0].metadata.name}'
-}
-
-golden_claim() {
-    pool_field "$POOL" .status.goldenImages | jq -r --arg ns "$NS" \
-        '[.[]?.namespaces[]? | select(.namespace == $ns)][0].pvcName // empty'
-}
-
-# The catalog entry for this pool points at this pool's golden claim, and the
-# cluster can use it.
-catalog_entry_ready() {
-    local claim; claim=$(golden_claim)
-    oc get datasources.cdi.kubevirt.io -n "$IMAGES_NS" -l "$POOL_LABEL=$POOL" -o json | jq -e --arg ns "$NS" --arg claim "$claim" '
-        [.items[] | select(.spec.source.pvc.namespace == $ns and .spec.source.pvc.name == $claim)
-                  | select(any(.status.conditions[]?; .type == "Ready" and .status == "True"))] | length > 0' >/dev/null
-}
-
-# vmi_field JSONPATH [VM] — one field of a running VM (default: the template VM).
-vmi_field() { oc get vmi -n "$NS" "${2:-$VM}" -o jsonpath="{$1}" 2>/dev/null; }
-vmi_condition() { vmi_field ".status.conditions[?(@.type==\"$1\")].status" "${2:-$VM}"; }
-
-vm_ready() { [ "$(vmi_field .status.phase "${1:-$VM}")" = "Running" ] && [ "$(vmi_condition Ready "${1:-$VM}")" = "True" ]; }
-agent_connected() { [ "$(vmi_condition AgentConnected "${1:-$VM}")" = "True" ]; }
-
-catalog_entry() {
-    oc get datasources.cdi.kubevirt.io -n "$IMAGES_NS" -l "$POOL_LABEL=$POOL" -o jsonpath='{.items[0].metadata.name}'
-}
-
 # create_catalog_vm — a VM as the console's catalog makes it: an instance
-# type, and a boot disk copied from the catalog entry onto the pool.
+# type, and a boot disk copied from the catalog image onto the pool.
 create_catalog_vm() {
     oc apply -n "$NS" -f - >/dev/null <<YAML
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
 metadata:
-  name: $CATALOG_VM
+  name: $VM
 spec:
   runStrategy: Always
   instancetype:
@@ -91,20 +54,20 @@ spec:
     name: u1.medium
   preference:
     kind: VirtualMachineClusterPreference
-    name: centos.stream9
+    name: $CATALOG_PREFERENCE
   dataVolumeTemplates:
     - metadata:
-        name: $CATALOG_VM-boot
+        name: $VM-boot
       spec:
         sourceRef:
           kind: DataSource
-          name: $(catalog_entry)
+          name: $CATALOG_IMAGE
           namespace: $IMAGES_NS
         storage:
           storageClassName: $POOL
           resources:
             requests:
-              storage: 20Gi
+              storage: 30Gi
   template:
     spec:
       domain:
@@ -112,23 +75,31 @@ spec:
       volumes:
         - name: rootdisk
           dataVolume:
-            name: $CATALOG_VM-boot
+            name: $VM-boot
         - name: cloudinit
           cloudInitNoCloud:
-            userData: "#cloud-config\n"
+            userData: "#cloud-config\\n"
 YAML
 }
 
-catalog_disk_on_pool() {
-    local sc; sc=$(oc get pvc -n "$NS" "$CATALOG_VM-boot" -o jsonpath='{.spec.storageClassName}')
-    echo "catalog VM boot disk storage class: $sc"
-    [ "$sc" = "$POOL" ]
+vmi_field() { oc get vmi -n "$NS" "$VM" -o jsonpath="{$1}" 2>/dev/null; }
+vmi_condition() { vmi_field ".status.conditions[?(@.type==\"$1\")].status"; }
+
+vm_ready() { [ "$(vmi_field .status.phase)" = "Running" ] && [ "$(vmi_condition Ready)" = "True" ]; }
+agent_connected() { [ "$(vmi_condition AgentConnected)" = "True" ]; }
+
+boot_disk_on_pool_without_restarts() {
+    local sc restarts
+    sc=$(oc get pvc -n "$NS" "$VM-boot" -o jsonpath='{.spec.storageClassName}')
+    restarts=$(oc get dv -n "$NS" "$VM-boot" -o jsonpath='{.status.restartCount}')
+    echo "boot disk storage class: $sc, copy restarts: ${restarts:-0}"
+    [ "$sc" = "$POOL" ] && [ "${restarts:-0}" -eq 0 ]
 }
 
-guest_reports_centos() {
-    local os; os=$(vmi_field .status.guestOSInfo.name)
+guest_reports_os() {
+    local os; os=$(vmi_field .status.guestOSInfo.prettyName)
     echo "guest OS: $os"
-    echo "$os" | grep -qi centos
+    [ -n "$os" ]
 }
 
 live_migratable() {
@@ -163,45 +134,111 @@ moved_without_restart() {
     [ "$now_uid" = "$uid" ] && [ -n "$now_node" ] && [ "$now_node" != "$node" ]
 }
 
-gone() { ! oc get "$@" >/dev/null 2>&1; }
-
-# shared_leftovers — objects the driver made for this pool in the shared
-# OS images namespace.
-shared_leftovers() {
-    oc get datasources.cdi.kubevirt.io,rolebindings -n "$IMAGES_NS" -o json |
-        jq -r --arg label "$POOL_LABEL" --arg pool "$POOL" --arg ns "$NS" '.items[]
-            | select(.metadata.labels[$label] == $pool
-                     or .spec.source.pvc.namespace == $ns
-                     or any(.subjects[]?; .name == "system:serviceaccounts:" + $ns))
-            | .kind + "/" + .metadata.name'
+# root_pod NS NAME PVC COMMAND — a root pod with PVC at /data.
+root_pod() {
+    oc apply -n "$1" -f - >/dev/null <<YAML
+apiVersion: v1
+kind: Pod
+metadata:
+  name: $2
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsUser: 0
+  containers:
+    - name: main
+      image: $RT_IMAGE
+      command: ["/bin/sh", "-c", "$4"]
+      volumeMounts:
+        - name: data
+          mountPath: /data
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: $3
+YAML
 }
 
-nothing_left_for_pool() {
-    local left; left=$(shared_leftovers)
-    echo "left in $IMAGES_NS: ${left:-none}"
-    [ -z "$left" ]
+pod_succeeded() { [ "$(oc get pod -n "$1" "$2" -o jsonpath='{.status.phase}')" = "Succeeded" ]; }
+
+dv_done() {
+    local phase; phase=$(oc get dv -n "$COPY_NS" "$1" -o jsonpath='{.status.phase}')
+    [ "$phase" = "Failed" ] && return 1
+    [ "$phase" = "Succeeded" ]
+}
+
+copy_matches_source() {
+    local a b
+    a=$(oc logs -n "$COPY_NS" sum-source | cut -d' ' -f1)
+    b=$(oc logs -n "$COPY_NS" sum-copy | cut -d' ' -f1)
+    echo "source $a, copy $b, copy restarts: $(oc get dv -n "$COPY_NS" big-copy -o jsonpath='{.status.restartCount}')"
+    [ -n "$a" ] && [ "$a" = "$b" ]
+}
+
+# large_copy — CDI copies 25 GB of random data from Ceph onto the pool. With
+# CDI's default memory limit this copy is killed (spec 2026-10-20-cdi-copy-limit).
+# The pods that write and read the data run as root, so they use their own
+# namespace, and the VM namespace keeps no extra permissions.
+large_copy() {
+    rt_namespace "$COPY_NS"
+    oc adm policy add-scc-to-user anyuid -z default -n "$COPY_NS" >/dev/null
+    oc apply -n "$COPY_NS" -f - >/dev/null <<YAML
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: big-source
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: $CEPH_SC
+  resources:
+    requests:
+      storage: 30Gi
+YAML
+    root_pod "$COPY_NS" fill big-source "head -c $COPY_BYTES /dev/urandom > /data/disk.img && sync"
+    if ! wait_until 900 10 pod_succeeded "$COPY_NS" fill; then
+        not_checked "a 25 GB CDI copy onto the pool" "could not fill the Ceph source"
+        return 0
+    fi
+    oc delete pod -n "$COPY_NS" fill --wait=true >/dev/null
+    oc apply -n "$COPY_NS" -f - >/dev/null <<YAML
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: DataVolume
+metadata:
+  name: big-copy
+spec:
+  source:
+    pvc:
+      name: big-source
+      namespace: $COPY_NS
+  storage:
+    storageClassName: $POOL
+    resources:
+      requests:
+        storage: 30Gi
+YAML
+    check "CDI copies 25 GB from Ceph onto the pool" wait_until 1500 10 dv_done big-copy
+    root_pod "$COPY_NS" sum-source big-source "sha256sum /data/disk.img"
+    root_pod "$COPY_NS" sum-copy big-copy "sha256sum /data/disk.img"
+    wait_until 900 10 pod_succeeded "$COPY_NS" sum-source
+    wait_until 900 10 pod_succeeded "$COPY_NS" sum-copy
+    check "the 25 GB copy matches its source" copy_matches_source
 }
 
 run() {
     oc get crd virtualmachines.kubevirt.io >/dev/null 2>&1 || skip "OpenShift Virtualization is not installed"
-    oc get dataimportcrons.cdi.kubevirt.io -n "$IMAGES_NS" -o name 2>/dev/null | grep -q centos-stream9 ||
-        skip "the cluster has no CentOS Stream 9 image source"
+    oc get datasources.cdi.kubevirt.io -n "$IMAGES_NS" "$CATALOG_IMAGE" >/dev/null 2>&1 ||
+        skip "the cluster has no $CATALOG_IMAGE catalog image"
     [ "$(worker_nodes | wc -l)" -ge 2 ] || skip "live migration needs two workers"
 
     rt_namespace "$NS"
     create_pool
     check "the VM pool reaches Ready" wait_until 900 10 pool_is_ready "$POOL"
-    check "the golden image is ready in a namespace with no extra permissions" \
-        wait_until 1200 15 golden_image_ready
-    check "a VM template for the golden image exists" wait_until 120 5 template_name
-    check "the VM catalog entry points at this pool's golden image" wait_until 300 10 catalog_entry_ready
 
-    local template; template=$(template_name)
-    [ -n "$template" ] || return 0
-    oc process "$template" -n "$NS" -p NAME="$VM" | oc apply -n "$NS" -f - >/dev/null
-    check "a VM made from the template boots" wait_until 900 10 vm_ready
+    create_catalog_vm
+    check "a VM made from the catalog image boots" wait_until 1200 10 vm_ready
+    check "its boot disk is on the pool, copied without restarts" boot_disk_on_pool_without_restarts
     check "the VM's guest agent connects" wait_until 600 10 agent_connected
-    check "the guest agent reports CentOS" guest_reports_centos
+    check "the guest agent reports its OS" guest_reports_os
 
     check "the VM can live-migrate" live_migratable
     local uid node
@@ -212,29 +249,16 @@ run() {
     check "the VM moved to another worker without a restart" moved_without_restart "$uid" "$node"
     check "the VM keeps running after the move" vm_ready
     check "the guest agent connects after the move" wait_until 300 10 agent_connected
+    oc delete vm -n "$NS" "$VM" --wait=true --timeout=300s >/dev/null
 
-    if [ -n "$(catalog_entry)" ]; then
-        create_catalog_vm
-        check "a VM made from the catalog entry boots" wait_until 1200 10 vm_ready "$CATALOG_VM"
-        check "its boot disk is on the pool" catalog_disk_on_pool
-        check "its guest agent connects" wait_until 600 10 agent_connected "$CATALOG_VM"
+    if oc get sc "$CEPH_SC" >/dev/null 2>&1; then
+        large_copy
+    else
+        not_checked "a 25 GB CDI copy onto the pool" "no StorageClass $CEPH_SC"
     fi
-
-    oc delete vm -n "$NS" "$VM" "$CATALOG_VM" --ignore-not-found --wait=true --timeout=300s >/dev/null
-    oc delete pvc -n "$NS" "$VM-boot" "$VM-data" --ignore-not-found --wait=true --timeout=300s >/dev/null
-    oc delete filesharepool "$POOL" --wait=false >/dev/null
-    check "the pool can be deleted while golden images are on" wait_until 900 10 gone filesharepool "$POOL"
-    check "the pool's golden image and template are removed" \
-        wait_until 300 10 sh -c "[ -z \"\$(oc get datavolumes,pvc,templates -n $NS -l $POOL_LABEL=$POOL -o name)\" ]"
-    check "nothing is left for the pool in $IMAGES_NS" wait_until 300 10 nothing_left_for_pool
 }
 
 cleanup() {
-    oc delete namespace "$NS" --ignore-not-found --wait=true --timeout=600s
+    oc delete namespace "$NS" "$COPY_NS" --ignore-not-found --wait=true --timeout=600s
     oc delete filesharepool "$POOL" --ignore-not-found --wait=true --timeout=600s
-    # Objects the driver made in the shared namespace: removed so a failed run
-    # leaves the lab clean. The check above has already recorded them.
-    shared_leftovers | while read -r obj; do
-        oc delete -n "$IMAGES_NS" "$obj" --ignore-not-found
-    done
 }

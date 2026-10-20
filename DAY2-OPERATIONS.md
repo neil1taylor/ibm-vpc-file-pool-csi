@@ -10,8 +10,8 @@ Step-by-step procedures for operating the pool CSI driver in production.
 
 ```bash
 # 1. Verify all driver pods are running
-kubectl get pods -n kube-system -l app=vpc-file-pool-csi-controller
-kubectl get pods -n kube-system -l app=vpc-file-pool-csi-node
+kubectl get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller
+kubectl get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node
 
 # 2. Check pool phases — all should be "Ready"
 kubectl get filesharepools
@@ -20,7 +20,7 @@ kubectl get filesharepools
 kubectl get pvc --all-namespaces -o wide | grep -E "Pending.*ibm-vpc-file-pool"
 
 # 4. Check for controller errors in the last 24h
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller \
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller \
   -c csi-controller --since=24h | grep -c -i "error"
 ```
 
@@ -99,7 +99,7 @@ If the pool stays in `Expanding` for more than 10 minutes:
 
 ```bash
 # 1. Check controller logs for VPC API errors
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller \
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller \
   -c csi-controller --tail=200 | grep -i "expand\|create.*share\|error"
 
 # 2. Check VPC share quota
@@ -208,7 +208,7 @@ NODE=$(kubectl get pod <affected-pod> -o jsonpath='{.spec.nodeName}')
 kubectl delete pod <affected-pod>
 
 # 3. If many pods on the same node are affected, restart the node agent
-kubectl delete pod -n kube-system -l app=vpc-file-pool-csi-node \
+kubectl delete pod -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node \
   --field-selector spec.nodeName=${NODE}
 ```
 
@@ -274,7 +274,7 @@ ibmcloud is share <share-id> --output json | jq '{lifecycle_state, health_state}
 **Steps:**
 ```bash
 # 1. Check controller pod status
-kubectl get pods -n kube-system -l app=vpc-file-pool-csi-controller
+kubectl get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller
 
 # 2. Check for OOM, CrashLoop, or other failures
 kubectl describe pod -n kube-system <controller-pod>
@@ -296,7 +296,7 @@ kubectl delete lease -n kube-system vpc-file-pool-csi-leader
 **Steps:**
 ```bash
 # 1. Identify the affected node
-kubectl get pods -n kube-system -l app=vpc-file-pool-csi-node -o wide
+kubectl get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node -o wide
 
 # 2. Check node agent logs
 kubectl logs -n kube-system <node-agent-pod> -c csi-node --tail=100
@@ -342,7 +342,7 @@ kubectl create secret generic ibm-cloud-credentials \
 kubectl rollout restart deployment/vpc-file-pool-csi-controller -n kube-system
 
 # 4. Verify the new key works
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller \
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller \
   -c csi-controller --tail=20 | grep -i "auth\|credential"
 
 # 5. Clean up
@@ -429,17 +429,17 @@ OUTPUT="csi-diagnostics-$(date +%Y%m%d-%H%M%S).txt"
   kubectl get pvc --all-namespaces | grep Pending
 
   echo -e "\n=== Controller Pods ==="
-  kubectl get pods -n kube-system -l app=vpc-file-pool-csi-controller -o wide
+  kubectl get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -o wide
 
   echo -e "\n=== Node Agent Pods ==="
-  kubectl get pods -n kube-system -l app=vpc-file-pool-csi-node -o wide
+  kubectl get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node -o wide
 
   echo -e "\n=== Controller Logs (last 500 lines) ==="
-  kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller \
+  kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller \
     -c csi-controller --tail=500
 
   echo -e "\n=== Node Agent Logs (last 200 lines per pod) ==="
-  for pod in $(kubectl get pods -n kube-system -l app=vpc-file-pool-csi-node \
+  for pod in $(kubectl get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node \
     -o jsonpath='{.items[*].metadata.name}'); do
     echo "--- Pod: $pod ---"
     kubectl logs -n kube-system "$pod" -c csi-node --tail=200

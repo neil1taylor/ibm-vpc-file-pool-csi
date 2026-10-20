@@ -109,7 +109,7 @@ First-class support for running virtual machines on pooled storage.
 
 - **UID 107 directory ownership** — Pool `defaultUID: 107` and `defaultGID: 107` ensure subdirectories are pre-owned for QEMU (virt-handler chowns to 107:107).
 - **Raw disk image support** — KubeVirt requires raw format for filesystem PVCs. Cloud images (distributed as qcow2) must be converted to raw. CDI does this when it imports an image, and the pool's golden images are made by CDI. Convert with `qemu-img convert -f qcow2 -O raw` only if you write images to a pool yourself.
-- **CDI registry import** — CDI imports an image from a registry onto a pool StorageClass. This was measured on rovslab (CentOS Stream 9 in about 40 s, RHEL 9 in about 2.5 min). A CDI host-assisted clone onto the pool from other storage (such as Ceph) ran out of memory in CDI's upload pod, so use a registry import instead.
+- **CDI registry import** — CDI imports an image from a registry onto a pool StorageClass. This was measured on rovslab (CentOS Stream 9 in about 40 s, RHEL 9 in about 2.5 min). A copy of a catalog image from other storage (such as Ceph) onto the pool uses CDI's copy pods. Their default memory limit is too small, so the controller raises it (see the CDI copy limit feature below).
 - **`sec=sys` enables chown** — With `sec=sys`, virt-handler's chown to UID 107 succeeds. Without it, chown fails for all non-root UIDs.
 
 ### Multi-Tenancy & Performance Tiers — Beta
@@ -195,13 +195,25 @@ Visual management of file share pools through the OpenShift Console.
 - **Single tabbed navigation** — One "IBM VPC File Pools" item under Storage in the console sidebar opens a tabbed interface (Overview, Pools, SubVolumes, Snapshots, Group Snapshots, Replication, Monitoring). Detail and create pages render standalone without tabs.
 - **Pool dashboard** — Overview tab showing all FileSharePools with status, capacity gauges, share count, SubVolume count, and recent activity table.
 - **CRUD for all 5 CRDs** — List, detail, create, edit, and delete views for FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, and ReplicationPolicy resources. Create buttons route to custom form wizards (not the YAML editor).
-- **FileSharePool creation wizard** — 6-step guided wizard for creating pools: zone/profile selection, capacity configuration, allocation strategy, directory ownership, golden image config, and review.
+- **FileSharePool creation wizard** — 6-step guided wizard for creating pools: zone/profile selection, capacity configuration, allocation strategy, directory ownership, and review. The form no longer offers golden images.
 - **IOPS column in pool table** — Displays `spec.iops`, or "VPC default" when it is not set.
 - **Monitoring tab** — Dedicated metrics page with time range selector (1h/6h/24h/7d), stat cards (allocation rate, P95 latency, VPC API health, replication status), and time-series charts (allocation rate, latency, API call rate by status, replication lag).
 - **Prometheus metrics panels** — Stat cards and time-series charts using the driver's 21+ Prometheus metrics with `usePrometheusRange` hook for range queries.
 - **TLS via service-ca** — Plugin Service uses OpenShift's service-ca operator for automatic TLS certificate provisioning (no cert-manager dependency).
 
-### Golden Image Syncer — Beta
+### CDI Copy Limit — Beta
+
+Lets VMs from the standard OpenShift Virtualization catalog use a pool for their boot disk.
+
+- **Standard catalog** — Pick a catalog image and choose the pool's StorageClass for the boot disk. CDI copies the image onto the pool. See [USER-GUIDE.md](USER-GUIDE.md#create-a-vm-with-its-boot-disk-on-a-pool).
+- **Copy pod memory limit** — The controller keeps the memory limit of CDI's copy pods at least 8Gi, through `HyperConverged` `spec.resourceRequirements.storageWorkloads`. It checks at start-up and every 5 minutes (leader only), and it only raises the limit. Helm value `cdi.copyPodMemoryLimit`; empty turns the check off.
+- **Visible resets** — Each raise logs a warning and adds 1 to `vpc_file_pool_cdi_copy_limit_raised_total`.
+- **Measured** — On rovslab, a 25 GB copy finished in 134 s with 8Gi and never finished with 2Gi. A RHEL 9 catalog VM had its guest agent after 103 s.
+- **ROVS** — IBM says the virtualization add-on cannot be modified. See [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md#cdi-containerized-data-importer-compatibility).
+
+### Golden Image Syncer — Hidden
+
+**Hidden.** The code is kept for possible later use. The console pool form no longer offers golden images, and the "VM storage" preset no longer turns them on. A pool that sets `spec.goldenImages` in YAML still works. The standard catalog is the recommended way to make VMs. The features below stay listed for that reason.
 
 VM image caching for KubeVirt workloads.
 

@@ -435,8 +435,8 @@ Run this checklist after every upgrade:
 
 ```bash
 # 1. Verify all pods are running
-kubectl get pods -n kube-system -l app=vpc-file-pool-csi-controller
-kubectl get pods -n kube-system -l app=vpc-file-pool-csi-node
+kubectl get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller
+kubectl get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node
 
 # 2. Verify all pools are Ready
 kubectl get filesharepools
@@ -469,7 +469,7 @@ kill %1
 kubectl delete pvc upgrade-test-pvc
 
 # 7. Check controller logs for errors
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller --tail=50 | grep -i "error\|fail"
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller --tail=50 | grep -i "error\|fail"
 ```
 
 ---
