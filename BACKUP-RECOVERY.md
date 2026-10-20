@@ -231,6 +231,17 @@ spec:
     apiGroup: snapshot.storage.k8s.io
 ```
 
+### Restore in the console
+
+The console can do the same without YAML. Open a snapshot in the IBM VPC File Pools page (Snapshots tab) and choose **Restore to new PVC**, on the details page or in the row menu.
+
+- The form has defaults: the name is `<source claim>-restored`, the size is the snapshot's size (you can make it bigger, not smaller), and the storage class, access mode and volume mode come from the source claim when it still exists.
+- The namespace is fixed to the namespace of the snapshot. This is a Kubernetes rule.
+- The action only creates a new claim. It never replaces an existing volume.
+- The page then shows the copy: the percent copied while the claim is `Pending`, then "ready" when it is `Bound`. If the copy fails, it shows the error, and the claim is not deleted.
+- The action is off, with a reason, when the snapshot is not ready or when no `VolumeSnapshot` points to it. A snapshot made directly as a `Snapshot` object has no `VolumeSnapshot`: create one first.
+- **A snapshot of a running VM's disk is a plain file copy, and the restored disk may not boot.** The form warns when a VM uses the source claim.
+
 ---
 
 ## Group Snapshots

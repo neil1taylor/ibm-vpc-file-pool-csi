@@ -16,6 +16,7 @@ export const ROUTES = {
   SNAPSHOTS: '/vpc-file-pools/snapshots',
   SNAPSHOT_CREATE: '/vpc-file-pools/snapshots/~new',
   SNAPSHOT_DETAIL: '/vpc-file-pools/snapshots/:name',
+  SNAPSHOT_RESTORE: '/vpc-file-pools/snapshots/:name/restore',
   GROUP_SNAPSHOTS: '/vpc-file-pools/group-snapshots',
   GROUP_SNAPSHOT_CREATE: '/vpc-file-pools/group-snapshots/~new',
   GROUP_SNAPSHOT_DETAIL: '/vpc-file-pools/group-snapshots/:name',
