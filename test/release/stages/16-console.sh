@@ -134,7 +134,7 @@ run() {
     api=$(oc whoami --show-server)
     work=$(mktemp -d)
     cp -R "$TEST_DIR" "$work/integration-tests"
-    mkdir -p "$SHOTS"
+    mkdir -p "$SHOTS" "$RT_OUT/console-test-results"
 
     cat >"$work/nginx.conf" <<NGINX
 pid /tmp/nginx.pid;
@@ -164,7 +164,7 @@ NGINX
     check "the local console starts" wait_until 120 3 console_is_up
 
     podman run --rm --network host \
-        -v "$work:/work:Z" -v "$SHOTS:/screenshots:Z" \
+        -v "$work:/work:Z" -v "$SHOTS:/screenshots:Z" -v "$RT_OUT/console-test-results:/work/test-results:Z" \
         -e CONSOLE_URL="http://localhost:$CONSOLE_PORT" -e CONSOLE_AUTH=none \
         -e SCREENSHOT_DIR=/screenshots -e PLAYWRIGHT_JSON_OUTPUT_NAME=/work/result.json \
         -w /work "$PLAYWRIGHT_IMAGE" \
