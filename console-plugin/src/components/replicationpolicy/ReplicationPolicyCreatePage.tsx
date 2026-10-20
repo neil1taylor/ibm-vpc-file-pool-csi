@@ -40,7 +40,12 @@ import { ROUTES } from '../../constants';
 import FieldPopover from '../common/FieldPopover';
 import SchedulePresets from '../common/SchedulePresets';
 import HookEditor from '../common/HookEditor';
-import { destinationSpecFields } from '../../utils/replication-helpers';
+import {
+  DEFAULT_RESTORE_POINT_KEEP_HOURS,
+  DEFAULT_VM_COPY_SPEED_MBPS,
+  destinationSpecFields,
+  vmCopySpecFields,
+} from '../../utils/replication-helpers';
 
 const SCHEDULE_PRESETS = [
   { label: '5m', value: '5m' },
@@ -67,6 +72,8 @@ const ReplicationPolicyCreatePage: React.FC = () => {
   const [incrementalSync, setIncrementalSync] = useState(true);
   const [bandwidthLimitMbps, setBandwidthLimitMbps] = useState(0);
   const [maxParallelSyncs, setMaxParallelSyncs] = useState(1);
+  const [vmCopySpeedLimitMBps, setVmCopySpeedLimitMBps] = useState(DEFAULT_VM_COPY_SPEED_MBPS);
+  const [restorePointKeepHours, setRestorePointKeepHours] = useState(DEFAULT_RESTORE_POINT_KEEP_HOURS);
   const [rsyncOptions, setRsyncOptions] = useState('');
 
   const isDriverToDriver = replicationMode === 'driver-to-driver';
@@ -125,6 +132,7 @@ const ReplicationPolicyCreatePage: React.FC = () => {
         bandwidthLimitMbps: isDriverToDriver ? undefined : (bandwidthLimitMbps > 0 ? bandwidthLimitMbps : undefined),
         maxParallelSyncs: maxParallelSyncs > 1 ? maxParallelSyncs : undefined,
         rsyncOptions: isDriverToDriver ? undefined : (rsyncOptions.trim() ? rsyncOptions.trim().split('\n').filter(Boolean) : undefined),
+        ...vmCopySpecFields({ speedLimitMBps: vmCopySpeedLimitMBps, restorePointKeepHours }),
         ...destinationSpecFields({
           isDriverToDriver,
           nfsServer: destinationNFSServer,
@@ -487,6 +495,48 @@ const ReplicationPolicyCreatePage: React.FC = () => {
               onChange={(event) => {
                 const val = parseInt((event.target as HTMLInputElement).value, 10);
                 if (!isNaN(val)) setMaxParallelSyncs(val);
+              }}
+            />
+          </FieldPopover>
+        </StackItem>
+
+        <StackItem>
+          <FieldPopover
+            fieldId="rp-vm-speed"
+            label="VM Copy Speed Limit (MB/s per disk)"
+            description="How fast a running VM's disk is copied. A higher limit gives a shorter copy and a lower recovery point, but slows the VM's own disk writes more. 0 means unlimited. Default 20."
+          >
+            <NumberInput
+              id="rp-vm-speed"
+              value={vmCopySpeedLimitMBps}
+              min={0}
+              max={10000}
+              onMinus={() => setVmCopySpeedLimitMBps(Math.max(0, vmCopySpeedLimitMBps - 5))}
+              onPlus={() => setVmCopySpeedLimitMBps(Math.min(10000, vmCopySpeedLimitMBps + 5))}
+              onChange={(event) => {
+                const val = parseInt((event.target as HTMLInputElement).value, 10);
+                if (!isNaN(val)) setVmCopySpeedLimitMBps(val);
+              }}
+            />
+          </FieldPopover>
+        </StackItem>
+
+        <StackItem>
+          <FieldPopover
+            fieldId="rp-vm-keep"
+            label="Restore Point Keep Time (hours)"
+            description="How long the destination keeps earlier copies of a running VM's disks, so you can recover to an earlier moment. Longer needs more space at the destination. Default 24."
+          >
+            <NumberInput
+              id="rp-vm-keep"
+              value={restorePointKeepHours}
+              min={1}
+              max={8760}
+              onMinus={() => setRestorePointKeepHours(Math.max(1, restorePointKeepHours - 1))}
+              onPlus={() => setRestorePointKeepHours(Math.min(8760, restorePointKeepHours + 1))}
+              onChange={(event) => {
+                const val = parseInt((event.target as HTMLInputElement).value, 10);
+                if (!isNaN(val)) setRestorePointKeepHours(val);
               }}
             />
           </FieldPopover>

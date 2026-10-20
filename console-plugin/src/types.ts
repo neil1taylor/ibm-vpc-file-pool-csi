@@ -243,6 +243,10 @@ export interface ReplicationPolicySpec {
   destinationAuthSecretRef?: string;
   /** Secret name in kube-system with a "ca.crt" key. Used in driver-to-driver mode when the receiver has a self-signed certificate. */
   destinationCACertSecretRef?: string;
+  /** Speed limit for copying a running VM's disk, in MB/s for each disk. 0 is unlimited. Default 20. */
+  vmCopySpeedLimitMBps?: number;
+  /** How long the destination keeps restore points of a running VM's disks. Default 24. */
+  restorePointKeepHours?: number;
 }
 
 export interface ReplicationPolicyStatus {

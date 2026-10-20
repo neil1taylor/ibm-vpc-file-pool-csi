@@ -33,6 +33,7 @@ import { ReplicationPolicyModel } from '../../models';
 import { ReplicationPolicy, Hook } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
 import DeleteModal from '../common/DeleteModal';
+import { vmCopySettingsText } from '../../utils/replication-helpers';
 import { formatAge, formatDuration, humanizeBytes } from '../../utils/resource-helpers';
 import { ROUTES } from '../../constants';
 
@@ -253,6 +254,14 @@ const ReplicationPolicyDetailsPage: React.FC = () => {
             <DescriptionListDescription>
               {spec.maxParallelSyncs ?? 1}
             </DescriptionListDescription>
+          </DescriptionListGroup>
+          <DescriptionListGroup>
+            <DescriptionListTerm>VM Copy Speed Limit</DescriptionListTerm>
+            <DescriptionListDescription>{vmCopySettingsText(spec).speed}</DescriptionListDescription>
+          </DescriptionListGroup>
+          <DescriptionListGroup>
+            <DescriptionListTerm>Restore Point Keep Time</DescriptionListTerm>
+            <DescriptionListDescription>{vmCopySettingsText(spec).keep}</DescriptionListDescription>
           </DescriptionListGroup>
           {!isReceiverMode && (
             <DescriptionListGroup>
