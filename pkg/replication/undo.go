@@ -76,6 +76,75 @@ type ApplyResult struct {
 
 func undoDir(disk string) string { return filepath.Join(filepath.Dir(disk), undoDirName) }
 
+// volume is the folder that holds a far-site disk. Every file operation goes
+// through an os.Root on it, so a link planted in the folder, for example by a
+// VM that used it after a failover, cannot lead to another volume on the share.
+type volume struct {
+	root *os.Root
+	disk string // file name of the disk in the folder
+}
+
+func openVolume(disk string) (*volume, error) {
+	root, err := os.OpenRoot(filepath.Dir(disk))
+	if err != nil {
+		return nil, err
+	}
+	return &volume{root: root, disk: filepath.Base(disk)}, nil
+}
+
+func (v *volume) close() { _ = v.root.Close() }
+
+// diskInfo returns the disk's file info; the disk must be a regular file.
+func (v *volume) diskInfo() (os.FileInfo, error) {
+	fi, err := v.root.Lstat(v.disk)
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", v.disk)
+	}
+	return fi, nil
+}
+
+func (v *volume) openDisk(flag int) (*os.File, error) {
+	if _, err := v.diskInfo(); err != nil {
+		return nil, err
+	}
+	return v.root.OpenFile(v.disk, flag, 0)
+}
+
+// undoEntries lists the undo folder; a missing folder is empty.
+func (v *volume) undoEntries() ([]os.DirEntry, error) {
+	fi, err := v.root.Lstat(undoDirName)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !fi.IsDir() {
+		return nil, fmt.Errorf("%s is not a folder", undoDirName)
+	}
+	d, err := v.root.Open(undoDirName)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = d.Close() }()
+	return d.ReadDir(-1)
+}
+
+// sync makes a rename or a new file in the named folder durable.
+func (v *volume) sync(name string) error {
+	d, err := v.root.Open(name)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = d.Close() }()
+	return d.Sync()
+}
+
+func undoPath(name string) string { return filepath.Join(undoDirName, name) }
+
 // sortExtents sorts extents by offset.
 func sortExtents(exts []qcow2.Extent) {
 	sort.Slice(exts, func(i, j int) bool { return exts[i].Offset < exts[j].Offset })
@@ -88,15 +157,20 @@ func sortExtents(exts []qcow2.Extent) {
 // exist yet, it is made in one step and there is no restore point.
 func ApplyCopy(src CopySource, disk string, opts ApplyOptions) (ApplyResult, error) {
 	var res ApplyResult
-	rolled, err := Recover(disk)
+	v, err := openVolume(disk)
+	if err != nil {
+		return res, err
+	}
+	defer v.close()
+	rolled, err := v.recover()
 	if err != nil {
 		return res, fmt.Errorf("rolling back an unfinished copy: %w", err)
 	}
 	res.RolledBack = rolled
 
-	fi, err := os.Stat(disk)
+	fi, err := v.diskInfo()
 	if errors.Is(err, os.ErrNotExist) {
-		n, werr := writeNewDiskFrom(src, disk)
+		n, werr := writeNewDiskFrom(src, v)
 		res.ChangedBytes = n
 		return res, werr
 	}
@@ -105,32 +179,31 @@ func ApplyCopy(src CopySource, disk string, opts ApplyOptions) (ApplyResult, err
 	}
 	oldSize, newSize := fi.Size(), src.Size()
 
-	f, err := os.OpenFile(disk, os.O_RDWR, 0) // #nosec G304 -- path comes from the controller's Job spec
+	f, err := v.openDisk(os.O_RDWR)
 	if err != nil {
 		return res, err
 	}
 	defer func() { _ = f.Close() }()
 
-	dir := undoDir(disk)
-	if err = os.MkdirAll(dir, 0o770); err != nil { // #nosec G301 -- the QEMU user and the driver's Jobs share it
+	if err = v.root.MkdirAll(undoDirName, 0o770); err != nil { // #nosec G301 -- shared with the QEMU user
 		return res, err
 	}
-	seq, err := nextUndoSeq(dir)
+	seq, err := nextUndoSeq(v)
 	if err != nil {
 		return res, err
 	}
-	base := filepath.Join(dir, fmt.Sprintf("%010d", seq))
+	base := undoPath(fmt.Sprintf("%010d", seq))
 
 	// 1. Save the old contents of every block that will change.
-	changed, err := writeUndo(base+undoPart, src, f, oldSize, opts)
+	changed, err := writeUndo(v, base+undoPart, src, f, oldSize, opts)
 	if err != nil {
-		_ = os.Remove(base + undoPart)
+		_ = v.root.Remove(base + undoPart)
 		return res, err
 	}
-	if err = os.Rename(base+undoPart, base+undoReady); err != nil {
+	if err = v.root.Rename(base+undoPart, base+undoReady); err != nil {
 		return res, err
 	}
-	if err = syncDir(dir); err != nil {
+	if err = v.sync(undoDirName); err != nil {
 		return res, err
 	}
 
@@ -165,15 +238,15 @@ func ApplyCopy(src CopySource, disk string, opts ApplyOptions) (ApplyResult, err
 	}
 
 	// 3. The disk holds the copy: the undo file is now a restore point.
-	if err = os.Rename(base+undoReady, base+undoApplied); err != nil {
+	if err = v.root.Rename(base+undoReady, base+undoApplied); err != nil {
 		return res, err
 	}
-	if err = syncDir(dir); err != nil {
+	if err = v.sync(undoDirName); err != nil {
 		return res, err
 	}
 	res.ChangedBytes = int64(len(changed)) * compareChunk
 	if opts.Keep > 0 {
-		if err = pruneUndo(dir, opts.Now.Add(-opts.Keep)); err != nil {
+		if err = pruneUndo(v, opts.Now.Add(-opts.Keep)); err != nil {
 			return res, err
 		}
 	}
@@ -181,12 +254,12 @@ func ApplyCopy(src CopySource, disk string, opts ApplyOptions) (ApplyResult, err
 }
 
 // writeNewDiskFrom makes a new disk from a copy, in one step.
-func writeNewDiskFrom(src CopySource, disk string) (int64, error) {
-	tmp := disk + newDiskSuffix
-	if err := os.Remove(tmp); err != nil && !errors.Is(err, os.ErrNotExist) {
+func writeNewDiskFrom(src CopySource, v *volume) (int64, error) {
+	tmp := v.disk + newDiskSuffix
+	if err := v.root.Remove(tmp); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return 0, err
 	}
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, diskFileMode) // #nosec G304 -- path comes from the controller's Job spec
+	f, err := v.root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, diskFileMode)
 	if err != nil {
 		return 0, err
 	}
@@ -213,13 +286,13 @@ func writeNewDiskFrom(src CopySource, disk string) (int64, error) {
 		err = f.Close()
 	}
 	if err == nil {
-		err = os.Rename(tmp, disk)
+		err = v.root.Rename(tmp, v.disk)
 	}
 	if err != nil {
-		_ = os.Remove(tmp)
+		_ = v.root.Remove(tmp)
 		return n, err
 	}
-	return n, syncDir(filepath.Dir(disk))
+	return n, v.sync(".")
 }
 
 // forEachNewChunk calls fn with the new contents of the copy, one chunk of at
@@ -273,8 +346,8 @@ func forEachNewChunk(src CopySource, full bool, fn func(off int64, data []byte) 
 
 // writeUndo writes the undo file for a copy: the old contents of each chunk
 // whose new contents differ. It returns the offsets of those chunks.
-func writeUndo(path string, src CopySource, disk *os.File, oldSize int64, opts ApplyOptions) (map[int64]bool, error) {
-	uf, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o660) // #nosec G302,G304 -- inside the disk's undo folder, shared with the QEMU user
+func writeUndo(v *volume, name string, src CopySource, disk *os.File, oldSize int64, opts ApplyOptions) (map[int64]bool, error) {
+	uf, err := v.root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o660)
 	if err != nil {
 		return nil, err
 	}
@@ -358,9 +431,9 @@ type undoHeader struct {
 }
 
 // readUndo checks an undo file and calls fn for each record, if fn is not nil.
-func readUndo(path string, fn func(off int64, data []byte) error) (undoHeader, error) {
+func readUndo(v *volume, path string, fn func(off int64, data []byte) error) (undoHeader, error) {
 	var h undoHeader
-	f, err := os.Open(path) // #nosec G304 -- path is inside the disk's undo folder
+	f, err := v.root.Open(path)
 	if err != nil {
 		return h, err
 	}
@@ -410,13 +483,14 @@ func readUndo(path string, fn func(off int64, data []byte) error) (undoHeader, e
 	return h, nil
 }
 
-// applyUndo takes the disk file back to the moment before the undo file's copy.
-func applyUndo(path string, f *os.File) error {
-	h, err := readUndo(path, nil) // check the whole file before changing anything
+// applyUndo takes the disk file f back to the moment before the undo file's
+// copy. f may be the disk itself or a copy of it.
+func applyUndo(v *volume, name string, f *os.File) error {
+	h, err := readUndo(v, name, nil) // check the whole file before changing anything
 	if err != nil {
 		return err
 	}
-	if _, err = readUndo(path, func(off int64, data []byte) error {
+	if _, err = readUndo(v, name, func(off int64, data []byte) error {
 		_, werr := f.WriteAt(data, off)
 		return werr
 	}); err != nil {
@@ -432,53 +506,55 @@ func applyUndo(path string, f *os.File) error {
 // deletes undo files that were never completed. It reports whether it rolled
 // back.
 func Recover(disk string) (bool, error) {
-	dir := undoDir(disk)
-	entries, err := os.ReadDir(dir)
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
+	v, err := openVolume(disk)
 	if err != nil {
+		return false, err
+	}
+	defer v.close()
+	return v.recover()
+}
+
+func (v *volume) recover() (bool, error) {
+	entries, err := v.undoEntries()
+	if err != nil || entries == nil {
 		return false, err
 	}
 	rolled := false
 	for _, e := range entries {
-		p := filepath.Join(dir, e.Name())
+		p := undoPath(e.Name())
 		switch {
 		case strings.HasSuffix(e.Name(), undoPart):
-			if err = os.Remove(p); err != nil {
+			if err = v.root.Remove(p); err != nil {
 				return rolled, err
 			}
 		case strings.HasSuffix(e.Name(), undoReady):
-			f, err := os.OpenFile(disk, os.O_RDWR, 0) // #nosec G304 -- path comes from the controller's Job spec
+			f, err := v.openDisk(os.O_RDWR)
 			if err != nil {
 				return rolled, err
 			}
-			err = applyUndo(p, f)
+			err = applyUndo(v, p, f)
 			_ = f.Close()
 			if err != nil {
 				return rolled, fmt.Errorf("rolling back from %s: %w", e.Name(), err)
 			}
-			if err = os.Remove(p); err != nil {
+			if err = v.root.Remove(p); err != nil {
 				return rolled, err
 			}
 			rolled = true
 		}
 	}
-	return rolled, syncDir(dir)
+	return rolled, v.sync(undoDirName)
 }
 
 type undoFile struct {
 	seq  int
-	path string
+	path string // relative to the volume folder
 	hdr  undoHeader
 }
 
 // appliedUndo lists the restore point undo files, oldest first.
-func appliedUndo(dir string) ([]undoFile, error) {
-	entries, err := os.ReadDir(dir)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
+func appliedUndo(v *volume) ([]undoFile, error) {
+	entries, err := v.undoEntries()
 	if err != nil {
 		return nil, err
 	}
@@ -488,14 +564,14 @@ func appliedUndo(dir string) ([]undoFile, error) {
 		if !strings.HasSuffix(name, undoApplied) {
 			continue
 		}
-		seq, err := strconv.Atoi(strings.TrimSuffix(name, undoApplied))
-		if err != nil {
+		seq, aerr := strconv.Atoi(strings.TrimSuffix(name, undoApplied))
+		if aerr != nil {
 			continue
 		}
-		p := filepath.Join(dir, name)
-		h, err := readUndo(p, nil)
-		if err != nil {
-			return nil, err
+		p := undoPath(name)
+		h, rerr := readUndo(v, p, nil)
+		if rerr != nil {
+			return nil, rerr
 		}
 		files = append(files, undoFile{seq: seq, path: p, hdr: h})
 	}
@@ -503,8 +579,8 @@ func appliedUndo(dir string) ([]undoFile, error) {
 	return files, nil
 }
 
-func nextUndoSeq(dir string) (int, error) {
-	entries, err := os.ReadDir(dir)
+func nextUndoSeq(v *volume) (int, error) {
+	entries, err := v.undoEntries()
 	if err != nil {
 		return 0, err
 	}
@@ -512,7 +588,7 @@ func nextUndoSeq(dir string) (int, error) {
 	for _, e := range entries {
 		name := e.Name()
 		if i := strings.Index(name, ".undo"); i > 0 {
-			if n, err := strconv.Atoi(name[:i]); err == nil && n >= next {
+			if n, aerr := strconv.Atoi(name[:i]); aerr == nil && n >= next {
 				next = n + 1
 			}
 		}
@@ -522,8 +598,8 @@ func nextUndoSeq(dir string) (int, error) {
 
 // pruneUndo deletes, oldest first, the undo files of copies made before
 // cutoff, so the remaining ones still chain back from the latest copy.
-func pruneUndo(dir string, cutoff time.Time) error {
-	files, err := appliedUndo(dir)
+func pruneUndo(v *volume, cutoff time.Time) error {
+	files, err := appliedUndo(v)
 	if err != nil {
 		return err
 	}
@@ -531,7 +607,7 @@ func pruneUndo(dir string, cutoff time.Time) error {
 		if !u.hdr.to.Before(cutoff) {
 			break
 		}
-		if err := os.Remove(u.path); err != nil {
+		if err := v.root.Remove(u.path); err != nil {
 			return err
 		}
 	}
@@ -541,7 +617,12 @@ func pruneUndo(dir string, cutoff time.Time) error {
 // RestorePoints lists the moments the disk can be rewound to, oldest first.
 // The latest copy, in the disk itself, is not included.
 func RestorePoints(disk string) ([]time.Time, error) {
-	files, err := appliedUndo(undoDir(disk))
+	v, err := openVolume(disk)
+	if err != nil {
+		return nil, err
+	}
+	defer v.close()
+	files, err := appliedUndo(v)
 	if err != nil {
 		return nil, err
 	}
@@ -555,10 +636,15 @@ func RestorePoints(disk string) ([]time.Time, error) {
 // Rewind writes to out a disk as it was at restore point to. It does not
 // change the latest disk, except to roll back a copy that stopped half way.
 func Rewind(disk string, to time.Time, out string) error {
-	if _, err := Recover(disk); err != nil {
+	v, err := openVolume(disk)
+	if err != nil {
 		return err
 	}
-	files, err := appliedUndo(undoDir(disk))
+	defer v.close()
+	if _, err = v.recover(); err != nil {
+		return err
+	}
+	files, err := appliedUndo(v)
 	if err != nil {
 		return err
 	}
@@ -571,38 +657,23 @@ func Rewind(disk string, to time.Time, out string) error {
 	if stop < 0 {
 		return fmt.Errorf("no restore point at %s", to.UTC().Format(time.RFC3339Nano))
 	}
-	if err = copyFile(disk, out); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(out, os.O_RDWR, 0) // #nosec G304 -- path chosen by the caller
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-	for i := len(files) - 1; i >= stop; i-- {
-		if err = applyUndo(files[i].path, f); err != nil {
-			return fmt.Errorf("rewinding with %s: %w", filepath.Base(files[i].path), err)
-		}
-	}
-	return f.Close()
-}
-
-func copyFile(src, dst string) error {
-	in, err := os.Open(src) // #nosec G304 -- path comes from the caller
+	in, err := v.openDisk(os.O_RDONLY)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = in.Close() }()
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, diskFileMode) // #nosec G304 -- path chosen by the caller
+	f, err := os.OpenFile(out, os.O_RDWR|os.O_CREATE|os.O_EXCL, diskFileMode) // #nosec G304 -- path chosen by the caller
 	if err != nil {
 		return err
 	}
-	defer func() { _ = out.Close() }()
-	if _, err = io.Copy(out, in); err != nil {
+	defer func() { _ = f.Close() }()
+	if _, err = io.Copy(f, in); err != nil {
 		return err
 	}
-	if err = out.Sync(); err != nil {
-		return err
+	for i := len(files) - 1; i >= stop; i-- {
+		if err = applyUndo(v, files[i].path, f); err != nil {
+			return fmt.Errorf("rewinding with %s: %w", filepath.Base(files[i].path), err)
+		}
 	}
-	return out.Close()
+	return f.Close()
 }

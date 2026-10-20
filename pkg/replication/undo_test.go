@@ -390,3 +390,50 @@ func TestApplyCopy_RealStagingFile(t *testing.T) {
 		t.Error("rewind does not give the old disk")
 	}
 }
+
+// TestApplyCopy_RefusesLinksOutOfTheFolder verifies that a link planted in the
+// disk's folder cannot make the Job read or write another volume.
+func TestApplyCopy_RefusesLinksOutOfTheFolder(t *testing.T) {
+	share := t.TempDir()
+	other := filepath.Join(share, "pvc-other")
+	mine := filepath.Join(share, "pvc-mine")
+	for _, d := range []string{other, mine} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	otherDisk := filepath.Join(other, "disk.img")
+	secret := patterned(4 * chunk)
+	writeDisk(t, otherDisk, secret)
+
+	t.Run("disk is a link", func(t *testing.T) {
+		disk := filepath.Join(mine, "disk.img")
+		if err := os.Symlink(otherDisk, disk); err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = os.Remove(disk) }()
+		if _, err := ApplyCopy(change(4*chunk, 0xaa, []int64{0}, nil), disk, ApplyOptions{From: t0, To: t1}); err == nil {
+			t.Error("expected a disk that is a link to be refused")
+		}
+		if !bytes.Equal(readDisk(t, otherDisk), secret) {
+			t.Error("the other volume's disk was changed")
+		}
+	})
+
+	t.Run("undo folder is a link", func(t *testing.T) {
+		disk := filepath.Join(mine, "disk.img")
+		writeDisk(t, disk, patterned(4*chunk))
+		defer func() { _ = os.Remove(disk) }()
+		if err := os.Symlink(other, filepath.Join(mine, undoDirName)); err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = os.Remove(filepath.Join(mine, undoDirName)) }()
+		if _, err := ApplyCopy(change(4*chunk, 0xaa, []int64{0}, nil), disk, ApplyOptions{From: t0, To: t1}); err == nil {
+			t.Error("expected an undo folder that leads out of the volume to be refused")
+		}
+		entries, _ := os.ReadDir(other)
+		if len(entries) != 1 {
+			t.Errorf("files were written into the other volume: %v", entries)
+		}
+	})
+}
