@@ -30,6 +30,10 @@ type DiskState struct {
 	// first, not counting Moment. A restore point dated at the epoch stands
 	// for a moment that was not known; it is left out.
 	RestorePoints []time.Time
+	// Modified is true if something wrote to the disk after the last copy,
+	// for example a VM that booted from it. Its restore points then no longer
+	// fit it. A copy that stopped half way does not count.
+	Modified bool
 }
 
 // ReadDiskState reads the state of the disk. It does not change anything. A
@@ -50,6 +54,13 @@ func ReadDiskState(disk string) (DiskState, error) {
 	}
 	if mf != nil {
 		st.VMGroup = mf.VMGroup
+		if fi, derr := v.diskInfo(); derr == nil && mf.DiskMtimeNs != 0 && fi.ModTime().UnixNano() != mf.DiskMtimeNs {
+			unfinished, uerr := v.hasUnfinishedCopy()
+			if uerr != nil {
+				return st, uerr
+			}
+			st.Modified = !unfinished
+		}
 	}
 	files, err := appliedUndo(v)
 	if err != nil {
@@ -118,4 +129,19 @@ func writeLease(dir string, expires time.Time) error {
 // does after a commit. The receiver and tests use it.
 func WriteMoment(dir string, t time.Time, vmGroup string) error {
 	return writeMoment(dir, t, vmGroup)
+}
+
+// hasUnfinishedCopy reports whether a copy changed the disk and did not end:
+// its undo file is complete but not marked applied.
+func (v *volume) hasUnfinishedCopy() (bool, error) {
+	entries, err := v.undoEntries()
+	if err != nil {
+		return false, err
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), undoReady) {
+			return true, nil
+		}
+	}
+	return false, nil
 }

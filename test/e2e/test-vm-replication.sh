@@ -414,13 +414,6 @@ spec:
 YAML
 done
 
-log "booting the copy"
-vm_yaml copy copy-root copy-data no | oc apply -f -
-wait_until 900 "copy guest agent" agent_connected copy
-
-log "waiting for ssh on the copy"
-wait_until 300 "ssh on the copy" vssh copy true
-
 # check_copy <vmi> <moment>: the VM booted from far-site disks shows no file
 # system errors, and every file in the writer's log on the root disk is on the
 # data disk with the logged checksum.
@@ -433,9 +426,6 @@ check_copy() {
     echo "$result" | grep -q CHECKSUMS_OK || fail "files on the data disk of $vmi do not match the log on the root disk"
     log "PASS: $vmi booted; $(echo "$result" | head -1) files logged up to $at, all checksums match"
 }
-
-log "checking the copy"
-check_copy copy "$moment"
 
 # failover_check rewinds both disks to the first copy with the failover tool,
 # run in the receiver pod where the share is mounted, and boots from them.
@@ -487,6 +477,27 @@ YAML
     check_copy rewound "$first"
 }
 
+# Rewind first. A VM that boots from the latest copy writes to it, and a disk
+# that was written to cannot be rewound.
 if [ "$MODE" = receiver ]; then
     failover_check
+fi
+
+log "booting the copy"
+vm_yaml copy copy-root copy-data no | oc apply -f -
+wait_until 900 "copy guest agent" agent_connected copy
+
+log "waiting for ssh on the copy"
+wait_until 300 "ssh on the copy" vssh copy true
+
+log "checking the copy"
+check_copy copy "$moment"
+
+# The copy VM wrote to the latest disk, so the failover tool must now refuse
+# to rewind from it.
+if [ "$MODE" = receiver ]; then
+    refusal=$(oc exec -n kube-system "deploy/$RECV" -- /tmp/kubectl-failover execute --nfs-mount-path /data/repl --prepare-only --rewind-to "$first" 2>&1 || true)
+    echo "$refusal"
+    echo "$refusal" | grep -q "has changed since its last copy" || fail "the failover tool rewound a disk that a VM had written to"
+    log "PASS: the failover tool refuses to rewind a disk that a VM has written to"
 fi

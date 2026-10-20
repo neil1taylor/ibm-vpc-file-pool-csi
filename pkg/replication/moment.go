@@ -17,6 +17,11 @@ const momentFileName = ".repl-moment"
 type momentFile struct {
 	Moment  time.Time `json:"moment"`
 	VMGroup string    `json:"vmGroup,omitempty"`
+	// DiskMtimeNs and DiskSize seal the disk as the last copy left it. A
+	// different modification time later means something else wrote to the
+	// disk, for example a VM that booted from it.
+	DiskMtimeNs int64 `json:"diskMtimeNs,omitempty"`
+	DiskSize    int64 `json:"diskSize,omitempty"`
 }
 
 // moment returns the moment the disk shows now. The newest restore point
@@ -58,6 +63,9 @@ func (v *volume) readMomentFile() (*momentFile, error) {
 }
 
 func (v *volume) writeMomentFile(mf momentFile) error {
+	if fi, err := v.diskInfo(); err == nil {
+		mf.DiskMtimeNs, mf.DiskSize = fi.ModTime().UnixNano(), fi.Size()
+	}
 	b, err := json.Marshal(mf)
 	if err != nil {
 		return err
@@ -93,9 +101,20 @@ func CurrentMoment(disk string) (t time.Time, ok bool, err error) {
 	return v.moment()
 }
 
-// writeMoment records the moment of a disk in the folder that holds it.
+// reseal records the disk's modification time again, after a roll back put it
+// back to what the last copy left.
+func (v *volume) reseal() error {
+	mf, err := v.readMomentFile()
+	if err != nil || mf == nil {
+		return err
+	}
+	return v.writeMomentFile(*mf)
+}
+
+// writeMoment records the moment of a disk in the folder that holds it, and
+// seals the disk.
 func writeMoment(dir string, t time.Time, vmGroup string) error {
-	v, err := openVolume(filepath.Join(dir, "x"))
+	v, err := openVolume(filepath.Join(dir, defaultDiskName))
 	if err != nil {
 		return err
 	}

@@ -169,6 +169,9 @@ func (p *FailoverPlan) ResolveVMs(opts VMOptions) error {
 			sv.VMGroup = key
 			sv.VMMoment = chosen
 			sv.Rewind = !chosen.Equal(d.state.Moment)
+			if sv.Rewind && d.state.Modified {
+				return fmt.Errorf("%s has changed since its last copy (a VM has probably run on it), so its restore points no longer fit it and it cannot be rewound; use the disk as it is, or fail over from a copy that no VM has used", d.name)
+			}
 			sv.LastSyncTime = chosen
 		}
 	}

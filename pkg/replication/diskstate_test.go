@@ -1,6 +1,7 @@
 package replication
 
 import (
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -95,5 +96,62 @@ func TestReceiverVM_CommitLeavesNoLease(t *testing.T) {
 	}
 	if on, _ := LeaseActive(filepath.Dir(c.diskPath()), time.Now()); on {
 		t.Fatal("lease after a refused commit")
+	}
+}
+
+func TestReadDiskState_ModifiedAfterTheLastCopy(t *testing.T) {
+	c := newVMTestClient(t)
+	if code, _ := c.send("f4f4f4f4-1", change(2*chunk, 5, []int64{0, chunk}, nil), nil, t1, true); code != http.StatusOK {
+		t.Fatal("first copy failed")
+	}
+	st, err := ReadDiskState(c.diskPath())
+	if err != nil || st.Modified {
+		t.Fatalf("right after the commit: modified = %v, err = %v", st.Modified, err)
+	}
+	// A VM that runs on the disk writes to it.
+	f, err := os.OpenFile(c.diskPath(), os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.WriteAt([]byte{9}, 10); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	later := time.Now().Add(time.Minute)
+	if err = os.Chtimes(c.diskPath(), later, later); err != nil {
+		t.Fatal(err)
+	}
+	if st, err = ReadDiskState(c.diskPath()); err != nil || !st.Modified {
+		t.Fatalf("after a write: modified = %v, err = %v", st.Modified, err)
+	}
+}
+
+func TestReadDiskState_UnfinishedCopyIsNotAModification(t *testing.T) {
+	dir := t.TempDir()
+	disk := filepath.Join(dir, "disk.img")
+	if _, err := ApplyCopy(change(2*chunk, 1, []int64{0, chunk}, nil), disk, ApplyOptions{To: t1, Full: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteMoment(dir, t1, "ns/vm"); err != nil {
+		t.Fatal(err)
+	}
+	// A copy that stops half way changes the disk, and leaves a .ready undo file.
+	stop := errors.New("stop")
+	_, err := ApplyCopy(change(2*chunk, 2, []int64{0, chunk}, nil), disk, ApplyOptions{From: t1, To: t2, Full: true, beforeDiskWrite: func() error { return stop }})
+	if !errors.Is(err, stop) {
+		t.Fatalf("err = %v", err)
+	}
+	later := time.Now().Add(time.Minute)
+	_ = os.Chtimes(disk, later, later)
+	st, err := ReadDiskState(disk)
+	if err != nil || st.Modified {
+		t.Fatalf("with an unfinished copy: modified = %v, err = %v", st.Modified, err)
+	}
+	// After the roll back, the disk is as it was and counts as unmodified.
+	if _, err = Recover(disk); err != nil {
+		t.Fatal(err)
+	}
+	if st, err = ReadDiskState(disk); err != nil || st.Modified {
+		t.Fatalf("after the roll back: modified = %v, err = %v", st.Modified, err)
 	}
 }

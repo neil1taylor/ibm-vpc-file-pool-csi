@@ -271,3 +271,33 @@ func TestCommonMoments(t *testing.T) {
 		t.Errorf("common moments = %v, want [%v %v] (newest first)", moments, m2, m1)
 	}
 }
+
+func TestResolveVMs_RefusesToRewindADiskThatWasModified(t *testing.T) {
+	root := t.TempDir()
+	a := vmDisk(t, root, "pvc-a", "ns/vm", step{m1, 1}, step{m2, 2})
+	b := vmDisk(t, root, "pvc-b", "ns/vm", step{m1, 1}, step{m2, 2})
+	// A VM ran on disk A after the last copy.
+	f, err := os.OpenFile(filepath.Join(a.LocalDir, "disk.img"), os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.WriteAt([]byte{9}, 5); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	later := time.Now().Add(time.Hour)
+	if err = os.Chtimes(filepath.Join(a.LocalDir, "disk.img"), later, later); err != nil {
+		t.Fatal(err)
+	}
+
+	// Using it in place is allowed: that is what a failover does.
+	if _, err = resolve(t, []FailoverSubVolumePlan{a, b}, VMOptions{Now: m3}); err != nil {
+		t.Fatalf("in place: %v", err)
+	}
+	// Rewinding from it is not: the undo files no longer fit.
+	to := m1.Add(time.Minute)
+	_, err = resolve(t, []FailoverSubVolumePlan{a, b}, VMOptions{Now: m3, RewindTo: &to})
+	if err == nil || !strings.Contains(err.Error(), "pvc-a") || !strings.Contains(err.Error(), "changed since") {
+		t.Fatalf("error = %v, want a refusal that names pvc-a and says it changed", err)
+	}
+}

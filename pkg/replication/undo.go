@@ -543,6 +543,12 @@ func (v *volume) recover() (bool, error) {
 			rolled = true
 		}
 	}
+	if rolled {
+		// The disk is as the last copy left it again.
+		if err = v.reseal(); err != nil {
+			return rolled, err
+		}
+	}
 	return rolled, v.sync(undoDirName)
 }
 
