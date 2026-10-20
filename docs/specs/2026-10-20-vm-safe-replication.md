@@ -52,7 +52,7 @@ On each cycle, the controller checks every volume in the policy. A volume takes 
 
 ### Take a copy at one moment
 
-The controller runs commands in the VM pod. On OpenShift, a user may run commands in a pod only if it could also create that pod. VM pods run under the `kubevirt-controller` security policy (SCC), so the controller's account gets `use` on that one SCC. Kasten and IBM Backup and Recovery have the same permission for the same reason. The controller's account cannot create pods, so it cannot start pods under this SCC. Found in the end-to-end test on 20 Oct: without it, every copy failed with "exec operation is not allowed because the pod's security context exceeds your permissions".
+The controller runs commands in the VM pod. On OpenShift, a user may run commands in a pod only if it could also create that pod. VM pods run under the `kubevirt-controller` security policy (SCC), so the controller's account gets `use` on that one SCC. Kasten and IBM Backup and Recovery have the same permission for the same reason. This gives the account no new power to start pods. It cannot create pods directly. A pod can run as this account only in `kube-system`, where OpenShift applies no SCC at all, so the Jobs the controller already creates there are unrestricted. Found in the end-to-end test on 20 Oct: without it, every copy failed with "exec operation is not allowed because the pod's security context exceeds your permissions".
 
 1. Freeze the guest file systems through the guest agent, with KubeVirt's own freeze tool in the VM pod.
    - The tool thaws the guest by itself after a timeout, even if the controller never sends the thaw. The controller sets 30 s. So a lost connection cannot leave the guest frozen.
@@ -225,7 +225,7 @@ The run needs one COS bucket for the backup stage. I will ask you to create it w
 - **VM moves wait for the copy to cancel.** A move waits up to one controller cycle, 30 s by default. A full copy that is cancelled starts again from the beginning.
 - **Staging space.** Each copy needs free space in the VM's volume for its staging file, until the Job has sent it: the used data for a full copy, the changed blocks for a change copy.
 - **Red Hat does not support it.** An OpenShift Virtualization update can change the VM pod and break this method. Each release test run will include a VM replication stage, so we find a break before you do. If it breaks, VM volumes are skipped with an error. They are never copied unsafely.
-- **Security.** The controller runs commands in VM pods, which needs `use` on the `kubevirt-controller` SCC (above). The disk view is reachable only inside the VM's namespace, with a one-time certificate.
+- **Security.** The controller runs commands in VM pods, which needs `use` on the `kubevirt-controller` SCC (above). The staging files stay in the VM's own volume; the apply Job mounts only that volume's folder and refuses links.
 - **Backup cost.** A snapshot pool is extra VPC file shares, paid for as normal shares. COS is paid for each GB stored, and only changed chunks are added after the first upload. A cost estimate goes into this spec once you choose the keep times.
 - **New dependency.** Kopia, for the COS export only.
 
@@ -271,4 +271,4 @@ The run needs one COS bucket for the backup stage. I will ask you to create it w
 - The default speed limit stays at 20 MB/s per disk, even though full copies are slow, because full copies are rare.
 - The driver reads QEMU's staging file format itself, and refuses any part of the format that QEMU does not use for a copy.
 - The copy Job runs as the QEMU user, so it can delete the staging file.
-- The driver's controller account may use the `kubevirt-controller` security policy, as Kasten and IBM Backup and Recovery do. OpenShift requires it to run commands in VM pods. The account cannot create pods, so this does not let it start privileged pods.
+- The driver's controller account may use the `kubevirt-controller` security policy, as Kasten and IBM Backup and Recovery do. OpenShift requires it to run commands in VM pods. It adds no new power to start pods, because the controller's Jobs in `kube-system` already skip SCC checks.
