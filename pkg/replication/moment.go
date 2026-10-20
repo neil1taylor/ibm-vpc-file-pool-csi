@@ -31,7 +31,7 @@ func (v *volume) moment() (t time.Time, ok bool, err error) {
 		return files[len(files)-1].hdr.to, true, nil
 	}
 	mf, err := v.readMomentFile()
-	if err != nil || mf == nil {
+	if err != nil || mf == nil || mf.Moment.IsZero() {
 		return t, false, err
 	}
 	return mf.Moment, true, nil
