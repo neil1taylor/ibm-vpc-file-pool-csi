@@ -12,16 +12,19 @@ export async function navigateTo(page: Page, path: string): Promise<void> {
   await dismissWelcomeTour(page);
 }
 
+const tourHandled = new WeakSet<Page>();
+
 /**
- * Close the console's "Welcome" tour dialog if it shows. A console that cannot
- * save user settings (a test console with a read-only token) shows it again on
- * every page load, and it covers the page.
+ * Close the console's "Welcome" tour dialog whenever it shows. A console that
+ * cannot save user settings (a test console with a read-only token) shows it
+ * again on every page load, and it can appear after the page is ready.
  */
 export async function dismissWelcomeTour(page: Page): Promise<void> {
-  const skip = page.getByRole('button', { name: 'Skip tour' });
-  if (await skip.isVisible({ timeout: 4_000 }).catch(() => false)) {
+  if (tourHandled.has(page)) return;
+  tourHandled.add(page);
+  await page.addLocatorHandler(page.getByRole('button', { name: 'Skip tour' }), async (skip) => {
     await skip.click();
-  }
+  });
 }
 
 /** Assert the plugin page title is visible */
