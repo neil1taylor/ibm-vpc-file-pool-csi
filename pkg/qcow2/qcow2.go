@@ -302,3 +302,6 @@ func (img *Image) WriteRaw(dst io.WriterAt, zeros bool) (int64, error) {
 	})
 	return written, err
 }
+
+// Size returns the virtual size of the disk in the image.
+func (img *Image) Size() int64 { return img.VirtualSize }
