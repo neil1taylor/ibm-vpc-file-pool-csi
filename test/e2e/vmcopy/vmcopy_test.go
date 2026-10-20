@@ -89,13 +89,13 @@ func run(t *testing.T, ex hooks.PodExecer, vm vmcopy.VM, args ...string) string 
 func TestFullCopy(t *testing.T) {
 	c, ex, vm, vols := setup(t)
 	ctx := context.Background()
-	if err := c.RemoveStale(ctx, vm, vols); err != nil {
+	if err := c.RemoveStale(ctx, vm, vols, ""); err != nil {
 		t.Fatalf("RemoveStale: %v", err)
 	}
 
 	id := fmt.Sprintf("e2e%x", time.Now().Unix())
 	start := time.Now()
-	cp, err := c.Start(ctx, vm, vols, 0, id)
+	cp, err := c.Start(ctx, vm, vols, vmcopy.StartOptions{ID: id})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -126,10 +126,10 @@ func TestFullCopy(t *testing.T) {
 func TestCancel(t *testing.T) {
 	c, ex, vm, vols := setup(t)
 	ctx := context.Background()
-	if err := c.RemoveStale(ctx, vm, vols); err != nil {
+	if err := c.RemoveStale(ctx, vm, vols, ""); err != nil {
 		t.Fatalf("RemoveStale: %v", err)
 	}
-	cp, err := c.Start(ctx, vm, vols, 1<<20, fmt.Sprintf("e2e%x", time.Now().Unix()))
+	cp, err := c.Start(ctx, vm, vols, vmcopy.StartOptions{Speed: 1 << 20, ID: fmt.Sprintf("e2e%x", time.Now().Unix())})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}

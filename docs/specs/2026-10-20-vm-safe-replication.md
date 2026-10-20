@@ -78,35 +78,38 @@ The limit counts empty disk space too. A full copy of a 20 GB disk with 2 GB of 
 
 ### Send only changed blocks
 
-- **Normal cycle:** QEMU writes only the blocks in the change list to the staging file. The Job sends that file over HTTPS to the receiver in the other region. This uses the existing driver-to-driver replication path.
-- **First copy, or after the change list is lost:** a live migration or a VM restart erases the change list. The controller sees that the list is gone, and asks QEMU for a full copy. Then the Job does a compare pass: it sends only a checksum for each 4 MB block of the full copy. The receiver compares the checksums with its own copy and asks only for the blocks that differ. So a node drain costs a full copy in the source region, but not a full transfer between regions.
+- **Change list.** QEMU keeps a change list (a dirty bitmap) for each disk, in memory. Each copy starts a new list at its moment. The list of the last copy that reached the other region stays until the next copy has reached it too. So if a copy fails, the next one still includes every block that changed since the last good copy.
+- **Normal cycle:** QEMU writes only the blocks in that list to the staging file.
+- **First copy, or after the change list is lost:** a live migration or a VM restart erases the lists. The controller sees that the list is gone and asks QEMU for a full copy. The staging file of a full copy holds only the data the disk really uses.
+- **Compare pass.** When a full copy reaches a far-site disk that already exists, only the blocks that differ are written, and only those go into the undo file (below). In direct NFS mode the Job compares the blocks itself, so it reads the far-site data once over the network; that costs about as much as sending it. Receiver mode will compare at the far site, from checksums, so only the blocks that differ cross the network.
 - The Job never reads the VM's live disk file. It reads only staging files, which do not change while it reads them.
 
 ### Apply the copy in the other region
 
-The far-site disk must never be left half updated.
+The far-site disk must never be left half updated, and a rewind must be possible. One method serves both, and it works in direct NFS mode, where nothing of ours runs in the other region:
 
-1. The receiver writes the incoming blocks to a change file next to the disk, not into the disk.
-2. When all blocks have arrived, the receiver marks the change file complete.
-3. Before it changes the disk, the receiver saves the disk's current contents of those blocks into an undo file, and marks the undo file complete.
-4. Then the receiver writes the blocks into the disk, and deletes the change file.
+1. Before it changes any block, the Job reads the far-site disk's current contents of every block it will change, and writes them to an undo file next to the disk. Then it marks the undo file complete.
+2. It writes the new blocks into the disk.
+3. It marks the undo file applied. The undo file is now a restore point: it can take the disk back to the moment before this copy.
 
-If the receiver stops during step 4, it applies the same complete change file again when it restarts. This is safe, because each block goes to a fixed place in the disk. An incomplete change file is deleted, and the disk keeps the previous good copy.
+If the Job stops during step 2, the disk is half updated, but the complete undo file is at the far site. The next Job, or failover, first rolls the disk back from that undo file to the previous good moment. This needs nothing from the source region, so it also works after the source region is lost. An undo file that is not complete is deleted; the disk was not touched yet.
 
-Failover finishes any complete change file first. It refuses to use a disk while a change file is being applied.
+In direct NFS mode each changed block crosses the network about three times: the old block is read and written to the undo file, and the new block is written. Receiver mode will do steps 1 to 3 at the far site, so each block crosses once.
 
-**Full copies before step 5.** Step 3 sends whole disks. The far site writes each one to a new file and swaps it in only when it is complete. So the disk is never half written, but step 3 keeps no restore points.
+Failover rolls back any applied-but-not-marked copy first. It refuses to use a disk while a Job is applying a copy.
+
+**Full copies in step 3.** Step 3 sent whole disks and swapped each one in only when complete. Step 4 changes this to the method above, so the first copy after the change gives the first restore point.
 
 ### Restore points in the other region
 
 The far site keeps the copies of the last 24 hours, so you can rewind if bad data reached the VM, for example ransomware or a broken update. Each policy has a keep time, 24 hours by default.
 
-- Each cycle's undo files form one restore point. A restore point covers all disks of a VM at the same moment.
+- Each copy's undo files form one restore point. A restore point covers all disks of a VM at the same moment.
 - The disk itself always holds the latest copy. So a failover to the latest copy is as fast as today.
 - To rewind, failover makes a new disk from the latest one, then applies the undo files from newest to oldest, back to the chosen moment. The latest disk is not changed, so you can rewind again to a different moment.
-- When an undo file is older than the keep time, the receiver deletes it.
+- When an undo file is older than the keep time, the next Job deletes it. Undo files are deleted oldest first, so the remaining ones always form a complete chain back from the latest copy.
 - After a compare pass, the undo file holds only the blocks that differed. So a VM move does not cost a full disk of storage.
-- The policy status in the other region lists the restore points.
+- The policy status lists the restore points.
 
 ### What the status shows
 
@@ -204,8 +207,8 @@ The part that takes the copy is one replaceable piece. When the clusters run the
    - The speed limit counts empty disk space (above).
    - The staging file is owned by the QEMU user, and only that user can delete it.
    - End-to-end test, 20 Oct (`test/e2e/test-vm-replication.sh`, direct NFS mode, two pools on the driver): a CentOS VM with a 20 GB root disk and a 10 GB data disk wrote a file every 0.1 s. Both disks showed the same moment and were file-system consistent. The far-site copy booted with no XFS errors, and all 1,579 files written before the freeze matched their checksums; the last one was written at the moment of the freeze. Data sent: 1.98 GB and 118 MB. The test pool's shares had 100 IOPS at first, and the copy ran at about 3 MB/s per disk; at 3000 IOPS it ran at the speed limit. So the copy time depends on the share's IOPS as well as the speed limit.
-4. **Change-only cycles and the compare pass.**
-5. **Safe apply in the other region, restore points, and failover changes.** This includes rewind to any restore point in the last 24 hours.
+4. **Change-only cycles, safe apply with undo files, and restore points, in direct NFS mode.** Parts: change lists in the copy piece; the undo-file apply and roll-back; the controller and a keep time per policy. This took over the safe-apply part of step 5, because direct NFS mode has no far-site receiver to do it.
+5. **Receiver mode for VM disks, and failover changes.** The receiver does the same apply at the far site, and compares checksums for the compare pass. Failover rolls back an unfinished copy and can rewind to any restore point.
 6. **Test across two regions,** with a failover and a boot of a Linux VM and a Windows VM. This includes the first test of Windows freeze and thaw. Then update `CROSS-REGION-DR.md`, `FEATURES.md` and the tutorial.
 7. **Safe snapshots of running VMs,** using the copy from step 3.
 8. **Backup to a snapshot pool:** the `BackupPolicy` resource, the chain of change files, hard-link snapshots, merging, and restore.
@@ -264,6 +267,10 @@ The run needs one COS bucket for the backup stage. I will ask you to create it w
 - Backup is built after replication, because it reuses the safe copy and the change list.
 - Multi-disk VMs are copied at one moment as part of this work. Group snapshots (issue #14) stay a separate issue.
 - The far site keeps restore points for 24 hours by default, set per policy. You chose 24 hours on 20 Oct.
+- Safe apply and restore points use one method: undo files written at the far site before the disk changes. It works in direct NFS mode, which has nothing of ours at the far site. The cost there is about three network crossings per changed block; receiver mode will need one.
+- Direct NFS mode has no checksum compare pass. After a VM move, the Job reads the far-site data once to compare, which costs about as much as sending it.
+- A failed copy loses nothing: the change list of the last good copy is kept until the next copy reaches the far site.
+- Step 4 builds this for direct NFS mode first, because that is the mode that copies VMs today. Receiver mode follows in step 5.
 - Restore points are undo files: the disk always holds the latest copy, so failover to the latest copy stays fast. A rewind is slower, because it must apply undo files.
 - A rewind makes a new disk and leaves the latest copy unchanged.
 - Step 3 keeps no restore points. They start in step 5.

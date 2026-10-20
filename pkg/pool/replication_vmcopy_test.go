@@ -46,10 +46,11 @@ func newFakeVMCopier() *fakeVMCopier {
 	return &fakeVMCopier{moment: time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)}
 }
 
-func (f *fakeVMCopier) Start(_ context.Context, vm vmcopy.VM, volumes []string, speed int64, id string) (*vmcopy.Copy, error) {
+func (f *fakeVMCopier) Start(_ context.Context, vm vmcopy.VM, volumes []string, opts vmcopy.StartOptions) (*vmcopy.Copy, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.starts = append(f.starts, fakeStart{vm, volumes, speed, id})
+	id := opts.ID
+	f.starts = append(f.starts, fakeStart{vm, volumes, opts.Speed, id})
 	if f.startErr != nil {
 		return nil, f.startErr
 	}
@@ -80,7 +81,7 @@ func (f *fakeVMCopier) Cancel(_ context.Context, _ vmcopy.VM, _ *vmcopy.Copy) er
 	return nil
 }
 
-func (f *fakeVMCopier) RemoveStale(_ context.Context, _ vmcopy.VM, _ []string) error {
+func (f *fakeVMCopier) RemoveStale(_ context.Context, _ vmcopy.VM, _ []string, _ string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.removeStale++

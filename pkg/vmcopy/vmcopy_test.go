@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -17,10 +18,11 @@ import (
 type fakeLauncher struct {
 	mu sync.Mutex
 
-	disks map[string]int64 // volume -> virtual size; the VM's disks
-	files map[string]bool  // files that exist in the volume dirs
-	nodes map[string]bool  // block nodes added by blockdev-add
-	jobs  map[string]*fakeJob
+	disks   map[string]int64           // volume -> virtual size; the VM's disks
+	files   map[string]bool            // files that exist in the volume dirs
+	nodes   map[string]bool            // block nodes added by blockdev-add
+	bitmaps map[string]map[string]bool // dirty bitmaps per disk node
+	jobs    map[string]*fakeJob
 
 	moment       time.Time
 	frozen       bool
@@ -39,13 +41,34 @@ type fakeJob struct {
 
 func newFakeLauncher() *fakeLauncher {
 	return &fakeLauncher{
-		disks: map[string]int64{"rootdisk": 21474836480, "datadisk": 10737418240},
-		files: map[string]bool{},
-		nodes: map[string]bool{},
-		jobs:  map[string]*fakeJob{},
+		disks:   map[string]int64{"rootdisk": 21474836480, "datadisk": 10737418240},
+		files:   map[string]bool{},
+		nodes:   map[string]bool{},
+		bitmaps: map[string]map[string]bool{},
+		jobs:    map[string]*fakeJob{},
 
 		moment: time.Date(2026, 10, 20, 12, 0, 0, 123, time.UTC),
 	}
+}
+
+func (f *fakeLauncher) volumeNames() []string {
+	var names []string
+	for v := range f.disks {
+		names = append(names, v)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// nodeOf returns the disk node of a volume: libvirt-<n>-format, numbered
+// in volume name order.
+func (f *fakeLauncher) nodeOf(vol string) string {
+	for i, v := range f.volumeNames() {
+		if v == vol {
+			return fmt.Sprintf("libvirt-%d-format", i+1)
+		}
+	}
+	return ""
 }
 
 func diskPath(vol string) string { return "/var/run/kubevirt-private/vmi-disks/" + vol + "/disk.img" }
@@ -144,17 +167,21 @@ func (f *fakeLauncher) qmp(in string) (string, string, error) {
 	switch req.Execute {
 	case "query-block":
 		var devs []map[string]any
-		i := 1
-		for vol, size := range f.disks {
+		for _, vol := range f.volumeNames() {
+			node := f.nodeOf(vol)
+			var bms []map[string]any
+			for name := range f.bitmaps[node] {
+				bms = append(bms, map[string]any{"name": name, "recording": true, "granularity": 65536})
+			}
 			devs = append(devs, map[string]any{
 				"device": "", "qdev": "ua-" + vol,
 				"inserted": map[string]any{
-					"node-name": fmt.Sprintf("libvirt-%d-format", i),
-					"file":      diskPath(vol),
-					"image":     map[string]any{"virtual-size": size},
+					"node-name":     node,
+					"file":          diskPath(vol),
+					"image":         map[string]any{"virtual-size": f.disks[vol]},
+					"dirty-bitmaps": bms,
 				},
 			})
-			i++
 		}
 		devs = append(devs, map[string]any{"device": "", "qdev": "ua-cloudinit",
 			"inserted": map[string]any{"node-name": "libvirt-9-format", "file": "/var/run/kubevirt-ephemeral-disks/cloud-init-data/vms/web/noCloud.iso", "image": map[string]any{"virtual-size": 374784}}})
@@ -180,6 +207,14 @@ func (f *fakeLauncher) qmp(in string) (string, string, error) {
 		}
 		f.nodes[name] = true
 		return ok, "", nil
+	case "block-dirty-bitmap-remove":
+		node, _ := req.Arguments["node"].(string)
+		name, _ := req.Arguments["name"].(string)
+		if !f.bitmaps[node][name] {
+			return qmpErr("Dirty bitmap '" + name + "' not found")
+		}
+		delete(f.bitmaps[node], name)
+		return ok, "", nil
 	case "blockdev-del":
 		name, _ := req.Arguments["node-name"].(string)
 		if !f.nodes[name] {
@@ -202,11 +237,29 @@ func (f *fakeLauncher) qmp(in string) (string, string, error) {
 		}
 		for _, act := range txn.Arguments.Actions {
 			data, _ := act["data"].(map[string]any)
+			f.txnActions = append(f.txnActions, act)
+			if act["type"] == "block-dirty-bitmap-add" {
+				node, _ := data["node"].(string)
+				name, _ := data["name"].(string)
+				if data["persistent"] != false {
+					return qmpErr("expected a non-persistent bitmap")
+				}
+				if f.bitmaps[node] == nil {
+					f.bitmaps[node] = map[string]bool{}
+				}
+				f.bitmaps[node][name] = true
+				continue
+			}
 			target, _ := data["target"].(string)
 			job, _ := data["job-id"].(string)
-			f.txnActions = append(f.txnActions, act)
 			if !f.nodes[target] {
 				return qmpErr("target missing")
+			}
+			if bm, _ := data["bitmap"].(string); bm != "" {
+				dev, _ := data["device"].(string)
+				if !f.bitmaps[dev][bm] {
+					return qmpErr("Bitmap '" + bm + "' could not be found")
+				}
 			}
 			f.jobs[job] = &fakeJob{status: "running"}
 		}
@@ -262,7 +315,7 @@ func TestStart_CopiesAllDisksAtOneMoment(t *testing.T) {
 	f := newFakeLauncher()
 	c := newTestCopier(f)
 
-	cp, err := c.Start(context.Background(), testVM, []string{"rootdisk", "datadisk"}, 20<<20, "a1")
+	cp, err := c.Start(context.Background(), testVM, []string{"rootdisk", "datadisk"}, StartOptions{Speed: 20 << 20, ID: "a1"})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -281,14 +334,19 @@ func TestStart_CopiesAllDisksAtOneMoment(t *testing.T) {
 	if f.frozen || f.unfreezeSeen != 1 {
 		t.Errorf("expected exactly one thaw after the copy started (frozen=%v, thaws=%d)", f.frozen, f.unfreezeSeen)
 	}
-	if len(f.txnActions) != 2 {
-		t.Fatalf("expected one transaction with 2 actions, got %d", len(f.txnActions))
-	}
+	backups := 0
 	for _, a := range f.txnActions {
+		if a["type"] != "blockdev-backup" {
+			continue
+		}
+		backups++
 		d, _ := a["data"].(map[string]any)
-		if a["type"] != "blockdev-backup" || d["sync"] != "full" || d["auto-dismiss"] != false || d["speed"] != float64(20<<20) {
+		if d["sync"] != "full" || d["auto-dismiss"] != false || d["speed"] != float64(20<<20) {
 			t.Errorf("unexpected action %v", a)
 		}
+	}
+	if backups != 2 {
+		t.Fatalf("expected one transaction with 2 disk copies, got %d", backups)
 	}
 	if len(cp.Disks) != 2 || cp.Disks[0].Volume != "rootdisk" || cp.Disks[1].Volume != "datadisk" {
 		t.Fatalf("Disks = %+v", cp.Disks)
@@ -324,7 +382,7 @@ func TestStart_FreezeFailsGivesCrashConsistentCopy(t *testing.T) {
 	f.freezeErr = "guest agent is not connected"
 	c := newTestCopier(f)
 
-	cp, err := c.Start(context.Background(), testVM, []string{"rootdisk"}, 0, "a1")
+	cp, err := c.Start(context.Background(), testVM, []string{"rootdisk"}, StartOptions{Speed: 0, ID: "a1"})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -344,7 +402,7 @@ func TestStart_TransactionFailsCleansUp(t *testing.T) {
 	f.transErr = "Bitmap already exists"
 	c := newTestCopier(f)
 
-	if _, err := c.Start(context.Background(), testVM, []string{"rootdisk", "datadisk"}, 0, "a1"); err == nil || !strings.Contains(err.Error(), "Bitmap already exists") {
+	if _, err := c.Start(context.Background(), testVM, []string{"rootdisk", "datadisk"}, StartOptions{Speed: 0, ID: "a1"}); err == nil || !strings.Contains(err.Error(), "Bitmap already exists") {
 		t.Fatalf("Start error = %v", err)
 	}
 	if f.frozen || f.unfreezeSeen != 1 {
@@ -361,7 +419,7 @@ func TestStart_TransactionFailsCleansUp(t *testing.T) {
 func TestStart_RefusesUnknownVolume(t *testing.T) {
 	f := newFakeLauncher()
 	c := newTestCopier(f)
-	if _, err := c.Start(context.Background(), testVM, []string{"rootdisk", "hotplugged"}, 0, "a1"); err == nil || !strings.Contains(err.Error(), "hotplugged") {
+	if _, err := c.Start(context.Background(), testVM, []string{"rootdisk", "hotplugged"}, StartOptions{Speed: 0, ID: "a1"}); err == nil || !strings.Contains(err.Error(), "hotplugged") {
 		t.Fatalf("Start error = %v, want one naming the volume", err)
 	}
 	if f.unfreezeSeen != 0 || len(f.files) != 0 {
@@ -381,7 +439,7 @@ func TestStart_RefusesBadNames(t *testing.T) {
 		{[]string{"rootdisk"}, ""},
 		{nil, "a1"},
 	} {
-		if _, err := c.Start(context.Background(), testVM, tc.vols, 0, tc.id); err == nil {
+		if _, err := c.Start(context.Background(), testVM, tc.vols, StartOptions{Speed: 0, ID: tc.id}); err == nil {
 			t.Errorf("Start(%v, %q) succeeded, want an error", tc.vols, tc.id)
 		}
 	}
@@ -391,7 +449,7 @@ func TestProgress(t *testing.T) {
 	f := newFakeLauncher()
 	c := newTestCopier(f)
 	ctx := context.Background()
-	cp, err := c.Start(ctx, testVM, []string{"rootdisk", "datadisk"}, 0, "a1")
+	cp, err := c.Start(ctx, testVM, []string{"rootdisk", "datadisk"}, StartOptions{Speed: 0, ID: "a1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -426,7 +484,7 @@ func TestFinish_KeepsOrRemovesStaging(t *testing.T) {
 		f := newFakeLauncher()
 		c := newTestCopier(f)
 		ctx := context.Background()
-		cp, err := c.Start(ctx, testVM, []string{"rootdisk", "datadisk"}, 0, "a1")
+		cp, err := c.Start(ctx, testVM, []string{"rootdisk", "datadisk"}, StartOptions{Speed: 0, ID: "a1"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -451,7 +509,7 @@ func TestCancel(t *testing.T) {
 	f := newFakeLauncher()
 	c := newTestCopier(f)
 	ctx := context.Background()
-	cp, err := c.Start(ctx, testVM, []string{"rootdisk", "datadisk"}, 0, "a1")
+	cp, err := c.Start(ctx, testVM, []string{"rootdisk", "datadisk"}, StartOptions{Speed: 0, ID: "a1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -471,7 +529,7 @@ func TestRemoveStale(t *testing.T) {
 	f.files["/var/run/kubevirt-private/vmi-disks/rootdisk/disk.img"] = true
 	f.nodes["repl-old-t0"] = true
 
-	if err := c.RemoveStale(ctx, testVM, []string{"rootdisk"}); err != nil {
+	if err := c.RemoveStale(ctx, testVM, []string{"rootdisk"}, ""); err != nil {
 		t.Fatalf("RemoveStale: %v", err)
 	}
 	if f.files["/var/run/kubevirt-private/vmi-disks/rootdisk/.repl-staging-old.qcow2"] || f.nodes["repl-old-t0"] {
@@ -482,13 +540,158 @@ func TestRemoveStale(t *testing.T) {
 	}
 
 	// It must not touch a copy that is still running.
-	if _, err := c.Start(ctx, testVM, []string{"rootdisk"}, 0, "b2"); err != nil {
+	if _, err := c.Start(ctx, testVM, []string{"rootdisk"}, StartOptions{Speed: 0, ID: "b2"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.RemoveStale(ctx, testVM, []string{"rootdisk"}); err == nil {
+	if err := c.RemoveStale(ctx, testVM, []string{"rootdisk"}, ""); err == nil {
 		t.Error("expected RemoveStale to refuse while a copy runs")
 	}
 	if !f.files["/var/run/kubevirt-private/vmi-disks/rootdisk/.repl-staging-b2.qcow2"] {
 		t.Error("RemoveStale removed the staging file of a running copy")
+	}
+}
+
+func (f *fakeLauncher) hasBitmap(vol, name string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.bitmaps[f.nodeOf(vol)][name]
+}
+
+func TestStart_FullCopyStartsAChangeList(t *testing.T) {
+	f := newFakeLauncher()
+	c := newTestCopier(f)
+	cp, err := c.Start(context.Background(), testVM, []string{"rootdisk", "datadisk"}, StartOptions{ID: "a1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cp.Bitmap != "repl-a1" || cp.Base != "" || cp.Incremental {
+		t.Errorf("Copy = %+v, want bitmap repl-a1 and a full copy", cp)
+	}
+	for _, v := range []string{"rootdisk", "datadisk"} {
+		if !f.hasBitmap(v, "repl-a1") {
+			t.Errorf("expected change list repl-a1 on %s", v)
+		}
+	}
+	// The change lists start in the same transaction as the copies.
+	var adds, backups int
+	for _, a := range f.txnActions {
+		d, _ := a["data"].(map[string]any)
+		switch a["type"] {
+		case "block-dirty-bitmap-add":
+			adds++
+		case "blockdev-backup":
+			backups++
+			if d["sync"] != "full" {
+				t.Errorf("full copy action = %v", a)
+			}
+		}
+	}
+	if adds != 2 || backups != 2 {
+		t.Errorf("transaction had %d bitmap adds and %d backups, want 2 and 2", adds, backups)
+	}
+}
+
+func TestStart_ChangeCopyUsesTheBaseList(t *testing.T) {
+	f := newFakeLauncher()
+	c := newTestCopier(f)
+	ctx := context.Background()
+	first, err := c.Start(ctx, testVM, []string{"rootdisk", "datadisk"}, StartOptions{ID: "a1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.finishJobs("")
+	if ferr := c.Finish(ctx, testVM, first, false); ferr != nil {
+		t.Fatal(ferr)
+	}
+	f.txnActions = nil
+
+	cp, err := c.Start(ctx, testVM, []string{"rootdisk", "datadisk"}, StartOptions{ID: "b2", Base: "repl-a1"})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if cp.Bitmap != "repl-b2" || cp.Base != "repl-a1" || !cp.Incremental {
+		t.Errorf("Copy = %+v", cp)
+	}
+	for _, a := range f.txnActions {
+		d, _ := a["data"].(map[string]any)
+		if a["type"] == "blockdev-backup" && (d["sync"] != "bitmap" || d["bitmap"] != "repl-a1" || d["bitmap-mode"] != "never") {
+			t.Errorf("change copy action = %v, want sync bitmap from repl-a1 that keeps the list", a)
+		}
+	}
+	// Both lists exist until the change copy is committed.
+	if !f.hasBitmap("rootdisk", "repl-a1") || !f.hasBitmap("rootdisk", "repl-b2") {
+		t.Error("expected both change lists while the change copy is not committed")
+	}
+
+	f.finishJobs("")
+	if err := c.Finish(ctx, testVM, cp, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Commit(ctx, testVM, cp); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if f.hasBitmap("rootdisk", "repl-a1") || !f.hasBitmap("rootdisk", "repl-b2") {
+		t.Error("after Commit, expected only the new change list")
+	}
+	if err := c.Commit(ctx, testVM, cp); err != nil {
+		t.Errorf("a second Commit must succeed, got %v", err)
+	}
+}
+
+func TestStart_BaseListLost(t *testing.T) {
+	f := newFakeLauncher()
+	c := newTestCopier(f)
+	_, err := c.Start(context.Background(), testVM, []string{"rootdisk"}, StartOptions{ID: "b2", Base: "repl-a1"})
+	if !errors.Is(err, ErrBaseLost) {
+		t.Fatalf("Start error = %v, want ErrBaseLost", err)
+	}
+	if len(f.files) != 0 || f.unfreezeSeen != 0 {
+		t.Errorf("expected nothing done (files %v, thaws %d)", f.files, f.unfreezeSeen)
+	}
+}
+
+func TestFailedChangeCopyKeepsTheBaseList(t *testing.T) {
+	for _, how := range []string{"finish", "cancel"} {
+		f := newFakeLauncher()
+		c := newTestCopier(f)
+		ctx := context.Background()
+		first, err := c.Start(ctx, testVM, []string{"rootdisk"}, StartOptions{ID: "a1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.finishJobs("")
+		if ferr := c.Finish(ctx, testVM, first, false); ferr != nil {
+			t.Fatal(ferr)
+		}
+		cp, err := c.Start(ctx, testVM, []string{"rootdisk"}, StartOptions{ID: "b2", Base: "repl-a1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if how == "finish" {
+			f.finishJobs("No space left on device")
+			err = c.Finish(ctx, testVM, cp, true)
+		} else {
+			err = c.Cancel(ctx, testVM, cp)
+		}
+		if err != nil {
+			t.Fatalf("%s: %v", how, err)
+		}
+		if !f.hasBitmap("rootdisk", "repl-a1") || f.hasBitmap("rootdisk", "repl-b2") {
+			t.Errorf("%s: expected the base list kept and the new list removed, got %v", how, f.bitmaps)
+		}
+	}
+}
+
+func TestRemoveStale_KeepsTheBaseList(t *testing.T) {
+	f := newFakeLauncher()
+	c := newTestCopier(f)
+	node := f.nodeOf("rootdisk")
+	f.bitmaps[node] = map[string]bool{"repl-a1": true, "repl-old": true, "backup-tool": true}
+	if err := c.RemoveStale(context.Background(), testVM, []string{"rootdisk"}, "repl-a1"); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{"repl-a1": true, "backup-tool": true}
+	if fmt.Sprint(f.bitmaps[node]) != fmt.Sprint(want) {
+		t.Errorf("bitmaps = %v, want %v", f.bitmaps[node], want)
 	}
 }
