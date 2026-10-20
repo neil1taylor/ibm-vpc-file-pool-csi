@@ -28,7 +28,11 @@ func ReplaceDiskFromStaging(stagingPath, diskPath string) (int64, error) {
 	}
 	defer func() { _ = src.Close() }()
 
-	img, err := qcow2.Open(src)
+	fi, err := src.Stat()
+	if err != nil {
+		return 0, fmt.Errorf("reading staging file size: %w", err)
+	}
+	img, err := qcow2.Open(src, fi.Size())
 	if err != nil {
 		return 0, fmt.Errorf("staging file %s: %w", stagingPath, err)
 	}

@@ -18,7 +18,11 @@ func openTestImage(t *testing.T, name string) *Image {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = f.Close() })
-	img, err := Open(f)
+	fi, err := f.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := Open(f, fi.Size())
 	if err != nil {
 		t.Fatalf("Open(%s): %v", name, err)
 	}
@@ -118,8 +122,8 @@ func mutated(t *testing.T, edit func(b []byte)) *bytes.Reader {
 }
 
 func TestOpen_Refuses(t *testing.T) {
-	fromFile := func(name string) func(t *testing.T) io.ReaderAt {
-		return func(t *testing.T) io.ReaderAt {
+	fromFile := func(name string) func(t *testing.T) *bytes.Reader {
+		return func(t *testing.T) *bytes.Reader {
 			b, err := os.ReadFile(filepath.Join("testdata", name))
 			if err != nil {
 				t.Fatal(err)
@@ -127,12 +131,12 @@ func TestOpen_Refuses(t *testing.T) {
 			return bytes.NewReader(b)
 		}
 	}
-	edit := func(f func(b []byte)) func(t *testing.T) io.ReaderAt {
-		return func(t *testing.T) io.ReaderAt { return mutated(t, f) }
+	edit := func(f func(b []byte)) func(t *testing.T) *bytes.Reader {
+		return func(t *testing.T) *bytes.Reader { return mutated(t, f) }
 	}
 	tests := []struct {
 		name    string
-		image   func(t *testing.T) io.ReaderAt
+		image   func(t *testing.T) *bytes.Reader
 		wantErr string
 	}{
 		{"backing file", fromFile("backing.qcow2"), "backing file"},
@@ -145,11 +149,14 @@ func TestOpen_Refuses(t *testing.T) {
 		{"extended L2", edit(func(b []byte) { b[79] |= 16 }), "incompatible features"},
 		{"cluster size too small", edit(func(b []byte) { binary.BigEndian.PutUint32(b[20:], 8) }), "cluster size"},
 		{"cluster size too large", edit(func(b []byte) { binary.BigEndian.PutUint32(b[20:], 22) }), "cluster size"},
-		{"truncated header", func(t *testing.T) io.ReaderAt { return bytes.NewReader([]byte("QFI\xfb")) }, "header"},
+		{"truncated header", func(t *testing.T) *bytes.Reader { return bytes.NewReader([]byte("QFI\xfb")) }, "header"},
+		{"L1 table over the limit", edit(func(b []byte) { binary.BigEndian.PutUint32(b[36:], maxL1Entries+1) }), "limit"},
+		{"L1 table past the end of the file", edit(func(b []byte) { binary.BigEndian.PutUint32(b[36:], 1<<20) }), "past the end"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := Open(tt.image(t))
+			r := tt.image(t)
+			_, err := Open(r, r.Size())
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("Open error = %v, want one containing %q", err, tt.wantErr)
 			}
@@ -166,10 +173,11 @@ func TestExtents_RefusesCompressedClusters(t *testing.T) {
 
 func TestExtents_RefusesUnalignedTables(t *testing.T) {
 	// Point the L1 table at an offset that is not cluster aligned.
-	img, err := Open(mutated(t, func(b []byte) {
+	r := mutated(t, func(b []byte) {
 		l1 := binary.BigEndian.Uint64(b[40:])
 		binary.BigEndian.PutUint64(b[40:], l1+8)
-	}))
+	})
+	img, err := Open(r, r.Size())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -180,7 +188,8 @@ func TestExtents_RefusesUnalignedTables(t *testing.T) {
 
 func TestExtents_RefusesL1TooSmall(t *testing.T) {
 	// An L1 table that cannot cover the virtual size means a damaged header.
-	_, err := Open(mutated(t, func(b []byte) { binary.BigEndian.PutUint32(b[36:], 0) }))
+	r := mutated(t, func(b []byte) { binary.BigEndian.PutUint32(b[36:], 0) })
+	_, err := Open(r, r.Size())
 	if err == nil || !strings.Contains(err.Error(), "L1") {
 		t.Fatalf("Open error = %v, want one about the L1 table", err)
 	}
@@ -223,5 +232,57 @@ func TestImage_WriteRaw(t *testing.T) {
 		if !zeros && !bytes.Equal(zeroRegion, bytes.Repeat([]byte{0x11}, len(zeroRegion))) {
 			t.Errorf("WriteRaw(zeros=false) wrote the zero extent")
 		}
+	}
+}
+
+// l1Entry returns the offset of entry i of the L1 table in b.
+func l1Entry(b []byte, i int) int {
+	return int(binary.BigEndian.Uint64(b[40:])) + 8*i
+}
+
+func TestWalk_RefusesDamagedTables(t *testing.T) {
+	tests := []struct {
+		name    string
+		edit    func(b []byte)
+		wantErr string
+	}{
+		{"L2 table used twice", func(b []byte) {
+			// v3.qcow2 has 4 KiB clusters, so each L2 table covers 2 MiB and
+			// the 1 MiB disk needs one L1 entry. Give it a second one.
+			binary.BigEndian.PutUint32(b[24+4:], 4<<20) // virtual size 4 MiB
+			binary.BigEndian.PutUint32(b[36:], 2)
+			copy(b[l1Entry(b, 1):], b[l1Entry(b, 0):l1Entry(b, 0)+8])
+		}, "more than once"},
+		{"L2 table past the end of the file", func(b []byte) {
+			binary.BigEndian.PutUint64(b[l1Entry(b, 0):], 1<<40)
+		}, "past the end"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := mutated(t, tt.edit)
+			img, err := Open(r, r.Size())
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			if _, err := img.Extents(); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Extents error = %v, want one containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestWalk_RefusesDataPastEndOfFile(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("testdata", "v3.qcow2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Cut off the last data cluster (virtual offset 1 MiB, host offset 36864).
+	r := bytes.NewReader(b[:36864])
+	img, err := Open(r, r.Size())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err := img.Extents(); err == nil || !strings.Contains(err.Error(), "past the end") {
+		t.Fatalf("Extents error = %v, want one about data past the end of the file", err)
 	}
 }
