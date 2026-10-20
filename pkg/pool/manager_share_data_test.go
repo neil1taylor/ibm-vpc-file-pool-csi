@@ -127,7 +127,8 @@ func (f *fakeShareData) lastCopy(t *testing.T) shareDataCall {
 }
 
 func shareDataOf(m *Manager) *fakeShareData {
-	return m.shareData.(*fakeShareData)
+	sd, _ := m.shareData.(*fakeShareData)
+	return sd
 }
 
 const testRestorePVName = "pvc-b2c3d4e5-6789-01ab-cdef-234567890abc"

@@ -284,8 +284,8 @@ func TestShareJobRunner_Stop(t *testing.T) {
 		Name: "share-data-snap-1-abcde", Namespace: testDriverNS,
 		Labels: map[string]string{shareJobLabel: shareJobName("snap-1")},
 	}}
-	if err := c.Create(ctx, pod); err != nil {
-		t.Fatalf("create pod: %v", err)
+	if createErr := c.Create(ctx, pod); createErr != nil {
+		t.Fatalf("create pod: %v", createErr)
 	}
 	done, err = r.Stop(ctx, "snap-1")
 	if err != nil || done {

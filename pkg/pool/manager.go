@@ -386,9 +386,9 @@ func (m *Manager) Deallocate(ctx context.Context, subVolumeName string) (retErr 
 		return errShareDataNotSet
 	}
 	if sv.Labels[restoreSnapshotLabel] != "" {
-		stopped, err := m.shareData.Stop(ctx, "restore-"+sv.Name)
-		if err != nil {
-			return fmt.Errorf("stop restore copy: %w", err)
+		stopped, stopErr := m.shareData.Stop(ctx, "restore-"+sv.Name)
+		if stopErr != nil {
+			return fmt.Errorf("stop restore copy: %w", stopErr)
 		}
 		if !stopped {
 			return ErrOperationInProgress
@@ -615,12 +615,12 @@ func (m *Manager) CreateSnapshot(ctx context.Context, snapshotName, sourceVolume
 	if err == nil && existing != nil {
 		poolName = existing.Spec.PoolName
 		if !existing.Status.ReadyToUse {
-			pool, err := m.k8sClient.GetFileSharePool(ctx, poolName)
-			if err != nil {
+			pool, poolErr := m.k8sClient.GetFileSharePool(ctx, poolName)
+			if poolErr != nil {
 				return nil, fmt.Errorf("%w: %s", ErrPoolNotFound, poolName)
 			}
-			if err := m.copySnapshotData(ctx, existing, pool); err != nil {
-				return nil, err
+			if copyErr := m.copySnapshotData(ctx, existing, pool); copyErr != nil {
+				return nil, copyErr
 			}
 		}
 		return snapshotResult(existing), nil
@@ -894,12 +894,12 @@ func (m *Manager) RestoreSnapshot(ctx context.Context, snapshotName string, req 
 	if err == nil && existing != nil {
 		klog.V(2).InfoS("Idempotent restore: SubVolume already exists", "pvName", req.PVName)
 		if existing.Status.Phase != "Bound" && existing.Labels[restoreSnapshotLabel] != "" {
-			snap, err := m.k8sClient.GetSnapshot(ctx, existing.Labels[restoreSnapshotLabel])
-			if err != nil {
+			snap, snapErr := m.k8sClient.GetSnapshot(ctx, existing.Labels[restoreSnapshotLabel])
+			if snapErr != nil {
 				return nil, fmt.Errorf("%w: %s", ErrSnapshotNotFound, existing.Labels[restoreSnapshotLabel])
 			}
-			if err := m.copyRestoreData(ctx, existing, snap); err != nil {
-				return nil, err
+			if copyErr := m.copyRestoreData(ctx, existing, snap); copyErr != nil {
+				return nil, copyErr
 			}
 		}
 		return subVolumeAllocationResult(existing), nil
