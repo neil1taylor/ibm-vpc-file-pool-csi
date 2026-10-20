@@ -65,10 +65,13 @@ Each line says what the stage proves, and how it checks the result itself, not t
 7. **Clones.**
    - A clone of a PVC matches its source.
    - A pod that uses the clone cannot start until the copy is done.
-8. **VMs.**
-   - The existing VM clone test runs: a CentOS VM boots, and its guest agent connects.
-   - The VM then live-migrates to another worker and keeps running.
-9. **Golden images.** A pool with golden images turned on produces a bootable golden image volume.
+8. **VMs and golden images** (stage `08-vms`, in a namespace with no extra permissions).
+   - A pool with golden images turned on gets a CentOS Stream 9 golden disk from CDI, a VM template, and a catalog entry that points at its own disk.
+   - A VM made from the template boots, and its guest agent connects.
+   - The VM live-migrates to another worker without a restart and keeps running.
+   - A VM made from the catalog entry, with its boot disk on the pool, boots.
+   - Deleting the pool removes its golden disk, template and catalog entry.
+9. Merged into stage 8, because a VM needs a golden image to boot from.
 10. **Replication.** Replication runs between two pools on the same cluster, in direct NFS mode and in receiver mode. The copies at the destination match the source checksums. Pausing a policy stops new syncs.
     The VM checks below come from `2026-10-20-vm-safe-replication.md`. Each one is added when its part of that spec ships.
     - A running VM is replicated while it writes nonstop to two disks. A VM boots from the copy, and its guest agent connects. The kernel log shows no file system errors.
@@ -162,4 +165,5 @@ These figures are estimates from today's runs, not measurements of the full run.
 - The run is started by hand after an update. It is not run on a schedule or from CI, because each run costs money.
 - It is written in Bash with `oc`, the same as the existing VM clone test.
 - The VM replication and backup checks test Linux VMs only. Windows freeze is tested once, in the lab test of the VM replication spec, because the run has no Windows image.
+- Stages 8 and 9 are one stage: the VM checks need the golden image, so testing them apart would make the image twice.
 - Object lock is tested with a 1-day Compliance lock. The test bucket deletes those objects by itself the next day.
