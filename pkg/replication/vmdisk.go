@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"syscall"
 
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/qcow2"
 )
@@ -44,7 +45,9 @@ func ApplyVMDisk(stagingPath, diskPath string) (int64, error) {
 // either the old disk or the new one, never a mix. On error the old disk stays
 // and the new file is removed. It returns the number of data bytes written.
 func ReplaceDiskFromStaging(stagingPath, diskPath string) (int64, error) {
-	src, err := os.Open(stagingPath) // #nosec G304 -- path comes from the controller's Job spec
+	// O_NOFOLLOW and the regular-file check stop a staging file that was
+	// replaced by a link to some other file, such as another volume's disk.
+	src, err := os.OpenFile(stagingPath, os.O_RDONLY|syscall.O_NOFOLLOW, 0) // #nosec G304 -- path comes from the controller's Job spec
 	if err != nil {
 		return 0, fmt.Errorf("opening staging file: %w", err)
 	}
@@ -53,6 +56,9 @@ func ReplaceDiskFromStaging(stagingPath, diskPath string) (int64, error) {
 	fi, err := src.Stat()
 	if err != nil {
 		return 0, fmt.Errorf("reading staging file size: %w", err)
+	}
+	if !fi.Mode().IsRegular() {
+		return 0, fmt.Errorf("staging file %s is not a regular file", stagingPath)
 	}
 	img, err := qcow2.Open(src, fi.Size())
 	if err != nil {
