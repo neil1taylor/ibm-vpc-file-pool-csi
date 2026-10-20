@@ -104,7 +104,9 @@ Each line says what the stage proves, and how it checks the result itself, not t
     - a pod on a PVC from IBM's own class `ibmc-vpc-file-3000-iops`, as a baseline
     - inside a VM disk on pool storage
 
-    The pool's shares get 3,000 IOPS, the same as the baseline. Results go to `test/release/history.csv`. A result more than 20% worse than the last run is a warning, not a FAIL, because cloud storage speed varies.
+    The pool's shares get 3,000 IOPS, the same as the baseline. Results go to `speed.csv` in the run folder and to `history.csv` next to the run folders on the build server, because the test scripts folder is replaced on each run. The VM prints its results on its serial console, which the stage reads from the VM pod's log.
+
+    First run on rovslab (20 October, run 1020-1303): pool volume, IBM baseline and VM disk all gave about 3,000 IOPS random 4 KB and 187 MB/s sequential 1 MB, the share's limit. A result more than 20% worse than the last run is a warning, not a FAIL, because cloud storage speed varies.
 18. **Backup.** From `2026-10-20-vm-safe-replication.md`, added when backup ships.
     - A backup policy takes three snapshots of a running VM and of a normal PVC, into a separate snapshot pool.
     - The oldest and the newest snapshot are restored. The VM boots from each, and the PVC files match their checksums.
