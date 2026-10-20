@@ -32,6 +32,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Replication receiver: a tar upload could write files outside the destination volume through a symlink (a sibling directory whose name starts with the destination's name, or a symlinked parent directory). All writes now go through `os.Root`, and symlink targets are checked against the parent's real location.
 
 ### Fixed
+- **Replication failures could go uncounted, so a failing policy never paused.** A cycle was judged only when all its copy Jobs had finished at once, but a volume whose Job finished early got a new Job on the next check. With Jobs that finish at different times, that moment might never come. A volume's result is now kept until every volume of the cycle has finished.
+- While a new copy ran, or after one failed, the policy status dropped each volume's last good sync time. It now keeps it, so the age of the last good copy stays visible.
 - The replication controller read pods through the shared cache, which needs a `watch` permission the controller does not have, so the running-VM check could fail. It now reads directly.
 - The FileSharePool webhook allowed `expandThresholdPercent` 1–99 and `maxShares` up to 1000, but the CRD schema allows 50–95 and up to 100. The webhook now uses the schema's ranges, so its messages give the real limits.
 - **VMs made from a golden image template could not get a boot disk.** The template always asked for a 15 GB boot disk, but a copy cannot be smaller than its source, and CDI makes a disk a little larger than requested. The golden disk is now exactly the pool's `pvcSizeGB`, and the template's boot disk defaults to the same size.
