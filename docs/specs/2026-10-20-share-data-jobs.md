@@ -81,3 +81,7 @@ deleted while its restore runs, the provisioner finishes the create and then del
 - The old in-process copy and remove code paths for these four operations are removed, with their
   unit tests. They never ran in a real controller. New tests cover the Job-based behaviour.
 - The Job uses the same image as clone Jobs (`quay.io/centos/centos:stream9`).
+- The Job runner reads through the API directly, not the controller's cache, so it never acts on an old
+  view of a Job or pod.
+- A retried create for a restore or clone always goes to the pool manager. Only plain volumes are
+  answered from the existing record.

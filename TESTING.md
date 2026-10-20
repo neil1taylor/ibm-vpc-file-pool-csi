@@ -482,6 +482,7 @@ To run it from the current machine instead, with your own kubeconfig: `bash test
 | `01-preflight` | Controller and node agents ready, expected version, CRDs installed, webhook refuses a bad pool, no leftovers from an earlier run |
 | `02-pool` | A pool reaches `Ready`; its share uses security group access mode and its mount target is in the pool's zone (read from the VPC API); its StorageClass exists; a pool with a missing security group says why and makes no share |
 | `03-volumes` | Pods on two workers share a volume; owner and mode follow the pool; deleting the claim removes the PV, the SubVolume and the directory on the share |
+| `05-snapshots` | A snapshot becomes ready and its folder is on the share; a claim restored from it has the files as they were at snapshot time (the source is changed after the snapshot), with the pool's owner and mode; deleting the snapshot removes its folder |
 
 **Rules for every stage:**
 - A stage file in `test/release/stages/` defines `run` and `cleanup`.
@@ -503,6 +504,8 @@ ibmcloud is instance-update pool-csi-build --metadata-service true
 ```
 
 Undo: `ibmcloud iam trusted-profile-delete pool-csi-build-vpc-reader -f` and `ibmcloud is instance-update pool-csi-build --metadata-service false`. Without this setup, the VPC checks report "not checked" and the rest of the run still works.
+
+The metadata service accepts a trusted profile by ID, not by name, so `remote.sh` looks up the ID of `pool-csi-build-vpc-reader` (or `RT_VPC_PROFILE`) on your machine and passes it to the run.
 
 ## E2E Tests
 
