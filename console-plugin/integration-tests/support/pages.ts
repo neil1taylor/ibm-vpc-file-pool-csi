@@ -20,7 +20,7 @@ export async function expectPageTitle(page: Page, title: string): Promise<void> 
 
 /** Click a tab by its accessible name */
 export async function clickTab(page: Page, tabName: string): Promise<void> {
-  const tab = page.getByRole('tab', { name: tabName });
+  const tab = page.getByRole('tab', { name: tabName, exact: true });
   await tab.click();
   // Small wait for tab content to render
   await page.waitForTimeout(1_000);

@@ -58,7 +58,20 @@ YAML
 make_read_only_token() {
     rt_namespace "$NS"
     oc create serviceaccount "$SA" -n "$NS" >/dev/null
+    # cluster-reader does not cover the driver's own resource types, so a small
+    # read-only role for them is added.
     oc apply -f - >/dev/null <<YAML
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: $NS
+  labels:
+    $RT_LABEL: "$RT_ID"
+rules:
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -69,6 +82,21 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: cluster-reader
+subjects:
+  - kind: ServiceAccount
+    name: $SA
+    namespace: $NS
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: $NS-pools
+  labels:
+    $RT_LABEL: "$RT_ID"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: $NS
 subjects:
   - kind: ServiceAccount
     name: $SA
@@ -161,7 +189,7 @@ NGINX
 cleanup() {
     podman stop -t 5 "$CONSOLE_CONTAINER" "$PLUGIN_CONTAINER" >/dev/null 2>&1 || true
     rm -f "$TOKEN_FILE"
-    oc delete clusterrolebinding -l "$RT_LABEL=$RT_ID" --ignore-not-found --wait=true --timeout=120s
+    oc delete clusterrolebinding,clusterrole -l "$RT_LABEL=$RT_ID" --ignore-not-found --wait=true --timeout=120s
     oc delete namespace "$NS" --ignore-not-found --wait=true --timeout=300s
     oc delete filesharepool "$POOL" --ignore-not-found --wait=true --timeout=600s
 }
