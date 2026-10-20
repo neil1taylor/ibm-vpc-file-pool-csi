@@ -42,11 +42,11 @@ const (
 
 // VMCopier takes copies of running VM disks. pkg/vmcopy implements it.
 type VMCopier interface {
-	Start(ctx context.Context, vm vmcopy.VM, volumes []string, speed int64, id string) (*vmcopy.Copy, error)
+	Start(ctx context.Context, vm vmcopy.VM, volumes []string, opts vmcopy.StartOptions) (*vmcopy.Copy, error)
 	Progress(ctx context.Context, vm vmcopy.VM, cp *vmcopy.Copy) (vmcopy.State, string, error)
 	Finish(ctx context.Context, vm vmcopy.VM, cp *vmcopy.Copy, removeStaging bool) error
 	Cancel(ctx context.Context, vm vmcopy.VM, cp *vmcopy.Copy) error
-	RemoveStale(ctx context.Context, vm vmcopy.VM, volumes []string) error
+	RemoveStale(ctx context.Context, vm vmcopy.VM, volumes []string, keepBitmap string) error
 }
 
 // SetVMCopier turns on copies of running VM disks in direct NFS mode. Without
@@ -200,7 +200,7 @@ func (rc *ReplicationController) startVMCopy(ctx context.Context, policy *v1alph
 		}
 		return
 	}
-	if err = rc.vmCopier.RemoveStale(ctx, vm, g.volumes); err != nil {
+	if err = rc.vmCopier.RemoveStale(ctx, vm, g.volumes, ""); err != nil {
 		fail(fmt.Sprintf("clear an earlier copy: %v", err))
 		return
 	}
@@ -210,7 +210,7 @@ func (rc *ReplicationController) startVMCopy(ctx context.Context, policy *v1alph
 		speed = int64(*policy.Spec.VMCopySpeedLimitMBps)
 	}
 	id := strconv.FormatInt(rc.nowFunc().UnixNano(), 36)
-	cp, err := rc.vmCopier.Start(ctx, vm, g.volumes, speed<<20, id)
+	cp, err := rc.vmCopier.Start(ctx, vm, g.volumes, vmcopy.StartOptions{Speed: speed << 20, ID: id})
 	if err != nil {
 		fail(fmt.Sprintf("start the VM disk copy: %v", err))
 		return
