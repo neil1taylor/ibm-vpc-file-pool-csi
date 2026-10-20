@@ -108,6 +108,7 @@ Each line says what the stage proves, and how it checks the result itself, not t
     - With a keep count of 2, the third snapshot merges the oldest one away. The remaining snapshots still restore and boot.
     - The newest snapshot is exported to COS and restored from COS to a new PVC. The VM boots from it.
     - A known text string written in the VM cannot be found in any object in the bucket, which shows that the data is encrypted.
+    - The driver's key cannot delete a backup that has a Governance lock. The run uses Governance, not Compliance, so its own clean-up key can still delete the test backups at the end.
     - The run uses its own `rt-<run id>/` prefix in one test bucket, and deletes that prefix at the end.
 19. **Clean-up and report.**
 
