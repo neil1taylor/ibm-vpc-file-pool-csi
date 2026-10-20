@@ -497,6 +497,11 @@ func (in *ReplicationPolicySpec) DeepCopyInto(out *ReplicationPolicySpec) {
 		*out = new(int32)
 		**out = **in
 	}
+	if in.RestorePointKeepHours != nil {
+		in, out := &in.RestorePointKeepHours, &out.RestorePointKeepHours
+		*out = new(int32)
+		**out = **in
+	}
 	if in.PreSyncHooks != nil {
 		in, out := &in.PreSyncHooks, &out.PreSyncHooks
 		*out = make([]Hook, len(*in))
@@ -754,6 +759,10 @@ func (in *SubVolumeReplicationStatus) DeepCopyInto(out *SubVolumeReplicationStat
 	}
 	if in.CopyMoment != nil {
 		in, out := &in.CopyMoment, &out.CopyMoment
+		*out = (*in).DeepCopy()
+	}
+	if in.OldestRestorePoint != nil {
+		in, out := &in.OldestRestorePoint, &out.OldestRestorePoint
 		*out = (*in).DeepCopy()
 	}
 	if in.VMCopy != nil {

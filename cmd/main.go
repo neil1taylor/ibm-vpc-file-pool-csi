@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
@@ -78,6 +79,7 @@ func main() {
 		// Apply-vm-disk mode flags.
 		stagingPath string
 		diskPath    string
+		vmCopy      vmCopyFlags
 	)
 
 	flag.StringVar(&endpoint, "endpoint", "unix:///csi/csi.sock", "CSI endpoint")
@@ -116,6 +118,10 @@ func main() {
 	// Apply-vm-disk flags.
 	flag.StringVar(&stagingPath, "staging-path", "", "VM disk copy staging file for apply-vm-disk mode")
 	flag.StringVar(&diskPath, "disk-path", "", "Disk image to replace in apply-vm-disk mode")
+	flag.StringVar(&vmCopy.from, "from", "", "Moment the far-site disk shows now, RFC 3339 (apply-vm-disk mode; empty for a first copy)")
+	flag.StringVar(&vmCopy.to, "to", "", "Moment the copy shows, RFC 3339 (apply-vm-disk mode)")
+	flag.BoolVar(&vmCopy.full, "full", false, "The copy holds the whole disk (apply-vm-disk mode)")
+	flag.DurationVar(&vmCopy.keep, "keep", 24*time.Hour, "How long restore points are kept (apply-vm-disk mode)")
 
 	klog.InitFlags(nil)
 	flag.Parse()
@@ -130,7 +136,7 @@ func main() {
 	case "sync-client":
 		runSyncClient(receiverEndpoint, authTokenFile, sourcePath, destBasePath, subPath, subvolumeName, metadataJSON, caCertFile)
 	case "apply-vm-disk":
-		runApplyVMDisk(stagingPath, diskPath)
+		runApplyVMDisk(stagingPath, diskPath, vmCopy)
 	default:
 		runNode(endpoint, nodeID, mode)
 	}
@@ -571,19 +577,58 @@ func registerWebhooks(mgr ctrl.Manager) error {
 	return nil
 }
 
-// runApplyVMDisk replaces a far-site VM disk with a staged copy. A replication
-// Job runs it.
-func runApplyVMDisk(stagingPath, diskPath string) {
+// vmCopyFlags are the apply-vm-disk flags that describe the copy.
+type vmCopyFlags struct {
+	from, to string
+	full     bool
+	keep     time.Duration
+}
+
+// applyOptions turns the flags into replication.ApplyOptions.
+func (f vmCopyFlags) applyOptions(now time.Time) (replication.ApplyOptions, error) {
+	opts := replication.ApplyOptions{Full: f.full, Keep: f.keep, Now: now}
+	var err error
+	if opts.To, err = time.Parse(time.RFC3339Nano, f.to); err != nil {
+		return opts, fmt.Errorf("--to: %w", err)
+	}
+	if f.from != "" {
+		if opts.From, err = time.Parse(time.RFC3339Nano, f.from); err != nil {
+			return opts, fmt.Errorf("--from: %w", err)
+		}
+	}
+	return opts, nil
+}
+
+// applyVMDiskMessage is the termination message of an apply-vm-disk Job.
+func applyVMDiskMessage(res replication.VMDiskResult) string {
+	msg := struct {
+		BytesWritten       int64      `json:"bytesWritten"`
+		RestorePoints      int        `json:"restorePoints"`
+		OldestRestorePoint *time.Time `json:"oldestRestorePoint,omitempty"`
+	}{res.ChangedBytes, res.RestorePoints, res.OldestRestorePoint}
+	b, _ := json.Marshal(msg)
+	return string(b)
+}
+
+// runApplyVMDisk applies a staged VM disk copy to the far-site disk. A
+// replication Job runs it.
+func runApplyVMDisk(stagingPath, diskPath string, f vmCopyFlags) {
 	if stagingPath == "" || diskPath == "" {
 		klog.ErrorS(nil, "staging-path and disk-path are required for apply-vm-disk mode")
 		os.Exit(1)
 	}
-	n, err := replication.ApplyVMDisk(stagingPath, diskPath)
+	opts, err := f.applyOptions(time.Now())
+	if err != nil {
+		klog.ErrorS(err, "Invalid apply-vm-disk flags")
+		os.Exit(1)
+	}
+	res, err := replication.ApplyVMDisk(stagingPath, diskPath, opts)
 	if err != nil {
 		klog.ErrorS(err, "Failed to apply VM disk copy", "staging", stagingPath, "disk", diskPath)
 		os.Exit(1)
 	}
-	klog.InfoS("Applied VM disk copy", "disk", diskPath, "bytesWritten", n)
-	// The replication controller reads bytesWritten from the termination log.
-	_ = os.WriteFile("/dev/termination-log", []byte(fmt.Sprintf(`{"bytesWritten":%d}`, n)), 0o600)
+	klog.InfoS("Applied VM disk copy", "disk", diskPath, "changedBytes", res.ChangedBytes,
+		"rolledBack", res.RolledBack, "restorePoints", res.RestorePoints)
+	// The replication controller reads the result from the termination log.
+	_ = os.WriteFile("/dev/termination-log", []byte(applyVMDiskMessage(res)), 0o600)
 }

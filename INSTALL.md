@@ -379,6 +379,9 @@ kubectl apply -f config/deploy/node.yaml
 | `--ca-cert-file` | `""` | CA certificate file for verifying receiver TLS cert (sync-client mode). Empty = system trust store |
 | `--staging-path` | `""` | VM disk copy staging file (apply-vm-disk mode). Set by the replication controller |
 | `--disk-path` | `""` | Disk image to replace (apply-vm-disk mode). Set by the replication controller |
+| `--from`, `--to` | `""` | Moments the destination disk and the copy show, RFC 3339 (apply-vm-disk mode). Set by the replication controller |
+| `--full` | `false` | The copy holds the whole disk (apply-vm-disk mode). Set by the replication controller |
+| `--keep` | `24h` | How long restore points are kept (apply-vm-disk mode). Set by the replication controller |
 
 ---
 

@@ -1249,6 +1249,13 @@ type ReplicationPolicySpec struct {
     // +optional
     VMCopySpeedLimitMBps *int32 `json:"vmCopySpeedLimitMBps,omitempty"`
 
+    // RestorePointKeepHours is how long the destination keeps the restore
+    // points of running VM disks. See "Running VM disks" below.
+    // +kubebuilder:validation:Minimum=1
+    // +kubebuilder:default=24
+    // +optional
+    RestorePointKeepHours *int32 `json:"restorePointKeepHours,omitempty"`
+
     // DestinationEndpoint is the HTTPS URL of the replication receiver service
     // on the destination cluster (e.g., "https://repl-receiver.apps.cluster.example.com").
     // When set, the controller uses driver-to-driver mode instead of direct NFS.
@@ -1334,9 +1341,23 @@ type SubVolumeReplicationStatus struct {
     // +optional
     ConsistencyReason string `json:"consistencyReason,omitempty"`
 
+    // VMChangeList is the change list (QEMU dirty bitmap) of the last good
+    // copy of a running VM's disk; the next copy holds only blocks changed
+    // since then. Empty means the next copy is full.
+    // +optional
+    VMChangeList string `json:"vmChangeList,omitempty"`
+
+    // RestorePoints is how many earlier copies the destination keeps for a
+    // running VM's disk, and OldestRestorePoint the moment of the oldest.
+    // +optional
+    RestorePoints int32 `json:"restorePoints,omitempty"`
+    // +optional
+    OldestRestorePoint *metav1.Time `json:"oldestRestorePoint,omitempty"`
+
     // VMCopy is the state of an unfinished running VM disk copy: copy ID,
     // phase (Copying or Sending), VM pod name and UID, VMI name, pod volume
-    // name, disk index, staging file name, moment and freeze result.
+    // name, disk index, staging file name, moment, freeze result, and the
+    // change lists it started and read.
     // +optional
     VMCopy *VMCopyState `json:"vmCopy,omitempty"`
 }
@@ -1349,11 +1370,17 @@ stopping it. It finds the VM from the virt-launcher pod that mounts the claim.
 On a scheduled cycle it freezes the guest file systems (KubeVirt's
 virt-freezer, with a 30 s automatic thaw), makes QEMU copy all of the VM's
 disks in the policy at one moment into sparse staging files in each volume,
-and thaws the guest. Between scheduled cycles it checks the copy on every
-controller tick. When QEMU finishes, a Job per disk replaces the destination
-`disk.img` with the copy in one step and deletes the staging file. The
-`lastSyncTime` of a VM disk is the moment the copy shows, not the time the
-copy finished.
+and thaws the guest. In the same step QEMU starts a change list for each
+disk. The next copy holds only the blocks changed since the last good copy;
+after a VM restart or move the lists are gone and the copy is full. Between
+scheduled cycles the controller checks the copy on every controller tick.
+When QEMU finishes, a Job per disk applies the copy to the destination
+`disk.img`: it first saves the old contents of every block it will change in
+an undo file in `.repl-undo/` next to the disk, then writes the new blocks.
+A copy that stops half way is rolled back from its undo file by the next Job.
+The undo files are restore points, kept for `restorePointKeepHours`. Only
+blocks whose contents differ are written and saved. The `lastSyncTime` of a
+VM disk is the moment the copy shows, not the time the copy finished.
 
 - If a live migration of the VM is requested, the controller cancels the copy,
   because QEMU cannot migrate during a copy. The next cycle starts a new copy.

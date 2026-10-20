@@ -314,6 +314,16 @@ spec:
                   - type
                   type: object
                 type: array
+              restorePointKeepHours:
+                default: 24
+                description: |-
+                  RestorePointKeepHours is how long the destination keeps the restore
+                  points of running VM disks, so a failover can rewind to an earlier
+                  copy. Each restore point holds the old contents of the blocks the next
+                  copy changed.
+                format: int32
+                minimum: 1
+                type: integer
               rsyncOptions:
                 description: |-
                   RsyncOptions are extra rsync flags appended after the base flags (-a --delete).
@@ -463,14 +473,36 @@ spec:
                       description: LastSyncTime for this specific SubVolume.
                       format: date-time
                       type: string
+                    oldestRestorePoint:
+                      format: date-time
+                      type: string
+                    restorePoints:
+                      description: |-
+                        RestorePoints is how many earlier copies of a running VM's disk the
+                        destination keeps, and OldestRestorePoint the moment of the oldest.
+                      format: int32
+                      type: integer
                     subVolumeName:
                       description: SubVolumeName is the SubVolume CR name.
+                      type: string
+                    vmChangeList:
+                      description: |-
+                        VMChangeList is the change list (QEMU dirty bitmap) of the last good
+                        copy of a running VM's disk. The next copy holds only the blocks
+                        changed since then. Empty means the next copy is a full copy.
                       type: string
                     vmCopy:
                       description: |-
                         VMCopy is the state of a running VM disk copy that is not finished.
                         The controller uses it to continue the copy across cycles and restarts.
                       properties:
+                        base:
+                          type: string
+                        bitmap:
+                          description: |-
+                            Bitmap is the change list this copy started. Base is the change list it
+                            read, for a change copy; Incremental is true then.
+                          type: string
                         diskIndex:
                           format: int32
                           type: integer
@@ -486,6 +518,8 @@ spec:
                           description: ID names the copy. It is the same for all disks
                             of one VM copy.
                           type: string
+                        incremental:
+                          type: boolean
                         moment:
                           description: Moment is the moment the copy shows.
                           format: date-time
@@ -518,6 +552,7 @@ spec:
                             the copy.
                           type: string
                       required:
+                      - bitmap
                       - diskIndex
                       - fileSystemConsistent
                       - id

@@ -3,6 +3,7 @@ package pool
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -33,6 +34,8 @@ type fakeVMCopier struct {
 	cancels     int
 	removeStale int
 	moment      time.Time
+	commits     []string // Base of each committed copy
+	lostBases   map[string]bool
 }
 
 type fakeStart struct {
@@ -40,6 +43,7 @@ type fakeStart struct {
 	volumes []string
 	speed   int64
 	id      string
+	base    string
 }
 
 func newFakeVMCopier() *fakeVMCopier {
@@ -50,11 +54,15 @@ func (f *fakeVMCopier) Start(_ context.Context, vm vmcopy.VM, volumes []string, 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	id := opts.ID
-	f.starts = append(f.starts, fakeStart{vm, volumes, opts.Speed, id})
+	f.starts = append(f.starts, fakeStart{vm, volumes, opts.Speed, id, opts.Base})
 	if f.startErr != nil {
 		return nil, f.startErr
 	}
-	cp := &vmcopy.Copy{ID: id, Moment: f.moment, FileSystemConsistent: f.freezeErr == "", FreezeError: f.freezeErr}
+	if opts.Base != "" && f.lostBases[opts.Base] {
+		return nil, fmt.Errorf("volume %s: %w", volumes[0], vmcopy.ErrBaseLost)
+	}
+	cp := &vmcopy.Copy{ID: id, Moment: f.moment, FileSystemConsistent: f.freezeErr == "", FreezeError: f.freezeErr,
+		Bitmap: "repl-" + id, Base: opts.Base, Incremental: opts.Base != ""}
 	for _, v := range volumes {
 		cp.Disks = append(cp.Disks, vmcopy.Disk{Volume: v, StagingFile: vmcopy.StagingPrefix + id + ".qcow2"})
 	}
@@ -71,6 +79,13 @@ func (f *fakeVMCopier) Finish(_ context.Context, _ vmcopy.VM, _ *vmcopy.Copy, re
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.finishes = append(f.finishes, removeStaging)
+	return nil
+}
+
+func (f *fakeVMCopier) Commit(_ context.Context, _ vmcopy.VM, cp *vmcopy.Copy) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.commits = append(f.commits, cp.Base)
 	return nil
 }
 
@@ -502,5 +517,157 @@ func TestVMCopy_SuccessClearsOldPolicyError(t *testing.T) {
 
 	if p := e.k.getPolicy(e.policy); p.Status.LastError != "" {
 		t.Errorf("expected the old policy error cleared after a good copy, got %q", p.Status.LastError)
+	}
+}
+
+// jobArgs returns the apply Job's command line for a SubVolume.
+func (e *vmCopyEnv) jobArgs(t *testing.T, sv string) string {
+	t.Helper()
+	job := e.job(t, sv)
+	if job == nil {
+		t.Fatalf("no apply Job for %s", sv)
+	}
+	return strings.Join(job.Spec.Template.Spec.Containers[0].Command, " ")
+}
+
+// copyOnce runs one scheduled copy through to a good sync.
+func (e *vmCopyEnv) copyOnce(t *testing.T) {
+	t.Helper()
+	e.clock = e.clock.Add(2 * time.Hour) // due again
+	e.cop.state = vmcopy.Running
+	e.rc.processOnce(e.ctx)
+	e.cop.state = vmcopy.Done
+	e.tick()
+	e.succeedJobs(t)
+	e.tick()
+}
+
+func TestVMCopy_SecondCopyIsAChangeCopy(t *testing.T) {
+	e := newVMCopyEnv(t)
+	first := e.cop.moment
+	e.tick()
+	e.cop.state = vmcopy.Done
+	e.tick()
+	args := e.jobArgs(t, vmGuardSV1)
+	if !strings.Contains(args, "--full") || strings.Contains(args, "--from=") || !strings.Contains(args, "--keep=24h0m0s") {
+		t.Errorf("first apply Job %q: want --full, no --from, and the 24 h keep time", args)
+	}
+	if !strings.Contains(args, "--to="+first.Format(time.RFC3339Nano)) {
+		t.Errorf("first apply Job %q lacks the copy moment", args)
+	}
+	e.succeedJobs(t)
+	e.tick()
+	firstList := "repl-" + e.cop.starts[0].id
+	if s := e.status(t, vmGuardSV1); s.VMChangeList != firstList {
+		t.Fatalf("VMChangeList = %q, want %q", s.VMChangeList, firstList)
+	}
+	if len(e.cop.commits) != 1 {
+		t.Errorf("expected the good copy committed once, got %v", e.cop.commits)
+	}
+
+	e.cop.moment = first.Add(time.Hour)
+	e.clock = e.clock.Add(2 * time.Hour)
+	e.cop.state = vmcopy.Running
+	e.rc.processOnce(e.ctx)
+	if got := e.cop.starts[1].base; got != firstList {
+		t.Fatalf("second copy base = %q, want %q", got, firstList)
+	}
+	e.cop.state = vmcopy.Done
+	e.tick()
+	args = e.jobArgs(t, vmGuardSV1)
+	if strings.Contains(args, "--full") || !strings.Contains(args, "--from="+first.Format(time.RFC3339Nano)) {
+		t.Errorf("change copy apply Job %q: want no --full and --from the first moment", args)
+	}
+	e.succeedJobs(t)
+	e.tick()
+	if s := e.status(t, vmGuardSV1); s.VMChangeList != "repl-"+e.cop.starts[1].id {
+		t.Errorf("after the change copy, VMChangeList = %q", s.VMChangeList)
+	}
+	if len(e.cop.commits) != 2 || e.cop.commits[1] != firstList {
+		t.Errorf("expected the change copy committed with base %q, got %v", firstList, e.cop.commits)
+	}
+}
+
+func TestVMCopy_KeepTimeSetting(t *testing.T) {
+	e := newVMCopyEnv(t)
+	p := e.k.getPolicy(e.policy)
+	p.Spec.RestorePointKeepHours = int32Ptr(6)
+	e.k.addPolicy(p)
+	e.tick()
+	e.cop.state = vmcopy.Done
+	e.tick()
+	if args := e.jobArgs(t, vmGuardSV1); !strings.Contains(args, "--keep=6h0m0s") {
+		t.Errorf("apply Job %q lacks --keep=6h0m0s", args)
+	}
+}
+
+func TestVMCopy_LostChangeListFallsBackToFullCopy(t *testing.T) {
+	e := newVMCopyEnv(t)
+	e.copyOnce(t)
+	list := e.status(t, vmGuardSV1).VMChangeList
+	e.cop.lostBases = map[string]bool{list: true} // the VM moved: QEMU lost the list
+
+	e.copyOnce(t)
+	n := len(e.cop.starts)
+	if e.cop.starts[n-2].base != list || e.cop.starts[n-1].base != "" {
+		t.Errorf("starts = %+v, want a try with base %q, then a full copy", e.cop.starts, list)
+	}
+	if s := e.status(t, vmGuardSV1); s.VMChangeList != "repl-"+e.cop.starts[n-1].id || s.LastError != "" {
+		t.Errorf("status = %+v", s)
+	}
+}
+
+func TestVMCopy_FailedApplyKeepsTheChangeList(t *testing.T) {
+	e := newVMCopyEnv(t)
+	e.copyOnce(t)
+	list := e.status(t, vmGuardSV1).VMChangeList
+	finishes := len(e.cop.finishes)
+
+	e.clock = e.clock.Add(2 * time.Hour)
+	e.rc.processOnce(e.ctx)
+	e.cop.state = vmcopy.Done
+	e.tick()
+	for _, sv := range []string{vmGuardSV1, vmGuardSV2} {
+		job := e.job(t, sv)
+		job.Status.Failed = 4
+		if err := e.dc.Status().Update(e.ctx, job); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.tick()
+	if s := e.status(t, vmGuardSV1); s.VMChangeList != list || s.LastError == "" {
+		t.Errorf("status = %+v, want the old change list %q kept and an error", s, list)
+	}
+	if got := e.cop.finishes[finishes:]; len(got) != 2 || got[0] || !got[1] {
+		t.Errorf("Finish calls after the change copy = %v, want keep (when done) then remove (when the apply failed)", got)
+	}
+}
+
+func TestVMCopy_RestorePointsInStatus(t *testing.T) {
+	e := newVMCopyEnv(t)
+	e.tick()
+	e.cop.state = vmcopy.Done
+	e.tick()
+	for _, sv := range []string{vmGuardSV1, vmGuardSV2} {
+		job := e.job(t, sv)
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: job.Name + "-x", Namespace: replJobNamespace, Labels: job.Spec.Template.Labels},
+			Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
+				State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+					Message: `{"bytesWritten":65536,"restorePoints":3,"oldestRestorePoint":"2026-10-20T09:00:00Z"}`,
+				}},
+			}}},
+		}
+		if err := e.dc.Create(e.ctx, pod); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.succeedJobs(t)
+	e.tick()
+	s := e.status(t, vmGuardSV1)
+	if s.RestorePoints != 3 || s.OldestRestorePoint == nil ||
+		!s.OldestRestorePoint.Time.Equal(time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)) ||
+		s.BytesSynced == nil || *s.BytesSynced != 65536 {
+		t.Errorf("status = %+v", s)
 	}
 }

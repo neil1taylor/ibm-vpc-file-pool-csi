@@ -4,6 +4,9 @@ import (
 	"context"
 	"slices"
 	"testing"
+	"time"
+
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/replication"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -48,5 +51,35 @@ func TestDiscoverNetworkConfig_FlagsOverrideConfigMap(t *testing.T) {
 	}
 	if cfg.clusterID != "" {
 		t.Errorf("clusterID = %q, want empty without cluster-info", cfg.clusterID)
+	}
+}
+
+func TestVMCopyFlags_ApplyOptions(t *testing.T) {
+	now := time.Date(2026, 10, 20, 15, 0, 0, 0, time.UTC)
+	opts, err := vmCopyFlags{from: "2026-10-20T13:00:00.5Z", to: "2026-10-20T14:00:00.25Z", keep: 6 * time.Hour}.applyOptions(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !opts.From.Equal(time.Date(2026, 10, 20, 13, 0, 0, 5e8, time.UTC)) || !opts.To.Equal(time.Date(2026, 10, 20, 14, 0, 0, 25e7, time.UTC)) ||
+		opts.Full || opts.Keep != 6*time.Hour || !opts.Now.Equal(now) {
+		t.Errorf("opts = %+v", opts)
+	}
+	if opts, err = (vmCopyFlags{to: "2026-10-20T14:00:00Z", full: true}).applyOptions(now); err != nil || !opts.From.IsZero() || !opts.Full {
+		t.Errorf("first copy: opts = %+v, err = %v", opts, err)
+	}
+	for _, f := range []vmCopyFlags{{}, {to: "yesterday"}, {to: "2026-10-20T14:00:00Z", from: "noon"}} {
+		if _, err := f.applyOptions(now); err == nil {
+			t.Errorf("flags %+v: expected an error", f)
+		}
+	}
+}
+
+func TestApplyVMDiskMessage(t *testing.T) {
+	oldest := time.Date(2026, 10, 20, 13, 0, 0, 0, time.UTC)
+	res := replication.VMDiskResult{RestorePoints: 3, OldestRestorePoint: &oldest}
+	res.ChangedBytes = 4096
+	want := `{"bytesWritten":4096,"restorePoints":3,"oldestRestorePoint":"2026-10-20T13:00:00Z"}`
+	if got := applyVMDiskMessage(res); got != want {
+		t.Errorf("message = %s, want %s", got, want)
 	}
 }

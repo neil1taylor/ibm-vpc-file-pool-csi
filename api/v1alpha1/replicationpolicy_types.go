@@ -116,6 +116,15 @@ type ReplicationPolicySpec struct {
 	// +optional
 	VMCopySpeedLimitMBps *int32 `json:"vmCopySpeedLimitMBps,omitempty"`
 
+	// RestorePointKeepHours is how long the destination keeps the restore
+	// points of running VM disks, so a failover can rewind to an earlier
+	// copy. Each restore point holds the old contents of the blocks the next
+	// copy changed.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default=24
+	// +optional
+	RestorePointKeepHours *int32 `json:"restorePointKeepHours,omitempty"`
+
 	// PreSyncHooks are hooks executed before each replication sync cycle.
 	// +optional
 	PreSyncHooks []Hook `json:"preSyncHooks,omitempty"`
@@ -185,6 +194,19 @@ type SubVolumeReplicationStatus struct {
 	// +optional
 	ConsistencyReason string `json:"consistencyReason,omitempty"`
 
+	// VMChangeList is the change list (QEMU dirty bitmap) of the last good
+	// copy of a running VM's disk. The next copy holds only the blocks
+	// changed since then. Empty means the next copy is a full copy.
+	// +optional
+	VMChangeList string `json:"vmChangeList,omitempty"`
+
+	// RestorePoints is how many earlier copies of a running VM's disk the
+	// destination keeps, and OldestRestorePoint the moment of the oldest.
+	// +optional
+	RestorePoints int32 `json:"restorePoints,omitempty"`
+	// +optional
+	OldestRestorePoint *metav1.Time `json:"oldestRestorePoint,omitempty"`
+
 	// VMCopy is the state of a running VM disk copy that is not finished.
 	// The controller uses it to continue the copy across cycles and restarts.
 	// +optional
@@ -226,6 +248,14 @@ type VMCopyState struct {
 	// FreezeError is the freeze error, if the freeze failed.
 	// +optional
 	FreezeError string `json:"freezeError,omitempty"`
+
+	// Bitmap is the change list this copy started. Base is the change list it
+	// read, for a change copy; Incremental is true then.
+	Bitmap string `json:"bitmap"`
+	// +optional
+	Base string `json:"base,omitempty"`
+	// +optional
+	Incremental bool `json:"incremental,omitempty"`
 }
 
 // +kubebuilder:object:root=true
