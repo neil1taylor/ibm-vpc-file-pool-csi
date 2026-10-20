@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
@@ -80,11 +81,15 @@ func main() {
 		stagingPath string
 		diskPath    string
 		vmCopy      vmCopyFlags
+
+		// Send-vm-disk mode flags (it also uses the sync-client flags).
+		vmGroup string
+		copyID  string
 	)
 
 	flag.StringVar(&endpoint, "endpoint", "unix:///csi/csi.sock", "CSI endpoint")
 	flag.StringVar(&nodeID, "node-id", "", "Node ID")
-	flag.StringVar(&mode, "mode", "controller", "Driver mode: controller, node, receiver, sync-client, or apply-vm-disk")
+	flag.StringVar(&mode, "mode", "controller", "Driver mode: controller, node, receiver, sync-client, apply-vm-disk, or send-vm-disk")
 	flag.StringVar(&region, "region", "", "IBM Cloud region (e.g. us-south); auto-discovered from secret provider if omitted")
 	flag.StringVar(&vpcID, "vpc-id", "", "IBM Cloud VPC ID for creating file share mount targets")
 	flag.StringVar(&subnetID, "subnet-id", "", "Comma-separated IBM Cloud worker subnet IDs; each share's mount target goes in the one in the pool's zone")
@@ -123,6 +128,9 @@ func main() {
 	flag.BoolVar(&vmCopy.full, "full", false, "The copy holds the whole disk (apply-vm-disk mode)")
 	flag.DurationVar(&vmCopy.keep, "keep", 24*time.Hour, "How long restore points are kept (apply-vm-disk mode)")
 
+	flag.StringVar(&vmGroup, "vm-group", "", "namespace/name of the VM that owns the disk (send-vm-disk mode)")
+	flag.StringVar(&copyID, "copy-id", "", "Name of this copy attempt; a repeat with the same name resumes (send-vm-disk mode)")
+
 	klog.InitFlags(nil)
 	flag.Parse()
 
@@ -137,6 +145,8 @@ func main() {
 		runSyncClient(receiverEndpoint, authTokenFile, sourcePath, destBasePath, subPath, subvolumeName, metadataJSON, caCertFile)
 	case "apply-vm-disk":
 		runApplyVMDisk(stagingPath, diskPath, vmCopy)
+	case "send-vm-disk":
+		runSendVMDisk(receiverEndpoint, authTokenFile, caCertFile, stagingPath, destBasePath, subPath, subvolumeName, copyID, vmGroup, metadataJSON, vmCopy)
 	default:
 		runNode(endpoint, nodeID, mode)
 	}
@@ -401,16 +411,9 @@ func runReceiver(basePath, authTokenFile, listenAddr, tlsCertFile, tlsKeyFile st
 	}
 }
 
-func runSyncClient(endpoint, authTokenFile, sourcePath, destBasePath, subPath, svName, metadataJSON, caCertFile string) {
-	if endpoint == "" {
-		klog.ErrorS(nil, "receiver-endpoint is required for sync-client mode")
-		os.Exit(1)
-	}
-	if sourcePath == "" || destBasePath == "" || subPath == "" || svName == "" {
-		klog.ErrorS(nil, "source-path, dest-base-path, sub-path, and subvolume-name are required for sync-client mode")
-		os.Exit(1)
-	}
-
+// newSyncClient reads the auth token and the optional CA certificate and makes
+// the client. It exits if either file is not usable.
+func newSyncClient(endpoint, authTokenFile, caCertFile string) *replication.SyncClient {
 	// Read auth token from file.
 	tokenBytes, err := os.ReadFile(authTokenFile) //nolint:gosec // G304: path comes from the operator-set --auth-token-file flag
 	if err != nil {
@@ -422,24 +425,34 @@ func runSyncClient(endpoint, authTokenFile, sourcePath, destBasePath, subPath, s
 		klog.ErrorS(nil, "Auth token file is empty", "path", authTokenFile)
 		os.Exit(1)
 	}
-
-	var client *replication.SyncClient
-	if caCertFile != "" {
-		caCertPEM, readErr := os.ReadFile(caCertFile) //nolint:gosec // G304: path comes from the operator-set CA cert flag
-		if readErr != nil {
-			klog.ErrorS(readErr, "Failed to read CA cert file", "path", caCertFile)
-			os.Exit(1)
-		}
-		var caErr error
-		client, caErr = replication.NewSyncClientWithCA(endpoint, token, caCertPEM)
-		if caErr != nil {
-			klog.ErrorS(caErr, "Invalid CA cert file", "path", caCertFile)
-			os.Exit(1)
-		}
-		klog.V(2).InfoS("Using custom CA certificate for receiver TLS", "caCertFile", caCertFile)
-	} else {
-		client = replication.NewSyncClient(endpoint, token)
+	if caCertFile == "" {
+		return replication.NewSyncClient(endpoint, token)
 	}
+	caCertPEM, err := os.ReadFile(caCertFile) //nolint:gosec // G304: path comes from the operator-set CA cert flag
+	if err != nil {
+		klog.ErrorS(err, "Failed to read CA cert file", "path", caCertFile)
+		os.Exit(1)
+	}
+	client, err := replication.NewSyncClientWithCA(endpoint, token, caCertPEM)
+	if err != nil {
+		klog.ErrorS(err, "Invalid CA cert file", "path", caCertFile)
+		os.Exit(1)
+	}
+	klog.V(2).InfoS("Using custom CA certificate for receiver TLS", "caCertFile", caCertFile)
+	return client
+}
+
+func runSyncClient(endpoint, authTokenFile, sourcePath, destBasePath, subPath, svName, metadataJSON, caCertFile string) {
+	if endpoint == "" {
+		klog.ErrorS(nil, "receiver-endpoint is required for sync-client mode")
+		os.Exit(1)
+	}
+	if sourcePath == "" || destBasePath == "" || subPath == "" || svName == "" {
+		klog.ErrorS(nil, "source-path, dest-base-path, sub-path, and subvolume-name are required for sync-client mode")
+		os.Exit(1)
+	}
+
+	client := newSyncClient(endpoint, authTokenFile, caCertFile)
 
 	var metadata []byte
 	if metadataJSON != "" {
@@ -631,4 +644,74 @@ func runApplyVMDisk(stagingPath, diskPath string, f vmCopyFlags) {
 		"rolledBack", res.RolledBack, "restorePoints", res.RestorePoints)
 	// The replication controller reads the result from the termination log.
 	_ = os.WriteFile("/dev/termination-log", []byte(applyVMDiskMessage(res)), 0o600)
+}
+
+// sendVMDiskArgs turns the flags into the arguments of replication.SendVMDisk.
+func sendVMDiskArgs(f vmCopyFlags, destBasePath, subPath, svName, copyID, vmGroup string) (replication.VMSendArgs, error) {
+	opts, err := f.applyOptions(time.Now())
+	if err != nil {
+		return replication.VMSendArgs{}, err
+	}
+	a := replication.VMSendArgs{DestBasePath: destBasePath, SubPath: subPath, SVName: svName, CopyID: copyID,
+		Full: f.full, To: opts.To, VMGroup: vmGroup, Keep: f.keep}
+	if f.from != "" {
+		a.From = &opts.From
+	}
+	return a, nil
+}
+
+// sendVMDiskMessage is the termination message of a send-vm-disk Job. A copy
+// the receiver refused because its disk is at another moment is reported, not
+// failed, so the Job is not retried: the controller makes the next copy full.
+func sendVMDiskMessage(res replication.VMSendResult, wrongBase *replication.WrongBaseError) string {
+	msg := struct {
+		BytesWritten       int64      `json:"bytesWritten"`
+		RestorePoints      int32      `json:"restorePoints"`
+		OldestRestorePoint *time.Time `json:"oldestRestorePoint,omitempty"`
+		WrongBase          bool       `json:"wrongBase,omitempty"`
+		DiskMoment         string     `json:"diskMoment,omitempty"`
+	}{res.SentBytes, res.RestorePoints, res.OldestRestorePoint, false, ""}
+	if wrongBase != nil {
+		msg.WrongBase, msg.DiskMoment = true, wrongBase.DiskMoment
+	}
+	b, _ := json.Marshal(msg)
+	return string(b)
+}
+
+// runSendVMDisk sends a staged VM disk copy to a receiver at the far site, and
+// the volume's metadata file. A replication Job runs it.
+func runSendVMDisk(endpoint, authTokenFile, caCertFile, stagingPath, destBasePath, subPath, svName, copyID, vmGroup, metadataJSON string, f vmCopyFlags) {
+	if endpoint == "" || stagingPath == "" || destBasePath == "" || subPath == "" || svName == "" || copyID == "" {
+		klog.ErrorS(nil, "receiver-endpoint, staging-path, dest-base-path, sub-path, subvolume-name and copy-id are required for send-vm-disk mode")
+		os.Exit(1)
+	}
+	args, err := sendVMDiskArgs(f, destBasePath, subPath, svName, copyID, vmGroup)
+	if err != nil {
+		klog.ErrorS(err, "Invalid send-vm-disk flags")
+		os.Exit(1)
+	}
+	client := newSyncClient(endpoint, authTokenFile, caCertFile)
+	ctx := context.Background()
+	// The metadata goes first, as in direct NFS mode. If the Job is retried
+	// after the staging file was deleted, nothing is left to send.
+	if metadataJSON != "" {
+		if err = client.UploadVMMetadata(ctx, destBasePath, subPath, svName, []byte(metadataJSON)); err != nil {
+			klog.ErrorS(err, "Failed to upload the volume metadata", "subVolume", svName)
+			os.Exit(1)
+		}
+	}
+	res, err := replication.SendVMDiskFile(ctx, client, stagingPath, args)
+	var wrongBase *replication.WrongBaseError
+	if errors.As(err, &wrongBase) {
+		klog.ErrorS(err, "The far-site disk is not at the moment this copy starts from; the next copy will be a full copy", "subVolume", svName)
+		_ = os.WriteFile("/dev/termination-log", []byte(sendVMDiskMessage(res, wrongBase)), 0o600)
+		return
+	}
+	if err != nil {
+		klog.ErrorS(err, "Failed to send VM disk copy", "staging", stagingPath, "subVolume", svName)
+		os.Exit(1)
+	}
+	klog.InfoS("Sent VM disk copy", "subVolume", svName, "sentBytes", res.SentBytes, "changedBytes", res.ChangedBytes,
+		"restorePoints", res.RestorePoints, "alreadyApplied", res.AlreadyApplied)
+	_ = os.WriteFile("/dev/termination-log", []byte(sendVMDiskMessage(res, nil)), 0o600)
 }

@@ -1283,6 +1283,10 @@ type replJobResult struct {
 	BytesWritten       int64      `json:"bytesWritten"`
 	RestorePoints      int32      `json:"restorePoints"`
 	OldestRestorePoint *time.Time `json:"oldestRestorePoint,omitempty"`
+	// WrongBase is true if a send-vm-disk Job found the far-site disk at
+	// another moment than the copy starts from, and DiskMoment says which.
+	WrongBase  bool   `json:"wrongBase,omitempty"`
+	DiskMoment string `json:"diskMoment,omitempty"`
 }
 
 // readJobResult reads the result from the completed pod's termination
@@ -1301,7 +1305,7 @@ func (rc *ReplicationController) readJobResult(ctx context.Context, job *batchv1
 		for _, cs := range pod.Status.ContainerStatuses {
 			if cs.State.Terminated != nil && cs.State.Terminated.Message != "" {
 				var msg replJobResult
-				if err := json.Unmarshal([]byte(cs.State.Terminated.Message), &msg); err == nil && msg.BytesWritten > 0 {
+				if err := json.Unmarshal([]byte(cs.State.Terminated.Message), &msg); err == nil && (msg.BytesWritten > 0 || msg.WrongBase) {
 					return msg
 				}
 			}

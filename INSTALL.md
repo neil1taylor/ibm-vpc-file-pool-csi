@@ -363,7 +363,7 @@ kubectl apply -f config/deploy/node.yaml
 |------|---------|-------------|
 | `--endpoint` | `unix:///csi/csi.sock` | CSI gRPC endpoint |
 | `--node-id` | (required) | Kubernetes node name |
-| `--mode` | `controller` | `controller`, `node`, `receiver`, `sync-client`, or `apply-vm-disk` (run by replication Jobs) |
+| `--mode` | `controller` | `controller`, `node`, `receiver`, `sync-client`, `apply-vm-disk`, or `send-vm-disk` (the last three are run by replication Jobs) |
 | `--region` | Auto-discovered | IBM Cloud region |
 | `--vpc-id` | Auto-discovered | VPC ID for mount targets |
 | `--subnet-id` | Auto-discovered | Worker subnet IDs for mount targets, comma-separated; the controller uses the one in each pool's zone |
@@ -391,7 +391,9 @@ kubectl apply -f config/deploy/node.yaml
 | `--disk-path` | `""` | Disk image to replace (apply-vm-disk mode). Set by the replication controller |
 | `--from`, `--to` | `""` | Moments the destination disk and the copy show, RFC 3339 (apply-vm-disk mode). Set by the replication controller |
 | `--full` | `false` | The copy holds the whole disk (apply-vm-disk mode). Set by the replication controller |
-| `--keep` | `24h` | How long restore points are kept (apply-vm-disk mode). Set by the replication controller |
+| `--keep` | `24h` | How long restore points are kept (apply-vm-disk and send-vm-disk modes). Set by the replication controller |
+| `--vm-group` | `""` | `namespace/name` of the VM that owns the disk (send-vm-disk mode). Set by the replication controller |
+| `--copy-id` | `""` | Name of this copy attempt; a repeat with the same name resumes it (send-vm-disk mode). Set by the replication controller |
 
 ---
 

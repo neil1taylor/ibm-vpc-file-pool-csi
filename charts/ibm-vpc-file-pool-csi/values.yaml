@@ -175,6 +175,11 @@ replicationReceiver:
   pvcName: ""
   # Secret name containing a "token" key for bearer token authentication.
   authSecretName: ""
+  # User and group the receiver runs as. It writes the destination VM disks, and
+  # KubeVirt runs QEMU as 107, so a failed-over VM can open a disk only if 107
+  # owns it.
+  runAsUser: 107
+  runAsGroup: 107
   resources:
     requests:
       cpu: 100m

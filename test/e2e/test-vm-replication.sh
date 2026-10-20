@@ -13,7 +13,10 @@
 #   - the next scheduled copy changes far less than the disk size, and both
 #     disks then have a restore point at the destination
 #
-# Usage: KUBECONFIG=... SSH_KEY=~/.ssh/key test/e2e/test-vm-replication.sh [--keep]
+# Usage: KUBECONFIG=... SSH_KEY=~/.ssh/key [MODE=receiver] test/e2e/test-vm-replication.sh [--keep]
+# MODE=direct (default) writes the copy over NFS. MODE=receiver starts a replication
+# receiver in kube-system (own TLS certificate, token and data volume on the
+# destination pool) and sends the copy to it over HTTPS.
 # SSH_KEY is a private key whose .pub file is put in the VM for virtctl ssh.
 set -euo pipefail
 
@@ -28,6 +31,9 @@ SSH_KEY=${SSH_KEY:?set SSH_KEY to a private key file}
 IMAGE_URL=${IMAGE_URL:-https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2}
 COPY_TIMEOUT=${COPY_TIMEOUT:-5400}
 SCHEDULE=${SCHEDULE:-15m}
+MODE=${MODE:-direct}
+case "$MODE" in direct | receiver) ;; *) echo "MODE must be direct or receiver" >&2; exit 2 ;; esac
+RECV=$PREFIX-recv
 
 log() { echo "[$(date -u +%H:%M:%S)] $*"; }
 fail() { log "FAIL: $*"; exit 1; }
@@ -41,12 +47,17 @@ wait_until() { # wait_until <seconds> <description> <command...>
     done
 }
 
+RECV_LABEL=pool-csi-test=$RECV
+
 cleanup() {
     if $KEEP; then log "keeping test resources (--keep)"; return; fi
     log "cleaning up"
     oc delete replicationpolicy "$POLICY" --ignore-not-found --wait=false
     oc delete ns "$NS" --ignore-not-found --wait=true --timeout=10m || true
     oc delete pv "$PREFIX-copy-root" "$PREFIX-copy-data" --ignore-not-found
+    if [ "$MODE" = receiver ]; then
+        oc delete deploy,svc,secret,pvc -n kube-system -l "$RECV_LABEL" --ignore-not-found --wait=true --timeout=5m || true
+    fi
     oc delete filesharepool "$SRC" "$DST" --ignore-not-found --wait=false
 }
 trap cleanup EXIT
@@ -228,8 +239,101 @@ wait_until 300 "writer running" writer_running
 
 server=$(pool_field "$DST" '.status.shares[0].mountTargetIP')
 export_path=$(pool_field "$DST" '.status.shares[0].exportPath')
-log "making policy $POLICY to $server:$export_path"
-oc apply -f - <<YAML
+
+# start_receiver makes a receiver in kube-system. Its data volume is a claim on
+# the destination pool, so the far-site disks can be mounted by NFS afterwards.
+start_receiver() {
+    local image dir crt
+    image=$(oc get deploy -n kube-system -l app.kubernetes.io/component=controller \
+        -o jsonpath='{.items[0].spec.template.spec.containers[?(@.name=="csi-controller")].image}')
+    dir=$(mktemp -d)
+    openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=$RECV" \
+        -addext "subjectAltName=DNS:$RECV.kube-system.svc,DNS:$RECV.kube-system.svc.cluster.local" \
+        -keyout "$dir/tls.key" -out "$dir/tls.crt" 2>/dev/null
+    crt=$dir/tls.crt
+    oc create secret generic "$RECV-tls" -n kube-system --from-file=tls.crt="$crt" --from-file=tls.key="$dir/tls.key"
+    oc create secret generic "$RECV-ca" -n kube-system --from-file=ca.crt="$crt"
+    oc create secret generic "$RECV-token" -n kube-system --from-literal=token="$(openssl rand -hex 24)"
+    oc label secret -n kube-system "$RECV-tls" "$RECV-ca" "$RECV-token" "$RECV_LABEL"
+    oc apply -f - <<YAML
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: $RECV-data, namespace: kube-system, labels: {pool-csi-test: $RECV}}
+spec:
+  storageClassName: $DST
+  accessModes: [ReadWriteMany]
+  volumeMode: Filesystem
+  resources: {requests: {storage: 60Gi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: $RECV, namespace: kube-system, labels: {pool-csi-test: $RECV}}
+spec:
+  replicas: 1
+  selector: {matchLabels: {pool-csi-test-app: $RECV}}
+  template:
+    metadata: {labels: {pool-csi-test-app: $RECV}}
+    spec:
+      securityContext: {runAsUser: 107, runAsGroup: 107}
+      imagePullSecrets: [{name: all-icr-io}]
+      containers:
+      - name: receiver
+        image: $image
+        args:
+        - --mode=receiver
+        - --receiver-base-path=/data
+        - --receiver-auth-token-file=/etc/replication/token
+        - --receiver-listen-addr=:8443
+        - --receiver-tls-cert-file=/certs/tls.crt
+        - --receiver-tls-key-file=/certs/tls.key
+        ports: [{name: https, containerPort: 8443}]
+        readinessProbe: {httpGet: {path: /api/v1/health, port: https, scheme: HTTPS}, periodSeconds: 5}
+        volumeMounts:
+        - {name: data, mountPath: /data}
+        - {name: token, mountPath: /etc/replication, readOnly: true}
+        - {name: certs, mountPath: /certs, readOnly: true}
+      volumes:
+      - {name: data, persistentVolumeClaim: {claimName: $RECV-data}}
+      - {name: token, secret: {secretName: $RECV-token}}
+      - {name: certs, secret: {secretName: $RECV-tls}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: $RECV, namespace: kube-system, labels: {pool-csi-test: $RECV}}
+spec:
+  selector: {pool-csi-test-app: $RECV}
+  ports: [{name: https, port: 8443, targetPort: https}]
+YAML
+    recv_bound() { [ "$(oc get pvc -n kube-system "$RECV-data" -o jsonpath='{.status.phase}')" = Bound ]; }
+    wait_until 600 "the receiver data volume" recv_bound
+    wait_until 300 "the receiver" oc rollout status deploy/"$RECV" -n kube-system --timeout=10s
+}
+
+if [ "$MODE" = receiver ]; then
+    log "starting the receiver $RECV"
+    start_receiver
+    recv_pv=$(oc get pvc -n kube-system "$RECV-data" -o jsonpath='{.spec.volumeName}')
+    recv_sub=$(oc get subvolume "$recv_pv" -o jsonpath='{.spec.subPath}')
+    far_prefix="${export_path%/}$recv_sub/repl"
+    log "making policy $POLICY to https://$RECV.kube-system.svc:8443"
+    oc apply -f - <<YAML
+apiVersion: storage.ibmcloud.io/v1alpha1
+kind: ReplicationPolicy
+metadata: {name: $POLICY}
+spec:
+  sourcePoolName: $SRC
+  destinationEndpoint: https://$RECV.kube-system.svc:8443
+  destinationAuthSecretRef: $RECV-token
+  destinationCACertSecretRef: $RECV-ca
+  destinationBasePath: /repl
+  schedule: $SCHEDULE
+  maxRetries: 3
+  maxParallelSyncs: 2
+YAML
+else
+    far_prefix="${export_path%/}/repl"
+    log "making policy $POLICY to $server:$export_path"
+    oc apply -f - <<YAML
 apiVersion: storage.ibmcloud.io/v1alpha1
 kind: ReplicationPolicy
 metadata: {name: $POLICY}
@@ -242,6 +346,7 @@ spec:
   maxRetries: 3
   maxParallelSyncs: 2
 YAML
+fi
 
 copies_done() {
     local st
@@ -295,7 +400,7 @@ spec:
   accessModes: [ReadWriteMany]
   persistentVolumeReclaimPolicy: Retain
   mountOptions: [nfsvers=4.1, sec=sys, soft, timeo=600, retrans=3]
-  nfs: {server: "$server", path: "${export_path%/}/repl$sub"}
+  nfs: {server: "$server", path: "$far_prefix$sub"}
   claimRef: {namespace: $NS, name: copy-$d}
 ---
 apiVersion: v1

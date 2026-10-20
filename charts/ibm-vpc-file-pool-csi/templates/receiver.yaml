@@ -20,6 +20,9 @@ spec:
         app.kubernetes.io/component: replication-receiver
     spec:
       serviceAccountName: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-controller
+      securityContext:
+        runAsUser: {{ .Values.replicationReceiver.runAsUser }}
+        runAsGroup: {{ .Values.replicationReceiver.runAsGroup }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}

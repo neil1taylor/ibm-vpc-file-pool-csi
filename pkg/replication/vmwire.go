@@ -169,4 +169,28 @@ type CommitRequest struct {
 type CommitResponse struct {
 	ChangedBytes int64 `json:"changedBytes"`
 	RolledBack   bool  `json:"rolledBack"`
+	// RestorePoints is how many restore points the far-site disk has now,
+	// and OldestRestorePoint the oldest of them.
+	RestorePoints      int32      `json:"restorePoints"`
+	OldestRestorePoint *time.Time `json:"oldestRestorePoint,omitempty"`
+}
+
+// DiskMomentHeader is the response header of the compare call. It holds the
+// moment the far-site disk shows (RFC 3339), "none" if there is no disk, or
+// "unknown" if the disk exists but its moment is not known.
+const DiskMomentHeader = "Repl-Disk-Moment"
+
+// Conflict is the body of a 409 answer to the commit call.
+type Conflict struct {
+	Message string `json:"message"`
+	// DiskMoment has the same values as DiskMomentHeader.
+	DiskMoment string `json:"diskMoment"`
+}
+
+// StatusResponse is the answer to the status call.
+type StatusResponse struct {
+	// Offsets are the offsets of the data records stored so far.
+	Offsets []int64 `json:"offsets"`
+	// DiskMoment has the same values as DiskMomentHeader.
+	DiskMoment string `json:"diskMoment"`
 }

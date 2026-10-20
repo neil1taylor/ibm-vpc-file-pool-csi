@@ -23,6 +23,8 @@ type vmTestClient struct {
 	srv  *httptest.Server
 	rcv  *Receiver
 	base string
+
+	lastBody []byte
 }
 
 func newVMTestClient(t *testing.T) *vmTestClient {
@@ -124,6 +126,7 @@ func (c *vmTestClient) commit(copyID string, req CommitRequest) (int, CommitResp
 	c.t.Helper()
 	b, _ := json.Marshal(req)
 	code, resp := c.do(http.MethodPost, c.url(copyID, "commit"), bytes.NewReader(b), "test-token-123")
+	c.lastBody = resp
 	var out CommitResponse
 	if code == http.StatusOK {
 		if err := json.Unmarshal(resp, &out); err != nil {
@@ -484,5 +487,98 @@ func TestReceiverVM_LinkInVolumeCannotLeadOut(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
 		t.Fatalf("files were written outside the volume: %v", entries)
+	}
+}
+
+func TestReceiverVM_CompareReportsTheDiskMoment(t *testing.T) {
+	c := newVMTestClient(t)
+	moment := func(copyID string) string {
+		req, _ := http.NewRequest(http.MethodPost, c.url(copyID, "compare"), bytes.NewReader(nil))
+		req.Header.Set("Authorization", "Bearer test-token-123")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		return resp.Header.Get(DiskMomentHeader)
+	}
+	if got := moment("a1a1a1a1-1"); got != "none" {
+		t.Fatalf("no disk: header = %q, want none", got)
+	}
+	if code, _ := c.send("a1a1a1a1-2", change(2*chunk, 5, []int64{0, chunk}, nil), nil, t1, true); code != http.StatusOK {
+		t.Fatal("first copy failed")
+	}
+	if got := moment("a1a1a1a1-3"); got != t1.UTC().Format(time.RFC3339Nano) {
+		t.Fatalf("header = %q, want %s", got, t1.UTC().Format(time.RFC3339Nano))
+	}
+}
+
+func TestReceiverVM_FullCopyOntoDiskWithUnknownMoment(t *testing.T) {
+	c := newVMTestClient(t)
+	if err := os.MkdirAll(filepath.Dir(c.diskPath()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeDisk(t, c.diskPath(), bytes.Repeat([]byte{9}, 2*chunk))
+	src := change(2*chunk, 5, []int64{0, chunk}, nil)
+	if code, _ := c.send("b2b2b2b2-1", src, nil, t1, true); code != http.StatusOK {
+		t.Fatalf("full copy onto a disk with no known moment = %d, want 200", code)
+	}
+	if got := readDisk(t, c.diskPath()); got[0] != 5 || got[chunk] != 5 {
+		t.Fatal("disk was not replaced by the copy")
+	}
+	// A change copy cannot start from an unknown moment.
+	for _, name := range []string{momentFileName, undoDirName} {
+		if err := os.RemoveAll(filepath.Join(filepath.Dir(c.diskPath()), name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if code, _ := c.send("b2b2b2b2-2", change(2*chunk, 7, []int64{0}, nil), ptr(t1), t2, false); code != http.StatusConflict {
+		t.Fatalf("change copy from an unknown moment = %d, want 409", code)
+	}
+}
+
+func TestReceiverVM_ConflictNamesTheDiskMoment(t *testing.T) {
+	c := newVMTestClient(t)
+	if code, _ := c.send("c3c3c3c3-1", change(2*chunk, 5, []int64{0, chunk}, nil), nil, t1, true); code != http.StatusOK {
+		t.Fatal("first copy failed")
+	}
+	if code, _ := c.send("c3c3c3c3-2", change(2*chunk, 7, []int64{0}, nil), ptr(t0), t2, false); code != http.StatusConflict {
+		t.Fatal("expected 409")
+	}
+	var body struct {
+		Message    string `json:"message"`
+		DiskMoment string `json:"diskMoment"`
+	}
+	if err := json.Unmarshal(c.lastBody, &body); err != nil || body.DiskMoment != t1.UTC().Format(time.RFC3339Nano) {
+		t.Fatalf("409 body = %s (%v)", c.lastBody, err)
+	}
+}
+
+func TestReceiverVM_CommitReportsRestorePoints(t *testing.T) {
+	c := newVMTestClient(t)
+	if code, _ := c.send("d4d4d4d4-1", change(2*chunk, 5, []int64{0, chunk}, nil), nil, t1, true); code != http.StatusOK {
+		t.Fatal("first copy failed")
+	}
+	code, res := c.send("d4d4d4d4-2", change(2*chunk, 7, []int64{0}, nil), ptr(t1), t2, false)
+	if code != http.StatusOK {
+		t.Fatal("change copy failed")
+	}
+	if res.RestorePoints != 1 || res.OldestRestorePoint == nil || !res.OldestRestorePoint.Equal(t1) {
+		t.Fatalf("restore points = %d oldest %v, want 1 at %v", res.RestorePoints, res.OldestRestorePoint, t1)
+	}
+}
+
+func TestReceiverVM_DiskFolderIsWritableByTheVM(t *testing.T) {
+	c := newVMTestClient(t)
+	recs := chunks(t, change(2*chunk, 3, []int64{0}, nil), false)
+	if code := c.upload("e5e5e5e5-1", recs, "test-token-123"); code != http.StatusOK {
+		t.Fatal("upload failed")
+	}
+	fi, err := os.Stat(filepath.Dir(c.diskPath()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o777 {
+		t.Fatalf("folder mode = %o, want 777", fi.Mode().Perm())
 	}
 }
