@@ -713,6 +713,10 @@ func newStableShare(id, name string, totalGB, allocatedGB int64, pvcCount int32)
 func newManagerForTest(k8s *fakeK8sClient, vpc *fake.FakeVPCClient, nfs *fakeNFSOperations) *Manager {
 	m := NewManager(k8s, vpc, nfs, "/mnt/staging")
 	m.SetShareNetwork(testNetwork(vpc))
+	if nfs == nil {
+		nfs = newFakeNFSOperations()
+	}
+	m.SetShareData(&fakeShareData{nfs: nfs, base: "/mnt/staging"})
 	return m
 }
 
@@ -1534,15 +1538,6 @@ func TestCreateSubDirectory_InvalidPath(t *testing.T) {
 	nfs := newFakeNFSOperations()
 
 	err := createSubDirectory(nfs, "/mnt/staging", "/../../../etc/passwd", nil, nil, "")
-	if err == nil {
-		t.Fatal("expected error for invalid path")
-	}
-}
-
-func TestRemoveSubDirectory_InvalidPath(t *testing.T) {
-	nfs := newFakeNFSOperations()
-
-	err := removeSubDirectory(nfs, "/mnt/staging", "/../../../etc/passwd")
 	if err == nil {
 		t.Fatal("expected error for invalid path")
 	}

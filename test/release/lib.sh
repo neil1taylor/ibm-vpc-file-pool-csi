@@ -90,6 +90,23 @@ share_mount_on_node() {
         awk -v e=":$2" 'index($1, e) && substr($1, length($1) - length(e) + 1) == e {print $2; exit}' /proc/mounts
 }
 
+# path_on_share POOL NODE PATH — is PATH (a volume or snapshot folder) on the
+# pool's first share? Checked through the node agent's mount of the share on
+# NODE, so a pod on NODE must be using the share. Exit 0 = present,
+# 1 = absent, 2 = the share is not mounted on NODE.
+path_on_share() {
+    local export_path mnt
+    export_path=$(pool_field "$1" '.status.shares[0].exportPath')
+    mnt=$(share_mount_on_node "$2" "$export_path")
+    [ -n "$mnt" ] || { echo "share $export_path is not mounted on $2"; return 2; }
+    oc exec -n "$RT_DRIVER_NS" "$(node_agent_pod "$2")" -c csi-node -- test -d "$mnt$3"
+}
+
+path_gone_from_share() {
+    path_on_share "$@"
+    [ $? -eq 1 ]
+}
+
 # pod_on_node NS NAME NODE PVC COMMAND — run a pod with PVC at /data, pinned to NODE.
 pod_on_node() {
     oc apply -n "$1" -f - >/dev/null <<YAML

@@ -55,18 +55,3 @@ func createSubDirectory(nfsOps NFSOperations, basePath, subPath string, uid, gid
 
 	return nil
 }
-
-// removeSubDirectory removes a PVC subdirectory from an NFS share.
-// It validates the subPath before performing any filesystem operation.
-func removeSubDirectory(nfsOps NFSOperations, basePath, subPath string) error {
-	fullPath, err := util.SafeJoin(basePath, subPath)
-	if err != nil {
-		return fmt.Errorf("invalid subpath: %w", err)
-	}
-
-	if err := nfsOps.RemoveAll(fullPath); err != nil {
-		return fmt.Errorf("remove %s: %w", fullPath, err)
-	}
-
-	return nil
-}
