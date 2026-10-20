@@ -120,7 +120,7 @@ func TestResolveVMs_DisksAtDifferentMomentsUseTheLatestCommonOne(t *testing.T) {
 		t.Errorf("RPO = %v, want %v (the age of the chosen moment)", plan.RPO, m3.Sub(m1))
 	}
 
-	if err := plan.MaterializeVMs(); err != nil {
+	if err = plan.MaterializeVMs(); err != nil {
 		t.Fatal(err)
 	}
 	sa := byName(plan, "pvc-a")
