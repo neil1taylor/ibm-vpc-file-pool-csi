@@ -144,11 +144,6 @@ spec:
                   and maintains ready-to-clone golden image PVCs in target namespaces.
                   Not needed when the pool StorageClass is the cluster default (CDI handles natively).
                 properties:
-                  converterImage:
-                    default: quay.io/centos/centos:stream9
-                    description: ConverterImage is the container image used for qcow2-to-raw
-                      conversion jobs.
-                    type: string
                   enabled:
                     description: Enabled activates the golden image syncer for this
                       pool.

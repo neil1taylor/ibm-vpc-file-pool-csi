@@ -2,7 +2,6 @@ package pool
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -10,7 +9,6 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -48,7 +46,6 @@ func newPoolWithGoldenImages(name string, enabled bool, namespaces []string, fil
 			Enabled:          true,
 			TargetNamespaces: namespaces,
 			ImageFilter:      filters,
-			ConverterImage:   "quay.io/centos/centos:stream9",
 			PVCSizeGB:        15,
 		}
 	}
@@ -237,251 +234,6 @@ func TestDiscoverImages_NoCDI(t *testing.T) {
 	}
 }
 
-func TestEnsureGoldenPVC_Creates(t *testing.T) {
-	directClient := fake.NewClientBuilder().
-		WithScheme(newTestScheme()).
-		Build()
-	fk := newFakeK8sClient()
-
-	syncer := NewGoldenImageSyncer(fk, directClient)
-	ready, err := syncer.ensureGoldenPVC(context.Background(), "test-ns", "golden-centos", "centos-stream9", "my-pool", "my-pool", 15)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if ready {
-		t.Error("expected PVC to not be ready on creation")
-	}
-
-	// Verify PVC was created.
-	pvc := &corev1.PersistentVolumeClaim{}
-	if err := directClient.Get(context.Background(), types.NamespacedName{
-		Namespace: "test-ns", Name: "golden-centos",
-	}, pvc); err != nil {
-		t.Fatalf("expected PVC to exist: %v", err)
-	}
-	if pvc.Labels[goldenImageLabel] != "true" {
-		t.Errorf("expected golden-image label")
-	}
-	if pvc.Labels[goldenPoolLabel] != "my-pool" {
-		t.Errorf("expected pool label")
-	}
-	expectedSize := resource.MustParse("15Gi")
-	if !pvc.Spec.Resources.Requests.Storage().Equal(expectedSize) {
-		t.Errorf("expected 15Gi size, got %v", pvc.Spec.Resources.Requests.Storage())
-	}
-}
-
-func TestEnsureGoldenPVC_SkipsExisting(t *testing.T) {
-	existingPVC := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "golden-centos",
-			Namespace: "test-ns",
-			Labels:    map[string]string{goldenImageLabel: "true"},
-		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: resource.MustParse("15Gi"),
-				},
-			},
-		},
-	}
-	directClient := fake.NewClientBuilder().
-		WithScheme(newTestScheme()).
-		WithObjects(existingPVC).
-		Build()
-	fk := newFakeK8sClient()
-
-	syncer := NewGoldenImageSyncer(fk, directClient)
-	ready, err := syncer.ensureGoldenPVC(context.Background(), "test-ns", "golden-centos", "centos-stream9", "my-pool", "my-pool", 15)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if ready {
-		t.Error("expected existing PVC without ready annotation to not be ready")
-	}
-}
-
-func TestEnsureGoldenPVC_ReadyAnnotation(t *testing.T) {
-	existingPVC := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:        "golden-centos",
-			Namespace:   "test-ns",
-			Labels:      map[string]string{goldenImageLabel: "true"},
-			Annotations: map[string]string{"pool.storage.ibmcloud.io/golden-ready": "true"},
-		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: resource.MustParse("15Gi"),
-				},
-			},
-		},
-	}
-	directClient := fake.NewClientBuilder().
-		WithScheme(newTestScheme()).
-		WithObjects(existingPVC).
-		Build()
-	fk := newFakeK8sClient()
-
-	syncer := NewGoldenImageSyncer(fk, directClient)
-	ready, err := syncer.ensureGoldenPVC(context.Background(), "test-ns", "golden-centos", "centos-stream9", "my-pool", "my-pool", 15)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !ready {
-		t.Error("expected PVC with ready annotation to be ready")
-	}
-}
-
-func TestEnsureConverterJob_Creates(t *testing.T) {
-	// Pre-create the PVC so the Job has something to reference.
-	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "golden-centos",
-			Namespace: "test-ns",
-			Labels:    map[string]string{goldenImageLabel: "true"},
-		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("15Gi")},
-			},
-		},
-	}
-	directClient := fake.NewClientBuilder().
-		WithScheme(newTestScheme()).
-		WithObjects(pvc).
-		Build()
-	fk := newFakeK8sClient()
-
-	syncer := NewGoldenImageSyncer(fk, directClient)
-	img := goldenImageInfo{Name: "centos-stream9", RegistryURL: "docker://quay.io/containerdisks/centos-stream:9"}
-
-	done, err := syncer.ensureConverterJob(context.Background(), "test-ns", img, "my-pool", "golden-centos", "quay.io/centos/centos:stream9", 15)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if done {
-		t.Error("expected job to not be done on creation")
-	}
-
-	// Verify Job was created.
-	job := &batchv1.Job{}
-	if err := directClient.Get(context.Background(), types.NamespacedName{
-		Namespace: "test-ns", Name: "golden-convert-centos-stream9",
-	}, job); err != nil {
-		t.Fatalf("expected job to exist: %v", err)
-	}
-	if job.Labels[goldenImageLabel] != "true" {
-		t.Errorf("expected golden-image label on job")
-	}
-	if job.Labels[goldenNameLabel] != "centos-stream9" {
-		t.Errorf("expected image name label on job")
-	}
-	if *job.Spec.BackoffLimit != 3 {
-		t.Errorf("expected backoffLimit 3, got %d", *job.Spec.BackoffLimit)
-	}
-}
-
-func TestEnsureConverterJob_SkipsActive(t *testing.T) {
-	existingJob := &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "golden-convert-centos-stream9",
-			Namespace: "test-ns",
-			Labels:    map[string]string{goldenImageLabel: "true"},
-		},
-		Spec: batchv1.JobSpec{
-			Template: corev1.PodTemplateSpec{
-				Spec: corev1.PodSpec{
-					Containers:    []corev1.Container{{Name: "converter", Image: "centos:stream9"}},
-					RestartPolicy: corev1.RestartPolicyOnFailure,
-				},
-			},
-		},
-		Status: batchv1.JobStatus{
-			Active: 1,
-		},
-	}
-	directClient := fake.NewClientBuilder().
-		WithScheme(newTestScheme()).
-		WithObjects(existingJob).
-		Build()
-	fk := newFakeK8sClient()
-
-	syncer := NewGoldenImageSyncer(fk, directClient)
-	img := goldenImageInfo{Name: "centos-stream9", RegistryURL: "docker://quay.io/containerdisks/centos-stream:9"}
-
-	done, err := syncer.ensureConverterJob(context.Background(), "test-ns", img, "my-pool", "golden-centos", "quay.io/centos/centos:stream9", 15)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if done {
-		t.Error("expected active job to not be done")
-	}
-}
-
-func TestEnsureConverterJob_Completed(t *testing.T) {
-	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "golden-centos",
-			Namespace: "test-ns",
-			Labels:    map[string]string{goldenImageLabel: "true"},
-		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("15Gi")},
-			},
-		},
-	}
-	completedJob := &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "golden-convert-centos-stream9",
-			Namespace: "test-ns",
-			Labels:    map[string]string{goldenImageLabel: "true"},
-		},
-		Spec: batchv1.JobSpec{
-			Template: corev1.PodTemplateSpec{
-				Spec: corev1.PodSpec{
-					Containers:    []corev1.Container{{Name: "converter", Image: "centos:stream9"}},
-					RestartPolicy: corev1.RestartPolicyOnFailure,
-				},
-			},
-		},
-		Status: batchv1.JobStatus{
-			Succeeded: 1,
-		},
-	}
-	directClient := fake.NewClientBuilder().
-		WithScheme(newTestScheme()).
-		WithObjects(pvc, completedJob).
-		Build()
-	fk := newFakeK8sClient()
-
-	syncer := NewGoldenImageSyncer(fk, directClient)
-	img := goldenImageInfo{Name: "centos-stream9", RegistryURL: "docker://quay.io/containerdisks/centos-stream:9"}
-
-	done, err := syncer.ensureConverterJob(context.Background(), "test-ns", img, "my-pool", "golden-centos", "quay.io/centos/centos:stream9", 15)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !done {
-		t.Error("expected completed job to be done")
-	}
-
-	// Verify PVC was marked ready.
-	updatedPVC := &corev1.PersistentVolumeClaim{}
-	if err := directClient.Get(context.Background(), types.NamespacedName{Namespace: "test-ns", Name: "golden-centos"}, updatedPVC); err != nil {
-		t.Fatalf("failed to get PVC: %v", err)
-	}
-	if updatedPVC.Annotations["pool.storage.ibmcloud.io/golden-ready"] != "true" {
-		t.Error("expected PVC to have golden-ready annotation")
-	}
-}
-
 func TestEnsureTemplate_Creates(t *testing.T) {
 	// Register Template GVK.
 	scheme := newTestScheme()
@@ -659,21 +411,7 @@ func TestBuildVMTemplate(t *testing.T) {
 }
 
 func TestSyncImageInNamespace_EndToEnd(t *testing.T) {
-	// Set up completed Job and PVC.
-	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:        "golden-centos-stream9",
-			Namespace:   "test-ns",
-			Labels:      map[string]string{goldenImageLabel: "true"},
-			Annotations: map[string]string{"pool.storage.ibmcloud.io/golden-ready": "true"},
-		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("15Gi")},
-			},
-		},
-	}
+	dv := goldenDataVolume("test-ns", "golden-centos-stream9", "Succeeded")
 
 	// Register Template and DataSource GVKs.
 	scheme := newTestScheme()
@@ -694,17 +432,17 @@ func TestSyncImageInNamespace_EndToEnd(t *testing.T) {
 		&unstructured.UnstructuredList{},
 	)
 
+	addDataVolumeKinds(scheme)
 	directClient := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(pvc).
+		WithObjects(dv).
 		Build()
 	fk := newFakeK8sClient()
 
 	syncer := NewGoldenImageSyncer(fk, directClient)
 	img := goldenImageInfo{Name: "centos-stream9", RegistryURL: "docker://quay.io/containerdisks/centos-stream:9"}
 
-	status := syncer.syncImageInNamespace(context.Background(), "my-pool", "my-pool", "test-ns", img,
-		"quay.io/centos/centos:stream9", 15)
+	status := syncer.syncImageInNamespace(context.Background(), "my-pool", "my-pool", "test-ns", img, 15)
 
 	if status.Phase != "Ready" {
 		t.Errorf("expected Ready phase, got %s: %s", status.Phase, status.Message)
@@ -715,8 +453,8 @@ func TestSyncImageInNamespace_EndToEnd(t *testing.T) {
 	if status.TemplateName != "centos-stream9-nfs-pool" {
 		t.Errorf("expected template name centos-stream9-nfs-pool, got %s", status.TemplateName)
 	}
-	if status.DataSourceName != "centos-stream9-nfs-pool" {
-		t.Errorf("expected DataSource name centos-stream9-nfs-pool, got %s", status.DataSourceName)
+	if status.DataSourceName != "centos-stream9-test-ns-nfs-pool" {
+		t.Errorf("expected DataSource name centos-stream9-test-ns-nfs-pool, got %s", status.DataSourceName)
 	}
 }
 
@@ -764,8 +502,8 @@ func TestEnsureDataSource_Creates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if dsName != "centos-stream9-nfs-pool" {
-		t.Errorf("expected DataSource name centos-stream9-nfs-pool, got %s", dsName)
+	if dsName != "centos-stream9-test-ns-nfs-pool" {
+		t.Errorf("expected DataSource name centos-stream9-test-ns-nfs-pool, got %s", dsName)
 	}
 
 	// Verify DataSource was created.
@@ -774,7 +512,7 @@ func TestEnsureDataSource_Creates(t *testing.T) {
 		Group: "cdi.kubevirt.io", Version: "v1beta1", Kind: "DataSource",
 	})
 	if err := directClient.Get(context.Background(), types.NamespacedName{
-		Namespace: "openshift-virtualization-os-images", Name: "centos-stream9-nfs-pool",
+		Namespace: "openshift-virtualization-os-images", Name: "centos-stream9-test-ns-nfs-pool",
 	}, ds); err != nil {
 		t.Fatalf("expected DataSource to exist: %v", err)
 	}
@@ -813,7 +551,7 @@ func TestEnsureDataSource_SkipsExisting(t *testing.T) {
 			"apiVersion": "cdi.kubevirt.io/v1beta1",
 			"kind":       "DataSource",
 			"metadata": map[string]interface{}{
-				"name":      "centos-stream9-nfs-pool",
+				"name":      "centos-stream9-test-ns-nfs-pool",
 				"namespace": "openshift-virtualization-os-images",
 			},
 			"spec": map[string]interface{}{
@@ -849,8 +587,8 @@ func TestEnsureDataSource_SkipsExisting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if dsName != "centos-stream9-nfs-pool" {
-		t.Errorf("expected DataSource name centos-stream9-nfs-pool, got %s", dsName)
+	if dsName != "centos-stream9-test-ns-nfs-pool" {
+		t.Errorf("expected DataSource name centos-stream9-test-ns-nfs-pool, got %s", dsName)
 	}
 }
 
@@ -867,8 +605,8 @@ func TestEnsureDataSource_NoCDI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected nil error when CDI not installed, got: %v", err)
 	}
-	if dsName != "centos-stream9-nfs-pool" {
-		t.Errorf("expected DataSource name centos-stream9-nfs-pool, got %s", dsName)
+	if dsName != "centos-stream9-test-ns-nfs-pool" {
+		t.Errorf("expected DataSource name centos-stream9-test-ns-nfs-pool, got %s", dsName)
 	}
 }
 
@@ -907,6 +645,14 @@ func newImageStream(name, dockerImageRepository string) *unstructured.Unstructur
 			"metadata": map[string]interface{}{
 				"name":      name,
 				"namespace": "openshift-virtualization-os-images",
+			},
+			"spec": map[string]interface{}{
+				"tags": []interface{}{
+					map[string]interface{}{
+						"name": "latest",
+						"from": map[string]interface{}{"kind": "DockerImage", "name": "registry.redhat.io/rhel9/rhel-guest-image"},
+					},
+				},
 			},
 			"status": map[string]interface{}{
 				"dockerImageRepository": dockerImageRepository,
@@ -956,7 +702,8 @@ func TestDiscoverImages_ResolvesImageStream(t *testing.T) {
 	if images[0].Name != "rhel9-image-cron" {
 		t.Errorf("expected rhel9-image-cron, got %s", images[0].Name)
 	}
-	expectedURL := "docker://image-registry.openshift-image-registry.svc:5000/openshift-virtualization-os-images/rhel9-guest:latest"
+	// The node pulls from the registry the ImageStream imports from.
+	expectedURL := "docker://registry.redhat.io/rhel9/rhel-guest-image"
 	if images[0].RegistryURL != expectedURL {
 		t.Errorf("expected URL %s, got %s", expectedURL, images[0].RegistryURL)
 	}
@@ -1049,171 +796,5 @@ func TestDiscoverImages_ImageStreamNotFound(t *testing.T) {
 	}
 	if len(images) != 0 {
 		t.Errorf("expected 0 images when ImageStream not found, got %d", len(images))
-	}
-}
-
-func TestEnsureImagePullerRoleBinding_Creates(t *testing.T) {
-	scheme := newTestScheme()
-	scheme.AddKnownTypeWithName(
-		schema.GroupVersionKind{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "RoleBinding"},
-		&unstructured.Unstructured{},
-	)
-	scheme.AddKnownTypeWithName(
-		schema.GroupVersionKind{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "RoleBindingList"},
-		&unstructured.UnstructuredList{},
-	)
-
-	directClient := fake.NewClientBuilder().
-		WithScheme(scheme).
-		Build()
-	fk := newFakeK8sClient()
-
-	syncer := NewGoldenImageSyncer(fk, directClient)
-	err := syncer.ensureImagePullerRoleBinding(context.Background(), "latest-test")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// Verify RoleBinding was created.
-	rb := &unstructured.Unstructured{}
-	rb.SetGroupVersionKind(schema.GroupVersionKind{
-		Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "RoleBinding",
-	})
-	if err := directClient.Get(context.Background(), types.NamespacedName{
-		Namespace: "openshift-virtualization-os-images",
-		Name:      "pool-csi-image-puller-latest-test",
-	}, rb); err != nil {
-		t.Fatalf("expected RoleBinding to exist: %v", err)
-	}
-
-	// Verify roleRef
-	roleRefName, _, _ := unstructured.NestedString(rb.Object, "roleRef", "name")
-	if roleRefName != "system:image-puller" {
-		t.Errorf("expected roleRef name system:image-puller, got %s", roleRefName)
-	}
-
-	// Verify subject
-	subjects, _, _ := unstructured.NestedSlice(rb.Object, "subjects")
-	if len(subjects) != 1 {
-		t.Fatalf("expected 1 subject, got %d", len(subjects))
-	}
-	subj, ok := subjects[0].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected subject to be a map, got %T", subjects[0])
-	}
-	if subj["name"] != "system:serviceaccounts:latest-test" {
-		t.Errorf("expected subject name system:serviceaccounts:latest-test, got %s", subj["name"])
-	}
-}
-
-func TestEnsureImagePullerRoleBinding_SkipsExisting(t *testing.T) {
-	existingRB := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "rbac.authorization.k8s.io/v1",
-			"kind":       "RoleBinding",
-			"metadata": map[string]interface{}{
-				"name":      "pool-csi-image-puller-latest-test",
-				"namespace": "openshift-virtualization-os-images",
-			},
-			"roleRef": map[string]interface{}{
-				"apiGroup": "rbac.authorization.k8s.io",
-				"kind":     "ClusterRole",
-				"name":     "system:image-puller",
-			},
-		},
-	}
-
-	scheme := newTestScheme()
-	scheme.AddKnownTypeWithName(
-		schema.GroupVersionKind{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "RoleBinding"},
-		&unstructured.Unstructured{},
-	)
-	scheme.AddKnownTypeWithName(
-		schema.GroupVersionKind{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "RoleBindingList"},
-		&unstructured.UnstructuredList{},
-	)
-
-	directClient := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(existingRB).
-		Build()
-	fk := newFakeK8sClient()
-
-	syncer := NewGoldenImageSyncer(fk, directClient)
-	err := syncer.ensureImagePullerRoleBinding(context.Background(), "latest-test")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestIsInternalRegistryURL(t *testing.T) {
-	tests := []struct {
-		url      string
-		expected bool
-	}{
-		{"docker://image-registry.openshift-image-registry.svc:5000/ns/img:latest", true},
-		{"docker://quay.io/containerdisks/centos-stream:9", false},
-		{"docker://registry.redhat.io/rhel9/rhel-guest-image:latest", false},
-		{"", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.url, func(t *testing.T) {
-			if got := isInternalRegistryURL(tt.url); got != tt.expected {
-				t.Errorf("isInternalRegistryURL(%q) = %v, want %v", tt.url, got, tt.expected)
-			}
-		})
-	}
-}
-
-func TestConverterScript_InternalRegistryAuth(t *testing.T) {
-	// Verify that the converter script includes auth handling for internal registry URLs.
-	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "golden-rhel9",
-			Namespace: "test-ns",
-			Labels:    map[string]string{goldenImageLabel: "true"},
-		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("15Gi")},
-			},
-		},
-	}
-	directClient := fake.NewClientBuilder().
-		WithScheme(newTestScheme()).
-		WithObjects(pvc).
-		Build()
-	fk := newFakeK8sClient()
-
-	syncer := NewGoldenImageSyncer(fk, directClient)
-	internalURL := "docker://image-registry.openshift-image-registry.svc:5000/openshift-virtualization-os-images/rhel9-guest:latest"
-	img := goldenImageInfo{Name: "rhel9", RegistryURL: internalURL}
-
-	done, err := syncer.ensureConverterJob(context.Background(), "test-ns", img, "my-pool", "golden-rhel9", "quay.io/centos/centos:stream9", 15)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if done {
-		t.Error("expected job to not be done on creation")
-	}
-
-	// Verify Job was created with internal registry auth in the script.
-	job := &batchv1.Job{}
-	if err := directClient.Get(context.Background(), types.NamespacedName{
-		Namespace: "test-ns", Name: "golden-convert-rhel9",
-	}, job); err != nil {
-		t.Fatalf("expected job to exist: %v", err)
-	}
-
-	script := job.Spec.Template.Spec.Containers[0].Command[2]
-	if !strings.Contains(script, "image-registry.openshift-image-registry.svc") {
-		t.Error("expected script to contain internal registry URL")
-	}
-	if !strings.Contains(script, "serviceaccount/token") {
-		t.Error("expected script to contain SA token auth logic")
-	}
-	if !strings.Contains(script, "--authfile") {
-		t.Error("expected script to contain --authfile flag")
 	}
 }

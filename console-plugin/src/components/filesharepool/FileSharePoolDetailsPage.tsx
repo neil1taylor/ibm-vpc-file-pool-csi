@@ -526,14 +526,6 @@ const FileSharePoolDetailsPage: React.FC = () => {
                   </DescriptionListDescription>
                 </DescriptionListGroup>
               )}
-              {config.converterImage && (
-                <DescriptionListGroup>
-                  <DescriptionListTerm>Converter Image</DescriptionListTerm>
-                  <DescriptionListDescription>
-                    <code>{config.converterImage}</code>
-                  </DescriptionListDescription>
-                </DescriptionListGroup>
-              )}
               {config.pvcSizeGB != null && (
                 <DescriptionListGroup>
                   <DescriptionListTerm>PVC Size (GB)</DescriptionListTerm>

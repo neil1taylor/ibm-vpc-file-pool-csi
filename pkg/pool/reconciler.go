@@ -57,6 +57,18 @@ type FileSharePoolReconciler struct {
 	restMapper   meta.RESTMapper
 	cdiChecked   bool
 	cdiInstalled bool
+
+	goldenImages GoldenImageRemover
+}
+
+// GoldenImageRemover deletes the golden image objects made for a pool.
+type GoldenImageRemover interface {
+	RemovePoolImages(ctx context.Context, poolName string) (bool, error)
+}
+
+// SetGoldenImageRemover sets what removes a deleted pool's golden images.
+func (r *FileSharePoolReconciler) SetGoldenImageRemover(g GoldenImageRemover) {
+	r.goldenImages = g
 }
 
 // NewFileSharePoolReconciler creates a new reconciler with the given dependencies.
@@ -195,6 +207,18 @@ func (r *FileSharePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 // handleDeletion processes a pool that has a DeletionTimestamp set.
 func (r *FileSharePoolReconciler) handleDeletion(ctx context.Context, pool *v1alpha1.FileSharePool) (ctrl.Result, error) {
+	// The pool's golden images are volumes on the pool, so they go first.
+	if r.goldenImages != nil {
+		done, err := r.goldenImages.RemovePoolImages(ctx, pool.Name)
+		if err != nil {
+			klog.ErrorS(err, "Failed to remove golden images during deletion", "pool", pool.Name)
+			return reconcile.Result{}, err
+		}
+		if !done {
+			return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
+		}
+	}
+
 	// Check for active SubVolumes
 	subVolumes, err := r.k8sClient.ListSubVolumes(ctx, pool.Name)
 	if err != nil {

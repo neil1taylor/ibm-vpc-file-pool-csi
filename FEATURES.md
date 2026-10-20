@@ -208,7 +208,9 @@ VM image caching for KubeVirt workloads.
 - **CDI DataImportCron discovery** — Finds golden images defined by CDI DataImportCrons and syncs them to target namespaces.
 - **qcow2-to-raw conversion** — Runs a converter pod (centos:stream9 with `qemu-img`) to produce raw disk images compatible with KubeVirt filesystem PVCs.
 - **Configurable refresh interval** — Default 24-hour sync cycle. Per-pool configuration via `GoldenImageConfig` in the FileSharePool spec.
-- **CDI DataSource creation** — Creates DataSource CRs in `openshift-virtualization-os-images` with `-nfs-pool` suffix for InstanceTypes catalog visibility. Cross-namespace PVC reference points to the golden PVC in the target namespace.
+- **CDI DataSource creation** — Creates one DataSource CR per image and target namespace in `openshift-virtualization-os-images`, named `{image}-{namespace}-nfs-pool`, for InstanceTypes catalog visibility. Cross-namespace PVC reference points to the golden PVC in the target namespace.
+- **Converter Jobs need no namespace permissions** — they run in the driver's namespace and mount the share directly.
+- **Pool deletion removes golden images** — the golden PVCs, Templates and DataSources of a deleted pool are removed before the pool.
 - **Per-namespace status** — Tracks sync phase (Pending, Syncing, Ready, Failed) per target namespace.
 
 ---

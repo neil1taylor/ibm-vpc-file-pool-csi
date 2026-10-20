@@ -157,11 +157,6 @@ type GoldenImageConfig struct {
 	// +optional
 	RefreshInterval string `json:"refreshInterval,omitempty"`
 
-	// ConverterImage is the container image used for qcow2-to-raw conversion jobs.
-	// +kubebuilder:default="quay.io/centos/centos:stream9"
-	// +optional
-	ConverterImage string `json:"converterImage,omitempty"`
-
 	// PVCSizeGB is the size of golden image PVCs in GB.
 	// +kubebuilder:validation:Minimum=5
 	// +kubebuilder:default=15

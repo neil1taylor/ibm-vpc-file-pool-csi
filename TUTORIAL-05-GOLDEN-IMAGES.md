@@ -339,37 +339,25 @@ EOF
 
 The syncer starts its first cycle 30 seconds after the controller starts, then runs every `refreshInterval`. Since we just updated the pool spec, the reconciler triggers a sync within one reconcile interval (~30 seconds).
 
-### Step 2b: Grant SCC for Converter Jobs
+### Step 2b: Watch Converter Jobs
 
-Converter Jobs run as root (UID 0) to install `qemu-img` and convert disk images. On OpenShift, the default service account needs the `anyuid` SCC:
-
-```bash
-oc adm policy add-scc-to-user anyuid -z default -n ${TUTORIAL_NS}
-```
-
-### Step 2c: Watch Converter Jobs
-
-The syncer creates a converter Job for each discovered image that matches the filter:
+The syncer creates a converter Job for each discovered image that matches the filter. The Job runs in the driver's namespace, so your namespace needs no extra permissions:
 
 ```bash
-oc get jobs -n ${TUTORIAL_NS} -w
+oc get jobs -n kube-system -l storage.ibmcloud.io/share-data-job -w
 ```
 
 Expected (after the syncer runs):
 
 ```
-NAME                               COMPLETIONS   DURATION   AGE
-golden-convert-centos-stream9-image-cron   0/1           0s         5s
+NAME                                                COMPLETIONS   DURATION   AGE
+share-data-golden-pool-tutorial-golden-golden-c-b8d4b76b   0/1           0s         5s
 ```
 
 Watch the converter pod logs:
 
 ```bash
-# Find the converter pod
-oc get pods -n ${TUTORIAL_NS} -l pool.storage.ibmcloud.io/golden-image=true
-
-# Follow logs (replace pod name)
-oc logs -n ${TUTORIAL_NS} -l pool.storage.ibmcloud.io/image=centos-stream9-image-cron -f
+oc logs -n kube-system -l storage.ibmcloud.io/share-data-job -f
 ```
 
 The converter performs these steps:
@@ -382,20 +370,9 @@ The converter performs these steps:
 7. Sets the MBR bootable flag for SeaBIOS compatibility
 8. Marks the PVC as ready
 
-Wait for the Job to complete:
+The driver deletes the Job when it finishes and marks the golden PVC ready. This takes about 4 minutes.
 
-```bash
-oc get jobs -n ${TUTORIAL_NS} -w
-```
-
-Expected:
-
-```
-NAME                                       COMPLETIONS   DURATION   AGE
-golden-convert-centos-stream9-image-cron   1/1           3m45s      4m
-```
-
-### Step 2d: Verify Golden PVCs
+### Step 2c: Verify Golden PVCs
 
 ```bash
 oc get pvc -n ${TUTORIAL_NS} -l pool.storage.ibmcloud.io/golden-image=true
@@ -417,7 +394,7 @@ oc get pvc golden-centos-stream9-image-cron -n ${TUTORIAL_NS} \
 
 Expected: `true`
 
-### Step 2e: Verify OpenShift Templates
+### Step 2d: Verify OpenShift Templates
 
 The syncer creates an OpenShift Template for each golden image, enabling one-click VM creation from the Virtualization catalog:
 
@@ -511,7 +488,7 @@ Expected:
       phase: Ready
       pvcName: golden-centos-stream9-image-cron
       templateName: centos-stream9-nfs-pool
-      dataSourceName: centos-stream9-nfs-pool
+      dataSourceName: centos-stream9-pool-tutorial-golden-nfs-pool
       lastSyncTime: "2026-02-25T..."
       message: Golden image ready
 ```
@@ -558,14 +535,14 @@ oc get datasources -n openshift-virtualization-os-images -l pool.storage.ibmclou
 Expected:
 
 ```
-NAME                        AGE
-centos-stream9-nfs-pool     10m
+NAME                                         AGE
+centos-stream9-pool-tutorial-golden-nfs-pool 10m
 ```
 
 The DataSource points cross-namespace to the golden PVC in the target namespace:
 
 ```bash
-oc get datasource centos-stream9-nfs-pool -n openshift-virtualization-os-images -o yaml
+oc get datasource centos-stream9-${TUTORIAL_NS}-nfs-pool -n openshift-virtualization-os-images -o yaml
 ```
 
 ---
@@ -629,13 +606,10 @@ if [ -n "${ORIGINAL_DEFAULT_SC}" ]; then
         storageclass.kubernetes.io/is-default-class=true --overwrite
 fi
 
-# 11. Remove anyuid SCC
-oc adm policy remove-scc-from-user anyuid -z default -n ${TUTORIAL_NS}
-
-# 12. Delete namespace
+# 11. Delete namespace
 oc delete namespace ${TUTORIAL_NS} --timeout=60s --ignore-not-found
 
-# 13. Verify VPC shares are being deleted
+# 12. Verify VPC shares are being deleted
 ibmcloud is shares
 ```
 

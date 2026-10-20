@@ -107,12 +107,18 @@ spec:
 
 For each discovered image and each target namespace:
 
-| Resource | Name | Purpose |
-|----------|------|---------|
-| PVC | `golden-{imageName}` | Holds the raw disk image |
-| Job | `golden-convert-{imageName}` | Downloads, decompresses, and converts to raw |
-| DataSource | `golden-{imageName}` | CDI DataSource pointing to the golden PVC (enables InstanceTypes tab) |
-| Template | `{imageName}-nfs-pool` | OpenShift VM template for UI catalog |
+| Resource | Where | Name | Purpose |
+|----------|-------|------|---------|
+| PVC | target namespace | `golden-{imageName}` | Holds the raw disk image |
+| Job | driver namespace (`kube-system`) | `share-data-golden-{namespace}-golden-{imageName}` (shortened with a hash when long) | Downloads, decompresses, and converts to raw. Removed when it finishes. |
+| DataSource | `openshift-virtualization-os-images` | `{imageName}-{namespace}-nfs-pool` | CDI DataSource pointing to the golden PVC (enables InstanceTypes tab) |
+| Template | target namespace | `{imageName}-nfs-pool` | OpenShift VM template for UI catalog |
+
+The converter Job runs in the driver's namespace and mounts the share directly, so the target namespaces need no `anyuid` grant.
+
+When you delete the pool, the driver deletes its golden PVCs, Templates and DataSources first, then the pool. Running converter Jobs are stopped before their PVC is deleted. The pool still waits for every other volume on it, such as VM disks, to be deleted.
+
+Two pools must not use the same target namespace: the golden PVC and Template names do not include the pool name, so the second pool reuses the first pool's objects.
 
 The converter Job handles the full OCI-to-raw pipeline:
 1. Downloads OCI image from the container registry via `skopeo`
@@ -121,7 +127,7 @@ The converter Job handles the full OCI-to-raw pipeline:
 4. Converts qcow2 to raw if needed, or moves raw images directly
 5. Writes `disk.img` to the golden PVC with `chmod 0666`
 
-Decompression writes directly to the NFS PVC mount (`/data/`) to avoid OOM — emptyDir staging (tmpfs) uses pod memory and large images exceed the memory limit.
+Decompression writes directly to the golden PVC's folder on the share to avoid OOM — emptyDir staging (tmpfs) uses pod memory and large images exceed the memory limit.
 
 ### Verification
 
@@ -186,8 +192,9 @@ The test handles cleanup automatically (before and after), but if you use `--kee
 ### Converter Job Fails
 
 ```bash
-# Check Job logs
-kubectl logs job/golden-convert-centos-stream9 -n pool-tutorial
+# Check Job logs (the Job runs in the driver's namespace)
+kubectl get jobs -n kube-system -l storage.ibmcloud.io/share-data-job
+kubectl logs -n kube-system job/<job name from the list above>
 
 # Common issues:
 # - Network access to container registry blocked
@@ -201,14 +208,14 @@ kubectl logs job/golden-convert-centos-stream9 -n pool-tutorial
 
 **Cause (pre-v0.11.0):** Older converter scripts wrote decompressed OCI layers to the staging emptyDir, which uses tmpfs (pod memory). Large images (2+ GB decompressed) exceeded the 2Gi memory limit.
 
-**Fix:** Upgrade to v0.11.0+. The converter now decompresses directly to the NFS PVC mount (`/data/`), bypassing emptyDir memory usage. If you see OOMKilled on v0.11.0+, the OCI image download itself may be too large for staging — delete the job and let the syncer recreate it.
+**Fix:** Upgrade to v0.11.0+. The converter now decompresses directly to the golden PVC's folder on the share, bypassing emptyDir memory usage. If you see OOMKilled on v0.11.0+, the OCI image download itself may be too large for staging — delete the job and let the syncer recreate it.
 
 ```bash
 # Check for OOMKilled
-kubectl get pod -n pool-tutorial -l job-name=golden-convert-centos-stream10 -o jsonpath='{.items[0].status.containerStatuses[0].state}'
+kubectl get pods -n kube-system -l storage.ibmcloud.io/share-data-job -o jsonpath='{range .items[*]}{.metadata.name} {.status.containerStatuses[0].state}{"\n"}{end}'
 
-# Delete failed job to trigger retry with current converter script
-kubectl delete job golden-convert-centos-stream10 -n pool-tutorial
+# Delete the failed job to trigger a retry with the current converter script
+kubectl delete job -n kube-system <job name>
 ```
 
 ### Converter Job Uses Old Script After Upgrade
