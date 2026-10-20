@@ -7,7 +7,7 @@
 #     (set RT_STAGES=01,08 to run only some stages)
 #   bash test/release/remote.sh report RUN_ID             copy the report folder back and print it
 #
-# Needs: ibmcloud (logged in), ssh access to the build server.
+# Needs: ibmcloud (logged in), go, ssh access to the build server.
 
 set -euo pipefail
 
@@ -33,6 +33,10 @@ start() {
     id="$(date -u +%m%d-%H%M)"
     ensure_server
     build 'command -v jq >/dev/null || sudo apt-get install -y -q jq >/dev/null'
+
+    echo "Building kubectl-migrate for the build server..."
+    mkdir -p "$ROOT/test/release/bin"
+    (cd "$ROOT" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o test/release/bin/kubectl-migrate ./cmd/migrate/)
 
     echo "Copying the test scripts..."
     (cd "$ROOT" && tar -czf - test/release test/e2e/lib) |

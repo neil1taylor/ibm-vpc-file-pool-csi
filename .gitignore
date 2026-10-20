@@ -39,5 +39,5 @@ console-plugin/playwright-report/
 
 # Claude Code
 .claude/settings.local.json
-migrate
+/migrate
 test/release/out/
