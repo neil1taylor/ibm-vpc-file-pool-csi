@@ -197,3 +197,31 @@ func TestFileSharePoolValidator_Create_DefaultPermissions(t *testing.T) {
 		})
 	}
 }
+
+// The webhook allows exactly what the CRD schema allows, so a pool it accepts
+// is never refused by the API server, and its messages give the real range.
+func TestFileSharePoolValidator_Create_MatchesSchemaLimits(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*v1alpha1.FileSharePoolSpec)
+		wantErr bool
+	}{
+		{"threshold 49", func(s *v1alpha1.FileSharePoolSpec) { s.ExpandThresholdPercent = 49 }, true},
+		{"threshold 50", func(s *v1alpha1.FileSharePoolSpec) { s.ExpandThresholdPercent = 50 }, false},
+		{"threshold 95", func(s *v1alpha1.FileSharePoolSpec) { s.ExpandThresholdPercent = 95 }, false},
+		{"threshold 96", func(s *v1alpha1.FileSharePoolSpec) { s.ExpandThresholdPercent = 96 }, true},
+		{"maxShares 100", func(s *v1alpha1.FileSharePoolSpec) { s.MaxShares = 100 }, false},
+		{"maxShares 101", func(s *v1alpha1.FileSharePoolSpec) { s.MaxShares = 101 }, true},
+	}
+	v := &FileSharePoolValidator{}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pool := validFileSharePool()
+			tt.mutate(&pool.Spec)
+			_, err := v.ValidateCreate(context.Background(), pool)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateCreate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
