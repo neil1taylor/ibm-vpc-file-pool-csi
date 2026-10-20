@@ -226,7 +226,7 @@ func writeRewound(disk string, moment time.Time, out string) error {
 	if err := os.RemoveAll(part); err != nil {
 		return err
 	}
-	if err := os.Mkdir(part, 0o777); err != nil { // #nosec G301 -- the VM runs as another user
+	if err := os.Mkdir(part, 0o777); err != nil { //nolint:gosec // G301: the VM runs as another user
 		return err
 	}
 	file := filepath.Join(part, diskFile)
@@ -237,11 +237,11 @@ func writeRewound(disk string, moment time.Time, out string) error {
 	// QEMU runs as 107. Root may not change the owner on NFS (root_squash), so
 	// if that fails the disk is made usable by anyone who can reach the share.
 	if err := os.Chown(file, qemuUID, qemuUID); err != nil {
-		if err = os.Chmod(file, 0o666); err != nil { // #nosec G302 -- see above
+		if err = os.Chmod(file, 0o666); err != nil { //nolint:gosec // G302: see above
 			return err
 		}
 	}
-	if err := os.Chmod(part, 0o777); err != nil { // #nosec G302 -- the VM runs as another user
+	if err := os.Chmod(part, 0o777); err != nil { //nolint:gosec // G302: the VM runs as another user
 		return err
 	}
 	return os.Rename(part, out)

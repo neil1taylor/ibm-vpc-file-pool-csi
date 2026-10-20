@@ -148,10 +148,10 @@ func TestResolveVMs_DisksAtDifferentMomentsUseTheLatestCommonOne(t *testing.T) {
 
 	// Running it again reuses the rewound disk.
 	again := &FailoverPlan{SubVolumes: []FailoverSubVolumePlan{a, b}}
-	if err := again.ResolveVMs(VMOptions{Now: m3}); err != nil {
+	if err = again.ResolveVMs(VMOptions{Now: m3}); err != nil {
 		t.Fatal(err)
 	}
-	if err := again.MaterializeVMs(); err != nil {
+	if err = again.MaterializeVMs(); err != nil {
 		t.Fatalf("second run: %v", err)
 	}
 	if byName(again, "pvc-a").SubPath != sa.SubPath {
