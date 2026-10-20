@@ -117,19 +117,25 @@ A policy selects VMs by label, and covers all disks of each VM, taken at one mom
 
 - creates the COS instance, if you do not give an existing one
 - creates the bucket, with object lock turned on and no fixed keep time, so each policy decides
-- can set your own Key Protect root key for the bucket
+- sets your Key Protect root key for the bucket
 - creates a key for the driver that can write to this one bucket and nothing else
-- creates the encryption key for the backups (below), and shows it to you once
+- creates the backup key (below), has Key Protect encrypt it, and shows the readable key to you once
 
 The driver itself never creates or deletes a COS instance or bucket. If someone takes over the cluster, they get only the driver's key, and that key cannot remove a lock. An uninstall or a clean-up of the driver never touches the bucket.
 
 **Encryption.** Backups are encrypted in three places:
 
 - on the way to COS, with HTTPS
-- inside COS, with COS encryption, and optionally with your own Key Protect root key. While object lock is on, COS stops anyone from deleting that root key, so nobody can make the backups unreadable by deleting it
-- before upload, by Kopia, so COS only ever holds encrypted data
+- inside COS, with COS encryption and your Key Protect root key. While object lock is on, COS stops anyone from deleting that root key, so nobody can make the backups unreadable by deleting it
+- before upload, by Kopia with the backup key, so COS only ever holds encrypted data
 
-The Kopia key is kept in a Kubernetes Secret, so the driver can use it. If the cluster is lost, that Secret is lost too. So the setup command shows the key once, and you must keep a copy outside the cluster, for example in a password manager. A restore in another cluster asks for it. Without this key, nobody can read the backups, including IBM and us.
+**The backup key is protected by Key Protect.** Key Protect encrypts the backup key with the same root key as the bucket. Only that encrypted copy is stored: in a Kubernetes Secret, and next to the backups in COS. The readable key is never stored. When the driver needs the key, it asks Key Protect to unlock it, and keeps it only in memory.
+
+- Because it is the bucket's root key, object lock also protects it from deletion.
+- If the cluster is lost, a restore in another cluster reads the encrypted copy from COS and asks Key Protect to unlock it.
+- If you remove the driver's access in Key Protect, the driver can no longer read or write backups.
+
+**Emergency copy.** Key Protect runs in one region. If that region is down, Key Protect cannot unlock the key. So the setup command shows the readable key once, and you keep a copy outside IBM Cloud, for example in a password manager. A restore can use it instead of Key Protect. Without either Key Protect or this copy, nobody can read the backups, including IBM and us.
 
 **Immutable backups.** Each policy sets a lock mode and a keep time for its COS backups:
 
@@ -206,7 +212,9 @@ The run needs one COS bucket for the backup stage. I will ask you to create it w
 - A backup policy selects whole VMs by label. A VM can be in only one backup policy.
 - A setup command that you run creates the COS instance, the bucket and the driver's key. The driver never creates or deletes buckets.
 - The driver's COS key can write to one bucket only, and cannot remove locks.
-- Backups in COS are always encrypted. The setup command shows the key once, and you keep a copy outside the cluster.
+- Backups in COS are always encrypted. Key Protect protects the backup key with the bucket's root key, so the readable key is never stored.
+- The setup command shows the readable key once, as an emergency copy for when Key Protect is down. You keep it outside IBM Cloud.
+- Key Protect is required for COS export.
 - The lock mode and keep time are set in each policy. A new policy defaults to Compliance mode for 30 days.
 - Each policy has its own area in the bucket, so storage is slightly higher than one shared area.
 - Snapshots of running VMs are fixed to use the safe copy, as part of this work.
