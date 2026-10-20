@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -318,6 +319,13 @@ func (r *FileSharePoolReconciler) healthCheck(ctx context.Context, pool *v1alpha
 
 		switch info.LifecycleState {
 		case "stable":
+			// A healthy share that is not on the drain list takes new
+			// volumes again, also after a drain request was removed or the
+			// VPC reported it degraded for a while.
+			if share.State == "draining" && !slices.Contains(pool.Spec.DrainShares, share.ShareID) {
+				share.State = "stable"
+				klog.V(2).InfoS("Share back in service", "pool", pool.Name, "shareID", share.ShareID)
+			}
 			if share.State == "creating" {
 				share.State = "stable"
 				klog.V(2).InfoS("Share transitioned to stable",

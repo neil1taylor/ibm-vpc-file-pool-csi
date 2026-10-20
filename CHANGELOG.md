@@ -37,6 +37,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Replication receiver: a tar upload could write files outside the destination volume through a symlink (a sibling directory whose name starts with the destination's name, or a symlinked parent directory). All writes now go through `os.Root`, and symlink targets are checked against the parent's real location.
 
 ### Fixed
+- **A drained share never came back into use.** Once a share was marked draining, by a drain request or because the VPC reported it degraded, it stayed draining after the request was removed or the VPC reported it healthy again. It got no new volumes but was still billed. A healthy share that is not on the drain list is now back in use.
 - **Replication failures could go uncounted, so a failing policy never paused.** A cycle was judged only when all its copy Jobs had finished at once, but a volume whose Job finished early got a new Job on the next check. With Jobs that finish at different times, that moment might never come. A volume's result is now kept until every volume of the cycle has finished.
 - While a new copy ran, or after one failed, the policy status dropped each volume's last good sync time. It now keeps it, so the age of the last good copy stays visible.
 - The replication controller read pods through the shared cache, which needs a `watch` permission the controller does not have, so the running-VM check could fail. It now reads directly.

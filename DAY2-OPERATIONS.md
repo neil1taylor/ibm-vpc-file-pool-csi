@@ -82,14 +82,14 @@ When the pool's allocated capacity crosses `expandThresholdPercent` (default 80%
 
 ```bash
 # Option 1: Increase maxShares to allow more shares
-kubectl patch filesharespool <pool-name> --type merge \
+kubectl patch filesharepool <pool-name> --type merge \
   -p '{"spec":{"maxShares":20}}'
 
 # Option 2: Lower the threshold temporarily to trigger expansion sooner
-kubectl patch filesharespool <pool-name> --type merge \
+kubectl patch filesharepool <pool-name> --type merge \
   -p '{"spec":{"expandThresholdPercent":50}}'
 # Reset after expansion completes:
-kubectl patch filesharespool <pool-name> --type merge \
+kubectl patch filesharepool <pool-name> --type merge \
   -p '{"spec":{"expandThresholdPercent":80}}'
 ```
 
@@ -131,7 +131,7 @@ Common causes:
 
 ```bash
 # 1. Mark the share for draining
-kubectl patch filesharespool <pool-name> --type merge \
+kubectl patch filesharepool <pool-name> --type merge \
   -p '{"spec":{"drainShares":["<share-id>"]}}'
 
 # 2. Monitor drain progress
@@ -148,6 +148,18 @@ kubectl get subvolumes -l storage.ibmcloud.io/share-id=<share-id> \
 # 5. Once all SubVolumes are gone, the share is fully drained
 #    The DrainComplete condition is set on the pool
 kubectl get fsp <pool-name> -o jsonpath='{.status.conditions}' | jq '.[] | select(.type=="DrainComplete")'
+
+# 6. To remove the drained share: keep it on the drain list while you delete it.
+#    If it leaves the list first, it takes new volumes again within about 60 s.
+ibmcloud is share-delete <share-id> -f
+#    Wait until the share is gone from the pool status (no PVCs left, so the
+#    pool drops it), then take it off the list.
+kubectl get fsp <pool-name> -o jsonpath='{.status.shares[*].shareID}'
+kubectl patch filesharepool <pool-name> --type merge -p '{"spec":{"drainShares":[]}}'
+
+# To stop draining instead: take the share off the list. If the VPC reports the
+# share healthy, it takes new volumes again within one reconcile (about 60 s).
+kubectl patch filesharepool <pool-name> --type merge -p '{"spec":{"drainShares":[]}}'
 ```
 
 **Note:** Draining prevents new allocations to the share but does not migrate existing data. Applications must create new PVCs to move off the draining share.
@@ -180,7 +192,7 @@ ibmcloud is share <share-id> --output json | jq '.access_control_mode'
 # "security_group" = incompatible — must drain
 
 # 4. For shares stuck without mount targets, trigger drain
-kubectl patch filesharespool <pool-name> --type merge \
+kubectl patch filesharepool <pool-name> --type merge \
   -p '{"spec":{"drainShares":["<share-id>"]}}'
 ```
 
@@ -225,7 +237,7 @@ There is no automated rebalancing. To manually rebalance:
 For less disruptive rebalancing, switch the pool to `spread` strategy:
 
 ```bash
-kubectl patch filesharespool <pool-name> --type merge \
+kubectl patch filesharepool <pool-name> --type merge \
   -p '{"spec":{"allocationStrategy":"spread"}}'
 ```
 

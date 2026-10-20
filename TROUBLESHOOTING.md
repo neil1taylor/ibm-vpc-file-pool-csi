@@ -56,13 +56,13 @@ Ensure the pool name in the StorageClass's `parameters.pool` exactly matches the
 ```bash
 # Check pool utilization
 kubectl get filesharepools
-kubectl get filesharespool <pool-name> -o jsonpath='{.status.totalAllocatedGB}/{.status.totalCapacityGB}'
+kubectl get filesharepool <pool-name> -o jsonpath='{.status.totalAllocatedGB}/{.status.totalCapacityGB}'
 
 # Option 1: Increase maxShares to allow more shares
-kubectl patch filesharespool <pool-name> --type merge -p '{"spec":{"maxShares":20}}'
+kubectl patch filesharepool <pool-name> --type merge -p '{"spec":{"maxShares":20}}'
 
 # Option 2: Increase share size (triggers VPC API call, takes 30-90s)
-kubectl patch filesharespool <pool-name> --type merge -p '{"spec":{"shareSizeGB":4000}}'
+kubectl patch filesharepool <pool-name> --type merge -p '{"spec":{"shareSizeGB":4000}}'
 
 # Option 3: Delete unused PVCs to free capacity
 kubectl get subvolumes -l storage.ibmcloud.io/pool=<pool-name> -o wide
@@ -98,7 +98,7 @@ Common sub-causes for prolonged expansion:
 **Fix:**
 ```bash
 # Check available tiers in the pool
-kubectl get filesharespool <pool-name> -o jsonpath='{.spec.tiers[*].name}'
+kubectl get filesharepool <pool-name> -o jsonpath='{.spec.tiers[*].name}'
 
 # Check the StorageClass tier parameter
 kubectl get storageclass <sc-name> -o jsonpath='{.parameters.tier}'
@@ -439,7 +439,7 @@ kubectl delete pod <pod-name> --force --grace-period=0
 **Fix:**
 ```bash
 # Check pool events
-kubectl describe filesharespool <pool-name>
+kubectl describe filesharepool <pool-name>
 
 # Check controller logs for VPC API errors
 kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller --tail=100 | grep -i "error\|fail"
@@ -465,7 +465,7 @@ Common causes:
 **Fix:**
 ```bash
 # Identify the unhealthy share(s)
-kubectl get filesharespool <pool-name> -o jsonpath='{range .status.shares[*]}{.shareID}{"\t"}{.state}{"\n"}{end}'
+kubectl get filesharepool <pool-name> -o jsonpath='{range .status.shares[*]}{.shareID}{"\t"}{.state}{"\n"}{end}'
 
 # Check the share in VPC
 ibmcloud is share <share-id> --output json | jq '{lifecycle_state, health_state, health_reasons}'
@@ -506,10 +506,10 @@ The controller retries share creation automatically. If it's stuck, check VPC AP
 ```bash
 # Option 1: Increase maxShares (check your VPC quota first)
 ibmcloud is shares --output json | jq length  # Current total shares
-kubectl patch filesharespool <pool-name> --type merge -p '{"spec":{"maxShares":20}}'
+kubectl patch filesharepool <pool-name> --type merge -p '{"spec":{"maxShares":20}}'
 
 # Option 2: Increase share size (existing shares grow)
-kubectl patch filesharespool <pool-name> --type merge -p '{"spec":{"shareSizeGB":4000}}'
+kubectl patch filesharepool <pool-name> --type merge -p '{"spec":{"shareSizeGB":4000}}'
 
 # Option 3: Identify and remove unused PVCs
 kubectl get subvolumes -l storage.ibmcloud.io/pool=<pool-name> --sort-by=.metadata.creationTimestamp
@@ -519,7 +519,7 @@ kubectl get subvolumes -l storage.ibmcloud.io/pool=<pool-name> --sort-by=.metada
 
 ### Pool deletion blocked by active SubVolumes
 
-**Symptom:** `kubectl delete filesharespool <name>` hangs or the pool stays in `Terminating`.
+**Symptom:** `kubectl delete filesharepool <name>` hangs or the pool stays in `Terminating`.
 
 **Cause:** The pool has a finalizer that prevents deletion while SubVolumes still reference its shares.
 
@@ -535,7 +535,7 @@ kubectl delete pvc -l storageClassName=<sc-name> --all-namespaces
 kubectl get subvolumes -l storage.ibmcloud.io/pool=<pool-name> -w
 
 # Then retry pool deletion
-kubectl delete filesharespool <pool-name>
+kubectl delete filesharepool <pool-name>
 ```
 
 If SubVolumes are stuck in a finalizer loop, check the controller logs for errors during cleanup.
@@ -781,10 +781,10 @@ kubectl get servicemonitor -n kube-system vpc-file-pool-csi
 **Fix:**
 ```bash
 # Check the last reconciliation time
-kubectl get filesharespool <pool-name> -o jsonpath='{.status.lastReconcileTime}'
+kubectl get filesharepool <pool-name> -o jsonpath='{.status.lastReconcileTime}'
 
 # Force reconciliation by annotating the pool
-kubectl annotate filesharespool <pool-name> reconcile-trigger=$(date +%s) --overwrite
+kubectl annotate filesharepool <pool-name> reconcile-trigger=$(date +%s) --overwrite
 ```
 
 ---

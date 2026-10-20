@@ -1992,3 +1992,33 @@ func TestEnsureStorageProfiles_ClonesWithTheDriver(t *testing.T) {
 		t.Errorf("cloneStrategy = %q, want csi-clone", got)
 	}
 }
+
+// A share that is no longer on the drain list, and that the VPC reports as
+// healthy, takes new volumes again. Before, it stayed "draining" for good.
+func TestReconcile_DrainRequests_RemovedShareReturnsToService(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	shareInfo, _ := vpc.CreateFileShare(context.Background(), ibmcloudInput("test-pool", 1000))
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		v1alpha1.PoolShareStatus{
+			ShareID:       shareInfo.ID,
+			ShareName:     shareInfo.Name,
+			MountTargetIP: "10.240.0.1",
+			TotalGB:       1000,
+			State:         "draining",
+			Zone:          "us-south-1",
+		},
+	)
+	pool.Spec.InitialShares = 1
+	k.addPool(pool)
+
+	r := newReconciler(k, vpc)
+	if _, err := reconcilePool(r, "test-pool"); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	if got := k.getPool("test-pool").Status.Shares[0].State; got != "stable" {
+		t.Errorf("share state = %q, want stable once it is off the drain list and healthy", got)
+	}
+}

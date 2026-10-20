@@ -82,7 +82,7 @@ Each line says what the stage proves, and how it checks the result itself, not t
     - The source VM live-migrates while a full copy runs. The migration succeeds within one controller cycle, and the next cycle makes a good copy.
     - Until the new copy method ships, a running VM volume is skipped with an error, and no rsync copy is made.
     - The guest pause and the VM slowdown during a copy are saved to `test/release/history.csv`. More than 20% worse than the last run is a warning.
-11. **Draining.** A share marked for draining gets no new volumes.
+11. **Draining.** A share marked for draining gets no new volumes, and the pool counts the volumes left on it. Taken off the drain list, the share takes new volumes again.
 12. **Restarts.**
     - The controller pod is deleted. A new one takes over, and every pool and volume is unchanged.
     - A node agent pod is deleted. A pod that is writing to a volume keeps writing.
