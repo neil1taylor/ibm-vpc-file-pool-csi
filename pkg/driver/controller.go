@@ -63,9 +63,13 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 				}
 				return nil, status.Errorf(codes.Internal, "clone previously failed for %s: %s", req.GetName(), errMsg)
 			}
-			return &csi.CreateVolumeResponse{
-				Volume: subVolumeToCSIVolume(existing),
-			}, nil
+			// A restore or clone goes on to the pool manager, which checks
+			// its copy and answers with the content source.
+			if req.GetVolumeContentSource() == nil {
+				return &csi.CreateVolumeResponse{
+					Volume: subVolumeToCSIVolume(existing),
+				}, nil
+			}
 		}
 	}
 

@@ -13,6 +13,7 @@ set -euo pipefail
 BUILD_HOST="${BUILD_HOST:-ubuntu@10.250.0.46}"
 BUILD_KEY="${BUILD_KEY:-$HOME/.ssh/pool-csi-build}"
 BUILD_VSI="${BUILD_VSI:-pool-csi-build}"
+VPC_PROFILE="${RT_VPC_PROFILE:-pool-csi-build-vpc-reader}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 build() { ssh -q -o ConnectTimeout=10 -i "$BUILD_KEY" -o IdentitiesOnly=yes "$BUILD_HOST" "$@"; }
@@ -27,7 +28,7 @@ ensure_server() {
 }
 
 start() {
-    local cluster="$1" version="${2:-}" id kubeconfig
+    local cluster="$1" version="${2:-}" id kubeconfig profile_id
     id="$(date -u +%m%d-%H%M)"
     ensure_server
     build 'command -v jq >/dev/null || sudo apt-get install -y -q jq >/dev/null'
@@ -42,7 +43,14 @@ start() {
     build "umask 077 && cat > ~/release-test/kubeconfig-$id" <"$kubeconfig/config"
     rm -rf "$kubeconfig"
 
-    build "cd ~/release-test/src && nohup bash -c 'KUBECONFIG=\$HOME/release-test/kubeconfig-$id RT_ID=$id \
+    # The metadata service needs the trusted profile's ID. Without it the VPC
+    # checks report "not checked" and the run goes on.
+    profile_id=$(ibmcloud iam trusted-profile "$VPC_PROFILE" --id 2>/dev/null | tail -1 | grep '^Profile-' || true)
+
+    # Only the run goes to the background, with every stream redirected, so
+    # this SSH session can end at once.
+    build "cd ~/release-test/src || exit 1; nohup bash -c 'KUBECONFIG=\$HOME/release-test/kubeconfig-$id RT_ID=$id \
+        RT_VPC_PROFILE_ID=$profile_id \
         bash test/release/run.sh --cluster $cluster ${version:+--version $version} --out \$HOME/release-test/out/$id; \
         rm -f \$HOME/release-test/kubeconfig-$id' >\$HOME/release-test/out/$id.log 2>&1 </dev/null &"
     echo "Started run $id on $cluster."

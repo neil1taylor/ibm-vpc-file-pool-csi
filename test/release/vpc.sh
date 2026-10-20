@@ -2,10 +2,12 @@
 # vpc.sh — Read-only VPC API calls for release test stages.
 #
 # On the build server the token comes from the instance metadata service and
-# the trusted profile RT_VPC_PROFILE (read-only VPC access), so no key is
-# stored. Set RT_VPC_TOKEN to use a token you already have instead.
+# the trusted profile with ID RT_VPC_PROFILE_ID (read-only VPC access), so no
+# key is stored. remote.sh looks the ID up. The metadata service accepts a
+# profile ID or CRN, not a name. Set RT_VPC_TOKEN to use a token you already
+# have instead.
 
-RT_VPC_PROFILE="${RT_VPC_PROFILE:-pool-csi-build-vpc-reader}"
+RT_VPC_PROFILE_ID="${RT_VPC_PROFILE_ID:-}"
 RT_VPC_REGION="${RT_VPC_REGION:-eu-de}"
 RT_VPC_API="https://${RT_VPC_REGION}.iaas.cloud.ibm.com/v1"
 RT_METADATA="http://api.metadata.cloud.ibm.com"
@@ -14,6 +16,7 @@ _vpc_token_file() { echo "$RT_OUT/.vpc-token"; }
 # vpc_token — print an IAM token, renewed when it is older than 30 minutes.
 vpc_token() {
     if [ -n "${RT_VPC_TOKEN:-}" ]; then echo "$RT_VPC_TOKEN"; return 0; fi
+    [ -n "$RT_VPC_PROFILE_ID" ] || return 1
     local f; f=$(_vpc_token_file)
     if [ -s "$f" ] && [ -z "$(find "$f" -mmin +30 2>/dev/null)" ]; then cat "$f"; return 0; fi
     local identity token
@@ -23,7 +26,7 @@ vpc_token() {
     [ -n "$identity" ] || return 1
     token=$(curl -sf -m 10 -X POST "$RT_METADATA/instance_identity/v1/iam_token?version=2022-03-01" \
         -H "Authorization: Bearer $identity" -H "Content-Type: application/json" \
-        -d "{\"trusted_profile\": {\"name\": \"$RT_VPC_PROFILE\"}}" |
+        -d "{\"trusted_profile\": {\"id\": \"$RT_VPC_PROFILE_ID\"}}" |
         jq -r '.access_token // empty') || return 1
     [ -n "$token" ] || return 1
     (umask 077; echo "$token" >"$f")
