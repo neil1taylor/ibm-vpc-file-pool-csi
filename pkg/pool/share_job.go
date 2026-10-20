@@ -292,24 +292,31 @@ func validateSharePath(path string) error {
 	return fmt.Errorf("path %q is not a volume or snapshot folder", path)
 }
 
-// Stop deletes the Job for key and its claims and PVs. It reports done once
-// the Job is gone.
+// Stop deletes the Job for key. It reports done once the Job and all its
+// pods are gone; only then are the Job's claims and PVs removed.
 func (r *ShareJobRunner) Stop(ctx context.Context, key string) (bool, error) {
 	jobName := shareJobName(key)
 	err := r.client.Get(ctx, types.NamespacedName{Namespace: r.namespace, Name: jobName}, &batchv1.Job{})
-	switch {
-	case apierrors.IsNotFound(err):
-		r.cleanup(ctx, jobName, 2)
-		return true, nil
-	case err != nil:
+	if err != nil && !apierrors.IsNotFound(err) {
 		return false, fmt.Errorf("get share Job %s: %w", jobName, err)
 	}
-	propagation := metav1.DeletePropagationForeground
-	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: jobName, Namespace: r.namespace}}
-	if err := r.client.Delete(ctx, job, &client.DeleteOptions{PropagationPolicy: &propagation}); err != nil && !apierrors.IsNotFound(err) {
-		return false, fmt.Errorf("stop share Job %s: %w", jobName, err)
+	if err == nil {
+		propagation := metav1.DeletePropagationForeground
+		job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: jobName, Namespace: r.namespace}}
+		if err := r.client.Delete(ctx, job, &client.DeleteOptions{PropagationPolicy: &propagation}); err != nil && !apierrors.IsNotFound(err) {
+			return false, fmt.Errorf("stop share Job %s: %w", jobName, err)
+		}
+		klog.V(2).InfoS("Stopping share data Job", "job", jobName, "namespace", r.namespace)
+		return false, nil
+	}
+
+	pods := &corev1.PodList{}
+	if err := r.client.List(ctx, pods, client.InNamespace(r.namespace), client.MatchingLabels{shareJobLabel: jobName}); err != nil {
+		return false, fmt.Errorf("list pods of share Job %s: %w", jobName, err)
+	}
+	if len(pods.Items) > 0 {
+		return false, nil
 	}
 	r.cleanup(ctx, jobName, 2)
-	klog.V(2).InfoS("Stopping share data Job", "job", jobName, "namespace", r.namespace)
-	return false, nil
+	return true, nil
 }

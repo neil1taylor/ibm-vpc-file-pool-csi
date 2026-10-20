@@ -10,6 +10,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -276,6 +277,28 @@ func TestShareJobRunner_Stop(t *testing.T) {
 	err = c.Get(ctx, types.NamespacedName{Namespace: testDriverNS, Name: shareJobName("snap-1")}, &batchv1.Job{})
 	if !apierrors.IsNotFound(err) {
 		t.Errorf("Stop() did not delete the Job: %v", err)
+	}
+
+	// The Job is gone, but its pod is still shutting down.
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name: "share-data-snap-1-abcde", Namespace: testDriverNS,
+		Labels: map[string]string{shareJobLabel: shareJobName("snap-1")},
+	}}
+	if err := c.Create(ctx, pod); err != nil {
+		t.Fatalf("create pod: %v", err)
+	}
+	done, err = r.Stop(ctx, "snap-1")
+	if err != nil || done {
+		t.Fatalf("Stop() while the pod remains = %v, %v; want false, nil", done, err)
+	}
+	if n := countPVs(t, c); n != 1 {
+		t.Errorf("share PV removed while the pod still uses it (%d PVs)", n)
+	}
+
+	_ = c.Delete(ctx, pod)
+	done, err = r.Stop(ctx, "snap-1")
+	if err != nil || !done {
+		t.Fatalf("Stop() after the pod is gone = %v, %v; want true, nil", done, err)
 	}
 	if n := countPVs(t, c); n != 0 {
 		t.Errorf("%d share PVs left after Stop", n)

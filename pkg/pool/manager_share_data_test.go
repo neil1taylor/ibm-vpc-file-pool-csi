@@ -476,3 +476,54 @@ func TestCreateVolumeGroupSnapshot_NotReadyUntilEveryCopyFinished(t *testing.T) 
 		t.Errorf("after copies: phase %q ready %d, want Complete and 2", vgs.Status.Phase, vgs.Status.ReadyCount)
 	}
 }
+
+// newUnfinishedRestore records a restored volume whose status write was lost:
+// it has the restore label but no phase.
+func newUnfinishedRestore(k *fakeK8sClient) {
+	sv := newTestSubVolume(testRestorePVName, "test-pool", "share-1", 10)
+	sv.Spec.ShareExportPath = "/share_one"
+	sv.Labels[restoreSnapshotLabel] = "my-snapshot"
+	sv.Status.Phase = ""
+	k.addSubVolume(sv)
+}
+
+func TestRestoreSnapshot_LostStatusWrite_StillCopies(t *testing.T) {
+	k, _, mgr := newShareDataTestManager(t)
+	addReadySnapshot(k)
+	newUnfinishedRestore(k)
+	sd := shareDataOf(mgr)
+	sd.setInProgress(true)
+
+	_, err := mgr.RestoreSnapshot(context.Background(), "my-snapshot", restoreRequest())
+	if !errors.Is(err, ErrOperationInProgress) {
+		t.Fatalf("RestoreSnapshot() error = %v, want ErrOperationInProgress (the copy has not finished)", err)
+	}
+}
+
+func TestDeallocate_LostStatusWrite_StillStopsRestoreCopy(t *testing.T) {
+	k, _, mgr := newShareDataTestManager(t)
+	addReadySnapshot(k)
+	newUnfinishedRestore(k)
+	sd := shareDataOf(mgr)
+	sd.setRunning("restore-" + testRestorePVName)
+
+	err := mgr.Deallocate(context.Background(), testRestorePVName)
+	if !errors.Is(err, ErrOperationInProgress) {
+		t.Fatalf("Deallocate() error = %v, want ErrOperationInProgress while the copy stops", err)
+	}
+	if sd.removeCount() != 0 {
+		t.Error("folder removal started while the restore copy was still running")
+	}
+}
+
+func TestDeleteSnapshot_ReadySnapshot_StillChecksForCopy(t *testing.T) {
+	k, _, mgr := newShareDataTestManager(t)
+	addReadySnapshot(k)
+	sd := shareDataOf(mgr)
+	sd.setRunning("snap-my-snapshot")
+
+	err := mgr.DeleteSnapshot(context.Background(), "my-snapshot")
+	if !errors.Is(err, ErrOperationInProgress) {
+		t.Fatalf("DeleteSnapshot() error = %v, want ErrOperationInProgress while a copy Job remains", err)
+	}
+}

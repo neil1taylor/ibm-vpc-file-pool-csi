@@ -229,8 +229,14 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 
 	poolManager := pool.NewManager(k8sClient, nil, nil, stagingBasePath)
 	// The controller has no NFS access, so folder removal and copies on
-	// shares run as Jobs in the driver's namespace.
-	poolManager.SetShareData(pool.NewShareJobRunner(mgr.GetClient(), driverNamespace, pool.DefaultCloneImage))
+	// shares run as Jobs in the driver's namespace. The runner reads without
+	// the cache: a stale read could report a copy as stopped too early.
+	shareJobClient, err := client.New(restConfig, client.Options{Scheme: mgr.GetScheme()})
+	if err != nil {
+		klog.ErrorS(err, "Failed to create the share data Job client")
+		os.Exit(1)
+	}
+	poolManager.SetShareData(pool.NewShareJobRunner(shareJobClient, driverNamespace, pool.DefaultCloneImage))
 
 	// Run CSI gRPC server in a goroutine — serves immediately, but controller
 	// methods return Unavailable until readyCh is closed.

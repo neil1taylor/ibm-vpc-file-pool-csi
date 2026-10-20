@@ -385,7 +385,7 @@ func (m *Manager) Deallocate(ctx context.Context, subVolumeName string) (retErr 
 	if m.shareData == nil {
 		return errShareDataNotSet
 	}
-	if sv.Status.Phase == "Creating" && sv.Labels[restoreSnapshotLabel] != "" {
+	if sv.Labels[restoreSnapshotLabel] != "" {
 		stopped, err := m.shareData.Stop(ctx, "restore-"+sv.Name)
 		if err != nil {
 			return fmt.Errorf("stop restore copy: %w", err)
@@ -801,14 +801,12 @@ func (m *Manager) DeleteSnapshot(ctx context.Context, snapshotName string) (retE
 	if err != nil {
 		return err
 	}
-	if !snap.Status.ReadyToUse {
-		stopped, err := m.shareData.Stop(ctx, "snap-"+snapshotName)
-		if err != nil {
-			return fmt.Errorf("stop snapshot copy: %w", err)
-		}
-		if !stopped {
-			return ErrOperationInProgress
-		}
+	stopped, err := m.shareData.Stop(ctx, "snap-"+snapshotName)
+	if err != nil {
+		return fmt.Errorf("stop snapshot copy: %w", err)
+	}
+	if !stopped {
+		return ErrOperationInProgress
 	}
 	done, err := m.shareData.RemoveDir(ctx, "rmsnap-"+snapshotName, share, snap.Spec.SnapshotPath)
 	if err != nil {
@@ -895,7 +893,7 @@ func (m *Manager) RestoreSnapshot(ctx context.Context, snapshotName string, req 
 	existing, err := m.k8sClient.GetSubVolume(ctx, req.PVName)
 	if err == nil && existing != nil {
 		klog.V(2).InfoS("Idempotent restore: SubVolume already exists", "pvName", req.PVName)
-		if existing.Status.Phase == "Creating" && existing.Labels[restoreSnapshotLabel] != "" {
+		if existing.Status.Phase != "Bound" && existing.Labels[restoreSnapshotLabel] != "" {
 			snap, err := m.k8sClient.GetSnapshot(ctx, existing.Labels[restoreSnapshotLabel])
 			if err != nil {
 				return nil, fmt.Errorf("%w: %s", ErrSnapshotNotFound, existing.Labels[restoreSnapshotLabel])
