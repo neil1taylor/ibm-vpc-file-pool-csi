@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `metrics.serviceMonitor.enabled` is now `true` by default. The chart creates the ServiceMonitor only when the cluster has the Prometheus Operator API, so installs on other clusters still work.
 
 ### Added
+- **Replication copies running VMs again, safely (direct NFS mode).** The controller freezes the guest for a moment, has QEMU copy all of the VM's disks at that one moment, and replaces each destination disk in one step. The policy status shows the moment each copy shows and whether it is file-system or crash consistent. A live migration cancels the copy, so node drains are not held up. New policy field `vmCopySpeedLimitMBps` (default 20) limits how much a copy slows the VM. Receiver mode still skips running VM volumes. The controller needs `list` on KubeVirt `virtualmachineinstancemigrations`, and on OpenShift `use` on the `kubevirt-controller` SCC, because OpenShift allows exec into a VM pod only to a user who could create it.
 - `webhook.caBundle` Helm value for `webhook.certProvider=manual`; the render fails without it. Controller flags `--enable-webhooks` and `--webhook-port`, set by the chart from `webhook.enabled` and `webhook.port`.
 - The E2E VM clone test reads the zone from the worker nodes when `--zone` is not given.
 - CI runs the chart and script tests (`make test-scripts`).
@@ -32,6 +33,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 - **A drained share never came back into use.** Once a share was marked draining, by a drain request or because the VPC reported it degraded, it stayed draining after the request was removed or the VPC reported it healthy again. It got no new volumes but was still billed. A healthy share that is not on the drain list is now back in use.
+- The replication controller read pods through the shared cache, which needs a `watch` permission the controller does not have, so the running-VM check could fail. It now reads directly.
 - The FileSharePool webhook allowed `expandThresholdPercent` 1–99 and `maxShares` up to 1000, but the CRD schema allows 50–95 and up to 100. The webhook now uses the schema's ranges, so its messages give the real limits.
 - **VMs made from a golden image template could not get a boot disk.** The template always asked for a 15 GB boot disk, but a copy cannot be smaller than its source, and CDI makes a disk a little larger than requested. The golden disk is now exactly the pool's `pvcSizeGB`, and the template's boot disk defaults to the same size.
 - **A pool with golden images could not be deleted.** The syncer made the golden disks again while the pool was being deleted. Deleting a pool now deletes its golden DataVolumes, claims and Templates in its target namespaces, and its DataSources, before the pool. The syncer skips pools that are being deleted.

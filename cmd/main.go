@@ -31,6 +31,7 @@ import (
 	_ "github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics" // Register Prometheus collectors via init()
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/pool"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/replication"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/vmcopy"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/webhook"
 )
 
@@ -266,8 +267,8 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 	}
 
 	go func() {
-		if err := d.Run(); err != nil {
-			klog.ErrorS(err, "CSI gRPC server failed")
+		if runErr := d.Run(); runErr != nil {
+			klog.ErrorS(runErr, "CSI gRPC server failed")
 			os.Exit(1)
 		}
 	}()
@@ -330,8 +331,15 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 	reconciler.SetGoldenImageRemover(goldenImageSyncer)
 	go goldenImageSyncer.Run(signalCtx)
 
-	// Start the background replication controller for cross-region DR.
-	replController := pool.NewReplicationController(k8sClient, mgr.GetClient(), nfsOps)
+	// Start the background replication controller for cross-region DR. It
+	// reads without the cache: the cache would watch every pod in the cluster,
+	// and the controller may only get and list pods.
+	replClient, err := client.New(restConfig, client.Options{Scheme: mgr.GetScheme()})
+	if err != nil {
+		klog.ErrorS(err, "Failed to create the replication client")
+		os.Exit(1)
+	}
+	replController := pool.NewReplicationController(k8sClient, replClient, nfsOps)
 	hookOrchestrator := hooks.NewOrchestrator(
 		hooks.NewExecHook(clientset, restConfig),
 		hooks.NewHTTPHook(nil),
@@ -339,6 +347,8 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 	replController.SetOrchestrator(hookOrchestrator)
 	replController.SetDriverImage(driverImage)
 	replController.SetReplicationImage(driverImage)
+	// Copies of running VM disks run commands in the VM pods, as hooks do.
+	replController.SetVMCopier(vmcopy.NewCopier(hooks.NewPodExecer(clientset, restConfig)))
 	go replController.Run(signalCtx)
 
 	// mgr.Start blocks until signal or error
