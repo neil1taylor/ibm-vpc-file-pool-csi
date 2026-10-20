@@ -900,11 +900,15 @@ func (r *FileSharePoolReconciler) ensureStorageProfiles(ctx context.Context, poo
 	}
 }
 
+// cdiCloneStrategy is the StorageProfile clone strategy for pool StorageClasses.
+const cdiCloneStrategy = "csi-clone"
+
 // patchStorageProfile patches the CDI StorageProfile with the given name,
 // setting spec.claimPropertySets and spec.cloneStrategy if not already set.
 // claimPropertySets enables the Virtualization UI to auto-select access modes.
-// cloneStrategy "copy" forces host-assisted cloning — CDI's snapshot-based
-// cloning does not work with our CSI driver.
+// cloneStrategy "csi-clone" makes CDI ask the driver for a clone. CDI's
+// snapshot clone does not work with this driver, and CDI's host-assisted copy
+// pods run out of memory when they write onto NFS (rovslab, 20 October 2026).
 func (r *FileSharePoolReconciler) patchStorageProfile(ctx context.Context, name string) {
 	if r.directClient == nil {
 		return
@@ -948,9 +952,9 @@ func (r *FileSharePoolReconciler) patchStorageProfile(ctx context.Context, name 
 		needsPatch = true
 	}
 
-	// Ensure cloneStrategy is "copy" — CDI's snapshot clone doesn't work with our driver.
-	if spec == nil || spec["cloneStrategy"] != "copy" {
-		specPatch["cloneStrategy"] = "copy"
+	// Ensure the driver makes CDI's clones.
+	if spec == nil || spec["cloneStrategy"] != cdiCloneStrategy {
+		specPatch["cloneStrategy"] = cdiCloneStrategy
 		needsPatch = true
 	}
 
@@ -970,7 +974,7 @@ func (r *FileSharePoolReconciler) patchStorageProfile(ctx context.Context, name 
 	klog.V(2).InfoS("Patched StorageProfile",
 		"storageProfile", name,
 		"claimPropertySets", "ReadWriteMany/Filesystem",
-		"cloneStrategy", "copy")
+		"cloneStrategy", cdiCloneStrategy)
 }
 
 // SetupWithManager registers the reconciler with a controller-runtime Manager.
