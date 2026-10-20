@@ -94,7 +94,9 @@ New metrics: copy type, guest pause time, and how long the VM was slowed by a co
 
 ### Optional backup: snapshot pool and COS
 
-A new `BackupPolicy` resource turns backup on for a set of volumes. It has a schedule, a snapshot pool, how long to keep local snapshots, and optional COS settings. Backup is off unless you create a policy.
+A new `BackupPolicy` resource turns backup on. It has a schedule, a snapshot pool, how long to keep local snapshots, and optional COS settings. Backup is off unless you create a policy.
+
+A policy selects VMs by label, and covers all disks of each VM, taken at one moment. It can also select normal PVCs by label. One VM belongs to at most one backup policy. If two policies match a VM, the webhook refuses the second one.
 
 **Local snapshots in their own pool.** A snapshot pool is a normal pool that holds only snapshots. It uses its own VPC file shares, so a lost or full data share does not take the snapshots with it.
 
@@ -107,9 +109,43 @@ A new `BackupPolicy` resource turns backup on for a set of volumes. It has a sch
 **Export to COS (optional).** After each local snapshot, the driver uploads it to a COS bucket.
 
 - It reads from the snapshot pool, not from the VM, so the export does not slow the VM.
-- It uses Kopia, an open-source Go backup library. Kopia splits data into chunks, uploads only chunks that COS does not already have, and encrypts the data before upload. The key is in a Kubernetes Secret that you keep. Writing this ourselves would take months. Kopia is also what Velero and Kasten use.
+- It uses Kopia, an open-source Go backup library. Kopia splits data into chunks, uploads only chunks that COS does not already have, and encrypts the data before upload. Writing this ourselves would take months. Kopia is also what Velero and Kasten use.
 - It has its own keep time, usually longer than the local one.
-- It can use COS object lock, if the bucket was created with it. Then nobody can delete or change a backup before its keep time ends, which protects against ransomware. This is off by default, because the bucket must be created with it.
+- Each policy has its own area in the bucket. So the locks of one policy cannot affect another. The cost: two policies do not share identical chunks, so storage is a little higher.
+
+**Setup command for COS.** You run it once, with your own IBM Cloud login. It is in the console plugin and in the CLI. It:
+
+- creates the COS instance, if you do not give an existing one
+- creates the bucket, with object lock turned on and no fixed keep time, so each policy decides
+- sets your Key Protect root key for the bucket
+- creates a key for the driver that can write to this one bucket and nothing else
+- creates the backup key (below), has Key Protect encrypt it, and shows the readable key to you once
+
+The driver itself never creates or deletes a COS instance or bucket. If someone takes over the cluster, they get only the driver's key, and that key cannot remove a lock. An uninstall or a clean-up of the driver never touches the bucket.
+
+**Encryption.** Backups are encrypted in three places:
+
+- on the way to COS, with HTTPS
+- inside COS, with COS encryption and your Key Protect root key. While object lock is on, COS stops anyone from deleting that root key, so nobody can make the backups unreadable by deleting it
+- before upload, by Kopia with the backup key, so COS only ever holds encrypted data
+
+**The backup key is protected by Key Protect.** Key Protect encrypts the backup key with the same root key as the bucket. Only that encrypted copy is stored: in a Kubernetes Secret, and next to the backups in COS. The readable key is never stored. When the driver needs the key, it asks Key Protect to unlock it, and keeps it only in memory.
+
+- Because it is the bucket's root key, object lock also protects it from deletion.
+- If the cluster is lost, a restore in another cluster reads the encrypted copy from COS and asks Key Protect to unlock it.
+- If you remove the driver's access in Key Protect, the driver can no longer read or write backups.
+
+**Emergency copy.** Key Protect runs in one region. If that region is down, Key Protect cannot unlock the key. So the setup command shows the readable key once, and you keep a copy outside IBM Cloud, for example in a password manager. A restore can use it instead of Key Protect. Without either Key Protect or this copy, nobody can read the backups, including IBM and us.
+
+**Immutable backups.** Each policy sets a lock mode and a keep time for its COS backups:
+
+- **Compliance:** nobody can delete or change a backup before its keep time ends. That includes you, your account admins and IBM. This is the default for a new policy, with a keep time of 30 days.
+- **Governance:** a user you name can delete a backup early. Anyone with that user's access can also do it.
+- **None:** no lock.
+
+A change to a policy affects only new backups. A backup in Compliance mode keeps its lock to the end, even if you change or delete the policy. COS bills a locked backup until its lock ends. IBM requires the account to stay in good standing while any lock is active.
+
+Step 1 of the plan checks that Kopia's lock settings work with IBM COS object lock. IBM COS supports both modes, and object lock needs versioning, which the setup command turns on.
 - Restore from COS makes a new PVC in any cluster that runs the driver, including a cluster in another region. This is the last line of defence if both regions lose their pools.
 
 **Fix for today's snapshots.** A snapshot of a running VM volume also uses the safe copy, not a file copy.
@@ -126,6 +162,7 @@ The part that takes the copy is one replaceable piece. When the clusters run the
    - the VM slows down less than in the 20 Oct test, measured with the same load
    - a Windows VM freezes and thaws through its guest agent
    - it works on a VM with two disks
+   - Kopia writes to an IBM COS bucket with object lock, in both lock modes, and a locked backup cannot be deleted with the driver's key
 
    If the pull backup fails, the plan uses the tested staging method, and this spec gets an update.
 2. **Stop unsafe copies.** The controller detects running VMs and skips their volumes with a clear error. This ships first and by itself, because today's behaviour makes copies that cannot boot.
@@ -135,7 +172,7 @@ The part that takes the copy is one replaceable piece. When the clusters run the
 6. **Test across two regions,** with a failover and a boot of a Linux VM and a Windows VM. Then update `CROSS-REGION-DR.md`, `FEATURES.md` and the tutorial.
 7. **Safe snapshots of running VMs,** using the copy from step 3.
 8. **Backup to a snapshot pool:** the `BackupPolicy` resource, the chain of change files, hard-link snapshots, merging, and restore.
-9. **Export to COS:** Kopia upload, encryption, keep time, object lock, and restore from COS into another cluster. Then add a backup stage to the release test run.
+9. **Export to COS:** the setup command, Kopia upload, encryption, keep time, lock modes per policy, and restore from COS into another cluster. Then add a backup stage to the release test run.
 
 About 5 PRs for replication after the lab test, and 3 more for backup.
 
@@ -172,8 +209,14 @@ The run needs one COS bucket for the backup stage. I will ask you to create it w
 - VM disk snapshots are a chain of change files, and old ones are merged. Other volumes use hard-link snapshots.
 - The COS export reads from the snapshot pool, never from the running VM.
 - The COS export uses Kopia (chunking, encryption, upload of new chunks only), instead of our own format.
-- Backups in COS are always encrypted. You keep the key.
-- Object lock is supported but off by default, because the bucket must be created with it.
+- A backup policy selects whole VMs by label. A VM can be in only one backup policy.
+- A setup command that you run creates the COS instance, the bucket and the driver's key. The driver never creates or deletes buckets.
+- The driver's COS key can write to one bucket only, and cannot remove locks.
+- Backups in COS are always encrypted. Key Protect protects the backup key with the bucket's root key, so the readable key is never stored.
+- The setup command shows the readable key once, as an emergency copy for when Key Protect is down. You keep it outside IBM Cloud.
+- Key Protect is required for COS export.
+- The lock mode and keep time are set in each policy. A new policy defaults to Compliance mode for 30 days.
+- Each policy has its own area in the bucket, so storage is slightly higher than one shared area.
 - Snapshots of running VMs are fixed to use the safe copy, as part of this work.
 - Backup is built after replication, because it reuses the safe copy and the change list.
 - Multi-disk VMs are copied at one moment as part of this work. Group snapshots (issue #14) stay a separate issue.
