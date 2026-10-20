@@ -650,7 +650,7 @@ kubectl get filesharepools
 kubectl get filesharespool <pool-name> -o jsonpath='{range .status.shares[*]}{.shareID}{"\t"}{.state}{"\n"}{end}'
 
 # Check controller logs for reconciliation errors
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller --tail=50
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller --tail=50
 ```
 
 ---

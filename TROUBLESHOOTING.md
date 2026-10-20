@@ -6,8 +6,8 @@ Run these five commands first when investigating any issue:
 
 ```bash
 # 1. Are the driver pods running?
-kubectl get pods -n kube-system -l app=vpc-file-pool-csi-controller
-kubectl get pods -n kube-system -l app=vpc-file-pool-csi-node
+kubectl get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller
+kubectl get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node
 
 # 2. What state are the pools in?
 kubectl get filesharepools
@@ -16,11 +16,11 @@ kubectl get filesharepools
 kubectl describe pvc <pvc-name>
 
 # 4. Controller logs (last 100 lines)
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller --tail=100
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller --tail=100
 
 # 5. Node agent logs on the affected node
 NODE=$(kubectl get pod <pod-name> -o jsonpath='{.spec.nodeName}')
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-node --field-selector spec.nodeName=${NODE} -c csi-node --tail=100
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node --field-selector spec.nodeName=${NODE} -c csi-node --tail=100
 ```
 
 ---
@@ -79,7 +79,7 @@ kubectl get subvolumes -l storage.ibmcloud.io/pool=<pool-name> -o wide
 **Fix:** Wait 2-3 minutes. If still pending after 5 minutes, check controller logs:
 
 ```bash
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller --tail=100 | grep -i "error\|fail\|share"
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller --tail=100 | grep -i "error\|fail\|share"
 ```
 
 Common sub-causes for prolonged expansion:
@@ -376,7 +376,7 @@ Solutions:
 NODE=$(kubectl get pod <pod-name> -o jsonpath='{.spec.nodeName}')
 
 # Check the node agent logs for the mount state
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-node --field-selector spec.nodeName=${NODE} -c csi-node --tail=50
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node --field-selector spec.nodeName=${NODE} -c csi-node --tail=50
 
 # The simplest fix is to delete the pod — the kubelet will re-mount on restart
 kubectl delete pod <pod-name>
@@ -442,7 +442,7 @@ kubectl delete pod <pod-name> --force --grace-period=0
 kubectl describe filesharespool <pool-name>
 
 # Check controller logs for VPC API errors
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller --tail=100 | grep -i "error\|fail"
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller --tail=100 | grep -i "error\|fail"
 ```
 
 Common causes:
@@ -486,7 +486,7 @@ If the share is permanently failed, the pool manager will eventually need to mig
 **Fix:**
 ```bash
 # Check controller logs for the expansion status
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller --tail=200 | grep -i "expand\|share\|create"
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller --tail=200 | grep -i "expand\|share\|create"
 
 # Check if the share was created in VPC but not yet detected
 ibmcloud is shares --output json | jq '.[] | select(.name | contains("<pool-name>"))'
@@ -580,7 +580,7 @@ Common causes:
 kubectl get lease -n kube-system vpc-file-pool-csi-leader -o yaml
 
 # Check controller logs for leader election messages
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller --tail=50 | grep -i "leader"
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller --tail=50 | grep -i "leader"
 ```
 
 If the leader lease is held by a dead pod, delete the lease to force re-election:
@@ -828,19 +828,19 @@ kubectl edit deployment -n kube-system vpc-file-pool-csi-controller
 
 ```bash
 # Allocation events
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller | grep "Allocated\|Deallocated"
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller | grep "Allocated\|Deallocated"
 
 # VPC API calls
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller | grep "vpc\|api\|share"
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller | grep "vpc\|api\|share"
 
 # Errors only
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller | grep -i "error\|fail\|panic"
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller | grep -i "error\|fail\|panic"
 
 # Specific PVC
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller | grep "pvc-<uuid>"
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller | grep "pvc-<uuid>"
 
 # Node mount operations
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-node -c csi-node | grep "mount\|stage\|publish"
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node -c csi-node | grep "mount\|stage\|publish"
 ```
 
 ---
@@ -866,10 +866,10 @@ If you can't resolve the issue:
   kubectl get subvolumes -o wide
   echo
   echo "=== Controller logs (last 200 lines) ==="
-  kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller --tail=200
+  kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller --tail=200
   echo
   echo "=== Node agent logs (last 100 lines per node) ==="
-  kubectl logs -n kube-system -l app=vpc-file-pool-csi-node -c csi-node --tail=100
+  kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node -c csi-node --tail=100
 } > csi-diagnostics.txt
 ```
 
