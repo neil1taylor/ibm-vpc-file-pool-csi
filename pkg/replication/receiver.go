@@ -57,6 +57,12 @@ type Receiver struct {
 	// destLocks holds one *sync.Mutex per destination directory, so uploads
 	// into the same subvolume run one at a time instead of interleaving.
 	destLocks sync.Map
+
+	// vmLocks holds one *sync.Mutex per VM disk: one call at a time.
+	vmLocks sync.Map
+
+	// maxVMDiskBytes is the largest VM disk accepted; 0 means the default.
+	maxVMDiskBytes int64
 }
 
 // NewReceiver creates a new replication receiver HTTP server.
@@ -71,6 +77,7 @@ func NewReceiver(basePath, authToken, listenAddr string) *Receiver {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/sync/", r.handleSync)
 	mux.HandleFunc("/api/v1/metadata/", r.handleMetadata)
+	mux.HandleFunc("/api/v1/vmcopy/", r.handleVMCopy)
 	mux.HandleFunc("/api/v1/health", r.handleHealth)
 
 	r.httpServer = &http.Server{
