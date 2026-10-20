@@ -54,7 +54,7 @@ cleanup() {
     log "cleaning up"
     oc delete replicationpolicy "$POLICY" --ignore-not-found --wait=false
     oc delete ns "$NS" --ignore-not-found --wait=true --timeout=10m || true
-    oc delete pv "$PREFIX-copy-root" "$PREFIX-copy-data" --ignore-not-found
+    oc delete pv "$PREFIX-copy-root" "$PREFIX-copy-data" "$PREFIX-rewind-root" "$PREFIX-rewind-data" --ignore-not-found
     if [ "$MODE" = receiver ]; then
         oc delete deploy,svc,secret,pvc -n kube-system -l "$RECV_LABEL" --ignore-not-found --wait=true --timeout=5m || true
     fi
@@ -421,10 +421,72 @@ wait_until 900 "copy guest agent" agent_connected copy
 log "waiting for ssh on the copy"
 wait_until 300 "ssh on the copy" vssh copy true
 
+# check_copy <vmi> <moment>: the VM booted from far-site disks shows no file
+# system errors, and every file in the writer's log on the root disk is on the
+# data disk with the logged checksum.
+check_copy() {
+    local vmi=$1 at=$2 xfs result
+    xfs=$(vssh "$vmi" 'sudo journalctl -k --no-pager | grep -ci "xfs.*\(corrupt\|error\)" || true')
+    [ "$xfs" = 0 ] || fail "XFS errors in the kernel log of $vmi: $xfs"
+    result=$(vssh "$vmi" 'sudo systemctl stop writer; awk -v m="$(date -d '"$at"' +%s)" '"'"'$3 <= m {c++} END {print c+0}'"'"' /var/log/writer.log; while read n s t; do echo "$s  /data/f$n"; done < /var/log/writer.log | sha256sum -c --quiet && echo CHECKSUMS_OK')
+    echo "$result"
+    echo "$result" | grep -q CHECKSUMS_OK || fail "files on the data disk of $vmi do not match the log on the root disk"
+    log "PASS: $vmi booted; $(echo "$result" | head -1) files logged up to $at, all checksums match"
+}
+
 log "checking the copy"
-xfs=$(vssh copy 'sudo journalctl -k --no-pager | grep -ci "xfs.*\(corrupt\|error\)" || true')
-[ "$xfs" = 0 ] || fail "XFS errors in the copy's kernel log: $xfs"
-result=$(vssh copy 'sudo systemctl stop writer; awk -v m="$(date -d '"$moment"' +%s)" '"'"'$3 <= m {c++} END {print c+0}'"'"' /var/log/writer.log; while read n s t; do echo "$s  /data/f$n"; done < /var/log/writer.log | sha256sum -c --quiet && echo CHECKSUMS_OK')
-echo "$result"
-echo "$result" | grep -q CHECKSUMS_OK || fail "files on the data disk do not match the log on the root disk"
-log "PASS: the copy booted; $(echo "$result" | head -1) files logged up to the copy moment, all checksums match"
+check_copy copy "$moment"
+
+# failover_check rewinds both disks to the first copy with the failover tool,
+# run in the receiver pod where the share is mounted, and boots from them.
+failover_check() {
+    local bin epoch pod=deploy/$RECV d pv sub moments
+    bin=$(mktemp)
+    log "building kubectl-failover and putting it in the receiver pod"
+    (cd "$(dirname "$0")/../.." && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o "$bin" ./cmd/failover/)
+    oc exec -i -n kube-system "$pod" -- sh -c 'cat > /tmp/kubectl-failover && chmod +x /tmp/kubectl-failover' < "$bin"
+
+    log "failover: moments both disks can show"
+    moments=$(oc exec -n kube-system "$pod" -- /tmp/kubectl-failover plan --nfs-mount-path /data/repl --list-moments)
+    echo "$moments"
+    echo "$moments" | grep -q "$moment" || fail "the latest moment $moment is not listed"
+    echo "$moments" | grep -q "$first" || fail "the first copy moment $first is not listed"
+
+    log "failover: rewinding both disks to $first"
+    oc exec -n kube-system "$pod" -- /tmp/kubectl-failover execute --nfs-mount-path /data/repl --prepare-only --rewind-to "$first"
+    epoch=$(perl -MTime::Piece -e 'print Time::Piece->strptime(shift, "%Y-%m-%dT%H:%M:%SZ")->epoch' "$first")
+    for d in root data; do
+        pv=$(oc get pvc -n "$NS" "$d" -o jsonpath='{.spec.volumeName}')
+        sub=$(oc get subvolume "$pv" -o jsonpath='{.spec.subPath}')
+        oc apply -f - <<YAML
+apiVersion: v1
+kind: PersistentVolume
+metadata: {name: $PREFIX-rewind-$d}
+spec:
+  capacity: {storage: $( [ $d = root ] && echo 20Gi || echo 10Gi )}
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  mountOptions: [nfsvers=4.1, sec=sys, soft, timeo=600, retrans=3]
+  nfs: {server: "$server", path: "$far_prefix$sub.rewind-$epoch"}
+  claimRef: {namespace: $NS, name: rewind-$d}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: rewind-$d, namespace: $NS}
+spec:
+  storageClassName: ""
+  volumeName: $PREFIX-rewind-$d
+  accessModes: [ReadWriteMany]
+  resources: {requests: {storage: $( [ $d = root ] && echo 20Gi || echo 10Gi )}}
+YAML
+    done
+    log "booting the rewound copy"
+    vm_yaml rewound rewind-root rewind-data no | oc apply -f -
+    wait_until 900 "rewound guest agent" agent_connected rewound
+    wait_until 300 "ssh on the rewound copy" vssh rewound true
+    check_copy rewound "$first"
+}
+
+if [ "$MODE" = receiver ]; then
+    failover_check
+fi

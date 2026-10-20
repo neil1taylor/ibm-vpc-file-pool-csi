@@ -1137,7 +1137,7 @@ kubectl failover plan --nfs-mount-path /data --list-moments       # moments each
 kubectl failover execute --nfs-mount-path /data ... --rewind-to 2026-10-20T10:30:00Z   # newest moment at or before this time
 ```
 
-`--rewind-to` takes an RFC 3339 time. The restore points reach back as far as the policy's `restorePointKeepHours` (24 hours by default).
+`execute --prepare-only` does the roll-back and the rewinds and stops: it needs no cluster and no `--dr-pool`, so you can prepare the disks before the cutover. `--rewind-to` takes an RFC 3339 time. The restore points reach back as far as the policy's `restorePointKeepHours` (24 hours by default).
 
 #### `kubectl failover status`
 
