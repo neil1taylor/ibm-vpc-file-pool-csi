@@ -198,3 +198,23 @@ func TestApplyVMDisk_RefusesOtherFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestApplyVMDisk_RefusesSymlink(t *testing.T) {
+	dir := t.TempDir()
+	other := filepath.Join(dir, "other-tenant-disk.qcow2")
+	copyTestImage(t, "v3.qcow2", other)
+	staging := filepath.Join(dir, ".repl-staging-a1.qcow2")
+	if err := os.Symlink(other, staging); err != nil {
+		t.Fatal(err)
+	}
+	disk := filepath.Join(dir, "disk.img")
+	if _, err := ApplyVMDisk(staging, disk); err == nil {
+		t.Fatal("expected a staging file that is a symlink to be refused")
+	}
+	if _, err := os.Stat(disk); !os.IsNotExist(err) {
+		t.Errorf("expected no disk written, stat err = %v", err)
+	}
+	if _, err := os.Lstat(staging); err != nil {
+		t.Errorf("expected the symlink left alone, lstat err = %v", err)
+	}
+}
