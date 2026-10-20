@@ -288,7 +288,7 @@ oc patch console.operator.openshift.io cluster --type=json \
 
 **Note:** If you already have manually created StorageClasses, they are not overwritten. To opt out of auto-creation, annotate the pool:
 ```bash
-kubectl annotate filesharespool <pool-name> storage.ibmcloud.io/skip-storageclass="true"
+kubectl annotate filesharepool <pool-name> storage.ibmcloud.io/skip-storageclass="true"
 ```
 
 ---

@@ -543,7 +543,7 @@ Delete the pool when benchmarking is complete to free the VPC share quota:
 
 ```bash
 kubectl delete pvc bench-pvc -n default
-kubectl delete filesharespool bench-pool
+kubectl delete filesharepool bench-pool
 ```
 
 ### Benchmark PVC Setup

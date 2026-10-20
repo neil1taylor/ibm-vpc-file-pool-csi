@@ -132,7 +132,7 @@ Rules of thumb:
 kubectl get filesharepools
 
 # Detailed status with per-share breakdown
-kubectl get filesharespool general-purpose -o yaml
+kubectl get filesharepool general-purpose -o yaml
 ```
 
 The status section shows each share's ID, mount target IP, total/allocated capacity, PVC count, and health state.
@@ -171,7 +171,7 @@ If `autoExpand` is `false` or you want to proactively add capacity:
 
 ```bash
 # Option 1: Increase maxShares and let the reconciler add shares as needed
-kubectl patch filesharespool general-purpose --type merge -p '{"spec":{"maxShares":15}}'
+kubectl patch filesharepool general-purpose --type merge -p '{"spec":{"maxShares":15}}'
 
 # Option 2: Increase individual share size (expands the underlying VPC file share)
 # This is handled by the reconciler when the pool detects shares approaching capacity
@@ -630,7 +630,7 @@ The controller exposes metrics on `:8080/metrics`. Scrape this endpoint with Pro
 kubectl get filesharepools
 
 # If a pool shows "Degraded", check which share is unhealthy
-kubectl get filesharespool <pool-name> -o jsonpath='{range .status.shares[*]}{.shareID}{"\t"}{.state}{"\n"}{end}'
+kubectl get filesharepool <pool-name> -o jsonpath='{range .status.shares[*]}{.shareID}{"\t"}{.state}{"\n"}{end}'
 
 # Check controller logs for reconciliation errors
 kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller --tail=50

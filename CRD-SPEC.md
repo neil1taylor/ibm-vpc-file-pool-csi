@@ -32,7 +32,7 @@ Cluster-scoped resource. Defines a pool of VPC file shares that back PVC subdire
 ### Go Type Definition
 
 ```go
-// api/v1alpha1/filesharespool_types.go
+// api/v1alpha1/filesharepool_types.go
 package v1alpha1
 
 import (
