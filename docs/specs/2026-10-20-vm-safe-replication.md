@@ -54,22 +54,26 @@ On each cycle, the controller checks every volume in the policy. A volume takes 
 
 The controller runs commands in the VM pod. It already has permission to do this, for hooks.
 
-1. Freeze the guest file systems through the guest agent. If there is no guest agent, skip this step and mark the copy "crash consistent".
-2. In one QEMU step, for all disks of the VM: start a new change list, and open a read-only view of each disk at this moment.
-3. Thaw the guest. The guest is paused for about 0.1 s.
-4. A copy Job reads the disk views and sends the data to the other region (below).
-5. When the transfer is complete, close the views.
+1. Freeze the guest file systems through the guest agent.
+   - If there is no guest agent, skip this step.
+   - If the freeze fails, thaw and go on without it. Example: on a Linux guest with SELinux, one file system with a missing label makes the whole freeze fail.
+   - In both cases the copy is marked "crash consistent", and the status shows the guest's error.
+2. In one QEMU step, for all disks of the VM: start a new change list, and start a copy of each disk as it is at this moment.
+3. Thaw the guest. The guest is paused for about 0.2 s.
+4. QEMU writes the copy to a staging file in the VM's own volume, at a speed limit.
+5. A copy Job sends the staging file to the other region (below), then deletes it.
 
-The disk view uses QEMU's "pull" backup. QEMU serves the frozen view over the network, and the copy Job reads it. If the VM writes a block that the Job has not read yet, QEMU first saves the old block to a small scratch file. So, unlike the tested method, no full-size copy of the disk is written to the share. This removes the 40 GB staging copy and half of the extra disk writes.
+The staging file is sparse: it holds only the data the disk really uses (a full copy) or the blocks that changed (a change copy). In the step 1 test, a full copy of a 40 GB disk with 5 GB of data was 5.1 GB.
 
-The pull backup is not tested yet. Step 1 of the plan tests it. If it does not work, the fallback is the tested method: QEMU writes a staging copy to the share, and the Job sends that copy.
+**Speed limit.** Without a limit, the copy uses all the share's bandwidth, and the VM's writes were 16 to 19 times slower. At 20 MB/s per disk, the VM kept 93% of its normal write speed. The policy has a speed setting, 20 MB/s per disk by default. A higher limit gives a shorter copy and a lower RPO, but slows the VM more.
 
-The copy Job runs in the VM's namespace. So it reaches the VM pod on the VM's own network, also when the VM uses a user-defined primary network. The view is protected with TLS and a certificate made for that one copy.
+**Why not read the disk over the network.** The earlier draft read the disk from QEMU over the network, with no staging file. Step 1 showed that this cannot work. The VM pod forwards every incoming connection to the guest, so nothing outside the pod can reach QEMU. The only other way is through the node, with a privileged reader. That stays a possible later change, because the node agent is already privileged.
 
 ### Send only changed blocks
 
-- **Normal cycle:** the Job reads only the blocks in the change list, and sends them over HTTPS to the receiver in the other region. This uses the existing driver-to-driver replication path.
-- **First copy, or after the change list is lost:** a live migration or a VM restart erases the change list. The controller sees that the list is gone, and does a compare pass. The Job reads the whole disk, but sends only a checksum for each 4 MB block. The receiver compares the checksums with its own copy and asks only for the blocks that differ. So a node drain costs a full read in the source region, but not a full transfer between regions.
+- **Normal cycle:** QEMU writes only the blocks in the change list to the staging file. The Job sends that file over HTTPS to the receiver in the other region. This uses the existing driver-to-driver replication path.
+- **First copy, or after the change list is lost:** a live migration or a VM restart erases the change list. The controller sees that the list is gone, and asks QEMU for a full copy. Then the Job does a compare pass: it sends only a checksum for each 4 MB block of the full copy. The receiver compares the checksums with its own copy and asks only for the blocks that differ. So a node drain costs a full copy in the source region, but not a full transfer between regions.
+- The Job never reads the VM's live disk file. It reads only staging files, which do not change while it reads them.
 
 ### Apply the copy in the other region
 
@@ -118,7 +122,8 @@ A policy selects VMs by label, and covers all disks of each VM, taken at one mom
 - creates the COS instance, if you do not give an existing one
 - creates the bucket, with object lock turned on and no fixed keep time, so each policy decides
 - sets your Key Protect root key for the bucket
-- creates a key for the driver that can write to this one bucket and nothing else
+- creates a key for the driver, with a custom role on this one bucket only. The role can read, write, and extend locks. It cannot delete a version of an object, skip a lock, or change the bucket settings. IBM's standard Writer role is not used, because it can skip Governance locks.
+- gives the driver the Reader role on the root key in Key Protect. Reader can encrypt and unlock the backup key, but cannot delete the root key.
 - creates the backup key (below), has Key Protect encrypt it, and shows the readable key to you once
 
 The driver itself never creates or deletes a COS instance or bucket. If someone takes over the cluster, they get only the driver's key, and that key cannot remove a lock. An uninstall or a clean-up of the driver never touches the bucket.
@@ -137,15 +142,20 @@ The driver itself never creates or deletes a COS instance or bucket. If someone 
 
 **Emergency copy.** Key Protect runs in one region. If that region is down, Key Protect cannot unlock the key. So the setup command shows the readable key once, and you keep a copy outside IBM Cloud, for example in a password manager. A restore can use it instead of Key Protect. Without either Key Protect or this copy, nobody can read the backups, including IBM and us.
 
-**Immutable backups.** Each policy sets a lock mode and a keep time for its COS backups:
+**Immutable backups.** Each policy sets a keep time for its COS backups, and either Compliance lock or no lock:
 
 - **Compliance:** nobody can delete or change a backup before its keep time ends. That includes you, your account admins and IBM. This is the default for a new policy, with a keep time of 30 days.
-- **Governance:** a user you name can delete a backup early. Anyone with that user's access can also do it.
 - **None:** no lock.
 
 A change to a policy affects only new backups. A backup in Compliance mode keeps its lock to the end, even if you change or delete the policy. COS bills a locked backup until its lock ends. IBM requires the account to stay in good standing while any lock is active.
 
-Step 1 of the plan checks that Kopia's lock settings work with IBM COS object lock. IBM COS supports both modes, and object lock needs versioning, which the setup command turns on.
+**What the step 1 test showed (Kopia 0.23.1, IBM COS, 20 Oct):**
+
+- Kopia locks its data, its indexes and its repository files in COS. Restore matched the checksums. No readable text from the backup was found in any object.
+- No role could shorten a Compliance lock.
+- **Governance mode does not protect against a stolen driver key.** IBM's Writer role can skip Governance locks. A custom role without that permission stops the skip. But the driver also needs permission to extend locks, and with it the driver can shorten a Governance lock. So Governance is not offered.
+- **Locks must be extended.** A chunk that a new backup still uses keeps the lock from its first upload. Kopia extends the locks of chunks that are still in use during its maintenance run. This needs the "extend locks" permission, which is safe in Compliance mode. Kopia requires the keep time to be at least the maintenance interval plus 24 hours. The driver sets the maintenance interval to fit.
+- **A delete by the driver's key only hides data.** COS adds a delete marker, and the data stays. But Kopia cannot read hidden data. So the restore command, run with your own login, first removes any delete markers. The driver's key cannot remove them.
 - Restore from COS makes a new PVC in any cluster that runs the driver, including a cluster in another region. This is the last line of defence if both regions lose their pools.
 
 **Fix for today's snapshots.** A snapshot of a running VM volume also uses the safe copy, not a file copy.
@@ -156,20 +166,20 @@ The part that takes the copy is one replaceable piece. When the clusters run the
 
 ## Plan
 
-1. **Lab test of the pull backup (no product code).** On rovslab, check that:
-   - a Job in the VM namespace can read the frozen view over TLS
-   - the change list can be read through it
-   - the VM slows down less than in the 20 Oct test, measured with the same load
-   - a Windows VM freezes and thaws through its guest agent
-   - it works on a VM with two disks
-   - Kopia writes to an IBM COS bucket with object lock, in both lock modes, and a locked backup cannot be deleted with the driver's key
-
-   If the pull backup fails, the plan uses the tested staging method, and this spec gets an update.
+1. **Lab test (done, 20 Oct).** Results:
+   - Reading the disk over the network: cannot work, see above. The plan uses the staging method.
+   - Two disks: one QEMU step copies both at the same moment. The far-site disks booted, and both showed the same last write.
+   - Speed limit: at 20 MB/s per disk, the VM kept 93% of its write speed.
+   - Sparse staging files: 5.1 GB for a 40 GB disk with 5 GB of data.
+   - A full copy plus two change copies, applied at the far site, booted with all files intact.
+   - Linux freeze fails if a file system has no SELinux label. The design now falls back to a crash-consistent copy.
+   - Windows freeze: not tested. The lab's only Windows disk is in use by other lab work. It moves to step 6.
+   - COS and Kopia: see "Immutable backups" below.
 2. **Stop unsafe copies.** The controller detects running VMs and skips their volumes with a clear error. This ships first and by itself, because today's behaviour makes copies that cannot boot.
 3. **Copy at one moment.** Freeze, take the view, thaw, read the full disk, and send it.
 4. **Change-only cycles and the compare pass.**
 5. **Safe apply in the other region, and failover changes.**
-6. **Test across two regions,** with a failover and a boot of a Linux VM and a Windows VM. Then update `CROSS-REGION-DR.md`, `FEATURES.md` and the tutorial.
+6. **Test across two regions,** with a failover and a boot of a Linux VM and a Windows VM. This includes the first test of Windows freeze and thaw. Then update `CROSS-REGION-DR.md`, `FEATURES.md` and the tutorial.
 7. **Safe snapshots of running VMs,** using the copy from step 3.
 8. **Backup to a snapshot pool:** the `BackupPolicy` resource, the chain of change files, hard-link snapshots, merging, and restore.
 9. **Export to COS:** the setup command, Kopia upload, encryption, keep time, lock modes per policy, and restore from COS into another cluster. Then add a backup stage to the release test run.
@@ -184,12 +194,12 @@ The run needs one COS bucket for the backup stage. I will ask you to create it w
 
 ## Cost and risk
 
-- **VM slowdown during a copy.** It was large in the test, with a VM that wrote nonstop. Step 1 measures it again with the pull backup. If it is still large, we add a speed limit for the copy Job. A slower copy makes a longer copy window, so this is a trade-off between RPO and VM speed. The policy will have a setting for it.
+- **VM slowdown during a copy.** Without a limit, a VM that writes nonstop was 16 to 19 times slower during a copy. The default limit of 20 MB/s per disk kept 93% of its speed. A slower copy makes a longer copy window, so this is a trade-off between RPO and VM speed. The policy has a setting for it.
+- **Staging space.** Each copy needs free space in the VM's volume for its staging file, until the Job has sent it: the used data for a full copy, the changed blocks for a change copy.
 - **Red Hat does not support it.** An OpenShift Virtualization update can change the VM pod and break this method. Each release test run will include a VM replication stage, so we find a break before you do. If it breaks, VM volumes are skipped with an error. They are never copied unsafely.
 - **Security.** The controller runs commands in VM pods. It already can, for hooks. The disk view is reachable only inside the VM's namespace, with a one-time certificate.
 - **Backup cost.** A snapshot pool is extra VPC file shares, paid for as normal shares. COS is paid for each GB stored, and only changed chunks are added after the first upload. A cost estimate goes into this spec once you choose the keep times.
 - **New dependency.** Kopia, for the COS export only.
-- **Scratch space.** Blocks that the VM overwrites during a copy are saved in a scratch file on the VM's share until the copy ends.
 
 ## Decisions I made for you
 
@@ -197,7 +207,6 @@ The run needs one COS bucket for the backup stage. I will ask you to create it w
 - Step 2 (stop unsafe copies) ships first, before the new copy method exists.
 - A VM without a guest agent still replicates, as a crash-consistent copy. The status says so.
 - Stopped VMs still use rsync, with a check that the VM stayed stopped.
-- The copy is read over the network from QEMU, not written to the share first. The tested staging method is the fallback.
 - After a migration or restart, a compare pass sends only the blocks that differ, not the whole disk.
 - The far-site disk is updated through a change file, so it is never left half written.
 - Replication copies disks only. VM definitions are not replicated. After failover, you create the VMs from your own definitions, as today.
@@ -215,7 +224,12 @@ The run needs one COS bucket for the backup stage. I will ask you to create it w
 - Backups in COS are always encrypted. Key Protect protects the backup key with the bucket's root key, so the readable key is never stored.
 - The setup command shows the readable key once, as an emergency copy for when Key Protect is down. You keep it outside IBM Cloud.
 - Key Protect is required for COS export.
-- The lock mode and keep time are set in each policy. A new policy defaults to Compliance mode for 30 days.
+- Each policy sets a keep time, and either Compliance lock or no lock. A new policy defaults to Compliance for 30 days.
+- Governance lock is not offered. Tested on 20 Oct: it cannot stop a stolen driver key from shortening the lock, while still letting the driver extend locks.
+- The driver's COS key uses a custom role: read, write and extend locks. It cannot delete versions, skip locks or change the bucket.
+- The restore command removes delete markers first, with your login.
+- When a Linux or Windows guest cannot freeze, the copy goes ahead as crash consistent, and the status shows why.
+- The copy uses a sparse staging file in the VM's own volume, at 20 MB/s per disk by default. Reading the disk over the network is not possible (tested 20 Oct).
 - Each policy has its own area in the bucket, so storage is slightly higher than one shared area.
 - Snapshots of running VMs are fixed to use the safe copy, as part of this work.
 - Backup is built after replication, because it reuses the safe copy and the change list.
