@@ -54,18 +54,25 @@ On each cycle, the controller checks every volume in the policy. A volume takes 
 
 The controller runs commands in the VM pod. It already has permission to do this, for hooks.
 
-1. Freeze the guest file systems through the guest agent.
+1. Freeze the guest file systems through the guest agent, with KubeVirt's own freeze tool in the VM pod.
+   - The tool thaws the guest by itself after a timeout, even if the controller never sends the thaw. The controller sets 30 s. So a lost connection cannot leave the guest frozen.
    - If there is no guest agent, skip this step.
    - If the freeze fails, thaw and go on without it. Example: on a Linux guest with SELinux, one file system with a missing label makes the whole freeze fail.
    - In both cases the copy is marked "crash consistent", and the status shows the guest's error.
 2. In one QEMU step, for all disks of the VM: start a new change list, and start a copy of each disk as it is at this moment.
 3. Thaw the guest. The guest is paused for about 0.2 s.
 4. QEMU writes the copy to a staging file in the VM's own volume, at a speed limit.
-5. A copy Job sends the staging file to the other region (below), then deletes it.
+5. A copy Job sends the staging file to the other region (below), then deletes it. The Job runs as the same user as QEMU, because only that user can delete the file.
+
+**If the VM must move during a copy.** A VM cannot live-migrate while QEMU copies its disks: the move fails, and the VM stays where it is (tested 20 Oct). A worker drain or a cluster update would wait for the copy. So the controller watches for a requested move. When it sees one, it cancels the copy and deletes the staging files. The move then works, and the next cycle starts a new copy. A move waits at most one controller cycle, 30 s by default.
+
+**Reading the staging file.** The staging file is in QEMU's qcow2 format. The driver image cannot install `qemu-img`, so the driver reads the format itself. It accepts only what QEMU makes for a copy, and it refuses anything else. A staging file lies in a volume that other pods in the namespace can write, so the reader checks every table against the file size.
 
 The staging file is sparse: it holds only the data the disk really uses (a full copy) or the blocks that changed (a change copy). In the step 1 test, a full copy of a 40 GB disk with 5 GB of data was 5.1 GB.
 
 **Speed limit.** Without a limit, the copy uses all the share's bandwidth, and the VM's writes were 16 to 19 times slower. At 20 MB/s per disk, the VM kept 93% of its normal write speed. The policy has a speed setting, 20 MB/s per disk by default. A higher limit gives a shorter copy and a lower RPO, but slows the VM more.
+
+The limit counts empty disk space too. A full copy of a 20 GB disk with 2 GB of data took about 18 minutes at 20 MB/s (tested 20 Oct). Change copies are not affected. Full copies happen only on the first copy and after a VM moves or restarts.
 
 **Why not read the disk over the network.** The earlier draft read the disk from QEMU over the network, with no staging file. Step 1 showed that this cannot work. The VM pod forwards every incoming connection to the guest, so nothing outside the pod can reach QEMU. The only other way is through the node, with a privileged reader. That stays a possible later change, because the node agent is already privileged.
 
@@ -81,11 +88,25 @@ The far-site disk must never be left half updated.
 
 1. The receiver writes the incoming blocks to a change file next to the disk, not into the disk.
 2. When all blocks have arrived, the receiver marks the change file complete.
-3. Then the receiver writes the blocks into the disk, and deletes the change file.
+3. Before it changes the disk, the receiver saves the disk's current contents of those blocks into an undo file, and marks the undo file complete.
+4. Then the receiver writes the blocks into the disk, and deletes the change file.
 
-If the receiver stops during step 3, it applies the same complete change file again when it restarts. This is safe, because each block goes to a fixed place in the disk. An incomplete change file is deleted, and the disk keeps the previous good copy.
+If the receiver stops during step 4, it applies the same complete change file again when it restarts. This is safe, because each block goes to a fixed place in the disk. An incomplete change file is deleted, and the disk keeps the previous good copy.
 
 Failover finishes any complete change file first. It refuses to use a disk while a change file is being applied.
+
+**Full copies before step 5.** Step 3 sends whole disks. The far site writes each one to a new file and swaps it in only when it is complete. So the disk is never half written, but step 3 keeps no restore points.
+
+### Restore points in the other region
+
+The far site keeps the copies of the last 24 hours, so you can rewind if bad data reached the VM, for example ransomware or a broken update. Each policy has a keep time, 24 hours by default.
+
+- Each cycle's undo files form one restore point. A restore point covers all disks of a VM at the same moment.
+- The disk itself always holds the latest copy. So a failover to the latest copy is as fast as today.
+- To rewind, failover makes a new disk from the latest one, then applies the undo files from newest to oldest, back to the chosen moment. The latest disk is not changed, so you can rewind again to a different moment.
+- When an undo file is older than the keep time, the receiver deletes it.
+- After a compare pass, the undo file holds only the blocks that differed. So a VM move does not cost a full disk of storage.
+- The policy status in the other region lists the restore points.
 
 ### What the status shows
 
@@ -93,6 +114,7 @@ For each VM volume, the policy status shows:
 - the moment the last good copy shows
 - "file-system consistent" or "crash consistent"
 - whether the last cycle was a change-only cycle or a compare pass, and the bytes sent
+- the oldest and newest restore points in the other region
 
 New metrics: copy type, guest pause time, and how long the VM was slowed by a copy.
 
@@ -176,9 +198,13 @@ The part that takes the copy is one replaceable piece. When the clusters run the
    - Windows freeze: not tested. The lab's only Windows disk is in use by other lab work. It moves to step 6.
    - COS and Kopia: see "Immutable backups" below.
 2. **Stop unsafe copies.** The controller detects running VMs and skips their volumes with a clear error. This ships first and by itself, because today's behaviour makes copies that cannot boot.
-3. **Copy at one moment.** Freeze, take the view, thaw, read the full disk, and send it.
+3. **Copy at one moment.** Freeze, take the view, thaw, read the full disk, and send it. Cancel the copy when the VM must move. Lab test of the parts, 20 Oct:
+   - KubeVirt's freeze tool is in the VM pod. Freeze took 0.11 s, thaw 0.03 s, and the automatic thaw worked.
+   - A live migration during a copy fails, and the VM keeps running where it was. After the copy is cancelled, the migration took 8 s.
+   - The speed limit counts empty disk space (above).
+   - The staging file is owned by the QEMU user, and only that user can delete it.
 4. **Change-only cycles and the compare pass.**
-5. **Safe apply in the other region, and failover changes.**
+5. **Safe apply in the other region, restore points, and failover changes.** This includes rewind to any restore point in the last 24 hours.
 6. **Test across two regions,** with a failover and a boot of a Linux VM and a Windows VM. This includes the first test of Windows freeze and thaw. Then update `CROSS-REGION-DR.md`, `FEATURES.md` and the tutorial.
 7. **Safe snapshots of running VMs,** using the copy from step 3.
 8. **Backup to a snapshot pool:** the `BackupPolicy` resource, the chain of change files, hard-link snapshots, merging, and restore.
@@ -195,6 +221,8 @@ The run needs one COS bucket for the backup stage. I will ask you to create it w
 ## Cost and risk
 
 - **VM slowdown during a copy.** Without a limit, a VM that writes nonstop was 16 to 19 times slower during a copy. The default limit of 20 MB/s per disk kept 93% of its speed. A slower copy makes a longer copy window, so this is a trade-off between RPO and VM speed. The policy has a setting for it.
+- **Restore point space.** The far site keeps the old contents of every block that changed in the last 24 hours. A VM that rewrites much of its disk each day needs up to one more disk of space at the far site.
+- **VM moves wait for the copy to cancel.** A move waits up to one controller cycle, 30 s by default. A full copy that is cancelled starts again from the beginning.
 - **Staging space.** Each copy needs free space in the VM's volume for its staging file, until the Job has sent it: the used data for a full copy, the changed blocks for a change copy.
 - **Red Hat does not support it.** An OpenShift Virtualization update can change the VM pod and break this method. Each release test run will include a VM replication stage, so we find a break before you do. If it breaks, VM volumes are skipped with an error. They are never copied unsafely.
 - **Security.** The controller runs commands in VM pods. It already can, for hooks. The disk view is reachable only inside the VM's namespace, with a one-time certificate.
@@ -234,3 +262,12 @@ The run needs one COS bucket for the backup stage. I will ask you to create it w
 - Snapshots of running VMs are fixed to use the safe copy, as part of this work.
 - Backup is built after replication, because it reuses the safe copy and the change list.
 - Multi-disk VMs are copied at one moment as part of this work. Group snapshots (issue #14) stay a separate issue.
+- The far site keeps restore points for 24 hours by default, set per policy. You chose 24 hours on 20 Oct.
+- Restore points are undo files: the disk always holds the latest copy, so failover to the latest copy stays fast. A rewind is slower, because it must apply undo files.
+- A rewind makes a new disk and leaves the latest copy unchanged.
+- Step 3 keeps no restore points. They start in step 5.
+- The guest freeze uses KubeVirt's own freeze tool, which thaws the guest by itself after 30 s.
+- When a VM must move, the controller cancels the copy. A move is more important than a copy.
+- The default speed limit stays at 20 MB/s per disk, even though full copies are slow, because full copies are rare.
+- The driver reads QEMU's staging file format itself, and refuses any part of the format that QEMU does not use for a copy.
+- The copy Job runs as the QEMU user, so it can delete the staging file.

@@ -77,6 +77,8 @@ Each line says what the stage proves, and how it checks the result itself, not t
     - The source VM live-migrates. The next cycle is a compare pass, sends far fewer bytes than the disk size, and the copy still boots.
     - The receiver is stopped in the middle of applying a copy. After it restarts, the copy boots and shows either the old or the new moment, never a mix.
     - A stopped VM is copied with rsync, and it is still stopped afterwards.
+    - The VM writes a marker file in each of three cycles. A rewind to the second restore point boots, has the first two markers and not the third. The latest copy still has all three.
+    - The source VM live-migrates while a full copy runs. The migration succeeds within one controller cycle, and the next cycle makes a good copy.
     - Until the new copy method ships, a running VM volume is skipped with an error, and no rsync copy is made.
     - The guest pause and the VM slowdown during a copy are saved to `test/release/history.csv`. More than 20% worse than the last run is a warning.
 11. **Draining.** A share marked for draining gets no new volumes.
