@@ -6,6 +6,7 @@ import (
 	"regexp"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
@@ -51,6 +52,20 @@ func validateFileSharePoolSpec(spec *v1alpha1.FileSharePoolSpec) error {
 	}
 	if spec.ShareSizeGB < 10 || spec.ShareSizeGB > 32000 {
 		return fmt.Errorf("spec.shareSizeGB must be between 10 and 32000, got %d", spec.ShareSizeGB)
+	}
+	if spec.IOPS != nil {
+		if err := ibmcloud.ValidateShareIOPS(spec.Profile, spec.ShareSizeGB, *spec.IOPS); err != nil {
+			return fmt.Errorf("spec.iops: %w", err)
+		}
+	}
+	for i := range spec.Tiers {
+		t := &spec.Tiers[i]
+		if t.IOPS == nil {
+			continue
+		}
+		if err := ibmcloud.ValidateShareIOPS(t.Profile, t.ShareSizeGB, *t.IOPS); err != nil {
+			return fmt.Errorf("spec.tiers[%d] (%s) iops: %w", i, t.Name, err)
+		}
 	}
 	if spec.MaxShares < 1 || spec.MaxShares > 100 {
 		return fmt.Errorf("spec.maxShares must be between 1 and 100, got %d", spec.MaxShares)
