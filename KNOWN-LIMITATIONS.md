@@ -102,7 +102,7 @@ kubectl migrate execute --namespace default --pvc my-data --target-pool general-
 kubectl migrate status --namespace default
 ```
 
-The tool creates a new PVC on the pool driver, launches a temporary pod that rsyncs data from the old PVC to the new one, and verifies file counts. The new PVC is named `<old name>-pooled`. A pool's StorageClass has the same name as the pool, so `--target-storage-class` is the pool name. The file count check only prints a warning if the counts differ, so check the pod log. The old PVC is NOT deleted automatically — you switch your workloads to the new PVC and delete the old one when ready.
+The tool creates a new PVC on the pool driver, launches a temporary pod that rsyncs data from the old PVC to the new one, and compares file counts. The new PVC is named `<old name>-pooled`. A pool's StorageClass has the same name as the pool, so `--target-storage-class` is the pool name. If the file counts differ, the pod fails and the tool reports the migration as failed. The old PVC is NOT deleted automatically — you switch your workloads to the new PVC and delete the old one when ready.
 
 **Limitations:**
 - The tool finds the cluster like `kubectl`: the `--kubeconfig` flag, then the `KUBECONFIG` variable, then `~/.kube/config`.

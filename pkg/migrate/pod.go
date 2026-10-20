@@ -53,7 +53,7 @@ func BuildMigrationPod(spec MigrationPodSpec) *corev1.Pod {
 				{
 					Name:  "migrate",
 					Image: MigrationImage,
-					// Install rsync, run the copy, then report file counts for verification.
+					// Install rsync, run the copy, then report file counts for verification. A count mismatch fails the pod.
 					Command: []string{"sh", "-c", `
 set -e
 apk add --no-cache rsync >/dev/null 2>&1
@@ -70,8 +70,8 @@ if [ "$SOURCE_COUNT" = "$TARGET_COUNT" ]; then
   echo "VERIFICATION: OK (file counts match: $SOURCE_COUNT)"
   exit 0
 else
-  echo "VERIFICATION: WARNING (source=$SOURCE_COUNT target=$TARGET_COUNT)"
-  exit 0
+  echo "VERIFICATION: FAILED (source=$SOURCE_COUNT target=$TARGET_COUNT)"
+  exit 1
 fi
 `},
 					VolumeMounts: []corev1.VolumeMount{
