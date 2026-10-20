@@ -636,4 +636,4 @@ receivers:
 - [PERFORMANCE-TUNING.md](PERFORMANCE-TUNING.md) — Capacity planning PromQL queries
 - [HELM-VALUES.md](HELM-VALUES.md) — Metrics endpoint configuration
 - [CAPACITY-PLANNING.md](CAPACITY-PLANNING.md) — Using metrics for growth projection
-- [`pkg/metrics/metrics.go`](pkg/metrics/metrics.go) — Metric definitions in source code
+- [`pkg/metrics/metrics.go`](https://github.com/neil1taylor/ibm-vpc-file-pool-csi/blob/main/pkg/metrics/metrics.go) — Metric definitions in source code

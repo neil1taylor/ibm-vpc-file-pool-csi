@@ -376,7 +376,17 @@ kubectl apply -f config/deploy/node.yaml
 | `--webhook-port` | `9443` | Port of the admission webhook server. Helm sets it from `webhook.port` |
 | `--receiver-tls-cert-file` | `""` | TLS certificate file for receiver HTTPS. Empty = plain HTTP |
 | `--receiver-tls-key-file` | `""` | TLS private key file for receiver HTTPS. Empty = plain HTTP |
+| `--receiver-base-path` | `/data` | NFS mount point inside the receiver container (receiver mode). Set by the Helm chart |
+| `--receiver-auth-token-file` | `/etc/replication/token` | File with the bearer token the receiver requires (receiver mode) |
+| `--receiver-listen-addr` | `:8443` | Listen address of the receiver (receiver mode) |
+| `--receiver-endpoint` | `""` | URL of the destination receiver (sync-client mode). Set by the replication controller |
+| `--auth-token-file` | `/etc/replication/token` | File with the bearer token the sync client sends (sync-client mode) |
 | `--ca-cert-file` | `""` | CA certificate file for verifying receiver TLS cert (sync-client mode). Empty = system trust store |
+| `--source-path` | `""` | Mounted source NFS path (sync-client mode). Set by the replication controller |
+| `--dest-base-path` | `""` | Destination base path (sync-client mode). Set by the replication controller |
+| `--sub-path` | `""` | SubVolume sub path (sync-client mode). Set by the replication controller |
+| `--subvolume-name` | `""` | SubVolume CR name (sync-client mode). Set by the replication controller |
+| `--metadata-json` | `""` | Serialized SubVolume metadata (sync-client mode). Set by the replication controller |
 | `--staging-path` | `""` | VM disk copy staging file (apply-vm-disk mode). Set by the replication controller |
 | `--disk-path` | `""` | Disk image to replace (apply-vm-disk mode). Set by the replication controller |
 | `--from`, `--to` | `""` | Moments the destination disk and the copy show, RFC 3339 (apply-vm-disk mode). Set by the replication controller |
