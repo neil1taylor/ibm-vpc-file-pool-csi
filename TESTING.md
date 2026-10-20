@@ -487,6 +487,7 @@ To run it from the current machine instead, with your own kubeconfig: `bash test
 | `07-clones` | A clone in a namespace with no extra permissions has the source's files and the pool's owner and mode; a pod using it starts only after the copy; the copy leaves nothing in the app's namespace; deleting the clone removes its folder |
 | `15-metrics` | Prometheus has the driver's metrics with non-zero allocation and VPC API counts; each pool reconciles about once a minute (at most 3) |
 | `13-webhooks` | Bad pools, SubVolumes and replication policies are refused with a message that names the problem; a good one of each kind is accepted. All requests are server-side dry runs |
+| `17-speed` | fio runs 5 tests of 60 s (sequential 1 MB read and write, random 4 KB read and write, 70/30 mix) on a pool volume, on IBM's `ibmc-vpc-file-3000-iops` class as the baseline, and inside a VM on a pool disk. Results go to `speed.csv` in the run folder and to `history.csv` next to the run folders; more than 20% below the last run is a NOTE |
 
 **Rules for every stage:**
 - A stage file in `test/release/stages/` defines `run` and `cleanup`.
