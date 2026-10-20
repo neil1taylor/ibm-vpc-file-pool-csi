@@ -49,6 +49,14 @@ const (
 	// pausedAnnotation pauses a policy while it is set to "true". The controller
 	// sets it after maxRetries; a person removes it to resume.
 	pausedAnnotation = "storage.ibmcloud.io/paused"
+
+	// skippedRunningVMPrefix starts the status error of a volume that the
+	// controller did not copy because a running VM uses it.
+	skippedRunningVMPrefix = "skipped: in use by running VM"
+
+	// kubevirtPodLabel marks KubeVirt pods. Its value is "virt-launcher" for a
+	// VM pod and "hotplug-disk" for a pod that holds a hot-plugged disk.
+	kubevirtPodLabel = "kubevirt.io"
 )
 
 // ReplicationController manages cross-region replication of SubVolume data.
@@ -306,6 +314,7 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 	var svStatuses []v1alpha1.SubVolumeReplicationStatus
 	var syncErrors []string
 	activeJobs := int32(0)
+	skipped := 0
 
 	for _, sv := range matched {
 		svCopy := sv
@@ -325,6 +334,21 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 
 		if done {
 			if succeeded {
+				// A VM that started during the copy wrote to the disk while it
+				// was read, so the copy may not boot.
+				if vmPod, vmErr := rc.runningVMPod(ctx, &svCopy); vmErr != nil || vmPod != "" {
+					msg := fmt.Sprintf("VM pod %s/%s started during the copy; the copy may not boot", svCopy.Spec.PVCNamespace, vmPod)
+					if vmErr != nil {
+						msg = fmt.Sprintf("check for a running VM after the copy: %v", vmErr)
+					}
+					syncErrors = append(syncErrors, fmt.Sprintf("%s: %s", svCopy.Name, msg))
+					svStatuses = append(svStatuses, v1alpha1.SubVolumeReplicationStatus{
+						SubVolumeName: svCopy.Name,
+						LastError:     msg,
+					})
+					rc.cleanupReplicationResources(ctx, policy, svCopy.Name)
+					continue
+				}
 				// Job succeeded — record success and cleanup.
 				now := metav1.NewTime(rc.nowFunc())
 				svStatus := v1alpha1.SubVolumeReplicationStatus{
@@ -375,6 +399,30 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 			svStatuses = append(svStatuses, v1alpha1.SubVolumeReplicationStatus{
 				SubVolumeName: svCopy.Name,
 				LastError:     "deferred: parallel limit",
+			})
+			continue
+		}
+
+		// A file copy of a running VM's disk mixes data from different
+		// moments and may not boot, so the controller never makes one.
+		vmPod, vmErr := rc.runningVMPod(ctx, &svCopy)
+		if vmErr != nil {
+			syncErrors = append(syncErrors, fmt.Sprintf("%s: check for a running VM: %v", svCopy.Name, vmErr))
+			svStatuses = append(svStatuses, v1alpha1.SubVolumeReplicationStatus{
+				SubVolumeName: svCopy.Name,
+				LastError:     fmt.Sprintf("check for a running VM: %v", vmErr),
+			})
+			continue
+		}
+		if vmPod != "" {
+			klog.InfoS("Skipping replication of a volume in use by a running VM",
+				"policy", policyName, "subVolume", svCopy.Name,
+				"pod", klog.KRef(svCopy.Spec.PVCNamespace, vmPod))
+			skipped++
+			svStatuses = append(svStatuses, v1alpha1.SubVolumeReplicationStatus{
+				SubVolumeName: svCopy.Name,
+				LastError: fmt.Sprintf("%s %s/%s; a file copy of a running VM disk may not boot",
+					skippedRunningVMPrefix, svCopy.Spec.PVCNamespace, vmPod),
 			})
 			continue
 		}
@@ -455,14 +503,15 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 		}
 	}
 
-	// All succeeded.
+	// All succeeded, apart from skipped VM volumes. Those do not count as a
+	// failed cycle, so they never pause the policy for the other volumes.
 	now := metav1.NewTime(rc.nowFunc())
 	policy.Status.Phase = "Active"
 	policy.Status.LastSyncTime = &now
 	policy.Status.LastSyncDuration = duration.String()
 	policy.Status.SubVolumeStatuses = svStatuses
 	policy.Status.ConsecutiveFailures = 0
-	policy.Status.LastError = ""
+	policy.Status.LastError = skippedVMError(skipped)
 
 	if err := rc.k8sClient.UpdateReplicationPolicyStatus(ctx, policy); err != nil {
 		klog.ErrorS(err, "Failed to update policy status after successful sync", "policy", policyName)
@@ -480,6 +529,46 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 		"subVolumes", len(matched),
 		"duration", duration.String(),
 	)
+}
+
+// runningVMPod returns the name of a KubeVirt pod that is running or starting
+// and mounts the SubVolume's PVC, or "" if there is none. Both the VM pod and a
+// hot-plug disk pod count, because both mean a running VM writes to the disk.
+func (rc *ReplicationController) runningVMPod(ctx context.Context, sv *v1alpha1.SubVolume) (string, error) {
+	podList := &corev1.PodList{}
+	if err := rc.directClient.List(ctx, podList,
+		client.InNamespace(sv.Spec.PVCNamespace),
+		client.HasLabels{kubevirtPodLabel},
+	); err != nil {
+		return "", fmt.Errorf("listing pods in %s: %w", sv.Spec.PVCNamespace, err)
+	}
+	for i := range podList.Items {
+		pod := &podList.Items[i]
+		if kind := pod.Labels[kubevirtPodLabel]; kind != "virt-launcher" && kind != "hotplug-disk" {
+			continue
+		}
+		if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+			continue
+		}
+		for _, vol := range pod.Spec.Volumes {
+			if vol.PersistentVolumeClaim != nil && vol.PersistentVolumeClaim.ClaimName == sv.Spec.PVCName {
+				return pod.Name, nil
+			}
+		}
+	}
+	return "", nil
+}
+
+// skippedVMError is the policy error for a cycle that skipped VM volumes.
+func skippedVMError(skipped int) string {
+	switch skipped {
+	case 0:
+		return ""
+	case 1:
+		return "1 SubVolume skipped: in use by a running VM"
+	default:
+		return fmt.Sprintf("%d SubVolumes skipped: in use by a running VM", skipped)
+	}
 }
 
 // isReceiverMode returns true if the policy uses driver-to-driver replication.
