@@ -362,6 +362,14 @@ func (s *GoldenImageSyncer) ensureGoldenDataVolume(
 	dv.SetGroupVersionKind(dataVolumeGVK)
 	err := s.directClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, dv)
 	if err == nil {
+		// Anyone who can write in the namespace could have made this
+		// DataVolume. Publish it only if it is the one this pool would make.
+		url, _, _ := unstructured.NestedString(dv.Object, "spec", "source", "registry", "url")
+		sc, _, _ := unstructured.NestedString(dv.Object, "spec", "storage", "storageClassName")
+		labels := dv.GetLabels()
+		if labels[goldenImageLabel] != "true" || labels[goldenPoolLabel] != poolName || url != img.RegistryURL || sc != scName {
+			return "", fmt.Errorf("DataVolume %s/%s was not made by pool %s for %s; delete it to let the pool make it", ns, name, poolName, img.RegistryURL)
+		}
 		phase, _, _ := unstructured.NestedString(dv.Object, "status", "phase")
 		return phase, nil
 	}
@@ -774,21 +782,38 @@ func (s *GoldenImageSyncer) ensureDataSource(
 	return dsName, nil
 }
 
-// RemovePoolImages deletes the golden DataVolumes, claims, Templates and
-// catalog DataSources made for poolName, in every namespace. It reports
-// done=true once none are left.
-func (s *GoldenImageSyncer) RemovePoolImages(ctx context.Context, poolName string) (bool, error) {
+// RemovePoolImages deletes the golden DataVolumes, claims and Templates made
+// for pool in its target namespaces, and its catalog DataSources. It reports
+// done=true once none are left, or the ones left are already being deleted.
+func (s *GoldenImageSyncer) RemovePoolImages(ctx context.Context, pool *v1alpha1.FileSharePool) (bool, error) {
+	poolName := pool.Name
 	selector := client.MatchingLabels{goldenImageLabel: "true", goldenPoolLabel: poolName}
-	lists := []client.ObjectList{&corev1.PersistentVolumeClaimList{}}
-	for _, gvk := range []schema.GroupVersionKind{dataVolumeGVK, templateGVK, dataSourceGVK} {
+	newList := func(gvk schema.GroupVersionKind) client.ObjectList {
 		list := &unstructured.UnstructuredList{}
 		list.SetGroupVersionKind(gvk.GroupVersion().WithKind(gvk.Kind + "List"))
-		lists = append(lists, list)
+		return list
+	}
+	type search struct {
+		list client.ObjectList
+		ns   string
+	}
+	// Labels can be set by anyone who can write in a namespace, so only the
+	// pool's target namespaces are searched. Only admins write in the shared
+	// images namespace.
+	searches := []search{{newList(dataSourceGVK), "openshift-virtualization-os-images"}}
+	if pool.Spec.GoldenImages != nil {
+		for _, ns := range pool.Spec.GoldenImages.TargetNamespaces {
+			searches = append(searches,
+				search{newList(dataVolumeGVK), ns},
+				search{&corev1.PersistentVolumeClaimList{}, ns},
+				search{newList(templateGVK), ns})
+		}
 	}
 
 	done := true
-	for _, list := range lists {
-		if err := s.directClient.List(ctx, list, selector); err != nil {
+	for _, sr := range searches {
+		list := sr.list
+		if err := s.directClient.List(ctx, list, selector, client.InNamespace(sr.ns)); err != nil {
 			if isNoMatchError(err) {
 				continue
 			}
@@ -800,7 +825,7 @@ func (s *GoldenImageSyncer) RemovePoolImages(ctx context.Context, poolName strin
 		}
 		for _, o := range objs {
 			obj, ok := o.(client.Object)
-			if !ok {
+			if !ok || obj.GetDeletionTimestamp() != nil {
 				continue
 			}
 			done = false

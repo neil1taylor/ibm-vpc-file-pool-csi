@@ -63,7 +63,7 @@ type FileSharePoolReconciler struct {
 
 // GoldenImageRemover deletes the golden image objects made for a pool.
 type GoldenImageRemover interface {
-	RemovePoolImages(ctx context.Context, poolName string) (bool, error)
+	RemovePoolImages(ctx context.Context, pool *v1alpha1.FileSharePool) (bool, error)
 }
 
 // SetGoldenImageRemover sets what removes a deleted pool's golden images.
@@ -209,7 +209,7 @@ func (r *FileSharePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 func (r *FileSharePoolReconciler) handleDeletion(ctx context.Context, pool *v1alpha1.FileSharePool) (ctrl.Result, error) {
 	// The pool's golden images are volumes on the pool, so they go first.
 	if r.goldenImages != nil {
-		done, err := r.goldenImages.RemovePoolImages(ctx, pool.Name)
+		done, err := r.goldenImages.RemovePoolImages(ctx, pool)
 		if err != nil {
 			klog.ErrorS(err, "Failed to remove golden images during deletion", "pool", pool.Name)
 			return reconcile.Result{}, err

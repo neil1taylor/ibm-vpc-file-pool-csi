@@ -18,9 +18,12 @@ func addDataVolumeKinds(s *runtime.Scheme) {
 	s.AddKnownTypeWithName(list, &unstructured.UnstructuredList{})
 }
 
-// goldenDataVolume is a golden image DataVolume of my-pool in the given phase.
+// goldenDataVolume is the CentOS Stream 9 golden image DataVolume that pool
+// my-pool (StorageClass my-pool) makes, in the given phase.
 func goldenDataVolume(ns, name, phase string) *unstructured.Unstructured {
 	dv := labelledUnstructured(dataVolumeGVK, ns, name, goldenLabels("my-pool"))
+	_ = unstructured.SetNestedField(dv.Object, "docker://quay.io/containerdisks/centos-stream:9", "spec", "source", "registry", "url")
+	_ = unstructured.SetNestedField(dv.Object, "my-pool", "spec", "storage", "storageClassName")
 	if phase != "" {
 		_ = unstructured.SetNestedField(dv.Object, phase, "status", "phase")
 	}
@@ -83,7 +86,7 @@ func TestEnsureGoldenDataVolume_ReportsThePhase(t *testing.T) {
 		syncer := NewGoldenImageSyncer(newFakeK8sClient(), newDataVolumeClient(goldenDataVolume("app-a", "golden-centos-stream9", phase)))
 		img := goldenImageInfo{Name: "centos-stream9", RegistryURL: "docker://quay.io/containerdisks/centos-stream:9"}
 
-		got, err := syncer.ensureGoldenDataVolume(context.Background(), "app-a", "golden-centos-stream9", img, "my-pool", "my-sc", 15)
+		got, err := syncer.ensureGoldenDataVolume(context.Background(), "app-a", "golden-centos-stream9", img, "my-pool", "my-pool", 15)
 		if err != nil || got != phase {
 			t.Errorf("phase %s: ensureGoldenDataVolume() = %q, %v", phase, got, err)
 		}
@@ -107,5 +110,24 @@ func TestSyncImageInNamespace_FailedImport(t *testing.T) {
 	status := syncer.syncImageInNamespace(context.Background(), "my-pool", "my-pool", "app-a", img, 15)
 	if status.Phase != "Failed" {
 		t.Errorf("phase = %s, want Failed", status.Phase)
+	}
+}
+
+func TestEnsureGoldenDataVolume_RefusesADataVolumeItDidNotMake(t *testing.T) {
+	img := goldenImageInfo{Name: "centos-stream9", RegistryURL: "docker://quay.io/containerdisks/centos-stream:9"}
+	unlabelled := labelledUnstructured(dataVolumeGVK, "app-a", "golden-centos-stream9", nil)
+	_ = unstructured.SetNestedField(unlabelled.Object, "Succeeded", "status", "phase")
+	otherSource := goldenDataVolume("app-a", "golden-centos-stream9", "Succeeded")
+	_ = unstructured.SetNestedField(otherSource.Object, "docker://evil.example/disk:1", "spec", "source", "registry", "url")
+
+	for name, dv := range map[string]*unstructured.Unstructured{"no pool labels": unlabelled, "another source": otherSource} {
+		syncer := NewGoldenImageSyncer(newFakeK8sClient(), newDataVolumeClient(dv))
+		if _, err := syncer.ensureGoldenDataVolume(context.Background(), "app-a", "golden-centos-stream9", img, "my-pool", "my-pool", 15); err == nil {
+			t.Errorf("%s: expected the DataVolume to be refused", name)
+		}
+		status := syncer.syncImageInNamespace(context.Background(), "my-pool", "my-pool", "app-a", img, 15)
+		if status.Phase != "Failed" || status.DataSourceName != "" {
+			t.Errorf("%s: status = %s with catalog entry %q, want Failed and no catalog entry", name, status.Phase, status.DataSourceName)
+		}
 	}
 }

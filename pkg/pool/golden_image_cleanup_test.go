@@ -62,7 +62,7 @@ func TestRemovePoolImages_RemovesOnlyThePoolsObjects(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(goldenCleanupScheme()).WithObjects(append(ours, others...)...).Build()
 	syncer := NewGoldenImageSyncer(newFakeK8sClient(), c)
 
-	done, err := syncer.RemovePoolImages(context.Background(), "my-pool")
+	done, err := syncer.RemovePoolImages(context.Background(), newPoolWithGoldenImages("my-pool", true, []string{"app-a"}, nil))
 	if err != nil {
 		t.Fatalf("RemovePoolImages: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestRemovePoolImages_RemovesOnlyThePoolsObjects(t *testing.T) {
 		}
 	}
 
-	done, err = syncer.RemovePoolImages(context.Background(), "my-pool")
+	done, err = syncer.RemovePoolImages(context.Background(), newPoolWithGoldenImages("my-pool", true, []string{"app-a"}, nil))
 	if err != nil {
 		t.Fatalf("second RemovePoolImages: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestRemovePoolImages_NoTemplateOrCDIAPI(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(pvc).Build()
 	syncer := NewGoldenImageSyncer(newFakeK8sClient(), c)
 
-	if _, err := syncer.RemovePoolImages(context.Background(), "my-pool"); err != nil {
+	if _, err := syncer.RemovePoolImages(context.Background(), newPoolWithGoldenImages("my-pool", true, []string{"app-a"}, nil)); err != nil {
 		t.Fatalf("RemovePoolImages without the Template and CDI APIs: %v", err)
 	}
 	if exists(t, c, pvc) {
@@ -130,7 +130,7 @@ type fakeGoldenImageRemover struct {
 	done  bool
 }
 
-func (f *fakeGoldenImageRemover) RemovePoolImages(_ context.Context, _ string) (bool, error) {
+func (f *fakeGoldenImageRemover) RemovePoolImages(_ context.Context, _ *v1alpha1.FileSharePool) (bool, error) {
 	f.calls++
 	return f.done, nil
 }
@@ -172,5 +172,27 @@ func TestReconcile_Deletion_WaitsForGoldenImages(t *testing.T) {
 	}
 	if vpc.DeleteCalls != 1 {
 		t.Errorf("expected the share to be deleted once the golden images are gone, got %d", vpc.DeleteCalls)
+	}
+}
+
+func TestRemovePoolImages_OnlyInTargetNamespacesAndIgnoresTerminating(t *testing.T) {
+	outside := &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: "data", Namespace: "elsewhere", Labels: goldenLabels("my-pool")}}
+	now := metav1.Now()
+	stuck := &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{
+		Name: "golden-centos-stream9", Namespace: "app-a", Labels: goldenLabels("my-pool"),
+		DeletionTimestamp: &now, Finalizers: []string{"example.com/stuck"},
+	}}
+	c := fake.NewClientBuilder().WithScheme(goldenCleanupScheme()).WithObjects(outside, stuck).Build()
+	syncer := NewGoldenImageSyncer(newFakeK8sClient(), c)
+
+	done, err := syncer.RemovePoolImages(context.Background(), newPoolWithGoldenImages("my-pool", true, []string{"app-a"}, nil))
+	if err != nil {
+		t.Fatalf("RemovePoolImages: %v", err)
+	}
+	if !done {
+		t.Error("an object that is already being deleted must not hold up the pool")
+	}
+	if !exists(t, c, outside) {
+		t.Error("a labelled claim outside the pool's target namespaces was deleted")
 	}
 }
