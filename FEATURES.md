@@ -108,8 +108,8 @@ Efficient NFS mount handling with security enforcement.
 First-class support for running virtual machines on pooled storage.
 
 - **UID 107 directory ownership** — Pool `defaultUID: 107` and `defaultGID: 107` ensure subdirectories are pre-owned for QEMU (virt-handler chowns to 107:107).
-- **Raw disk image support** — KubeVirt requires raw format for filesystem PVCs. Cloud images (distributed as qcow2) must be converted with `qemu-img convert -f qcow2 -O raw`.
-- **Direct PVC creation** — CDI's VolumePopulator is incompatible with subdirectory-based CSI. PVCs are created directly and populated via curl + converter pods.
+- **Raw disk image support** — KubeVirt requires raw format for filesystem PVCs. Cloud images (distributed as qcow2) must be converted to raw. CDI does this when it imports an image, and the pool's golden images are made by CDI. Convert with `qemu-img convert -f qcow2 -O raw` only if you write images to a pool yourself.
+- **CDI registry import** — CDI imports an image from a registry onto a pool StorageClass. This was measured on rovslab (CentOS Stream 9 in about 40 s, RHEL 9 in about 2.5 min). A CDI host-assisted clone onto the pool from other storage (such as Ceph) ran out of memory in CDI's upload pod, so use a registry import instead.
 - **`sec=sys` enables chown** — With `sec=sys`, virt-handler's chown to UID 107 succeeds. Without it, chown fails for all non-root UIDs.
 
 ### Multi-Tenancy & Performance Tiers — Beta
@@ -206,9 +206,10 @@ Visual management of file share pools through the OpenShift Console.
 VM image caching for KubeVirt workloads.
 
 - **CDI DataImportCron discovery** — Finds golden images defined by CDI DataImportCrons and syncs them to target namespaces.
-- **qcow2-to-raw conversion** — Runs a converter pod (centos:stream9 with `qemu-img`) to produce raw disk images compatible with KubeVirt filesystem PVCs.
+- **CDI import** — Makes a CDI DataVolume `golden-<image>` in each target namespace, on the pool's StorageClass, from the registry URL of the DataImportCron (`pullMethod: node`). CDI converts the image to raw. For ImageStream-based crons (RHEL), the syncer uses the external address the ImageStream imports from. The image is ready when the DataVolume phase is Succeeded. Target namespaces need no `anyuid` grant.
 - **Configurable refresh interval** — Default 24-hour sync cycle. Per-pool configuration via `GoldenImageConfig` in the FileSharePool spec.
-- **CDI DataSource creation** — Creates DataSource CRs in `openshift-virtualization-os-images` with `-nfs-pool` suffix for InstanceTypes catalog visibility. Cross-namespace PVC reference points to the golden PVC in the target namespace.
+- **CDI DataSource creation** — Creates DataSource CRs in `openshift-virtualization-os-images`, named `<image>-<namespace>-nfs-pool` (one per golden claim), for InstanceTypes catalog visibility. Each points to the golden PVC in its target namespace. Creating a VM from the InstanceTypes tab with its boot disk on the pool is being tested.
+- **Pool deletion clean-up** — Deleting a pool deletes its golden DataVolumes, PVCs, Templates and DataSources first. The syncer skips pools being deleted. The syncer refuses a `golden-<image>` DataVolume that the pool did not make.
 - **Per-namespace status** — Tracks sync phase (Pending, Syncing, Ready, Failed) per target namespace.
 
 ---

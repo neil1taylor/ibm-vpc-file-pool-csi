@@ -36,7 +36,6 @@ export interface GoldenImageConfig {
   targetNamespaces: string[];
   imageFilter?: string[];
   refreshInterval?: string;
-  converterImage?: string;
   pvcSizeGB?: number;
 }
 

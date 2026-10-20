@@ -546,7 +546,7 @@ All files use `//go:build e2e` — `make test` never runs them.
 
 ### VM Clone E2E Test
 
-`test/e2e/test-vm-clone.sh` validates the full syncer-driven KubeVirt golden image clone pipeline. The test creates a pool with `goldenImages.enabled=true` and lets the golden image syncer handle image discovery from CDI DataImportCrons, PVC creation, qcow2-to-raw converter Jobs, and OpenShift Template creation. It then creates a VM from the syncer-generated template, verifies the CSI clone Job completes, and checks VM boot with connectivity tests.
+`test/e2e/test-vm-clone.sh` validates the full syncer-driven KubeVirt golden image clone pipeline. The test creates a pool with `goldenImages.enabled=true` and lets the golden image syncer handle image discovery from CDI DataImportCrons, CDI DataVolume creation, and OpenShift Template creation. It then creates a VM from the syncer-generated template, verifies the CSI clone Job completes, and checks VM boot with connectivity tests.
 
 ```bash
 # Via make
@@ -575,14 +575,14 @@ Requires: ROKS or ROVS cluster with OpenShift Virtualization + CDI installed, `o
 | 3. create_namespace | Create test namespace | — |
 | 4. create_pool | StorageClass + FileSharePool with goldenImages.enabled | — |
 | 5. wait_pool_ready | Poll Phase=Ready | 180s |
-| 6. wait_golden_images_ready | Syncer creates PVCs + converter Jobs + templates | 900s |
+| 6. wait_golden_images_ready | Syncer creates DataVolumes + templates | 900s |
 | 7. pick_ready_image | Find first ready template in namespace | — |
 | 8. create_vm_from_template | `oc process` template, apply VM + PVCs | — |
 | 9. wait_clone_complete | Poll SubVolume cloneStatus=Complete | 300s |
 | 10. wait_vm_running | Poll VMI Phase=Running + Ready=True | 180s |
 | 11. verify_vm_connectivity | virtctl console + guest agent (best-effort) | 30s |
 
-Automatic diagnostic collection on failure: pool YAML + goldenImages status, SubVolumes, PVC status, clone/converter Job logs, controller/node agent logs, VM events.
+Automatic diagnostic collection on failure: pool YAML + goldenImages status, SubVolumes, PVC status, clone Job logs, golden DataVolumes, controller/node agent logs, VM events.
 
 ### Cleanup
 

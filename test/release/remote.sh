@@ -4,6 +4,7 @@
 #
 # Usage:
 #   bash test/release/remote.sh start CLUSTER [VERSION]   start a run, print its ID
+#     (set RT_STAGES=01,08 to run only some stages)
 #   bash test/release/remote.sh report RUN_ID             copy the report folder back and print it
 #
 # Needs: ibmcloud (logged in), ssh access to the build server.
@@ -51,7 +52,7 @@ start() {
     # this SSH session can end at once.
     build "cd ~/release-test/src || exit 1; nohup bash -c 'KUBECONFIG=\$HOME/release-test/kubeconfig-$id RT_ID=$id \
         RT_VPC_PROFILE_ID=$profile_id \
-        bash test/release/run.sh --cluster $cluster ${version:+--version $version} --out \$HOME/release-test/out/$id; \
+        bash test/release/run.sh --cluster $cluster ${version:+--version $version} ${RT_STAGES:+--stages $RT_STAGES} --out \$HOME/release-test/out/$id; \
         rm -f \$HOME/release-test/kubeconfig-$id' >\$HOME/release-test/out/$id.log 2>&1 </dev/null &"
     echo "Started run $id on $cluster."
     echo "Report: bash test/release/remote.sh report $id"
@@ -72,5 +73,5 @@ report() {
 case "${1:-}" in
     start) shift; start "$@" ;;
     report) shift; report "$@" ;;
-    *) sed -n '2,9p' "$0"; exit 2 ;;
+    *) sed -n '2,10p' "$0"; exit 2 ;;
 esac

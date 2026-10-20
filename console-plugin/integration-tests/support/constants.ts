@@ -100,12 +100,13 @@ export const SELECTORS = {
   expandableToggle: 'button',
 } as const;
 
-/** Golden image DataSource names to verify */
-export const GOLDEN_IMAGE_DATASOURCES = [
-  'rhel8-nfs-pool',
-  'rhel9-nfs-pool',
-  'rhel10-nfs-pool',
-] as const;
+/** Namespace that receives the golden images (a pool's targetNamespaces entry) */
+const GOLDEN_IMAGE_NAMESPACE = process.env.GOLDEN_IMAGE_NAMESPACE || 'pool-tutorial';
+
+/** Golden image DataSource names to verify: one per image and target namespace */
+export const GOLDEN_IMAGE_DATASOURCES = ['rhel8', 'rhel9', 'rhel10'].map(
+  (image) => `${image}-${GOLDEN_IMAGE_NAMESPACE}-nfs-pool`,
+);
 
 /** DataSource detail route template */
 export function dataSourceRoute(name: string): string {

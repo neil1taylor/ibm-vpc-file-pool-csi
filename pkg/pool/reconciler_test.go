@@ -1801,14 +1801,14 @@ func (c *fakeDirectClient) Patch(_ context.Context, obj client.Object, patch cli
 		return err
 	}
 
-	// Simple merge: decode the patch JSON and set claimPropertySets
+	// Simple merge: decode the patch JSON and set each spec field
 	var patchMap map[string]interface{}
 	if err := json.Unmarshal(patchData, &patchMap); err != nil {
 		return err
 	}
 	if specPatch, ok := patchMap["spec"].(map[string]interface{}); ok {
-		if cps, ok := specPatch["claimPropertySets"]; ok {
-			_ = unstructured.SetNestedField(sp.Object, cps, "spec", "claimPropertySets")
+		for field, value := range specPatch {
+			_ = unstructured.SetNestedField(sp.Object, value, "spec", field)
 		}
 	}
 	return nil
@@ -1969,5 +1969,26 @@ func ibmcloudInput(poolName string, sizeGB int64) ibmcloud.CreateShareInput {
 		Profile:  "dp2",
 		SizeGB:   sizeGB,
 		SubnetID: "subnet-us-south-1",
+	}
+}
+
+// CDI's own copy pods run out of memory when they write onto NFS (rovslab,
+// 20 October), so CDI must ask the driver to make clones.
+func TestEnsureStorageProfiles_ClonesWithTheDriver(t *testing.T) {
+	k := newFakeK8sClient()
+	r := newReconciler(k, fake.NewFakeVPCClient())
+	fakeClient := newFakeDirectClient()
+	r.directClient = fakeClient
+	r.restMapper = newFakeRESTMapper(true)
+	fakeClient.addStorageProfile("test-pool", nil)
+	pool := newTestPool("test-pool", "spread", 1000)
+	pool.Spec.InitialShares = 0
+	k.addPool(pool)
+
+	r.ensureStorageProfiles(context.Background(), pool)
+
+	got, _, _ := unstructured.NestedString(fakeClient.getStorageProfile("test-pool").Object, "spec", "cloneStrategy")
+	if got != "csi-clone" {
+		t.Errorf("cloneStrategy = %q, want csi-clone", got)
 	}
 }

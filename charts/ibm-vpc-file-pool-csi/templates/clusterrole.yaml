@@ -89,8 +89,12 @@ rules:
   # CDI DataSources (InstanceTypes catalog visibility)
   - apiGroups: ["cdi.kubevirt.io"]
     resources: ["datasources"]
-    verbs: ["get", "create"]
-  # Jobs for golden image conversion
+    verbs: ["get", "list", "create", "delete"]
+  # CDI DataVolumes (golden images are imported by CDI)
+  - apiGroups: ["cdi.kubevirt.io"]
+    resources: ["datavolumes"]
+    verbs: ["get", "list", "create", "delete"]
+  # Jobs for share data (copies and removals on the shares)
   - apiGroups: ["batch"]
     resources: ["jobs"]
     verbs: ["get", "list", "watch", "create", "delete"]
@@ -98,14 +102,6 @@ rules:
   - apiGroups: ["image.openshift.io"]
     resources: ["imagestreams"]
     verbs: ["get"]
-  # ImageStream layers (required to grant system:image-puller via RoleBinding)
-  - apiGroups: ["", "image.openshift.io"]
-    resources: ["imagestreams/layers"]
-    verbs: ["get"]
-  # RoleBindings for image-puller access (converter Jobs pulling from internal registry)
-  - apiGroups: ["rbac.authorization.k8s.io"]
-    resources: ["rolebindings"]
-    verbs: ["get", "create"]
   # OpenShift Templates for VM catalog
   - apiGroups: ["template.openshift.io"]
     resources: ["templates"]

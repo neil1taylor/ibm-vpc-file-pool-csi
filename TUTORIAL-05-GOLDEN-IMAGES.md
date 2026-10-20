@@ -293,7 +293,7 @@ oc get sc | grep "(default)"
 
 ## Mode 2: Custom Syncer
 
-The custom syncer is a background controller built into the CSI driver. When configured via `spec.goldenImages`, it discovers CDI DataImportCron images, downloads and converts them using converter Jobs, and creates ready-to-clone PVCs and OpenShift Templates in target namespaces.
+The custom syncer is a background controller built into the CSI driver. When configured via `spec.goldenImages`, it discovers CDI DataImportCron images, imports each one with a CDI DataVolume on the pool StorageClass, and creates ready-to-clone PVCs and OpenShift Templates in target namespaces.
 
 ### Step 2a: Configure the Pool with Golden Images
 
@@ -333,69 +333,38 @@ EOF
 - `imageFilter: ["centos"]` limits syncing to images whose names contain "centos" (substring match)
 - `refreshInterval: "1h"` checks for new images every hour
 - `pvcSizeGB: 15` creates 15 GB PVCs for golden images
-- The syncer uses `quay.io/centos/centos:stream9` as the default converter image
 
 > **Note:** The syncer skips processing if the pool StorageClass is already the cluster default (CDI native mode handles it). Make sure you restored the original default in Step 1f before proceeding.
 
 The syncer starts its first cycle 30 seconds after the controller starts, then runs every `refreshInterval`. Since we just updated the pool spec, the reconciler triggers a sync within one reconcile interval (~30 seconds).
 
-### Step 2b: Grant SCC for Converter Jobs
+### Step 2b: Watch the DataVolumes
 
-Converter Jobs run as root (UID 0) to install `qemu-img` and convert disk images. On OpenShift, the default service account needs the `anyuid` SCC:
-
-```bash
-oc adm policy add-scc-to-user anyuid -z default -n ${TUTORIAL_NS}
-```
-
-### Step 2c: Watch Converter Jobs
-
-The syncer creates a converter Job for each discovered image that matches the filter:
+The syncer creates a CDI DataVolume `golden-<image>` for each discovered image that matches the filter. CDI downloads the image and converts it to raw format. The target namespace needs no extra permissions.
 
 ```bash
-oc get jobs -n ${TUTORIAL_NS} -w
+oc get dv -n ${TUTORIAL_NS} -w
 ```
 
 Expected (after the syncer runs):
 
 ```
-NAME                               COMPLETIONS   DURATION   AGE
-golden-convert-centos-stream9-image-cron   0/1           0s         5s
+NAME                               PHASE              PROGRESS   RESTARTS   AGE
+golden-centos-stream9-image-cron   ImportInProgress   45.00%                20s
 ```
 
-Watch the converter pod logs:
-
-```bash
-# Find the converter pod
-oc get pods -n ${TUTORIAL_NS} -l pool.storage.ibmcloud.io/golden-image=true
-
-# Follow logs (replace pod name)
-oc logs -n ${TUTORIAL_NS} -l pool.storage.ibmcloud.io/image=centos-stream9-image-cron -f
-```
-
-The converter performs these steps:
-1. Installs `skopeo`, `qemu-img`, and `jq`
-2. Downloads the OCI image from the container registry
-3. Extracts the disk layer from the OCI manifest
-4. Decompresses gzip layers directly to the NFS PVC (avoids OOM on emptyDir)
-5. Extracts the disk image from the tar archive (containerdisks store images at `disk/disk.img`)
-6. Converts qcow2 to raw format (KubeVirt requires raw)
-7. Sets the MBR bootable flag for SeaBIOS compatibility
-8. Marks the PVC as ready
-
-Wait for the Job to complete:
-
-```bash
-oc get jobs -n ${TUTORIAL_NS} -w
-```
-
-Expected:
+Wait for the phase to be `Succeeded`:
 
 ```
-NAME                                       COMPLETIONS   DURATION   AGE
-golden-convert-centos-stream9-image-cron   1/1           3m45s      4m
+NAME                               PHASE       PROGRESS   RESTARTS   AGE
+golden-centos-stream9-image-cron   Succeeded   100.0%                1m
 ```
 
-### Step 2d: Verify Golden PVCs
+On rovslab, a CentOS Stream 9 import took about 40 seconds.
+
+If the phase is `Failed`, run `oc describe dv golden-centos-stream9-image-cron -n ${TUTORIAL_NS}` to see the events. To retry, delete the DataVolume. The syncer makes a new one on the next cycle.
+
+### Step 2c: Verify Golden PVCs
 
 ```bash
 oc get pvc -n ${TUTORIAL_NS} -l pool.storage.ibmcloud.io/golden-image=true
@@ -408,16 +377,9 @@ NAME                              STATUS   VOLUME          CAPACITY   ACCESS MOD
 golden-centos-stream9-image-cron  Bound    pvc-cccc...     15Gi       RWX            golden-pool    5m
 ```
 
-Check the PVC has the `golden-ready` annotation:
+CDI makes the PVC for the DataVolume. The pool status in Step 5 shows `Ready` when the DataVolume has succeeded.
 
-```bash
-oc get pvc golden-centos-stream9-image-cron -n ${TUTORIAL_NS} \
-    -o jsonpath='{.metadata.annotations.pool\.storage\.ibmcloud\.io/golden-ready}'
-```
-
-Expected: `true`
-
-### Step 2e: Verify OpenShift Templates
+### Step 2d: Verify OpenShift Templates
 
 The syncer creates an OpenShift Template for each golden image, enabling one-click VM creation from the Virtualization catalog:
 
@@ -444,7 +406,7 @@ The template includes:
 - **DATA_DISK_SIZE**: Data disk size (default 10Gi)
 - **CLOUD_USER_PASSWORD**: Auto-generated password for cloud-init
 
-### Step 2f: Create a VM from the Golden Image Template
+### Step 2e: Create a VM from the Golden Image Template
 
 ```bash
 oc process centos-stream9-nfs-pool -n ${TUTORIAL_NS} \
@@ -511,7 +473,7 @@ Expected:
       phase: Ready
       pvcName: golden-centos-stream9-image-cron
       templateName: centos-stream9-nfs-pool
-      dataSourceName: centos-stream9-nfs-pool
+      dataSourceName: centos-stream9-image-cron-pool-tutorial-golden-nfs-pool
       lastSyncTime: "2026-02-25T..."
       message: Golden image ready
 ```
@@ -534,18 +496,19 @@ Expected:
 
 | Phase | Description |
 |-------|-------------|
-| `Pending` | Golden PVC has been created but the converter Job has not started yet |
-| `Syncing` | Converter Job is running (downloading, extracting, converting the image) |
-| `Ready` | Golden image PVC is populated and the Template has been created |
+| `Pending` | The syncer has not yet made the DataVolume |
+| `Syncing` | The CDI DataVolume is importing the image |
+| `Ready` | The DataVolume phase is `Succeeded` and the Template has been created |
 | `Failed` | An error occurred (check `message` for details) |
 
-If a golden image shows `Failed`, check the converter Job logs:
+If a golden image shows `Failed`, check the DataVolume:
 
 ```bash
-oc logs -n ${TUTORIAL_NS} -l pool.storage.ibmcloud.io/golden-image=true --tail=50
+oc get dv -n ${TUTORIAL_NS}
+oc describe dv golden-centos-stream9-image-cron -n ${TUTORIAL_NS}
 ```
 
-Failed converter Jobs are automatically deleted by the syncer on the next cycle so they can be recreated.
+To retry, delete the DataVolume. The syncer makes a new one on the next cycle. If the message says the DataVolume "was not made by pool", a DataVolume with the same name already exists that the pool did not make. Delete it, or use a different name.
 
 ### Step 5d: Verify the CDI DataSource
 
@@ -558,14 +521,14 @@ oc get datasources -n openshift-virtualization-os-images -l pool.storage.ibmclou
 Expected:
 
 ```
-NAME                        AGE
-centos-stream9-nfs-pool     10m
+NAME                                                              AGE
+centos-stream9-image-cron-pool-tutorial-golden-nfs-pool           10m
 ```
 
 The DataSource points cross-namespace to the golden PVC in the target namespace:
 
 ```bash
-oc get datasource centos-stream9-nfs-pool -n openshift-virtualization-os-images -o yaml
+oc get datasource centos-stream9-image-cron-pool-tutorial-golden-nfs-pool -n openshift-virtualization-os-images -o yaml
 ```
 
 ---
@@ -584,9 +547,9 @@ for i in $(seq 1 15); do
     sleep 2
 done
 
-# 3. Delete pods (converter jobs) and PVCs
+# 3. Delete pods, golden DataVolumes and PVCs
 oc delete pods --all -n ${TUTORIAL_NS} --force --grace-period=0 --ignore-not-found
-oc delete jobs --all -n ${TUTORIAL_NS} --ignore-not-found
+oc delete dv --all -n ${TUTORIAL_NS} --timeout=60s --ignore-not-found
 oc delete pvc --all -n ${TUTORIAL_NS} --timeout=60s --ignore-not-found
 
 # 4. Delete syncer-created Templates
@@ -629,13 +592,10 @@ if [ -n "${ORIGINAL_DEFAULT_SC}" ]; then
         storageclass.kubernetes.io/is-default-class=true --overwrite
 fi
 
-# 11. Remove anyuid SCC
-oc adm policy remove-scc-from-user anyuid -z default -n ${TUTORIAL_NS}
-
-# 12. Delete namespace
+# 11. Delete namespace
 oc delete namespace ${TUTORIAL_NS} --timeout=60s --ignore-not-found
 
-# 13. Verify VPC shares are being deleted
+# 12. Verify VPC shares are being deleted
 ibmcloud is shares
 ```
 
@@ -647,8 +607,8 @@ ibmcloud is shares
 |------|---------|
 | Pool golden image status | `oc get filesharepool <pool> -o yaml \| grep -A30 goldenImages` |
 | Golden PVCs | `oc get pvc -n <ns> -l pool.storage.ibmcloud.io/golden-image=true` |
-| Converter Jobs | `oc get jobs -n <ns> -l pool.storage.ibmcloud.io/golden-image=true` |
-| Converter Job logs | `oc logs -n <ns> -l pool.storage.ibmcloud.io/golden-image=true` |
+| Golden DataVolumes | `oc get dv -n <ns>` |
+| DataVolume events | `oc describe dv golden-<image> -n <ns>` |
 | Golden Templates | `oc get templates -n <ns> -l pool.storage.ibmcloud.io/golden-image=true` |
 | CDI DataSources | `oc get datasources -n openshift-virtualization-os-images -l pool.storage.ibmcloud.io/golden-image=true` |
 | CDI DataImportCrons | `oc get dataimportcrons -n openshift-virtualization-os-images` |
@@ -667,7 +627,6 @@ ibmcloud is shares
 | `targetNamespaces` | []string | (required, min 1) | Namespaces where golden PVCs and Templates are created |
 | `imageFilter` | []string | (optional) | Substring filters for image names (empty = sync all) |
 | `refreshInterval` | string | "24h" | How often the syncer checks for new images (Go duration) |
-| `converterImage` | string | "quay.io/centos/centos:stream9" | Container image for converter Jobs |
 | `pvcSizeGB` | int64 | 15 | Size of golden image PVCs in GB (min 5) |
 
 ---
