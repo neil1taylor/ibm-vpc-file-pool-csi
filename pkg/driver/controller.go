@@ -480,6 +480,8 @@ func (d *Driver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotRequ
 		switch {
 		case errors.Is(err, pool.ErrOperationInProgress):
 			return nil, status.Error(codes.Aborted, err.Error())
+		case errors.Is(err, pool.ErrInsufficientShareCapacity):
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		case errors.Is(err, pool.ErrSourceNotFound):
 			return nil, status.Errorf(codes.NotFound, "source volume not found")
 		case errors.Is(err, pool.ErrSnapshotUnsupported), errors.Is(err, pool.ErrSnapshotFailed):

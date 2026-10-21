@@ -814,6 +814,20 @@ func (m *Manager) restoreInstant(ctx context.Context, sv *v1alpha1.SubVolume, sn
 	return m.instant.jobs.RunChainScript(ctx, "restore-"+sv.Name, folders, script, "set -eu\nchmod 0777 /vol1\n")
 }
 
+// checkShareRoom returns ErrInsufficientShareCapacity when shareID has less
+// than sizeGB free.
+func checkShareRoom(pool *v1alpha1.FileSharePool, shareID string, sizeGB int64) error {
+	for _, s := range pool.Status.Shares {
+		if s.ShareID == shareID {
+			if free := s.TotalGB - s.AllocatedGB; sizeGB > free {
+				return fmt.Errorf("%w: the snapshot needs %d GB but share %s has %d GB free", ErrInsufficientShareCapacity, sizeGB, shareID, free)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("share %s is not in pool %s", shareID, pool.Name)
+}
+
 // snapshotChargeGB is the share space a snapshot is charged.
 func snapshotChargeGB(snap *v1alpha1.Snapshot) int64 {
 	if snap.Annotations[snapshotMethodAnnotation] == snapshotMethodInstant {
@@ -841,7 +855,7 @@ func (m *Manager) deleteInstantSnapshot(ctx context.Context, snap *v1alpha1.Snap
 	if err = m.k8sClient.DeleteSnapshot(ctx, snap.Name); err != nil {
 		return fmt.Errorf("delete Snapshot CR: %w", err)
 	}
-	m.updateShareDeallocation(pool, snap.Spec.ShareID, snapshotChargeGB(snap))
+	m.chargeShare(pool, snap.Spec.ShareID, -snapshotChargeGB(snap))
 	if err := m.k8sClient.UpdateFileSharePoolStatus(ctx, pool); err != nil {
 		klog.ErrorS(err, "Failed to update pool status after snapshot deletion", "pool", pool.Name)
 	}
