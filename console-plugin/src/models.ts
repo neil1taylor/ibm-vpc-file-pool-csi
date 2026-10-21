@@ -68,6 +68,16 @@ export const PersistentVolumeClaimModel: K8sModel = {
   namespaced: true,
 };
 
+export const PodModel: K8sModel = {
+  apiVersion: 'v1',
+  kind: 'Pod',
+  plural: 'pods',
+  abbr: 'P',
+  label: 'Pod',
+  labelPlural: 'Pods',
+  namespaced: true,
+};
+
 export const StorageClassModel: K8sModel = {
   apiGroup: 'storage.k8s.io',
   apiVersion: 'v1',
