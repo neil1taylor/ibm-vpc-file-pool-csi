@@ -1370,7 +1370,7 @@ type BackupPolicySpec struct {
 }
 ```
 
-Status: `phase` (`Active`, `Suspended`, `Error`), `message`, `volumeCount`, `replicationPolicies`, and `volumes`. Each volume has the claim, the VM, `lastBackupTime`, `oldestBackupTime`, `restorePoints` (moments before the newest that can be restored), `bytesWritten`, `consistency` (`FileSystemConsistent` or `CrashConsistent` for a VM disk, `FileCopy` for any other volume) and `lastError`. It also keeps what a restore needs (`subPath`, `requestedGB`, `storageClassName`). A volume that was deleted, or no longer matches the selector, stays in the list with `retained: true` until the keep time has passed since its last backup.
+Status: `phase` (`Active`, `Suspended`, `Error`; `Error` is also set, with the usage in `message`, while the snapshot pool's share is more than 85% full and new backups are stopped), `message`, `volumeCount`, `replicationPolicies`, and `volumes`. Each volume has the claim, the VM, `lastBackupTime`, `oldestBackupTime`, `restorePoints` (moments before the newest that can be restored), `bytesWritten`, `consistency` (`FileSystemConsistent` or `CrashConsistent` for a VM disk, `FileCopy` for any other volume) and `lastError`. It also keeps what a restore needs (`subPath`, `requestedGB`, `storageClassName`). A volume that was deleted, or no longer matches the selector, stays in the list with `retained: true` until the keep time has passed since its last backup.
 
 A volume belongs to one policy. A second policy that selects it skips it and says so in its `message`. The policy name goes into a label value, so it has at most 63 characters.
 

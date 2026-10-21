@@ -37,6 +37,11 @@ type fakeShareData struct {
 	// what a finished restore reports.
 	restoreErr     error
 	restoreOutcome RestoreOutcome
+	// usagePercent is what ShareUsage reports; usageErr makes it fail as a
+	// failed Job; usageCalls counts the calls.
+	usagePercent int
+	usageErr     error
+	usageCalls   int
 }
 
 type restoreCall struct {
@@ -132,6 +137,22 @@ func (f *fakeShareData) RestoreBackup(_ context.Context, key string, _ ShareMoun
 		return false, RestoreOutcome{}, nil
 	}
 	return true, outcome, nil
+}
+
+func (f *fakeShareData) ShareUsage(_ context.Context, _ string, _ ShareMount) (bool, int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.usageCalls++
+	if f.apiErr != nil {
+		return false, 0, f.apiErr
+	}
+	if f.usageErr != nil {
+		return false, 0, fmt.Errorf("%w: %v", ErrShareJobFailed, f.usageErr)
+	}
+	if f.inProgress {
+		return false, 0, nil
+	}
+	return true, f.usagePercent, nil
 }
 
 // Stop reports done once no Job runs for key. The first call on a running

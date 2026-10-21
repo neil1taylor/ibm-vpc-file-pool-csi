@@ -232,6 +232,16 @@ var (
 		[]string{"policy"},
 	)
 
+	// BackupSnapshotPoolUsedPercent is how full the share of a snapshot pool
+	// was when a Job last read it.
+	BackupSnapshotPoolUsedPercent = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "vpc_file_pool_backup_snapshot_pool_used_percent",
+			Help: "Percent of the share of a snapshot pool that is used, as last read by a Job",
+		},
+		[]string{"pool"},
+	)
+
 	// CDICopyLimitRaisedTotal counts how often the controller raised CDI's
 	// copy pod memory limit. More than one raise means something resets it.
 	CDICopyLimitRaisedTotal = prometheus.NewCounter(
@@ -268,6 +278,7 @@ func init() {
 		BackupVolumes,
 		BackupStalestAgeSeconds,
 		BackupOldestAgeSeconds,
+		BackupSnapshotPoolUsedPercent,
 		CDICopyLimitRaisedTotal,
 	)
 }

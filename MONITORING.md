@@ -19,7 +19,7 @@ The driver emits 25 metrics across eight categories:
 | Group Snapshots | 4 | Multi-PVC snapshot coordination |
 | Replication | 5 | Cross-region DR health |
 | CDI | 1 | CDI copy pod memory limit |
-| Backup | 3 | Backup policy health and age of backups |
+| Backup | 4 | Backup policy health, age of backups and fullness of the snapshot pool |
 
 ---
 
@@ -175,6 +175,7 @@ kill %1
 | `vpc_file_pool_backup_volumes` | Gauge | `policy` | Number of volumes a backup policy backs up. |
 | `vpc_file_pool_backup_stalest_age_seconds` | Gauge | `policy` | Age of the newest backup of the volume that was backed up longest ago. A volume that was never backed up counts from the time the policy was made. This is the RPO indicator of a backup policy. |
 | `vpc_file_pool_backup_oldest_age_seconds` | Gauge | `policy` | Age of the oldest backup the policy keeps. It should stay near `keepFor`. |
+| `vpc_file_pool_backup_snapshot_pool_used_percent` | Gauge | `pool` | Percent of the snapshot pool's share that is used, read by a Job about every 10 minutes (`df`). The controller cannot see this from custom resources: a pool counts only claims, not backups. Above 85%, the policies on the pool stop new backups. |
 
 Copy results of backups are in the replication metrics: the policies the controller makes are named `backup-<policy>-<source pool>`.
 
@@ -186,6 +187,26 @@ Alert when a backup is late, using twice the schedule as the limit (here 12 hour
   for: 15m
   annotations:
     summary: "Backup policy {{ $labels.policy }} has a volume with no backup for over 12 hours"
+```
+
+Alert before the snapshot pool reaches the limit, and when it has. At 85% the policies on the pool stop new backups; they never delete backups to make room, so the fix is more space or a shorter `keepFor`:
+
+```yaml
+- alert: SnapshotPoolNearlyFull
+  expr: vpc_file_pool_backup_snapshot_pool_used_percent > 75
+  for: 30m
+  labels:
+    severity: warning
+  annotations:
+    summary: "Snapshot pool {{ $labels.pool }} is {{ $value }}% full; new backups stop at 85%"
+
+- alert: SnapshotPoolFullBackupsStopped
+  expr: vpc_file_pool_backup_snapshot_pool_used_percent > 85
+  for: 15m
+  labels:
+    severity: critical
+  annotations:
+    summary: "Snapshot pool {{ $labels.pool }} is {{ $value }}% full; new backups are stopped"
 ```
 
 ---

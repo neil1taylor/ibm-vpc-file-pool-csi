@@ -69,13 +69,15 @@ type BackupController struct {
 	shareData ShareData
 	// reported holds the policies that have metric series.
 	reported map[string]bool
+	// usage holds what the usage Jobs found, by snapshot pool.
+	usage map[string]*poolUsage
 }
 
 // NewBackupController returns a controller that reads and writes with c. It
 // must read without a cache of pods or PVCs for every namespace, as the
 // replication controller does.
 func NewBackupController(c client.Client) *BackupController {
-	return &BackupController{client: c, interval: DefaultBackupInterval, nowFunc: time.Now, reported: map[string]bool{}}
+	return &BackupController{client: c, interval: DefaultBackupInterval, nowFunc: time.Now, reported: map[string]bool{}, usage: map[string]*poolUsage{}}
 }
 
 // SetNowFunc replaces the clock (for tests).
@@ -221,6 +223,11 @@ func (bc *BackupController) reconcile(ctx context.Context, bp *v1alpha1.BackupPo
 		return
 	}
 
+	// A snapshot pool above the limit gets no new backups. The policy is paused
+	// like a suspended one, and the status says why.
+	usedPercent, full := bc.snapshotPoolFull(ctx, bp.Spec.SnapshotPool, shareMountOf(share))
+	paused := bp.Spec.Suspend || full
+
 	targets, conflicts, err := bc.resolveTargets(ctx, bp, svs.Items)
 	if err != nil {
 		status = bc.keepStatus(bp, err.Error())
@@ -253,7 +260,7 @@ func (bc *BackupController) reconcile(ctx context.Context, bp *v1alpha1.BackupPo
 		name := backupReplicationName(bp.Name, pool)
 		desired[name] = true
 		names = append(names, name)
-		if err := bc.ensureReplicationPolicy(ctx, bp, pool, name, share); err != nil {
+		if err := bc.ensureReplicationPolicy(ctx, bp, pool, name, share, paused); err != nil {
 			status = bc.keepStatus(bp, fmt.Sprintf("make the replication policy for pool %s: %v", pool, err))
 			return
 		}
@@ -271,6 +278,9 @@ func (bc *BackupController) reconcile(ctx context.Context, bp *v1alpha1.BackupPo
 	}
 
 	status = bc.buildStatus(ctx, bp, targets, names, conflicts)
+	if full {
+		status.Phase, status.Message = backupPhaseError, snapshotPoolFullMessage(bp.Spec.SnapshotPool, usedPercent)
+	}
 }
 
 // keepStatus keeps the last status and adds why this pass did not finish.
@@ -500,7 +510,7 @@ func ptrEq(a, b *int32) bool {
 
 // ensureReplicationPolicy makes the ReplicationPolicy for one source pool, or
 // brings it in line with the BackupPolicy.
-func (bc *BackupController) ensureReplicationPolicy(ctx context.Context, bp *v1alpha1.BackupPolicy, pool, name string, share v1alpha1.PoolShareStatus) error {
+func (bc *BackupController) ensureReplicationPolicy(ctx context.Context, bp *v1alpha1.BackupPolicy, pool, name string, share v1alpha1.PoolShareStatus, paused bool) error {
 	want := desiredReplicationSpec(bp, pool, share)
 	rp := &v1alpha1.ReplicationPolicy{}
 	err := bc.client.Get(ctx, types.NamespacedName{Name: name}, rp)
@@ -510,7 +520,7 @@ func (bc *BackupController) ensureReplicationPolicy(ctx context.Context, bp *v1a
 			Labels:          map[string]string{backupPolicyLabel: bp.Name},
 			OwnerReferences: []metav1.OwnerReference{ownerOf(bp)},
 		}, Spec: want}
-		setPaused(rp, bp.Spec.Suspend)
+		setPaused(rp, paused)
 		if createErr := bc.client.Create(ctx, rp); createErr != nil {
 			return createErr
 		}
@@ -520,7 +530,7 @@ func (bc *BackupController) ensureReplicationPolicy(ctx context.Context, bp *v1a
 	if err != nil {
 		return err
 	}
-	if sameReplicationSpec(rp.Spec, want) && (rp.Annotations[pausedAnnotation] == "true") == bp.Spec.Suspend {
+	if sameReplicationSpec(rp.Spec, want) && (rp.Annotations[pausedAnnotation] == "true") == paused {
 		return nil
 	}
 	rp.Spec.SourcePoolName, rp.Spec.DestinationNFSServer, rp.Spec.DestinationExportPath = want.SourcePoolName, want.DestinationNFSServer, want.DestinationExportPath
@@ -528,7 +538,7 @@ func (bc *BackupController) ensureReplicationPolicy(ctx context.Context, bp *v1a
 	rp.Spec.MaxRetries, rp.Spec.MaxParallelSyncs = want.MaxRetries, want.MaxParallelSyncs
 	rp.Spec.VMCopySpeedLimitMBps, rp.Spec.RestorePointKeepHours = want.VMCopySpeedLimitMBps, want.RestorePointKeepHours
 	rp.Spec.MomentKeepHours = want.MomentKeepHours
-	setPaused(rp, bp.Spec.Suspend)
+	setPaused(rp, paused)
 	return bc.client.Update(ctx, rp)
 }
 
