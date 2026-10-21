@@ -477,10 +477,9 @@ func (d *Driver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotRequ
 
 	result, err := d.poolManager.CreateSnapshot(ctx, req.GetName(), req.GetSourceVolumeId(), req.GetParameters())
 	if err != nil {
-		if retryErr := shareDataRetryError(err); retryErr != nil {
-			return nil, retryErr
-		}
 		switch {
+		case errors.Is(err, pool.ErrOperationInProgress):
+			return nil, status.Error(codes.Aborted, err.Error())
 		case errors.Is(err, pool.ErrSourceNotFound):
 			return nil, status.Errorf(codes.NotFound, "source volume not found")
 		case errors.Is(err, pool.ErrSnapshotUnsupported), errors.Is(err, pool.ErrSnapshotFailed):
