@@ -46,8 +46,9 @@ export async function clickTab(page: Page, tabName: string): Promise<void> {
 /** Assert that a set of cards with the given titles are visible */
 export async function expectCards(page: Page, titles: readonly string[]): Promise<void> {
   for (const title of titles) {
+    // A title can be part of a longer one ("Utilization" in "Capacity Utilization Over Time").
     await expect(
-      page.locator(SELECTORS.cardTitle).filter({ hasText: title })
+      page.locator(SELECTORS.cardTitle).filter({ hasText: title }).first()
     ).toBeVisible({ timeout: 15_000 });
   }
 }
@@ -74,14 +75,16 @@ export async function expectTableHasRows(page: Page, tableSelector?: string): Pr
 export async function expectTableOrEmptyState(page: Page): Promise<void> {
   const table = page.locator('table tbody tr');
   const emptyState = page.locator('.pf-v6-c-empty-state, [class*="empty-state"], [class*="EmptyState"]');
+  // The list pages show "No <things> found" in plain text when there is nothing to list.
+  const emptyMessage = page.getByText(/^No .+ found\.?$/);
 
-  // Wait for either a table row or an empty state component
-  await expect(table.first().or(emptyState.first())).toBeVisible({ timeout: 30_000 });
+  // Wait for either a table row or an empty state
+  await expect(table.first().or(emptyState.first()).or(emptyMessage.first())).toBeVisible({ timeout: 30_000 });
 }
 
 /** Get a time range toggle button */
 export function getTimeRangeButton(page: Page, label: string): Locator {
-  return page.locator(SELECTORS.timeRangeGroup).getByText(label, { exact: true });
+  return page.locator(SELECTORS.timeRangeGroup).getByRole('button', { name: label, exact: true });
 }
 
 /** Check if the current URL is an IAM redirect (session expired) */
