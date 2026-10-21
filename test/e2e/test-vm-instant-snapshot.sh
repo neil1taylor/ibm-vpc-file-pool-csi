@@ -257,6 +257,8 @@ chain() {
     echo "${c:-disk.img}"
 }
 top_of() { chain "$1" | cut -d' ' -f1; }
+# words <text>: how many words. (wc pads its count with spaces on macOS.)
+words() { set -f; set -- $1; set +f; echo $#; }
 
 # open_file <vm> <volume>: the file QEMU has open for the volume, by name.
 open_file() {
@@ -381,7 +383,7 @@ for vs in $disk_snapshots; do
     log "$vs: $st"
     [ "$st" = "instant FileSystemConsistent" ] || fail "$vs is \"$st\", want an instant, FileSystemConsistent snapshot"
 done
-[ "$(echo "$disk_snapshots" | wc -w)" = 2 ] || fail "expected 2 disk snapshots, found: $disk_snapshots"
+[ "$(words "$disk_snapshots")" = 2 ] || fail "expected 2 disk snapshots, found: $disk_snapshots"
 log "the VM snapshot was ready $took s after the request"
 expect_open src rootdisk root
 expect_open src datadisk data
@@ -449,7 +451,7 @@ for i in 1 2 3; do
     st=$(snapshot_status "s$i")
     [ "${st%% *}" = instant ] || fail "s$i is \"$st\", want instant"
 done
-[ "$(chain root | wc -w)" = 4 ] || fail "the root chain is \"$(chain root)\", want 3 snapshot files and disk.img"
+[ "$(words "$(chain root)")" = 4 ] || fail "the root chain is \"$(chain root)\", want 3 snapshot files and disk.img"
 expect_open src rootdisk root
 
 log "live migration right after the last snapshot"
@@ -490,7 +492,7 @@ virtctl stop src -n "$NS" >/dev/null
 wait_until 600 "the VM stopped" vmi_gone src
 take s4 root
 wait_until "$JOB_TIMEOUT" "snapshot s4 of the stopped VM ready" snap_ready s4
-[ "$(chain root | wc -w)" = 2 ] || fail "the root chain is \"$(chain root)\", want 1 snapshot file and disk.img"
+[ "$(words "$(chain root)")" = 2 ] || fail "the root chain is \"$(chain root)\", want 1 snapshot file and disk.img"
 virtctl start src -n "$NS" >/dev/null
 wait_until 900 "src running" vmi_ready src
 wait_until 600 "src answering" guest_ready src
