@@ -45,7 +45,7 @@ Share selection and capacity management across the pool.
 
 Directory-level point-in-time copies via the standard CSI snapshot interface.
 
-- **CreateSnapshot** — A Job in the driver's namespace copies the SubVolume directory to a snapshot path on the same share. The Snapshot CR reads `readyToUse: false` until the copy has finished.
+- **CreateSnapshot** — A Job in the driver's namespace copies the SubVolume directory to a snapshot path on the same share. The Snapshot CR reads `readyToUse: false` until the copy has finished. If a running VM uses the claim, the snapshot is a QEMU copy of that disk at one moment instead (guest frozen for a moment; `status.consistency` says if it worked; `vmCopySpeedLimitMBps` on the VolumeSnapshotClass sets the speed, default 20 MB/s). Experimental, like the VM disk copy for replication.
 - **DeleteSnapshot** — A Job removes the snapshot directory; then the CR is deleted and the pool capacity is given back.
 - **ListSnapshots** — Lists snapshots filtered by source volume with pagination support.
 - **Restore from snapshot** — A Job copies the snapshot directory into the new volume and sets the pool's owner and permissions. The claim stays Pending until the copy has finished.
