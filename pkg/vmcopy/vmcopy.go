@@ -39,6 +39,14 @@ const (
 // after the VM restarted or moved. The caller makes a full copy instead.
 var ErrBaseLost = errors.New("the change list of the last copy is gone")
 
+// SnapshotIDPrefix starts the id of every copy that a snapshot makes. Ids
+// name the staging file, block nodes, jobs and change list of a copy, so the
+// prefix tells snapshot copies and replication copies apart.
+const SnapshotIDPrefix = "snap"
+
+// ErrBusy means a copy is still running in the VM, so no other copy can start.
+var ErrBusy = errors.New("a copy is already running in the VM")
+
 // bitmapPrefix starts the name of every change list (dirty bitmap) we make.
 const bitmapPrefix = "repl-"
 
@@ -61,7 +69,8 @@ type VM struct {
 	Name      string // the VirtualMachineInstance name
 }
 
-func (vm VM) domain() string { return vm.Namespace + "_" + vm.Name }
+// Domain is the libvirt domain name of the VM.
+func (vm VM) Domain() string { return vm.Namespace + "_" + vm.Name }
 
 // StartOptions configure a copy.
 type StartOptions struct {
@@ -168,7 +177,7 @@ func (c *Copier) Start(ctx context.Context, vm VM, volumes []string, opts StartO
 	}
 	var found []disk
 	for _, v := range volumes {
-		d, ok := devs[vmiDisksDir+"/"+v+"/disk.img"]
+		d, ok := devs[v]
 		if !ok {
 			return nil, fmt.Errorf("volume %q is not a disk of VM %s/%s", v, vm.Namespace, vm.Name)
 		}
@@ -287,7 +296,7 @@ type freezeResult struct {
 }
 
 func (c *Copier) freezeAndStart(ctx context.Context, vm VM, txn string) (*freezeResult, error) {
-	out, err := c.run(ctx, vm, "bash", "-c", freezeScript, "repl-freeze", vm.Name, vm.Namespace, vm.domain(), txn)
+	out, err := c.run(ctx, vm, "bash", "-c", freezeScript, "repl-freeze", vm.Name, vm.Namespace, vm.Domain(), txn)
 	if err != nil {
 		return nil, fmt.Errorf("running the freeze and copy start: %w", err)
 	}
@@ -376,7 +385,7 @@ func (c *Copier) removeBitmaps(ctx context.Context, vm VM, disks []Disk, match f
 		return err
 	}
 	for _, d := range disks {
-		dev, ok := devs[vmiDisksDir+"/"+d.Volume+"/disk.img"]
+		dev, ok := devs[d.Volume]
 		if !ok {
 			continue
 		}
@@ -415,26 +424,56 @@ func (c *Copier) Cancel(ctx context.Context, vm VM, cp *Copy) error {
 	return c.cleanup(ctx, vm, cp, true)
 }
 
-// RemoveStale deletes staging files, block nodes and change lists that an
-// earlier copy left behind, for example after a controller restart. It keeps
-// the change list keepBitmap, the base of the next change copy. It refuses
-// while any copy runs in the VM.
-func (c *Copier) RemoveStale(ctx context.Context, vm VM, volumes []string, keepBitmap string) error {
+// CheckIdle returns ErrBusy while any copy runs in the VM. It changes nothing,
+// so a caller that must not touch other copies' change lists can use it
+// instead of RemoveStale.
+func (c *Copier) CheckIdle(ctx context.Context, vm VM) error {
 	jobs, err := c.queryJobs(ctx, vm)
 	if err != nil {
 		return err
 	}
 	for id := range jobs {
 		if strings.HasPrefix(id, "repl-") {
-			return fmt.Errorf("copy job %s is still in QEMU", id)
+			return fmt.Errorf("copy job %s is still in QEMU: %w", id, ErrBusy)
 		}
+	}
+	return nil
+}
+
+// RemoveStale deletes staging files, block nodes and change lists that an
+// earlier copy left behind, for example after a controller restart. It keeps
+// the change list keepBitmap, the base of the next change copy. It refuses
+// while any copy runs in the VM.
+func (c *Copier) RemoveStale(ctx context.Context, vm VM, volumes []string, keepBitmap string) error {
+	return c.removeStale(ctx, vm, volumes, false, keepBitmap)
+}
+
+// CleanStaleCopies deletes what earlier snapshot copies left behind: their
+// staging files, block nodes and change lists. It touches nothing that
+// replication made, and RemoveStale touches nothing that a snapshot made, so
+// neither can delete a staging file that the other's Job still needs. A copy
+// in that wait has no QEMU job, so QEMU cannot show it. It refuses with
+// ErrBusy while any copy runs in the VM.
+func (c *Copier) CleanStaleCopies(ctx context.Context, vm VM, volumes []string) error {
+	return c.removeStale(ctx, vm, volumes, true, "")
+}
+
+// removeStale removes the leftovers of one kind of copy: snapshot copies
+// (their copy ids start with SnapshotIDPrefix) or all others.
+func (c *Copier) removeStale(ctx context.Context, vm VM, volumes []string, snapshots bool, keepBitmap string) error {
+	if err := c.CheckIdle(ctx, vm); err != nil {
+		return err
+	}
+	// ours reports whether a name made by a copy belongs to the kind we clean.
+	ours := func(name, prefix string) bool {
+		return strings.HasPrefix(name, prefix) && strings.HasPrefix(strings.TrimPrefix(name, prefix), SnapshotIDPrefix) == snapshots
 	}
 	nodes, err := c.namedNodes(ctx, vm)
 	if err != nil {
 		return err
 	}
 	for _, n := range nodes {
-		if strings.HasPrefix(n, "repl-") {
+		if ours(n, "repl-") {
 			if _, err := c.qmp(ctx, vm, "blockdev-del", map[string]any{"node-name": n}); err != nil {
 				return fmt.Errorf("removing block node %s: %w", n, err)
 			}
@@ -448,12 +487,18 @@ func (c *Copier) RemoveStale(ctx context.Context, vm VM, volumes []string, keepB
 		disks = append(disks, Disk{Volume: v})
 	}
 	if err := c.removeBitmaps(ctx, vm, disks, func(name string) bool {
-		return strings.HasPrefix(name, bitmapPrefix) && name != keepBitmap
+		return ours(name, bitmapPrefix) && name != keepBitmap
 	}); err != nil {
 		return err
 	}
 	for _, v := range volumes {
-		if _, err := c.run(ctx, vm, "find", vmiDisksDir+"/"+v, "-maxdepth", "1", "-name", StagingPrefix+"*.qcow2", "-delete"); err != nil {
+		args := []string{"find", vmiDisksDir + "/" + v, "-maxdepth", "1"}
+		if snapshots {
+			args = append(args, "-name", StagingPrefix+SnapshotIDPrefix+"*.qcow2")
+		} else {
+			args = append(args, "-name", StagingPrefix+"*.qcow2", "!", "-name", StagingPrefix+SnapshotIDPrefix+"*")
+		}
+		if _, err := c.run(ctx, vm, append(args, "-delete")...); err != nil {
 			return fmt.Errorf("removing staging files of %s: %w", v, err)
 		}
 	}
@@ -512,7 +557,9 @@ type blockDev struct {
 	bitmaps map[string]bool
 }
 
-// queryBlock maps each disk file of the VM to its top block node and size.
+// queryBlock maps each filesystem volume of the VM to the top block node of
+// its disk and the disk size. The top file is disk.img, or the newest file of
+// a snapshot chain in the same folder (see pkg/vmsnap).
 func (c *Copier) queryBlock(ctx context.Context, vm VM) (map[string]blockDev, error) {
 	out, err := c.qmp(ctx, vm, "query-block", nil)
 	if err != nil {
@@ -543,10 +590,39 @@ func (c *Copier) queryBlock(ctx context.Context, vm VM) (map[string]blockDev, er
 			for _, b := range append(d.Inserted.DirtyBitmaps, d.DirtyBitmaps...) {
 				bms[b.Name] = true
 			}
-			m[d.Inserted.File] = blockDev{node: d.Inserted.NodeName, size: d.Inserted.Image.VirtualSize, bitmaps: bms}
+			if vol := volumeOfFile(d.Inserted.File); vol != "" {
+				m[vol] = blockDev{node: d.Inserted.NodeName, size: d.Inserted.Image.VirtualSize, bitmaps: bms}
+			}
 		}
 	}
 	return m, nil
+}
+
+// volumeOfFile returns the volume whose folder holds a disk's top file, or ""
+// for a file outside the volume folders. QEMU reports a file that has a
+// backing file named relative to it as a json: description; the top file is
+// its "file" filename then.
+func volumeOfFile(file string) string {
+	if desc, ok := strings.CutPrefix(file, "json:"); ok {
+		var d struct {
+			File struct {
+				Filename string `json:"filename"`
+			} `json:"file"`
+		}
+		if json.Unmarshal([]byte(desc), &d) != nil {
+			return ""
+		}
+		file = d.File.Filename
+	}
+	rest, ok := strings.CutPrefix(file, vmiDisksDir+"/")
+	if !ok {
+		return ""
+	}
+	vol, name, ok := strings.Cut(rest, "/")
+	if !ok || strings.Contains(name, "/") {
+		return ""
+	}
+	return vol
 }
 
 type qemuJob struct {
@@ -599,7 +675,7 @@ func (c *Copier) qmp(ctx context.Context, vm VM, command string, args map[string
 	if err != nil {
 		return nil, err
 	}
-	out, err := c.run(ctx, vm, "virsh", "qemu-monitor-command", vm.domain(), string(b))
+	out, err := c.run(ctx, vm, "virsh", "qemu-monitor-command", vm.Domain(), string(b))
 	if err != nil {
 		return nil, err
 	}

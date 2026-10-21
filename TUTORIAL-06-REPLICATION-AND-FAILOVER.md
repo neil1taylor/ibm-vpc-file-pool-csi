@@ -1007,6 +1007,19 @@ oc config use-context source-cluster
 
 ---
 
+## Running VMs
+
+A VM that is running is not copied with rsync. The controller freezes the guest for a moment, copies all of its disks at that one moment, and keeps restore points at the destination. At failover, rewind **before** you start the VM:
+
+```bash
+kubectl failover plan --nfs-mount-path /data --list-moments
+kubectl failover execute --nfs-mount-path /data --prepare-only --rewind-to 2026-10-20T10:30:00Z
+```
+
+See `CROSS-REGION-DR.md`, "Running VM disks", for the details and the lab results.
+
+---
+
 ## Cleanup
 
 ### Source Cluster
@@ -1110,6 +1123,7 @@ oc delete namespace pool-tutorial-repl --timeout=60s --ignore-not-found
 | Replication Job logs | `oc logs -n kube-system job/<job-name>` |
 | Receiver pod status | `oc get pods -n kube-system -l app.kubernetes.io/component=replication-receiver` |
 | Receiver health check | `curl -k https://<receiver-route>/api/v1/health` |
+| Receiver token check (needs the token) | `curl -k -H "Authorization: Bearer $TOKEN" https://<receiver-route>/api/v1/auth-check` |
 | Receiver logs | `oc logs -n kube-system -l app.kubernetes.io/component=replication-receiver` |
 | Failover plan | `kubectl failover plan --nfs-mount-path <path>` |
 | Failover dry-run | `kubectl failover execute --nfs-mount-path <path> --dr-pool <pool> --dr-share-ip <ip> --dry-run` |

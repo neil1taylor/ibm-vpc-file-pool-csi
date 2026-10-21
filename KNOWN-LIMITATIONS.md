@@ -18,7 +18,8 @@ Explicit list of what the IBM VPC File Pool CSI Driver does not support, why, an
 
 **Limitations:**
 - Snapshots and clones are not instantaneous — they are full data copies proportional to the source volume size.
-- A snapshot of a volume that is being written is not one point in time: files can change while the copy runs. Stop or freeze the workload before the snapshot if you need a consistent copy.
+- A snapshot of a volume that is being written is not one point in time: files can change while the copy runs. Stop or freeze the workload before the snapshot if you need a consistent copy. The exception is a disk that a running KubeVirt VM uses: that snapshot is a QEMU copy at one moment, with the guest frozen for a moment (see below).
+- A snapshot of a running VM is made for each disk (each claim) as KubeVirt asks for it, but the driver copies all the pool disks of the VM at one moment, so the snapshots of the disks fit each other. A snapshot of one disk of a multi-disk VM therefore also copies the other disks to temporary files; the files of a disk that no snapshot claims within 10 minutes are deleted, and each share needs room for them. A disk that is not on a pool is not part of the moment. The copy runs at 20 MB/s by default, so a 20 GB disk takes about 20 minutes; set `vmCopySpeedLimitMBps` on the VolumeSnapshotClass to change that. Red Hat does not support the QEMU commands this uses.
 - Cross-share clones require the async path (no same-share optimization).
 - Per-PVC quota enforcement limitations (see above) also apply to cloned volumes.
 - No incremental or COW snapshots — each snapshot is a full copy.
@@ -26,6 +27,18 @@ Explicit list of what the IBM VPC File Pool CSI Driver does not support, why, an
 **Workaround:** For very large volumes where copy time is unacceptable, consider application-level backup/restore tools.
 
 **Roadmap:** Phase 4a (snapshots) and Phase 4b (clones) are complete.
+
+### Instant VM disk snapshots (Experimental)
+
+Where the KubeVirt `Sidecar` feature gate is on, a VM disk snapshot is instant instead of a copy. See [VM-INSTANT-SNAPSHOTS.md](VM-INSTANT-SNAPSHOTS.md). Its limits:
+- **Support:** the `Sidecar` feature gate is not supported by Red Hat, and on OpenShift it is set through a `jsonpatch` annotation on `HyperConverged`, which marks the cluster `TaintedConfiguration`. On ROVS, IBM's add-on manages that resource.
+- **Gate off:** a VM whose disks have instant snapshots does not start while the gate is off; the webhook says so. Turn the gate on, or run `kubectl pool-snapshots flatten <vm>`, which deletes the VM's snapshots.
+- **Restore is a copy.** OpenShift restores a snapshot into new PVCs; the driver writes each with one sparse `qemu-img convert`. Instant restore is not built.
+- **One disk per plain VolumeSnapshot.** All disks of a VM at one moment come from an OpenShift VM snapshot, which freezes the guest first.
+- **Replication and backups** of a VM disk make a full copy after each snapshot, because QEMU's list of changed blocks stays with the frozen file. A stopped VM's disk with snapshots is not copied at all (its status says so): a copy of its folder would give the far site an old `disk.img`. It is copied again while the VM runs, or after `kubectl pool-snapshots flatten`.
+- **No clone** of a disk with instant snapshots: restore one of its snapshots instead. A copy of the folder would not be a clone.
+- At most 16 snapshots per disk. Hot-plugged disks are not supported.
+- A deleted claim's folder stays while any of its instant snapshots exists.
 
 ## Volume Group Snapshots
 
@@ -247,3 +260,15 @@ Since ROKS and ROVS worker nodes run RHCOS, encryption in transit cannot be enab
 **Workaround:** The pool driver significantly reduces share consumption by hosting many PVCs per share. A single pool with 5 shares can serve hundreds of PVCs. Request a quota increase via IBM Cloud support if needed.
 
 **Roadmap:** No change planned — platform quota.
+
+## Backups to a Snapshot Pool
+
+**What:** a `BackupPolicy` backs up selected PVCs and VMs into a snapshot pool (see `BACKUP-RECOVERY.md`).
+
+**Limitations:**
+- The snapshot pool must have exactly one share (issue #71).
+- No check that the snapshot pool is full; backups fail when it is (issue #69).
+- No command to remove the backups of a volume (issue #70). Backups of a deleted volume stay on the share, and can be restored, until the keep time has passed since the last backup; after that the files stay on the share until someone removes them.
+- A backup of a volume that is not a VM disk is a file copy. It is as consistent as the files are.
+- Backups are in the same VPC as the data, and are not encrypted or locked beyond what the file share does (export to COS is a later step).
+- A restore needs the snapshot pool to be ready, and waits while a copy is being written to the backup of that volume.

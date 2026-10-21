@@ -108,6 +108,7 @@ export interface GoldenImageNamespaceStatus {
 export interface ShareDrainStatus {
   shareID: string;
   remainingSubVolumes: number;
+  remainingSnapshots?: number;
   drained: boolean;
   drainStartedAt?: string;
 }

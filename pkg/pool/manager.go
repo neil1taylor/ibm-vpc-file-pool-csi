@@ -13,6 +13,7 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/k8s"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/util"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 )
@@ -33,6 +34,7 @@ var (
 	ErrGroupSnapshotFailed       = errors.New("group snapshot failed")
 	ErrEmptySourceList           = errors.New("source volume list is empty")
 	ErrOperationInProgress       = errors.New("operation in progress, retry shortly")
+	ErrRestoreTooSmall           = errors.New("the new volume is smaller than the snapshot")
 
 	errShareDataNotSet = errors.New("share data operations are not configured")
 )
@@ -123,6 +125,9 @@ type AllocationRequest struct {
 	UID          *int64
 	GID          *int64
 	Permissions  string
+	// RestorePending makes the volume held back from pods from the start,
+	// because a BackupRestore is about to fill it.
+	RestorePending bool
 }
 
 // AllocationResult contains the result of a successful allocation.
@@ -140,11 +145,21 @@ type AllocationResult struct {
 
 // Manager implements PoolManager. It is the core brain of the CSI driver.
 type Manager struct {
-	mu                   sync.Mutex
-	k8sClient            k8s.Client
-	vpcClient            ibmcloud.VPCFileClient
-	nfsOps               NFSOperations
-	shareData            ShareData
+	mu        sync.Mutex
+	k8sClient k8s.Client
+	vpcClient ibmcloud.VPCFileClient
+	nfsOps    NFSOperations
+	shareData ShareData
+	vm        *vmSnapshots
+	instant   *instantSnapshots
+	vmNow     func() time.Time
+	// volumes serializes the changes to one volume; see volumeLocks.
+	volumes volumeLocks
+	// vmMu serializes the steps of the VM snapshot loop with the delete of a
+	// snapshot, without holding mu while commands run in a VM pod. Lock order:
+	// a volume lock, then mu, then vmMu. The loop never takes mu while it
+	// holds vmMu.
+	vmMu                 sync.Mutex
 	stagingBasePath      string
 	defaultResourceGroup string
 	network              *ShareNetwork
@@ -269,13 +284,17 @@ func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (_ *Alloc
 
 	// 7. Build and create SubVolume CR
 	now := metav1.Now()
+	labels := map[string]string{
+		"storage.ibmcloud.io/pool":     req.PoolName,
+		"storage.ibmcloud.io/share-id": share.ShareID,
+	}
+	if req.RestorePending {
+		labels[RestorePendingLabel] = "true"
+	}
 	sv := &v1alpha1.SubVolume{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: req.PVName,
-			Labels: map[string]string{
-				"storage.ibmcloud.io/pool":     req.PoolName,
-				"storage.ibmcloud.io/share-id": share.ShareID,
-			},
+			Name:   req.PVName,
+			Labels: labels,
 		},
 		Spec: v1alpha1.SubVolumeSpec{
 			PoolName:           req.PoolName,
@@ -364,6 +383,8 @@ func (m *Manager) Deallocate(ctx context.Context, subVolumeName string) (retErr 
 		metrics.AllocationsTotal.WithLabelValues(poolName, status).Inc()
 	}()
 
+	// A volume is not deleted while one of its snapshots changes it.
+	defer m.volumes.lock(subVolumeName)()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -394,13 +415,23 @@ func (m *Manager) Deallocate(ctx context.Context, subVolumeName string) (retErr 
 			return ErrOperationInProgress
 		}
 	}
-	done, err := m.shareData.RemoveDir(ctx, "rm-"+sv.Name, subVolumeShareMount(sv), sv.Spec.SubPath)
+	// The folder of a VM disk with instant snapshots holds the snapshots'
+	// files. It stays until the last snapshot is deleted.
+	keep, err := m.hasInstantSnapshots(ctx, sv.Name)
 	if err != nil {
-		klog.ErrorS(err, "Failed to remove subdirectory, retaining SubVolume CR", "subPath", sv.Spec.SubPath)
-		return fmt.Errorf("remove subdirectory: %w", err)
+		return err
 	}
-	if !done {
-		return ErrOperationInProgress
+	if keep {
+		klog.V(2).InfoS("Keeping the folder of a deleted volume for its instant snapshots", "subVolume", sv.Name, "subPath", sv.Spec.SubPath)
+	} else {
+		done, rmErr := m.shareData.RemoveDir(ctx, "rm-"+sv.Name, subVolumeShareMount(sv), sv.Spec.SubPath)
+		if rmErr != nil {
+			klog.ErrorS(rmErr, "Failed to remove subdirectory, retaining SubVolume CR", "subPath", sv.Spec.SubPath)
+			return fmt.Errorf("remove subdirectory: %w", rmErr)
+		}
+		if !done {
+			return ErrOperationInProgress
+		}
 	}
 
 	// 4. Delete SubVolume CR
@@ -582,6 +613,53 @@ func (m *Manager) updateShareAllocation(pool *v1alpha1.FileSharePool, shareID st
 	pool.Status.TotalPVCCount++
 }
 
+// chargeShare adds sizeGB (or, when negative, gives it back) to a share's
+// AllocatedGB for a snapshot. A snapshot uses space but is not a PVC.
+func (m *Manager) chargeShare(pool *v1alpha1.FileSharePool, shareID string, sizeGB int64) {
+	for i := range pool.Status.Shares {
+		if pool.Status.Shares[i].ShareID == shareID {
+			pool.Status.Shares[i].AllocatedGB += sizeGB
+			break
+		}
+	}
+	pool.Status.TotalAllocatedGB += sizeGB
+}
+
+// bookShare charges sizeGB to a share for a snapshot, on a fresh copy of the
+// pool and under the Manager's lock, so it never overwrites another call's
+// bookkeeping. It refuses a charge that the share has no room for.
+func (m *Manager) bookShare(ctx context.Context, poolName, shareID string, sizeGB int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	pool, err := m.k8sClient.GetFileSharePool(ctx, poolName)
+	if err != nil {
+		return fmt.Errorf("%w: %s", ErrPoolNotFound, poolName)
+	}
+	if err = checkShareRoom(pool, shareID, sizeGB); err != nil {
+		return err
+	}
+	m.chargeShare(pool, shareID, sizeGB)
+	if err = m.k8sClient.UpdateFileSharePoolStatus(ctx, pool); err != nil {
+		return fmt.Errorf("record the snapshot's space on pool %s: %w", poolName, err)
+	}
+	return nil
+}
+
+// unbookShare gives a snapshot's charge back, like bookShare. A failure is
+// logged: the pool's next recount corrects the share.
+func (m *Manager) unbookShare(ctx context.Context, poolName, shareID string, sizeGB int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	pool, err := m.k8sClient.GetFileSharePool(ctx, poolName)
+	if err == nil {
+		m.chargeShare(pool, shareID, -sizeGB)
+		err = m.k8sClient.UpdateFileSharePoolStatus(ctx, pool)
+	}
+	if err != nil {
+		klog.ErrorS(err, "Failed to give a snapshot's space back; the next recount corrects it", "pool", poolName, "shareID", shareID)
+	}
+}
+
 // updateShareDeallocation decrements a share's AllocatedGB and PVCCount.
 func (m *Manager) updateShareDeallocation(pool *v1alpha1.FileSharePool, shareID string, sizeGB int64) {
 	for i := range pool.Status.Shares {
@@ -607,14 +685,33 @@ func (m *Manager) CreateSnapshot(ctx context.Context, snapshotName, sourceVolume
 		metrics.SnapshotDuration.WithLabelValues(poolName, "create").Observe(time.Since(start).Seconds())
 	}()
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	// Parse sourceVolumeID to get pvName, and hold that volume's lock: a
+	// snapshot may wait long on a VM pod, so it must not hold the Manager's
+	// lock, but no other change to the same disk may run beside it.
+	_, _, pvName, err := parseManagerVolumeID(sourceVolumeID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid source volume ID: %w", err)
+	}
+	defer m.volumes.lock(pvName)()
 
 	// 1. Idempotency check
 	existing, err := m.k8sClient.GetSnapshot(ctx, snapshotName)
 	if err == nil && existing != nil {
 		poolName = existing.Spec.PoolName
-		if !existing.Status.ReadyToUse {
+		if existing.Status.Phase == "Failed" {
+			return nil, fmt.Errorf("%w: snapshot %s: %s", ErrSnapshotFailed, snapshotName, existing.Status.Message)
+		}
+		if !existing.Status.ReadyToUse && existing.Annotations[snapshotMethodAnnotation] == snapshotMethodInstant {
+			src, svErr := m.k8sClient.GetSubVolume(ctx, existing.Spec.SourceSubVolume)
+			if svErr != nil {
+				return nil, fmt.Errorf("%w: %s", ErrSourceNotFound, existing.Spec.SourceSubVolume)
+			}
+			if takeErr := m.takeInstant(ctx, existing, src); takeErr != nil {
+				return nil, takeErr
+			}
+			return snapshotResult(existing), nil
+		}
+		if !existing.Status.ReadyToUse && existing.Annotations[snapshotMethodAnnotation] != snapshotMethodVM {
 			pool, poolErr := m.k8sClient.GetFileSharePool(ctx, poolName)
 			if poolErr != nil {
 				return nil, fmt.Errorf("%w: %s", ErrPoolNotFound, poolName)
@@ -626,10 +723,9 @@ func (m *Manager) CreateSnapshot(ctx context.Context, snapshotName, sourceVolume
 		return snapshotResult(existing), nil
 	}
 
-	// 2. Parse sourceVolumeID to get pvName
-	_, _, pvName, err := parseManagerVolumeID(sourceVolumeID)
+	speed, err := snapshotSpeed(params)
 	if err != nil {
-		return nil, fmt.Errorf("invalid source volume ID: %w", err)
+		return nil, err
 	}
 
 	// 3. Fetch source SubVolume CR
@@ -648,14 +744,51 @@ func (m *Manager) CreateSnapshot(ctx context.Context, snapshotName, sourceVolume
 	// 5. Build snapshot path
 	snapshotPath := fmt.Sprintf("/pvcs/.snapshots/snap-%s", snapshotName)
 
+	// A disk that a running VM writes to is copied with QEMU. Check before
+	// anything is created, so a failed check leaves nothing behind.
+	method := snapshotMethodFile
+	methodReason := ""
+	if m.instant != nil {
+		plan, reason, planErr := m.planInstant(ctx, sv)
+		if planErr != nil {
+			return nil, planErr
+		}
+		if plan != nil {
+			method = snapshotMethodInstant
+		}
+		methodReason = reason
+	}
+	if method != snapshotMethodInstant && len(sv.Status.DiskChain) > 0 {
+		return nil, fmt.Errorf("%w: %s/%s has instant snapshots, and only an instant snapshot can be taken of it (%s); turn the KubeVirt Sidecar feature gate on, or delete its snapshots first",
+			ErrSnapshotUnsupported, sv.Spec.PVCNamespace, sv.Spec.PVCName, orDefault(methodReason, "no VM uses it"))
+	}
+	if method == snapshotMethodFile && m.vm != nil {
+		pod, _, vmErr := findVMPodForClaim(ctx, m.vm.kube, sv.Spec.PVCNamespace, sv.Spec.PVCName)
+		if vmErr != nil {
+			return nil, fmt.Errorf("check for a running VM: %w", vmErr)
+		}
+		if pod != nil {
+			if pod.Labels[kubevirtPodLabel] != "virt-launcher" {
+				return nil, fmt.Errorf("%w: %s/%s is a hot-plugged disk of a running VM; stop the VM or detach the disk, because a file copy would not be safe and QEMU cannot copy a hot-plugged disk yet",
+					ErrSnapshotUnsupported, sv.Spec.PVCNamespace, sv.Spec.PVCName)
+			}
+			method = snapshotMethodVM
+		}
+	}
+
 	// 6. Create the Snapshot CR, not ready until its copy has finished
 	if m.shareData == nil {
 		return nil, errShareDataNotSet
 	}
 	now := metav1.Now()
+	annotations := map[string]string{snapshotMethodAnnotation: method}
+	if speed != "" {
+		annotations[snapshotSpeedAnnotation] = speed
+	}
 	snap := &v1alpha1.Snapshot{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: snapshotName,
+			Name:        snapshotName,
+			Annotations: annotations,
 			Labels: map[string]string{
 				"storage.ibmcloud.io/pool":             poolName,
 				"storage.ibmcloud.io/share-id":         sv.Spec.ShareID,
@@ -676,12 +809,20 @@ func (m *Manager) CreateSnapshot(ctx context.Context, snapshotName, sourceVolume
 			ReadyToUse:   false,
 			SizeBytes:    sv.Spec.RequestedGB * (1 << 30),
 			CreationTime: &now,
+			MethodReason: methodReason,
 		},
 	}
 
 	desiredStatus := snap.Status
 
+	// 7. Charge the snapshot's space to its source's share. A share with no
+	// room refuses it, so the share is never over-committed.
+	if err := m.bookShare(ctx, poolName, sv.Spec.ShareID, snapshotChargeGB(snap)); err != nil {
+		return nil, err
+	}
+
 	if err := m.k8sClient.CreateSnapshot(ctx, snap); err != nil {
+		m.unbookShare(ctx, poolName, sv.Spec.ShareID, snapshotChargeGB(snap))
 		return nil, fmt.Errorf("create Snapshot CR: %w", err)
 	}
 
@@ -690,15 +831,18 @@ func (m *Manager) CreateSnapshot(ctx context.Context, snapshotName, sourceVolume
 		klog.ErrorS(err, "Failed to update Snapshot status", "snapshot", snapshotName)
 	}
 
-	// 7. Update pool allocated capacity (snapshots count toward share usage)
-	m.updateShareAllocation(pool, sv.Spec.ShareID, sv.Spec.RequestedGB)
-	if err := m.k8sClient.UpdateFileSharePoolStatus(ctx, pool); err != nil {
-		klog.ErrorS(err, "Failed to update pool status after snapshot", "pool", poolName)
+	// 8. Copy the volume folder into the snapshot folder. A VM disk is
+	// copied by AdvanceVMSnapshots instead, and an instant snapshot copies
+	// nothing.
+	if method == snapshotMethodInstant {
+		if err := m.takeInstant(ctx, snap, sv); err != nil {
+			return nil, err
+		}
 	}
-
-	// 8. Copy the volume folder into the snapshot folder
-	if err := m.copySnapshotData(ctx, snap, pool); err != nil {
-		return nil, err
+	if method == snapshotMethodFile {
+		if err := m.copySnapshotData(ctx, snap, pool); err != nil {
+			return nil, err
+		}
 	}
 
 	klog.V(2).InfoS("Created snapshot",
@@ -721,6 +865,13 @@ func (m *Manager) copySnapshotData(ctx context.Context, snap *v1alpha1.Snapshot,
 	if m.shareData == nil {
 		return errShareDataNotSet
 	}
+	// A VM that started since the copy began may write to the disk while it
+	// is read. Do not go on with the file copy then.
+	if handled, vmErr := m.switchToVMPath(ctx, snap); vmErr != nil {
+		return vmErr
+	} else if handled {
+		return nil
+	}
 	share, err := poolShareMount(pool, snap.Spec.ShareID)
 	if err != nil {
 		return err
@@ -734,13 +885,17 @@ func (m *Manager) copySnapshotData(ctx context.Context, snap *v1alpha1.Snapshot,
 		if delErr := m.k8sClient.DeleteSnapshot(ctx, snap.Name); delErr != nil {
 			return fmt.Errorf("copy snapshot: %w (and deleting the Snapshot CR failed: %v)", err, delErr)
 		}
-		m.updateShareDeallocation(pool, snap.Spec.ShareID, snap.Spec.SizeGB)
-		if updErr := m.k8sClient.UpdateFileSharePoolStatus(ctx, pool); updErr != nil {
-			klog.ErrorS(updErr, "Failed to update pool status after snapshot copy failure", "pool", pool.Name)
-		}
+		m.unbookShare(ctx, pool.Name, snap.Spec.ShareID, snapshotChargeGB(snap))
 		return fmt.Errorf("copy snapshot: %w", err)
 	}
 	if !done {
+		return nil
+	}
+	// A VM that started during the copy may have written to the disk while it
+	// was read. Then the folder is not a snapshot of one moment.
+	if handled, vmErr := m.switchToVMPath(ctx, snap); vmErr != nil {
+		return vmErr
+	} else if handled {
 		return nil
 	}
 	snap.Status.Phase = "Ready"
@@ -778,15 +933,37 @@ func (m *Manager) DeleteSnapshot(ctx context.Context, snapshotName string) (retE
 		metrics.SnapshotsTotal.WithLabelValues(poolName, "delete", status).Inc()
 	}()
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// 1. Fetch Snapshot CR
+	// 1. Fetch Snapshot CR, then hold its volume's lock and read it again.
 	snap, err := m.k8sClient.GetSnapshot(ctx, snapshotName)
 	if err != nil {
 		return fmt.Errorf("%w: %s", ErrSnapshotNotFound, snapshotName)
 	}
+	defer m.volumes.lock(snap.Spec.SourceSubVolume)()
+	if snap, err = m.k8sClient.GetSnapshot(ctx, snapshotName); err != nil {
+		return fmt.Errorf("%w: %s", ErrSnapshotNotFound, snapshotName)
+	}
 	poolName = snap.Spec.PoolName
+
+	// A pool deleted by an older driver did not wait for its snapshots, and
+	// took their data with it. Only the record is left to remove.
+	if _, err = m.k8sClient.GetFileSharePool(ctx, poolName); apierrors.IsNotFound(err) {
+		if err = m.k8sClient.DeleteSnapshot(ctx, snapshotName); err != nil {
+			return fmt.Errorf("delete Snapshot CR: %w", err)
+		}
+		klog.InfoS("Removed the record of a snapshot whose pool is gone", "snapshot", snapshotName, "pool", poolName)
+		return nil
+	}
+
+	if snap.Annotations[snapshotMethodAnnotation] == snapshotMethodInstant {
+		return m.deleteInstantSnapshot(ctx, snap)
+	}
+
+	// Mark the snapshot first, so the copy loop leaves it alone, then cancel a
+	// QEMU copy in progress. A copy that cannot be cancelled keeps its record
+	// and the delete is tried again.
+	if err = m.cancelVMSnapshotForDelete(ctx, snap); err != nil {
+		return err
+	}
 
 	// 2. Remove the snapshot folder. The CR and its capacity stay until
 	// the folder is gone.
@@ -801,12 +978,14 @@ func (m *Manager) DeleteSnapshot(ctx context.Context, snapshotName string) (retE
 	if err != nil {
 		return err
 	}
-	stopped, err := m.shareData.Stop(ctx, "snap-"+snapshotName)
-	if err != nil {
-		return fmt.Errorf("stop snapshot copy: %w", err)
-	}
-	if !stopped {
-		return ErrOperationInProgress
+	for _, key := range []string{"snap-" + snapshotName, "snapvm-" + snapshotName} {
+		stopped, stopErr := m.shareData.Stop(ctx, key)
+		if stopErr != nil {
+			return fmt.Errorf("stop snapshot copy: %w", stopErr)
+		}
+		if !stopped {
+			return ErrOperationInProgress
+		}
 	}
 	done, err := m.shareData.RemoveDir(ctx, "rmsnap-"+snapshotName, share, snap.Spec.SnapshotPath)
 	if err != nil {
@@ -821,11 +1000,8 @@ func (m *Manager) DeleteSnapshot(ctx context.Context, snapshotName string) (retE
 		return fmt.Errorf("delete Snapshot CR: %w", err)
 	}
 
-	// 4. Update pool status (free capacity)
-	m.updateShareDeallocation(pool, snap.Spec.ShareID, snap.Spec.SizeGB)
-	if err := m.k8sClient.UpdateFileSharePoolStatus(ctx, pool); err != nil {
-		klog.ErrorS(err, "Failed to update pool status after snapshot deletion", "pool", poolName)
-	}
+	// 4. Give the snapshot's space back
+	m.unbookShare(ctx, poolName, snap.Spec.ShareID, snapshotChargeGB(snap))
 
 	klog.V(2).InfoS("Deleted snapshot",
 		"snapshot", snapshotName,
@@ -886,8 +1062,9 @@ func (m *Manager) RestoreSnapshot(ctx context.Context, snapshotName string, req 
 		metrics.SnapshotDuration.WithLabelValues(req.PoolName, "restore").Observe(time.Since(start).Seconds())
 	}()
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	// Hold the new volume's lock for the whole call. The Manager's lock is
+	// only held while a share is picked and charged; the copy runs without it.
+	defer m.volumes.lock(req.PVName)()
 
 	// 1. Idempotency check
 	existing, err := m.k8sClient.GetSubVolume(ctx, req.PVName)
@@ -898,7 +1075,7 @@ func (m *Manager) RestoreSnapshot(ctx context.Context, snapshotName string, req 
 			if snapErr != nil {
 				return nil, fmt.Errorf("%w: %s", ErrSnapshotNotFound, existing.Labels[restoreSnapshotLabel])
 			}
-			if copyErr := m.copyRestoreData(ctx, existing, snap); copyErr != nil {
+			if copyErr := m.copyRestoreLocked(ctx, existing, snap); copyErr != nil {
 				return nil, copyErr
 			}
 		}
@@ -913,6 +1090,43 @@ func (m *Manager) RestoreSnapshot(ctx context.Context, snapshotName string, req 
 	if !snap.Status.ReadyToUse {
 		return nil, fmt.Errorf("snapshot %q is not ready to use (phase: %s)", snapshotName, snap.Status.Phase)
 	}
+	if req.RequestedGB < snap.Spec.SizeGB {
+		return nil, fmt.Errorf("%w: snapshot %q holds a %d GB volume; the new volume asks for %d GB",
+			ErrRestoreTooSmall, snapshotName, snap.Spec.SizeGB, req.RequestedGB)
+	}
+
+	sv, err := m.reserveRestore(ctx, snapshotName, req)
+	if err != nil {
+		return nil, err
+	}
+
+	// 6. Copy the snapshot folder into the new volume folder
+	if err := m.copyRestoreLocked(ctx, sv, snap); err != nil {
+		return nil, err
+	}
+
+	klog.V(2).InfoS("Restored snapshot",
+		"snapshot", snapshotName,
+		"pvName", req.PVName,
+		"pool", req.PoolName,
+		"shareID", sv.Spec.ShareID,
+	)
+
+	return subVolumeAllocationResult(sv), nil
+}
+
+// copyRestoreLocked runs a restore's copy step while it holds the lock of the
+// snapshot's volume, so no merge or snapshot of that disk runs beside it.
+func (m *Manager) copyRestoreLocked(ctx context.Context, sv *v1alpha1.SubVolume, snap *v1alpha1.Snapshot) error {
+	defer m.volumes.lock(snap.Spec.SourceSubVolume)()
+	return m.copyRestoreData(ctx, sv, snap)
+}
+
+// reserveRestore picks a share for a restored volume, records its SubVolume
+// in phase Creating and charges the share, under the Manager's lock.
+func (m *Manager) reserveRestore(ctx context.Context, snapshotName string, req AllocationRequest) (*v1alpha1.SubVolume, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	// 3. Fetch pool and select share
 	pool, err := m.k8sClient.GetFileSharePool(ctx, req.PoolName)
@@ -985,19 +1199,7 @@ func (m *Manager) RestoreSnapshot(ctx context.Context, snapshotName string, req 
 		klog.ErrorS(err, "Failed to update pool status after restore", "pool", req.PoolName)
 	}
 
-	// 6. Copy the snapshot folder into the new volume folder
-	if err := m.copyRestoreData(ctx, sv, snap); err != nil {
-		return nil, err
-	}
-
-	klog.V(2).InfoS("Restored snapshot",
-		"snapshot", snapshotName,
-		"pvName", req.PVName,
-		"pool", req.PoolName,
-		"shareID", share.ShareID,
-	)
-
-	return subVolumeAllocationResult(sv), nil
+	return sv, nil
 }
 
 // copyRestoreData starts or checks the copy of a snapshot into a restored
@@ -1016,8 +1218,13 @@ func (m *Manager) copyRestoreData(ctx context.Context, sv *v1alpha1.SubVolume, s
 	if err != nil {
 		return err
 	}
-	owner := &Ownership{UID: sv.Spec.UID, GID: sv.Spec.GID, Permissions: sv.Spec.Permissions}
-	done, err := m.shareData.CopyDir(ctx, "restore-"+sv.Name, src, snap.Spec.SnapshotPath, subVolumeShareMount(sv), sv.Spec.SubPath, owner)
+	var done bool
+	if snap.Annotations[snapshotMethodAnnotation] == snapshotMethodInstant {
+		done, err = m.restoreInstant(ctx, sv, snap, src)
+	} else {
+		owner := &Ownership{UID: sv.Spec.UID, GID: sv.Spec.GID, Permissions: sv.Spec.Permissions}
+		done, err = m.shareData.CopyDir(ctx, "restore-"+sv.Name, src, snap.Spec.SnapshotPath, subVolumeShareMount(sv), sv.Spec.SubPath, owner)
+	}
 	if err != nil {
 		return fmt.Errorf("restore snapshot: %w", err)
 	}
@@ -1083,6 +1290,10 @@ func (m *Manager) CloneVolume(ctx context.Context, sourceVolumeID string, req Al
 		metrics.ClonesTotal.WithLabelValues(req.PoolName, status).Inc()
 	}()
 
+	// A clone of a disk must not overlap a snapshot or merge of that disk.
+	if _, _, src, parseErr := parseManagerVolumeID(sourceVolumeID); parseErr == nil {
+		defer m.volumes.lock(src)()
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -1117,6 +1328,10 @@ func (m *Manager) CloneVolume(ctx context.Context, sourceVolumeID string, req Al
 
 	// 3. Fetch source SubVolume CR
 	sourceSV, err := m.k8sClient.GetSubVolume(ctx, pvName)
+	if err == nil && len(sourceSV.Status.DiskChain) > 0 {
+		return nil, fmt.Errorf("%w: %s/%s has instant snapshots, so a copy of its folder is not a clone; restore one of its snapshots instead",
+			ErrSnapshotUnsupported, sourceSV.Spec.PVCNamespace, sourceSV.Spec.PVCName)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrSourceNotFound, pvName)
 	}

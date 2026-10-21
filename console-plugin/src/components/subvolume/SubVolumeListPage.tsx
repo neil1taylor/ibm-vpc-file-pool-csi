@@ -8,7 +8,7 @@ import {
   useListPageFilter,
   Timestamp,
 } from '@openshift-console/dynamic-plugin-sdk';
-import { Link } from 'react-router-dom';
+import { Link, useHistory } from 'react-router-dom';
 import {
   Table,
   Thead,
@@ -26,13 +26,16 @@ import { SubVolume } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
 import DeleteModal from '../common/DeleteModal';
 import { ROUTES } from '../../constants';
+import { cloneDisabledReason } from '../../utils/restore-helpers';
 
 const SubVolumeRow: React.FC<{
   sv: SubVolume;
   onDelete: (name: string) => void;
 }> = ({ sv, onDelete }) => {
+  const history = useHistory();
   const name = sv.metadata?.name || '';
   const detailPath = ROUTES.SUBVOLUME_DETAIL.replace(':name', name);
+  const cloneReason = cloneDisabledReason(sv);
 
   const rowActions: IAction[] = [
     {
@@ -44,6 +47,12 @@ const SubVolumeRow: React.FC<{
           Create Snapshot
         </Link>
       ),
+    },
+    {
+      title: 'Clone to new PVC',
+      isDisabled: !!cloneReason,
+      description: cloneReason,
+      onClick: () => history.push(ROUTES.SUBVOLUME_CLONE.replace(':name', name)),
     },
     {
       isSeparator: true,

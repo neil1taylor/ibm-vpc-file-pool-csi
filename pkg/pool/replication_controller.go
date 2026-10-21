@@ -13,6 +13,7 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/hooks"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/k8s"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/util"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -388,6 +389,14 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 	for _, sv := range matched {
 		svCopy := sv
 
+		// A stopped VM's disk with instant snapshots is a chain of files; a
+		// copy of its folder would give the far site an old disk.img. It is
+		// copied by the VM path while its VM runs.
+		if len(svCopy.Status.DiskChain) > 0 {
+			finish(carry(svCopy.Name, "the disk has instant snapshots, so it is copied only while its VM runs; or remove them with kubectl pool-snapshots flatten"), "")
+			continue
+		}
+
 		if r, ok := round[svCopy.Name]; ok {
 			svStatuses = append(svStatuses, r.status)
 			if r.syncErr != "" {
@@ -428,6 +437,13 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 				}
 				if bytesWritten > 0 {
 					svStatus.BytesSynced = &bytesWritten
+				}
+				if jobRes.RestorePoints > 0 {
+					svStatus.RestorePoints = jobRes.RestorePoints
+					if jobRes.OldestRestorePoint != nil {
+						t := metav1.NewTime(*jobRes.OldestRestorePoint)
+						svStatus.OldestRestorePoint = &t
+					}
 				}
 				finish(svStatus, "")
 				rc.recordSubVolumeSyncTime(policyName, svCopy.Name)
@@ -497,8 +513,11 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 	// 4. Update policy status.
 	duration := rc.nowFunc().Sub(start)
 
-	// Check if all Jobs completed (no active or deferred).
-	allComplete := !vmRes.inProgress
+	// Check if all Jobs completed (no active or deferred). A VM disk copy in
+	// flight does not count: it moves forward on every tick, and a new one
+	// starts at every due tick, so waiting for it would hold the results of
+	// the other volumes for ever and they would never be copied again.
+	allComplete := true
 	for _, svs := range svStatuses {
 		if svs.LastError == "sync in progress" || svs.LastError == "deferred: parallel limit" {
 			allComplete = false
@@ -596,35 +615,7 @@ func (rc *ReplicationController) runningVMPod(ctx context.Context, sv *v1alpha1.
 // VM pod and a hot-plug disk pod count, because both mean a running VM writes
 // to the disk; a VM pod is preferred.
 func (rc *ReplicationController) vmPodForClaim(ctx context.Context, namespace, claim string) (*corev1.Pod, string, error) {
-	podList := &corev1.PodList{}
-	if err := rc.directClient.List(ctx, podList,
-		client.InNamespace(namespace),
-		client.HasLabels{kubevirtPodLabel},
-	); err != nil {
-		return nil, "", fmt.Errorf("listing pods in %s: %w", namespace, err)
-	}
-	var found *corev1.Pod
-	var foundVol string
-	for i := range podList.Items {
-		pod := &podList.Items[i]
-		kind := pod.Labels[kubevirtPodLabel]
-		if kind != "virt-launcher" && kind != "hotplug-disk" {
-			continue
-		}
-		if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
-			continue
-		}
-		for _, vol := range pod.Spec.Volumes {
-			if vol.PersistentVolumeClaim == nil || vol.PersistentVolumeClaim.ClaimName != claim {
-				continue
-			}
-			if kind == "virt-launcher" {
-				return pod, vol.Name, nil
-			}
-			found, foundVol = pod, vol.Name
-		}
-	}
-	return found, foundVol, nil
+	return findVMPodForClaim(ctx, rc.directClient, namespace, claim)
 }
 
 // vmProblemsError is the policy error for a cycle that skipped VM volumes or
@@ -1072,6 +1063,48 @@ func (rc *ReplicationController) ensureReplicationPVC(ctx context.Context, pvNam
 	return nil
 }
 
+// metadataScript writes the metadata file of a volume at the destination. With
+// atomic set it writes a new file and renames it, so a moment that links the
+// old file keeps its contents.
+func metadataScript(destBasePath, subPath, metaJSON string, atomic bool) string {
+	file := "/dest" + destBasePath + subPath + "/.subvolume-metadata.json"
+	if !atomic {
+		return fmt.Sprintf("echo \"Writing metadata sidecar...\"\ncat > %s <<'METADATA'\n%s\nMETADATA\n", util.ShellQuote(file), metaJSON)
+	}
+	return fmt.Sprintf("echo \"Writing metadata sidecar...\"\ncat > %[1]s <<'METADATA'\n%[2]s\nMETADATA\nmv %[1]s %[3]s\n",
+		util.ShellQuote(file+".tmp"), metaJSON, util.ShellQuote(file))
+}
+
+// momentsScript keeps the synced volume as a moment: a folder of hard links in
+// .moments next to the destination. It removes moments older than the keep
+// time, and reports in the Job's termination message how many earlier moments
+// are left besides the newest (as a VM disk counts its restore points) and the
+// time of the oldest moment. It returns "" when moments are off.
+func momentsScript(destBasePath, subPath string, keepHours *int32) string {
+	if keepHours == nil || *keepHours <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(`echo "Keeping a moment..."
+moments=%[1]s
+mkdir -p "$moments"
+stamp=$(date -u +%%Y%%m%%dT%%H%%M%%SZ)
+[ -e "$moments/$stamp" ] || cp -a -l %[2]s "$moments/$stamp"
+cutoff=$(date -u -d "-%[3]d hours" +%%Y%%m%%dT%%H%%M%%SZ)
+for d in "$moments"/*; do
+  [ -d "$d" ] || continue
+  if [[ "$(basename "$d")" < "$cutoff" ]]; then rm -r -f -- "$d"; fi
+done
+count=$(find "$moments" -mindepth 1 -maxdepth 1 -type d | wc -l)
+older=$((count - 1))
+oldest=""
+for d in "$moments"/*; do
+  [ -d "$d" ] && { oldest=$(basename "$d"); break; }
+done
+oldest_iso=$(date -u -d "${oldest:0:4}-${oldest:4:2}-${oldest:6:2} ${oldest:9:2}:${oldest:11:2}:${oldest:13:2}" +%%Y-%%m-%%dT%%H:%%M:%%SZ)
+printf '{"bytesWritten":0,"restorePoints":%%s,"oldestRestorePoint":"%%s"}' "$older" "$oldest_iso" > /dev/termination-log
+`, util.ShellQuote("/dest"+destBasePath+"/.moments"+subPath), util.ShellQuote("/dest"+destBasePath+subPath), *keepHours)
+}
+
 // ensureReplicationJob creates a Job that runs rsync from source to destination.
 func (rc *ReplicationController) ensureReplicationJob(ctx context.Context, policy *v1alpha1.ReplicationPolicy, sv *v1alpha1.SubVolume) error {
 	policyName := policy.Name
@@ -1085,8 +1118,10 @@ func (rc *ReplicationController) ensureReplicationJob(ctx context.Context, polic
 		return nil // already exists
 	}
 
-	// Build rsync options.
-	useIncremental := policy.Spec.IncrementalSync == nil || *policy.Spec.IncrementalSync
+	// Build rsync options. Moments are hard links, so the copy must write a
+	// changed file as a new file: rsync does, cp does not.
+	keepMoments := policy.Spec.MomentKeepHours != nil && *policy.Spec.MomentKeepHours > 0
+	useIncremental := policy.Spec.IncrementalSync == nil || *policy.Spec.IncrementalSync || keepMoments
 
 	bwlimit := ""
 	if policy.Spec.BandwidthLimitMbps > 0 {
@@ -1097,7 +1132,7 @@ func (rc *ReplicationController) ensureReplicationJob(ctx context.Context, polic
 
 	extraArgs := ""
 	for _, arg := range policy.Spec.RsyncOptions {
-		extraArgs += " " + arg
+		extraArgs += " " + util.ShellQuote(arg)
 	}
 
 	// Build metadata JSON for the sidecar file.
@@ -1114,39 +1149,33 @@ func (rc *ReplicationController) ensureReplicationJob(ctx context.Context, polic
 	destBasePath := policy.Spec.DestinationBasePath
 
 	var script string
+	destDir := util.ShellQuote("/dest" + destBasePath + subPath)
+	destSync := util.ShellQuote("/dest" + destBasePath + subPath + "/")
 	if useIncremental {
 		script = fmt.Sprintf(`set -euo pipefail
-echo "Replication: syncing %s -> %s%s"
-mkdir -p "/dest%s%s"
-rsync -a --delete --exclude=/.repl-staging-* %s %s %s "/source%s/" "/dest%s%s/"
-echo "Writing metadata sidecar..."
-cat > "/dest%s%s/.subvolume-metadata.json" <<'METADATA'
-%s
-METADATA
+echo %s
+mkdir -p %s
+rsync -a --delete --exclude=/.repl-staging-* %s%s %s %s
+%s%s
 echo "Replication complete."
-`, subPath, destBasePath, subPath,
-			destBasePath, subPath,
-			bwlimit, extraArgs, "", // empty string placeholder for cleaner formatting
-			subPath, destBasePath, subPath,
-			destBasePath, subPath,
-			string(metaJSON))
+`, util.ShellQuote("Replication: syncing "+subPath+" -> "+destBasePath+subPath),
+			destDir,
+			bwlimit, extraArgs, util.ShellQuote("/source"+subPath+"/"), destSync,
+			metadataScript(destBasePath, subPath, string(metaJSON), keepMoments),
+			momentsScript(destBasePath, subPath, policy.Spec.MomentKeepHours))
 	} else {
 		script = fmt.Sprintf(`set -euo pipefail
-echo "Replication: copying %s -> %s%s"
-mkdir -p "/dest%s%s"
-cp -a "/source%s/." "/dest%s%s/"
-find "/dest%s%s" -maxdepth 1 -name '.repl-staging-*' -delete
-echo "Writing metadata sidecar..."
-cat > "/dest%s%s/.subvolume-metadata.json" <<'METADATA'
+echo %s
+mkdir -p %s
+cp -a %s %s
+find %s -maxdepth 1 -name '.repl-staging-*' -delete
 %s
-METADATA
 echo "Replication complete."
-`, subPath, destBasePath, subPath,
-			destBasePath, subPath,
-			subPath, destBasePath, subPath,
-			destBasePath, subPath,
-			destBasePath, subPath,
-			string(metaJSON))
+`, util.ShellQuote("Replication: copying "+subPath+" -> "+destBasePath+subPath),
+			destDir,
+			util.ShellQuote("/source"+subPath+"/."), destSync,
+			destDir,
+			metadataScript(destBasePath, subPath, string(metaJSON), false))
 	}
 
 	backoffLimit := int32(3)
@@ -1305,7 +1334,7 @@ func (rc *ReplicationController) readJobResult(ctx context.Context, job *batchv1
 		for _, cs := range pod.Status.ContainerStatuses {
 			if cs.State.Terminated != nil && cs.State.Terminated.Message != "" {
 				var msg replJobResult
-				if err := json.Unmarshal([]byte(cs.State.Terminated.Message), &msg); err == nil && (msg.BytesWritten > 0 || msg.WrongBase) {
+				if err := json.Unmarshal([]byte(cs.State.Terminated.Message), &msg); err == nil && (msg.BytesWritten > 0 || msg.RestorePoints > 0 || msg.WrongBase) {
 					return msg
 				}
 			}

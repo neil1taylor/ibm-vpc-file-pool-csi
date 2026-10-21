@@ -49,6 +49,13 @@ spec:
             {{- end }}
             - "--cdi-copy-pod-memory-limit={{ .Values.cdi.copyPodMemoryLimit }}"
             - "--driver-image={{ .Values.image.repository }}:{{ .Values.image.tag }}"
+            {{- if not (has .Values.vmSnapshots.method (list "auto" "copy")) }}
+            {{- fail "vmSnapshots.method must be auto or copy" }}
+            {{- end }}
+            - "--vm-snapshot-method={{ .Values.vmSnapshots.method }}"
+            {{- with .Values.vmSnapshots.launcherImage }}
+            - "--virt-launcher-image={{ . }}"
+            {{- end }}
             {{- if .Values.webhook.enabled }}
             - "--webhook-port={{ .Values.webhook.port }}"
             {{- else }}

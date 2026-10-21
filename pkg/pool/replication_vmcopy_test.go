@@ -26,17 +26,28 @@ import (
 type fakeVMCopier struct {
 	mu sync.Mutex
 
-	starts      []fakeStart
-	startErr    error
-	freezeErr   string
-	state       vmcopy.State
-	stateMsg    string
-	finishes    []bool // removeStaging of each Finish call
+	starts    []fakeStart
+	startErr  error
+	freezeErr string
+	state     vmcopy.State
+	stateMsg  string
+	finishes  []bool // removeStaging of each Finish call
+	// finishDisks and cancelDisks hold the volumes of the Copy each Finish and
+	// Cancel call got.
+	finishDisks [][]string
+	cancelDisks [][]string
 	cancels     int
 	removeStale int
 	moment      time.Time
 	commits     []string // Base of each committed copy
 	lostBases   map[string]bool
+	// removeStaleErr makes RemoveStale fail, as when another copy runs.
+	removeStaleErr error
+	// idleErr makes CheckIdle fail, as when a copy runs in the VM.
+	idleErr    error
+	cleanStale int
+	// cancelErr makes Cancel and Finish(true) fail.
+	cancelErr error
 }
 
 type fakeStart struct {
@@ -76,10 +87,19 @@ func (f *fakeVMCopier) Progress(_ context.Context, _ vmcopy.VM, _ *vmcopy.Copy) 
 	return f.state, f.stateMsg, nil
 }
 
-func (f *fakeVMCopier) Finish(_ context.Context, _ vmcopy.VM, _ *vmcopy.Copy, removeStaging bool) error {
+func copyVolumes(cp *vmcopy.Copy) []string {
+	var v []string
+	for _, d := range cp.Disks {
+		v = append(v, d.Volume)
+	}
+	return v
+}
+
+func (f *fakeVMCopier) Finish(_ context.Context, _ vmcopy.VM, cp *vmcopy.Copy, removeStaging bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.finishes = append(f.finishes, removeStaging)
+	f.finishDisks = append(f.finishDisks, copyVolumes(cp))
 	return nil
 }
 
@@ -90,18 +110,26 @@ func (f *fakeVMCopier) Commit(_ context.Context, _ vmcopy.VM, cp *vmcopy.Copy) e
 	return nil
 }
 
-func (f *fakeVMCopier) Cancel(_ context.Context, _ vmcopy.VM, _ *vmcopy.Copy) error {
+func (f *fakeVMCopier) Cancel(_ context.Context, _ vmcopy.VM, cp *vmcopy.Copy) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.cancels++
-	return nil
+	f.cancelDisks = append(f.cancelDisks, copyVolumes(cp))
+	return f.cancelErr
+}
+
+func (f *fakeVMCopier) CleanStaleCopies(_ context.Context, _ vmcopy.VM, _ []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cleanStale++
+	return f.idleErr
 }
 
 func (f *fakeVMCopier) RemoveStale(_ context.Context, _ vmcopy.VM, _ []string, _ string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.removeStale++
-	return nil
+	return f.removeStaleErr
 }
 
 var vmimGVK = schema.GroupVersionKind{Group: "kubevirt.io", Version: "v1", Kind: "VirtualMachineInstanceMigration"}
@@ -813,5 +841,76 @@ func TestVMCopy_RestorePointsInStatus(t *testing.T) {
 		!s.OldestRestorePoint.Time.Equal(time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)) ||
 		s.BytesSynced == nil || *s.BytesSynced != 65536 {
 		t.Errorf("status = %+v", s)
+	}
+}
+
+func TestVMCopy_WaitsWhileAnotherCopyRunsInTheVM(t *testing.T) {
+	e := newVMCopyEnv(t)
+	e.cop.removeStaleErr = fmt.Errorf("copy job repl-x-0 is still in QEMU: %w", vmcopy.ErrBusy)
+	e.tick()
+	if len(e.cop.starts) != 0 {
+		t.Error("started a copy while another copy runs in the VM")
+	}
+	if n := e.k.getPolicy(e.policy).Status.ConsecutiveFailures; n != 0 {
+		t.Errorf("waiting for another copy must not count as a failed cycle, got %d", n)
+	}
+	for _, sv := range []string{vmGuardSV1, vmGuardSV2} {
+		if s := e.status(t, sv); !strings.Contains(s.LastError, "another copy") {
+			t.Errorf("%s: LastError = %q, want it to say another copy runs", sv, s.LastError)
+		}
+	}
+	// Once the VM is free, the copy starts.
+	e.cop.removeStaleErr = nil
+	e.clock = e.clock.Add(2 * time.Hour)
+	e.tick()
+	if len(e.cop.starts) != 1 {
+		t.Errorf("starts = %d, want 1 once the VM is free", len(e.cop.starts))
+	}
+}
+
+// A plain volume beside a VM gets a new copy on every due tick. The VM always
+// has a copy in flight at a due tick, which must not hold the plain volume's
+// result of the last cycle for ever.
+func TestVMCopy_PlainVolumeIsCopiedAgainWhileTheVMAlwaysCopies(t *testing.T) {
+	e := newVMCopyEnv(t)
+	plain := newTestSubVolume("pvc-plain-0000-0000-0000-000000000003", "prod-pool", "share-1", 5)
+	plain.Spec.PVCName = "plain-pvc"
+	e.k.addSubVolume(plain)
+
+	dueTick := func() {
+		e.clock = e.clock.Add(2 * time.Hour)
+		e.rc.processOnce(e.ctx)
+	}
+	finishJob := func(sv string) {
+		job := e.job(t, sv)
+		if job == nil {
+			t.Fatalf("no Job for %s", sv)
+		}
+		job.Status.Succeeded = 1
+		if err := e.dc.Status().Update(e.ctx, job); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	e.cop.state = vmcopy.Running
+	e.rc.processOnce(e.ctx) // cycle 1: VM copy starts, plain Job created
+	finishJob(plain.Name)
+	e.cop.state = vmcopy.Done
+	e.tick() // VM copy moves to Sending
+	e.succeedJobs(t)
+	e.tick() // VM copy done
+	e.cop.state = vmcopy.Running
+	dueTick() // cycle 2: the plain Job of cycle 1 is recorded; VM copy starts again
+	if e.status(t, plain.Name).LastSyncTime == nil {
+		t.Fatal("expected the plain volume's first copy to be recorded")
+	}
+	e.cop.state = vmcopy.Done
+	e.tick()
+	e.succeedJobs(t)
+	e.tick()
+	e.cop.state = vmcopy.Running
+	dueTick() // cycle 3: the plain volume must get a new Job
+	if e.job(t, plain.Name) == nil {
+		t.Fatal("expected a new Job for the plain volume in the third cycle")
 	}
 }

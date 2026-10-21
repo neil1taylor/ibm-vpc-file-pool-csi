@@ -3,6 +3,12 @@ import { GOLDEN_IMAGE_DATASOURCES, dataSourceRoute } from '../support/constants'
 import { navigateTo, checkSessionValid } from '../support/pages';
 
 test.describe('Golden Image DataSources', () => {
+  // Golden images are a hidden feature, and these names belong to the tutorial pool.
+  test.skip(
+    !process.env.GOLDEN_IMAGE_TESTS,
+    'set GOLDEN_IMAGE_TESTS=1 on a cluster that has the golden image DataSources',
+  );
+
   for (const dsName of GOLDEN_IMAGE_DATASOURCES) {
     test(`${dsName} DataSource is present and ready`, async ({ page }) => {
       await navigateTo(page, dataSourceRoute(dsName));

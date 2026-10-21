@@ -528,9 +528,9 @@ func (v *volume) recover() (bool, error) {
 				return rolled, err
 			}
 		case strings.HasSuffix(e.Name(), undoReady):
-			f, err := v.openDisk(os.O_RDWR)
-			if err != nil {
-				return rolled, err
+			f, oerr := v.openDisk(os.O_RDWR)
+			if oerr != nil {
+				return rolled, oerr
 			}
 			err = applyUndo(v, p, f)
 			_ = f.Close()
@@ -541,6 +541,12 @@ func (v *volume) recover() (bool, error) {
 				return rolled, err
 			}
 			rolled = true
+		}
+	}
+	if rolled {
+		// The disk is as the last copy left it again.
+		if err = v.reseal(); err != nil {
+			return rolled, err
 		}
 	}
 	return rolled, v.sync(undoDirName)
@@ -635,7 +641,7 @@ func RestorePoints(disk string) ([]time.Time, error) {
 
 // Rewind writes to out a disk as it was at restore point to. It does not
 // change the latest disk, except to roll back a copy that stopped half way.
-func Rewind(disk string, to time.Time, out string) error {
+func Rewind(disk string, to time.Time, out string) (err error) {
 	v, err := openVolume(disk)
 	if err != nil {
 		return err
@@ -664,9 +670,15 @@ func Rewind(disk string, to time.Time, out string) error {
 	defer func() { _ = in.Close() }()
 	f, err := os.OpenFile(out, os.O_RDWR|os.O_CREATE|os.O_EXCL, diskFileMode) // #nosec G304 -- path chosen by the caller
 	if err != nil {
-		return err
+		return err // out exists or cannot be made: it is not ours to remove
 	}
-	defer func() { _ = f.Close() }()
+	// From here out is our file: a failure leaves no partial disk.
+	defer func() {
+		_ = f.Close()
+		if err != nil {
+			_ = os.Remove(out)
+		}
+	}()
 	if _, err = io.Copy(f, in); err != nil {
 		return err
 	}

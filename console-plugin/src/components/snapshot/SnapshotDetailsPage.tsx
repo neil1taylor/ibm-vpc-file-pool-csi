@@ -21,11 +21,13 @@ import {
   Split,
   SplitItem,
 } from '@patternfly/react-core';
-import { SnapshotModel } from '../../models';
+import { SnapshotModel, VolumeSnapshotContentModel } from '../../models';
 import { Snapshot } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
 import DeleteModal from '../common/DeleteModal';
 import { humanizeBytes } from '../../utils/resource-helpers';
+import { VolumeSnapshotContent } from '../../utils/k8s-objects';
+import { findVolumeSnapshotRef, restoreDisabledReason } from '../../utils/restore-helpers';
 import { ROUTES } from '../../constants';
 
 const SnapshotDetailsPage: React.FC = () => {
@@ -40,6 +42,14 @@ const SnapshotDetailsPage: React.FC = () => {
       kind: SnapshotModel.kind,
     },
     name,
+  });
+  const [contents] = useK8sWatchResource<VolumeSnapshotContent[]>({
+    groupVersionKind: {
+      group: VolumeSnapshotContentModel.apiGroup,
+      version: VolumeSnapshotContentModel.apiVersion,
+      kind: VolumeSnapshotContentModel.kind,
+    },
+    isList: true,
   });
 
   if (!loaded) {
@@ -75,6 +85,8 @@ const SnapshotDetailsPage: React.FC = () => {
 
   const subvolumeDetailPath = ROUTES.SUBVOLUME_DETAIL.replace(':name', spec.sourceSubVolume);
   const poolDetailPath = ROUTES.POOL_DETAIL.replace(':name', spec.poolName);
+  const restoreReason = restoreDisabledReason(snapshot, findVolumeSnapshotRef(snapshot, contents || []));
+  const restorePath = ROUTES.SNAPSHOT_RESTORE.replace(':name', name);
 
   return (
     <>
@@ -86,6 +98,17 @@ const SnapshotDetailsPage: React.FC = () => {
             </Title>
           </SplitItem>
           <SplitItem>
+            {restoreReason ? (
+              <Button variant="secondary" isDisabled>
+                Restore to new PVC
+              </Button>
+            ) : (
+              <Button variant="secondary" component={(props) => <Link {...props} to={restorePath} />}>
+                Restore to new PVC
+              </Button>
+            )}
+          </SplitItem>
+          <SplitItem>
             <Button
               variant="danger"
               onClick={() => setDeleteModalOpen(true)}
@@ -94,6 +117,9 @@ const SnapshotDetailsPage: React.FC = () => {
             </Button>
           </SplitItem>
         </Split>
+        {restoreReason && (
+          <p style={{ marginTop: 8, color: 'var(--pf-t--global--color--subtle)' }}>{restoreReason}</p>
+        )}
       </PageSection>
       <PageSection>
         <Grid hasGutter>

@@ -245,7 +245,7 @@ The savings increase as PVC sizes decrease below the 10 GB VPC minimum.
 | Factor | Impact |
 |--------|--------|
 | Share IOPS profile | Higher IOPS = higher cost per GB |
-| Snapshot storage | Snapshots consume share capacity (billed) |
+| Snapshot storage | Snapshots consume share capacity (billed). A snapshot is kept on its volume's share and is charged the volume's size (a copy) or a tenth of it (an instant VM snapshot). A share without that much free space refuses the snapshot (`ResourceExhausted`). Snapshots do not count as PVCs. |
 | Replication storage | DR destination pool is billed separately |
 
 ---

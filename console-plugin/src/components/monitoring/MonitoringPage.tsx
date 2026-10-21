@@ -39,6 +39,7 @@ const MonitoringPage: React.FC = () => {
     error?: string;
   } | null>(null);
   const [allocationExpanded, setAllocationExpanded] = useState(false);
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
 
   useEffect(() => {
     checkPrometheusConnection().then(setConnStatus);
@@ -403,6 +404,66 @@ const MonitoringPage: React.FC = () => {
                     yLabel="ms"
                     chartType="line"
                     emptyMessage="No allocation latency data in this time range"
+                  />
+                </CardBody>
+              </Card>
+            </GridItem>
+          </Grid>
+        </ExpandableSection>
+      </div>
+
+      {/* E2. Group snapshots and CDI (expandable) */}
+      <div style={{ marginBottom: 16 }}>
+        <ExpandableSection
+          toggleText={detailsExpanded ? 'Hide Group Snapshot and CDI Activity' : 'Show Group Snapshot and CDI Activity'}
+          onToggle={(_event, isExpanded) => setDetailsExpanded(isExpanded)}
+          isExpanded={detailsExpanded}
+        >
+          <Grid hasGutter style={{ marginTop: 8 }}>
+            <GridItem sm={12} md={6}>
+              <Card>
+                <CardTitle>Group Snapshot Inconsistency Window (P95)</CardTitle>
+                <CardBody>
+                  <TimeSeriesChart
+                    query={metricQueries.groupSnapshotWindowP95Ms}
+                    range={range}
+                    yLabel="ms"
+                    chartType="line"
+                    emptyMessage="No group snapshots in this time range"
+                  />
+                </CardBody>
+              </Card>
+            </GridItem>
+
+            <GridItem sm={12} md={6}>
+              <Card>
+                <CardTitle>Group Snapshot Members (average)</CardTitle>
+                <CardBody>
+                  <TimeSeriesChart
+                    query={metricQueries.groupSnapshotMembersAvg}
+                    range={range}
+                    yLabel="members"
+                    chartType="line"
+                    emptyMessage="No group snapshots in this time range"
+                  />
+                </CardBody>
+              </Card>
+            </GridItem>
+
+            <GridItem sm={12} md={6}>
+              <Card>
+                <CardTitle>CDI Copy Limit Raises (per hour)</CardTitle>
+                <CardBody>
+                  <p style={{ color: 'var(--pf-t--global--color--subtle)', margin: '0 0 8px 0' }}>
+                    The driver raises the memory limit of CDI&apos;s copy pod when it starts. A raise later on means
+                    something reset the limit, for example an add-on update.
+                  </p>
+                  <TimeSeriesChart
+                    query={metricQueries.cdiLimitRaises1h}
+                    range={range}
+                    yLabel="raises"
+                    chartType="line"
+                    emptyMessage="No raises in this time range"
                   />
                 </CardBody>
               </Card>

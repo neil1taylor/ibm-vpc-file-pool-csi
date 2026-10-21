@@ -79,6 +79,7 @@ func NewReceiver(basePath, authToken, listenAddr string) *Receiver {
 	mux.HandleFunc("/api/v1/metadata/", r.handleMetadata)
 	mux.HandleFunc("/api/v1/vmcopy/", r.handleVMCopy)
 	mux.HandleFunc("/api/v1/health", r.handleHealth)
+	mux.HandleFunc("/api/v1/auth-check", r.handleAuthCheck)
 
 	r.httpServer = &http.Server{
 		Addr:              listenAddr,
@@ -138,6 +139,28 @@ func (r *Receiver) Start(ctx context.Context) error {
 // Stop gracefully stops the HTTP server.
 func (r *Receiver) Stop(ctx context.Context) error {
 	return r.httpServer.Shutdown(ctx)
+}
+
+// handleAuthCheck tells a client whether its token is accepted and the receiver's
+// storage is reachable. It changes nothing. The console's receiver setup uses it
+// (through the sync client's Check) before a policy is made.
+func (r *Receiver) handleAuthCheck(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !r.authenticate(req) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if _, err := os.Stat(r.basePath); err != nil {
+		klog.ErrorS(err, "Auth check failed: base path not accessible", "basePath", r.basePath)
+		http.Error(w, "NFS mount not accessible", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	writeResponse(w, `{"status":"ok","basePath":%q}`, r.basePath)
 }
 
 // handleHealth checks that the NFS base path is accessible.
