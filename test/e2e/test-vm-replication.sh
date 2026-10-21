@@ -19,6 +19,11 @@
 # destination pool) and sends the copy to it over HTTPS.
 # SSH_KEY is a private key whose .pub file is put in the VM for virtctl ssh.
 #
+# Windows: GUEST=windows boots a Windows Server 2022 VM from a copy of an existing
+# Windows disk (WIN_IMAGE_NS/WIN_IMAGE_PVC, a block PVC; it is only read). A
+# PowerShell writer on C: and D: replaces the Linux writer, and the checks run
+# through the QEMU guest agent. This tests the freeze through VSS.
+#
 # Two clusters: set DR_KUBECONFIG (needs MODE=receiver). KUBECONFIG is then the
 # source cluster. The destination pool, the receiver, the far-site disks and
 # the copy VMs all live on the DR cluster. The receiver is reached through an
@@ -39,6 +44,14 @@ SCHEDULE=${SCHEDULE:-15m}
 MODE=${MODE:-direct}
 case "$MODE" in direct | receiver) ;; *) echo "MODE must be direct or receiver" >&2; exit 2 ;; esac
 RECV=$PREFIX-recv
+GUEST=${GUEST:-linux}
+case "$GUEST" in linux | windows) ;; *) echo "GUEST must be linux or windows" >&2; exit 2 ;; esac
+WIN_IMAGE_NS=${WIN_IMAGE_NS:-brs-win-image}
+WIN_IMAGE_PVC=${WIN_IMAGE_PVC:-win2k22-brs}
+WIN_BLOCK_SC=${WIN_BLOCK_SC:-ocs-storagecluster-ceph-rbd-virtualization}
+ROOT_GI=20
+[ "$GUEST" = windows ] && ROOT_GI=24
+DATA_GI=10
 DR_KUBECONFIG=${DR_KUBECONFIG:-}
 SRC_KUBECONFIG=${KUBECONFIG:-$HOME/.kube/config}
 if [ -n "$DR_KUBECONFIG" ] && [ "$MODE" != receiver ]; then echo "DR_KUBECONFIG needs MODE=receiver" >&2; exit 2; fi
@@ -120,6 +133,69 @@ oc create ns "$NS" --dry-run=client -o yaml | oc apply -f -
 oc adm policy add-scc-to-user anyuid -z default -n "$NS" >/dev/null
 onfar oc create ns "$NS" --dry-run=client -o yaml | onfar oc apply -f -
 
+if [ -n "${RESUME:-}" ]; then
+    log "RESUME: reusing the disks and namespace of an earlier --keep run"
+elif [ "$GUEST" = windows ]; then
+log "copying the Windows image $WIN_IMAGE_NS/$WIN_IMAGE_PVC onto the source pool"
+oc apply -n "$NS" -f - <<YAML
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: root}
+spec:
+  storageClassName: $SRC
+  accessModes: [ReadWriteMany]
+  volumeMode: Filesystem
+  resources: {requests: {storage: ${ROOT_GI}Gi}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: data}
+spec:
+  storageClassName: $SRC
+  accessModes: [ReadWriteMany]
+  volumeMode: Filesystem
+  resources: {requests: {storage: ${DATA_GI}Gi}}
+---
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: DataVolume
+metadata: {name: winbase}
+spec:
+  source:
+    pvc: {namespace: $WIN_IMAGE_NS, name: $WIN_IMAGE_PVC}
+  storage:
+    storageClassName: $WIN_BLOCK_SC
+    volumeMode: Block
+    accessModes: [ReadWriteMany]
+    resources: {requests: {storage: 20Gi}}
+---
+apiVersion: batch/v1
+kind: Job
+metadata: {name: convert}
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext: {runAsUser: 0}
+      containers:
+      - name: c
+        image: quay.io/centos/centos:stream9
+        command: [/bin/bash, -ec]
+        args:
+        - |
+          dd if=/dev/win of=/disk/disk.img bs=4M conv=sparse status=none
+          chown 107:107 /disk/disk.img
+          truncate -s 8G /data/disk.img
+          chown 107:107 /data/disk.img
+        volumeDevices: [{name: w, devicePath: /dev/win}]
+        volumeMounts: [{name: d, mountPath: /disk}, {name: e, mountPath: /data}]
+      volumes:
+      - {name: w, persistentVolumeClaim: {claimName: winbase, readOnly: true}}
+      - {name: d, persistentVolumeClaim: {claimName: root}}
+      - {name: e, persistentVolumeClaim: {claimName: data}}
+YAML
+oc wait -n "$NS" job/convert --for=condition=complete --timeout=40m
+else
 log "making the source disks"
 oc apply -n "$NS" -f - <<YAML
 apiVersion: v1
@@ -129,7 +205,7 @@ spec:
   storageClassName: $SRC
   accessModes: [ReadWriteMany]
   volumeMode: Filesystem
-  resources: {requests: {storage: 20Gi}}
+  resources: {requests: {storage: ${ROOT_GI}Gi}}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -138,7 +214,7 @@ spec:
   storageClassName: $SRC
   accessModes: [ReadWriteMany]
   volumeMode: Filesystem
-  resources: {requests: {storage: 10Gi}}
+  resources: {requests: {storage: ${DATA_GI}Gi}}
 ---
 apiVersion: batch/v1
 kind: Job
@@ -165,9 +241,33 @@ spec:
       volumes: [{name: d, persistentVolumeClaim: {claimName: root}}]
 YAML
 oc wait -n "$NS" job/convert --for=condition=complete --timeout=20m
+fi
 
 PUBKEY=$(cat "$SSH_KEY.pub")
 vm_yaml() { # vm_yaml <name> <root claim> <data claim> <with cloud-init: yes|no>
+    if [ "$GUEST" = windows ]; then
+        cat <<YAML
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata: {name: $1, namespace: $NS}
+spec:
+  runStrategy: Always
+  instancetype: {name: u1.large, kind: VirtualMachineClusterInstancetype}
+  preference: {name: windows.2k22.virtio, kind: VirtualMachineClusterPreference}
+  template:
+    spec:
+      evictionStrategy: LiveMigrate
+      domain:
+        devices:
+          disks:
+          - {name: rootdisk, disk: {bus: virtio}, bootOrder: 1}
+          - {name: datadisk, disk: {bus: virtio}}
+      volumes:
+      - {name: rootdisk, persistentVolumeClaim: {claimName: $2}}
+      - {name: datadisk, persistentVolumeClaim: {claimName: $3}}
+YAML
+        return 0
+    fi
     cat <<YAML
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
@@ -251,10 +351,70 @@ vssh() { # vssh <vmi> <command>
         -t "-o LogLevel=ERROR" -t "-o IdentitiesOnly=yes" -c "$2"
 }
 
+# wexec <vm> <PowerShell command> runs the command in a Windows VM through the
+# QEMU guest agent and prints its output.
+wexec() {
+    local vm=$1 pod dom req pid r
+    pod=$(oc get pod -n "$NS" -l "vm.kubevirt.io/name=$vm" -o jsonpath='{.items[0].metadata.name}')
+    dom=$(oc exec -n "$NS" "$pod" -c compute -- virsh list --name | head -1)
+    req=$(python3 -I -c 'import json,sys;print(json.dumps({"execute":"guest-exec","arguments":{"path":"powershell.exe","arg":["-NoProfile","-Command",sys.argv[1]],"capture-output":True}}))' "$2")
+    pid=$(oc exec -n "$NS" "$pod" -c compute -- virsh qemu-agent-command "$dom" "$req" | python3 -I -c 'import json,sys;print(json.load(sys.stdin)["return"]["pid"])')
+    for _ in $(seq 1 900); do
+        r=$(oc exec -n "$NS" "$pod" -c compute -- virsh qemu-agent-command "$dom" "{\"execute\":\"guest-exec-status\",\"arguments\":{\"pid\":$pid}}")
+        if echo "$r" | python3 -I -c 'import json,sys;sys.exit(0 if json.load(sys.stdin)["return"]["exited"] else 1)'; then
+            echo "$r" | python3 -I -c 'import json,sys,base64;d=json.load(sys.stdin)["return"];print(base64.b64decode(d.get("out-data","")).decode(errors="replace"),end="");e=d.get("err-data");e and print(base64.b64decode(e).decode(errors="replace"),end="",file=sys.stderr);sys.exit(d.get("exitcode",0))'
+            return $?
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+# wping <vm>: the guest agent of a Windows VM answers a ping. Commands sent
+# before it does leave the agent channel out of step, so wait for this first.
+wping() {
+    local pod dom
+    pod=$(oc get pod -n "$NS" -l "vm.kubevirt.io/name=$1" -o jsonpath='{.items[0].metadata.name}') || return 1
+    dom=$(oc exec -n "$NS" "$pod" -c compute -- virsh list --name 2>/dev/null | head -1) || return 1
+    oc exec -n "$NS" "$pod" -c compute -- virsh qemu-agent-command "$dom" '{"execute":"guest-ping"}' >/dev/null 2>&1
+}
+
+# guest_ready <vm>: the VM answers a command.
+guest_ready() {
+    if [ "$GUEST" = windows ]; then wping "$1" && wexec "$1" '1' >/dev/null; else vssh "$1" true >/dev/null 2>&1; fi
+}
+
+WRITER_PS1='$n = 0
+if (Test-Path C:\writer.log) { $n = (Get-Content C:\writer.log | Measure-Object -Line).Lines }
+$rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+$sha = [Security.Cryptography.SHA256]::Create()
+while ($true) {
+  $n++
+  $b = New-Object byte[] 65536
+  $rng.GetBytes($b)
+  $fs = [IO.File]::Create("D:\f$n")
+  $fs.Write($b, 0, $b.Length); $fs.Flush($true); $fs.Close()
+  $h = ([BitConverter]::ToString($sha.ComputeHash($b)) -replace "-","").ToLower()
+  $t = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000
+  $fs = New-Object IO.FileStream("C:\writer.log", "Append", "Write", "Read")
+  $w = [Text.Encoding]::ASCII.GetBytes("$n $h $t`n")
+  $fs.Write($w, 0, $w.Length); $fs.Flush($true); $fs.Close()
+  Start-Sleep -Milliseconds 100
+}'
+
 log "starting the source VM"
 vm_yaml src root data yes | oc apply -f -
 wait_until 900 "source guest agent" agent_connected src
-writer_running() { vssh src 'test -s /var/log/writer.log' >/dev/null 2>&1; }
+if [ "$GUEST" = windows ]; then
+    # A new Windows VM can take about 40 minutes before the agent runs commands.
+    wait_until 3600 "the Windows guest agent to run commands" guest_ready src
+    b64=$(printf '%s' "$WRITER_PS1" | base64 | tr -d '\n')
+    wexec src "[IO.File]::WriteAllBytes('C:\\writer.ps1',[Convert]::FromBase64String('$b64')); Set-Disk -Number 1 -IsOffline \$false; Set-Disk -Number 1 -IsReadOnly \$false; Initialize-Disk -Number 1 -PartitionStyle GPT; New-Partition -DiskNumber 1 -DriveLetter D -UseMaximumSize | Format-Volume -FileSystem NTFS -NewFileSystemLabel data -Confirm:\$false | Out-Null; Start-Process powershell.exe -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File C:\\writer.ps1' -WindowStyle Hidden"
+fi
+writer_running() {
+    if [ "$GUEST" = windows ]; then wexec src 'if ((Get-Content C:\writer.log -ErrorAction SilentlyContinue | Measure-Object -Line).Lines -gt 0) { exit 0 } else { exit 1 }' >/dev/null 2>&1
+    else vssh src 'test -s /var/log/writer.log' >/dev/null 2>&1; fi
+}
 wait_until 300 "writer running" writer_running
 
 server=$(onfar pool_field "$DST" '.status.shares[0].mountTargetIP')
@@ -441,7 +601,7 @@ apiVersion: v1
 kind: PersistentVolume
 metadata: {name: $PREFIX-copy-$d}
 spec:
-  capacity: {storage: $( [ $d = root ] && echo 20Gi || echo 10Gi )}
+  capacity: {storage: $( [ $d = root ] && echo ${ROOT_GI}Gi || echo ${DATA_GI}Gi )}
   accessModes: [ReadWriteMany]
   persistentVolumeReclaimPolicy: Retain
   mountOptions: [nfsvers=4.1, sec=sys, soft, timeo=600, retrans=3]
@@ -455,15 +615,51 @@ spec:
   storageClassName: ""
   volumeName: $PREFIX-copy-$d
   accessModes: [ReadWriteMany]
-  resources: {requests: {storage: $( [ $d = root ] && echo 20Gi || echo 10Gi )}}
+  resources: {requests: {storage: $( [ $d = root ] && echo ${ROOT_GI}Gi || echo ${DATA_GI}Gi )}}
 YAML
 done
+
+# check_copy_windows <vm> <moment>: no NTFS errors since boot, and every file in
+# the writer's log on C: is on D: with the logged checksum.
+check_copy_windows() {
+    local vm=$1 at=$2 epoch result
+    epoch=$(perl -MTime::Piece -e 'print Time::Piece->strptime(shift, "%Y-%m-%dT%H:%M:%SZ")->epoch' "$at")
+    result=$(onfar wexec "$vm" '
+$boot = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
+$bad = @(Get-WinEvent -FilterHashtable @{LogName="System"; ProviderName="Ntfs"; StartTime=$boot} -ErrorAction SilentlyContinue | Where-Object { $_.Id -in 55,136,137,140 -or $_.LevelDisplayName -in "Error","Critical" })
+"NTFS_EVENTS=" + $bad.Count
+$bad | ForEach-Object { "  " + $_.Id + " " + $_.Message.Split("`n")[0] }
+"DIRTY_C=" + ((fsutil dirty query C:) -join " ")
+"DIRTY_D=" + ((fsutil dirty query D:) -join " ")
+$sha = [Security.Cryptography.SHA256]::Create()
+$total = 0; $upto = 0; $badfiles = 0
+foreach ($line in [IO.File]::ReadLines("C:\writer.log")) {
+  $p = $line.Split(" ")
+  if ($p.Count -lt 3) { continue }
+  $total++
+  if ([double]$p[2] -le '"$epoch"') { $upto++ }
+  $f = "D:\f" + $p[0]
+  if (-not (Test-Path $f)) { $badfiles++; continue }
+  $h = ([BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadAllBytes($f))) -replace "-","").ToLower()
+  if ($h -ne $p[1]) { $badfiles++ }
+}
+"LOGGED=" + $total + " UPTO_MOMENT=" + $upto + " BAD=" + $badfiles
+if ($badfiles -eq 0 -and $bad.Count -eq 0) { "CHECKSUMS_OK" }
+')
+    echo "$result"
+    echo "$result" | grep -q CHECKSUMS_OK || fail "the Windows copy $vm has file system errors or files that do not match the log"
+    log "PASS: $vm booted; $(echo "$result" | grep -o 'LOGGED=.*') (moment $at), all checksums match"
+}
 
 # check_copy <vmi> <moment>: the VM booted from far-site disks shows no file
 # system errors, and every file in the writer's log on the root disk is on the
 # data disk with the logged checksum.
 check_copy() {
     local vmi=$1 at=$2 xfs result
+    if [ "$GUEST" = windows ]; then
+        check_copy_windows "$vmi" "$at"
+        return
+    fi
     xfs=$(onfar vssh "$vmi" 'sudo journalctl -k --no-pager | grep -ci "xfs.*\(corrupt\|error\)" || true')
     [ "$xfs" = 0 ] || fail "XFS errors in the kernel log of $vmi: $xfs"
     result=$(onfar vssh "$vmi" 'sudo systemctl stop writer; awk -v m="$(date -d '"$at"' +%s)" '"'"'$3 <= m {c++} END {print c+0}'"'"' /var/log/writer.log; while read n s t; do echo "$s  /data/f$n"; done < /var/log/writer.log | sha256sum -c --quiet && echo CHECKSUMS_OK')
@@ -498,7 +694,7 @@ apiVersion: v1
 kind: PersistentVolume
 metadata: {name: $PREFIX-rewind-$d}
 spec:
-  capacity: {storage: $( [ $d = root ] && echo 20Gi || echo 10Gi )}
+  capacity: {storage: $( [ $d = root ] && echo ${ROOT_GI}Gi || echo ${DATA_GI}Gi )}
   accessModes: [ReadWriteMany]
   persistentVolumeReclaimPolicy: Retain
   mountOptions: [nfsvers=4.1, sec=sys, soft, timeo=600, retrans=3]
@@ -512,13 +708,13 @@ spec:
   storageClassName: ""
   volumeName: $PREFIX-rewind-$d
   accessModes: [ReadWriteMany]
-  resources: {requests: {storage: $( [ $d = root ] && echo 20Gi || echo 10Gi )}}
+  resources: {requests: {storage: $( [ $d = root ] && echo ${ROOT_GI}Gi || echo ${DATA_GI}Gi )}}
 YAML
     done
     log "booting the rewound copy"
     vm_yaml rewound rewind-root rewind-data no | onfar oc apply -f -
     wait_until 900 "rewound guest agent" onfar agent_connected rewound
-    wait_until 300 "ssh on the rewound copy" onfar vssh rewound true
+    wait_until 300 "the rewound copy to answer" onfar guest_ready rewound
     check_copy rewound "$first"
 }
 
@@ -533,7 +729,7 @@ vm_yaml copy copy-root copy-data no | onfar oc apply -f -
 wait_until 900 "copy guest agent" onfar agent_connected copy
 
 log "waiting for ssh on the copy"
-wait_until 300 "ssh on the copy" onfar vssh copy true
+wait_until 300 "the copy to answer" onfar guest_ready copy
 
 log "checking the copy"
 check_copy copy "$moment"
