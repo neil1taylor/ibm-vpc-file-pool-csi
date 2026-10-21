@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/util"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/vmcopy"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -61,6 +63,9 @@ type Ownership struct {
 type ShareData interface {
 	RemoveDir(ctx context.Context, key string, share ShareMount, path string) (bool, error)
 	CopyDir(ctx context.Context, key string, src ShareMount, srcPath string, dst ShareMount, dstPath string, owner *Ownership) (bool, error)
+	// ApplyVMDisk turns the staged QEMU copy volPath/stagingFile into the raw
+	// disk dstPath/disk.img on the same share, then deletes the staging file.
+	ApplyVMDisk(ctx context.Context, key string, share ShareMount, volPath, stagingFile, dstPath string, moment time.Time) (bool, error)
 	// Stop ends any work running for key. It reports done=true once
 	// nothing runs for key any more.
 	Stop(ctx context.Context, key string) (bool, error)
@@ -69,9 +74,26 @@ type ShareData interface {
 // ShareJobRunner implements ShareData with Kubernetes Jobs in the driver's
 // namespace, because the controller pod has no NFS access.
 type ShareJobRunner struct {
-	client    client.Client
-	namespace string
-	image     string
+	client      client.Client
+	namespace   string
+	image       string
+	driverImage string
+}
+
+// SetDriverImage sets the image of Jobs that run the driver itself. Without
+// it, those Jobs are refused.
+func (r *ShareJobRunner) SetDriverImage(image string) {
+	r.driverImage = image
+}
+
+// jobShape is how a share data Job's pod differs from the usual root shell
+// script: an optional init container that runs as root, and a main container
+// that runs a command as a given user.
+type jobShape struct {
+	image      string
+	command    []string
+	runAsUser  int64
+	initScript string
 }
 
 // NewShareJobRunner creates a runner that starts Jobs in namespace with image.
@@ -88,7 +110,7 @@ func (r *ShareJobRunner) RemoveDir(ctx context.Context, key string, share ShareM
 		return false, err
 	}
 	script := fmt.Sprintf("set -eu\nrm -r -f -- \"/share0%s\"\n", path)
-	return r.run(ctx, key, []ShareMount{share}, script)
+	return r.run(ctx, key, []ShareMount{share}, r.scriptShape(script))
 }
 
 // CopyDir replaces dstPath on dst with a copy of srcPath on src, keeping
@@ -133,17 +155,54 @@ func (r *ShareJobRunner) CopyDir(ctx context.Context, key string, src ShareMount
 		}
 	}
 	b.WriteString("trap - EXIT\n")
-	return r.run(ctx, key, shares, b.String())
+	return r.run(ctx, key, shares, r.scriptShape(b.String()))
+}
+
+// scriptShape is a Job that runs a shell script as root.
+func (r *ShareJobRunner) scriptShape(script string) jobShape {
+	return jobShape{image: r.image, command: []string{"/bin/sh", "-c", script}, runAsUser: 0}
+}
+
+// ApplyVMDisk runs the driver's apply-vm-disk mode on one share. An init
+// container, as root, makes the snapshot folder. The main container runs as
+// the QEMU user, because only that user can delete the staging file, and the
+// new disk image must belong to it.
+func (r *ShareJobRunner) ApplyVMDisk(ctx context.Context, key string, share ShareMount, volPath, stagingFile, dstPath string, moment time.Time) (bool, error) {
+	if err := validateSharePath(volPath); err != nil {
+		return false, err
+	}
+	if err := validateSharePath(dstPath); err != nil {
+		return false, err
+	}
+	if !strings.HasPrefix(stagingFile, vmcopy.StagingPrefix) || strings.ContainsAny(stagingFile, "/\x00") {
+		return false, fmt.Errorf("%q is not a staging file name", stagingFile)
+	}
+	if r.driverImage == "" {
+		return false, errors.New("no driver image set for VM disk apply Jobs")
+	}
+	shape := jobShape{
+		image: r.driverImage,
+		command: []string{"/usr/local/bin/vpc-file-pool-csi",
+			"--mode=apply-vm-disk",
+			"--staging-path=/share0" + volPath + "/" + stagingFile,
+			"--disk-path=/share0" + dstPath + "/disk.img",
+			"--to=" + moment.UTC().Format(time.RFC3339Nano),
+			"--full",
+		},
+		runAsUser:  qemuUID,
+		initScript: fmt.Sprintf("set -eu\nmkdir -p \"/share0%s\"\nchmod 0777 \"/share0%s\"\n", dstPath, dstPath),
+	}
+	return r.run(ctx, key, []ShareMount{share}, shape)
 }
 
 // run starts the Job for key, or reports on the Job that already exists.
-func (r *ShareJobRunner) run(ctx context.Context, key string, shares []ShareMount, script string) (bool, error) {
+func (r *ShareJobRunner) run(ctx context.Context, key string, shares []ShareMount, shape jobShape) (bool, error) {
 	jobName := shareJobName(key)
 	job := &batchv1.Job{}
 	err := r.client.Get(ctx, types.NamespacedName{Namespace: r.namespace, Name: jobName}, job)
 	switch {
 	case apierrors.IsNotFound(err):
-		return false, r.start(ctx, jobName, shares, script)
+		return false, r.start(ctx, jobName, shares, shape)
 	case err != nil:
 		return false, fmt.Errorf("get share Job %s: %w", jobName, err)
 	case job.Status.Succeeded > 0:
@@ -157,7 +216,7 @@ func (r *ShareJobRunner) run(ctx context.Context, key string, shares []ShareMoun
 	}
 }
 
-func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []ShareMount, script string) error {
+func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []ShareMount, shape jobShape) error {
 	labels := map[string]string{shareJobLabel: jobName}
 	var volumes []corev1.Volume
 	var mounts []corev1.VolumeMount
@@ -180,6 +239,27 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 		mounts = append(mounts, corev1.VolumeMount{Name: volName, MountPath: "/" + volName})
 	}
 
+	resources := corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("100m"),
+			corev1.ResourceMemory: resource.MustParse("128Mi"),
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("1"),
+			corev1.ResourceMemory: resource.MustParse("512Mi"),
+		},
+	}
+	var initContainers []corev1.Container
+	if shape.initScript != "" {
+		initContainers = []corev1.Container{{
+			Name:            "prepare",
+			Image:           shape.image,
+			Command:         []string{"/bin/sh", "-c", shape.initScript},
+			SecurityContext: &corev1.SecurityContext{RunAsUser: int64Ptr(0)},
+			Resources:       resources,
+			VolumeMounts:    mounts,
+		}}
+	}
 	backoffLimit := shareJobBackoffLimit
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{Name: jobName, Namespace: r.namespace, Labels: labels},
@@ -189,21 +269,13 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
 					RestartPolicy:   corev1.RestartPolicyOnFailure,
-					SecurityContext: &corev1.PodSecurityContext{RunAsUser: int64Ptr(0)},
+					SecurityContext: &corev1.PodSecurityContext{RunAsUser: int64Ptr(shape.runAsUser), RunAsGroup: int64Ptr(shape.runAsUser)},
+					InitContainers:  initContainers,
 					Containers: []corev1.Container{{
-						Name:    "share-data",
-						Image:   r.image,
-						Command: []string{"/bin/sh", "-c", script},
-						Resources: corev1.ResourceRequirements{
-							Requests: corev1.ResourceList{
-								corev1.ResourceCPU:    resource.MustParse("100m"),
-								corev1.ResourceMemory: resource.MustParse("128Mi"),
-							},
-							Limits: corev1.ResourceList{
-								corev1.ResourceCPU:    resource.MustParse("1"),
-								corev1.ResourceMemory: resource.MustParse("512Mi"),
-							},
-						},
+						Name:         "share-data",
+						Image:        shape.image,
+						Command:      shape.command,
+						Resources:    resources,
 						VolumeMounts: mounts,
 					}},
 					Volumes: volumes,
