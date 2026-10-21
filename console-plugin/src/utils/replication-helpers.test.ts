@@ -1,5 +1,11 @@
-import { destinationSpecFields, describeVolumeStatus, replicationDestination } from './replication-helpers';
-import { SubVolumeReplicationStatus } from '../types';
+import {
+  describeVolumeStatus,
+  destinationSpecFields,
+  replicationDestination,
+  vmCopySettingsText,
+  vmCopySpecFields,
+} from './replication-helpers';
+import { ReplicationPolicySpec, SubVolumeReplicationStatus } from '../types';
 
 describe('destinationSpecFields', () => {
   it('direct mode sets only the NFS server', () => {
@@ -61,6 +67,42 @@ describe('replicationDestination', () => {
 
   it('falls back to a dash', () => {
     expect(replicationDestination(undefined)).toBe('-');
+  });
+});
+
+describe('vmCopySpecFields', () => {
+  it('leaves out settings that equal the defaults', () => {
+    expect(vmCopySpecFields({ speedLimitMBps: 20, restorePointKeepHours: 24 })).toEqual({});
+  });
+
+  it('sets a changed speed limit, and 0 means unlimited', () => {
+    expect(vmCopySpecFields({ speedLimitMBps: 50, restorePointKeepHours: 24 })).toEqual({ vmCopySpeedLimitMBps: 50 });
+    expect(vmCopySpecFields({ speedLimitMBps: 0, restorePointKeepHours: 24 })).toEqual({ vmCopySpeedLimitMBps: 0 });
+  });
+
+  it('sets a changed keep time', () => {
+    expect(vmCopySpecFields({ speedLimitMBps: 20, restorePointKeepHours: 72 })).toEqual({ restorePointKeepHours: 72 });
+  });
+
+  it('keeps the keep time at 1 hour or more and the speed at 0 or more', () => {
+    expect(vmCopySpecFields({ speedLimitMBps: -5, restorePointKeepHours: 0 })).toEqual({ vmCopySpeedLimitMBps: 0, restorePointKeepHours: 1 });
+  });
+});
+
+describe('vmCopySettingsText', () => {
+  it('shows defaults when the policy sets nothing', () => {
+    expect(vmCopySettingsText({} as ReplicationPolicySpec)).toEqual({ speed: '20 MB/s per disk (default)', keep: '24 hours (default)' });
+  });
+
+  it('shows what the policy sets', () => {
+    expect(vmCopySettingsText({ vmCopySpeedLimitMBps: 0, restorePointKeepHours: 1 } as ReplicationPolicySpec)).toEqual({
+      speed: 'Unlimited',
+      keep: '1 hour',
+    });
+    expect(vmCopySettingsText({ vmCopySpeedLimitMBps: 50, restorePointKeepHours: 72 } as ReplicationPolicySpec)).toEqual({
+      speed: '50 MB/s per disk',
+      keep: '72 hours',
+    });
   });
 });
 
