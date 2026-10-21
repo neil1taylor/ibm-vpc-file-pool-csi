@@ -56,6 +56,10 @@ if [ -f "$src/disk.img" ]; then
   # A retry finds the disk of the first try; the target is a new volume, so
   # this removes only our own earlier output.
   rm -f "$dst/disk.img"
+  # The new volume has no folder until a pod mounts it. The disk restore runs
+  # as the QEMU user, so it needs to be able to write there.
+  mkdir -p "$dst"
+  chmod 0777 "$dst"
   exec /usr/local/bin/vpc-file-pool-csi --mode=restore-vm-disk --backup-disk="$src/disk.img" --out-disk="$dst/disk.img"%s
 fi
 pick="$src"

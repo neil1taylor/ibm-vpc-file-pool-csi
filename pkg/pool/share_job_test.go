@@ -569,3 +569,26 @@ func TestShareJobRunner_RestoreBackup_RejectsBadInput(t *testing.T) {
 		t.Error("bad permissions: want an error")
 	}
 }
+
+// A pod that restarts in place (restartPolicy OnFailure) uses up the Job's
+// retries without the Job's failed count passing the limit. The Job's Failed
+// condition is what says the Job is over. Found on rovslab, where a restore
+// stayed "Restoring" for an hour after its Job had failed.
+func TestShareJobRunner_ApplyVMDisk_FailedConditionReportsError(t *testing.T) {
+	r, c := newApplyRunner()
+	ctx := context.Background()
+	moment := time.Now()
+	if _, err := r.ApplyVMDisk(ctx, "snap-a", testShareA, testVolPath, ".repl-staging-abc", testSnapPath, moment); err != nil {
+		t.Fatal(err)
+	}
+	job := getShareJob(t, c, "snap-a")
+	job.Status.Failed = 1
+	job.Status.Conditions = []batchv1.JobCondition{{Type: batchv1.JobFailed, Status: corev1.ConditionTrue, Reason: "BackoffLimitExceeded"}}
+	if err := c.Status().Update(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	_, err := r.ApplyVMDisk(ctx, "snap-a", testShareA, testVolPath, ".repl-staging-abc", testSnapPath, moment)
+	if !errors.Is(err, ErrShareJobFailed) {
+		t.Fatalf("err = %v, want ErrShareJobFailed", err)
+	}
+}

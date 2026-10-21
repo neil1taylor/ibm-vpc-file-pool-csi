@@ -230,12 +230,24 @@ func (r *ShareJobRunner) runMessage(ctx context.Context, key string, shares []Sh
 		msg := r.terminationMessage(ctx, jobName)
 		r.cleanup(ctx, jobName, len(shares))
 		return true, msg, nil
-	case job.Status.Failed > shareJobBackoffLimit:
+	case job.Status.Failed > shareJobBackoffLimit || jobHasFailed(job):
 		r.cleanup(ctx, jobName, len(shares))
 		return false, "", fmt.Errorf("%w: %s", ErrShareJobFailed, jobName)
 	default:
 		return false, "", nil
 	}
+}
+
+// jobHasFailed reports whether the Job has its Failed condition. A pod that
+// restarts in place uses up the retries of a Job without raising the Job's
+// failed count past the limit.
+func jobHasFailed(job *batchv1.Job) bool {
+	for _, c := range job.Status.Conditions {
+		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
 }
 
 // terminationMessage returns what the container of a Job's pod wrote to its

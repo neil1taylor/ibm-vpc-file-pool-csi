@@ -222,6 +222,10 @@ func TestRestoreScript_RunsInBashAndSurvivesARetry(t *testing.T) {
 	if rm < 0 || rm > disk {
 		t.Errorf("a retry finds disk.img from the first try; the script must remove it before the disk restore:\n%s", script)
 	}
+	mk := strings.Index(script, `mkdir -p "$dst"`)
+	if mk < 0 || mk > disk {
+		t.Errorf("the new volume has no folder yet; the script must make it before the disk restore opens a file in it:\n%s", script)
+	}
 	if strings.Contains(script, "| tail") {
 		t.Errorf("no pipes under set -e:\n%s", script)
 	}
