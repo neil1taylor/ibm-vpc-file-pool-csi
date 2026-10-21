@@ -244,13 +244,27 @@ func (m *Manager) guestFrozen(ctx context.Context, namespace, vmi string) bool {
 }
 
 // setDiskTop records volume's top file on the running VMI, for its next start.
-// An empty top removes the entry. A failure is logged: the next snapshot or
-// merge writes it again, and a VM that starts without it fails safe.
+// An empty top removes the entry. Calls for other disks of the same VM can
+// run at once, so the write fails on a newer VMI and is tried again on a
+// fresh read; no call loses another's entry. A failure is logged: the next
+// snapshot or merge writes it again, and a VM that starts without it fails
+// safe.
 func (m *Manager) setDiskTop(ctx context.Context, namespace, vmiName, volume, top string) {
+	var err error
+	for try := 0; try < 5; try++ {
+		if err = m.trySetDiskTop(ctx, namespace, vmiName, volume, top); !apierrors.IsConflict(err) {
+			break
+		}
+	}
+	if err != nil {
+		klog.ErrorS(err, "Failed to record the disk top on the VMI", "vmi", klog.KRef(namespace, vmiName), "volume", volume)
+	}
+}
+
+func (m *Manager) trySetDiskTop(ctx context.Context, namespace, vmiName, volume, top string) error {
 	vmi, err := m.getVMI(ctx, namespace, vmiName)
 	if err != nil {
-		klog.ErrorS(err, "Failed to read the VMI to record its disk top", "vmi", klog.KRef(namespace, vmiName))
-		return
+		return fmt.Errorf("read the VMI: %w", err)
 	}
 	base := vmi.DeepCopy()
 	ann := vmi.GetAnnotations()
@@ -273,9 +287,7 @@ func (m *Manager) setDiskTop(ctx context.Context, namespace, vmiName, volume, to
 		ann[DiskTopsAnnotation] = string(b)
 	}
 	vmi.SetAnnotations(ann)
-	if err := m.instant.kube.Patch(ctx, vmi, client.MergeFrom(base)); err != nil {
-		klog.ErrorS(err, "Failed to record the disk top on the VMI", "vmi", klog.KRef(namespace, vmiName))
-	}
+	return m.instant.kube.Patch(ctx, vmi, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
 }
 
 // ensureVMHook makes or updates the hook ConfigMap in namespace.
@@ -855,10 +867,7 @@ func (m *Manager) deleteInstantSnapshot(ctx context.Context, snap *v1alpha1.Snap
 	if err = m.k8sClient.DeleteSnapshot(ctx, snap.Name); err != nil {
 		return fmt.Errorf("delete Snapshot CR: %w", err)
 	}
-	m.chargeShare(pool, snap.Spec.ShareID, -snapshotChargeGB(snap))
-	if err := m.k8sClient.UpdateFileSharePoolStatus(ctx, pool); err != nil {
-		klog.ErrorS(err, "Failed to update pool status after snapshot deletion", "pool", pool.Name)
-	}
+	m.unbookShare(ctx, pool.Name, snap.Spec.ShareID, snapshotChargeGB(snap))
 	klog.V(2).InfoS("Deleted instant snapshot", "snapshot", snap.Name, "pool", pool.Name)
 	return nil
 }
