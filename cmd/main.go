@@ -265,6 +265,11 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 		klog.ErrorS(err, "Failed to set up reconciler")
 		os.Exit(1)
 	}
+	rebind := &pool.ClaimRebindReconciler{Reader: mgr.GetClient(), K8sClient: k8sClient, DriverName: driver.DriverName}
+	if err = rebind.SetupWithManager(mgr); err != nil {
+		klog.ErrorS(err, "Failed to set up the claim rebind reconciler")
+		os.Exit(1)
+	}
 
 	// Register validating webhooks for CRD resources. The manager starts the
 	// webhook server only when a webhook is registered, so with webhooks
