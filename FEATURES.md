@@ -157,7 +157,7 @@ Defense-in-depth controls for a storage driver running with host access.
 
 Prometheus metrics and structured logging for operational visibility.
 
-- **Prometheus metrics** — 21+ metrics covering allocation (count, duration, capacity), VPC API calls (count, latency), snapshots, clones, group snapshots, and replication.
+- **Prometheus metrics** — 22 metrics covering allocation (count, duration, capacity), VPC API calls (count, latency), snapshots, clones, group snapshots, and replication.
 - **Structured logging** — `klog/v2` with `InfoS`/`ErrorS` and key-value pairs. V(2) for normal operations, V(4) for detailed flow, V(6) for trace-level.
 - **Key metrics:**
   - `vpc_file_pool_allocations_total` — allocation/deallocation counts by pool and status
@@ -200,7 +200,7 @@ Visual management of file share pools through the OpenShift Console.
 - **Restore a snapshot to a new PVC** — A "Restore to new PVC" action on the snapshot details page and in the list row menu opens a form (name, size, storage class, access and volume mode) and creates a claim whose data source is the snapshot's `VolumeSnapshot`. A banner follows the copy. It never replaces an existing volume. See [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md#restore-in-the-console).
 - **Clone a volume to a new PVC** — A "Clone to new PVC" action on the SubVolume details page and in the list row menu opens the same kind of form and creates a claim whose data source is the volume's claim. The same banner follows the copy. It never changes the source volume. See [VOLUME-CLONING.md](VOLUME-CLONING.md#clone-in-the-console).
 - **Monitoring tab** — Dedicated metrics page with time range selector (1h/6h/24h/7d), stat cards (allocation rate, P95 latency, VPC API health, replication status), and time-series charts (allocation rate, latency, API call rate by status, replication lag).
-- **Prometheus metrics panels** — Stat cards and time-series charts using the driver's 21+ Prometheus metrics with `usePrometheusRange` hook for range queries.
+- **Prometheus metrics panels** — Stat cards and time-series charts using the driver's 22 Prometheus metrics with `usePrometheusRange` hook for range queries.
 - **TLS via service-ca** — Plugin Service uses OpenShift's service-ca operator for automatic TLS certificate provisioning (no cert-manager dependency).
 
 ### CDI Copy Limit — Beta
@@ -244,7 +244,7 @@ How this driver compares to the two most common alternatives for NFS-based Kuber
 | CreateVolume / DeleteVolume | ✅ | ✅ | ✅ |
 | ExpandVolume | ✅ (pool-level) | ✅ (share-level) | ❌ |
 | Volume snapshots | ✅ (directory copy) | ❌ | ❌ |
-| Volume clones | ✅ (sync + async) | ❌ | ❌ |
+| Volume clones | ✅ (async, Job-based) | ❌ | ❌ |
 | Volume group snapshots | ✅ (beta) | ❌ | ❌ |
 | Clone status gate | ✅ | — | — |
 | **NFS** | | | |
@@ -276,7 +276,7 @@ How this driver compares to the two most common alternatives for NFS-based Kuber
 | Config auto-discovery | ✅ | ✅ | ❌ |
 | API rate limiting | ✅ | ✅ | — |
 | **Observability** | | | |
-| Prometheus metrics | ✅ (21+ metrics) | ✅ | ❌ |
+| Prometheus metrics | ✅ (22 metrics) | ✅ | ❌ |
 | Structured logging (klog) | ✅ | ✅ | ✅ |
 | OpenShift Console plugin | ✅ (beta) | ❌ | ❌ |
 | **Deployment** | | | |

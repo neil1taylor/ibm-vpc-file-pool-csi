@@ -206,8 +206,8 @@ type AccessorZone struct {
 
     // SubnetID is not used. Shares use security group access mode, and one mount
     // target in the home zone serves every zone. Kept so existing pools still apply.
-    // +kubebuilder:validation:Required
-    SubnetID string `json:"subnetID"`
+    // +optional
+    SubnetID string `json:"subnetID,omitempty"`
 }
 
 // ShareTier defines the VPC share configuration for a performance tier within the pool.
@@ -455,11 +455,11 @@ spec:
   expandThresholdPercent: 80
   allocationStrategy: spread
   defaultPermissions: "0755"
-  accessorZones:                     # Mount targets created in these zones too
+  accessorZones:                     # Nodes in these zones mount the share across zones
     - zone: us-south-2
-      subnetID: "0717-xxxx-yyyy"     # Subnet in us-south-2
+      subnetID: "0717-xxxx-yyyy"     # Optional and not used
     - zone: us-south-3
-      subnetID: "0727-aaaa-bbbb"     # Subnet in us-south-3
+      subnetID: "0727-aaaa-bbbb"     # Optional and not used
 ```
 
 When a share is created, it gets one mount target, in the home zone. Nodes in the accessor zones mount it across zones, and the pool status records its address for each accessor zone. The `subnetID` of an accessor zone is not used.

@@ -369,7 +369,7 @@ kubectl apply -f config/deploy/node.yaml
 | `--subnet-id` | Auto-discovered | Worker subnet IDs for mount targets, comma-separated; the controller uses the one in each pool's zone |
 | `--kubelet-dir` | `/var/lib/kubelet` | Kubelet root directory (ROKS/ROVS: use `/var/data/kubelet`) |
 | `--clone-worker-interval` | `10s` | Clone worker poll interval |
-| `--golden-image-sync-interval` | `5m` | Golden image syncer poll interval |
+| `--golden-image-sync-interval` | `1h` | Golden image syncer poll interval (the Helm chart sets `5m`) |
 | `--cdi-copy-pod-memory-limit` | `8Gi` | Keep the memory limit of CDI's copy pods at least this high (OpenShift Virtualization `HyperConverged`); empty turns the check off |
 | `--driver-image` | `""` | Driver container image for receiver-mode sync-client Jobs (auto-set by Helm) |
 | `--enable-webhooks` | `true` | Serve the validating admission webhooks. Helm sets `false` when `webhook.enabled=false` |
