@@ -149,6 +149,13 @@ type jobShape struct {
 	// folders, if set, replace the share mounts: each mounts one folder of
 	// a share.
 	folders []folderMount
+	// readOnly mounts every share read-only, down to the NFS export.
+	readOnly bool
+	// env is added to the main container. Secrets go here as references, so
+	// they are never in the Job's command.
+	env []corev1.EnvVar
+	// resources replaces the default limits of the main container.
+	resources *corev1.ResourceRequirements
 }
 
 // folderMount mounts subPath of share number share at at.
@@ -349,7 +356,7 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 
 	for i, share := range shares {
 		name := fmt.Sprintf("%s-s%d", jobName, i)
-		if err := r.ensureSharePV(ctx, name, share, labels); err != nil {
+		if err := r.ensureSharePV(ctx, name, share, labels, shape.readOnly); err != nil {
 			return err
 		}
 		if err := r.ensureShareClaim(ctx, name, labels); err != nil {
@@ -359,15 +366,15 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 		volumes = append(volumes, corev1.Volume{
 			Name: volName,
 			VolumeSource: corev1.VolumeSource{
-				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: name},
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: name, ReadOnly: shape.readOnly},
 			},
 		})
-		mounts = append(mounts, corev1.VolumeMount{Name: volName, MountPath: "/" + volName})
+		mounts = append(mounts, corev1.VolumeMount{Name: volName, MountPath: "/" + volName, ReadOnly: shape.readOnly})
 	}
 	if shape.folders != nil {
 		mounts = nil
 		for _, f := range shape.folders {
-			mounts = append(mounts, corev1.VolumeMount{Name: fmt.Sprintf("share%d", f.share), MountPath: f.at, SubPath: f.subPath})
+			mounts = append(mounts, corev1.VolumeMount{Name: fmt.Sprintf("share%d", f.share), MountPath: f.at, SubPath: f.subPath, ReadOnly: shape.readOnly})
 		}
 	}
 
@@ -380,6 +387,10 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 			corev1.ResourceCPU:    resource.MustParse("1"),
 			corev1.ResourceMemory: resource.MustParse("512Mi"),
 		},
+	}
+	mainResources := resources
+	if shape.resources != nil {
+		mainResources = *shape.resources
 	}
 	var initContainers []corev1.Container
 	if shape.initScript != "" {
@@ -409,7 +420,8 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 						Name:         "share-data",
 						Image:        shape.image,
 						Command:      shape.command,
-						Resources:    resources,
+						Env:          shape.env,
+						Resources:    mainResources,
 						VolumeMounts: mounts,
 					}},
 					Volumes: volumes,
@@ -424,7 +436,7 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 	return nil
 }
 
-func (r *ShareJobRunner) ensureSharePV(ctx context.Context, name string, share ShareMount, labels map[string]string) error {
+func (r *ShareJobRunner) ensureSharePV(ctx context.Context, name string, share ShareMount, labels map[string]string, readOnly bool) error {
 	exportPath := share.ExportPath
 	if exportPath == "" {
 		exportPath = "/"
@@ -438,7 +450,7 @@ func (r *ShareJobRunner) ensureSharePV(ctx context.Context, name string, share S
 			PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimRetain,
 			MountOptions:                  []string{"nfsvers=4.1", "soft", "timeo=600", "retrans=3", "sec=sys"},
 			PersistentVolumeSource: corev1.PersistentVolumeSource{
-				NFS: &corev1.NFSVolumeSource{Server: share.MountTargetIP, Path: exportPath},
+				NFS: &corev1.NFSVolumeSource{Server: share.MountTargetIP, Path: exportPath, ReadOnly: readOnly},
 			},
 			ClaimRef: &corev1.ObjectReference{Name: name, Namespace: r.namespace},
 		},
