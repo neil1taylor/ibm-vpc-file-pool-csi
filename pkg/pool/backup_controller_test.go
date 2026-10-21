@@ -159,7 +159,7 @@ func TestBackupController_MakesAnOwnedReplicationPolicy(t *testing.T) {
 		t.Fatalf("replication policies = %d, want 1", len(rps))
 	}
 	rp := rps[0]
-	if rp.Name != "backup-nightly-data-a" {
+	if rp.Name != backupReplicationName("nightly", "data-a") {
 		t.Errorf("name = %q", rp.Name)
 	}
 	sp := rp.Spec

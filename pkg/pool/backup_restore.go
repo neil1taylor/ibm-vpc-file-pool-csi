@@ -42,6 +42,7 @@ const (
 func (bc *BackupController) SetShareData(sd ShareData) { bc.shareData = sd }
 
 func (bc *BackupController) reconcileRestores(ctx context.Context) {
+	bc.openFinishedRestores(ctx)
 	list := &v1alpha1.BackupRestoreList{}
 	if err := bc.client.List(ctx, list); err != nil {
 		klog.ErrorS(err, "Failed to list BackupRestores")
@@ -58,13 +59,21 @@ func (bc *BackupController) reconcileRestores(ctx context.Context) {
 
 // setRestoreStatus records the phase and the message of a restore.
 func (bc *BackupController) setRestoreStatus(ctx context.Context, br *v1alpha1.BackupRestore, phase, msg string) {
+	_ = bc.saveRestoreStatus(ctx, br, phase, msg) // a failed save is logged and tried again next pass
+}
+
+// saveRestoreStatus is setRestoreStatus for a caller that must know if the
+// save worked.
+func (bc *BackupController) saveRestoreStatus(ctx context.Context, br *v1alpha1.BackupRestore, phase, msg string) error {
 	if br.Status.Phase == phase && br.Status.Message == msg {
-		return
+		return nil
 	}
 	br.Status.Phase, br.Status.Message = phase, msg
 	if err := bc.client.Status().Update(ctx, br); err != nil {
 		klog.ErrorS(err, "Failed to update BackupRestore status", "restore", br.Name)
+		return err
 	}
+	return nil
 }
 
 func (bc *BackupController) failRestore(ctx context.Context, br *v1alpha1.BackupRestore, msg string) {
@@ -159,13 +168,46 @@ func (bc *BackupController) reconcileRestore(ctx context.Context, br *v1alpha1.B
 		bc.setRestoreStatus(ctx, br, restorePhaseRestoring, "copying the backup into the new volume")
 		return
 	}
-	bc.setSubVolumeRestoreLabel(ctx, sv, false)
+	// Save Done first. The volume opens only after that, so a failed save
+	// cannot leave a volume open that the next pass would empty and fill again.
 	br.Status.Latest = outcome.Latest
 	if !outcome.Moment.IsZero() {
 		m := metav1.NewTime(outcome.Moment)
 		br.Status.RestoredMoment = &m
 	}
-	bc.setRestoreStatus(ctx, br, restorePhaseDone, "")
+	if err := bc.saveRestoreStatus(ctx, br, restorePhaseDone, ""); err != nil {
+		return
+	}
+	bc.setSubVolumeRestoreLabel(ctx, sv, false)
+}
+
+// openFinishedRestores removes the hold-back label from volumes whose restore
+// has ended with Done. It covers a controller that stopped after it saved Done
+// and before it removed the label.
+func (bc *BackupController) openFinishedRestores(ctx context.Context) {
+	svs := &v1alpha1.SubVolumeList{}
+	if err := bc.client.List(ctx, svs, client.MatchingLabels{RestorePendingLabel: "true"}); err != nil {
+		klog.ErrorS(err, "Failed to list held-back SubVolumes")
+		return
+	}
+	for i := range svs.Items {
+		sv := &svs.Items[i]
+		pvc := &corev1.PersistentVolumeClaim{}
+		if err := bc.client.Get(ctx, types.NamespacedName{Namespace: sv.Spec.PVCNamespace, Name: sv.Spec.PVCName}, pvc); err != nil {
+			continue
+		}
+		name := pvc.Annotations[backupRestoreAnnotation]
+		if name == "" {
+			continue
+		}
+		br := &v1alpha1.BackupRestore{}
+		if err := bc.client.Get(ctx, types.NamespacedName{Name: name}, br); err != nil {
+			continue
+		}
+		if br.Status.Phase == restorePhaseDone {
+			bc.setSubVolumeRestoreLabel(ctx, sv, false)
+		}
+	}
 }
 
 // shareMountOf turns the status of a pool's share into a mount.

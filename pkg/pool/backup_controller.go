@@ -2,6 +2,8 @@ package pool
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"sort"
@@ -10,6 +12,7 @@ import (
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -135,7 +138,7 @@ func (bc *BackupController) tidyDeleted(ctx context.Context, known map[string]bo
 		klog.ErrorS(err, "Failed to list backup ReplicationPolicies")
 	} else {
 		for i := range rps.Items {
-			if !known[rps.Items[i].Labels[backupPolicyLabel]] {
+			if bc.policyIsGone(ctx, rps.Items[i].Labels[backupPolicyLabel], known) {
 				bc.deleteReplicationPolicy(ctx, &rps.Items[i])
 			}
 		}
@@ -146,10 +149,20 @@ func (bc *BackupController) tidyDeleted(ctx context.Context, known map[string]bo
 		return
 	}
 	for i := range svs.Items {
-		if !known[svs.Items[i].Labels[backupPolicyLabel]] {
+		if bc.policyIsGone(ctx, svs.Items[i].Labels[backupPolicyLabel], known) {
 			bc.setSubVolumeLabel(ctx, &svs.Items[i], "")
 		}
 	}
+}
+
+// policyIsGone is true only when the API says the policy does not exist. A
+// list that misses a policy (a cache that has not filled) is not enough.
+func (bc *BackupController) policyIsGone(ctx context.Context, name string, known map[string]bool) bool {
+	if known[name] {
+		return false
+	}
+	err := bc.client.Get(ctx, types.NamespacedName{Name: name}, &v1alpha1.BackupPolicy{})
+	return apierrors.IsNotFound(err)
 }
 
 func (bc *BackupController) deleteReplicationPolicy(ctx context.Context, rp *v1alpha1.ReplicationPolicy) {
@@ -280,7 +293,7 @@ func (bc *BackupController) saveStatus(ctx context.Context, bp *v1alpha1.BackupP
 func equalBackupStatus(a, b v1alpha1.BackupPolicyStatus) bool {
 	return a.Phase == b.Phase && a.Message == b.Message && a.VolumeCount == b.VolumeCount &&
 		strings.Join(a.ReplicationPolicies, ",") == strings.Join(b.ReplicationPolicies, ",") &&
-		fmt.Sprint(a.Volumes) == fmt.Sprint(b.Volumes)
+		equality.Semantic.DeepEqual(a.Volumes, b.Volumes)
 }
 
 // snapshotShare checks the snapshot pool and returns its share. The pool must
@@ -427,14 +440,16 @@ func vmClaims(vm *unstructured.Unstructured) []string {
 
 // backupReplicationName names the ReplicationPolicy of a backup policy for
 // one source pool.
+// The short hash keeps "a-b" + "c" apart from "a" + "b-c".
 func backupReplicationName(policy, pool string) string {
-	return "backup-" + policy + "-" + pool
+	sum := sha256.Sum256([]byte(policy + "\x00" + pool))
+	return "backup-" + policy + "-" + pool + "-" + hex.EncodeToString(sum[:3])
 }
 
 // backupKeepHours is the keep time rounded up to whole hours.
 func backupKeepHours(bp *v1alpha1.BackupPolicy) int32 {
 	d, err := v1alpha1.ParseKeepFor(bp.Spec.KeepFor)
-	if err != nil || d < time.Hour {
+	if err != nil || d <= 0 {
 		d = v1alpha1.DefaultBackupKeepFor
 	}
 	return int32(math.Ceil(d.Hours())) // #nosec G115 -- a keep time is far below 2^31 hours
@@ -473,7 +488,7 @@ func sameReplicationSpec(a, b v1alpha1.ReplicationPolicySpec) bool {
 		a.Schedule == b.Schedule && a.MaxRetries == b.MaxRetries && a.MaxParallelSyncs == b.MaxParallelSyncs &&
 		ptrEq(a.VMCopySpeedLimitMBps, b.VMCopySpeedLimitMBps) && ptrEq(a.RestorePointKeepHours, b.RestorePointKeepHours) &&
 		ptrEq(a.MomentKeepHours, b.MomentKeepHours) &&
-		fmt.Sprint(a.SubVolumeSelector) == fmt.Sprint(b.SubVolumeSelector)
+		equality.Semantic.DeepEqual(a.SubVolumeSelector, b.SubVolumeSelector)
 }
 
 func ptrEq(a, b *int32) bool {
@@ -583,7 +598,16 @@ func (bc *BackupController) buildStatus(ctx context.Context, bp *v1alpha1.Backup
 				}
 			}
 		}
-		if rs, ok := byName[t.sv.Name]; ok {
+		if rs, ok := byName[t.sv.Name]; !ok {
+			// No report this pass (the replication policy is new, or cannot be
+			// read): keep what the last pass knew, or an alert would be false.
+			for _, old := range bp.Status.Volumes {
+				if old.SubVolumeName == t.sv.Name && !old.Retained {
+					v.LastBackupTime, v.OldestBackupTime, v.RestorePoints = old.LastBackupTime, old.OldestBackupTime, old.RestorePoints
+					v.BytesWritten, v.Consistency, v.LastError = old.BytesWritten, old.Consistency, old.LastError
+				}
+			}
+		} else {
 			v.LastBackupTime = rs.LastSyncTime
 			v.OldestBackupTime = rs.OldestRestorePoint
 			v.RestorePoints = rs.RestorePoints
@@ -617,10 +641,7 @@ func (bc *BackupController) buildStatus(ctx context.Context, bp *v1alpha1.Backup
 // on the share, and a restore needs their entry. An entry goes once the keep
 // time has passed since its last backup.
 func (bc *BackupController) retainedVolumes(bp *v1alpha1.BackupPolicy, targets []backupTarget) []v1alpha1.BackupVolumeStatus {
-	keep, err := v1alpha1.ParseKeepFor(bp.Spec.KeepFor)
-	if err != nil {
-		keep = v1alpha1.DefaultBackupKeepFor
-	}
+	keep := time.Duration(backupKeepHours(bp)) * time.Hour
 	current := map[string]bool{}
 	for _, t := range targets {
 		current[t.sv.Name] = true

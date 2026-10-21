@@ -1083,7 +1083,10 @@ for d in "$moments"/*; do
 done
 count=$(find "$moments" -mindepth 1 -maxdepth 1 -type d | wc -l)
 older=$((count - 1))
-oldest=$(ls -1 "$moments" | head -n 1)
+oldest=""
+for d in "$moments"/*; do
+  [ -d "$d" ] && { oldest=$(basename "$d"); break; }
+done
 oldest_iso=$(date -u -d "${oldest:0:4}-${oldest:4:2}-${oldest:6:2} ${oldest:9:2}:${oldest:11:2}:${oldest:13:2}" +%%Y-%%m-%%dT%%H:%%M:%%SZ)
 printf '{"bytesWritten":0,"restorePoints":%%s,"oldestRestorePoint":"%%s"}' "$older" "$oldest_iso" > /dev/termination-log
 `, destBasePath, subPath, *keepHours)

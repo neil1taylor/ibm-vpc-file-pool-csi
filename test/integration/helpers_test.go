@@ -154,6 +154,10 @@ func (f *fakeK8sClient) ListCloneSubVolumes(_ context.Context) ([]v1alpha1.SubVo
 	return result, nil
 }
 
+func (f *fakeK8sClient) HasOpenRestore(_ context.Context, _, _ string) (bool, error) {
+	return false, nil
+}
+
 func (f *fakeK8sClient) CreateSubVolume(_ context.Context, sv *v1alpha1.SubVolume) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

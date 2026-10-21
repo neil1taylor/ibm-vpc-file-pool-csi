@@ -123,6 +123,9 @@ type AllocationRequest struct {
 	UID          *int64
 	GID          *int64
 	Permissions  string
+	// RestorePending makes the volume held back from pods from the start,
+	// because a BackupRestore is about to fill it.
+	RestorePending bool
 }
 
 // AllocationResult contains the result of a successful allocation.
@@ -275,13 +278,17 @@ func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (_ *Alloc
 
 	// 7. Build and create SubVolume CR
 	now := metav1.Now()
+	labels := map[string]string{
+		"storage.ibmcloud.io/pool":     req.PoolName,
+		"storage.ibmcloud.io/share-id": share.ShareID,
+	}
+	if req.RestorePending {
+		labels[RestorePendingLabel] = "true"
+	}
 	sv := &v1alpha1.SubVolume{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: req.PVName,
-			Labels: map[string]string{
-				"storage.ibmcloud.io/pool":     req.PoolName,
-				"storage.ibmcloud.io/share-id": share.ShareID,
-			},
+			Name:   req.PVName,
+			Labels: labels,
 		},
 		Spec: v1alpha1.SubVolumeSpec{
 			PoolName:           req.PoolName,

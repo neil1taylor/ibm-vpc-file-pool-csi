@@ -53,11 +53,17 @@ moments="/share0%s"
 dst="/share1%s"
 at="%s"
 if [ -f "$src/disk.img" ]; then
+  # A retry finds the disk of the first try; the target is a new volume, so
+  # this removes only our own earlier output.
+  rm -f "$dst/disk.img"
   exec /usr/local/bin/vpc-file-pool-csi --mode=restore-vm-disk --backup-disk="$src/disk.img" --out-disk="$dst/disk.img"%s
 fi
 pick="$src"
 latest=true
-newest=$(ls -1 "$moments" 2>/dev/null | tail -n 1 || true)
+newest=""
+for d in "$moments"/*; do
+  [ -d "$d" ] && newest=$(basename "$d")
+done
 if [ -n "$at" ]; then
   want=$(date -u -d "$at" +%%Y%%m%%dT%%H%%M%%SZ)
   pick=""
@@ -65,9 +71,16 @@ if [ -n "$at" ]; then
     [ -d "$d" ] || continue
     if [[ ! "$(basename "$d")" > "$want" ]]; then pick="$d"; fi
   done
-  [ -n "$pick" ] || { echo "no backup at or before $at" >&2; exit 1; }
-  if [ "$(basename "$pick")" != "$newest" ]; then latest=false; fi
-  stamp=$(basename "$pick")
+  if [ -z "$newest" ]; then
+    # no moment folder yet: the only copy is the latest one
+    echo "no moment folder yet; using the latest copy" >&2
+    pick="$src"
+    stamp=""
+  else
+    [ -n "$pick" ] || { echo "no backup at or before $at" >&2; exit 1; }
+    if [ "$(basename "$pick")" != "$newest" ]; then latest=false; fi
+    stamp=$(basename "$pick")
+  fi
 else
   stamp="$newest"
 fi
@@ -85,7 +98,7 @@ printf '{"moment":"%s","latest":%s}' "$iso" "$latest" > /dev/termination-log
 `)
 	shape := jobShape{
 		image:     r.driverImage,
-		command:   []string{"/bin/sh", "-c", b.String()},
+		command:   []string{"/bin/bash", "-c", b.String()},
 		runAsUser: 0,
 	}
 	done, msg, err := r.runMessage(ctx, key, []ShareMount{backup, dst}, shape)
