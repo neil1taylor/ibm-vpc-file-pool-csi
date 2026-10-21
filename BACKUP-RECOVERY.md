@@ -398,7 +398,19 @@ spec:
 
 After each local backup of a volume, an export Job reads the snapshot pool's share (read-only, so a running VM is never slowed) and sends the changes to the bucket. `kubectl get backuppolicy NAME -o yaml` shows `exportedTime`, `exportedBytes` and `exportError` for each volume. A failed export is tried again after 5 minutes and never stops the backups to the snapshot pool. A maintenance Job runs once a day (hourly for the shortest keep time of 25 hours) and deletes snapshots older than `keepFor`. Alert rules for a late export are in [MONITORING.md](MONITORING.md#backup-metrics).
 
-Not built yet: the handling of the backup key (the Secrets above are made by hand), the `kubectl backup cos-setup` command that makes the bucket, the keys and the lock, and the restore from COS. For the bucket and its lock, see [TUTORIAL-09-COS-BACKUP-BUCKET.md](TUTORIAL-09-COS-BACKUP-BUCKET.md). The design is in `docs/specs/2026-10-21-backup-cos-export.md`.
+**`kubectl backup cos-setup`** makes the IBM Cloud side with your own login (`IBMCLOUD_API_KEY`, `IBMCLOUD_IAM_TOKEN` or your `ibmcloud` login; it needs no cluster and never deletes anything). Run it with `--dry-run` first: it prints every step and the exact objects.
+
+```bash
+kubectl backup cos-setup --dry-run \
+  --region eu-de --resource-group my-rg --bucket my-backups-0123 \
+  --root-key crn:v1:bluemix:public:kms:eu-de:a/ACCT:INSTANCE:key:KEYID \
+  --vpc-crn <cluster VPC CRN> --admin-address <your public address>[,more] \
+  --key-file ~/.config/pool-csi/cos-key.yaml --secret-file ~/.config/pool-csi/backup-key-secret.yaml
+```
+
+It makes (or reuses, by name) the COS instance, a versioned bucket with object lock and no default keep time, the `PoolCsiBackupWriter` role, a service ID limited to that one bucket, an HMAC key, a CBR zone and rule, and a backup key wrapped by your Key Protect root key. You must give an existing Key Protect root key; it does not make one. It refuses to run with `--cbr-mode enabled` (the default) when your own address is not in the zone, so you cannot lock yourself out; use `--zone-id` to reuse a zone. It refuses a bucket it did not make unless you pass `--existing-bucket`. It writes the COS key to `--key-file` (a Secret manifest, mode 0600, never printed), shows the readable backup key once and waits until you type that you saved a copy outside IBM Cloud, then stores only the wrapped copy in the bucket and in `--secret-file`. A keep time above 90 days needs a typed confirmation because a Compliance lock cannot be undone. Run it again at any time: what exists is left as it is. It prints the `spec.export` block to paste. Not run against real IBM Cloud yet.
+
+Not built yet: the handling of the backup key in the Jobs (part 3: the interim Job still reads `backupKey` from the Secret, so the Secret `cos-setup` writes needs part 3 to be used), and the restore from COS. For the bucket and its lock, see [TUTORIAL-09-COS-BACKUP-BUCKET.md](TUTORIAL-09-COS-BACKUP-BUCKET.md). The design is in `docs/specs/2026-10-21-backup-cos-export.md`.
 
 **A Compliance lock cannot be undone**, not even by IBM. Locked data is billed until its lock ends, also after you delete the policy.
 
