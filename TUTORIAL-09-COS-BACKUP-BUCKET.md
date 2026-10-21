@@ -4,6 +4,8 @@
 
 Make an IBM Cloud Object Storage (COS) bucket that the backup export can use: a locked, versioned bucket, a key that can only write to it, and a network rule that lets only the cluster and your admin addresses reach it. This is the setup that `kubectl backup cos-setup` will do for you (see `docs/specs/2026-10-21-backup-cos-export.md`). Until that command exists, follow these steps. They are what we ran on the lab on 21 October 2026, and each one was checked.
 
+> **Note:** once part 4 of the COS export is merged, `kubectl backup cos-setup` automates these steps (run it with `--dry-run` first; see [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md#export-to-cos-building-not-usable-end-to-end-yet)). It has not been run against real IBM Cloud yet. This page stays the tested manual procedure and the reference for what the command makes.
+
 **Account:** the one that holds your cluster. **Region:** the bucket is in the cluster's region (`eu-de` here).
 
 ---

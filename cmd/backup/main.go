@@ -6,6 +6,7 @@
 //	kubectl backup list    [--policy NAME]
 //	kubectl backup restore --policy NAME --pvc NAMESPACE/NAME --to NAMESPACE/NAME [--moment TIME] [--storage-class CLASS] [--wait]
 //	kubectl backup delete  --policy NAME --pvc NAMESPACE/NAME [--yes]
+//	kubectl backup cos-setup --region R --resource-group G --bucket B --root-key CRN ... [--dry-run]
 //
 // A restore makes a BackupRestore resource. The driver makes the new PVC and
 // copies the backup into it; it never writes over a volume that exists.
@@ -53,6 +54,13 @@ func main() {
 	case "--help", "-h", "help":
 		printUsage(os.Stdout)
 		return
+	case "cos-setup":
+		// It needs the caller's IBM Cloud login, not a cluster.
+		if err := runCOSSetup(context.Background(), os.Stdout, os.Stdin, stdinIsTerminal(), parseFlags(os.Args[2:])); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		return
 	case "list", "restore", "delete":
 	default:
 		_, _ = fmt.Fprintf(os.Stderr, "Unknown subcommand: %s\n\n", os.Args[1])
@@ -91,6 +99,7 @@ Usage:
   kubectl backup list    [--policy NAME]            List the backed-up volumes and their moments
   kubectl backup restore [flags]                    Make a new PVC from a backup
   kubectl backup delete  [flags]                    Remove all backups of one volume, for good
+  kubectl backup cos-setup [flags]                  Make the COS bucket, keys and lock for the export (your own IBM Cloud login)
   kubectl backup version                            Print version
 
 Delete flags:
@@ -105,8 +114,25 @@ Delete flags:
   restore of the volume may be running. It removes the volume's backup folder and
   its earlier moments from the snapshot pool's share, after showing how much.
 
+cos-setup flags (run on your machine; it needs no cluster; it never deletes anything):
+  --region, --resource-group, --bucket   Where to make the bucket (required)
+  --root-key        CRN of the Key Protect root key that wraps the backup key (required; not made here)
+  --vpc-crn, --admin-address   The cluster VPC and your admin addresses (comma separated), for a new CBR zone.
+                    Your own address must be in the list. Or use --zone-id for an existing zone
+  --cbr-mode        report or enabled (default enabled; refused if your address is not in the zone)
+  --key-file        Where to write the COS key as a Secret manifest (mode 0600, never printed)
+  --secret-file     Where to write the wrapped backup key as a Secret manifest
+  --keep-for, --lock, --prefix, --endpoint   Go into the printed spec.export block (keep-for default 30d, lock default Compliance)
+  --instance        COS instance name (default pool-csi-backup-cos; reused if it exists)
+  --existing-bucket Use a bucket this command did not make (never changed; needs versioning and object lock)
+  --my-address      Your public address, when it cannot be found
+  --dry-run         Show each step and the exact objects, change nothing
+  --yes             Skip the typed confirmation. A keep time over 90 days needs --confirm-keep-for=VALUE
+  --namespace, --credentials-secret, --backup-key-secret   Names in the Secret manifests
+  Login: IBMCLOUD_IAM_TOKEN, or IBMCLOUD_API_KEY, or your ibmcloud CLI login. Never stored or printed.
+
 Restore flags:
-  --policy          The BackupPolicy that holds the backup (required)
+  --policy         The BackupPolicy that holds the backup (required)
   --pvc             The backed-up claim, as NAMESPACE/NAME (required). It may be gone
   --to              The new PVC, as NAMESPACE/NAME (required). It must not exist
   --moment          Restore the newest backup at or before this time (RFC 3339). Default: the latest
@@ -132,7 +158,7 @@ func parseFlags(args []string) map[string]string {
 			flags[arg[:idx]] = arg[idx+1:]
 			continue
 		}
-		if arg == "wait" || arg == "yes" {
+		if arg == "wait" || arg == "yes" || arg == "dry-run" || arg == "existing-bucket" {
 			flags[arg] = "true"
 			continue
 		}
