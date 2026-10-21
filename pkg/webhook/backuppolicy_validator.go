@@ -56,8 +56,8 @@ func validateBackupPolicySpec(spec *v1alpha1.BackupPolicySpec) error {
 	if spec.Selector == nil || (len(spec.Selector.MatchLabels) == 0 && len(spec.Selector.MatchExpressions) == 0) {
 		return fmt.Errorf("spec.selector must select by label: an empty selector would back up every volume")
 	}
-	if _, err := metav1.LabelSelectorAsSelector(spec.Selector); err != nil {
-		return fmt.Errorf("spec.selector is not valid: %v", err)
+	if _, selErr := metav1.LabelSelectorAsSelector(spec.Selector); selErr != nil {
+		return fmt.Errorf("spec.selector is not valid: %v", selErr)
 	}
 	keep, err := v1alpha1.ParseKeepFor(spec.KeepFor)
 	if err != nil {
