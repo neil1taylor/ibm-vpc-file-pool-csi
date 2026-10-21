@@ -69,7 +69,8 @@ One `BackupPolicy` backs up the volumes and VMs it selects into a pool that hold
 - **Selection** — By PVC label and namespace. If any disk of a VM matches, all its disks are backed up.
 - **Moments** — The latest backup of a VM disk is whole; earlier moments are undo files (restore points). Other volumes keep each sync as a folder of hard links, so an unchanged file takes no extra space. Moments older than `keepFor` (default 7 days) go.
 - **Restore** — `kubectl backup restore --policy P --pvc NS/NAME --to NS/NEW [--moment TIME]` makes a new PVC and copies the backup into it; the volume is held back from pods until the copy ends. It never writes over a volume that exists, and works after the source volume is deleted.
-- **Not yet** — one share in the snapshot pool (#71), a stop at 85% full (#69), a command to remove the backups of a volume (#70), export to COS (step 9).
+- **Delete** — `kubectl backup delete --policy P --pvc NS/NAME` removes the backup and all earlier moments of one volume, after a typed confirmation (or `--yes`). It refuses while the policy still backs up the volume or a restore of it runs, and the controller never runs it.
+- **Not yet** — one share in the snapshot pool (#71), a stop at 85% full (#69), export to COS (step 9).
 
 ### Volume Group Snapshots — Beta
 

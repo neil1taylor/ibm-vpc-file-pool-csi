@@ -5,6 +5,7 @@
 //
 //	kubectl backup list    [--policy NAME]
 //	kubectl backup restore --policy NAME --pvc NAMESPACE/NAME --to NAMESPACE/NAME [--moment TIME] [--storage-class CLASS] [--wait]
+//	kubectl backup delete  --policy NAME --pvc NAMESPACE/NAME [--yes]
 //
 // A restore makes a BackupRestore resource. The driver makes the new PVC and
 // copies the backup into it; it never writes over a volume that exists.
@@ -23,7 +24,9 @@ import (
 	"time"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/pool"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -52,14 +55,23 @@ func main() {
 	case "--help", "-h", "help":
 		printUsage(os.Stdout)
 		return
-	case "list", "restore":
+	case "list", "restore", "delete":
 	default:
 		_, _ = fmt.Fprintf(os.Stderr, "Unknown subcommand: %s\n\n", os.Args[1])
 		printUsage(os.Stderr)
 		os.Exit(1)
 	}
-	c, err := buildClient(parseFlags(os.Args[2:])["kubeconfig"])
-	if err == nil {
+	flags := parseFlags(os.Args[2:])
+	c, err := buildClient(flags["kubeconfig"])
+	switch {
+	case err != nil:
+	case os.Args[1] == "delete":
+		namespace := flags["driver-namespace"]
+		if namespace == "" {
+			namespace = pool.DefaultDriverNamespace
+		}
+		err = runDelete(context.Background(), c, os.Stdout, os.Stdin, stdinIsTerminal(), pool.NewShareJobRunner(c, namespace, ""), flags)
+	default:
 		err = run(context.Background(), c, os.Stdout, os.Args[1:], time.Now)
 	}
 	if err != nil {
@@ -68,13 +80,31 @@ func main() {
 	}
 }
 
+// stdinIsTerminal says if a person can type an answer.
+func stdinIsTerminal() bool {
+	fi, err := os.Stdin.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}
+
 func printUsage(w io.Writer) {
 	_, _ = fmt.Fprint(w, `kubectl-backup — backups of volumes and VMs
 
 Usage:
   kubectl backup list    [--policy NAME]            List the backed-up volumes and their moments
   kubectl backup restore [flags]                    Make a new PVC from a backup
+  kubectl backup delete  [flags]                    Remove all backups of one volume, for good
   kubectl backup version                            Print version
+
+Delete flags:
+  --policy          The BackupPolicy that holds the backup (required)
+  --pvc             The backed-up claim, as NAMESPACE/NAME (required)
+  --yes             Do not ask for a typed confirmation. Required in a non-interactive shell
+  --pool, --volume  Only when the policy is deleted: the snapshot pool, and the volume name (pvc-...)
+  --driver-namespace  Where the driver runs its Jobs (default kube-system)
+  --timeout         How long each Job may take (default 2h)
+  The policy must no longer back up the volume (remove the label first), and no
+  restore of the volume may be running. It removes the volume's backup folder and
+  its earlier moments from the snapshot pool's share, after showing how much.
 
 Restore flags:
   --policy          The BackupPolicy that holds the backup (required)
@@ -103,7 +133,7 @@ func parseFlags(args []string) map[string]string {
 			flags[arg[:idx]] = arg[idx+1:]
 			continue
 		}
-		if arg == "wait" {
+		if arg == "wait" || arg == "yes" {
 			flags[arg] = "true"
 			continue
 		}
@@ -129,6 +159,7 @@ func buildClient(kubeconfig string) (client.Client, error) {
 	}
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
+	_ = batchv1.AddToScheme(scheme)
 	_ = v1alpha1.AddToScheme(scheme)
 	return client.New(config, client.Options{Scheme: scheme})
 }
