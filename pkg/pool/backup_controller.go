@@ -60,6 +60,8 @@ type BackupController struct {
 	client   client.Client
 	interval time.Duration
 	nowFunc  func() time.Time
+	// shareData runs Jobs on shares, for restores.
+	shareData ShareData
 }
 
 // NewBackupController returns a controller that reads and writes with c. It
@@ -109,6 +111,7 @@ func (bc *BackupController) ReconcileAll(ctx context.Context) {
 	for i := range list.Items {
 		bc.reconcile(ctx, &list.Items[i])
 	}
+	bc.reconcileRestores(ctx)
 }
 
 // tidyDeleted removes the labels and the ReplicationPolicies of policies that
@@ -184,7 +187,9 @@ func (bc *BackupController) reconcile(ctx context.Context, bp *v1alpha1.BackupPo
 		// Do not copy into a pool that may be wrong. Pause what exists; do not
 		// delete it, so a short outage does not throw away the change lists.
 		bc.pauseOwned(ctx, bp, true)
-		status = v1alpha1.BackupPolicyStatus{Phase: backupPhaseError, Message: err.Error(), ReplicationPolicies: bp.Status.ReplicationPolicies}
+		// Keep the list of volumes: a restore needs it when the pool is back.
+		status = bc.keepStatus(bp, err.Error())
+		status.Phase = backupPhaseError
 		return
 	}
 
