@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,11 +22,9 @@ func TestRestoreVMDiskMessage(t *testing.T) {
 		t.Errorf("message = %+v", got)
 	}
 	// A moment that is not known is left out, not written as the year 1.
-	if err := json.Unmarshal([]byte(restoreVMDiskMessage(replication.RestoreResult{Latest: true})), &got); err != nil {
-		t.Fatal(err)
-	}
-	if got.Moment != "" {
-		t.Errorf("an unknown moment was written as %q", got.Moment)
+	unknown := restoreVMDiskMessage(replication.RestoreResult{Latest: true})
+	if strings.Contains(unknown, "moment") {
+		t.Errorf("an unknown moment was written: %s", unknown)
 	}
 }
 
