@@ -13,6 +13,7 @@ export const ROUTES = {
   SUBVOLUMES: '/vpc-file-pools/subvolumes',
   SUBVOLUME_CREATE: '/vpc-file-pools/subvolumes/~new',
   SUBVOLUME_DETAIL: '/vpc-file-pools/subvolumes/:name',
+  SUBVOLUME_CLONE: '/vpc-file-pools/subvolumes/:name/clone',
   SNAPSHOTS: '/vpc-file-pools/snapshots',
   SNAPSHOT_CREATE: '/vpc-file-pools/snapshots/~new',
   SNAPSHOT_DETAIL: '/vpc-file-pools/snapshots/:name',

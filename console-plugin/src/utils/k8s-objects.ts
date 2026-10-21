@@ -9,7 +9,7 @@ export interface PersistentVolumeClaim extends K8sResourceCommon {
     volumeMode?: string;
     volumeName?: string;
     resources: { requests: { storage: string } };
-    dataSource?: { apiGroup: string; kind: string; name: string };
+    dataSource?: { apiGroup?: string; kind: string; name: string };
   };
   status?: { phase?: string };
 }
