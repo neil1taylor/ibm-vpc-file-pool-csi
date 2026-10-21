@@ -89,6 +89,23 @@ webhooks:
         apiVersions: ["v1alpha1"]
         operations: ["CREATE", "UPDATE"]
         resources: ["replicationpolicies"]
+  - name: validate-failover.storage.ibmcloud.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Fail
+    clientConfig:
+      {{- with $caBundle }}
+      caBundle: {{ . }}
+      {{- end }}
+      service:
+        name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-webhook
+        namespace: {{ .Release.Namespace }}
+        path: /validate-storage-ibmcloud-io-v1alpha1-failover
+    rules:
+      - apiGroups: ["storage.ibmcloud.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["failovers"]
   - name: validate-snapshot.storage.ibmcloud.io
     admissionReviewVersions: ["v1"]
     sideEffects: None

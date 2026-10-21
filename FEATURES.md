@@ -88,6 +88,7 @@ Disaster recovery with configurable sync schedules. Two replication modes are su
 - **Pre/post-sync hooks** — Exec and HTTP hooks for application quiescing before sync and notification after.
 - **Metadata sidecar** — Writes `.subvolume-metadata.json` alongside each replicated SubVolume directory, enabling the failover CLI to reconstruct resources without querying the source cluster.
 - **Failover CLI** — `kubectl failover` plugin with `plan` (scan destination NFS, compute RPO), `execute` (create SubVolume CRs, PVs, PVCs on DR cluster), and `status` (report PVC binding) subcommands. For running VMs it picks the newest moment all of a VM's disks can show, rolls back a copy that stopped half way, and with `--rewind-to` goes back to an earlier restore point (`--list-moments` lists them). Supports `--dry-run` and is idempotent.
+- **Failover resource** — Experimental — A cluster-scoped `Failover` resource plans or carries out a failover on the destination cluster without a shell. A Job in `kube-system` mounts the destination claim (by default the receiver's data claim) and runs the same code as `kubectl failover`; the result goes into the resource's status (VMs, the moment each will show, the moments to choose from, which disks must be rewound, the RPO). `action: Execute` also makes the SubVolume, PV and PVC objects. An Execute is refused unless a `Plan` for the same source and `rewindTo` finished in the last 15 minutes, the share still gives the same plan, and the VM was not failed over on this cluster before. Only cluster admins can create one (the `failover-admin` ClusterRole is bound to nobody by default). The console page for it is a later step.
 - **Status tracking** — Per-policy LastSyncTime and LastSyncDuration. Per-SubVolume sync state with BytesSynced and LastError.
 - **Destination config** — NFS server IP and base path (direct NFS mode), or HTTPS receiver endpoint with bearer token auth (driver-to-driver mode).
 - **Prometheus metrics** — Dedicated metrics for sync total, duration, lag, failures, and SubVolume count.
@@ -149,7 +150,7 @@ Thin wrapper around the VPC file share API with operational guardrails.
 Defense-in-depth controls for a storage driver running with host access.
 
 - **Path traversal validation** — All mkdir/rm operations validate paths against `^/pvcs/pvc-[a-f0-9-]{36}$` and reject traversal attempts.
-- **Validating admission webhooks** — Beta — Five webhook validators cover all CRD types (FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, ReplicationPolicy).
+- **Validating admission webhooks** — Beta — Six webhook validators cover all CRD types (FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, ReplicationPolicy, Failover).
 - **RBAC minimal permissions** — Controller and node service accounts use least-privilege roles.
 - **No secrets in logs** — API keys and tokens are never logged. Share IDs and mount target IPs are safe to log.
 

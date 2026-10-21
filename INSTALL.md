@@ -363,7 +363,7 @@ kubectl apply -f config/deploy/node.yaml
 |------|---------|-------------|
 | `--endpoint` | `unix:///csi/csi.sock` | CSI gRPC endpoint |
 | `--node-id` | (required) | Kubernetes node name |
-| `--mode` | `controller` | `controller`, `node`, `receiver`, `sync-client`, `check-receiver`, `apply-vm-disk`, or `send-vm-disk` (all but the first three are run as Jobs; `check-receiver` is run by the console's receiver setup) |
+| `--mode` | `controller` | `controller`, `node`, `receiver`, `sync-client`, `check-receiver`, `apply-vm-disk`, `send-vm-disk`, or `failover` (all but the first three are run as Jobs; `check-receiver` is run by the console's receiver setup) |
 | `--region` | Auto-discovered | IBM Cloud region |
 | `--vpc-id` | Auto-discovered | VPC ID for mount targets |
 | `--subnet-id` | Auto-discovered | Worker subnet IDs for mount targets, comma-separated; the controller uses the one in each pool's zone |
@@ -372,6 +372,8 @@ kubectl apply -f config/deploy/node.yaml
 | `--golden-image-sync-interval` | `1h` | Golden image syncer poll interval (the Helm chart sets `5m`) |
 | `--cdi-copy-pod-memory-limit` | `8Gi` | Keep the memory limit of CDI's copy pods at least this high (OpenShift Virtualization `HyperConverged`); empty turns the check off |
 | `--driver-image` | `""` | Driver container image for receiver-mode sync-client Jobs (auto-set by Helm) |
+| `--failover-default-source` | `""` | Destination claim a `Failover` reads when it names none. Helm sets it from `replicationReceiver.pvcName` |
+| `--nfs-mount-path`, `--failover-action`, `--rewind-to`, `--force`, `--failover-expect` | | Failover mode only: the Job started for a `Failover` resource sets them. `--failover-action` is `Plan` or `Execute`; `--failover-expect` is the confirmed plan as JSON |
 | `--enable-webhooks` | `true` | Serve the validating admission webhooks. Helm sets `false` when `webhook.enabled=false` |
 | `--webhook-port` | `9443` | Port of the admission webhook server. Helm sets it from `webhook.port` |
 | `--receiver-tls-cert-file` | `""` | TLS certificate file for receiver HTTPS. Empty = plain HTTP |
