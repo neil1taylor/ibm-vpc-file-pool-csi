@@ -431,3 +431,141 @@ func TestShareJobRunner_ScriptJobsKeepTheirSecurityContext(t *testing.T) {
 		t.Errorf("a script Job must run as root and set no group, as before: %+v", sc)
 	}
 }
+
+const (
+	testBackupVol     = "/backup/nightly/pvcs/pvc-11111111-2222-3333-4444-555555555555"
+	testBackupMoments = "/backup/nightly/.moments/pvcs/pvc-11111111-2222-3333-4444-555555555555"
+)
+
+func restoreOwner() *Ownership {
+	uid, gid := int64(107), int64(107)
+	return &Ownership{UID: &uid, GID: &gid, Permissions: "0777", Recursive: true}
+}
+
+func TestShareJobRunner_RestoreBackup_FirstCallStartsJob(t *testing.T) {
+	r, c := newApplyRunner()
+	at := time.Date(2026, 10, 21, 9, 30, 0, 0, time.UTC)
+	done, _, err := r.RestoreBackup(context.Background(), "restore-a", testShareB, testBackupVol, testBackupMoments,
+		testShareA, testVolPath, at, restoreOwner())
+	if err != nil || done {
+		t.Fatalf("RestoreBackup() = %v, %v; want false, nil", done, err)
+	}
+	job := getShareJob(t, c, "restore-a")
+	spec := job.Spec.Template.Spec
+	if got := spec.Containers[0].Image; got != "de.icr.io/test/driver:v1" {
+		t.Errorf("image = %q, want the driver image", got)
+	}
+	if spec.SecurityContext.RunAsUser == nil || *spec.SecurityContext.RunAsUser != 0 {
+		t.Errorf("the restore Job must run as root: it also copies files of any owner")
+	}
+	if len(spec.Volumes) != 2 || countPVs(t, c) != 2 {
+		t.Errorf("want the backup share and the data share, got %d volumes and %d PVs", len(spec.Volumes), countPVs(t, c))
+	}
+	script := jobScript(job)
+	for _, want := range []string{
+		`src="/share0` + testBackupVol + `"`,
+		`moments="/share0` + testBackupMoments + `"`,
+		`dst="/share1` + testVolPath + `"`,
+		"--mode=restore-vm-disk",
+		`--backup-disk="$src/disk.img"`,
+		`--out-disk="$dst/disk.img"`,
+		"--restore-moment=2026-10-21T09:30:00Z",
+		`cp -a "$pick/." "$dst/"`,
+		"chown -R 107:107",
+		"chmod 0777",
+		"/dev/termination-log",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("script lacks %q:\n%s", want, script)
+		}
+	}
+}
+
+func TestShareJobRunner_RestoreBackup_LatestHasNoMomentFlag(t *testing.T) {
+	r, c := newApplyRunner()
+	if _, _, err := r.RestoreBackup(context.Background(), "restore-a", testShareB, testBackupVol, testBackupMoments,
+		testShareA, testVolPath, time.Time{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	script := jobScript(getShareJob(t, c, "restore-a"))
+	if strings.Contains(script, "--restore-moment") {
+		t.Errorf("a restore of the latest backup must not name a moment:\n%s", script)
+	}
+	if strings.Contains(script, "chown") {
+		t.Errorf("no owner was asked for:\n%s", script)
+	}
+}
+
+func TestShareJobRunner_RestoreBackup_SucceededReturnsTheMoment(t *testing.T) {
+	r, c := newApplyRunner()
+	ctx := context.Background()
+	call := func() (bool, RestoreOutcome, error) {
+		return r.RestoreBackup(ctx, "restore-a", testShareB, testBackupVol, testBackupMoments, testShareA, testVolPath, time.Time{}, nil)
+	}
+	if _, _, err := call(); err != nil {
+		t.Fatal(err)
+	}
+	setJobStatus(t, c, "restore-a", 1, 0)
+	job := getShareJob(t, c, "restore-a")
+	if err := c.Create(ctx, &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "restore-a-pod", Namespace: testDriverNS, Labels: job.Spec.Template.Labels},
+		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
+			Name: "share-data",
+			State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+				Message: `{"moment":"2026-10-21T09:00:00Z","latest":false}`,
+			}},
+		}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	done, out, err := call()
+	if err != nil || !done {
+		t.Fatalf("RestoreBackup() = %v, %v; want true, nil", done, err)
+	}
+	if out.Latest || !out.Moment.Equal(time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC)) {
+		t.Errorf("outcome = %+v, want the moment 2026-10-21T09:00:00Z, not the latest", out)
+	}
+	if countPVs(t, c) != 0 {
+		t.Errorf("the share PVs were not removed")
+	}
+}
+
+func TestShareJobRunner_RestoreBackup_FailedJobReportsError(t *testing.T) {
+	r, c := newApplyRunner()
+	ctx := context.Background()
+	call := func() (bool, RestoreOutcome, error) {
+		return r.RestoreBackup(ctx, "restore-a", testShareB, testBackupVol, testBackupMoments, testShareA, testVolPath, time.Time{}, nil)
+	}
+	if _, _, err := call(); err != nil {
+		t.Fatal(err)
+	}
+	setJobStatus(t, c, "restore-a", 0, shareJobBackoffLimit+1)
+	if _, _, err := call(); !errors.Is(err, ErrShareJobFailed) {
+		t.Fatalf("err = %v, want ErrShareJobFailed", err)
+	}
+}
+
+func TestShareJobRunner_RestoreBackup_RejectsBadInput(t *testing.T) {
+	r, _ := newApplyRunner()
+	ctx := context.Background()
+	cases := []struct{ name, vol, moments, dst string }{
+		{"backup path", "/etc", testBackupMoments, testVolPath},
+		{"traversal", "/backup/../pvcs/pvc-11111111-2222-3333-4444-555555555555", testBackupMoments, testVolPath},
+		{"moments path", testBackupVol, "/backup/nightly/pvcs/pvc-11111111-2222-3333-4444-555555555555", testVolPath},
+		{"destination", testBackupVol, testBackupMoments, "/etc"},
+		{"destination is a backup", testBackupVol, testBackupMoments, testBackupVol},
+	}
+	for _, tc := range cases {
+		if _, _, err := r.RestoreBackup(ctx, "restore-bad", testShareB, tc.vol, tc.moments, testShareA, tc.dst, time.Time{}, nil); err == nil {
+			t.Errorf("%s: want an error", tc.name)
+		}
+	}
+	noImage, _ := newShareJobTestRunner()
+	if _, _, err := noImage.RestoreBackup(ctx, "restore-bad", testShareB, testBackupVol, testBackupMoments, testShareA, testVolPath, time.Time{}, nil); err == nil {
+		t.Error("no driver image: want an error")
+	}
+	if _, _, err := r.RestoreBackup(ctx, "restore-bad", testShareB, testBackupVol, testBackupMoments, testShareA, testVolPath, time.Time{},
+		&Ownership{Permissions: "rwx"}); err == nil {
+		t.Error("bad permissions: want an error")
+	}
+}

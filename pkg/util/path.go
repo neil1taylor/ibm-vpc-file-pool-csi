@@ -75,3 +75,38 @@ func SafeJoinSnapshot(base, snapshotPath string) (string, error) {
 
 	return joined, nil
 }
+
+// A backup policy's folder name is its Kubernetes name, at most 63 characters
+// (the length of a label value) of lower-case letters, digits, '-' and '.',
+// starting and ending with a letter or digit.
+const backupPolicyDir = `[a-z0-9]([-a-z0-9.]{0,61}[a-z0-9])?`
+
+var (
+	validBackupPathPattern    = regexp.MustCompile(`^/backup/` + backupPolicyDir + `/pvcs/pvc-[a-f0-9-]{36}$`)
+	validBackupMomentsPattern = regexp.MustCompile(`^/backup/` + backupPolicyDir + `/\.moments/pvcs/pvc-[a-f0-9-]{36}$`)
+)
+
+// ValidateBackupPath ensures a path to the backup of one volume, on the
+// snapshot pool's share, is safe: /backup/<policy>/pvcs/<volume>.
+func ValidateBackupPath(p string) error {
+	return validateBackup(p, validBackupPathPattern, "backup path")
+}
+
+// ValidateBackupMomentsPath ensures a path to the earlier moments of one
+// volume's backup is safe: /backup/<policy>/.moments/pvcs/<volume>.
+func ValidateBackupMomentsPath(p string) error {
+	return validateBackup(p, validBackupMomentsPattern, "backup moments path")
+}
+
+func validateBackup(p string, re *regexp.Regexp, what string) error {
+	if !re.MatchString(p) {
+		return fmt.Errorf("%s %q does not match expected pattern", what, p)
+	}
+	if filepath.Clean(p) != p {
+		return fmt.Errorf("%s %q is not clean", what, p)
+	}
+	if strings.Contains(p, "..") {
+		return fmt.Errorf("%s %q contains path traversal", what, p)
+	}
+	return nil
+}
