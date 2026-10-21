@@ -44,16 +44,21 @@ func newRunFixture(t *testing.T, finalPhase corev1.PodPhase, objects ...runtime.
 
 	// The driver binds a new claim as soon as it is made.
 	cs.PrependReactor("create", "persistentvolumeclaims", func(action ktesting.Action) (bool, runtime.Object, error) {
-		if pvc, ok := action.(ktesting.CreateAction).GetObject().(*corev1.PersistentVolumeClaim); ok {
-			pvc.Status.Phase = corev1.ClaimBound
+		if create, ok := action.(ktesting.CreateAction); ok {
+			if pvc, isPVC := create.GetObject().(*corev1.PersistentVolumeClaim); isPVC {
+				pvc.Status.Phase = corev1.ClaimBound
+			}
 		}
 		return false, nil, nil
 	})
 	// A real watch without a resource version starts with the current object. The fake one does not, so send it.
 	cs.PrependWatchReactor("persistentvolumeclaims", func(action ktesting.Action) (bool, watch.Interface, error) {
 		w := watch.NewFakeWithChanSize(1, false)
-		name := action.(ktesting.WatchAction).GetWatchRestrictions().Fields.String()
-		name = strings.TrimPrefix(name, "metadata.name=")
+		watchAction, ok := action.(ktesting.WatchAction)
+		if !ok {
+			return false, nil, nil
+		}
+		name := strings.TrimPrefix(watchAction.GetWatchRestrictions().Fields.String(), "metadata.name=")
 		pvc, err := cs.Tracker().Get(corev1.SchemeGroupVersion.WithResource("persistentvolumeclaims"), "apps", name)
 		if err != nil {
 			return true, nil, err
