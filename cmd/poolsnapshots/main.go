@@ -242,7 +242,7 @@ func confirm(in io.Reader, out io.Writer, want string) bool {
 	line, _ := bufio.NewReader(in).ReadString('\n')
 	ok := strings.TrimSpace(line) == want
 	if !ok {
-		fmt.Fprintln(out)
+		_, _ = fmt.Fprintln(out)
 	}
 	return ok
 }
