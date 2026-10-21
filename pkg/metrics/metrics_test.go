@@ -118,6 +118,7 @@ func TestAllCollectorsRegistered(t *testing.T) {
 	BackupVolumes.WithLabelValues("test-policy").Set(1)
 	BackupStalestAgeSeconds.WithLabelValues("test-policy").Set(1)
 	BackupOldestAgeSeconds.WithLabelValues("test-policy").Set(1)
+	BackupSnapshotPoolUsedPercent.WithLabelValues("test-pool").Set(1)
 
 	// Gather from controller-runtime's registry (where init() registers them).
 	gatherer, ok := ctrlmetrics.Registry.(prometheus.Gatherer)
@@ -130,20 +131,21 @@ func TestAllCollectorsRegistered(t *testing.T) {
 	}
 
 	expected := map[string]bool{
-		"vpc_file_pool_allocations_total":           false,
-		"vpc_file_pool_allocation_duration_seconds": false,
-		"vpc_file_pool_capacity_gb":                 false,
-		"vpc_file_pool_allocated_gb":                false,
-		"vpc_file_pool_share_count":                 false,
-		"vpc_file_pool_pvc_count":                   false,
-		"vpc_file_pool_api_calls_total":             false,
-		"vpc_file_pool_api_call_duration_seconds":   false,
-		"vpc_file_pool_snapshots_total":             false,
-		"vpc_file_pool_snapshot_duration_seconds":   false,
-		"vpc_file_pool_cdi_copy_limit_raised_total": false,
-		"vpc_file_pool_backup_volumes":              false,
-		"vpc_file_pool_backup_stalest_age_seconds":  false,
-		"vpc_file_pool_backup_oldest_age_seconds":   false,
+		"vpc_file_pool_allocations_total":                 false,
+		"vpc_file_pool_allocation_duration_seconds":       false,
+		"vpc_file_pool_capacity_gb":                       false,
+		"vpc_file_pool_allocated_gb":                      false,
+		"vpc_file_pool_share_count":                       false,
+		"vpc_file_pool_pvc_count":                         false,
+		"vpc_file_pool_api_calls_total":                   false,
+		"vpc_file_pool_api_call_duration_seconds":         false,
+		"vpc_file_pool_snapshots_total":                   false,
+		"vpc_file_pool_snapshot_duration_seconds":         false,
+		"vpc_file_pool_cdi_copy_limit_raised_total":       false,
+		"vpc_file_pool_backup_volumes":                    false,
+		"vpc_file_pool_backup_stalest_age_seconds":        false,
+		"vpc_file_pool_backup_oldest_age_seconds":         false,
+		"vpc_file_pool_backup_snapshot_pool_used_percent": false,
 	}
 
 	for _, fam := range families {

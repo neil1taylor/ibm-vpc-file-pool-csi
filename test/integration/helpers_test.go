@@ -728,6 +728,11 @@ func (s *nfsShareData) RestoreBackup(context.Context, string, pool.ShareMount, s
 	return true, pool.RestoreOutcome{}, nil
 }
 
+// ShareUsage is not used: the integration tests make no backups.
+func (s *nfsShareData) ShareUsage(context.Context, string, pool.ShareMount) (bool, int, error) {
+	return true, 0, nil
+}
+
 // ApplyVMDisk is not used: the integration tests have no running VMs.
 func (s *nfsShareData) ApplyVMDisk(context.Context, string, pool.ShareMount, string, string, string, time.Time) (bool, error) {
 	return true, nil

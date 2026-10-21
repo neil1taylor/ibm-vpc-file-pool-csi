@@ -70,6 +70,8 @@ type ShareData interface {
 	// moment at or before moment (the zero time asks for the latest), into the
 	// volume folder dstPath on dst. It reports which moment it wrote.
 	RestoreBackup(ctx context.Context, key string, backup ShareMount, volPath, momentsPath string, dst ShareMount, dstPath string, moment time.Time, owner *Ownership) (bool, RestoreOutcome, error)
+	// ShareUsage reads how full the share is, as a whole percent.
+	ShareUsage(ctx context.Context, key string, share ShareMount) (bool, int, error)
 	// Stop ends any work running for key. It reports done=true once
 	// nothing runs for key any more.
 	Stop(ctx context.Context, key string) (bool, error)
