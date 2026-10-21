@@ -50,6 +50,18 @@ const (
 // ErrInvalidSnapshotParameter means a VolumeSnapshotClass parameter has a bad value.
 var ErrInvalidSnapshotParameter = errors.New("invalid snapshot parameter")
 
+// ErrSnapshotUnsupported means the volume is in use in a way that a snapshot
+// cannot be made safely. Retrying does not help.
+var ErrSnapshotUnsupported = errors.New("snapshot not supported")
+
+// ErrSnapshotFailed means the snapshot ended in the Failed phase. Retrying
+// does not help; delete the VolumeSnapshot and make a new one.
+var ErrSnapshotFailed = errors.New("snapshot failed")
+
+// snapshotDeletingAnnotation marks a snapshot whose delete has started, so the
+// copy loop leaves it alone.
+const snapshotDeletingAnnotation = "storage.ibmcloud.io/deleting"
+
 // vmSnapshots is what the Manager needs to snapshot running VMs.
 type vmSnapshots struct {
 	copier VMCopier
@@ -115,11 +127,14 @@ func (m *Manager) runningVMPodForSnapshot(ctx context.Context, vm *vmSnapshots, 
 	return pod, vol, sv, nil
 }
 
-// switchToVMPath is called when a file copy has finished. If a VM started
-// during the copy, the copy may mix moments, so the snapshot moves to the VM
-// path and the finished folder is replaced by the apply Job.
+// switchToVMPath is called while a file copy runs or when it has finished. If
+// a VM uses the disk, the copy may mix moments, so the snapshot moves to the
+// VM path and the apply Job replaces the folder. It first stops the file copy
+// Job, so two writers never work on the folder. It reports handled=true when
+// the caller must not go on with the file copy: the Job is still stopping, or
+// the snapshot has moved.
 func (m *Manager) switchToVMPath(ctx context.Context, snap *v1alpha1.Snapshot) (bool, error) {
-	if m.vm == nil {
+	if m.vm == nil || m.shareData == nil {
 		return false, nil
 	}
 	pod, _, _, err := m.runningVMPodForSnapshot(ctx, m.vm, snap)
@@ -129,11 +144,18 @@ func (m *Manager) switchToVMPath(ctx context.Context, snap *v1alpha1.Snapshot) (
 	if pod == nil {
 		return false, nil
 	}
-	klog.V(2).InfoS("A VM started during a snapshot file copy; copying again with QEMU", "snapshot", snap.Name, "vmPod", klog.KObj(pod))
+	stopped, err := m.shareData.Stop(ctx, "snap-"+snap.Name)
+	if err != nil {
+		return false, fmt.Errorf("stop the file copy: %w", err)
+	}
+	if !stopped {
+		return true, nil
+	}
+	klog.V(2).InfoS("A VM uses the snapshot source; copying with QEMU instead of files", "snapshot", snap.Name, "vmPod", klog.KObj(pod))
 	if err := m.setSnapshotMethod(ctx, snap, snapshotMethodVM); err != nil {
 		return false, err
 	}
-	snap.Status.Message = "a VM started during the copy; copying again with QEMU"
+	snap.Status.Message = "a VM uses the disk; copying again with QEMU"
 	return true, m.k8sClient.UpdateSnapshotStatus(ctx, snap)
 }
 
@@ -183,43 +205,64 @@ func (m *Manager) AdvanceVMSnapshots(ctx context.Context) {
 		klog.ErrorS(err, "Failed to list pools for VM snapshots")
 		return
 	}
+	// One listing per pass: the VM pods that a snapshot copies now, and the
+	// snapshots to advance.
+	active := map[string]string{}
+	var todo []string
 	for i := range pools {
-		snaps, err := m.k8sClient.ListSnapshots(ctx, pools[i].Name)
-		if err != nil {
-			klog.ErrorS(err, "Failed to list snapshots", "pool", pools[i].Name)
+		snaps, listErr := m.k8sClient.ListSnapshots(ctx, pools[i].Name)
+		if listErr != nil {
+			klog.ErrorS(listErr, "Failed to list snapshots", "pool", pools[i].Name)
 			continue
 		}
 		for j := range snaps {
 			s := &snaps[j]
-			if s.Annotations[snapshotMethodAnnotation] != snapshotMethodVM || s.Status.ReadyToUse || s.Status.Phase == "Failed" {
-				continue
+			if s.Status.VMCopy != nil {
+				active[s.Status.VMCopy.PodName] = s.Name
 			}
-			m.advanceVMSnapshot(ctx, vm, s.Name)
+			if snapshotNeedsVMStep(s) {
+				todo = append(todo, s.Name)
+			}
 		}
+	}
+	for _, name := range todo {
+		m.advanceVMSnapshot(ctx, vm, name, active)
 	}
 }
 
-// advanceVMSnapshot takes the lock, reads the Snapshot again so that it works
-// on the newest state, and does one step.
-func (m *Manager) advanceVMSnapshot(ctx context.Context, vm *vmSnapshots, name string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+// snapshotNeedsVMStep reports whether the VM loop has work on the snapshot.
+func snapshotNeedsVMStep(s *v1alpha1.Snapshot) bool {
+	return s.Annotations[snapshotMethodAnnotation] == snapshotMethodVM &&
+		s.Annotations[snapshotDeletingAnnotation] == "" &&
+		!s.Status.ReadyToUse && s.Status.Phase != "Failed"
+}
+
+// advanceVMSnapshot reads the Snapshot again, so that it works on the newest
+// state, and does one step. It holds vmMu, not mu: commands in a VM pod can be
+// slow, and CSI calls must not wait for them.
+func (m *Manager) advanceVMSnapshot(ctx context.Context, vm *vmSnapshots, name string, active map[string]string) {
+	m.vmMu.Lock()
+	defer m.vmMu.Unlock()
 	snap, err := m.k8sClient.GetSnapshot(ctx, name)
-	if err != nil || snap.Annotations[snapshotMethodAnnotation] != snapshotMethodVM || snap.Status.ReadyToUse || snap.Status.Phase == "Failed" {
-		return
-	}
-	pool, err := m.k8sClient.GetFileSharePool(ctx, snap.Spec.PoolName)
-	if err != nil {
-		klog.ErrorS(err, "Failed to get the pool of a VM snapshot", "snapshot", name, "pool", snap.Spec.PoolName)
+	if err != nil || !snapshotNeedsVMStep(snap) {
 		return
 	}
 	switch {
 	case snap.Status.VMCopy == nil:
-		m.startVMSnapshotCopy(ctx, vm, snap, pool)
+		m.startVMSnapshotCopy(ctx, vm, snap, active)
 	case snap.Status.VMCopy.Phase == vmCopyPhaseCopying:
-		m.watchVMSnapshotCopy(ctx, vm, snap, pool)
+		m.watchVMSnapshotCopy(ctx, vm, snap)
 	default:
-		m.watchVMSnapshotApply(ctx, vm, snap, pool)
+		m.watchVMSnapshotApply(ctx, vm, snap)
+	}
+	// Keep the map right for the snapshots later in this pass.
+	for pod, owner := range active {
+		if owner == snap.Name {
+			delete(active, pod)
+		}
+	}
+	if snap.Status.VMCopy != nil {
+		active[snap.Status.VMCopy.PodName] = snap.Name
 	}
 }
 
@@ -235,6 +278,16 @@ func (m *Manager) waitVMSnapshot(ctx context.Context, snap *v1alpha1.Snapshot, m
 		return
 	}
 	snap.Status.Message = msg
+	m.saveSnapshotStatus(ctx, snap)
+}
+
+// failVMSnapshot ends the snapshot at once, without more tries.
+func (m *Manager) failVMSnapshot(ctx context.Context, snap *v1alpha1.Snapshot, reason string) {
+	snap.Status.Phase = "Failed"
+	snap.Status.VMCopy = nil
+	snap.Status.VMCopyStarted = nil
+	snap.Status.Message = reason
+	klog.ErrorS(nil, "VM snapshot failed", "snapshot", snap.Name, "reason", reason)
 	m.saveSnapshotStatus(ctx, snap)
 }
 
@@ -259,7 +312,7 @@ func (m *Manager) vmSnapshotTryFailed(ctx context.Context, snap *v1alpha1.Snapsh
 	m.saveSnapshotStatus(ctx, snap)
 }
 
-func (m *Manager) startVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, snap *v1alpha1.Snapshot, pool *v1alpha1.FileSharePool) {
+func (m *Manager) startVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, snap *v1alpha1.Snapshot, active map[string]string) {
 	now := m.timeNow()
 	if snap.Status.VMCopyRetryAfter != nil && now.Before(snap.Status.VMCopyRetryAfter.Time) {
 		return
@@ -270,15 +323,16 @@ func (m *Manager) startVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, snap
 		return
 	}
 	if pod == nil {
-		// The VM stopped: the disk is at rest, so a file copy is safe.
+		// The VM stopped: the disk is at rest, so a file copy is safe. The
+		// file copy runs when the snapshotter next calls CreateSnapshot.
 		klog.V(2).InfoS("No VM uses the snapshot source any more; using the file copy", "snapshot", snap.Name)
 		if setErr := m.setSnapshotMethod(ctx, snap, snapshotMethodFile); setErr != nil {
 			m.waitVMSnapshot(ctx, snap, setErr.Error())
-			return
 		}
-		if copyErr := m.copySnapshotData(ctx, snap, pool); copyErr != nil {
-			klog.ErrorS(copyErr, "File copy of a snapshot failed", "snapshot", snap.Name)
-		}
+		return
+	}
+	if pod.Labels[kubevirtPodLabel] != "virt-launcher" {
+		m.failVMSnapshot(ctx, snap, "the disk is hot-plugged into the running VM; QEMU cannot copy it yet. Stop the VM or detach the disk, and snapshot again")
 		return
 	}
 	vmi := vmiName(pod)
@@ -298,13 +352,7 @@ func (m *Manager) startVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, snap
 	target := vmcopy.VM{Namespace: pod.Namespace, Pod: pod.Name, Name: vmi}
 	// Snapshots of one VM take turns: a copy that waits for its apply Job has
 	// no QEMU job, and the next snapshot's cleanup must not remove its file.
-	var other string
-	other, err = m.otherSnapshotCopying(ctx, snap, pod)
-	if err != nil {
-		m.waitVMSnapshot(ctx, snap, fmt.Sprintf("check other snapshots: %v", err))
-		return
-	}
-	if other != "" {
+	if other := active[pod.Name]; other != "" && other != snap.Name {
 		m.waitVMSnapshot(ctx, snap, fmt.Sprintf("copy waits: another snapshot of this VM (%s) is being copied", other))
 		return
 	}
@@ -356,28 +404,6 @@ func newSnapshotCopyID(now time.Time) string {
 	return vmcopy.SnapshotIDPrefix + t
 }
 
-// otherSnapshotCopying returns the name of another snapshot whose copy of the
-// same VM pod is in progress, or "".
-func (m *Manager) otherSnapshotCopying(ctx context.Context, snap *v1alpha1.Snapshot, pod *corev1.Pod) (string, error) {
-	pools, err := m.k8sClient.ListFileSharePools(ctx)
-	if err != nil {
-		return "", err
-	}
-	for i := range pools {
-		snaps, listErr := m.k8sClient.ListSnapshots(ctx, pools[i].Name)
-		if listErr != nil {
-			return "", listErr
-		}
-		for j := range snaps {
-			o := &snaps[j]
-			if o.Name != snap.Name && o.Status.VMCopy != nil && o.Status.VMCopy.PodName == pod.Name {
-				return o.Name, nil
-			}
-		}
-	}
-	return "", nil
-}
-
 // vmOfCopy returns the VM and the Copy that a Snapshot's state names.
 func vmOfCopy(ns string, st *v1alpha1.VMCopyState) (vmcopy.VM, *vmcopy.Copy) {
 	return vmcopy.VM{Namespace: ns, Pod: st.PodName, Name: st.VMIName},
@@ -385,7 +411,7 @@ func vmOfCopy(ns string, st *v1alpha1.VMCopyState) (vmcopy.VM, *vmcopy.Copy) {
 			Bitmap: st.Bitmap, Disks: []vmcopy.Disk{{Volume: st.Volume, StagingFile: st.StagingFile}}}
 }
 
-func (m *Manager) watchVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, snap *v1alpha1.Snapshot, pool *v1alpha1.FileSharePool) {
+func (m *Manager) watchVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, snap *v1alpha1.Snapshot) {
 	st := snap.Status.VMCopy
 	sv, err := m.k8sClient.GetSubVolume(ctx, snap.Spec.SourceSubVolume)
 	if err != nil {
@@ -445,7 +471,7 @@ func (m *Manager) watchVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, snap
 		st.Phase = vmCopyPhaseSending
 		snap.Status.Message = ""
 		m.saveSnapshotStatus(ctx, snap)
-		m.watchVMSnapshotApply(ctx, vm, snap, pool)
+		m.watchVMSnapshotApply(ctx, vm, snap)
 	}
 }
 
@@ -456,11 +482,16 @@ func orDefault(s, d string) string {
 	return s
 }
 
-func (m *Manager) watchVMSnapshotApply(ctx context.Context, vm *vmSnapshots, snap *v1alpha1.Snapshot, pool *v1alpha1.FileSharePool) {
+func (m *Manager) watchVMSnapshotApply(ctx context.Context, vm *vmSnapshots, snap *v1alpha1.Snapshot) {
 	st := snap.Status.VMCopy
 	sv, err := m.k8sClient.GetSubVolume(ctx, snap.Spec.SourceSubVolume)
 	if err != nil {
 		m.waitVMSnapshot(ctx, snap, fmt.Sprintf("get source SubVolume: %v", err))
+		return
+	}
+	pool, err := m.k8sClient.GetFileSharePool(ctx, snap.Spec.PoolName)
+	if err != nil {
+		m.waitVMSnapshot(ctx, snap, fmt.Sprintf("get the pool: %v", err))
 		return
 	}
 	share, err := poolShareMount(pool, snap.Spec.ShareID)
@@ -469,7 +500,7 @@ func (m *Manager) watchVMSnapshotApply(ctx context.Context, vm *vmSnapshots, sna
 		return
 	}
 	target, cp := vmOfCopy(sv.Spec.PVCNamespace, st)
-	done, err := m.shareData.ApplyVMDisk(ctx, "snap-"+snap.Name, share, snap.Spec.SourceSubPath, st.StagingFile, snap.Spec.SnapshotPath, st.Moment.Time)
+	done, err := m.shareData.ApplyVMDisk(ctx, "snapvm-"+snap.Name, share, snap.Spec.SourceSubPath, st.StagingFile, snap.Spec.SnapshotPath, st.Moment.Time)
 	if errors.Is(err, ErrShareJobFailed) {
 		m.releaseVMSnapshotCopy(ctx, vm, target, cp, st, sv.Spec.PVCNamespace)
 		m.vmSnapshotTryFailed(ctx, snap, fmt.Sprintf("writing the snapshot failed: %v", err))
@@ -513,31 +544,52 @@ func (m *Manager) releaseVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, ta
 	}
 }
 
-// cancelVMSnapshotCopy ends a copy in progress, before the snapshot is deleted.
-func (m *Manager) cancelVMSnapshotCopy(ctx context.Context, snap *v1alpha1.Snapshot) {
-	st := snap.Status.VMCopy
-	if m.vm == nil || st == nil {
-		return
+// cancelVMSnapshotForDelete is called when a snapshot is deleted. It marks the
+// snapshot, so the copy loop leaves it alone, waits for a loop step that runs
+// now, and cancels a QEMU copy in progress. It returns an error when the copy
+// cannot be cancelled; the record of the copy stays, so a later delete tries
+// again and the copy is never forgotten while it runs.
+func (m *Manager) cancelVMSnapshotForDelete(ctx context.Context, snap *v1alpha1.Snapshot) error {
+	if m.vm == nil {
+		return nil
 	}
-	sv, err := m.k8sClient.GetSubVolume(ctx, snap.Spec.SourceSubVolume)
+	if snap.Annotations[snapshotDeletingAnnotation] == "" {
+		if snap.Annotations == nil {
+			snap.Annotations = map[string]string{}
+		}
+		snap.Annotations[snapshotDeletingAnnotation] = "true"
+		if err := m.k8sClient.UpdateSnapshot(ctx, snap); err != nil {
+			return fmt.Errorf("mark the snapshot as deleting: %w", err)
+		}
+	}
+	// A loop step that started before the mark ends first; the next ones skip
+	// the snapshot. The step may have changed the record, so read it again.
+	m.vmMu.Lock()
+	defer m.vmMu.Unlock()
+	fresh, err := m.k8sClient.GetSnapshot(ctx, snap.Name)
 	if err != nil {
-		klog.ErrorS(err, "Cannot cancel a VM snapshot copy: the source SubVolume is gone", "snapshot", snap.Name)
-		return
+		return fmt.Errorf("read the snapshot: %w", err)
 	}
-	ns := sv.Spec.PVCNamespace
-	target, cp := vmOfCopy(ns, st)
-	if samePod(ctx, m.vm.kube, ns, st.PodName, st.PodUID) {
-		var err error
+	st := fresh.Status.VMCopy
+	if st == nil {
+		return nil
+	}
+	sv, err := m.k8sClient.GetSubVolume(ctx, fresh.Spec.SourceSubVolume)
+	if err != nil {
+		klog.ErrorS(err, "Cannot cancel a VM snapshot copy: the source SubVolume is gone", "snapshot", fresh.Name)
+	} else if ns := sv.Spec.PVCNamespace; samePod(ctx, m.vm.kube, ns, st.PodName, st.PodUID) {
+		target, cp := vmOfCopy(ns, st)
 		if st.Phase == vmCopyPhaseCopying {
 			err = m.vm.copier.Cancel(ctx, target, cp)
 		} else {
 			err = m.vm.copier.Finish(ctx, target, cp, true)
 		}
 		if err != nil {
-			klog.ErrorS(err, "Failed to cancel a VM snapshot copy", "snapshot", snap.Name)
+			return fmt.Errorf("cancel the VM snapshot copy: %w", err)
 		}
 	}
-	snap.Status.VMCopy = nil
-	snap.Status.VMCopyStarted = nil
-	m.saveSnapshotStatus(ctx, snap)
+	fresh.Status.VMCopy = nil
+	fresh.Status.VMCopyStarted = nil
+	m.saveSnapshotStatus(ctx, fresh)
+	return nil
 }

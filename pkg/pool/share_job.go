@@ -216,6 +216,16 @@ func (r *ShareJobRunner) run(ctx context.Context, key string, shares []ShareMoun
 	}
 }
 
+// podSecurityContext runs a share data Job as uid. Root Jobs set no group, as
+// before; a Job for another user runs with that user's group too.
+func podSecurityContext(uid int64) *corev1.PodSecurityContext {
+	sc := &corev1.PodSecurityContext{RunAsUser: int64Ptr(uid)}
+	if uid != 0 {
+		sc.RunAsGroup = int64Ptr(uid)
+	}
+	return sc
+}
+
 func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []ShareMount, shape jobShape) error {
 	labels := map[string]string{shareJobLabel: jobName}
 	var volumes []corev1.Volume
@@ -269,7 +279,7 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
 					RestartPolicy:   corev1.RestartPolicyOnFailure,
-					SecurityContext: &corev1.PodSecurityContext{RunAsUser: int64Ptr(shape.runAsUser), RunAsGroup: int64Ptr(shape.runAsUser)},
+					SecurityContext: podSecurityContext(shape.runAsUser),
 					InitContainers:  initContainers,
 					Containers: []corev1.Container{{
 						Name:         "share-data",

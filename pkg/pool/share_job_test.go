@@ -335,6 +335,9 @@ func TestShareJobRunner_ApplyVMDisk_FirstCallStartsJob(t *testing.T) {
 	if got := strings.Join(initC.Command, " "); !strings.Contains(got, `rm -r -f -- "/share0`+testSnapPath+`"`) {
 		t.Errorf("init script does not clear an old snapshot folder: %s", got)
 	}
+	if got := *spec.SecurityContext.RunAsGroup; got != qemuUID {
+		t.Errorf("pod group = %d, want %d", got, qemuUID)
+	}
 	if *spec.SecurityContext.RunAsUser != qemuUID {
 		t.Errorf("pod runs as %d, want %d", *spec.SecurityContext.RunAsUser, qemuUID)
 	}
@@ -407,5 +410,16 @@ func TestShareJobRunner_ApplyVMDisk_RejectsBadInput(t *testing.T) {
 	noImage, _ := newShareJobTestRunner()
 	if _, err := noImage.ApplyVMDisk(ctx, "snap-bad", testShareA, testVolPath, ".repl-staging-abc", testSnapPath, moment); err == nil {
 		t.Errorf("no driver image: want an error")
+	}
+}
+
+func TestShareJobRunner_ScriptJobsKeepTheirSecurityContext(t *testing.T) {
+	r, c := newShareJobTestRunner()
+	if _, err := r.RemoveDir(context.Background(), "rm-a", testShareA, testVolPath); err != nil {
+		t.Fatal(err)
+	}
+	sc := getShareJob(t, c, "rm-a").Spec.Template.Spec.SecurityContext
+	if sc.RunAsUser == nil || *sc.RunAsUser != 0 || sc.RunAsGroup != nil {
+		t.Errorf("a script Job must run as root and set no group, as before: %+v", sc)
 	}
 }

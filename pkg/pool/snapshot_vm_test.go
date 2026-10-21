@@ -10,6 +10,7 @@ import (
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/vmcopy"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -191,7 +192,7 @@ func TestAdvanceVMSnapshots_FullRunToReady(t *testing.T) {
 		t.Fatal("no apply Job")
 	}
 	a := e.sd.applies[0]
-	if a.key != "snap-"+vmSnapName || a.volPath != "/pvcs/"+testPVName || a.dstPath != "/pvcs/.snapshots/snap-"+vmSnapName ||
+	if a.key != "snapvm-"+vmSnapName || a.volPath != "/pvcs/"+testPVName || a.dstPath != "/pvcs/.snapshots/snap-"+vmSnapName ||
 		a.stagingFile != vc.StagingFile || !a.moment.Equal(vc.Moment.Time) {
 		t.Errorf("apply call = %+v", a)
 	}
@@ -363,10 +364,12 @@ func TestAdvanceVMSnapshots_StoppedVMFallsBackToFileCopy(t *testing.T) {
 	if s.Annotations[snapshotMethodAnnotation] != snapshotMethodFile {
 		t.Errorf("method = %q, want %q", s.Annotations[snapshotMethodAnnotation], snapshotMethodFile)
 	}
+	// The file copy runs when the snapshotter next calls CreateSnapshot.
+	res := e.create(nil)
 	if len(e.sd.copies) != 1 {
 		t.Fatalf("file copies = %d, want 1", len(e.sd.copies))
 	}
-	if !s.Status.ReadyToUse {
+	if !res.ReadyToUse || !e.snap().Status.ReadyToUse {
 		t.Error("the file copy finished, so the snapshot is ready")
 	}
 }
@@ -476,7 +479,7 @@ func TestDeleteSnapshot_StopsTheApplyJob(t *testing.T) {
 	}
 	found := false
 	for _, k := range e.sd.stops {
-		if k == "snap-"+vmSnapName {
+		if k == "snapvm-"+vmSnapName {
 			found = true
 		}
 	}
@@ -577,5 +580,94 @@ func TestAdvanceVMSnapshots_OneSnapshotCopyPerVM(t *testing.T) {
 	e.tick()
 	if len(e.cop.starts) != 2 {
 		t.Errorf("starts = %d, want the second copy to start once the first snapshot was ready", len(e.cop.starts))
+	}
+}
+
+func TestDeleteSnapshot_AMidDeleteSnapshotIsNotCopiedAgain(t *testing.T) {
+	e := newVMSnapEnv(t)
+	e.startVM()
+	e.create(nil)
+	e.tick()                 // copying
+	e.sd.setInProgress(true) // the folder removal takes a while
+	if err := e.mgr.DeleteSnapshot(e.ctx, vmSnapName); !errors.Is(err, ErrOperationInProgress) {
+		t.Fatalf("DeleteSnapshot = %v, want ErrOperationInProgress", err)
+	}
+	starts := e.cop.startCount()
+	e.tick()
+	e.tick()
+	if e.cop.startCount() != starts {
+		t.Error("the loop copied a snapshot that is being deleted")
+	}
+	if len(e.sd.applies) != 0 {
+		t.Error("the loop wrote a snapshot that is being deleted")
+	}
+}
+
+func TestDeleteSnapshot_KeepsTheCopyRecordWhenCancelFails(t *testing.T) {
+	e := newVMSnapEnv(t)
+	e.startVM()
+	e.create(nil)
+	e.tick()
+	e.cop.cancelErr = errors.New("exec timed out")
+	if err := e.mgr.DeleteSnapshot(e.ctx, vmSnapName); err == nil {
+		t.Fatal("DeleteSnapshot must fail while the copy cannot be cancelled")
+	}
+	if e.snap().Status.VMCopy == nil {
+		t.Error("the copy record was forgotten, so nothing would cancel the copy later")
+	}
+	e.cop.cancelErr = nil
+	if err := e.mgr.DeleteSnapshot(e.ctx, vmSnapName); err != nil {
+		t.Fatalf("DeleteSnapshot once cancel works: %v", err)
+	}
+}
+
+func TestCreateSnapshot_HotPluggedDiskIsRefused(t *testing.T) {
+	e := newVMSnapEnv(t)
+	hp := newVMPod("hp-volume-xyz", "default", "hotplug-disk", "", corev1.PodRunning)
+	hp.Spec.Volumes = []corev1.Volume{{Name: "hp", VolumeSource: corev1.VolumeSource{
+		PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "my-pvc"}}}}
+	if err := e.dc.Create(e.ctx, hp); err != nil {
+		t.Fatal(err)
+	}
+	_, err := e.mgr.CreateSnapshot(e.ctx, vmSnapName, "test-pool/share-1/"+testPVName, nil)
+	if !errors.Is(err, ErrSnapshotUnsupported) {
+		t.Fatalf("err = %v, want ErrSnapshotUnsupported: a file copy of a hot-plugged VM disk is unsafe and QEMU cannot copy it yet", err)
+	}
+	if e.k.getSnapshot(vmSnapName) != nil {
+		t.Error("a refused snapshot must leave no Snapshot CR")
+	}
+}
+
+func TestCreateSnapshot_FailedSnapshotReturnsATerminalError(t *testing.T) {
+	e := newVMSnapEnv(t)
+	e.startVM()
+	e.create(nil)
+	s := e.snap()
+	s.Status.Phase, s.Status.Message = "Failed", "failed after 3 tries: x"
+	if err := e.k.UpdateSnapshotStatus(e.ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	_, err := e.mgr.CreateSnapshot(e.ctx, vmSnapName, "test-pool/share-1/"+testPVName, nil)
+	if !errors.Is(err, ErrSnapshotFailed) {
+		t.Errorf("err = %v, want ErrSnapshotFailed so the driver can return a terminal code", err)
+	}
+}
+
+func TestCreateSnapshot_VMStartsDuringFileCopyStopsTheFileCopyEarly(t *testing.T) {
+	e := newVMSnapEnv(t)
+	e.sd.setInProgress(true)
+	e.create(nil) // no VM yet: the file copy starts and runs
+	e.startVM()
+	e.sd.running = map[string]bool{"snap-" + vmSnapName: true}
+	res := e.create(nil) // the next call sees the VM
+	if res.ReadyToUse {
+		t.Fatal("not ready")
+	}
+	if e.snap().Annotations[snapshotMethodAnnotation] == snapshotMethodVM {
+		t.Fatal("the snapshot must stay on the file path until the file copy Job has stopped, or the two writers meet")
+	}
+	e.create(nil) // the Job has stopped now
+	if e.snap().Annotations[snapshotMethodAnnotation] != snapshotMethodVM {
+		t.Error("once the file copy has stopped, the snapshot moves to the VM path")
 	}
 }

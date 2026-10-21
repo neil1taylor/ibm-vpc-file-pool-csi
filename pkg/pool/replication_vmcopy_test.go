@@ -42,6 +42,8 @@ type fakeVMCopier struct {
 	// idleErr makes CheckIdle fail, as when a copy runs in the VM.
 	idleErr    error
 	cleanStale int
+	// cancelErr makes Cancel and Finish(true) fail.
+	cancelErr error
 }
 
 type fakeStart struct {
@@ -99,7 +101,7 @@ func (f *fakeVMCopier) Cancel(_ context.Context, _ vmcopy.VM, _ *vmcopy.Copy) er
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.cancels++
-	return nil
+	return f.cancelErr
 }
 
 func (f *fakeVMCopier) CleanStaleCopies(_ context.Context, _ vmcopy.VM, _ []string) error {
