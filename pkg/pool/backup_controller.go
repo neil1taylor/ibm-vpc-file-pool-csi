@@ -18,6 +18,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
 )
 
 // A BackupPolicy backs up the PVCs it selects, and the VMs whose disks it
@@ -62,13 +64,15 @@ type BackupController struct {
 	nowFunc  func() time.Time
 	// shareData runs Jobs on shares, for restores.
 	shareData ShareData
+	// reported holds the policies that have metric series.
+	reported map[string]bool
 }
 
 // NewBackupController returns a controller that reads and writes with c. It
 // must read without a cache of pods or PVCs for every namespace, as the
 // replication controller does.
 func NewBackupController(c client.Client) *BackupController {
-	return &BackupController{client: c, interval: DefaultBackupInterval, nowFunc: time.Now}
+	return &BackupController{client: c, interval: DefaultBackupInterval, nowFunc: time.Now, reported: map[string]bool{}}
 }
 
 // SetNowFunc replaces the clock (for tests).
@@ -101,6 +105,14 @@ func (bc *BackupController) ReconcileAll(ctx context.Context) {
 		known[list.Items[i].Name] = true
 	}
 	bc.tidyDeleted(ctx, known)
+	for name := range bc.reported {
+		if !known[name] {
+			metrics.BackupVolumes.DeleteLabelValues(name)
+			metrics.BackupStalestAgeSeconds.DeleteLabelValues(name)
+			metrics.BackupOldestAgeSeconds.DeleteLabelValues(name)
+			delete(bc.reported, name)
+		}
+	}
 	sort.Slice(list.Items, func(i, j int) bool {
 		a, b := list.Items[i].CreationTimestamp, list.Items[j].CreationTimestamp
 		if !a.Equal(&b) {
@@ -174,7 +186,10 @@ func claimKey(ns, name string) string { return ns + "/" + name }
 
 func (bc *BackupController) reconcile(ctx context.Context, bp *v1alpha1.BackupPolicy) {
 	status := v1alpha1.BackupPolicyStatus{}
-	defer func() { bc.saveStatus(ctx, bp, status) }()
+	defer func() {
+		bc.saveStatus(ctx, bp, status)
+		bc.recordMetrics(bp, status)
+	}()
 
 	svs := &v1alpha1.SubVolumeList{}
 	if err := bc.client.List(ctx, svs); err != nil {
@@ -620,4 +635,35 @@ func (bc *BackupController) retainedVolumes(bp *v1alpha1.BackupPolicy, targets [
 		out = append(out, old)
 	}
 	return out
+}
+
+// recordMetrics reports how many volumes a policy backs up and how old its
+// backups are.
+func (bc *BackupController) recordMetrics(bp *v1alpha1.BackupPolicy, st v1alpha1.BackupPolicyStatus) {
+	now := bc.nowFunc()
+	var stalest, oldest float64
+	for _, v := range st.Volumes {
+		if v.LastBackupTime != nil {
+			if !v.Retained {
+				if age := now.Sub(v.LastBackupTime.Time).Seconds(); age > stalest {
+					stalest = age
+				}
+			}
+			first := v.LastBackupTime.Time
+			if v.OldestBackupTime != nil && v.OldestBackupTime.Before(&metav1.Time{Time: first}) {
+				first = v.OldestBackupTime.Time
+			}
+			if age := now.Sub(first).Seconds(); age > oldest {
+				oldest = age
+			}
+		} else if !v.Retained && !bp.CreationTimestamp.IsZero() {
+			if age := now.Sub(bp.CreationTimestamp.Time).Seconds(); age > stalest {
+				stalest = age
+			}
+		}
+	}
+	metrics.BackupVolumes.WithLabelValues(bp.Name).Set(float64(st.VolumeCount))
+	metrics.BackupStalestAgeSeconds.WithLabelValues(bp.Name).Set(stalest)
+	metrics.BackupOldestAgeSeconds.WithLabelValues(bp.Name).Set(oldest)
+	bc.reported[bp.Name] = true
 }

@@ -54,7 +54,7 @@ func main() {
 		return
 	case "list", "restore":
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown subcommand: %s\n\n", os.Args[1])
+		_, _ = fmt.Fprintf(os.Stderr, "Unknown subcommand: %s\n\n", os.Args[1])
 		printUsage(os.Stderr)
 		os.Exit(1)
 	}
@@ -63,13 +63,13 @@ func main() {
 		err = run(context.Background(), c, os.Stdout, os.Args[1:], time.Now)
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprint(w, `kubectl-backup — backups of volumes and VMs
+	_, _ = fmt.Fprint(w, `kubectl-backup — backups of volumes and VMs
 
 Usage:
   kubectl backup list    [--policy NAME]            List the backed-up volumes and their moments
@@ -169,17 +169,17 @@ func runList(ctx context.Context, c client.Client, out io.Writer, policy string)
 	sort.Slice(policies, func(i, j int) bool { return policies[i].Name < policies[j].Name })
 
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "POLICY\tVOLUME\tVM\tLAST BACKUP\tOLDEST\tPOINTS\tCONSISTENCY\tSTATE\tERROR")
+	_, _ = fmt.Fprintln(w, "POLICY\tVOLUME\tVM\tLAST BACKUP\tOLDEST\tPOINTS\tCONSISTENCY\tSTATE\tERROR")
 	for _, p := range policies {
 		if p.Status.Phase == "Error" || p.Status.Message != "" {
-			fmt.Fprintf(w, "%s\t(policy %s)\t\t\t\t\t\t\t%s\n", p.Name, strings.ToLower(p.Status.Phase), p.Status.Message)
+			_, _ = fmt.Fprintf(w, "%s\t(policy %s)\t\t\t\t\t\t\t%s\n", p.Name, strings.ToLower(p.Status.Phase), p.Status.Message)
 		}
 		for _, v := range p.Status.Volumes {
 			state := "active"
 			if v.Retained {
 				state = "retained"
 			}
-			fmt.Fprintf(w, "%s\t%s/%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n", p.Name, v.PVCNamespace, v.PVCName, dash(v.VMName),
+			_, _ = fmt.Fprintf(w, "%s\t%s/%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n", p.Name, v.PVCNamespace, v.PVCName, dash(v.VMName),
 				formatTime(v.LastBackupTime), formatTime(v.OldestBackupTime), v.RestorePoints, dash(v.Consistency), state, v.LastError)
 		}
 	}
@@ -268,9 +268,9 @@ func runRestore(ctx context.Context, c client.Client, out io.Writer, flags map[s
 	if err = c.Create(ctx, br); err != nil {
 		return fmt.Errorf("making the restore request: %w", err)
 	}
-	fmt.Fprintf(out, "Restore %s asked: %s/%s from policy %s into new PVC %s/%s\n", br.Name, srcNS, srcName, policy, dstNS, dstName)
+	_, _ = fmt.Fprintf(out, "Restore %s asked: %s/%s from policy %s into new PVC %s/%s\n", br.Name, srcNS, srcName, policy, dstNS, dstName)
 	if flags["wait"] != "true" {
-		fmt.Fprintf(out, "Follow it with: kubectl get backuprestore %s\n", br.Name)
+		_, _ = fmt.Fprintf(out, "Follow it with: kubectl get backuprestore %s\n", br.Name)
 		return nil
 	}
 	return waitRestore(ctx, c, out, br.Name, poll, timeout)
@@ -295,7 +295,7 @@ func waitRestore(ctx context.Context, c client.Client, out io.Writer, name strin
 		}
 		if br.Status.Phase != lastPhase {
 			lastPhase = br.Status.Phase
-			fmt.Fprintf(out, "  %s %s\n", dash(br.Status.Phase), br.Status.Message)
+			_, _ = fmt.Fprintf(out, "  %s %s\n", dash(br.Status.Phase), br.Status.Message)
 		}
 		switch br.Status.Phase {
 		case "Done":
@@ -303,7 +303,7 @@ func waitRestore(ctx context.Context, c client.Client, out io.Writer, name strin
 			if br.Status.RestoredMoment != nil {
 				moment = formatTime(br.Status.RestoredMoment)
 			}
-			fmt.Fprintf(out, "Done: %s/%s holds the backup of %s\n", br.Spec.TargetNamespace, br.Spec.TargetName, moment)
+			_, _ = fmt.Fprintf(out, "Done: %s/%s holds the backup of %s\n", br.Spec.TargetNamespace, br.Spec.TargetName, moment)
 			return nil
 		case "Failed":
 			return fmt.Errorf("the restore failed: %s", br.Status.Message)

@@ -7,6 +7,9 @@ import (
 	"time"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -527,4 +530,74 @@ func TestBackupController_KeepsTheBackupsOfAVolumeThatIsGone(t *testing.T) {
 	if got := len(e.bp("nightly").Status.Volumes); got != 0 {
 		t.Errorf("volumes = %d, want 0 after the keep time", got)
 	}
+}
+
+func TestBackupController_ReportsTheAgeOfItsBackups(t *testing.T) {
+	e := newBackupEnv(t)
+	clock := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	e.bc.SetNowFunc(func() time.Time { return clock })
+	a := e.addClaim("apps", "a", "data-a", yes)
+	b := e.addClaim("apps", "b", "data-a", yes)
+	e.policy("nightly", nil)
+	e.reconcile()
+
+	rp := e.repls()[0]
+	lastA, lastB := metav1.NewTime(clock.Add(-time.Hour)), metav1.NewTime(clock.Add(-3*time.Hour))
+	oldA := metav1.NewTime(clock.Add(-48 * time.Hour))
+	rp.Status.SubVolumeStatuses = []v1alpha1.SubVolumeReplicationStatus{
+		{SubVolumeName: a.Name, LastSyncTime: &lastA, RestorePoints: 2, OldestRestorePoint: &oldA},
+		{SubVolumeName: b.Name, LastSyncTime: &lastB},
+	}
+	if err := e.c.Status().Update(e.ctx, &rp); err != nil {
+		t.Fatal(err)
+	}
+	e.reconcile()
+
+	// The stalest volume is volume b: its last backup is 3 hours old.
+	if got := gaugeValue(metrics.BackupStalestAgeSeconds.WithLabelValues("nightly")); got != 3*3600 {
+		t.Errorf("stalest age = %v, want %v", got, 3*3600)
+	}
+	// The oldest backup that is kept is volume a's restore point, 48 hours old.
+	if got := gaugeValue(metrics.BackupOldestAgeSeconds.WithLabelValues("nightly")); got != 48*3600 {
+		t.Errorf("oldest age = %v, want %v", got, 48*3600)
+	}
+	if got := gaugeValue(metrics.BackupVolumes.WithLabelValues("nightly")); got != 2 {
+		t.Errorf("volumes = %v, want 2", got)
+	}
+}
+
+func TestBackupController_ADeletedPolicyLeavesNoMetrics(t *testing.T) {
+	e := newBackupEnv(t)
+	e.addClaim("apps", "a", "data-a", yes)
+	e.policy("gone-soon", nil)
+	e.reconcile()
+	before := seriesCount(metrics.BackupVolumes)
+	if err := e.c.Delete(e.ctx, e.bp("gone-soon")); err != nil {
+		t.Fatal(err)
+	}
+	e.reconcile()
+	if after := seriesCount(metrics.BackupVolumes); after != before-1 {
+		t.Errorf("series before %d, after %d: the series of a deleted policy must go", before, after)
+	}
+}
+
+// gaugeValue reads a gauge.
+func gaugeValue(g prometheus.Gauge) float64 {
+	var m dto.Metric
+	if err := g.Write(&m); err != nil {
+		return -1
+	}
+	return m.GetGauge().GetValue()
+}
+
+// seriesCount counts the series of a metric.
+func seriesCount(c prometheus.Collector) int {
+	ch := make(chan prometheus.Metric, 1024)
+	c.Collect(ch)
+	close(ch)
+	n := 0
+	for range ch {
+		n++
+	}
+	return n
 }
