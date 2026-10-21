@@ -701,10 +701,10 @@ func (m *Manager) restoreInstant(ctx context.Context, sv *v1alpha1.SubVolume, sn
 	if err != nil {
 		return false, err
 	}
-	init := fmt.Sprintf("set -eu\nmkdir -p %q\nchown %d:%d %q\n", to, qemuUID, qemuUID, to)
-	if sv.Spec.Permissions != "" && validPermissionsPattern.MatchString(sv.Spec.Permissions) {
-		init += fmt.Sprintf("chmod %s %q\n", sv.Spec.Permissions, to)
-	}
+	// The share squashes root, so root cannot give the folder to the QEMU
+	// user; it opens the folder to all, as the snapshot apply Job does.
+	// KubeVirt gives it to the QEMU user when a VM starts.
+	init := fmt.Sprintf("set -eu\nmkdir -p %q\nchmod 0777 %q\n", to, to)
 	return m.instant.jobs.RunChainScript(ctx, "restore-"+sv.Name, shares, script, init)
 }
 

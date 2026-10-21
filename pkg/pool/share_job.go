@@ -74,10 +74,34 @@ type ShareData interface {
 // ShareJobRunner implements ShareData with Kubernetes Jobs in the driver's
 // namespace, because the controller pod has no NFS access.
 type ShareJobRunner struct {
-	client      client.Client
-	namespace   string
-	image       string
-	driverImage string
+	client        client.Client
+	namespace     string
+	image         string
+	driverImage   string
+	launcherImage string
+}
+
+// SetLauncherImage sets KubeVirt's virt-launcher image, which has qemu-img,
+// for the Jobs that change a VM disk's snapshot chain. Without it, those Jobs
+// are refused.
+func (r *ShareJobRunner) SetLauncherImage(image string) {
+	r.launcherImage = image
+}
+
+// RunChainScript runs a pkg/vmsnap script as the QEMU user in the
+// virt-launcher image, after initScript (if set) as root. It implements
+// ChainJobs.
+func (r *ShareJobRunner) RunChainScript(ctx context.Context, key string, shares []ShareMount, script, initScript string) (bool, error) {
+	if r.launcherImage == "" {
+		return false, errors.New("no virt-launcher image set for VM disk chain Jobs")
+	}
+	shape := jobShape{
+		image:      r.launcherImage,
+		command:    []string{"/bin/sh", "-c", script},
+		runAsUser:  qemuUID,
+		initScript: initScript,
+	}
+	return r.run(ctx, key, shares, shape)
 }
 
 // SetDriverImage sets the image of Jobs that run the driver itself. Without

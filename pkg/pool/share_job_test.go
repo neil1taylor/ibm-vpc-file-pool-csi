@@ -431,3 +431,32 @@ func TestShareJobRunner_ScriptJobsKeepTheirSecurityContext(t *testing.T) {
 		t.Errorf("a script Job must run as root and set no group, as before: %+v", sc)
 	}
 }
+
+func TestShareJobRunner_RunChainScript(t *testing.T) {
+	r, c := newApplyRunner()
+	ctx := context.Background()
+	if _, err := r.RunChainScript(ctx, "chain-a", []ShareMount{testShareA}, "set -eu\nqemu-img info x\n", "mkdir -p /share0/x\n"); err == nil {
+		t.Fatal("without the launcher image the Job must be refused")
+	}
+	r.SetLauncherImage("registry.redhat.io/cnv/virt-launcher@sha256:abc")
+	done, err := r.RunChainScript(ctx, "chain-a", []ShareMount{testShareA}, "set -eu\nqemu-img info x\n", "mkdir -p /share0/x\n")
+	if err != nil || done {
+		t.Fatalf("RunChainScript() = %v, %v; want false, nil", done, err)
+	}
+	spec := getShareJob(t, c, "chain-a").Spec.Template.Spec
+	mainC := spec.Containers[0]
+	if mainC.Image != "registry.redhat.io/cnv/virt-launcher@sha256:abc" || !strings.Contains(strings.Join(mainC.Command, " "), "qemu-img info x") {
+		t.Errorf("main container = %s %v", mainC.Image, mainC.Command)
+	}
+	if *spec.SecurityContext.RunAsUser != qemuUID || *spec.SecurityContext.RunAsGroup != qemuUID {
+		t.Errorf("the Job must run as the QEMU user")
+	}
+	if len(spec.InitContainers) != 1 || *spec.InitContainers[0].SecurityContext.RunAsUser != 0 ||
+		!strings.Contains(strings.Join(spec.InitContainers[0].Command, " "), "mkdir -p /share0/x") {
+		t.Errorf("init containers = %+v", spec.InitContainers)
+	}
+	setJobStatus(t, c, "chain-a", 1, 0)
+	if done, err = r.RunChainScript(ctx, "chain-a", []ShareMount{testShareA}, "x", ""); err != nil || !done {
+		t.Fatalf("RunChainScript() = %v, %v; want true, nil", done, err)
+	}
+}
