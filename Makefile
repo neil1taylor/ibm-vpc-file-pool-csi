@@ -8,7 +8,7 @@ GOBIN := $(shell go env GOPATH)/bin
 GOLANGCI_LINT := $(GOBIN)/golangci-lint
 CONTROLLER_GEN := $(GOBIN)/controller-gen
 
-.PHONY: build build-migrate build-failover test test-scripts test-integration test-e2e test-release test-vm test-coverage vet lint generate docker-build \
+.PHONY: build build-migrate build-failover build-backup test test-scripts test-integration test-e2e test-release test-vm test-coverage vet lint generate docker-build \
         install-crds deploy helm-install helm-lint helm-template run-local tools clean \
         console-plugin-install console-plugin-build console-plugin-dev console-plugin-lint \
         console-plugin-test console-plugin-docker-build \
@@ -22,6 +22,9 @@ build-migrate:
 
 build-failover:
 	CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$(VERSION)" -o bin/kubectl-failover ./cmd/failover/
+
+build-backup:
+	CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$(VERSION)" -o bin/kubectl-backup ./cmd/backup/
 
 test:
 	go test ./... -v -race -count=1
