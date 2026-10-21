@@ -443,15 +443,55 @@ func (r *Receiver) resolveDestPath(basePath, subPath string) (string, error) {
 	if !subVolumeNamePattern.MatchString(filepath.Base(cleanDest)) {
 		return "", fmt.Errorf("the destination %q is not a pvc-<uuid> folder", cleanDest)
 	}
-	// No folder on the way may start with a dot (.snapshots and the like).
-	rel := strings.TrimPrefix(strings.TrimPrefix(cleanDest, cleanBase), "/")
-	for _, part := range strings.Split(rel, "/") {
-		if strings.HasPrefix(part, ".") {
-			return "", fmt.Errorf("the destination %q has a folder that starts with a dot", cleanDest)
-		}
+	// No folder on the way may start with a dot (.snapshots and the like), and
+	// no folder on the way may be a symlink to somewhere else. The check runs on
+	// the real path of the deepest folder that exists.
+	if err := checkRealDest(cleanBase, cleanDest); err != nil {
+		return "", err
 	}
 
 	return cleanDest, nil
+}
+
+// checkRealDest resolves the symlinks in dest (as far as dest exists) and
+// checks that the real path is under the real base path and that no folder
+// below the base starts with a dot.
+func checkRealDest(base, dest string) error {
+	realBase, err := filepath.EvalSymlinks(base)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil // nothing below a missing base can be a symlink
+	}
+	if err != nil {
+		return fmt.Errorf("the receiver's base path is not usable: %w", err)
+	}
+	// Find the deepest part of dest that exists, and resolve it.
+	existing, tail := dest, ""
+	for {
+		if _, statErr := os.Lstat(existing); statErr == nil {
+			break
+		}
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			return fmt.Errorf("no part of %q exists", dest)
+		}
+		tail = filepath.Join(filepath.Base(existing), tail)
+		existing = parent
+	}
+	realExisting, err := filepath.EvalSymlinks(existing)
+	if err != nil {
+		return fmt.Errorf("resolving %q: %w", existing, err)
+	}
+	realDest := filepath.Join(realExisting, tail)
+	if realDest != realBase && !strings.HasPrefix(realDest, realBase+"/") {
+		return fmt.Errorf("the destination %q leads outside the base path through a symlink", dest)
+	}
+	rel := strings.TrimPrefix(strings.TrimPrefix(realDest, realBase), "/")
+	for _, part := range strings.Split(rel, "/") {
+		if strings.HasPrefix(part, ".") {
+			return fmt.Errorf("the destination %q has a folder that starts with a dot", dest)
+		}
+	}
+	return nil
 }
 
 // extractTar reads a tar stream and extracts files to destDir.

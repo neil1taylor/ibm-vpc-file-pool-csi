@@ -992,3 +992,31 @@ func TestReceiver_Sync_PathMustNameTheVolumeInTheURL(t *testing.T) {
 		t.Errorf("status = %d, want 400: the subPath names another volume than the URL", rec.Code)
 	}
 }
+
+func TestReceiver_ResolveDestPath_SymlinkedParentCannotLeaveTheBase(t *testing.T) {
+	base := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(base, "pvcs")); err != nil {
+		t.Fatal(err)
+	}
+	r := NewReceiver(base, strings.Repeat("a", 40), ":0")
+	const pv = "pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"
+	if dir, err := r.resolveDestPath("/pvcs", "/pvcs/"+pv); err == nil {
+		t.Errorf("resolveDestPath accepted %q although /pvcs is a symlink to a folder outside the base", dir)
+	}
+}
+
+func TestReceiver_ResolveDestPath_SymlinkInsideTheBaseIsStillRefusedForHiddenTargets(t *testing.T) {
+	base := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(base, ".snapshots"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(base, ".snapshots"), filepath.Join(base, "pvcs")); err != nil {
+		t.Fatal(err)
+	}
+	r := NewReceiver(base, strings.Repeat("a", 40), ":0")
+	const pv = "pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"
+	if dir, err := r.resolveDestPath("/pvcs", "/pvcs/"+pv); err == nil {
+		t.Errorf("resolveDestPath accepted %q although /pvcs is a symlink to .snapshots", dir)
+	}
+}
