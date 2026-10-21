@@ -59,14 +59,18 @@ var vmListGVK = schema.GroupVersionKind{Group: "kubevirt.io", Version: "v1", Kin
 type BackupController struct {
 	client   client.Client
 	interval time.Duration
+	nowFunc  func() time.Time
 }
 
 // NewBackupController returns a controller that reads and writes with c. It
 // must read without a cache of pods or PVCs for every namespace, as the
 // replication controller does.
 func NewBackupController(c client.Client) *BackupController {
-	return &BackupController{client: c, interval: DefaultBackupInterval}
+	return &BackupController{client: c, interval: DefaultBackupInterval, nowFunc: time.Now}
 }
+
+// SetNowFunc replaces the clock (for tests).
+func (bc *BackupController) SetNowFunc(f func() time.Time) { bc.nowFunc = f }
 
 // Run looks at all BackupPolicies every interval until ctx ends.
 func (bc *BackupController) Run(ctx context.Context) {
@@ -158,8 +162,9 @@ func (bc *BackupController) setSubVolumeLabel(ctx context.Context, sv *v1alpha1.
 
 // backupTarget is a volume a policy backs up.
 type backupTarget struct {
-	sv     *v1alpha1.SubVolume
-	vmName string
+	sv           *v1alpha1.SubVolume
+	vmName       string
+	storageClass string
 }
 
 func claimKey(ns, name string) string { return ns + "/" + name }
@@ -296,6 +301,7 @@ func (bc *BackupController) resolveTargets(ctx context.Context, bp *v1alpha1.Bac
 		return nil, nil, fmt.Errorf("the selector is not valid: %w", err)
 	}
 	selected := map[string]bool{}
+	classes := map[string]string{}
 	list := func(ns string) error {
 		pvcs := &corev1.PersistentVolumeClaimList{}
 		opts := []client.ListOption{client.MatchingLabelsSelector{Selector: sel}}
@@ -307,7 +313,11 @@ func (bc *BackupController) resolveTargets(ctx context.Context, bp *v1alpha1.Bac
 		}
 		for i := range pvcs.Items {
 			if pvcs.Items[i].DeletionTimestamp == nil {
-				selected[claimKey(pvcs.Items[i].Namespace, pvcs.Items[i].Name)] = true
+				key := claimKey(pvcs.Items[i].Namespace, pvcs.Items[i].Name)
+				selected[key] = true
+				if sc := pvcs.Items[i].Spec.StorageClassName; sc != nil {
+					classes[key] = *sc
+				}
 			}
 		}
 		return nil
@@ -368,7 +378,7 @@ func (bc *BackupController) resolveTargets(ctx context.Context, bp *v1alpha1.Bac
 			conflicts = append(conflicts, fmt.Sprintf("%s is already backed up by policy %s", key, owner))
 			continue
 		}
-		targets = append(targets, backupTarget{sv: sv, vmName: vmOf[key]})
+		targets = append(targets, backupTarget{sv: sv, vmName: vmOf[key], storageClass: classes[key]})
 	}
 	sort.Slice(targets, func(i, j int) bool { return targets[i].sv.Name < targets[j].sv.Name })
 	sort.Strings(conflicts)
@@ -542,6 +552,16 @@ func (bc *BackupController) buildStatus(ctx context.Context, bp *v1alpha1.Backup
 	for _, t := range targets {
 		v := v1alpha1.BackupVolumeStatus{
 			PVCNamespace: t.sv.Spec.PVCNamespace, PVCName: t.sv.Spec.PVCName, SubVolumeName: t.sv.Name, VMName: t.vmName,
+			SubPath: t.sv.Spec.SubPath, RequestedGB: t.sv.Spec.RequestedGB, StorageClassName: t.storageClass,
+		}
+		if v.StorageClassName == "" {
+			// The claim is not listed this pass (a VM disk found through its VM):
+			// keep what the last pass knew.
+			for _, old := range bp.Status.Volumes {
+				if old.SubVolumeName == t.sv.Name {
+					v.StorageClassName = old.StorageClassName
+				}
+			}
 		}
 		if rs, ok := byName[t.sv.Name]; ok {
 			v.LastBackupTime = rs.LastSyncTime
@@ -558,6 +578,7 @@ func (bc *BackupController) buildStatus(ctx context.Context, bp *v1alpha1.Backup
 		}
 		st.Volumes = append(st.Volumes, v)
 	}
+	st.Volumes = append(st.Volumes, bc.retainedVolumes(bp, targets)...)
 	if bp.Spec.Suspend {
 		st.Phase, st.Message = backupPhaseSuspended, "backups are suspended; existing backups stay"
 	}
@@ -569,4 +590,29 @@ func (bc *BackupController) buildStatus(ctx context.Context, bp *v1alpha1.Backup
 		st.Message = msg
 	}
 	return st
+}
+
+// retainedVolumes lists the volumes that were backed up before and are not any
+// more (deleted, or no longer matching the selector). Their backups are still
+// on the share, and a restore needs their entry. An entry goes once the keep
+// time has passed since its last backup.
+func (bc *BackupController) retainedVolumes(bp *v1alpha1.BackupPolicy, targets []backupTarget) []v1alpha1.BackupVolumeStatus {
+	keep, err := v1alpha1.ParseKeepFor(bp.Spec.KeepFor)
+	if err != nil {
+		keep = v1alpha1.DefaultBackupKeepFor
+	}
+	current := map[string]bool{}
+	for _, t := range targets {
+		current[t.sv.Name] = true
+	}
+	now := bc.nowFunc()
+	var out []v1alpha1.BackupVolumeStatus
+	for _, old := range bp.Status.Volumes {
+		if current[old.SubVolumeName] || old.LastBackupTime == nil || now.Sub(old.LastBackupTime.Time) > keep {
+			continue
+		}
+		old.Retained = true
+		out = append(out, old)
+	}
+	return out
 }

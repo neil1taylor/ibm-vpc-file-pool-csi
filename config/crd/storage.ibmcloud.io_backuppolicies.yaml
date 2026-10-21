@@ -205,11 +205,31 @@ spec:
                     pvcNamespace:
                       description: PVCNamespace and PVCName name the claim.
                       type: string
+                    requestedGB:
+                      description: |-
+                        RequestedGB and StorageClassName are what the volume had, so a restore can
+                        make a volume like it after the volume is gone.
+                      format: int64
+                      type: integer
                     restorePoints:
                       description: RestorePoints counts the older moments that can
                         be restored.
                       format: int32
                       type: integer
+                    retained:
+                      description: |-
+                        Retained is true when the policy no longer backs up the volume (it was
+                        deleted, or no longer matches the selector). Its existing backups stay
+                        until the keep time has passed since the last backup.
+                      type: boolean
+                    storageClassName:
+                      type: string
+                    subPath:
+                      description: |-
+                        SubPath is the folder of the volume on its share (/pvcs/pvc-...). The
+                        backup is in the same place below the policy's folder. A restore needs
+                        it after the volume is gone.
+                      type: string
                     subVolumeName:
                       description: SubVolumeName is the SubVolume of the claim.
                       type: string

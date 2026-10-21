@@ -102,6 +102,25 @@ type BackupVolumeStatus struct {
 	// +optional
 	VMName string `json:"vmName,omitempty"`
 
+	// SubPath is the folder of the volume on its share (/pvcs/pvc-...). The
+	// backup is in the same place below the policy's folder. A restore needs
+	// it after the volume is gone.
+	// +optional
+	SubPath string `json:"subPath,omitempty"`
+
+	// RequestedGB and StorageClassName are what the volume had, so a restore can
+	// make a volume like it after the volume is gone.
+	// +optional
+	RequestedGB int64 `json:"requestedGB,omitempty"`
+	// +optional
+	StorageClassName string `json:"storageClassName,omitempty"`
+
+	// Retained is true when the policy no longer backs up the volume (it was
+	// deleted, or no longer matches the selector). Its existing backups stay
+	// until the keep time has passed since the last backup.
+	// +optional
+	Retained bool `json:"retained,omitempty"`
+
 	// LastBackupTime is the moment of the newest backup.
 	// +optional
 	LastBackupTime *metav1.Time `json:"lastBackupTime,omitempty"`

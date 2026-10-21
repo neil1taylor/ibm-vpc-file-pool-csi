@@ -458,3 +458,73 @@ func TestBackupController_LeavesOtherReplicationPoliciesAlone(t *testing.T) {
 		t.Fatal("the controller deleted a policy it does not own")
 	}
 }
+
+func TestBackupController_StatusKeepsWhatARestoreNeeds(t *testing.T) {
+	e := newBackupEnv(t)
+	sv := e.addClaim("apps", "db", "data-a", yes)
+	sc := "fast"
+	pvc := &corev1.PersistentVolumeClaim{}
+	if err := e.c.Get(e.ctx, types.NamespacedName{Namespace: "apps", Name: "db"}, pvc); err != nil {
+		t.Fatal(err)
+	}
+	pvc.Spec.StorageClassName = &sc
+	if err := e.c.Update(e.ctx, pvc); err != nil {
+		t.Fatal(err)
+	}
+	sv.Spec.RequestedGB = 40
+	if err := e.c.Update(e.ctx, sv); err != nil {
+		t.Fatal(err)
+	}
+	e.policy("nightly", nil)
+	e.reconcile()
+	v := e.bp("nightly").Status.Volumes[0]
+	if v.SubPath != sv.Spec.SubPath || v.RequestedGB != 40 || v.StorageClassName != "fast" {
+		t.Errorf("volume status = %+v, want subPath %s, 40 GB, class fast", v, sv.Spec.SubPath)
+	}
+}
+
+// markSynced pretends a backup ran for the volume at the given time.
+func (e *backupEnv) markSynced(svName string, at time.Time) {
+	e.t.Helper()
+	rp := e.repls()[0]
+	m := metav1.NewTime(at)
+	rp.Status.SubVolumeStatuses = []v1alpha1.SubVolumeReplicationStatus{{SubVolumeName: svName, LastSyncTime: &m}}
+	if err := e.c.Status().Update(e.ctx, &rp); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+func TestBackupController_KeepsTheBackupsOfAVolumeThatIsGone(t *testing.T) {
+	e := newBackupEnv(t)
+	clock := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	e.bc.SetNowFunc(func() time.Time { return clock })
+	sv := e.addClaim("apps", "db", "data-a", yes)
+	e.policy("nightly", func(p *v1alpha1.BackupPolicy) { p.Spec.KeepFor = "48h" })
+	e.reconcile()
+	e.markSynced(sv.Name, clock.Add(-time.Hour))
+	e.reconcile()
+
+	// The claim and its SubVolume are deleted. The backups are on the share.
+	if err := e.c.Delete(e.ctx, e.sv(sv.Name)); err != nil {
+		t.Fatal(err)
+	}
+	pvc := &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Namespace: "apps", Name: "db"}}
+	if err := e.c.Delete(e.ctx, pvc); err != nil {
+		t.Fatal(err)
+	}
+	e.reconcile()
+	st := e.bp("nightly").Status
+	if len(st.Volumes) != 1 || !st.Volumes[0].Retained || st.Volumes[0].SubPath != sv.Spec.SubPath {
+		t.Fatalf("status = %+v, want the deleted volume kept as retained, with its subPath", st.Volumes)
+	}
+	if st.VolumeCount != 0 {
+		t.Errorf("volumeCount = %d: only volumes that are backed up now count", st.VolumeCount)
+	}
+
+	// After the keep time it goes.
+	clock = clock.Add(49 * time.Hour)
+	e.reconcile()
+	if got := len(e.bp("nightly").Status.Volumes); got != 0 {
+		t.Errorf("volumes = %d, want 0 after the keep time", got)
+	}
+}
