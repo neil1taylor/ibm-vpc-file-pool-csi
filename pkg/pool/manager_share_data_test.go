@@ -32,6 +32,19 @@ type fakeShareData struct {
 	applies    []applyCall
 	// applyErr makes the next ApplyVMDisk calls fail as a failed Job.
 	applyErr error
+	restores []restoreCall
+	// restoreErr makes RestoreBackup fail as a failed Job; restoreOutcome is
+	// what a finished restore reports.
+	restoreErr     error
+	restoreOutcome RestoreOutcome
+}
+
+type restoreCall struct {
+	key         string
+	volPath     string
+	momentsPath string
+	dstPath     string
+	moment      time.Time
 }
 
 type applyCall struct {
@@ -100,6 +113,25 @@ func (f *fakeShareData) ApplyVMDisk(_ context.Context, key string, _ ShareMount,
 		return false, nil
 	}
 	return true, nil
+}
+
+// RestoreBackup records the call and reports done when the call is not held
+// up. The outcome is the latest backup, unless restoreOutcome says otherwise.
+func (f *fakeShareData) RestoreBackup(_ context.Context, key string, _ ShareMount, volPath, momentsPath string, _ ShareMount, dstPath string, moment time.Time, _ *Ownership) (bool, RestoreOutcome, error) {
+	f.mu.Lock()
+	f.restores = append(f.restores, restoreCall{key: key, volPath: volPath, momentsPath: momentsPath, dstPath: dstPath, moment: moment})
+	inProgress, apiErr, restoreErr, outcome := f.inProgress, f.apiErr, f.restoreErr, f.restoreOutcome
+	f.mu.Unlock()
+	if apiErr != nil {
+		return false, RestoreOutcome{}, apiErr
+	}
+	if restoreErr != nil {
+		return false, RestoreOutcome{}, fmt.Errorf("%w: %v", ErrShareJobFailed, restoreErr)
+	}
+	if inProgress {
+		return false, RestoreOutcome{}, nil
+	}
+	return true, outcome, nil
 }
 
 // Stop reports done once no Job runs for key. The first call on a running

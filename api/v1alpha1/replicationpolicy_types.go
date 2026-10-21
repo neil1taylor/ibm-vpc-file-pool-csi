@@ -125,6 +125,15 @@ type ReplicationPolicySpec struct {
 	// +optional
 	RestorePointKeepHours *int32 `json:"restorePointKeepHours,omitempty"`
 
+	// MomentKeepHours keeps earlier moments of volumes that are not VM disks, as
+	// folders of hard links next to the destination (in .moments). A file that
+	// did not change takes no extra space. A moment older than this many hours is
+	// removed after each sync. Unset or 0 keeps none. Needs rsync: it is used
+	// even when IncrementalSync is false. BackupPolicy sets this.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	MomentKeepHours *int32 `json:"momentKeepHours,omitempty"`
+
 	// PreSyncHooks are hooks executed before each replication sync cycle.
 	// +optional
 	PreSyncHooks []Hook `json:"preSyncHooks,omitempty"`
