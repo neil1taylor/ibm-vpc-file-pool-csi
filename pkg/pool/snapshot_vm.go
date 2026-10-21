@@ -296,8 +296,9 @@ func (m *Manager) startVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, snap
 		return
 	}
 	target := vmcopy.VM{Namespace: pod.Namespace, Pod: pod.Name, Name: vmi}
-	// Look only: the change list that replication keeps for this VM must stay.
-	if err := vm.copier.CheckIdle(ctx, target); err != nil {
+	// Clear what an earlier try left, but keep every change list: the one
+	// that replication keeps for this VM must stay.
+	if err := vm.copier.CleanStaleCopies(ctx, target, []string{volume}); err != nil {
 		if errors.Is(err, vmcopy.ErrBusy) {
 			m.waitVMSnapshot(ctx, snap, vmBusyMessage)
 		} else {

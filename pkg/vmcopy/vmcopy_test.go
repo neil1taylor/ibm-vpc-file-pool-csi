@@ -727,3 +727,37 @@ func TestRemoveStale_RefusalIsErrBusy(t *testing.T) {
 		t.Errorf("RemoveStale while a copy runs = %v, want ErrBusy", err)
 	}
 }
+
+func TestCleanStaleCopies_KeepsEveryChangeList(t *testing.T) {
+	f := newFakeLauncher()
+	c := newTestCopier(f)
+	ctx := context.Background()
+	node := f.nodeOf("rootdisk")
+	f.bitmaps[node] = map[string]bool{"repl-a1": true, "repl-old": true}
+	f.files["/var/run/kubevirt-private/vmi-disks/rootdisk/.repl-staging-old.qcow2"] = true
+	f.files["/var/run/kubevirt-private/vmi-disks/rootdisk/disk.img"] = true
+	f.nodes["repl-old-t0"] = true
+
+	if err := c.CleanStaleCopies(ctx, testVM, []string{"rootdisk"}); err != nil {
+		t.Fatalf("CleanStaleCopies: %v", err)
+	}
+	if f.files["/var/run/kubevirt-private/vmi-disks/rootdisk/.repl-staging-old.qcow2"] || f.nodes["repl-old-t0"] {
+		t.Errorf("the stale staging file and node must go: files %v nodes %v", f.files, f.nodes)
+	}
+	if !f.files["/var/run/kubevirt-private/vmi-disks/rootdisk/disk.img"] {
+		t.Error("the disk was removed")
+	}
+	if want := map[string]bool{"repl-a1": true, "repl-old": true}; fmt.Sprint(f.bitmaps[node]) != fmt.Sprint(want) {
+		t.Errorf("bitmaps = %v, want all kept: the change list of replication is not ours to remove", f.bitmaps[node])
+	}
+
+	if _, err := c.Start(ctx, testVM, []string{"rootdisk"}, StartOptions{ID: "b2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.CleanStaleCopies(ctx, testVM, []string{"rootdisk"}); !errors.Is(err, ErrBusy) {
+		t.Errorf("CleanStaleCopies while a copy runs = %v, want ErrBusy", err)
+	}
+	if !f.files["/var/run/kubevirt-private/vmi-disks/rootdisk/.repl-staging-b2.qcow2"] {
+		t.Error("the staging file of a running copy was removed")
+	}
+}

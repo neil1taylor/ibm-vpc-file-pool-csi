@@ -51,9 +51,10 @@ type VMCopier interface {
 	Commit(ctx context.Context, vm vmcopy.VM, cp *vmcopy.Copy) error
 	Cancel(ctx context.Context, vm vmcopy.VM, cp *vmcopy.Copy) error
 	RemoveStale(ctx context.Context, vm vmcopy.VM, volumes []string, keepBitmap string) error
-	// CheckIdle returns vmcopy.ErrBusy while a copy runs in the VM. It
-	// changes nothing.
-	CheckIdle(ctx context.Context, vm vmcopy.VM) error
+	// CleanStaleCopies removes staging files and nodes that an earlier copy
+	// left, keeps every change list, and returns vmcopy.ErrBusy while a copy
+	// runs in the VM.
+	CleanStaleCopies(ctx context.Context, vm vmcopy.VM, volumes []string) error
 }
 
 // SetVMCopier turns on copies of running VM disks in direct NFS mode. Without

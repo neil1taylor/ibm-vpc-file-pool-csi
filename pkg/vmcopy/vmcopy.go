@@ -439,6 +439,18 @@ func (c *Copier) CheckIdle(ctx context.Context, vm VM) error {
 // the change list keepBitmap, the base of the next change copy. It refuses
 // while any copy runs in the VM.
 func (c *Copier) RemoveStale(ctx context.Context, vm VM, volumes []string, keepBitmap string) error {
+	return c.removeStale(ctx, vm, volumes, true, keepBitmap)
+}
+
+// CleanStaleCopies deletes staging files and block nodes that an earlier
+// copy left behind, and keeps every change list: the change list of another
+// copy, such as replication's, is not ours to remove. It refuses with ErrBusy
+// while any copy runs in the VM.
+func (c *Copier) CleanStaleCopies(ctx context.Context, vm VM, volumes []string) error {
+	return c.removeStale(ctx, vm, volumes, false, "")
+}
+
+func (c *Copier) removeStale(ctx context.Context, vm VM, volumes []string, dropBitmaps bool, keepBitmap string) error {
 	if err := c.CheckIdle(ctx, vm); err != nil {
 		return err
 	}
@@ -460,10 +472,12 @@ func (c *Copier) RemoveStale(ctx context.Context, vm VM, volumes []string, keepB
 		}
 		disks = append(disks, Disk{Volume: v})
 	}
-	if err := c.removeBitmaps(ctx, vm, disks, func(name string) bool {
-		return strings.HasPrefix(name, bitmapPrefix) && name != keepBitmap
-	}); err != nil {
-		return err
+	if dropBitmaps {
+		if err := c.removeBitmaps(ctx, vm, disks, func(name string) bool {
+			return strings.HasPrefix(name, bitmapPrefix) && name != keepBitmap
+		}); err != nil {
+			return err
+		}
 	}
 	for _, v := range volumes {
 		if _, err := c.run(ctx, vm, "find", vmiDisksDir+"/"+v, "-maxdepth", "1", "-name", StagingPrefix+"*.qcow2", "-delete"); err != nil {

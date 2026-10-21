@@ -155,6 +155,9 @@ func TestAdvanceVMSnapshots_FullRunToReady(t *testing.T) {
 	if e.cop.removeStale != 0 {
 		t.Error("a snapshot must not remove the change lists of other copies")
 	}
+	if e.cop.cleanStale != 1 {
+		t.Errorf("cleanStale = %d: a snapshot clears the leftovers of an earlier try", e.cop.cleanStale)
+	}
 	vc := e.snap().Status.VMCopy
 	if vc == nil || vc.Phase != vmCopyPhaseCopying || vc.StagingFile == "" || vc.PodUID != "pod-uid-1" {
 		t.Fatalf("VMCopy = %+v", vc)
