@@ -1,0 +1,258 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: failovers.storage.ibmcloud.io
+spec:
+  group: storage.ibmcloud.io
+  names:
+    kind: Failover
+    listKind: FailoverList
+    plural: failovers
+    shortNames:
+    - fo
+    singular: failover
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.action
+      name: Action
+      type: string
+    - jsonPath: .status.source
+      name: Source
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.rpo
+      name: RPO
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Failover asks the driver on the destination (DR) cluster to read a
+          replicated copy and plan, or carry out, a failover to it. A Job reads the
+          copy with the same code as `kubectl failover`. An Execute makes the
+          SubVolume, PV and PVC objects, as the CLI does. See
+          docs/specs for the design (issue #44).
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: FailoverSpec says what to read and whether to change anything.
+            properties:
+              action:
+                description: |-
+                  Action is Plan (read and report; changes nothing) or Execute (make the
+                  objects for the failed-over volumes). An Execute is allowed only after a
+                  Plan for the same source finished in the last 15 minutes.
+                enum:
+                - Plan
+                - Execute
+                type: string
+              drExportPath:
+                type: string
+              drPool:
+                description: |-
+                  DRPool is the FileSharePool on this cluster that the new SubVolumes
+                  belong to. Required for Execute.
+                type: string
+              drShareIP:
+                description: |-
+                  DRShareIP and DRExportPath are the NFS server and export of the
+                  destination claim. Unset means they are read from the claim's volume,
+                  which must then be an NFS volume.
+                type: string
+              force:
+                description: |-
+                  Force goes on although a copy may still be applied to a disk. An
+                  unfinished copy is rolled back first.
+                type: boolean
+              namespace:
+                description: Namespace overrides the namespace of the PVCs that are
+                  made.
+                type: string
+              rewindTo:
+                description: |-
+                  RewindTo limits the moment of each running VM to the newest one at or
+                  before it. Unset means the newest moment all disks of a VM share.
+                format: date-time
+                type: string
+              source:
+                description: |-
+                  Source is the name of the destination claim to read, in the driver's
+                  namespace. For receiver mode it is the receiver's data claim. Unset
+                  means the claim the Helm chart names for the receiver.
+                type: string
+            required:
+            - action
+            type: object
+          status:
+            description: FailoverStatus reports the plan or the result.
+            properties:
+              createdPVCs:
+                description: CreatedPVCs lists the PVCs an Execute made.
+                items:
+                  description: FailoverPVC is a PVC an Execute made.
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                    pv:
+                      type: string
+                    subVolume:
+                      type: string
+                  required:
+                  - name
+                  - namespace
+                  - pv
+                  - subVolume
+                  type: object
+                type: array
+              finishedAt:
+                format: date-time
+                type: string
+              message:
+                description: Message says why the failover failed, or what it waits
+                  for.
+                type: string
+              momentsTruncated:
+                description: |-
+                  MomentsTruncated is true if the list of moments of a VM was cut to fit
+                  the Job's termination message.
+                type: boolean
+              phase:
+                description: Phase is Planning, Planned, Executing, Done or Failed.
+                enum:
+                - Planning
+                - Planned
+                - Executing
+                - Done
+                - Failed
+                type: string
+              rpo:
+                description: RPO is the age of the oldest moment that will be shown.
+                type: string
+              source:
+                description: Source is the claim that was read (spec.source, or the
+                  default).
+                type: string
+              startedAt:
+                description: StartedAt and FinishedAt bound the run.
+                format: date-time
+                type: string
+              vms:
+                description: VMs lists each running VM found, with the moment it will
+                  show.
+                items:
+                  description: FailoverVM is one running VM found on the copy.
+                  properties:
+                    disks:
+                      description: Disks are the VM's disks.
+                      items:
+                        description: FailoverDisk is one disk of a VM.
+                        properties:
+                          rewind:
+                            description: |-
+                              Rewind is true if the disk must be rewound to the VM's moment (it
+                              copies the whole disk); false if it is used in place.
+                            type: boolean
+                          subVolume:
+                            description: SubVolume names the volume.
+                            type: string
+                        required:
+                        - rewind
+                        - subVolume
+                        type: object
+                      type: array
+                    moment:
+                      description: Moment is the moment the failed-over disks will
+                        show.
+                      format: date-time
+                      type: string
+                    moments:
+                      description: Moments are the moments all disks of the VM can
+                        show, newest first.
+                      items:
+                        format: date-time
+                        type: string
+                      type: array
+                    name:
+                      description: Name is "namespace/name" of the VM.
+                      type: string
+                  required:
+                  - disks
+                  - moment
+                  - name
+                  type: object
+                type: array
+              volumes:
+                description: Volumes lists every volume that is, or would be, failed
+                  over.
+                items:
+                  description: FailoverVolume is one volume found on the copy.
+                  properties:
+                    gid:
+                      format: int64
+                      type: integer
+                    lastSync:
+                      description: LastSync is the moment the volume shows.
+                      format: date-time
+                      type: string
+                    permissions:
+                      type: string
+                    policy:
+                      description: Policy is the ReplicationPolicy that wrote the
+                        copy.
+                      type: string
+                    pvcName:
+                      type: string
+                    pvcNamespace:
+                      type: string
+                    requestedGB:
+                      format: int64
+                      type: integer
+                    subPath:
+                      description: |-
+                        SubPath is the folder on the share. For a rewound disk it is the new
+                        folder.
+                      type: string
+                    subVolume:
+                      type: string
+                    uid:
+                      format: int64
+                      type: integer
+                  required:
+                  - lastSync
+                  - pvcName
+                  - pvcNamespace
+                  - requestedGB
+                  - subPath
+                  - subVolume
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
