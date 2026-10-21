@@ -19,6 +19,9 @@ To make a release:
 
 ## [Unreleased]
 
+### Added
+- Release test stage 18 (backup to a snapshot pool): runs `test/e2e/test-backup.sh` and checks each outcome it logs. Not run on a cluster yet. `remote.sh` now also builds `kubectl-backup` and ships all of `test/e2e` (stage 6 needs `test-vm-snapshot.sh` there).
+
 ### Changed
 - **VMs now come from the standard OpenShift Virtualization catalog.** Pick a catalog image and choose the pool's StorageClass for the boot disk. CDI copies the image onto the pool. The controller keeps the memory limit of CDI's copy pods at least 8Gi, through `HyperConverged` `spec.resourceRequirements.storageWorkloads`. CDI's default of 600 MB is too small for copies onto NFS: the pod is killed. Measured on rovslab on 20 October 2026: a 25 GB copy with a 2Gi limit was killed 6 times and never finished. With 8Gi it finished in 134 s and the checksum matched. A RHEL 9 catalog VM on a pool had its guest agent after 103 s.
 - **Golden images are hidden from the console pool form.** The pool form no longer offers them, and the "VM storage" preset no longer turns them on. The code is kept for possible later use, and `spec.goldenImages` still works if a pool sets it in YAML. The standard catalog is the recommended way.
