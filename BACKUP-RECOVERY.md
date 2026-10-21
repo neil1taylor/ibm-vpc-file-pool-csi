@@ -362,8 +362,22 @@ Things to know:
 - **Size the snapshot pool** for one whole copy of the selected data plus the changes kept for `keepFor`. A VM that rewrites half its disk a day, kept for 14 days, needs up to 7 extra disks of undo files. When the share is more than 85% full, the policy stops new backups: its `status.phase` is `Error` and `status.message` says how full the share is. The controller starts a small Job on the share about every 10 minutes to read its usage (`df`), and pauses the policy's `ReplicationPolicy` objects with the same annotation that `suspend` uses. **Backups are never deleted to make room.** Backups resume by themselves when usage falls to 85% or less, for example after you lower `keepFor` or remove the backups of a volume. Alert on `vpc_file_pool_backup_snapshot_pool_used_percent` (see [MONITORING.md](MONITORING.md#backup-metrics)) so you act before the limit.
 - A volume that is not a VM disk is synced with rsync and each sync is kept as a folder of hard links, so a backup of a running database is only as consistent as its files. Use the hooks of replication for such volumes.
 - Backups are in the same VPC as the data. They do not cover the loss of the VPC; use cross-region replication for that.
-- A volume that is deleted, or no longer matches the selector, keeps its backups until `keepFor` has passed since its last backup, and can be restored until then. Deleting a policy keeps its backups on the share; there is no command yet to remove them (issue #70).
+- A volume that is deleted, or no longer matches the selector, keeps its backups until `keepFor` has passed since its last backup, and can be restored until then. Deleting a policy keeps its backups on the share; `kubectl backup delete` removes them (below).
 - A VM restored from an earlier moment may need its guest to run a file system check, as after a power loss, if the backup is `CrashConsistent`. A backup that says `FileSystemConsistent` does not.
+
+Remove the backups of a volume you no longer want (for example a volume that is gone and will never be restored). This is the only way to remove them before `keepFor` has passed, and only this command does it: the controller never removes backups by itself.
+
+```bash
+kubectl backup delete --policy nightly --pvc vms/web-root
+```
+
+It measures the backup folder and the folder of earlier moments with a Job on the snapshot pool's share, shows both paths and the size, and asks you to type `vms/web-root`. Use `--yes` instead of the typed answer; in a shell that is not interactive (a script, CI) `--yes` is required, and without it the command stops before it starts a Job. The Jobs run in the driver namespace (`--driver-namespace`, default `kube-system`), so you need the right to make Jobs, claims and PVs there.
+
+It refuses, and changes nothing, in these cases:
+- The policy still backs up the volume. Remove the label that selects the claim (or delete the policy), wait for one backup cycle so `kubectl backup list` shows the volume as `retained`, then run it again.
+- A restore of the volume has not ended (any `BackupRestore` for that policy and claim that is not `Done` or `Failed`).
+
+If the policy is already deleted, its status can no longer say where the backup is. Name the snapshot pool and the volume yourself: `--pool backups --volume pvc-...`. The volume name is the folder under `/backup/<policy>/pvcs/` on the share.
 
 ---
 
