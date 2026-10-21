@@ -12,6 +12,11 @@
 #   - every file in the writer's log is on the disk with the logged checksum
 #   - the snapshot was not made with a file copy
 #
+# Windows: GUEST=windows boots a Windows Server 2022 VM from a copy of an existing
+# Windows disk (WIN_IMAGE_NS/WIN_IMAGE_PVC, a block PVC; it is only read). A
+# PowerShell writer replaces the Linux writer, and the checks run through the
+# QEMU guest agent. This tests the freeze through VSS.
+#
 # Usage: KUBECONFIG=... SSH_KEY=~/.ssh/key test/e2e/test-vm-snapshot.sh [--keep]
 # SSH_KEY is a private key whose .pub file is put in the VM for virtctl ssh.
 set -euo pipefail
@@ -24,6 +29,13 @@ POOL=$PREFIX-pool
 CLASS=$PREFIX-class
 SSH_KEY=${SSH_KEY:?set SSH_KEY to a private key file}
 IMAGE_URL=${IMAGE_URL:-https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2}
+GUEST=${GUEST:-linux}
+case "$GUEST" in linux | windows) ;; *) echo "GUEST must be linux or windows" >&2; exit 2 ;; esac
+WIN_IMAGE_NS=${WIN_IMAGE_NS:-brs-win-image}
+WIN_IMAGE_PVC=${WIN_IMAGE_PVC:-win2k22-brs}
+WIN_BLOCK_SC=${WIN_BLOCK_SC:-ocs-storagecluster-ceph-rbd-virtualization}
+ROOT_GI=20
+[ "$GUEST" = windows ] && ROOT_GI=24
 SNAPSHOT_TIMEOUT=${SNAPSHOT_TIMEOUT:-3600}
 # Speed limit of the snapshot copy in MB/s; the default 20 would take about 20 minutes.
 SNAPSHOT_SPEED=${SNAPSHOT_SPEED:-100}
@@ -92,6 +104,55 @@ parameters:
   vmCopySpeedLimitMBps: "$SNAPSHOT_SPEED"
 YAML
 
+if [ "$GUEST" = windows ]; then
+log "copying the Windows image $WIN_IMAGE_NS/$WIN_IMAGE_PVC onto the pool"
+oc apply -n "$NS" -f - <<YAML
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: root}
+spec:
+  storageClassName: $POOL
+  accessModes: [ReadWriteMany]
+  volumeMode: Filesystem
+  resources: {requests: {storage: ${ROOT_GI}Gi}}
+---
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: DataVolume
+metadata: {name: winbase}
+spec:
+  source:
+    pvc: {namespace: $WIN_IMAGE_NS, name: $WIN_IMAGE_PVC}
+  storage:
+    storageClassName: $WIN_BLOCK_SC
+    volumeMode: Block
+    accessModes: [ReadWriteMany]
+    resources: {requests: {storage: 20Gi}}
+---
+apiVersion: batch/v1
+kind: Job
+metadata: {name: convert}
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext: {runAsUser: 0}
+      containers:
+      - name: c
+        image: quay.io/centos/centos:stream9
+        command: [/bin/bash, -ec]
+        args:
+        - |
+          dd if=/dev/win of=/disk/disk.img bs=4M conv=sparse status=none
+          chown 107:107 /disk/disk.img
+        volumeDevices: [{name: w, devicePath: /dev/win}]
+        volumeMounts: [{name: d, mountPath: /disk}]
+      volumes:
+      - {name: w, persistentVolumeClaim: {claimName: winbase, readOnly: true}}
+      - {name: d, persistentVolumeClaim: {claimName: root}}
+YAML
+oc wait -n "$NS" job/convert --for=condition=complete --timeout=40m
+else
 log "making the source disk"
 oc apply -n "$NS" -f - <<YAML
 apiVersion: v1
@@ -101,7 +162,7 @@ spec:
   storageClassName: $POOL
   accessModes: [ReadWriteMany]
   volumeMode: Filesystem
-  resources: {requests: {storage: 20Gi}}
+  resources: {requests: {storage: ${ROOT_GI}Gi}}
 ---
 apiVersion: batch/v1
 kind: Job
@@ -129,8 +190,31 @@ spec:
 YAML
 oc wait -n "$NS" job/convert --for=condition=complete --timeout=20m
 
+fi
+
 PUBKEY=$(cat "$SSH_KEY.pub")
 vm_yaml() { # vm_yaml <name> <root claim> <with cloud-init: yes|no>
+    if [ "$GUEST" = windows ]; then
+        cat <<YAML
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata: {name: $1, namespace: $NS}
+spec:
+  runStrategy: Always
+  instancetype: {name: u1.large, kind: VirtualMachineClusterInstancetype}
+  preference: {name: windows.2k22.virtio, kind: VirtualMachineClusterPreference}
+  template:
+    spec:
+      evictionStrategy: LiveMigrate
+      domain:
+        devices:
+          disks:
+          - {name: rootdisk, disk: {bus: virtio}, bootOrder: 1}
+      volumes:
+      - {name: rootdisk, persistentVolumeClaim: {claimName: $2}}
+YAML
+        return 0
+    fi
     cat <<YAML
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
@@ -198,12 +282,79 @@ vssh() { # vssh <vmi> <command>
         -t "-o LogLevel=ERROR" -t "-o IdentitiesOnly=yes" -c "$2"
 }
 
+# wexec <vm> <PowerShell command> runs the command in a Windows VM through the
+# QEMU guest agent and prints its output.
+wexec() {
+    local vm=$1 pod dom req pid r
+    pod=$(oc get pod -n "$NS" -l "vm.kubevirt.io/name=$vm" -o jsonpath='{.items[0].metadata.name}')
+    dom=$(oc exec -n "$NS" "$pod" -c compute -- virsh list --name | head -1)
+    req=$(python3 -I -c 'import json,sys;print(json.dumps({"execute":"guest-exec","arguments":{"path":"powershell.exe","arg":["-NoProfile","-Command",sys.argv[1]],"capture-output":True}}))' "$2")
+    pid=$(oc exec -n "$NS" "$pod" -c compute -- virsh qemu-agent-command "$dom" "$req" | python3 -I -c 'import json,sys;print(json.load(sys.stdin)["return"]["pid"])')
+    for _ in $(seq 1 900); do
+        r=$(oc exec -n "$NS" "$pod" -c compute -- virsh qemu-agent-command "$dom" "{\"execute\":\"guest-exec-status\",\"arguments\":{\"pid\":$pid}}")
+        if echo "$r" | python3 -I -c 'import json,sys;sys.exit(0 if json.load(sys.stdin)["return"]["exited"] else 1)'; then
+            echo "$r" | python3 -I -c 'import json,sys,base64;d=json.load(sys.stdin)["return"];print(base64.b64decode(d.get("out-data","")).decode(errors="replace"),end="");e=d.get("err-data");e and print(base64.b64decode(e).decode(errors="replace"),end="",file=sys.stderr);sys.exit(d.get("exitcode",0))'
+            return $?
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+# wping <vm>: the guest agent of a Windows VM answers a ping. Commands sent
+# before it does leave the agent channel out of step, so wait for this first.
+wping() {
+    local pod dom
+    pod=$(oc get pod -n "$NS" -l "vm.kubevirt.io/name=$1" -o jsonpath='{.items[0].metadata.name}') || return 1
+    dom=$(oc exec -n "$NS" "$pod" -c compute -- virsh list --name 2>/dev/null | head -1) || return 1
+    oc exec -n "$NS" "$pod" -c compute -- virsh qemu-agent-command "$dom" '{"execute":"guest-ping"}' >/dev/null 2>&1
+}
+
+# guest_ready <vm>: the VM answers a command.
+guest_ready() {
+    if [ "$GUEST" = windows ]; then wping "$1" && wexec "$1" '1' >/dev/null; else vssh "$1" true >/dev/null 2>&1; fi
+}
+
+WRITER_PS1='New-Item -ItemType Directory -Force C:\data | Out-Null
+$n = 0
+if (Test-Path C:\writer.log) { $n = (Get-Content C:\writer.log | Measure-Object -Line).Lines }
+$rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+$sha = [Security.Cryptography.SHA256]::Create()
+while ($true) {
+  $n++
+  $b = New-Object byte[] 65536
+  $rng.GetBytes($b)
+  $fs = [IO.File]::Create("C:\data\f$n")
+  $fs.Write($b, 0, $b.Length); $fs.Flush($true); $fs.Close()
+  $h = ([BitConverter]::ToString($sha.ComputeHash($b)) -replace "-","").ToLower()
+  $t = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000
+  $fs = New-Object IO.FileStream("C:\writer.log", "Append", "Write", "Read")
+  $w = [Text.Encoding]::ASCII.GetBytes("$n $h $t`n")
+  $fs.Write($w, 0, $w.Length); $fs.Flush($true); $fs.Close()
+  Start-Sleep -Milliseconds 100
+}'
+
+# logged_files <vm>: how many files the writer has logged.
+logged_files() {
+    if [ "$GUEST" = windows ]; then wexec "$1" '(Get-Content C:\writer.log | Measure-Object -Line).Lines'
+    else vssh "$1" 'wc -l < /var/log/writer.log'; fi
+}
+
 log "starting the source VM"
 vm_yaml src root yes | oc apply -f -
 wait_until 900 "source guest agent" agent_connected src
-writer_running() { vssh src 'test -s /var/log/writer.log' >/dev/null 2>&1; }
+if [ "$GUEST" = windows ]; then
+    # A new Windows VM can take about 40 minutes before the agent runs commands.
+    wait_until 3600 "the Windows guest agent to run commands" guest_ready src
+    b64=$(printf '%s' "$WRITER_PS1" | base64 | tr -d '\n')
+    wexec src "[IO.File]::WriteAllBytes('C:\\writer.ps1',[Convert]::FromBase64String('$b64')); Start-Process powershell.exe -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File C:\\writer.ps1' -WindowStyle Hidden"
+fi
+writer_running() {
+    if [ "$GUEST" = windows ]; then wexec src 'if ((Get-Content C:\writer.log -ErrorAction SilentlyContinue | Measure-Object -Line).Lines -gt 0) { exit 0 } else { exit 1 }' >/dev/null 2>&1
+    else vssh src 'test -s /var/log/writer.log' >/dev/null 2>&1; fi
+}
 wait_until 300 "writer running" writer_running
-before=$(vssh src 'wc -l < /var/log/writer.log')
+before=$(logged_files src)
 
 log "taking the snapshot of the running VM (speed limit $SNAPSHOT_SPEED MB/s)"
 start=$SECONDS
@@ -230,7 +381,7 @@ consistency=$(echo "$st" | jq -r '.status.consistency')
 [ "$consistency" = FileSystemConsistent ] || log "WARNING: the snapshot is $consistency: $(echo "$st" | jq -r '.status.consistencyReason')"
 moment=$(echo "$st" | jq -r '.status.copyMoment')
 
-after=$(vssh src 'wc -l < /var/log/writer.log')
+after=$(logged_files src)
 log "the source VM wrote $((after - before)) files while the snapshot ran"
 [ $((after - before)) -gt 0 ] || fail "the source VM stopped writing during the snapshot"
 
@@ -244,16 +395,41 @@ spec:
   accessModes: [ReadWriteMany]
   volumeMode: Filesystem
   dataSource: {apiGroup: snapshot.storage.k8s.io, kind: VolumeSnapshot, name: snap}
-  resources: {requests: {storage: 20Gi}}
+  resources: {requests: {storage: ${ROOT_GI}Gi}}
 YAML
 vm_yaml restored restored no | oc apply -f -
 wait_until 2400 "restored guest agent" agent_connected restored
-ssh_ok() { vssh restored true >/dev/null 2>&1; }
-wait_until 300 "ssh on the restored VM" ssh_ok
+wait_until 1500 "the restored VM to answer" guest_ready restored
+epoch=$(perl -MTime::Piece -e 'print Time::Piece->strptime(shift, "%Y-%m-%dT%H:%M:%SZ")->epoch' "$moment")
+if [ "$GUEST" = windows ]; then
+    result=$(wexec restored '
+$boot = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
+$bad = @(Get-WinEvent -FilterHashtable @{LogName="System"; ProviderName="Ntfs"; StartTime=$boot} -ErrorAction SilentlyContinue | Where-Object { $_.Id -in 55,136,137,140 -or $_.LevelDisplayName -in "Error","Critical" })
+"NTFS_EVENTS=" + $bad.Count
+"DIRTY_C=" + ((fsutil dirty query C:) -join " ")
+$sha = [Security.Cryptography.SHA256]::Create()
+$total = 0; $upto = 0; $badfiles = 0
+foreach ($line in [IO.File]::ReadLines("C:\writer.log")) {
+  $p = $line.Split(" ")
+  if ($p.Count -lt 3) { continue }
+  $total++
+  if ([double]$p[2] -le '"$epoch"') { $upto++ }
+  $f = "C:\data\f" + $p[0]
+  if (-not (Test-Path $f)) { $badfiles++; continue }
+  $h = ([BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadAllBytes($f))) -replace "-","").ToLower()
+  if ($h -ne $p[1]) { $badfiles++ }
+}
+"LOGGED=" + $total + " UPTO_MOMENT=" + $upto + " BAD=" + $badfiles
+if ($badfiles -eq 0 -and $bad.Count -eq 0) { "CHECKSUMS_OK" }
+')
+    echo "$result"
+    echo "$result" | grep -q CHECKSUMS_OK || fail "the restored Windows VM has file system errors or files that do not match the log"
+    log "PASS: restored Windows VM booted; $(echo "$result" | grep -o 'LOGGED=.*') (moment $moment), all checksums match"
+    exit 0
+fi
 
 xfs=$(vssh restored 'sudo journalctl -k --no-pager | grep -ci "xfs.*\(corrupt\|error\)" || true')
 [ "$xfs" = 0 ] || fail "XFS errors in the kernel log of the restored VM: $xfs"
-epoch=$(perl -MTime::Piece -e 'print Time::Piece->strptime(shift, "%Y-%m-%dT%H:%M:%SZ")->epoch' "$moment")
 result=$(vssh restored 'sudo systemctl stop writer; awk -v m='"$epoch"' '"'"'$3 <= m {c++} END {print c+0}'"'"' /var/log/writer.log; while read n s t; do echo "$s  /opt/data/f$n"; done < /var/log/writer.log | sha256sum -c --quiet && echo CHECKSUMS_OK')
 echo "$result"
 echo "$result" | grep -q CHECKSUMS_OK || fail "files on the restored disk do not match the log"
