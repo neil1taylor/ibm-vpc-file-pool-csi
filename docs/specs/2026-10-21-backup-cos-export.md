@@ -16,7 +16,7 @@ When this step is done:
 
 - `bucket`, `endpoint` and `prefix` (the bucket and where it is)
 - `credentialsSecret` (the driver's COS key, made by the setup command)
-- `keepFor` (how long COS backups are kept, default `30d`) and `lock` (`Compliance` or `None`, default `Compliance`)
+- `keepFor` (how long COS backups are kept, default `30d`) and `lock` (`Compliance` or `None`, default `Compliance`). Both are set on each policy, so a test policy can use a short lock and a real policy a long one. The webhook refuses a keep time below the minimum (see "The shortest lock")
 - `schedule` (how often to send, default after each local backup moment)
 
 Without `export`, nothing changes from step 8.
@@ -75,6 +75,14 @@ The setup command never runs in the cluster, and the driver never creates or del
 
 In a new cluster the policy and the snapshot pool need not exist. The command needs only the bucket, the endpoint, the keys, and a pool to restore into.
 
+## The shortest lock
+
+Each policy sets its own lock mode and keep time, so tests use a short lock. **The shortest possible lock is a little over 1 day, not 1 day.** Kopia needs the keep time to be at least its maintenance interval plus 24 hours, because it extends the locks of chunks still in use at each maintenance run (tested 20 Oct). The driver sets the maintenance interval from the keep time, with 1 hour as the shortest. So:
+
+- the webhook refuses a keep time below 25 hours
+- release tests and lab runs use `keepFor: 25h` with `lock: Compliance`, and the hourly maintenance run. Their data is then billed for 25 hours and can be deleted after that
+- a real policy defaults to 30 days
+
 ## Not in this step
 
 - No Governance lock (the main spec explains why).
@@ -116,7 +124,7 @@ Each part is a PR with its tests, and updates the docs and the release test run 
 - We run the Kopia program as a child of the Job. We do not link it into the driver.
 - The Job unlocks the backup key. The controller never holds it.
 - Export is off unless the policy has `spec.export`.
-- A new export block defaults to Compliance lock and 30 days.
+- A new export block defaults to Compliance lock and 30 days. Lock mode and keep time are set on each policy. Tests use Compliance for 25 hours, the shortest Kopia allows (the owner asked for 1 day; 1 day is 1 hour short of Kopia's rule).
 - A keep time above 90 days needs a typed confirmation, because it cannot be undone.
 - One export Job runs at a time for each policy. A missed moment goes out with the next one.
 - Restore from COS reuses the step 8 restore Job, so there is one restore path to test.
