@@ -8,6 +8,7 @@ import (
 	"time"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/util"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
@@ -64,6 +65,9 @@ func validateReplicationPolicySpec(spec *v1alpha1.ReplicationPolicySpec) error {
 	if spec.DestinationBasePath == "" {
 		return fmt.Errorf("spec.destinationBasePath is required")
 	}
+	if !util.ValidBasePath(spec.DestinationBasePath) {
+		return fmt.Errorf("spec.destinationBasePath must be an absolute path of letters, digits, '.', '_', '-' and '/', without '..': %q", spec.DestinationBasePath)
+	}
 	if spec.Schedule == "" {
 		return fmt.Errorf("spec.schedule is required")
 	}
@@ -82,6 +86,9 @@ func validateReplicationPolicySpec(spec *v1alpha1.ReplicationPolicySpec) error {
 	// Rsync options only apply to direct NFS mode.
 	if !isReceiverMode {
 		for _, opt := range spec.RsyncOptions {
+			if !util.ValidRsyncOption(opt) {
+				return fmt.Errorf("spec.rsyncOptions entry %q must be one rsync flag such as --compress or --bwlimit=100, with no spaces, quotes or shell characters", opt)
+			}
 			for _, blocked := range rsyncBlocklist {
 				if opt == blocked || strings.HasPrefix(opt, blocked+"=") {
 					return fmt.Errorf("spec.rsyncOptions contains disallowed flag %q", opt)
