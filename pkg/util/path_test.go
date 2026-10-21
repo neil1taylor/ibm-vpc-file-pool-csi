@@ -1,6 +1,7 @@
 package util
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -37,6 +38,19 @@ func TestValidateSubDir_Invalid(t *testing.T) {
 		{"dotdot_only", ".."},
 		{"spaces", "/pvcs/pvc a1b2c3d4-5678-90ab-cdef-1234567890ab"},
 		{"not_a_uuid", "/pvcs/pvc-not-a-valid-uuid-at-all-nope"},
+		{"trailing_newline", "/pvcs/pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab\n"},
+		{"leading_space", " /pvcs/pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"},
+		{"tab", "/pvcs/pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab\t"},
+		{"nul_byte", "/pvcs/pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab\x00"},
+		{"nul_byte_then_traversal", "/pvcs/pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab\x00/../.."},
+		{"one_char_too_long", "/pvcs/pvc-a1b2c3d4-5678-90ab-cdef-1234567890abc"},
+		{"one_char_too_short", "/pvcs/pvc-a1b2c3d4-5678-90ab-cdef-1234567890a"},
+		{"backslash", "/pvcs\\pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"},
+		{"percent_encoded_dots", "/pvcs/%2e%2e/pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"},
+		{"fullwidth_slash", "\uff0fpvcs/pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"},
+		{"fullwidth_digit", "/pvcs/pvc-\uff11b2c3d4-5678-90ab-cdef-1234567890ab"},
+		{"double_slash", "//pvcs/pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"},
+		{"dot_segment", "/pvcs/./pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -134,6 +148,16 @@ func TestValidateSnapshotPath_Invalid(t *testing.T) {
 		{"nested", "/pvcs/.snapshots/snap-abc123/data"},
 		{"spaces", "/pvcs/.snapshots/snap abc123"},
 		{"dotdot", "/pvcs/..snapshots/snap-abc123"},
+		{"trailing_newline", "/pvcs/.snapshots/snap-abc123\n"},
+		{"nul_byte", "/pvcs/.snapshots/snap-abc123\x00"},
+		{"nul_byte_then_traversal", "/pvcs/.snapshots/snap-abc123\x00/../.."},
+		{"underscore", "/pvcs/.snapshots/snap-abc_123"},
+		{"dot_in_name", "/pvcs/.snapshots/snap-abc.123"},
+		{"empty_name", "/pvcs/.snapshots/snap-"},
+		{"backslash", "/pvcs/.snapshots\\snap-abc123"},
+		{"percent_encoded_dots", "/pvcs/.snapshots/%2e%2e/snap-abc123"},
+		{"double_slash", "//pvcs/.snapshots/snap-abc123"},
+		{"fullwidth_letter", "/pvcs/.snapshots/snap-\uff41bc123"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -159,5 +183,62 @@ func TestSafeJoinSnapshot_InvalidPath(t *testing.T) {
 	_, err := SafeJoinSnapshot("/mnt/staging", "/pvcs/../etc/passwd")
 	if err == nil {
 		t.Error("SafeJoinSnapshot should reject invalid snapshot path")
+	}
+}
+
+const backupPV = "pvc-11111111-2222-3333-4444-555555555555"
+
+func TestValidateBackupPath_Valid(t *testing.T) {
+	for _, p := range []string{
+		"/backup/nightly/pvcs/" + backupPV,
+		"/backup/a/pvcs/" + backupPV,
+		"/backup/my-policy.v2/pvcs/" + backupPV,
+	} {
+		if err := ValidateBackupPath(p); err != nil {
+			t.Errorf("ValidateBackupPath(%q) = %v, want nil", p, err)
+		}
+	}
+	for _, p := range []string{
+		"/backup/nightly/.moments/pvcs/" + backupPV,
+		"/backup/a/.moments/pvcs/" + backupPV,
+	} {
+		if err := ValidateBackupMomentsPath(p); err != nil {
+			t.Errorf("ValidateBackupMomentsPath(%q) = %v, want nil", p, err)
+		}
+	}
+}
+
+func TestValidateBackupPath_Invalid(t *testing.T) {
+	bad := []string{
+		"",
+		"/backup",
+		"/backup/nightly",
+		"/backup/nightly/pvcs/" + backupPV + "/",
+		"/backup/nightly/pvcs/" + backupPV + "/x",
+		"/backup/../pvcs/" + backupPV,
+		"/backup/nightly/../other/pvcs/" + backupPV,
+		"/backup//pvcs/" + backupPV,
+		"/backup/Night ly/pvcs/" + backupPV,
+		"/backup/-x/pvcs/" + backupPV,
+		"/backup/x-/pvcs/" + backupPV,
+		"/backup/a..b/pvcs/" + backupPV,
+		"/pvcs/" + backupPV,
+		"/backup/nightly/pvcs/pvc-short",
+		"/backup/nightly/.moments/pvcs/" + backupPV, // that is a moments path, not a volume path
+		"backup/nightly/pvcs/" + backupPV,
+	}
+	for _, p := range bad {
+		if err := ValidateBackupPath(p); err == nil {
+			t.Errorf("ValidateBackupPath(%q) accepted an unsafe path", p)
+		}
+	}
+	for _, p := range append(bad, "/backup/nightly/pvcs/"+backupPV) { // a volume path is not a moments path
+		if err := ValidateBackupMomentsPath(p); err == nil && p != "/backup/nightly/.moments/pvcs/"+backupPV {
+			t.Errorf("ValidateBackupMomentsPath(%q) accepted a bad path", p)
+		}
+	}
+	long := "/backup/" + strings.Repeat("a", 64) + "/pvcs/" + backupPV
+	if err := ValidateBackupPath(long); err == nil {
+		t.Error("a policy name of 64 characters does not fit a label value and must be refused")
 	}
 }

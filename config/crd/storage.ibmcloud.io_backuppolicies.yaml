@@ -1,0 +1,251 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: backuppolicies.storage.ibmcloud.io
+spec:
+  group: storage.ibmcloud.io
+  names:
+    kind: BackupPolicy
+    listKind: BackupPolicyList
+    plural: backuppolicies
+    shortNames:
+    - bp
+    singular: backuppolicy
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.snapshotPool
+      name: Pool
+      type: string
+    - jsonPath: .spec.schedule
+      name: Schedule
+      type: string
+    - jsonPath: .spec.keepFor
+      name: Keep
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.volumeCount
+      name: Volumes
+      type: integer
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          BackupPolicy backs up the PVCs it selects, and the VMs whose disks it
+          selects, into a pool that holds only backups. The controller makes a
+          ReplicationPolicy for each source pool and keeps it in step. See
+          docs/specs/2026-10-21-backup-to-snapshot-pool.md.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: BackupPolicySpec defines what is backed up, where, how often
+              and for how long.
+            properties:
+              keepFor:
+                default: 7d
+                description: |-
+                  KeepFor is how long backups are kept: a Go duration, or a number of days
+                  such as "30d". At least one hour.
+                type: string
+              namespaces:
+                description: Namespaces limits the PVCs to these namespaces. Empty
+                  means all.
+                items:
+                  type: string
+                type: array
+              schedule:
+                description: 'Schedule is a Go duration such as "6h": how often a
+                  backup is made.'
+                type: string
+              selector:
+                description: |-
+                  Selector selects PVCs by label. A VM is selected through its disks: if
+                  any disk matches, all disks of the VM are backed up. It must select
+                  something: an empty selector is refused.
+                properties:
+                  matchExpressions:
+                    description: matchExpressions is a list of label selector requirements.
+                      The requirements are ANDed.
+                    items:
+                      description: |-
+                        A label selector requirement is a selector that contains values, a key, and an operator that
+                        relates the key and values.
+                      properties:
+                        key:
+                          description: key is the label key that the selector applies
+                            to.
+                          type: string
+                        operator:
+                          description: |-
+                            operator represents a key's relationship to a set of values.
+                            Valid operators are In, NotIn, Exists and DoesNotExist.
+                          type: string
+                        values:
+                          description: |-
+                            values is an array of string values. If the operator is In or NotIn,
+                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                            the values array must be empty. This array is replaced during a strategic
+                            merge patch.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      map is equivalent to an element of matchExpressions, whose key field is "key", the
+                      operator is "In", and the values array contains only "value". The requirements are ANDed.
+                    type: object
+                type: object
+                x-kubernetes-map-type: atomic
+              snapshotPool:
+                description: |-
+                  SnapshotPool is the pool that holds the backups. It must hold no workload
+                  claims, so a lost or full data share does not take the backups with it.
+                type: string
+              suspend:
+                description: Suspend stops new backups. Existing backups stay.
+                type: boolean
+              vmCopySpeedLimitMBps:
+                default: 20
+                description: |-
+                  VMCopySpeedLimitMBps limits how fast QEMU copies each disk of a running
+                  VM, in megabytes per second. 0 means no limit.
+                format: int32
+                minimum: 0
+                type: integer
+            required:
+            - schedule
+            - selector
+            - snapshotPool
+            type: object
+          status:
+            description: BackupPolicyStatus reports what the policy does.
+            properties:
+              message:
+                description: Message says why the policy is in Error, or why it is
+                  Suspended.
+                type: string
+              phase:
+                description: Phase is Active, Suspended or Error.
+                enum:
+                - Active
+                - Suspended
+                - Error
+                type: string
+              replicationPolicies:
+                description: |-
+                  ReplicationPolicies names the ReplicationPolicy objects the controller
+                  made for this policy, one for each source pool.
+                items:
+                  type: string
+                type: array
+              volumeCount:
+                description: VolumeCount is the number of volumes the policy backs
+                  up.
+                format: int32
+                type: integer
+              volumes:
+                description: Volumes lists each backed-up volume.
+                items:
+                  description: BackupVolumeStatus is the state of one backed-up volume.
+                  properties:
+                    bytesWritten:
+                      description: BytesWritten is what the newest backup wrote.
+                      format: int64
+                      type: integer
+                    consistency:
+                      description: |-
+                        Consistency is FileSystemConsistent or CrashConsistent for a VM disk
+                        and FileCopy for any other volume.
+                      type: string
+                    lastBackupTime:
+                      description: LastBackupTime is the moment of the newest backup.
+                      format: date-time
+                      type: string
+                    lastError:
+                      description: LastError is the last error of the volume's backup.
+                      type: string
+                    oldestBackupTime:
+                      description: OldestBackupTime is the moment of the oldest restore
+                        point that is kept.
+                      format: date-time
+                      type: string
+                    pvcName:
+                      type: string
+                    pvcNamespace:
+                      description: PVCNamespace and PVCName name the claim.
+                      type: string
+                    requestedGB:
+                      description: |-
+                        RequestedGB and StorageClassName are what the volume had, so a restore can
+                        make a volume like it after the volume is gone.
+                      format: int64
+                      type: integer
+                    restorePoints:
+                      description: RestorePoints counts the older moments that can
+                        be restored.
+                      format: int32
+                      type: integer
+                    retained:
+                      description: |-
+                        Retained is true when the policy no longer backs up the volume (it was
+                        deleted, or no longer matches the selector). Its existing backups stay
+                        until the keep time has passed since the last backup.
+                      type: boolean
+                    storageClassName:
+                      type: string
+                    subPath:
+                      description: |-
+                        SubPath is the folder of the volume on its share (/pvcs/pvc-...). The
+                        backup is in the same place below the policy's folder. A restore needs
+                        it after the volume is gone.
+                      type: string
+                    subVolumeName:
+                      description: SubVolumeName is the SubVolume of the claim.
+                      type: string
+                    vmName:
+                      description: VMName is the VirtualMachine the disk belongs to,
+                        if any.
+                      type: string
+                  required:
+                  - pvcName
+                  - pvcNamespace
+                  - subVolumeName
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
