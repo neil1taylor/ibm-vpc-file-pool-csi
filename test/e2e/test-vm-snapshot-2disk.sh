@@ -14,6 +14,9 @@
 #   - every file named in the log is on the second disk with the logged checksum
 #   - the kernel log has no XFS errors
 # The test prints the gap between the two copy moments.
+# KubeVirt gives up on a VirtualMachineSnapshot after 5 minutes by default
+# ("snapshot deadline exceeded"). The QEMU copy of two disks takes longer, so the
+# test sets failureDeadline to 1h. A user's snapshot needs the same.
 #
 # Usage: KUBECONFIG=... SSH_KEY=~/.ssh/key test/e2e/test-vm-snapshot-2disk.sh [--keep]
 # SSH_KEY is a private key whose .pub file is put in the VM for virtctl ssh.
@@ -240,6 +243,7 @@ apiVersion: snapshot.kubevirt.io/v1beta1
 kind: VirtualMachineSnapshot
 metadata: {name: vmsnap}
 spec:
+  failureDeadline: 1h
   source: {apiGroup: kubevirt.io, kind: VirtualMachine, name: src}
 YAML
 snapshot_done() {
