@@ -46,6 +46,8 @@ type fakeShareData struct {
 	// usageSeen lists the mount target IPs ShareUsage was asked about.
 	usageByIP map[string]int
 	usageSeen []string
+	// export holds what the COS export Jobs report (see export_fake_test.go).
+	export fakeExport
 }
 
 type restoreCall struct {
