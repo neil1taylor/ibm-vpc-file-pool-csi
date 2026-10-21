@@ -1399,6 +1399,7 @@ type ReplicationPolicySpec struct {
     // RsyncOptions allows passing extra rsync flags to customize transfer behavior.
     // These are appended to the default flags ["-a", "--delete", "--partial", "--timeout=300"].
     // Security: --daemon, --server, --rsh, and --rsync-path flags are blocked by validation.
+    // Each entry must be one plain flag (for example --compress or --bwlimit=100): no spaces, quotes or shell characters.
     // Only applies to direct NFS mode (not driver-to-driver mode).
     // +optional
     RsyncOptions []string `json:"rsyncOptions,omitempty"`

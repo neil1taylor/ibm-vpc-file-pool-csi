@@ -13,6 +13,7 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/hooks"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/k8s"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/util"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -1069,7 +1070,7 @@ func (rc *ReplicationController) ensureReplicationJob(ctx context.Context, polic
 
 	extraArgs := ""
 	for _, arg := range policy.Spec.RsyncOptions {
-		extraArgs += " " + arg
+		extraArgs += " " + util.ShellQuote(arg)
 	}
 
 	// Build metadata JSON for the sidecar file.
@@ -1086,38 +1087,40 @@ func (rc *ReplicationController) ensureReplicationJob(ctx context.Context, polic
 	destBasePath := policy.Spec.DestinationBasePath
 
 	var script string
+	destDir := util.ShellQuote("/dest" + destBasePath + subPath)
+	destSync := util.ShellQuote("/dest" + destBasePath + subPath + "/")
+	destMeta := util.ShellQuote("/dest" + destBasePath + subPath + "/.subvolume-metadata.json")
 	if useIncremental {
 		script = fmt.Sprintf(`set -euo pipefail
-echo "Replication: syncing %s -> %s%s"
-mkdir -p "/dest%s%s"
-rsync -a --delete --exclude=/.repl-staging-* %s %s %s "/source%s/" "/dest%s%s/"
+echo %s
+mkdir -p %s
+rsync -a --delete --exclude=/.repl-staging-* %s%s %s %s
 echo "Writing metadata sidecar..."
-cat > "/dest%s%s/.subvolume-metadata.json" <<'METADATA'
+cat > %s <<'METADATA'
 %s
 METADATA
 echo "Replication complete."
-`, subPath, destBasePath, subPath,
-			destBasePath, subPath,
-			bwlimit, extraArgs, "", // empty string placeholder for cleaner formatting
-			subPath, destBasePath, subPath,
-			destBasePath, subPath,
+`, util.ShellQuote("Replication: syncing "+subPath+" -> "+destBasePath+subPath),
+			destDir,
+			bwlimit, extraArgs, util.ShellQuote("/source"+subPath+"/"), destSync,
+			destMeta,
 			string(metaJSON))
 	} else {
 		script = fmt.Sprintf(`set -euo pipefail
-echo "Replication: copying %s -> %s%s"
-mkdir -p "/dest%s%s"
-cp -a "/source%s/." "/dest%s%s/"
-find "/dest%s%s" -maxdepth 1 -name '.repl-staging-*' -delete
+echo %s
+mkdir -p %s
+cp -a %s %s
+find %s -maxdepth 1 -name '.repl-staging-*' -delete
 echo "Writing metadata sidecar..."
-cat > "/dest%s%s/.subvolume-metadata.json" <<'METADATA'
+cat > %s <<'METADATA'
 %s
 METADATA
 echo "Replication complete."
-`, subPath, destBasePath, subPath,
-			destBasePath, subPath,
-			subPath, destBasePath, subPath,
-			destBasePath, subPath,
-			destBasePath, subPath,
+`, util.ShellQuote("Replication: copying "+subPath+" -> "+destBasePath+subPath),
+			destDir,
+			util.ShellQuote("/source"+subPath+"/."), destSync,
+			destDir,
+			destMeta,
 			string(metaJSON))
 	}
 
