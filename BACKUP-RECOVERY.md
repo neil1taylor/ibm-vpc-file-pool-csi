@@ -490,7 +490,7 @@ Pool CSI snapshots can supplement application-level backups for non-critical dat
 
 ### KubeVirt VMs
 
-**A snapshot of a running VM's disk is safe.** The driver sees that a running VM uses the claim and copies the disk with QEMU at one moment, with the guest file systems frozen for a fraction of a second. The Snapshot says `FileSystemConsistent` when that worked. The copy is slow on purpose (20 MB/s by default, about 20 minutes for a 20 GB disk) so the VM keeps its speed. Set `vmCopySpeedLimitMBps` on the VolumeSnapshotClass to change the speed. The snapshot covers one disk. A VM with several disks needs a group snapshot (issue #14) if the disks must match each other.
+**A snapshot of a running VM's disk is safe.** The driver sees that a running VM uses the claim and copies the disk with QEMU at one moment, with the guest file systems frozen for a fraction of a second. The Snapshot says `FileSystemConsistent` when that worked. The copy is slow on purpose (20 MB/s by default, about 20 minutes for a 20 GB disk) so the VM keeps its speed. Set `vmCopySpeedLimitMBps` on the VolumeSnapshotClass to change the speed. A VM with several pool disks gets one moment for all of them: when the first disk's snapshot starts, the driver copies every pool disk of the VM at once, and the snapshots of the other disks (KubeVirt asks for them together) join that copy. Their `status.copyMoment` and `status.copyID` are the same. A KubeVirt `VirtualMachineSnapshot` is done after a few seconds, but each disk's `VolumeSnapshot` is ready only when its copy ends; wait for all of them before you restore.
 
 ```bash
 kubectl get snapshots.storage.ibmcloud.io <name> -o jsonpath='{.status.consistency}{" "}{.status.copyMoment}{"\n"}'

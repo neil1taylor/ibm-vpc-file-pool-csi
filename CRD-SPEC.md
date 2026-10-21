@@ -922,6 +922,16 @@ type SnapshotStatus struct {
     // +optional
     VMCopy *VMCopyState `json:"vmCopy,omitempty"`
 
+    // CopyID names the QEMU copy that made the snapshot. Snapshots of the disks
+    // of one VM that show the same moment have the same CopyID.
+    // +optional
+    CopyID string `json:"copyID,omitempty"`
+
+    // VMCopySet lists the disks of the QEMU copy while other Snapshots of the
+    // same VM may join it. It is on the Snapshot that started the copy.
+    // +optional
+    VMCopySet *VMCopySet `json:"vmCopySet,omitempty"`
+
     // VMCopyAttempts counts copies that were cancelled or failed. After 3 the snapshot fails.
     // +optional
     VMCopyAttempts int32 `json:"vmCopyAttempts,omitempty"`
@@ -960,7 +970,7 @@ If a running (or starting) KubeVirt VM uses the source claim, the snapshot is a 
 - A live migration cancels the copy. A cancelled or failed copy is tried again after a minute; after 3 tries the snapshot is `Failed` and `status.message` says why.
 - A copy that runs much longer than the disk needs (2 hours plus twice the time at the speed limit) is cancelled and counts as one try.
 - If the VM stops before the copy starts, the snapshot is a file copy. If a VM starts during a file copy, the folder is discarded and the snapshot is copied again with QEMU.
-- A snapshot covers one claim. To match several disks of a VM, see issue #14.
+- Each Snapshot covers one claim, but the controller copies all the pool disks of the VM at one moment. The first Snapshot of a VM starts the QEMU copy of every pool disk and records the set in `status.vmCopySet` (disks, staging files, and `joinUntil`, 10 minutes after the start). A Snapshot of another disk of the same VM that starts before `joinUntil` joins the copy: its `status.vmCopy.leader` names the first Snapshot, and it shows the same moment. `status.copyID` is the same on all of them. After `joinUntil`, the controller deletes the staging files of the disks no Snapshot claimed, and clears `status.vmCopySet`. If the first Snapshot's copy is cancelled, the joined Snapshots try again.
 - While a snapshot copies a VM, replication of the same VM waits (and the other way round).
 
 ### Example Snapshot CR
