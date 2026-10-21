@@ -67,6 +67,18 @@ cdi:
   # NFS, and 2Gi failed for a 25 GB disk. Empty turns the check off.
   copyPodMemoryLimit: 8Gi
 
+vmSnapshots:
+  # How snapshots of KubeVirt VM disks are made. See VM-INSTANT-SNAPSHOTS.md.
+  # auto: instant snapshots (a new overlay file per snapshot, nothing copied)
+  #   where the KubeVirt Sidecar feature gate is on, and a copy elsewhere. It
+  #   adds a webhook that gives each VM with snapshots a hook when it starts.
+  #   Red Hat does not support the Sidecar feature gate.
+  # copy: every VM disk snapshot is a copy.
+  method: auto
+  # KubeVirt's virt-launcher image, for the Jobs that change a stopped VM's
+  # snapshot files. Empty reads it from the virt-operator Deployment.
+  launcherImage: ""
+
 webhook:
   # Enable validating admission webhooks for CRD resources.
   enabled: true
