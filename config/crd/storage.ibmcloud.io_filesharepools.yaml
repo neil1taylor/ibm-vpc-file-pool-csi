@@ -373,9 +373,15 @@ spec:
                       format: date-time
                       type: string
                     drained:
-                      description: Drained is true when the share has zero SubVolumes
-                        remaining.
+                      description: Drained is true when the share has no SubVolumes
+                        and no snapshots left.
                       type: boolean
+                    remainingSnapshots:
+                      description: |-
+                        RemainingSnapshots is the number of snapshots whose data is still on
+                        this share. Deleting the share deletes them.
+                      format: int32
+                      type: integer
                     remainingSubVolumes:
                       description: RemainingSubVolumes is the number of SubVolumes
                         still on this share.

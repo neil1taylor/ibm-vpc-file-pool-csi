@@ -533,11 +533,18 @@ kubectl get subvolumes -l storage.ibmcloud.io/pool=<pool-name> --sort-by=.metada
 
 ---
 
-### Pool deletion blocked by active SubVolumes
+### Pool deletion blocked by active SubVolumes or snapshots
 
-**Symptom:** `kubectl delete filesharepool <name>` hangs or the pool stays in `Terminating`.
+**Symptom:** `kubectl delete filesharepool <name>` hangs or the pool stays in `Terminating`. The pool's `DeletionBlocked` condition says why: `ActiveSubVolumes` or `SnapshotsExist`.
 
-**Cause:** The pool has a finalizer that prevents deletion while SubVolumes still reference its shares.
+**Cause:** The pool has a finalizer that prevents deletion while SubVolumes still reference its shares, or while snapshots keep their data on them. Deleting the shares would delete that data.
+
+If the reason is `SnapshotsExist`, delete the pool's VolumeSnapshots first:
+```bash
+kubectl get snapshots.storage.ibmcloud.io -o json |
+  jq -r '.items[] | select(.spec.poolName=="<pool-name>") | .metadata.name'
+# Find the VolumeSnapshot of each one through its VolumeSnapshotContent, and delete it.
+```
 
 **Fix:**
 ```bash

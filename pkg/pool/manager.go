@@ -13,6 +13,7 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/k8s"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/util"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 )
@@ -891,6 +892,16 @@ func (m *Manager) DeleteSnapshot(ctx context.Context, snapshotName string) (retE
 		return fmt.Errorf("%w: %s", ErrSnapshotNotFound, snapshotName)
 	}
 	poolName = snap.Spec.PoolName
+
+	// A pool deleted by an older driver did not wait for its snapshots, and
+	// took their data with it. Only the record is left to remove.
+	if _, err = m.k8sClient.GetFileSharePool(ctx, poolName); apierrors.IsNotFound(err) {
+		if err = m.k8sClient.DeleteSnapshot(ctx, snapshotName); err != nil {
+			return fmt.Errorf("delete Snapshot CR: %w", err)
+		}
+		klog.InfoS("Removed the record of a snapshot whose pool is gone", "snapshot", snapshotName, "pool", poolName)
+		return nil
+	}
 
 	if snap.Annotations[snapshotMethodAnnotation] == snapshotMethodInstant {
 		return m.deleteInstantSnapshot(ctx, snap)

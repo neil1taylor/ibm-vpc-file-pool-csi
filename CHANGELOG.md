@@ -24,6 +24,7 @@ To make a release:
 - Release test stage 18 (backup to a snapshot pool): runs `test/e2e/test-backup.sh` and checks each outcome it logs. Not run on a cluster yet. `remote.sh` now also builds `kubectl-backup` and ships all of `test/e2e` (stage 6 needs `test-vm-snapshot.sh` there).
 
 ### Fixed
+- Deleting a pool no longer deletes the data of its snapshots. The pool waits while snapshots exist (`DeletionBlocked` reason `SnapshotsExist`), and a drained share counts its snapshots too (new `status.drainStatus[].remainingSnapshots`). A snapshot whose pool an older driver already deleted can now be deleted; before, its delete was stuck for ever (issue #96).
 - A restore into a volume smaller than the snapshot is refused (`OutOfRange`) instead of making a volume the data does not fit in (issue #98).
 - Replication finds a VM disk whose top file is not `disk.img`.
 

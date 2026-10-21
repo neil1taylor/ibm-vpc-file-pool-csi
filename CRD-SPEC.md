@@ -332,7 +332,12 @@ type ShareDrainStatus struct {
     // RemainingSubVolumes is the number of SubVolumes still on this share.
     RemainingSubVolumes int32 `json:"remainingSubVolumes"`
 
-    // Drained is true when the share has zero SubVolumes remaining.
+    // RemainingSnapshots is the number of snapshots whose data is still on
+    // this share. Deleting the share deletes them.
+    // +optional
+    RemainingSnapshots int32 `json:"remainingSnapshots,omitempty"`
+
+    // Drained is true when the share has no SubVolumes and no snapshots left.
     Drained bool `json:"drained"`
 
     // DrainStartedAt is when the drain was initiated.
