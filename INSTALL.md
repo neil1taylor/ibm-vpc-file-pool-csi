@@ -148,6 +148,8 @@ podman build -t ${IMAGE} .
 # Note: Do NOT include a tag in IMAGE_NAME — the Makefile appends :$(VERSION) automatically.
 ```
 
+The image also holds the Kopia command-line program (pinned in the `Dockerfile` by version and SHA-256; the build stops if the checksum does not match). Only the COS export Jobs run it. The driver does not link it, and the image build needs to reach `github.com` to fetch it. To move to another Kopia version, change `KOPIA_VERSION` and `KOPIA_SHA256` together, using the checksum in `checksums.txt` of the official release.
+
 Push the image to IBM Cloud Container Registry so your cluster nodes can pull it:
 
 ```bash

@@ -93,6 +93,8 @@ Each policy sets its own lock mode and keep time, so tests use a short lock. **T
 
 ## Build order
 
+Status: part 1 built (PR open; tested against a local Kopia repository, not yet against MinIO or a real bucket, and the image was not built). Parts 2 to 6 not started. Part 1 leaves two things for later parts: the Job reads the backup key from a Secret (part 3 replaces this with the Key Protect unlock), and nothing yet removes Kopia snapshots past their keep time (part 2 sets the retention policy with the controller).
+
 Each part is a PR with its tests, and updates the docs and the release test run in the same PR.
 
 1. **Kopia in the image and the export Job.** Image change (pinned, checked). A new mode of the Job runner: `export`, run against a local test repository (a folder), then against MinIO in CI for the S3 path. Status fields.
