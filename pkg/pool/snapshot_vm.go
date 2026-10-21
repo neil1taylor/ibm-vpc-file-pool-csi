@@ -296,8 +296,13 @@ func (m *Manager) startVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, snap
 		return
 	}
 	target := vmcopy.VM{Namespace: pod.Namespace, Pod: pod.Name, Name: vmi}
-	if err := vm.copier.RemoveStale(ctx, target, []string{volume}, ""); err != nil {
-		m.waitVMSnapshot(ctx, snap, fmt.Sprintf("copy waits: another copy of this VM may be running (%v)", err))
+	// Look only: the change list that replication keeps for this VM must stay.
+	if err := vm.copier.CheckIdle(ctx, target); err != nil {
+		if errors.Is(err, vmcopy.ErrBusy) {
+			m.waitVMSnapshot(ctx, snap, vmBusyMessage)
+		} else {
+			m.waitVMSnapshot(ctx, snap, fmt.Sprintf("check the VM for other copies: %v", err))
+		}
 		return
 	}
 	id := strconv.FormatInt(now.UnixNano(), 36)

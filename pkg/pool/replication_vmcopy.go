@@ -40,6 +40,7 @@ const (
 	qemuUID = 107
 
 	vmMovingMessage = "copy waits: the VM is moving to another worker"
+	vmBusyMessage   = "copy waits: another copy of this VM is running"
 )
 
 // VMCopier takes copies of running VM disks. pkg/vmcopy implements it.
@@ -50,6 +51,9 @@ type VMCopier interface {
 	Commit(ctx context.Context, vm vmcopy.VM, cp *vmcopy.Copy) error
 	Cancel(ctx context.Context, vm vmcopy.VM, cp *vmcopy.Copy) error
 	RemoveStale(ctx context.Context, vm vmcopy.VM, volumes []string, keepBitmap string) error
+	// CheckIdle returns vmcopy.ErrBusy while a copy runs in the VM. It
+	// changes nothing.
+	CheckIdle(ctx context.Context, vm vmcopy.VM) error
 }
 
 // SetVMCopier turns on copies of running VM disks in direct NFS mode. Without
@@ -209,6 +213,13 @@ func (rc *ReplicationController) startVMCopy(ctx context.Context, policy *v1alph
 		}
 	}
 	if err = rc.vmCopier.RemoveStale(ctx, vm, g.volumes, base); err != nil {
+		if errors.Is(err, vmcopy.ErrBusy) {
+			// A snapshot copies this VM now. Wait; this is not a failed cycle.
+			for _, sv := range g.members {
+				res.statuses = append(res.statuses, vmStatus(prev, sv.Name, vmBusyMessage))
+			}
+			return
+		}
 		fail(fmt.Sprintf("clear an earlier copy: %v", err))
 		return
 	}

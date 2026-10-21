@@ -39,6 +39,9 @@ const (
 // after the VM restarted or moved. The caller makes a full copy instead.
 var ErrBaseLost = errors.New("the change list of the last copy is gone")
 
+// ErrBusy means a copy is still running in the VM, so no other copy can start.
+var ErrBusy = errors.New("a copy is already running in the VM")
+
 // bitmapPrefix starts the name of every change list (dirty bitmap) we make.
 const bitmapPrefix = "repl-"
 
@@ -415,19 +418,29 @@ func (c *Copier) Cancel(ctx context.Context, vm VM, cp *Copy) error {
 	return c.cleanup(ctx, vm, cp, true)
 }
 
-// RemoveStale deletes staging files, block nodes and change lists that an
-// earlier copy left behind, for example after a controller restart. It keeps
-// the change list keepBitmap, the base of the next change copy. It refuses
-// while any copy runs in the VM.
-func (c *Copier) RemoveStale(ctx context.Context, vm VM, volumes []string, keepBitmap string) error {
+// CheckIdle returns ErrBusy while any copy runs in the VM. It changes nothing,
+// so a caller that must not touch other copies' change lists can use it
+// instead of RemoveStale.
+func (c *Copier) CheckIdle(ctx context.Context, vm VM) error {
 	jobs, err := c.queryJobs(ctx, vm)
 	if err != nil {
 		return err
 	}
 	for id := range jobs {
 		if strings.HasPrefix(id, "repl-") {
-			return fmt.Errorf("copy job %s is still in QEMU", id)
+			return fmt.Errorf("copy job %s is still in QEMU: %w", id, ErrBusy)
 		}
+	}
+	return nil
+}
+
+// RemoveStale deletes staging files, block nodes and change lists that an
+// earlier copy left behind, for example after a controller restart. It keeps
+// the change list keepBitmap, the base of the next change copy. It refuses
+// while any copy runs in the VM.
+func (c *Copier) RemoveStale(ctx context.Context, vm VM, volumes []string, keepBitmap string) error {
+	if err := c.CheckIdle(ctx, vm); err != nil {
+		return err
 	}
 	nodes, err := c.namedNodes(ctx, vm)
 	if err != nil {

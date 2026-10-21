@@ -695,3 +695,35 @@ func TestRemoveStale_KeepsTheBaseList(t *testing.T) {
 		t.Errorf("bitmaps = %v, want %v", f.bitmaps[node], want)
 	}
 }
+
+func TestCheckIdle_ReportsABusyVMAndTouchesNothing(t *testing.T) {
+	f := newFakeLauncher()
+	c := newTestCopier(f)
+	ctx := context.Background()
+	f.files["/var/run/kubevirt-private/vmi-disks/rootdisk/.repl-staging-old.qcow2"] = true
+	f.nodes["repl-old-t0"] = true
+	if err := c.CheckIdle(ctx, testVM); err != nil {
+		t.Fatalf("CheckIdle on an idle VM: %v", err)
+	}
+	if !f.files["/var/run/kubevirt-private/vmi-disks/rootdisk/.repl-staging-old.qcow2"] || !f.nodes["repl-old-t0"] {
+		t.Error("CheckIdle must only look: it removed something")
+	}
+	if _, err := c.Start(ctx, testVM, []string{"rootdisk"}, StartOptions{ID: "b2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.CheckIdle(ctx, testVM); !errors.Is(err, ErrBusy) {
+		t.Errorf("CheckIdle while a copy runs = %v, want ErrBusy", err)
+	}
+}
+
+func TestRemoveStale_RefusalIsErrBusy(t *testing.T) {
+	f := newFakeLauncher()
+	c := newTestCopier(f)
+	ctx := context.Background()
+	if _, err := c.Start(ctx, testVM, []string{"rootdisk"}, StartOptions{ID: "b2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RemoveStale(ctx, testVM, []string{"rootdisk"}, ""); !errors.Is(err, ErrBusy) {
+		t.Errorf("RemoveStale while a copy runs = %v, want ErrBusy", err)
+	}
+}

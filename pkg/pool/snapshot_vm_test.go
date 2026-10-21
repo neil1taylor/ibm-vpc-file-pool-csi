@@ -3,6 +3,7 @@ package pool
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -150,6 +151,9 @@ func TestAdvanceVMSnapshots_FullRunToReady(t *testing.T) {
 	}
 	if st.base != "" {
 		t.Errorf("base = %q: a snapshot is always a full copy", st.base)
+	}
+	if e.cop.removeStale != 0 {
+		t.Error("a snapshot must not remove the change lists of other copies")
 	}
 	vc := e.snap().Status.VMCopy
 	if vc == nil || vc.Phase != vmCopyPhaseCopying || vc.StagingFile == "" || vc.PodUID != "pod-uid-1" {
@@ -358,7 +362,7 @@ func TestAdvanceVMSnapshots_WaitsWhileAnotherCopyRunsInTheVM(t *testing.T) {
 	e := newVMSnapEnv(t)
 	e.startVM()
 	e.create(nil)
-	e.cop.removeStaleErr = errors.New("a copy is running in the VM")
+	e.cop.idleErr = fmt.Errorf("copy job repl-x-0 is still in QEMU: %w", vmcopy.ErrBusy)
 	e.tick()
 	s := e.snap()
 	if s.Status.VMCopyAttempts != 0 {
@@ -367,7 +371,7 @@ func TestAdvanceVMSnapshots_WaitsWhileAnotherCopyRunsInTheVM(t *testing.T) {
 	if !strings.Contains(s.Status.Message, "another copy") {
 		t.Errorf("message = %q", s.Status.Message)
 	}
-	e.cop.removeStaleErr = nil
+	e.cop.idleErr = nil
 	e.tick()
 	if len(e.cop.starts) != 1 {
 		t.Error("the copy did not start once the VM was free")
