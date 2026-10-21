@@ -1064,8 +1064,9 @@ func metadataScript(destBasePath, subPath, metaJSON string, atomic bool) string 
 
 // momentsScript keeps the synced volume as a moment: a folder of hard links in
 // .moments next to the destination. It removes moments older than the keep
-// time, and reports how many are left and the oldest, in the Job's termination
-// message. It returns "" when moments are off.
+// time, and reports in the Job's termination message how many earlier moments
+// are left besides the newest (as a VM disk counts its restore points) and the
+// time of the oldest moment. It returns "" when moments are off.
 func momentsScript(destBasePath, subPath string, keepHours *int32) string {
 	if keepHours == nil || *keepHours <= 0 {
 		return ""
@@ -1081,9 +1082,10 @@ for d in "$moments"/*; do
   if [[ "$(basename "$d")" < "$cutoff" ]]; then rm -r -f -- "$d"; fi
 done
 count=$(find "$moments" -mindepth 1 -maxdepth 1 -type d | wc -l)
+older=$((count - 1))
 oldest=$(ls -1 "$moments" | head -n 1)
 oldest_iso=$(date -u -d "${oldest:0:4}-${oldest:4:2}-${oldest:6:2} ${oldest:9:2}:${oldest:11:2}:${oldest:13:2}" +%%Y-%%m-%%dT%%H:%%M:%%SZ)
-printf '{"bytesWritten":0,"restorePoints":%%s,"oldestRestorePoint":"%%s"}' "$count" "$oldest_iso" > /dev/termination-log
+printf '{"bytesWritten":0,"restorePoints":%%s,"oldestRestorePoint":"%%s"}' "$older" "$oldest_iso" > /dev/termination-log
 `, destBasePath, subPath, *keepHours)
 }
 
