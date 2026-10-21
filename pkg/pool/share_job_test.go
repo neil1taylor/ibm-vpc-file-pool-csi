@@ -469,6 +469,9 @@ func TestShareJobRunner_RunChainScript(t *testing.T) {
 	if len(spec.Volumes) != 1 {
 		t.Errorf("one share needs one volume, got %d", len(spec.Volumes))
 	}
+	if spec.AutomountServiceAccountToken == nil || *spec.AutomountServiceAccountToken {
+		t.Error("a Job that opens VM disk files must not get API credentials")
+	}
 	if _, badErr := r.RunChainScript(ctx, "chain-b", []ShareFolder{{Share: testShareA, Path: "/pvcs/../etc"}}, "x", ""); badErr == nil {
 		t.Error("a bad folder path must be refused")
 	}

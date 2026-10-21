@@ -15,7 +15,8 @@ import (
 //
 // Anyone who can write to a volume can put files in its folder, so before
 // qemu-img opens a chain, the script checks every link: each backing file is
-// disk.img (raw) or a snapshot file (qcow2) in the same folder. The Job also
+// disk.img (raw) or a snapshot file (qcow2) in the same folder, named with
+// plain characters only, and no file keeps its data in another file. The Job also
 // mounts only the volume folders it works on, never a whole share.
 //
 // The scripts run as the QEMU user in KubeVirt's virt-launcher image, which
@@ -31,6 +32,7 @@ func checkChainFunc() string {
   while [ "$f" != %s ]; do
     case "$f" in snap-*.qcow2) ;; *) echo "bad chain file: $f" >&2; return 1 ;; esac
     info=$(qemu-img info -f qcow2 -U --output=json "$d/$f")
+    if printf '%%s\n' "$info" | grep -q '"data-file"'; then echo "$f keeps its data in another file" >&2; return 1; fi
     b=$(printf '%%s\n' "$info" | sed -n 's/^ *"backing-filename": "\(.*\)",*$/\1/p')
     bf=$(printf '%%s\n' "$info" | sed -n 's/^ *"backing-filename-format": "\(.*\)",*$/\1/p')
     case "$b" in
@@ -38,7 +40,7 @@ func checkChainFunc() string {
       snap-*.qcow2) [ "$bf" = qcow2 ] || { echo "$f backs onto $b as $bf" >&2; return 1; } ;;
       *) echo "$f backs onto $b" >&2; return 1 ;;
     esac
-    case "$b" in */*) echo "$f backs onto $b" >&2; return 1 ;; esac
+    case "$b" in *[!a-z0-9.-]*) echo "$f backs onto $b" >&2; return 1 ;; esac
     f=$b; n=$((n+1))
     [ $n -le %d ] || { echo "chain too long" >&2; return 1; }
   done

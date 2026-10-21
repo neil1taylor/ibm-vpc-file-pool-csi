@@ -344,9 +344,11 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
-					RestartPolicy:   corev1.RestartPolicyOnFailure,
-					SecurityContext: podSecurityContext(shape.runAsUser),
-					InitContainers:  initContainers,
+					// A Job that opens VM disk files needs no API access.
+					AutomountServiceAccountToken: boolPtr(shape.folders == nil),
+					RestartPolicy:                corev1.RestartPolicyOnFailure,
+					SecurityContext:              podSecurityContext(shape.runAsUser),
+					InitContainers:               initContainers,
 					Containers: []corev1.Container{{
 						Name:         "share-data",
 						Image:        shape.image,
@@ -478,3 +480,5 @@ func (r *ShareJobRunner) Stop(ctx context.Context, key string) (bool, error) {
 	r.cleanup(ctx, jobName, 2)
 	return true, nil
 }
+
+func boolPtr(v bool) *bool { return &v }

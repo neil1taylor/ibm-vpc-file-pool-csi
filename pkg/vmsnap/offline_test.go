@@ -22,7 +22,7 @@ func stubQemuImg(t *testing.T) (binDir, logFile string) {
 echo "$*" >> "` + logFile + `"
 case "$1" in
 create) eval last=\${$#}; printf '%s' "$8" > "$last.backing"; : > "$last" ;;
-info) eval last=\${$#}; b=$(cat "$last.backing" 2>/dev/null); bf=qcow2; [ "$b" = disk.img ] && bf=raw; [ -e "$last.backingfmt" ] && bf=$(cat "$last.backingfmt"); printf '{\n    "backing-filename-format": "%s",\n    "full-backing-filename": "/x/%s",\n    "backing-filename": "%s",\n    "format": "qcow2"\n}\n' "$bf" "$b" "$b" ;;
+info) eval last=\${$#}; b=$(cat "$last.backing" 2>/dev/null); bf=qcow2; [ "$b" = disk.img ] && bf=raw; [ -e "$last.backingfmt" ] && bf=$(cat "$last.backingfmt"); printf '{\n    "backing-filename-format": "%s",\n    "full-backing-filename": "/x/%s",\n    "backing-filename": "%s",\n    "format": "qcow2"\n' "$bf" "$b" "$b"; if [ -e "$last.datafile" ]; then printf '    "format-specific": {"data": {"data-file": "%s"}}\n' "$(cat "$last.datafile")"; fi; printf '}\n' ;;
 rebase) eval last=\${$#}; printf '%s' "$8" > "$last.backing" ;;
 convert) eval last=\${$#}; : > "$last" ;;
 commit) ;;
@@ -181,12 +181,19 @@ func TestConvertScript_RefusesAPlantedChain(t *testing.T) {
 		{"disk.img", "qcow2"},            // the raw base read as qcow2
 		{"snap-b.qcow2", "raw"},          // a qcow2 file read as raw
 		{"json:{\"file\": 1}", "qcow2"},  // a json: description
+		{`snap-a\u002fx.qcow2`, "qcow2"}, // an escaped character
+		{"datafile", "qcow2"},            // see below: an external data file
 	} {
 		bin, log := stubQemuImg(t)
 		src, dst := t.TempDir(), t.TempDir()
 		_ = os.WriteFile(filepath.Join(src, "snap-a.qcow2"), nil, 0o444)
 		_ = os.WriteFile(filepath.Join(src, "snap-a.qcow2.backing"), []byte(tc.backing), 0o644)
 		_ = os.WriteFile(filepath.Join(src, "snap-a.qcow2.backingfmt"), []byte(tc.format), 0o644)
+		if tc.backing == "datafile" {
+			_ = os.WriteFile(filepath.Join(src, "snap-a.qcow2.backing"), []byte("disk.img"), 0o644)
+			_ = os.WriteFile(filepath.Join(src, "snap-a.qcow2.backingfmt"), []byte("raw"), 0o644)
+			_ = os.WriteFile(filepath.Join(src, "snap-a.qcow2.datafile"), []byte("../pvc-other/disk.img"), 0o644)
+		}
 		script, err := ConvertScript(src, "snap-a.qcow2", dst)
 		if err != nil {
 			t.Fatal(err)
