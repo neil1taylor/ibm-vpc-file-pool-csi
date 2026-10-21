@@ -113,7 +113,8 @@ run() {
     pool_is_ready "$POOL" || return 0
 
     claim data
-    wait_until 300 5 bound data
+    check "the first volume is bound" wait_until 300 5 bound data
+    bound data || return 0
     local node
     node=$(worker_nodes | head -1)
     pod_on_node "$NS" "$WRITER" "$node" data 'i=0; while true; do echo $i >> /data/log; i=$((i+1)); sleep 1; done'
