@@ -95,6 +95,11 @@ spec:
             type: object
           status:
             properties:
+              chainFile:
+                description: |-
+                  ChainFile is the file of the source disk's chain that holds an instant
+                  snapshot. It changes when a newer snapshot of the disk is merged into it.
+                type: string
               consistency:
                 description: |-
                   Consistency of a snapshot of a running VM's disk.
@@ -116,8 +121,18 @@ spec:
                 description: CreationTime is when the snapshot was created.
                 format: date-time
                 type: string
+              mergeChild:
+                description: |-
+                  MergeChild is the newer file that is merged into ChainFile while the
+                  snapshot is deleted.
+                type: string
               message:
                 description: Message says what a snapshot waits for or why it failed.
+                type: string
+              methodReason:
+                description: |-
+                  MethodReason says why a snapshot of a VM disk is a copy and not an
+                  instant snapshot.
                 type: string
               phase:
                 description: Phase is the snapshot lifecycle state.

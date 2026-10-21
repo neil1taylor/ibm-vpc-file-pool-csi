@@ -68,6 +68,21 @@ type SnapshotStatus struct {
 	// +optional
 	CreationTime *metav1.Time `json:"creationTime,omitempty"`
 
+	// ChainFile is the file of the source disk's chain that holds an instant
+	// snapshot. It changes when a newer snapshot of the disk is merged into it.
+	// +optional
+	ChainFile string `json:"chainFile,omitempty"`
+
+	// MergeChild is the newer file that is merged into ChainFile while the
+	// snapshot is deleted.
+	// +optional
+	MergeChild string `json:"mergeChild,omitempty"`
+
+	// MethodReason says why a snapshot of a VM disk is a copy and not an
+	// instant snapshot.
+	// +optional
+	MethodReason string `json:"methodReason,omitempty"`
+
 	// VMCopy is the state of the QEMU copy while a snapshot of a running VM's
 	// disk is made. It is empty for other snapshots and once the copy ends.
 	// +optional
