@@ -261,10 +261,13 @@ top_of() { chain "$1" | cut -d' ' -f1; }
 words() { set -f; set -- $1; set +f; echo $#; }
 
 # open_file <vm> <volume>: the file QEMU has open for the volume, by name.
+# Right after a live migration the old VM pod still runs for a while, so take
+# the pod on the worker where the VMI runs now.
 open_file() {
-    local pod
+    local node pod
+    node=$(oc get vmi -n "$NS" "$1" -o jsonpath='{.status.nodeName}')
     pod=$(oc get pod -n "$NS" -l "kubevirt.io=virt-launcher,vm.kubevirt.io/name=$1" \
-        --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')
+        --field-selector="status.phase=Running,spec.nodeName=$node" -o jsonpath='{.items[0].metadata.name}')
     oc exec -n "$NS" "$pod" -c compute -- virsh domblklist "${NS}_$1" |
         awk -v v="/vmi-disks/$2/" 'index($2, v) {n=split($2, p, "/"); print p[n]}'
 }
