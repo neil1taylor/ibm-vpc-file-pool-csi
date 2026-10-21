@@ -23,7 +23,7 @@ echo "$*" >> "` + logFile + `"
 case "$1" in
 create) eval last=\${$#}; printf '%s' "$8" > "$last.backing"; : > "$last" ;;
 info) eval last=\${$#}; b=$(cat "$last.backing" 2>/dev/null); printf '{"backing-filename": "%s"}\n' "$b" ;;
-rebase) eval last=\${$#}; printf '%s' "$6" > "$last.backing" ;;
+rebase) eval last=\${$#}; printf '%s' "$8" > "$last.backing" ;;
 convert) eval last=\${$#}; : > "$last" ;;
 commit) ;;
 esac
@@ -103,7 +103,7 @@ func TestOfflineMergeScript_MiddleFile(t *testing.T) {
 		}
 	}
 	c := calls(t, log)
-	if strings.Count(c, "commit -q "+vol+"/snap-b.qcow2") != 1 || strings.Count(c, "rebase -u -F qcow2 -b snap-a.qcow2 "+vol+"/snap-c.qcow2") != 1 {
+	if strings.Count(c, "commit -q -f qcow2 "+vol+"/snap-b.qcow2") != 1 || strings.Count(c, "rebase -u -f qcow2 -F qcow2 -b snap-a.qcow2 "+vol+"/snap-c.qcow2") != 1 {
 		t.Errorf("calls:\n%s", c)
 	}
 	if strings.Index(c, "commit") > strings.Index(c, "rebase") {
@@ -160,7 +160,7 @@ func TestConvertScript(t *testing.T) {
 	if out, err := runScript(t, bin, script); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if !strings.Contains(calls(t, log), "convert -O raw "+src+"/snap-a.qcow2 "+dst+"/disk.img.part") {
+	if !strings.Contains(calls(t, log), "convert -f qcow2 -O raw "+src+"/snap-a.qcow2 "+dst+"/disk.img.part") {
 		t.Errorf("calls:\n%s", calls(t, log))
 	}
 	if m := mode(t, filepath.Join(dst, "disk.img")); m == "missing" {

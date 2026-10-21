@@ -7,7 +7,11 @@ import (
 )
 
 // Scripts for a Job that changes the chain of a stopped VM's disk, and for a
-// Job that restores a snapshot into a new disk. They run as the QEMU user in
+// Job that restores a snapshot into a new disk. Every qemu-img command names
+// the format of its image, and every qcow2 file records the format of its
+// backing file: the guest can write anything into a raw disk, including a
+// qcow2 header that names another file on the share, so qemu-img must never
+// guess a format. They run as the QEMU user in
 // KubeVirt's virt-launcher image, which has qemu-img. dir is where the Job
 // mounts the volume folder. Every script is safe to run again after it
 // stopped part way.
@@ -49,12 +53,12 @@ func OfflineMergeScript(dir, file, child, grandchild string) (string, error) {
 	b.WriteString("set -eu\n")
 	fmt.Fprintf(&b, "if [ -e %q ]; then\n", c)
 	// Refuse to merge into a file that child does not back onto.
-	fmt.Fprintf(&b, "  qemu-img info -U --output=json %q | grep -q '\"backing-filename\": \"%s\"' || { echo %q >&2; exit 1; }\n",
+	fmt.Fprintf(&b, "  qemu-img info -f qcow2 -U --output=json %q | grep -q '\"backing-filename\": \"%s\"' || { echo %q >&2; exit 1; }\n",
 		c, file, child+" does not back onto "+file)
 	fmt.Fprintf(&b, "  chmod %s %q\n", modeLive, f)
-	fmt.Fprintf(&b, "  qemu-img commit -q %q\n", c)
+	fmt.Fprintf(&b, "  qemu-img commit -q -f qcow2 %q\n", c)
 	if grandchild != "" {
-		fmt.Fprintf(&b, "  qemu-img rebase -u -F qcow2 -b %s %q\n", file, dir+"/"+grandchild)
+		fmt.Fprintf(&b, "  qemu-img rebase -u -f qcow2 -F %s -b %s %q\n", FormatOf(file), file, dir+"/"+grandchild)
 	}
 	fmt.Fprintf(&b, "  rm -f -- %q\n", c)
 	b.WriteString("fi\n")
@@ -79,7 +83,7 @@ func ConvertScript(srcDir, file, dstDir string) (string, error) {
 	var b strings.Builder
 	b.WriteString("set -eu\n")
 	fmt.Fprintf(&b, "trap 'rm -f -- %q' EXIT\n", part)
-	fmt.Fprintf(&b, "qemu-img convert -O raw %q %q\n", srcDir+"/"+file, part)
+	fmt.Fprintf(&b, "qemu-img convert -f %s -O raw %q %q\n", FormatOf(file), srcDir+"/"+file, part)
 	fmt.Fprintf(&b, "mv -f -- %q %q\n", part, dstDir+"/"+BaseFile)
 	b.WriteString("trap - EXIT\n")
 	return b.String(), nil
