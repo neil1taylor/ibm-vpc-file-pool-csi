@@ -37,6 +37,19 @@ func TestValidateSubDir_Invalid(t *testing.T) {
 		{"dotdot_only", ".."},
 		{"spaces", "/pvcs/pvc a1b2c3d4-5678-90ab-cdef-1234567890ab"},
 		{"not_a_uuid", "/pvcs/pvc-not-a-valid-uuid-at-all-nope"},
+		{"trailing_newline", "/pvcs/pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab\n"},
+		{"leading_space", " /pvcs/pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"},
+		{"tab", "/pvcs/pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab\t"},
+		{"nul_byte", "/pvcs/pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab\x00"},
+		{"nul_byte_then_traversal", "/pvcs/pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab\x00/../.."},
+		{"one_char_too_long", "/pvcs/pvc-a1b2c3d4-5678-90ab-cdef-1234567890abc"},
+		{"one_char_too_short", "/pvcs/pvc-a1b2c3d4-5678-90ab-cdef-1234567890a"},
+		{"backslash", "/pvcs\\pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"},
+		{"percent_encoded_dots", "/pvcs/%2e%2e/pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"},
+		{"fullwidth_slash", "\uff0fpvcs/pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"},
+		{"fullwidth_digit", "/pvcs/pvc-\uff11b2c3d4-5678-90ab-cdef-1234567890ab"},
+		{"double_slash", "//pvcs/pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"},
+		{"dot_segment", "/pvcs/./pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -134,6 +147,16 @@ func TestValidateSnapshotPath_Invalid(t *testing.T) {
 		{"nested", "/pvcs/.snapshots/snap-abc123/data"},
 		{"spaces", "/pvcs/.snapshots/snap abc123"},
 		{"dotdot", "/pvcs/..snapshots/snap-abc123"},
+		{"trailing_newline", "/pvcs/.snapshots/snap-abc123\n"},
+		{"nul_byte", "/pvcs/.snapshots/snap-abc123\x00"},
+		{"nul_byte_then_traversal", "/pvcs/.snapshots/snap-abc123\x00/../.."},
+		{"underscore", "/pvcs/.snapshots/snap-abc_123"},
+		{"dot_in_name", "/pvcs/.snapshots/snap-abc.123"},
+		{"empty_name", "/pvcs/.snapshots/snap-"},
+		{"backslash", "/pvcs/.snapshots\\snap-abc123"},
+		{"percent_encoded_dots", "/pvcs/.snapshots/%2e%2e/snap-abc123"},
+		{"double_slash", "//pvcs/.snapshots/snap-abc123"},
+		{"fullwidth_letter", "/pvcs/.snapshots/snap-\uff41bc123"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
