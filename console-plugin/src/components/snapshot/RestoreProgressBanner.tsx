@@ -8,8 +8,17 @@ import { PersistentVolumeClaim, pvcPath } from '../../utils/k8s-objects';
 import { humanizeBytes } from '../../utils/resource-helpers';
 import { restoreProgress } from '../../utils/restore-helpers';
 
-/** Follows a restored claim: the copy percent, then ready, or the copy error. The claim is never deleted here. */
-const RestoreProgressBanner: React.FC<{ namespace: string; name: string }> = ({ namespace, name }) => {
+/**
+ * Follows a new claim made from a snapshot (a restore) or from another volume (a clone): the copy percent,
+ * then ready, or the copy error. The claim is never deleted here.
+ */
+const RestoreProgressBanner: React.FC<{ namespace: string; name: string; source?: 'snapshot' | 'volume' }> = ({
+  namespace,
+  name,
+  source = 'snapshot',
+}) => {
+  const clone = source === 'volume';
+  const doing = clone ? 'Cloning' : 'Restoring';
   const [pvc] = useK8sWatchResource<PersistentVolumeClaim>({
     groupVersionKind: { version: PersistentVolumeClaimModel.apiVersion, kind: PersistentVolumeClaimModel.kind },
     namespace,
@@ -36,19 +45,19 @@ const RestoreProgressBanner: React.FC<{ namespace: string; name: string }> = ({ 
   switch (progress.state) {
     case 'ready':
       return (
-        <Alert variant="success" title="The restored volume is ready" isInline>
+        <Alert variant="success" title={`The ${clone ? 'cloned' : 'restored'} volume is ready`} isInline>
           The claim {claimLink} is Bound. Use it in a workload from the Add storage page of the workload.
         </Alert>
       );
     case 'failed':
       return (
-        <Alert variant="danger" title="Restoring failed" isInline>
+        <Alert variant="danger" title={`${doing} failed`} isInline>
           {progress.error} The claim {claimLink} was not deleted. See the log of the copy Job in the driver namespace.
         </Alert>
       );
     case 'copying':
       return (
-        <Alert variant="info" title={`Restoring: copying ${humanizeBytes(progress.totalBytes)} from the snapshot`} isInline>
+        <Alert variant="info" title={`${doing}: copying ${humanizeBytes(progress.totalBytes)} from the ${source}`} isInline>
           <Progress
             value={progress.percent}
             title={`Copied ${humanizeBytes(progress.copiedBytes)} of ${humanizeBytes(progress.totalBytes)}`}
@@ -59,7 +68,7 @@ const RestoreProgressBanner: React.FC<{ namespace: string; name: string }> = ({ 
       );
     default:
       return (
-        <Alert variant="info" title="Restoring: the copy is starting" isInline>
+        <Alert variant="info" title={`${doing}: the copy is starting`} isInline>
           The claim {claimLink} stays Pending until the copy ends.
         </Alert>
       );

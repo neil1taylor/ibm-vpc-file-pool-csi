@@ -81,7 +81,7 @@ export function restoreDefaults(input: {
 
 export function validateRestore(
   form: RestoreForm,
-  context: { existingNames: string[]; minGiB: number },
+  context: { existingNames: string[]; minGiB: number; minLabel?: string },
 ): RestoreErrors {
   const errors: RestoreErrors = {};
   if (!isValidK8sName(form.name)) {
@@ -92,7 +92,7 @@ export function validateRestore(
   if (!Number.isInteger(form.sizeGiB)) {
     errors.size = 'The size must be a whole number of GiB.';
   } else if (form.sizeGiB < context.minGiB) {
-    errors.size = `The size must be at least ${context.minGiB} GiB (the snapshot's size).`;
+    errors.size = `The size must be at least ${context.minGiB} GiB (${context.minLabel || "the snapshot's"} size).`;
   }
   return errors;
 }
@@ -108,6 +108,53 @@ export function buildRestorePVC(form: RestoreForm, ref: VolumeSnapshotRef): Pers
       volumeMode: form.volumeMode,
       resources: { requests: { storage: `${form.sizeGiB}Gi` } },
       dataSource: { apiGroup: 'snapshot.storage.k8s.io', kind: 'VolumeSnapshot', name: ref.name },
+    },
+  };
+}
+
+/** Why the clone action is off, or undefined when it is on. */
+export function cloneDisabledReason(subvolume: SubVolume): string | undefined {
+  if (!subvolume.spec?.pvcName) {
+    return 'This volume has no claim to clone.';
+  }
+  if (subvolume.status?.phase !== 'Bound') {
+    return `The volume is not Bound yet (phase: ${subvolume.status?.phase || 'unknown'}).`;
+  }
+  if (subvolume.status?.cloneStatus === 'InProgress') {
+    return 'A copy into this volume is still running.';
+  }
+  return undefined;
+}
+
+export function cloneDefaults(input: {
+  subvolume: SubVolume;
+  sourcePVC: PersistentVolumeClaim | undefined;
+  storageClasses: StorageClass[];
+}): RestoreForm {
+  const { subvolume, sourcePVC, storageClasses } = input;
+  const ours = storageClasses.filter((sc) => sc.provisioner === CSI_DRIVER_NAME).map((sc) => sc.metadata?.name || '');
+  const poolClass = storageClassFor(subvolume.spec.poolName);
+  return {
+    name: `${subvolume.spec.pvcName}-clone`,
+    sizeGiB: Math.max(1, Math.ceil(subvolume.spec.requestedGB || 0)),
+    storageClass: sourcePVC?.spec?.storageClassName || (ours.includes(poolClass) ? poolClass : ours[0] || poolClass),
+    accessMode: sourcePVC?.spec?.accessModes?.[0] || 'ReadWriteMany',
+    volumeMode: sourcePVC?.spec?.volumeMode || 'Filesystem',
+  };
+}
+
+/** A claim whose data source is another claim: the driver copies the source volume into it. */
+export function buildClonePVC(form: RestoreForm, source: { name: string; namespace: string }): PersistentVolumeClaim {
+  return {
+    apiVersion: 'v1',
+    kind: 'PersistentVolumeClaim',
+    metadata: { name: form.name, namespace: source.namespace },
+    spec: {
+      accessModes: [form.accessMode],
+      storageClassName: form.storageClass,
+      volumeMode: form.volumeMode,
+      resources: { requests: { storage: `${form.sizeGiB}Gi` } },
+      dataSource: { kind: 'PersistentVolumeClaim', name: source.name },
     },
   };
 }

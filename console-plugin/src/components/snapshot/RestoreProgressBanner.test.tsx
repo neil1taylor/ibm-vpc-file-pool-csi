@@ -54,4 +54,26 @@ describe('RestoreProgressBanner', () => {
     render(<RestoreProgressBanner namespace="apps" name="data-restored" />);
     expect(screen.getByText(/rsync failed/)).toBeTruthy();
   });
+
+  it('says Cloning, not Restoring, for a clone', () => {
+    watch({ PersistentVolumeClaim: pvc('Pending') });
+    render(<RestoreProgressBanner namespace="apps" name="data-restored" source="volume" />);
+    expect(screen.getByText(/Cloning/)).toBeTruthy();
+    expect(screen.queryByText(/Restoring/)).toBeNull();
+  });
+
+  it('names the volume as the source of the copy for a clone', () => {
+    watch({
+      PersistentVolumeClaim: pvc('Pending', 'pvc-x'),
+      SubVolume: { metadata: { name: 'pvc-x' }, status: { cloneStatus: 'InProgress', cloneProgress: { bytesCopied: 5, totalBytes: 20 } } },
+    });
+    render(<RestoreProgressBanner namespace="apps" name="data-restored" source="volume" />);
+    expect(screen.getByText(/from the volume/)).toBeTruthy();
+  });
+
+  it('says the cloned volume is ready when the claim is Bound', () => {
+    watch({ PersistentVolumeClaim: pvc('Bound', 'pvc-x') });
+    render(<RestoreProgressBanner namespace="apps" name="data-restored" source="volume" />);
+    expect(screen.getByText(/The cloned volume is ready/)).toBeTruthy();
+  });
 });
