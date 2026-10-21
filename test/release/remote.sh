@@ -33,6 +33,8 @@ start() {
     id="$(date -u +%m%d-%H%M)"
     ensure_server
     build 'command -v jq >/dev/null || sudo apt-get install -y -q jq >/dev/null'
+    # Stages 06 and 18 drive VMs with virtctl and skip without it.
+    build 'command -v virtctl >/dev/null || { curl -sSfL -o /tmp/virtctl https://github.com/kubevirt/kubevirt/releases/download/v1.9.1/virtctl-v1.9.1-linux-amd64 && sudo install -m 0755 /tmp/virtctl /usr/local/bin/virtctl; }'
 
     echo "Building kubectl-migrate for the build server..."
     mkdir -p "$ROOT/test/release/bin"
