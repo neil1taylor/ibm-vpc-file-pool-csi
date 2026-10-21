@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
 
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/pool"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/util"
 )
 
@@ -98,6 +99,11 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 		if parseErr == nil {
 			sv, svErr := d.k8sClient.GetSubVolume(ctx, pvName)
 			if svErr == nil {
+				// A restore from backup is still copying into this volume.
+				if sv.Labels[pool.RestorePendingLabel] == "true" {
+					klog.V(4).InfoS("Restore gate: blocking mount until the restore from backup ends", "subVolume", pvName)
+					return nil, status.Error(codes.Unavailable, "a restore from backup is still filling this volume (retry later)")
+				}
 				isClone := sv.Labels["storage.ibmcloud.io/clone-source"] != ""
 				cloneStatus := sv.Status.CloneStatus
 
