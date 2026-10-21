@@ -95,9 +95,29 @@ spec:
             type: object
           status:
             properties:
+              consistency:
+                description: |-
+                  Consistency of a snapshot of a running VM's disk.
+                  FileSystemConsistent means the guest file systems were frozen for the
+                  copy. CrashConsistent means they were not, as after a power loss.
+                enum:
+                - FileSystemConsistent
+                - CrashConsistent
+                type: string
+              consistencyReason:
+                description: ConsistencyReason says why a snapshot is only crash consistent.
+                type: string
+              copyMoment:
+                description: CopyMoment is the moment a snapshot of a running VM's
+                  disk shows.
+                format: date-time
+                type: string
               creationTime:
                 description: CreationTime is when the snapshot was created.
                 format: date-time
+                type: string
+              message:
+                description: Message says what a snapshot waits for or why it failed.
                 type: string
               phase:
                 description: Phase is the snapshot lifecycle state.
@@ -115,6 +135,89 @@ spec:
                 description: SizeBytes is the actual size of the snapshot data.
                 format: int64
                 type: integer
+              vmCopy:
+                description: |-
+                  VMCopy is the state of the QEMU copy while a snapshot of a running VM's
+                  disk is made. It is empty for other snapshots and once the copy ends.
+                properties:
+                  base:
+                    type: string
+                  bitmap:
+                    description: |-
+                      Bitmap is the change list this copy started. Base is the change list it
+                      read, for a change copy; Incremental is true then.
+                    type: string
+                  diskIndex:
+                    format: int32
+                    type: integer
+                  fileSystemConsistent:
+                    description: FileSystemConsistent is true if the guest was frozen
+                      for the copy.
+                    type: boolean
+                  freezeError:
+                    description: FreezeError is the freeze error, if the freeze failed.
+                    type: string
+                  id:
+                    description: ID names the copy. It is the same for all disks of
+                      one VM copy.
+                    type: string
+                  incremental:
+                    type: boolean
+                  moment:
+                    description: Moment is the moment the copy shows.
+                    format: date-time
+                    type: string
+                  phase:
+                    description: |-
+                      Phase is Copying while QEMU writes the staging file, and Sending while
+                      a Job applies it at the destination.
+                    enum:
+                    - Copying
+                    - Sending
+                    type: string
+                  podName:
+                    description: |-
+                      PodName and PodUID identify the virt-launcher pod. If the pod changes,
+                      the VM restarted or moved and QEMU no longer has the copy.
+                    type: string
+                  podUID:
+                    type: string
+                  stagingFile:
+                    description: StagingFile is the staging file name in the volume's
+                      root directory.
+                    type: string
+                  vmiName:
+                    description: VMIName is the VirtualMachineInstance name.
+                    type: string
+                  volume:
+                    description: |-
+                      Volume is the pod volume name of this disk, and DiskIndex its place in
+                      the copy.
+                    type: string
+                required:
+                - bitmap
+                - diskIndex
+                - fileSystemConsistent
+                - id
+                - moment
+                - phase
+                - podName
+                - podUID
+                - stagingFile
+                - vmiName
+                - volume
+                type: object
+              vmCopyAttempts:
+                description: |-
+                  VMCopyAttempts counts the copies that were cancelled or failed for a
+                  snapshot of a running VM. After 3 the snapshot fails.
+                format: int32
+                type: integer
+              vmCopyRetryAfter:
+                description: VMCopyRetryAfter is the earliest time of the next copy
+                  try.
+                format: date-time
+                type: string
             required:
             - readyToUse
             type: object
