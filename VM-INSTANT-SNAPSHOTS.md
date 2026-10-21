@@ -58,7 +58,7 @@ This set of files is a **chain**. Each file holds only the parts of the disk tha
 
 ### Deleting a snapshot (merge)
 
-A file in the chain cannot just be deleted, because the newer files depend on it. Instead, the driver makes the deleted snapshot's file writable, merges the next file up into it (`virsh blockcommit`), then deletes the next file. Only the changed parts are copied, so a merge takes about as long as copying the changes, not the whole disk. QEMU merges while the VM runs. If the VM is stopped, a Job does the same with `qemu-img commit`.
+A file in the chain cannot just be deleted, because the newer files depend on it. Instead, the driver makes the deleted snapshot's file writable, merges the next file up into it (`virsh blockcommit`), then deletes the next file. Only the changed parts are copied, so a merge takes about as long as copying the changes, not the whole disk. QEMU merges while the VM runs, in the background: the driver starts the merge, checks on it at each retry of the delete, and finishes it when QEMU is ready. While it runs, the SubVolume's `status.chainOperation` names it, and no other snapshot or merge of that disk starts. If the merge fails, the driver stops it and makes the snapshot's file read-only again. If the VM stops during a merge, a Job does the merge next. If the VM is stopped, a Job does the same with `qemu-img commit`.
 
 ### Restoring a snapshot
 

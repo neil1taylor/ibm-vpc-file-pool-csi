@@ -533,12 +533,15 @@ func (m *Manager) deleteInstant(ctx context.Context, snap *v1alpha1.Snapshot, po
 		}
 	}
 	key := "chain-rm-" + snap.Name
+	// liveKey marks a merge that QEMU runs in the background in a running VM.
+	liveKey := "chain-live-rm-" + snap.Name
+	op := sv.Status.ChainOperation
 	var newChain []string
 	switch {
-	case sv.Status.ChainOperation == key:
+	case op == key:
 		newChain, err = m.mergeOffline(ctx, sv, key, file, child)
-	case sv.Status.ChainOperation != "":
-		return fmt.Errorf("%w: %s changes the disk now", ErrOperationInProgress, sv.Status.ChainOperation)
+	case op != "" && op != liveKey:
+		return fmt.Errorf("%w: %s changes the disk now", ErrOperationInProgress, op)
 	default:
 		var pod *corev1.Pod
 		var vol string
@@ -546,12 +549,24 @@ func (m *Manager) deleteInstant(ctx context.Context, snap *v1alpha1.Snapshot, po
 		switch {
 		case err != nil:
 			return fmt.Errorf("check for a running VM: %w", err)
+		case pod == nil && op == liveKey:
+			// The VM stopped, and the merge with it. The files on the
+			// share still make the old chain; a Job merges them next.
+			if err = m.saveDiskChain(ctx, sv.Name, sv.Status.DiskChain, ""); err != nil {
+				return err
+			}
+			return fmt.Errorf("%w: the VM stopped during the merge", ErrOperationInProgress)
 		case pod == nil:
 			if err = m.checkVMStopped(ctx, sv); err != nil {
 				return err
 			}
 			newChain, err = m.mergeOffline(ctx, sv, key, file, child)
 		default:
+			if op != liveKey {
+				if err = m.saveDiskChain(ctx, sv.Name, sv.Status.DiskChain, liveKey); err != nil {
+					return err
+				}
+			}
 			newChain, err = m.mergeRunning(ctx, pod, vol, file, child)
 		}
 	}
@@ -596,6 +611,9 @@ func (m *Manager) mergeRunning(ctx context.Context, pod *corev1.Pod, vol, file, 
 		return nil, fmt.Errorf("%w: the VM is moving to another worker", ErrOperationInProgress)
 	}
 	chain, err := m.instant.snap.Merge(ctx, vmcopy.VM{Namespace: pod.Namespace, Pod: pod.Name, Name: vmi}, vol, file, child)
+	if errors.Is(err, vmsnap.ErrMergeRunning) {
+		return nil, fmt.Errorf("%w: QEMU merges %s into %s", ErrOperationInProgress, child, file)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("merge the snapshot: %w", err)
 	}

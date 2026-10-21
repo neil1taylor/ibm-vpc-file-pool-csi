@@ -35,6 +35,8 @@ type fakeInstant struct {
 	merges  [][2]string
 	takeErr error
 	moment  time.Time
+	// mergeRuns is how many Merge calls report a running merge before it is done.
+	mergeRuns int
 }
 
 type fakeTake struct {
@@ -82,6 +84,10 @@ func (f *fakeInstant) Merge(_ context.Context, _ vmcopy.VM, volume, file, child 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.merges = append(f.merges, [2]string{file, child})
+	if f.mergeRuns > 0 {
+		f.mergeRuns--
+		return nil, vmsnap.ErrMergeRunning
+	}
 	c := f.chain(volume)
 	var out []string
 	for _, n := range c {
@@ -689,5 +695,72 @@ func TestInstantSnapshot_DeleteOnARunningVMWaitsForAChainJob(t *testing.T) {
 	}
 	if len(e.snap.merges) != 0 {
 		t.Error("no merge while a Job changes the disk")
+	}
+}
+
+func TestInstantSnapshot_DeleteOnARunningVMDoesNotWaitForTheMerge(t *testing.T) {
+	e := newInstantEnv(t)
+	e.startVM(false)
+	e.mustCreate("snap-one")
+	e.snap.mergeRuns = 1
+	if err := e.mgr.DeleteSnapshot(e.ctx, "snap-one"); !errors.Is(err, ErrOperationInProgress) {
+		t.Fatalf("err = %v, want ErrOperationInProgress while the merge runs", err)
+	}
+	if op := e.sv().Status.ChainOperation; op == "" {
+		t.Error("the SubVolume must name the running merge, so nothing else changes the disk")
+	}
+	if e.k.getSnapshot("snap-one") == nil {
+		t.Fatal("the Snapshot stays until the merge is done")
+	}
+	if err := e.mgr.DeleteSnapshot(e.ctx, "snap-one"); err != nil {
+		t.Fatalf("DeleteSnapshot: %v", err)
+	}
+	sv := e.sv()
+	if sv.Status.ChainOperation != "" || len(sv.Status.DiskChain) != 0 {
+		t.Errorf("SubVolume status = %+v", sv.Status)
+	}
+	if e.k.getSnapshot("snap-one") != nil {
+		t.Error("the Snapshot must be gone")
+	}
+}
+
+func TestInstantSnapshot_SnapshotWaitsForARunningMerge(t *testing.T) {
+	e := newInstantEnv(t)
+	e.startVM(false)
+	e.mustCreate("snap-one")
+	e.snap.mergeRuns = 1
+	_ = e.mgr.DeleteSnapshot(e.ctx, "snap-one")
+	if _, err := e.create("snap-two"); !errors.Is(err, ErrOperationInProgress) {
+		t.Fatalf("err = %v, want ErrOperationInProgress while a merge runs", err)
+	}
+	if len(e.snap.takes) != 1 {
+		t.Error("no snapshot while a merge runs")
+	}
+}
+
+func TestInstantSnapshot_VMStopsDuringAMerge(t *testing.T) {
+	e := newInstantEnv(t)
+	e.startVM(false)
+	e.mustCreate("snap-one")
+	e.snap.mergeRuns = 1
+	_ = e.mgr.DeleteSnapshot(e.ctx, "snap-one")
+	e.stopVM() // the merge job ends with QEMU; the chain on disk is unchanged
+	e.defineVM()
+	e.jobs.done = true
+	for i := 0; i < 3; i++ {
+		if err := e.mgr.DeleteSnapshot(e.ctx, "snap-one"); err == nil {
+			break
+		} else if !errors.Is(err, ErrOperationInProgress) {
+			t.Fatalf("DeleteSnapshot: %v", err)
+		}
+	}
+	if e.k.getSnapshot("snap-one") != nil {
+		t.Fatal("the delete must finish with a Job once the VM is stopped")
+	}
+	if _, ok := e.jobs.scripts["chain-rm-snap-one"]; !ok {
+		t.Error("the merge of a stopped VM's disk runs in a Job")
+	}
+	if sv := e.sv(); sv.Status.ChainOperation != "" || len(sv.Status.DiskChain) != 0 {
+		t.Errorf("SubVolume status = %+v", sv.Status)
 	}
 }

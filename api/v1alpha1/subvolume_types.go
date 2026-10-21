@@ -128,8 +128,10 @@ type SubVolumeStatus struct {
 	// +optional
 	DiskChain []string `json:"diskChain,omitempty"`
 
-	// ChainOperation names the Job that changes DiskChain while the VM is
-	// stopped. A VM that uses the disk is not started while it is set.
+	// ChainOperation names the work that changes DiskChain: a Job while the
+	// VM is stopped, or a merge that QEMU runs in a running VM. Nothing else
+	// changes the disk, and a VM that uses the disk is not started, while it
+	// is set.
 	// +optional
 	ChainOperation string `json:"chainOperation,omitempty"`
 }

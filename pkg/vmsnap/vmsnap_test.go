@@ -32,8 +32,23 @@ type fakeLauncher struct {
 	// when the exec stream breaks after libvirt has done the work.
 	snapshotErrAfter string
 	quiesceErrAfter  string // the same, for the --quiesce try only
-	commitErr   string // blockcommit fails with this
-	log         []string
+	commitErr        string // blockcommit fails with this
+	pivotErr         string // blockjob --pivot fails with this
+	// jobPolls is how many --info calls a started commit job runs for
+	// before it is ready (active) or done (not active).
+	jobPolls int
+	jobs     map[string]*fakeJob // target -> block job
+	aborts   []string            // targets of blockjob --abort
+	log      []string
+}
+
+// fakeJob is a block job that libvirt runs in the background.
+type fakeJob struct {
+	kind  string // "Active Block Commit", "Block Commit" or "Block Copy"
+	vol   string
+	base  string
+	top   string
+	polls int
 }
 
 func newFakeLauncher() *fakeLauncher {
@@ -42,6 +57,7 @@ func newFakeLauncher() *fakeLauncher {
 		targets: map[string]string{"rootdisk": "vda", "data": "vdb"},
 		files:   map[string]string{},
 		backing: map[string]string{},
+		jobs:    map[string]*fakeJob{},
 	}
 	f.files[dir+"/rootdisk/disk.img"] = "0644"
 	f.files[dir+"/data/disk.img"] = "0644"
@@ -109,6 +125,8 @@ func (f *fakeLauncher) virsh(args []string, fail func(string) (string, string, e
 		return f.snapshot(args, fail)
 	case "blockcommit":
 		return f.commit(args, fail)
+	case "blockjob":
+		return f.blockjob(args, fail)
 	}
 	return "", "", fmt.Errorf("unknown virsh command %v", args)
 }
@@ -218,7 +236,7 @@ func (f *fakeLauncher) snapshot(args []string, fail func(string) (string, string
 }
 
 func (f *fakeLauncher) commit(args []string, fail func(string) (string, string, error)) (string, string, error) {
-	if args[1] != "vms_web" || !contains(args, "--keep-relative") || !contains(args, "--wait") {
+	if args[1] != "vms_web" || !contains(args, "--keep-relative") {
 		return "", "", fmt.Errorf("bad blockcommit args %v", args)
 	}
 	vol := f.volumeOfTarget(args[2])
@@ -227,28 +245,89 @@ func (f *fakeLauncher) commit(args []string, fail func(string) (string, string, 
 	if f.commitErr != "" {
 		return fail(f.commitErr)
 	}
+	if _, busy := f.jobs[args[2]]; busy {
+		return fail("error: block copy still active: disk '" + args[2] + "' already in active block job")
+	}
 	if f.files[dir+"/"+vol+"/"+base] != "0644" {
 		return fail("Permission denied: the base file is read-only")
 	}
 	bi := idx(chain, base)
 	if contains(args, "--active") {
-		if !contains(args, "--pivot") || argAfter(args, "--top") != "" {
+		if argAfter(args, "--top") != "" || bi < 0 {
 			return "", "", fmt.Errorf("bad active commit %v", args)
 		}
-		if bi < 0 {
-			return fail("base not in chain")
+		if contains(args, "--wait") != contains(args, "--pivot") {
+			return "", "", fmt.Errorf("an active commit pivots by itself only with --wait: %v", args)
 		}
-		f.chains[vol] = chain[bi:]
-		return "Successfully pivoted\n", "", nil
+		if contains(args, "--wait") {
+			f.chains[vol] = chain[bi:]
+			return "Successfully pivoted\n", "", nil
+		}
+		f.jobs[args[2]] = &fakeJob{kind: "Active Block Commit", vol: vol, base: base, polls: f.jobPolls}
+		return "Active Block Commit started\n", "", nil
 	}
 	top := strings.TrimPrefix(argAfter(args, "--top"), dir+"/"+vol+"/")
 	ti := idx(chain, top)
 	if ti <= 0 || bi != ti+1 {
 		return fail(fmt.Sprintf("top %s and base %s are not neighbours below the active file in %v", top, base, chain))
 	}
-	f.chains[vol] = append(append([]string{}, chain[:ti]...), chain[bi:]...)
-	f.backing[dir+"/"+vol+"/"+chain[ti-1]] = base
-	return "Commit complete\n", "", nil
+	if contains(args, "--wait") {
+		f.finishCommit(&fakeJob{vol: vol, base: base, top: top})
+		return "Commit complete\n", "", nil
+	}
+	f.jobs[args[2]] = &fakeJob{kind: "Block Commit", vol: vol, base: base, top: top, polls: f.jobPolls}
+	return "Block Commit started\n", "", nil
+}
+
+// finishCommit removes the top file of a commit that is not active.
+func (f *fakeLauncher) finishCommit(j *fakeJob) {
+	chain := f.chains[j.vol]
+	ti := idx(chain, j.top)
+	f.chains[j.vol] = append(append([]string{}, chain[:ti]...), chain[ti+1:]...)
+	f.backing[dir+"/"+j.vol+"/"+chain[ti-1]] = j.base
+}
+
+// blockjob is `virsh blockjob <dom> <target> --info --raw | --pivot | --abort`.
+func (f *fakeLauncher) blockjob(args []string, fail func(string) (string, string, error)) (string, string, error) {
+	if len(args) < 4 || args[1] != "vms_web" {
+		return "", "", fmt.Errorf("bad blockjob args %v", args)
+	}
+	t := args[2]
+	j := f.jobs[t]
+	switch {
+	case contains(args, "--info"):
+		if !contains(args, "--raw") {
+			return "", "", fmt.Errorf("blockjob --info without --raw: %v", args)
+		}
+		if j == nil {
+			return "", "", nil
+		}
+		if j.polls > 0 {
+			j.polls--
+			return fmt.Sprintf(" type=%s\n bandwidth=0\n cur=1048576\n end=2621440\n", j.kind), "", nil
+		}
+		if j.kind == "Block Commit" {
+			f.finishCommit(j)
+			delete(f.jobs, t)
+			return "", "", nil
+		}
+		return fmt.Sprintf(" type=%s\n bandwidth=0\n cur=2621440\n end=2621440\n", j.kind), "", nil
+	case contains(args, "--pivot"):
+		if j == nil || j.kind != "Active Block Commit" || j.polls > 0 {
+			return fail("error: block job is not ready")
+		}
+		if f.pivotErr != "" {
+			return fail(f.pivotErr)
+		}
+		f.chains[j.vol] = f.chains[j.vol][idx(f.chains[j.vol], j.base):]
+		delete(f.jobs, t)
+		return "", "", nil
+	case contains(args, "--abort"):
+		f.aborts = append(f.aborts, t)
+		delete(f.jobs, t)
+		return "", "", nil
+	}
+	return "", "", fmt.Errorf("bad blockjob args %v", args)
 }
 
 func contains(s []string, v string) bool { return idx(s, v) >= 0 }
@@ -477,12 +556,25 @@ func chainOf(t *testing.T, s *Snapshotter, vol string, files ...string) {
 	}
 }
 
+// merge runs Merge until it is done, as the pool manager's retries do.
+func merge(t *testing.T, s *Snapshotter, vol, file, child string) ([]File, error) {
+	t.Helper()
+	for i := 0; i < 10; i++ {
+		chain, err := s.Merge(context.Background(), testVM, vol, file, child)
+		if !errors.Is(err, ErrMergeRunning) {
+			return chain, err
+		}
+	}
+	t.Fatal("the merge never finished")
+	return nil, nil
+}
+
 func TestMerge_OldestSnapshot(t *testing.T) {
 	f := newFakeLauncher()
 	s := newTestSnapshotter(f)
 	chainOf(t, s, "rootdisk", "snap-a.qcow2", "snap-b.qcow2")
 	// Delete the snapshot frozen in disk.img: snap-a merges into it.
-	chain, err := s.Merge(context.Background(), testVM, "rootdisk", "disk.img", "snap-a.qcow2")
+	chain, err := merge(t, s, "rootdisk", "disk.img", "snap-a.qcow2")
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
@@ -502,7 +594,7 @@ func TestMerge_NewestSnapshotMergesTheLiveFile(t *testing.T) {
 	s := newTestSnapshotter(f)
 	chainOf(t, s, "rootdisk", "snap-a.qcow2", "snap-b.qcow2")
 	// The newest snapshot is frozen in snap-a; the live file snap-b merges into it.
-	chain, err := s.Merge(context.Background(), testVM, "rootdisk", "snap-a.qcow2", "snap-b.qcow2")
+	chain, err := merge(t, s, "rootdisk", "snap-a.qcow2", "snap-b.qcow2")
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
@@ -524,7 +616,7 @@ func TestMerge_MiddleSnapshot(t *testing.T) {
 	f := newFakeLauncher()
 	s := newTestSnapshotter(f)
 	chainOf(t, s, "rootdisk", "snap-a.qcow2", "snap-b.qcow2", "snap-c.qcow2")
-	chain, err := s.Merge(context.Background(), testVM, "rootdisk", "snap-a.qcow2", "snap-b.qcow2")
+	chain, err := merge(t, s, "rootdisk", "snap-a.qcow2", "snap-b.qcow2")
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
@@ -559,7 +651,7 @@ func TestMerge_DoneAlreadyOnlyCleansUp(t *testing.T) {
 	f := newFakeLauncher()
 	s := newTestSnapshotter(f)
 	chainOf(t, s, "rootdisk", "snap-a.qcow2", "snap-b.qcow2")
-	if _, err := s.Merge(context.Background(), testVM, "rootdisk", "disk.img", "snap-a.qcow2"); err != nil {
+	if _, err := merge(t, s, "rootdisk", "disk.img", "snap-a.qcow2"); err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
 	f.files[dir+"/rootdisk/snap-a.qcow2"] = "0644" // as if the delete had not run
@@ -567,7 +659,7 @@ func TestMerge_DoneAlreadyOnlyCleansUp(t *testing.T) {
 	// The caller could not save that the merge was done and asks again. It
 	// must not merge disk.img's new child too: that would delete another
 	// snapshot.
-	chain, err := s.Merge(context.Background(), testVM, "rootdisk", "disk.img", "snap-a.qcow2")
+	chain, err := merge(t, s, "rootdisk", "disk.img", "snap-a.qcow2")
 	if err != nil {
 		t.Fatalf("second Merge: %v", err)
 	}
@@ -622,5 +714,99 @@ func TestFlatten(t *testing.T) {
 	// Flattening a plain disk does nothing.
 	if err := s.Flatten(context.Background(), testVM, "data"); err != nil {
 		t.Fatalf("Flatten plain disk: %v", err)
+	}
+}
+
+func TestMerge_NewestSnapshotDoesNotWait(t *testing.T) {
+	f := newFakeLauncher()
+	f.jobPolls = 1
+	s := newTestSnapshotter(f)
+	chainOf(t, s, "rootdisk", "snap-a.qcow2")
+	ctx := context.Background()
+	if _, err := s.Merge(ctx, testVM, "rootdisk", "disk.img", "snap-a.qcow2"); !errors.Is(err, ErrMergeRunning) {
+		t.Fatalf("Merge: %v, want ErrMergeRunning once the job is started", err)
+	}
+	log := strings.Join(f.log, "\n")
+	if strings.Contains(log, "--wait") || strings.Contains(log, "blockcommit vms_web vda --base "+dir+"/rootdisk/disk.img --keep-relative --active --pivot") {
+		t.Errorf("Merge must start the job and return, log:\n%s", log)
+	}
+	if _, err := s.Merge(ctx, testVM, "rootdisk", "disk.img", "snap-a.qcow2"); !errors.Is(err, ErrMergeRunning) {
+		t.Fatalf("Merge: %v, want ErrMergeRunning until the job is ready", err)
+	}
+	if n := strings.Count(strings.Join(f.log, "\n"), "blockcommit"); n != 1 {
+		t.Errorf("a running job must not be started again, blockcommit ran %d times", n)
+	}
+	chain, err := s.Merge(ctx, testVM, "rootdisk", "disk.img", "snap-a.qcow2")
+	if err != nil {
+		t.Fatalf("Merge: %v, want done once the job is ready and pivoted", err)
+	}
+	if got := fmt.Sprint(names(chain)); got != "[disk.img]" {
+		t.Errorf("chain = %s", got)
+	}
+	if f.files[dir+"/rootdisk/disk.img"] != "0644" {
+		t.Error("disk.img is the live file again and must be writable")
+	}
+	if _, left := f.files[dir+"/rootdisk/snap-a.qcow2"]; left {
+		t.Error("the merged file must be deleted")
+	}
+}
+
+func TestMerge_MiddleSnapshotDoesNotWait(t *testing.T) {
+	f := newFakeLauncher()
+	f.jobPolls = 1
+	s := newTestSnapshotter(f)
+	chainOf(t, s, "rootdisk", "snap-a.qcow2", "snap-b.qcow2")
+	ctx := context.Background()
+	for i := 0; i < 2; i++ {
+		if _, err := s.Merge(ctx, testVM, "rootdisk", "disk.img", "snap-a.qcow2"); !errors.Is(err, ErrMergeRunning) {
+			t.Fatalf("call %d: %v, want ErrMergeRunning", i, err)
+		}
+	}
+	chain, err := s.Merge(ctx, testVM, "rootdisk", "disk.img", "snap-a.qcow2")
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if got := fmt.Sprint(names(chain)); got != "[snap-b.qcow2 disk.img]" {
+		t.Errorf("chain = %s", got)
+	}
+	if f.files[dir+"/rootdisk/disk.img"] != "0444" {
+		t.Error("disk.img holds snap-b's snapshot now and must be read-only")
+	}
+}
+
+func TestMerge_FailedPivotAbortsTheJob(t *testing.T) {
+	f := newFakeLauncher()
+	f.pivotErr = "error: internal error: unable to execute QEMU command 'job-complete'"
+	s := newTestSnapshotter(f)
+	chainOf(t, s, "rootdisk", "snap-a.qcow2")
+	ctx := context.Background()
+	if _, err := s.Merge(ctx, testVM, "rootdisk", "disk.img", "snap-a.qcow2"); !errors.Is(err, ErrMergeRunning) {
+		t.Fatalf("Merge: %v", err)
+	}
+	_, err := s.Merge(ctx, testVM, "rootdisk", "disk.img", "snap-a.qcow2")
+	if err == nil || errors.Is(err, ErrMergeRunning) {
+		t.Fatalf("Merge: %v, want the pivot error", err)
+	}
+	if fmt.Sprint(f.aborts) != "[vda]" {
+		t.Errorf("aborts = %v: a failed pivot must stop the job", f.aborts)
+	}
+	if f.files[dir+"/rootdisk/disk.img"] != "0444" {
+		t.Error("disk.img still holds the snapshot and must be read-only again")
+	}
+	if got := fmt.Sprint(f.chains["rootdisk"]); got != "[snap-a.qcow2 disk.img]" {
+		t.Errorf("chain = %s", got)
+	}
+}
+
+func TestMerge_WaitsForAnotherBlockJob(t *testing.T) {
+	f := newFakeLauncher()
+	s := newTestSnapshotter(f)
+	chainOf(t, s, "rootdisk", "snap-a.qcow2")
+	f.jobs["vda"] = &fakeJob{kind: "Block Copy", vol: "rootdisk", polls: 5}
+	if _, err := s.Merge(context.Background(), testVM, "rootdisk", "disk.img", "snap-a.qcow2"); err == nil {
+		t.Fatal("expected an error while another block job runs on the disk")
+	}
+	if strings.Contains(strings.Join(f.log, "\n"), "blockcommit") || len(f.aborts) != 0 {
+		t.Error("Merge must not start a commit or stop another job")
 	}
 }

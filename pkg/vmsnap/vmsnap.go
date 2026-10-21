@@ -25,6 +25,7 @@ import (
 	"path"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,6 +52,9 @@ const (
 var (
 	// ErrNotADisk means the volume is not a file disk of the VM.
 	ErrNotADisk = errors.New("not a disk of the VM")
+	// ErrMergeRunning means a merge has started and is not done yet. Call
+	// Merge again to go on with it.
+	ErrMergeRunning = errors.New("the merge is running")
 	// ErrChainFull means the disk has MaxSnapshots snapshots already.
 	ErrChainFull = fmt.Errorf("the disk has %d snapshots, the most allowed", MaxSnapshots)
 
@@ -229,29 +233,118 @@ func (s *Snapshotter) Merge(ctx context.Context, vm vmcopy.VM, volume, file, chi
 	case ci != fi-1:
 		return nil, fmt.Errorf("%s is not the next file after %s in %v", child, file, names(d.chain))
 	}
-	if _, err = s.run(ctx, vm, "chmod", modeLive, folder+"/"+file); err != nil {
+	job, err := s.blockJob(ctx, vm, d.target)
+	if err != nil {
 		return nil, err
 	}
-	args := []string{"virsh", "blockcommit", vm.Domain(), d.target, "--base", folder + "/" + file, "--keep-relative", "--wait"}
-	if ci == 0 {
-		args = append(args, "--active", "--pivot")
-	} else {
-		args = append(args, "--top", folder+"/"+child)
-	}
-	if _, err = s.run(ctx, vm, args...); err != nil {
-		if _, modeErr := s.run(ctx, vm, "chmod", modeFrozen, folder+"/"+file); modeErr != nil {
-			return nil, fmt.Errorf("merging %s into %s: %w (and %s could not be made read-only again: %v)", child, file, err, file, modeErr)
+	switch {
+	case job == nil:
+		// A commit may have ended after the chain was read. Read it again
+		// so a done merge is not started twice.
+		again, err := s.disks(ctx, vm)
+		if err != nil {
+			return nil, err
 		}
-		return nil, fmt.Errorf("merging %s into %s: %w", child, file, err)
+		if fmt.Sprint(again.byVolume[volume].chain) != fmt.Sprint(d.chain) {
+			return s.Merge(ctx, vm, volume, file, child)
+		}
+		return nil, s.startCommit(ctx, vm, d, folder, file, child, ci == 0)
+	case job.kind != jobActiveCommit && job.kind != jobCommit:
+		return nil, fmt.Errorf("a %q job runs on %s; the merge waits for it", job.kind, volume)
+	case job.kind == jobCommit || !job.ready():
+		return nil, ErrMergeRunning
+	}
+	// The active commit is ready: QEMU writes to file and child alike. The
+	// pivot makes file the live file.
+	if _, err = s.run(ctx, vm, "virsh", "blockjob", vm.Domain(), d.target, "--pivot"); err != nil {
+		return nil, s.abortCommit(ctx, vm, d.target, folder+"/"+file, fmt.Errorf("merging %s into %s: %w", child, file, err))
 	}
 	chain := append(append([]File{}, d.chain[:ci]...), d.chain[fi:]...)
-	if err = s.setMode(ctx, vm, folder+"/"+file, ci == 0); err != nil {
+	if err = s.setMode(ctx, vm, folder+"/"+file, true); err != nil {
 		return nil, err
 	}
 	if _, err = s.run(ctx, vm, "rm", "-f", "--", folder+"/"+child); err != nil {
 		return nil, err
 	}
 	return chain, nil
+}
+
+// startCommit starts the block job that merges child into file, and returns
+// ErrMergeRunning. libvirt runs the job in the background. A commit of the
+// live file is pivoted by a later Merge, once it is ready.
+func (s *Snapshotter) startCommit(ctx context.Context, vm vmcopy.VM, d disk, folder, file, child string, active bool) error {
+	if _, err := s.run(ctx, vm, "chmod", modeLive, folder+"/"+file); err != nil {
+		return err
+	}
+	args := []string{"virsh", "blockcommit", vm.Domain(), d.target, "--base", folder + "/" + file, "--keep-relative"}
+	if active {
+		args = append(args, "--active")
+	} else {
+		args = append(args, "--top", folder+"/"+child)
+	}
+	if _, err := s.run(ctx, vm, args...); err != nil {
+		return s.abortCommit(ctx, vm, d.target, folder+"/"+file, fmt.Errorf("merging %s into %s: %w", child, file, err))
+	}
+	return ErrMergeRunning
+}
+
+// abortCommit stops a commit that failed, and makes the snapshot's file
+// read-only again: it still holds the snapshot. It returns cause.
+func (s *Snapshotter) abortCommit(ctx context.Context, vm vmcopy.VM, target, filePath string, cause error) error {
+	if job, err := s.blockJob(ctx, vm, target); err == nil && job != nil && (job.kind == jobActiveCommit || job.kind == jobCommit) {
+		if _, err = s.run(ctx, vm, "virsh", "blockjob", vm.Domain(), target, "--abort"); err != nil {
+			return fmt.Errorf("%w (and the job could not be stopped: %v)", cause, err)
+		}
+	}
+	if _, err := s.run(ctx, vm, "chmod", modeFrozen, filePath); err != nil {
+		return fmt.Errorf("%w (and %s could not be made read-only again: %v)", cause, filePath, err)
+	}
+	return cause
+}
+
+const (
+	jobActiveCommit = "Active Block Commit"
+	jobCommit       = "Block Commit"
+)
+
+// blockJob is a libvirt block job, as `virsh blockjob --info --raw` prints it.
+type blockJob struct {
+	kind     string
+	cur, end uint64
+}
+
+// ready reports whether an active commit may be pivoted. libvirt reports
+// cur equal to end only once QEMU says the job is ready.
+func (j *blockJob) ready() bool { return j.end > 0 && j.cur == j.end }
+
+// blockJob returns the block job on a disk target, or nil when there is none.
+func (s *Snapshotter) blockJob(ctx context.Context, vm vmcopy.VM, target string) (*blockJob, error) {
+	out, err := s.run(ctx, vm, "virsh", "blockjob", vm.Domain(), target, "--info", "--raw")
+	if err != nil {
+		return nil, err
+	}
+	var j blockJob
+	for _, line := range strings.Split(out, "\n") {
+		k, v, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok {
+			continue
+		}
+		switch k {
+		case "type":
+			j.kind = v
+		case "cur":
+			j.cur, err = strconv.ParseUint(v, 10, 64)
+		case "end":
+			j.end, err = strconv.ParseUint(v, 10, 64)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("parsing the block job of %s: %q: %w", target, line, err)
+		}
+	}
+	if j.kind == "" {
+		return nil, nil
+	}
+	return &j, nil
 }
 
 // Flatten merges every file of volume's chain into disk.img and deletes the
