@@ -86,11 +86,16 @@ func main() {
 		// Send-vm-disk mode flags (it also uses the sync-client flags).
 		vmGroup string
 		copyID  string
+
+		// Restore-vm-disk mode flags.
+		backupDisk    string
+		outDisk       string
+		restoreMoment string
 	)
 
 	flag.StringVar(&endpoint, "endpoint", "unix:///csi/csi.sock", "CSI endpoint")
 	flag.StringVar(&nodeID, "node-id", "", "Node ID")
-	flag.StringVar(&mode, "mode", "controller", "Driver mode: controller, node, receiver, sync-client, check-receiver, apply-vm-disk, or send-vm-disk")
+	flag.StringVar(&mode, "mode", "controller", "Driver mode: controller, node, receiver, sync-client, check-receiver, apply-vm-disk, send-vm-disk, or restore-vm-disk")
 	flag.StringVar(&region, "region", "", "IBM Cloud region (e.g. us-south); auto-discovered from secret provider if omitted")
 	flag.StringVar(&vpcID, "vpc-id", "", "IBM Cloud VPC ID for creating file share mount targets")
 	flag.StringVar(&subnetID, "subnet-id", "", "Comma-separated IBM Cloud worker subnet IDs; each share's mount target goes in the one in the pool's zone")
@@ -129,6 +134,11 @@ func main() {
 	flag.BoolVar(&vmCopy.full, "full", false, "The copy holds the whole disk (apply-vm-disk mode)")
 	flag.DurationVar(&vmCopy.keep, "keep", 24*time.Hour, "How long restore points are kept (apply-vm-disk mode)")
 
+	// Restore-vm-disk flags.
+	flag.StringVar(&backupDisk, "backup-disk", "", "Backed-up VM disk image to restore from (restore-vm-disk mode)")
+	flag.StringVar(&outDisk, "out-disk", "", "New disk image to write; it must not exist (restore-vm-disk mode)")
+	flag.StringVar(&restoreMoment, "restore-moment", "", "Moment to restore, RFC 3339; empty for the latest backup (restore-vm-disk mode)")
+
 	flag.StringVar(&vmGroup, "vm-group", "", "namespace/name of the VM that owns the disk (send-vm-disk mode)")
 	flag.StringVar(&copyID, "copy-id", "", "Name of this copy attempt; a repeat with the same name resumes (send-vm-disk mode)")
 
@@ -148,6 +158,8 @@ func main() {
 		runCheckReceiver(receiverEndpoint, authTokenFile, caCertFile)
 	case "apply-vm-disk":
 		runApplyVMDisk(stagingPath, diskPath, vmCopy)
+	case "restore-vm-disk":
+		runRestoreVMDisk(backupDisk, outDisk, restoreMoment)
 	case "send-vm-disk":
 		runSendVMDisk(receiverEndpoint, authTokenFile, caCertFile, stagingPath, destBasePath, subPath, subvolumeName, copyID, vmGroup, metadataJSON, vmCopy)
 	default:
