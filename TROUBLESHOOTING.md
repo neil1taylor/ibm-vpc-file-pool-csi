@@ -163,6 +163,22 @@ See [TUTORIAL.md](TUTORIAL.md) Step 8b and [VM-DISK-FORMATS.md](VM-DISK-FORMATS.
 
 ---
 
+### VM with instant snapshots does not start
+
+**Symptoms and causes:**
+- `admission webhook "vm-hook.storage.ibmcloud.io" denied the request: ... need the KubeVirt Sidecar feature gate`: the VM's disks have instant snapshots and the `Sidecar` gate is off. Turn it on (see [VM-INSTANT-SNAPSHOTS.md](VM-INSTANT-SNAPSHOTS.md)), or remove the snapshots with `kubectl pool-snapshots flatten <vm> -n <namespace>`.
+- `... a snapshot Job changes the disk now`: a Job adds or merges a snapshot file of the stopped VM. KubeVirt starts the VM when it is done.
+- `sidecar feature gate is not enabled in kubevirt-config, invalid entry metadata.annotations.hooks.kubevirt.io/hookSidecars`: the gate was turned off after the VM got its hook. As above.
+- `Could not open '/var/run/kubevirt-private/vmi-disks/<volume>/disk.img': Permission denied` (VMI event `SyncFailed`): the VM started without the hook, so it tried to write a frozen snapshot file. This is the safety stop: nothing was written. Check that the controller and its webhook run (`kubectl get mutatingwebhookconfiguration | grep vm-hook`), and that the ConfigMap `ibm-vpc-file-pool-vm-hook` exists in the VM's namespace, then restart the VM.
+
+**Diagnosis:**
+```bash
+kubectl get subvolume <pv-name> -o jsonpath='{.status.diskChain}{"\n"}{.status.chainOperation}{"\n"}'
+kubectl get vmi <vm> -n <ns> -o jsonpath='{.metadata.annotations.storage\.ibmcloud\.io/disk-tops}{"\n"}'
+```
+
+---
+
 ### OpenShift Virtualization UI: "no accessMode specified in StorageProfile"
 
 **Symptom:** When creating a VM through the OpenShift Virtualization UI using the `ibm-vpc-file-pool` StorageClass, the UI shows:

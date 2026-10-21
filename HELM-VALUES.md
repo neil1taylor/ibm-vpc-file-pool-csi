@@ -114,6 +114,15 @@ Controller-side replication Job configuration.
 |-----------|------|---------|-------------|
 | `replication.image` | string | `""` | Override container image for replication Jobs. When empty, the driver image is used for receiver-mode (sync-client) Jobs; CentOS Stream 9 is used for direct-NFS (rsync) Jobs |
 
+## VM Snapshots
+
+See [VM-INSTANT-SNAPSHOTS.md](VM-INSTANT-SNAPSHOTS.md).
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `vmSnapshots.method` | string | `auto` | `auto`: a snapshot of a KubeVirt VM disk is instant (a new overlay file, nothing copied) where the KubeVirt `Sidecar` feature gate is on, and a copy elsewhere. It adds the VM hook webhook. `copy`: every VM disk snapshot is a copy, and there is no VM hook webhook. Red Hat does not support the `Sidecar` feature gate |
+| `vmSnapshots.launcherImage` | string | `""` | KubeVirt's virt-launcher image, which has `qemu-img`, for the Jobs that change a stopped VM's snapshot files and that restore instant snapshots. Empty reads it from the virt-operator Deployment in the namespace of the `KubeVirt` resource |
+
 ## Webhook
 
 | Parameter | Type | Default | Description |

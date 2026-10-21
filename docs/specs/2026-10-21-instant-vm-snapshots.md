@@ -165,4 +165,7 @@ A restored disk could be a new overlay file in the new folder, on top of the sna
 - A claim with snapshots keeps its folder until the last snapshot goes.
 - Each snapshot is charged 10 % of the disk size; real use is measured and shown.
 - Turning the gate off never deletes data. VMs with chains refuse to start until you run `flatten`.
-- The wrong-moment bug in the copy method and the other snapshot bugs found on 21 Oct are fixed in separate issues, not in this build.
+- The wrong-moment bug in the copy method and the other snapshot bugs found on 21 Oct are fixed in separate issues, not in this build. The exception is the restore size check (#98), which the restore path needed.
+- Changed while building: replication makes a full copy after each snapshot instead of moving its change list to the new file. Moving it safely would need the change list and the snapshot in one QEMU step, which libvirt does not offer; a full copy is always correct.
+- Changed while building: a clone of a disk with snapshots is refused instead of flattened. Restoring a snapshot does the same job.
+- Changed while building: new files name their backing file by file name only, and the stopped-VM and restore Jobs run in KubeVirt's virt-launcher image (it has `qemu-img`), mount only the folders they need, and check the chain before they open it.
