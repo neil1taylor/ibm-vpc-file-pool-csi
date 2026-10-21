@@ -5,6 +5,10 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 // A snapshot call can wait a long time on the VM pod or the Kubernetes API.
@@ -108,5 +112,41 @@ func TestSnapshotLock_TheSameDiskWaits(t *testing.T) {
 	waitDone(t, second, "the second snapshot")
 	if len(e.snap.takes) != 2 {
 		t.Errorf("takes = %d, want 2", len(e.snap.takes))
+	}
+}
+
+// OpenShift snapshots every disk of a VM at once, so two calls can record a
+// disk's top file on the same VMI at the same time. Neither may lose the
+// other's entry: the hook opens the wrong file for a disk without one.
+func TestSetDiskTop_KeepsAConcurrentEntry(t *testing.T) {
+	base := newInstantDirectClient()
+	injected := false
+	c := interceptor.NewClient(base.(client.WithWatch), interceptor.Funcs{
+		Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if err := cl.Get(ctx, key, obj, opts...); err != nil {
+				return err
+			}
+			// Right after this call reads the VMI, another call records
+			// the data disk's top file.
+			if u, ok := obj.(*unstructured.Unstructured); ok && u.GetKind() == "VirtualMachineInstance" && !injected {
+				injected = true
+				other := u.DeepCopy()
+				other.SetAnnotations(map[string]string{DiskTopsAnnotation: `{"datadisk":"snap-bbbb.qcow2"}`})
+				if err := cl.Update(ctx, other); err != nil {
+					t.Fatalf("inject the other entry: %v", err)
+				}
+			}
+			return nil
+		},
+	})
+	e := newInstantEnv(t)
+	e.dc = c
+	e.mgr.SetInstantSnapshots(e.snap, e.jobs, c)
+	e.createVMI(false)
+
+	e.mgr.setDiskTop(context.Background(), "default", "web", "rootdisk", "snap-aaaa.qcow2")
+
+	if tops := e.diskTops(); tops["rootdisk"] != "snap-aaaa.qcow2" || tops["datadisk"] != "snap-bbbb.qcow2" {
+		t.Errorf("disk tops = %v, want both disks' entries", tops)
 	}
 }
