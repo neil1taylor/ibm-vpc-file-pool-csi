@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -184,5 +186,19 @@ func TestRestore_WaitTimesOut(t *testing.T) {
 	l := &v1alpha1.BackupRestoreList{}
 	if err := c.List(context.Background(), l); err != nil || len(l.Items) != 1 {
 		t.Errorf("restores = %v, %v; want the request to stay", l.Items, err)
+	}
+}
+
+// kubectl plugins must use the KUBECONFIG variable when --kubeconfig is not given.
+func TestBuildClient_UsesKUBECONFIGVariable(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "kubeconfig")
+	yaml := "apiVersion: v1\nkind: Config\nclusters:\n- name: c\n  cluster:\n    server: https://127.0.0.1:1\ncontexts:\n- name: x\n  context:\n    cluster: c\n    user: u\ncurrent-context: x\nusers:\n- name: u\n  user:\n    token: t\n"
+	if err := os.WriteFile(cfg, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KUBECONFIG", cfg)
+	t.Setenv("HOME", t.TempDir())
+	if _, err := buildClient(""); err != nil {
+		t.Fatalf("buildClient did not use KUBECONFIG: %v", err)
 	}
 }
