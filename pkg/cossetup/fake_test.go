@@ -27,6 +27,7 @@ type fakeCloud struct {
 	rules     []map[string]any
 	kpKeys    map[string]bool
 	nextID    int
+	requests  int // every request, reads included
 	// broadPolicyOnKey makes a new resource key add a policy on the whole
 	// instance to the service ID, as a service key might.
 	broadPolicyOnKey bool
@@ -74,6 +75,7 @@ func jsonOut(w http.ResponseWriter, code int, v any) {
 func (f *fakeCloud) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.requests++
 	if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
 		http.Error(w, "no token", http.StatusUnauthorized)
 		return

@@ -17,7 +17,7 @@ func TestEnvironmentTokenExchangesAnAPIKey(t *testing.T) {
 	defer srv.Close()
 	t.Setenv("IBMCLOUD_IAM_TOKEN", "")
 	t.Setenv("IBMCLOUD_API_KEY", "my-api-key")
-	tok, err := EnvironmentToken{HTTP: srv.Client(), IAM: srv.URL}.Token(context.Background())
+	tok, err := EnvironmentToken{HTTP: srv.Client(), IAM: srv.URL, allowAnyHost: true}.Token(context.Background())
 	if err != nil || tok != "tok-1" {
 		t.Fatalf("token = %q, %v", tok, err)
 	}

@@ -49,6 +49,10 @@ type Setup struct {
 	In          io.Reader
 	Out         io.Writer
 	Interactive bool // a person can type answers
+
+	// allowAnyHost lets tests use an httptest server. It is not reachable from
+	// a flag or an environment variable.
+	allowAnyHost bool
 }
 
 var bucketNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`)
@@ -69,6 +73,9 @@ func parseRootKey(crn string) (kpKey, error) {
 	}
 	if len(p) < 10 || p[0] != "crn" || (p[4] != "kms" && p[4] != "hs-crypto") || p[8] != "key" || p[5] == "" || p[7] == "" || p[9] == "" {
 		return kpKey{}, fmt.Errorf("--root-key must be the CRN of a Key Protect root key (crn:v1:bluemix:public:kms:REGION:a/ACCOUNT:INSTANCE:key:KEYID), got %q", crn)
+	}
+	if err := validRegion(p[5]); err != nil {
+		return kpKey{}, fmt.Errorf("--root-key: the region in the CRN: %w", err)
 	}
 	return kpKey{service: p[4], region: p[5], instance: p[7], id: p[9]}, nil
 }
@@ -112,6 +119,8 @@ func (o *Options) validate() (time.Duration, error) {
 	switch {
 	case o.Region == "":
 		return 0, fmt.Errorf("--region is required (the region of the bucket, such as eu-de)")
+	case validRegion(o.Region) != nil:
+		return 0, fmt.Errorf("--region: %w", validRegion(o.Region))
 	case o.ResourceGroup == "":
 		return 0, fmt.Errorf("--resource-group is required")
 	case !bucketNameRE.MatchString(o.Bucket):

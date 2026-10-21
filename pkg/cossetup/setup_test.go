@@ -90,6 +90,7 @@ func newEnv(t *testing.T, input string) *env {
 				KeyProtect: func(string) string { return srv.URL + "/kp" },
 			},
 			Rand: bytes.NewReader(bytes.Repeat([]byte{7}, 64)), In: strings.NewReader(input), Out: out, Interactive: true,
+			allowAnyHost: true, // the fake runs on 127.0.0.1; only tests can set this
 		},
 		opts: Options{
 			Region: "eu-de", ResourceGroup: "rg", InstanceName: "pool-csi-backup-cos", Bucket: "pool-csi-test-bucket",

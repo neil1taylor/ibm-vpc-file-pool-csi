@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 )
 
@@ -63,6 +64,8 @@ func (t StaticToken) Token(context.Context) (string, error) { return string(t), 
 type EnvironmentToken struct {
 	HTTP Doer
 	IAM  string
+
+	allowAnyHost bool // tests only
 }
 
 // Token returns a bearer token without the "Bearer " prefix.
@@ -89,6 +92,11 @@ func (e EnvironmentToken) Token(ctx context.Context) (string, error) {
 }
 
 func (e EnvironmentToken) exchange(ctx context.Context, apiKey string) (string, error) {
+	if !e.allowAnyHost {
+		if err := checkHost(e.IAM); err != nil {
+			return "", err
+		}
+	}
 	form := url.Values{"grant_type": {"urn:ibm:params:oauth:grant-type:apikey"}, "apikey": {apiKey}}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.IAM+"/identity/token", strings.NewReader(form.Encode()))
 	if err != nil {
@@ -204,6 +212,12 @@ func (r *run) call(ctx context.Context, method, rawURL string, body any, headers
 			headers["Content-Type"] = "application/json"
 		}
 	}
+	// The check comes before the token is attached to anything.
+	if !r.s.allowAnyHost {
+		if err := checkHost(rawURL); err != nil {
+			return reply{}, err
+		}
+	}
 	req, err := http.NewRequestWithContext(ctx, method, rawURL, rd)
 	if err != nil {
 		return reply{}, err
@@ -220,6 +234,32 @@ func (r *run) call(ctx context.Context, method, rawURL string, body any, headers
 	defer func() { _ = resp.Body.Close() }()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	return reply{status: resp.StatusCode, body: data}, nil
+}
+
+var regionRE = regexp.MustCompile(`^[a-z]{2}-[a-z]+(-[0-9])?$`)
+
+// validRegion accepts only the shape of an IBM Cloud region, such as eu-de or
+// us-south. A region becomes part of a host name, so anything else (a dot, a
+// slash, an @, a colon, a space) is refused.
+func validRegion(region string) error {
+	if !regionRE.MatchString(region) {
+		return fmt.Errorf("%q is not a valid IBM Cloud region (expected something like eu-de or us-south)", region)
+	}
+	return nil
+}
+
+// checkHost allows a request only to an https address on an IBM Cloud domain.
+// The caller's token and keys are sent only to such hosts.
+func checkHost(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.User != nil {
+		return fmt.Errorf("refusing to send credentials to %s: not an https IBM Cloud address", redactURL(raw))
+	}
+	h := strings.ToLower(u.Hostname())
+	if !strings.HasSuffix(h, ".cloud.ibm.com") && !strings.HasSuffix(h, ".appdomain.cloud") {
+		return fmt.Errorf("refusing to send credentials to %s: not an IBM Cloud host", redactURL(raw))
+	}
+	return nil
 }
 
 func redactURL(raw string) string {
