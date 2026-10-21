@@ -1,0 +1,99 @@
+package webhook
+
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+
+	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+func validBackupPolicy() *v1alpha1.BackupPolicy {
+	return &v1alpha1.BackupPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "nightly"},
+		Spec: v1alpha1.BackupPolicySpec{
+			SnapshotPool: "backups",
+			Schedule:     "6h",
+			Selector:     &metav1.LabelSelector{MatchLabels: map[string]string{"backup": "yes"}},
+			KeepFor:      "7d",
+		},
+	}
+}
+
+func TestBackupPolicyValidator_Valid(t *testing.T) {
+	v := &BackupPolicyValidator{}
+	if _, err := v.ValidateCreate(context.Background(), validBackupPolicy()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := v.ValidateUpdate(context.Background(), validBackupPolicy(), validBackupPolicy()); err != nil {
+		t.Fatalf("unexpected error on update: %v", err)
+	}
+}
+
+func TestBackupPolicyValidator_Refuses(t *testing.T) {
+	zero := int32(0)
+	neg := int32(-1)
+	cases := []struct {
+		name   string
+		mutate func(*v1alpha1.BackupPolicy)
+		want   string
+	}{
+		{"no pool", func(p *v1alpha1.BackupPolicy) { p.Spec.SnapshotPool = "" }, "snapshotPool"},
+		{"no schedule", func(p *v1alpha1.BackupPolicy) { p.Spec.Schedule = "" }, "schedule"},
+		{"bad schedule", func(p *v1alpha1.BackupPolicy) { p.Spec.Schedule = "often" }, "schedule"},
+		{"too frequent", func(p *v1alpha1.BackupPolicy) { p.Spec.Schedule = "30s" }, "schedule"},
+		{"no selector", func(p *v1alpha1.BackupPolicy) { p.Spec.Selector = nil }, "selector"},
+		{"empty selector selects everything", func(p *v1alpha1.BackupPolicy) { p.Spec.Selector = &metav1.LabelSelector{} }, "selector"},
+		{"bad selector", func(p *v1alpha1.BackupPolicy) {
+			p.Spec.Selector = &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "a", Operator: "Nope"}}}
+		}, "selector"},
+		{"bad keep", func(p *v1alpha1.BackupPolicy) { p.Spec.KeepFor = "soon" }, "keepFor"},
+		{"keep under an hour", func(p *v1alpha1.BackupPolicy) { p.Spec.KeepFor = "30m" }, "keepFor"},
+		{"negative days", func(p *v1alpha1.BackupPolicy) { p.Spec.KeepFor = "-3d" }, "keepFor"},
+		{"negative speed", func(p *v1alpha1.BackupPolicy) { p.Spec.VMCopySpeedLimitMBps = &neg }, "vmCopySpeedLimitMBps"},
+		{"empty namespace name", func(p *v1alpha1.BackupPolicy) { p.Spec.Namespaces = []string{""} }, "namespaces"},
+	}
+	for _, tc := range cases {
+		p := validBackupPolicy()
+		tc.mutate(p)
+		_, err := (&BackupPolicyValidator{}).ValidateCreate(context.Background(), p)
+		if err == nil {
+			t.Errorf("%s: want an error", tc.name)
+			continue
+		}
+		if !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: error %q should name %q", tc.name, err, tc.want)
+		}
+	}
+	// A speed of 0 means no limit and is allowed.
+	p := validBackupPolicy()
+	p.Spec.VMCopySpeedLimitMBps = &zero
+	if _, err := (&BackupPolicyValidator{}).ValidateCreate(context.Background(), p); err != nil {
+		t.Errorf("speed 0 (no limit): %v", err)
+	}
+}
+
+func TestBackupPolicyKeepDuration(t *testing.T) {
+	cases := map[string]time.Duration{
+		"":      7 * 24 * time.Hour, // the default
+		"7d":    7 * 24 * time.Hour,
+		"30d":   30 * 24 * time.Hour,
+		"36h":   36 * time.Hour,
+		"90m":   90 * time.Minute,
+		"1d12h": 0, // not accepted: use "36h"
+	}
+	for in, want := range cases {
+		got, err := v1alpha1.ParseKeepFor(in)
+		if want == 0 {
+			if err == nil {
+				t.Errorf("ParseKeepFor(%q) = %v, want an error", in, got)
+			}
+			continue
+		}
+		if err != nil || got != want {
+			t.Errorf("ParseKeepFor(%q) = %v, %v; want %v", in, got, err, want)
+		}
+	}
+}
