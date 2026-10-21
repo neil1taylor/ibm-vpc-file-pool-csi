@@ -69,13 +69,18 @@ type BackupController struct {
 	reported map[string]bool
 	// usage holds what the usage Jobs found, by share ID.
 	usage map[string]*poolUsage
+	// exports holds what the controller remembers about the COS exports of each
+	// policy; exportReported holds the policies that have export metric series.
+	exports        map[string]*exportState
+	exportReported map[string]bool
 }
 
 // NewBackupController returns a controller that reads and writes with c. It
 // must read without a cache of pods or PVCs for every namespace, as the
 // replication controller does.
 func NewBackupController(c client.Client) *BackupController {
-	return &BackupController{client: c, interval: DefaultBackupInterval, nowFunc: time.Now, reported: map[string]bool{}, usage: map[string]*poolUsage{}}
+	return &BackupController{client: c, interval: DefaultBackupInterval, nowFunc: time.Now, reported: map[string]bool{}, usage: map[string]*poolUsage{},
+		exports: map[string]*exportState{}, exportReported: map[string]bool{}}
 }
 
 // SetNowFunc replaces the clock (for tests).
@@ -114,6 +119,16 @@ func (bc *BackupController) ReconcileAll(ctx context.Context) {
 			metrics.BackupStalestAgeSeconds.DeleteLabelValues(name)
 			metrics.BackupOldestAgeSeconds.DeleteLabelValues(name)
 			delete(bc.reported, name)
+		}
+	}
+	for name := range bc.exportReported {
+		if !known[name] {
+			bc.deleteExportMetrics(name)
+		}
+	}
+	for name := range bc.exports {
+		if !known[name] {
+			delete(bc.exports, name)
 		}
 	}
 	sort.Slice(list.Items, func(i, j int) bool {
@@ -208,6 +223,7 @@ func (bc *BackupController) reconcile(ctx context.Context, bp *v1alpha1.BackupPo
 	defer func() {
 		bc.saveStatus(ctx, bp, status)
 		bc.recordMetrics(bp, status)
+		bc.recordExportMetrics(bp, status)
 	}()
 
 	svs := &v1alpha1.SubVolumeList{}
@@ -299,6 +315,7 @@ func (bc *BackupController) reconcile(ctx context.Context, bp *v1alpha1.BackupPo
 	if msg := bc.shareProblems(bp, status, shares, full, usedPercent, waiting); msg != "" {
 		status.Phase, status.Message = backupPhaseError, msg
 	}
+	bc.reconcileExport(ctx, bp, &status, shares)
 }
 
 // shareProblems says what is wrong with the shares of the snapshot pool, for
@@ -636,6 +653,14 @@ func (bc *BackupController) buildStatus(ctx context.Context, bp *v1alpha1.Backup
 			for _, old := range bp.Status.Volumes {
 				if old.SubVolumeName == t.sv.Name {
 					v.StorageClassName = old.StorageClassName
+				}
+			}
+		}
+		if bp.Spec.Export != nil {
+			// The export fields are the controller's own: keep what the last pass knew.
+			for _, old := range bp.Status.Volumes {
+				if old.SubVolumeName == t.sv.Name {
+					v.ExportedTime, v.ExportedBytes, v.ExportError = old.ExportedTime, old.ExportedBytes, old.ExportError
 				}
 			}
 		}

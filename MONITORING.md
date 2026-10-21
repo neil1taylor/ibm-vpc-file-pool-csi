@@ -8,7 +8,7 @@ Complete metrics reference, alerting rules, and dashboard templates for operatin
 
 The controller exposes Prometheus metrics on `:8080/metrics`. All metrics use the `vpc_file_pool_` or `pool_csi_` prefix and follow the [Prometheus naming conventions](https://prometheus.io/docs/practices/naming/).
 
-The driver emits 25 metrics across eight categories:
+The driver emits 28 metrics across eight categories:
 
 | Category | Metrics | Purpose |
 |----------|---------|---------|
@@ -19,7 +19,7 @@ The driver emits 25 metrics across eight categories:
 | Group Snapshots | 4 | Multi-PVC snapshot coordination |
 | Replication | 5 | Cross-region DR health |
 | CDI | 1 | CDI copy pod memory limit |
-| Backup | 4 | Backup policy health, age of backups and fullness of the snapshot pool |
+| Backup | 6 | Backup policy health, age of backups, fullness of the snapshot pool and lateness of the export to COS |
 
 ---
 
@@ -175,6 +175,8 @@ kill %1
 | `vpc_file_pool_backup_volumes` | Gauge | `policy` | Number of volumes a backup policy backs up. |
 | `vpc_file_pool_backup_stalest_age_seconds` | Gauge | `policy` | Age of the newest backup of the volume that was backed up longest ago. A volume that was never backed up counts from the time the policy was made. This is the RPO indicator of a backup policy. |
 | `vpc_file_pool_backup_oldest_age_seconds` | Gauge | `policy` | Age of the oldest backup the policy keeps. It should stay near `keepFor`. |
+| `vpc_file_pool_backup_export_oldest_unexported_age_seconds` | Gauge | `policy` | Age of the oldest backup moment that is in the snapshot pool and not yet in COS. 0 when everything is exported. Only for policies with `spec.export`. |
+| `vpc_file_pool_backup_export_newest_age_seconds` | Gauge | `policy` | Age of the newest export to COS (the moment it sent). Before the first export, it counts from the time the policy was made, once a backup exists. Only for policies with `spec.export`. This is the RPO indicator of the COS copy. |
 | `vpc_file_pool_backup_snapshot_pool_used_percent` | Gauge | `pool`, `share` | Percent of a share of the snapshot pool that is used, read by a Job about every 10 minutes (`df`). The controller cannot see this from custom resources: a pool counts only claims, not backups. Above 85%, the policies stop new backups to that share. |
 
 Copy results of backups are in the replication metrics: the policies the controller makes are named `backup-<policy>-<source pool>`.
@@ -188,6 +190,24 @@ Alert when a backup is late, using twice the schedule as the limit (here 12 hour
   annotations:
     summary: "Backup policy {{ $labels.policy }} has a volume with no backup for over 12 hours"
 ```
+
+Alert when the copy in COS is late, using twice the export schedule as the limit (here 12 hours for a `spec.export.schedule` of `6h`; with no export schedule, use twice the backup schedule). The first alert is the age of the newest export; the second is a moment that waits too long to go out:
+
+```yaml
+- alert: ExportLate
+  expr: vpc_file_pool_backup_export_newest_age_seconds > 12 * 3600
+  for: 15m
+  annotations:
+    summary: "Backup policy {{ $labels.policy }} has not exported to COS for over 12 hours"
+
+- alert: ExportMomentWaiting
+  expr: vpc_file_pool_backup_export_oldest_unexported_age_seconds > 12 * 3600
+  for: 15m
+  annotations:
+    summary: "Backup policy {{ $labels.policy }} has a backup moment that has waited over 12 hours to go to COS"
+```
+
+An export problem never stops the backups to the snapshot pool. `status.volumes[].exportError` says what failed. The chart does not ship these two rules yet (issue #117).
 
 Alert before the snapshot pool reaches the limit, and when it has. At 85% the policies on the pool stop new backups; they never delete backups to make room, so the fix is more space or a shorter `keepFor`:
 

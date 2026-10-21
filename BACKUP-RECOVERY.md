@@ -379,6 +379,29 @@ It refuses, and changes nothing, in these cases:
 
 If the policy is already deleted, its status can no longer say where the backup is. Name the snapshot pool and the volume yourself: `--pool backups --volume pvc-...`. The volume name is the folder under `/backup/<policy>/pvcs/` on the share.
 
+### Export to COS (building; not usable end to end yet)
+
+A policy can also send its backups to an IBM Cloud Object Storage bucket, encrypted before they leave the cluster, with a lock that nobody can shorten. The controller does this with the `spec.export` block:
+
+```yaml
+spec:
+  export:
+    bucket: pool-backups
+    endpoint: s3.eu-de.cloud-object-storage.appdomain.cloud
+    prefix: lab
+    credentialsSecret: cos-credentials   # in the driver namespace
+    backupKeySecret: cos-backup-key      # in the driver namespace
+    keepFor: 30d                         # default; at least 25h with lock Compliance
+    lock: Compliance                     # or None
+    schedule: 6h                         # optional; default: after each local backup
+```
+
+After each local backup of a volume, an export Job reads the snapshot pool's share (read-only, so a running VM is never slowed) and sends the changes to the bucket. `kubectl get backuppolicy NAME -o yaml` shows `exportedTime`, `exportedBytes` and `exportError` for each volume. A failed export is tried again after 5 minutes and never stops the backups to the snapshot pool. A maintenance Job runs once a day (hourly for the shortest keep time of 25 hours) and deletes snapshots older than `keepFor`. Alert rules for a late export are in [MONITORING.md](MONITORING.md#backup-metrics).
+
+Not built yet: the handling of the backup key (the Secrets above are made by hand), the `kubectl backup cos-setup` command that makes the bucket, the keys and the lock, and the restore from COS. For the bucket and its lock, see [TUTORIAL-09-COS-BACKUP-BUCKET.md](TUTORIAL-09-COS-BACKUP-BUCKET.md). The design is in `docs/specs/2026-10-21-backup-cos-export.md`.
+
+**A Compliance lock cannot be undone**, not even by IBM. Locked data is billed until its lock ends, also after you delete the policy.
+
 ---
 
 ## Cross-Region Replication

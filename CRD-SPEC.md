@@ -1367,10 +1367,34 @@ type BackupPolicySpec struct {
     VMCopySpeedLimitMBps *int32 `json:"vmCopySpeedLimitMBps,omitempty"`
     // Suspend stops new backups. Existing backups stay.
     Suspend bool `json:"suspend,omitempty"`
+    // Export also sends the backups to an IBM Cloud Object Storage bucket (see below). Optional.
+    Export *BackupExport `json:"export,omitempty"`
+}
+
+type BackupExport struct {
+    Bucket   string `json:"bucket"`             // the COS bucket
+    Endpoint string `json:"endpoint"`           // S3 host, e.g. s3.eu-de.cloud-object-storage.appdomain.cloud
+    Prefix   string `json:"prefix,omitempty"`   // folder in the bucket; the policy's own area is <prefix>/<policy>/
+    // CredentialsSecret names a Secret in the driver namespace with the driver's COS HMAC key:
+    // access_key_id and secret_access_key.
+    CredentialsSecret string `json:"credentialsSecret"`
+    // BackupKeySecret names a Secret in the driver namespace with the key that encrypts the
+    // backups (key "backupKey"). Only the Jobs read it, never the controller.
+    BackupKeySecret string `json:"backupKeySecret"`
+    // KeepFor is a Go duration or a number of days. Default "30d". At least one hour; with a
+    // Compliance lock, at least 25 hours.
+    KeepFor string `json:"keepFor,omitempty"`
+    // Lock is "Compliance" (default: nobody can delete or shorten the keep time) or "None".
+    Lock string `json:"lock,omitempty"`
+    // Schedule is a Go duration of at least 1 minute: the most often a volume is sent.
+    // Empty: after each local backup.
+    Schedule string `json:"schedule,omitempty"`
 }
 ```
 
 Status: `phase` (`Active`, `Suspended`, `Error`; `Error` is also set, with the usage in `message`, while the snapshot pool's share is more than 85% full and new backups are stopped), `message`, `volumeCount`, `replicationPolicies`, and `volumes`. Each volume has the claim, the VM, `lastBackupTime`, `oldestBackupTime`, `restorePoints` (moments before the newest that can be restored), `bytesWritten`, `consistency` (`FileSystemConsistent` or `CrashConsistent` for a VM disk, `FileCopy` for any other volume) and `lastError`. It also keeps what a restore needs (`subPath`, `requestedGB`, `storageClassName`). A volume that was deleted, or no longer matches the selector, stays in the list with `retained: true` until the keep time has passed since its last backup.
+
+**Export to COS.** With `spec.export`, when the local backup of a volume has a moment newer than the last one exported, the controller starts an export Job for the volume (one at a time for each policy). The Job mounts the snapshot pool's share read-only and sends the backup folder and the moments folder to a Kopia repository in the bucket, in the area `<prefix>/<policy>/`. Each volume's status then has `exportedTime` (the moment of the newest copy in COS), `exportedBytes` (what the last export sent) and `exportError` (the last error; the export is tried again after 5 minutes). Once a volume is exported, a maintenance Job runs once every maintenance interval (a day, or less for a short keep time; one hour at the least): it extends the locks of chunks still in use and deletes the Kopia snapshots older than `keepFor`. The rule for the shortest Compliance lock is in one helper (`v1alpha1.MinComplianceKeepFor`): the keep time must be at least the maintenance interval plus 24 hours, so 25 hours at the least; the webhook and the controller both use it. An export problem never changes `phase` and never stops the backups to the snapshot pool. Removing `spec.export` clears the three export fields; backups already in COS stay until their lock ends. Key handling and `kubectl backup cos-setup` come in a later step; see `docs/specs/2026-10-21-backup-cos-export.md`.
 
 A volume belongs to one policy. A second policy that selects it skips it and says so in its `message`. The policy name goes into a label value, so it has at most 63 characters.
 
