@@ -31,6 +31,7 @@ Read the relevant doc before implementing any component:
 | `FEATURES.md` | Complete feature catalog with maturity badges and comparison table |
 | `VOLUME-CLONING.md` | Async Job-based clone design (Phase 4b) |
 | `VOLUME-GROUP-SNAPSHOTS.md` | Coordinated multi-PVC snapshots (Phase 4c) |
+| `VM-INSTANT-SNAPSHOTS.md` | Instant VM snapshots with overlay files (design; spec `docs/specs/2026-10-21-instant-vm-snapshots.md`) |
 | `CROSS-REGION-DR.md` | Replication architecture and consistency analysis (Phase 4d) |
 | `CONSISTENCY-MODEL.md` | NFS consistency guarantees and limitations |
 | `GOLDEN-IMAGE-WORKFLOW.md` | KubeVirt golden image syncer modes and setup |
