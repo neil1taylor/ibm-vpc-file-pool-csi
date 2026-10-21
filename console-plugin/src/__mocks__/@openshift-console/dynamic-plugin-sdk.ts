@@ -7,6 +7,9 @@ export const useK8sWatchResource = jest.fn(() => [[], true, undefined]);
 export const k8sCreate = jest.fn();
 export const k8sDelete = jest.fn();
 export const k8sPatch = jest.fn();
+
+// Access review mock: allowed, not loading
+export const useAccessReview = jest.fn(() => [true, false]);
 export const k8sUpdate = jest.fn();
 
 // Console fetch mock
