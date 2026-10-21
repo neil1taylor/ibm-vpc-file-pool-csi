@@ -305,6 +305,8 @@ spec:
 YAML
 restore_done() { [ "$(oc get vmrestore -n "$NS" vmrestore -o jsonpath='{.status.complete}' 2>/dev/null)" = true ]; }
 wait_until 2400 "the restore complete" restore_done
+# KubeVirt makes the restored VM stopped.
+virtctl start copy -n "$NS" >/dev/null
 wait_until 2400 "restored guest agent" agent_connected copy
 guest_ready() { vssh copy true >/dev/null 2>&1; }
 wait_until 1500 "the restored VM to answer" guest_ready
