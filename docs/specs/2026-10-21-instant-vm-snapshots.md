@@ -1,6 +1,6 @@
 # Spec: instant VM snapshots (overlay files)
 
-Date: 2026-10-21. Status: draft for review. It replaces the VM path of `2026-10-21-vm-safe-snapshots.md` (step 7) for clusters that allow it. How the method works, with the lab evidence, is in `VM-INSTANT-SNAPSHOTS.md`. Read that first.
+Date: 2026-10-21. Status: approved ("spec agreed continue"); updated with the lab check results the same day. It replaces the VM path of `2026-10-21-vm-safe-snapshots.md` (step 7) for clusters that allow it. How the method works, with the lab evidence, is in `VM-INSTANT-SNAPSHOTS.md`. Read that first.
 
 ## Goal
 
@@ -28,7 +28,7 @@ Gap against the goal (VMware-like): in VMware, "revert to snapshot" is instant. 
 `CreateSnapshot` uses the instant method when all of these are true:
 1. The volume is the disk of a KubeVirt VM (a `virt-launcher` pod mounts the claim, or the VM is stopped and its spec names the claim).
 2. The KubeVirt `Sidecar` feature gate is on. The driver reads it from the `KubeVirt` resource on each call.
-3. The VM was started with the driver's hook (see below), or it is stopped.
+3. The VM is running or stopped. A running VM does not need the hook for its first snapshot. The hook is only needed when a VM with a chain starts.
 4. The disk is not a hot-plugged disk.
 5. The disk's chain has fewer than 16 snapshot files.
 
@@ -41,10 +41,13 @@ Otherwise, it uses the existing copy method, and the Snapshot status says why (`
 
 ### The hook
 
-- The driver adds a hook to every VM that has a pool disk. A new mutating webhook on `VirtualMachineInstance` create adds the `hooks.kubevirt.io/hookSidecars` annotation. A VM is changed only when one of its volumes is a claim of this driver.
+- A new mutating webhook on `VirtualMachineInstance` create adds the `hooks.kubevirt.io/hookSidecars` annotation, only when both are true:
+  - at least one of the VM's disks is a pool claim with a chain (a snapshot exists), and
+  - the `Sidecar` feature gate is on. With the gate off, KubeVirt refuses any VMI with the hook annotation ("sidecar feature gate is not enabled"), so adding it would stop the VM from starting.
+- A VM without snapshots is never changed.
 - The hook uses KubeVirt's own `sidecar-shim` image, with a script from a ConfigMap. This is the setup tested in the lab. The controller keeps the ConfigMap `ibm-vpc-file-pool-vm-hook` in every namespace that has a pool claim.
 - The webhook also writes the current top file of each disk into a VMI annotation, `storage.ibmcloud.io/disk-top-<volume>`, read from the SubVolume status. The hook script opens that file as qcow2 instead of `disk.img`. With no annotation, the disk is opened as plain `disk.img`, as today.
-- After every snapshot and merge, the controller updates that annotation on the running VMI, so a live migration target gets the current file.
+- After every snapshot and merge, the controller updates that annotation on the running VMI. A live migration does not need it: the target takes the chain from the running VM (lab check 2). The annotation is for the next start.
 - The webhook is set to `failurePolicy: Ignore`. Missing the hook is made safe by the read-only rule below, not by blocking all VMs.
 
 ### The read-only rule (safety)
@@ -73,7 +76,8 @@ Rule: the snapshot's frozen file F has one child C (the next file up the chain).
 - Running VM, C is the live top: `virsh blockcommit --active --pivot`.
 - Running VM, C is in the middle: `virsh blockcommit --top C --base F`.
 - Stopped VM: a Job runs `qemu-img commit`.
-- Then delete C's file, fix read-only bits, update the chain in the SubVolume status and the VMI annotation.
+- F is read-only, and a merge into a read-only file fails. So the driver makes F writable just before the merge. If the merge fails, it makes F read-only again. If C was the live top, F is now the live top and stays writable.
+- Then delete C's file, update the chain in the SubVolume status and the VMI annotation.
 - A merge and a live migration cannot run at the same time. The driver waits and retries for up to 30 minutes, then returns an error that the snapshotter retries.
 
 ### Restore to a new disk
@@ -116,14 +120,15 @@ When a claim is deleted and its disk still has snapshots, the driver keeps the f
 - `cmd/` : the `flatten` command.
 - Docs: `VM-INSTANT-SNAPSHOTS.md` (from design to built), `FEATURES.md`, `KNOWN-LIMITATIONS.md`, `CONSISTENCY-MODEL.md`, `INSTALL.md`, `TROUBLESHOOTING.md`, `MONITORING.md`, `CHANGELOG.md`.
 
-## Lab checks before building
+## Lab checks (done, rovslab, 21 Oct)
 
-These are not yet known, and each one changes the design:
-1. Does KubeVirt change the permissions of `disk.img` when it starts a VM? If it does, the read-only rule does not work, and the webhook must use `failurePolicy: Fail` instead.
-2. A live migration straight after a snapshot, before the VMI annotation is updated: does the target open the chain?
-3. With the gate off, does KubeVirt refuse a VMI that has the hook annotation, or ignore the annotation?
-4. How long does OpenShift keep the guest frozen while it waits for the snapshots, and what is the time limit?
-5. Does the IBM add-on remove the `jsonpatch` annotation on its own? It survived about 3 hours on 21 Oct.
+1. **KubeVirt keeps the read-only bits.** A VM with a chain started with the hook, and `disk.img` stayed `0444`. Without the hook, the VM did not start: QEMU said "Could not open .../disk.img: Permission denied". The read-only rule works, so the webhook keeps `failurePolicy: Ignore`.
+2. **A live migration straight after a snapshot keeps the chain**, even for a VM started with no hook at all. The target takes the chain from the running VM.
+3. **With the gate off, KubeVirt refuses a VMI that has the hook annotation.** So the webhook adds the hook only when the gate is on and the VM has a chain (see "The hook").
+4. **Time limits:** a `VirtualMachineSnapshot` fails after 5 minutes by default, and the chart runs `csi-snapshotter` with `--timeout=300s`. OpenShift held the freeze for 1 second with a fast `CreateSnapshot`. An instant snapshot takes 2 to 5 seconds per disk.
+5. **The IBM add-on did not undo the `jsonpatch` annotation**, nor the driver's own `HyperConverged` change from 20 Oct. Only KubeVirt's operator wrote to the resource since then.
+
+New finding: a merge into a read-only file fails. The merge rule above handles it.
 
 ## Tests
 
@@ -151,7 +156,7 @@ A restored disk could be a new overlay file in the new folder, on top of the sna
 
 - The instant method is the default wherever the cluster allows it. The copy method stays for clusters without the `Sidecar` gate.
 - The hook uses KubeVirt's own shim image and a ConfigMap, as tested. No new image to pull into user namespaces.
-- The webhook adds the hook only to VMs with a pool disk, and does not block VM starts if it is down. Safety comes from the read-only rule.
+- The webhook adds the hook only to VMs that have snapshots, and only while the gate is on. It does not block VM starts if it is down. Safety comes from the read-only rule.
 - Chain state lives in the SubVolume status. After each change the driver reads the real chain from QEMU, and the real chain wins.
 - At most 16 snapshot files per disk. More are refused with a clear message, because long chains slow reads.
 - A plain `VolumeSnapshot` covers one disk. All disks at one moment comes from an OpenShift VM snapshot. No new group snapshot work.
