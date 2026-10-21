@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -86,8 +84,7 @@ func (f *fakeShareData) CopyDir(_ context.Context, key string, src ShareMount, s
 	return true, nil
 }
 
-// ApplyVMDisk writes a disk.img into the snapshot folder when the call is not
-// held up, so tests can see that the folder exists.
+// ApplyVMDisk records the call and reports done when the call is not held up.
 func (f *fakeShareData) ApplyVMDisk(_ context.Context, key string, _ ShareMount, volPath, stagingFile, dstPath string, moment time.Time) (bool, error) {
 	f.mu.Lock()
 	f.applies = append(f.applies, applyCall{key: key, volPath: volPath, stagingFile: stagingFile, dstPath: dstPath, moment: moment})
@@ -101,13 +98,6 @@ func (f *fakeShareData) ApplyVMDisk(_ context.Context, key string, _ ShareMount,
 	}
 	if inProgress {
 		return false, nil
-	}
-	dir := filepath.Join(f.base, dstPath)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return false, err
-	}
-	if err := os.WriteFile(filepath.Join(dir, "disk.img"), []byte("disk"), 0o600); err != nil {
-		return false, err
 	}
 	return true, nil
 }

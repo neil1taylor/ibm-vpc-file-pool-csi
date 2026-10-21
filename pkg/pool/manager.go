@@ -145,6 +145,8 @@ type Manager struct {
 	vpcClient            ibmcloud.VPCFileClient
 	nfsOps               NFSOperations
 	shareData            ShareData
+	vm                   *vmSnapshots
+	vmNow                func() time.Time
 	stagingBasePath      string
 	defaultResourceGroup string
 	network              *ShareNetwork
@@ -614,7 +616,10 @@ func (m *Manager) CreateSnapshot(ctx context.Context, snapshotName, sourceVolume
 	existing, err := m.k8sClient.GetSnapshot(ctx, snapshotName)
 	if err == nil && existing != nil {
 		poolName = existing.Spec.PoolName
-		if !existing.Status.ReadyToUse {
+		if existing.Status.Phase == "Failed" {
+			return nil, fmt.Errorf("snapshot %s failed: %s", snapshotName, existing.Status.Message)
+		}
+		if !existing.Status.ReadyToUse && existing.Annotations[snapshotMethodAnnotation] != snapshotMethodVM {
 			pool, poolErr := m.k8sClient.GetFileSharePool(ctx, poolName)
 			if poolErr != nil {
 				return nil, fmt.Errorf("%w: %s", ErrPoolNotFound, poolName)
@@ -624,6 +629,11 @@ func (m *Manager) CreateSnapshot(ctx context.Context, snapshotName, sourceVolume
 			}
 		}
 		return snapshotResult(existing), nil
+	}
+
+	speed, err := snapshotSpeed(params)
+	if err != nil {
+		return nil, err
 	}
 
 	// 2. Parse sourceVolumeID to get pvName
@@ -648,14 +658,32 @@ func (m *Manager) CreateSnapshot(ctx context.Context, snapshotName, sourceVolume
 	// 5. Build snapshot path
 	snapshotPath := fmt.Sprintf("/pvcs/.snapshots/snap-%s", snapshotName)
 
+	// A disk that a running VM writes to is copied with QEMU. Check before
+	// anything is created, so a failed check leaves nothing behind.
+	method := snapshotMethodFile
+	if m.vm != nil {
+		pod, _, vmErr := findVMPodForClaim(ctx, m.vm.kube, sv.Spec.PVCNamespace, sv.Spec.PVCName)
+		if vmErr != nil {
+			return nil, fmt.Errorf("check for a running VM: %w", vmErr)
+		}
+		if pod != nil {
+			method = snapshotMethodVM
+		}
+	}
+
 	// 6. Create the Snapshot CR, not ready until its copy has finished
 	if m.shareData == nil {
 		return nil, errShareDataNotSet
 	}
 	now := metav1.Now()
+	annotations := map[string]string{snapshotMethodAnnotation: method}
+	if speed != "" {
+		annotations[snapshotSpeedAnnotation] = speed
+	}
 	snap := &v1alpha1.Snapshot{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: snapshotName,
+			Name:        snapshotName,
+			Annotations: annotations,
 			Labels: map[string]string{
 				"storage.ibmcloud.io/pool":             poolName,
 				"storage.ibmcloud.io/share-id":         sv.Spec.ShareID,
@@ -696,9 +724,12 @@ func (m *Manager) CreateSnapshot(ctx context.Context, snapshotName, sourceVolume
 		klog.ErrorS(err, "Failed to update pool status after snapshot", "pool", poolName)
 	}
 
-	// 8. Copy the volume folder into the snapshot folder
-	if err := m.copySnapshotData(ctx, snap, pool); err != nil {
-		return nil, err
+	// 8. Copy the volume folder into the snapshot folder. A VM disk is
+	// copied by AdvanceVMSnapshots instead.
+	if method == snapshotMethodFile {
+		if err := m.copySnapshotData(ctx, snap, pool); err != nil {
+			return nil, err
+		}
 	}
 
 	klog.V(2).InfoS("Created snapshot",
@@ -741,6 +772,15 @@ func (m *Manager) copySnapshotData(ctx context.Context, snap *v1alpha1.Snapshot,
 		return fmt.Errorf("copy snapshot: %w", err)
 	}
 	if !done {
+		return nil
+	}
+	// A VM that started during the copy may have written to the disk while it
+	// was read. Then the folder is not a snapshot of one moment.
+	switched, err := m.switchToVMPath(ctx, snap)
+	if err != nil {
+		return err
+	}
+	if switched {
 		return nil
 	}
 	snap.Status.Phase = "Ready"
@@ -787,6 +827,9 @@ func (m *Manager) DeleteSnapshot(ctx context.Context, snapshotName string) (retE
 		return fmt.Errorf("%w: %s", ErrSnapshotNotFound, snapshotName)
 	}
 	poolName = snap.Spec.PoolName
+
+	// A QEMU copy in progress is cancelled first.
+	m.cancelVMSnapshotCopy(ctx, snap)
 
 	// 2. Remove the snapshot folder. The CR and its capacity stay until
 	// the folder is gone.

@@ -679,6 +679,10 @@ func (in *SnapshotStatus) DeepCopyInto(out *SnapshotStatus) {
 		*out = new(VMCopyState)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.VMCopyStarted != nil {
+		in, out := &in.VMCopyStarted, &out.VMCopyStarted
+		*out = (*in).DeepCopy()
+	}
 	if in.VMCopyRetryAfter != nil {
 		in, out := &in.VMCopyRetryAfter, &out.VMCopyRetryAfter
 		*out = (*in).DeepCopy()

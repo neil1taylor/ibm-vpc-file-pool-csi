@@ -218,6 +218,12 @@ spec:
                   try.
                 format: date-time
                 type: string
+              vmCopyStarted:
+                description: |-
+                  VMCopyStarted is when the current copy try started. A try that runs
+                  much longer than the disk needs is cancelled.
+                format: date-time
+                type: string
             required:
             - readyToUse
             type: object

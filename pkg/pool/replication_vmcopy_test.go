@@ -37,6 +37,8 @@ type fakeVMCopier struct {
 	moment      time.Time
 	commits     []string // Base of each committed copy
 	lostBases   map[string]bool
+	// removeStaleErr makes RemoveStale fail, as when another copy runs.
+	removeStaleErr error
 }
 
 type fakeStart struct {
@@ -101,7 +103,7 @@ func (f *fakeVMCopier) RemoveStale(_ context.Context, _ vmcopy.VM, _ []string, _
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.removeStale++
-	return nil
+	return f.removeStaleErr
 }
 
 var vmimGVK = schema.GroupVersionKind{Group: "kubevirt.io", Version: "v1", Kind: "VirtualMachineInstanceMigration"}

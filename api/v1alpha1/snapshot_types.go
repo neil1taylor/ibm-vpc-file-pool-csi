@@ -78,6 +78,11 @@ type SnapshotStatus struct {
 	// +optional
 	VMCopyAttempts int32 `json:"vmCopyAttempts,omitempty"`
 
+	// VMCopyStarted is when the current copy try started. A try that runs
+	// much longer than the disk needs is cancelled.
+	// +optional
+	VMCopyStarted *metav1.Time `json:"vmCopyStarted,omitempty"`
+
 	// VMCopyRetryAfter is the earliest time of the next copy try.
 	// +optional
 	VMCopyRetryAfter *metav1.Time `json:"vmCopyRetryAfter,omitempty"`
