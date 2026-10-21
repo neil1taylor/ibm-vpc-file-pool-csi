@@ -1121,6 +1121,25 @@ kubectl failover execute \
 # Failover complete. 3 PVCs ready in namespace "production".
 ```
 
+#### Running VM disks
+
+The destination keeps the disks of a running VM with restore points (see `CRD-SPEC.md`, "Running VM disks"). A VM with several disks must start from one moment, so `plan` and `execute` choose it for you:
+
+- They find the disks of each VM from the `.repl-moment` file the receiver writes next to the disk.
+- They choose the newest moment that all the VM's disks can show. If a copy reached one disk and not the other, the newer disk is rewound to the older moment. Disks of different VMs are chosen separately.
+- A disk that shows the chosen moment is used in place, after any copy that stopped half way is rolled back from its undo file. This needs nothing from the source region.
+- A disk that must be rewound is written into a new folder next to the old one (`<volume>.rewind-<time>`), and the PV points to it. This copies the whole disk, so it takes minutes for a large disk. The latest disk is not changed, so you can run it again with another moment.
+- **Rewind before you start the VM.** After a VM runs on the latest disk, the disk no longer matches the copy, and the restore points no longer fit it. The receiver seals each disk when a copy ends (the modification time, in the `.repl-moment` file). Failover refuses to rewind a disk that changed since, and says so. Using that disk in place still works. To keep the option of an earlier moment, rewind with `execute --prepare-only --rewind-to` first and boot from the rewound folder.
+- If no moment is shared by all disks of a VM, failover stops and lists the moments of each disk. It never mixes moments.
+- While the receiver applies a copy it keeps a lease file in the disk's folder. Failover stops and names the disk while the lease is live (up to 1 hour). `--force` goes on anyway; rolling back first makes that safe.
+
+```bash
+kubectl failover plan --nfs-mount-path /data --list-moments       # moments each VM can show, newest first
+kubectl failover execute --nfs-mount-path /data ... --rewind-to 2026-10-20T10:30:00Z   # newest moment at or before this time
+```
+
+`execute --prepare-only` does the roll-back and the rewinds and stops: it needs no cluster and no `--dr-pool`, so you can prepare the disks before the cutover. `--rewind-to` takes an RFC 3339 time. The restore points reach back as far as the policy's `restorePointKeepHours` (24 hours by default).
+
 #### `kubectl failover status`
 
 Reports the state of a previous failover operation, including which SubVolumes were promoted and their current PVC binding status.

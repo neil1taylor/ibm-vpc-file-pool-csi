@@ -37,6 +37,19 @@ type FailoverSubVolumePlan struct {
 	PoolName      string
 	ShareID       string
 	PolicyName    string
+
+	// LocalDir is the volume's folder on the mounted destination share.
+	LocalDir string
+
+	// The fields below are set for a running VM's disk by ResolveVMs.
+
+	// VMGroup is "namespace/name" of the VM that owns the disk.
+	VMGroup string
+	// VMMoment is the moment the failed-over disk will show.
+	VMMoment time.Time
+	// Rewind is true if the disk must be rewound to VMMoment. MaterializeVMs
+	// then makes a new disk and points SubPath at it.
+	Rewind bool
 }
 
 // Planner scans the destination NFS mount for .subvolume-metadata.json files
@@ -95,6 +108,7 @@ func (p *Planner) Plan(nfsMountPath string) (*FailoverPlan, error) {
 			PoolName:      meta.Spec.PoolName,
 			ShareID:       meta.Spec.ShareID,
 			PolicyName:    meta.ReplicationPolicy,
+			LocalDir:      subDir,
 		}
 
 		plan.SubVolumes = append(plan.SubVolumes, svPlan)

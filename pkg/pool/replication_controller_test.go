@@ -216,6 +216,37 @@ func waitForPolicySync(t *testing.T, k *replFakeK8sClient, policyName string, ti
 	}
 }
 
+// waitForSubVolumesSynced polls until the policy shows a good sync for each of
+// the given number of SubVolumes. The policy's own LastSyncTime is set as soon
+// as one SubVolume has synced, so it is not proof that all have.
+func waitForSubVolumesSynced(t *testing.T, k *replFakeK8sClient, policyName string, count int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.After(timeout)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for %d SubVolumes of policy %q to sync", count, policyName)
+		case <-ticker.C:
+			rp := k.getPolicy(policyName)
+			if rp == nil || len(rp.Status.SubVolumeStatuses) != count {
+				continue
+			}
+			synced := 0
+			for _, svs := range rp.Status.SubVolumeStatuses {
+				if svs.LastSyncTime != nil && svs.LastError == "" {
+					synced++
+				}
+			}
+			if synced == count {
+				return
+			}
+		}
+	}
+}
+
 // waitForConsecutiveFailures polls until the policy reaches the expected failure count.
 func waitForConsecutiveFailures(t *testing.T, k *replFakeK8sClient, policyName string, minFailures int32, timeout time.Duration) {
 	t.Helper()
@@ -461,7 +492,7 @@ func TestReplicationController_BasicSyncCycle(t *testing.T) {
 	simulateReplJobSucceeded(t, dc, "prod-to-dr", "pvc-22222222-2222-2222-2222-222222222222")
 
 	// Wait for sync to complete.
-	waitForPolicySync(t, k, "prod-to-dr", 5*time.Second)
+	waitForSubVolumesSynced(t, k, "prod-to-dr", 2, 5*time.Second)
 
 	// Verify policy status.
 	rp := k.getPolicy("prod-to-dr")

@@ -7,16 +7,18 @@
 //
 // Usage:
 //
-//	kubectl failover plan     --nfs-mount-path /repl/dst/10.245.3.8
-//	kubectl failover execute  --nfs-mount-path /repl/dst/10.245.3.8 --dr-pool dr-production --dr-share-ip 10.245.3.8 [--dry-run]
+//	kubectl failover plan     --nfs-mount-path /repl/dst/10.245.3.8 [--list-moments] [--rewind-to TIME]
+//	kubectl failover execute  --nfs-mount-path /repl/dst/10.245.3.8 --dr-pool dr-production --dr-share-ip 10.245.3.8 [--dry-run] [--rewind-to TIME] [--force]
 //	kubectl failover status
 package main
 
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -79,6 +81,9 @@ Usage:
 
 Plan flags:
   --nfs-mount-path     Local mount path of the destination NFS share (required)
+  --list-moments       For each running VM, list the moments all its disks can show, and exit
+  --rewind-to          Use the newest moment at or before this time (RFC 3339) for running VMs
+  --force              Go on although a copy may still be applied to a disk
 
 Execute flags:
   --nfs-mount-path     Local mount path of the destination NFS share (required)
@@ -86,6 +91,9 @@ Execute flags:
   --dr-share-ip        DR share mount target IP (required)
   --dr-export-path     NFS export path for VPC access mode (optional)
   --namespace, -n      Override PVC namespace (optional)
+  --rewind-to          Use the newest moment at or before this time (RFC 3339) for running VMs
+  --force              Go on although a copy may still be applied to a disk. An unfinished copy is rolled back first
+  --prepare-only       Only roll back and rewind running VM disks, then stop. Needs no cluster and no --dr-pool or --dr-share-ip
   --dry-run            Print what would happen without making changes
   --kubeconfig         Path to kubeconfig for the DR cluster (default: ~/.kube/config)
 
@@ -110,7 +118,7 @@ func parseFlags(args []string) map[string]string {
 		}
 
 		// Handle boolean flags.
-		if arg == "dry-run" {
+		if arg == "dry-run" || arg == "list-moments" || arg == "force" || arg == "prepare-only" {
 			flags[arg] = "true"
 			continue
 		}
@@ -174,6 +182,22 @@ func runPlan(args []string) error {
 		return nil
 	}
 
+	vmOpts, err := vmOptionsFromFlags(flags, time.Now())
+	if err != nil {
+		return err
+	}
+	if flags["list-moments"] == "true" {
+		moments, merr := plan.CommonMoments(vmOpts)
+		if merr != nil {
+			return merr
+		}
+		printMoments(os.Stdout, moments)
+		return nil
+	}
+	if err = plan.ResolveVMs(vmOpts); err != nil {
+		return err
+	}
+
 	fmt.Printf("Failover Plan\n")
 	fmt.Printf("=============\n")
 	fmt.Printf("NFS Mount Path:  %s\n", nfsMountPath)
@@ -189,6 +213,7 @@ func runPlan(args []string) error {
 			sv.RequestedGB, age, sv.PolicyName)
 	}
 	_ = w.Flush()
+	printVMPlan(os.Stdout, plan)
 
 	fmt.Printf("\nTo execute failover, run:\n")
 	fmt.Printf("  kubectl failover execute --nfs-mount-path %s --dr-pool <POOL> --dr-share-ip <IP>\n", nfsMountPath)
@@ -205,14 +230,15 @@ func runExecute(args []string) error {
 	namespace := flags["namespace"]
 	kubeconfig := flags["kubeconfig"]
 	dryRun := flags["dry-run"] == "true"
+	prepareOnly := flags["prepare-only"] == "true"
 
 	if nfsMountPath == "" {
 		return fmt.Errorf("--nfs-mount-path is required")
 	}
-	if drPool == "" {
+	if !prepareOnly && drPool == "" {
 		return fmt.Errorf("--dr-pool is required")
 	}
-	if drShareIP == "" {
+	if !prepareOnly && drShareIP == "" {
 		return fmt.Errorf("--dr-share-ip is required")
 	}
 
@@ -226,6 +252,30 @@ func runExecute(args []string) error {
 
 	if len(plan.SubVolumes) == 0 {
 		fmt.Printf("No SubVolume metadata found at %s/pvcs/\n", nfsMountPath)
+		return nil
+	}
+
+	vmOpts, err := vmOptionsFromFlags(flags, time.Now())
+	if err != nil {
+		return err
+	}
+	if err = plan.ResolveVMs(vmOpts); err != nil {
+		return err
+	}
+	printVMPlan(os.Stdout, plan)
+
+	if prepareOnly {
+		// Roll back and rewind running VM disks now, ahead of a failover. No
+		// cluster is needed, and nothing is created on it.
+		fmt.Println("Preparing running VM disks (rolling back unfinished copies, rewinding where needed)...")
+		if err = plan.MaterializeVMs(); err != nil {
+			return err
+		}
+		for _, sv := range plan.SubVolumes {
+			if sv.Rewind {
+				fmt.Printf("  %s rewound into %s\n", sv.SubVolumeName, sv.SubPath)
+			}
+		}
 		return nil
 	}
 
@@ -248,8 +298,77 @@ func runExecute(args []string) error {
 		return err
 	}
 
+	// Rewinding copies a whole disk, so it can take minutes.
+	fmt.Println("Preparing running VM disks (rolling back unfinished copies, rewinding where needed)...")
+	if err = plan.MaterializeVMs(); err != nil {
+		return err
+	}
+
 	exec := failover.NewExecutor(c, os.Stdout)
 	return exec.Execute(context.Background(), plan, opts)
+}
+
+// vmOptionsFromFlags reads the flags that choose the moment of running VM disks.
+func vmOptionsFromFlags(flags map[string]string, now time.Time) (failover.VMOptions, error) {
+	o := failover.VMOptions{Force: flags["force"] == "true", Now: now}
+	if v := flags["rewind-to"]; v != "" {
+		t, err := time.Parse(time.RFC3339Nano, v)
+		if err != nil {
+			return o, fmt.Errorf("--rewind-to: %w", err)
+		}
+		o.RewindTo = &t
+	}
+	return o, nil
+}
+
+// printVMPlan lists, for each running VM, the moment its disks will show and
+// which disks must be rewound to reach it. Volumes that are not VM disks are
+// left out.
+func printVMPlan(out io.Writer, plan *failover.FailoverPlan) {
+	groups := map[string][]failover.FailoverSubVolumePlan{}
+	for _, sv := range plan.SubVolumes {
+		if sv.VMGroup != "" {
+			groups[sv.VMGroup] = append(groups[sv.VMGroup], sv)
+		}
+	}
+	if len(groups) == 0 {
+		return
+	}
+	names := make([]string, 0, len(groups))
+	for g := range groups {
+		names = append(names, g)
+	}
+	sort.Strings(names)
+	_, _ = fmt.Fprintf(out, "\nRunning VM disks\n")
+	for _, g := range names {
+		_, _ = fmt.Fprintf(out, "  VM %s shows the moment %s\n", g, groups[g][0].VMMoment.UTC().Format(time.RFC3339))
+		for _, sv := range groups[g] {
+			how := "in place"
+			if sv.Rewind {
+				how = "rewind (copies the whole disk into a new folder)"
+			}
+			_, _ = fmt.Fprintf(out, "    %s: %s\n", sv.SubVolumeName, how)
+		}
+	}
+}
+
+// printMoments lists the moments each VM's disks can all show, newest first.
+func printMoments(out io.Writer, moments map[string][]time.Time) {
+	if len(moments) == 0 {
+		_, _ = fmt.Fprintln(out, "No running VM disks found.")
+		return
+	}
+	names := make([]string, 0, len(moments))
+	for g := range moments {
+		names = append(names, g)
+	}
+	sort.Strings(names)
+	for _, g := range names {
+		_, _ = fmt.Fprintf(out, "VM %s\n", g)
+		for _, m := range moments[g] {
+			_, _ = fmt.Fprintf(out, "  %s\n", m.UTC().Format(time.RFC3339))
+		}
+	}
 }
 
 func runStatus(args []string) error {

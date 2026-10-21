@@ -87,7 +87,7 @@ Disaster recovery with configurable sync schedules. Two replication modes are su
 - **Pause/resume via annotation** — Annotate a ReplicationPolicy with `storage.ibmcloud.io/paused=true` to pause; remove the annotation to resume. The controller updates `status.phase` accordingly.
 - **Pre/post-sync hooks** — Exec and HTTP hooks for application quiescing before sync and notification after.
 - **Metadata sidecar** — Writes `.subvolume-metadata.json` alongside each replicated SubVolume directory, enabling the failover CLI to reconstruct resources without querying the source cluster.
-- **Failover CLI** — `kubectl failover` plugin with `plan` (scan destination NFS, compute RPO), `execute` (create SubVolume CRs, PVs, PVCs on DR cluster), and `status` (report PVC binding) subcommands. Supports `--dry-run` and is idempotent.
+- **Failover CLI** — `kubectl failover` plugin with `plan` (scan destination NFS, compute RPO), `execute` (create SubVolume CRs, PVs, PVCs on DR cluster), and `status` (report PVC binding) subcommands. For running VMs it picks the newest moment all of a VM's disks can show, rolls back a copy that stopped half way, and with `--rewind-to` goes back to an earlier restore point (`--list-moments` lists them). Supports `--dry-run` and is idempotent.
 - **Status tracking** — Per-policy LastSyncTime and LastSyncDuration. Per-SubVolume sync state with BytesSynced and LastError.
 - **Destination config** — NFS server IP and base path (direct NFS mode), or HTTPS receiver endpoint with bearer token auth (driver-to-driver mode).
 - **Prometheus metrics** — Dedicated metrics for sync total, duration, lag, failures, and SubVolume count.

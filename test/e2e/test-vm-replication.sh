@@ -18,6 +18,11 @@
 # receiver in kube-system (own TLS certificate, token and data volume on the
 # destination pool) and sends the copy to it over HTTPS.
 # SSH_KEY is a private key whose .pub file is put in the VM for virtctl ssh.
+#
+# Two clusters: set DR_KUBECONFIG (needs MODE=receiver). KUBECONFIG is then the
+# source cluster. The destination pool, the receiver, the far-site disks and
+# the copy VMs all live on the DR cluster. The receiver is reached through an
+# OpenShift Route (TLS passthrough), as in docs/CROSS-REGION-DR.md.
 set -euo pipefail
 
 KEEP=false
@@ -34,6 +39,15 @@ SCHEDULE=${SCHEDULE:-15m}
 MODE=${MODE:-direct}
 case "$MODE" in direct | receiver) ;; *) echo "MODE must be direct or receiver" >&2; exit 2 ;; esac
 RECV=$PREFIX-recv
+DR_KUBECONFIG=${DR_KUBECONFIG:-}
+SRC_KUBECONFIG=${KUBECONFIG:-$HOME/.kube/config}
+if [ -n "$DR_KUBECONFIG" ] && [ "$MODE" != receiver ]; then echo "DR_KUBECONFIG needs MODE=receiver" >&2; exit 2; fi
+
+# onfar <command...> runs the command against the destination cluster. With one
+# cluster it runs the command unchanged. It also works for the functions below.
+onfar() {
+    if [ -n "$DR_KUBECONFIG" ]; then KUBECONFIG=$DR_KUBECONFIG "$@"; else "$@"; fi
+}
 
 log() { echo "[$(date -u +%H:%M:%S)] $*"; }
 fail() { log "FAIL: $*"; exit 1; }
@@ -54,11 +68,16 @@ cleanup() {
     log "cleaning up"
     oc delete replicationpolicy "$POLICY" --ignore-not-found --wait=false
     oc delete ns "$NS" --ignore-not-found --wait=true --timeout=10m || true
-    oc delete pv "$PREFIX-copy-root" "$PREFIX-copy-data" --ignore-not-found
+    onfar oc delete ns "$NS" --ignore-not-found --wait=true --timeout=10m || true
+    onfar oc delete pv "$PREFIX-copy-root" "$PREFIX-copy-data" "$PREFIX-rewind-root" "$PREFIX-rewind-data" --ignore-not-found
     if [ "$MODE" = receiver ]; then
-        oc delete deploy,svc,secret,pvc -n kube-system -l "$RECV_LABEL" --ignore-not-found --wait=true --timeout=5m || true
+        onfar oc delete deploy,svc,route,secret,pvc -n kube-system -l "$RECV_LABEL" --ignore-not-found --wait=true --timeout=5m || true
+        if [ -n "$DR_KUBECONFIG" ]; then
+            oc delete secret -n kube-system -l "$RECV_LABEL" --ignore-not-found || true
+        fi
     fi
-    oc delete filesharepool "$SRC" "$DST" --ignore-not-found --wait=false
+    oc delete filesharepool "$SRC" --ignore-not-found --wait=false
+    onfar oc delete filesharepool "$DST" --ignore-not-found --wait=false
 }
 trap cleanup EXIT
 
@@ -93,12 +112,13 @@ pool_ready() { [ "$(pool_field "$1" .status.phase)" = "Ready" ]; }
 
 log "making pools $SRC and $DST"
 make_pool "$SRC"
-make_pool "$DST"
-pools_ready() { pool_ready "$SRC" && pool_ready "$DST"; }
+onfar make_pool "$DST"
+pools_ready() { pool_ready "$SRC" && onfar pool_ready "$DST"; }
 wait_until 1200 "pools Ready" pools_ready
 
 oc create ns "$NS" --dry-run=client -o yaml | oc apply -f -
 oc adm policy add-scc-to-user anyuid -z default -n "$NS" >/dev/null
+onfar oc create ns "$NS" --dry-run=client -o yaml | onfar oc apply -f -
 
 log "making the source disks"
 oc apply -n "$NS" -f - <<YAML
@@ -237,24 +257,33 @@ wait_until 900 "source guest agent" agent_connected src
 writer_running() { vssh src 'test -s /var/log/writer.log' >/dev/null 2>&1; }
 wait_until 300 "writer running" writer_running
 
-server=$(pool_field "$DST" '.status.shares[0].mountTargetIP')
-export_path=$(pool_field "$DST" '.status.shares[0].exportPath')
+server=$(onfar pool_field "$DST" '.status.shares[0].mountTargetIP')
+export_path=$(onfar pool_field "$DST" '.status.shares[0].exportPath')
 
 # start_receiver makes a receiver in kube-system. Its data volume is a claim on
 # the destination pool, so the far-site disks can be mounted by NFS afterwards.
 start_receiver() {
-    local image dir crt
+    local image dir crt san token
     image=$(oc get deploy -n kube-system -l app.kubernetes.io/component=controller \
         -o jsonpath='{.items[0].spec.template.spec.containers[?(@.name=="csi-controller")].image}')
     dir=$(mktemp -d)
+    san="DNS:$RECV.kube-system.svc,DNS:$RECV.kube-system.svc.cluster.local"
+    [ -z "$DR_KUBECONFIG" ] || san="$san,DNS:$RECV_HOST"
     openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=$RECV" \
-        -addext "subjectAltName=DNS:$RECV.kube-system.svc,DNS:$RECV.kube-system.svc.cluster.local" \
+        -addext "subjectAltName=$san" \
         -keyout "$dir/tls.key" -out "$dir/tls.crt" 2>/dev/null
     crt=$dir/tls.crt
+    token=$(openssl rand -hex 24)
     oc create secret generic "$RECV-tls" -n kube-system --from-file=tls.crt="$crt" --from-file=tls.key="$dir/tls.key"
     oc create secret generic "$RECV-ca" -n kube-system --from-file=ca.crt="$crt"
-    oc create secret generic "$RECV-token" -n kube-system --from-literal=token="$(openssl rand -hex 24)"
+    oc create secret generic "$RECV-token" -n kube-system --from-literal=token="$token"
     oc label secret -n kube-system "$RECV-tls" "$RECV-ca" "$RECV-token" "$RECV_LABEL"
+    if [ -n "$DR_KUBECONFIG" ]; then
+        # The source cluster needs the same CA and token to call the receiver.
+        KUBECONFIG=$SRC_KUBECONFIG oc create secret generic "$RECV-ca" -n kube-system --from-file=ca.crt="$crt"
+        KUBECONFIG=$SRC_KUBECONFIG oc create secret generic "$RECV-token" -n kube-system --from-literal=token="$token"
+        KUBECONFIG=$SRC_KUBECONFIG oc label secret -n kube-system "$RECV-ca" "$RECV-token" "$RECV_LABEL"
+    fi
     oc apply -f - <<YAML
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -303,6 +332,15 @@ metadata: {name: $RECV, namespace: kube-system, labels: {pool-csi-test: $RECV}}
 spec:
   selector: {pool-csi-test-app: $RECV}
   ports: [{name: https, port: 8443, targetPort: https}]
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata: {name: $RECV, namespace: kube-system, labels: {pool-csi-test: $RECV}}
+spec:
+  host: $RECV_HOST
+  to: {kind: Service, name: $RECV}
+  port: {targetPort: https}
+  tls: {termination: passthrough}
 YAML
     recv_bound() { [ "$(oc get pvc -n kube-system "$RECV-data" -o jsonpath='{.status.phase}')" = Bound ]; }
     wait_until 600 "the receiver data volume" recv_bound
@@ -311,18 +349,25 @@ YAML
 
 if [ "$MODE" = receiver ]; then
     log "starting the receiver $RECV"
-    start_receiver
-    recv_pv=$(oc get pvc -n kube-system "$RECV-data" -o jsonpath='{.spec.volumeName}')
-    recv_sub=$(oc get subvolume "$recv_pv" -o jsonpath='{.spec.subPath}')
+    if [ -n "$DR_KUBECONFIG" ]; then
+        RECV_HOST=$RECV-kube-system.$(onfar oc get ingresses.config cluster -o jsonpath='{.spec.domain}')
+        RECV_URL=https://$RECV_HOST
+    else
+        RECV_HOST=$RECV.kube-system.svc
+        RECV_URL=https://$RECV_HOST:8443
+    fi
+    onfar start_receiver
+    recv_pv=$(onfar oc get pvc -n kube-system "$RECV-data" -o jsonpath='{.spec.volumeName}')
+    recv_sub=$(onfar oc get subvolume "$recv_pv" -o jsonpath='{.spec.subPath}')
     far_prefix="${export_path%/}$recv_sub/repl"
-    log "making policy $POLICY to https://$RECV.kube-system.svc:8443"
+    log "making policy $POLICY to $RECV_URL"
     oc apply -f - <<YAML
 apiVersion: storage.ibmcloud.io/v1alpha1
 kind: ReplicationPolicy
 metadata: {name: $POLICY}
 spec:
   sourcePoolName: $SRC
-  destinationEndpoint: https://$RECV.kube-system.svc:8443
+  destinationEndpoint: $RECV_URL
   destinationAuthSecretRef: $RECV-token
   destinationCACertSecretRef: $RECV-ca
   destinationBasePath: /repl
@@ -391,7 +436,7 @@ log "making far-site volumes"
 for d in root data; do
     pv=$(oc get pvc -n "$NS" "$d" -o jsonpath='{.spec.volumeName}')
     sub=$(oc get subvolume "$pv" -o jsonpath='{.spec.subPath}')
-    oc apply -f - <<YAML
+    onfar oc apply -f - <<YAML
 apiVersion: v1
 kind: PersistentVolume
 metadata: {name: $PREFIX-copy-$d}
@@ -414,17 +459,90 @@ spec:
 YAML
 done
 
+# check_copy <vmi> <moment>: the VM booted from far-site disks shows no file
+# system errors, and every file in the writer's log on the root disk is on the
+# data disk with the logged checksum.
+check_copy() {
+    local vmi=$1 at=$2 xfs result
+    xfs=$(onfar vssh "$vmi" 'sudo journalctl -k --no-pager | grep -ci "xfs.*\(corrupt\|error\)" || true')
+    [ "$xfs" = 0 ] || fail "XFS errors in the kernel log of $vmi: $xfs"
+    result=$(onfar vssh "$vmi" 'sudo systemctl stop writer; awk -v m="$(date -d '"$at"' +%s)" '"'"'$3 <= m {c++} END {print c+0}'"'"' /var/log/writer.log; while read n s t; do echo "$s  /data/f$n"; done < /var/log/writer.log | sha256sum -c --quiet && echo CHECKSUMS_OK')
+    echo "$result"
+    echo "$result" | grep -q CHECKSUMS_OK || fail "files on the data disk of $vmi do not match the log on the root disk"
+    log "PASS: $vmi booted; $(echo "$result" | head -1) files logged up to $at, all checksums match"
+}
+
+# failover_check rewinds both disks to the first copy with the failover tool,
+# run in the receiver pod where the share is mounted, and boots from them.
+failover_check() {
+    local bin epoch pod=deploy/$RECV d pv sub moments
+    bin=$(mktemp)
+    log "building kubectl-failover and putting it in the receiver pod"
+    (cd "$(dirname "$0")/../.." && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o "$bin" ./cmd/failover/)
+    onfar oc exec -i -n kube-system "$pod" -- sh -c 'cat > /tmp/kubectl-failover && chmod +x /tmp/kubectl-failover' < "$bin"
+
+    log "failover: moments both disks can show"
+    moments=$(onfar oc exec -n kube-system "$pod" -- /tmp/kubectl-failover plan --nfs-mount-path /data/repl --list-moments)
+    echo "$moments"
+    echo "$moments" | grep -q "$moment" || fail "the latest moment $moment is not listed"
+    echo "$moments" | grep -q "$first" || fail "the first copy moment $first is not listed"
+
+    log "failover: rewinding both disks to $first"
+    onfar oc exec -n kube-system "$pod" -- /tmp/kubectl-failover execute --nfs-mount-path /data/repl --prepare-only --rewind-to "$first"
+    epoch=$(perl -MTime::Piece -e 'print Time::Piece->strptime(shift, "%Y-%m-%dT%H:%M:%SZ")->epoch' "$first")
+    for d in root data; do
+        pv=$(oc get pvc -n "$NS" "$d" -o jsonpath='{.spec.volumeName}')
+        sub=$(oc get subvolume "$pv" -o jsonpath='{.spec.subPath}')
+        onfar oc apply -f - <<YAML
+apiVersion: v1
+kind: PersistentVolume
+metadata: {name: $PREFIX-rewind-$d}
+spec:
+  capacity: {storage: $( [ $d = root ] && echo 20Gi || echo 10Gi )}
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  mountOptions: [nfsvers=4.1, sec=sys, soft, timeo=600, retrans=3]
+  nfs: {server: "$server", path: "$far_prefix$sub.rewind-$epoch"}
+  claimRef: {namespace: $NS, name: rewind-$d}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: rewind-$d, namespace: $NS}
+spec:
+  storageClassName: ""
+  volumeName: $PREFIX-rewind-$d
+  accessModes: [ReadWriteMany]
+  resources: {requests: {storage: $( [ $d = root ] && echo 20Gi || echo 10Gi )}}
+YAML
+    done
+    log "booting the rewound copy"
+    vm_yaml rewound rewind-root rewind-data no | onfar oc apply -f -
+    wait_until 900 "rewound guest agent" onfar agent_connected rewound
+    wait_until 300 "ssh on the rewound copy" onfar vssh rewound true
+    check_copy rewound "$first"
+}
+
+# Rewind first. A VM that boots from the latest copy writes to it, and a disk
+# that was written to cannot be rewound.
+if [ "$MODE" = receiver ]; then
+    failover_check
+fi
+
 log "booting the copy"
-vm_yaml copy copy-root copy-data no | oc apply -f -
-wait_until 900 "copy guest agent" agent_connected copy
+vm_yaml copy copy-root copy-data no | onfar oc apply -f -
+wait_until 900 "copy guest agent" onfar agent_connected copy
 
 log "waiting for ssh on the copy"
-wait_until 300 "ssh on the copy" vssh copy true
+wait_until 300 "ssh on the copy" onfar vssh copy true
 
 log "checking the copy"
-xfs=$(vssh copy 'sudo journalctl -k --no-pager | grep -ci "xfs.*\(corrupt\|error\)" || true')
-[ "$xfs" = 0 ] || fail "XFS errors in the copy's kernel log: $xfs"
-result=$(vssh copy 'sudo systemctl stop writer; awk -v m="$(date -d '"$moment"' +%s)" '"'"'$3 <= m {c++} END {print c+0}'"'"' /var/log/writer.log; while read n s t; do echo "$s  /data/f$n"; done < /var/log/writer.log | sha256sum -c --quiet && echo CHECKSUMS_OK')
-echo "$result"
-echo "$result" | grep -q CHECKSUMS_OK || fail "files on the data disk do not match the log on the root disk"
-log "PASS: the copy booted; $(echo "$result" | head -1) files logged up to the copy moment, all checksums match"
+check_copy copy "$moment"
+
+# The copy VM wrote to the latest disk, so the failover tool must now refuse
+# to rewind from it.
+if [ "$MODE" = receiver ]; then
+    refusal=$(onfar oc exec -n kube-system "deploy/$RECV" -- /tmp/kubectl-failover execute --nfs-mount-path /data/repl --prepare-only --rewind-to "$first" 2>&1 || true)
+    echo "$refusal"
+    echo "$refusal" | grep -q "has changed since its last copy" || fail "the failover tool rewound a disk that a VM had written to"
+    log "PASS: the failover tool refuses to rewind a disk that a VM has written to"
+fi
