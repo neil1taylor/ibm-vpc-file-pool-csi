@@ -20,7 +20,12 @@ To make a release:
 ## [Unreleased]
 
 ### Added
+- **Instant VM disk snapshots (Experimental).** Where the KubeVirt `Sidecar` feature gate is on, a snapshot of a VM disk is a new overlay file, as in VMware: nothing is copied, and the snapshot is ready in seconds whatever the disk size. It is taken inside `CreateSnapshot`, so an OpenShift VM snapshot gives every disk of a VM at the moment OpenShift froze the guest; before, each disk was copied later, one after another (issue #14). Deleting a snapshot merges its file while the VM runs. Restoring is one sparse `qemu-img convert`. A mutating webhook gives a VM with snapshots the driver's hook when it starts; frozen files are read-only, so a VM that starts without the hook fails safe. New: Helm `vmSnapshots.method` and `vmSnapshots.launcherImage`, flags `--vm-snapshot-method` and `--virt-launcher-image`, SubVolume `status.diskChain` and `status.chainOperation`, Snapshot `status.chainFile`, `status.mergeChild` and `status.methodReason`, and the `kubectl pool-snapshots flatten` plugin (`make build-pool-snapshots`). Design and lab results: [VM-INSTANT-SNAPSHOTS.md](VM-INSTANT-SNAPSHOTS.md).
 - Release test stage 18 (backup to a snapshot pool): runs `test/e2e/test-backup.sh` and checks each outcome it logs. Not run on a cluster yet. `remote.sh` now also builds `kubectl-backup` and ships all of `test/e2e` (stage 6 needs `test-vm-snapshot.sh` there).
+
+### Fixed
+- A restore into a volume smaller than the snapshot is refused (`OutOfRange`) instead of making a volume the data does not fit in (issue #98).
+- Replication finds a VM disk whose top file is not `disk.img`.
 
 ### Changed
 - **VMs now come from the standard OpenShift Virtualization catalog.** Pick a catalog image and choose the pool's StorageClass for the boot disk. CDI copies the image onto the pool. The controller keeps the memory limit of CDI's copy pods at least 8Gi, through `HyperConverged` `spec.resourceRequirements.storageWorkloads`. CDI's default of 600 MB is too small for copies onto NFS: the pod is killed. Measured on rovslab on 20 October 2026: a 25 GB copy with a 2Gi limit was killed 6 times and never finished. With 8Gi it finished in 134 s and the checksum matched. A RHEL 9 catalog VM on a pool had its guest agent after 103 s.

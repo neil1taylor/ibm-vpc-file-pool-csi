@@ -28,6 +28,18 @@ Explicit list of what the IBM VPC File Pool CSI Driver does not support, why, an
 
 **Roadmap:** Phase 4a (snapshots) and Phase 4b (clones) are complete.
 
+### Instant VM disk snapshots (Experimental)
+
+Where the KubeVirt `Sidecar` feature gate is on, a VM disk snapshot is instant instead of a copy. See [VM-INSTANT-SNAPSHOTS.md](VM-INSTANT-SNAPSHOTS.md). Its limits:
+- **Support:** the `Sidecar` feature gate is not supported by Red Hat, and on OpenShift it is set through a `jsonpatch` annotation on `HyperConverged`, which marks the cluster `TaintedConfiguration`. On ROVS, IBM's add-on manages that resource.
+- **Gate off:** a VM whose disks have instant snapshots does not start while the gate is off; the webhook says so. Turn the gate on, or run `kubectl pool-snapshots flatten <vm>`, which deletes the VM's snapshots.
+- **Restore is a copy.** OpenShift restores a snapshot into new PVCs; the driver writes each with one sparse `qemu-img convert`. Instant restore is not built.
+- **One disk per plain VolumeSnapshot.** All disks of a VM at one moment come from an OpenShift VM snapshot, which freezes the guest first.
+- **Replication and backups** of a VM disk make a full copy after each snapshot, because QEMU's list of changed blocks stays with the frozen file. A stopped VM's disk with snapshots is not copied at all (its status says so): a copy of its folder would give the far site an old `disk.img`. It is copied again while the VM runs, or after `kubectl pool-snapshots flatten`.
+- **No clone** of a disk with instant snapshots: restore one of its snapshots instead. A copy of the folder would not be a clone.
+- At most 16 snapshots per disk. Hot-plugged disks are not supported.
+- A deleted claim's folder stays while any of its instant snapshots exists.
+
 ## Volume Group Snapshots
 
 **What:** Volume group snapshots (`VolumeGroupSnapshot`) are implemented. The driver supports coordinated multi-PVC snapshots via `CreateVolumeGroupSnapshot` and `DeleteVolumeGroupSnapshot` CSI RPCs.

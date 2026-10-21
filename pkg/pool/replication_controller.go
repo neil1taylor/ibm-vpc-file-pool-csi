@@ -389,6 +389,14 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 	for _, sv := range matched {
 		svCopy := sv
 
+		// A stopped VM's disk with instant snapshots is a chain of files; a
+		// copy of its folder would give the far site an old disk.img. It is
+		// copied by the VM path while its VM runs.
+		if len(svCopy.Status.DiskChain) > 0 {
+			finish(carry(svCopy.Name, "the disk has instant snapshots, so it is copied only while its VM runs; or remove them with kubectl pool-snapshots flatten"), "")
+			continue
+		}
+
 		if r, ok := round[svCopy.Name]; ok {
 			svStatuses = append(svStatuses, r.status)
 			if r.syncErr != "" {

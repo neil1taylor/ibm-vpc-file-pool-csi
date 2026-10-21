@@ -46,6 +46,7 @@ Share selection and capacity management across the pool.
 Directory-level point-in-time copies via the standard CSI snapshot interface.
 
 - **CreateSnapshot** — A Job in the driver's namespace copies the SubVolume directory to a snapshot path on the same share. The Snapshot CR reads `readyToUse: false` until the copy has finished. If a running VM uses the claim, the snapshot is a QEMU copy of that disk at one moment instead (guest frozen for a moment; `status.consistency` says if it worked; `vmCopySpeedLimitMBps` on the VolumeSnapshotClass sets the speed, default 20 MB/s). Experimental, like the VM disk copy for replication.
+- **Instant VM disk snapshots** — Experimental — Where the KubeVirt `Sidecar` feature gate is on, a snapshot of a VM disk is a new overlay file and nothing is copied: it is ready in seconds, whatever the disk size, and an OpenShift VM snapshot gives all disks of a VM at the moment OpenShift froze the guest. Deleting a snapshot merges its file back while the VM runs. A webhook gives a VM with snapshots the driver's hook when it starts. Red Hat does not support the `Sidecar` gate. See [VM-INSTANT-SNAPSHOTS.md](VM-INSTANT-SNAPSHOTS.md).
 - **DeleteSnapshot** — A Job removes the snapshot directory; then the CR is deleted and the pool capacity is given back.
 - **ListSnapshots** — Lists snapshots filtered by source volume with pagination support.
 - **Restore from snapshot** — A Job copies the snapshot directory into the new volume and sets the pool's owner and permissions. The claim stays Pending until the copy has finished.
@@ -158,7 +159,7 @@ Thin wrapper around the VPC file share API with operational guardrails.
 Defense-in-depth controls for a storage driver running with host access.
 
 - **Path traversal validation** — All mkdir/rm operations validate paths against `^/pvcs/pvc-[a-f0-9-]{36}$` and reject traversal attempts.
-- **Validating admission webhooks** — Beta — Five webhook validators cover all CRD types (FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, ReplicationPolicy).
+- **Validating admission webhooks** — Beta — Five webhook validators cover all CRD types (FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, ReplicationPolicy). A sixth, mutating webhook adds the VM hook to VMs with instant snapshots.
 - **RBAC minimal permissions** — Controller and node service accounts use least-privilege roles.
 - **No secrets in logs** — API keys and tokens are never logged. Share IDs and mount target IPs are safe to log.
 

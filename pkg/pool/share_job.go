@@ -78,10 +78,54 @@ type ShareData interface {
 // ShareJobRunner implements ShareData with Kubernetes Jobs in the driver's
 // namespace, because the controller pod has no NFS access.
 type ShareJobRunner struct {
-	client      client.Client
-	namespace   string
-	image       string
-	driverImage string
+	client        client.Client
+	namespace     string
+	image         string
+	driverImage   string
+	launcherImage string
+}
+
+// SetLauncherImage sets KubeVirt's virt-launcher image, which has qemu-img,
+// for the Jobs that change a VM disk's snapshot chain. Without it, those Jobs
+// are refused.
+func (r *ShareJobRunner) SetLauncherImage(image string) {
+	r.launcherImage = image
+}
+
+// RunChainScript runs a pkg/vmsnap script as the QEMU user in the
+// virt-launcher image, after initScript (if set) as root. Folder i is mounted
+// at /vol<i>; nothing else of the shares is mounted. It implements ChainJobs.
+func (r *ShareJobRunner) RunChainScript(ctx context.Context, key string, folders []ShareFolder, script, initScript string) (bool, error) {
+	if r.launcherImage == "" {
+		return false, errors.New("no virt-launcher image set for VM disk chain Jobs")
+	}
+	var shares []ShareMount
+	// The root step runs in the runner's own image: the virt-launcher image
+	// only ever runs as the QEMU user.
+	shape := jobShape{
+		image:      r.launcherImage,
+		command:    []string{"/bin/sh", "-c", script},
+		runAsUser:  qemuUID,
+		initScript: initScript,
+		initImage:  r.image,
+	}
+	for i, f := range folders {
+		if err := validateSharePath(f.Path); err != nil {
+			return false, err
+		}
+		idx := -1
+		for j, sh := range shares {
+			if sh == f.Share {
+				idx = j
+			}
+		}
+		if idx < 0 {
+			shares = append(shares, f.Share)
+			idx = len(shares) - 1
+		}
+		shape.folders = append(shape.folders, folderMount{share: idx, subPath: strings.TrimPrefix(f.Path, "/"), at: fmt.Sprintf("/vol%d", i)})
+	}
+	return r.run(ctx, key, shares, shape)
 }
 
 // SetDriverImage sets the image of Jobs that run the driver itself. Without
@@ -98,6 +142,24 @@ type jobShape struct {
 	command    []string
 	runAsUser  int64
 	initScript string
+	// initImage runs initScript; empty means image.
+	initImage string
+	// folders, if set, replace the share mounts: each mounts one folder of
+	// a share.
+	folders []folderMount
+}
+
+// folderMount mounts subPath of share number share at at.
+type folderMount struct {
+	share   int
+	subPath string
+	at      string
+}
+
+// ShareFolder is one folder on a share.
+type ShareFolder struct {
+	Share ShareMount
+	Path  string // e.g. /pvcs/pvc-abc
 }
 
 // NewShareJobRunner creates a runner that starts Jobs in namespace with image.
@@ -300,6 +362,12 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 		})
 		mounts = append(mounts, corev1.VolumeMount{Name: volName, MountPath: "/" + volName})
 	}
+	if shape.folders != nil {
+		mounts = nil
+		for _, f := range shape.folders {
+			mounts = append(mounts, corev1.VolumeMount{Name: fmt.Sprintf("share%d", f.share), MountPath: f.at, SubPath: f.subPath})
+		}
+	}
 
 	resources := corev1.ResourceRequirements{
 		Requests: corev1.ResourceList{
@@ -315,7 +383,7 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 	if shape.initScript != "" {
 		initContainers = []corev1.Container{{
 			Name:            "prepare",
-			Image:           shape.image,
+			Image:           orDefault(shape.initImage, shape.image),
 			Command:         []string{"/bin/sh", "-c", shape.initScript},
 			SecurityContext: &corev1.SecurityContext{RunAsUser: int64Ptr(0)},
 			Resources:       resources,
@@ -330,9 +398,11 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
-					RestartPolicy:   corev1.RestartPolicyOnFailure,
-					SecurityContext: podSecurityContext(shape.runAsUser),
-					InitContainers:  initContainers,
+					// A Job that opens VM disk files needs no API access.
+					AutomountServiceAccountToken: boolPtr(shape.folders == nil),
+					RestartPolicy:                corev1.RestartPolicyOnFailure,
+					SecurityContext:              podSecurityContext(shape.runAsUser),
+					InitContainers:               initContainers,
 					Containers: []corev1.Container{{
 						Name:         "share-data",
 						Image:        shape.image,
@@ -464,3 +534,5 @@ func (r *ShareJobRunner) Stop(ctx context.Context, key string) (bool, error) {
 	r.cleanup(ctx, jobName, 2)
 	return true, nil
 }
+
+func boolPtr(v bool) *bool { return &v }

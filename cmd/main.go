@@ -35,6 +35,7 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/pool"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/replication"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/vmcopy"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/vmsnap"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/webhook"
 )
 
@@ -67,6 +68,9 @@ func main() {
 
 		// Replication controller flags.
 		driverImage string
+
+		// VM disk snapshot flags.
+		vmSnapshots vmSnapshotOptions
 
 		// Sync-client mode flags.
 		receiverEndpoint string
@@ -106,6 +110,8 @@ func main() {
 
 	// Replication controller flags.
 	flag.StringVar(&driverImage, "driver-image", "", "Driver container image for receiver-mode sync-client Jobs")
+	flag.StringVar(&vmSnapshots.method, "vm-snapshot-method", "auto", "Snapshots of VM disks: auto (instant where the KubeVirt Sidecar feature gate is on) or copy (never instant)")
+	flag.StringVar(&vmSnapshots.launcherImage, "virt-launcher-image", "", "KubeVirt virt-launcher image for VM disk snapshot Jobs; empty reads it from virt-operator")
 	flag.BoolVar(&webhooks.enabled, "enable-webhooks", true, "Serve the validating admission webhooks (needs a serving certificate)")
 	flag.IntVar(&webhooks.port, "webhook-port", 9443, "Port of the admission webhook server")
 
@@ -149,7 +155,11 @@ func main() {
 
 	switch mode {
 	case "controller":
-		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, cloneWorkerInterval, goldenImageSyncInterval, cdiCopyPodMemoryLimit, driverImage, webhooks)
+		if err := vmSnapshots.check(); err != nil {
+			klog.ErrorS(err, "Invalid flag")
+			os.Exit(1)
+		}
+		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, cloneWorkerInterval, goldenImageSyncInterval, cdiCopyPodMemoryLimit, driverImage, webhooks, vmSnapshots)
 	case "receiver":
 		runReceiver(receiverBasePath, receiverAuthTokenFile, receiverListenAddr, receiverTLSCertFile, receiverTLSKeyFile)
 	case "sync-client":
@@ -173,7 +183,7 @@ type webhookOptions struct {
 	port    int
 }
 
-func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string, cloneWorkerInterval, goldenImageSyncInterval time.Duration, cdiCopyPodMemoryLimit, driverImage string, webhooks webhookOptions) {
+func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string, cloneWorkerInterval, goldenImageSyncInterval time.Duration, cdiCopyPodMemoryLimit, driverImage string, webhooks webhookOptions, vmSnapshots vmSnapshotOptions) {
 	scheme := runtime.NewScheme()
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
 		klog.ErrorS(err, "Failed to add CRD types to scheme")
@@ -399,6 +409,23 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 	// Snapshots of running VM disks are QEMU copies. The same commands run in
 	// the VM pod; a timer on the leader moves each copy forward.
 	poolManager.SetVMSnapshots(vmCopier, replClient)
+
+	// Instant snapshots of VM disks change the disk's file chain in the VM
+	// pod, or with a Job in the virt-launcher image when the VM is stopped.
+	// See VM-INSTANT-SNAPSHOTS.md.
+	if vmSnapshots.method == "auto" {
+		image := vmSnapshots.launcherImage
+		if image == "" {
+			image = discoverLauncherImage(signalCtx, clientset, replClient)
+		}
+		if image == "" {
+			klog.InfoS("No KubeVirt virt-launcher image found; VM disk snapshots are copies")
+		} else {
+			shareRunner.SetLauncherImage(image)
+			poolManager.SetInstantSnapshots(vmsnap.New(hooks.NewPodExecer(clientset, restConfig)), shareRunner, replClient)
+			klog.V(2).InfoS("Instant VM disk snapshots are on where the KubeVirt Sidecar feature gate is on", "launcherImage", image)
+		}
+	}
 	if addErr := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
 		poolManager.RunVMSnapshots(ctx, pool.DefaultVMSnapshotInterval)
 		return nil
@@ -668,6 +695,9 @@ func registerWebhooks(mgr ctrl.Manager) error {
 		WithValidator(&webhook.VolumeGroupSnapshotValidator{}).Complete(); err != nil {
 		return fmt.Errorf("register VolumeGroupSnapshot webhook: %w", err)
 	}
+	// The VM hook webhook reads without the cache: a VM must start with the
+	// newest chain of its disks.
+	mgr.GetWebhookServer().Register(webhook.VMIHookPath, &ctrlwebhook.Admission{Handler: &webhook.VMIHookInjector{Client: mgr.GetAPIReader()}})
 	return nil
 }
 

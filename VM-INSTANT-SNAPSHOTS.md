@@ -1,6 +1,20 @@
 # Instant VM snapshots
 
-Status: **design, not built yet.** The method was tested by hand on rovslab on 21 October 2026 (results below). The build plan is `docs/specs/2026-10-21-instant-vm-snapshots.md`.
+Status: **built, Experimental.** Tested by hand on rovslab on 21 October 2026 (results below). The build plan is `docs/specs/2026-10-21-instant-vm-snapshots.md`; the limits are in [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md#instant-vm-disk-snapshots-experimental).
+
+## Turning it on
+
+1. Install the driver with `vmSnapshots.method=auto` (the default) and webhooks on.
+2. Turn on the KubeVirt `Sidecar` feature gate. On OpenShift, add one operation to the `kubevirt.kubevirt.io/jsonpatch` annotation of `HyperConverged`. Keep any operations that are there already:
+   ```bash
+   cur=$(oc get hyperconverged kubevirt-hyperconverged -n openshift-cnv -o jsonpath='{.metadata.annotations.kubevirt\.kubevirt\.io/jsonpatch}')
+   new=$(echo "${cur:-[]}" | jq -c '. + [{"op":"add","path":"/spec/configuration/developerConfiguration/featureGates/-","value":"Sidecar"}]')
+   oc annotate --overwrite hyperconverged kubevirt-hyperconverged -n openshift-cnv kubevirt.kubevirt.io/jsonpatch="$new"
+   ```
+   **Red Hat does not support this setting**, and `HyperConverged` then reports `TaintedConfiguration=True`.
+3. Take a snapshot from the console's VM Snapshots tab, or with a `VirtualMachineSnapshot`. The VolumeSnapshots are ready at once.
+
+To stop: delete the VMs' snapshots (`kubectl pool-snapshots flatten <vm> -n <namespace>` for each VM), then remove the operation from the annotation. A VM with snapshots does not start while the gate is off.
 
 ## In one paragraph
 
@@ -44,7 +58,7 @@ This set of files is a **chain**. Each file holds only the parts of the disk tha
 
 ### Deleting a snapshot (merge)
 
-A file in the chain cannot just be deleted, because the newer files depend on it. Instead, the driver merges the next file up into the deleted snapshot's file (`virsh blockcommit`), then deletes the next file. Only the changed parts are copied, so a merge takes about as long as copying the changes, not the whole disk. QEMU merges while the VM runs. If the VM is stopped, a Job does the same with `qemu-img commit`.
+A file in the chain cannot just be deleted, because the newer files depend on it. Instead, the driver makes the deleted snapshot's file writable, merges the next file up into it (`virsh blockcommit`), then deletes the next file. Only the changed parts are copied, so a merge takes about as long as copying the changes, not the whole disk. QEMU merges while the VM runs, in the background: the driver starts the merge, checks on it at each retry of the delete, and finishes it when QEMU is ready. While it runs, the SubVolume's `status.chainOperation` names it, and no other snapshot or merge of that disk starts. If the merge fails, the driver stops it and makes the snapshot's file read-only again. If the VM stops during a merge, a Job does the merge next. If the VM is stopped, a Job does the same with `qemu-img commit`.
 
 ### Restoring a snapshot
 
@@ -56,7 +70,8 @@ KubeVirt, which starts the VM, always opens `disk.img` as a plain file. On its o
 
 So the driver adds a **hook** to each VM with a pool disk. A hook is a small extra container in the VM's pod. KubeVirt calls it just before the VM starts, and it changes how the VM opens its disks: "open the newest file in the chain, as a qcow2 file". QEMU then follows the chain down to `disk.img`.
 
-- The driver adds the hook by itself when the VM starts. You make VMs the normal way, from the standard catalog, with the pool's StorageClass.
+- The driver adds the hook by itself when a VM that has snapshots starts. A VM without snapshots is not changed. You make VMs the normal way, from the standard catalog, with the pool's StorageClass.
+- A running VM does not need the hook to take a snapshot or to live-migrate. The hook is only needed at the next start.
 - The hook needs the KubeVirt **`Sidecar` feature gate**. It is off by default. On OpenShift you turn it on with an annotation on the `HyperConverged` resource. **Red Hat does not support this setting**, and the cluster then reports `TaintedConfiguration`. On ROVS, IBM's add-on manages that resource.
 
 ### Safety: frozen files are read-only
@@ -83,4 +98,19 @@ Also seen:
 - libvirt writes absolute paths for the chain (`/var/run/kubevirt-private/vmi-disks/<volume>/...`). That path is the same in every VM pod. Driver Jobs that work on a chain mount the volume at the same path.
 - libvirt does not delete files after a merge. The driver must.
 
-Not tested yet: the five lab checks in the spec, and Windows with two disks.
+Lab checks, also 21 Oct:
+- KubeVirt keeps the read-only bits on frozen files when it starts a VM. Without the hook, a VM with a chain does not start ("Permission denied" on `disk.img`).
+- A live migration straight after a snapshot keeps the chain, even without the hook.
+- With the `Sidecar` gate off, KubeVirt refuses to start a VM that has the hook. So the driver adds the hook only to VMs that have snapshots, and only while the gate is on.
+- A merge into a read-only file fails, so the driver makes that file writable for the merge.
+
+Not tested yet: Windows with two disks, and the driver code end to end (the tests above ran the same commands by hand).
+
+## How the driver does it
+
+- **Snapshot, VM running:** `CreateSnapshot` makes the new file next to the top file with a name-only backing reference (`qemu-img create -F <format> -b <top>`), then `virsh snapshot-create-as --reuse-external` in the VM pod. If OpenShift has frozen the guest, the driver does not freeze again; otherwise it asks the guest agent to freeze. The driver asks the guest agent itself whether the guest is frozen (`guest-fsfreeze-status`), because the VMI's `status.fsFreezeStatus` shows OpenShift's freeze late, and a frozen guest agent refuses a second freeze. It records the chain in the SubVolume's `status.diskChain` and the new top file in the VMI annotation `storage.ibmcloud.io/disk-tops`, then returns `ReadyToUse: true`.
+- **Snapshot, VM stopped:** a Job in KubeVirt's virt-launcher image makes the new file. While it runs, the SubVolume's `status.chainOperation` names it, and the webhook does not let the VM start.
+- **Delete:** the driver merges the next newer file into the snapshot's file (`virsh blockcommit --keep-relative`, or `qemu-img commit` in a Job when the VM is stopped). The snapshot that was held in the newer file is held in the merged file from then on (`status.chainFile`).
+- **Restore:** a Job converts the snapshot's file, through its backing files, into the new volume's `disk.img`.
+- **Start:** the webhook adds the hook only to a VM whose disks have a chain, and only while the `Sidecar` gate is on. The hook script is in the ConfigMap `ibm-vpc-file-pool-vm-hook` in the VM's namespace; the controller writes it.
+- **Safety:** frozen files are read-only. The Jobs mount only the volume folders they work on, check every backing reference of the chain first (a plain file name, `disk.img` as raw, snapshot files as qcow2, no external data file), and get no API credentials. Anyone who can write to a volume can put files in its folder, so these checks keep such a file from reaching another volume on the share.
