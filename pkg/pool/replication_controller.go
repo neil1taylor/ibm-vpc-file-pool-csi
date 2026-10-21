@@ -504,8 +504,11 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 	// 4. Update policy status.
 	duration := rc.nowFunc().Sub(start)
 
-	// Check if all Jobs completed (no active or deferred).
-	allComplete := !vmRes.inProgress
+	// Check if all Jobs completed (no active or deferred). A VM disk copy in
+	// flight does not count: it moves forward on every tick, and a new one
+	// starts at every due tick, so waiting for it would hold the results of
+	// the other volumes for ever and they would never be copied again.
+	allComplete := true
 	for _, svs := range svStatuses {
 		if svs.LastError == "sync in progress" || svs.LastError == "deferred: parallel limit" {
 			allComplete = false
