@@ -27,7 +27,7 @@ const VMIHookPath = "/mutate-kubevirt-io-v1-virtualmachineinstance"
 // disk at the top of its snapshot chain. A VM without instant snapshots is
 // not changed. See VM-INSTANT-SNAPSHOTS.md.
 type VMIHookInjector struct {
-	Client client.Client
+	Client client.Reader
 }
 
 var _ admission.Handler = (*VMIHookInjector)(nil)

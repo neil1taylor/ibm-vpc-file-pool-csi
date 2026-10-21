@@ -168,7 +168,7 @@ func (m *Manager) planInstant(ctx context.Context, sv *v1alpha1.SubVolume) (*ins
 
 // SidecarGateOn reports whether a KubeVirt resource turns the Sidecar feature
 // gate on.
-func SidecarGateOn(ctx context.Context, c client.Client) (bool, error) {
+func SidecarGateOn(ctx context.Context, c client.Reader) (bool, error) {
 	list := &unstructured.UnstructuredList{}
 	list.SetGroupVersionKind(kubevirtListGVK)
 	if err := c.List(ctx, list); err != nil {
