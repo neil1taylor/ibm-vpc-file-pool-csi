@@ -395,6 +395,17 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 		os.Exit(1)
 	}
 
+	// Backup policies: label the volumes they select and keep one
+	// ReplicationPolicy for each source pool. Runs on the leader only.
+	backupController := pool.NewBackupController(replClient)
+	if addErr := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		backupController.Run(ctx)
+		return nil
+	})); addErr != nil {
+		klog.ErrorS(addErr, "Failed to add the backup policy controller")
+		os.Exit(1)
+	}
+
 	// mgr.Start blocks until signal or error
 	klog.InfoS("Starting controller-runtime manager with leader election")
 	if err := mgr.Start(signalCtx); err != nil {
@@ -627,6 +638,10 @@ func registerWebhooks(mgr ctrl.Manager) error {
 	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.ReplicationPolicy{}).
 		WithValidator(&webhook.ReplicationPolicyValidator{}).Complete(); err != nil {
 		return fmt.Errorf("register ReplicationPolicy webhook: %w", err)
+	}
+	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.BackupPolicy{}).
+		WithValidator(&webhook.BackupPolicyValidator{}).Complete(); err != nil {
+		return fmt.Errorf("register BackupPolicy webhook: %w", err)
 	}
 	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.Snapshot{}).
 		WithValidator(&webhook.SnapshotValidator{}).Complete(); err != nil {

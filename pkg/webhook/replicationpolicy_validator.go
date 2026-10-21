@@ -79,6 +79,20 @@ func validateReplicationPolicySpec(spec *v1alpha1.ReplicationPolicySpec) error {
 	if spec.MaxParallelSyncs < 0 {
 		return fmt.Errorf("spec.maxParallelSyncs must be >= 0, got %d", spec.MaxParallelSyncs)
 	}
+	if spec.MomentKeepHours != nil && *spec.MomentKeepHours < 0 {
+		return fmt.Errorf("spec.momentKeepHours must be >= 0, got %d", *spec.MomentKeepHours)
+	}
+	// Moments are folders of hard links. A flag that changes a file in place
+	// would also change the same file in every older moment.
+	if spec.MomentKeepHours != nil && *spec.MomentKeepHours > 0 {
+		for _, opt := range spec.RsyncOptions {
+			for _, inPlace := range []string{"--inplace", "--append", "--append-verify"} {
+				if opt == inPlace {
+					return fmt.Errorf("spec.rsyncOptions contains %q, which changes files in place and would change older moments", opt)
+				}
+			}
+		}
+	}
 	// Rsync options only apply to direct NFS mode.
 	if !isReceiverMode {
 		for _, opt := range spec.RsyncOptions {

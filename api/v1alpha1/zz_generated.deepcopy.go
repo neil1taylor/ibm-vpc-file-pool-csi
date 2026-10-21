@@ -641,6 +641,11 @@ func (in *ReplicationPolicySpec) DeepCopyInto(out *ReplicationPolicySpec) {
 		*out = new(int32)
 		**out = **in
 	}
+	if in.MomentKeepHours != nil {
+		in, out := &in.MomentKeepHours, &out.MomentKeepHours
+		*out = new(int32)
+		**out = **in
+	}
 	if in.PreSyncHooks != nil {
 		in, out := &in.PreSyncHooks, &out.PreSyncHooks
 		*out = make([]Hook, len(*in))

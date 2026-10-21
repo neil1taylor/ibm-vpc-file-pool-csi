@@ -75,6 +75,18 @@ func TestBackupPolicyValidator_Refuses(t *testing.T) {
 	}
 }
 
+func TestBackupPolicyValidator_NameMustFitALabelValue(t *testing.T) {
+	p := validBackupPolicy()
+	p.Name = strings.Repeat("a", 64)
+	if _, err := (&BackupPolicyValidator{}).ValidateCreate(context.Background(), p); err == nil || !strings.Contains(err.Error(), "name") {
+		t.Errorf("err = %v: the name goes into a label value and may have 63 characters at most", err)
+	}
+	p.Name = strings.Repeat("a", 63)
+	if _, err := (&BackupPolicyValidator{}).ValidateCreate(context.Background(), p); err != nil {
+		t.Errorf("a 63-character name: %v", err)
+	}
+}
+
 func TestBackupPolicyKeepDuration(t *testing.T) {
 	cases := map[string]time.Duration{
 		"":      7 * 24 * time.Hour, // the default

@@ -27,6 +27,10 @@ var _ admission.Validator[*v1alpha1.BackupPolicy] = &BackupPolicyValidator{}
 
 func (v *BackupPolicyValidator) ValidateCreate(_ context.Context, bp *v1alpha1.BackupPolicy) (admission.Warnings, error) {
 	klog.V(4).InfoS("Validating BackupPolicy create", "name", bp.Name)
+	// The name is the value of a label on every volume the policy backs up.
+	if len(bp.Name) > 63 {
+		return nil, fmt.Errorf("the name must be at most 63 characters, got %d", len(bp.Name))
+	}
 	return nil, validateBackupPolicySpec(&bp.Spec)
 }
 

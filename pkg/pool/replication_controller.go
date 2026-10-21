@@ -429,6 +429,13 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 				if bytesWritten > 0 {
 					svStatus.BytesSynced = &bytesWritten
 				}
+				if jobRes.RestorePoints > 0 {
+					svStatus.RestorePoints = jobRes.RestorePoints
+					if jobRes.OldestRestorePoint != nil {
+						t := metav1.NewTime(*jobRes.OldestRestorePoint)
+						svStatus.OldestRestorePoint = &t
+					}
+				}
 				finish(svStatus, "")
 				rc.recordSubVolumeSyncTime(policyName, svCopy.Name)
 				rc.cleanupReplicationResources(ctx, policy, svCopy.Name)
@@ -1044,6 +1051,42 @@ func (rc *ReplicationController) ensureReplicationPVC(ctx context.Context, pvNam
 	return nil
 }
 
+// metadataScript writes the metadata file of a volume at the destination. With
+// atomic set it writes a new file and renames it, so a moment that links the
+// old file keeps its contents.
+func metadataScript(destBasePath, subPath, metaJSON string, atomic bool) string {
+	file := fmt.Sprintf("/dest%s%s/.subvolume-metadata.json", destBasePath, subPath)
+	if !atomic {
+		return fmt.Sprintf("echo \"Writing metadata sidecar...\"\ncat > \"%s\" <<'METADATA'\n%s\nMETADATA\n", file, metaJSON)
+	}
+	return fmt.Sprintf("echo \"Writing metadata sidecar...\"\ncat > \"%[1]s.tmp\" <<'METADATA'\n%[2]s\nMETADATA\nmv \"%[1]s.tmp\" \"%[1]s\"\n", file, metaJSON)
+}
+
+// momentsScript keeps the synced volume as a moment: a folder of hard links in
+// .moments next to the destination. It removes moments older than the keep
+// time, and reports how many are left and the oldest, in the Job's termination
+// message. It returns "" when moments are off.
+func momentsScript(destBasePath, subPath string, keepHours *int32) string {
+	if keepHours == nil || *keepHours <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(`echo "Keeping a moment..."
+moments="/dest%[1]s/.moments%[2]s"
+mkdir -p "$moments"
+stamp=$(date -u +%%Y%%m%%dT%%H%%M%%SZ)
+[ -e "$moments/$stamp" ] || cp -a -l "/dest%[1]s%[2]s" "$moments/$stamp"
+cutoff=$(date -u -d "-%[3]d hours" +%%Y%%m%%dT%%H%%M%%SZ)
+for d in "$moments"/*; do
+  [ -d "$d" ] || continue
+  if [[ "$(basename "$d")" < "$cutoff" ]]; then rm -r -f -- "$d"; fi
+done
+count=$(find "$moments" -mindepth 1 -maxdepth 1 -type d | wc -l)
+oldest=$(ls -1 "$moments" | head -n 1)
+oldest_iso=$(date -u -d "${oldest:0:4}-${oldest:4:2}-${oldest:6:2} ${oldest:9:2}:${oldest:11:2}:${oldest:13:2}" +%%Y-%%m-%%dT%%H:%%M:%%SZ)
+printf '{"bytesWritten":0,"restorePoints":%%s,"oldestRestorePoint":"%%s"}' "$count" "$oldest_iso" > /dev/termination-log
+`, destBasePath, subPath, *keepHours)
+}
+
 // ensureReplicationJob creates a Job that runs rsync from source to destination.
 func (rc *ReplicationController) ensureReplicationJob(ctx context.Context, policy *v1alpha1.ReplicationPolicy, sv *v1alpha1.SubVolume) error {
 	policyName := policy.Name
@@ -1057,8 +1100,10 @@ func (rc *ReplicationController) ensureReplicationJob(ctx context.Context, polic
 		return nil // already exists
 	}
 
-	// Build rsync options.
-	useIncremental := policy.Spec.IncrementalSync == nil || *policy.Spec.IncrementalSync
+	// Build rsync options. Moments are hard links, so the copy must write a
+	// changed file as a new file: rsync does, cp does not.
+	keepMoments := policy.Spec.MomentKeepHours != nil && *policy.Spec.MomentKeepHours > 0
+	useIncremental := policy.Spec.IncrementalSync == nil || *policy.Spec.IncrementalSync || keepMoments
 
 	bwlimit := ""
 	if policy.Spec.BandwidthLimitMbps > 0 {
@@ -1091,34 +1136,27 @@ func (rc *ReplicationController) ensureReplicationJob(ctx context.Context, polic
 echo "Replication: syncing %s -> %s%s"
 mkdir -p "/dest%s%s"
 rsync -a --delete --exclude=/.repl-staging-* %s %s %s "/source%s/" "/dest%s%s/"
-echo "Writing metadata sidecar..."
-cat > "/dest%s%s/.subvolume-metadata.json" <<'METADATA'
-%s
-METADATA
+%s%s
 echo "Replication complete."
 `, subPath, destBasePath, subPath,
 			destBasePath, subPath,
 			bwlimit, extraArgs, "", // empty string placeholder for cleaner formatting
 			subPath, destBasePath, subPath,
-			destBasePath, subPath,
-			string(metaJSON))
+			metadataScript(destBasePath, subPath, string(metaJSON), keepMoments),
+			momentsScript(destBasePath, subPath, policy.Spec.MomentKeepHours))
 	} else {
 		script = fmt.Sprintf(`set -euo pipefail
 echo "Replication: copying %s -> %s%s"
 mkdir -p "/dest%s%s"
 cp -a "/source%s/." "/dest%s%s/"
 find "/dest%s%s" -maxdepth 1 -name '.repl-staging-*' -delete
-echo "Writing metadata sidecar..."
-cat > "/dest%s%s/.subvolume-metadata.json" <<'METADATA'
 %s
-METADATA
 echo "Replication complete."
 `, subPath, destBasePath, subPath,
 			destBasePath, subPath,
 			subPath, destBasePath, subPath,
 			destBasePath, subPath,
-			destBasePath, subPath,
-			string(metaJSON))
+			metadataScript(destBasePath, subPath, string(metaJSON), false))
 	}
 
 	backoffLimit := int32(3)
@@ -1277,7 +1315,7 @@ func (rc *ReplicationController) readJobResult(ctx context.Context, job *batchv1
 		for _, cs := range pod.Status.ContainerStatuses {
 			if cs.State.Terminated != nil && cs.State.Terminated.Message != "" {
 				var msg replJobResult
-				if err := json.Unmarshal([]byte(cs.State.Terminated.Message), &msg); err == nil && (msg.BytesWritten > 0 || msg.WrongBase) {
+				if err := json.Unmarshal([]byte(cs.State.Terminated.Message), &msg); err == nil && (msg.BytesWritten > 0 || msg.RestorePoints > 0 || msg.WrongBase) {
 					return msg
 				}
 			}

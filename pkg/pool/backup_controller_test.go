@@ -167,6 +167,9 @@ func TestBackupController_MakesAnOwnedReplicationPolicy(t *testing.T) {
 	if sp.RestorePointKeepHours == nil || *sp.RestorePointKeepHours != 30*24 {
 		t.Errorf("restorePointKeepHours = %v, want 720", sp.RestorePointKeepHours)
 	}
+	if sp.MomentKeepHours == nil || *sp.MomentKeepHours != 30*24 {
+		t.Errorf("momentKeepHours = %v, want 720: files of non-VM volumes keep their moments too", sp.MomentKeepHours)
+	}
 	if sp.VMCopySpeedLimitMBps == nil || *sp.VMCopySpeedLimitMBps != 50 {
 		t.Errorf("speed = %v, want 50", sp.VMCopySpeedLimitMBps)
 	}
