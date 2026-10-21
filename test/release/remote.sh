@@ -39,7 +39,7 @@ start() {
     (cd "$ROOT" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o test/release/bin/kubectl-migrate ./cmd/migrate/)
 
     echo "Copying the test scripts..."
-    (cd "$ROOT" && tar -czf - test/release test/e2e/lib) |
+    (cd "$ROOT" && tar -czf - test/release test/e2e/lib console-plugin/integration-tests) |
         build "rm -rf ~/release-test/src && mkdir -p ~/release-test/src ~/release-test/out && tar -xzf - -C ~/release-test/src"
 
     # An admin kubeconfig for this run only. The run deletes it when it ends.
