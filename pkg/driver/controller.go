@@ -94,18 +94,30 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 		}
 	}
 
+	// A volume that a backup restore is about to fill is held back from the
+	// start: a pod must not mount it empty.
+	restorePending := false
+	if d.k8sClient != nil && params["csi.storage.k8s.io/pvc/name"] != "" {
+		open, err := d.k8sClient.HasOpenRestore(ctx, params["csi.storage.k8s.io/pvc/namespace"], params["csi.storage.k8s.io/pvc/name"])
+		if err != nil {
+			return nil, status.Errorf(codes.Unavailable, "check for a backup restore: %v", err)
+		}
+		restorePending = open
+	}
+
 	// Delegate to Pool Manager
 	allocReq := pool.AllocationRequest{
-		PVName:       req.GetName(),
-		PVCName:      params["csi.storage.k8s.io/pvc/name"],
-		PVCNamespace: params["csi.storage.k8s.io/pvc/namespace"],
-		PoolName:     poolName,
-		RequestedGB:  requiredGB,
-		Zone:         zone,
-		Tier:         params["tier"],
-		UID:          parseOptionalInt64(params["uid"]),
-		GID:          parseOptionalInt64(params["gid"]),
-		Permissions:  params["permissions"],
+		PVName:         req.GetName(),
+		RestorePending: restorePending,
+		PVCName:        params["csi.storage.k8s.io/pvc/name"],
+		PVCNamespace:   params["csi.storage.k8s.io/pvc/namespace"],
+		PoolName:       poolName,
+		RequestedGB:    requiredGB,
+		Zone:           zone,
+		Tier:           params["tier"],
+		UID:            parseOptionalInt64(params["uid"]),
+		GID:            parseOptionalInt64(params["gid"]),
+		Permissions:    params["permissions"],
 	}
 
 	result, err := d.poolManager.Allocate(ctx, allocReq)

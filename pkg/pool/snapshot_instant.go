@@ -77,8 +77,8 @@ var VMHookSidecar = map[string]any{
 
 var (
 	kubevirtListGVK = schema.GroupVersionKind{Group: "kubevirt.io", Version: "v1", Kind: "KubeVirtList"}
-	vmListGVK       = schema.GroupVersionKind{Group: "kubevirt.io", Version: "v1", Kind: "VirtualMachineList"}
-	vmiObjGVK       = schema.GroupVersionKind{Group: "kubevirt.io", Version: "v1", Kind: "VirtualMachineInstance"}
+
+	vmiObjGVK = schema.GroupVersionKind{Group: "kubevirt.io", Version: "v1", Kind: "VirtualMachineInstance"}
 )
 
 // InstantSnapshotter changes the chain of a running VM's disk. pkg/vmsnap

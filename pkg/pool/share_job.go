@@ -66,6 +66,10 @@ type ShareData interface {
 	// ApplyVMDisk turns the staged QEMU copy volPath/stagingFile into the raw
 	// disk dstPath/disk.img on the same share, then deletes the staging file.
 	ApplyVMDisk(ctx context.Context, key string, share ShareMount, volPath, stagingFile, dstPath string, moment time.Time) (bool, error)
+	// RestoreBackup writes the backup of one volume, as it was at the newest
+	// moment at or before moment (the zero time asks for the latest), into the
+	// volume folder dstPath on dst. It reports which moment it wrote.
+	RestoreBackup(ctx context.Context, key string, backup ShareMount, volPath, momentsPath string, dst ShareMount, dstPath string, moment time.Time, owner *Ownership) (bool, RestoreOutcome, error)
 	// Stop ends any work running for key. It reports done=true once
 	// nothing runs for key any more.
 	Stop(ctx context.Context, key string) (bool, error)
@@ -204,20 +208,26 @@ func (r *ShareJobRunner) CopyDir(ctx context.Context, key string, src ShareMount
 	fmt.Fprintf(&b, "rm -r -f -- \"%s\"\n", to)
 	fmt.Fprintf(&b, "mkdir -p \"%s\"\n", to)
 	fmt.Fprintf(&b, "cp -a \"%s/.\" \"%s/\"\n", from, to)
-	if owner != nil {
-		if owner.UID != nil && owner.GID != nil {
-			recursive := ""
-			if owner.Recursive {
-				recursive = "-R "
-			}
-			fmt.Fprintf(&b, "chown %s%d:%d \"%s\"\n", recursive, *owner.UID, *owner.GID, to)
-		}
-		if owner.Permissions != "" {
-			fmt.Fprintf(&b, "chmod %s \"%s\"\n", owner.Permissions, to)
-		}
-	}
+	writeOwnerScript(&b, to, owner)
 	b.WriteString("trap - EXIT\n")
 	return r.run(ctx, key, shares, r.scriptShape(b.String()))
+}
+
+// writeOwnerScript adds the commands that give the folder to its owner.
+func writeOwnerScript(b *strings.Builder, to string, owner *Ownership) {
+	if owner == nil {
+		return
+	}
+	if owner.UID != nil && owner.GID != nil {
+		recursive := ""
+		if owner.Recursive {
+			recursive = "-R "
+		}
+		fmt.Fprintf(b, "chown %s%d:%d \"%s\"\n", recursive, *owner.UID, *owner.GID, to)
+	}
+	if owner.Permissions != "" {
+		fmt.Fprintf(b, "chmod %s \"%s\"\n", owner.Permissions, to)
+	}
 }
 
 // scriptShape is a Job that runs a shell script as root.
@@ -262,23 +272,62 @@ exec /usr/local/bin/vpc-file-pool-csi --mode=apply-vm-disk --staging-path="%s" -
 
 // run starts the Job for key, or reports on the Job that already exists.
 func (r *ShareJobRunner) run(ctx context.Context, key string, shares []ShareMount, shape jobShape) (bool, error) {
+	done, _, err := r.runMessage(ctx, key, shares, shape)
+	return done, err
+}
+
+// runMessage is run, and it also returns the termination message of the Job's
+// container when the Job has succeeded. It reads the message before the Job
+// and its pods are removed.
+func (r *ShareJobRunner) runMessage(ctx context.Context, key string, shares []ShareMount, shape jobShape) (bool, string, error) {
 	jobName := shareJobName(key)
 	job := &batchv1.Job{}
 	err := r.client.Get(ctx, types.NamespacedName{Namespace: r.namespace, Name: jobName}, job)
 	switch {
 	case apierrors.IsNotFound(err):
-		return false, r.start(ctx, jobName, shares, shape)
+		return false, "", r.start(ctx, jobName, shares, shape)
 	case err != nil:
-		return false, fmt.Errorf("get share Job %s: %w", jobName, err)
+		return false, "", fmt.Errorf("get share Job %s: %w", jobName, err)
 	case job.Status.Succeeded > 0:
+		msg := r.terminationMessage(ctx, jobName)
 		r.cleanup(ctx, jobName, len(shares))
-		return true, nil
-	case job.Status.Failed > shareJobBackoffLimit:
+		return true, msg, nil
+	case job.Status.Failed > shareJobBackoffLimit || jobHasFailed(job):
 		r.cleanup(ctx, jobName, len(shares))
-		return false, fmt.Errorf("%w: %s", ErrShareJobFailed, jobName)
+		return false, "", fmt.Errorf("%w: %s", ErrShareJobFailed, jobName)
 	default:
-		return false, nil
+		return false, "", nil
 	}
+}
+
+// jobHasFailed reports whether the Job has its Failed condition. A pod that
+// restarts in place uses up the retries of a Job without raising the Job's
+// failed count past the limit.
+func jobHasFailed(job *batchv1.Job) bool {
+	for _, c := range job.Status.Conditions {
+		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
+}
+
+// terminationMessage returns what the container of a Job's pod wrote to its
+// termination log, or "".
+func (r *ShareJobRunner) terminationMessage(ctx context.Context, jobName string) string {
+	pods := &corev1.PodList{}
+	if err := r.client.List(ctx, pods, client.InNamespace(r.namespace), client.MatchingLabels{shareJobLabel: jobName}); err != nil {
+		klog.V(4).InfoS("Could not list pods of a share data Job", "job", jobName, "err", err)
+		return ""
+	}
+	for _, p := range pods.Items {
+		for _, cs := range p.Status.ContainerStatuses {
+			if cs.State.Terminated != nil && cs.State.Terminated.Message != "" {
+				return cs.State.Terminated.Message
+			}
+		}
+	}
+	return ""
 }
 
 // podSecurityContext runs a share data Job as uid. Root Jobs set no group, as

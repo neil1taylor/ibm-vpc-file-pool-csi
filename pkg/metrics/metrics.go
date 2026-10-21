@@ -203,6 +203,35 @@ var (
 		[]string{"policy", "source_pool"},
 	)
 
+	// BackupVolumes is the number of volumes a BackupPolicy backs up.
+	BackupVolumes = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "vpc_file_pool_backup_volumes",
+			Help: "Number of volumes a backup policy backs up",
+		},
+		[]string{"policy"},
+	)
+
+	// BackupStalestAgeSeconds is the age of the newest backup of the volume
+	// that was backed up longest ago. A volume that was never backed up counts
+	// from the time the policy was made.
+	BackupStalestAgeSeconds = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "vpc_file_pool_backup_stalest_age_seconds",
+			Help: "Age in seconds of the newest backup of the least recently backed-up volume of a policy",
+		},
+		[]string{"policy"},
+	)
+
+	// BackupOldestAgeSeconds is the age of the oldest backup that is kept.
+	BackupOldestAgeSeconds = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "vpc_file_pool_backup_oldest_age_seconds",
+			Help: "Age in seconds of the oldest backup a policy keeps",
+		},
+		[]string{"policy"},
+	)
+
 	// CDICopyLimitRaisedTotal counts how often the controller raised CDI's
 	// copy pod memory limit. More than one raise means something resets it.
 	CDICopyLimitRaisedTotal = prometheus.NewCounter(
@@ -236,6 +265,9 @@ func init() {
 		ReplicationLagSeconds,
 		ReplicationConsecutiveFailures,
 		ReplicationSubVolumeCount,
+		BackupVolumes,
+		BackupStalestAgeSeconds,
+		BackupOldestAgeSeconds,
 		CDICopyLimitRaisedTotal,
 	)
 }

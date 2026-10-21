@@ -114,6 +114,11 @@ func TestSnapshotDuration_Observe(t *testing.T) {
 }
 
 func TestAllCollectorsRegistered(t *testing.T) {
+	// A vector with no series is not gathered; make one for each backup metric.
+	BackupVolumes.WithLabelValues("test-policy").Set(1)
+	BackupStalestAgeSeconds.WithLabelValues("test-policy").Set(1)
+	BackupOldestAgeSeconds.WithLabelValues("test-policy").Set(1)
+
 	// Gather from controller-runtime's registry (where init() registers them).
 	gatherer, ok := ctrlmetrics.Registry.(prometheus.Gatherer)
 	if !ok {
@@ -136,6 +141,9 @@ func TestAllCollectorsRegistered(t *testing.T) {
 		"vpc_file_pool_snapshots_total":             false,
 		"vpc_file_pool_snapshot_duration_seconds":   false,
 		"vpc_file_pool_cdi_copy_limit_raised_total": false,
+		"vpc_file_pool_backup_volumes":              false,
+		"vpc_file_pool_backup_stalest_age_seconds":  false,
+		"vpc_file_pool_backup_oldest_age_seconds":   false,
 	}
 
 	for _, fam := range families {
