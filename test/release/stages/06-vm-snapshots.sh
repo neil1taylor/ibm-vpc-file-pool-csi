@@ -6,6 +6,8 @@
 # test/e2e/test-vm-snapshot.sh does the work and checks all of that.
 # A second check takes a KubeVirt VirtualMachineSnapshot of a running VM with two
 # disks (issue #14) and tests that the two restored disks fit each other.
+# With the KubeVirt Sidecar gate on, VM disk snapshots are instant instead, so
+# this stage skips and stage 19 runs.
 
 RT_STAGE_TIMEOUT=5400
 
@@ -20,6 +22,7 @@ run() {
     for tool in virtctl perl jq ssh-keygen; do
         command -v "$tool" >/dev/null || skip "needs $tool"
     done
+    sidecar_gate_on && skip "the KubeVirt Sidecar gate is on, so VM disk snapshots are instant, not QEMU copies; stage 19 tests them"
     key="$RT_OUT/vm-snapshot-key"
     [ -f "$key" ] || ssh-keygen -q -t ed25519 -N '' -f "$key"
     check "a snapshot of a running VM is consistent, restores, and the restored VM boots with all checksums matching" \
