@@ -10,14 +10,14 @@ import (
 	"strings"
 	"time"
 
+	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/util"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
-// ExportToCOS and MaintainCOSRepo are on ShareJobRunner but not in ShareData on
-// purpose: the controller starts them in a later build step (see
-// docs/specs/2026-10-21-backup-cos-export.md), and part 1 only adds the Jobs.
+// ExportToCOS and MaintainCOSRepo are in ShareData: the backup controller starts
+// them (see docs/specs/2026-10-21-backup-cos-export.md).
 
 // Names of the keys inside the Secrets that an export Job reads. The COS key is
 // the HMAC key pair of an IBM Cloud Object Storage service credential.
@@ -38,14 +38,6 @@ const (
 )
 
 const (
-	// minExportMaintenanceInterval is the shortest time between Kopia
-	// maintenance runs.
-	minExportMaintenanceInterval = time.Hour
-	// exportLockMargin is how much longer than the maintenance interval the keep
-	// time must be: Kopia extends the locks of chunks still in use at each
-	// maintenance run (tested 20 Oct 2026).
-	exportLockMargin = 24 * time.Hour
-
 	exportUser = "driver"
 	exportHost = "pool-csi"
 )
@@ -79,6 +71,9 @@ type ExportRepo struct {
 	// MaintenanceInterval is the time between Kopia maintenance runs, 1 hour at
 	// the least.
 	MaintenanceInterval time.Duration
+	// ExpireBefore is used by maintenance only: Kopia snapshots that started
+	// before this time are deleted. The zero time deletes nothing.
+	ExpireBefore time.Time
 }
 
 // ExportOutcome is what an export Job reports.
@@ -105,13 +100,13 @@ func (e ExportRepo) validate() error {
 			return fmt.Errorf("the %s Secret name %q is not a valid name", what, name)
 		}
 	}
-	if e.MaintenanceInterval < minExportMaintenanceInterval {
-		return fmt.Errorf("the maintenance interval %s is shorter than %s", e.MaintenanceInterval, minExportMaintenanceInterval)
+	if e.MaintenanceInterval < v1alpha1.MinExportMaintenanceInterval {
+		return fmt.Errorf("the maintenance interval %s is shorter than %s", e.MaintenanceInterval, v1alpha1.MinExportMaintenanceInterval)
 	}
 	switch e.LockMode {
 	case ExportLockNone:
 	case ExportLockCompliance:
-		if min := e.MaintenanceInterval + exportLockMargin; e.KeepFor < min {
+		if min := v1alpha1.MinComplianceKeepFor(e.MaintenanceInterval); e.KeepFor < min {
 			return fmt.Errorf("the keep time %s is shorter than the maintenance interval plus 24 hours (%s)", e.KeepFor, min)
 		}
 	default:
@@ -194,6 +189,8 @@ func exportScript(p exportParams) string {
 	p.scriptHead(&b)
 	backend := p.backendWords()
 	fmt.Fprintf(&b, "kopia repository connect %s $ident 2>/dev/null || kopia repository create %s $ident%s\n", backend, backend, p.retentionWords())
+	// Kopia drops snapshots by count. Keep them all: maintenance deletes by age.
+	b.WriteString(keepAllSnapshotsPolicy + "\n")
 	tags := "--tags=" + util.ShellQuote("moment:"+p.moment.UTC().Format(time.RFC3339)) + " --tags=" + util.ShellQuote("volume:"+p.volume)
 	fmt.Fprintf(&b, `blob_total() { kopia blob stats --raw | sed -n 's/^Total: //p'; }
 before=$(blob_total)
@@ -212,6 +209,24 @@ printf '{"moment":"%%s","bytes":%%s}' %s "$sent" > %s
 	return b.String()
 }
 
+// keepAllSnapshotsPolicy is the Kopia policy of the repository. It stops Kopia
+// from dropping snapshots by count (its default keeps the latest 10, then
+// hourly, daily, weekly, monthly and yearly ones). Snapshots go by age, in the
+// maintenance Job.
+const keepAllSnapshotsPolicy = "kopia policy set --global --keep-latest=1000000 --keep-hourly=0 --keep-daily=0 --keep-weekly=0 --keep-monthly=0 --keep-annual=0"
+
+// expireScript deletes the Kopia snapshots that started before the cutoff. Kopia
+// prints RFC 3339 times in UTC, which sort as text.
+func expireScript(before time.Time) string {
+	return fmt.Sprintf(`cutoff=%s
+kopia snapshot list --all --json | sed -n 's/^ *{"id":"\([^"]*\)".*"startTime":"\([^"]*\)".*/\1 \2/p' | while read -r id started; do
+  if [ "$(LC_ALL=C expr "$started" '<' "$cutoff")" = 1 ]; then
+    kopia snapshot delete "$id" --delete
+  fi
+done
+`, util.ShellQuote(before.UTC().Format("2006-01-02T15:04:05Z")))
+}
+
 // maintenanceScript connects to an existing repository and runs Kopia's full
 // maintenance. With a Compliance lock it first turns on the extension of
 // object locks, so chunks still in use stay locked.
@@ -219,6 +234,9 @@ func maintenanceScript(p exportParams) string {
 	var b strings.Builder
 	p.scriptHead(&b)
 	fmt.Fprintf(&b, "kopia repository connect %s $ident\n", p.backendWords())
+	if !p.repo.ExpireBefore.IsZero() {
+		b.WriteString(expireScript(p.repo.ExpireBefore))
+	}
 	set := "kopia maintenance set --full-interval=" + util.ShellQuote(p.repo.MaintenanceInterval.String())
 	if p.repo.LockMode == ExportLockCompliance {
 		set += " --extend-object-locks=true"

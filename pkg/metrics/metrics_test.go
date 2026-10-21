@@ -119,6 +119,8 @@ func TestAllCollectorsRegistered(t *testing.T) {
 	BackupStalestAgeSeconds.WithLabelValues("test-policy").Set(1)
 	BackupOldestAgeSeconds.WithLabelValues("test-policy").Set(1)
 	BackupSnapshotPoolUsedPercent.WithLabelValues("test-pool", "test-share").Set(1)
+	BackupExportOldestUnexportedAgeSeconds.WithLabelValues("test-policy").Set(1)
+	BackupExportNewestAgeSeconds.WithLabelValues("test-policy").Set(1)
 
 	// Gather from controller-runtime's registry (where init() registers them).
 	gatherer, ok := ctrlmetrics.Registry.(prometheus.Gatherer)
@@ -131,21 +133,23 @@ func TestAllCollectorsRegistered(t *testing.T) {
 	}
 
 	expected := map[string]bool{
-		"vpc_file_pool_allocations_total":                 false,
-		"vpc_file_pool_allocation_duration_seconds":       false,
-		"vpc_file_pool_capacity_gb":                       false,
-		"vpc_file_pool_allocated_gb":                      false,
-		"vpc_file_pool_share_count":                       false,
-		"vpc_file_pool_pvc_count":                         false,
-		"vpc_file_pool_api_calls_total":                   false,
-		"vpc_file_pool_api_call_duration_seconds":         false,
-		"vpc_file_pool_snapshots_total":                   false,
-		"vpc_file_pool_snapshot_duration_seconds":         false,
-		"vpc_file_pool_cdi_copy_limit_raised_total":       false,
-		"vpc_file_pool_backup_volumes":                    false,
-		"vpc_file_pool_backup_stalest_age_seconds":        false,
-		"vpc_file_pool_backup_oldest_age_seconds":         false,
-		"vpc_file_pool_backup_snapshot_pool_used_percent": false,
+		"vpc_file_pool_allocations_total":                           false,
+		"vpc_file_pool_allocation_duration_seconds":                 false,
+		"vpc_file_pool_capacity_gb":                                 false,
+		"vpc_file_pool_allocated_gb":                                false,
+		"vpc_file_pool_share_count":                                 false,
+		"vpc_file_pool_pvc_count":                                   false,
+		"vpc_file_pool_api_calls_total":                             false,
+		"vpc_file_pool_api_call_duration_seconds":                   false,
+		"vpc_file_pool_snapshots_total":                             false,
+		"vpc_file_pool_snapshot_duration_seconds":                   false,
+		"vpc_file_pool_cdi_copy_limit_raised_total":                 false,
+		"vpc_file_pool_backup_volumes":                              false,
+		"vpc_file_pool_backup_stalest_age_seconds":                  false,
+		"vpc_file_pool_backup_oldest_age_seconds":                   false,
+		"vpc_file_pool_backup_snapshot_pool_used_percent":           false,
+		"vpc_file_pool_backup_export_oldest_unexported_age_seconds": false,
+		"vpc_file_pool_backup_export_newest_age_seconds":            false,
 	}
 
 	for _, fam := range families {

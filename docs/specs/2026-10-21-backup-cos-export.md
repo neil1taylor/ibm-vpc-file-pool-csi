@@ -93,7 +93,7 @@ Each policy sets its own lock mode and keep time, so tests use a short lock. **T
 
 ## Build order
 
-Status: part 1 built (PR open; tested against a local Kopia repository, not yet against MinIO or a real bucket, and the image was not built). Parts 2 to 6 not started. Part 1 leaves two things for later parts: the Job reads the backup key from a Secret (part 3 replaces this with the Key Protect unlock), and nothing yet removes Kopia snapshots past their keep time (part 2 sets the retention policy with the controller).
+Status: part 1 built and merged (tested against a local Kopia repository, not yet against MinIO or a real bucket, and the image was not built). Part 2 built (PR open): `spec.export`, the status fields, the webhook rules, the export and maintenance Jobs driven by the controller, Kopia retention, the two metrics and the alert examples; tested with fakes and a local Kopia repository, not on a cluster and not against a bucket. Parts 3 to 6 not started. The Job still reads the backup key from a Secret (part 3 replaces this with the Key Protect unlock). Part 2 decisions: the maintenance Job runs every maintenance interval (a day, or an hour for a 25-hour keep time) rather than a fixed once a day, so the lock extension keeps pace with a short lock; snapshots past the keep time are deleted by age in the maintenance Job, because Kopia can expire only by count; a failed export is retried after 5 minutes; the controller keeps exporting while a policy is suspended.
 
 Each part is a PR with its tests, and updates the docs and the release test run in the same PR.
 
@@ -134,6 +134,11 @@ Each part is a PR with its tests, and updates the docs and the release test run 
 - Only IBM COS for now.
 - The bucket is locked to the cluster with a context-based restriction (CBR) rule: the cluster VPC and the admin addresses only. A virtual private endpoint (VPE) for COS in the cluster's VPC is recommended for real backups and not needed for lab tests. The setup command offers both, and `docs` tutorial 9 shows the manual steps. The admin addresses must be in the zone, or `cos-setup`, `cos-list` and `restore --from-cos` fail from a laptop.
 - The setup command is built last of the key parts, after the export works against MinIO and a real bucket by hand.
+- Maintenance runs every maintenance interval, not on a fixed daily timer: a day for a normal keep time, an hour for the 25-hour test lock. This keeps lock extension ahead of a short lock.
+- Snapshots past the keep time are deleted by age in the maintenance Job. Kopia can only expire by count, so the export tells Kopia to keep every snapshot and the Job does the expiry.
+- A failed export is tried again after 5 minutes, and a volume that keeps failing does not hold up the others.
+- The controller keeps exporting while a policy is suspended: suspend stops new local backups, not the copy of moments that already exist.
+- A failed maintenance run is written to the controller log and tried again; it is not in the status yet.
 
 ## Needs from you
 

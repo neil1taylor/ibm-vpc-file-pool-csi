@@ -733,6 +733,16 @@ func (s *nfsShareData) ShareUsage(context.Context, string, pool.ShareMount) (boo
 	return true, 0, nil
 }
 
+// ExportToCOS is not used: the integration tests make no backups.
+func (s *nfsShareData) ExportToCOS(context.Context, string, pool.ShareMount, pool.ExportRepo, string, string, time.Time) (bool, pool.ExportOutcome, error) {
+	return true, pool.ExportOutcome{}, nil
+}
+
+// MaintainCOSRepo is not used: the integration tests make no backups.
+func (s *nfsShareData) MaintainCOSRepo(context.Context, string, pool.ExportRepo) (bool, error) {
+	return true, nil
+}
+
 // ApplyVMDisk is not used: the integration tests have no running VMs.
 func (s *nfsShareData) ApplyVMDisk(context.Context, string, pool.ShareMount, string, string, string, time.Time) (bool, error) {
 	return true, nil
