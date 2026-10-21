@@ -45,6 +45,9 @@ func checkChainFunc() string {
     [ $n -le %d ] || { echo "chain too long" >&2; return 1; }
   done
 }
+backing_of() {
+  qemu-img info -f qcow2 -U --output=json "$1/$2" | sed -n 's/^ *"backing-filename": "\(.*\)",*$/\1/p'
+}
 `, BaseFile, BaseFile, MaxSnapshots+1)
 }
 
@@ -64,7 +67,13 @@ func OfflineTakeScript(dir string, top File, newFile string) (string, error) {
 	b.WriteString("set -eu\n")
 	b.WriteString(checkChainFunc())
 	fmt.Fprintf(&b, "check_chain %q %s\n", dir, top.Name)
-	fmt.Fprintf(&b, "if [ ! -e %q ]; then\n", dir+"/"+newFile)
+	// A file left by an older try is used only if it backs onto top. One
+	// made on an older top would hide top's data.
+	fmt.Fprintf(&b, "if [ -e %q ]; then\n", dir+"/"+newFile)
+	fmt.Fprintf(&b, "  check_chain %q %s\n", dir, newFile)
+	fmt.Fprintf(&b, "  [ \"$(backing_of %q %s)\" = %s ] || { echo %q >&2; exit 1; }\n",
+		dir, newFile, top.Name, newFile+" is left from an older try and does not back onto "+top.Name)
+	b.WriteString("else\n")
 	fmt.Fprintf(&b, "  qemu-img create -q -f qcow2 -F %s -b %s %q\n", top.Format, top.Name, dir+"/"+newFile)
 	b.WriteString("fi\n")
 	fmt.Fprintf(&b, "chmod %s %q\n", modeFrozen, dir+"/"+top.Name)
@@ -91,6 +100,14 @@ func OfflineMergeScript(dir, file, child, grandchild string) (string, error) {
 	// Refuse to merge into a file that child does not back onto.
 	fmt.Fprintf(&b, "  qemu-img info -f qcow2 -U --output=json %q | grep -q '\"backing-filename\": \"%s\"' || { echo %q >&2; exit 1; }\n",
 		c, file, child+" does not back onto "+file)
+	// Refuse when a file other than grandchild backs onto child: deleting
+	// child would break it.
+	fmt.Fprintf(&b, "  for o in %q/snap-*.qcow2; do\n", dir)
+	b.WriteString("    [ -e \"$o\" ] || continue\n")
+	b.WriteString("    o=${o##*/}\n")
+	fmt.Fprintf(&b, "    case \"$o\" in %s|%s) continue ;; esac\n", child, orNone(grandchild))
+	fmt.Fprintf(&b, "    [ \"$(backing_of %q \"$o\")\" != %s ] || { echo \"$o backs onto %s\" >&2; exit 1; }\n", dir, child, child)
+	b.WriteString("  done\n")
 	fmt.Fprintf(&b, "  chmod %s %q\n", modeLive, f)
 	fmt.Fprintf(&b, "  qemu-img commit -q -f qcow2 %q\n", c)
 	if grandchild != "" {
@@ -125,6 +142,14 @@ func ConvertScript(srcDir, file, dstDir string) (string, error) {
 	fmt.Fprintf(&b, "mv -f -- %q %q\n", part, dstDir+"/"+BaseFile)
 	b.WriteString("trap - EXIT\n")
 	return b.String(), nil
+}
+
+// orNone is name, or a pattern no file name matches when name is "".
+func orNone(name string) string {
+	if name == "" {
+		return "/"
+	}
+	return name
 }
 
 // checkScriptArgs refuses a folder or file name that a script must not use.

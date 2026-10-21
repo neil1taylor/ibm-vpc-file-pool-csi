@@ -222,3 +222,63 @@ func TestConvertScript_FollowsAGoodChain(t *testing.T) {
 		t.Errorf("calls:\n%s", calls(t, log))
 	}
 }
+
+func TestOfflineTakeScript_RefusesALeftoverFileOnAnotherBase(t *testing.T) {
+	bin, log := stubQemuImg(t)
+	vol := t.TempDir()
+	_ = os.WriteFile(filepath.Join(vol, "disk.img"), nil, 0o444)
+	_ = os.WriteFile(filepath.Join(vol, "snap-a.qcow2"), nil, 0o644)
+	_ = os.WriteFile(filepath.Join(vol, "snap-a.qcow2.backing"), []byte("disk.img"), 0o644)
+	// A file left by an older try, made when disk.img was the top file.
+	_ = os.WriteFile(filepath.Join(vol, "snap-1.qcow2"), nil, 0o644)
+	_ = os.WriteFile(filepath.Join(vol, "snap-1.qcow2.backing"), []byte("disk.img"), 0o644)
+	script, err := OfflineTakeScript(vol, File{Name: "snap-a.qcow2", Format: "qcow2"}, "snap-1.qcow2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runScript(t, bin, script); err == nil {
+		t.Fatal("a new file that does not back onto the top file would lose the top file's data")
+	}
+	if strings.Contains(calls(t, log), "create") {
+		t.Error("must not make a file")
+	}
+	if m := mode(t, filepath.Join(vol, "snap-a.qcow2")); m != "-rw-r--r--" {
+		t.Errorf("the top file stays the live file, mode %s", m)
+	}
+}
+
+func TestOfflineTakeScript_ReusesALeftoverFileOnTheTop(t *testing.T) {
+	bin, log := stubQemuImg(t)
+	vol := t.TempDir()
+	_ = os.WriteFile(filepath.Join(vol, "disk.img"), nil, 0o644)
+	_ = os.WriteFile(filepath.Join(vol, "snap-1.qcow2"), nil, 0o644)
+	_ = os.WriteFile(filepath.Join(vol, "snap-1.qcow2.backing"), []byte("disk.img"), 0o644)
+	script, _ := OfflineTakeScript(vol, File{Name: "disk.img", Format: "raw"}, "snap-1.qcow2")
+	if out, err := runScript(t, bin, script); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if strings.Contains(calls(t, log), "create") {
+		t.Error("the leftover file is right and is used as it is")
+	}
+}
+
+func TestOfflineMergeScript_RefusesWhenAnotherFileBacksOntoTheChild(t *testing.T) {
+	bin, log := stubQemuImg(t)
+	vol := t.TempDir()
+	_ = os.WriteFile(filepath.Join(vol, "disk.img"), nil, 0o444)
+	_ = os.WriteFile(filepath.Join(vol, "snap-a.qcow2"), nil, 0o644)
+	_ = os.WriteFile(filepath.Join(vol, "snap-a.qcow2.backing"), []byte("disk.img"), 0o644)
+	_ = os.WriteFile(filepath.Join(vol, "snap-x.qcow2"), nil, 0o644)
+	_ = os.WriteFile(filepath.Join(vol, "snap-x.qcow2.backing"), []byte("snap-a.qcow2"), 0o644)
+	script, _ := OfflineMergeScript(vol, "disk.img", "snap-a.qcow2", "")
+	out, err := runScript(t, bin, script)
+	if err == nil {
+		t.Fatal("deleting a file that another file backs onto breaks that file")
+	}
+	if !strings.Contains(out, "snap-x.qcow2") {
+		t.Errorf("the error must name the other file, output:\n%s", out)
+	}
+	if strings.Contains(calls(t, log), "commit") {
+		t.Error("must not commit")
+	}
+}
