@@ -232,14 +232,14 @@ var (
 		[]string{"policy"},
 	)
 
-	// BackupSnapshotPoolUsedPercent is how full the share of a snapshot pool
-	// was when a Job last read it.
+	// BackupSnapshotPoolUsedPercent is how full a share of a snapshot pool was
+	// when a Job last read it.
 	BackupSnapshotPoolUsedPercent = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "vpc_file_pool_backup_snapshot_pool_used_percent",
-			Help: "Percent of the share of a snapshot pool that is used, as last read by a Job",
+			Help: "Percent of a share of a snapshot pool that is used, as last read by a Job",
 		},
-		[]string{"pool"},
+		[]string{"pool", "share"},
 	)
 
 	// CDICopyLimitRaisedTotal counts how often the controller raised CDI's

@@ -328,7 +328,7 @@ spec:
   profile: dp2
   shareSizeGB: 2000
   iops: 3000
-  maxShares: 1          # one share for now
+  maxShares: 1          # more than one share is allowed; each volume stays on one of them
   initialShares: 1
   autoExpand: false
 ---

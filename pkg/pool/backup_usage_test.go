@@ -20,11 +20,16 @@ type usageEnv struct {
 func newUsageEnv(t *testing.T, percent int) *usageEnv {
 	t.Helper()
 	e := &usageEnv{backupEnv: newBackupEnv(t), now: time.Date(2026, 10, 21, 8, 0, 0, 0, time.UTC)}
-	e.sd = &fakeShareData{nfs: newFakeNFSOperations(), base: "/x", usagePercent: percent}
+	e.sd = &fakeShareData{nfs: newFakeNFSOperations(), base: "/x"}
 	e.bc.SetShareData(e.sd)
 	e.bc.SetNowFunc(func() time.Time { return e.now })
 	e.addClaim("apps", "db", "data-a", yes)
 	e.policy("nightly", nil)
+	// A new volume is placed on a share with room, so the share is empty for
+	// the first pass; the tests see it at the given usage a read later.
+	e.reconcile()
+	e.sd.usagePercent, e.sd.usageCalls = percent, 0
+	e.now = e.now.Add(snapshotUsageInterval + time.Second)
 	return e
 }
 
@@ -170,7 +175,7 @@ func TestBackupController_UsageCheckNeedsAShareRunner(t *testing.T) {
 func TestBackupController_ReportsTheUsageOfTheSnapshotPool(t *testing.T) {
 	e := newUsageEnv(t, 91)
 	e.reconcile()
-	if got := gaugeValue(metrics.BackupSnapshotPoolUsedPercent.WithLabelValues("backups")); got != 91 {
+	if got := gaugeValue(metrics.BackupSnapshotPoolUsedPercent.WithLabelValues("backups", "backups-share")); got != 91 {
 		t.Errorf("used percent metric = %v, want 91", got)
 	}
 }

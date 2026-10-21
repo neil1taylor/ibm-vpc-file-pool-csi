@@ -28,6 +28,7 @@ type backupRunner interface {
 // deleteTarget is the backup of one volume on a snapshot pool.
 type deleteTarget struct {
 	policy, pool    string
+	shareID         string // the share that holds the backup; empty means the first share of the pool
 	namespace, name string
 	subPath         string
 	backup, moments string
@@ -76,7 +77,7 @@ func runDelete(ctx context.Context, c client.Client, out io.Writer, in io.Reader
 	if err = refuseWhileRestoring(ctx, c, t); err != nil {
 		return err
 	}
-	share, err := snapshotPoolShare(ctx, c, t.pool)
+	share, err := snapshotPoolShare(ctx, c, t.pool, t.shareID)
 	if err != nil {
 		return err
 	}
@@ -126,7 +127,13 @@ func resolveDeleteTarget(ctx context.Context, c client.Client, policy, ns, name 
 		if flags["pool"] == "" || flags["volume"] == "" {
 			return nil, fmt.Errorf("backup policy %q does not exist, so its status cannot say where the backup is; add --pool and --volume (the snapshot pool and the volume name pvc-...)", policy)
 		}
-		t.pool, t.subPath = flags["pool"], "/pvcs/"+flags["volume"]
+		t.pool, t.subPath, t.shareID = flags["pool"], "/pvcs/"+flags["volume"], flags["share"]
+		if t.shareID == "" {
+			p := &v1alpha1.FileSharePool{}
+			if gerr := c.Get(ctx, types.NamespacedName{Name: t.pool}, p); gerr == nil && len(p.Status.Shares) > 1 {
+				return nil, fmt.Errorf("the snapshot pool %q has %d shares and the deleted policy cannot say which one holds the backup; add --share (the share ID)", t.pool, len(p.Status.Shares))
+			}
+		}
 	case err != nil:
 		return nil, fmt.Errorf("backup policy %q: %w", policy, err)
 	default:
@@ -143,7 +150,7 @@ func resolveDeleteTarget(ctx context.Context, c client.Client, policy, ns, name 
 			return nil, fmt.Errorf("policy %s still backs up %s/%s: remove the label that selects it, or delete the policy, wait for the next backup cycle, then run this again (after the policy is deleted, add --pool %s --volume %s)",
 				policy, ns, name, bp.Spec.SnapshotPool, strings.TrimPrefix(entry.SubPath, "/pvcs/"))
 		}
-		t.pool, t.subPath = bp.Spec.SnapshotPool, entry.SubPath
+		t.pool, t.subPath, t.shareID = bp.Spec.SnapshotPool, entry.SubPath, entry.ShareID
 	}
 	t.backup = "/backup/" + policy + t.subPath
 	t.moments = "/backup/" + policy + "/.moments" + t.subPath
@@ -169,16 +176,33 @@ func refuseWhileRestoring(ctx context.Context, c client.Client, t *deleteTarget)
 	return nil
 }
 
-// snapshotPoolShare returns the share of the snapshot pool.
-func snapshotPoolShare(ctx context.Context, c client.Client, poolName string) (pool.ShareMount, error) {
+// snapshotPoolShare returns the share of the snapshot pool that holds a backup.
+// An empty shareID means the first share: an entry made when the pool had one
+// share has none. Once a policy is gone, a pool with more than one share needs
+// the share named.
+func snapshotPoolShare(ctx context.Context, c client.Client, poolName, shareID string) (pool.ShareMount, error) {
 	p := &v1alpha1.FileSharePool{}
 	if err := c.Get(ctx, types.NamespacedName{Name: poolName}, p); err != nil {
 		return pool.ShareMount{}, fmt.Errorf("the snapshot pool %q: %w", poolName, err)
 	}
-	if len(p.Status.Shares) != 1 || p.Status.Shares[0].MountTargetIP == "" {
-		return pool.ShareMount{}, fmt.Errorf("the snapshot pool %q must have exactly one share with a mount target, it has %d share(s) and the first is not ready", poolName, len(p.Status.Shares))
+	if len(p.Status.Shares) == 0 {
+		return pool.ShareMount{}, fmt.Errorf("the snapshot pool %q has no share", poolName)
 	}
 	sh := p.Status.Shares[0]
+	if shareID != "" {
+		found := false
+		for _, cand := range p.Status.Shares {
+			if cand.ShareID == shareID {
+				sh, found = cand, true
+			}
+		}
+		if !found {
+			return pool.ShareMount{}, fmt.Errorf("share %q is not a share of the snapshot pool %q", shareID, poolName)
+		}
+	}
+	if sh.MountTargetIP == "" {
+		return pool.ShareMount{}, fmt.Errorf("share %s of the snapshot pool %q has no mount target yet", sh.ShareID, poolName)
+	}
 	return pool.ShareMount{MountTargetIP: sh.MountTargetIP, ExportPath: sh.ExportPath}, nil
 }
 

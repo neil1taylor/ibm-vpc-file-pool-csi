@@ -118,7 +118,7 @@ func TestAllCollectorsRegistered(t *testing.T) {
 	BackupVolumes.WithLabelValues("test-policy").Set(1)
 	BackupStalestAgeSeconds.WithLabelValues("test-policy").Set(1)
 	BackupOldestAgeSeconds.WithLabelValues("test-policy").Set(1)
-	BackupSnapshotPoolUsedPercent.WithLabelValues("test-pool").Set(1)
+	BackupSnapshotPoolUsedPercent.WithLabelValues("test-pool", "test-share").Set(1)
 
 	// Gather from controller-runtime's registry (where init() registers them).
 	gatherer, ok := ctrlmetrics.Registry.(prometheus.Gatherer)
