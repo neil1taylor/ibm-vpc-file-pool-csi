@@ -68,10 +68,10 @@ func TestMigrationObjects_MatchGoldenFile(t *testing.T) {
 	got = append(got, '\n')
 
 	if *updateGolden {
-		if err := os.MkdirAll(filepath.Dir(goldenPath), 0o755); err != nil {
+		if err = os.MkdirAll(filepath.Dir(goldenPath), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(goldenPath, got, 0o644); err != nil {
+		if err = os.WriteFile(goldenPath, got, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
