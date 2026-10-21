@@ -8,6 +8,7 @@ import {
   validateReceiverAddress,
   validateReceiverCA,
   CheckPodLike,
+  secretsMadeFor,
 } from './receiver-objects';
 
 // The Go side (pkg/replication/checkjob_test.go) writes this file from its own builder.
@@ -106,5 +107,33 @@ describe('receiverCheckResult', () => {
       state: 'failed',
       reason: 'The check ended without a result. It may have run out of time.',
     });
+  });
+});
+
+describe('secretsMadeFor', () => {
+  const policy = (name: string, auth?: string, ca?: string) => ({
+    metadata: { name },
+    spec: { destinationAuthSecretRef: auth, destinationCACertSecretRef: ca },
+  });
+
+  it('lists the two Secrets the setup names for a policy, when the policy uses them', () => {
+    const p = policy('dr', 'dr-receiver-token', 'dr-receiver-ca');
+    expect(secretsMadeFor(p, [p])).toEqual(['dr-receiver-token', 'dr-receiver-ca']);
+  });
+
+  it('leaves out a Secret the policy does not use', () => {
+    const p = policy('dr', 'dr-receiver-token', '');
+    expect(secretsMadeFor(p, [p])).toEqual(['dr-receiver-token']);
+  });
+
+  it('leaves out Secrets that do not have the names the setup makes', () => {
+    const p = policy('dr', 'my-token', 'my-ca');
+    expect(secretsMadeFor(p, [p])).toEqual([]);
+  });
+
+  it('leaves out a Secret that another policy also uses', () => {
+    const p = policy('dr', 'dr-receiver-token', 'dr-receiver-ca');
+    const other = policy('other', 'dr-receiver-token', 'x-ca');
+    expect(secretsMadeFor(p, [p, other])).toEqual(['dr-receiver-ca']);
   });
 });
