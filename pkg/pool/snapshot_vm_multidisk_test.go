@@ -58,6 +58,28 @@ func (e *vmSnapEnv) dataSnap() *v1alpha1.Snapshot {
 	return s
 }
 
+// owner returns the name of the snapshot that owns the QEMU copy, and the name
+// of the one that joined it. Which snapshot starts the copy depends on the order
+// in which the controller lists them.
+func (e *vmSnapEnv) owner() (owner, joined string) {
+	e.t.Helper()
+	for _, name := range []string{vmSnapName, dataSnapName} {
+		vc := e.k.getSnapshot(name).Status.VMCopy
+		if vc == nil {
+			e.t.Fatalf("%s holds no copy", name)
+		}
+		if vc.Leader == "" {
+			owner = name
+		} else {
+			joined = name
+		}
+	}
+	if owner == "" || joined == "" {
+		e.t.Fatalf("owner %q, joined %q: want one of each", owner, joined)
+	}
+	return owner, joined
+}
+
 func TestMultiDisk_FirstSnapshotCopiesEveryPoolDiskAtOnce(t *testing.T) {
 	e := newTwoDiskEnv(t)
 	e.startTwoDiskVM(map[string]string{"cloudinit": "claim-without-a-pool-volume"})
@@ -89,8 +111,9 @@ func TestMultiDisk_SecondDiskJoinsTheCopyAndShowsTheSameMoment(t *testing.T) {
 	if data.ID != root.ID || !data.Moment.Equal(&root.Moment) {
 		t.Errorf("data copy %s at %v, root copy %s at %v: they must be one copy", data.ID, data.Moment, root.ID, root.Moment)
 	}
-	if data.Leader != vmSnapName || root.Leader != "" {
-		t.Errorf("leaders: root %q, data %q; the first snapshot owns the copy", root.Leader, data.Leader)
+	owner, joined := e.owner()
+	if e.k.getSnapshot(joined).Status.VMCopy.Leader != owner {
+		t.Errorf("the joined snapshot names leader %q, want %q", e.k.getSnapshot(joined).Status.VMCopy.Leader, owner)
 	}
 	if root.Volume != "rootdisk" || data.Volume != "datadisk" || root.DiskIndex != 0 || data.DiskIndex != 1 {
 		t.Errorf("volumes: root %s/%d, data %s/%d", root.Volume, root.DiskIndex, data.Volume, data.DiskIndex)
@@ -277,22 +300,23 @@ func TestMultiDisk_MigrationCancelsTheWholeCopyAndBothSnapshotsRetry(t *testing.
 	}
 }
 
-func TestMultiDisk_DeletingTheFirstSnapshotWhileCopyingCancelsTheJoinedOne(t *testing.T) {
+func TestMultiDisk_DeletingTheOwnerWhileCopyingCancelsTheJoinedSnapshot(t *testing.T) {
 	e := newTwoDiskEnv(t)
 	e.startTwoDiskVM(nil)
 	e.create(nil)
 	e.createData()
 	e.tick()
+	owner, joined := e.owner()
 
-	if err := e.mgr.DeleteSnapshot(e.ctx, vmSnapName); err != nil {
+	if err := e.mgr.DeleteSnapshot(e.ctx, owner); err != nil {
 		t.Fatalf("DeleteSnapshot: %v", err)
 	}
 	if len(e.cop.cancelDisks) != 1 || !reflect.DeepEqual(e.cop.cancelDisks[0], []string{"rootdisk", "datadisk"}) {
 		t.Fatalf("cancels = %v, want one Cancel of both disks", e.cop.cancelDisks)
 	}
 	e.tick()
-	if d := e.dataSnap(); d.Status.VMCopy != nil || d.Status.VMCopyAttempts != 1 {
-		t.Errorf("data snapshot: VMCopy %+v, attempts %d; want the try counted", d.Status.VMCopy, d.Status.VMCopyAttempts)
+	if j := e.k.getSnapshot(joined); j.Status.VMCopy != nil || j.Status.VMCopyAttempts != 1 {
+		t.Errorf("joined snapshot: VMCopy %+v, attempts %d; want the try counted", j.Status.VMCopy, j.Status.VMCopyAttempts)
 	}
 }
 
@@ -302,15 +326,16 @@ func TestMultiDisk_DeletingAJoinedSnapshotWhileCopyingLeavesTheCopyRunning(t *te
 	e.create(nil)
 	e.createData()
 	e.tick()
+	owner, joined := e.owner()
 
-	if err := e.mgr.DeleteSnapshot(e.ctx, dataSnapName); err != nil {
+	if err := e.mgr.DeleteSnapshot(e.ctx, joined); err != nil {
 		t.Fatalf("DeleteSnapshot: %v", err)
 	}
 	if e.cop.cancels != 0 {
-		t.Errorf("cancels = %d: the first snapshot's copy must keep running", e.cop.cancels)
+		t.Errorf("cancels = %d: the owner's copy must keep running", e.cop.cancels)
 	}
-	if e.snap().Status.VMCopy == nil {
-		t.Error("the first snapshot lost its copy")
+	if e.k.getSnapshot(owner).Status.VMCopy == nil {
+		t.Error("the owner lost its copy")
 	}
 }
 
