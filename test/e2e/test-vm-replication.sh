@@ -402,12 +402,26 @@ while ($true) {
   Start-Sleep -Milliseconds 100
 }'
 
+# wait_guest <seconds> <vm>: wait until a VM answers a command. A Windows guest
+# agent that is called every few seconds while Windows still boots stays broken
+# (libvirt reads leftover bytes: "failed to parse JSON"); calls a minute apart
+# let it recover.
+wait_guest() {
+    local t=$1 vm=$2 pause=10
+    [ "$GUEST" = windows ] && pause=60
+    local end=$((SECONDS + t))
+    until guest_ready "$vm"; do
+        [ $SECONDS -ge $end ] && fail "timed out after ${t}s waiting for $vm to answer"
+        sleep "$pause"
+    done
+}
+
 log "starting the source VM"
 vm_yaml src root data yes | oc apply -f -
 wait_until 900 "source guest agent" agent_connected src
 if [ "$GUEST" = windows ]; then
     # A new Windows VM can take about 40 minutes before the agent runs commands.
-    wait_until 3600 "the Windows guest agent to run commands" guest_ready src
+    wait_guest 3600 src
     b64=$(printf '%s' "$WRITER_PS1" | base64 | tr -d '\n')
     wexec src "[IO.File]::WriteAllBytes('C:\\writer.ps1',[Convert]::FromBase64String('$b64')); Set-Disk -Number 1 -IsOffline \$false; Set-Disk -Number 1 -IsReadOnly \$false; Initialize-Disk -Number 1 -PartitionStyle GPT; New-Partition -DiskNumber 1 -DriveLetter D -UseMaximumSize | Format-Volume -FileSystem NTFS -NewFileSystemLabel data -Confirm:\$false | Out-Null; Start-Process powershell.exe -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File C:\\writer.ps1' -WindowStyle Hidden"
 fi

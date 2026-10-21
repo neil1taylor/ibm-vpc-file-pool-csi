@@ -22,6 +22,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	ctrlwebhook "sigs.k8s.io/controller-runtime/pkg/webhook"
 
@@ -89,7 +90,7 @@ func main() {
 
 	flag.StringVar(&endpoint, "endpoint", "unix:///csi/csi.sock", "CSI endpoint")
 	flag.StringVar(&nodeID, "node-id", "", "Node ID")
-	flag.StringVar(&mode, "mode", "controller", "Driver mode: controller, node, receiver, sync-client, apply-vm-disk, or send-vm-disk")
+	flag.StringVar(&mode, "mode", "controller", "Driver mode: controller, node, receiver, sync-client, check-receiver, apply-vm-disk, or send-vm-disk")
 	flag.StringVar(&region, "region", "", "IBM Cloud region (e.g. us-south); auto-discovered from secret provider if omitted")
 	flag.StringVar(&vpcID, "vpc-id", "", "IBM Cloud VPC ID for creating file share mount targets")
 	flag.StringVar(&subnetID, "subnet-id", "", "Comma-separated IBM Cloud worker subnet IDs; each share's mount target goes in the one in the pool's zone")
@@ -143,6 +144,8 @@ func main() {
 		runReceiver(receiverBasePath, receiverAuthTokenFile, receiverListenAddr, receiverTLSCertFile, receiverTLSKeyFile)
 	case "sync-client":
 		runSyncClient(receiverEndpoint, authTokenFile, sourcePath, destBasePath, subPath, subvolumeName, metadataJSON, caCertFile)
+	case "check-receiver":
+		runCheckReceiver(receiverEndpoint, authTokenFile, caCertFile)
 	case "apply-vm-disk":
 		runApplyVMDisk(stagingPath, diskPath, vmCopy)
 	case "send-vm-disk":
@@ -265,7 +268,10 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 		klog.ErrorS(err, "Failed to create the share data Job client")
 		os.Exit(1)
 	}
-	poolManager.SetShareData(pool.NewShareJobRunner(shareJobClient, driverNamespace, pool.DefaultCloneImage))
+	shareRunner := pool.NewShareJobRunner(shareJobClient, driverNamespace, pool.DefaultCloneImage)
+	// Snapshots of running VM disks run the driver itself in a Job.
+	shareRunner.SetDriverImage(driverImage)
+	poolManager.SetShareData(shareRunner)
 
 	// Run CSI gRPC server in a goroutine — serves immediately, but controller
 	// methods return Unavailable until readyCh is closed.
@@ -374,8 +380,20 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 	replController.SetDriverImage(driverImage)
 	replController.SetReplicationImage(driverImage)
 	// Copies of running VM disks run commands in the VM pods, as hooks do.
-	replController.SetVMCopier(vmcopy.NewCopier(hooks.NewPodExecer(clientset, restConfig)))
+	vmCopier := vmcopy.NewCopier(hooks.NewPodExecer(clientset, restConfig))
+	replController.SetVMCopier(vmCopier)
 	go replController.Run(signalCtx)
+
+	// Snapshots of running VM disks are QEMU copies. The same commands run in
+	// the VM pod; a timer on the leader moves each copy forward.
+	poolManager.SetVMSnapshots(vmCopier, replClient)
+	if addErr := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		poolManager.RunVMSnapshots(ctx, pool.DefaultVMSnapshotInterval)
+		return nil
+	})); addErr != nil {
+		klog.ErrorS(addErr, "Failed to add the VM snapshot loop")
+		os.Exit(1)
+	}
 
 	// mgr.Start blocks until signal or error
 	klog.InfoS("Starting controller-runtime manager with leader election")
@@ -479,6 +497,37 @@ func runSyncClient(endpoint, authTokenFile, sourcePath, destBasePath, subPath, s
 	// Write bytesWritten to termination-log so the replication controller can
 	// read it from the completed pod's container status.
 	_ = os.WriteFile("/dev/termination-log", []byte(fmt.Sprintf(`{"bytesWritten":%d}`, bytesWritten)), 0o600)
+}
+
+// checkReceiverResult is the one result line of a receiver check ("ok", or the short reason) and the exit code.
+func checkReceiverResult(err error) (string, int) {
+	if err == nil {
+		return "ok", 0
+	}
+	var checkErr *replication.CheckError
+	if errors.As(err, &checkErr) {
+		return checkErr.Reason, 1
+	}
+	return err.Error(), 1
+}
+
+// runCheckReceiver tests a receiver the way a replication Job reaches it: the address, the
+// certificate and the token. It writes one result line to the output and to the termination log
+// (so the console can read it from the Pod status), and exits 1 when the check fails.
+func runCheckReceiver(endpoint, authTokenFile, caCertFile string) {
+	if endpoint == "" {
+		klog.ErrorS(nil, "receiver-endpoint is required for check-receiver mode")
+		os.Exit(1)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	line, code := checkReceiverResult(replication.CheckReceiver(ctx, endpoint, authTokenFile, caCertFile))
+	fmt.Println(line)
+	_ = os.WriteFile("/dev/termination-log", []byte(line), 0o600)
+	if code != 0 {
+		os.Exit(code)
+	}
 }
 
 func runNode(endpoint, nodeID, mode string) {

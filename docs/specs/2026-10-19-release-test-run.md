@@ -60,7 +60,7 @@ Each line says what the stage proves, and how it checks the result itself, not t
    - A small pool with auto-expand adds a second share when it fills.
 5. **Snapshots.**
    - A VolumeSnapshot is restored to a new PVC. Its files match the source checksums.
-   - A snapshot of a running VM that writes nonstop is restored, and a VM boots from it. Added by `2026-10-20-vm-safe-replication.md`.
+   - A snapshot of a running VM that writes nonstop is restored, and a VM boots from it. Added by `2026-10-20-vm-safe-replication.md` (the stage file is `06-vm-snapshots.sh`, which runs `test/e2e/test-vm-snapshot.sh`).
 6. **Group snapshots.** A group snapshot of two PVCs is restored. Both match. If the cluster has no group snapshot API, the stage is SKIP.
 7. **Clones.**
    - A clone of a PVC matches its source.

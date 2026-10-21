@@ -464,6 +464,10 @@ func (d *Driver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotRequ
 		switch {
 		case errors.Is(err, pool.ErrSourceNotFound):
 			return nil, status.Errorf(codes.NotFound, "source volume not found")
+		case errors.Is(err, pool.ErrSnapshotUnsupported), errors.Is(err, pool.ErrSnapshotFailed):
+			return nil, status.Error(codes.FailedPrecondition, err.Error())
+		case errors.Is(err, pool.ErrInvalidSnapshotParameter):
+			return nil, status.Error(codes.InvalidArgument, err.Error())
 		default:
 			return nil, status.Errorf(codes.Internal, "create snapshot failed: %v", err)
 		}

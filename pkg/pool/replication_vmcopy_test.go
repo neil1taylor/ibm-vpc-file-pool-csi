@@ -37,6 +37,13 @@ type fakeVMCopier struct {
 	moment      time.Time
 	commits     []string // Base of each committed copy
 	lostBases   map[string]bool
+	// removeStaleErr makes RemoveStale fail, as when another copy runs.
+	removeStaleErr error
+	// idleErr makes CheckIdle fail, as when a copy runs in the VM.
+	idleErr    error
+	cleanStale int
+	// cancelErr makes Cancel and Finish(true) fail.
+	cancelErr error
 }
 
 type fakeStart struct {
@@ -94,14 +101,21 @@ func (f *fakeVMCopier) Cancel(_ context.Context, _ vmcopy.VM, _ *vmcopy.Copy) er
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.cancels++
-	return nil
+	return f.cancelErr
+}
+
+func (f *fakeVMCopier) CleanStaleCopies(_ context.Context, _ vmcopy.VM, _ []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cleanStale++
+	return f.idleErr
 }
 
 func (f *fakeVMCopier) RemoveStale(_ context.Context, _ vmcopy.VM, _ []string, _ string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.removeStale++
-	return nil
+	return f.removeStaleErr
 }
 
 var vmimGVK = schema.GroupVersionKind{Group: "kubevirt.io", Version: "v1", Kind: "VirtualMachineInstanceMigration"}
@@ -813,5 +827,29 @@ func TestVMCopy_RestorePointsInStatus(t *testing.T) {
 		!s.OldestRestorePoint.Time.Equal(time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)) ||
 		s.BytesSynced == nil || *s.BytesSynced != 65536 {
 		t.Errorf("status = %+v", s)
+	}
+}
+
+func TestVMCopy_WaitsWhileAnotherCopyRunsInTheVM(t *testing.T) {
+	e := newVMCopyEnv(t)
+	e.cop.removeStaleErr = fmt.Errorf("copy job repl-x-0 is still in QEMU: %w", vmcopy.ErrBusy)
+	e.tick()
+	if len(e.cop.starts) != 0 {
+		t.Error("started a copy while another copy runs in the VM")
+	}
+	if n := e.k.getPolicy(e.policy).Status.ConsecutiveFailures; n != 0 {
+		t.Errorf("waiting for another copy must not count as a failed cycle, got %d", n)
+	}
+	for _, sv := range []string{vmGuardSV1, vmGuardSV2} {
+		if s := e.status(t, sv); !strings.Contains(s.LastError, "another copy") {
+			t.Errorf("%s: LastError = %q, want it to say another copy runs", sv, s.LastError)
+		}
+	}
+	// Once the VM is free, the copy starts.
+	e.cop.removeStaleErr = nil
+	e.clock = e.clock.Add(2 * time.Hour)
+	e.tick()
+	if len(e.cop.starts) != 1 {
+		t.Errorf("starts = %d, want 1 once the VM is free", len(e.cop.starts))
 	}
 }

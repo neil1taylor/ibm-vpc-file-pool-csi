@@ -1,0 +1,100 @@
+{
+  "input": {
+    "namespace": "apps",
+    "pool": "pool-a",
+    "size": "200Gi",
+    "sourcePVC": "data",
+    "storageClass": "pool-a"
+  },
+  "migrationPod": {
+    "apiVersion": "v1",
+    "kind": "Pod",
+    "metadata": {
+      "annotations": {
+        "vpc-file-pool-csi.ibm.io/source-pvc": "data",
+        "vpc-file-pool-csi.ibm.io/target-pvc": "data-pooled"
+      },
+      "labels": {
+        "vpc-file-pool-csi.ibm.io/migration": "true"
+      },
+      "name": "migrate-data",
+      "namespace": "apps"
+    },
+    "spec": {
+      "containers": [
+        {
+          "command": [
+            "sh",
+            "-c",
+            "\nset -e\napk add --no-cache rsync \u003e/dev/null 2\u003e\u00261\necho \"=== Migration started ===\"\necho \"Source: /source\"\necho \"Target: /target\"\nSOURCE_COUNT=$(find /source -type f | wc -l)\necho \"Source file count: $SOURCE_COUNT\"\nrsync -avz --progress /source/ /target/\nTARGET_COUNT=$(find /target -type f | wc -l)\necho \"Target file count: $TARGET_COUNT\"\necho \"=== Migration complete ===\"\nif [ \"$SOURCE_COUNT\" = \"$TARGET_COUNT\" ]; then\n  echo \"VERIFICATION: OK (file counts match: $SOURCE_COUNT)\"\n  exit 0\nelse\n  echo \"VERIFICATION: FAILED (source=$SOURCE_COUNT target=$TARGET_COUNT)\"\n  exit 1\nfi\n"
+          ],
+          "image": "alpine:3.20",
+          "name": "migrate",
+          "resources": {
+            "limits": {
+              "cpu": "500m",
+              "memory": "256Mi"
+            },
+            "requests": {
+              "cpu": "100m",
+              "memory": "128Mi"
+            }
+          },
+          "volumeMounts": [
+            {
+              "mountPath": "/source",
+              "name": "source",
+              "readOnly": true
+            },
+            {
+              "mountPath": "/target",
+              "name": "target"
+            }
+          ]
+        }
+      ],
+      "restartPolicy": "Never",
+      "volumes": [
+        {
+          "name": "source",
+          "persistentVolumeClaim": {
+            "claimName": "data",
+            "readOnly": true
+          }
+        },
+        {
+          "name": "target",
+          "persistentVolumeClaim": {
+            "claimName": "data-pooled"
+          }
+        }
+      ]
+    }
+  },
+  "targetPVC": {
+    "apiVersion": "v1",
+    "kind": "PersistentVolumeClaim",
+    "metadata": {
+      "annotations": {
+        "vpc-file-pool-csi.ibm.io/pool": "pool-a",
+        "vpc-file-pool-csi.ibm.io/source-pvc": "data"
+      },
+      "labels": {
+        "vpc-file-pool-csi.ibm.io/migration": "true"
+      },
+      "name": "data-pooled",
+      "namespace": "apps"
+    },
+    "spec": {
+      "accessModes": [
+        "ReadWriteMany"
+      ],
+      "resources": {
+        "requests": {
+          "storage": "200Gi"
+        }
+      },
+      "storageClassName": "pool-a"
+    }
+  }
+}

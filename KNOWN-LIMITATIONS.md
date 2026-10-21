@@ -18,7 +18,8 @@ Explicit list of what the IBM VPC File Pool CSI Driver does not support, why, an
 
 **Limitations:**
 - Snapshots and clones are not instantaneous — they are full data copies proportional to the source volume size.
-- A snapshot of a volume that is being written is not one point in time: files can change while the copy runs. Stop or freeze the workload before the snapshot if you need a consistent copy.
+- A snapshot of a volume that is being written is not one point in time: files can change while the copy runs. Stop or freeze the workload before the snapshot if you need a consistent copy. The exception is a disk that a running KubeVirt VM uses: that snapshot is a QEMU copy at one moment, with the guest frozen for a moment (see below).
+- A snapshot of a running VM covers one disk (one claim). The disks of a VM are not matched to each other; group snapshots of VMs are issue #14. The copy runs at 20 MB/s by default, so a 20 GB disk takes about 20 minutes; set `vmCopySpeedLimitMBps` on the VolumeSnapshotClass to change that. Red Hat does not support the QEMU commands this uses.
 - Cross-share clones require the async path (no same-share optimization).
 - Per-PVC quota enforcement limitations (see above) also apply to cloned volumes.
 - No incremental or COW snapshots — each snapshot is a full copy.

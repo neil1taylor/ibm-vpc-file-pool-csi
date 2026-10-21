@@ -29,6 +29,7 @@ import PhaseStatus from '../common/PhaseStatus';
 import ConditionsTable from '../common/ConditionsTable';
 import DeleteModal from '../common/DeleteModal';
 import { humanizeBytes, formatAge } from '../../utils/resource-helpers';
+import { cloneDisabledReason } from '../../utils/restore-helpers';
 import { ROUTES } from '../../constants';
 
 const SubVolumeDetailsPage: React.FC = () => {
@@ -76,6 +77,8 @@ const SubVolumeDetailsPage: React.FC = () => {
   const spec = subVolume.spec;
   const status = subVolume.status;
   const cloneProgress = status?.cloneProgress;
+  const cloneReason = cloneDisabledReason(subVolume);
+  const clonePath = ROUTES.SUBVOLUME_CLONE.replace(':name', name);
 
   const clonePercent =
     cloneProgress && cloneProgress.totalBytes > 0
@@ -98,6 +101,17 @@ const SubVolumeDetailsPage: React.FC = () => {
             </Title>
           </SplitItem>
           <SplitItem>
+            {cloneReason ? (
+              <Button variant="secondary" isDisabled>
+                Clone to new PVC
+              </Button>
+            ) : (
+              <Button variant="secondary" component={(props) => <Link {...props} to={clonePath} />}>
+                Clone to new PVC
+              </Button>
+            )}
+          </SplitItem>
+          <SplitItem>
             <Button
               variant="danger"
               onClick={() => setDeleteModalOpen(true)}
@@ -106,6 +120,9 @@ const SubVolumeDetailsPage: React.FC = () => {
             </Button>
           </SplitItem>
         </Split>
+        {cloneReason && (
+          <p style={{ marginTop: 8, color: 'var(--pf-t--global--color--subtle)' }}>{cloneReason}</p>
+        )}
       </PageSection>
 
       <PageSection>

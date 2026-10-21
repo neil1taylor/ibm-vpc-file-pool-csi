@@ -596,35 +596,7 @@ func (rc *ReplicationController) runningVMPod(ctx context.Context, sv *v1alpha1.
 // VM pod and a hot-plug disk pod count, because both mean a running VM writes
 // to the disk; a VM pod is preferred.
 func (rc *ReplicationController) vmPodForClaim(ctx context.Context, namespace, claim string) (*corev1.Pod, string, error) {
-	podList := &corev1.PodList{}
-	if err := rc.directClient.List(ctx, podList,
-		client.InNamespace(namespace),
-		client.HasLabels{kubevirtPodLabel},
-	); err != nil {
-		return nil, "", fmt.Errorf("listing pods in %s: %w", namespace, err)
-	}
-	var found *corev1.Pod
-	var foundVol string
-	for i := range podList.Items {
-		pod := &podList.Items[i]
-		kind := pod.Labels[kubevirtPodLabel]
-		if kind != "virt-launcher" && kind != "hotplug-disk" {
-			continue
-		}
-		if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
-			continue
-		}
-		for _, vol := range pod.Spec.Volumes {
-			if vol.PersistentVolumeClaim == nil || vol.PersistentVolumeClaim.ClaimName != claim {
-				continue
-			}
-			if kind == "virt-launcher" {
-				return pod, vol.Name, nil
-			}
-			found, foundVol = pod, vol.Name
-		}
-	}
-	return found, foundVol, nil
+	return findVMPodForClaim(ctx, rc.directClient, namespace, claim)
 }
 
 // vmProblemsError is the policy error for a cycle that skipped VM volumes or

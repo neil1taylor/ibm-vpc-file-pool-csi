@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud/fake"
@@ -28,6 +29,17 @@ type fakeShareData struct {
 	removes    []shareDataCall
 	copies     []shareDataCall
 	stops      []string
+	applies    []applyCall
+	// applyErr makes the next ApplyVMDisk calls fail as a failed Job.
+	applyErr error
+}
+
+type applyCall struct {
+	key         string
+	volPath     string
+	stagingFile string
+	dstPath     string
+	moment      time.Time
 }
 
 type shareDataCall struct {
@@ -68,6 +80,24 @@ func (f *fakeShareData) CopyDir(_ context.Context, key string, src ShareMount, s
 	}
 	if err := f.nfs.CopyDir(f.base+srcPath, f.base+dstPath); err != nil {
 		return false, fmt.Errorf("%w: %v", ErrShareJobFailed, err)
+	}
+	return true, nil
+}
+
+// ApplyVMDisk records the call and reports done when the call is not held up.
+func (f *fakeShareData) ApplyVMDisk(_ context.Context, key string, _ ShareMount, volPath, stagingFile, dstPath string, moment time.Time) (bool, error) {
+	f.mu.Lock()
+	f.applies = append(f.applies, applyCall{key: key, volPath: volPath, stagingFile: stagingFile, dstPath: dstPath, moment: moment})
+	inProgress, apiErr, applyErr := f.inProgress, f.apiErr, f.applyErr
+	f.mu.Unlock()
+	if apiErr != nil {
+		return false, apiErr
+	}
+	if applyErr != nil {
+		return false, fmt.Errorf("%w: %v", ErrShareJobFailed, applyErr)
+	}
+	if inProgress {
+		return false, nil
 	}
 	return true, nil
 }

@@ -367,6 +367,17 @@ oc delete pod migration-verifier -n ${TUTORIAL_NS}
 
 ---
 
+### Migrate in the console
+
+The console can do the same migration. On the Pools tab, choose **Migrate volumes into a pool**.
+
+1. Choose the source storage class and the namespace. The table lists the claims.
+2. A claim that a pod uses cannot move: the row names the pods. Stop the application first.
+3. Choose **Migrate**, pick the target pool, and confirm. The page refuses a claim that does not fit the free space of the pool.
+4. The page makes the new claim `<name>-pooled` and the pod `migrate-<name>`, as the `kubectl migrate` tool does. The row shows the copy, with a link to the pod log. When it says "Copied", point your application at the new claim.
+
+The page never deletes the old claim. Delete it yourself when you are sure the new one is right.
+
 ## Step 8: Console Plugin -- Enable
 
 The OpenShift Console dynamic plugin provides a visual interface for managing pools, SubVolumes, snapshots, group snapshots, and replication policies.

@@ -67,6 +67,44 @@ type SnapshotStatus struct {
 	// CreationTime is when the snapshot was created.
 	// +optional
 	CreationTime *metav1.Time `json:"creationTime,omitempty"`
+
+	// VMCopy is the state of the QEMU copy while a snapshot of a running VM's
+	// disk is made. It is empty for other snapshots and once the copy ends.
+	// +optional
+	VMCopy *VMCopyState `json:"vmCopy,omitempty"`
+
+	// VMCopyAttempts counts the copies that were cancelled or failed for a
+	// snapshot of a running VM. After 3 the snapshot fails.
+	// +optional
+	VMCopyAttempts int32 `json:"vmCopyAttempts,omitempty"`
+
+	// VMCopyStarted is when the current copy try started. A try that runs
+	// much longer than the disk needs is cancelled.
+	// +optional
+	VMCopyStarted *metav1.Time `json:"vmCopyStarted,omitempty"`
+
+	// VMCopyRetryAfter is the earliest time of the next copy try.
+	// +optional
+	VMCopyRetryAfter *metav1.Time `json:"vmCopyRetryAfter,omitempty"`
+
+	// CopyMoment is the moment a snapshot of a running VM's disk shows.
+	// +optional
+	CopyMoment *metav1.Time `json:"copyMoment,omitempty"`
+
+	// Consistency of a snapshot of a running VM's disk.
+	// FileSystemConsistent means the guest file systems were frozen for the
+	// copy. CrashConsistent means they were not, as after a power loss.
+	// +kubebuilder:validation:Enum=FileSystemConsistent;CrashConsistent
+	// +optional
+	Consistency string `json:"consistency,omitempty"`
+
+	// ConsistencyReason says why a snapshot is only crash consistent.
+	// +optional
+	ConsistencyReason string `json:"consistencyReason,omitempty"`
+
+	// Message says what a snapshot waits for or why it failed.
+	// +optional
+	Message string `json:"message,omitempty"`
 }
 
 // +kubebuilder:object:root=true
