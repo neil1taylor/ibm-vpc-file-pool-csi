@@ -247,9 +247,9 @@ func (s *Snapshotter) Merge(ctx context.Context, vm vmcopy.VM, volume, file, chi
 	case job == nil:
 		// A commit may have ended after the chain was read. Read it again
 		// so a done merge is not started twice.
-		again, err := s.disks(ctx, vm)
-		if err != nil {
-			return nil, err
+		again, readErr := s.disks(ctx, vm)
+		if readErr != nil {
+			return nil, readErr
 		}
 		if fmt.Sprint(again.byVolume[volume].chain) != fmt.Sprint(d.chain) {
 			return s.Merge(ctx, vm, volume, file, child)

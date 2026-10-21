@@ -26,11 +26,11 @@ type fakeLauncher struct {
 	files   map[string]string   // path -> mode ("0644", "0444")
 	backing map[string]string   // path -> backing file name, as written in the file
 
-	quiesceErr  string // snapshot-create-as --quiesce fails with this
+	quiesceErr string // snapshot-create-as --quiesce fails with this
 	// agentFrozen: someone else has frozen the guest. The guest agent then
 	// refuses every freeze, as qemu-ga does.
 	agentFrozen bool
-	agentDown   bool // the guest agent does not answer
+	agentDown   bool   // the guest agent does not answer
 	snapshotErr string // snapshot-create-as fails with this
 	// snapshot-create-as makes the snapshot, then reports this error, as
 	// when the exec stream breaks after libvirt has done the work.
