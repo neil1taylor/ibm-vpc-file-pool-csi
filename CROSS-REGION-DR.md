@@ -368,6 +368,22 @@ kubectl create secret generic repl-receiver-ca \
 
 The replication controller mounts this Secret into sync-client Job pods and passes `--ca-cert-file` to the sync-client binary, which creates an HTTPS client with a custom CA trust pool.
 
+### Set up the receiver in the console
+
+The console can make the two Secrets and test the receiver before it makes the policy. On the Replication tab, choose **Create ReplicationPolicy**, set the mode to **Driver-to-Driver**, and fill in:
+
+1. **Receiver Endpoint.** The `https://` address of the receiver. The form refuses `http://`.
+2. **Token and certificate.** Choose "Make new Secrets from what I paste" and paste the token (it is in the receiver's Secret on the destination cluster) and, for a self-signed receiver, the CA certificate in PEM form. The console makes the Secrets `<policy name>-receiver-token` and `<policy name>-receiver-ca` in `kube-system`. Or choose "Use Secrets that already exist" and give their names.
+3. **Check connection.** The console runs a short Job in `kube-system`, with the driver image, that tests three things in order: the receiver answers, its certificate is trusted, and it accepts the token. The form shows the result: *The receiver is ready*, or one reason (`cannot connect`, `certificate not trusted`, `token refused`, `receiver storage not reachable`, or `receiver has no auth-check call; update it`).
+4. **Create** turns on when the check passes. Change any field and the check must run again.
+
+Notes:
+
+- The token goes once from the browser to this cluster's API server. The console never reads a Secret back. If a Secret of the same name exists and the console did not make it, the form stops and says so.
+- The check Job deletes itself after ten minutes.
+- A user who may not make Jobs in `kube-system` sees a warning and can still make the policy without the check. A user who may not make Secrets there is told to ask an administrator and use existing Secrets.
+- The same test from a terminal: `curl -H "Authorization: Bearer $TOKEN" https://<receiver>/api/v1/auth-check` (add `--cacert ca.crt` for a self-signed receiver).
+
 ### Replication Data Flow
 
 ```

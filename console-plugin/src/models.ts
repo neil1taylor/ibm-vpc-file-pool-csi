@@ -68,6 +68,38 @@ export const PersistentVolumeClaimModel: K8sModel = {
   namespaced: true,
 };
 
+export const DeploymentModel: K8sModel = {
+  apiGroup: 'apps',
+  apiVersion: 'v1',
+  kind: 'Deployment',
+  plural: 'deployments',
+  abbr: 'D',
+  label: 'Deployment',
+  labelPlural: 'Deployments',
+  namespaced: true,
+};
+
+export const JobModel: K8sModel = {
+  apiGroup: 'batch',
+  apiVersion: 'v1',
+  kind: 'Job',
+  plural: 'jobs',
+  abbr: 'J',
+  label: 'Job',
+  labelPlural: 'Jobs',
+  namespaced: true,
+};
+
+export const SecretModel: K8sModel = {
+  apiVersion: 'v1',
+  kind: 'Secret',
+  plural: 'secrets',
+  abbr: 'S',
+  label: 'Secret',
+  labelPlural: 'Secrets',
+  namespaced: true,
+};
+
 export const PodModel: K8sModel = {
   apiVersion: 'v1',
   kind: 'Pod',
