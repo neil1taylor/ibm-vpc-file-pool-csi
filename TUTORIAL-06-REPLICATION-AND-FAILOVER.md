@@ -1007,6 +1007,19 @@ oc config use-context source-cluster
 
 ---
 
+## Running VMs
+
+A VM that is running is not copied with rsync. The controller freezes the guest for a moment, copies all of its disks at that one moment, and keeps restore points at the destination. At failover, rewind **before** you start the VM:
+
+```bash
+kubectl failover plan --nfs-mount-path /data --list-moments
+kubectl failover execute --nfs-mount-path /data --prepare-only --rewind-to 2026-10-20T10:30:00Z
+```
+
+See `CROSS-REGION-DR.md`, "Running VM disks", for the details and the lab results.
+
+---
+
 ## Cleanup
 
 ### Source Cluster

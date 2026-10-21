@@ -83,3 +83,34 @@ func TestApplyVMDiskMessage(t *testing.T) {
 		t.Errorf("message = %s, want %s", got, want)
 	}
 }
+
+func TestSendVMDiskMessage(t *testing.T) {
+	oldest := time.Date(2026, 10, 20, 13, 0, 0, 0, time.UTC)
+	res := replication.VMSendResult{SentBytes: 2048, CommitResponse: replication.CommitResponse{RestorePoints: 2, OldestRestorePoint: &oldest}}
+	want := `{"bytesWritten":2048,"restorePoints":2,"oldestRestorePoint":"2026-10-20T13:00:00Z"}`
+	if got := sendVMDiskMessage(res, nil); got != want {
+		t.Errorf("message = %s, want %s", got, want)
+	}
+	wb := &replication.WrongBaseError{DiskMoment: "2026-10-20T12:00:00Z", Message: "x"}
+	want = `{"bytesWritten":0,"restorePoints":0,"wrongBase":true,"diskMoment":"2026-10-20T12:00:00Z"}`
+	if got := sendVMDiskMessage(replication.VMSendResult{}, wb); got != want {
+		t.Errorf("wrong base message = %s, want %s", got, want)
+	}
+}
+
+func TestSendVMDiskArgs(t *testing.T) {
+	f := vmCopyFlags{from: "2026-10-20T13:00:00Z", to: "2026-10-20T14:00:00Z", keep: time.Hour}
+	a, err := sendVMDiskArgs(f, "/", "/pvcs/pvc-1", "pvc-1", "copy-7", "ns/vm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.From == nil || a.To.IsZero() || a.CopyID != "copy-7" || a.VMGroup != "ns/vm" || a.Keep != time.Hour || a.Full {
+		t.Errorf("args = %+v", a)
+	}
+	if a, err = sendVMDiskArgs(vmCopyFlags{to: "2026-10-20T14:00:00Z", full: true}, "/", "/p", "pvc-1", "c", "g"); err != nil || a.From != nil || !a.Full {
+		t.Errorf("first full copy args = %+v %v", a, err)
+	}
+	if _, err = sendVMDiskArgs(vmCopyFlags{}, "/", "/p", "pvc-1", "c", "g"); err == nil {
+		t.Error("expected an error without --to")
+	}
+}

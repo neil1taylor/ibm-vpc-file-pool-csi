@@ -95,6 +95,18 @@ func (c *vmCall) fail(code int, format string, args ...any) {
 	http.Error(c.w, fmt.Sprintf(format, args...), code)
 }
 
+// conflict answers 409 with the moment the disk shows now.
+func (c *vmCall) conflict(format string, args ...any) {
+	moment, err := c.baseMoment()
+	if err != nil {
+		moment = "unknown"
+	}
+	c.w.Header().Set("Content-Type", "application/json")
+	c.w.WriteHeader(http.StatusConflict)
+	b, _ := json.Marshal(Conflict{Message: fmt.Sprintf(format, args...), DiskMoment: moment})
+	_, _ = c.w.Write(b)
+}
+
 func (c *vmCall) release() {
 	c.v.close()
 	c.unlock()
@@ -163,6 +175,13 @@ func (r *Receiver) openVMCall(w http.ResponseWriter, req *http.Request) *vmCall 
 		c.unlock()
 		klog.ErrorS(err, "Failed to create destination directory", "dir", dir)
 		c.fail(http.StatusInternalServerError, "failed to create destination directory")
+		return nil
+	}
+	// The VM that boots from a failed-over copy runs as another user and
+	// must be able to use the folder, as in direct NFS mode.
+	if err = os.Chmod(dir, 0o777); err != nil { //nolint:gosec // G302: see above
+		c.unlock()
+		c.fail(http.StatusInternalServerError, "failed to set the folder mode")
 		return nil
 	}
 	if c.v, err = openVolume(c.disk); err != nil {
@@ -312,8 +331,13 @@ func (c *vmCall) status() {
 		}
 	}
 	sort.Slice(offs, func(i, j int) bool { return offs[i] < offs[j] })
+	moment, err := c.baseMoment()
+	if err != nil {
+		c.fail(http.StatusInternalServerError, "%v", err)
+		return
+	}
 	c.w.Header().Set("Content-Type", "application/json")
-	b, _ := json.Marshal(map[string]any{"offsets": offs})
+	b, _ := json.Marshal(StatusResponse{Offsets: offs, DiskMoment: moment})
 	_, _ = c.w.Write(b)
 }
 
@@ -415,6 +439,7 @@ func (c *vmCall) compare() {
 		return
 	}
 	c.w.Header().Set("Content-Type", "application/octet-stream")
+	c.w.Header().Set(DiskMomentHeader, base)
 	_, _ = c.w.Write(need.Bytes())
 }
 
@@ -557,38 +582,48 @@ func (c *vmCall) commit() {
 		c.fail(http.StatusRequestEntityTooLarge, "disk size %d is above the limit %d", cr.Size, c.r.vmLimit())
 		return
 	}
+	// Failover waits while a commit may be changing the disk.
+	if err := c.v.writeLeaseFile(time.Now().Add(leaseTTL)); err != nil {
+		c.fail(http.StatusInternalServerError, "writing the lease: %v", err)
+		return
+	}
+	defer c.v.removeLeaseFile()
 	if _, err := c.v.recover(); err != nil {
 		c.fail(http.StatusInternalServerError, "rolling back an unfinished copy: %v", err)
 		return
 	}
 
-	// The copy must start from the moment the disk shows now.
+	// The copy must start from the moment the disk shows now. A full copy
+	// may replace a disk whose moment is not known, because it writes every
+	// block.
 	fi, derr := c.v.diskInfo()
 	exists := derr == nil
 	if derr != nil && !errors.Is(derr, os.ErrNotExist) {
 		c.fail(http.StatusInternalServerError, "%v", derr)
 		return
 	}
+	var cur time.Time
+	var known bool
+	if exists {
+		var merr error
+		if cur, known, merr = c.v.moment(); merr != nil {
+			c.fail(http.StatusInternalServerError, "%v", merr)
+			return
+		}
+	}
 	switch {
 	case !exists && cr.From != nil:
-		c.fail(http.StatusConflict, "the copy starts from %s but there is no disk", momentOf(cr.From))
-		return
-	case exists && cr.From == nil:
-		c.fail(http.StatusConflict, "the disk exists; a first copy cannot replace it")
+		c.conflict("the copy starts from %s but there is no disk", momentOf(cr.From))
 		return
 	case !exists && !cr.Full:
-		c.fail(http.StatusConflict, "there is no disk, so the copy must be a full copy")
+		c.conflict("there is no disk, so the copy must be a full copy")
 		return
-	case exists:
-		cur, ok, err := c.v.moment()
-		if err != nil {
-			c.fail(http.StatusInternalServerError, "%v", err)
-			return
-		}
-		if !ok || !cur.Equal(*cr.From) {
-			c.fail(http.StatusConflict, "the disk shows %v, not %s", cur, momentOf(cr.From))
-			return
-		}
+	case exists && cr.From == nil && (known || !cr.Full):
+		c.conflict("the disk exists; a first copy cannot replace it")
+		return
+	case exists && cr.From != nil && (!known || !cur.Equal(*cr.From)):
+		c.conflict("the disk shows %v, not %s", cur, momentOf(cr.From))
+		return
 	}
 	// A compare answer holds only while the disk is the same.
 	if b, err := c.v.root.Open(filepath.Join(c.sessionDir(), baseName)); err == nil {
@@ -667,8 +702,13 @@ func (c *vmCall) commit() {
 	}
 
 	opts := ApplyOptions{To: cr.To, Full: cr.Full, Now: time.Now(), Keep: time.Duration(cr.KeepSeconds) * time.Second}
-	if cr.From != nil {
+	switch {
+	case cr.From != nil:
 		opts.From = *cr.From
+	case exists:
+		// The old moment is not known. The restore point made from this
+		// disk is dated at the epoch.
+		opts.From = time.Unix(0, 0).UTC()
 	}
 	res, err := ApplyCopy(rc, c.disk, opts)
 	if err != nil {
@@ -684,8 +724,15 @@ func (c *vmCall) commit() {
 		klog.ErrorS(err, "Could not remove the upload folder", "dir", c.sessionDir())
 	}
 	klog.V(2).InfoS("VM disk copy applied", "disk", c.disk, "to", cr.To, "changedBytes", res.ChangedBytes, "rolledBack", res.RolledBack)
+	out := CommitResponse{ChangedBytes: res.ChangedBytes, RolledBack: res.RolledBack}
+	if points, perr := RestorePoints(c.disk); perr == nil {
+		out.RestorePoints = int32(len(points)) // #nosec G115 -- a handful
+		if len(points) > 0 {
+			out.OldestRestorePoint = &points[0]
+		}
+	}
 	c.w.Header().Set("Content-Type", "application/json")
-	b, _ := json.Marshal(CommitResponse(res))
+	b, _ := json.Marshal(out)
 	_, _ = c.w.Write(b)
 }
 

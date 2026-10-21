@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -462,17 +463,160 @@ func TestVMCopy_ApplyJobFails(t *testing.T) {
 	}
 }
 
-func TestVMCopy_ReceiverModeStillSkipped(t *testing.T) {
-	e := newVMCopyEnv(t)
+// receiverMode points the policy at a receiver at the far site.
+func (e *vmCopyEnv) receiverMode() {
 	p := e.k.getPolicy(e.policy)
 	p.Spec.DestinationEndpoint = "https://receiver.example"
+	p.Spec.DestinationAuthSecretRef = "replication-auth"
+	p.Spec.DestinationCACertSecretRef = "replication-ca"
 	e.k.addPolicy(p)
+}
+
+func TestVMCopy_ReceiverMode_StartsCopyAndMakesSendJobs(t *testing.T) {
+	e := newVMCopyEnv(t)
+	e.receiverMode()
+	e.tick()
+	if len(e.cop.starts) != 1 {
+		t.Fatalf("expected one VM copy in receiver mode, got %d", len(e.cop.starts))
+	}
+	e.cop.state = vmcopy.Done
+	e.tick()
+	job := e.job(t, vmGuardSV1)
+	if job == nil {
+		t.Fatal("expected a send Job")
+	}
+	spec := job.Spec.Template.Spec
+	c := spec.Containers[0]
+	args := strings.Join(append(c.Command, c.Args...), " ")
+	for _, want := range []string{"--mode=send-vm-disk",
+		"--receiver-endpoint=https://receiver.example",
+		"--auth-token-file=/etc/replication/token",
+		"--ca-cert-file=/etc/replication-ca/ca.crt",
+		"--staging-path=/source/" + vmcopy.StagingPrefix + e.cop.starts[0].id + ".qcow2",
+		"--sub-path=/pvcs/" + vmGuardSV1,
+		"--subvolume-name=" + vmGuardSV1,
+		"--vm-group=default/web",
+		"--copy-id=" + e.cop.starts[0].id,
+		"--to=" + e.cop.moment.Format(time.RFC3339Nano),
+		"--full", "--keep=24h0m0s", "--metadata-json="} {
+		if !strings.Contains(args, want) {
+			t.Errorf("send Job command %q lacks %q", args, want)
+		}
+	}
+	if strings.Contains(args, "--from=") {
+		t.Errorf("a first copy has no --from: %q", args)
+	}
+	if sc := spec.SecurityContext; sc == nil || sc.RunAsUser == nil || *sc.RunAsUser != 107 {
+		t.Errorf("expected the send Job to run as the QEMU user, got %+v", sc)
+	}
+	if len(spec.InitContainers) != 0 {
+		t.Error("a send Job needs no init container: the receiver makes the folder")
+	}
+	var secrets []string
+	for _, v := range spec.Volumes {
+		if v.Secret != nil {
+			secrets = append(secrets, v.Secret.SecretName)
+		}
+		if v.Name == "dest" {
+			t.Error("a send Job must not mount a destination volume")
+		}
+	}
+	if !slices.Contains(secrets, "replication-auth") || !slices.Contains(secrets, "replication-ca") {
+		t.Errorf("secrets = %v, want the auth token and the CA certificate", secrets)
+	}
+	for _, m := range c.VolumeMounts {
+		if m.Name == "source" && (m.ReadOnly || m.SubPath != "pvcs/"+vmGuardSV1) {
+			t.Errorf("source mount = %+v, want read-write and only the volume's folder", m)
+		}
+	}
+	pvc := &corev1.PersistentVolumeClaim{}
+	if err := e.dc.Get(e.ctx, types.NamespacedName{Namespace: replJobNamespace, Name: replDestPVCName(e.policy, vmGuardSV1)}, pvc); err == nil {
+		t.Error("expected no destination PVC in receiver mode")
+	}
+}
+
+func TestVMCopy_ReceiverMode_FullCycleAndChangeCopy(t *testing.T) {
+	e := newVMCopyEnv(t)
+	e.receiverMode()
+	e.copyOnce(t)
+	for _, sv := range []string{vmGuardSV1, vmGuardSV2} {
+		s := e.status(t, sv)
+		if s.VMCopy != nil || s.CopyMoment == nil || s.LastError != "" || s.VMChangeList == "" {
+			t.Errorf("%s: status = %+v", sv, s)
+		}
+		if e.job(t, sv) != nil {
+			t.Errorf("%s: expected the send Job cleaned up", sv)
+		}
+	}
+	// The second copy is a change copy that starts from the first moment.
+	e.clock = e.clock.Add(2 * time.Hour)
+	e.rc.processOnce(e.ctx)
+	e.cop.state = vmcopy.Done
+	e.tick()
+	args := e.jobArgs(t, vmGuardSV1)
+	if strings.Contains(args, "--full") || !strings.Contains(args, "--from=") {
+		t.Errorf("second send Job %q: want --from and no --full", args)
+	}
+}
+
+func TestVMCopy_ReceiverMode_WrongBaseMakesTheNextCopyFull(t *testing.T) {
+	e := newVMCopyEnv(t)
+	e.receiverMode()
+	e.copyOnce(t)
+	first := e.status(t, vmGuardSV1).CopyMoment
+
+	e.clock = e.clock.Add(2 * time.Hour)
+	e.rc.processOnce(e.ctx)
+	e.cop.state = vmcopy.Done
+	e.tick()
+	job := e.job(t, vmGuardSV1)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: job.Name + "-x", Namespace: replJobNamespace, Labels: job.Spec.Template.Labels},
+		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
+			State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+				Message: `{"bytesWritten":0,"restorePoints":0,"wrongBase":true,"diskMoment":"2026-10-20T08:00:00Z"}`,
+			}},
+		}}},
+	}
+	if err := e.dc.Create(e.ctx, pod); err != nil {
+		t.Fatal(err)
+	}
+	e.succeedJobs(t)
+	e.tick()
+	s := e.status(t, vmGuardSV1)
+	if s.VMChangeList != "" {
+		t.Errorf("change list = %q, want it dropped so the next copy is full", s.VMChangeList)
+	}
+	if !strings.Contains(s.LastError, "full copy") || !strings.Contains(s.LastError, "2026-10-20T08:00:00Z") {
+		t.Errorf("LastError = %q", s.LastError)
+	}
+	if s.CopyMoment == nil || !s.CopyMoment.Time.Equal(first.Time) {
+		t.Errorf("CopyMoment = %v, want the earlier good copy %v", s.CopyMoment, first)
+	}
+
+	// The next copy starts from no base: QEMU makes a full copy.
+	e.clock = e.clock.Add(2 * time.Hour)
+	e.rc.processOnce(e.ctx)
+	n := len(e.cop.starts)
+	if e.cop.starts[n-1].base != "" {
+		t.Errorf("next copy base = %q, want a full copy", e.cop.starts[n-1].base)
+	}
+}
+
+func TestVMCopy_ReceiverMode_HotPluggedDisksStillSkipped(t *testing.T) {
+	e := newVMCopyEnv(t)
+	e.receiverMode()
+	pod := &corev1.Pod{}
+	if err := e.dc.Get(e.ctx, types.NamespacedName{Namespace: "default", Name: "virt-launcher-web-abcde"}, pod); err != nil {
+		t.Fatal(err)
+	}
+	pod.Labels[kubevirtPodLabel] = "hotplug-disk"
+	if err := e.dc.Update(e.ctx, pod); err != nil {
+		t.Fatal(err)
+	}
 	e.tick()
 	if len(e.cop.starts) != 0 {
-		t.Fatal("expected no VM copy in receiver mode yet")
-	}
-	if s := e.status(t, vmGuardSV1); !strings.Contains(s.LastError, skippedRunningVMPrefix) {
-		t.Errorf("status = %+v", s)
+		t.Fatal("expected no VM copy for a hot-plug pod")
 	}
 }
 
