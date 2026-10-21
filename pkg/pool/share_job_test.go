@@ -331,6 +331,14 @@ func TestShareJobRunner_ApplyVMDisk_FirstCallStartsJob(t *testing.T) {
 	if got := strings.Join(initC.Command, " "); !strings.Contains(got, `mkdir -p "/share0`+testSnapPath+`"`) {
 		t.Errorf("init script does not make the snapshot folder: %s", got)
 	}
+	// The Job is safe to run twice: a second run, after the staging file was
+	// applied and removed, leaves the finished snapshot alone.
+	if got := strings.Join(initC.Command, " "); !strings.Contains(got, `if [ -e "/share0`+testVolPath+`/.repl-staging-abc" ]`) {
+		t.Errorf("init script must only clear the folder while the staging file exists: %s", got)
+	}
+	if got := strings.Join(mainC.Command, " "); !strings.Contains(got, "already applied") {
+		t.Errorf("the command must skip an apply that has been done: %s", got)
+	}
 	// A folder from an earlier try or a discarded file copy is replaced.
 	if got := strings.Join(initC.Command, " "); !strings.Contains(got, `rm -r -f -- "/share0`+testSnapPath+`"`) {
 		t.Errorf("init script does not clear an old snapshot folder: %s", got)
@@ -347,8 +355,8 @@ func TestShareJobRunner_ApplyVMDisk_FirstCallStartsJob(t *testing.T) {
 	cmd := strings.Join(mainC.Command, " ")
 	for _, want := range []string{
 		"--mode=apply-vm-disk",
-		"--staging-path=/share0" + testVolPath + "/.repl-staging-abc",
-		"--disk-path=/share0" + testSnapPath + "/disk.img",
+		`--staging-path="/share0` + testVolPath + `/.repl-staging-abc"`,
+		`--disk-path="/share0` + testSnapPath + `/disk.img"`,
 		"--to=2026-10-21T09:30:00Z",
 		"--full",
 	} {

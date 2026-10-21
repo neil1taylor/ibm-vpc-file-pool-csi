@@ -671,3 +671,66 @@ func TestCreateSnapshot_VMStartsDuringFileCopyStopsTheFileCopyEarly(t *testing.T
 		t.Error("once the file copy has stopped, the snapshot moves to the VM path")
 	}
 }
+
+func TestAdvanceVMSnapshots_FinishesWithoutTheSourceSubVolume(t *testing.T) {
+	e := newVMSnapEnv(t)
+	e.startVM()
+	e.create(nil)
+	e.tick()
+	if err := e.k.DeleteSubVolume(e.ctx, testPVName); err != nil {
+		t.Fatal(err)
+	}
+	e.cop.state = vmcopy.Done
+	e.tick()
+	e.tick()
+	if !e.snap().Status.ReadyToUse {
+		t.Errorf("status = %+v: the copy knows its VM pod, so a deleted PVC must not stop it", e.snap().Status)
+	}
+}
+
+func TestAdvanceVMSnapshots_CancelsTheCopyWhenItsRecordCannotBeSaved(t *testing.T) {
+	e := newVMSnapEnv(t)
+	e.startVM()
+	e.create(nil)
+	e.k.UpdateSnapshotStatusErr = errors.New("conflict")
+	e.tick()
+	if e.cop.cancels != 1 {
+		t.Errorf("cancels = %d, want 1: a copy that nothing records would run unseen", e.cop.cancels)
+	}
+}
+
+func TestDeleteSnapshot_DoesNotWaitForARunningLoopStep(t *testing.T) {
+	e := newVMSnapEnv(t)
+	e.startVM()
+	e.create(nil)
+	e.tick()
+	e.mgr.vmMu.Lock() // a loop step is running
+	err := e.mgr.DeleteSnapshot(e.ctx, vmSnapName)
+	e.mgr.vmMu.Unlock()
+	if !errors.Is(err, ErrOperationInProgress) {
+		t.Errorf("err = %v, want ErrOperationInProgress: CSI calls must not wait for a slow VM command", err)
+	}
+}
+
+func TestAdvanceVMSnapshots_SnapshotsOfOneVMTakeTurnsAcrossAPodChange(t *testing.T) {
+	e := newVMSnapEnv(t)
+	e.startVM()
+	e.create(nil)
+	if _, err := e.mgr.CreateSnapshot(e.ctx, "second-snapshot", "test-pool/share-1/"+testPVName, nil); err != nil {
+		t.Fatal(err)
+	}
+	e.tick()
+	e.cop.state = vmcopy.Done
+	e.sd.setInProgress(true)
+	e.tick() // the first snapshot waits for its apply Job
+	e.cop.state = vmcopy.Running
+	e.stopVM()
+	if err := e.dc.Create(e.ctx, newLauncherPod("virt-launcher-web-zzzzz", "pod-uid-9", "web", map[string]string{"rootdisk": "my-pvc"})); err != nil {
+		t.Fatal(err)
+	}
+	starts := e.cop.startCount()
+	e.tick()
+	if e.cop.startCount() != starts {
+		t.Error("the second snapshot started while the first still waits for its apply Job: its staging file would be removed")
+	}
+}

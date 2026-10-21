@@ -180,6 +180,11 @@ spec:
                       PodName and PodUID identify the virt-launcher pod. If the pod changes,
                       the VM restarted or moved and QEMU no longer has the copy.
                     type: string
+                  podNamespace:
+                    description: |-
+                      PodNamespace is the namespace of the VM pod. A snapshot copy sets it so
+                      the copy can be watched and cancelled without its source volume.
+                    type: string
                   podUID:
                     type: string
                   stagingFile:

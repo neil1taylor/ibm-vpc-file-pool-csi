@@ -198,6 +198,8 @@ type fakeK8sClient struct {
 	GetSnapshotErr      error
 	CreateSnapshotErr   error
 	DeleteSnapshotErr   error
+	// UpdateSnapshotStatusErr makes UpdateSnapshotStatus fail.
+	UpdateSnapshotStatusErr error
 }
 
 var _ = (interface {
@@ -447,6 +449,9 @@ func (f *fakeK8sClient) UpdateSnapshot(_ context.Context, snap *v1alpha1.Snapsho
 func (f *fakeK8sClient) UpdateSnapshotStatus(_ context.Context, snap *v1alpha1.Snapshot) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.UpdateSnapshotStatusErr != nil {
+		return f.UpdateSnapshotStatusErr
+	}
 	existing, ok := f.snapshots[snap.Name]
 	if !ok {
 		return fmt.Errorf("snapshot %q not found", snap.Name)

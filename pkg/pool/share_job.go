@@ -180,17 +180,20 @@ func (r *ShareJobRunner) ApplyVMDisk(ctx context.Context, key string, share Shar
 	if r.driverImage == "" {
 		return false, errors.New("no driver image set for VM disk apply Jobs")
 	}
+	staging := "/share0" + volPath + "/" + stagingFile
+	disk := "/share0" + dstPath + "/disk.img"
+	// The Job is safe to run twice. A run after the staging file was applied and
+	// removed (for example because the controller could not save that the
+	// snapshot was ready) must leave the finished snapshot alone.
+	run := fmt.Sprintf(`if [ ! -e "%s" ] && [ -f "%s" ]; then echo already applied; exit 0; fi
+exec /usr/local/bin/vpc-file-pool-csi --mode=apply-vm-disk --staging-path="%s" --disk-path="%s" --to=%s --full`,
+		staging, disk, staging, disk, moment.UTC().Format(time.RFC3339Nano))
 	shape := jobShape{
-		image: r.driverImage,
-		command: []string{"/usr/local/bin/vpc-file-pool-csi",
-			"--mode=apply-vm-disk",
-			"--staging-path=/share0" + volPath + "/" + stagingFile,
-			"--disk-path=/share0" + dstPath + "/disk.img",
-			"--to=" + moment.UTC().Format(time.RFC3339Nano),
-			"--full",
-		},
-		runAsUser:  qemuUID,
-		initScript: fmt.Sprintf("set -eu\nrm -r -f -- \"/share0%s\"\nmkdir -p \"/share0%s\"\nchmod 0777 \"/share0%s\"\n", dstPath, dstPath, dstPath),
+		image:     r.driverImage,
+		command:   []string{"/bin/sh", "-c", run},
+		runAsUser: qemuUID,
+		initScript: fmt.Sprintf("set -eu\nif [ -e \"%s\" ]; then\nrm -r -f -- \"/share0%s\"\nmkdir -p \"/share0%s\"\nchmod 0777 \"/share0%s\"\nfi\n",
+			staging, dstPath, dstPath, dstPath),
 	}
 	return r.run(ctx, key, []ShareMount{share}, shape)
 }

@@ -218,7 +218,7 @@ func (m *Manager) AdvanceVMSnapshots(ctx context.Context) {
 		for j := range snaps {
 			s := &snaps[j]
 			if s.Status.VMCopy != nil {
-				active[s.Status.VMCopy.PodName] = s.Name
+				active[vmKey(s.Status.VMCopy)] = s.Name
 			}
 			if snapshotNeedsVMStep(s) {
 				todo = append(todo, s.Name)
@@ -229,6 +229,10 @@ func (m *Manager) AdvanceVMSnapshots(ctx context.Context) {
 		m.advanceVMSnapshot(ctx, vm, name, active)
 	}
 }
+
+// vmKey names the VM that a copy runs in. It stays the same when the VM pod is
+// replaced, so a snapshot that waits for its apply Job keeps the VM busy.
+func vmKey(st *v1alpha1.VMCopyState) string { return st.PodNamespace + "/" + st.VMIName }
 
 // snapshotNeedsVMStep reports whether the VM loop has work on the snapshot.
 func snapshotNeedsVMStep(s *v1alpha1.Snapshot) bool {
@@ -262,7 +266,7 @@ func (m *Manager) advanceVMSnapshot(ctx context.Context, vm *vmSnapshots, name s
 		}
 	}
 	if snap.Status.VMCopy != nil {
-		active[snap.Status.VMCopy.PodName] = snap.Name
+		active[vmKey(snap.Status.VMCopy)] = snap.Name
 	}
 }
 
@@ -352,7 +356,7 @@ func (m *Manager) startVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, snap
 	target := vmcopy.VM{Namespace: pod.Namespace, Pod: pod.Name, Name: vmi}
 	// Snapshots of one VM take turns: a copy that waits for its apply Job has
 	// no QEMU job, and the next snapshot's cleanup must not remove its file.
-	if other := active[pod.Name]; other != "" && other != snap.Name {
+	if other := active[pod.Namespace+"/"+vmi]; other != "" && other != snap.Name {
 		m.waitVMSnapshot(ctx, snap, fmt.Sprintf("copy waits: another snapshot of this VM (%s) is being copied", other))
 		return
 	}
@@ -378,6 +382,7 @@ func (m *Manager) startVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, snap
 	snap.Status.VMCopy = &v1alpha1.VMCopyState{
 		ID:                   id,
 		Phase:                vmCopyPhaseCopying,
+		PodNamespace:         pod.Namespace,
 		PodName:              pod.Name,
 		PodUID:               string(pod.UID),
 		VMIName:              vmi,
@@ -391,7 +396,13 @@ func (m *Manager) startVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, snap
 	snap.Status.VMCopyStarted = &started
 	snap.Status.VMCopyRetryAfter = nil
 	snap.Status.Message = ""
-	m.saveSnapshotStatus(ctx, snap)
+	if saveErr := m.k8sClient.UpdateSnapshotStatus(ctx, snap); saveErr != nil {
+		// Nothing records the copy now, so it would run unseen. End it.
+		klog.ErrorS(saveErr, "Failed to record a VM snapshot copy; cancelling it", "snapshot", snap.Name, "copy", id)
+		if cancelErr := vm.copier.Cancel(ctx, target, cp); cancelErr != nil {
+			klog.ErrorS(cancelErr, "Failed to cancel an unrecorded VM snapshot copy", "snapshot", snap.Name, "copy", id)
+		}
+	}
 }
 
 // newSnapshotCopyID makes the id of a copy. The prefix marks it as a snapshot
@@ -413,16 +424,11 @@ func vmOfCopy(ns string, st *v1alpha1.VMCopyState) (vmcopy.VM, *vmcopy.Copy) {
 
 func (m *Manager) watchVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, snap *v1alpha1.Snapshot) {
 	st := snap.Status.VMCopy
-	sv, err := m.k8sClient.GetSubVolume(ctx, snap.Spec.SourceSubVolume)
-	if err != nil {
-		m.waitVMSnapshot(ctx, snap, fmt.Sprintf("get source SubVolume: %v", err))
-		return
-	}
-	ns := sv.Spec.PVCNamespace
+	ns := st.PodNamespace
 	target, cp := vmOfCopy(ns, st)
 
 	pod := &corev1.Pod{}
-	err = vm.kube.Get(ctx, types.NamespacedName{Namespace: ns, Name: st.PodName}, pod)
+	err := vm.kube.Get(ctx, types.NamespacedName{Namespace: ns, Name: st.PodName}, pod)
 	if apierrors.IsNotFound(err) || (err == nil && string(pod.UID) != st.PodUID) {
 		m.vmSnapshotTryFailed(ctx, snap, "the VM restarted or moved during the copy")
 		return
@@ -484,11 +490,7 @@ func orDefault(s, d string) string {
 
 func (m *Manager) watchVMSnapshotApply(ctx context.Context, vm *vmSnapshots, snap *v1alpha1.Snapshot) {
 	st := snap.Status.VMCopy
-	sv, err := m.k8sClient.GetSubVolume(ctx, snap.Spec.SourceSubVolume)
-	if err != nil {
-		m.waitVMSnapshot(ctx, snap, fmt.Sprintf("get source SubVolume: %v", err))
-		return
-	}
+	ns := st.PodNamespace
 	pool, err := m.k8sClient.GetFileSharePool(ctx, snap.Spec.PoolName)
 	if err != nil {
 		m.waitVMSnapshot(ctx, snap, fmt.Sprintf("get the pool: %v", err))
@@ -499,10 +501,10 @@ func (m *Manager) watchVMSnapshotApply(ctx context.Context, vm *vmSnapshots, sna
 		m.waitVMSnapshot(ctx, snap, err.Error())
 		return
 	}
-	target, cp := vmOfCopy(sv.Spec.PVCNamespace, st)
+	target, cp := vmOfCopy(ns, st)
 	done, err := m.shareData.ApplyVMDisk(ctx, "snapvm-"+snap.Name, share, snap.Spec.SourceSubPath, st.StagingFile, snap.Spec.SnapshotPath, st.Moment.Time)
 	if errors.Is(err, ErrShareJobFailed) {
-		m.releaseVMSnapshotCopy(ctx, vm, target, cp, st, sv.Spec.PVCNamespace)
+		m.releaseVMSnapshotCopy(ctx, vm, target, cp, st, ns)
 		m.vmSnapshotTryFailed(ctx, snap, fmt.Sprintf("writing the snapshot failed: %v", err))
 		return
 	}
@@ -514,7 +516,7 @@ func (m *Manager) watchVMSnapshotApply(ctx context.Context, vm *vmSnapshots, sna
 		return
 	}
 	// The change list of a snapshot is not needed: every snapshot is full.
-	m.releaseVMSnapshotCopy(ctx, vm, target, cp, st, sv.Spec.PVCNamespace)
+	m.releaseVMSnapshotCopy(ctx, vm, target, cp, st, ns)
 
 	moment := st.Moment
 	snap.Status.Phase = "Ready"
@@ -553,31 +555,31 @@ func (m *Manager) cancelVMSnapshotForDelete(ctx context.Context, snap *v1alpha1.
 	if m.vm == nil {
 		return nil
 	}
-	if snap.Annotations[snapshotDeletingAnnotation] == "" {
-		if snap.Annotations == nil {
-			snap.Annotations = map[string]string{}
-		}
-		snap.Annotations[snapshotDeletingAnnotation] = "true"
-		if err := m.k8sClient.UpdateSnapshot(ctx, snap); err != nil {
-			return fmt.Errorf("mark the snapshot as deleting: %w", err)
-		}
+	// A loop step that runs now may take long (a slow command in the VM pod).
+	// CSI calls must not wait for it: ask the caller to try again.
+	if !m.vmMu.TryLock() {
+		return ErrOperationInProgress
 	}
-	// A loop step that started before the mark ends first; the next ones skip
-	// the snapshot. The step may have changed the record, so read it again.
-	m.vmMu.Lock()
 	defer m.vmMu.Unlock()
 	fresh, err := m.k8sClient.GetSnapshot(ctx, snap.Name)
 	if err != nil {
 		return fmt.Errorf("read the snapshot: %w", err)
 	}
+	// Mark it, so the loop leaves it alone from now on.
+	if fresh.Annotations[snapshotDeletingAnnotation] == "" {
+		if fresh.Annotations == nil {
+			fresh.Annotations = map[string]string{}
+		}
+		fresh.Annotations[snapshotDeletingAnnotation] = "true"
+		if err = m.k8sClient.UpdateSnapshot(ctx, fresh); err != nil {
+			return fmt.Errorf("mark the snapshot as deleting: %w", err)
+		}
+	}
 	st := fresh.Status.VMCopy
 	if st == nil {
 		return nil
 	}
-	sv, err := m.k8sClient.GetSubVolume(ctx, fresh.Spec.SourceSubVolume)
-	if err != nil {
-		klog.ErrorS(err, "Cannot cancel a VM snapshot copy: the source SubVolume is gone", "snapshot", fresh.Name)
-	} else if ns := sv.Spec.PVCNamespace; samePod(ctx, m.vm.kube, ns, st.PodName, st.PodUID) {
+	if ns := st.PodNamespace; samePod(ctx, m.vm.kube, ns, st.PodName, st.PodUID) {
 		target, cp := vmOfCopy(ns, st)
 		if st.Phase == vmCopyPhaseCopying {
 			err = m.vm.copier.Cancel(ctx, target, cp)
