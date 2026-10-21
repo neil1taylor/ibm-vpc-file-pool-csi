@@ -69,7 +69,8 @@ type VM struct {
 	Name      string // the VirtualMachineInstance name
 }
 
-func (vm VM) domain() string { return vm.Namespace + "_" + vm.Name }
+// Domain is the libvirt domain name of the VM.
+func (vm VM) Domain() string { return vm.Namespace + "_" + vm.Name }
 
 // StartOptions configure a copy.
 type StartOptions struct {
@@ -295,7 +296,7 @@ type freezeResult struct {
 }
 
 func (c *Copier) freezeAndStart(ctx context.Context, vm VM, txn string) (*freezeResult, error) {
-	out, err := c.run(ctx, vm, "bash", "-c", freezeScript, "repl-freeze", vm.Name, vm.Namespace, vm.domain(), txn)
+	out, err := c.run(ctx, vm, "bash", "-c", freezeScript, "repl-freeze", vm.Name, vm.Namespace, vm.Domain(), txn)
 	if err != nil {
 		return nil, fmt.Errorf("running the freeze and copy start: %w", err)
 	}
@@ -674,7 +675,7 @@ func (c *Copier) qmp(ctx context.Context, vm VM, command string, args map[string
 	if err != nil {
 		return nil, err
 	}
-	out, err := c.run(ctx, vm, "virsh", "qemu-monitor-command", vm.domain(), string(b))
+	out, err := c.run(ctx, vm, "virsh", "qemu-monitor-command", vm.Domain(), string(b))
 	if err != nil {
 		return nil, err
 	}
