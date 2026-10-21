@@ -608,11 +608,17 @@ func (r *FileSharePoolReconciler) processDrainRequests(ctx context.Context, pool
 	}
 }
 
-// reconcileMetrics recalculates per-share and pool totals from SubVolume CRs.
+// reconcileMetrics recalculates per-share and pool totals from SubVolume and
+// Snapshot CRs. A snapshot uses space on its share but is not a PVC.
 func (r *FileSharePoolReconciler) reconcileMetrics(ctx context.Context, pool *v1alpha1.FileSharePool) {
 	subVolumes, err := r.k8sClient.ListSubVolumes(ctx, pool.Name)
 	if err != nil {
 		klog.ErrorS(err, "Failed to list SubVolumes for metrics reconciliation", "pool", pool.Name)
+		return
+	}
+	snapshots, err := r.k8sClient.ListSnapshots(ctx, pool.Name)
+	if err != nil {
+		klog.ErrorS(err, "Failed to list snapshots for metrics reconciliation", "pool", pool.Name)
 		return
 	}
 
@@ -622,6 +628,9 @@ func (r *FileSharePoolReconciler) reconcileMetrics(ctx context.Context, pool *v1
 	for _, sv := range subVolumes {
 		shareAllocated[sv.Spec.ShareID] += sv.Spec.RequestedGB
 		sharePVCCount[sv.Spec.ShareID]++
+	}
+	for i := range snapshots {
+		shareAllocated[snapshots[i].Spec.ShareID] += snapshotChargeGB(&snapshots[i])
 	}
 
 	// Update per-share values

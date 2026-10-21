@@ -607,6 +607,18 @@ func (m *Manager) updateShareAllocation(pool *v1alpha1.FileSharePool, shareID st
 	pool.Status.TotalPVCCount++
 }
 
+// chargeShare adds sizeGB (or, when negative, gives it back) to a share's
+// AllocatedGB for a snapshot. A snapshot uses space but is not a PVC.
+func (m *Manager) chargeShare(pool *v1alpha1.FileSharePool, shareID string, sizeGB int64) {
+	for i := range pool.Status.Shares {
+		if pool.Status.Shares[i].ShareID == shareID {
+			pool.Status.Shares[i].AllocatedGB += sizeGB
+			break
+		}
+	}
+	pool.Status.TotalAllocatedGB += sizeGB
+}
+
 // updateShareDeallocation decrements a share's AllocatedGB and PVCCount.
 func (m *Manager) updateShareDeallocation(pool *v1alpha1.FileSharePool, shareID string, sizeGB int64) {
 	for i := range pool.Status.Shares {
@@ -762,6 +774,12 @@ func (m *Manager) CreateSnapshot(ctx context.Context, snapshotName, sourceVolume
 
 	desiredStatus := snap.Status
 
+	// The snapshot uses space on its source's share; refuse it when the
+	// share has no room, so the share is never over-committed.
+	if err := checkShareRoom(pool, sv.Spec.ShareID, snapshotChargeGB(snap)); err != nil {
+		return nil, err
+	}
+
 	if err := m.k8sClient.CreateSnapshot(ctx, snap); err != nil {
 		return nil, fmt.Errorf("create Snapshot CR: %w", err)
 	}
@@ -772,7 +790,7 @@ func (m *Manager) CreateSnapshot(ctx context.Context, snapshotName, sourceVolume
 	}
 
 	// 7. Update pool allocated capacity (snapshots count toward share usage)
-	m.updateShareAllocation(pool, sv.Spec.ShareID, snapshotChargeGB(snap))
+	m.chargeShare(pool, sv.Spec.ShareID, snapshotChargeGB(snap))
 	if err := m.k8sClient.UpdateFileSharePoolStatus(ctx, pool); err != nil {
 		klog.ErrorS(err, "Failed to update pool status after snapshot", "pool", poolName)
 	}
@@ -831,7 +849,7 @@ func (m *Manager) copySnapshotData(ctx context.Context, snap *v1alpha1.Snapshot,
 		if delErr := m.k8sClient.DeleteSnapshot(ctx, snap.Name); delErr != nil {
 			return fmt.Errorf("copy snapshot: %w (and deleting the Snapshot CR failed: %v)", err, delErr)
 		}
-		m.updateShareDeallocation(pool, snap.Spec.ShareID, snap.Spec.SizeGB)
+		m.chargeShare(pool, snap.Spec.ShareID, -snapshotChargeGB(snap))
 		if updErr := m.k8sClient.UpdateFileSharePoolStatus(ctx, pool); updErr != nil {
 			klog.ErrorS(updErr, "Failed to update pool status after snapshot copy failure", "pool", pool.Name)
 		}
@@ -939,7 +957,7 @@ func (m *Manager) DeleteSnapshot(ctx context.Context, snapshotName string) (retE
 	}
 
 	// 4. Update pool status (free capacity)
-	m.updateShareDeallocation(pool, snap.Spec.ShareID, snapshotChargeGB(snap))
+	m.chargeShare(pool, snap.Spec.ShareID, -snapshotChargeGB(snap))
 	if err := m.k8sClient.UpdateFileSharePoolStatus(ctx, pool); err != nil {
 		klog.ErrorS(err, "Failed to update pool status after snapshot deletion", "pool", poolName)
 	}

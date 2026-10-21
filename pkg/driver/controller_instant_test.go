@@ -44,3 +44,10 @@ func TestCreateVolume_FromClone_UnsupportedIsFailedPrecondition(t *testing.T) {
 	})
 	assertGRPCCode(t, err, codes.FailedPrecondition)
 }
+
+func TestCreateSnapshot_FullShareIsResourceExhausted(t *testing.T) {
+	pm := &mockPoolManager{createSnapshotErr: fmt.Errorf("%w: the snapshot needs 10 GB but share s1 has 5 GB free", pool.ErrInsufficientShareCapacity)}
+	d := newTestDriver(pm, nil)
+	_, err := d.CreateSnapshot(context.Background(), &csi.CreateSnapshotRequest{Name: "snap-test", SourceVolumeId: "pool/share/pvc-test"})
+	assertGRPCCode(t, err, codes.ResourceExhausted)
+}
