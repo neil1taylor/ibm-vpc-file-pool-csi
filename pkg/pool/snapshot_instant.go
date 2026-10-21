@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/vmcopy"
@@ -762,11 +763,34 @@ func (m *Manager) chainRestoreRunning(ctx context.Context, poolName, svName stri
 			continue
 		}
 		s, err := m.k8sClient.GetSnapshot(ctx, snapName)
-		if err == nil && s.Spec.SourceSubVolume == svName && s.Annotations[snapshotMethodAnnotation] == snapshotMethodInstant {
+		if err != nil || s.Spec.SourceSubVolume != svName || s.Annotations[snapshotMethodAnnotation] != snapshotMethodInstant {
+			continue
+		}
+		wanted, err := m.restoreWanted(ctx, &r)
+		if err != nil {
+			return false, err
+		}
+		if wanted {
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+// restoreWanted reports whether the claim of a restore still waits for it.
+// When the claim is deleted before the restore is done, nothing finishes the
+// restore. The provisioner names a claim's volume after the claim's UID, so a
+// new claim with the same name does not count.
+func (m *Manager) restoreWanted(ctx context.Context, sv *v1alpha1.SubVolume) (bool, error) {
+	pvc := &corev1.PersistentVolumeClaim{}
+	err := m.instant.kube.Get(ctx, types.NamespacedName{Namespace: sv.Spec.PVCNamespace, Name: sv.Spec.PVCName}, pvc)
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read the claim of restore %s: %w", sv.Name, err)
+	}
+	return pvc.UID != "" && strings.HasSuffix(sv.Name, string(pvc.UID)), nil
 }
 
 // restoreInstant converts an instant snapshot's file into the restored

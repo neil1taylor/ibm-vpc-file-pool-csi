@@ -565,10 +565,23 @@ func TestInstantSnapshot_RestoreRefusesASmallerVolume(t *testing.T) {
 	}
 }
 
+// restoreClaim makes the claim of the test restore, as the provisioner names
+// its volume: "pvc-" and the claim's UID.
+func (e *instantEnv) restoreClaim() {
+	e.t.Helper()
+	pvc := &corev1.PersistentVolumeClaim{}
+	pvc.Namespace, pvc.Name = "default", "restored"
+	pvc.UID = types.UID(strings.TrimPrefix(testRestorePVName, "pvc-"))
+	if err := e.dc.Create(e.ctx, pvc); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
 func TestInstantSnapshot_DeleteWaitsForARestore(t *testing.T) {
 	e := newInstantEnv(t)
 	e.startVM(false)
 	e.mustCreate("snap-one")
+	e.restoreClaim()
 	if _, err := e.mgr.RestoreSnapshot(e.ctx, "snap-one", AllocationRequest{
 		PVName: testRestorePVName, PVCName: "restored", PVCNamespace: "default", PoolName: "test-pool", RequestedGB: 10,
 	}); !errors.Is(err, ErrOperationInProgress) {
@@ -811,5 +824,23 @@ func TestInstantSnapshot_DeleteMergesATakenFileThatWasNotRecorded(t *testing.T) 
 	}
 	if c := e.sv().Status.DiskChain; len(c) != 0 {
 		t.Errorf("DiskChain = %v", c)
+	}
+}
+
+func TestInstantSnapshot_DeleteDoesNotWaitForAnAbandonedRestore(t *testing.T) {
+	e := newInstantEnv(t)
+	e.startVM(false)
+	e.mustCreate("snap-one")
+	if _, err := e.mgr.RestoreSnapshot(e.ctx, "snap-one", AllocationRequest{
+		PVName: testRestorePVName, PVCName: "restored", PVCNamespace: "default", PoolName: "test-pool", RequestedGB: 10,
+	}); !errors.Is(err, ErrOperationInProgress) {
+		t.Fatalf("restore: %v", err)
+	}
+	// The claim was deleted before the restore was done; nothing will finish it.
+	if err := e.mgr.DeleteSnapshot(e.ctx, "snap-one"); err != nil {
+		t.Fatalf("DeleteSnapshot: %v: a restore whose claim is gone must not block the delete", err)
+	}
+	if len(e.snap.merges) != 1 {
+		t.Errorf("merges = %v", e.snap.merges)
 	}
 }
