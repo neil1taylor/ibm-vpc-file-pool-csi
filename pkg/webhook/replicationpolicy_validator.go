@@ -8,6 +8,7 @@ import (
 	"time"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/util"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
@@ -64,6 +65,9 @@ func validateReplicationPolicySpec(spec *v1alpha1.ReplicationPolicySpec) error {
 	if spec.DestinationBasePath == "" {
 		return fmt.Errorf("spec.destinationBasePath is required")
 	}
+	if !util.ValidBasePath(spec.DestinationBasePath) {
+		return fmt.Errorf("spec.destinationBasePath must be an absolute path of letters, digits, '.', '_', '-' and '/', without '..': %q", spec.DestinationBasePath)
+	}
 	if spec.Schedule == "" {
 		return fmt.Errorf("spec.schedule is required")
 	}
@@ -79,9 +83,26 @@ func validateReplicationPolicySpec(spec *v1alpha1.ReplicationPolicySpec) error {
 	if spec.MaxParallelSyncs < 0 {
 		return fmt.Errorf("spec.maxParallelSyncs must be >= 0, got %d", spec.MaxParallelSyncs)
 	}
+	if spec.MomentKeepHours != nil && *spec.MomentKeepHours < 0 {
+		return fmt.Errorf("spec.momentKeepHours must be >= 0, got %d", *spec.MomentKeepHours)
+	}
+	// Moments are folders of hard links. A flag that changes a file in place
+	// would also change the same file in every older moment.
+	if spec.MomentKeepHours != nil && *spec.MomentKeepHours > 0 {
+		for _, opt := range spec.RsyncOptions {
+			for _, inPlace := range []string{"--inplace", "--append", "--append-verify"} {
+				if opt == inPlace {
+					return fmt.Errorf("spec.rsyncOptions contains %q, which changes files in place and would change older moments", opt)
+				}
+			}
+		}
+	}
 	// Rsync options only apply to direct NFS mode.
 	if !isReceiverMode {
 		for _, opt := range spec.RsyncOptions {
+			if !util.ValidRsyncOption(opt) {
+				return fmt.Errorf("spec.rsyncOptions entry %q must be one rsync flag such as --compress or --bwlimit=100, with no spaces, quotes or shell characters", opt)
+			}
 			for _, blocked := range rsyncBlocklist {
 				if opt == blocked || strings.HasPrefix(opt, blocked+"=") {
 					return fmt.Errorf("spec.rsyncOptions contains disallowed flag %q", opt)

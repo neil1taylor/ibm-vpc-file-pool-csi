@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,6 +34,22 @@ func newVMTestClient(t *testing.T) *vmTestClient {
 	srv := httptest.NewServer(rcv.httpServer.Handler)
 	t.Cleanup(srv.Close)
 	return &vmTestClient{t: t, srv: srv, rcv: rcv, base: base}
+}
+
+// diskLockHeld reports whether a call holds the lock of any disk of the receiver.
+func (c *vmTestClient) diskLockHeld() bool {
+	held := false
+	c.rcv.vmLocks.Range(func(_, v any) bool {
+		if m, ok := v.(*sync.Mutex); ok {
+			if m.TryLock() {
+				m.Unlock()
+			} else {
+				held = true
+			}
+		}
+		return !held
+	})
+	return held
 }
 
 func (c *vmTestClient) diskPath() string { return filepath.Join(c.base, "pvcs", testSV, "disk.img") }
@@ -418,6 +435,9 @@ func TestReceiverVM_OneCallPerDiskAtATime(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan struct{})
 	pr, pw := io.Pipe()
+	// Always end the first call's body. If the test fails while the first call is still reading it, the
+	// server would wait for the body for ever and the test server's Close would never return.
+	defer func() { _ = pw.Close() }()
 	go func() {
 		req, _ := http.NewRequest(http.MethodPut, c.url("88888888-1", ""), pr)
 		req.Header.Set("Authorization", "Bearer test-token-123")
@@ -428,21 +448,20 @@ func TestReceiverVM_OneCallPerDiskAtATime(t *testing.T) {
 		close(release)
 	}()
 	<-started
-	// Let the first call take the lock: write one record and wait until it
-	// is stored.
+	// Let the first call take the lock: write one record, then wait until a disk lock is held. Asking the
+	// receiver for its lock is exact; calling it a second time and hoping the first call has arrived is not.
 	var rec bytes.Buffer
 	_ = WriteUploadRecord(&rec, UploadRecord{Off: 0, Data: bytes.Repeat([]byte{1}, chunk)})
 	_, _ = pw.Write(rec.Bytes())
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		code, _ := c.do(http.MethodPut, c.url("88888888-2", ""), bytes.NewReader(nil), "test-token-123")
-		if code == http.StatusTooManyRequests {
-			break
-		}
+	deadline := time.Now().Add(10 * time.Second)
+	for !c.diskLockHeld() {
 		if time.Now().After(deadline) {
-			t.Fatalf("second call got %d, want 429", code)
+			t.Fatal("the first call did not take the disk lock")
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
+	}
+	if code, _ := c.do(http.MethodPut, c.url("88888888-2", ""), bytes.NewReader(nil), "test-token-123"); code != http.StatusTooManyRequests {
+		t.Fatalf("second call got %d, want 429", code)
 	}
 	_ = pw.Close()
 	<-release

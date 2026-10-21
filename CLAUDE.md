@@ -31,6 +31,7 @@ Read the relevant doc before implementing any component:
 | `FEATURES.md` | Complete feature catalog with maturity badges and comparison table |
 | `VOLUME-CLONING.md` | Async Job-based clone design (Phase 4b) |
 | `VOLUME-GROUP-SNAPSHOTS.md` | Coordinated multi-PVC snapshots (Phase 4c) |
+| `VM-INSTANT-SNAPSHOTS.md` | Instant VM snapshots with overlay files (design; spec `docs/specs/2026-10-21-instant-vm-snapshots.md`) |
 | `CROSS-REGION-DR.md` | Replication architecture and consistency analysis (Phase 4d) |
 | `CONSISTENCY-MODEL.md` | NFS consistency guarantees and limitations |
 | `GOLDEN-IMAGE-WORKFLOW.md` | KubeVirt golden image syncer modes and setup |
@@ -43,7 +44,7 @@ Read the relevant doc before implementing any component:
 | `UPGRADE-GUIDE.md` | Version upgrade procedures and compatibility matrix |
 | `HELM-VALUES.md` | Complete Helm chart values reference |
 | `API-KEY-SETUP.md` | Authentication via secret-common-lib |
-| `MONITORING.md` | All 22 Prometheus metrics, alerting rules, Grafana dashboard |
+| `MONITORING.md` | All 25 Prometheus metrics, alerting rules, Grafana dashboard |
 | `DAY2-OPERATIONS.md` | Production runbook: health checks, draining, failover |
 | `CAPACITY-PLANNING.md` | Sizing guidance, cost estimation, example configs |
 | `BACKUP-RECOVERY.md` | Snapshot scheduling, DR setup, recovery runbooks |
@@ -113,7 +114,7 @@ Run a single test: `go test ./pkg/pool/ -v -race -run TestPoolManager_Allocate`
 
 **Hook Orchestrator** (`pkg/hooks/`) — Executes lifecycle hooks (exec commands or HTTP webhooks) before/after replication syncs and group snapshots.
 
-**Admission Webhooks** (`pkg/webhook/`) — Five validating webhooks covering FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, and ReplicationPolicy CRDs.
+**Admission Webhooks** (`pkg/webhook/`) — Seven validating webhooks covering FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, ReplicationPolicy, BackupPolicy, and BackupRestore CRDs.
 
 **CSI Node Agent** (DaemonSet) — Mounts NFS shares once per node, bind-mounts subdirectories into pod paths. Maintains mount cache.
 
@@ -135,7 +136,7 @@ pkg/k8s/           → Kubernetes client and CRD reconcilers
 pkg/util/          → Mount helpers, path validation, quota tracking
 pkg/hooks/         → Lifecycle hook orchestrator (exec + HTTP)
 pkg/webhook/       → Validating admission webhooks for all CRDs
-pkg/metrics/       → Prometheus metric definitions (22 metrics)
+pkg/metrics/       → Prometheus metric definitions (25 metrics)
 pkg/migrate/       → PVC migration logic
 api/v1alpha1/      → CRD Go types and generated code
 config/            → Kubernetes manifests (CRDs, RBAC, deployments, webhooks)

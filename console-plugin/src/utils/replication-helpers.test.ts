@@ -75,7 +75,8 @@ describe('describeVolumeStatus', () => {
     expect(d.restorePoints).toBe('-');
   });
 
-  it('a VM disk shows its copy moment, consistency and restore points', () => {
+  it('a VM disk shows its copy moment, consistency and restore points, with times as ages like the rest of the page', () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-10-20T12:00:00Z'));
     const d = describeVolumeStatus({
       ...base,
       copyMoment: '2026-10-20T10:00:00Z',
@@ -84,10 +85,11 @@ describe('describeVolumeStatus', () => {
       oldestRestorePoint: '2026-10-19T10:30:00Z',
     });
     expect(d.isVMDisk).toBe(true);
-    expect(d.copyMoment).toBe('2026-10-20T10:00:00Z');
+    jest.useRealTimers();
+    expect(d.copyMoment).toBe('2h');
     expect(d.consistency).toBe('File-system consistent');
     expect(d.consistencyWarning).toBe(false);
-    expect(d.restorePoints).toBe('3 (oldest 2026-10-19T10:30:00Z)');
+    expect(d.restorePoints).toBe('3 (oldest 1d)');
   });
 
   it('crash consistent copies are flagged, with the reason', () => {

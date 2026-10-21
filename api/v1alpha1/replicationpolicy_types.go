@@ -125,6 +125,15 @@ type ReplicationPolicySpec struct {
 	// +optional
 	RestorePointKeepHours *int32 `json:"restorePointKeepHours,omitempty"`
 
+	// MomentKeepHours keeps earlier moments of volumes that are not VM disks, as
+	// folders of hard links next to the destination (in .moments). A file that
+	// did not change takes no extra space. A moment older than this many hours is
+	// removed after each sync. Unset or 0 keeps none. Needs rsync: it is used
+	// even when IncrementalSync is false. BackupPolicy sets this.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	MomentKeepHours *int32 `json:"momentKeepHours,omitempty"`
+
 	// PreSyncHooks are hooks executed before each replication sync cycle.
 	// +optional
 	PreSyncHooks []Hook `json:"preSyncHooks,omitempty"`
@@ -222,6 +231,11 @@ type VMCopyState struct {
 	// a Job applies it at the destination.
 	// +kubebuilder:validation:Enum=Copying;Sending
 	Phase string `json:"phase"`
+
+	// PodNamespace is the namespace of the VM pod. A snapshot copy sets it so
+	// the copy can be watched and cancelled without its source volume.
+	// +optional
+	PodNamespace string `json:"podNamespace,omitempty"`
 
 	// PodName and PodUID identify the virt-launcher pod. If the pod changes,
 	// the VM restarted or moved and QEMU no longer has the copy.

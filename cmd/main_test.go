@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -112,5 +113,26 @@ func TestSendVMDiskArgs(t *testing.T) {
 	}
 	if _, err = sendVMDiskArgs(vmCopyFlags{}, "/", "/p", "pvc-1", "c", "g"); err == nil {
 		t.Error("expected an error without --to")
+	}
+}
+
+func TestCheckReceiverResult(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		wantLine string
+		wantCode int
+	}{
+		{"ok", nil, "ok", 0},
+		{"a check error shows its short reason only", &replication.CheckError{Reason: replication.ReasonTokenRefused, Err: errors.New("HTTP 401")}, "token refused", 1},
+		{"another error shows its text", errors.New("boom"), "boom", 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			line, code := checkReceiverResult(tt.err)
+			if line != tt.wantLine || code != tt.wantCode {
+				t.Errorf("got (%q, %d), want (%q, %d)", line, code, tt.wantLine, tt.wantCode)
+			}
+		})
 	}
 }

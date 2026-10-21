@@ -1,4 +1,5 @@
 import { ReplicationPolicySpec, SubVolumeReplicationStatus } from '../types';
+import { formatAge } from './resource-helpers';
 
 interface DestinationInput {
   isDriverToDriver: boolean;
@@ -67,12 +68,12 @@ export function describeVolumeStatus(s: SubVolumeReplicationStatus): VolumeStatu
   if (isVMDisk) {
     restorePoints =
       s.restorePoints && s.restorePoints > 0
-        ? `${s.restorePoints} (oldest ${s.oldestRestorePoint || '-'})`
+        ? `${s.restorePoints} (oldest ${formatAge(s.oldestRestorePoint)})`
         : 'none yet';
   }
   return {
     isVMDisk,
-    copyMoment: s.copyMoment || '-',
+    copyMoment: formatAge(s.copyMoment),
     consistency,
     consistencyWarning: s.consistency === 'CrashConsistent',
     consistencyReason: s.consistencyReason || '',

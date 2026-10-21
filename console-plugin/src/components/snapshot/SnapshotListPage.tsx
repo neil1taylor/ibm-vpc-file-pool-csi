@@ -8,7 +8,7 @@ import {
   useListPageFilter,
   Timestamp,
 } from '@openshift-console/dynamic-plugin-sdk';
-import { Link } from 'react-router-dom';
+import { Link, useHistory } from 'react-router-dom';
 import {
   Table,
   Thead,
@@ -21,22 +21,33 @@ import {
   IAction,
 } from '@patternfly/react-table';
 import { Bullseye, Spinner, Label } from '@patternfly/react-core';
-import { SnapshotModel, VolumeSnapshotModel } from '../../models';
+import { SnapshotModel, VolumeSnapshotContentModel, VolumeSnapshotModel } from '../../models';
 import { Snapshot } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
 import DeleteModal from '../common/DeleteModal';
 import { ROUTES } from '../../constants';
+import { VolumeSnapshotContent } from '../../utils/k8s-objects';
+import { findVolumeSnapshotRef, restoreDisabledReason } from '../../utils/restore-helpers';
 
 const SnapshotRow: React.FC<{
   snap: Snapshot;
+  contents: VolumeSnapshotContent[];
   onDelete: (name: string) => void;
-}> = ({ snap, onDelete }) => {
+}> = ({ snap, contents, onDelete }) => {
+  const history = useHistory();
   const name = snap.metadata?.name || '';
   const detailPath = ROUTES.SNAPSHOT_DETAIL.replace(':name', name);
+  const restoreReason = restoreDisabledReason(snap, findVolumeSnapshotRef(snap, contents));
 
   const rowActions: IAction[] = [
     {
       title: <Link to={detailPath}>View Details</Link>,
+    },
+    {
+      title: 'Restore to new PVC',
+      isDisabled: !!restoreReason,
+      description: restoreReason,
+      onClick: () => history.push(ROUTES.SNAPSHOT_RESTORE.replace(':name', name)),
     },
     {
       title: 'Delete',
@@ -82,6 +93,15 @@ const SnapshotListPage: React.FC = () => {
       group: SnapshotModel.apiGroup,
       version: SnapshotModel.apiVersion,
       kind: SnapshotModel.kind,
+    },
+    isList: true,
+  });
+
+  const [contents] = useK8sWatchResource<VolumeSnapshotContent[]>({
+    groupVersionKind: {
+      group: VolumeSnapshotContentModel.apiGroup,
+      version: VolumeSnapshotContentModel.apiVersion,
+      kind: VolumeSnapshotContentModel.kind,
     },
     isList: true,
   });
@@ -173,6 +193,7 @@ const SnapshotListPage: React.FC = () => {
                 <SnapshotRow
                   key={snap.metadata?.uid || snap.metadata?.name}
                   snap={snap}
+                  contents={contents || []}
                   onDelete={setDeleteTarget}
                 />
               ))}

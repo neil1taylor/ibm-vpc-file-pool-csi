@@ -40,6 +40,7 @@ import { ROUTES } from '../../constants';
 import FieldPopover from '../common/FieldPopover';
 import SchedulePresets from '../common/SchedulePresets';
 import HookEditor from '../common/HookEditor';
+import ReceiverSetup from './ReceiverSetup';
 import { destinationSpecFields } from '../../utils/replication-helpers';
 
 const SCHEDULE_PRESETS = [
@@ -70,6 +71,8 @@ const ReplicationPolicyCreatePage: React.FC = () => {
   const [rsyncOptions, setRsyncOptions] = useState('');
 
   const isDriverToDriver = replicationMode === 'driver-to-driver';
+  // The receiver passed the check (or the user cannot run it). A policy for a receiver is not made before that.
+  const [receiverChecked, setReceiverChecked] = useState(false);
 
   // Label selector as key-value pairs
   const [labelPairs, setLabelPairs] = useState<Array<{ key: string; value: string }>>([]);
@@ -108,7 +111,7 @@ const ReplicationPolicyCreatePage: React.FC = () => {
     destinationBasePath.length > 0 &&
     schedule.length > 0 &&
     (isDriverToDriver
-      ? destinationEndpoint.length > 0 && destinationAuthSecretRef.length > 0
+      ? destinationEndpoint.length > 0 && destinationAuthSecretRef.length > 0 && receiverChecked
       : destinationNFSServer.length > 0);
 
   const handleCreate = async () => {
@@ -239,7 +242,11 @@ const ReplicationPolicyCreatePage: React.FC = () => {
             <FormSelect
               id="rp-mode"
               value={replicationMode}
-              onChange={(_event, value) => setReplicationMode(value as 'direct' | 'driver-to-driver')}
+              onChange={(_event, value) => {
+                setReplicationMode(value as 'direct' | 'driver-to-driver');
+                // The receiver setup starts over when it is shown again.
+                setReceiverChecked(false);
+              }}
             >
               <FormSelectOption value="direct" label="Direct NFS" />
               <FormSelectOption value="driver-to-driver" label="Driver-to-Driver (cross-region)" />
@@ -294,71 +301,18 @@ const ReplicationPolicyCreatePage: React.FC = () => {
         )}
 
         {isDriverToDriver && (
-          <>
-            <StackItem>
-              <FieldPopover
-                fieldId="rp-dest-endpoint"
-                label="Receiver Endpoint"
-                description="HTTPS URL of the replication receiver service on the destination cluster. This is typically an OpenShift Route URL."
-                isRequired
-              >
-                <TextInput
-                  id="rp-dest-endpoint"
-                  value={destinationEndpoint}
-                  onChange={(_event, value) => setDestinationEndpoint(value)}
-                  isRequired
-                  placeholder="https://repl-receiver.apps.cluster.example.com"
-                />
-                <FormHelperText>
-                  <HelperText>
-                    <HelperTextItem>HTTPS URL of the receiver on the destination cluster</HelperTextItem>
-                  </HelperText>
-                </FormHelperText>
-              </FieldPopover>
-            </StackItem>
-
-            <StackItem>
-              <FieldPopover
-                fieldId="rp-dest-auth-secret"
-                label="Auth Secret Name"
-                description="Name of a Secret in kube-system containing a 'token' key with the bearer token for authenticating to the receiver."
-                isRequired
-              >
-                <TextInput
-                  id="rp-dest-auth-secret"
-                  value={destinationAuthSecretRef}
-                  onChange={(_event, value) => setDestinationAuthSecretRef(value)}
-                  isRequired
-                  placeholder="replication-auth"
-                />
-                <FormHelperText>
-                  <HelperText>
-                    <HelperTextItem>Secret name with bearer token for receiver authentication</HelperTextItem>
-                  </HelperText>
-                </FormHelperText>
-              </FieldPopover>
-            </StackItem>
-
-            <StackItem>
-              <FieldPopover
-                fieldId="rp-dest-ca-secret"
-                label="CA Certificate Secret"
-                description="Name of a Secret in kube-system with a 'ca.crt' key. The driver uses it to trust the receiver's certificate."
-              >
-                <TextInput
-                  id="rp-dest-ca-secret"
-                  value={destinationCACertSecretRef}
-                  onChange={(_event, value) => setDestinationCACertSecretRef(value)}
-                  placeholder="replication-receiver-ca"
-                />
-                <FormHelperText>
-                  <HelperText>
-                    <HelperTextItem>Secret in kube-system with key ca.crt; needed when the receiver uses a self-signed certificate.</HelperTextItem>
-                  </HelperText>
-                </FormHelperText>
-              </FieldPopover>
-            </StackItem>
-          </>
+          <StackItem>
+            <ReceiverSetup
+              policyName={name}
+              endpoint={destinationEndpoint}
+              onEndpointChange={setDestinationEndpoint}
+              authSecretRef={destinationAuthSecretRef}
+              onAuthSecretRefChange={setDestinationAuthSecretRef}
+              caCertSecretRef={destinationCACertSecretRef}
+              onCaCertSecretRefChange={setDestinationCACertSecretRef}
+              onCheckedChange={setReceiverChecked}
+            />
+          </StackItem>
         )}
 
         <StackItem>

@@ -51,14 +51,17 @@ type MigrationStatus struct {
 type Executor struct {
 	clientset kubernetes.Interface
 	output    io.Writer
+	// deleteWait is how long to wait after deleting an earlier migration pod of the same name.
+	deleteWait time.Duration
 }
 
 // NewExecutor creates an Executor with the given Kubernetes client.
 // The output writer receives progress messages (typically os.Stdout).
 func NewExecutor(clientset kubernetes.Interface, output io.Writer) *Executor {
 	return &Executor{
-		clientset: clientset,
-		output:    output,
+		clientset:  clientset,
+		output:     output,
+		deleteWait: 2 * time.Second,
 	}
 }
 
@@ -112,28 +115,14 @@ func (e *Executor) Execute(ctx context.Context, namespace, sourcePVC, targetPool
 	_, _ = fmt.Fprintf(e.output, "Creating target PVC %s/%s (size: %s, storageClass: %s)...\n",
 		namespace, targetPVCName, storageSize.String(), targetStorageClass)
 
-	targetPVC := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      targetPVCName,
-			Namespace: namespace,
-			Labels: map[string]string{
-				LabelMigration: "true",
-			},
-			Annotations: map[string]string{
-				AnnotationSourcePVC:             sourcePVC,
-				"vpc-file-pool-csi.ibm.io/pool": targetPool,
-			},
-		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
-			StorageClassName: &targetStorageClass,
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: storageSize,
-				},
-			},
-		},
-	}
+	targetPVC := BuildTargetPVC(TargetPVCSpec{
+		Name:         targetPVCName,
+		Namespace:    namespace,
+		SourcePVC:    sourcePVC,
+		Pool:         targetPool,
+		StorageClass: targetStorageClass,
+		Size:         storageSize,
+	})
 
 	_, err = e.clientset.CoreV1().PersistentVolumeClaims(namespace).Create(ctx, targetPVC, metav1.CreateOptions{})
 	if err != nil {
@@ -164,7 +153,7 @@ func (e *Executor) Execute(ctx context.Context, namespace, sourcePVC, targetPool
 	// Clean up any previous migration pod with the same name.
 	_ = e.clientset.CoreV1().Pods(namespace).Delete(ctx, migrationPodName, metav1.DeleteOptions{})
 	// Brief pause to let the delete propagate.
-	time.Sleep(2 * time.Second)
+	time.Sleep(e.deleteWait)
 
 	_, err = e.clientset.CoreV1().Pods(namespace).Create(ctx, migrationPod, metav1.CreateOptions{})
 	if err != nil {

@@ -582,6 +582,12 @@ func (c *vmCall) commit() {
 		c.fail(http.StatusRequestEntityTooLarge, "disk size %d is above the limit %d", cr.Size, c.r.vmLimit())
 		return
 	}
+	// Failover waits while a commit may be changing the disk.
+	if err := c.v.writeLeaseFile(time.Now().Add(leaseTTL)); err != nil {
+		c.fail(http.StatusInternalServerError, "writing the lease: %v", err)
+		return
+	}
+	defer c.v.removeLeaseFile()
 	if _, err := c.v.recover(); err != nil {
 		c.fail(http.StatusInternalServerError, "rolling back an unfinished copy: %v", err)
 		return

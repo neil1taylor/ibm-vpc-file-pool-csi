@@ -110,4 +110,20 @@ fi
 expect_contains "refusal names both clusters" "$OUT.log" "is other-cluster, not lab-cluster"
 if [ -f "$OUT/01.cleanup" ]; then fail "no stage runs on the wrong cluster"; else pass "no stage runs on the wrong cluster"; fi
 
+# Helpers that read the log of an end-to-end script (used by stage 18).
+source "$HERE/lib.sh"
+E2ELOG="$WORK/e2e.log"
+printf '[10:00:01] making pools\n[10:05:00] PASS: three volumes backed up, two moments each\n[10:09:00] FAIL: the root disk backup is not FileSystemConsistent\n[10:09:01] FAIL: a later one\n' >"$E2ELOG"
+if [ "$(first_fail_line "$E2ELOG")" = "FAIL: the root disk backup is not FileSystemConsistent" ]; then
+    pass "first_fail_line prints the first FAIL line without the time"
+else
+    fail "first_fail_line prints the first FAIL line without the time"
+fi
+printf '[10:00:01] PASS: all good\n' >"$WORK/e2e-ok.log"
+if first_fail_line "$WORK/e2e-ok.log" >/dev/null; then fail "first_fail_line fails when there is no FAIL line"; else pass "first_fail_line fails when there is no FAIL line"; fi
+if first_fail_line "$WORK/missing.log" >/dev/null; then fail "first_fail_line fails when the log is missing"; else pass "first_fail_line fails when the log is missing"; fi
+if log_has_pass "$E2ELOG" "three volumes backed up"; then pass "log_has_pass finds a PASS line"; else fail "log_has_pass finds a PASS line"; fi
+if log_has_pass "$E2ELOG" "the latest restore"; then fail "log_has_pass is false for a PASS line that is not there"; else pass "log_has_pass is false for a PASS line that is not there"; fi
+if log_has_pass "$E2ELOG" "making pools"; then fail "log_has_pass ignores lines that are not PASS lines"; else pass "log_has_pass ignores lines that are not PASS lines"; fi
+
 exit "$FAILED"

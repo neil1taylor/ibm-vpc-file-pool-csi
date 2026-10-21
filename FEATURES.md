@@ -45,7 +45,7 @@ Share selection and capacity management across the pool.
 
 Directory-level point-in-time copies via the standard CSI snapshot interface.
 
-- **CreateSnapshot** — A Job in the driver's namespace copies the SubVolume directory to a snapshot path on the same share. The Snapshot CR reads `readyToUse: false` until the copy has finished.
+- **CreateSnapshot** — A Job in the driver's namespace copies the SubVolume directory to a snapshot path on the same share. The Snapshot CR reads `readyToUse: false` until the copy has finished. If a running VM uses the claim, the snapshot is a QEMU copy of that disk at one moment instead (guest frozen for a moment; `status.consistency` says if it worked; `vmCopySpeedLimitMBps` on the VolumeSnapshotClass sets the speed, default 20 MB/s). Experimental, like the VM disk copy for replication.
 - **DeleteSnapshot** — A Job removes the snapshot directory; then the CR is deleted and the pool capacity is given back.
 - **ListSnapshots** — Lists snapshots filtered by source volume with pagination support.
 - **Restore from snapshot** — A Job copies the snapshot directory into the new volume and sets the pool's owner and permissions. The claim stays Pending until the copy has finished.
@@ -60,6 +60,15 @@ Asynchronous, Job-based cloning for every volume size.
 - **Clone status gate** — NodePublishVolume returns `Unavailable` for SubVolumes with an in-progress clone, preventing pods from mounting incomplete data.
 - **Crash recovery** — The clone worker recovers incomplete clones on restart by scanning for SubVolumes in Pending/InProgress state.
 - **Progress tracking** — CloneProgress tracks BytesCopied, TotalBytes, StartedAt, CompletedAt, and Error.
+
+### Backup to a Snapshot Pool — Experimental
+
+One `BackupPolicy` backs up the volumes and VMs it selects into a pool that holds only backups, so a lost data share does not take the backups with it. Built on replication, so a running VM is backed up at one moment, all disks together, and only changed blocks are copied.
+
+- **Selection** — By PVC label and namespace. If any disk of a VM matches, all its disks are backed up.
+- **Moments** — The latest backup of a VM disk is whole; earlier moments are undo files (restore points). Other volumes keep each sync as a folder of hard links, so an unchanged file takes no extra space. Moments older than `keepFor` (default 7 days) go.
+- **Restore** — `kubectl backup restore --policy P --pvc NS/NAME --to NS/NEW [--moment TIME]` makes a new PVC and copies the backup into it; the volume is held back from pods until the copy ends. It never writes over a volume that exists, and works after the source volume is deleted.
+- **Not yet** — one share in the snapshot pool (#71), a stop at 85% full (#69), a command to remove the backups of a volume (#70), export to COS (step 9).
 
 ### Volume Group Snapshots — Beta
 
@@ -83,11 +92,11 @@ Disaster recovery with configurable sync schedules. Two replication modes are su
 - **Bandwidth limiting and parallel syncs** — `bandwidthLimitMbps` caps rsync throughput (direct NFS mode); `maxParallelSyncs` controls concurrent SubVolume syncs in both modes.
 - **Extra rsync options** — `rsyncOptions` field passes additional rsync flags (e.g., `--compress`, `--checksum`). Dangerous flags (`--daemon`, `--server`, `--rsh`, `--rsync-path`) are blocked by the webhook. Only applies to direct NFS mode.
 - **Retry with backoff** — Configurable max retries (default 3). Policy pauses on consecutive failures.
-- **Running VM disks** — Experimental — The controller copies a running VM's disks with QEMU, all at one moment, after a short guest freeze (0.15 s in a lab test). After the first copy, each copy holds only the changed blocks. The destination saves the old contents of every changed block first, so a copy that stops half way is rolled back, and it keeps those as restore points for 24 hours by default (`restorePointKeepHours`). The copy is file-system consistent, or crash consistent if the guest cannot freeze, and the status says which. A live migration cancels the copy. In receiver mode the receiver at the destination applies each copy, and after a VM move only the blocks that differ are sent. Red Hat does not support the QEMU commands this uses.
+- **Running VM disks** — Experimental — The controller copies a running VM's disks with QEMU, all at one moment, after a short guest freeze (0.15 s in a lab test). After the first copy, each copy holds only the changed blocks. The destination saves the old contents of every changed block first, so a copy that stops half way is rolled back, and it keeps those as restore points for 24 hours by default (`restorePointKeepHours`). The copy is file-system consistent, or crash consistent if the guest cannot freeze, and the status says which. A live migration cancels the copy. In receiver mode the receiver at the destination applies each copy, and after a VM move only the blocks that differ are sent. Tested between two clusters with Linux and Windows Server 2022 VMs (freeze, copy, rewind and boot). Red Hat does not support the QEMU commands this uses.
 - **Pause/resume via annotation** — Annotate a ReplicationPolicy with `storage.ibmcloud.io/paused=true` to pause; remove the annotation to resume. The controller updates `status.phase` accordingly.
 - **Pre/post-sync hooks** — Exec and HTTP hooks for application quiescing before sync and notification after.
 - **Metadata sidecar** — Writes `.subvolume-metadata.json` alongside each replicated SubVolume directory, enabling the failover CLI to reconstruct resources without querying the source cluster.
-- **Failover CLI** — `kubectl failover` plugin with `plan` (scan destination NFS, compute RPO), `execute` (create SubVolume CRs, PVs, PVCs on DR cluster), and `status` (report PVC binding) subcommands. Supports `--dry-run` and is idempotent.
+- **Failover CLI** — `kubectl failover` plugin with `plan` (scan destination NFS, compute RPO), `execute` (create SubVolume CRs, PVs, PVCs on DR cluster), and `status` (report PVC binding) subcommands. For running VMs it picks the newest moment all of a VM's disks can show, rolls back a copy that stopped half way, and with `--rewind-to` goes back to an earlier restore point (`--list-moments` lists them). Supports `--dry-run` and is idempotent.
 - **Status tracking** — Per-policy LastSyncTime and LastSyncDuration. Per-SubVolume sync state with BytesSynced and LastError.
 - **Destination config** — NFS server IP and base path (direct NFS mode), or HTTPS receiver endpoint with bearer token auth (driver-to-driver mode).
 - **Prometheus metrics** — Dedicated metrics for sync total, duration, lag, failures, and SubVolume count.
@@ -157,7 +166,7 @@ Defense-in-depth controls for a storage driver running with host access.
 
 Prometheus metrics and structured logging for operational visibility.
 
-- **Prometheus metrics** — 21+ metrics covering allocation (count, duration, capacity), VPC API calls (count, latency), snapshots, clones, group snapshots, and replication.
+- **Prometheus metrics** — 25 metrics covering allocation (count, duration, capacity), VPC API calls (count, latency), snapshots, clones, group snapshots, replication, and backups.
 - **Structured logging** — `klog/v2` with `InfoS`/`ErrorS` and key-value pairs. V(2) for normal operations, V(4) for detailed flow, V(6) for trace-level.
 - **Key metrics:**
   - `vpc_file_pool_allocations_total` — allocation/deallocation counts by pool and status
@@ -184,6 +193,8 @@ CLI tool for migrating PVCs from the stock IBM VPC File CSI driver.
 - **`kubectl migrate plan`** — Discovers PVCs in a namespace by StorageClass, calculates total size, detects pod attachments.
 - **`kubectl migrate execute`** — Creates a migration pod that copies data from the source PVC to a new SubVolume in the target pool.
 - **`kubectl migrate status`** — Checks migration pod progress.
+- **Migrate volumes in the console** — A "Migrate volumes into a pool" link on the Pools tab opens a page that lists the claims of another storage class, refuses a claim a pod uses or a move that does not fit the pool, asks for confirmation, and then makes the same new claim and pod as `kubectl migrate execute`. It follows the copy and never deletes the old claim. See [TUTORIAL-08-MIGRATION-AND-CONSOLE.md](TUTORIAL-08-MIGRATION-AND-CONSOLE.md#migrate-in-the-console).
+- **Receiver setup in the console** — The replication form, in Driver-to-Driver mode, makes the token and CA Secrets from what you paste, runs a short check Job in the source cluster (the address answers, the certificate is trusted, the token is accepted), and turns Create on only when it passes. See [CROSS-REGION-DR.md](CROSS-REGION-DR.md#set-up-the-receiver-in-the-console).
 - **Dry-run mode** — Preview migration plan without making changes.
 - **Idempotent and resumable** — Safe to re-run after interruption.
 
@@ -197,8 +208,10 @@ Visual management of file share pools through the OpenShift Console.
 - **CRUD for all 5 CRDs** — List, detail, create, edit, and delete views for FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, and ReplicationPolicy resources. Create buttons route to custom form wizards (not the YAML editor).
 - **FileSharePool creation wizard** — 6-step guided wizard for creating pools: zone/profile selection, capacity configuration, allocation strategy, directory ownership, and review. The form no longer offers golden images.
 - **IOPS column in pool table** — Displays `spec.iops`, or "VPC default" when it is not set.
-- **Monitoring tab** — Dedicated metrics page with time range selector (1h/6h/24h/7d), stat cards (allocation rate, P95 latency, VPC API health, replication status), and time-series charts (allocation rate, latency, API call rate by status, replication lag).
-- **Prometheus metrics panels** — Stat cards and time-series charts using the driver's 21+ Prometheus metrics with `usePrometheusRange` hook for range queries.
+- **Restore a snapshot to a new PVC** — A "Restore to new PVC" action on the snapshot details page and in the list row menu opens a form (name, size, storage class, access and volume mode) and creates a claim whose data source is the snapshot's `VolumeSnapshot`. A banner follows the copy. It never replaces an existing volume. See [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md#restore-in-the-console).
+- **Clone a volume to a new PVC** — A "Clone to new PVC" action on the SubVolume details page and in the list row menu opens the same kind of form and creates a claim whose data source is the volume's claim. The same banner follows the copy. It never changes the source volume. See [VOLUME-CLONING.md](VOLUME-CLONING.md#clone-in-the-console).
+- **Monitoring tab** — Dedicated metrics page with time range selector (1h/6h/24h/7d), stat cards (allocation rate, P95 latency, VPC API health, replication status), and time-series charts (allocation rate, latency, API call rate by status, replication lag), and a collapsed section with the group snapshot inconsistency window, the group snapshot member count, and the times the controller raised CDI's copy limit.
+- **Prometheus metrics panels** — Stat cards and time-series charts using the driver's Prometheus metrics with `usePrometheusRange` hook for range queries.
 - **TLS via service-ca** — Plugin Service uses OpenShift's service-ca operator for automatic TLS certificate provisioning (no cert-manager dependency).
 
 ### CDI Copy Limit — Beta
@@ -242,7 +255,7 @@ How this driver compares to the two most common alternatives for NFS-based Kuber
 | CreateVolume / DeleteVolume | ✅ | ✅ | ✅ |
 | ExpandVolume | ✅ (pool-level) | ✅ (share-level) | ❌ |
 | Volume snapshots | ✅ (directory copy) | ❌ | ❌ |
-| Volume clones | ✅ (sync + async) | ❌ | ❌ |
+| Volume clones | ✅ (async, Job-based) | ❌ | ❌ |
 | Volume group snapshots | ✅ (beta) | ❌ | ❌ |
 | Clone status gate | ✅ | — | — |
 | **NFS** | | | |
@@ -274,7 +287,7 @@ How this driver compares to the two most common alternatives for NFS-based Kuber
 | Config auto-discovery | ✅ | ✅ | ❌ |
 | API rate limiting | ✅ | ✅ | — |
 | **Observability** | | | |
-| Prometheus metrics | ✅ (21+ metrics) | ✅ | ❌ |
+| Prometheus metrics | ✅ (25 metrics) | ✅ | ❌ |
 | Structured logging (klog) | ✅ | ✅ | ✅ |
 | OpenShift Console plugin | ✅ (beta) | ❌ | ❌ |
 | **Deployment** | | | |

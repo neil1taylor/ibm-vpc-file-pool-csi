@@ -34,6 +34,8 @@ import { ReplicationPolicy, Hook } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
 import DeleteModal from '../common/DeleteModal';
 import VolumeStatusTable from './VolumeStatusTable';
+import { secretsMadeFor } from '../../utils/receiver-objects';
+import { deleteMadeSecrets } from '../../utils/receiver-secrets';
 import { formatAge, formatDuration } from '../../utils/resource-helpers';
 import { ROUTES } from '../../constants';
 
@@ -99,6 +101,15 @@ const ReplicationPolicyDetailsPage: React.FC = () => {
     },
     name,
   });
+  // The Secrets of the receiver setup are offered for delete only when no other policy uses them.
+  const [allPolicies] = useK8sWatchResource<ReplicationPolicy[]>({
+    groupVersionKind: {
+      group: ReplicationPolicyModel.apiGroup,
+      version: ReplicationPolicyModel.apiVersion,
+      kind: ReplicationPolicyModel.kind,
+    },
+    isList: true,
+  });
 
   if (!loaded) {
     return (
@@ -129,6 +140,7 @@ const ReplicationPolicyDetailsPage: React.FC = () => {
   }
 
   const spec = policy.spec;
+  const madeSecrets = secretsMadeFor(policy, allPolicies || []);
   const status = policy.status;
   const currentPhase = status?.phase || '';
   const isPaused = currentPhase === 'Paused';
@@ -382,6 +394,14 @@ const ReplicationPolicyDetailsPage: React.FC = () => {
           setDeleteModalOpen(false);
           history.push(ROUTES.REPLICATION);
         }}
+        extraOption={
+          madeSecrets.length > 0
+            ? {
+                label: `Also delete the Secrets the receiver setup made (${madeSecrets.join(', ')})`,
+                run: () => deleteMadeSecrets(madeSecrets),
+              }
+            : undefined
+        }
       />
     </>
   );

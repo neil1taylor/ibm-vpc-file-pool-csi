@@ -21,11 +21,13 @@ describe('VolumeStatusTable', () => {
         vmChangeList: 'repl-abc',
       },
     ];
+    jest.useFakeTimers().setSystemTime(new Date('2026-10-20T12:00:00Z'));
     render(<VolumeStatusTable statuses={statuses} />);
+    jest.useRealTimers();
     expect(screen.getByText('pvc-vm-disk')).toBeTruthy();
-    expect(screen.getByText('2026-10-20T10:00:00Z')).toBeTruthy();
+    expect(screen.getByText('2h')).toBeTruthy();
     expect(screen.getByText('File-system consistent')).toBeTruthy();
-    expect(screen.getByText('2 (oldest 2026-10-19T12:00:00Z)')).toBeTruthy();
+    expect(screen.getByText('2 (oldest 1d)')).toBeTruthy();
     expect(screen.getByText('changes only')).toBeTruthy();
   });
 

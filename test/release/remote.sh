@@ -37,9 +37,11 @@ start() {
     echo "Building kubectl-migrate for the build server..."
     mkdir -p "$ROOT/test/release/bin"
     (cd "$ROOT" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o test/release/bin/kubectl-migrate ./cmd/migrate/)
+    echo "Building kubectl-backup for the build server..."
+    (cd "$ROOT" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o test/release/bin/kubectl-backup ./cmd/backup/)
 
     echo "Copying the test scripts..."
-    (cd "$ROOT" && tar -czf - test/release test/e2e/lib) |
+    (cd "$ROOT" && tar -czf - test/release test/e2e console-plugin/integration-tests) |
         build "rm -rf ~/release-test/src && mkdir -p ~/release-test/src ~/release-test/out && tar -xzf - -C ~/release-test/src"
 
     # An admin kubeconfig for this run only. The run deletes it when it ends.
