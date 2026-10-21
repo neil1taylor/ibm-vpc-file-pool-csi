@@ -964,3 +964,31 @@ func TestReceiver_ResolveDestPath_OnlyVolumeFolders(t *testing.T) {
 		}
 	}
 }
+
+func TestReceiver_ResolveDestPath_NoHiddenFolders(t *testing.T) {
+	r := NewReceiver(t.TempDir(), strings.Repeat("a", 40), ":0")
+	const pv = "pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"
+	for _, bad := range []struct{ base, sub string }{
+		{"/.snapshots", "/.snapshots/" + pv},
+		{"/pvcs", "/pvcs/.hidden/" + pv},
+		{"/.pvcs", "/.pvcs/" + pv},
+	} {
+		if _, err := r.resolveDestPath(bad.base, bad.sub); err == nil {
+			t.Errorf("resolveDestPath(%q, %q) was accepted: a folder that starts with a dot may not be written", bad.base, bad.sub)
+		}
+	}
+}
+
+func TestReceiver_Sync_PathMustNameTheVolumeInTheURL(t *testing.T) {
+	r, _ := createTestReceiver(t)
+	body := createTarStream(t, map[string]string{"f": "x"})
+	const urlPV = "pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"
+	const otherPV = "pvc-b2b2b2b2-5678-90ab-cdef-1234567890ab"
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/sync/"+urlPV+"?basePath=/pvcs&subPath=/pvcs/"+otherPV, body)
+	req.Header.Set("Authorization", "Bearer test-token-123")
+	rec := httptest.NewRecorder()
+	r.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400: the subPath names another volume than the URL", rec.Code)
+	}
+}

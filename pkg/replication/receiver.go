@@ -211,6 +211,9 @@ func (r *Receiver) handleSync(w http.ResponseWriter, req *http.Request) {
 	}
 
 	destDir, err := r.resolveDestPath(destBasePath, subPath)
+	if err == nil && filepath.Base(destDir) != svName {
+		err = fmt.Errorf("the destination %q is not the folder of volume %s", destDir, svName)
+	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -290,6 +293,9 @@ func (r *Receiver) handleMetadata(w http.ResponseWriter, req *http.Request) {
 	}
 
 	destDir, err := r.resolveDestPath(destBasePath, subPath)
+	if err == nil && filepath.Base(destDir) != svName {
+		err = fmt.Errorf("the destination %q is not the folder of volume %s", destDir, svName)
+	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -436,6 +442,13 @@ func (r *Receiver) resolveDestPath(basePath, subPath string) (string, error) {
 	// to write anywhere else under the base path, for example .snapshots.
 	if !subVolumeNamePattern.MatchString(filepath.Base(cleanDest)) {
 		return "", fmt.Errorf("the destination %q is not a pvc-<uuid> folder", cleanDest)
+	}
+	// No folder on the way may start with a dot (.snapshots and the like).
+	rel := strings.TrimPrefix(strings.TrimPrefix(cleanDest, cleanBase), "/")
+	for _, part := range strings.Split(rel, "/") {
+		if strings.HasPrefix(part, ".") {
+			return "", fmt.Errorf("the destination %q has a folder that starts with a dot", cleanDest)
+		}
 	}
 
 	return cleanDest, nil
