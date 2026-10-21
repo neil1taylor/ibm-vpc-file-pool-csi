@@ -104,6 +104,7 @@ parameters:
   vmCopySpeedLimitMBps: "$SNAPSHOT_SPEED"
 YAML
 
+if [ -z "${RESUME:-}" ]; then
 if [ "$GUEST" = windows ]; then
 log "copying the Windows image $WIN_IMAGE_NS/$WIN_IMAGE_PVC onto the pool"
 oc apply -n "$NS" -f - <<YAML
@@ -153,6 +154,9 @@ spec:
 YAML
 oc wait -n "$NS" job/convert --for=condition=complete --timeout=40m
 else
+if [ -n "${RESUME:-}" ]; then
+    log "RESUME: reusing the pool, claim and VM of an earlier --keep run"
+fi
 log "making the source disk"
 oc apply -n "$NS" -f - <<YAML
 apiVersion: v1
@@ -189,6 +193,8 @@ spec:
       volumes: [{name: d, persistentVolumeClaim: {claimName: root}}]
 YAML
 oc wait -n "$NS" job/convert --for=condition=complete --timeout=20m
+
+fi
 
 fi
 
@@ -315,6 +321,20 @@ guest_ready() {
     if [ "$GUEST" = windows ]; then wping "$1" && wexec "$1" '1' >/dev/null; else vssh "$1" true >/dev/null 2>&1; fi
 }
 
+# wait_guest <seconds> <vm>: wait until a VM answers a command. A Windows guest
+# agent that is called every few seconds while Windows still boots stays broken
+# (libvirt reads leftover bytes: "failed to parse JSON"); calls a minute apart
+# let it recover.
+wait_guest() {
+    local t=$1 vm=$2 pause=10
+    [ "$GUEST" = windows ] && pause=60
+    local end=$((SECONDS + t))
+    until guest_ready "$vm"; do
+        [ $SECONDS -ge $end ] && fail "timed out after ${t}s waiting for $vm to answer"
+        sleep "$pause"
+    done
+}
+
 WRITER_PS1='New-Item -ItemType Directory -Force C:\data | Out-Null
 $n = 0
 if (Test-Path C:\writer.log) { $n = (Get-Content C:\writer.log | Measure-Object -Line).Lines }
@@ -336,8 +356,8 @@ while ($true) {
 
 # logged_files <vm>: how many files the writer has logged.
 logged_files() {
-    if [ "$GUEST" = windows ]; then wexec "$1" '(Get-Content C:\writer.log | Measure-Object -Line).Lines'
-    else vssh "$1" 'wc -l < /var/log/writer.log'; fi
+    if [ "$GUEST" = windows ]; then wexec "$1" '(Get-Content C:\writer.log | Measure-Object -Line).Lines' | tr -dc '0-9'
+    else vssh "$1" 'wc -l < /var/log/writer.log' | tr -dc '0-9'; fi
 }
 
 log "starting the source VM"
@@ -345,7 +365,7 @@ vm_yaml src root yes | oc apply -f -
 wait_until 900 "source guest agent" agent_connected src
 if [ "$GUEST" = windows ]; then
     # A new Windows VM can take about 40 minutes before the agent runs commands.
-    wait_until 3600 "the Windows guest agent to run commands" guest_ready src
+    wait_guest 3600 src
     b64=$(printf '%s' "$WRITER_PS1" | base64 | tr -d '\n')
     wexec src "[IO.File]::WriteAllBytes('C:\\writer.ps1',[Convert]::FromBase64String('$b64')); Start-Process powershell.exe -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File C:\\writer.ps1' -WindowStyle Hidden"
 fi
@@ -399,7 +419,7 @@ spec:
 YAML
 vm_yaml restored restored no | oc apply -f -
 wait_until 2400 "restored guest agent" agent_connected restored
-wait_until 1500 "the restored VM to answer" guest_ready restored
+wait_guest 1500 restored
 epoch=$(perl -MTime::Piece -e 'print Time::Piece->strptime(shift, "%Y-%m-%dT%H:%M:%SZ")->epoch' "$moment")
 if [ "$GUEST" = windows ]; then
     result=$(wexec restored '
