@@ -100,6 +100,7 @@ Delete flags:
   --pvc             The backed-up claim, as NAMESPACE/NAME (required)
   --yes             Do not ask for a typed confirmation. Required in a non-interactive shell
   --pool, --volume  Only when the policy is deleted: the snapshot pool, and the volume name (pvc-...)
+  --share           Only when the policy is deleted and the pool has more than one share: the share ID
   --driver-namespace  Where the driver runs its Jobs (default kube-system)
   --timeout         How long each Job may take (default 2h)
   The policy must no longer back up the volume (remove the label first), and no

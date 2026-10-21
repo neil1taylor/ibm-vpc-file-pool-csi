@@ -114,7 +114,7 @@ func (bc *BackupController) reconcileRestore(ctx context.Context, br *v1alpha1.B
 		bc.setRestoreStatus(ctx, br, restorePhasePending, fmt.Sprintf("list SubVolumes: %v", err))
 		return
 	}
-	backupShare, err := bc.snapshotShare(ctx, policy, svs.Items)
+	backupShare, err := bc.backupShareOf(ctx, policy, svs.Items, entry)
 	if err != nil {
 		bc.setRestoreStatus(ctx, br, restorePhasePending, err.Error())
 		return

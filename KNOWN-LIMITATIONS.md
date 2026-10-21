@@ -266,7 +266,7 @@ Since ROKS and ROVS worker nodes run RHCOS, encryption in transit cannot be enab
 **What:** a `BackupPolicy` backs up selected PVCs and VMs into a snapshot pool (see `BACKUP-RECOVERY.md`).
 
 **Limitations:**
-- The snapshot pool must have exactly one share (issue #71).
+- A volume stays on the share it was first backed up to. Backups are not moved when a share is added or fills up, and a share that holds backups must not be removed from the pool.
 - No check that the snapshot pool is full; backups fail when it is (issue #69).
 - No command to remove the backups of a volume (issue #70). Backups of a deleted volume stay on the share, and can be restored, until the keep time has passed since the last backup; after that the files stay on the share until someone removes them.
 - A backup of a volume that is not a VM disk is a file copy. It is as consistent as the files are.

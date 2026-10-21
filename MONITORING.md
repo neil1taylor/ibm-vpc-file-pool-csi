@@ -175,7 +175,7 @@ kill %1
 | `vpc_file_pool_backup_volumes` | Gauge | `policy` | Number of volumes a backup policy backs up. |
 | `vpc_file_pool_backup_stalest_age_seconds` | Gauge | `policy` | Age of the newest backup of the volume that was backed up longest ago. A volume that was never backed up counts from the time the policy was made. This is the RPO indicator of a backup policy. |
 | `vpc_file_pool_backup_oldest_age_seconds` | Gauge | `policy` | Age of the oldest backup the policy keeps. It should stay near `keepFor`. |
-| `vpc_file_pool_backup_snapshot_pool_used_percent` | Gauge | `pool` | Percent of the snapshot pool's share that is used, read by a Job about every 10 minutes (`df`). The controller cannot see this from custom resources: a pool counts only claims, not backups. Above 85%, the policies on the pool stop new backups. |
+| `vpc_file_pool_backup_snapshot_pool_used_percent` | Gauge | `pool`, `share` | Percent of a share of the snapshot pool that is used, read by a Job about every 10 minutes (`df`). The controller cannot see this from custom resources: a pool counts only claims, not backups. Above 85%, the policies stop new backups to that share. |
 
 Copy results of backups are in the replication metrics: the policies the controller makes are named `backup-<policy>-<source pool>`.
 

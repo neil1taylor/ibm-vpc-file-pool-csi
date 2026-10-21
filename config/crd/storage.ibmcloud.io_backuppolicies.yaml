@@ -222,6 +222,14 @@ spec:
                         deleted, or no longer matches the selector). Its existing backups stay
                         until the keep time has passed since the last backup.
                       type: boolean
+                    shareID:
+                      description: |-
+                        ShareID is the share of the snapshot pool that holds the backups of this
+                        volume. It is chosen when the volume is first backed up and never changes,
+                        because the backups stay where they are. A restore reads from it. An entry
+                        with no ShareID was made when the snapshot pool had one share; it belongs
+                        to the first share of the pool.
+                      type: string
                     storageClassName:
                       type: string
                     subPath:

@@ -108,6 +108,14 @@ type BackupVolumeStatus struct {
 	// +optional
 	SubPath string `json:"subPath,omitempty"`
 
+	// ShareID is the share of the snapshot pool that holds the backups of this
+	// volume. It is chosen when the volume is first backed up and never changes,
+	// because the backups stay where they are. A restore reads from it. An entry
+	// with no ShareID was made when the snapshot pool had one share; it belongs
+	// to the first share of the pool.
+	// +optional
+	ShareID string `json:"shareID,omitempty"`
+
 	// RequestedGB and StorageClassName are what the volume had, so a restore can
 	// make a volume like it after the volume is gone.
 	// +optional

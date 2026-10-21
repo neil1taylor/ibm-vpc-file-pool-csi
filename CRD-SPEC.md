@@ -1352,7 +1352,7 @@ Cluster-scoped. Backs up the PVCs it selects, and the VMs whose disks it selects
 
 ```go
 type BackupPolicySpec struct {
-    // SnapshotPool holds the backups. It must hold no workload claims and have exactly one ready share.
+    // SnapshotPool holds the backups. It must hold no workload claims and have at least one ready share.
     SnapshotPool string `json:"snapshotPool"`
     // Schedule is a Go duration of at least 1 minute, such as "6h".
     Schedule string `json:"schedule"`
@@ -1374,7 +1374,7 @@ Status: `phase` (`Active`, `Suspended`, `Error`; `Error` is also set, with the u
 
 A volume belongs to one policy. A second policy that selects it skips it and says so in its `message`. The policy name goes into a label value, so it has at most 63 characters.
 
-Limits: one share in the snapshot pool (issue #71); no check yet that the snapshot pool is full (issue #69); no command yet to remove the backups of a volume (issue #70).
+A snapshot pool may have several shares. A volume gets a share when it is first backed up (the one with room that holds the fewest volumes) and keeps it; `status.volumes[].shareID` names it, and a restore reads from it. An entry with no `shareID` was made when the pool had one share and belongs to the first share. A policy makes one ReplicationPolicy for each source pool and share (the SubVolumes carry `storage.ibmcloud.io/backup-share`). A new volume that no ready share below 85% can take waits, with its `lastError` saying so.
 
 ## BackupRestore
 

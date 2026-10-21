@@ -314,3 +314,53 @@ func TestRun_DoesNotKnowDeleteSoItCannotRunWithoutARunner(t *testing.T) {
 		t.Fatal("run must not handle delete: it has no runner")
 	}
 }
+
+var delShare2 = pool.ShareMount{MountTargetIP: "10.240.0.10", ExportPath: "/share_bk2"}
+
+// delPoolTwoShares is a snapshot pool with a second share.
+func delPoolTwoShares() *v1alpha1.FileSharePool {
+	p := delPool()
+	p.Status.Shares = append(p.Status.Shares, v1alpha1.PoolShareStatus{ShareID: "r2", MountTargetIP: delShare2.MountTargetIP, ExportPath: delShare2.ExportPath})
+	return p
+}
+
+func TestDelete_RunsOnTheShareThatHoldsTheBackup(t *testing.T) {
+	bp := delPolicy(true)
+	bp.Status.Volumes[0].ShareID = "r2"
+	r := doDelete(t, baseFlags(), "", false, &fakeRunner{bytes: 10}, bp, delPoolTwoShares())
+	if r.err != nil {
+		t.Fatal(r.err)
+	}
+	if r.runner.share != delShare2 {
+		t.Errorf("Job ran on %+v, want the second share %+v", r.runner.share, delShare2)
+	}
+}
+
+func TestDelete_AnEntryWithNoShareBelongsToTheFirstShare(t *testing.T) {
+	r := doDelete(t, baseFlags(), "", false, &fakeRunner{bytes: 10}, delPolicy(true), delPoolTwoShares())
+	if r.err != nil {
+		t.Fatal(r.err)
+	}
+	if r.runner.share != delShare {
+		t.Errorf("Job ran on %+v, want the first share %+v", r.runner.share, delShare)
+	}
+}
+
+func TestDelete_PolicyGoneInAPoolWithTwoSharesNeedsTheShare(t *testing.T) {
+	flags := baseFlags()
+	flags["pool"], flags["volume"] = "backups", delVolume
+	r := doDelete(t, flags, "", false, &fakeRunner{bytes: 10}, delPoolTwoShares())
+	if r.err == nil || !strings.Contains(r.err.Error(), "--share") || len(r.runner.removed) != 0 {
+		t.Fatalf("err = %v, removed %v; want a request for --share", r.err, r.runner.removed)
+	}
+	flags["share"] = "nope"
+	r = doDelete(t, flags, "", false, &fakeRunner{bytes: 10}, delPoolTwoShares())
+	if r.err == nil || len(r.runner.removed) != 0 {
+		t.Fatalf("err = %v, removed %v; want a refusal for a share that is not in the pool", r.err, r.runner.removed)
+	}
+	flags["share"] = "r2"
+	r = doDelete(t, flags, "", false, &fakeRunner{bytes: 10}, delPoolTwoShares())
+	if r.err != nil || r.runner.share != delShare2 {
+		t.Fatalf("err = %v, share %+v; want the delete to run on the second share", r.err, r.runner.share)
+	}
+}

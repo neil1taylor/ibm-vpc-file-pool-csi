@@ -90,6 +90,16 @@ New metrics: backups made, bytes written, last backup age per policy, and oldest
 - `api/v1alpha1`: run `make generate`. Update `CRD-SPEC.md`.
 - Docs: `FEATURES.md`, `BACKUP-RECOVERY.md`, `MONITORING.md`, `HELM-VALUES.md` (RBAC), `CHANGELOG.md`.
 
+## More than one share in the snapshot pool (issue #71)
+
+A snapshot pool may have several shares. Each volume is backed up to one share, chosen when the volume is first backed up and kept for good, because its backups and its change lists are on that share.
+
+- **Where a new volume goes:** the ready share below 85% that holds the fewest volumes (counted over all backup policies on the pool). Ties go to the first share in the pool's list. If no share qualifies, the volume waits and its error says so.
+- **Where it is written down:** `shareID` in the volume's entry in the policy status. A restore and `kubectl backup delete` read it. An entry without one was made when the pool had one share; it belongs to the first share.
+- **How it is copied:** one replication policy for each source pool and share. The SubVolumes carry a `storage.ibmcloud.io/backup-share` label that the replication policy selects on. The policy for the first share keeps its old name, so an upgrade keeps the change lists of running VM copies.
+- **The 85% rule:** read for each share. Only the copies to a full share are paused. New volumes avoid it.
+- **Not done:** backups are never moved between shares, and a share that holds backups must not be removed from the pool.
+
 ## Tests
 
 - Unit tests with fakes: the owned policy is made from the backup policy and follows its changes; the webhook refuses overlap and a pool with claims; hard-link folders and their clean-up; the 85% rule; `restore` picks the nearest earlier moment.
@@ -115,3 +125,6 @@ New metrics: backups made, bytes written, last backup age per policy, and oldest
 - Deleting a policy keeps the backups. Removing them is a separate, confirmed command.
 - Restore is a command first (`kubectl backup`). The console comes later.
 - Restore makes new PVCs. It never writes over an existing volume.
+- A snapshot pool can have more than one share. A volume stays on the share it was first backed up to, so adding a share never moves backups (issue #71).
+- A new volume goes to the ready share with room that holds the fewest volumes. If none has room, it waits.
+- The 85% limit is for each share, not for the pool.

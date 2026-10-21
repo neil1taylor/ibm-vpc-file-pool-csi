@@ -54,8 +54,6 @@ const (
 	// consistencyFileCopy is reported for a volume that is not a VM disk: the
 	// backup is a copy of files and is as consistent as the files are.
 	consistencyFileCopy = "FileCopy"
-
-	shareStateStable = "stable"
 )
 
 var vmListGVK = schema.GroupVersionKind{Group: "kubevirt.io", Version: "v1", Kind: "VirtualMachineList"}
@@ -69,7 +67,7 @@ type BackupController struct {
 	shareData ShareData
 	// reported holds the policies that have metric series.
 	reported map[string]bool
-	// usage holds what the usage Jobs found, by snapshot pool.
+	// usage holds what the usage Jobs found, by share ID.
 	usage map[string]*poolUsage
 }
 
@@ -152,7 +150,7 @@ func (bc *BackupController) tidyDeleted(ctx context.Context, known map[string]bo
 	}
 	for i := range svs.Items {
 		if bc.policyIsGone(ctx, svs.Items[i].Labels[backupPolicyLabel], known) {
-			bc.setSubVolumeLabel(ctx, &svs.Items[i], "")
+			bc.setSubVolumeLabel(ctx, &svs.Items[i], "", "")
 		}
 	}
 }
@@ -175,15 +173,21 @@ func (bc *BackupController) deleteReplicationPolicy(ctx context.Context, rp *v1a
 
 // setSubVolumeLabel sets the backup label of a SubVolume, or removes it when
 // policy is empty.
-func (bc *BackupController) setSubVolumeLabel(ctx context.Context, sv *v1alpha1.SubVolume, policy string) {
+func (bc *BackupController) setSubVolumeLabel(ctx context.Context, sv *v1alpha1.SubVolume, policy, shareID string) {
+	if sv.Labels[backupPolicyLabel] == policy && sv.Labels[backupShareLabel] == shareID {
+		return
+	}
 	patch := client.MergeFrom(sv.DeepCopy())
-	if policy == "" {
-		delete(sv.Labels, backupPolicyLabel)
-	} else {
+	delete(sv.Labels, backupPolicyLabel)
+	delete(sv.Labels, backupShareLabel)
+	if policy != "" {
 		if sv.Labels == nil {
 			sv.Labels = map[string]string{}
 		}
 		sv.Labels[backupPolicyLabel] = policy
+		if shareID != "" {
+			sv.Labels[backupShareLabel] = shareID
+		}
 	}
 	if err := bc.client.Patch(ctx, sv, patch); err != nil {
 		klog.ErrorS(err, "Failed to label a SubVolume for backup", "subVolume", sv.Name, "policy", policy)
@@ -212,7 +216,7 @@ func (bc *BackupController) reconcile(ctx context.Context, bp *v1alpha1.BackupPo
 		return
 	}
 
-	share, err := bc.snapshotShare(ctx, bp, svs.Items)
+	shares, err := bc.snapshotShares(ctx, bp, svs.Items)
 	if err != nil {
 		// Do not copy into a pool that may be wrong. Pause what exists; do not
 		// delete it, so a short outage does not throw away the change lists.
@@ -223,10 +227,14 @@ func (bc *BackupController) reconcile(ctx context.Context, bp *v1alpha1.BackupPo
 		return
 	}
 
-	// A snapshot pool above the limit gets no new backups. The policy is paused
-	// like a suspended one, and the status says why.
-	usedPercent, full := bc.snapshotPoolFull(ctx, bp.Spec.SnapshotPool, shareMountOf(share))
-	paused := bp.Spec.Suspend || full
+	// A share above the limit gets no new backups. Its copies are paused like
+	// a suspended policy's, and the status says why. The other shares go on.
+	full, usedPercent := map[string]bool{}, map[string]int{}
+	for _, sh := range shares {
+		if shareReady(sh) {
+			usedPercent[sh.ShareID], full[sh.ShareID] = bc.shareFull(ctx, bp.Spec.SnapshotPool, sh)
+		}
+	}
 
 	targets, conflicts, err := bc.resolveTargets(ctx, bp, svs.Items)
 	if err != nil {
@@ -234,34 +242,44 @@ func (bc *BackupController) reconcile(ctx context.Context, bp *v1alpha1.BackupPo
 		return
 	}
 
-	// Labels: the selected volumes get this policy's name, others lose it.
+	// Each volume has one share for good: its backups stay where they are.
+	placement, waiting := placeVolumes(bp.Status.Volumes, targets, shares, full, bc.shareLoad(ctx, bp.Spec.SnapshotPool, shares))
+
+	// Labels: the selected volumes get this policy's name and their share, others lose them.
 	chosen := map[string]bool{}
 	for _, t := range targets {
 		chosen[t.sv.Name] = true
-		if t.sv.Labels[backupPolicyLabel] != bp.Name {
-			bc.setSubVolumeLabel(ctx, t.sv, bp.Name)
-		}
+		bc.setSubVolumeLabel(ctx, t.sv, bp.Name, placement[t.sv.Name])
 	}
 	for i := range svs.Items {
 		sv := &svs.Items[i]
 		if sv.Labels[backupPolicyLabel] == bp.Name && !chosen[sv.Name] {
-			bc.setSubVolumeLabel(ctx, sv, "")
+			bc.setSubVolumeLabel(ctx, sv, "", "")
 		}
 	}
 
-	// One ReplicationPolicy for each source pool that has volumes.
-	pools := map[string]bool{}
+	// One ReplicationPolicy for each source pool and share that has volumes.
+	type group struct{ pool, shareID string }
+	groups := map[group]bool{}
 	for _, t := range targets {
-		pools[t.sv.Spec.PoolName] = true
+		if id := placement[t.sv.Name]; id != "" {
+			groups[group{t.sv.Spec.PoolName, id}] = true
+		}
 	}
 	var names []string
 	desired := map[string]bool{}
-	for pool := range pools {
-		name := backupReplicationName(bp.Name, pool)
+	for g := range groups {
+		sh, found := shareByID(shares, g.shareID)
+		if !found || !shareReady(sh) {
+			// The share of these volumes is gone or not ready: nothing to copy
+			// to, and their entries stay for a restore.
+			continue
+		}
+		name := backupReplicationName(bp.Name, g.pool, g.shareID, shares[0].ShareID)
 		desired[name] = true
 		names = append(names, name)
-		if err := bc.ensureReplicationPolicy(ctx, bp, pool, name, share, paused); err != nil {
-			status = bc.keepStatus(bp, fmt.Sprintf("make the replication policy for pool %s: %v", pool, err))
+		if err := bc.ensureReplicationPolicy(ctx, bp, g.pool, name, sh, bp.Spec.Suspend || full[g.shareID]); err != nil {
+			status = bc.keepStatus(bp, fmt.Sprintf("make the replication policy for pool %s: %v", g.pool, err))
 			return
 		}
 	}
@@ -277,10 +295,36 @@ func (bc *BackupController) reconcile(ctx context.Context, bp *v1alpha1.BackupPo
 		}
 	}
 
-	status = bc.buildStatus(ctx, bp, targets, names, conflicts)
-	if full {
-		status.Phase, status.Message = backupPhaseError, snapshotPoolFullMessage(bp.Spec.SnapshotPool, usedPercent)
+	status = bc.buildStatus(ctx, bp, targets, names, conflicts, placement, waiting)
+	if msg := bc.shareProblems(bp, status, shares, full, usedPercent, waiting); msg != "" {
+		status.Phase, status.Message = backupPhaseError, msg
 	}
+}
+
+// shareProblems says what is wrong with the shares of the snapshot pool, for
+// the status: a share that holds volumes of the policy and is too full, a
+// volume whose share is gone, and volumes that wait for room.
+func (bc *BackupController) shareProblems(bp *v1alpha1.BackupPolicy, st v1alpha1.BackupPolicyStatus, shares []v1alpha1.PoolShareStatus,
+	full map[string]bool, usedPercent map[string]int, waiting map[string]string) string {
+	var msgs []string
+	seen := map[string]bool{}
+	for _, v := range st.Volumes {
+		id := v.ShareID
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		if _, found := shareByID(shares, id); !found {
+			msgs = append(msgs, fmt.Sprintf("share %s of the snapshot pool %q, which holds backups, is not in the pool", id, bp.Spec.SnapshotPool))
+		} else if full[id] {
+			msgs = append(msgs, snapshotPoolFullMessage(bp.Spec.SnapshotPool, id, usedPercent[id]))
+		}
+	}
+	if n := len(waiting); n > 0 {
+		msgs = append(msgs, fmt.Sprintf("%d new volume(s) wait: %s", n, noRoomMessage))
+	}
+	sort.Strings(msgs)
+	return strings.Join(msgs, "; ")
 }
 
 // keepStatus keeps the last status and adds why this pass did not finish.
@@ -304,35 +348,6 @@ func equalBackupStatus(a, b v1alpha1.BackupPolicyStatus) bool {
 	return a.Phase == b.Phase && a.Message == b.Message && a.VolumeCount == b.VolumeCount &&
 		strings.Join(a.ReplicationPolicies, ",") == strings.Join(b.ReplicationPolicies, ",") &&
 		equality.Semantic.DeepEqual(a.Volumes, b.Volumes)
-}
-
-// snapshotShare checks the snapshot pool and returns its share. The pool must
-// exist, hold no workload claims, and have one ready share.
-func (bc *BackupController) snapshotShare(ctx context.Context, bp *v1alpha1.BackupPolicy, svs []v1alpha1.SubVolume) (v1alpha1.PoolShareStatus, error) {
-	pool := &v1alpha1.FileSharePool{}
-	if err := bc.client.Get(ctx, types.NamespacedName{Name: bp.Spec.SnapshotPool}, pool); err != nil {
-		if apierrors.IsNotFound(err) {
-			return v1alpha1.PoolShareStatus{}, fmt.Errorf("the snapshot pool %q does not exist", bp.Spec.SnapshotPool)
-		}
-		return v1alpha1.PoolShareStatus{}, fmt.Errorf("get the snapshot pool %q: %w", bp.Spec.SnapshotPool, err)
-	}
-	claims := 0
-	for i := range svs {
-		if svs[i].Spec.PoolName == pool.Name {
-			claims++
-		}
-	}
-	if claims > 0 {
-		return v1alpha1.PoolShareStatus{}, fmt.Errorf("the snapshot pool %q holds %d workload claim(s); a snapshot pool must hold only backups", pool.Name, claims)
-	}
-	if len(pool.Status.Shares) != 1 {
-		return v1alpha1.PoolShareStatus{}, fmt.Errorf("the snapshot pool %q must have exactly one share for now, it has %d", pool.Name, len(pool.Status.Shares))
-	}
-	sh := pool.Status.Shares[0]
-	if sh.State != shareStateStable || sh.MountTargetIP == "" {
-		return v1alpha1.PoolShareStatus{}, fmt.Errorf("the share of the snapshot pool %q is not ready (state %q)", pool.Name, sh.State)
-	}
-	return sh, nil
 }
 
 // resolveTargets finds the volumes the policy backs up: the claims that match
@@ -448,11 +463,17 @@ func vmClaims(vm *unstructured.Unstructured) []string {
 	return out
 }
 
-// backupReplicationName names the ReplicationPolicy of a backup policy for
-// one source pool.
+// backupReplicationName names the ReplicationPolicy of a backup policy for one
+// source pool and one share of the snapshot pool. The policy for the first
+// share of the pool keeps the name it had when a snapshot pool had one share,
+// so an upgrade keeps its change lists.
 // The short hash keeps "a-b" + "c" apart from "a" + "b-c".
-func backupReplicationName(policy, pool string) string {
-	sum := sha256.Sum256([]byte(policy + "\x00" + pool))
+func backupReplicationName(policy, pool, shareID, firstShareID string) string {
+	key := policy + "\x00" + pool
+	if shareID != firstShareID {
+		key += "\x00" + shareID
+	}
+	sum := sha256.Sum256([]byte(key))
 	return "backup-" + policy + "-" + pool + "-" + hex.EncodeToString(sum[:3])
 }
 
@@ -465,8 +486,8 @@ func backupKeepHours(bp *v1alpha1.BackupPolicy) int32 {
 	return int32(math.Ceil(d.Hours())) // #nosec G115 -- a keep time is far below 2^31 hours
 }
 
-// desiredReplicationSpec is what the ReplicationPolicy for one source pool
-// must say.
+// desiredReplicationSpec is what the ReplicationPolicy for one source pool and
+// one share of the snapshot pool must say.
 func desiredReplicationSpec(bp *v1alpha1.BackupPolicy, pool string, share v1alpha1.PoolShareStatus) v1alpha1.ReplicationPolicySpec {
 	speed := int32(defaultVMCopySpeedLimitMBps)
 	if bp.Spec.VMCopySpeedLimitMBps != nil {
@@ -483,7 +504,7 @@ func desiredReplicationSpec(bp *v1alpha1.BackupPolicy, pool string, share v1alph
 		DestinationExportPath: export,
 		DestinationBasePath:   backupBasePath + "/" + bp.Name,
 		Schedule:              bp.Spec.Schedule,
-		SubVolumeSelector:     &metav1.LabelSelector{MatchLabels: map[string]string{backupPolicyLabel: bp.Name}},
+		SubVolumeSelector:     &metav1.LabelSelector{MatchLabels: map[string]string{backupPolicyLabel: bp.Name, backupShareLabel: share.ShareID}},
 		MaxRetries:            backupMaxRetries,
 		MaxParallelSyncs:      backupMaxParallelSyncs,
 		VMCopySpeedLimitMBps:  &speed,
@@ -508,8 +529,8 @@ func ptrEq(a, b *int32) bool {
 	return *a == *b
 }
 
-// ensureReplicationPolicy makes the ReplicationPolicy for one source pool, or
-// brings it in line with the BackupPolicy.
+// ensureReplicationPolicy makes the ReplicationPolicy for one source pool and
+// one share, or brings it in line with the BackupPolicy.
 func (bc *BackupController) ensureReplicationPolicy(ctx context.Context, bp *v1alpha1.BackupPolicy, pool, name string, share v1alpha1.PoolShareStatus, paused bool) error {
 	want := desiredReplicationSpec(bp, pool, share)
 	rp := &v1alpha1.ReplicationPolicy{}
@@ -582,7 +603,7 @@ func ownerOf(bp *v1alpha1.BackupPolicy) metav1.OwnerReference {
 
 // buildStatus makes the policy's status from the targets and from what the
 // owned ReplicationPolicies report.
-func (bc *BackupController) buildStatus(ctx context.Context, bp *v1alpha1.BackupPolicy, targets []backupTarget, rpNames, conflicts []string) v1alpha1.BackupPolicyStatus {
+func (bc *BackupController) buildStatus(ctx context.Context, bp *v1alpha1.BackupPolicy, targets []backupTarget, rpNames, conflicts []string, placement, waiting map[string]string) v1alpha1.BackupPolicyStatus {
 	byName := map[string]v1alpha1.SubVolumeReplicationStatus{}
 	for _, n := range rpNames {
 		rp := &v1alpha1.ReplicationPolicy{}
@@ -598,6 +619,12 @@ func (bc *BackupController) buildStatus(ctx context.Context, bp *v1alpha1.Backup
 		v := v1alpha1.BackupVolumeStatus{
 			PVCNamespace: t.sv.Spec.PVCNamespace, PVCName: t.sv.Spec.PVCName, SubVolumeName: t.sv.Name, VMName: t.vmName,
 			SubPath: t.sv.Spec.SubPath, RequestedGB: t.sv.Spec.RequestedGB, StorageClassName: t.storageClass,
+			ShareID: placement[t.sv.Name],
+		}
+		if msg, ok := waiting[t.sv.Name]; ok {
+			v.LastError = msg
+			st.Volumes = append(st.Volumes, v)
+			continue
 		}
 		if v.StorageClassName == "" {
 			// The claim is not listed this pass (a VM disk found through its VM):
