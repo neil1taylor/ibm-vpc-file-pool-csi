@@ -44,6 +44,6 @@ The driver copies all pool disks of the VM at one moment, when the first disk's 
 
 - All pool disks of the VM are copied at one moment, even when only one disk was asked for. A guess at which disks belong together would be less safe than the extra copy.
 - The wait for sibling requests is 10 minutes. KubeVirt needs seconds. A longer wait only costs staging space.
-- A disk of the VM that is not on a pool is not copied. A VM that mixes pool disks and other storage does not get one moment across both; the Snapshot says so in its status.
+- A disk of the VM that is not on a pool is not copied. A VM that mixes pool disks and other storage does not get one moment across both. (The first draft said the Snapshot would say so in its status. It does not: the driver cannot know that a disk on other storage matters.)
 - Restore and the group snapshot API do not change. KubeVirt does not use the group API, so the API stays as a separate item.
 - The 2-disk test stays in stage 06 and fails until this is built. A failing test is the honest state.
