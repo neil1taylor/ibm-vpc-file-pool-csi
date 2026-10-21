@@ -131,7 +131,7 @@ kubectl get crd filesharepools.storage.ibmcloud.io -o json | \
 
 **Action required:**
 1. Apply updated CRDs: `kubectl apply -f config/crd/`
-2. Upgrade with Helm. The controller and node ClusterRoles gain permissions (DataVolumes, DataSources, KubeVirt migrations, `hyperconvergeds`).
+2. Upgrade with Helm. The controller ClusterRole gains permissions (DataVolumes, DataSources, KubeVirt migrations, the `kubevirt-controller` SCC, `hyperconvergeds`) and loses ImageStreams and RoleBindings.
 3. Shares you made before this version in VPC access mode keep working until IBM ends support on 6 May 2027. New shares use security group access mode. The driver does not change an existing share.
 4. If the Prometheus Operator API is present, the chart now creates a ServiceMonitor by default (`metrics.serviceMonitor.enabled`).
 
