@@ -15,9 +15,11 @@ To make a release:
 3. Set `version` and `appVersion` in `charts/ibm-vpc-file-pool-csi/Chart.yaml` to `X.Y.Z`.
 4. Tag the merge commit `vX.Y.Z` and push the tag.
 
-`v0.11.0`, `v0.13.0`, `v0.13.1` and `v0.13.2` were tagged on 21 October 2026, at the commit that added their changelog entry. `v0.10.0` and `v0.12.0` were written in the same commits as `v0.11.0` and `v0.13.0`, so they have no tag of their own. The chart still says `0.1.0`: it is set at the next release.
+`v0.11.0`, `v0.13.0` and `v0.13.1` were tagged on 21 October 2026, at the commit that added their changelog entry. `v0.13.2` sits at `e2b780f`, the last commit of 25 February 2026: the commit that first added its entry (`a2c2a07`) lacked the TLS work the entry names. `v0.10.0` and `v0.12.0` were written in the same commits as `v0.11.0` and `v0.13.0`, so they have no tag of their own. The chart said `0.1.0` until `v0.14.0`.
 
 ## [Unreleased]
+
+## [v0.14.0] — 2026-10-21
 
 ### Changed
 - **VMs now come from the standard OpenShift Virtualization catalog.** Pick a catalog image and choose the pool's StorageClass for the boot disk. CDI copies the image onto the pool. The controller keeps the memory limit of CDI's copy pods at least 8Gi, through `HyperConverged` `spec.resourceRequirements.storageWorkloads`. CDI's default of 600 MB is too small for copies onto NFS: the pod is killed. Measured on rovslab on 20 October 2026: a 25 GB copy with a 2Gi limit was killed 6 times and never finished. With 8Gi it finished in 134 s and the checksum matched. A RHEL 9 catalog VM on a pool had its guest agent after 103 s.

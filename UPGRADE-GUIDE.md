@@ -43,6 +43,7 @@ Before upgrading, complete every item:
 | v0.11.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.12.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.13.0–v0.13.2 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
+| v0.14.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
 
 ---
 
@@ -121,6 +122,18 @@ kubectl get crd filesharepools.storage.ibmcloud.io -o json | \
 ---
 
 ## Version-Specific Upgrade Notes
+
+### Upgrading to v0.14.0 (from v0.13.2)
+
+**Changes:** shares use security group access mode; VM snapshots and replication use a QEMU copy of running VMs; golden images are imported by CDI; new console pages. See `CHANGELOG.md` for the full list.
+
+**CRD changes (additive):** `FileSharePool.spec.securityGroupIDs`, new status fields on `Snapshot` (`consistency`, `copyMoment`) and `ReplicationPolicy` (restore points, copy moments), and `ReplicationPolicy.spec.vmCopySpeedLimitMBps`.
+
+**Action required:**
+1. Apply updated CRDs: `kubectl apply -f config/crd/`
+2. Upgrade with Helm. The controller and node ClusterRoles gain permissions (DataVolumes, DataSources, KubeVirt migrations, `hyperconvergeds`).
+3. Shares you made before this version in VPC access mode keep working until IBM ends support on 6 May 2027. New shares use security group access mode. The driver does not change an existing share.
+4. If the Prometheus Operator API is present, the chart now creates a ServiceMonitor by default (`metrics.serviceMonitor.enabled`).
 
 ### Upgrading to v0.13.2 (from v0.13.1)
 
