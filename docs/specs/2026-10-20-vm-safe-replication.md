@@ -198,7 +198,7 @@ The part that takes the copy is one replaceable piece. When the clusters run the
    - Sparse staging files: 5.1 GB for a 40 GB disk with 5 GB of data.
    - A full copy plus two change copies, applied at the far site, booted with all files intact.
    - Linux freeze fails if a file system has no SELinux label. The design now falls back to a crash-consistent copy.
-   - Windows freeze: not tested. The lab's only Windows disk is in use by other lab work. It moves to step 6.
+   - Windows freeze: tested in step 6 (21 Oct). The freeze goes through VSS and the copy is file-system consistent; see step 6.
    - COS and Kopia: see "Immutable backups" below.
 2. **Stop unsafe copies.** The controller detects running VMs and skips their volumes with a clear error. This ships first and by itself, because today's behaviour makes copies that cannot boot.
 3. **Copy at one moment.** Freeze, take the view, thaw, read the full disk, and send it. Cancel the copy when the VM must move. Lab test of the parts, 20 Oct:
@@ -209,7 +209,7 @@ The part that takes the copy is one replaceable piece. When the clusters run the
    - End-to-end test, 20 Oct (`test/e2e/test-vm-replication.sh`, direct NFS mode, two pools on the driver): a CentOS VM with a 20 GB root disk and a 10 GB data disk wrote a file every 0.1 s. Both disks showed the same moment and were file-system consistent. The far-site copy booted with no XFS errors, and all 1,579 files written before the freeze matched their checksums; the last one was written at the moment of the freeze. Data sent: 1.98 GB and 118 MB. The test pool's shares had 100 IOPS at first, and the copy ran at about 3 MB/s per disk; at 3000 IOPS it ran at the speed limit. So the copy time depends on the share's IOPS as well as the speed limit.
 4. **Change-only cycles, safe apply with undo files, and restore points, in direct NFS mode.** Parts: change lists in the copy piece; the undo-file apply and roll-back; the controller and a keep time per policy. This took over the safe-apply part of step 5, because direct NFS mode has no far-site receiver to do it.
 5. **Receiver mode for VM disks, and failover changes.** The receiver does the same apply at the far site, and compares checksums for the compare pass. Failover rolls back an unfinished copy and can rewind to any restore point.
-6. **Test across two regions,** with a failover and a boot of a Linux VM and a Windows VM. This includes the first test of Windows freeze and thaw. Then update `CROSS-REGION-DR.md`, `FEATURES.md` and the tutorial.
+6. **Test across two regions,** with a failover and a boot of a Linux VM and a Windows VM. This includes the first test of Windows freeze and thaw. Then update `CROSS-REGION-DR.md`, `FEATURES.md` and the tutorial. **Done 21 Oct** on two clusters in Frankfurt (no second region exists in the lab): Linux and Windows Server 2022 both passed. A new Windows VM can take about 40 minutes before its guest agent runs commands.
 7. **Safe snapshots of running VMs,** using the copy from step 3.
 8. **Backup to a snapshot pool:** the `BackupPolicy` resource, the chain of change files, hard-link snapshots, merging, and restore.
 9. **Export to COS:** the setup command, Kopia upload, encryption, keep time, lock modes per policy, and restore from COS into another cluster. Then add a backup stage to the release test run.
