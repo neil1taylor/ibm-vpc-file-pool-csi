@@ -432,6 +432,12 @@ func (r *Receiver) resolveDestPath(basePath, subPath string) (string, error) {
 		return "", fmt.Errorf("resolved path %q escapes base path %q", cleanDest, cleanBase)
 	}
 
+	// The receiver writes volume folders only. A token holder must not be able
+	// to write anywhere else under the base path, for example .snapshots.
+	if !subVolumeNamePattern.MatchString(filepath.Base(cleanDest)) {
+		return "", fmt.Errorf("the destination %q is not a pvc-<uuid> folder", cleanDest)
+	}
+
 	return cleanDest, nil
 }
 

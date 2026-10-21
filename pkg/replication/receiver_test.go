@@ -529,10 +529,10 @@ func TestResolveDestPath(t *testing.T) {
 		sub     string
 		wantErr bool
 	}{
-		{"/pvcs", "pvc-abc", false},
+		{"/pvcs", "pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab", false},
 		{"../../etc", "passwd", true},
 		{"/pvcs", "../../../etc/passwd", true},
-		{"/pvcs", "valid-path", false},
+		{"/pvcs", "valid/pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab", false},
 	}
 
 	for _, tt := range tests {
@@ -935,6 +935,32 @@ func TestValidateToken(t *testing.T) {
 	for _, bad := range []string{"", "short", strings.Repeat("x", MinTokenLength-1), strings.Repeat("x", 31) + " "} {
 		if err := ValidateToken(bad); err == nil {
 			t.Errorf("token %q was accepted", bad)
+		}
+	}
+}
+
+func TestReceiver_ResolveDestPath_OnlyVolumeFolders(t *testing.T) {
+	r := NewReceiver(t.TempDir(), strings.Repeat("a", 40), ":0")
+	const pv = "pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"
+	for _, ok := range []struct{ base, sub string }{
+		{"/pvcs", "/pvcs/" + pv},
+		{"/pvcs", "/" + pv},
+		{"/dr/site1", "/dr/site1/" + pv},
+	} {
+		if _, err := r.resolveDestPath(ok.base, ok.sub); err != nil {
+			t.Errorf("resolveDestPath(%q, %q) refused: %v", ok.base, ok.sub, err)
+		}
+	}
+	for _, bad := range []struct{ base, sub string }{
+		{"/pvcs", "/pvcs/.snapshots"},
+		{"/pvcs", "/pvcs/other-folder"},
+		{"/pvcs", "/pvcs"},
+		{"/", "/"},
+		{"/pvcs", "/pvcs/" + pv + "/inner"},
+		{"/pvcs", "/pvcs/PVC-a1b2c3d4-5678-90ab-cdef-1234567890ab"},
+	} {
+		if _, err := r.resolveDestPath(bad.base, bad.sub); err == nil {
+			t.Errorf("resolveDestPath(%q, %q) was accepted: only pvc-<uuid> folders may be written", bad.base, bad.sub)
 		}
 	}
 }
