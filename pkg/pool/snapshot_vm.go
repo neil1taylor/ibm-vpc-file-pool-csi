@@ -149,6 +149,24 @@ func (m *Manager) setSnapshotMethod(ctx context.Context, snap *v1alpha1.Snapshot
 	return nil
 }
 
+// DefaultVMSnapshotInterval is how often the controller moves VM snapshot
+// copies forward.
+const DefaultVMSnapshotInterval = 10 * time.Second
+
+// RunVMSnapshots calls AdvanceVMSnapshots every interval until ctx ends.
+func (m *Manager) RunVMSnapshots(ctx context.Context, interval time.Duration) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			m.AdvanceVMSnapshots(ctx)
+		}
+	}
+}
+
 // AdvanceVMSnapshots moves every snapshot of a running VM disk forward by one
 // step: it starts the QEMU copy, watches it, and starts and watches the Job
 // that writes the disk image into the snapshot folder. The controller calls it

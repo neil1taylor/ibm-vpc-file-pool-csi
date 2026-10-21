@@ -501,3 +501,34 @@ func TestSnapshotsOfOtherVolumesAreNotTouchedByTheLoop(t *testing.T) {
 		t.Error("the loop copied a snapshot that is not a VM snapshot")
 	}
 }
+
+func (f *fakeVMCopier) startCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.starts)
+}
+
+func TestRunVMSnapshots_AdvancesOnATimerAndStopsWithItsContext(t *testing.T) {
+	e := newVMSnapEnv(t)
+	e.startVM()
+	e.create(nil)
+	ctx, cancel := context.WithCancel(e.ctx)
+	done := make(chan struct{})
+	go func() {
+		e.mgr.RunVMSnapshots(ctx, 5*time.Millisecond)
+		close(done)
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for e.cop.startCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the loop did not stop with its context")
+	}
+	if e.cop.startCount() == 0 {
+		t.Error("the loop never started the copy")
+	}
+}

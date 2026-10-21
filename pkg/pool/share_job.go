@@ -190,7 +190,7 @@ func (r *ShareJobRunner) ApplyVMDisk(ctx context.Context, key string, share Shar
 			"--full",
 		},
 		runAsUser:  qemuUID,
-		initScript: fmt.Sprintf("set -eu\nmkdir -p \"/share0%s\"\nchmod 0777 \"/share0%s\"\n", dstPath, dstPath),
+		initScript: fmt.Sprintf("set -eu\nrm -r -f -- \"/share0%s\"\nmkdir -p \"/share0%s\"\nchmod 0777 \"/share0%s\"\n", dstPath, dstPath, dstPath),
 	}
 	return r.run(ctx, key, []ShareMount{share}, shape)
 }

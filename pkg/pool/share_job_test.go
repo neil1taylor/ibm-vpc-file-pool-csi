@@ -331,6 +331,10 @@ func TestShareJobRunner_ApplyVMDisk_FirstCallStartsJob(t *testing.T) {
 	if got := strings.Join(initC.Command, " "); !strings.Contains(got, `mkdir -p "/share0`+testSnapPath+`"`) {
 		t.Errorf("init script does not make the snapshot folder: %s", got)
 	}
+	// A folder from an earlier try or a discarded file copy is replaced.
+	if got := strings.Join(initC.Command, " "); !strings.Contains(got, `rm -r -f -- "/share0`+testSnapPath+`"`) {
+		t.Errorf("init script does not clear an old snapshot folder: %s", got)
+	}
 	if *spec.SecurityContext.RunAsUser != qemuUID {
 		t.Errorf("pod runs as %d, want %d", *spec.SecurityContext.RunAsUser, qemuUID)
 	}

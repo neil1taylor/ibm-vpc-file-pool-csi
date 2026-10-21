@@ -22,6 +22,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	ctrlwebhook "sigs.k8s.io/controller-runtime/pkg/webhook"
 
@@ -265,7 +266,10 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 		klog.ErrorS(err, "Failed to create the share data Job client")
 		os.Exit(1)
 	}
-	poolManager.SetShareData(pool.NewShareJobRunner(shareJobClient, driverNamespace, pool.DefaultCloneImage))
+	shareRunner := pool.NewShareJobRunner(shareJobClient, driverNamespace, pool.DefaultCloneImage)
+	// Snapshots of running VM disks run the driver itself in a Job.
+	shareRunner.SetDriverImage(driverImage)
+	poolManager.SetShareData(shareRunner)
 
 	// Run CSI gRPC server in a goroutine — serves immediately, but controller
 	// methods return Unavailable until readyCh is closed.
@@ -374,8 +378,20 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 	replController.SetDriverImage(driverImage)
 	replController.SetReplicationImage(driverImage)
 	// Copies of running VM disks run commands in the VM pods, as hooks do.
-	replController.SetVMCopier(vmcopy.NewCopier(hooks.NewPodExecer(clientset, restConfig)))
+	vmCopier := vmcopy.NewCopier(hooks.NewPodExecer(clientset, restConfig))
+	replController.SetVMCopier(vmCopier)
 	go replController.Run(signalCtx)
+
+	// Snapshots of running VM disks are QEMU copies. The same commands run in
+	// the VM pod; a timer on the leader moves each copy forward.
+	poolManager.SetVMSnapshots(vmCopier, replClient)
+	if addErr := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		poolManager.RunVMSnapshots(ctx, pool.DefaultVMSnapshotInterval)
+		return nil
+	})); addErr != nil {
+		klog.ErrorS(addErr, "Failed to add the VM snapshot loop")
+		os.Exit(1)
+	}
 
 	// mgr.Start blocks until signal or error
 	klog.InfoS("Starting controller-runtime manager with leader election")
