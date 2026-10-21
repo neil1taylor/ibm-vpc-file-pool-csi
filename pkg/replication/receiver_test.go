@@ -890,3 +890,51 @@ func TestExtractTar_SymlinkEscapes(t *testing.T) {
 		})
 	}
 }
+
+func TestReceiver_Authenticate_EmptyConfiguredTokenRefusesEveryone(t *testing.T) {
+	r := NewReceiver(t.TempDir(), "", ":0")
+	for _, header := range []string{"Bearer ", "Bearer", "Bearer  ", ""} {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+		if header != "" {
+			req.Header.Set("Authorization", header)
+		}
+		if r.authenticate(req) {
+			t.Errorf("header %q was accepted although the receiver has no token", header)
+		}
+	}
+}
+
+func TestReceiver_Authenticate_ExactTokenOnly(t *testing.T) {
+	token := strings.Repeat("a", 40)
+	r := NewReceiver(t.TempDir(), token, ":0")
+	tests := map[string]bool{
+		"Bearer " + token:                   true,
+		"Bearer  " + token + " ":            true, // surrounding spaces are trimmed
+		"Bearer " + token + "b":             false,
+		"Bearer " + token[:39]:              false,
+		"Bearer " + strings.Repeat("b", 40): false,
+		"bearer " + token:                   false,
+		token:                               false,
+		"Bearer " + token + "\x00":          false,
+		"Bearer " + strings.ToUpper(token):  false,
+		"Basic " + token:                    false,
+	}
+	for header, want := range tests {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+		req.Header.Set("Authorization", header)
+		if got := r.authenticate(req); got != want {
+			t.Errorf("authenticate(%q) = %v, want %v", header, got, want)
+		}
+	}
+}
+
+func TestValidateToken(t *testing.T) {
+	if err := ValidateToken(strings.Repeat("x", MinTokenLength)); err != nil {
+		t.Errorf("a token of %d characters was refused: %v", MinTokenLength, err)
+	}
+	for _, bad := range []string{"", "short", strings.Repeat("x", MinTokenLength-1), strings.Repeat("x", 31) + " "} {
+		if err := ValidateToken(bad); err == nil {
+			t.Errorf("token %q was accepted", bad)
+		}
+	}
+}

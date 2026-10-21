@@ -3,6 +3,8 @@ package replication
 import (
 	"archive/tar"
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -355,7 +357,33 @@ func (r *Receiver) authenticate(req *http.Request) bool {
 	if !strings.HasPrefix(auth, prefix) {
 		return false
 	}
-	return strings.TrimSpace(auth[len(prefix):]) == r.authToken
+	// An empty configured token must never match an empty header token.
+	if r.authToken == "" {
+		return false
+	}
+	// Compare digests in constant time, so the time taken does not show how
+	// much of a guessed token was right.
+	got := sha256.Sum256([]byte(strings.TrimSpace(auth[len(prefix):])))
+	want := sha256.Sum256([]byte(r.authToken))
+	return subtle.ConstantTimeCompare(got[:], want[:]) == 1
+}
+
+// MinTokenLength is the shortest bearer token the receiver accepts. A token
+// from `openssl rand -hex 32` has 64 characters.
+const MinTokenLength = 32
+
+// ValidateToken checks that a bearer token is long enough and has no space or
+// control character.
+func ValidateToken(token string) error {
+	if len(token) < MinTokenLength {
+		return fmt.Errorf("the token has %d characters; use at least %d, for example `openssl rand -hex 32`", len(token), MinTokenLength)
+	}
+	for _, c := range token {
+		if c <= ' ' || c == 0x7f {
+			return fmt.Errorf("the token contains a space or control character")
+		}
+	}
+	return nil
 }
 
 // extractSubVolumeName extracts and validates the SubVolume name from the URL path.
