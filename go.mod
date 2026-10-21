@@ -14,7 +14,7 @@ require (
 	golang.org/x/sys v0.48.0
 	golang.org/x/time v0.14.0
 	gomodules.xyz/jsonpatch/v2 v2.4.0
-	google.golang.org/grpc v1.83.1
+	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.11
 	k8s.io/api v0.35.0
 	k8s.io/apimachinery v0.35.1
