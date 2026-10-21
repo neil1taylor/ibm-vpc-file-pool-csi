@@ -6,7 +6,10 @@ import {
   VirtualMachineLike,
 } from './k8s-objects';
 import {
+  buildClonePVC,
   buildRestorePVC,
+  cloneDefaults,
+  cloneDisabledReason,
   findVolumeSnapshotRef,
   restoreDefaults,
   restoreDisabledReason,
@@ -199,5 +202,77 @@ describe('restoreProgress', () => {
 
   it('is waiting while the claim is Pending and no SubVolume exists yet', () => {
     expect(restoreProgress(pvc('Pending'), undefined)).toEqual({ state: 'waiting' });
+  });
+});
+
+describe('clone helpers', () => {
+  const classes: StorageClass[] = [
+    { metadata: { name: 'pool-a' }, provisioner: DRIVER },
+    { metadata: { name: 'pool-b' }, provisioner: DRIVER },
+  ];
+  const subvolume = (over: Partial<SubVolume> = {}): SubVolume =>
+    ({
+      metadata: { name: 'pvc-x' },
+      spec: { poolName: 'pool-a', pvcName: 'data', pvcNamespace: 'apps', requestedGB: 10 },
+      status: { phase: 'Bound' },
+      ...over,
+    }) as SubVolume;
+  const claim: PersistentVolumeClaim = {
+    metadata: { name: 'data', namespace: 'apps' },
+    spec: { accessModes: ['ReadWriteOnce'], storageClassName: 'pool-b', volumeMode: 'Block', resources: { requests: { storage: '10Gi' } } },
+  };
+
+  it('allows a Bound volume', () => {
+    expect(cloneDisabledReason(subvolume())).toBeUndefined();
+  });
+
+  it('says why when the volume is not Bound', () => {
+    expect(cloneDisabledReason(subvolume({ status: { phase: 'Creating' } }))).toMatch(/not Bound/);
+    expect(cloneDisabledReason(subvolume({ status: undefined }))).toMatch(/not Bound/);
+  });
+
+  it('says why when a copy into the volume is still running', () => {
+    expect(cloneDisabledReason(subvolume({ status: { phase: 'Bound', cloneStatus: 'InProgress' } }))).toMatch(/still running/);
+  });
+
+  it('says why when the volume has no claim', () => {
+    const sv = subvolume();
+    sv.spec.pvcName = '';
+    expect(cloneDisabledReason(sv)).toMatch(/no claim/);
+  });
+
+  it('defaults to <claim>-clone, the volume size, and the source claim settings', () => {
+    expect(cloneDefaults({ subvolume: subvolume(), sourcePVC: claim, storageClasses: classes })).toEqual({
+      name: 'data-clone',
+      sizeGiB: 10,
+      storageClass: 'pool-b',
+      accessMode: 'ReadWriteOnce',
+      volumeMode: 'Block',
+    });
+  });
+
+  it('falls back to the pool class, ReadWriteMany and Filesystem when the claim is gone', () => {
+    expect(cloneDefaults({ subvolume: subvolume(), sourcePVC: undefined, storageClasses: classes })).toEqual({
+      name: 'data-clone',
+      sizeGiB: 10,
+      storageClass: 'pool-a',
+      accessMode: 'ReadWriteMany',
+      volumeMode: 'Filesystem',
+    });
+  });
+
+  it('makes a claim in the source namespace with the source claim as its data source and no apiGroup', () => {
+    const pvc = buildClonePVC(
+      { name: 'data-clone', sizeGiB: 20, storageClass: 'pool-a', accessMode: 'ReadWriteMany', volumeMode: 'Filesystem' },
+      { name: 'data', namespace: 'apps' },
+    );
+    expect(pvc.metadata).toEqual({ name: 'data-clone', namespace: 'apps' });
+    expect(pvc.spec.dataSource).toEqual({ kind: 'PersistentVolumeClaim', name: 'data' });
+    expect(pvc.spec.resources.requests.storage).toBe('20Gi');
+  });
+
+  it('names the volume, not the snapshot, in the size message', () => {
+    const form = { name: 'data-clone', sizeGiB: 5, storageClass: 'pool-a', accessMode: 'ReadWriteMany', volumeMode: 'Filesystem' };
+    expect(validateRestore(form, { existingNames: [], minGiB: 10, minLabel: "the volume's" }).size).toMatch(/at least 10 GiB \(the volume's size\)/);
   });
 });

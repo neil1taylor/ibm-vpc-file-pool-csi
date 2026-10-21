@@ -86,6 +86,17 @@ spec:
     name: my-original-pvc     # Source PVC in the same namespace
 ```
 
+### Clone in the console
+
+The console can clone without YAML. Open a volume in the IBM VPC File Pools page (SubVolumes tab) and choose **Clone to new PVC**, on the details page or in the row menu.
+
+- The form has defaults: the name is `<source claim>-clone`, the size is the volume's size (you can make it bigger, not smaller), and the storage class, access mode and volume mode come from the source claim.
+- The namespace is fixed to the namespace of the source claim. This is a Kubernetes rule.
+- The action only creates a new claim. It never changes the source volume.
+- The page then shows the copy: the percent copied while the claim is `Pending`, then "ready" when it is `Bound`. If the copy fails, it shows the error, and the claim is not deleted.
+- The action is off, with a reason, when the volume is not `Bound`, when a copy into it is still running, or when its claim no longer exists.
+- **A clone of a running VM's disk is a plain file copy, and the cloned disk may not boot.** The form warns when a VM uses the source claim.
+
 ### CSI CreateVolume Request (from csi-provisioner)
 
 The provisioner translates the PVC `dataSource` into a `VolumeContentSource`:
