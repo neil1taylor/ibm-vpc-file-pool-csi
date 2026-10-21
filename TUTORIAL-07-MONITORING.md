@@ -2,7 +2,7 @@
 
 > **Tutorial Series:** [Index](TUTORIAL.md) | [Part 1: Pool Creation](TUTORIAL-01-POOL-CREATION.md) | [Part 2: Snapshots & Clones](TUTORIAL-02-SNAPSHOTS-AND-CLONES.md) | [Part 3: Group Snapshots & Hooks](TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md) | [Part 4: Pool Configuration](TUTORIAL-04-POOL-CONFIGURATION.md) | [Part 5: Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md) | [Part 6: Replication & Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md) | **Part 7** | [Part 8: Migration & Console](TUTORIAL-08-MIGRATION-AND-CONSOLE.md)
 
-Set up Prometheus monitoring for the CSI driver: enable metric scraping, explore all 21 metrics, deploy alerting rules, trigger a test alert, and import a Grafana dashboard.
+Set up Prometheus monitoring for the CSI driver: enable metric scraping, explore the main metrics, deploy alerting rules, trigger a test alert, and import a Grafana dashboard.
 
 **Cluster:** ROKS eu-de (OpenShift Virtualization enabled)
 **Zone:** eu-de-1
@@ -206,7 +206,7 @@ vpc_file_pool_share_count{pool="monitored-pool"} 1
 
 ## Step 4: Key Metrics Walkthrough
 
-The driver exposes 21 metrics across six categories. This section walks through each category with PromQL queries and explains what to look for.
+The driver exposes 28 metrics across eight categories. This section walks through the first six categories (21 metrics) with PromQL queries and explains what to look for. The backup and CDI metrics are in [MONITORING.md](MONITORING.md).
 
 ### Allocation Metrics (6 metrics)
 
