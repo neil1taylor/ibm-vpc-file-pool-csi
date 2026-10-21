@@ -119,9 +119,12 @@ func TestSnapshotLock_TheSameDiskWaits(t *testing.T) {
 // disk's top file on the same VMI at the same time. Neither may lose the
 // other's entry: the hook opens the wrong file for a disk without one.
 func TestSetDiskTop_KeepsAConcurrentEntry(t *testing.T) {
-	base := newInstantDirectClient()
+	base, ok := newInstantDirectClient().(client.WithWatch)
+	if !ok {
+		t.Fatal("the fake client cannot watch")
+	}
 	injected := false
-	c := interceptor.NewClient(base.(client.WithWatch), interceptor.Funcs{
+	c := interceptor.NewClient(base, interceptor.Funcs{
 		Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 			if err := cl.Get(ctx, key, obj, opts...); err != nil {
 				return err
