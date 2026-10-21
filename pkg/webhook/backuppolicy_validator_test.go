@@ -93,13 +93,13 @@ func TestBackupPolicyValidator_Export(t *testing.T) {
 		"24h compliance": func(e *v1alpha1.BackupExport) { e.KeepFor = "24h" },
 	}
 	for name, mutate := range cases {
-		p := validBackupPolicy()
-		p.Spec.Export = good()
-		mutate(p.Spec.Export)
-		if _, err := (&BackupPolicyValidator{}).ValidateCreate(context.Background(), p); err == nil || !strings.Contains(err.Error(), "spec.export") {
+		bad := validBackupPolicy()
+		bad.Spec.Export = good()
+		mutate(bad.Spec.Export)
+		if _, err := (&BackupPolicyValidator{}).ValidateCreate(context.Background(), bad); err == nil || !strings.Contains(err.Error(), "spec.export") {
 			t.Errorf("%s: err = %v, want an error that names spec.export", name, err)
 		}
-		if _, err := (&BackupPolicyValidator{}).ValidateUpdate(context.Background(), validBackupPolicy(), p); err == nil {
+		if _, err := (&BackupPolicyValidator{}).ValidateUpdate(context.Background(), validBackupPolicy(), bad); err == nil {
 			t.Errorf("%s: an update must be refused too", name)
 		}
 	}

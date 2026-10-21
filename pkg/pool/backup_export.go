@@ -102,7 +102,7 @@ func exportDue(v v1alpha1.BackupVolumeStatus, now time.Time, schedule time.Durat
 	if v.ExportedTime == nil {
 		return true
 	}
-	if !v.LastBackupTime.Time.After(v.ExportedTime.Time) {
+	if !v.LastBackupTime.After(v.ExportedTime.Time) {
 		return false
 	}
 	return schedule == 0 || now.Sub(v.ExportedTime.Time) >= schedule
@@ -249,7 +249,7 @@ func (bc *BackupController) recordExportMetrics(bp *v1alpha1.BackupPolicy, st v1
 			continue
 		}
 		exportable = true
-		if v.ExportedTime == nil || v.LastBackupTime.Time.After(v.ExportedTime.Time) {
+		if v.ExportedTime == nil || v.LastBackupTime.After(v.ExportedTime.Time) {
 			if age := now.Sub(v.LastBackupTime.Time).Seconds(); age > oldestUnexported {
 				oldestUnexported = age
 			}
