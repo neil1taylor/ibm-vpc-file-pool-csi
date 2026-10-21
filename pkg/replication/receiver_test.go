@@ -1020,3 +1020,16 @@ func TestReceiver_ResolveDestPath_SymlinkInsideTheBaseIsStillRefusedForHiddenTar
 		t.Errorf("resolveDestPath accepted %q although /pvcs is a symlink to .snapshots", dir)
 	}
 }
+
+func TestReceiver_ResolveDestPath_HiddenFoldersRefusedEvenWhenTheBaseIsMissing(t *testing.T) {
+	r := NewReceiver("/nonexistent/receiver/base", strings.Repeat("a", 40), ":0")
+	const pv = "pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"
+	for _, bad := range []struct{ base, sub string }{
+		{"/.snapshots", "/.snapshots/" + pv},
+		{"/pvcs", "/pvcs/.hidden/" + pv},
+	} {
+		if dir, err := r.resolveDestPath(bad.base, bad.sub); err == nil {
+			t.Errorf("resolveDestPath(%q, %q) accepted %q", bad.base, bad.sub, dir)
+		}
+	}
+}

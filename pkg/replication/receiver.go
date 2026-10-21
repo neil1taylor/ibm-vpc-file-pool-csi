@@ -443,9 +443,12 @@ func (r *Receiver) resolveDestPath(basePath, subPath string) (string, error) {
 	if !subVolumeNamePattern.MatchString(filepath.Base(cleanDest)) {
 		return "", fmt.Errorf("the destination %q is not a pvc-<uuid> folder", cleanDest)
 	}
-	// No folder on the way may start with a dot (.snapshots and the like), and
-	// no folder on the way may be a symlink to somewhere else. The check runs on
-	// the real path of the deepest folder that exists.
+	// No folder on the way may start with a dot (.snapshots and the like).
+	if err := checkNoDotFolders(cleanBase, cleanDest); err != nil {
+		return "", err
+	}
+	// No folder on the way may be a symlink to somewhere else. This runs on the
+	// real path of the deepest folder that exists.
 	if err := checkRealDest(cleanBase, cleanDest); err != nil {
 		return "", err
 	}
@@ -485,7 +488,13 @@ func checkRealDest(base, dest string) error {
 	if realDest != realBase && !strings.HasPrefix(realDest, realBase+"/") {
 		return fmt.Errorf("the destination %q leads outside the base path through a symlink", dest)
 	}
-	rel := strings.TrimPrefix(strings.TrimPrefix(realDest, realBase), "/")
+	return checkNoDotFolders(realBase, realDest)
+}
+
+// checkNoDotFolders refuses a destination that has a folder starting with a dot
+// below the base path.
+func checkNoDotFolders(base, dest string) error {
+	rel := strings.TrimPrefix(strings.TrimPrefix(dest, base), "/")
 	for _, part := range strings.Split(rel, "/") {
 		if strings.HasPrefix(part, ".") {
 			return fmt.Errorf("the destination %q has a folder that starts with a dot", dest)
