@@ -106,17 +106,17 @@ type fakeChainJobs struct {
 	done    bool
 	scripts map[string]string
 	inits   map[string]string
-	shares  map[string][]ShareMount
+	folders map[string][]ShareFolder
 }
 
 func newFakeChainJobs() *fakeChainJobs {
-	return &fakeChainJobs{scripts: map[string]string{}, inits: map[string]string{}, shares: map[string][]ShareMount{}}
+	return &fakeChainJobs{scripts: map[string]string{}, inits: map[string]string{}, folders: map[string][]ShareFolder{}}
 }
 
-func (f *fakeChainJobs) RunChainScript(_ context.Context, key string, shares []ShareMount, script, initScript string) (bool, error) {
+func (f *fakeChainJobs) RunChainScript(_ context.Context, key string, folders []ShareFolder, script, initScript string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.scripts[key], f.inits[key], f.shares[key] = script, initScript, shares
+	f.scripts[key], f.inits[key], f.folders[key] = script, initScript, folders
 	return f.done, nil
 }
 
@@ -453,6 +453,9 @@ func TestInstantSnapshot_StoppedVMUsesAJob(t *testing.T) {
 	if !strings.Contains(e.jobs.scripts[key], "-b disk.img") || !strings.Contains(e.jobs.scripts[key], newFile) {
 		t.Fatalf("Job script:\n%s", e.jobs.scripts[key])
 	}
+	if want := []ShareFolder{{Share: shareOne, Path: "/pvcs/" + testPVName}}; fmt.Sprint(e.jobs.folders[key]) != fmt.Sprint(want) {
+		t.Errorf("folders = %v, want only the volume's folder", e.jobs.folders[key])
+	}
 	if e.sv().Status.ChainOperation != key {
 		t.Errorf("ChainOperation = %q: the VM must not start while the Job runs", e.sv().Status.ChainOperation)
 	}
@@ -506,10 +509,15 @@ func TestInstantSnapshot_RestoreConvertsTheSnapshotsFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RestoreSnapshot: %v", err)
 	}
-	script := e.jobs.scripts["restore-"+testRestorePVName]
-	if !strings.Contains(script, "convert -f raw -O raw") || !strings.Contains(script, "/pvcs/"+testPVName+"/disk.img") ||
-		!strings.Contains(script, "/pvcs/"+testRestorePVName+"/disk.img") {
+	key := "restore-" + testRestorePVName
+	script := e.jobs.scripts[key]
+	if !strings.Contains(script, `convert -f raw -O raw "/vol0/disk.img" "/vol1/disk.img.part"`) {
 		t.Errorf("restore script:\n%s", script)
+	}
+	// The Job sees only the two volume folders, never the whole share.
+	want := []ShareFolder{{Share: shareOne, Path: "/pvcs/" + testPVName}, {Share: shareOne, Path: "/pvcs/" + testRestorePVName}}
+	if fmt.Sprint(e.jobs.folders[key]) != fmt.Sprint(want) {
+		t.Errorf("folders = %v, want %v", e.jobs.folders[key], want)
 	}
 	if len(e.sd.copies) != 0 {
 		t.Error("an instant snapshot is restored by converting its file, not by copying the folder")

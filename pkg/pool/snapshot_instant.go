@@ -90,11 +90,12 @@ type InstantSnapshotter interface {
 }
 
 // ChainJobs runs a pkg/vmsnap script in a Job, as the QEMU user, in an image
-// that has qemu-img. initScript, if set, runs first as root. The share mounts
-// are /share0, /share1 and so on. It reports done=true once the Job has
-// finished; it is idempotent for a key.
+// that has qemu-img. initScript, if set, runs first as root. Folder i is
+// mounted at /vol<i>, and nothing else of the shares, so a file planted in a
+// volume folder cannot reach another volume. It reports done=true once the
+// Job has finished; it is idempotent for a key.
 type ChainJobs interface {
-	RunChainScript(ctx context.Context, key string, shares []ShareMount, script, initScript string) (bool, error)
+	RunChainScript(ctx context.Context, key string, folders []ShareFolder, script, initScript string) (bool, error)
 }
 
 type instantSnapshots struct {
@@ -449,11 +450,11 @@ func (m *Manager) takeInstantOffline(ctx context.Context, snap *v1alpha1.Snapsho
 				return fmt.Errorf("%w: the VM started", ErrOperationInProgress)
 			}
 		}
-		script, err := vmsnap.OfflineTakeScript("/share0"+sv.Spec.SubPath, chainFiles(chain)[0], newFile)
+		script, err := vmsnap.OfflineTakeScript("/vol0", chainFiles(chain)[0], newFile)
 		if err != nil {
 			return err
 		}
-		done, err := m.instant.jobs.RunChainScript(ctx, key, []ShareMount{subVolumeShareMount(sv)}, script, "")
+		done, err := m.instant.jobs.RunChainScript(ctx, key, []ShareFolder{{Share: subVolumeShareMount(sv), Path: sv.Spec.SubPath}}, script, "")
 		if err != nil {
 			return fmt.Errorf("run the snapshot Job: %w", err)
 		}
@@ -605,11 +606,11 @@ func (m *Manager) mergeOffline(ctx context.Context, sv *v1alpha1.SubVolume, key,
 			return nil, fmt.Errorf("%w: the VM started", ErrOperationInProgress)
 		}
 	}
-	script, err := vmsnap.OfflineMergeScript("/share0"+sv.Spec.SubPath, file, child, grandchild)
+	script, err := vmsnap.OfflineMergeScript("/vol0", file, child, grandchild)
 	if err != nil {
 		return nil, err
 	}
-	done, err := m.instant.jobs.RunChainScript(ctx, key, []ShareMount{subVolumeShareMount(sv)}, script, "")
+	done, err := m.instant.jobs.RunChainScript(ctx, key, []ShareFolder{{Share: subVolumeShareMount(sv), Path: sv.Spec.SubPath}}, script, "")
 	if err != nil {
 		return nil, fmt.Errorf("run the merge Job: %w", err)
 	}
@@ -689,23 +690,16 @@ func (m *Manager) restoreInstant(ctx context.Context, sv *v1alpha1.SubVolume, sn
 	if source, err := m.k8sClient.GetSubVolume(ctx, snap.Spec.SourceSubVolume); err == nil && source.Status.ChainOperation != "" {
 		return false, nil // a Job changes the chain now
 	}
-	dst := subVolumeShareMount(sv)
-	shares := []ShareMount{src}
-	dstRoot := "/share0"
-	if dst != src {
-		shares = append(shares, dst)
-		dstRoot = "/share1"
-	}
-	to := dstRoot + sv.Spec.SubPath
-	script, err := vmsnap.ConvertScript("/share0"+snap.Spec.SourceSubPath, snap.Status.ChainFile, to)
+	folders := []ShareFolder{{Share: src, Path: snap.Spec.SourceSubPath}, {Share: subVolumeShareMount(sv), Path: sv.Spec.SubPath}}
+	script, err := vmsnap.ConvertScript("/vol0", snap.Status.ChainFile, "/vol1")
 	if err != nil {
 		return false, err
 	}
-	// The share squashes root, so root cannot give the folder to the QEMU
-	// user; it opens the folder to all, as the snapshot apply Job does.
-	// KubeVirt gives it to the QEMU user when a VM starts.
-	init := fmt.Sprintf("set -eu\nmkdir -p %q\nchmod 0777 %q\n", to, to)
-	return m.instant.jobs.RunChainScript(ctx, "restore-"+sv.Name, shares, script, init)
+	// The kubelet makes the new folder for the mount. The share squashes
+	// root, so root cannot give the folder to the QEMU user; it opens the
+	// folder to all, as the snapshot apply Job does. KubeVirt gives it to the
+	// QEMU user when a VM starts.
+	return m.instant.jobs.RunChainScript(ctx, "restore-"+sv.Name, folders, script, "set -eu\nchmod 0777 /vol1\n")
 }
 
 // snapshotChargeGB is the share space a snapshot is charged.

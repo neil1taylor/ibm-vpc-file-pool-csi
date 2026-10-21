@@ -89,17 +89,34 @@ func (r *ShareJobRunner) SetLauncherImage(image string) {
 }
 
 // RunChainScript runs a pkg/vmsnap script as the QEMU user in the
-// virt-launcher image, after initScript (if set) as root. It implements
-// ChainJobs.
-func (r *ShareJobRunner) RunChainScript(ctx context.Context, key string, shares []ShareMount, script, initScript string) (bool, error) {
+// virt-launcher image, after initScript (if set) as root. Folder i is mounted
+// at /vol<i>; nothing else of the shares is mounted. It implements ChainJobs.
+func (r *ShareJobRunner) RunChainScript(ctx context.Context, key string, folders []ShareFolder, script, initScript string) (bool, error) {
 	if r.launcherImage == "" {
 		return false, errors.New("no virt-launcher image set for VM disk chain Jobs")
 	}
+	var shares []ShareMount
 	shape := jobShape{
 		image:      r.launcherImage,
 		command:    []string{"/bin/sh", "-c", script},
 		runAsUser:  qemuUID,
 		initScript: initScript,
+	}
+	for i, f := range folders {
+		if err := validateSharePath(f.Path); err != nil {
+			return false, err
+		}
+		idx := -1
+		for j, sh := range shares {
+			if sh == f.Share {
+				idx = j
+			}
+		}
+		if idx < 0 {
+			shares = append(shares, f.Share)
+			idx = len(shares) - 1
+		}
+		shape.folders = append(shape.folders, folderMount{share: idx, subPath: strings.TrimPrefix(f.Path, "/"), at: fmt.Sprintf("/vol%d", i)})
 	}
 	return r.run(ctx, key, shares, shape)
 }
@@ -118,6 +135,22 @@ type jobShape struct {
 	command    []string
 	runAsUser  int64
 	initScript string
+	// folders, if set, replace the share mounts: each mounts one folder of
+	// a share.
+	folders []folderMount
+}
+
+// folderMount mounts subPath of share number share at at.
+type folderMount struct {
+	share   int
+	subPath string
+	at      string
+}
+
+// ShareFolder is one folder on a share.
+type ShareFolder struct {
+	Share ShareMount
+	Path  string // e.g. /pvcs/pvc-abc
 }
 
 // NewShareJobRunner creates a runner that starts Jobs in namespace with image.
@@ -274,6 +307,12 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 			},
 		})
 		mounts = append(mounts, corev1.VolumeMount{Name: volName, MountPath: "/" + volName})
+	}
+	if shape.folders != nil {
+		mounts = nil
+		for _, f := range shape.folders {
+			mounts = append(mounts, corev1.VolumeMount{Name: fmt.Sprintf("share%d", f.share), MountPath: f.at, SubPath: f.subPath})
+		}
 	}
 
 	resources := corev1.ResourceRequirements{

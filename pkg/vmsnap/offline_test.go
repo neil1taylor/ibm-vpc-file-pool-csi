@@ -22,7 +22,7 @@ func stubQemuImg(t *testing.T) (binDir, logFile string) {
 echo "$*" >> "` + logFile + `"
 case "$1" in
 create) eval last=\${$#}; printf '%s' "$8" > "$last.backing"; : > "$last" ;;
-info) eval last=\${$#}; b=$(cat "$last.backing" 2>/dev/null); printf '{"backing-filename": "%s"}\n' "$b" ;;
+info) eval last=\${$#}; b=$(cat "$last.backing" 2>/dev/null); bf=qcow2; [ "$b" = disk.img ] && bf=raw; [ -e "$last.backingfmt" ] && bf=$(cat "$last.backingfmt"); printf '{\n    "backing-filename-format": "%s",\n    "full-backing-filename": "/x/%s",\n    "backing-filename": "%s",\n    "format": "qcow2"\n}\n' "$bf" "$b" "$b" ;;
 rebase) eval last=\${$#}; printf '%s' "$8" > "$last.backing" ;;
 convert) eval last=\${$#}; : > "$last" ;;
 commit) ;;
@@ -92,6 +92,7 @@ func TestOfflineMergeScript_MiddleFile(t *testing.T) {
 		}
 	}
 	_ = os.WriteFile(filepath.Join(vol, "snap-b.qcow2.backing"), []byte("snap-a.qcow2"), 0o644)
+	_ = os.WriteFile(filepath.Join(vol, "snap-a.qcow2.backing"), []byte("disk.img"), 0o644)
 	_ = os.Chmod(filepath.Join(vol, "snap-c.qcow2"), 0o644)
 	script, err := OfflineMergeScript(vol, "snap-a.qcow2", "snap-b.qcow2", "snap-c.qcow2")
 	if err != nil {
@@ -153,6 +154,8 @@ func TestOfflineMergeScript_RefusesAWrongBackingFile(t *testing.T) {
 func TestConvertScript(t *testing.T) {
 	bin, log := stubQemuImg(t)
 	src, dst := t.TempDir(), t.TempDir()
+	_ = os.WriteFile(filepath.Join(src, "snap-a.qcow2"), nil, 0o444)
+	_ = os.WriteFile(filepath.Join(src, "snap-a.qcow2.backing"), []byte("disk.img"), 0o644)
 	script, err := ConvertScript(src, "snap-a.qcow2", dst)
 	if err != nil {
 		t.Fatal(err)
@@ -168,5 +171,47 @@ func TestConvertScript(t *testing.T) {
 	}
 	if m := mode(t, filepath.Join(dst, "disk.img.part")); m != "missing" {
 		t.Error("the part file must be renamed")
+	}
+}
+
+func TestConvertScript_RefusesAPlantedChain(t *testing.T) {
+	for _, tc := range []struct{ backing, format string }{
+		{"../pvc-other/disk.img", "raw"}, // another folder
+		{"/etc/shadow", "raw"},           // an absolute path
+		{"disk.img", "qcow2"},            // the raw base read as qcow2
+		{"snap-b.qcow2", "raw"},          // a qcow2 file read as raw
+		{"json:{\"file\": 1}", "qcow2"},  // a json: description
+	} {
+		bin, log := stubQemuImg(t)
+		src, dst := t.TempDir(), t.TempDir()
+		_ = os.WriteFile(filepath.Join(src, "snap-a.qcow2"), nil, 0o444)
+		_ = os.WriteFile(filepath.Join(src, "snap-a.qcow2.backing"), []byte(tc.backing), 0o644)
+		_ = os.WriteFile(filepath.Join(src, "snap-a.qcow2.backingfmt"), []byte(tc.format), 0o644)
+		script, err := ConvertScript(src, "snap-a.qcow2", dst)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := runScript(t, bin, script); err == nil {
+			t.Errorf("backing %q (%s) was accepted", tc.backing, tc.format)
+		}
+		if strings.Contains(calls(t, log), "convert") {
+			t.Errorf("backing %q: convert must not run", tc.backing)
+		}
+	}
+}
+
+func TestConvertScript_FollowsAGoodChain(t *testing.T) {
+	bin, log := stubQemuImg(t)
+	src, dst := t.TempDir(), t.TempDir()
+	_ = os.WriteFile(filepath.Join(src, "snap-b.qcow2"), nil, 0o444)
+	_ = os.WriteFile(filepath.Join(src, "snap-b.qcow2.backing"), []byte("snap-a.qcow2"), 0o644)
+	_ = os.WriteFile(filepath.Join(src, "snap-a.qcow2"), nil, 0o444)
+	_ = os.WriteFile(filepath.Join(src, "snap-a.qcow2.backing"), []byte("disk.img"), 0o644)
+	script, _ := ConvertScript(src, "snap-b.qcow2", dst)
+	if out, err := runScript(t, bin, script); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(calls(t, log), "convert -f qcow2 -O raw "+src+"/snap-b.qcow2") {
+		t.Errorf("calls:\n%s", calls(t, log))
 	}
 }

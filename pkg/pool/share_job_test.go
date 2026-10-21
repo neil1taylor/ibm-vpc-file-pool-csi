@@ -3,6 +3,7 @@ package pool
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -435,11 +436,12 @@ func TestShareJobRunner_ScriptJobsKeepTheirSecurityContext(t *testing.T) {
 func TestShareJobRunner_RunChainScript(t *testing.T) {
 	r, c := newApplyRunner()
 	ctx := context.Background()
-	if _, err := r.RunChainScript(ctx, "chain-a", []ShareMount{testShareA}, "set -eu\nqemu-img info x\n", "mkdir -p /share0/x\n"); err == nil {
+	folders := []ShareFolder{{Share: testShareA, Path: testVolPath}, {Share: testShareA, Path: testSnapPath}}
+	if _, err := r.RunChainScript(ctx, "chain-a", folders, "set -eu\nqemu-img info x\n", "mkdir -p /vol1/x\n"); err == nil {
 		t.Fatal("without the launcher image the Job must be refused")
 	}
 	r.SetLauncherImage("registry.redhat.io/cnv/virt-launcher@sha256:abc")
-	done, err := r.RunChainScript(ctx, "chain-a", []ShareMount{testShareA}, "set -eu\nqemu-img info x\n", "mkdir -p /share0/x\n")
+	done, err := r.RunChainScript(ctx, "chain-a", folders, "set -eu\nqemu-img info x\n", "mkdir -p /vol1/x\n")
 	if err != nil || done {
 		t.Fatalf("RunChainScript() = %v, %v; want false, nil", done, err)
 	}
@@ -452,11 +454,26 @@ func TestShareJobRunner_RunChainScript(t *testing.T) {
 		t.Errorf("the Job must run as the QEMU user")
 	}
 	if len(spec.InitContainers) != 1 || *spec.InitContainers[0].SecurityContext.RunAsUser != 0 ||
-		!strings.Contains(strings.Join(spec.InitContainers[0].Command, " "), "mkdir -p /share0/x") {
+		!strings.Contains(strings.Join(spec.InitContainers[0].Command, " "), "mkdir -p /vol1/x") {
 		t.Errorf("init containers = %+v", spec.InitContainers)
 	}
+	// Each folder is mounted alone, from the one share volume.
+	for _, c := range append(spec.InitContainers, spec.Containers...) {
+		got := fmt.Sprint(c.VolumeMounts)
+		want := fmt.Sprint([]corev1.VolumeMount{{Name: "share0", MountPath: "/vol0", SubPath: strings.TrimPrefix(testVolPath, "/")},
+			{Name: "share0", MountPath: "/vol1", SubPath: strings.TrimPrefix(testSnapPath, "/")}})
+		if got != want {
+			t.Errorf("%s mounts %s, want %s", c.Name, got, want)
+		}
+	}
+	if len(spec.Volumes) != 1 {
+		t.Errorf("one share needs one volume, got %d", len(spec.Volumes))
+	}
+	if _, err := r.RunChainScript(ctx, "chain-b", []ShareFolder{{Share: testShareA, Path: "/pvcs/../etc"}}, "x", ""); err == nil {
+		t.Error("a bad folder path must be refused")
+	}
 	setJobStatus(t, c, "chain-a", 1, 0)
-	if done, err = r.RunChainScript(ctx, "chain-a", []ShareMount{testShareA}, "x", ""); err != nil || !done {
+	if done, err = r.RunChainScript(ctx, "chain-a", folders, "x", ""); err != nil || !done {
 		t.Fatalf("RunChainScript() = %v, %v; want true, nil", done, err)
 	}
 }
