@@ -596,3 +596,20 @@ func TestInstantSnapshot_CloneRefusesAChainedDisk(t *testing.T) {
 		t.Fatalf("err = %v: a folder copy of a chained disk is not a clone", err)
 	}
 }
+
+func TestInstantSnapshot_DeleteKeepsTheFolderWhenTheVolumeCannotBeRead(t *testing.T) {
+	e := newInstantEnv(t)
+	e.startVM(false)
+	e.mustCreate("snap-one")
+	e.k.GetSubVolumeErr = errors.New("etcdserver: request timed out")
+	if err := e.mgr.DeleteSnapshot(e.ctx, "snap-one"); err == nil {
+		t.Fatal("expected an error to retry: the volume may still exist")
+	}
+	e.k.GetSubVolumeErr = nil
+	if e.sd.removeCount() != 0 {
+		t.Fatal("a failed read must never remove the folder of a disk that may be in use")
+	}
+	if e.k.getSnapshot("snap-one") == nil {
+		t.Error("the Snapshot must stay until the delete can finish")
+	}
+}

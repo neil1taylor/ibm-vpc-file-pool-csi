@@ -477,8 +477,11 @@ func (m *Manager) deleteInstant(ctx context.Context, snap *v1alpha1.Snapshot, po
 		return nil // never taken
 	}
 	sv, err := m.k8sClient.GetSubVolume(ctx, snap.Spec.SourceSubVolume)
-	if err != nil {
+	if apierrors.IsNotFound(err) {
 		return m.deleteInstantOfGoneVolume(ctx, snap, pool)
+	}
+	if err != nil {
+		return fmt.Errorf("read the snapshot's volume: %w", err)
 	}
 	if busy, busyErr := m.chainRestoreRunning(ctx, snap.Spec.PoolName, sv.Name); busyErr != nil {
 		return busyErr
