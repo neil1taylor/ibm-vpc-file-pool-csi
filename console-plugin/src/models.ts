@@ -122,3 +122,25 @@ export const VolumeGroupSnapshotClassModel: K8sModel = {
   labelPlural: 'VolumeGroupSnapshotClasses',
   namespaced: false,
 };
+
+export const VolumeSnapshotContentModel: K8sModel = {
+  apiGroup: 'snapshot.storage.k8s.io',
+  apiVersion: 'v1',
+  kind: 'VolumeSnapshotContent',
+  plural: 'volumesnapshotcontents',
+  abbr: 'VSC',
+  label: 'VolumeSnapshotContent',
+  labelPlural: 'VolumeSnapshotContents',
+  namespaced: false,
+};
+
+export const VirtualMachineModel: K8sModel = {
+  apiGroup: 'kubevirt.io',
+  apiVersion: 'v1',
+  kind: 'VirtualMachine',
+  plural: 'virtualmachines',
+  abbr: 'VM',
+  label: 'VirtualMachine',
+  labelPlural: 'VirtualMachines',
+  namespaced: true,
+};
