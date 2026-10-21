@@ -616,6 +616,7 @@ const FileSharePoolDetailsPage: React.FC = () => {
           <Tr>
             <Th>Share ID</Th>
             <Th>Remaining SubVolumes</Th>
+            <Th>Remaining snapshots</Th>
             <Th>Drained</Th>
             <Th>Drain Started</Th>
           </Tr>
@@ -627,6 +628,7 @@ const FileSharePoolDetailsPage: React.FC = () => {
                 <code>{ds.shareID}</code>
               </Td>
               <Td>{ds.remainingSubVolumes}</Td>
+              <Td>{ds.remainingSnapshots ?? 0}</Td>
               <Td>
                 <Label color={ds.drained ? 'green' : 'orange'}>
                   {ds.drained ? 'Yes' : 'No'}

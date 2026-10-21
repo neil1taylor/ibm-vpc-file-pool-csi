@@ -145,7 +145,9 @@ kubectl get subvolumes -l storage.ibmcloud.io/share-id=<share-id>
 kubectl get subvolumes -l storage.ibmcloud.io/share-id=<share-id> \
   -o jsonpath='{range .items[*]}{.spec.pvcNamespace}/{.spec.pvcName}{"\n"}{end}'
 
-# 5. Once all SubVolumes are gone, the share is fully drained
+# 5. Once all SubVolumes and snapshots on it are gone, the share is fully drained.
+#    Snapshots keep their data on the share, so delete their VolumeSnapshots too
+#    (status.drainStatus[].remainingSnapshots counts them).
 #    The DrainComplete condition is set on the pool
 kubectl get fsp <pool-name> -o jsonpath='{.status.conditions}' | jq '.[] | select(.type=="DrainComplete")'
 
