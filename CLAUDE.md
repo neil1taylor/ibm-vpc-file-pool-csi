@@ -155,7 +155,7 @@ test/              → Integration and e2e tests (unit tests live next to code)
 
 ## Testing Conventions
 
-- **Go 1.25+**, module path: `github.com/IBM/ibm-vpc-file-pool-csi`
+- **Go 1.26+**, module path: `github.com/IBM/ibm-vpc-file-pool-csi`
 - Unit tests live next to code (`_test.go`), use table-driven tests
 - Race detector mandatory: `-race` flag
 - Fake VPC client: `pkg/ibmcloud/fake/fake_client.go`
