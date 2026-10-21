@@ -55,7 +55,7 @@ const (
 	// backup is a copy of files and is as consistent as the files are.
 	consistencyFileCopy = "FileCopy"
 
-	shareStateStable = "Stable"
+	shareStateStable = "stable"
 )
 
 var vmListGVK = schema.GroupVersionKind{Group: "kubevirt.io", Version: "v1", Kind: "VirtualMachineList"}

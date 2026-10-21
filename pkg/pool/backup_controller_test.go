@@ -56,7 +56,7 @@ func (e *backupEnv) addPool(name, ip, export string) {
 	e.t.Helper()
 	p := &v1alpha1.FileSharePool{ObjectMeta: metav1.ObjectMeta{Name: name}}
 	p.Status.Phase = "Ready"
-	p.Status.Shares = []v1alpha1.PoolShareStatus{{ShareID: name + "-share", MountTargetIP: ip, ExportPath: export, State: "Stable", TotalGB: 100}}
+	p.Status.Shares = []v1alpha1.PoolShareStatus{{ShareID: name + "-share", MountTargetIP: ip, ExportPath: export, State: "stable", TotalGB: 100}}
 	e.create(p)
 }
 
@@ -313,7 +313,7 @@ func TestBackupController_SnapshotPoolProblemsAreReported(t *testing.T) {
 		{"pool with two shares", func(e *backupEnv) {
 			p := &v1alpha1.FileSharePool{}
 			_ = e.c.Get(e.ctx, types.NamespacedName{Name: "backups"}, p)
-			p.Status.Shares = append(p.Status.Shares, v1alpha1.PoolShareStatus{ShareID: "second", MountTargetIP: "10.0.0.5", State: "Stable"})
+			p.Status.Shares = append(p.Status.Shares, v1alpha1.PoolShareStatus{ShareID: "second", MountTargetIP: "10.0.0.5", State: "stable"})
 			_ = e.c.Update(e.ctx, p)
 			e.policy("nightly", nil)
 		}, "one share"},
