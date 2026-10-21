@@ -155,6 +155,16 @@ run() {
     cp -R "$TEST_DIR" "$work/integration-tests"
     mkdir -p "$SHOTS" "$RT_OUT/console-test-results"
 
+    # The console always checks the cluster's certificate. It uses the CA of the kubeconfig when there is one.
+    # IBM's cluster addresses use a publicly trusted certificate, so the kubeconfig may have none: then the
+    # console uses the system trust store of its image. Its token goes in a file, not on the command line.
+    ca_args=()
+    oc config view --raw --minify -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d >"$work/ca.crt" 2>/dev/null
+    if [ -s "$work/ca.crt" ]; then
+        ca_args=(-v "$work/ca.crt:/ca.crt:ro,Z" -e BRIDGE_K8S_MODE_OFF_CLUSTER_CA_FILE=/ca.crt)
+    fi
+    (umask 077; printf 'BRIDGE_K8S_AUTH_BEARER_TOKEN=%s\n' "$(cat "$TOKEN_FILE")" >"$work/console.env")
+
     cat >"$work/nginx.conf" <<NGINX
 pid /tmp/nginx.pid;
 events { worker_connections 64; }
@@ -175,9 +185,9 @@ NGINX
         -e BRIDGE_USER_AUTH=disabled \
         -e BRIDGE_K8S_MODE=off-cluster \
         -e BRIDGE_K8S_MODE_OFF_CLUSTER_ENDPOINT="$api" \
-        -e BRIDGE_K8S_MODE_OFF_CLUSTER_SKIP_VERIFY_TLS=true \
+        "${ca_args[@]}" \
         -e BRIDGE_K8S_AUTH=bearer-token \
-        -e BRIDGE_K8S_AUTH_BEARER_TOKEN="$(cat "$TOKEN_FILE")" \
+        --env-file "$work/console.env" \
         -e BRIDGE_PLUGINS="$PLUGIN_NAME=http://127.0.0.1:$PLUGIN_PORT" \
         "$CONSOLE_IMAGE" >/dev/null
     check "the local console starts" wait_until 120 3 console_is_up
