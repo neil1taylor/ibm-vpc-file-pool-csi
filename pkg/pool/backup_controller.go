@@ -467,14 +467,18 @@ func vmClaims(vm *unstructured.Unstructured) []string {
 // source pool and one share of the snapshot pool. The policy for the first
 // share of the pool keeps the name it had when a snapshot pool had one share,
 // so an upgrade keeps its change lists.
-// The short hash keeps "a-b" + "c" apart from "a" + "b-c".
+// The short hash keeps "a-b" + "c" apart from "a" + "b-c", and keeps long names apart.
 func backupReplicationName(policy, pool, shareID, firstShareID string) string {
 	key := policy + "\x00" + pool
 	if shareID != firstShareID {
 		key += "\x00" + shareID
 	}
 	sum := sha256.Sum256([]byte(key))
-	return "backup-" + policy + "-" + pool + "-" + hex.EncodeToString(sum[:3])
+	suffix := "-" + hex.EncodeToString(sum[:3])
+	// The name is a label value on the temporary PV of a copy: 63 characters at
+	// most. A long name loses the end of its readable part; the hash keeps it unique.
+	readable := strings.TrimRight(truncate("backup-"+policy+"-"+pool, 63-len(suffix)), "-")
+	return readable + suffix
 }
 
 // backupKeepHours is the keep time rounded up to whole hours.

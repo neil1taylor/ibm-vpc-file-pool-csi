@@ -1,6 +1,8 @@
 package pool
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 	"time"
@@ -268,5 +270,39 @@ func TestBackupMultiShare_TheFirstShareKeepsTheNameOfBefore(t *testing.T) {
 	}
 	if other := backupReplicationName("nightly", "data-a", "s2", "s1"); other == before {
 		t.Errorf("the second share must get its own replication policy, got the same name %q", other)
+	}
+}
+
+func TestBackupReplicationName_FitsALabelValueForALongPolicyName(t *testing.T) {
+	// The name is a label value on the temporary PV of a copy: 63 characters at most.
+	long := strings.Repeat("p", 55) // a policy name may have up to 63 characters
+	for _, tc := range []struct{ policy, pool string }{
+		{"rt-1021-2037-backup-policy", "rt-1021-2037-backup-src"}, // the name that failed stage 18 (66 characters)
+		{long, "data-a"},
+		{long, strings.Repeat("q", 63)},
+	} {
+		name := backupReplicationName(tc.policy, tc.pool, "s1", "s1")
+		if len(name) > 63 {
+			t.Errorf("name %q for %q and %q has %d characters, want at most 63", name, tc.policy, tc.pool, len(name))
+		}
+		if strings.HasSuffix(strings.TrimSuffix(name, name[len(name)-6:]), "--") {
+			t.Errorf("name %q has a double dash before the hash", name)
+		}
+	}
+	// Two long names that start alike stay apart, and so do two shares.
+	a := backupReplicationName(long, "data-a", "s1", "s1")
+	b := backupReplicationName(long, "data-b", "s1", "s1")
+	c := backupReplicationName(long, "data-a", "s2", "s1")
+	if a == b || a == c || b == c {
+		t.Errorf("long names collide: %q %q %q", a, b, c)
+	}
+}
+
+func TestBackupReplicationName_ShortNamesStayAsTheyWere(t *testing.T) {
+	// A policy made before this fix keeps its replication policy, and with it the change lists of its VM copies.
+	sum := sha256.Sum256([]byte("nightly\x00data-a"))
+	want := "backup-nightly-data-a-" + hex.EncodeToString(sum[:3])
+	if got := backupReplicationName("nightly", "data-a", "s1", "s1"); got != want {
+		t.Errorf("name = %q, want the old form %q", got, want)
 	}
 }
