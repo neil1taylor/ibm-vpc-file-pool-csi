@@ -1,6 +1,7 @@
 package util
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -182,5 +183,62 @@ func TestSafeJoinSnapshot_InvalidPath(t *testing.T) {
 	_, err := SafeJoinSnapshot("/mnt/staging", "/pvcs/../etc/passwd")
 	if err == nil {
 		t.Error("SafeJoinSnapshot should reject invalid snapshot path")
+	}
+}
+
+const backupPV = "pvc-11111111-2222-3333-4444-555555555555"
+
+func TestValidateBackupPath_Valid(t *testing.T) {
+	for _, p := range []string{
+		"/backup/nightly/pvcs/" + backupPV,
+		"/backup/a/pvcs/" + backupPV,
+		"/backup/my-policy.v2/pvcs/" + backupPV,
+	} {
+		if err := ValidateBackupPath(p); err != nil {
+			t.Errorf("ValidateBackupPath(%q) = %v, want nil", p, err)
+		}
+	}
+	for _, p := range []string{
+		"/backup/nightly/.moments/pvcs/" + backupPV,
+		"/backup/a/.moments/pvcs/" + backupPV,
+	} {
+		if err := ValidateBackupMomentsPath(p); err != nil {
+			t.Errorf("ValidateBackupMomentsPath(%q) = %v, want nil", p, err)
+		}
+	}
+}
+
+func TestValidateBackupPath_Invalid(t *testing.T) {
+	bad := []string{
+		"",
+		"/backup",
+		"/backup/nightly",
+		"/backup/nightly/pvcs/" + backupPV + "/",
+		"/backup/nightly/pvcs/" + backupPV + "/x",
+		"/backup/../pvcs/" + backupPV,
+		"/backup/nightly/../other/pvcs/" + backupPV,
+		"/backup//pvcs/" + backupPV,
+		"/backup/Night ly/pvcs/" + backupPV,
+		"/backup/-x/pvcs/" + backupPV,
+		"/backup/x-/pvcs/" + backupPV,
+		"/backup/a..b/pvcs/" + backupPV,
+		"/pvcs/" + backupPV,
+		"/backup/nightly/pvcs/pvc-short",
+		"/backup/nightly/.moments/pvcs/" + backupPV, // that is a moments path, not a volume path
+		"backup/nightly/pvcs/" + backupPV,
+	}
+	for _, p := range bad {
+		if err := ValidateBackupPath(p); err == nil {
+			t.Errorf("ValidateBackupPath(%q) accepted an unsafe path", p)
+		}
+	}
+	for _, p := range append(bad, "/backup/nightly/pvcs/"+backupPV) { // a volume path is not a moments path
+		if err := ValidateBackupMomentsPath(p); err == nil && p != "/backup/nightly/.moments/pvcs/"+backupPV {
+			t.Errorf("ValidateBackupMomentsPath(%q) accepted a bad path", p)
+		}
+	}
+	long := "/backup/" + strings.Repeat("a", 64) + "/pvcs/" + backupPV
+	if err := ValidateBackupPath(long); err == nil {
+		t.Error("a policy name of 64 characters does not fit a label value and must be refused")
 	}
 }

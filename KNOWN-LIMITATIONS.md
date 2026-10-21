@@ -248,3 +248,15 @@ Since ROKS and ROVS worker nodes run RHCOS, encryption in transit cannot be enab
 **Workaround:** The pool driver significantly reduces share consumption by hosting many PVCs per share. A single pool with 5 shares can serve hundreds of PVCs. Request a quota increase via IBM Cloud support if needed.
 
 **Roadmap:** No change planned — platform quota.
+
+## Backups to a Snapshot Pool
+
+**What:** a `BackupPolicy` backs up selected PVCs and VMs into a snapshot pool (see `BACKUP-RECOVERY.md`).
+
+**Limitations:**
+- The snapshot pool must have exactly one share (issue #71).
+- No check that the snapshot pool is full; backups fail when it is (issue #69).
+- No command to remove the backups of a volume (issue #70). Backups of a deleted volume stay on the share, and can be restored, until the keep time has passed since the last backup; after that the files stay on the share until someone removes them.
+- A backup of a volume that is not a VM disk is a file copy. It is as consistent as the files are.
+- Backups are in the same VPC as the data, and are not encrypted or locked beyond what the file share does (export to COS is a later step).
+- A restore needs the snapshot pool to be ready, and waits while a copy is being written to the backup of that volume.

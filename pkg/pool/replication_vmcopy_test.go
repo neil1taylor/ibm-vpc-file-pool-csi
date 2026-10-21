@@ -867,3 +867,50 @@ func TestVMCopy_WaitsWhileAnotherCopyRunsInTheVM(t *testing.T) {
 		t.Errorf("starts = %d, want 1 once the VM is free", len(e.cop.starts))
 	}
 }
+
+// A plain volume beside a VM gets a new copy on every due tick. The VM always
+// has a copy in flight at a due tick, which must not hold the plain volume's
+// result of the last cycle for ever.
+func TestVMCopy_PlainVolumeIsCopiedAgainWhileTheVMAlwaysCopies(t *testing.T) {
+	e := newVMCopyEnv(t)
+	plain := newTestSubVolume("pvc-plain-0000-0000-0000-000000000003", "prod-pool", "share-1", 5)
+	plain.Spec.PVCName = "plain-pvc"
+	e.k.addSubVolume(plain)
+
+	dueTick := func() {
+		e.clock = e.clock.Add(2 * time.Hour)
+		e.rc.processOnce(e.ctx)
+	}
+	finishJob := func(sv string) {
+		job := e.job(t, sv)
+		if job == nil {
+			t.Fatalf("no Job for %s", sv)
+		}
+		job.Status.Succeeded = 1
+		if err := e.dc.Status().Update(e.ctx, job); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	e.cop.state = vmcopy.Running
+	e.rc.processOnce(e.ctx) // cycle 1: VM copy starts, plain Job created
+	finishJob(plain.Name)
+	e.cop.state = vmcopy.Done
+	e.tick() // VM copy moves to Sending
+	e.succeedJobs(t)
+	e.tick() // VM copy done
+	e.cop.state = vmcopy.Running
+	dueTick() // cycle 2: the plain Job of cycle 1 is recorded; VM copy starts again
+	if e.status(t, plain.Name).LastSyncTime == nil {
+		t.Fatal("expected the plain volume's first copy to be recorded")
+	}
+	e.cop.state = vmcopy.Done
+	e.tick()
+	e.succeedJobs(t)
+	e.tick()
+	e.cop.state = vmcopy.Running
+	dueTick() // cycle 3: the plain volume must get a new Job
+	if e.job(t, plain.Name) == nil {
+		t.Fatal("expected a new Job for the plain volume in the third cycle")
+	}
+}

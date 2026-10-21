@@ -11,6 +11,7 @@ Data protection strategy using the driver's snapshot, clone, group snapshot, and
 | [Volume Snapshots](#volume-snapshots) | Point-in-time | Minutes (copy speed) | Single PVC | Regular backups of individual volumes |
 | [Volume Clones](#volume-clones) | Point-in-time | Seconds (sync) to minutes (async) | Single PVC | Dev/test copies, pre-migration backup |
 | [Group Snapshots](#group-snapshots) | Coordinated point-in-time | Minutes | Multiple PVCs | Multi-volume application backups |
+| [Backups to a Snapshot Pool](#backups-to-a-snapshot-pool) | Schedule-based (minutes to hours) | Minutes to hours (copy speed) | Selected PVCs and VMs, all disks of a VM together | Keeping many moments of a volume or VM in the same region, on shares of their own |
 | [Cross-Region Replication](#cross-region-replication) | Schedule-based (minutes to hours) | Manual failover | Full pool or label-selected | Disaster recovery |
 | [Application-Level Backup](#application-level-backup) | Varies | Varies | Application-specific | Databases, VMs, crash-consistent workloads |
 
@@ -311,6 +312,58 @@ spec:
 ```
 
 The inconsistency window (time between first and last member copy) is tracked in `status.inconsistencyWindow`. For the smallest window, order PVCs from largest to smallest so the longest copy runs first.
+
+---
+
+## Backups to a Snapshot Pool
+
+A `BackupPolicy` backs up the PVCs and VMs you select into a pool that holds only backups. The pool has its own VPC file share, so losing or filling a data share does not take the backups with it. A running VM is backed up at one moment for all its disks, with the guest file systems frozen for a fraction of a second, and only changed blocks are copied after the first backup.
+
+```yaml
+apiVersion: storage.ibmcloud.io/v1alpha1
+kind: FileSharePool
+metadata: {name: backups}
+spec:
+  zone: eu-de-3
+  profile: dp2
+  shareSizeGB: 2000
+  iops: 3000
+  maxShares: 1          # one share for now
+  initialShares: 1
+  autoExpand: false
+---
+apiVersion: storage.ibmcloud.io/v1alpha1
+kind: BackupPolicy
+metadata: {name: nightly}
+spec:
+  snapshotPool: backups
+  schedule: 6h
+  keepFor: 14d
+  namespaces: [vms, apps]
+  selector:
+    matchLabels: {backup: "yes"}     # a label on the PVCs
+```
+
+Check it, and list the moments you can restore:
+
+```bash
+kubectl get backuppolicy nightly
+kubectl backup list --policy nightly
+```
+
+Restore a volume as it was at a moment, to a new PVC (the volume may be gone). A VM has one PVC for each disk: restore each disk at the same moment, then make a VM from the new PVCs.
+
+```bash
+kubectl backup restore --policy nightly --pvc vms/web-root --to vms/web-root-restored \
+  --moment 2026-10-20T09:00:00Z --wait
+```
+
+Things to know:
+- **Size the snapshot pool** for one whole copy of the selected data plus the changes kept for `keepFor`. A VM that rewrites half its disk a day, kept for 14 days, needs up to 7 extra disks of undo files. There is no check yet that the pool is full (issue #69), so watch its share.
+- A volume that is not a VM disk is synced with rsync and each sync is kept as a folder of hard links, so a backup of a running database is only as consistent as its files. Use the hooks of replication for such volumes.
+- Backups are in the same VPC as the data. They do not cover the loss of the VPC; use cross-region replication for that.
+- A volume that is deleted, or no longer matches the selector, keeps its backups until `keepFor` has passed since its last backup, and can be restored until then. Deleting a policy keeps its backups on the share; there is no command yet to remove them (issue #70).
+- A VM restored from an earlier moment may need its guest to run a file system check, as after a power loss, if the backup is `CrashConsistent`. A backup that says `FileSystemConsistent` does not.
 
 ---
 
