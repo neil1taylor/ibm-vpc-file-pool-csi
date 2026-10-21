@@ -169,3 +169,8 @@ A restored disk could be a new overlay file in the new folder, on top of the sna
 - Changed while building: replication makes a full copy after each snapshot instead of moving its change list to the new file. Moving it safely would need the change list and the snapshot in one QEMU step, which libvirt does not offer; a full copy is always correct.
 - Changed while building: a clone of a disk with snapshots is refused instead of flattened. Restoring a snapshot does the same job.
 - Changed while building: new files name their backing file by file name only, and the stopped-VM and restore Jobs run in KubeVirt's virt-launcher image (it has `qemu-img`), mount only the folders they need, and check the chain before they open it.
+- Changed after review: deleting a snapshot of a running VM no longer waits for the merge. The driver starts it, checks on it at each retry, and finishes it when QEMU is ready. While a merge or a Job changes a disk, every other snapshot or delete of that disk waits.
+- Changed after review: a Job changes a stopped VM's disk only when there is no VM pod and no VM instance for it, so a VM that is just starting is never touched.
+- Changed after review: if a snapshot command reports an error but the chain shows the snapshot was made, the snapshot counts as made (crash consistent). The new file is never deleted then.
+- Changed after review: a restore whose claim was deleted before it finished no longer blocks snapshot deletes.
+- The release test has a new stage 19 for instant snapshots. It runs when the gate is on; stage 06 (the QEMU copy) runs when it is off. The console tab, Windows, removing the hook and the gate-off fallback stay manual checks.
