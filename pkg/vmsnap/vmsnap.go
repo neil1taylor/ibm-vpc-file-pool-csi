@@ -19,6 +19,7 @@ package vmsnap
 
 import (
 	"context"
+	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -152,6 +153,11 @@ func (s *Snapshotter) Take(ctx context.Context, vm vmcopy.VM, volume, newFile st
 		}
 	}
 	res := &Result{Frozen: top.Name, FileSystemConsistent: true}
+	// OpenShift freezes the guest for a VM snapshot, and the VMI shows it
+	// late. A frozen guest agent refuses a second freeze, so ask it first.
+	if freeze && s.agentFrozen(ctx, vm) {
+		freeze = false
+	}
 	if freeze {
 		_, err = s.run(ctx, vm, append(args, "--quiesce")...)
 		if err != nil {
@@ -394,6 +400,19 @@ func (s *Snapshotter) Chain(ctx context.Context, vm vmcopy.VM, volume string) ([
 		return nil, fmt.Errorf("volume %q: %w %s/%s", volume, ErrNotADisk, vm.Namespace, vm.Name)
 	}
 	return d.chain, nil
+}
+
+// agentFrozen reports whether the guest agent says the guest file systems
+// are frozen. Any error means no: the snapshot then tries its own freeze.
+func (s *Snapshotter) agentFrozen(ctx context.Context, vm vmcopy.VM) bool {
+	out, err := s.run(ctx, vm, "virsh", "qemu-agent-command", vm.Domain(), `{"execute":"guest-fsfreeze-status"}`)
+	if err != nil {
+		return false
+	}
+	var reply struct {
+		Return string `json:"return"`
+	}
+	return json.Unmarshal([]byte(out), &reply) == nil && reply.Return == "frozen"
 }
 
 // isTop reports whether file is the top file of volume's chain.

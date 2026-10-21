@@ -27,6 +27,10 @@ type fakeLauncher struct {
 	backing map[string]string   // path -> backing file name, as written in the file
 
 	quiesceErr  string // snapshot-create-as --quiesce fails with this
+	// agentFrozen: someone else has frozen the guest. The guest agent then
+	// refuses every freeze, as qemu-ga does.
+	agentFrozen bool
+	agentDown   bool // the guest agent does not answer
 	snapshotErr string // snapshot-create-as fails with this
 	// snapshot-create-as makes the snapshot, then reports this error, as
 	// when the exec stream breaks after libvirt has done the work.
@@ -127,6 +131,17 @@ func (f *fakeLauncher) virsh(args []string, fail func(string) (string, string, e
 		return f.commit(args, fail)
 	case "blockjob":
 		return f.blockjob(args, fail)
+	case "qemu-agent-command":
+		if len(args) != 3 || args[1] != "vms_web" || args[2] != `{"execute":"guest-fsfreeze-status"}` {
+			return "", "", fmt.Errorf("bad qemu-agent-command args %v", args)
+		}
+		if f.agentDown {
+			return fail("error: Guest agent is not responding: QEMU guest agent is not connected")
+		}
+		if f.agentFrozen {
+			return `{"return":"frozen"}` + "\n", "", nil
+		}
+		return `{"return":"thawed"}` + "\n", "", nil
 	}
 	return "", "", fmt.Errorf("unknown virsh command %v", args)
 }
@@ -187,6 +202,9 @@ func (f *fakeLauncher) snapshot(args []string, fail func(string) (string, string
 		if !contains(args, flag) {
 			return "", "", fmt.Errorf("snapshot-create-as without %s: %v", flag, args)
 		}
+	}
+	if contains(args, "--quiesce") && f.agentFrozen {
+		return fail("error: internal error: unable to execute QEMU agent command 'guest-fsfreeze-freeze': Command guest-fsfreeze-freeze has been disabled: the command is not allowed")
 	}
 	if contains(args, "--quiesce") && f.quiesceErr != "" {
 		return fail(f.quiesceErr)
@@ -418,6 +436,38 @@ func TestTake_WithoutFreezeWhenTheGuestIsFrozenAlready(t *testing.T) {
 	}
 	if !res.FileSystemConsistent {
 		t.Error("a snapshot inside the caller's freeze is file-system consistent")
+	}
+}
+
+func TestTake_InsideAnotherFreezeIsFileSystemConsistent(t *testing.T) {
+	f := newFakeLauncher()
+	f.agentFrozen = true // OpenShift froze the guest for a VM snapshot
+	s := newTestSnapshotter(f)
+
+	res, err := s.Take(context.Background(), testVM, "rootdisk", "snap-1.qcow2", true)
+	if err != nil {
+		t.Fatalf("Take: %v", err)
+	}
+	if !res.FileSystemConsistent || res.FreezeError != "" {
+		t.Errorf("the guest is frozen, so the snapshot is file-system consistent, got %+v", res)
+	}
+	if strings.Contains(strings.Join(f.log, "\n"), "--quiesce") {
+		t.Error("must not ask for a second freeze")
+	}
+}
+
+func TestTake_AgentDownGivesACrashConsistentSnapshot(t *testing.T) {
+	f := newFakeLauncher()
+	f.agentDown = true
+	f.quiesceErr = "error: Guest agent is not responding: QEMU guest agent is not connected"
+	s := newTestSnapshotter(f)
+
+	res, err := s.Take(context.Background(), testVM, "rootdisk", "snap-1.qcow2", true)
+	if err != nil {
+		t.Fatalf("Take: %v", err)
+	}
+	if res.FileSystemConsistent {
+		t.Errorf("Result = %+v, want crash consistent", res)
 	}
 }
 
