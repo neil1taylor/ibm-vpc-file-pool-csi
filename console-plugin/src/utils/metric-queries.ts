@@ -12,4 +12,8 @@ export const metricQueries = {
   cloneMedian: `histogram_quantile(0.5, sum(rate(${METRICS.CLONE_DURATION}_bucket[1h])) by (le))`,
   apiP95Ms: `${apiP95} * 1000`,
   allocationP95Ms: `${allocationP95} * 1000`,
+  // This histogram is already in milliseconds.
+  groupSnapshotWindowP95Ms: p95(METRICS.GROUP_SNAPSHOT_INCONSISTENCY_WINDOW_MS, '5m', 'le'),
+  groupSnapshotMembersAvg: `sum(rate(${METRICS.GROUP_SNAPSHOT_MEMBER_COUNT}_sum[1h])) / sum(rate(${METRICS.GROUP_SNAPSHOT_MEMBER_COUNT}_count[1h]))`,
+  cdiLimitRaises1h: `sum(increase(${METRICS.CDI_COPY_LIMIT_RAISED_TOTAL}[1h]))`,
 };

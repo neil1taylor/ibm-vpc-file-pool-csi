@@ -8,7 +8,7 @@ Complete metrics reference, alerting rules, and dashboard templates for operatin
 
 The controller exposes Prometheus metrics on `:8080/metrics`. All metrics use the `vpc_file_pool_` or `pool_csi_` prefix and follow the [Prometheus naming conventions](https://prometheus.io/docs/practices/naming/).
 
-The driver emits 22 metrics across seven categories:
+The driver emits 25 metrics across eight categories:
 
 | Category | Metrics | Purpose |
 |----------|---------|---------|
@@ -19,6 +19,7 @@ The driver emits 22 metrics across seven categories:
 | Group Snapshots | 4 | Multi-PVC snapshot coordination |
 | Replication | 5 | Cross-region DR health |
 | CDI | 1 | CDI copy pod memory limit |
+| Backup | 3 | Backup policy health and age of backups |
 
 ---
 
@@ -28,7 +29,7 @@ The driver emits 22 metrics across seven categories:
 
 The Helm chart creates a `ServiceMonitor` for the controller when the cluster has the Prometheus Operator API (`monitoring.coreos.com/v1`). OpenShift has it. To turn it off, set `metrics.serviceMonitor.enabled=false`.
 
-The console plugin's charts read these metrics. Without the `ServiceMonitor`, they show no data.
+The console plugin's charts read these metrics. Without the `ServiceMonitor`, they show no data. The console queries 19 of the first 22 metrics on its other pages, and the other three are charted in the Monitoring tab's "Group Snapshot and CDI Activity" section; the VM copy metrics named in the VM-safe replication spec do not exist yet, so they have no panel.
 
 ### OpenShift User Workload Monitoring
 
@@ -166,6 +167,26 @@ kill %1
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
 | `vpc_file_pool_cdi_copy_limit_raised_total` | Counter | none | Times the controller raised the memory limit of CDI's copy pods (`HyperConverged` `spec.resourceRequirements.storageWorkloads`) to `cdi.copyPodMemoryLimit`. The controller also logs a warning each time. The first raise is normal. A later raise means something, such as an update of IBM's add-on, put the old value back. |
+
+### Backup Metrics
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `vpc_file_pool_backup_volumes` | Gauge | `policy` | Number of volumes a backup policy backs up. |
+| `vpc_file_pool_backup_stalest_age_seconds` | Gauge | `policy` | Age of the newest backup of the volume that was backed up longest ago. A volume that was never backed up counts from the time the policy was made. This is the RPO indicator of a backup policy. |
+| `vpc_file_pool_backup_oldest_age_seconds` | Gauge | `policy` | Age of the oldest backup the policy keeps. It should stay near `keepFor`. |
+
+Copy results of backups are in the replication metrics: the policies the controller makes are named `backup-<policy>-<source pool>`.
+
+Alert when a backup is late, using twice the schedule as the limit (here 12 hours for a 6-hour schedule):
+
+```yaml
+- alert: BackupLate
+  expr: vpc_file_pool_backup_stalest_age_seconds > 12 * 3600
+  for: 15m
+  annotations:
+    summary: "Backup policy {{ $labels.policy }} has a volume with no backup for over 12 hours"
+```
 
 ---
 

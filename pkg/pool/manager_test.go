@@ -198,6 +198,8 @@ type fakeK8sClient struct {
 	GetSnapshotErr      error
 	CreateSnapshotErr   error
 	DeleteSnapshotErr   error
+	// UpdateSnapshotStatusErr makes UpdateSnapshotStatus fail.
+	UpdateSnapshotStatusErr error
 }
 
 var _ = (interface {
@@ -298,6 +300,10 @@ func (f *fakeK8sClient) ListCloneSubVolumes(_ context.Context) ([]v1alpha1.SubVo
 		}
 	}
 	return result, nil
+}
+
+func (f *fakeK8sClient) HasOpenRestore(_ context.Context, _, _ string) (bool, error) {
+	return false, nil
 }
 
 func (f *fakeK8sClient) CreateSubVolume(_ context.Context, sv *v1alpha1.SubVolume) error {
@@ -447,6 +453,9 @@ func (f *fakeK8sClient) UpdateSnapshot(_ context.Context, snap *v1alpha1.Snapsho
 func (f *fakeK8sClient) UpdateSnapshotStatus(_ context.Context, snap *v1alpha1.Snapshot) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.UpdateSnapshotStatusErr != nil {
+		return f.UpdateSnapshotStatusErr
+	}
 	existing, ok := f.snapshots[snap.Name]
 	if !ok {
 		return fmt.Errorf("snapshot %q not found", snap.Name)
@@ -3709,5 +3718,24 @@ func TestCloneVolume_DoesNotRecordCloneDuration(t *testing.T) {
 	close(series)
 	if n := len(series); n != 0 {
 		t.Errorf("clone duration series = %d, want 0 before the copy runs", n)
+	}
+}
+
+func TestAllocate_RestorePendingSetsTheGateLabel(t *testing.T) {
+	k := newFakeK8sClient()
+	k.addPool(newTestPool("test-pool", "spread", 1000, newStableShare("share-1", "s1", 1000, 0, 0)))
+	mgr := newManagerForTest(k, fake.NewFakeVPCClient(), newFakeNFSOperations())
+
+	if _, err := mgr.Allocate(context.Background(), AllocationRequest{
+		PVName: testPVName, PVCName: "my-pvc", PVCNamespace: "default", PoolName: "test-pool", RequestedGB: 10, RestorePending: true,
+	}); err != nil {
+		t.Fatalf("Allocate failed: %v", err)
+	}
+	sv, err := k.GetSubVolume(context.Background(), testPVName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sv.Labels[RestorePendingLabel] != "true" {
+		t.Errorf("labels = %v: a volume made for a restore must be held back from its first moment", sv.Labels)
 	}
 }

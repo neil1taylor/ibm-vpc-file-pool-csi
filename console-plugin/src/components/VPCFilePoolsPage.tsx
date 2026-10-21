@@ -39,6 +39,15 @@ const SnapshotListPage = React.lazy(
 const SnapshotDetailsPage = React.lazy(
   () => import('./snapshot/SnapshotDetailsPage'),
 );
+const MigrateVolumesPage = React.lazy(
+  () => import('./migrate/MigrateVolumesPage'),
+);
+const CloneVolumePage = React.lazy(
+  () => import('./subvolume/CloneVolumePage'),
+);
+const RestoreSnapshotPage = React.lazy(
+  () => import('./snapshot/RestoreSnapshotPage'),
+);
 const SnapshotCreatePage = React.lazy(
   () => import('./snapshot/SnapshotCreatePage'),
 );
@@ -119,6 +128,9 @@ const VPCFilePoolsPage: React.FC = () => {
           <Route exact path={ROUTES.SNAPSHOT_CREATE} component={SnapshotCreatePage} />
           <Route exact path={ROUTES.GROUP_SNAPSHOT_CREATE} component={VolumeGroupSnapshotCreatePage} />
           <Route exact path={ROUTES.REPLICATION_CREATE} component={ReplicationPolicyCreatePage} />
+          <Route exact path={ROUTES.SNAPSHOT_RESTORE} component={RestoreSnapshotPage} />
+          <Route exact path={ROUTES.MIGRATE} component={MigrateVolumesPage} />
+          <Route exact path={ROUTES.SUBVOLUME_CLONE} component={CloneVolumePage} />
           {/* Detail pages */}
           <Route exact path={ROUTES.POOL_DETAIL} component={FileSharePoolDetailsPage} />
           <Route exact path={ROUTES.SUBVOLUME_DETAIL} component={SubVolumeDetailsPage} />

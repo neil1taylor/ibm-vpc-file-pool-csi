@@ -54,6 +54,17 @@ wait_until() {
 # rt_labels — the label every object of this run carries, for the final sweep.
 rt_labels() { echo "${RT_LABEL}=${RT_ID}"; }
 
+# first_fail_line LOG — print the first "FAIL: ..." line of an end-to-end
+# script's log, without its time stamp. Exit 1 if there is none.
+first_fail_line() {
+    local line
+    line=$(grep -m1 -o 'FAIL: .*' "$1" 2>/dev/null) || return 1
+    echo "$line"
+}
+
+# log_has_pass LOG TEXT — did an end-to-end script log a "PASS: ..." line that contains TEXT?
+log_has_pass() { grep -F 'PASS: ' "$1" 2>/dev/null | grep -qF -- "$2"; }
+
 # --- Cluster helpers ---------------------------------------------------------
 
 RT_DRIVER_NS="${RT_DRIVER_NS:-kube-system}"

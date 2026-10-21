@@ -216,6 +216,37 @@ func waitForPolicySync(t *testing.T, k *replFakeK8sClient, policyName string, ti
 	}
 }
 
+// waitForSubVolumesSynced polls until the policy shows a good sync for each of
+// the given number of SubVolumes. The policy's own LastSyncTime is set as soon
+// as one SubVolume has synced, so it is not proof that all have.
+func waitForSubVolumesSynced(t *testing.T, k *replFakeK8sClient, policyName string, count int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.After(timeout)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for %d SubVolumes of policy %q to sync", count, policyName)
+		case <-ticker.C:
+			rp := k.getPolicy(policyName)
+			if rp == nil || len(rp.Status.SubVolumeStatuses) != count {
+				continue
+			}
+			synced := 0
+			for _, svs := range rp.Status.SubVolumeStatuses {
+				if svs.LastSyncTime != nil && svs.LastError == "" {
+					synced++
+				}
+			}
+			if synced == count {
+				return
+			}
+		}
+	}
+}
+
 // waitForConsecutiveFailures polls until the policy reaches the expected failure count.
 func waitForConsecutiveFailures(t *testing.T, k *replFakeK8sClient, policyName string, minFailures int32, timeout time.Duration) {
 	t.Helper()
@@ -461,7 +492,7 @@ func TestReplicationController_BasicSyncCycle(t *testing.T) {
 	simulateReplJobSucceeded(t, dc, "prod-to-dr", "pvc-22222222-2222-2222-2222-222222222222")
 
 	// Wait for sync to complete.
-	waitForPolicySync(t, k, "prod-to-dr", 5*time.Second)
+	waitForSubVolumesSynced(t, k, "prod-to-dr", 2, 5*time.Second)
 
 	// Verify policy status.
 	rp := k.getPolicy("prod-to-dr")
@@ -2345,5 +2376,41 @@ func TestReplicationController_ResumeResetsFailures(t *testing.T) {
 	}
 	if rp.Status.ConsecutiveFailures != 0 {
 		t.Errorf("expected consecutive failures reset to 0 on resume, got %d", rp.Status.ConsecutiveFailures)
+	}
+}
+
+// The webhook can be switched off, so the Job script must be safe on its own:
+// a hostile rsync option or base path must reach the shell only as quoted text.
+func TestReplicationController_JobScriptQuotesHostileValues(t *testing.T) {
+	k := newReplFakeK8sClient()
+	dc := newReplFakeDirectClient()
+	nfs := newFakeNFSOperations()
+
+	sv1 := newTestSubVolume("pvc-11111111-1111-1111-1111-111111111111", "prod-pool", "share-1", 10)
+	k.addSubVolume(sv1)
+
+	policy := newTestReplicationPolicy("hostile", "prod-pool", "1ms")
+	policy.Spec.RsyncOptions = []string{"--compress; touch /pwned #"}
+	policy.Spec.DestinationBasePath = "/pvcs\"; touch /pwned2; \""
+	k.addPolicy(policy)
+
+	rc := newReplController(k, dc, nfs)
+	ctx := context.Background()
+	rc.processOnce(ctx)
+
+	jobName := replJobName("hostile", "pvc-11111111-1111-1111-1111-111111111111")
+	job := &batchv1.Job{}
+	if err := dc.Get(ctx, types.NamespacedName{Namespace: replJobNamespace, Name: jobName}, job); err != nil {
+		// Refusing to make the Job is also safe.
+		return
+	}
+	script := job.Spec.Template.Spec.Containers[0].Command[2]
+	for _, want := range []string{`'--compress; touch /pwned #'`, `'/dest/pvcs"; touch /pwned2; "`} {
+		if !containsSubstring(script, want) {
+			t.Errorf("expected the quoted form %s in the script, got: %s", want, script)
+		}
+	}
+	if containsSubstring(script, `"/dest/pvcs"; touch`) {
+		t.Errorf("base path reached the shell inside double quotes: %s", script)
 	}
 }

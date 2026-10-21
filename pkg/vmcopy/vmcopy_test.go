@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 	"sync"
@@ -126,9 +127,30 @@ func (f *fakeLauncher) Exec(_ context.Context, ns, pod, container string, cmd []
 		}
 		return "", "", nil
 	case "find":
-		// find <dir> -maxdepth 1 -name .repl-staging-*.qcow2 -delete
+		// find <dir> -maxdepth 1 -name <glob> [! -name <glob>] -delete
+		var want, skip []string
+		for i := 2; i < len(cmd); i++ {
+			switch {
+			case cmd[i] == "-name" && i > 0 && cmd[i-1] == "!":
+				skip = append(skip, cmd[i+1])
+			case cmd[i] == "-name":
+				want = append(want, cmd[i+1])
+			}
+		}
 		for p := range f.files {
-			if strings.HasPrefix(p, cmd[1]+"/.repl-staging-") {
+			dir, name := path.Split(p)
+			if strings.TrimSuffix(dir, "/") != cmd[1] {
+				continue
+			}
+			match := func(globs []string) bool {
+				for _, g := range globs {
+					if ok, _ := path.Match(g, name); ok {
+						return true
+					}
+				}
+				return false
+			}
+			if match(want) && !match(skip) {
 				delete(f.files, p)
 			}
 		}
@@ -693,5 +715,105 @@ func TestRemoveStale_KeepsTheBaseList(t *testing.T) {
 	want := map[string]bool{"repl-a1": true, "backup-tool": true}
 	if fmt.Sprint(f.bitmaps[node]) != fmt.Sprint(want) {
 		t.Errorf("bitmaps = %v, want %v", f.bitmaps[node], want)
+	}
+}
+
+func TestCheckIdle_ReportsABusyVMAndTouchesNothing(t *testing.T) {
+	f := newFakeLauncher()
+	c := newTestCopier(f)
+	ctx := context.Background()
+	f.files["/var/run/kubevirt-private/vmi-disks/rootdisk/.repl-staging-old.qcow2"] = true
+	f.nodes["repl-old-t0"] = true
+	if err := c.CheckIdle(ctx, testVM); err != nil {
+		t.Fatalf("CheckIdle on an idle VM: %v", err)
+	}
+	if !f.files["/var/run/kubevirt-private/vmi-disks/rootdisk/.repl-staging-old.qcow2"] || !f.nodes["repl-old-t0"] {
+		t.Error("CheckIdle must only look: it removed something")
+	}
+	if _, err := c.Start(ctx, testVM, []string{"rootdisk"}, StartOptions{ID: "b2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.CheckIdle(ctx, testVM); !errors.Is(err, ErrBusy) {
+		t.Errorf("CheckIdle while a copy runs = %v, want ErrBusy", err)
+	}
+}
+
+func TestRemoveStale_RefusalIsErrBusy(t *testing.T) {
+	f := newFakeLauncher()
+	c := newTestCopier(f)
+	ctx := context.Background()
+	if _, err := c.Start(ctx, testVM, []string{"rootdisk"}, StartOptions{ID: "b2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RemoveStale(ctx, testVM, []string{"rootdisk"}, ""); !errors.Is(err, ErrBusy) {
+		t.Errorf("RemoveStale while a copy runs = %v, want ErrBusy", err)
+	}
+}
+
+const (
+	fakeVolDir      = "/var/run/kubevirt-private/vmi-disks/rootdisk"
+	snapStagingFile = fakeVolDir + "/.repl-staging-snapabc.qcow2"
+	oldStagingFile  = fakeVolDir + "/.repl-staging-old.qcow2"
+)
+
+// RemoveStale belongs to replication. A copy that a snapshot made is not its
+// to remove: the snapshot's staging file may wait for its apply Job.
+func TestRemoveStale_LeavesSnapshotCopies(t *testing.T) {
+	f := newFakeLauncher()
+	c := newTestCopier(f)
+	node := f.nodeOf("rootdisk")
+	f.bitmaps[node] = map[string]bool{"repl-snapabc": true, "repl-old": true}
+	f.files[snapStagingFile] = true
+	f.files[oldStagingFile] = true
+	f.nodes["repl-snapabc-t0"] = true
+	f.nodes["repl-old-t0"] = true
+
+	if err := c.RemoveStale(context.Background(), testVM, []string{"rootdisk"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if !f.files[snapStagingFile] || !f.nodes["repl-snapabc-t0"] || !f.bitmaps[node]["repl-snapabc"] {
+		t.Errorf("RemoveStale removed what a snapshot copy owns: files %v nodes %v bitmaps %v", f.files, f.nodes, f.bitmaps[node])
+	}
+	if f.files[oldStagingFile] || f.nodes["repl-old-t0"] || f.bitmaps[node]["repl-old"] {
+		t.Errorf("RemoveStale kept the stale replication leftovers: files %v nodes %v bitmaps %v", f.files, f.nodes, f.bitmaps[node])
+	}
+}
+
+// CleanStaleCopies belongs to snapshots. It removes only what snapshot copies
+// left, never replication's staging files, nodes or change lists: a
+// replication copy that waits for its apply Job has no QEMU job to show it.
+func TestCleanStaleCopies_OnlyRemovesSnapshotLeftovers(t *testing.T) {
+	f := newFakeLauncher()
+	c := newTestCopier(f)
+	ctx := context.Background()
+	node := f.nodeOf("rootdisk")
+	f.bitmaps[node] = map[string]bool{"repl-snapabc": true, "repl-a1": true, "repl-old": true}
+	f.files[snapStagingFile] = true
+	f.files[oldStagingFile] = true
+	f.files[fakeVolDir+"/disk.img"] = true
+	f.nodes["repl-snapabc-t0"] = true
+	f.nodes["repl-old-t0"] = true
+
+	if err := c.CleanStaleCopies(ctx, testVM, []string{"rootdisk"}); err != nil {
+		t.Fatalf("CleanStaleCopies: %v", err)
+	}
+	if f.files[snapStagingFile] || f.nodes["repl-snapabc-t0"] || f.bitmaps[node]["repl-snapabc"] {
+		t.Errorf("the snapshot leftovers must go: files %v nodes %v bitmaps %v", f.files, f.nodes, f.bitmaps[node])
+	}
+	if !f.files[oldStagingFile] || !f.nodes["repl-old-t0"] || !f.bitmaps[node]["repl-a1"] || !f.bitmaps[node]["repl-old"] {
+		t.Errorf("CleanStaleCopies touched replication's copies: files %v nodes %v bitmaps %v", f.files, f.nodes, f.bitmaps[node])
+	}
+	if !f.files[fakeVolDir+"/disk.img"] {
+		t.Error("the disk was removed")
+	}
+
+	if _, err := c.Start(ctx, testVM, []string{"rootdisk"}, StartOptions{ID: "snapb2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.CleanStaleCopies(ctx, testVM, []string{"rootdisk"}); !errors.Is(err, ErrBusy) {
+		t.Errorf("CleanStaleCopies while a copy runs = %v, want ErrBusy", err)
+	}
+	if !f.files[fakeVolDir+"/.repl-staging-snapb2.qcow2"] {
+		t.Error("the staging file of a running copy was removed")
 	}
 }

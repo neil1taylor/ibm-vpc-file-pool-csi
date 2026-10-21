@@ -18,11 +18,8 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -43,6 +40,7 @@ const (
 	qemuUID = 107
 
 	vmMovingMessage = "copy waits: the VM is moving to another worker"
+	vmBusyMessage   = "copy waits: another copy of this VM is running"
 )
 
 // VMCopier takes copies of running VM disks. pkg/vmcopy implements it.
@@ -53,6 +51,10 @@ type VMCopier interface {
 	Commit(ctx context.Context, vm vmcopy.VM, cp *vmcopy.Copy) error
 	Cancel(ctx context.Context, vm vmcopy.VM, cp *vmcopy.Copy) error
 	RemoveStale(ctx context.Context, vm vmcopy.VM, volumes []string, keepBitmap string) error
+	// CleanStaleCopies removes staging files and nodes that an earlier copy
+	// left, keeps every change list, and returns vmcopy.ErrBusy while a copy
+	// runs in the VM.
+	CleanStaleCopies(ctx context.Context, vm vmcopy.VM, volumes []string) error
 }
 
 // SetVMCopier turns on copies of running VM disks in direct NFS mode. Without
@@ -60,8 +62,6 @@ type VMCopier interface {
 func (rc *ReplicationController) SetVMCopier(c VMCopier) {
 	rc.vmCopier = c
 }
-
-var vmimListGVK = schema.GroupVersionKind{Group: "kubevirt.io", Version: "v1", Kind: "VirtualMachineInstanceMigrationList"}
 
 // vmCopyResult is what processVMVolumes did.
 type vmCopyResult struct {
@@ -214,6 +214,13 @@ func (rc *ReplicationController) startVMCopy(ctx context.Context, policy *v1alph
 		}
 	}
 	if err = rc.vmCopier.RemoveStale(ctx, vm, g.volumes, base); err != nil {
+		if errors.Is(err, vmcopy.ErrBusy) {
+			// A snapshot copies this VM now. Wait; this is not a failed cycle.
+			for _, sv := range g.members {
+				res.statuses = append(res.statuses, vmStatus(prev, sv.Name, vmBusyMessage))
+			}
+			return
+		}
 		fail(fmt.Sprintf("clear an earlier copy: %v", err))
 		return
 	}
@@ -442,28 +449,12 @@ func (rc *ReplicationController) advanceVMCopy(ctx context.Context, policy *v1al
 // sameVMPod reports whether the VM pod of a copy still runs, so QEMU still
 // has the copy's change lists.
 func (rc *ReplicationController) sameVMPod(ctx context.Context, ns string, st *v1alpha1.VMCopyState) bool {
-	pod := &corev1.Pod{}
-	if err := rc.directClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: st.PodName}, pod); err != nil {
-		return false
-	}
-	return string(pod.UID) == st.PodUID
+	return samePod(ctx, rc.directClient, ns, st.PodName, st.PodUID)
 }
 
 // vmMoving reports whether a live migration of the VMI is requested or running.
 func (rc *ReplicationController) vmMoving(ctx context.Context, namespace, vmi string) (bool, error) {
-	list := &unstructured.UnstructuredList{}
-	list.SetGroupVersionKind(vmimListGVK)
-	if err := rc.directClient.List(ctx, list, client.InNamespace(namespace)); err != nil {
-		return false, fmt.Errorf("listing VM migrations in %s: %w", namespace, err)
-	}
-	for _, m := range list.Items {
-		name, _, _ := unstructured.NestedString(m.Object, "spec", "vmiName")
-		phase, _, _ := unstructured.NestedString(m.Object, "status", "phase")
-		if name == vmi && phase != "Succeeded" && phase != "Failed" {
-			return true, nil
-		}
-	}
-	return false, nil
+	return vmInstanceMoving(ctx, rc.directClient, namespace, vmi)
 }
 
 // advanceVMCopies moves copies of running VM disks forward between scheduled
