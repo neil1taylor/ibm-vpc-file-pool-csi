@@ -156,6 +156,8 @@ func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (*Allocat
 }
 ```
 
+Never hold the Manager's lock while a call waits on something slow: a command in a VM pod, a Job, or many Kubernetes API calls. Every other volume would wait behind it. Snapshot, restore and clone calls hold the lock of the one volume they change (`volumeLocks` in `pkg/pool/volume_locks.go`) for their whole run, and take the Manager's lock only for the short pool bookkeeping, on a fresh copy of the pool (`bookShare`, `unbookShare`). Lock order: a volume lock, then the Manager's lock, then `vmMu`.
+
 ### Path Validation (CRITICAL)
 
 Any path derived from user input or volume context MUST be validated before use:

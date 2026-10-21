@@ -855,10 +855,7 @@ func (m *Manager) deleteInstantSnapshot(ctx context.Context, snap *v1alpha1.Snap
 	if err = m.k8sClient.DeleteSnapshot(ctx, snap.Name); err != nil {
 		return fmt.Errorf("delete Snapshot CR: %w", err)
 	}
-	m.chargeShare(pool, snap.Spec.ShareID, -snapshotChargeGB(snap))
-	if err := m.k8sClient.UpdateFileSharePoolStatus(ctx, pool); err != nil {
-		klog.ErrorS(err, "Failed to update pool status after snapshot deletion", "pool", pool.Name)
-	}
+	m.unbookShare(ctx, pool.Name, snap.Spec.ShareID, snapshotChargeGB(snap))
 	klog.V(2).InfoS("Deleted instant snapshot", "snapshot", snap.Name, "pool", pool.Name)
 	return nil
 }

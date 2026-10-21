@@ -37,6 +37,22 @@ type fakeInstant struct {
 	moment  time.Time
 	// mergeRuns is how many Merge calls report a running merge before it is done.
 	mergeRuns int
+	// gate, when set, holds every Take and Merge until it is closed, after
+	// it reports the call on entered: a slow command in the VM pod.
+	gate    chan struct{}
+	entered chan string
+}
+
+// wait holds a call while the gate is set.
+func (f *fakeInstant) wait(call string) {
+	f.mu.Lock()
+	gate, entered := f.gate, f.entered
+	f.mu.Unlock()
+	if gate == nil {
+		return
+	}
+	entered <- call
+	<-gate
 }
 
 type fakeTake struct {
@@ -66,6 +82,7 @@ func files(names []string) []vmsnap.File {
 }
 
 func (f *fakeInstant) Take(_ context.Context, vm vmcopy.VM, volume, newFile string, freeze bool) (*vmsnap.Result, error) {
+	f.wait("take " + newFile)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.takes = append(f.takes, fakeTake{vm, volume, newFile, freeze})
@@ -81,6 +98,7 @@ func (f *fakeInstant) Take(_ context.Context, vm vmcopy.VM, volume, newFile stri
 }
 
 func (f *fakeInstant) Merge(_ context.Context, _ vmcopy.VM, volume, file, child string) ([]vmsnap.File, error) {
+	f.wait("merge " + child)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.merges = append(f.merges, [2]string{file, child})
