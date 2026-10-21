@@ -296,8 +296,19 @@ func (m *Manager) startVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, snap
 		return
 	}
 	target := vmcopy.VM{Namespace: pod.Namespace, Pod: pod.Name, Name: vmi}
-	// Clear what an earlier try left, but keep every change list: the one
-	// that replication keeps for this VM must stay.
+	// Snapshots of one VM take turns: a copy that waits for its apply Job has
+	// no QEMU job, and the next snapshot's cleanup must not remove its file.
+	other, err := m.otherSnapshotCopying(ctx, snap, pod)
+	if err != nil {
+		m.waitVMSnapshot(ctx, snap, fmt.Sprintf("check other snapshots: %v", err))
+		return
+	}
+	if other != "" {
+		m.waitVMSnapshot(ctx, snap, fmt.Sprintf("copy waits: another snapshot of this VM (%s) is being copied", other))
+		return
+	}
+	// Clear what earlier snapshot copies left. Replication's copies and change
+	// lists stay: the change list that replication keeps for this VM must live.
 	if err := vm.copier.CleanStaleCopies(ctx, target, []string{volume}); err != nil {
 		if errors.Is(err, vmcopy.ErrBusy) {
 			m.waitVMSnapshot(ctx, snap, vmBusyMessage)
@@ -306,7 +317,7 @@ func (m *Manager) startVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, snap
 		}
 		return
 	}
-	id := strconv.FormatInt(now.UnixNano(), 36)
+	id := newSnapshotCopyID(now)
 	cp, err := vm.copier.Start(ctx, target, []string{volume}, vmcopy.StartOptions{Speed: snapshotSpeedMBps(snap) << 20, ID: id})
 	if err != nil {
 		m.vmSnapshotTryFailed(ctx, snap, fmt.Sprintf("start the VM disk copy: %v", err))
@@ -332,6 +343,38 @@ func (m *Manager) startVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, snap
 	snap.Status.VMCopyRetryAfter = nil
 	snap.Status.Message = ""
 	m.saveSnapshotStatus(ctx, snap)
+}
+
+// newSnapshotCopyID makes the id of a copy. The prefix marks it as a snapshot
+// copy, so replication's cleanup leaves it alone. Ids are at most 16 characters.
+func newSnapshotCopyID(now time.Time) string {
+	t := strconv.FormatInt(now.UnixNano(), 36)
+	if n := 16 - len(vmcopy.SnapshotIDPrefix); len(t) > n {
+		t = t[len(t)-n:]
+	}
+	return vmcopy.SnapshotIDPrefix + t
+}
+
+// otherSnapshotCopying returns the name of another snapshot whose copy of the
+// same VM pod is in progress, or "".
+func (m *Manager) otherSnapshotCopying(ctx context.Context, snap *v1alpha1.Snapshot, pod *corev1.Pod) (string, error) {
+	pools, err := m.k8sClient.ListFileSharePools(ctx)
+	if err != nil {
+		return "", err
+	}
+	for i := range pools {
+		snaps, err := m.k8sClient.ListSnapshots(ctx, pools[i].Name)
+		if err != nil {
+			return "", err
+		}
+		for j := range snaps {
+			o := &snaps[j]
+			if o.Name != snap.Name && o.Status.VMCopy != nil && o.Status.VMCopy.PodName == pod.Name {
+				return o.Name, nil
+			}
+		}
+	}
+	return "", nil
 }
 
 // vmOfCopy returns the VM and the Copy that a Snapshot's state names.

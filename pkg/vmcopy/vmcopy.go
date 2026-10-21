@@ -39,6 +39,11 @@ const (
 // after the VM restarted or moved. The caller makes a full copy instead.
 var ErrBaseLost = errors.New("the change list of the last copy is gone")
 
+// SnapshotIDPrefix starts the id of every copy that a snapshot makes. Ids
+// name the staging file, block nodes, jobs and change list of a copy, so the
+// prefix tells snapshot copies and replication copies apart.
+const SnapshotIDPrefix = "snap"
+
 // ErrBusy means a copy is still running in the VM, so no other copy can start.
 var ErrBusy = errors.New("a copy is already running in the VM")
 
@@ -439,27 +444,35 @@ func (c *Copier) CheckIdle(ctx context.Context, vm VM) error {
 // the change list keepBitmap, the base of the next change copy. It refuses
 // while any copy runs in the VM.
 func (c *Copier) RemoveStale(ctx context.Context, vm VM, volumes []string, keepBitmap string) error {
-	return c.removeStale(ctx, vm, volumes, true, keepBitmap)
+	return c.removeStale(ctx, vm, volumes, false, keepBitmap)
 }
 
-// CleanStaleCopies deletes staging files and block nodes that an earlier
-// copy left behind, and keeps every change list: the change list of another
-// copy, such as replication's, is not ours to remove. It refuses with ErrBusy
-// while any copy runs in the VM.
+// CleanStaleCopies deletes what earlier snapshot copies left behind: their
+// staging files, block nodes and change lists. It touches nothing that
+// replication made, and RemoveStale touches nothing that a snapshot made, so
+// neither can delete a staging file that the other's Job still needs. A copy
+// in that wait has no QEMU job, so QEMU cannot show it. It refuses with
+// ErrBusy while any copy runs in the VM.
 func (c *Copier) CleanStaleCopies(ctx context.Context, vm VM, volumes []string) error {
-	return c.removeStale(ctx, vm, volumes, false, "")
+	return c.removeStale(ctx, vm, volumes, true, "")
 }
 
-func (c *Copier) removeStale(ctx context.Context, vm VM, volumes []string, dropBitmaps bool, keepBitmap string) error {
+// removeStale removes the leftovers of one kind of copy: snapshot copies
+// (their copy ids start with SnapshotIDPrefix) or all others.
+func (c *Copier) removeStale(ctx context.Context, vm VM, volumes []string, snapshots bool, keepBitmap string) error {
 	if err := c.CheckIdle(ctx, vm); err != nil {
 		return err
+	}
+	// ours reports whether a name made by a copy belongs to the kind we clean.
+	ours := func(name, prefix string) bool {
+		return strings.HasPrefix(name, prefix) && strings.HasPrefix(strings.TrimPrefix(name, prefix), SnapshotIDPrefix) == snapshots
 	}
 	nodes, err := c.namedNodes(ctx, vm)
 	if err != nil {
 		return err
 	}
 	for _, n := range nodes {
-		if strings.HasPrefix(n, "repl-") {
+		if ours(n, "repl-") {
 			if _, err := c.qmp(ctx, vm, "blockdev-del", map[string]any{"node-name": n}); err != nil {
 				return fmt.Errorf("removing block node %s: %w", n, err)
 			}
@@ -472,15 +485,19 @@ func (c *Copier) removeStale(ctx context.Context, vm VM, volumes []string, dropB
 		}
 		disks = append(disks, Disk{Volume: v})
 	}
-	if dropBitmaps {
-		if err := c.removeBitmaps(ctx, vm, disks, func(name string) bool {
-			return strings.HasPrefix(name, bitmapPrefix) && name != keepBitmap
-		}); err != nil {
-			return err
-		}
+	if err := c.removeBitmaps(ctx, vm, disks, func(name string) bool {
+		return ours(name, bitmapPrefix) && name != keepBitmap
+	}); err != nil {
+		return err
 	}
 	for _, v := range volumes {
-		if _, err := c.run(ctx, vm, "find", vmiDisksDir+"/"+v, "-maxdepth", "1", "-name", StagingPrefix+"*.qcow2", "-delete"); err != nil {
+		args := []string{"find", vmiDisksDir + "/" + v, "-maxdepth", "1"}
+		if snapshots {
+			args = append(args, "-name", StagingPrefix+SnapshotIDPrefix+"*.qcow2")
+		} else {
+			args = append(args, "-name", StagingPrefix+"*.qcow2", "!", "-name", StagingPrefix+SnapshotIDPrefix+"*")
+		}
+		if _, err := c.run(ctx, vm, append(args, "-delete")...); err != nil {
 			return fmt.Errorf("removing staging files of %s: %w", v, err)
 		}
 	}

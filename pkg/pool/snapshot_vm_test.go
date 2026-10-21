@@ -152,6 +152,12 @@ func TestAdvanceVMSnapshots_FullRunToReady(t *testing.T) {
 	if st.base != "" {
 		t.Errorf("base = %q: a snapshot is always a full copy", st.base)
 	}
+	if !strings.HasPrefix(st.id, vmcopy.SnapshotIDPrefix) {
+		t.Errorf("copy id %q must start with %q, so replication leaves the copy alone", st.id, vmcopy.SnapshotIDPrefix)
+	}
+	if len(st.id) > 16 {
+		t.Errorf("copy id %q is longer than the 16 characters vmcopy accepts", st.id)
+	}
 	if e.cop.removeStale != 0 {
 		t.Error("a snapshot must not remove the change lists of other copies")
 	}
@@ -537,5 +543,35 @@ func TestRunVMSnapshots_AdvancesOnATimerAndStopsWithItsContext(t *testing.T) {
 	}
 	if e.cop.startCount() == 0 {
 		t.Error("the loop never started the copy")
+	}
+}
+
+func TestAdvanceVMSnapshots_OneSnapshotCopyPerVM(t *testing.T) {
+	e := newVMSnapEnv(t)
+	e.startVM()
+	e.create(nil)
+	if _, err := e.mgr.CreateSnapshot(e.ctx, "second-snapshot", "test-pool/share-1/"+testPVName, nil); err != nil {
+		t.Fatal(err)
+	}
+	e.tick()
+	if len(e.cop.starts) != 1 {
+		t.Fatalf("starts = %d after the first pass, want 1: a second snapshot of the same VM must wait", len(e.cop.starts))
+	}
+	waiting := e.k.getSnapshot(vmSnapName)
+	if waiting.Status.VMCopy != nil {
+		waiting = e.k.getSnapshot("second-snapshot")
+	}
+	if !strings.Contains(waiting.Status.Message, "another snapshot") {
+		t.Errorf("the waiting snapshot says %q, want it to name the other snapshot", waiting.Status.Message)
+	}
+
+	// When the first is ready, the second starts.
+	e.cop.state = vmcopy.Done
+	e.tick()
+	e.tick()
+	e.cop.state = vmcopy.Running
+	e.tick()
+	if len(e.cop.starts) != 2 {
+		t.Errorf("starts = %d, want the second copy to start once the first snapshot was ready", len(e.cop.starts))
 	}
 }
