@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,7 +31,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/util/homedir"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -149,14 +147,12 @@ func parseFlags(args []string) map[string]string {
 }
 
 func buildClient(kubeconfig string) (client.Client, error) {
-	if kubeconfig == "" {
-		if home := homedir.HomeDir(); home != "" {
-			kubeconfig = filepath.Join(home, ".kube", "config")
-		}
-	}
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	// Without --kubeconfig, use the KUBECONFIG variable, then ~/.kube/config, as kubectl does.
+	rules := clientcmd.NewDefaultClientConfigLoadingRules()
+	rules.ExplicitPath = kubeconfig
+	config, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, &clientcmd.ConfigOverrides{}).ClientConfig()
 	if err != nil {
-		return nil, fmt.Errorf("failed to build kubeconfig from %s: %w", kubeconfig, err)
+		return nil, fmt.Errorf("failed to build kubeconfig: %w", err)
 	}
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
