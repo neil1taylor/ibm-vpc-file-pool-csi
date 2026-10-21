@@ -96,11 +96,14 @@ func (r *ShareJobRunner) RunChainScript(ctx context.Context, key string, folders
 		return false, errors.New("no virt-launcher image set for VM disk chain Jobs")
 	}
 	var shares []ShareMount
+	// The root step runs in the runner's own image: the virt-launcher image
+	// only ever runs as the QEMU user.
 	shape := jobShape{
 		image:      r.launcherImage,
 		command:    []string{"/bin/sh", "-c", script},
 		runAsUser:  qemuUID,
 		initScript: initScript,
+		initImage:  r.image,
 	}
 	for i, f := range folders {
 		if err := validateSharePath(f.Path); err != nil {
@@ -135,6 +138,8 @@ type jobShape struct {
 	command    []string
 	runAsUser  int64
 	initScript string
+	// initImage runs initScript; empty means image.
+	initImage string
 	// folders, if set, replace the share mounts: each mounts one folder of
 	// a share.
 	folders []folderMount
@@ -329,7 +334,7 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 	if shape.initScript != "" {
 		initContainers = []corev1.Container{{
 			Name:            "prepare",
-			Image:           shape.image,
+			Image:           orDefault(shape.initImage, shape.image),
 			Command:         []string{"/bin/sh", "-c", shape.initScript},
 			SecurityContext: &corev1.SecurityContext{RunAsUser: int64Ptr(0)},
 			Resources:       resources,

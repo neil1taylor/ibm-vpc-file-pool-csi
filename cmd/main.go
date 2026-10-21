@@ -404,7 +404,7 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 	if vmSnapshots.method == "auto" {
 		image := vmSnapshots.launcherImage
 		if image == "" {
-			image = discoverLauncherImage(signalCtx, clientset)
+			image = discoverLauncherImage(signalCtx, clientset, replClient)
 		}
 		if image == "" {
 			klog.InfoS("No KubeVirt virt-launcher image found; VM disk snapshots are copies")

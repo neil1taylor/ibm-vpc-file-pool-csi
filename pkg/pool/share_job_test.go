@@ -453,7 +453,7 @@ func TestShareJobRunner_RunChainScript(t *testing.T) {
 	if *spec.SecurityContext.RunAsUser != qemuUID || *spec.SecurityContext.RunAsGroup != qemuUID {
 		t.Errorf("the Job must run as the QEMU user")
 	}
-	if len(spec.InitContainers) != 1 || *spec.InitContainers[0].SecurityContext.RunAsUser != 0 ||
+	if len(spec.InitContainers) != 1 || *spec.InitContainers[0].SecurityContext.RunAsUser != 0 || spec.InitContainers[0].Image == mainC.Image ||
 		!strings.Contains(strings.Join(spec.InitContainers[0].Command, " "), "mkdir -p /vol1/x") {
 		t.Errorf("init containers = %+v", spec.InitContainers)
 	}
