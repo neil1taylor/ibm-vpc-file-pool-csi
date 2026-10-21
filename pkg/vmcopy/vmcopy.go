@@ -176,7 +176,7 @@ func (c *Copier) Start(ctx context.Context, vm VM, volumes []string, opts StartO
 	}
 	var found []disk
 	for _, v := range volumes {
-		d, ok := devs[vmiDisksDir+"/"+v+"/disk.img"]
+		d, ok := devs[v]
 		if !ok {
 			return nil, fmt.Errorf("volume %q is not a disk of VM %s/%s", v, vm.Namespace, vm.Name)
 		}
@@ -384,7 +384,7 @@ func (c *Copier) removeBitmaps(ctx context.Context, vm VM, disks []Disk, match f
 		return err
 	}
 	for _, d := range disks {
-		dev, ok := devs[vmiDisksDir+"/"+d.Volume+"/disk.img"]
+		dev, ok := devs[d.Volume]
 		if !ok {
 			continue
 		}
@@ -556,7 +556,9 @@ type blockDev struct {
 	bitmaps map[string]bool
 }
 
-// queryBlock maps each disk file of the VM to its top block node and size.
+// queryBlock maps each filesystem volume of the VM to the top block node of
+// its disk and the disk size. The top file is disk.img, or the newest file of
+// a snapshot chain in the same folder (see pkg/vmsnap).
 func (c *Copier) queryBlock(ctx context.Context, vm VM) (map[string]blockDev, error) {
 	out, err := c.qmp(ctx, vm, "query-block", nil)
 	if err != nil {
@@ -587,10 +589,39 @@ func (c *Copier) queryBlock(ctx context.Context, vm VM) (map[string]blockDev, er
 			for _, b := range append(d.Inserted.DirtyBitmaps, d.DirtyBitmaps...) {
 				bms[b.Name] = true
 			}
-			m[d.Inserted.File] = blockDev{node: d.Inserted.NodeName, size: d.Inserted.Image.VirtualSize, bitmaps: bms}
+			if vol := volumeOfFile(d.Inserted.File); vol != "" {
+				m[vol] = blockDev{node: d.Inserted.NodeName, size: d.Inserted.Image.VirtualSize, bitmaps: bms}
+			}
 		}
 	}
 	return m, nil
+}
+
+// volumeOfFile returns the volume whose folder holds a disk's top file, or ""
+// for a file outside the volume folders. QEMU reports a file that has a
+// backing file named relative to it as a json: description; the top file is
+// its "file" filename then.
+func volumeOfFile(file string) string {
+	if desc, ok := strings.CutPrefix(file, "json:"); ok {
+		var d struct {
+			File struct {
+				Filename string `json:"filename"`
+			} `json:"file"`
+		}
+		if json.Unmarshal([]byte(desc), &d) != nil {
+			return ""
+		}
+		file = d.File.Filename
+	}
+	rest, ok := strings.CutPrefix(file, vmiDisksDir+"/")
+	if !ok {
+		return ""
+	}
+	vol, name, ok := strings.Cut(rest, "/")
+	if !ok || strings.Contains(name, "/") {
+		return ""
+	}
+	return vol
 }
 
 type qemuJob struct {
