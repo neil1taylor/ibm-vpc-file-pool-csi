@@ -143,12 +143,12 @@ run() {
 
     create_pool
     check "pool reaches Ready" wait_until 600 10 pool_is_ready "$POOL"
-    create_claim
-    check "a test volume is bound" wait_until 300 5 claim_is_bound
 
     (umask 077; make_read_only_token >"$TOKEN_FILE")
     check "the test token can read pools" token_reads_pools
     check "the test token cannot create or delete anything" token_cannot_write
+    create_claim
+    check "a test volume is bound" wait_until 300 5 claim_is_bound
 
     api=$(oc whoami --show-server)
     work=$(mktemp -d)
