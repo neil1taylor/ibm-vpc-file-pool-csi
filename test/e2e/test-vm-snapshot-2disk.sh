@@ -13,6 +13,9 @@
 #   - both VolumeSnapshots were made with the QEMU copy
 #   - every file named in the log is on the second disk with the logged checksum
 #   - the kernel log has no XFS errors
+# The mount point gets the SELinux label mnt_t: with the default label the guest
+# agent cannot open it, the freeze fails ("failed to open /mnt/data: Permission
+# denied") and KubeVirt makes no VolumeSnapshot at all.
 # The test prints the gap between the two copy moments.
 # KubeVirt gives up on a VirtualMachineSnapshot after 5 minutes by default
 # ("snapshot deadline exceeded"). The QEMU copy of two disks takes longer, so the
@@ -189,7 +192,7 @@ YAML
             fs_setup:
             - {label: data, filesystem: xfs, device: /dev/vdb}
             mounts:
-            - [LABEL=data, /mnt/data, xfs, "defaults,nofail"]
+            - [LABEL=data, /mnt/data, xfs, "defaults,nofail,context=system_u:object_r:mnt_t:s0"]
             write_files:
             - path: /usr/local/bin/writer
               permissions: "0755"
