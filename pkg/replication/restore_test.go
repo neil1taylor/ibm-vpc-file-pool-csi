@@ -2,6 +2,7 @@ package replication
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -153,5 +154,75 @@ func TestRestoreDisk_RefusesADiskThatAVMWroteTo(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "disk.img")
 	if _, err := RestoreDisk(disk, time.Time{}, out); err == nil {
 		t.Error("want an error: the backup disk changed after its last copy")
+	}
+}
+
+// RestoreDisk must never remove a file it did not make.
+func TestRestoreDisk_DoesNotTouchAnExistingOutFile(t *testing.T) {
+	disk, _, _, _ := backupWithMoments(t)
+	for _, at := range []time.Time{{}, t0} { // a plain copy, and a rewind
+		out := filepath.Join(t.TempDir(), "disk.img")
+		writeDisk(t, out, []byte("somebody else's file"))
+		if _, err := RestoreDisk(disk, at, out); err == nil {
+			t.Errorf("at %v: want an error: the out file exists", at)
+		}
+		if got := readDisk(t, out); string(got) != "somebody else's file" {
+			t.Errorf("at %v: the existing out file was changed or removed: %q", at, got)
+		}
+	}
+}
+
+// The backup disk is read through the folder handle that refuses links, as
+// every other read of a backup disk is: a link must not lead out of the folder.
+func TestRestoreDisk_RefusesALinkedBackupDisk(t *testing.T) {
+	dir := t.TempDir()
+	secret := filepath.Join(t.TempDir(), "secret")
+	writeDisk(t, secret, []byte("not a disk of this volume"))
+	disk := filepath.Join(dir, "disk.img")
+	if err := os.Symlink(secret, disk); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "disk.img")
+	if _, err := RestoreDisk(disk, time.Time{}, out); err == nil {
+		t.Error("want an error: the backup disk is a link")
+	}
+	if _, err := os.Stat(out); err == nil {
+		t.Error("the content behind a link was copied")
+	}
+}
+
+// A backup that is being written holds a half-changed disk. A restore must
+// not copy it, and must not roll the copy back either: the copy may be alive.
+func TestRestoreDisk_RefusesWhileACopyIsBeingWritten(t *testing.T) {
+	dir := t.TempDir()
+	disk := filepath.Join(dir, "disk.img")
+	old := patterned(8 * chunk)
+	writeDisk(t, disk, old)
+	writes := 0
+	if _, err := ApplyCopy(change(8*chunk, 0xaa, []int64{1 * chunk, 4 * chunk, 6 * chunk}, nil), disk, ApplyOptions{
+		From: t0, To: t1,
+		beforeDiskWrite: func() error {
+			writes++
+			if writes == 2 {
+				return errors.New("job killed")
+			}
+			return nil
+		},
+	}); err == nil {
+		t.Fatal("test setup: the copy should fail half way")
+	}
+	half := readDisk(t, disk)
+	for _, at := range []time.Time{{}, t0} {
+		out := filepath.Join(t.TempDir(), "disk.img")
+		_, err := RestoreDisk(disk, at, out)
+		if !errors.Is(err, ErrCopyInProgress) {
+			t.Errorf("at %v: err = %v, want ErrCopyInProgress", at, err)
+		}
+		if _, statErr := os.Stat(out); statErr == nil {
+			t.Errorf("at %v: a restore of a half-written disk left a file", at)
+		}
+	}
+	if !bytes.Equal(readDisk(t, disk), half) {
+		t.Error("RestoreDisk changed the backup disk: it must not roll back a copy that may be running")
 	}
 }

@@ -9,9 +9,16 @@ import (
 	"time"
 )
 
+// ErrCopyInProgress means a copy is being written to the backup disk, or
+// stopped half way, so the disk may be half changed. Try again after the next
+// copy has ended. A restore never rolls a copy back, because the copy may be
+// running.
+var ErrCopyInProgress = errors.New("a copy is being written to the backup disk; try again when it has ended")
+
 // RestoreResult says which moment RestoreDisk wrote.
 type RestoreResult struct {
-	// Moment is the moment of the disk that was written.
+	// Moment is the moment of the disk that was written. It is the zero time
+	// for a disk whose moment is not known.
 	Moment time.Time
 	// Latest is true if it is the newest moment, a plain copy of the disk.
 	Latest bool
@@ -19,11 +26,18 @@ type RestoreResult struct {
 
 // RestoreDisk writes to out the backup disk as it was at the newest moment at
 // or before at. The zero time asks for the latest. It does not change the
-// backup. out must not exist. When it fails, it leaves no file at out.
+// backup. out must not exist, and it is never removed unless this call made
+// it. A backup disk that is a link is refused.
 func RestoreDisk(disk string, at time.Time, out string) (RestoreResult, error) {
+	if _, err := os.Lstat(out); err == nil {
+		return RestoreResult{}, fmt.Errorf("%s already exists: %w", out, os.ErrExist)
+	}
 	st, err := ReadDiskState(disk)
 	if err != nil {
 		return RestoreResult{}, err
+	}
+	if st.Unfinished {
+		return RestoreResult{}, ErrCopyInProgress
 	}
 	if st.Modified {
 		return RestoreResult{}, errors.New("the backup disk changed after its last copy; its restore points no longer fit it")
@@ -53,16 +67,22 @@ func RestoreDisk(disk string, at time.Time, out string) (RestoreResult, error) {
 			at.UTC().Format(time.RFC3339), oldest.UTC().Format(time.RFC3339))
 	}
 	if err := Rewind(disk, chosen, out); err != nil {
-		_ = os.Remove(out)
 		return RestoreResult{}, err
 	}
 	return RestoreResult{Moment: chosen}, nil
 }
 
-// copySparse copies the file src to the new file dst. A block of zeros becomes
-// a hole, so a mostly empty disk stays small.
-func copySparse(src, dst string) (err error) {
-	in, err := os.Open(src) // #nosec G304 -- path chosen by the caller
+// copySparse copies the backup disk to the new file dst. A block of zeros
+// becomes a hole, so a mostly empty disk stays small. It reads the disk
+// through the folder handle that refuses links, and checks that it is a
+// regular file on the handle it reads.
+func copySparse(disk, dst string) (err error) {
+	v, err := openVolume(disk)
+	if err != nil {
+		return err
+	}
+	defer v.close()
+	in, err := v.openDisk(os.O_RDONLY)
 	if err != nil {
 		return err
 	}
@@ -71,9 +91,12 @@ func copySparse(src, dst string) (err error) {
 	if err != nil {
 		return err
 	}
+	if !fi.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a regular file", disk)
+	}
 	f, err := os.OpenFile(dst, os.O_RDWR|os.O_CREATE|os.O_EXCL, diskFileMode) // #nosec G304 -- path chosen by the caller
 	if err != nil {
-		return err
+		return err // dst exists or cannot be made: it is not ours to remove
 	}
 	defer func() {
 		if cerr := f.Close(); err == nil {
