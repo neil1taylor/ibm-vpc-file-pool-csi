@@ -28,7 +28,7 @@ The driver emits 22 metrics across seven categories:
 
 The Helm chart creates a `ServiceMonitor` for the controller when the cluster has the Prometheus Operator API (`monitoring.coreos.com/v1`). OpenShift has it. To turn it off, set `metrics.serviceMonitor.enabled=false`.
 
-The console plugin's charts read these metrics. Without the `ServiceMonitor`, they show no data.
+The console plugin's charts read these metrics. Without the `ServiceMonitor`, they show no data. The Monitoring tab charts 19 of the 22 metrics directly and the other three in its "Group Snapshot and CDI Activity" section; the VM copy metrics named in the VM-safe replication spec do not exist yet, so they have no panel.
 
 ### OpenShift User Workload Monitoring
 
