@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## How versions work
+
+A version is a git tag `vX.Y.Z`. The driver reports `git describe`: `v0.13.2-59-g2f04e1e` means 59 commits after `v0.13.2`.
+
+To make a release:
+
+1. Move the items under Unreleased to a new heading `## [vX.Y.Z] — date`.
+2. Add the section and the compatibility row to `UPGRADE-GUIDE.md`.
+3. Set `version` and `appVersion` in `charts/ibm-vpc-file-pool-csi/Chart.yaml` to `X.Y.Z`.
+4. Tag the merge commit `vX.Y.Z` and push the tag.
+
+`v0.11.0`, `v0.13.0`, `v0.13.1` and `v0.13.2` were tagged on 21 October 2026, at the commit that added their changelog entry. `v0.10.0` and `v0.12.0` were written in the same commits as `v0.11.0` and `v0.13.0`, so they have no tag of their own. The chart still says `0.1.0`: it is set at the next release.
+
 ## [Unreleased]
 
 ### Changed
