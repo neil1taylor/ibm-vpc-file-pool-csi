@@ -36,7 +36,7 @@ func syncScript(t *testing.T, mutate func(*v1alpha1.ReplicationPolicy)) string {
 func TestReplicationJob_KeepsMomentsAsHardLinks(t *testing.T) {
 	script := syncScript(t, func(p *v1alpha1.ReplicationPolicy) { p.Spec.MomentKeepHours = int32Ptr(48) })
 	for _, want := range []string{
-		`cp -a -l "/dest/pvcs/pvcs/pvc-11111111-1111-1111-1111-111111111111"`,
+		`cp -a -l '/dest/pvcs/pvcs/pvc-11111111-1111-1111-1111-111111111111'`,
 		"/dest/pvcs/.moments/pvcs/pvc-11111111-1111-1111-1111-111111111111",
 		`date -u -d "-48 hours"`,
 		"/dev/termination-log",

@@ -13,6 +13,7 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/hooks"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/k8s"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/util"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -1058,11 +1059,12 @@ func (rc *ReplicationController) ensureReplicationPVC(ctx context.Context, pvNam
 // atomic set it writes a new file and renames it, so a moment that links the
 // old file keeps its contents.
 func metadataScript(destBasePath, subPath, metaJSON string, atomic bool) string {
-	file := fmt.Sprintf("/dest%s%s/.subvolume-metadata.json", destBasePath, subPath)
+	file := "/dest" + destBasePath + subPath + "/.subvolume-metadata.json"
 	if !atomic {
-		return fmt.Sprintf("echo \"Writing metadata sidecar...\"\ncat > \"%s\" <<'METADATA'\n%s\nMETADATA\n", file, metaJSON)
+		return fmt.Sprintf("echo \"Writing metadata sidecar...\"\ncat > %s <<'METADATA'\n%s\nMETADATA\n", util.ShellQuote(file), metaJSON)
 	}
-	return fmt.Sprintf("echo \"Writing metadata sidecar...\"\ncat > \"%[1]s.tmp\" <<'METADATA'\n%[2]s\nMETADATA\nmv \"%[1]s.tmp\" \"%[1]s\"\n", file, metaJSON)
+	return fmt.Sprintf("echo \"Writing metadata sidecar...\"\ncat > %[1]s <<'METADATA'\n%[2]s\nMETADATA\nmv %[1]s %[3]s\n",
+		util.ShellQuote(file+".tmp"), metaJSON, util.ShellQuote(file))
 }
 
 // momentsScript keeps the synced volume as a moment: a folder of hard links in
@@ -1075,10 +1077,10 @@ func momentsScript(destBasePath, subPath string, keepHours *int32) string {
 		return ""
 	}
 	return fmt.Sprintf(`echo "Keeping a moment..."
-moments="/dest%[1]s/.moments%[2]s"
+moments=%[1]s
 mkdir -p "$moments"
 stamp=$(date -u +%%Y%%m%%dT%%H%%M%%SZ)
-[ -e "$moments/$stamp" ] || cp -a -l "/dest%[1]s%[2]s" "$moments/$stamp"
+[ -e "$moments/$stamp" ] || cp -a -l %[2]s "$moments/$stamp"
 cutoff=$(date -u -d "-%[3]d hours" +%%Y%%m%%dT%%H%%M%%SZ)
 for d in "$moments"/*; do
   [ -d "$d" ] || continue
@@ -1092,7 +1094,7 @@ for d in "$moments"/*; do
 done
 oldest_iso=$(date -u -d "${oldest:0:4}-${oldest:4:2}-${oldest:6:2} ${oldest:9:2}:${oldest:11:2}:${oldest:13:2}" +%%Y-%%m-%%dT%%H:%%M:%%SZ)
 printf '{"bytesWritten":0,"restorePoints":%%s,"oldestRestorePoint":"%%s"}' "$older" "$oldest_iso" > /dev/termination-log
-`, destBasePath, subPath, *keepHours)
+`, util.ShellQuote("/dest"+destBasePath+"/.moments"+subPath), util.ShellQuote("/dest"+destBasePath+subPath), *keepHours)
 }
 
 // ensureReplicationJob creates a Job that runs rsync from source to destination.
@@ -1122,7 +1124,7 @@ func (rc *ReplicationController) ensureReplicationJob(ctx context.Context, polic
 
 	extraArgs := ""
 	for _, arg := range policy.Spec.RsyncOptions {
-		extraArgs += " " + arg
+		extraArgs += " " + util.ShellQuote(arg)
 	}
 
 	// Build metadata JSON for the sidecar file.
@@ -1139,31 +1141,32 @@ func (rc *ReplicationController) ensureReplicationJob(ctx context.Context, polic
 	destBasePath := policy.Spec.DestinationBasePath
 
 	var script string
+	destDir := util.ShellQuote("/dest" + destBasePath + subPath)
+	destSync := util.ShellQuote("/dest" + destBasePath + subPath + "/")
 	if useIncremental {
 		script = fmt.Sprintf(`set -euo pipefail
-echo "Replication: syncing %s -> %s%s"
-mkdir -p "/dest%s%s"
-rsync -a --delete --exclude=/.repl-staging-* %s %s %s "/source%s/" "/dest%s%s/"
+echo %s
+mkdir -p %s
+rsync -a --delete --exclude=/.repl-staging-* %s%s %s %s
 %s%s
 echo "Replication complete."
-`, subPath, destBasePath, subPath,
-			destBasePath, subPath,
-			bwlimit, extraArgs, "", // empty string placeholder for cleaner formatting
-			subPath, destBasePath, subPath,
+`, util.ShellQuote("Replication: syncing "+subPath+" -> "+destBasePath+subPath),
+			destDir,
+			bwlimit, extraArgs, util.ShellQuote("/source"+subPath+"/"), destSync,
 			metadataScript(destBasePath, subPath, string(metaJSON), keepMoments),
 			momentsScript(destBasePath, subPath, policy.Spec.MomentKeepHours))
 	} else {
 		script = fmt.Sprintf(`set -euo pipefail
-echo "Replication: copying %s -> %s%s"
-mkdir -p "/dest%s%s"
-cp -a "/source%s/." "/dest%s%s/"
-find "/dest%s%s" -maxdepth 1 -name '.repl-staging-*' -delete
+echo %s
+mkdir -p %s
+cp -a %s %s
+find %s -maxdepth 1 -name '.repl-staging-*' -delete
 %s
 echo "Replication complete."
-`, subPath, destBasePath, subPath,
-			destBasePath, subPath,
-			subPath, destBasePath, subPath,
-			destBasePath, subPath,
+`, util.ShellQuote("Replication: copying "+subPath+" -> "+destBasePath+subPath),
+			destDir,
+			util.ShellQuote("/source"+subPath+"/."), destSync,
+			destDir,
 			metadataScript(destBasePath, subPath, string(metaJSON), false))
 	}
 

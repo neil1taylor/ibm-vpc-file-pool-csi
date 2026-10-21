@@ -156,3 +156,25 @@ export function receiverCheckResult(pod: CheckPodLike | undefined): ReceiverChec
   if (message === 'ok') return { state: 'ok' };
   return { state: 'failed', reason: message || 'The check ended without a result. It may have run out of time.' };
 }
+
+interface PolicyWithSecrets {
+  metadata?: { name?: string };
+  spec?: { destinationAuthSecretRef?: string; destinationCACertSecretRef?: string };
+}
+
+/**
+ * The Secrets of a policy that the receiver setup may have made: those that have the names it gives and that the
+ * policy uses, and that no other policy uses. Whether the console really made them is checked at delete time.
+ */
+export function secretsMadeFor(policy: PolicyWithSecrets, allPolicies: PolicyWithSecrets[]): string[] {
+  const names = receiverNames(policy.metadata?.name || '');
+  const usedByOthers = new Set(
+    allPolicies
+      .filter((p) => p.metadata?.name !== policy.metadata?.name)
+      .flatMap((p) => [p.spec?.destinationAuthSecretRef, p.spec?.destinationCACertSecretRef]),
+  );
+  return [
+    policy.spec?.destinationAuthSecretRef === names.tokenSecret ? names.tokenSecret : '',
+    policy.spec?.destinationCACertSecretRef === names.caSecret ? names.caSecret : '',
+  ].filter((name) => name && !usedByOthers.has(name));
+}

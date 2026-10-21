@@ -734,3 +734,36 @@ func TestAdvanceVMSnapshots_SnapshotsOfOneVMTakeTurnsAcrossAPodChange(t *testing
 		t.Error("the second snapshot started while the first still waits for its apply Job: its staging file would be removed")
 	}
 }
+
+// CreateSnapshot refuses a disk that is already hot-plugged. A disk can also become hot-plugged after the
+// snapshot was made: the VM restarts with the disk in a hotplug-disk pod. QEMU cannot copy it yet, so the
+// snapshot must fail at once and say what to do, not retry for nothing.
+func TestAdvanceVMSnapshots_DiskHotPluggedAfterTheSnapshotFailsAtOnceWithAReason(t *testing.T) {
+	e := newVMSnapEnv(t)
+	e.startVM()
+	e.create(nil)
+	e.stopVM()
+	pod := newLauncherPod("hp-volume-abcde", "pod-uid-2", "web", map[string]string{"rootdisk": "my-pvc"})
+	pod.Labels[kubevirtPodLabel] = "hotplug-disk"
+	if err := e.dc.Create(e.ctx, pod); err != nil {
+		t.Fatal(err)
+	}
+	e.tick()
+
+	s := e.snap()
+	if s.Status.Phase != "Failed" || s.Status.ReadyToUse {
+		t.Fatalf("status = %+v, want Failed and not ready", s.Status)
+	}
+	if !strings.Contains(s.Status.Message, "hot-plugged") || !strings.Contains(s.Status.Message, "Stop the VM or detach the disk") {
+		t.Errorf("message = %q, want the reason and what to do", s.Status.Message)
+	}
+	if s.Status.VMCopyAttempts != 0 {
+		t.Errorf("attempts = %d: a hot-plugged disk is not a failed try", s.Status.VMCopyAttempts)
+	}
+	if len(e.cop.starts) != 0 {
+		t.Errorf("a copy was started %d times for a disk QEMU cannot copy", len(e.cop.starts))
+	}
+	if s.Status.VMCopy != nil {
+		t.Errorf("no copy may be recorded: %+v", s.Status.VMCopy)
+	}
+}
