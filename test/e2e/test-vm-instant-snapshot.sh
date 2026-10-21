@@ -463,7 +463,11 @@ migrated() {
     local p
     p=$(oc get vmim -n "$NS" -o json | jq -r '[.items[] | select(.spec.vmiName == "src")] | sort_by(.metadata.creationTimestamp) | last | .status.phase')
     [ "$p" = Failed ] && fail "the live migration failed"
-    [ "$p" = Succeeded ]
+    [ "$p" = Succeeded ] || return 1
+    # The VMI names the new worker once the hand-over is complete.
+    [ "$(oc get vmi -n "$NS" src -o jsonpath='{.status.migrationState.completed}')" = true ] &&
+        [ "$(oc get vmi -n "$NS" src -o jsonpath='{.status.nodeName}')" = \
+          "$(oc get vmi -n "$NS" src -o jsonpath='{.status.migrationState.targetNode}')" ]
 }
 wait_until 900 "the live migration" migrated
 expect_open src rootdisk root
