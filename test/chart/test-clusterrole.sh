@@ -6,6 +6,9 @@
 # makes ReplicationPolicies owned by a BackupPolicy, so the role must allow
 # "backuppolicies/finalizers". The lab run on rovslab found this.
 #
+# Before a Job changes the files of a VM disk, the controller lists the
+# VirtualMachineInstances, so a VM that starts is seen. That needs "list".
+#
 # Usage: bash test/chart/test-clusterrole.sh
 # Requires: helm.
 
@@ -30,6 +33,22 @@ for owner in "${OWNERS[@]}"; do
         pass "config/rbac: the controller may update $owner/finalizers"
     else
         fail "config/rbac: the controller role lacks $owner/finalizers"
+    fi
+done
+
+# vmi_verbs FILE prints the verbs of the rule for virtualmachineinstances.
+vmi_verbs() { grep -A1 -F 'resources: ["virtualmachineinstances"]' "$1" | grep 'verbs:' || true; }
+
+RENDERED="$(mktemp)"
+trap 'rm -f "$RENDERED"' EXIT
+helm template test "$CHART" --namespace kube-system > "$RENDERED"
+for file in "$RENDERED" "$ROOT/config/rbac/clusterrole.yaml"; do
+    name="chart"
+    [ "$file" = "$RENDERED" ] || name="config/rbac"
+    if vmi_verbs "$file" | grep -qF '"list"'; then
+        pass "$name: the controller may list VirtualMachineInstances"
+    else
+        fail "$name: the controller role cannot list VirtualMachineInstances"
     fi
 done
 

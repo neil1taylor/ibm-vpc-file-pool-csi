@@ -175,14 +175,35 @@ func (e *instantEnv) startVM(frozen bool) {
 	if err := e.dc.Create(e.ctx, newLauncherPod("virt-launcher-web-abcde", "pod-uid-1", "web", map[string]string{"rootdisk": "my-pvc"})); err != nil {
 		e.t.Fatal(err)
 	}
+	e.createVMI(frozen)
+}
+
+// createVMI makes VirtualMachineInstance "web" with the test claim as volume
+// rootdisk. Without a pod, it is a VM that is starting.
+func (e *instantEnv) createVMI(frozen bool) {
+	e.t.Helper()
 	vmi := &unstructured.Unstructured{}
 	vmi.SetGroupVersionKind(vmiGVK)
 	vmi.SetNamespace("default")
 	vmi.SetName("web")
+	vols := []any{map[string]any{"name": "rootdisk", "persistentVolumeClaim": map[string]any{"claimName": "my-pvc"}}}
+	if err := unstructured.SetNestedSlice(vmi.Object, vols, "spec", "volumes"); err != nil {
+		e.t.Fatal(err)
+	}
 	if frozen {
 		_ = unstructured.SetNestedField(vmi.Object, "frozen", "status", "fsFreezeStatus")
 	}
 	if err := e.dc.Create(e.ctx, vmi); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// setChainOperation marks the test volume as changed by a chain Job.
+func (e *instantEnv) setChainOperation(op string) {
+	e.t.Helper()
+	sv := e.sv().DeepCopy()
+	sv.Status.ChainOperation = op
+	if err := e.k.UpdateSubVolumeStatus(e.ctx, sv); err != nil {
 		e.t.Fatal(err)
 	}
 }
@@ -611,5 +632,62 @@ func TestInstantSnapshot_DeleteKeepsTheFolderWhenTheVolumeCannotBeRead(t *testin
 	}
 	if e.k.getSnapshot("snap-one") == nil {
 		t.Error("the Snapshot must stay until the delete can finish")
+	}
+}
+
+func TestInstantSnapshot_StartingVMBlocksTheSnapshotJob(t *testing.T) {
+	e := newInstantEnv(t)
+	e.defineVM()
+	e.createVMI(false) // the VM starts; its pod does not exist yet
+	if _, err := e.create("snap-one"); !errors.Is(err, ErrOperationInProgress) {
+		t.Fatalf("err = %v, want ErrOperationInProgress while the VM starts", err)
+	}
+	if _, ok := e.jobs.scripts["chain-snap-one"]; ok {
+		t.Error("a Job must not change the disk of a VM that starts")
+	}
+	if op := e.sv().Status.ChainOperation; op != "" {
+		t.Errorf("ChainOperation = %q, want none", op)
+	}
+}
+
+func TestInstantSnapshot_StartingVMBlocksTheMergeJob(t *testing.T) {
+	e := newInstantEnv(t)
+	e.defineVM()
+	e.jobs.done = true
+	e.mustCreate("snap-one")
+	e.createVMI(false)
+	if err := e.mgr.DeleteSnapshot(e.ctx, "snap-one"); !errors.Is(err, ErrOperationInProgress) {
+		t.Fatalf("err = %v, want ErrOperationInProgress while the VM starts", err)
+	}
+	if _, ok := e.jobs.scripts["chain-rm-snap-one"]; ok {
+		t.Error("a merge Job must not change the disk of a VM that starts")
+	}
+	if op := e.sv().Status.ChainOperation; op != "" {
+		t.Errorf("ChainOperation = %q, want none", op)
+	}
+}
+
+func TestInstantSnapshot_RunningVMWaitsForAChainJob(t *testing.T) {
+	e := newInstantEnv(t)
+	e.startVM(false)
+	e.setChainOperation("chain-rm-other")
+	if _, err := e.create("snap-one"); !errors.Is(err, ErrOperationInProgress) {
+		t.Fatalf("err = %v, want ErrOperationInProgress while a Job changes the disk", err)
+	}
+	if len(e.snap.takes) != 0 {
+		t.Error("no snapshot while a Job changes the disk")
+	}
+}
+
+func TestInstantSnapshot_DeleteOnARunningVMWaitsForAChainJob(t *testing.T) {
+	e := newInstantEnv(t)
+	e.startVM(false)
+	e.mustCreate("snap-one")
+	e.setChainOperation("chain-rm-other")
+	if err := e.mgr.DeleteSnapshot(e.ctx, "snap-one"); !errors.Is(err, ErrOperationInProgress) {
+		t.Fatalf("err = %v, want ErrOperationInProgress while a Job changes the disk", err)
+	}
+	if len(e.snap.merges) != 0 {
+		t.Error("no merge while a Job changes the disk")
 	}
 }

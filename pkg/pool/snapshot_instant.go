@@ -144,6 +144,9 @@ func (m *Manager) planInstant(ctx context.Context, sv *v1alpha1.SubVolume) (*ins
 		return nil, "", fmt.Errorf("check for a running VM: %w", err)
 	}
 	if pod == nil {
+		if err = m.checkVMStopped(ctx, sv); err != nil {
+			return nil, "", err
+		}
 		vmName, vmVol, vmErr := findVMForClaim(ctx, in.kube, sv.Spec.PVCNamespace, sv.Spec.PVCName)
 		if vmErr != nil {
 			return nil, "", vmErr
@@ -303,6 +306,27 @@ func (m *Manager) ensureVMHook(ctx context.Context, namespace string) error {
 	return nil
 }
 
+// checkVMStopped returns nil when no VM runs or starts with sv's disk: there
+// is no VM pod and no VirtualMachineInstance that has not finished. Only then
+// may a Job change the disk's files.
+func (m *Manager) checkVMStopped(ctx context.Context, sv *v1alpha1.SubVolume) error {
+	pod, _, err := findVMPodForClaim(ctx, m.instant.kube, sv.Spec.PVCNamespace, sv.Spec.PVCName)
+	if err != nil {
+		return fmt.Errorf("check for a running VM: %w", err)
+	}
+	if pod != nil {
+		return fmt.Errorf("%w: VM pod %s uses the disk", ErrOperationInProgress, pod.Name)
+	}
+	vmi, err := findVMInstanceForClaim(ctx, m.instant.kube, sv.Spec.PVCNamespace, sv.Spec.PVCName)
+	if err != nil {
+		return fmt.Errorf("check for a starting VM: %w", err)
+	}
+	if vmi != "" {
+		return fmt.Errorf("%w: VM %s starts or stops", ErrOperationInProgress, vmi)
+	}
+	return nil
+}
+
 // chainFiles turns a chain of names into files.
 func chainFiles(names []string) []vmsnap.File {
 	out := make([]vmsnap.File, len(names))
@@ -386,6 +410,9 @@ func (m *Manager) takeInstant(ctx context.Context, snap *v1alpha1.Snapshot, sv *
 	if sv.Status.ChainOperation == key {
 		return m.takeInstantOffline(ctx, snap, sv, key, newFile)
 	}
+	if sv.Status.ChainOperation != "" {
+		return fmt.Errorf("%w: %s changes the disk now", ErrOperationInProgress, sv.Status.ChainOperation)
+	}
 	plan, reason, err := m.planInstant(ctx, sv)
 	if err != nil {
 		return err
@@ -443,11 +470,11 @@ func (m *Manager) takeInstantOffline(ctx context.Context, snap *v1alpha1.Snapsho
 				return err
 			}
 			// The VM may have started before the mark was saved.
-			if pod, _, err := findVMPodForClaim(ctx, m.instant.kube, sv.Spec.PVCNamespace, sv.Spec.PVCName); err != nil || pod != nil {
+			if err := m.checkVMStopped(ctx, sv); err != nil {
 				if clearErr := m.saveDiskChain(ctx, sv.Name, sv.Status.DiskChain, ""); clearErr != nil {
 					return clearErr
 				}
-				return fmt.Errorf("%w: the VM started", ErrOperationInProgress)
+				return err
 			}
 		}
 		script, err := vmsnap.OfflineTakeScript("/vol0", chainFiles(chain)[0], newFile)
@@ -507,9 +534,12 @@ func (m *Manager) deleteInstant(ctx context.Context, snap *v1alpha1.Snapshot, po
 	}
 	key := "chain-rm-" + snap.Name
 	var newChain []string
-	if sv.Status.ChainOperation == key {
+	switch {
+	case sv.Status.ChainOperation == key:
 		newChain, err = m.mergeOffline(ctx, sv, key, file, child)
-	} else {
+	case sv.Status.ChainOperation != "":
+		return fmt.Errorf("%w: %s changes the disk now", ErrOperationInProgress, sv.Status.ChainOperation)
+	default:
 		var pod *corev1.Pod
 		var vol string
 		pod, vol, err = findVMPodForClaim(ctx, m.instant.kube, sv.Spec.PVCNamespace, sv.Spec.PVCName)
@@ -517,6 +547,9 @@ func (m *Manager) deleteInstant(ctx context.Context, snap *v1alpha1.Snapshot, po
 		case err != nil:
 			return fmt.Errorf("check for a running VM: %w", err)
 		case pod == nil:
+			if err = m.checkVMStopped(ctx, sv); err != nil {
+				return err
+			}
 			newChain, err = m.mergeOffline(ctx, sv, key, file, child)
 		default:
 			newChain, err = m.mergeRunning(ctx, pod, vol, file, child)
@@ -602,11 +635,11 @@ func (m *Manager) mergeOffline(ctx context.Context, sv *v1alpha1.SubVolume, key,
 		if err := m.saveDiskChain(ctx, sv.Name, sv.Status.DiskChain, key); err != nil {
 			return nil, err
 		}
-		if pod, _, err := findVMPodForClaim(ctx, m.instant.kube, sv.Spec.PVCNamespace, sv.Spec.PVCName); err != nil || pod != nil {
+		if err := m.checkVMStopped(ctx, sv); err != nil {
 			if clearErr := m.saveDiskChain(ctx, sv.Name, sv.Status.DiskChain, ""); clearErr != nil {
 				return nil, clearErr
 			}
-			return nil, fmt.Errorf("%w: the VM started", ErrOperationInProgress)
+			return nil, err
 		}
 	}
 	script, err := vmsnap.OfflineMergeScript("/vol0", file, child, grandchild)

@@ -54,7 +54,7 @@ rules:
     verbs: ["get", "list"]
   - apiGroups: ["kubevirt.io"]
     resources: ["virtualmachineinstances"]
-    verbs: ["get", "patch"]
+    verbs: ["get", "list", "patch"]
   - apiGroups: [""]
     resources: ["configmaps"]
     verbs: ["create"]
