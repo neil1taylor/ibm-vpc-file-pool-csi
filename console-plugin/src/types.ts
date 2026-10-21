@@ -264,6 +264,18 @@ export interface SubVolumeReplicationStatus {
   lastSyncTime?: string;
   bytesSynced?: number;
   lastError?: string;
+  /** Running VM disks only: the moment the last good copy shows. */
+  copyMoment?: string;
+  consistency?: 'FileSystemConsistent' | 'CrashConsistent';
+  /** Why a copy is only crash consistent. */
+  consistencyReason?: string;
+  /** Empty means the next copy is a full copy. */
+  vmChangeList?: string;
+  /** How many earlier copies the destination keeps, and the moment of the oldest. */
+  restorePoints?: number;
+  oldestRestorePoint?: string;
+  /** A copy that is not finished. */
+  vmCopy?: { id: string; phase: string };
 }
 
 // ── Hooks ──
