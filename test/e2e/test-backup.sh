@@ -39,6 +39,8 @@ log() { echo "[$(date -u +%H:%M:%S)] $*"; }
 diagnose() {
     oc get backuppolicy "$POLICY" -o json 2>/dev/null | jq -c '.status // {} | {volumeCount, lastError, volumes: [.volumes[]? | {pvc: .pvcName, last: .lastBackupTime, points: .restorePoints, err: .lastError}]}' || true
     oc get replicationpolicy -o json 2>/dev/null | jq -c --arg p "backup-$POLICY" '.items[] | select(.metadata.name | startswith($p)) | {name: .metadata.name, phase: .status.phase, failures: .status.consecutiveFailures, err: .status.lastError, volumes: [.status.subVolumeStatuses[]? | {sv: .subVolumeName, err: .lastError}]}' || true
+    # The controller deletes a failed copy Job at once, so its pods are usually gone; the errors above and the log below are the record.
+    oc get jobs,pods -n kube-system -l storage.ibmcloud.io/repl-temp=true -o wide 2>/dev/null || true
     oc logs -n kube-system deploy/ibm-vpc-file-pool-csi-controller -c csi-controller --since=2h 2>/dev/null | grep -i "$POLICY" | tail -20 || true
 }
 fail() { log "FAIL: $*"; diagnose; exit 1; }

@@ -500,6 +500,7 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 
 		// Create PV/PVC/Job for this SubVolume.
 		if createErr := rc.createReplicationResources(ctx, policy, &svCopy); createErr != nil {
+			klog.ErrorS(createErr, "Failed to create replication resources", "policy", policyName, "subVolume", svCopy.Name)
 			syncErrors = append(syncErrors, fmt.Sprintf("%s: create resources: %v", svCopy.Name, createErr))
 			svStatuses = append(svStatuses, carry(svCopy.Name, fmt.Sprintf("create resources: %v", createErr)))
 			rc.cleanupReplicationResources(ctx, policy, svCopy.Name)
