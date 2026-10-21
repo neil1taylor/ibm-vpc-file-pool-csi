@@ -18,8 +18,8 @@
 # denied") and KubeVirt makes no VolumeSnapshot at all.
 # The test prints the gap between the two copy moments.
 # KubeVirt gives up on a VirtualMachineSnapshot after 5 minutes by default
-# ("snapshot deadline exceeded"). The QEMU copy of two disks takes longer, so the
-# test sets failureDeadline to 1h. A user's snapshot needs the same.
+# ("snapshot deadline exceeded"). KubeVirt does not wait for the copies, so the
+# deadline is not reached; the test still sets failureDeadline to 1h to be safe.
 #
 # Usage: KUBECONFIG=... SSH_KEY=~/.ssh/key test/e2e/test-vm-snapshot-2disk.sh [--keep]
 # SSH_KEY is a private key whose .pub file is put in the VM for virtctl ssh.
@@ -258,10 +258,22 @@ snapshot_done() {
 wait_until "$SNAPSHOT_TIMEOUT" "the VirtualMachineSnapshot done" snapshot_done
 log "the snapshot took $((SECONDS - start)) s"
 
+# KubeVirt calls the VirtualMachineSnapshot done as soon as it has made the
+# VolumeSnapshots, and does not wait for the copies. Wait for them here.
+vsc=$(oc get vmsnapshot -n "$NS" vmsnap -o jsonpath='{.status.virtualMachineSnapshotContentName}')
+disk_snapshots=$(oc get vmsnapshotcontent -n "$NS" "$vsc" -o json | jq -r '.spec.volumeBackups[].volumeSnapshotName')
+disk_snapshots_ready() {
+    local vs
+    for vs in $disk_snapshots; do
+        [ "$(oc get volumesnapshot -n "$NS" "$vs" -o jsonpath='{.status.readyToUse}' 2>/dev/null)" = true ] || return 1
+    done
+}
+wait_until "$SNAPSHOT_TIMEOUT" "both disk snapshots ready" disk_snapshots_ready
+log "both disk snapshots were ready $((SECONDS - start)) s after the request"
+
 # One Snapshot resource of the driver per disk: check the method and the moment.
 moments=()
-vsc=$(oc get vmsnapshot -n "$NS" vmsnap -o jsonpath='{.status.virtualMachineSnapshotContentName}')
-for vs in $(oc get vmsnapshotcontent -n "$NS" "$vsc" -o json | jq -r '.spec.volumeBackups[].status.volumeSnapshotName'); do
+for vs in $disk_snapshots; do
     content=$(oc get volumesnapshot -n "$NS" "$vs" -o jsonpath='{.status.boundVolumeSnapshotContentName}')
     handle=$(oc get volumesnapshotcontent "$content" -o jsonpath='{.status.snapshotHandle}')
     st=$(oc get snapshots.storage.ibmcloud.io "${handle##*/}" -o json)
