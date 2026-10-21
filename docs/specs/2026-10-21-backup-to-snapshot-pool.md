@@ -1,6 +1,6 @@
 # Spec: backup to a snapshot pool
 
-Date: 2026-10-21. Status: draft for review. This is step 8 of `2026-10-20-vm-safe-replication.md`. Read that spec first. Step 9 (export to COS) is a separate spec.
+Date: 2026-10-21. Status: draft for review. This is step 8 of `2026-10-20-vm-safe-replication.md`. Read that spec first. Step 9 (export to COS) is a separate spec: `2026-10-21-backup-cos-export.md`.
 
 ## Goal
 
