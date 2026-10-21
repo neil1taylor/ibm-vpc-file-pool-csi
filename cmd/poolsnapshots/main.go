@@ -98,19 +98,19 @@ func runFlatten(args []string, in io.Reader, out io.Writer) error {
 		return err
 	}
 	if len(plan.disks) == 0 {
-		fmt.Fprintf(out, "No disk of VM %s/%s has instant snapshots. Nothing to do.\n", *ns, vmName)
+		_, _ = fmt.Fprintf(out, "No disk of VM %s/%s has instant snapshots. Nothing to do.\n", *ns, vmName)
 		return nil
 	}
-	fmt.Fprintf(out, "VM %s/%s: disks with instant snapshots: %s\n", *ns, vmName, strings.Join(plan.disks, ", "))
-	fmt.Fprintf(out, "These snapshots will be deleted. Their data is merged into the disks and cannot be restored:\n")
+	_, _ = fmt.Fprintf(out, "VM %s/%s: disks with instant snapshots: %s\n", *ns, vmName, strings.Join(plan.disks, ", "))
+	_, _ = fmt.Fprintf(out, "These snapshots will be deleted. Their data is merged into the disks and cannot be restored:\n")
 	for _, n := range plan.vmSnapshots {
-		fmt.Fprintf(out, "  VirtualMachineSnapshot %s\n", n)
+		_, _ = fmt.Fprintf(out, "  VirtualMachineSnapshot %s\n", n)
 	}
 	for _, n := range plan.volumeSnapshots {
-		fmt.Fprintf(out, "  VolumeSnapshot %s\n", n)
+		_, _ = fmt.Fprintf(out, "  VolumeSnapshot %s\n", n)
 	}
 	if !*yes {
-		fmt.Fprintf(out, "Type the VM name (%s) to go on: ", vmName)
+		_, _ = fmt.Fprintf(out, "Type the VM name (%s) to go on: ", vmName)
 		if !confirm(in, out, vmName) {
 			return fmt.Errorf("not confirmed; nothing was deleted")
 		}
@@ -118,7 +118,7 @@ func runFlatten(args []string, in io.Reader, out io.Writer) error {
 	if err = deletePlan(ctx, c, *ns, plan); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "Deleted. Waiting for the merges...\n")
+	_, _ = fmt.Fprintf(out, "Deleted. Waiting for the merges...\n")
 	deadline := time.Now().Add(*timeout)
 	for {
 		left, err := planFlatten(ctx, c, *ns, vmName)
@@ -126,7 +126,7 @@ func runFlatten(args []string, in io.Reader, out io.Writer) error {
 			return err
 		}
 		if len(left.disks) == 0 {
-			fmt.Fprintf(out, "Done: every disk of %s/%s is a plain disk.img.\n", *ns, vmName)
+			_, _ = fmt.Fprintf(out, "Done: every disk of %s/%s is a plain disk.img.\n", *ns, vmName)
 			return nil
 		}
 		if time.Now().After(deadline) {

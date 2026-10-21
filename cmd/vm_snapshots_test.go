@@ -43,20 +43,20 @@ func kubevirtIn(ns string) client.Reader {
 
 func TestDiscoverLauncherImage(t *testing.T) {
 	ctx := context.Background()
-	ocp := fake.NewSimpleClientset(virtOperator("openshift-cnv", "registry.redhat.io/cnv/virt-launcher@sha256:1"))
+	ocp := fake.NewClientset(virtOperator("openshift-cnv", "registry.redhat.io/cnv/virt-launcher@sha256:1"))
 	if got := discoverLauncherImage(ctx, ocp, kubevirtIn("openshift-cnv")); got != "registry.redhat.io/cnv/virt-launcher@sha256:1" {
 		t.Errorf("OpenShift Virtualization: got %q", got)
 	}
-	up := fake.NewSimpleClientset(virtOperator("kubevirt", "quay.io/kubevirt/virt-launcher:v1.7.0"))
+	up := fake.NewClientset(virtOperator("kubevirt", "quay.io/kubevirt/virt-launcher:v1.7.0"))
 	if got := discoverLauncherImage(ctx, up, kubevirtIn("kubevirt")); got != "quay.io/kubevirt/virt-launcher:v1.7.0" {
 		t.Errorf("upstream KubeVirt: got %q", got)
 	}
-	if got := discoverLauncherImage(ctx, fake.NewSimpleClientset(), kubevirtIn("")); got != "" {
+	if got := discoverLauncherImage(ctx, fake.NewClientset(), kubevirtIn("")); got != "" {
 		t.Errorf("no KubeVirt: got %q", got)
 	}
 	// A user who made a "kubevirt" project with a fake virt-operator must not
 	// choose the image: KubeVirt is installed in openshift-cnv.
-	planted := fake.NewSimpleClientset(virtOperator("kubevirt", "evil.example/launcher:1"))
+	planted := fake.NewClientset(virtOperator("kubevirt", "evil.example/launcher:1"))
 	if got := discoverLauncherImage(ctx, planted, kubevirtIn("openshift-cnv")); got != "" {
 		t.Errorf("a Deployment outside KubeVirt's namespace was trusted: %q", got)
 	}
