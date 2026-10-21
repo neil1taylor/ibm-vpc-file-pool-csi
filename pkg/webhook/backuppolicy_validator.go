@@ -78,5 +78,10 @@ func validateBackupPolicySpec(spec *v1alpha1.BackupPolicySpec) error {
 			return fmt.Errorf("spec.namespaces must not contain an empty name")
 		}
 	}
+	if spec.Export != nil {
+		if err := spec.Export.Validate(); err != nil {
+			return err
+		}
+	}
 	return nil
 }

@@ -62,6 +62,64 @@ spec:
             description: BackupPolicySpec defines what is backed up, where, how often
               and for how long.
             properties:
+              export:
+                description: |-
+                  Export also sends the backups to an IBM Cloud Object Storage bucket.
+                  Without it, backups stay in the snapshot pool. An export problem never
+                  stops the backups to the snapshot pool. See
+                  docs/specs/2026-10-21-backup-cos-export.md.
+                properties:
+                  backupKeySecret:
+                    description: |-
+                      BackupKeySecret names the Secret with the key that encrypts the backups
+                      (backupKey). The controller never reads it: only the Jobs do.
+                    minLength: 1
+                    type: string
+                  bucket:
+                    description: Bucket is the name of the COS bucket.
+                    minLength: 1
+                    type: string
+                  credentialsSecret:
+                    description: |-
+                      CredentialsSecret names the Secret with the driver's COS key (an HMAC key:
+                      access_key_id and secret_access_key).
+                    minLength: 1
+                    type: string
+                  endpoint:
+                    description: |-
+                      Endpoint is the S3 host of the bucket, such as
+                      s3.eu-de.cloud-object-storage.appdomain.cloud.
+                    minLength: 1
+                    type: string
+                  keepFor:
+                    default: 30d
+                    description: |-
+                      KeepFor is how long exported backups are kept: a Go duration, or a number
+                      of days such as "30d". With a Compliance lock it is at least 25 hours.
+                    type: string
+                  lock:
+                    default: Compliance
+                    description: Lock is Compliance (nobody can delete or shorten
+                      the keep time) or None.
+                    enum:
+                    - Compliance
+                    - None
+                    type: string
+                  prefix:
+                    description: Prefix is a folder in the bucket. The policy's own
+                      area is below it.
+                    type: string
+                  schedule:
+                    description: |-
+                      Schedule is a Go duration such as "6h": the most often a volume is sent.
+                      Empty means after each local backup.
+                    type: string
+                required:
+                - backupKeySecret
+                - bucket
+                - credentialsSecret
+                - endpoint
+                type: object
               keepFor:
                 default: 7d
                 description: |-
@@ -187,6 +245,22 @@ spec:
                       description: |-
                         Consistency is FileSystemConsistent or CrashConsistent for a VM disk
                         and FileCopy for any other volume.
+                      type: string
+                    exportError:
+                      description: |-
+                        ExportError is the last error of the volume's export. The export is tried
+                        again; the local backup is not affected.
+                      type: string
+                    exportedBytes:
+                      description: ExportedBytes is how much the newest export sent
+                        to COS.
+                      format: int64
+                      type: integer
+                    exportedTime:
+                      description: |-
+                        ExportedTime is the moment of the newest copy in COS. Set only when the
+                        policy has an export block.
+                      format: date-time
                       type: string
                     lastBackupTime:
                       description: LastBackupTime is the moment of the newest backup.
