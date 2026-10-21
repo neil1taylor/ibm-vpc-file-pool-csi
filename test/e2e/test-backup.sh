@@ -31,9 +31,19 @@ BACKUP_BIN=${BACKUP_BIN:-kubectl-backup}
 IMAGE_URL=${IMAGE_URL:-https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2}
 SCHEDULE=${SCHEDULE:-5m}
 BACKUP_TIMEOUT=${BACKUP_TIMEOUT:-5400}
+# A small pod volume is copied in the first few cycles; a longer wait means the copy fails.
+FIRST_FILES_TIMEOUT=${FIRST_FILES_TIMEOUT:-1200}
 
 log() { echo "[$(date -u +%H:%M:%S)] $*"; }
-fail() { log "FAIL: $*"; exit 1; }
+# Show why a backup did not happen, before cleanup deletes the evidence.
+diagnose() {
+    oc get backuppolicy "$POLICY" -o json 2>/dev/null | jq -c '.status // {} | {volumeCount, lastError, volumes: [.volumes[]? | {pvc: .pvcName, last: .lastBackupTime, points: .restorePoints, err: .lastError}]}' || true
+    oc get replicationpolicy -o json 2>/dev/null | jq -c --arg p "backup-$POLICY" '.items[] | select(.metadata.name | startswith($p)) | {name: .metadata.name, phase: .status.phase, failures: .status.consecutiveFailures, err: .status.lastError, volumes: [.status.subVolumeStatuses[]? | {sv: .subVolumeName, err: .lastError}]}' || true
+    # The controller deletes a failed copy Job at once, so its pods are usually gone; the errors above and the log below are the record.
+    oc get jobs,pods -n kube-system -l storage.ibmcloud.io/repl-temp=true -o wide 2>/dev/null || true
+    oc logs -n kube-system deploy/ibm-vpc-file-pool-csi-controller -c csi-controller --since=2h 2>/dev/null | grep -i "$POLICY" | tail -20 || true
+}
+fail() { log "FAIL: $*"; diagnose; exit 1; }
 
 wait_until() { # wait_until <seconds> <description> <command...>
     local t=$1 what=$2; shift 2
@@ -258,6 +268,7 @@ wait_until 900 "source guest agent" agent_connected src
 writer_running() { vssh src 'test -s /var/log/writer.log' >/dev/null 2>&1; }
 wait_until 300 "writer running" writer_running
 files_pod files-writer files 'mkdir -p /data/a && for i in 1 2 3 4 5; do head -c 100000 /dev/urandom > /data/a/$i; done && (cd /data && find . -type f ! -name "manifest-*" | sort | xargs sha256sum > manifest-A.sha256) && touch /data/written && sleep infinity'
+wait_until 300 "the writer pod running" pod_running files-writer
 wait_until 300 "the pod volume written" oc exec -n "$NS" files-writer -- test -f /data/written
 
 log "making the backup policy $POLICY (schedule $SCHEDULE)"
@@ -280,7 +291,7 @@ vol_field() {
 }
 files_backed_up() { [ "$(vol_field files '.lastBackupTime // empty')" != "" ]; }
 log "waiting for the first backup of the pod volume"
-wait_until "$BACKUP_TIMEOUT" "the first backup of the pod volume" files_backed_up
+wait_until "$FIRST_FILES_TIMEOUT" "the first backup of the pod volume" files_backed_up
 
 # Change the pod volume after its first backup. The second backup holds this.
 oc exec -n "$NS" files-writer -- bash -ec 'head -c 100000 /dev/urandom > /data/a/1; head -c 50000 /dev/urandom > /data/b; cd /data && find . -type f ! -name "manifest-*" | sort | xargs sha256sum > manifest-B.sha256'
