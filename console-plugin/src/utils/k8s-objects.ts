@@ -6,8 +6,12 @@ export interface PersistentVolumeClaim extends K8sResourceCommon {
   spec: {
     accessModes: string[];
     storageClassName?: string;
+    volumeMode?: string;
+    volumeName?: string;
     resources: { requests: { storage: string } };
+    dataSource?: { apiGroup: string; kind: string; name: string };
   };
+  status?: { phase?: string };
 }
 
 export interface StorageClass extends K8sResourceCommon {
@@ -23,6 +27,26 @@ export interface VolumeSnapshot extends K8sResourceCommon {
   spec: {
     volumeSnapshotClassName: string;
     source: { persistentVolumeClaimName: string };
+  };
+}
+
+/** The cluster-scoped object that ties a VolumeSnapshot to the driver's snapshot. */
+export interface VolumeSnapshotContent extends K8sResourceCommon {
+  spec: { volumeSnapshotRef: { name: string; namespace: string } };
+  status?: { snapshotHandle?: string };
+}
+
+/** The parts of a KubeVirt VirtualMachine the console reads. */
+export interface VirtualMachineLike extends K8sResourceCommon {
+  spec?: {
+    template?: {
+      spec?: {
+        volumes?: Array<{
+          persistentVolumeClaim?: { claimName?: string };
+          dataVolume?: { name?: string };
+        }>;
+      };
+    };
   };
 }
 
