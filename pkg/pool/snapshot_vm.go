@@ -272,12 +272,12 @@ func (m *Manager) startVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, snap
 	if pod == nil {
 		// The VM stopped: the disk is at rest, so a file copy is safe.
 		klog.V(2).InfoS("No VM uses the snapshot source any more; using the file copy", "snapshot", snap.Name)
-		if err := m.setSnapshotMethod(ctx, snap, snapshotMethodFile); err != nil {
-			m.waitVMSnapshot(ctx, snap, err.Error())
+		if setErr := m.setSnapshotMethod(ctx, snap, snapshotMethodFile); setErr != nil {
+			m.waitVMSnapshot(ctx, snap, setErr.Error())
 			return
 		}
-		if err := m.copySnapshotData(ctx, snap, pool); err != nil {
-			klog.ErrorS(err, "File copy of a snapshot failed", "snapshot", snap.Name)
+		if copyErr := m.copySnapshotData(ctx, snap, pool); copyErr != nil {
+			klog.ErrorS(copyErr, "File copy of a snapshot failed", "snapshot", snap.Name)
 		}
 		return
 	}
@@ -298,7 +298,8 @@ func (m *Manager) startVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, snap
 	target := vmcopy.VM{Namespace: pod.Namespace, Pod: pod.Name, Name: vmi}
 	// Snapshots of one VM take turns: a copy that waits for its apply Job has
 	// no QEMU job, and the next snapshot's cleanup must not remove its file.
-	other, err := m.otherSnapshotCopying(ctx, snap, pod)
+	var other string
+	other, err = m.otherSnapshotCopying(ctx, snap, pod)
 	if err != nil {
 		m.waitVMSnapshot(ctx, snap, fmt.Sprintf("check other snapshots: %v", err))
 		return
@@ -309,11 +310,11 @@ func (m *Manager) startVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, snap
 	}
 	// Clear what earlier snapshot copies left. Replication's copies and change
 	// lists stay: the change list that replication keeps for this VM must live.
-	if err := vm.copier.CleanStaleCopies(ctx, target, []string{volume}); err != nil {
-		if errors.Is(err, vmcopy.ErrBusy) {
+	if cleanErr := vm.copier.CleanStaleCopies(ctx, target, []string{volume}); cleanErr != nil {
+		if errors.Is(cleanErr, vmcopy.ErrBusy) {
 			m.waitVMSnapshot(ctx, snap, vmBusyMessage)
 		} else {
-			m.waitVMSnapshot(ctx, snap, fmt.Sprintf("check the VM for other copies: %v", err))
+			m.waitVMSnapshot(ctx, snap, fmt.Sprintf("check the VM for other copies: %v", cleanErr))
 		}
 		return
 	}
@@ -363,9 +364,9 @@ func (m *Manager) otherSnapshotCopying(ctx context.Context, snap *v1alpha1.Snaps
 		return "", err
 	}
 	for i := range pools {
-		snaps, err := m.k8sClient.ListSnapshots(ctx, pools[i].Name)
-		if err != nil {
-			return "", err
+		snaps, listErr := m.k8sClient.ListSnapshots(ctx, pools[i].Name)
+		if listErr != nil {
+			return "", listErr
 		}
 		for j := range snaps {
 			o := &snaps[j]
@@ -405,8 +406,8 @@ func (m *Manager) watchVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, snap
 		return
 	}
 	cancel := func(reason string) {
-		if err := vm.copier.Cancel(ctx, target, cp); err != nil {
-			m.waitVMSnapshot(ctx, snap, fmt.Sprintf("cancel the copy (%s): %v", reason, err))
+		if cancelErr := vm.copier.Cancel(ctx, target, cp); cancelErr != nil {
+			m.waitVMSnapshot(ctx, snap, fmt.Sprintf("cancel the copy (%s): %v", reason, cancelErr))
 			return
 		}
 		m.vmSnapshotTryFailed(ctx, snap, reason)

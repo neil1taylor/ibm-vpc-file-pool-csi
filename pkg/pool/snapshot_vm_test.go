@@ -32,7 +32,11 @@ type vmSnapEnv struct {
 func newVMSnapEnv(t *testing.T) *vmSnapEnv {
 	t.Helper()
 	k, _, mgr := newShareDataTestManager(t)
-	e := &vmSnapEnv{t: t, k: k, mgr: mgr, sd: mgr.shareData.(*fakeShareData), dc: newVMCopyDirectClient(),
+	sd, ok := mgr.shareData.(*fakeShareData)
+	if !ok {
+		t.Fatal("the test manager has no fake share data")
+	}
+	e := &vmSnapEnv{t: t, k: k, mgr: mgr, sd: sd, dc: newVMCopyDirectClient(),
 		cop: newFakeVMCopier(), ctx: context.Background(), clock: time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC)}
 	mgr.SetVMSnapshots(e.cop, e.dc)
 	mgr.vmNow = func() time.Time { return e.clock }
