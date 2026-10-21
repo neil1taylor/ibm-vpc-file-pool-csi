@@ -127,7 +127,7 @@ func TestBackupRestore_RunsFromRequestToDone(t *testing.T) {
 	target := e.bindTarget()
 	e.sd.setInProgress(true)
 	e.reconcile()
-	if got := e.sv(target.Name).Labels[restorePendingLabel]; got != "true" {
+	if got := e.sv(target.Name).Labels[RestorePendingLabel]; got != "true" {
 		t.Errorf("restore-pending label = %q: a pod must not mount the volume during the copy", got)
 	}
 	if len(e.sd.restores) == 0 {
@@ -153,7 +153,7 @@ func TestBackupRestore_RunsFromRequestToDone(t *testing.T) {
 		!br.Status.RestoredMoment.Equal(&metav1.Time{Time: time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC)}) || br.Status.Latest {
 		t.Errorf("status = %+v, want Done at 09:00, not the latest", br.Status)
 	}
-	if got := e.sv(target.Name).Labels[restorePendingLabel]; got != "" {
+	if got := e.sv(target.Name).Labels[RestorePendingLabel]; got != "" {
 		t.Errorf("restore-pending label = %q after the copy, want it removed", got)
 	}
 	// Done stays done.
@@ -246,7 +246,7 @@ func TestBackupRestore_FailedCopyKeepsTheVolumeHeldBack(t *testing.T) {
 	if br.Status.Phase != "Failed" || !strings.Contains(br.Status.Message, "no space") {
 		t.Errorf("status = %+v, want Failed with the reason", br.Status)
 	}
-	if got := e.sv(target.Name).Labels[restorePendingLabel]; got != "true" {
+	if got := e.sv(target.Name).Labels[RestorePendingLabel]; got != "true" {
 		t.Errorf("label = %q: a half-restored volume must stay held back", got)
 	}
 }

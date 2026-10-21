@@ -24,6 +24,9 @@ rules:
   - apiGroups: ["storage.ibmcloud.io"]
     resources: ["backuppolicies", "backuppolicies/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["backuprestores", "backuprestores/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   # Backup policies back up a VM whole: they read the VM's volumes to find
   # all of its disks.
   - apiGroups: ["kubevirt.io"]

@@ -26,9 +26,9 @@ const (
 	// name of the BackupRestore.
 	backupRestoreAnnotation = "storage.ibmcloud.io/backup-restore"
 
-	// restorePendingLabel is on the SubVolume of a volume that a restore is
+	// RestorePendingLabel is on the SubVolume of a volume that a restore is
 	// still filling. The node plugin refuses to mount such a volume.
-	restorePendingLabel = "storage.ibmcloud.io/restore-pending"
+	RestorePendingLabel = "storage.ibmcloud.io/restore-pending"
 
 	restorePhasePending      = "Pending"
 	restorePhaseProvisioning = "Provisioning"
@@ -132,7 +132,7 @@ func (bc *BackupController) reconcileRestore(ctx context.Context, br *v1alpha1.B
 	}
 
 	// Hold back pods until the copy has ended.
-	if sv.Labels[restorePendingLabel] != "true" {
+	if sv.Labels[RestorePendingLabel] != "true" {
 		bc.setSubVolumeRestoreLabel(ctx, sv, true)
 	}
 
@@ -233,9 +233,9 @@ func (bc *BackupController) setSubVolumeRestoreLabel(ctx context.Context, sv *v1
 		if sv.Labels == nil {
 			sv.Labels = map[string]string{}
 		}
-		sv.Labels[restorePendingLabel] = "true"
+		sv.Labels[RestorePendingLabel] = "true"
 	} else {
-		delete(sv.Labels, restorePendingLabel)
+		delete(sv.Labels, RestorePendingLabel)
 	}
 	if err := bc.client.Patch(ctx, sv, patch); err != nil {
 		klog.ErrorS(err, "Failed to change the restore-pending label", "subVolume", sv.Name, "pending", pending)

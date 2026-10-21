@@ -9,6 +9,7 @@ import (
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/k8s"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/pool"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/util"
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
@@ -1599,5 +1600,41 @@ func TestNodePublishVolume_NonClone(t *testing.T) {
 	}
 	if resp == nil {
 		t.Fatal("expected non-nil response")
+	}
+}
+
+// A volume that a restore from backup is still filling must not be mounted:
+// a pod, or a VM, would see a half-written disk.
+func TestNodePublishVolume_RestoreFromBackupInProgress(t *testing.T) {
+	pvName := "pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"
+	k := &nodeTestK8sClient{
+		zone: "us-south-1",
+		subVolumes: map[string]*v1alpha1.SubVolume{
+			pvName: {
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{pool.RestorePendingLabel: "true"}},
+				Status:     v1alpha1.SubVolumeStatus{Phase: "Bound"},
+			},
+		},
+	}
+	d := newNodeTestDriver(mount.NewFakeMounter(nil), nil, k)
+
+	tmpDir := resolvedTempDir(t)
+	stagingPath := filepath.Join(tmpDir, "staging")
+	if err := os.MkdirAll(filepath.Join(stagingPath, "/pvcs/"+pvName), 0750); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	req := &csi.NodePublishVolumeRequest{
+		VolumeId:          fmt.Sprintf("pool/share/%s", pvName),
+		StagingTargetPath: stagingPath,
+		TargetPath:        filepath.Join(tmpDir, "target"),
+		VolumeContext:     map[string]string{"subDir": "/pvcs/" + pvName},
+	}
+	_, err := d.NodePublishVolume(context.Background(), req)
+	assertGRPCCode(t, err, codes.Unavailable)
+
+	// Once the label is removed, the volume mounts.
+	delete(k.subVolumes[pvName].Labels, pool.RestorePendingLabel)
+	if _, err := d.NodePublishVolume(context.Background(), req); err != nil {
+		t.Fatalf("after the restore: %v", err)
 	}
 }
