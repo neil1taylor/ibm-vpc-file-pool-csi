@@ -26,12 +26,16 @@ import (
 type fakeVMCopier struct {
 	mu sync.Mutex
 
-	starts      []fakeStart
-	startErr    error
-	freezeErr   string
-	state       vmcopy.State
-	stateMsg    string
-	finishes    []bool // removeStaging of each Finish call
+	starts    []fakeStart
+	startErr  error
+	freezeErr string
+	state     vmcopy.State
+	stateMsg  string
+	finishes  []bool // removeStaging of each Finish call
+	// finishDisks and cancelDisks hold the volumes of the Copy each Finish and
+	// Cancel call got.
+	finishDisks [][]string
+	cancelDisks [][]string
 	cancels     int
 	removeStale int
 	moment      time.Time
@@ -83,10 +87,19 @@ func (f *fakeVMCopier) Progress(_ context.Context, _ vmcopy.VM, _ *vmcopy.Copy) 
 	return f.state, f.stateMsg, nil
 }
 
-func (f *fakeVMCopier) Finish(_ context.Context, _ vmcopy.VM, _ *vmcopy.Copy, removeStaging bool) error {
+func copyVolumes(cp *vmcopy.Copy) []string {
+	var v []string
+	for _, d := range cp.Disks {
+		v = append(v, d.Volume)
+	}
+	return v
+}
+
+func (f *fakeVMCopier) Finish(_ context.Context, _ vmcopy.VM, cp *vmcopy.Copy, removeStaging bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.finishes = append(f.finishes, removeStaging)
+	f.finishDisks = append(f.finishDisks, copyVolumes(cp))
 	return nil
 }
 
@@ -97,10 +110,11 @@ func (f *fakeVMCopier) Commit(_ context.Context, _ vmcopy.VM, cp *vmcopy.Copy) e
 	return nil
 }
 
-func (f *fakeVMCopier) Cancel(_ context.Context, _ vmcopy.VM, _ *vmcopy.Copy) error {
+func (f *fakeVMCopier) Cancel(_ context.Context, _ vmcopy.VM, cp *vmcopy.Copy) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.cancels++
+	f.cancelDisks = append(f.cancelDisks, copyVolumes(cp))
 	return f.cancelErr
 }
 

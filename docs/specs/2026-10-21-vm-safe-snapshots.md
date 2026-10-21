@@ -48,7 +48,7 @@ A VolumeSnapshotClass parameter `vmCopySpeedLimitMBps` limits how much the copy 
 
 ### What this step does not do
 
-- It does not make several disks match. A snapshot is one PVC. A VM with two disks needs a group snapshot, which stays issue #14.
+- It does not make several disks match. A snapshot is one PVC. (Matching several disks was added later: see `2026-10-21-multi-disk-vm-snapshots.md`.)
 - No chain of change files and no merging. Every snapshot is a full copy. The chain belongs to the backup step (step 8).
 - No change to restore, or to group snapshots.
 
