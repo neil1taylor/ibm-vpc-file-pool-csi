@@ -764,3 +764,52 @@ func TestInstantSnapshot_VMStopsDuringAMerge(t *testing.T) {
 		t.Errorf("SubVolume status = %+v", sv.Status)
 	}
 }
+
+func TestInstantSnapshot_DeleteFinishesAPendingTakeFirst(t *testing.T) {
+	e := newInstantEnv(t)
+	e.defineVM()
+	e.mustCreate("snap-one") // the Job runs
+	for i := 0; i < 4; i++ {
+		e.jobs.done = i > 0
+		err := e.mgr.DeleteSnapshot(e.ctx, "snap-one")
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, ErrOperationInProgress) {
+			t.Fatalf("DeleteSnapshot: %v", err)
+		}
+	}
+	if e.k.getSnapshot("snap-one") != nil {
+		t.Fatal("the Snapshot must be gone")
+	}
+	sv := e.sv()
+	if sv.Status.ChainOperation != "" {
+		t.Errorf("ChainOperation = %q: a stale mark stops the VM from starting", sv.Status.ChainOperation)
+	}
+	if len(sv.Status.DiskChain) != 0 {
+		t.Errorf("DiskChain = %v: the taken file must be merged away", sv.Status.DiskChain)
+	}
+	if _, ok := e.jobs.scripts["chain-rm-snap-one"]; !ok {
+		t.Error("the file that the take Job made must be merged by a Job")
+	}
+}
+
+func TestInstantSnapshot_DeleteMergesATakenFileThatWasNotRecorded(t *testing.T) {
+	e := newInstantEnv(t)
+	e.startVM(false)
+	e.mustCreate("snap-one")
+	s := e.k.getSnapshot("snap-one").DeepCopy()
+	s.Status.ChainFile = "" // as if the result of the take was not saved
+	if err := e.k.UpdateSnapshotStatus(e.ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.mgr.DeleteSnapshot(e.ctx, "snap-one"); err != nil {
+		t.Fatalf("DeleteSnapshot: %v", err)
+	}
+	if fmt.Sprint(e.snap.merges) != fmt.Sprint([][2]string{{vmsnap.BaseFile, instantFileName("snap-one")}}) {
+		t.Errorf("merges = %v: the snapshot's file is in the chain and must be merged", e.snap.merges)
+	}
+	if c := e.sv().Status.DiskChain; len(c) != 0 {
+		t.Errorf("DiskChain = %v", c)
+	}
+}

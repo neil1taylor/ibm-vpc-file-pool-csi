@@ -501,7 +501,10 @@ func (m *Manager) takeInstantOffline(ctx context.Context, snap *v1alpha1.Snapsho
 // runs, or another error to retry.
 func (m *Manager) deleteInstant(ctx context.Context, snap *v1alpha1.Snapshot, pool *v1alpha1.FileSharePool) error {
 	if snap.Status.ChainFile == "" {
-		return nil // never taken
+		taken, err := m.findUntrackedInstant(ctx, snap)
+		if err != nil || !taken {
+			return err
+		}
 	}
 	sv, err := m.k8sClient.GetSubVolume(ctx, snap.Spec.SourceSubVolume)
 	if apierrors.IsNotFound(err) {
@@ -591,6 +594,37 @@ func (m *Manager) deleteInstant(ctx context.Context, snap *v1alpha1.Snapshot, po
 		}
 	}
 	return m.saveDiskChain(ctx, sv.Name, chainNamesOf(newChain), "")
+}
+
+// findUntrackedInstant looks for the file of a snapshot whose take was not
+// recorded: a Job still runs, or the result was not saved. A pending take is
+// finished first, so its mark does not stay on the volume. When it finds the
+// file, it sets snap's ChainFile and reports true; the caller merges it.
+func (m *Manager) findUntrackedInstant(ctx context.Context, snap *v1alpha1.Snapshot) (bool, error) {
+	sv, err := m.k8sClient.GetSubVolume(ctx, snap.Spec.SourceSubVolume)
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read the snapshot's volume: %w", err)
+	}
+	newFile := instantFileName(snap.Name)
+	if key := "chain-" + snap.Name; sv.Status.ChainOperation == key {
+		if err = m.takeInstantOffline(ctx, snap, sv, key, newFile); err != nil {
+			return false, err
+		}
+		if snap.Status.ChainFile == "" {
+			return false, fmt.Errorf("%w: the snapshot's Job runs; it is merged when the Job is done", ErrOperationInProgress)
+		}
+		return true, nil
+	}
+	chain := diskChainOf(sv)
+	i := indexOfName(chain, newFile)
+	if i < 0 || i+1 >= len(chain) {
+		return false, nil // never taken
+	}
+	snap.Status.ChainFile = chain[i+1]
+	return true, nil
 }
 
 func chainNamesOf(chain []string) []string {
