@@ -8,6 +8,7 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/driver"
@@ -717,6 +718,11 @@ func (s *nfsShareData) CopyDir(_ context.Context, _ string, _ pool.ShareMount, s
 }
 
 func (s *nfsShareData) Stop(context.Context, string) (bool, error) { return true, nil }
+
+// ApplyVMDisk is not used: the integration tests have no running VMs.
+func (s *nfsShareData) ApplyVMDisk(context.Context, string, pool.ShareMount, string, string, string, time.Time) (bool, error) {
+	return true, nil
+}
 
 func newTestHarness(t *testing.T) *testHarness {
 	t.Helper()

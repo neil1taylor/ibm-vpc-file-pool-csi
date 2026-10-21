@@ -140,11 +140,17 @@ type AllocationResult struct {
 
 // Manager implements PoolManager. It is the core brain of the CSI driver.
 type Manager struct {
-	mu                   sync.Mutex
-	k8sClient            k8s.Client
-	vpcClient            ibmcloud.VPCFileClient
-	nfsOps               NFSOperations
-	shareData            ShareData
+	mu        sync.Mutex
+	k8sClient k8s.Client
+	vpcClient ibmcloud.VPCFileClient
+	nfsOps    NFSOperations
+	shareData ShareData
+	vm        *vmSnapshots
+	vmNow     func() time.Time
+	// vmMu serializes the steps of the VM snapshot loop with the delete of a
+	// snapshot, without holding mu while commands run in a VM pod. Lock order:
+	// mu first, then vmMu. The loop never takes mu while it holds vmMu.
+	vmMu                 sync.Mutex
 	stagingBasePath      string
 	defaultResourceGroup string
 	network              *ShareNetwork
@@ -614,7 +620,10 @@ func (m *Manager) CreateSnapshot(ctx context.Context, snapshotName, sourceVolume
 	existing, err := m.k8sClient.GetSnapshot(ctx, snapshotName)
 	if err == nil && existing != nil {
 		poolName = existing.Spec.PoolName
-		if !existing.Status.ReadyToUse {
+		if existing.Status.Phase == "Failed" {
+			return nil, fmt.Errorf("%w: snapshot %s: %s", ErrSnapshotFailed, snapshotName, existing.Status.Message)
+		}
+		if !existing.Status.ReadyToUse && existing.Annotations[snapshotMethodAnnotation] != snapshotMethodVM {
 			pool, poolErr := m.k8sClient.GetFileSharePool(ctx, poolName)
 			if poolErr != nil {
 				return nil, fmt.Errorf("%w: %s", ErrPoolNotFound, poolName)
@@ -624,6 +633,11 @@ func (m *Manager) CreateSnapshot(ctx context.Context, snapshotName, sourceVolume
 			}
 		}
 		return snapshotResult(existing), nil
+	}
+
+	speed, err := snapshotSpeed(params)
+	if err != nil {
+		return nil, err
 	}
 
 	// 2. Parse sourceVolumeID to get pvName
@@ -648,14 +662,36 @@ func (m *Manager) CreateSnapshot(ctx context.Context, snapshotName, sourceVolume
 	// 5. Build snapshot path
 	snapshotPath := fmt.Sprintf("/pvcs/.snapshots/snap-%s", snapshotName)
 
+	// A disk that a running VM writes to is copied with QEMU. Check before
+	// anything is created, so a failed check leaves nothing behind.
+	method := snapshotMethodFile
+	if m.vm != nil {
+		pod, _, vmErr := findVMPodForClaim(ctx, m.vm.kube, sv.Spec.PVCNamespace, sv.Spec.PVCName)
+		if vmErr != nil {
+			return nil, fmt.Errorf("check for a running VM: %w", vmErr)
+		}
+		if pod != nil {
+			if pod.Labels[kubevirtPodLabel] != "virt-launcher" {
+				return nil, fmt.Errorf("%w: %s/%s is a hot-plugged disk of a running VM; stop the VM or detach the disk, because a file copy would not be safe and QEMU cannot copy a hot-plugged disk yet",
+					ErrSnapshotUnsupported, sv.Spec.PVCNamespace, sv.Spec.PVCName)
+			}
+			method = snapshotMethodVM
+		}
+	}
+
 	// 6. Create the Snapshot CR, not ready until its copy has finished
 	if m.shareData == nil {
 		return nil, errShareDataNotSet
 	}
 	now := metav1.Now()
+	annotations := map[string]string{snapshotMethodAnnotation: method}
+	if speed != "" {
+		annotations[snapshotSpeedAnnotation] = speed
+	}
 	snap := &v1alpha1.Snapshot{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: snapshotName,
+			Name:        snapshotName,
+			Annotations: annotations,
 			Labels: map[string]string{
 				"storage.ibmcloud.io/pool":             poolName,
 				"storage.ibmcloud.io/share-id":         sv.Spec.ShareID,
@@ -696,9 +732,12 @@ func (m *Manager) CreateSnapshot(ctx context.Context, snapshotName, sourceVolume
 		klog.ErrorS(err, "Failed to update pool status after snapshot", "pool", poolName)
 	}
 
-	// 8. Copy the volume folder into the snapshot folder
-	if err := m.copySnapshotData(ctx, snap, pool); err != nil {
-		return nil, err
+	// 8. Copy the volume folder into the snapshot folder. A VM disk is
+	// copied by AdvanceVMSnapshots instead.
+	if method == snapshotMethodFile {
+		if err := m.copySnapshotData(ctx, snap, pool); err != nil {
+			return nil, err
+		}
 	}
 
 	klog.V(2).InfoS("Created snapshot",
@@ -721,6 +760,13 @@ func (m *Manager) copySnapshotData(ctx context.Context, snap *v1alpha1.Snapshot,
 	if m.shareData == nil {
 		return errShareDataNotSet
 	}
+	// A VM that started since the copy began may write to the disk while it
+	// is read. Do not go on with the file copy then.
+	if handled, vmErr := m.switchToVMPath(ctx, snap); vmErr != nil {
+		return vmErr
+	} else if handled {
+		return nil
+	}
 	share, err := poolShareMount(pool, snap.Spec.ShareID)
 	if err != nil {
 		return err
@@ -741,6 +787,13 @@ func (m *Manager) copySnapshotData(ctx context.Context, snap *v1alpha1.Snapshot,
 		return fmt.Errorf("copy snapshot: %w", err)
 	}
 	if !done {
+		return nil
+	}
+	// A VM that started during the copy may have written to the disk while it
+	// was read. Then the folder is not a snapshot of one moment.
+	if handled, vmErr := m.switchToVMPath(ctx, snap); vmErr != nil {
+		return vmErr
+	} else if handled {
 		return nil
 	}
 	snap.Status.Phase = "Ready"
@@ -788,6 +841,13 @@ func (m *Manager) DeleteSnapshot(ctx context.Context, snapshotName string) (retE
 	}
 	poolName = snap.Spec.PoolName
 
+	// Mark the snapshot first, so the copy loop leaves it alone, then cancel a
+	// QEMU copy in progress. A copy that cannot be cancelled keeps its record
+	// and the delete is tried again.
+	if err = m.cancelVMSnapshotForDelete(ctx, snap); err != nil {
+		return err
+	}
+
 	// 2. Remove the snapshot folder. The CR and its capacity stay until
 	// the folder is gone.
 	if m.shareData == nil {
@@ -801,12 +861,14 @@ func (m *Manager) DeleteSnapshot(ctx context.Context, snapshotName string) (retE
 	if err != nil {
 		return err
 	}
-	stopped, err := m.shareData.Stop(ctx, "snap-"+snapshotName)
-	if err != nil {
-		return fmt.Errorf("stop snapshot copy: %w", err)
-	}
-	if !stopped {
-		return ErrOperationInProgress
+	for _, key := range []string{"snap-" + snapshotName, "snapvm-" + snapshotName} {
+		stopped, stopErr := m.shareData.Stop(ctx, key)
+		if stopErr != nil {
+			return fmt.Errorf("stop snapshot copy: %w", stopErr)
+		}
+		if !stopped {
+			return ErrOperationInProgress
+		}
 	}
 	done, err := m.shareData.RemoveDir(ctx, "rmsnap-"+snapshotName, share, snap.Spec.SnapshotPath)
 	if err != nil {

@@ -914,8 +914,54 @@ type SnapshotStatus struct {
     // CreationTime is when the snapshot was created.
     // +optional
     CreationTime *metav1.Time `json:"creationTime,omitempty"`
+
+    // The fields below are used only for a snapshot of a disk that a running
+    // VM uses. See "Snapshots of running VMs" below.
+
+    // VMCopy is the state of the QEMU copy while it runs.
+    // +optional
+    VMCopy *VMCopyState `json:"vmCopy,omitempty"`
+
+    // VMCopyAttempts counts copies that were cancelled or failed. After 3 the snapshot fails.
+    // +optional
+    VMCopyAttempts int32 `json:"vmCopyAttempts,omitempty"`
+
+    // VMCopyStarted is when the current try started.
+    // +optional
+    VMCopyStarted *metav1.Time `json:"vmCopyStarted,omitempty"`
+
+    // VMCopyRetryAfter is the earliest time of the next try.
+    // +optional
+    VMCopyRetryAfter *metav1.Time `json:"vmCopyRetryAfter,omitempty"`
+
+    // CopyMoment is the moment the snapshot shows.
+    // +optional
+    CopyMoment *metav1.Time `json:"copyMoment,omitempty"`
+
+    // Consistency is FileSystemConsistent (the guest was frozen) or CrashConsistent.
+    // +optional
+    Consistency string `json:"consistency,omitempty"`
+
+    // ConsistencyReason says why a snapshot is only crash consistent.
+    // +optional
+    ConsistencyReason string `json:"consistencyReason,omitempty"`
+
+    // Message says what the snapshot waits for or why it failed.
+    // +optional
+    Message string `json:"message,omitempty"`
 }
 ```
+
+### Snapshots of running VMs
+
+If a running (or starting) KubeVirt VM uses the source claim, the snapshot is a QEMU copy of that one disk, not a file copy. The Snapshot gets the annotation `storage.ibmcloud.io/snapshot-method: vm`. The controller freezes the guest for a moment, has QEMU copy the disk to a staging file, and an `apply-vm-disk` Job writes a raw `disk.img` into the snapshot folder. The snapshot is ready when the Job ends. `status.consistency` says whether the guest was frozen.
+
+- The `VolumeSnapshotClass` parameter `vmCopySpeedLimitMBps` (whole number, default 20) limits how much the copy slows the VM. The value is kept in the annotation `storage.ibmcloud.io/vm-copy-speed-mbps`.
+- A live migration cancels the copy. A cancelled or failed copy is tried again after a minute; after 3 tries the snapshot is `Failed` and `status.message` says why.
+- A copy that runs much longer than the disk needs (2 hours plus twice the time at the speed limit) is cancelled and counts as one try.
+- If the VM stops before the copy starts, the snapshot is a file copy. If a VM starts during a file copy, the folder is discarded and the snapshot is copied again with QEMU.
+- A snapshot covers one claim. To match several disks of a VM, see issue #14.
+- While a snapshot copies a VM, replication of the same VM waits (and the other way round).
 
 ### Example Snapshot CR
 
@@ -1492,6 +1538,11 @@ type VMCopyState struct {
     // a Job applies it at the destination.
     // +kubebuilder:validation:Enum=Copying;Sending
     Phase string `json:"phase"`
+
+    // PodNamespace is the namespace of the VM pod. A snapshot copy sets it so the
+    // copy can be watched and cancelled without its source volume.
+    // +optional
+    PodNamespace string `json:"podNamespace,omitempty"`
 
     // PodName and PodUID identify the virt-launcher pod. If the pod changes,
     // the VM restarted or moved and QEMU no longer has the copy.

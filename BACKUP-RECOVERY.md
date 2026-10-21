@@ -437,11 +437,15 @@ Pool CSI snapshots can supplement application-level backups for non-critical dat
 
 ### KubeVirt VMs
 
-**Do not snapshot or replicate running VM disk images.** The disk image will be in an inconsistent state.
+**A snapshot of a running VM's disk is safe.** The driver sees that a running VM uses the claim and copies the disk with QEMU at one moment, with the guest file systems frozen for a fraction of a second. The Snapshot says `FileSystemConsistent` when that worked. The copy is slow on purpose (20 MB/s by default, about 20 minutes for a 20 GB disk) so the VM keeps its speed. Set `vmCopySpeedLimitMBps` on the VolumeSnapshotClass to change the speed. The snapshot covers one disk. A VM with several disks needs a group snapshot (issue #14) if the disks must match each other.
 
-For VM backup:
+```bash
+kubectl get snapshots.storage.ibmcloud.io <name> -o jsonpath='{.status.consistency}{" "}{.status.copyMoment}{"\n"}'
+```
+
+To match the disks of a VM today, or if you cannot use the QEMU copy:
 1. **Stop the VM** with `virtctl stop <vm-name>`
-2. **Create a volume snapshot** of the disk PVC
+2. **Create a volume snapshot** of each disk PVC
 3. **Restart the VM** with `virtctl start <vm-name>`
 
 For ongoing VM protection, use application-level backup tools (e.g., Velero with KubeVirt plugin, Trilio) or shut down VMs before replication cycles via pre-sync hooks.

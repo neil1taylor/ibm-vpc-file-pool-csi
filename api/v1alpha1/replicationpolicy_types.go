@@ -223,6 +223,11 @@ type VMCopyState struct {
 	// +kubebuilder:validation:Enum=Copying;Sending
 	Phase string `json:"phase"`
 
+	// PodNamespace is the namespace of the VM pod. A snapshot copy sets it so
+	// the copy can be watched and cancelled without its source volume.
+	// +optional
+	PodNamespace string `json:"podNamespace,omitempty"`
+
 	// PodName and PodUID identify the virt-launcher pod. If the pod changes,
 	// the VM restarted or moved and QEMU no longer has the copy.
 	PodName string `json:"podName"`

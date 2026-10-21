@@ -39,7 +39,7 @@ A background loop in the controller moves the copy forward every 10 seconds. Sna
 - **The VM stops during the copy.** If the QEMU copy fails because of this, the controller starts again with the file copy, because the disk is now at rest.
 - **A VM starts during a file copy.** When a file copy ends, the controller checks again for a VM pod. If one is there, it deletes the snapshot folder and starts again on the VM path.
 - **Delete during a copy.** The controller cancels the QEMU copy, removes the staging file and the snapshot folder, and then removes the Snapshot.
-- **No progress.** If a copy shows no progress for 2 hours, it is cancelled and counts as one try.
+- **A copy that runs too long.** QEMU does not report how far a copy is, so progress cannot be measured. A copy that runs longer than 2 hours plus twice the time the disk needs at the speed limit is cancelled and counts as one try. (Changed during the build: the first draft said "no progress for 2 hours".)
 - **Controller restart.** The record in `status.vmCopy` lets the new leader carry on. If the VM pod is gone, the try is cancelled.
 
 ### Speed limit
@@ -78,7 +78,8 @@ A VolumeSnapshotClass parameter `vmCopySpeedLimitMBps` limits how much the copy 
 - One PVC per snapshot. Matching several disks stays with group snapshots (issue #14).
 - The default speed limit is 20 MB/s, the same as replication. A class parameter can change it.
 - A migration retries the copy three times, one minute apart, and then fails.
-- A copy with no progress for 2 hours is cancelled.
+- A copy that runs longer than 2 hours plus twice the expected time is cancelled. Progress cannot be measured, so a time limit replaces "no progress".
+- A snapshot never removes the change lists that replication keeps. It only checks that no other copy runs in the VM, and waits if one does. Replication waits the same way.
 - The status says whether the snapshot is file-system consistent or crash consistent. A crash-consistent snapshot is still ready to use; it is not an error.
 - If the VM stops during the copy, the controller falls back to the file copy.
 - The copy runs in a loop in the controller. It does not wait for the snapshotter to ask again.

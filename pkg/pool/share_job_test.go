@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -302,5 +303,131 @@ func TestShareJobRunner_Stop(t *testing.T) {
 	}
 	if n := countPVs(t, c); n != 0 {
 		t.Errorf("%d share PVs left after Stop", n)
+	}
+}
+
+func newApplyRunner() (*ShareJobRunner, client.Client) {
+	r, c := newShareJobTestRunner()
+	r.SetDriverImage("de.icr.io/test/driver:v1")
+	return r, c
+}
+
+func TestShareJobRunner_ApplyVMDisk_FirstCallStartsJob(t *testing.T) {
+	r, c := newApplyRunner()
+	moment := time.Date(2026, 10, 21, 9, 30, 0, 0, time.UTC)
+	done, err := r.ApplyVMDisk(context.Background(), "snap-a", testShareA, testVolPath, ".repl-staging-abc", testSnapPath, moment)
+	if err != nil || done {
+		t.Fatalf("ApplyVMDisk() = %v, %v; want false, nil", done, err)
+	}
+	job := getShareJob(t, c, "snap-a")
+	spec := job.Spec.Template.Spec
+	if len(spec.InitContainers) != 1 || len(spec.Containers) != 1 {
+		t.Fatalf("want 1 init container and 1 container, got %d and %d", len(spec.InitContainers), len(spec.Containers))
+	}
+	initC, mainC := spec.InitContainers[0], spec.Containers[0]
+	if *initC.SecurityContext.RunAsUser != 0 {
+		t.Errorf("init container runs as %d, want root", *initC.SecurityContext.RunAsUser)
+	}
+	if got := strings.Join(initC.Command, " "); !strings.Contains(got, `mkdir -p "/share0`+testSnapPath+`"`) {
+		t.Errorf("init script does not make the snapshot folder: %s", got)
+	}
+	// The Job is safe to run twice: a second run, after the staging file was
+	// applied and removed, leaves the finished snapshot alone.
+	if got := strings.Join(initC.Command, " "); !strings.Contains(got, `if [ -e "/share0`+testVolPath+`/.repl-staging-abc" ]`) {
+		t.Errorf("init script must only clear the folder while the staging file exists: %s", got)
+	}
+	if got := strings.Join(mainC.Command, " "); !strings.Contains(got, "already applied") {
+		t.Errorf("the command must skip an apply that has been done: %s", got)
+	}
+	// A folder from an earlier try or a discarded file copy is replaced.
+	if got := strings.Join(initC.Command, " "); !strings.Contains(got, `rm -r -f -- "/share0`+testSnapPath+`"`) {
+		t.Errorf("init script does not clear an old snapshot folder: %s", got)
+	}
+	if got := *spec.SecurityContext.RunAsGroup; got != qemuUID {
+		t.Errorf("pod group = %d, want %d", got, qemuUID)
+	}
+	if *spec.SecurityContext.RunAsUser != qemuUID {
+		t.Errorf("pod runs as %d, want %d", *spec.SecurityContext.RunAsUser, qemuUID)
+	}
+	if mainC.Image != "de.icr.io/test/driver:v1" {
+		t.Errorf("image = %q, want the driver image", mainC.Image)
+	}
+	cmd := strings.Join(mainC.Command, " ")
+	for _, want := range []string{
+		"--mode=apply-vm-disk",
+		`--staging-path="/share0` + testVolPath + `/.repl-staging-abc"`,
+		`--disk-path="/share0` + testSnapPath + `/disk.img"`,
+		"--to=2026-10-21T09:30:00Z",
+		"--full",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("command lacks %q: %s", want, cmd)
+		}
+	}
+	if countPVs(t, c) != 1 {
+		t.Errorf("want one share PV")
+	}
+}
+
+func TestShareJobRunner_ApplyVMDisk_SucceededIsDoneAndCleanedUp(t *testing.T) {
+	r, c := newApplyRunner()
+	ctx := context.Background()
+	moment := time.Now()
+	if _, err := r.ApplyVMDisk(ctx, "snap-a", testShareA, testVolPath, ".repl-staging-abc", testSnapPath, moment); err != nil {
+		t.Fatal(err)
+	}
+	setJobStatus(t, c, "snap-a", 1, 0)
+	done, err := r.ApplyVMDisk(ctx, "snap-a", testShareA, testVolPath, ".repl-staging-abc", testSnapPath, moment)
+	if err != nil || !done {
+		t.Fatalf("ApplyVMDisk() = %v, %v; want true, nil", done, err)
+	}
+	if countPVs(t, c) != 0 {
+		t.Errorf("share PV not removed")
+	}
+}
+
+func TestShareJobRunner_ApplyVMDisk_FailedJobReportsError(t *testing.T) {
+	r, c := newApplyRunner()
+	ctx := context.Background()
+	moment := time.Now()
+	if _, err := r.ApplyVMDisk(ctx, "snap-a", testShareA, testVolPath, ".repl-staging-abc", testSnapPath, moment); err != nil {
+		t.Fatal(err)
+	}
+	setJobStatus(t, c, "snap-a", 0, shareJobBackoffLimit+1)
+	_, err := r.ApplyVMDisk(ctx, "snap-a", testShareA, testVolPath, ".repl-staging-abc", testSnapPath, moment)
+	if !errors.Is(err, ErrShareJobFailed) {
+		t.Fatalf("err = %v, want ErrShareJobFailed", err)
+	}
+}
+
+func TestShareJobRunner_ApplyVMDisk_RejectsBadInput(t *testing.T) {
+	r, _ := newApplyRunner()
+	ctx := context.Background()
+	moment := time.Now()
+	cases := []struct{ name, vol, staging, dst string }{
+		{"volume path", "/etc", ".repl-staging-abc", testSnapPath},
+		{"snapshot path", testVolPath, ".repl-staging-abc", "/etc"},
+		{"staging name", testVolPath, "disk.img", testSnapPath},
+		{"staging with slash", testVolPath, ".repl-staging-../x", testSnapPath},
+	}
+	for _, tc := range cases {
+		if _, err := r.ApplyVMDisk(ctx, "snap-bad", testShareA, tc.vol, tc.staging, tc.dst, moment); err == nil {
+			t.Errorf("%s: want an error", tc.name)
+		}
+	}
+	noImage, _ := newShareJobTestRunner()
+	if _, err := noImage.ApplyVMDisk(ctx, "snap-bad", testShareA, testVolPath, ".repl-staging-abc", testSnapPath, moment); err == nil {
+		t.Errorf("no driver image: want an error")
+	}
+}
+
+func TestShareJobRunner_ScriptJobsKeepTheirSecurityContext(t *testing.T) {
+	r, c := newShareJobTestRunner()
+	if _, err := r.RemoveDir(context.Background(), "rm-a", testShareA, testVolPath); err != nil {
+		t.Fatal(err)
+	}
+	sc := getShareJob(t, c, "rm-a").Spec.Template.Spec.SecurityContext
+	if sc.RunAsUser == nil || *sc.RunAsUser != 0 || sc.RunAsGroup != nil {
+		t.Errorf("a script Job must run as root and set no group, as before: %+v", sc)
 	}
 }
