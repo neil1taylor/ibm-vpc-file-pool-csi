@@ -132,6 +132,7 @@ Each part is a PR with its tests, and updates the docs and the release test run 
 - Restore from COS reuses the step 8 restore Job, so there is one restore path to test.
 - COS restore into a new cluster needs no policy and no snapshot pool in that cluster.
 - Only IBM COS for now.
+- The bucket is locked to the cluster with a context-based restriction (CBR) rule: the cluster VPC and the admin addresses only. A virtual private endpoint (VPE) for COS in the cluster's VPC is recommended for real backups and not needed for lab tests. The setup command offers both, and `docs` tutorial 9 shows the manual steps. The admin addresses must be in the zone, or `cos-setup`, `cos-list` and `restore --from-cos` fail from a laptop.
 - The setup command is built last of the key parts, after the export works against MinIO and a real bucket by hand.
 
 ## Needs from you
