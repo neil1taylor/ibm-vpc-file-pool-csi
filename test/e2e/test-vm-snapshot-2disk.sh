@@ -298,6 +298,10 @@ metadata: {name: vmrestore}
 spec:
   target: {apiGroup: kubevirt.io, kind: VirtualMachine, name: copy}
   virtualMachineSnapshotName: vmsnap
+  # The snapshot keeps the source VM's MAC address. KubeMacPool refuses a second
+  # VM with the same address while the source runs.
+  patches:
+  - '{"op":"remove","path":"/spec/template/spec/domain/devices/interfaces/0/macAddress"}'
 YAML
 restore_done() { [ "$(oc get vmrestore -n "$NS" vmrestore -o jsonpath='{.status.complete}' 2>/dev/null)" = true ]; }
 wait_until 2400 "the restore complete" restore_done
