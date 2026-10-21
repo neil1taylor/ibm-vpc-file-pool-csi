@@ -8,6 +8,7 @@ export const PLUGIN_NAME = 'ibm-vpc-file-pool-csi';
 export const ROUTES = {
   DASHBOARD: '/vpc-file-pools',
   POOLS: '/vpc-file-pools/pools',
+  MIGRATE: '/vpc-file-pools/migrate',
   POOL_CREATE: '/vpc-file-pools/pools/~new',
   POOL_DETAIL: '/vpc-file-pools/pools/:name',
   SUBVOLUMES: '/vpc-file-pools/subvolumes',

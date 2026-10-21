@@ -112,28 +112,14 @@ func (e *Executor) Execute(ctx context.Context, namespace, sourcePVC, targetPool
 	_, _ = fmt.Fprintf(e.output, "Creating target PVC %s/%s (size: %s, storageClass: %s)...\n",
 		namespace, targetPVCName, storageSize.String(), targetStorageClass)
 
-	targetPVC := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      targetPVCName,
-			Namespace: namespace,
-			Labels: map[string]string{
-				LabelMigration: "true",
-			},
-			Annotations: map[string]string{
-				AnnotationSourcePVC:             sourcePVC,
-				"vpc-file-pool-csi.ibm.io/pool": targetPool,
-			},
-		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
-			StorageClassName: &targetStorageClass,
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: storageSize,
-				},
-			},
-		},
-	}
+	targetPVC := BuildTargetPVC(TargetPVCSpec{
+		Name:         targetPVCName,
+		Namespace:    namespace,
+		SourcePVC:    sourcePVC,
+		Pool:         targetPool,
+		StorageClass: targetStorageClass,
+		Size:         storageSize,
+	})
 
 	_, err = e.clientset.CoreV1().PersistentVolumeClaims(namespace).Create(ctx, targetPVC, metav1.CreateOptions{})
 	if err != nil {
