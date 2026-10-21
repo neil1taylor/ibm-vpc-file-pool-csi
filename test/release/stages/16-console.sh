@@ -109,6 +109,23 @@ sa_can() { oc auth can-i "$@" --as="system:serviceaccount:$NS:$SA" >/dev/null 2>
 token_reads_pools() { sa_can list filesharepools.storage.ibmcloud.io; }
 token_cannot_write() { ! sa_can create pods -n default && ! sa_can delete filesharepools.storage.ibmcloud.io; }
 
+# A volume, so that the SubVolumes tab and the dashboard have a row to show.
+create_claim() {
+    oc apply -n "$NS" -f - >/dev/null <<YAML
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: console-test
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: $POOL
+  resources:
+    requests:
+      storage: 1Gi
+YAML
+}
+claim_is_bound() { [ "$(oc get pvc -n "$NS" console-test -o jsonpath='{.status.phase}')" = "Bound" ]; }
+
 console_is_up() { curl -fsS "http://localhost:$CONSOLE_PORT/health" >/dev/null 2>&1; }
 
 # playwright_summary FILE — "passed failed" counts from Playwright's JSON report.
@@ -126,6 +143,8 @@ run() {
 
     create_pool
     check "pool reaches Ready" wait_until 600 10 pool_is_ready "$POOL"
+    create_claim
+    check "a test volume is bound" wait_until 300 5 claim_is_bound
 
     (umask 077; make_read_only_token >"$TOKEN_FILE")
     check "the test token can read pools" token_reads_pools
