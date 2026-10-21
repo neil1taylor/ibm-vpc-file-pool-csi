@@ -152,16 +152,35 @@ func (s *Snapshotter) Take(ctx context.Context, vm vmcopy.VM, volume, newFile st
 		_, err = s.run(ctx, vm, append(args, "--quiesce")...)
 		if err != nil {
 			res.FileSystemConsistent, res.FreezeError = false, err.Error()
-			_, err = s.run(ctx, vm, args...)
+			// virsh can fail after libvirt made the snapshot. A second
+			// snapshot would stack the live file on itself.
+			taken, readErr := s.isTop(ctx, vm, volume, newFile)
+			switch {
+			case readErr != nil:
+				return nil, fmt.Errorf("taking the snapshot: %w (and the chain could not be read: %v)", err, readErr)
+			case taken:
+				err = nil
+			default:
+				_, err = s.run(ctx, vm, args...)
+			}
 		}
 	} else {
 		_, err = s.run(ctx, vm, args...)
 	}
 	if err != nil {
-		// The new file is not in use. A failed delete leaves a small file
-		// that the next Take with this name makes again.
-		_, _ = s.run(ctx, vm, "rm", "-f", "--", newPath)
-		return nil, fmt.Errorf("taking the snapshot: %w", err)
+		// The new file may be the live file if virsh failed after libvirt
+		// made the snapshot. Remove it only when the chain shows it is not.
+		taken, readErr := s.isTop(ctx, vm, volume, newFile)
+		switch {
+		case readErr != nil:
+			return nil, fmt.Errorf("taking the snapshot: %w (and the chain could not be read: %v)", err, readErr)
+		case !taken:
+			// A failed delete leaves a small file that the next Take with
+			// this name makes again.
+			_, _ = s.run(ctx, vm, "rm", "-f", "--", newPath)
+			return nil, fmt.Errorf("taking the snapshot: %w", err)
+		}
+		res.FileSystemConsistent, res.FreezeError = false, err.Error()
 	}
 	res.Moment = s.now()
 	res.Chain = append([]File{{Name: newFile, Format: "qcow2"}}, d.chain...)
@@ -282,6 +301,19 @@ func (s *Snapshotter) Chain(ctx context.Context, vm vmcopy.VM, volume string) ([
 		return nil, fmt.Errorf("volume %q: %w %s/%s", volume, ErrNotADisk, vm.Namespace, vm.Name)
 	}
 	return d.chain, nil
+}
+
+// isTop reports whether file is the top file of volume's chain.
+func (s *Snapshotter) isTop(ctx context.Context, vm vmcopy.VM, volume, file string) (bool, error) {
+	disks, err := s.disks(ctx, vm)
+	if err != nil {
+		return false, err
+	}
+	d, ok := disks.byVolume[volume]
+	if !ok {
+		return false, fmt.Errorf("volume %q: %w %s/%s", volume, ErrNotADisk, vm.Namespace, vm.Name)
+	}
+	return d.chain[0].Name == file, nil
 }
 
 type disk struct {

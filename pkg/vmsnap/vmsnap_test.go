@@ -28,6 +28,10 @@ type fakeLauncher struct {
 
 	quiesceErr  string // snapshot-create-as --quiesce fails with this
 	snapshotErr string // snapshot-create-as fails with this
+	// snapshot-create-as makes the snapshot, then reports this error, as
+	// when the exec stream breaks after libvirt has done the work.
+	snapshotErrAfter string
+	quiesceErrAfter  string // the same, for the --quiesce try only
 	commitErr   string // blockcommit fails with this
 	log         []string
 }
@@ -204,6 +208,12 @@ func (f *fakeLauncher) snapshot(args []string, fail func(string) (string, string
 		}
 		f.chains[vol] = append([]string{path.Base(file)}, f.chains[vol]...)
 	}
+	if contains(args, "--quiesce") && f.quiesceErrAfter != "" {
+		return fail(f.quiesceErrAfter)
+	}
+	if f.snapshotErrAfter != "" {
+		return fail(f.snapshotErrAfter)
+	}
 	return "Domain snapshot " + args[2] + " created\n", "", nil
 }
 
@@ -365,6 +375,46 @@ func TestTake_FailureLeavesTheChainAsItWas(t *testing.T) {
 	}
 	if _, left := f.files[dir+"/rootdisk/snap-1.qcow2"]; left {
 		t.Error("the unused new file must be removed")
+	}
+}
+
+func TestTake_ErrorAfterTheSnapshotKeepsTheLiveFile(t *testing.T) {
+	f := newFakeLauncher()
+	f.snapshotErrAfter = "error: Disconnected from qemu:///session due to end of file"
+	s := newTestSnapshotter(f)
+
+	res, err := s.Take(context.Background(), testVM, "rootdisk", "snap-1.qcow2", false)
+	if err != nil {
+		t.Fatalf("Take: %v: the snapshot was made, so Take must report it", err)
+	}
+	if _, ok := f.files[dir+"/rootdisk/snap-1.qcow2"]; !ok {
+		t.Fatal("the new file is the VM's live file now and must never be removed")
+	}
+	if got := fmt.Sprint(f.chains["rootdisk"]); got != "[snap-1.qcow2 disk.img]" {
+		t.Errorf("chain = %s", got)
+	}
+	if res.Frozen != "disk.img" || f.files[dir+"/rootdisk/disk.img"] != "0444" {
+		t.Errorf("disk.img holds the snapshot and must be read-only, result %+v", res)
+	}
+}
+
+func TestTake_ErrorAfterAFrozenSnapshotDoesNotSnapshotAgain(t *testing.T) {
+	f := newFakeLauncher()
+	f.quiesceErrAfter = "error: Disconnected from qemu:///session due to end of file"
+	s := newTestSnapshotter(f)
+
+	res, err := s.Take(context.Background(), testVM, "rootdisk", "snap-1.qcow2", true)
+	if err != nil {
+		t.Fatalf("Take: %v", err)
+	}
+	if n := strings.Count(strings.Join(f.log, "\n"), "snapshot-create-as"); n != 1 {
+		t.Errorf("snapshot-create-as ran %d times: a second run would stack the live file on itself", n)
+	}
+	if got := fmt.Sprint(f.chains["rootdisk"]); got != "[snap-1.qcow2 disk.img]" {
+		t.Errorf("chain = %s", got)
+	}
+	if res.FileSystemConsistent {
+		t.Error("the freeze is not known to have worked, so the snapshot is only crash consistent")
 	}
 }
 
