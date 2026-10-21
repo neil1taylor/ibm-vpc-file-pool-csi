@@ -12,6 +12,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
+func watchClient(t *testing.T, c client.Client) client.WithWatch {
+	t.Helper()
+	w, ok := c.(client.WithWatch)
+	if !ok {
+		t.Fatal("the fake client cannot watch")
+	}
+	return w
+}
+
 // These tests cover the findings of the review of the backup code.
 
 // A restore that cannot save "Done" must not open the volume to pods.
@@ -25,7 +34,7 @@ func TestBackupRestore_VolumeStaysHeldUntilDoneIsSaved(t *testing.T) {
 	e.sd.setInProgress(false)
 
 	failSave := true
-	e.bc.client = interceptor.NewClient(e.c.(client.WithWatch), interceptor.Funcs{
+	e.bc.client = interceptor.NewClient(watchClient(t, e.c), interceptor.Funcs{
 		SubResourceUpdate: func(ctx context.Context, c client.Client, sub string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
 			if _, ok := obj.(*v1alpha1.BackupRestore); ok && failSave {
 				return errors.New("conflict")
@@ -93,7 +102,8 @@ func TestBackupReplicationName_DoesNotCollide(t *testing.T) {
 	if a, b := backupReplicationName("a-b", "c"), backupReplicationName("a", "b-c"); a == b {
 		t.Errorf("both give %q", a)
 	}
-	if backupReplicationName("nightly", "data-a") != backupReplicationName("nightly", "data-a") {
+	first := backupReplicationName("nightly", "data-a")
+	if again := backupReplicationName("nightly", "data-a"); first != again {
 		t.Error("the name must be stable")
 	}
 }
@@ -171,7 +181,7 @@ func TestBackupController_ASlowListDoesNotTidyALivePolicy(t *testing.T) {
 	e.reconcile()
 
 	// The list of policies comes back empty (a cache that has not filled).
-	e.bc.client = interceptor.NewClient(e.c.(client.WithWatch), interceptor.Funcs{
+	e.bc.client = interceptor.NewClient(watchClient(t, e.c), interceptor.Funcs{
 		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
 			if _, ok := list.(*v1alpha1.BackupPolicyList); ok {
 				return nil
