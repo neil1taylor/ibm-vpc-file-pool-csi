@@ -170,7 +170,7 @@ Defense-in-depth controls for a storage driver running with host access.
 
 Prometheus metrics and structured logging for operational visibility.
 
-- **Prometheus metrics** — 25 metrics covering allocation (count, duration, capacity), VPC API calls (count, latency), snapshots, clones, group snapshots, replication, and backups.
+- **Prometheus metrics** — 28 metrics covering allocation (count, duration, capacity), VPC API calls (count, latency), snapshots, clones, group snapshots, replication, and backups.
 - **Structured logging** — `klog/v2` with `InfoS`/`ErrorS` and key-value pairs. V(2) for normal operations, V(4) for detailed flow, V(6) for trace-level.
 - **Key metrics:**
   - `vpc_file_pool_allocations_total` — allocation/deallocation counts by pool and status
@@ -291,7 +291,7 @@ How this driver compares to the two most common alternatives for NFS-based Kuber
 | Config auto-discovery | ✅ | ✅ | ❌ |
 | API rate limiting | ✅ | ✅ | — |
 | **Observability** | | | |
-| Prometheus metrics | ✅ (25 metrics) | ✅ | ❌ |
+| Prometheus metrics | ✅ (28 metrics) | ✅ | ❌ |
 | Structured logging (klog) | ✅ | ✅ | ✅ |
 | OpenShift Console plugin | ✅ (beta) | ❌ | ❌ |
 | **Deployment** | | | |
