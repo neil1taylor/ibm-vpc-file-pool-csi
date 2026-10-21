@@ -24,7 +24,8 @@ It pools many volumes (PVCs) as folders on a few shared VPC file shares. A volum
 
 ## What does not work yet
 
-- **Group snapshots on ROVS** do not work: nothing on ROVS calls the driver for them (issue #14). Multi-disk VMs cannot use them. Use a snapshot per volume, or stop the application first. See [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md#volume-group-snapshots).
+- **The group snapshot API on ROVS** does not work: nothing on ROVS calls the driver for it (issue #14). You do not need it for VMs. A KubeVirt snapshot of a VM with several disks asks for one snapshot per disk, and the driver copies all the pool disks of the VM at one moment, so the disks fit each other (tested on 21 October 2026). See [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md#volume-group-snapshots).
+- **A snapshot is a full copy, not an instant one.** It takes minutes for a large disk and uses as much space as the disk holds. KubeVirt marks a `VirtualMachineSnapshot` done after a few seconds, but each disk's `VolumeSnapshot` is ready only when its copy ends. Wait for every `VolumeSnapshot` before you restore. A snapshot of one disk of a multi-disk VM also copies the other disks to temporary files, which are deleted after 10 minutes, so each share needs free room for them.
 - **A snapshot of a running VM's disk is consistent only when the driver can freeze the guest** (the guest agent must answer). The snapshot's `status.consistency` says which kind it is.
 - **Golden images** are hidden. Use the standard catalog.
 - Backups are not part of this list until they are released.
