@@ -363,7 +363,7 @@ kubectl apply -f config/deploy/node.yaml
 |------|---------|-------------|
 | `--endpoint` | `unix:///csi/csi.sock` | CSI gRPC endpoint |
 | `--node-id` | (required) | Kubernetes node name |
-| `--mode` | `controller` | `controller`, `node`, `receiver`, `sync-client`, `apply-vm-disk`, or `send-vm-disk` (the last three are run by replication Jobs) |
+| `--mode` | `controller` | `controller`, `node`, `receiver`, `sync-client`, `check-receiver`, `apply-vm-disk`, or `send-vm-disk` (all but the first three are run as Jobs; `check-receiver` is run by the console's receiver setup) |
 | `--region` | Auto-discovered | IBM Cloud region |
 | `--vpc-id` | Auto-discovered | VPC ID for mount targets |
 | `--subnet-id` | Auto-discovered | Worker subnet IDs for mount targets, comma-separated; the controller uses the one in each pool's zone |
@@ -379,9 +379,9 @@ kubectl apply -f config/deploy/node.yaml
 | `--receiver-base-path` | `/data` | NFS mount point inside the receiver container (receiver mode). Set by the Helm chart |
 | `--receiver-auth-token-file` | `/etc/replication/token` | File with the bearer token the receiver requires (receiver mode) |
 | `--receiver-listen-addr` | `:8443` | Listen address of the receiver (receiver mode) |
-| `--receiver-endpoint` | `""` | URL of the destination receiver (sync-client mode). Set by the replication controller |
-| `--auth-token-file` | `/etc/replication/token` | File with the bearer token the sync client sends (sync-client mode) |
-| `--ca-cert-file` | `""` | CA certificate file for verifying receiver TLS cert (sync-client mode). Empty = system trust store |
+| `--receiver-endpoint` | `""` | URL of the destination receiver (sync-client and check-receiver modes). Set by the replication controller |
+| `--auth-token-file` | `/etc/replication/token` | File with the bearer token the sync client sends (sync-client and check-receiver modes) |
+| `--ca-cert-file` | `""` | CA certificate file for verifying receiver TLS cert (sync-client and check-receiver modes). Empty = system trust store |
 | `--source-path` | `""` | Mounted source NFS path (sync-client mode). Set by the replication controller |
 | `--dest-base-path` | `""` | Destination base path (sync-client mode). Set by the replication controller |
 | `--sub-path` | `""` | SubVolume sub path (sync-client mode). Set by the replication controller |

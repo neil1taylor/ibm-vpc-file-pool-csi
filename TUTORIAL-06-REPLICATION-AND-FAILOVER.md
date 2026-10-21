@@ -1123,6 +1123,7 @@ oc delete namespace pool-tutorial-repl --timeout=60s --ignore-not-found
 | Replication Job logs | `oc logs -n kube-system job/<job-name>` |
 | Receiver pod status | `oc get pods -n kube-system -l app.kubernetes.io/component=replication-receiver` |
 | Receiver health check | `curl -k https://<receiver-route>/api/v1/health` |
+| Receiver token check (needs the token) | `curl -k -H "Authorization: Bearer $TOKEN" https://<receiver-route>/api/v1/auth-check` |
 | Receiver logs | `oc logs -n kube-system -l app.kubernetes.io/component=replication-receiver` |
 | Failover plan | `kubectl failover plan --nfs-mount-path <path>` |
 | Failover dry-run | `kubectl failover execute --nfs-mount-path <path> --dr-pool <pool> --dr-share-ip <ip> --dry-run` |
