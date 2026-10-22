@@ -10,7 +10,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
-var subPathPattern = regexp.MustCompile(`^/pvcs/pvc-[a-f0-9-]{36}$`)
+// subPathPattern is the volume folder, or the folder a failover to an earlier
+// restore point makes next to it (".rewind-<epoch>"). No other suffix is allowed.
+var subPathPattern = regexp.MustCompile(`^/pvcs/pvc-[a-f0-9-]{36}(\.rewind-[0-9]{1,12})?$`)
 
 // SubVolumeValidator validates SubVolume create and update requests.
 type SubVolumeValidator struct{}
