@@ -1,6 +1,6 @@
 # Spec: Run on ROVS, move to security group access, fix what the test found
 
-Date: 2026-10-19. Status: draft for review.
+Date: 2026-10-19. Status: built. The design was implemented and merged on 19 and 20 October 2026 (PRs #3, #6, #7, #9). This file is kept as the record of the decisions.
 
 ## Goal
 
