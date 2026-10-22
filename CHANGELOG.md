@@ -19,6 +19,7 @@ To make a release:
 
 ## [Unreleased]
 
+- **Console: the delete backups dialog gives an administrator the safe command.** When the user lacks the rights, the dialog now shows `kubectl backup delete --policy <policy> --pvc <namespace>/<name>`, which measures first and asks for the typed claim name. Before, it showed raw YAML that removed the backups with neither step.
 - **The documents moved into `docs/` (issue #116, part 1).** README, CHANGELOG, CONTRIBUTING, CLAUDE.md and SKILL.md stay in the root; every other guide is now in `docs/`, and the research notes are in `docs/archive/`. All links, the console's help links, the docs site and the code comments point to the new places. A branch that still edits a guide at its old place: after `git merge origin/main` stops, run `hack/follow-docs-move.sh` to carry the edits over.
 
 - **Receiver check on the policy: `ReceiverReachable` (issue #46, item 4).** For a policy in driver-to-driver mode, the replication controller now checks the receiver (it answers, the certificate is trusted, the token is accepted) when it first sees the policy and then once per schedule, and sets the `ReceiverReachable` condition on `status.conditions` with a plain reason such as "certificate not trusted" or "token refused". The Replication Policies list has a Receiver column with help text, and the policy page a Receiver Status line. A failing check does not stop replication. The controller reads the two Secrets in `kube-system` with the rights it already has.
