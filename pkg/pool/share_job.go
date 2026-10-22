@@ -189,6 +189,8 @@ type jobShape struct {
 	activeDeadline int64
 	// readiness is the main container's readiness probe.
 	readiness *corev1.Probe
+	// pullSecrets are the image pull Secrets of the pod.
+	pullSecrets []string
 }
 
 // folderMount mounts subPath of share number share at at.
@@ -473,6 +475,7 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 					RestartPolicy:                restart,
 					SecurityContext:              podSecurityContext(shape.runAsUser),
 					InitContainers:               initContainers,
+					ImagePullSecrets:             pullSecretRefs(shape.pullSecrets),
 					Containers: []corev1.Container{{
 						Name:            "share-data",
 						Image:           shape.image,
@@ -609,3 +612,11 @@ func (r *ShareJobRunner) Stop(ctx context.Context, key string) (bool, error) {
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+func pullSecretRefs(names []string) []corev1.LocalObjectReference {
+	var refs []corev1.LocalObjectReference
+	for _, n := range names {
+		refs = append(refs, corev1.LocalObjectReference{Name: n})
+	}
+	return refs
+}

@@ -53,6 +53,11 @@ check "a NetworkPolicy guards the helper pods" "$ON" 'kind: NetworkPolicy'
 check "the policy selects helper pods" "$ON" 'storage.ibmcloud.io/browse'
 check "the policy lets the gateway in" "$ON" 'app.kubernetes.io/component: backup-gateway'
 check "the policy names the helper port" "$ON" 'port: 8443'
+PULL="$(mktemp)"
+helm template test "$CHART" --namespace kube-system --set 'imagePullSecrets[0].name=all-icr-io' > "$PULL"
+check "the helper pulls with the chart's pull secrets" "$PULL" '--browse-image-pull-secrets=all-icr-io'
+absent "no pull secrets, no flag" "$ON" '--browse-image-pull-secrets'
+find "$PULL" -delete
 absent "off: no browse image" "$OFF" '--browse-image'
 absent "off: no NetworkPolicy" "$OFF" 'kind: NetworkPolicy'
 absent "off: no Role" "$OFF" 'kind: Role'

@@ -51,6 +51,9 @@ spec:
             - "--driver-image={{ .Values.image.repository }}:{{ .Values.image.tag }}"
             {{- if .Values.backupBrowse.enabled }}
             - "--browse-image={{ .Values.backupBrowse.image.repository }}:{{ .Values.backupBrowse.image.tag | default .Values.image.tag }}"
+            {{- if .Values.imagePullSecrets }}
+            - "--browse-image-pull-secrets={{ range $i, $s := .Values.imagePullSecrets }}{{ if $i }},{{ end }}{{ $s.name }}{{ end }}"
+            {{- end }}
             - "--browse-idle={{ .Values.backupBrowse.idle }}"
             - "--browse-max-life={{ .Values.backupBrowse.maxLife }}"
             - "--browse-max-sessions={{ .Values.backupBrowse.maxSessions }}"

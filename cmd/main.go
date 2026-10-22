@@ -127,6 +127,7 @@ func main() {
 
 	// Browse sessions (single-file restore, issue #92).
 	flag.StringVar(&browse.image, "browse-image", "", "Image of the browse helper; empty turns browse sessions off (controller mode)")
+	flag.StringVar(&browse.pullSecrets, "browse-image-pull-secrets", "", "Comma-separated names of the Secrets, in the driver namespace, that pull the browse image from a private registry")
 	flag.DurationVar(&browse.cfg.Idle, "browse-idle", 15*time.Minute, "End a browse session after this long without use")
 	flag.DurationVar(&browse.cfg.MaxLife, "browse-max-life", 2*time.Hour, "End a browse session after this long, even if in use")
 	flag.IntVar(&browse.cfg.MaxSessions, "browse-max-sessions", 5, "Open browse sessions in the cluster; more wait")
@@ -270,8 +271,9 @@ func runConsolePlugin(mode, name string) {
 
 // browseOptions are the flags for browse sessions.
 type browseOptions struct {
-	image string
-	cfg   pool.BrowseConfig
+	image       string
+	pullSecrets string
+	cfg         pool.BrowseConfig
 }
 
 // webhookOptions configures the admission webhook server.
@@ -569,6 +571,9 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metric
 	backupController.SetShareData(shareRunner)
 	if browse.image != "" {
 		shareRunner.SetBrowseImage(browse.image)
+		if browse.pullSecrets != "" {
+			shareRunner.SetBrowsePullSecrets(strings.Split(browse.pullSecrets, ","))
+		}
 		browse.cfg.Namespace = driverNamespace
 		backupController.SetBrowse(shareRunner, browse.cfg)
 	}

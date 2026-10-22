@@ -131,6 +131,7 @@ func (r *ShareJobRunner) StartBrowse(ctx context.Context, req BrowseJobRequest) 
 		labels:         map[string]string{browseLabel: req.ID},
 		owner:          &owner,
 		hardened:       true,
+		pullSecrets:    r.browsePullSecrets,
 		session:        true,
 		activeDeadline: int64((req.MaxLife + 5*time.Minute).Seconds()),
 		readiness: &corev1.Probe{
