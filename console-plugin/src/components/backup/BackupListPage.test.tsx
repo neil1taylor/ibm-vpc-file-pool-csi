@@ -96,6 +96,11 @@ describe('BackupListPage actions', () => {
     fireEvent.click(within(row).getByRole('button', { name: 'Kebab toggle' }));
   };
 
+  it('has a link to restore from COS', () => {
+    render(<BackupListPage />);
+    expect(screen.getByRole('link', { name: 'Restore from COS' }).getAttribute('href')).toBe('/vpc-file-pools/backups/~cos-restore');
+  });
+
   it('has a create link', () => {
     render(<BackupListPage />);
     expect(screen.getByText('Create BackupPolicy')).toBeTruthy();

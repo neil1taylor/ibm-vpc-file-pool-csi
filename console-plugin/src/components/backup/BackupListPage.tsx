@@ -111,6 +111,9 @@ const BackupListPage: React.FC = () => {
         >
           Create BackupPolicy
         </ListPageCreateLink>
+        <Link to={ROUTES.BACKUP_COS_RESTORE} style={{ marginLeft: 16 }}>
+          Restore from COS
+        </Link>
       </ListPageHeader>
       <p style={{ padding: '0 24px', color: 'var(--pf-t--global--color--subtle)', margin: '0 0 8px 0' }}>
         A backup policy copies the volumes it selects into a snapshot pool on a schedule, and keeps the copies for a set time.

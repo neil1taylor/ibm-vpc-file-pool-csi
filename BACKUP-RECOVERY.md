@@ -402,7 +402,7 @@ The **Backups** tab of the IBM VPC File Pools page shows the same facts as `kube
 - The list has one row for each policy: snapshot pool, schedule, keep time, phase, number of volumes, the age of the stalest backup, and whether the COS export is on.
 - A policy page shows its settings and one row for each volume: the claim, the VM, the newest and oldest backup, the restore points, the size of the newest backup, the consistency, the last error and the export state. A volume the policy no longer backs up is marked with the date its backups are kept until. A crash consistent copy has an orange label.
 - When new backups are stopped because the snapshot pool is more than 85% full, a banner says so on both pages and links to the pool. Nothing is deleted to make room; see [Backups stopped](TROUBLESHOOTING.md#backups-stopped-the-snapshot-pool-is-above-85-full).
-- Restore is in the console too (next section). The COS tab comes in a later step, with its own section here.
+- Restore is in the console too (next section). The COS tab and restore from COS are described below.
 
 #### Make and change a policy in the console
 
@@ -441,6 +441,16 @@ Open a policy, and choose **Restore** in the menu of a volume. This does what `k
 4. **Result.** The dialog follows the Job and says "Removed the backups of ... (size)", or the error. The console removes each Job, its claim and its PV when the Job ends.
 
 The Jobs run in the driver namespace (`kube-system`) with your own rights: to make and remove Jobs and claims there, to make and remove PersistentVolumes, and to list pods. Without them the dialog is off, names the missing rights, and shows the YAML of the delete objects for an administrator to apply (applying it removes the backups without the measure step or the typed confirmation, so only apply it knowingly). A link can open the dialog with `?claim=<namespace>/<name>` on the policy page. After a policy is deleted, its status can no longer say where its backups are; use `kubectl backup delete --pool ... --volume ...`.
+
+#### The COS tab and restore from COS in the console
+
+The **COS** tab of a policy page shows what `kubectl backup cos-list` shows, without `kubectl`.
+
+- **Export settings.** Bucket, endpoint, folder, keep time, lock, schedule, and the names of the Secrets and the Key Protect key. The console shows Secret names only and never reads a Secret.
+- **Export state of each volume.** When the newest copy in COS was sent and how big it was, or the export error. A failed export is tried again by itself and never stops the local backups.
+- **List COS contents.** Runs the same read-only Job as `cos-list` in the driver namespace and shows the volumes and their moments. It needs the right to make and remove a Job there and to list pods; without it the button is off, the missing right is named and the Job YAML is shown for an administrator. A long list is cut: enter one volume to see all its moments.
+
+**Restore from COS** (link on the Backups list and on the COS tab) makes one `BackupRestore` with `spec.fromCOS`, as `kubectl backup restore --from-cos` does, and works in a cluster that has no policy and no snapshot pool. Fill the settings from a policy of this cluster, or type them for another cluster's bucket. COS keeps neither the claim name, the storage class nor the size, so you give them. The Secrets (COS key, wrapped backup key, Key Protect API key) must already exist in the driver namespace. Two things the console cannot do, because it has no IBM Cloud login: it does not remove delete markers in the bucket (use the command if a backup you can see is not found), and it does not fetch the wrapped backup key from the bucket into a missing Secret. The readable emergency key as a file (`--backup-key-file`) is a command-line option only. The page takes `?policy=`, `?volume=` and `?moment=`.
 
 ### Export to COS (built; the release test is written and not yet run)
 

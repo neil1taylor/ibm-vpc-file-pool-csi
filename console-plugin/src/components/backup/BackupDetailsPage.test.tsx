@@ -5,6 +5,11 @@ import BackupDetailsPage from './BackupDetailsPage';
 import BackupVolumesTable from './BackupVolumesTable';
 import { BackupPolicy } from '../../types';
 
+jest.mock('./BackupCOSTab', () => ({
+  __esModule: true,
+  default: ({ policy }: { policy: { metadata: { name: string } } }) => <div>COS tab of {policy.metadata.name}</div>,
+}));
+
 let mockSearch = '';
 const mockReplace = jest.fn();
 jest.mock('./DeleteBackupsDialog', () => ({
@@ -183,6 +188,17 @@ describe('BackupDetailsPage actions', () => {
     expect((screen.getByRole('button', { name: 'Delete' }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(/You are not allowed to update BackupPolicy objects/)).toBeTruthy();
     expect(screen.getByText(/You are not allowed to delete BackupPolicy objects/)).toBeTruthy();
+  });
+});
+
+describe('BackupDetailsPage tabs', () => {
+  it('shows the overview first, and the COS tab on request', () => {
+    watch(policy());
+    render(<BackupDetailsPage />);
+    expect(screen.getByRole('tab', { name: 'Overview' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.queryByText('COS tab of nightly')).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: 'COS' }));
+    expect(screen.getByText('COS tab of nightly')).toBeTruthy();
   });
 });
 
