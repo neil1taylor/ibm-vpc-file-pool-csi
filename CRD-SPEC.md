@@ -1884,7 +1884,6 @@ The CSI driver reads these from the StorageClass `parameters` map:
 | `uid` | No | Pool default | Unix UID for the subdirectory |
 | `gid` | No | Pool default | Unix GID for the subdirectory |
 | `permissions` | No | Pool default | Unix permissions (e.g., "0755") |
-| `reclaimAction` | No | `delete` | `delete`, `retain`, or `archive` |
 
 Example auto-created StorageClass (for a pool named `general-purpose`):
 ```yaml

@@ -8,11 +8,11 @@ Complete metrics reference, alerting rules, and dashboard templates for operatin
 
 The controller exposes Prometheus metrics on `:8080/metrics`. All metrics use the `vpc_file_pool_` or `pool_csi_` prefix and follow the [Prometheus naming conventions](https://prometheus.io/docs/practices/naming/).
 
-The driver emits 28 metrics across eight categories:
+The driver emits 29 metrics across eight categories:
 
 | Category | Metrics | Purpose |
 |----------|---------|---------|
-| Allocation | 6 | PVC provisioning health and capacity |
+| Allocation | 7 | PVC provisioning health and capacity |
 | VPC API | 2 | API call success rate and latency |
 | Snapshots | 2 | Snapshot operation tracking |
 | Clones | 2 | Clone operation tracking |
@@ -58,8 +58,8 @@ scrape_configs:
         namespaces:
           names: ['kube-system']
     relabel_configs:
-      - source_labels: [__meta_kubernetes_pod_label_app]
-        regex: vpc-file-pool-csi-controller
+      - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component]
+        regex: controller
         action: keep
       - source_labels: [__meta_kubernetes_pod_container_port_number]
         regex: "8080"
@@ -74,7 +74,7 @@ scrape_configs:
 
 ```bash
 # Port-forward to the metrics endpoint
-kubectl port-forward -n kube-system svc/vpc-file-pool-csi-controller 8080:8080 &
+kubectl port-forward -n kube-system svc/ibm-vpc-file-pool-csi-metrics 8080:8080 &
 
 # Check that metrics are being exported
 curl -s http://localhost:8080/metrics | grep vpc_file_pool | head -20
@@ -91,7 +91,7 @@ kill %1
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `vpc_file_pool_allocations_total` | Counter | `pool`, `status` | Total subvolume allocations. `status` is `success` or `error`. |
+| `vpc_file_pool_allocations_total` | Counter | `pool`, `status` | Total subvolume allocations. `status` is `success`, `error`, `deallocate_success` or `deallocate_error`. |
 | `vpc_file_pool_allocation_duration_seconds` | Histogram | `pool` | Time to allocate a subvolume. Buckets: 10ms to ~163s (exponential). |
 | `vpc_file_pool_capacity_gb` | Gauge | `pool` | Total pool capacity in GB across all shares. |
 | `vpc_file_pool_allocated_gb` | Gauge | `pool` | Total allocated (requested) capacity in GB. |
@@ -149,7 +149,7 @@ kill %1
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `pool_csi_replication_sync_total` | Counter | `policy`, `source_pool`, `result` | Replication sync attempts. `result`: `success`, `error`, `skipped`. |
+| `pool_csi_replication_sync_total` | Counter | `policy`, `source_pool`, `result` | Replication sync attempts. `result`: `success` or `failure`. |
 | `pool_csi_replication_sync_duration_seconds` | Histogram | `policy`, `source_pool` | Duration of replication sync cycles. |
 | `pool_csi_replication_lag_seconds` | Gauge | `policy`, `source_pool` | Current replication lag (seconds since last successful sync). This is your RPO indicator. |
 | `pool_csi_replication_consecutive_failures` | Gauge | `policy`, `source_pool` | Current consecutive failure count. Policy pauses after exceeding `maxRetries`. |
@@ -304,7 +304,7 @@ spec:
             runbook_url: "TROUBLESHOOTING.md#pvc-issues"
 
         - alert: ControllerDown
-          expr: absent(up{job="vpc-file-pool-csi"} == 1)
+          expr: absent(up{job="ibm-vpc-file-pool-csi-metrics"} == 1)
           for: 5m
           labels:
             severity: critical
@@ -692,7 +692,7 @@ Route CSI driver alerts to the storage team:
 route:
   routes:
     - match:
-        job: vpc-file-pool-csi
+        job: ibm-vpc-file-pool-csi-metrics
       receiver: storage-team
       group_by: ['alertname', 'pool']
       group_wait: 30s

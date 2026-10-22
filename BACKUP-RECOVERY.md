@@ -9,7 +9,7 @@ Data protection strategy using the driver's snapshot, clone, group snapshot, and
 | Method | RPO | RTO | Scope | Best For |
 |--------|-----|-----|-------|----------|
 | [Volume Snapshots](#volume-snapshots) | Point-in-time | Minutes (copy speed) | Single PVC | Regular backups of individual volumes |
-| [Volume Clones](#volume-clones) | Point-in-time | Seconds (sync) to minutes (async) | Single PVC | Dev/test copies, pre-migration backup |
+| [Volume Clones](#volume-clones) | Point-in-time | Minutes (the time to copy the data) | Single PVC | Dev/test copies, pre-migration backup |
 | [Group Snapshots](#group-snapshots) (not active) | Coordinated point-in-time | Minutes | Multiple PVCs | Multi-volume application backups |
 | [Backups to a Snapshot Pool](#backups-to-a-snapshot-pool) | Schedule-based (minutes to hours) | Minutes to hours (copy speed) | Selected PVCs and VMs, all disks of a VM together | Keeping many moments of a volume or VM in the same region, on shares of their own |
 | [Cross-Region Replication](#cross-region-replication) | Schedule-based (minutes to hours) | Manual failover | Full pool or label-selected | Disaster recovery |
@@ -55,7 +55,7 @@ spec:
                       app: myapp
                       snapshot-type: scheduled
                   spec:
-                    volumeSnapshotClassName: ibm-vpc-file-pool-snapclass
+                    volumeSnapshotClassName: ibm-vpc-file-pool
                     source:
                       persistentVolumeClaimName: myapp-data
                   SNAP
@@ -201,7 +201,9 @@ spec:
 EOF
 
 # 2. Wait for clone to complete
-kubectl get subvolumes myapp-data-backup -w
+# The SubVolume is named after the new PV (pvc-<uuid>)
+PV=$(kubectl get pvc myapp-data-backup -o jsonpath='{.spec.volumeName}')
+kubectl get subvolume ${PV} -w
 # Wait for cloneStatus to show "Complete"
 
 # 3. Proceed with the risky operation
@@ -275,22 +277,22 @@ spec:
       type: exec
       exec:
         podSelector:
-          matchLabels:
-            app: mydb
+          app: mydb
+        namespace: default
         container: db
         command: ["pg_ctl", "stop", "-m", "fast"]
-      timeout: 30s
+      timeoutSeconds: 30
       onError: Abort
   postSnapshotHooks:
     - name: resume-db
       type: exec
       exec:
         podSelector:
-          matchLabels:
-            app: mydb
+          app: mydb
+        namespace: default
         container: db
         command: ["pg_ctl", "start"]
-      timeout: 30s
+      timeoutSeconds: 30
       onError: Continue
 ```
 
@@ -408,7 +410,7 @@ spec:
 
 After each local backup of a volume, an export Job reads the snapshot pool's share (read-only, so a running VM is never slowed) and sends the changes to the bucket. `kubectl get backuppolicy NAME -o yaml` shows `exportedTime`, `exportedBytes` and `exportError` for each volume. A failed export is tried again after 5 minutes and never stops the backups to the snapshot pool. A maintenance Job runs once a day (hourly for the shortest keep time of 25 hours) and deletes snapshots older than `keepFor`. Alert rules for a late export are in [MONITORING.md](MONITORING.md#backup-metrics).
 
-**`kubectl backup cos-setup`** makes the IBM Cloud side with your own login (`IBMCLOUD_API_KEY`, `IBMCLOUD_IAM_TOKEN` or your `ibmcloud` login; it needs no cluster and never deletes anything). Run it with `--dry-run` first: it prints every step and the exact objects.
+**`kubectl backup cos-setup`** makes the IBM Cloud side with your own login (`IBMCLOUD_API_KEY`, `IBMCLOUD_IAM_TOKEN` or your `ibmcloud` login; it needs no cluster; it deletes only the instance-wide policy that IBM Cloud adds for the new HMAC key). Run it with `--dry-run` first: it prints every step and the exact objects.
 
 ```bash
 kubectl backup cos-setup --dry-run \
@@ -474,14 +476,14 @@ kind: ReplicationPolicy
 metadata:
   name: prod-to-dr
 spec:
-  sourcePool: production
+  sourcePoolName: production
   schedule: "15m"                    # Sync every 15 minutes
   incrementalSync: true              # Use rsync for delta-only transfer
   maxRetries: 3                      # Pause after 3 consecutive failures
-  destination:
-    nfsServer: "10.245.0.100"        # DR region mount target IP
-    basePath: "/pvcs"                # Base path on destination share
-  selector:                          # Optional: replicate only labeled SubVolumes
+  destinationNFSServer: "10.245.0.100"   # DR region mount target IP
+  destinationExportPath: "/"
+  destinationBasePath: "/pvcs"       # Base path on destination share
+  subVolumeSelector:                 # Optional: replicate only labeled SubVolumes
     matchLabels:
       backup: required
   preSyncHooks:                      # Optional: quiesce before sync
@@ -490,7 +492,7 @@ spec:
       http:
         url: "http://myapp:8080/quiesce"
         method: POST
-      timeout: 60s
+      timeoutSeconds: 60
       onError: Abort
   postSyncHooks:
     - name: resume-apps
@@ -498,7 +500,7 @@ spec:
       http:
         url: "http://myapp:8080/resume"
         method: POST
-      timeout: 60s
+      timeoutSeconds: 60
       onError: Continue
 ```
 
@@ -528,7 +530,7 @@ kubectl get replicationpolicy prod-to-dr -o jsonpath='{.status.lastSyncTime}'
 
 # 2. On the DR cluster, verify data exists
 kubectl debug node/<dr-node> -it --image=busybox -- sh -c \
-  "ls /var/data/kubelet/plugins/vpc-file-pool.csi.ibm.io/staging/<dr-share-id>/pvcs/"
+  "ls /host/var/data/kubelet/plugins/vpc-file-pool.csi.ibm.io/staging/<dr-share-id>/pvcs/"
 
 # 3. Create test PVCs on the DR cluster pointing to replicated data
 # 4. Deploy a test workload and verify data integrity
@@ -603,7 +605,7 @@ For ongoing VM protection, use application-level backup tools (e.g., Velero with
 | **Config data** | Scheduled snapshots (daily) | Cross-region replication | Low RPO tolerance |
 | **Application data** | Scheduled snapshots (6h) + clone before changes | Cross-region replication | Label-select critical PVCs |
 | **Databases** | Application-level backup (pg_dump, etc.) | Pool snapshots as secondary | Never rely solely on NFS snapshots |
-| **KubeVirt VMs** | Stop VM + snapshot | Application-level backup | Never snapshot running VMs |
+| **KubeVirt VMs** | Snapshot of the running VM (all pool disks are copied at one moment), or a `BackupPolicy` | Application-level backup | See [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md) |
 | **ML training data** | Group snapshots (model + checkpoints) | Cross-region for final models | Intermediate checkpoints are expendable |
 | **CI/CD artifacts** | None or short-lived snapshots | — | Easily reproducible |
 
