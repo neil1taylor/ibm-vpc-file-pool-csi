@@ -24,6 +24,10 @@ spec:
       {{- if and $fixedIDs (not (hasKey $podSC "fsGroup")) }}
       {{- $_ := set $podSC "fsGroup" 65532 }}
       {{- end }}
+      {{- $sidecarSC := deepCopy (.Values.controller.sidecarSecurityContext | default dict) }}
+      {{- if and $fixedIDs (not (hasKey $sidecarSC "runAsUser")) }}
+      {{- $_ := set $sidecarSC "runAsUser" 65532 }}
+      {{- end }}
       securityContext:
         {{- toYaml $podSC | nindent 8 }}
       {{- with .Values.imagePullSecrets }}
@@ -150,7 +154,7 @@ spec:
 
         - name: csi-provisioner
           image: {{ .Values.sidecars.provisioner.image }}
-          {{- with .Values.controller.sidecarSecurityContext }}
+          {{- with $sidecarSC }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -179,7 +183,7 @@ spec:
 
         - name: csi-resizer
           image: {{ .Values.sidecars.resizer.image }}
-          {{- with .Values.controller.sidecarSecurityContext }}
+          {{- with $sidecarSC }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -205,7 +209,7 @@ spec:
 
         - name: csi-snapshotter
           image: {{ .Values.sidecars.snapshotter.image }}
-          {{- with .Values.controller.sidecarSecurityContext }}
+          {{- with $sidecarSC }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -231,7 +235,7 @@ spec:
 
         - name: liveness-probe
           image: {{ .Values.sidecars.liveness.image }}
-          {{- with .Values.controller.sidecarSecurityContext }}
+          {{- with $sidecarSC }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -248,11 +252,7 @@ spec:
         {{- if .Values.secretProvider.managed }}
         - name: storage-secret-sidecar
           image: {{ .Values.secretProvider.sidecar.image }}
-          {{- $secretSC := deepCopy (.Values.controller.sidecarSecurityContext | default dict) }}
-          {{- if and $fixedIDs (not (hasKey $secretSC "runAsUser")) }}
-          {{- $_ := set $secretSC "runAsUser" 65532 }}
-          {{- end }}
-          {{- with $secretSC }}
+          {{- with $sidecarSC }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}

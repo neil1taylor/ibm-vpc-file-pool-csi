@@ -65,6 +65,10 @@ check "controller: fsGroup set on OpenShift in kube-system (no SCC assigns one t
 check "controller: no fixed fsGroup on OpenShift in an ordinary namespace" \
     "$(field "$(render --namespace csi-test --api-versions security.openshift.io/v1)" controller '.spec.template.spec.securityContext.fsGroup')" "null"
 SECRET='.spec.template.spec.containers[] | select(.name == "storage-secret-sidecar") | .securityContext.runAsUser'
+for sc in csi-provisioner csi-resizer csi-snapshotter liveness-probe; do
+    check "sidecar $sc: runs as the controller user so it can open the driver socket" \
+        "$(field "$OUT" controller ".spec.template.spec.containers[] | select(.name == \"$sc\") | .securityContext.runAsUser")" "65532"
+done
 check "secret sidecar: runs as the controller user so the controller can open its socket (kube-system)" \
     "$(field "$(render --api-versions security.openshift.io/v1)" controller "$SECRET")" "65532"
 check "secret sidecar: runs as the controller user off OpenShift" "$(field "$OUT" controller "$SECRET")" "65532"
