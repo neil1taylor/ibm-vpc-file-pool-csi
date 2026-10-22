@@ -65,6 +65,9 @@ func TestRunServesAndEndsWhenIdle(t *testing.T) {
 	if string(b) != "idle" {
 		t.Errorf("termination log = %q, want idle", b)
 	}
+	if !strings.Contains(out.String(), "openat2") {
+		t.Errorf("the start line should say how names are opened: %q", out.String())
+	}
 	if strings.Contains(out.String()+errb.String(), token) {
 		t.Error("the token was printed")
 	}

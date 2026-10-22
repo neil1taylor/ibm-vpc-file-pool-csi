@@ -75,7 +75,11 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 		_, _ = fmt.Fprintf(stderr, "listen: %v\n", err)
 		return 1
 	}
-	_, _ = fmt.Fprintf(stdout, "browse %s serving on %s\n", version, ln.Addr())
+	opened := "openat2"
+	if tree.Walking() {
+		opened = "folder by folder (openat2 is not available)"
+	}
+	_, _ = fmt.Fprintf(stdout, "browse %s serving on %s, opening names with %s\n", version, ln.Addr(), opened)
 	if onListen != nil {
 		onListen(ln.Addr())
 	}

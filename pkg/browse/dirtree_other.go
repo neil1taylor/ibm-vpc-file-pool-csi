@@ -16,7 +16,8 @@ var errUnsupported = errors.New("browsing a backup folder needs Linux")
 // NewTree is not supported here.
 func NewTree(root string) (*DirTree, error) { return nil, errUnsupported }
 
-func (*DirTree) Close() error { return nil }
+func (*DirTree) Close() error  { return nil }
+func (*DirTree) Walking() bool { return false }
 func (*DirTree) List([][]byte, []byte, int) (ListPage, error) {
 	return ListPage{}, errUnsupported
 }
