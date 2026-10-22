@@ -36,6 +36,7 @@ cleanup() {
     oc delete secret "$PREFIX-token" -n "$DRIVER_NS" --ignore-not-found || true
     oc delete ns "$NS" --ignore-not-found --wait=true --timeout=15m || true
     oc delete filesharepool "$POOL" --ignore-not-found --wait=false || true
+    oc wait --for=delete "filesharepool/$POOL" --timeout=900s || log "the pool $POOL is not gone yet"
 }
 trap cleanup EXIT
 
@@ -189,9 +190,10 @@ file() { api /v1/file "{\"path\":[$(for p in "$@"; do printf '"%s",' "$(b64 "$p"
 [ "$(file u2000 private0700 inner0600)" = inside ] && pass "the helper reads a file in another user's folder with mode 0700" || fail "cannot read u2000/private0700/inner0600"
 [ "$(file u0 secret0600)" = secret ] && pass "the helper reads a file made by root" || fail "cannot read u0/secret0600"
 api /v1/file "{\"path\":[\"$(b64 u1000)\",\"$(b64 to-etc)\",\"$(b64 passwd)\"],\"length\":-1}" | jq -e '.code == "link_refused"' >/dev/null && pass "a path through a link to /etc is refused" || fail "a link was followed"
-api /v1/list "{\"path\":[\"$(b64 u1000)\"]}" | jq -e '[.entries[] | select(.readable | not)] | length == 0 and ([.entries[] | select(.type == "symlink" and (.link | @base64d) == "/etc")] | length == 1)' >/dev/null && pass "the list shows a link as a link and every entry as readable" || fail "the list is wrong"
+api /v1/list "{\"path\":[\"$(b64 u1000)\"]}" | jq -e '([.entries[] | select(.readable | not)] | length) == 0 and ([.entries[] | select(.type == "symlink" and (.link | @base64d) == "/etc")] | length) == 1' >/dev/null && pass "the list shows a link as a link and every entry as readable" || fail "the list is wrong"
 n=$(curl -s -H "Authorization: Bearer $TOKEN" -X POST "localhost:$PORT/v1/tar" -d '{"path":[]}' | tar tf - | wc -l | tr -d ' ')
 [ "$n" -ge 21 ] && pass "a tar of the volume holds all $n entries" || fail "the tar holds only $n entries"
-oc exec -n "$DRIVER_NS" "$PREFIX-browse" -- sh -c 'touch /data/x' 2>&1 | grep -q "Read-only" && pass "the helper cannot write to the backup" || fail "the helper could write"
+out=$(oc exec -n "$DRIVER_NS" "$PREFIX-browse" -- sh -c 'touch /data/x' 2>&1 || true)
+[[ "$out" == *"Read-only"* ]] && pass "the helper cannot write to the backup" || fail "the helper could write"
 oc exec -n "$DRIVER_NS" "$PREFIX-browse" -- grep -q '^CapEff:.0000000000000000' /proc/self/status && pass "the helper has no capabilities" || fail "the helper has capabilities"
 log "all checks passed"
