@@ -132,13 +132,13 @@ ibm-vpc-file-pool-csi/
 ## Key Design Principles
 
 ### 1. One Share, Many PVCs
-Every `CreateVolume` call picks an existing VPC file share from a pool and records a SubVolume CR — it does NOT create a new VPC file share. New shares are only created by the pool manager when capacity runs low.
+Every `CreateVolume` call picks an existing VPC file share from a pool and records a SubVolume CR — it does NOT create a new VPC file share. New shares are normally created by the pool manager in the background. One exception: with `autoExpand` on, `Allocate` calls `CreateFileShare` when no share fits (`tryAutoExpand`) and the caller is told to retry.
 
 ### 2. State Lives in CRDs
 All state (which PVC is on which share, capacity allocations, pool membership) is stored in Kubernetes CRDs (`FileSharePool` and `SubVolume`). No external database, no local files on the controller pod.
 
 ### 3. Node Mounts Are Cached
-Each worker node mounts a VPC file share at most once. Individual PVCs are bind-mounted from subdirectories of that single NFS mount. This minimizes NFS connections.
+Each staged volume gets one NFS mount at the staging folder kubelet gives it. A second pod on the same volume reuses it; a different volume on the same share is mounted again. Pods bind-mount their volume's subdirectory.
 
 ### 4. Fail Safe, Not Fast
 If the pool manager can't find a share with enough room and can't create a new one, CreateVolume should return a retriable gRPC error — never silently overcommit.

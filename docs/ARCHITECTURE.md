@@ -77,35 +77,35 @@ The gRPC server that implements CSI Controller RPCs. Runs as a Deployment with 1
 **Does NOT:**
 - Mount anything.
 - Call IBM VPC API directly (goes through Pool Manager → IBM VPC Client).
-- Create VPC file shares in the CreateVolume hot path.
+- Create VPC file shares on purpose in the CreateVolume path. The one exception is auto-expand: when no share fits and `autoExpand` is on, `Allocate` calls `CreateFileShare` once (see [Pool Manager](#3-pool-manager)) and CreateVolume returns a retriable error so the provisioner retries after the share is ready.
 
 ### 2. CSI Node Agent (DaemonSet)
 
 Runs on every worker node. Implements CSI Node RPCs.
 
 **Responsibilities:**
-- `NodeStageVolume`: Mount the VPC file share (NFS) to a staging directory on the node. If the share is already mounted (another PVC on the same share), reuse the existing mount.
+- `NodeStageVolume`: Mount the VPC file share (NFS) at the staging folder that kubelet gives for this volume. If that staging folder is already mounted (a second pod on the same volume), reuse the mount. A different volume on the same share has its own staging folder, so the share is mounted again.
 - `NodePublishVolume`: Create the subdirectory on the share if it does not already exist (with uid/gid/permissions from VolumeContext), then bind-mount it into the pod's volume path.
 - `NodeUnpublishVolume`: Unmount the bind-mount from the pod path.
-- `NodeUnstageVolume`: Unmount the NFS share from the staging directory (only when no more PVCs reference it on this node).
+- `NodeUnstageVolume`: Unmount the NFS mount at the volume's staging folder. Kubelet calls this when no pod on the node uses the volume any more.
 - `NodeGetVolumeStats`: Return capacity/usage stats for the subdirectory (via `du` or `statfs`).
 
-**Mount caching strategy:**
+**Mount tracking (one NFS mount per staged volume):**
 
 ```
 Node filesystem:
-  /var/lib/kubelet/plugins/vpc-file-pool.csi.ibm.io/staging/
-    └── {share-id}/                    ← NFS mount of the whole share
-        └── pvcs/
-            ├── pvc-aaa/              ← subdirectory for PVC aaa
-            ├── pvc-bbb/              ← subdirectory for PVC bbb
-            └── pvc-ccc/              ← subdirectory for PVC ccc
+  <kubelet dir>/plugins/kubernetes.io/csi/<driver>/<hash for volume aaa>/globalmount/
+    └── NFS mount of the whole share (one per staged volume)
+        └── pvcs/pvc-aaa/             ← subdirectory for PVC aaa
+  <kubelet dir>/plugins/kubernetes.io/csi/<driver>/<hash for volume bbb>/globalmount/
+    └── NFS mount of the same share, mounted again for volume bbb
+        └── pvcs/pvc-bbb/             ← subdirectory for PVC bbb
 
-  /var/lib/kubelet/pods/{pod-uid}/volumes/kubernetes.io~csi/{pv-name}/mount/
-    └── (bind mount of /staging/{share-id}/pvcs/pvc-aaa/)
+  <kubelet dir>/pods/{pod-uid}/volumes/kubernetes.io~csi/{pv-name}/mount/
+    └── (bind mount of <staging folder>/pvcs/pvc-aaa/)
 ```
 
-The node agent maintains an in-memory reference count per share mount. When the last PVC using a share on that node is unpublished, the NFS mount is unmounted.
+The volume ID is `{pool}/{share-id}/{pv-name}`, so it includes the PV name. Kubelet therefore stages each volume in its own folder, and the node agent keeps an in-memory list of staged folders (not a reference count). A second pod on the same volume reuses the mount. A different volume on the same share is mounted again. Kubelet calls `NodeUnstageVolume` when the last pod on the node stops using the volume.
 
 **NFS mount via nsenter wrapper:**
 
@@ -230,7 +230,7 @@ Standalone reconciler that handles cross-region disaster recovery by copying Sub
 **Responsibilities:**
 - Watch `ReplicationPolicy` CRs and execute replication cycles on a configurable schedule.
 - Mount source shares (read-only) and destination shares (read-write, cross-region via Transit Gateway).
-- Copy each matching SubVolume's subdirectory from source to destination using `SyncDir` (rsync, incremental) or `CopyDir` (full copy).
+- Copy each matching SubVolume's subdirectory from source to destination in one of two modes. Direct NFS mode runs a Job that uses rsync (`SyncDir` incremental, or `CopyDir` full copy). Receiver mode (`destinationEndpoint` set) tars the whole folder and uploads it to the receiver each cycle; only direct NFS mode uses rsync.
 - Execute pre-sync and post-sync lifecycle hooks via the Hook Orchestrator for application-consistent replication.
 - Track replication progress, RPO, bytes transferred, and consecutive failures in `ReplicationPolicy.Status`.
 - Expose Prometheus metrics for replication lag, RPO, and error counts.
@@ -284,7 +284,7 @@ Six CRD types, managed by controller-runtime:
 - **SubVolume** — tracks a single PVC's allocation: which share, subdirectory path, requested size, and clone/snapshot state.
 - **Snapshot** — tracks a point-in-time directory copy of a SubVolume, stored under `/pvcs/.snapshots/`.
 - **VolumeGroupSnapshot** — coordinates multiple Snapshot CRs for multi-PVC consistent snapshots, with pre/post-snapshot lifecycle hooks.
-- **ReplicationPolicy** — defines a cross-region replication relationship between a source pool and a destination pool, with pre/post-sync lifecycle hooks and incremental rsync support.
+- **ReplicationPolicy** — defines a cross-region replication relationship between a source pool and a destination pool, with pre/post-sync lifecycle hooks. Direct NFS mode can use incremental rsync; receiver mode uploads the whole folder each cycle.
 - **Hook** (embedded type) — defines a lifecycle hook with exec or HTTP execution, timeout, and on-error policy. Embedded in VolumeGroupSnapshot and ReplicationPolicy specs.
 
 See `CRD-SPEC.md` for full type definitions.

@@ -88,6 +88,8 @@ Controls how the IBM Cloud API key is injected into the controller.
 
 ## Golden Image Syncer
 
+> **Hidden feature.** The code is kept for possible later use. The recommended way to make VMs is the standard OpenShift Virtualization catalog.
+
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `cdi.copyPodMemoryLimit` | string | `8Gi` | The controller keeps the memory limit of CDI's copy pods at least this high, through the OpenShift Virtualization `HyperConverged` setting `spec.resourceRequirements.storageWorkloads`. CDI's default of 600M is too small for copies onto NFS: the pod is killed. On rovslab, a 25 GB copy failed with 2Gi and finished with 8Gi. Empty turns the check off |
@@ -123,7 +125,7 @@ Configuration for the driver-to-driver cross-region replication receiver. Deploy
 | `replicationReceiver.securityContext` | object | no escalation, `runAsNonRoot`, drop ALL, seccomp `RuntimeDefault` | Container security context of the receiver |
 | `replicationReceiver.resources.requests.cpu` | string | `100m` | Receiver CPU request |
 | `replicationReceiver.resources.requests.memory` | string | `256Mi` | Receiver memory request |
-| `replicationReceiver.resources.limits.memory` | string | `512Mi` | Receiver memory limit |
+| `replicationReceiver.resources.limits.memory` | string | `1Gi` | Receiver memory limit. The receiver needs about 100 MiB itself. Pages of files on NFS count against the limit and the kernel drops them as it needs room, so the memory shown for a busy receiver stays near the limit; that is normal. The receiver forces its data out every 32 MiB and drops cached pages. A 512Mi limit survived an 11 GiB VM disk send in a lab test; the default adds room |
 | `replicationReceiver.tls.enabled` | bool | `false` | Enable native TLS on the receiver (certificates provisioned by cert-manager) |
 | `replicationReceiver.tls.additionalDNSNames` | list | `[]` | Extra DNS SANs for the receiver TLS certificate (e.g., custom ingress hostnames). On OpenShift, the Route hostname is added automatically |
 | `replicationReceiver.tls.certManager.issuerKind` | string | `Issuer` | cert-manager issuer kind: `Issuer` (namespace-scoped) or `ClusterIssuer` |

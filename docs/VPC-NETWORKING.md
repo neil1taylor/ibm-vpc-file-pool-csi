@@ -280,7 +280,7 @@ This keeps cross-zone latency low and avoids metered cross-zone bandwidth charge
 
 ## File Share Lifecycle and VPC API Timing
 
-VPC file share operations are **slow** (30-90 seconds). The driver isolates these from the CSI hot path:
+VPC file share operations are **slow** (30-90 seconds). The driver keeps them out of the CSI hot path, with one exception (auto-expand, below):
 
 | Operation | Typical Duration | Where It Runs |
 |-----------|-----------------|---------------|
@@ -292,7 +292,7 @@ VPC file share operations are **slow** (30-90 seconds). The driver isolates thes
 | `NodeStageVolume` (NFS mount) | 1-5s | CSI node agent |
 | `NodePublishVolume` (bind-mount) | < 1s | CSI node agent |
 
-The CSI `CreateVolume` call **never creates VPC resources**. It picks an existing share from the pool and records a SubVolume CR. All VPC API calls happen in the pool reconciler's background loop.
+The CSI `CreateVolume` call normally creates no VPC resources. It picks an existing share from the pool and records a SubVolume CR. One exception: with `autoExpand` on, if no share has room, `Allocate` (`tryAutoExpand` in `pkg/pool/manager.go`) calls `CreateFileShare` inside the request and returns a retriable error, so the provisioner retries once the share is ready. All other VPC API calls happen in the pool reconciler's background loop.
 
 ## NFS Mount Options
 
@@ -312,20 +312,22 @@ nfsvers=4.1,soft,timeo=600,retrans=3
 
 Optional encryption in transit adds `sec=krb5p` when `spec.encryptInTransit: true` is set on the pool.
 
-## Mount Caching: One NFS Mount Serves Many PVCs
+## Mounts: One NFS Mount per Staged Volume
 
-The node agent maintains a mount cache to avoid redundant NFS mounts:
+The node agent mounts at the staging folder kubelet gives for each volume. The volume ID includes the PV name, so each volume has its own staging folder. A second pod on the same volume reuses the mount. A different volume on the same share is mounted again:
 
 ```
 Node with 3 PVCs from the same share:
 
-  NFS mount (1 total):
-    10.240.1.5:/ → /staging/{share-id}/
+  NFS mounts (3 total, one per staged volume):
+    10.240.1.5:/ → <staging folder of aaa>/
+    10.240.1.5:/ → <staging folder of bbb>/
+    10.240.1.5:/ → <staging folder of ccc>/
 
-  Bind mounts (3 total):
-    /staging/{share-id}/pvcs/pvc-aaa/ → Pod A /data/
-    /staging/{share-id}/pvcs/pvc-bbb/ → Pod B /data/
-    /staging/{share-id}/pvcs/pvc-ccc/ → Pod C /data/
+  Bind mounts (one per pod):
+    <staging folder of aaa>/pvcs/pvc-aaa/ → Pod A /data/
+    <staging folder of bbb>/pvcs/pvc-bbb/ → Pod B /data/
+    <staging folder of ccc>/pvcs/pvc-ccc/ → Pod C /data/
 ```
 
 When `NodeStageVolume` is called for a share that's already mounted on the node, it's a no-op. The NFS mount is only removed when the last PVC using that share on the node is unpublished.

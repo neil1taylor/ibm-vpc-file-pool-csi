@@ -4,6 +4,8 @@ This page defines each word once. Other pages link here instead of defining the 
 
 The meanings come from the code (`api/v1alpha1/` and `pkg/`). If a page disagrees with this one, this one is right, and the page is a bug. Please report it.
 
+For pictures you can click through, see the [interactive diagrams](diagrams/index.html).
+
 **Contents**
 
 - [Storage](#storage): pool, share, mount target, SubVolume, volume, plain volume, VM disk, allocation strategy, auto-expand, tier, drain, StorageClass, staging, reclaim policy
@@ -25,7 +27,7 @@ Example: the pool `general-purpose` has 3 shares of 1000 GB each, and every PVC 
 
 ### Share
 
-A **share** is one VPC file share: an NFS export that IBM Cloud runs for you. A pool holds one or more shares. The driver creates a share in the background when a pool needs room, never while a PVC is being made.
+A **share** is one VPC file share: an NFS export that IBM Cloud runs for you. A pool holds one or more shares. The driver creates a share in the background when a pool needs room. One exception: with auto-expand on, a PVC request that finds no share with room makes the share itself, and is told to retry.
 
 Example: `r006-1234...` is a share of 1000 GB. It holds the folders of 40 PVCs.
 
@@ -43,7 +45,7 @@ Example: `kubectl get subvolume pvc-0a1b...` shows the pool, the share and the f
 
 ### Volume
 
-A **volume** is a PVC that uses a pool StorageClass. Its data is a folder (`/pvcs/pvc-<uuid>`) on one share. The docs also call this folder the subdirectory or the `subPath`. Many volumes share one NFS mount on a node; each pod sees only its own folder.
+A **volume** is a PVC that uses a pool StorageClass. Its data is a folder (`/pvcs/pvc-<uuid>`) on one share. The docs also call this folder the subdirectory or the `subPath`. Each staged volume has its own NFS mount on a node (a second pod on the same volume reuses it); each pod sees only its own folder.
 
 Example: the PVC `db-data` in the namespace `apps` is a volume of 20 GB.
 
@@ -67,7 +69,7 @@ Example: with `spread`, three new 10 GB volumes go to three different shares.
 
 ### Auto-expand
 
-**Auto-expand** (`spec.autoExpand`) lets the pool add a share by itself in the background. It starts when the space given to volumes crosses `expandThresholdPercent` (default 80) of the pool, and stops at `maxShares`. While it works, the pool phase is `Expanding`. If a request finds no room while the pool expands, it is told to retry shortly. If the pool is at `maxShares` and full, it is refused.
+**Auto-expand** (`spec.autoExpand`) lets the pool add a share by itself. The background reconciler starts one when the space given to volumes crosses `expandThresholdPercent` (default 80) of the pool, and it stops at `maxShares`. A volume request that finds no share with room also makes a share itself (`tryAutoExpand`, inside `Allocate`), and gets a retry error. While it works, the pool phase is `Expanding`. If a request finds no room while the pool expands, it is told to retry shortly. If the pool is at `maxShares` and full, it is refused.
 
 Example: a pool of 2 shares of 1000 GB adds a third when volumes hold 1600 GB.
 
@@ -269,7 +271,7 @@ Example: `keepFor: 30d` with `lock: Compliance` holds each exported backup for 3
 
 ### Backup key
 
-The **backup key** encrypts exported backups. The driver stores it only wrapped by an IBM Key Protect root key. The readable key is shown once, by `kubectl backup cos-setup`, and you must keep a copy outside IBM Cloud.
+The **backup key** encrypts exported backups. The driver stores it only wrapped by an IBM Key Protect root key. Jobs unwrap it with the API key of a service ID (held in a Secret) that has the Reader role on the root key. The readable key is shown once, by `kubectl backup cos-setup`, and you must keep a copy outside IBM Cloud.
 
 Example: restore with `--backup-key-file ./backup-key.txt` if Key Protect is gone.
 
@@ -291,7 +293,7 @@ Example: it lists `/var/www` of last night's backup of the volume `web-data`.
 
 ### Replication
 
-**Replication** copies volumes to a destination on a schedule. The destination is another pool or another cluster. If the source site is lost, you can start the workload there. By default it keeps only the latest copy of a plain volume (a backup keeps more moments). A plain volume is copied with rsync, and only the files that changed cross the network (`incrementalSync`, on by default). A running VM is copied with a QEMU copy, all disks at one moment. The destination keeps restore points of VM disks for `restorePointKeepHours` (default 24).
+**Replication** copies volumes to a destination on a schedule. The destination is another pool or another cluster. If the source site is lost, you can start the workload there. By default it keeps only the latest copy of a plain volume (a backup keeps more moments). A plain volume is copied in one of two ways. In direct NFS mode (no `destinationEndpoint`), rsync copies it and only the files that changed cross the network (`incrementalSync`, on by default). In receiver mode (`destinationEndpoint` set, the mode for another cluster), the driver packs the whole folder into one tar stream and uploads all of it each cycle (`pkg/replication/syncclient.go`); `incrementalSync` does not reduce what is sent. A running VM is copied with a QEMU copy, all disks at one moment. The destination keeps restore points of VM disks for `restorePointKeepHours` (default 24).
 
 Example: replicate the pool `production` in Frankfurt to a pool in London every 15 minutes.
 

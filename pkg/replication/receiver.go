@@ -65,6 +65,11 @@ type Receiver struct {
 
 	// maxVMDiskBytes is the largest VM disk accepted; 0 means the default.
 	maxVMDiskBytes int64
+	// cacheDropEvery is how many bytes of a file are stored or read before the
+	// receiver drops its cached pages; 0 means the default. onCacheDrop runs
+	// after each drop (tests only).
+	cacheDropEvery int64
+	onCacheDrop    func()
 }
 
 // NewReceiver creates a new replication receiver HTTP server.
@@ -565,7 +570,7 @@ func (r *Receiver) extractTar(reader io.Reader, destDir string) (_ int, _ int64,
 				return fileCount, totalBytes, fmt.Errorf("creating parent dir for %s: %w", cleanName, err)
 			}
 
-			written, writeErr := writeFile(root, cleanName, tr, tarMode(header.Mode))
+			written, writeErr := writeFile(root, cleanName, tr, tarMode(header.Mode), r.cacheDropEvery, r.onCacheDrop)
 			totalBytes += written
 			if writeErr != nil {
 				return fileCount, totalBytes, fmt.Errorf("writing file %s: %w", cleanName, writeErr)
@@ -639,16 +644,24 @@ func tarMode(mode int64) os.FileMode {
 }
 
 // writeFile writes data from reader to the file name inside root with the given mode.
-func writeFile(root *os.Root, name string, reader io.Reader, mode os.FileMode) (_ int64, retErr error) {
+func writeFile(root *os.Root, name string, reader io.Reader, mode os.FileMode, syncEvery int64, onSync func()) (_ int64, retErr error) {
 	f, err := root.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode|0600)
 	if err != nil {
 		return 0, err
 	}
 	defer func() {
-		if err := f.Close(); err != nil && retErr == nil {
-			retErr = err
+		if cerr := f.Close(); cerr != nil && retErr == nil {
+			retErr = cerr
 		}
 	}()
 
-	return io.Copy(f, reader)
+	// Sync while writing, so dirty pages of a large file do not fill the
+	// container's memory (issue #225).
+	bound := newDirtyBound(f, syncEvery)
+	bound.onSync = onSync
+	n, err := io.Copy(&boundedWriter{w: f, bound: bound}, reader)
+	if err == nil {
+		err = bound.flush()
+	}
+	return n, err
 }

@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cloning a VM disk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#f4f6f8; --panel:#ffffff; --fg:#161d26; --muted:#5a6675; --line:#d5dce4; --share:#e9eef4;
+  --ok:#0e6b4f; --warn:#8a5300; --bad:#b3261e; --btn:#0f4fd6; --btn-fg:#ffffff;
+  --plain:#0e7a86; --vm:#6a43b0; --lock:#9a5b00; --cos:#1f5fbf;
+  --l0:#2b6f8f; --l1:#d9780f; --l2:#7a4fb0; --l3:#c43d63; --l4:#3a8a2b; --l5:#8d9124;
+  --font:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#10161d; --panel:#18212b; --fg:#e6ebf1; --muted:#9aa7b6; --line:#2b3745; --share:#1d2834;
+  --ok:#5fd0a6; --warn:#e0a24a; --bad:#ff8a80; --btn:#6c9bff; --btn-fg:#0b1220;
+  --plain:#5fc7d3; --vm:#b595e6; --lock:#e0a24a; --cos:#7fb0ff;
+  --l0:#5fb3d6; --l1:#f0a04b; --l2:#b595e6; --l3:#ee7f9b; --l4:#7fcb6a; --l5:#c4c76a; color-scheme:dark;}}
+:root[data-theme="dark"]{
+  --bg:#10161d; --panel:#18212b; --fg:#e6ebf1; --muted:#9aa7b6; --line:#2b3745; --share:#1d2834;
+  --ok:#5fd0a6; --warn:#e0a24a; --bad:#ff8a80; --btn:#6c9bff; --btn-fg:#0b1220;
+  --plain:#5fc7d3; --vm:#b595e6; --lock:#e0a24a; --cos:#7fb0ff;
+  --l0:#5fb3d6; --l1:#f0a04b; --l2:#b595e6; --l3:#ee7f9b; --l4:#7fcb6a; --l5:#c4c76a; color-scheme:dark;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 var(--font);
+  padding-block:20px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+main{max-width:860px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+nav.top{max-width:860px;margin:0 auto 14px;display:flex;flex-wrap:wrap;gap:6px 16px;font-size:.88rem}
+nav.top a{color:var(--btn)}
+nav.top .sp{flex:1}
+a{color:var(--btn)}
+h1{font-size:1.5rem;line-height:1.2;margin:0 0 6px;font-weight:600;text-wrap:balance}
+h2{font-size:.75rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0;font-weight:600}
+h3{font-size:.95rem;margin:0;font-weight:600}
+p{margin:0;max-width:65ch}
+.lead{color:var(--muted)}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button{font:inherit;font-weight:500;border:1px solid var(--line);background:var(--panel);color:var(--fg);padding:8px 14px;border-radius:6px;cursor:pointer}
+button.primary{background:var(--btn);color:var(--btn-fg);border-color:var(--btn)}
+button:disabled{opacity:.45;cursor:not-allowed}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--btn);outline-offset:2px}
+label.opt{display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:.9rem}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+@media (max-width:700px){.grid2{grid-template-columns:minmax(0,1fr)}}
+.share{background:var(--share);border:1px solid var(--line);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.mono{font-family:var(--mono);font-size:.82rem;overflow-wrap:anywhere}
+.row{display:grid;grid-template-columns:130px minmax(0,1fr);gap:10px;align-items:center}
+.row .who{display:flex;flex-direction:column}
+.row .who b{font-weight:600;font-size:.9rem}
+.row .who span{font-size:.78rem;color:var(--muted)}
+@media (max-width:620px){.row{grid-template-columns:1fr;gap:4px}}
+.blocks{display:grid;gap:4px;grid-template-columns:repeat(var(--n,8),minmax(0,1fr))}
+.blk{font-style:normal;font-family:var(--mono);font-size:.78rem;text-align:center;padding:6px 2px;border-radius:4px;min-width:0;overflow-wrap:anywhere;
+  border:2px solid var(--c,var(--line));background:color-mix(in srgb,var(--c,transparent) 22%,var(--panel));color:var(--fg)}
+.blk.plain{--c:var(--plain)}
+.blk.vm{--c:var(--vm)}
+.blk.none{border:2px dashed var(--line);background:transparent;color:var(--muted)}
+.blk.new{box-shadow:0 0 0 2px var(--fg)}
+.blk.old{--c:var(--muted);text-decoration:line-through}
+.blk.lock{--c:var(--lock)}
+.blk.cos{--c:var(--cos)}
+.blk.bad{--c:var(--bad)}
+.blk.ok{--c:var(--ok)}
+.tag{font-size:.78rem;color:var(--muted)}
+.tag.good{color:var(--ok);font-weight:600}
+.tag.warn{color:var(--warn);font-weight:600}
+.tag.bad{color:var(--bad);font-weight:600}
+.legend{display:flex;flex-wrap:wrap;gap:8px 16px;font-size:.82rem;color:var(--muted);align-items:center}
+.legend span{display:inline-flex;gap:6px;align-items:center}
+.legend .blk{display:inline-block;width:2.2em;padding:2px 0}
+.log{border-left:3px solid var(--btn);padding:6px 12px;min-height:3.6em;background:var(--panel)}
+.stats{display:flex;flex-wrap:wrap;gap:6px 16px;color:var(--muted);font-size:.9rem}
+.stats b{color:var(--fg);font-variant-numeric:tabular-nums}
+.hint{font-size:.85rem;color:var(--muted)}
+.steps{display:flex;flex-wrap:wrap;gap:6px;margin:0;padding:0;list-style:none}
+.steps li{font-size:.78rem;border:1px solid var(--line);border-radius:999px;padding:2px 10px;color:var(--muted);background:var(--panel)}
+.steps li.on{background:var(--btn);color:var(--btn-fg);border-color:var(--btn)}
+.steps li.done{color:var(--fg);border-color:var(--ok)}
+.pill{display:inline-block;font-size:.75rem;border:1px solid var(--line);border-radius:999px;padding:1px 8px;color:var(--muted)}
+.pill.on{color:var(--ok);border-color:var(--ok);font-weight:600}
+.pill.off{color:var(--bad);border-color:var(--bad);font-weight:600}
+.box{border:1px solid var(--line);border-left:6px solid var(--c,var(--line));background:var(--panel);border-radius:6px;padding:8px 10px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.box.dashed{border-left-style:dashed;border-style:dashed;background:transparent;color:var(--muted)}
+table.glance{border-collapse:collapse;width:100%;font-size:.88rem;table-layout:fixed;overflow-wrap:anywhere}
+table.glance th,table.glance td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+table.glance th{background:var(--share);font-weight:600}
+@media (prefers-reduced-motion:no-preference){.blk{transition:background .25s,border-color .25s}}
+.blk.hid{border-style:dashed}
+
+</style>
+</head>
+<body>
+<nav class="top" aria-label="Pages"><a href="index.html">All pages</a><span class="sp"></span><a href="06-backup-key-chain.html">&larr; The backup key chain</a><a href="08-how-a-pod-gets-its-volume.html">How a pod gets its volume &rarr;</a></nav>
+<main>
+  <div>
+    <h1>Cloning a VM disk</h1>
+    <p class="lead">A clone is a new volume made from an existing one. The file share cannot copy a file by pointing to it, so the clone is a <b>real copy of every byte</b>. That takes time. The driver makes the new volume at once, but the VM must <b>wait</b> until the copy is complete. This waiting is called the <b>clone gate</b>. Press the buttons in order.</p>
+  </div>
+
+  <ol class="steps" id="steps" aria-label="Steps"></ol>
+  <div class="bar">
+    <button class="primary" id="b-create">1. Create the clone PVC</button>
+    <button id="b-vm">2. Start the VM on the clone</button>
+    <button id="b-worker">3. Clone worker looks (every 10 s)</button>
+    <button id="b-copy">4. Copy more data (the Job)</button>
+    <button id="b-fail">Make the copy fail</button>
+    <button id="b-reset">Start again</button>
+  </div>
+  <div class="bar">
+    <label class="opt"><input type="checkbox" id="running"> The source VM is still running while it is copied</label>
+    <label class="opt"><input type="checkbox" id="roomA" checked> The source share has room for the clone</label>
+  </div>
+
+  <div class="legend" aria-label="Legend">
+    <span><i class="blk vm">A1</i> a piece of a VM disk (letter = piece, number = version)</span>
+    <span><i class="blk none">--</i> dashed = not copied yet</span>
+    <span><i class="blk bad">A1</i> red = the source changed after this piece was copied</span>
+    <span><i class="blk vm new">A1</i> white outline = copied or changed just now</span>
+  </div>
+
+  <div class="grid2">
+    <section class="card" aria-label="Kubernetes">
+      <h2>Kubernetes</h2>
+      <div id="k8s" style="display:flex;flex-direction:column;gap:8px"></div>
+    </section>
+    <section class="card" aria-label="The VM pod">
+      <h2>The VM</h2>
+      <div id="pod"></div>
+    </section>
+  </div>
+
+  <div id="shares" style="display:flex;flex-direction:column;gap:12px"></div>
+
+  <div class="stats" aria-live="polite">
+    <span>Pieces copied: <b id="s-copied">0</b> of 8</span>
+    <span>Mount tries by the VM: <b id="s-tries">0</b></span>
+    <span>Writes by the source VM during the copy: <b id="s-writes">0</b></span>
+  </div>
+  <div class="log" id="log" aria-live="polite"></div>
+
+  <section class="card" aria-label="Why it takes time">
+    <h2>Why it takes time</h2>
+    <p>A file share keeps no shortcut for copying a file. The copy Job reads every byte from the source and writes it to the clone, so the time grows with the size of the disk. A clone on another share is slower, because the data crosses the network twice. The driver prefers the source's share when it has room.</p>
+    <p>Stop the source VM before you clone it. If the VM writes while the file is copied, the clone mixes different moments of the disk and may not boot.</p>
+  </section>
+</main>
+<script>
+(function(){
+  var L="ABCDEFGH", N=8, s;
+  var logEl=document.getElementById("log"), stepsEl=document.getElementById("steps");
+  var running=document.getElementById("running"), roomA=document.getElementById("roomA");
+  var b={create:document.getElementById("b-create"),vm:document.getElementById("b-vm"),worker:document.getElementById("b-worker"),copy:document.getElementById("b-copy"),fail:document.getElementById("b-fail")};
+
+  function reset(){
+    s={created:false,status:"",phase:"",job:false,jobDone:false,copied:0,clone:[0,0,0,0,0,0,0,0],src:[1,1,1,1,1,1,1,1],
+       writes:0,tries:0,pod:"none",sameShare:true,lastCopied:[],lastWrite:-1};
+    running.disabled=false; roomA.disabled=false;
+    say("A source VM disk, 8 pieces, on share A. No clone yet. Press <b>1. Create the clone PVC</b>.");
+  }
+  function say(h){ logEl.innerHTML=h; render(); }
+  function vb(i,ver,cls){ return '<i class="blk vm'+(cls||'')+'">'+L[i]+ver+'</i>'; }
+  function grid(vals,hl,isClone){
+    return '<div class="blocks" style="--n:8">'+vals.map(function(x,i){
+      if(isClone&&!x) return '<i class="blk none">--</i>';
+      var bad=isClone&&x!==s.src[i];
+      var c=(bad?' bad':'')+(hl.indexOf(i)>=0?' new':'');
+      return bad?'<i class="blk bad'+(hl.indexOf(i)>=0?' new':'')+'">'+L[i]+x+'</i>':vb(i,x,c); }).join('')+'</div>';
+  }
+  function none(t){ return '<div class="box dashed">'+t+'</div>'; }
+  function box(c,t){ return '<div class="box" style="--c:'+c+'">'+t+'</div>'; }
+  function statusPill(){
+    var cls={"":"","Pending":"","InProgress":"","Complete":"on","Failed":"off"}[s.status];
+    return '<span class="pill '+cls+'">cloneStatus: '+(s.status||"not set")+'</span>';
+  }
+
+  function render(){
+    var k='';
+    k+= s.created ? box("var(--btn)",'<b>PVC</b> with <span class="mono">dataSource</span> = the source PVC<span class="tag">The volume record exists. The data does not yet.</span>') : none("No clone PVC yet");
+    k+= s.created ? box("var(--l1)",'<b>SubVolume record</b>'+statusPill()+'<span class="pill">phase: '+(s.phase||"-")+'</span><span class="tag">'+(s.sameShare?'On the source share (preferred).':'On another share: the source share had no room.')+'</span>') : none("No SubVolume record yet");
+    k+= s.job ? box(s.jobDone?"var(--ok)":"var(--l0)",'<b>Copy Job</b> in kube-system<span class="mono">cp -a source/. clone/ then chown + chmod</span><span class="tag">'+(s.jobDone?'Finished. The worker has not seen it yet.':'Running. It uses temporary PV and PVC that mount the share root.')+'</span>') : none(s.status==="Complete"?"Copy Job finished and its temporary PV, PVC and Job were removed.":"No copy Job running");
+    document.getElementById("k8s").innerHTML=k;
+
+    var podHtml;
+    if(s.pod==="none") podHtml=none("The VM is not started.");
+    else if(s.pod==="waiting") podHtml=box("var(--warn)",'<b>VM pod: waiting (ContainerCreating)</b><span class="tag warn">The node plugin answered "Unavailable: clone is '+s.status+', not ready for mount (retry later)". The kubelet tries again after a growing delay.</span>');
+    else if(s.pod==="running") podHtml=box("var(--ok)",'<b>VM pod: running</b><span class="tag good">The node plugin mounted the clone folder into the pod.</span>');
+    else podHtml=box("var(--bad)",'<b>VM pod: error</b><span class="tag bad">The node plugin answered "Internal: clone failed". The pod will not start from this clone.</span>');
+    document.getElementById("pod").innerHTML=podHtml;
+
+    var sh='';
+    sh+='<section class="share" aria-label="Share A"><h2>Share A</h2><div class="tag"><b style="color:var(--vm)">Source</b> <span class="mono">/pvcs/pvc-src/disk.img</span></div>'+grid(s.src,s.lastWrite>=0?[s.lastWrite]:[],false)+
+        (s.created&&s.sameShare?'<div class="tag"><b>Clone</b> <span class="mono">/pvcs/pvc-clone/disk.img</span></div>'+grid(s.clone,s.lastCopied,true):'')+'</section>';
+    if(s.created&&!s.sameShare) sh+='<section class="share" aria-label="Share B"><h2>Share B</h2><div class="tag"><b>Clone</b> <span class="mono">/pvcs/pvc-clone/disk.img</span></div>'+grid(s.clone,s.lastCopied,true)+'</section>';
+    document.getElementById("shares").innerHTML=sh;
+
+    var st=s.status, n=s.status===""?0:(s.status==="Pending"?2:(s.status==="InProgress"?(s.jobDone?4:3):(s.status==="Complete"?5:3)));
+    if(s.pod==="running") n=6;
+    var T=["Request","Record","Worker + Job","Copy","Complete","VM mounts"];
+    stepsEl.innerHTML=T.map(function(t,i){ var m=i+1; return '<li class="'+(m===n?'on':(m<n?'done':''))+'">'+m+'. '+t+'</li>'; }).join('');
+    document.getElementById("s-copied").textContent=s.copied;
+    document.getElementById("s-tries").textContent=s.tries;
+    document.getElementById("s-writes").textContent=s.writes;
+
+    b.create.disabled=s.created;
+    b.vm.disabled=!s.created||s.pod==="running";
+    b.worker.disabled=!s.created||s.status==="Complete"||s.status==="Failed";
+    b.copy.disabled=!(s.status==="InProgress"&&s.job&&!s.jobDone);
+    b.fail.disabled=!(s.status==="InProgress"&&s.job&&!s.jobDone);
+    running.disabled=s.created; roomA.disabled=s.created;
+  }
+
+  b.create.onclick=function(){
+    s.created=true; s.status="Pending"; s.phase="Cloning"; s.sameShare=roomA.checked; s.lastCopied=[];
+    say("<b>The clone PVC is created.</b> The driver records a SubVolume with cloneStatus Pending and answers at once, so the PVC looks ready in a second. "+(s.sameShare?"It chose the source's share because it has room.":"It chose another share, because the source share is full. The copy will be slower.")+" No data has been copied yet.");
+  };
+  b.vm.onclick=function(){
+    s.tries++; s.lastCopied=[];
+    if(s.status==="Complete"){ s.pod="running"; say("<b>The VM starts.</b> The clone is complete, so the node plugin bind-mounts the folder into the pod. The VM boots from the copy."+(s.writes>0?" <span class='tag bad'>But the source VM wrote "+s.writes+" times during the copy, so the clone mixes moments (red pieces). It may not boot.</span>":"")); }
+    else if(s.status==="Failed"){ s.pod="error"; say("<b>The VM cannot start.</b> The clone failed. The node plugin answers Internal with the error, and the pod does not start."); }
+    else { s.pod="waiting"; say("<b>The VM has to wait.</b> The clone gate blocks the mount while cloneStatus is "+s.status+". Without the gate, the VM would mount an empty folder and find no disk to boot from. The kubelet tries again by itself."); }
+  };
+  b.worker.onclick=function(){
+    s.lastCopied=[];
+    if(s.status==="Pending"){ s.status="InProgress"; s.phase="Cloning"; s.job=true; s.jobDone=false;
+      say("<b>The clone worker finds a Pending clone.</b> It sets cloneStatus to InProgress, makes temporary PV and PVC for the share, and starts a copy Job in the driver's namespace. The controller itself has no NFS access, so a Job does the copying."); return; }
+    if(s.status==="InProgress"&&s.jobDone){ s.status="Complete"; s.phase="Bound"; s.job=false;
+      say("<b>The worker sees that the Job succeeded.</b> It sets cloneStatus to Complete and phase to Bound, and removes the temporary resources. The gate opens: the next mount try by the kubelet will work."); return; }
+    say("<b>The worker looks, and the Job is still copying.</b> Nothing changes. It looks again in 10 seconds.");
+  };
+  b.copy.onclick=function(){
+    var idx=[],i=s.copied; while(idx.length<2&&i<N){ idx.push(i); i++; }
+    idx.forEach(function(j){ s.clone[j]=s.src[j]; }); s.copied=i; s.lastCopied=idx; s.lastWrite=-1;
+    var extra="";
+    if(running.checked){ var w=Math.floor(Math.random()*N); s.src[w]++; s.writes++; s.lastWrite=w; extra=" The running VM also wrote to piece "+L[w]+" (white outline on the source)."+(s.clone[w]&&s.clone[w]!==s.src[w]?" That piece was already copied, so the clone now holds an old version (red).":""); }
+    if(s.copied>=N){ s.jobDone=true; say("<b>The Job copied the last pieces.</b> The Job is finished, but cloneStatus is still InProgress. The clone worker will notice on its next look."+extra); }
+    else say("<b>The Job copied "+idx.length+" more pieces.</b> It has copied "+s.copied+" of "+N+". A real disk is far bigger than 8 pieces, which is why a real clone takes minutes or more."+extra);
+  };
+  b.fail.onclick=function(){
+    s.status="Failed"; s.phase="Failed"; s.job=false; s.lastCopied=[];
+    say("<b>The copy Job failed after its retries.</b> The worker sets cloneStatus to Failed. The clone has no usable data. A VM that tries to mount it gets an error.");
+  };
+  document.getElementById("b-reset").onclick=reset;
+  reset();
+})();
+</script>
+
+</body>
+</html>

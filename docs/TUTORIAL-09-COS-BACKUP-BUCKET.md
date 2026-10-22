@@ -4,7 +4,7 @@
 
 Make an IBM Cloud Object Storage (COS) bucket that the backup export can use: a locked, versioned bucket, a key that can only write to it, and a network rule that lets only the cluster and your admin addresses reach it. This is the setup that `kubectl backup cos-setup` does for you (see `docs/specs/2026-10-21-backup-cos-export.md`). Follow these steps by hand if you want to see each one. They are what we ran on the lab on 21 October 2026, and each one was checked.
 
-> **Note:** `kubectl backup cos-setup` automates these steps (run it with `--dry-run` first; see [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md#export-to-cos-built-the-release-test-is-written-and-not-yet-run)). It has not been run against real IBM Cloud yet. The command also makes the backup key and wraps it with Key Protect. These manual steps do not. This page stays the tested manual procedure and the reference for what the command makes.
+> **Note:** `kubectl backup cos-setup` automates these steps (run it with `--dry-run` first; see [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md#export-to-cos-built-proved-in-stage-18-except-the-emergency-key-and-dr-cluster-restores)). It was run against real IBM Cloud in stage 18 of the release test. The command also makes the backup key and wraps it with Key Protect. These manual steps do not. This page stays the tested manual procedure and the reference for what the command makes.
 
 **Account:** the one that holds your cluster. **Region:** the bucket is in the cluster's region (`eu-de` here).
 
@@ -225,4 +225,4 @@ Delete the key file `~/.config/pool-csi/cos-key.json` too.
 
 ## Next
 
-The backup export itself (the `spec.export` block, `kubectl backup cos-setup`, `kubectl backup restore --from-cos`) is described in [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md#export-to-cos-built-the-release-test-is-written-and-not-yet-run) and in `docs/specs/2026-10-21-backup-cos-export.md`. [Part 6: Replication and Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md) covers replication between sites.
+The backup export itself (the `spec.export` block, `kubectl backup cos-setup`, `kubectl backup restore --from-cos`) is described in [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md#export-to-cos-built-proved-in-stage-18-except-the-emergency-key-and-dr-cluster-restores) and in `docs/specs/2026-10-21-backup-cos-export.md`. [Part 6: Replication and Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md) covers replication between sites.
