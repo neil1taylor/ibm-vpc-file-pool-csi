@@ -69,3 +69,20 @@ describe('VolumeStatusTable', () => {
     expect(screen.getByText('Sending')).toBeTruthy();
   });
 });
+
+describe('VolumeStatusTable Red Hat support note', () => {
+  it('says that copies of running VMs are not supported by Red Hat when a VM disk is in the policy', () => {
+    render(<VolumeStatusTable statuses={[{ subVolumeName: 'pvc-vm', copyMoment: '2026-10-20T10:00:00Z' }]} />);
+    expect(screen.getByText('Not supported by Red Hat')).toBeTruthy();
+    expect(
+      screen.getByText(
+        'To copy a running VM, the driver works directly with QEMU, which runs the VM, not through OpenShift. Red Hat does not support this. While this has been tested, an OpenShift update could stop copies until the driver is updated.',
+      ),
+    ).toBeTruthy();
+  });
+
+  it('says nothing about Red Hat when no VM disk is in the policy', () => {
+    render(<VolumeStatusTable statuses={[{ subVolumeName: 'pvc-a', lastSyncTime: '2026-10-20T10:00:00Z' }]} />);
+    expect(screen.queryByText('Not supported by Red Hat')).toBeNull();
+  });
+});
