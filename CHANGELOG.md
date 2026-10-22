@@ -19,6 +19,8 @@ To make a release:
 
 ## [Unreleased]
 
+- **README: a table of every use case and its status** (included with its maturity, in progress, proposed, not active).
+
 - **Replication and backup status follow the copy Jobs within seconds (issue #192).** Before, a policy looked at its Jobs only when its schedule was next due, so `sync in progress` stayed for the whole schedule (a first backup took about 13 minutes to show LAST BACKUP). Now a policy with a cycle in progress is checked on every poll (30 seconds), the controllers also watch the Jobs in the driver namespace and wake when one finishes, and the backup controller wakes after each replication pass. Pre-sync hooks still run once at the start of a cycle, and the cycle's duration is measured from its start.
 
 - **Release test stage 16: browser tests for draining a share, migrating a claim and cloning a volume (issue #46, items 5 to 7).** Each drives the console page with a token that has only the rights of that page, then checks the cluster. Found issue #196 (migrate fails for a user without the root right on OpenShift).
