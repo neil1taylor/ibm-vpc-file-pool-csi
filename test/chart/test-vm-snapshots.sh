@@ -81,7 +81,8 @@ expect_absent "gate on: the Job never runs on delete" "$gate" "pre-delete"
 expect_contains "gate on: Job uses its own service account" "$gate" "serviceAccountName: test-ibm-vpc-file-pool-csi-sidecar-gate"
 role=$(awk '/^---/{if (doc ~ /kind: ClusterRole\n/ && doc ~ /sidecar-gate/) print doc; doc=""; next} {doc = doc $0 "\n"} END{if (doc ~ /kind: ClusterRole\n/ && doc ~ /sidecar-gate/) print doc}' <<<"$out")
 expect_contains "gate on: RBAC on HyperConverged only" "$role" 'resources: ["hyperconvergeds"]'
-expect_contains "gate on: RBAC get, list and update only" "$role" 'verbs: ["get", "list", "update"]'
+expect_contains "gate on: RBAC get and update only" "$role" 'verbs: ["get", "update"]'
+expect_contains "gate on: RBAC on the one HyperConverged object only" "$role" 'resourceNames: ["kubevirt-hyperconverged"]'
 notes=$(render_notes --set vmSnapshots.enableSidecarGate=true)
 expect_contains "gate on: install notes say the gate is on" "$notes" "turns on the KubeVirt Sidecar feature gate"
 expect_contains "gate on: install notes say Red Hat does not support it" "$notes" "Red Hat does not support"

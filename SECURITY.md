@@ -75,6 +75,17 @@ Lock down the security group attached to VPC file share mount targets:
 
 Run the CSI driver pods under the `restricted` Pod Security Standard where possible. The node agent requires `privileged` for mount operations, but the controller does not.
 
+### KubeVirt Sidecar Feature Gate
+
+Instant VM snapshots need the KubeVirt `Sidecar` feature gate. The Helm value `vmSnapshots.enableSidecarGate` (off by default) turns it on.
+
+- The gate is cluster-wide. Once it is on, anyone who can create or edit a VM can add a hook sidecar container to that VM's pod with the `hooks.kubevirt.io/hookSidecars` annotation. The container runs under the namespace's normal pod security rules.
+- The chart never turns the gate off, not on upgrade and not on uninstall, because VMs with instant snapshots cannot start without it.
+- The hook Job that turns it on may only get and update the `HyperConverged` object named `kubevirt-hyperconverged`.
+- Red Hat does not support settings made through the `kubevirt.kubevirt.io/jsonpatch` annotation.
+
+To limit hook sidecars to the driver's own hook, add a validating admission policy that rejects any VM whose `hooks.kubevirt.io/hookSidecars` annotation names a container other than the one the driver sets.
+
 ### Image Pinning
 
 Pin container image tags to digests in production Helm values to prevent supply-chain attacks:
