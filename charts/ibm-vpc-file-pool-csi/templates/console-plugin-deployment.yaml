@@ -21,8 +21,12 @@ spec:
     spec:
       containers:
         - name: console-plugin
-          image: "{{ .Values.consolePlugin.image.repository }}:{{ .Values.consolePlugin.image.tag }}"
+          image: "{{ include "ibm-vpc-file-pool-csi.consolePluginImage" . }}"
           imagePullPolicy: {{ .Values.consolePlugin.image.pullPolicy | default .Values.image.pullPolicy }}
+          {{- with .Values.consolePlugin.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - name: https
               containerPort: {{ .Values.consolePlugin.port }}

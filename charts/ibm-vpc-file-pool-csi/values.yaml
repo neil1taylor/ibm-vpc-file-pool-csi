@@ -3,7 +3,8 @@ fullnameOverride: ""
 
 image:
   repository: de.icr.io/ibm-vpc-file-pool-csi/driver
-  tag: latest
+  # Empty means "v" plus the chart appVersion (never "latest").
+  tag: ""
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
@@ -19,6 +20,24 @@ config:
 controller:
   replicas: 1
   healthPort: 8081
+  # Pod and container security contexts. The image runs as user 65532, so the
+  # controller needs no root. Outside OpenShift the chart adds fsGroup 65532 so
+  # the user can read the webhook key (mode 0400); OpenShift assigns its own,
+  # except in kube-system, where no SCC applies and the chart adds it too.
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    runAsNonRoot: true
+    capabilities:
+      drop: ["ALL"]
+  # Security context for the sidecar containers (provisioner, resizer,
+  # snapshotter, liveness probe, secret provider). Their user is not changed.
+  sidecarSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
   resources:
     requests:
       cpu: 50m
@@ -30,6 +49,11 @@ controller:
   affinity: {}
 
 node:
+  # The node agent must run privileged as root: it mounts NFS on the host, and
+  # the image itself now defaults to a non-root user.
+  securityContext:
+    privileged: true
+    runAsUser: 0
   # Kubelet root directory. ROKS/IKS uses /var/data/kubelet (the real path).
   # /var/lib/kubelet is a symlink on ROKS, but kubelet sends CSI RPCs with
   # the resolved real path. The container mountPath MUST match the path
@@ -258,6 +282,13 @@ replicationReceiver:
   # owns it.
   runAsUser: 107
   runAsGroup: 107
+  securityContext:
+    allowPrivilegeEscalation: false
+    runAsNonRoot: true
+    capabilities:
+      drop: ["ALL"]
+    seccompProfile:
+      type: RuntimeDefault
   resources:
     requests:
       cpu: 100m
@@ -290,7 +321,16 @@ consolePlugin:
   enabled: true
   image:
     repository: de.icr.io/ibm-vpc-file-pool-csi/console-plugin
-    tag: latest
+    # Empty means "v" plus the chart appVersion (never "latest").
+    tag: ""
+  # The image already runs as user 1001 (nginx).
+  securityContext:
+    allowPrivilegeEscalation: false
+    runAsNonRoot: true
+    capabilities:
+      drop: ["ALL"]
+    seccompProfile:
+      type: RuntimeDefault
   replicas: 2
   # HTTPS port for the plugin Service. TLS certs are auto-provisioned
   # by the OpenShift service-ca operator.

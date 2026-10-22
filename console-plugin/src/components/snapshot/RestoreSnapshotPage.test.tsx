@@ -156,6 +156,19 @@ describe('RestoreSnapshotPage', () => {
     expect(createButton().disabled).toBe(false);
   });
 
+  it('says which right is missing, instead of spinning, when the user may not read VolumeSnapshotContents (#186)', () => {
+    watch(base());
+    const answer = (useK8sWatchResource as jest.Mock).getMockImplementation()!;
+    (useK8sWatchResource as jest.Mock).mockImplementation((req: { groupVersionKind: { kind: string } } | null) =>
+      req?.groupVersionKind.kind === 'VolumeSnapshotContent'
+        ? [[], false, { code: 403, message: 'volumesnapshotcontents is forbidden' }]
+        : answer(req),
+    );
+    render(<RestoreSnapshotPage />);
+    expect(screen.getByText(/You are not allowed to read VolumeSnapshotContents/)).toBeTruthy();
+    expect(screen.queryByRole('progressbar')).toBeNull();
+  });
+
   it('shows the reason and no form when no VolumeSnapshot points to the snapshot', () => {
     watch({ ...base(), VolumeSnapshotContent: [] });
     render(<RestoreSnapshotPage />);

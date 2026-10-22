@@ -29,8 +29,12 @@ spec:
       {{- end }}
       containers:
         - name: receiver
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ include "ibm-vpc-file-pool-csi.driverImage" . }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.replicationReceiver.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           args:
             - --mode=receiver
             - --receiver-base-path=/data
