@@ -10,15 +10,15 @@ You are building `ibm-vpc-file-pool-csi`, a Kubernetes CSI driver for IBM Cloud 
 
 1. Read this file completely.
 2. Read the reference docs in this directory based on what you're working on:
-   - `ARCHITECTURE.md` — system design, component diagram, data flow
-   - `CRD-SPEC.md` — FileSharePool and SubVolume CRD definitions
-   - `CSI-INTERFACE.md` — CSI gRPC method implementations with pool-aware logic
-   - `IBM-VPC-API.md` — IBM Cloud VPC file share API usage and client wrapper
-   - `CODING-GUIDELINES.md` — Go conventions, error handling, testing patterns
-   - `TESTING.md` — testing strategy, fakes/mocks, test cases, coverage targets
-   - `API-KEY-SETUP.md` — IBM Cloud API key creation, IAM permissions, rotation, security
-   - `INSTALL.md` — build, deploy, Helm chart, verification steps
-   - `USER-GUIDE.md` — end-user guide for pools, StorageClasses, PVCs, monitoring
+   - `docs/ARCHITECTURE.md` — system design, component diagram, data flow
+   - `docs/CRD-SPEC.md` — FileSharePool and SubVolume CRD definitions
+   - `docs/CSI-INTERFACE.md` — CSI gRPC method implementations with pool-aware logic
+   - `docs/IBM-VPC-API.md` — IBM Cloud VPC file share API usage and client wrapper
+   - `docs/CODING-GUIDELINES.md` — Go conventions, error handling, testing patterns
+   - `docs/TESTING.md` — testing strategy, fakes/mocks, test cases, coverage targets
+   - `docs/API-KEY-SETUP.md` — IBM Cloud API key creation, IAM permissions, rotation, security
+   - `docs/INSTALL.md` — build, deploy, Helm chart, verification steps
+   - `docs/USER-GUIDE.md` — end-user guide for pools, StorageClasses, PVCs, monitoring
 3. Check the existing codebase before writing new code. Don't duplicate what exists.
 
 ## Project Structure
@@ -172,41 +172,41 @@ make test-e2e                 # E2E tests (requires live cluster, //go:build e2e
 ## Task-Specific Guidance
 
 ### When implementing CRD types
-- Read `CRD-SPEC.md` first
+- Read `docs/CRD-SPEC.md` first
 - Use `api/v1alpha1/` directory
 - Include validation markers (`+kubebuilder:validation:*`)
 - Always add a `Status` subresource
 - Run `make generate` after changing types
 
 ### When implementing CSI Controller methods
-- Read `CSI-INTERFACE.md` first
+- Read `docs/CSI-INTERFACE.md` first
 - The controller MUST be idempotent — if called twice with the same volume name, return the same result
 - CreateVolume: call pool manager → create SubVolume CR → return (no mkdir; subdirectory creation is deferred to NodePublishVolume)
 - DeleteVolume: update pool tracking → delete SubVolume CR (no subdir removal; nfsOps is nil in controller mode)
 - Never call IBM VPC API directly from CSI handlers — go through pool manager
 
 ### When implementing CSI Node methods
-- Read `CSI-INTERFACE.md` (Node section) first
+- Read `docs/CSI-INTERFACE.md` (Node section) first
 - NodeStageVolume: mount the whole NFS share if not already mounted
 - NodePublishVolume: create the subdirectory if it does not exist (with uid/gid/permissions from VolumeContext), then bind-mount it into the pod path
 - Track active mounts in memory with a sync.RWMutex-protected map
 - Always validate mount paths to prevent directory traversal
 
 ### When implementing the Pool Manager
-- Read `ARCHITECTURE.md` (Pool Manager section) first
+- Read `docs/ARCHITECTURE.md` (Pool Manager section) first
 - This is the brain of the system
 - It runs as a controller-runtime reconciler watching FileSharePool CRs
 - It also exposes a synchronous `Allocate(ctx, poolName, sizeGB)` method for the CSI controller
 - Uses optimistic locking on CRD status updates to prevent races
 
 ### When implementing the IBM Cloud VPC client
-- Read `IBM-VPC-API.md` first
+- Read `docs/IBM-VPC-API.md` first
 - Always use the `vpc-go-sdk` — never raw HTTP
 - All API calls must have context-based timeouts (2 minutes max)
 - Always implement a fake client for testing
 
 ### When writing tests
-- Read `CODING-GUIDELINES.md` (Testing section) first
+- Read `docs/CODING-GUIDELINES.md` (Testing section) first
 - Unit tests go next to the code (`_test.go`)
 - Use table-driven tests
 - Mock IBM Cloud API with fake client
@@ -220,28 +220,28 @@ make test-e2e                 # E2E tests (requires live cluster, //go:build e2e
 - RBAC must cover: FileSharePool, SubVolume (get/list/watch/create/update/patch), PVs, PVCs, Secrets, ConfigMaps, Events, CSINode, CSIDriver
 
 ### When implementing snapshots (Phase 4a)
-- Read `CSI-INTERFACE.md` (Snapshot section) and `VOLUME-GROUP-SNAPSHOTS.md`
+- Read `docs/CSI-INTERFACE.md` (Snapshot section) and `docs/VOLUME-GROUP-SNAPSHOTS.md`
 - Snapshots are directory copies under `/pvcs/.snapshots/{snap-name}/` using `NFSOperations.CopyDir`
 - The `Snapshot` CRD tracks each snapshot; the pool manager creates and deletes them
 - Restore from snapshot uses `RestoreSnapshot` which creates a new SubVolume from the snapshot data
 - All snapshot operations are synchronous (unlike clones)
 
 ### When implementing volume cloning (Phase 4b)
-- Read `VOLUME-CLONING.md` first
+- Read `docs/VOLUME-CLONING.md` first
 - Clones use `PoolManager.CloneVolume()` — always async
 - The clone worker (`pkg/pool/clone_worker.go`) handles clones in the background (it creates a copy Job)
 - NodePublishVolume gates pod access on `cloneStatus=Complete` — pods wait until clone finishes
 - Share selection prefers the source share when it has capacity (same-share clone is faster)
 
 ### When implementing group snapshots (Phase 4c)
-- Read `VOLUME-GROUP-SNAPSHOTS.md` first
+- Read `docs/VOLUME-GROUP-SNAPSHOTS.md` first
 - Group snapshots reuse the Phase 4a single-snapshot infrastructure
 - The CSI controller handles hook orchestration (pre/post quiesce hooks)
 - The pool manager handles only the data plane (creating/deleting snapshot directories)
 - Failure policy: Abort rolls back all completed snapshots; Continue marks as PartialFailure
 
 ### When implementing replication (Phase 4d)
-- Read `CROSS-REGION-DR.md` first
+- Read `docs/CROSS-REGION-DR.md` first
 - The replication controller (`pkg/pool/replication_controller.go`) runs as a separate reconciler
 - It copies SubVolume data between pools using `CopyDir`, not rsync (simplified from design doc)
 - Uses `time.Duration` schedule intervals, not cron expressions (simplified from design doc)

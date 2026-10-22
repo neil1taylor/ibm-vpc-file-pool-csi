@@ -42,7 +42,7 @@ rules:
   - apiGroups: ["kubevirt.io"]
     resources: ["virtualmachineinstancemigrations"]
     verbs: ["list"]
-  # Instant VM snapshots (VM-INSTANT-SNAPSHOTS.md): the controller reads the
+  # Instant VM snapshots (docs/VM-INSTANT-SNAPSHOTS.md): the controller reads the
   # Sidecar feature gate and a stopped VM's disks, records each disk's
   # newest snapshot file on the running VMI, and keeps the hook script in a
   # ConfigMap in the VM's namespace. It reads virt-operator to find the
@@ -104,6 +104,13 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]
+  # Check the caller of the metrics endpoint (token and rights)
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["subjectaccessreviews"]
+    verbs: ["create"]
   # Leader election
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]

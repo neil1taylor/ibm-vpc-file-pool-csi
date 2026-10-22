@@ -4,10 +4,10 @@ OpenShift Console dynamic plugin that adds **Storage > IBM VPC File Pools** with
 
 > **Other docs you may need:**
 >
-> - [INSTALL.md](../INSTALL.md) — enabling, registering, and verifying the plugin on a cluster
-> - [HELM-VALUES.md](../HELM-VALUES.md) — `consolePlugin.*` Helm values reference
-> - [FEATURES.md](../FEATURES.md) — complete feature catalog
-> - [UPGRADE-GUIDE.md](../UPGRADE-GUIDE.md) — version upgrade notes
+> - [INSTALL.md](../docs/INSTALL.md) — enabling, registering, and verifying the plugin on a cluster
+> - [HELM-VALUES.md](../docs/HELM-VALUES.md) — `consolePlugin.*` Helm values reference
+> - [FEATURES.md](../docs/FEATURES.md) — complete feature catalog
+> - [UPGRADE-GUIDE.md](../docs/UPGRADE-GUIDE.md) — version upgrade notes
 
 ---
 

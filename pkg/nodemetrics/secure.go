@@ -16,10 +16,16 @@ import (
 // uses tls.crt and tls.key from it (and reloads them when they change), so
 // callers can check the certificate; otherwise it makes a self-signed one.
 func NewSecureServer(addr, certDir string, cfg *rest.Config, httpClient *http.Client) (metricsserver.Server, error) {
-	return metricsserver.NewServer(metricsserver.Options{
+	return metricsserver.NewServer(SecureOptions(addr, certDir), cfg, httpClient)
+}
+
+// SecureOptions are the metrics server options for HTTPS with token login. The
+// controller manager uses them for its own metrics endpoint.
+func SecureOptions(addr, certDir string) metricsserver.Options {
+	return metricsserver.Options{
 		BindAddress:    addr,
 		SecureServing:  true,
 		FilterProvider: filters.WithAuthenticationAndAuthorization,
 		CertDir:        certDir,
-	}, cfg, httpClient)
+	}
 }

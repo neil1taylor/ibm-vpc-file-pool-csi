@@ -33,7 +33,7 @@ import { ReplicationPolicyModel } from '../../models';
 import { ReplicationPolicy, Hook } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
 import DeleteModal from '../common/DeleteModal';
-import { vmCopySettingsText } from '../../utils/replication-helpers';
+import { describeReceiverReachable, vmCopySettingsText } from '../../utils/replication-helpers';
 import VolumeStatusTable from './VolumeStatusTable';
 import { secretsMadeFor } from '../../utils/receiver-objects';
 import { deleteMadeSecrets } from '../../utils/receiver-secrets';
@@ -170,6 +170,7 @@ const ReplicationPolicyDetailsPage: React.FC = () => {
   };
 
   const isReceiverMode = !!spec.destinationEndpoint;
+  const receiver = describeReceiverReachable(policy);
 
   const renderOverview = () => (
     <Card>
@@ -196,6 +197,15 @@ const ReplicationPolicyDetailsPage: React.FC = () => {
                   <code>{spec.destinationEndpoint}</code>
                 </DescriptionListDescription>
               </DescriptionListGroup>
+              {receiver && (
+                <DescriptionListGroup>
+                  <DescriptionListTerm>Receiver Status</DescriptionListTerm>
+                  <DescriptionListDescription>
+                    <Label color={receiver.color}>{receiver.label}</Label>
+                    {receiver.detail && <span style={{ marginLeft: 8 }}>{receiver.detail}</span>}
+                  </DescriptionListDescription>
+                </DescriptionListGroup>
+              )}
               <DescriptionListGroup>
                 <DescriptionListTerm>Auth Secret</DescriptionListTerm>
                 <DescriptionListDescription>

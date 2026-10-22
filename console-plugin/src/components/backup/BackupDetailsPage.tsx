@@ -16,6 +16,9 @@ import {
   Spinner,
   Split,
   SplitItem,
+  Tab,
+  TabTitleText,
+  Tabs,
   Title,
 } from '@patternfly/react-core';
 import { BackupPolicyModel } from '../../models';
@@ -26,6 +29,7 @@ import DeleteModal from '../common/DeleteModal';
 import NoAccessNote from '../common/NoAccessNote';
 import { BACKUP_DELETE_NOTE } from './backup-texts';
 import BackupProblemBanner from './BackupProblemBanner';
+import BackupCOSTab from './BackupCOSTab';
 import BackupVolumesTable from './BackupVolumesTable';
 import { vmCopySettingsText } from '../../utils/replication-helpers';
 import { suspendPatch } from '../../utils/backup-helpers';
@@ -45,6 +49,7 @@ const BackupDetailsPage: React.FC = () => {
   const history = useHistory();
   const location = useLocation();
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [tab, setTab] = useState<string | number>('overview');
   const [actionError, setActionError] = useState('');
   const [canUpdate] = useAccessReview({ group: API_GROUP, resource: 'backuppolicies', verb: 'update' });
   const [canDelete] = useAccessReview({ group: API_GROUP, resource: 'backuppolicies', verb: 'delete' });
@@ -161,6 +166,9 @@ const BackupDetailsPage: React.FC = () => {
             {policy.status.message}
           </Alert>
         )}
+        <Tabs activeKey={tab} onSelect={(_e, key) => setTab(key)} mountOnEnter unmountOnExit={false}>
+          <Tab eventKey="overview" title={<TabTitleText>Overview</TabTitleText>}>
+            <div style={{ marginTop: 16 }}>
         <Card>
           <CardHelpTitle helpKey="backupPolicy" />
           <CardBody>
@@ -203,6 +211,12 @@ const BackupDetailsPage: React.FC = () => {
             if (location.search) history.replace(ROUTES.BACKUP_DETAIL.replace(':name', name));
           }}
         />
+            </div>
+          </Tab>
+          <Tab eventKey="cos" title={<TabTitleText>COS</TabTitleText>}>
+            <BackupCOSTab policy={policy} />
+          </Tab>
+        </Tabs>
       </PageSection>
       <DeleteModal
         isOpen={deleteOpen}

@@ -1,11 +1,12 @@
 {{- if and .Values.metrics.alerts.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PrometheusRule") }}
 {{- $a := .Values.metrics.alerts }}
+{{- $ruleNS := ternary .Values.metrics.monitoring.namespace .Release.Namespace (not (empty (include "ibm-vpc-file-pool-csi.uwm" .))) }}
 {{- $job := printf "%s-metrics" (include "ibm-vpc-file-pool-csi.fullname" .) }}
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ $ruleNS }}
   labels:
     {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
 spec:
@@ -146,7 +147,7 @@ spec:
     - name: vpc-file-pool-csi.service
       rules:
         - alert: VPCFilePoolControllerDown
-          expr: absent(up{job="{{ $job }}",namespace="{{ .Release.Namespace }}"} == 1)
+          expr: absent(up{job="{{ $job }}",namespace="{{ $ruleNS }}"} == 1)
           for: 5m
           labels:
             severity: critical

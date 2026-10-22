@@ -74,7 +74,7 @@ cdi:
   copyPodMemoryLimit: 8Gi
 
 vmSnapshots:
-  # How snapshots of KubeVirt VM disks are made. See VM-INSTANT-SNAPSHOTS.md.
+  # How snapshots of KubeVirt VM disks are made. See docs/VM-INSTANT-SNAPSHOTS.md.
   # auto: instant snapshots (a new overlay file per snapshot, nothing copied)
   #   where the KubeVirt Sidecar feature gate is on, and a copy elsewhere. It
   #   adds a webhook that gives each VM with snapshots a hook when it starts.
@@ -172,6 +172,19 @@ metrics:
     # (OpenShift has it). The console plugin's charts read these metrics.
     enabled: true
     interval: 30s
+  # Where scraping and alerts live on OpenShift. Platform monitoring reads only
+  # namespaces labelled openshift.io/cluster-monitoring=true, and Red Hat says not to
+  # label other namespaces or to put your own ServiceMonitors in kube-*. So the chart
+  # makes its own namespace for the ServiceMonitors, the PrometheusRule and Services
+  # whose Endpoints the controller keeps. OpenShift's user workload monitoring must be
+  # on (enableUserWorkload: true in openshift-monitoring/cluster-monitoring-config);
+  # the chart never changes that. See docs/MONITORING.md.
+  monitoring:
+    # auto: use it when the cluster has the Prometheus Operator API and the OpenShift
+    # console and webhook.certProvider=openshift. enabled: always (needs certProvider
+    # openshift). disabled: ServiceMonitors and rules stay in the release namespace.
+    mode: auto
+    namespace: ibm-vpc-file-pool-csi-monitoring
   # The service account that scrapes the node agents' metrics (they need a token
   # that may "get" /metrics). The defaults are OpenShift's Prometheus. Empty
   # serviceAccount creates no binding; then bind the chart's metrics-reader role yourself.

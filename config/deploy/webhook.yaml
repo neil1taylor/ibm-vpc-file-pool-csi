@@ -99,7 +99,7 @@ webhooks:
         resources: ["volumegroupsnapshots"]
 ---
 # Gives each starting VM that has instant snapshots the driver's hook (see
-# VM-INSTANT-SNAPSHOTS.md). Leave it out when the controller runs with
+# docs/VM-INSTANT-SNAPSHOTS.md). Leave it out when the controller runs with
 # --vm-snapshot-method=copy.
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration

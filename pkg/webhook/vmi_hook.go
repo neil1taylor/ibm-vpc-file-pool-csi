@@ -25,7 +25,7 @@ const VMIHookPath = "/mutate-kubevirt-io-v1-virtualmachineinstance"
 // VMIHookInjector adds the driver's VM hook to a VirtualMachineInstance whose
 // disks have instant snapshots, as the VM starts. The hook opens each such
 // disk at the top of its snapshot chain. A VM without instant snapshots is
-// not changed. See VM-INSTANT-SNAPSHOTS.md.
+// not changed. See docs/VM-INSTANT-SNAPSHOTS.md.
 type VMIHookInjector struct {
 	Client client.Reader
 }

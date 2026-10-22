@@ -198,3 +198,10 @@ func TestSecureServer_UsesTheGivenCertificate(t *testing.T) {
 		t.Errorf("want 200, got %d", resp.StatusCode)
 	}
 }
+
+func TestSecureOptions_AreHTTPSWithLogin(t *testing.T) {
+	o := SecureOptions(":8080", "/certs")
+	if !o.SecureServing || o.FilterProvider == nil || o.BindAddress != ":8080" || o.CertDir != "/certs" {
+		t.Errorf("options = %+v", o)
+	}
+}
