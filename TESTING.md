@@ -424,6 +424,20 @@ jobs:
 
 ---
 
+## Console and Go Job specs: golden files
+
+The console creates some of the same Jobs as the command-line tools. To keep the Go and TypeScript Job specs in step, a Go test writes the objects to a golden JSON file, and a console test builds them again from the same input and compares them. If one side changes alone, one of the tests fails.
+
+| Objects | Go test and golden file | Console builder and test |
+|---|---|---|
+| Migration claim and pod | `pkg/migrate/golden_test.go`, `pkg/migrate/testdata/migration-objects.golden.json` | `console-plugin/src/utils/migrate-objects.ts` |
+| Receiver check Job | `pkg/replication/checkjob_test.go`, `pkg/replication/testdata/check-job.golden.json` | `console-plugin/src/utils/receiver-objects.ts` |
+| Backup measure, delete and COS list Jobs | `pkg/pool/share_job_backup_golden_test.go`, `pkg/pool/testdata/backup-jobs.golden.json` | `console-plugin/src/utils/backup-jobs.ts` |
+
+To change a Job on purpose, change the Go builder, rewrite the golden file (for the backup Jobs: `go test ./pkg/pool -run BackupJobs_MatchGolden -update-backup-jobs`), then change the TypeScript builder until `yarn jest` passes.
+
+---
+
 ## Integration Tests
 
 Integration tests exercise the full CSI controller stack (CSI driver -> Pool Manager -> fakes) without any external dependencies. They use the `integration` build tag and are located in `test/integration/`.
