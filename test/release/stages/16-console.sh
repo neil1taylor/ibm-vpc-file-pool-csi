@@ -591,9 +591,8 @@ YAML
     # The page does not offer a claim that a pod uses, so the writer goes first.
     oc delete pod -n "$NS" console-migrate-writer --wait=true --timeout=120s >/dev/null
 
-    # The copy pod needs to run as root (issue #196: it fails for a user without that right). The grant is
-    # a role binding in the test namespace and goes with it.
-    oc adm policy add-scc-to-user anyuid -z default -n "$NS" >/dev/null
+    # The copy pod runs under the restricted rules, as a random user id, and the user has no right to
+    # anything more (issue #196). Nothing is granted here on purpose.
     run_playwright "$WRITE_PORT" result-migrate.json "$RT_OUT/console-playwright-migrate.log" \
         integration-tests/tests/migrate.spec.ts \
         -e MIGRATE_NS="$NS" -e MIGRATE_CLAIM="$MIGRATE_CLAIM" -e MIGRATE_CLASS="$MIGRATE_SC" -e MIGRATE_POOL="$POOL"

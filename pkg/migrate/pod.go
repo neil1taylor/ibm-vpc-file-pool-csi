@@ -7,8 +7,11 @@ import (
 )
 
 const (
-	// MigrationImage is the container image used for migration pods.
-	MigrationImage = "alpine:3.20"
+	// MigrationImage is the container image used for migration pods. It is the
+	// OpenShift "tools" image: it already holds rsync and find, needs no pull
+	// secret, and runs as any user id, so a user with only the edit role can
+	// use it (issue #196).
+	MigrationImage = "image-registry.openshift-image-registry.svc:5000/openshift/tools:latest"
 
 	// LabelMigration is applied to all migration pods for easy discovery.
 	LabelMigration = "vpc-file-pool-csi.ibm.io/migration"
@@ -33,8 +36,11 @@ type MigrationPodSpec struct {
 }
 
 // BuildMigrationPod creates a Pod specification that mounts both the source
-// and target PVCs and runs rsync to copy data from source to target.
+// and target PVCs and runs rsync to copy data from source to target. It fits
+// the restricted rules of OpenShift: it sets no user id, so the cluster gives
+// the user of the namespace, and it changes no owners.
 func BuildMigrationPod(spec MigrationPodSpec) *corev1.Pod {
+	noEscalation := false
 	return &corev1.Pod{
 		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Pod"},
 		ObjectMeta: metav1.ObjectMeta{
@@ -50,20 +56,29 @@ func BuildMigrationPod(spec MigrationPodSpec) *corev1.Pod {
 		},
 		Spec: corev1.PodSpec{
 			RestartPolicy: corev1.RestartPolicyNever,
+			SecurityContext: &corev1.PodSecurityContext{
+				SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
+			},
 			Containers: []corev1.Container{
 				{
 					Name:  "migrate",
 					Image: MigrationImage,
-					// Install rsync, run the copy, then report file counts for verification. A count mismatch fails the pod.
+					SecurityContext: &corev1.SecurityContext{
+						AllowPrivilegeEscalation: &noEscalation,
+						Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+					},
+					// Run the copy, then report file counts for verification. A count mismatch fails the pod.
+					// The copy runs as the user the cluster gives the pod, so it cannot set owners or modes:
+					// the new files belong to that user, who is also the user of the namespace's other pods.
+					// The top folder of the new claim belongs to the pool's user, so its times are left alone.
 					Command: []string{"sh", "-c", `
 set -e
-apk add --no-cache rsync >/dev/null 2>&1
 echo "=== Migration started ==="
 echo "Source: /source"
 echo "Target: /target"
 SOURCE_COUNT=$(find /source -type f | wc -l)
 echo "Source file count: $SOURCE_COUNT"
-rsync -avz --progress /source/ /target/
+rsync -rltSv --omit-dir-times --progress /source/ /target/
 TARGET_COUNT=$(find /target -type f | wc -l)
 echo "Target file count: $TARGET_COUNT"
 echo "=== Migration complete ==="

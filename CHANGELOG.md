@@ -19,6 +19,8 @@ To make a release:
 
 ## [Unreleased]
 
+- **Migrating a claim works for a user with only the edit role (issue #196).** The copy pod (`kubectl migrate execute` and the console page "Migrate volumes into a pool") ran `apk add rsync` at start, which fails for the random user id that OpenShift gives a normal user. It now uses the OpenShift `tools` image (`openshift/tools:latest` in the cluster's registry), which already holds rsync, and it follows the restricted rules (no user id set, no extra rights, all capabilities dropped). The copy runs as the namespace's user, so it no longer sets owners or folder times: the new files belong to that user. The release test for the console migrate page no longer grants the `anyuid` right.
+
 - **Interactive picture of the VM snapshot chain** (`docs/diagrams/vm-snapshot-chain.html`), linked from `VM-INSTANT-SNAPSHOTS.md`. Open it in a browser to step through snapshots, writes, restores and merges.
 
 - **Deleting the VolumeSnapshot of a failed snapshot no longer leaves a record that blocks the pool (issue #201).** When a snapshot failed (for example an instant snapshot of a disk the VM user does not own), the snapshot sidecar had no snapshot ID, so deleting the VolumeSnapshot never reached the driver and the `Snapshot` record stayed, which kept the pool in `SnapshotsExist`. The controller now removes a `Snapshot` record that is not ready, is at least 2 minutes old, is named by the sidecar (`<prefix>-<VolumeSnapshot UID>`) and has no VolumeSnapshotContent, with the normal delete (Jobs stopped, files merged away, space given back). This also cleans up records left by older versions. Ready snapshots and records made by group snapshots are never touched.
