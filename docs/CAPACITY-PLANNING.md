@@ -397,7 +397,7 @@ spec:
   defaultUID: 107          # QEMU user
   defaultGID: 107
   defaultPermissions: "0777"
-  goldenImages:            # Auto-provision golden images for KubeVirt
+  goldenImages:            # Hidden feature: auto-provision golden images for KubeVirt
     enabled: true
     targetNamespaces:
       - openshift-virtualization-os-images

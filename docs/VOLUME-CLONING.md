@@ -93,7 +93,7 @@ The console can clone without YAML. Open a volume in the IBM VPC File Pools page
 - The form has defaults: the name is `<source claim>-clone`, the size is the volume's size (you can make it bigger, not smaller), and the storage class, access mode and volume mode come from the source claim.
 - The namespace is fixed to the namespace of the source claim. This is a Kubernetes rule.
 - The action only creates a new claim. It never changes the source volume.
-- The page then shows the copy: the percent copied while the claim is `Pending`, then "ready" when it is `Bound`. If the copy fails, it shows the error, and the claim is not deleted.
+- The claim is created and `Bound` at once. The copy runs behind it, and a pod cannot mount the volume until the copy is done (the clone gate in `NodePublishVolume`). Follow the copy in the `cloneStatus` and `cloneProgress` of the volume's SubVolume. If the copy fails, the SubVolume shows the error, and the claim is not deleted.
 - The action is off, with a reason, when the volume is not `Bound`, when a copy into it is still running, or when its claim no longer exists.
 - **A clone of a running VM's disk is a plain file copy, and the cloned disk may not boot.** The form warns when a VM uses the source claim.
 

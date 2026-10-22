@@ -1491,7 +1491,7 @@ A session ends when the helper stops by itself (idle, default 15 minutes), when 
 
 ## ReplicationPolicy
 
-Cluster-scoped resource. Defines a replication relationship between a source FileSharePool on the local cluster and a destination NFS server for cross-region disaster recovery. Uses rsync-based incremental replication over Transit Gateway or VPN.
+Cluster-scoped resource. Defines a replication relationship between a source FileSharePool on the local cluster and a destination NFS server for cross-region disaster recovery. In direct NFS mode it uses rsync (incremental) over Transit Gateway or VPN. In receiver mode (`destinationEndpoint`) it uploads the whole folder as a tar stream each cycle.
 
 ### Go Type Definition
 
@@ -1563,7 +1563,8 @@ type ReplicationPolicySpec struct {
     MaxRetries int32 `json:"maxRetries"`
 
     // IncrementalSync enables rsync-based incremental replication instead of full copy.
-    // When true (default), only changed files are transferred.
+    // When true (default), only changed files are transferred. Applies to direct NFS mode only;
+    // receiver mode (destinationEndpoint) uploads the whole folder each cycle.
     // +kubebuilder:default=true
     // +optional
     IncrementalSync *bool `json:"incrementalSync,omitempty"`
@@ -1901,7 +1902,7 @@ kubectl annotate replicationpolicy <name> storage.ibmcloud.io/paused-
 ### Replication Behavior
 
 - Each replication cycle iterates over all SubVolumes matching the `subVolumeSelector` (or all SubVolumes in the pool if no selector is set).
-- For each SubVolume, an incremental rsync copies changed files from the source subdirectory to the destination NFS server at `destinationBasePath/<subPath>`.
+- For each SubVolume in direct NFS mode, an incremental rsync copies changed files from the source subdirectory to the destination NFS server at `destinationBasePath/<subPath>`. In receiver mode, the whole subdirectory is tarred and uploaded to the receiver each cycle.
 - `consecutiveFailures` increments on each failed cycle and resets to 0 on success. When it reaches `maxRetries`, the policy transitions to `Paused`.
 - `conditions` has `ReceiverReachable` for a policy with `destinationEndpoint` (driver-to-driver mode); direct-NFS policies have none. The controller reads the token and CA Secrets in `kube-system`, calls the receiver's `/api/v1/health` and `/api/v1/auth-check`, and records `True` (reason `Reachable`) or `False` with one reason and a plain message: `CertificateNotTrusted`, `TokenRefused`, `StorageNotReachable`, `ReceiverTooOld`, `CannotConnect`, `TimedOut`, `SecretMissing` or `BadInput`. It checks when it first sees the policy and then once per `schedule`. A `False` result does not pause or stop replication; it explains why a sync fails.
 - Per-SubVolume status in `subVolumeStatuses` allows operators to identify which volumes are failing independently.

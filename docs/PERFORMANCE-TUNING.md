@@ -339,12 +339,13 @@ rate(vpc_file_pool_api_calls_total{operation="create_share"}[1h]) * 3600
 
 ### Mount Caching
 
-The CSI node agent maintains one NFS mount per share per node. Multiple PVCs on the same share reuse this single NFS mount via bind-mounts. This means:
+The CSI node agent mounts NFS once per staged volume (kubelet gives each volume its own staging folder, because the volume ID includes the PV name). This means:
 
-- **First PVC on a node** from a given share: NFS mount (1-2 seconds)
-- **Subsequent PVCs on the same node** from the same share: bind-mount only (~10 ms)
+- **First pod on a volume on a node**: NFS mount (1-2 seconds)
+- **A second pod on the same volume on the same node**: bind-mount only (~10 ms)
+- **A different volume on the same share**: its own NFS mount
 
-This is why the `spread` strategy can increase mount latency on large clusters — more shares means more NFS mounts per node. With `binpack`, a single share serves many PVCs, and most nodes only need one NFS mount.
+The number of NFS mounts on a node follows the number of staged volumes, not the number of shares.
 
 ### Worker Node NFS Client Tuning
 
