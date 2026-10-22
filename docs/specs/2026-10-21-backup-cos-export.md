@@ -151,4 +151,4 @@ Each part is a PR with its tests, and updates the docs and the release test run 
 ## Needs from you
 
 - **A COS bucket for the release test, and a Key Protect root key in the lab account.** Needed from build part 3 on. I will build parts 1 and 2 without them (local repository and MinIO). Say if you want me to make them with the setup command once it exists instead.
-- **Keep times** (local and COS) that your pilot customer would choose, to fill in the cost table.
+- **Keep times** (local and COS) that a customer would choose, to fill in the cost table.
