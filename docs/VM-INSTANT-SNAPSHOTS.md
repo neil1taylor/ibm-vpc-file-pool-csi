@@ -53,6 +53,7 @@ This set of files is a **chain**. Each file holds only the parts of the disk tha
 
 ### Taking a snapshot
 
+0. The driver checks that the VM's user (UID 107) owns the disk's top file, because only the owner can make it read-only (step 4). If not, the snapshot fails here with a message, and nothing is changed. If a step after the new file starts fails, the driver merges the new file back and deletes it, so the chain is as it was.
 1. The guest is frozen for a moment, so the guest writes its pending data to disk. OpenShift does this itself when you take a VM snapshot from the console. Otherwise the driver asks the guest agent to freeze.
 2. The driver runs one command in the VM's pod: `virsh snapshot-create-as ... --disk-only`. QEMU starts the new file and switches to it.
 3. The guest is thawed. The VM never stops.

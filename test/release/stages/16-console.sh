@@ -17,7 +17,7 @@
 #
 # What this does not test: IBM's sign-in step, which the plugin does not own.
 
-RT_STAGE_TIMEOUT=3000
+RT_STAGE_TIMEOUT=4500
 
 POOL=$(rt_name console)
 NS=$(rt_name console)
@@ -325,6 +325,14 @@ NGINX
         test "$(find "$SHOTS" -name '*.png' | wc -l)" -ge 7
 
     restore_in_browser
+    # Clone and migrate use the console of the restore part (a write token for the test namespace).
+    if console_is_up "$WRITE_PORT"; then
+        clone_in_browser
+        migrate_in_browser
+    else
+        echo "SKIP: the restore part did not run, so the clone and migrate tests are not run"
+    fi
+    drain_in_browser
     rm -rf "$work"
 }
 
@@ -392,9 +400,217 @@ YAML
     check "the restored files match the data at snapshot time" restored_files_match
 }
 
+# The drain, clone and migrate parts (#46 items 5, 6 and 7). Each part gives
+# the browser only the rights it needs.
+DRAIN_SA=console-drain
+DRAIN_PORT=9200
+DRAIN_TOKEN_FILE="${TMPDIR:-/tmp}/rt-$RT_ID-console-drain-token"
+DRAIN_CONSOLE_CONTAINER="rt-$RT_ID-console-drain"
+CLONED=cloned-in-console
+MIGRATE_SC="${RT_MIGRATE_SC:-ocs-storagecluster-cephfs}"
+MIGRATE_CLAIM=migrate-src
+
+# make_drain_token — a ServiceAccount that reads like the read-only one and may
+# patch the test pool, and no other object. Prints a 2-hour token.
+make_drain_token() {
+    oc create serviceaccount "$DRAIN_SA" -n "$NS" >/dev/null
+    oc apply -f - >/dev/null <<YAML
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: $NS-drain
+  labels:
+    $RT_LABEL: "$RT_ID"
+rules:
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["filesharepools"]
+    resourceNames: ["$POOL"]
+    verbs: ["patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: $NS-drain
+  labels:
+    $RT_LABEL: "$RT_ID"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: $NS-drain
+subjects:
+  - kind: ServiceAccount
+    name: $DRAIN_SA
+    namespace: $NS
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: $NS-drain-read
+  labels:
+    $RT_LABEL: "$RT_ID"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-reader
+subjects:
+  - kind: ServiceAccount
+    name: $DRAIN_SA
+    namespace: $NS
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: $NS-drain-pools
+  labels:
+    $RT_LABEL: "$RT_ID"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: $NS
+subjects:
+  - kind: ServiceAccount
+    name: $DRAIN_SA
+    namespace: $NS
+YAML
+    oc create token "$DRAIN_SA" -n "$NS" --duration=2h
+}
+
+drain_sa_can() { oc auth can-i "$@" --as="system:serviceaccount:$NS:$DRAIN_SA" >/dev/null 2>&1; }
+drain_token_patches_only_the_test_pool() {
+    drain_sa_can patch "filesharepools.storage.ibmcloud.io/$POOL" &&
+        ! drain_sa_can patch "filesharepools.storage.ibmcloud.io/not-$POOL" &&
+        ! drain_sa_can create filesharepools.storage.ibmcloud.io &&
+        ! drain_sa_can delete filesharepools.storage.ibmcloud.io "$POOL" &&
+        ! drain_sa_can create persistentvolumeclaims -n "$NS"
+}
+
+pool_does_not_drain() { ! pool_drains "$1"; }
+pool_drains() { oc get filesharepool "$POOL" -o jsonpath='{.spec.drainShares}' | grep -q "$1"; }
+share_state_is() { [ "$(oc get filesharepool "$POOL" -o jsonpath='{.status.shares[0].state}')" = "$1" ]; }
+share_is_not_draining() { [ "$(oc get filesharepool "$POOL" -o jsonpath='{.status.shares[0].state}')" != "draining" ]; }
+
+# browser_result RESULT LABEL MIN — the checks on one Playwright JSON report.
+browser_result() {
+    local result="$work/$1" counts passed failed
+    check "Playwright wrote a result file for $2" test -s "$result"
+    if [ -s "$result" ]; then
+        counts=$(playwright_summary "$result")
+        passed=${counts% *}
+        failed=${counts#* }
+        echo "$2: $passed passed, $failed failed"
+        check "no $2 failed ($passed passed)" test "$failed" -eq 0
+        check "the $2 ran" test "$passed" -ge "$3"
+    fi
+}
+
+# drain_in_browser — Drain the pool's share in the browser, check the pool, then
+# return it to service in the browser, and check the pool again.
+drain_in_browser() {
+    local share_id share_name
+    share_id=$(oc get filesharepool "$POOL" -o jsonpath='{.status.shares[0].shareID}')
+    share_name=$(oc get filesharepool "$POOL" -o jsonpath='{.status.shares[0].shareName}')
+    check "the pool has a share to drain" test -n "$share_id" -a -n "$share_name"
+
+    (umask 077; make_drain_token >"$DRAIN_TOKEN_FILE")
+    check "the drain token can change the test pool and nothing else" drain_token_patches_only_the_test_pool
+    start_console "$DRAIN_CONSOLE_CONTAINER" "$DRAIN_PORT" "$DRAIN_TOKEN_FILE"
+    check "the console with the drain token starts" wait_until 120 3 console_is_up "$DRAIN_PORT"
+
+    run_playwright "$DRAIN_PORT" result-drain.json "$RT_OUT/console-playwright-drain.log" \
+        integration-tests/tests/drain.spec.ts \
+        -e DRAIN_POOL="$POOL" -e DRAIN_SHARE="$share_name" -e DRAIN_PHASE=drain
+    browser_result result-drain.json "drain browser test" 1
+    check "the share is on the pool's drain list" pool_drains "$share_id"
+    check "the pool reports the share as draining" wait_until 120 5 share_state_is draining
+
+    run_playwright "$DRAIN_PORT" result-return.json "$RT_OUT/console-playwright-return.log" \
+        integration-tests/tests/drain.spec.ts \
+        -e DRAIN_POOL="$POOL" -e DRAIN_SHARE="$share_name" -e DRAIN_PHASE=return
+    browser_result result-return.json "return-to-service browser test" 1
+    check "the share is off the drain list" pool_does_not_drain "$share_id"
+    check "the pool no longer reports the share as draining" wait_until 120 5 share_is_not_draining
+    podman logs "$DRAIN_CONSOLE_CONTAINER" >"$RT_OUT/console-bridge-drain.log" 2>&1 || true
+}
+
+cloned_is_bound() { [ "$(oc get pvc -n "$NS" "$CLONED" -o jsonpath='{.status.phase}' 2>/dev/null)" = "Bound" ]; }
+cloned_files_match() { oc exec -n "$NS" console-clone-reader -- sh -c 'cd /data && sha256sum -c current.sha256'; }
+
+# clone_in_browser — Clone the test volume in the browser (the write console from
+# the restore part is still running), then a pod reads the new claim and the
+# files must match the source.
+clone_in_browser() {
+    local node pv
+    node=$(worker_nodes | sed -n 1p)
+    oc exec -n "$NS" console-writer -- sh -c 'cd /data && sha256sum payload > current.sha256 && sync'
+    pv=$(oc get pvc -n "$NS" console-test -o jsonpath='{.spec.volumeName}')
+    echo "source volume: $pv"
+
+    run_playwright "$WRITE_PORT" result-clone.json "$RT_OUT/console-playwright-clone.log" \
+        integration-tests/tests/clone.spec.ts \
+        -e CLONE_SUBVOLUME="$pv" -e CLONE_NS="$NS" -e CLONE_SOURCE=console-test -e CLONE_NAME="$CLONED"
+    browser_result result-clone.json "clone browser test" 4
+
+    check "the claim made in the browser is bound" wait_until 900 10 cloned_is_bound
+    pod_on_node "$NS" console-clone-reader "$node" "$CLONED" "sleep infinity"
+    check "the reader of the cloned claim runs" wait_until 300 5 pod_is_running "$NS" console-clone-reader
+    check "the cloned files match the source" cloned_files_match
+}
+
+migrate_source_is_bound() { [ "$(oc get pvc -n "$NS" "$MIGRATE_CLAIM" -o jsonpath='{.status.phase}')" = "Bound" ]; }
+migrated_is_bound() { [ "$(oc get pvc -n "$NS" "$MIGRATE_CLAIM-pooled" -o jsonpath='{.status.phase}' 2>/dev/null)" = "Bound" ]; }
+class_of() { oc get pvc -n "$NS" "$1" -o jsonpath='{.spec.storageClassName}'; }
+migrated_files_match() { oc exec -n "$NS" console-migrate-reader -- sh -c 'cd /data && sha256sum -c original.sha256'; }
+
+# migrate_in_browser — Move a claim of another storage class into the pool in the
+# browser. The new claim must be bound on the pool and hold the same data, and
+# the old claim must be untouched.
+migrate_in_browser() {
+    local node
+    oc get storageclass "$MIGRATE_SC" >/dev/null 2>&1 || {
+        echo "SKIP: no StorageClass $MIGRATE_SC to migrate from, so the migrate test is not run"
+        return 0
+    }
+    node=$(worker_nodes | sed -n 1p)
+    oc apply -n "$NS" -f - >/dev/null <<YAML
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: $MIGRATE_CLAIM
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: $MIGRATE_SC
+  resources:
+    requests:
+      storage: 1Gi
+YAML
+    check "the claim to migrate is bound on $MIGRATE_SC" wait_until 300 5 migrate_source_is_bound
+    pod_on_node "$NS" console-migrate-writer "$node" "$MIGRATE_CLAIM" \
+        "head -c 3145728 /dev/urandom > /data/payload && cd /data && sha256sum payload > original.sha256 && touch /data/written && sleep infinity"
+    check "the writer of the claim to migrate runs" wait_until 300 5 pod_is_running "$NS" console-migrate-writer
+    check "it wrote its files" wait_until 120 5 oc exec -n "$NS" console-migrate-writer -- test -f /data/written
+    # The page does not offer a claim that a pod uses, so the writer goes first.
+    oc delete pod -n "$NS" console-migrate-writer --wait=true --timeout=120s >/dev/null
+
+    # The copy pod needs to run as root (issue #196: it fails for a user without that right). The grant is
+    # a role binding in the test namespace and goes with it.
+    oc adm policy add-scc-to-user anyuid -z default -n "$NS" >/dev/null
+    run_playwright "$WRITE_PORT" result-migrate.json "$RT_OUT/console-playwright-migrate.log" \
+        integration-tests/tests/migrate.spec.ts \
+        -e MIGRATE_NS="$NS" -e MIGRATE_CLAIM="$MIGRATE_CLAIM" -e MIGRATE_CLASS="$MIGRATE_SC" -e MIGRATE_POOL="$POOL"
+    browser_result result-migrate.json "migrate browser test" 2
+    podman logs "$WRITE_CONSOLE_CONTAINER" >"$RT_OUT/console-bridge-write.log" 2>&1 || true
+
+    check "the new claim is bound" wait_until 300 5 migrated_is_bound
+    check "the new claim is on the pool" test "$(class_of "$MIGRATE_CLAIM-pooled")" = "$POOL"
+    check "the old claim is still on $MIGRATE_SC" test "$(class_of "$MIGRATE_CLAIM")" = "$MIGRATE_SC"
+    pod_on_node "$NS" console-migrate-reader "$node" "$MIGRATE_CLAIM-pooled" "sleep infinity"
+    check "the reader of the new claim runs" wait_until 300 5 pod_is_running "$NS" console-migrate-reader
+    check "the new claim has the files of the old claim" migrated_files_match
+}
+
 cleanup() {
-    podman stop -t 5 "$WRITE_CONSOLE_CONTAINER" "$CONSOLE_CONTAINER" "$PLUGIN_CONTAINER" >/dev/null 2>&1 || true
-    rm -f "$TOKEN_FILE" "$WRITE_TOKEN_FILE"
+    podman stop -t 5 "$DRAIN_CONSOLE_CONTAINER" "$WRITE_CONSOLE_CONTAINER" "$CONSOLE_CONTAINER" "$PLUGIN_CONTAINER" >/dev/null 2>&1 || true
+    rm -f "$TOKEN_FILE" "$WRITE_TOKEN_FILE" "$DRAIN_TOKEN_FILE"
     oc delete clusterrolebinding,clusterrole -l "$RT_LABEL=$RT_ID" --ignore-not-found --wait=true --timeout=120s
     oc delete namespace "$NS" --ignore-not-found --wait=true --timeout=300s
     oc delete filesharepool "$POOL" --ignore-not-found --wait=true --timeout=600s

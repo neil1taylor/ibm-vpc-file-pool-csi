@@ -93,6 +93,22 @@ Controls how the IBM Cloud API key is injected into the controller.
 | `cdi.copyPodMemoryLimit` | string | `8Gi` | The controller keeps the memory limit of CDI's copy pods at least this high, through the OpenShift Virtualization `HyperConverged` setting `spec.resourceRequirements.storageWorkloads`. CDI's default of 600M is too small for copies onto NFS: the pod is killed. On rovslab, a 25 GB copy failed with 2Gi and finished with 8Gi. Empty turns the check off |
 | `goldenImageSyncer.interval` | string | `5m` | Background golden image syncer poll interval (Go duration). Controls how often the syncer checks for new CDI DataImportCrons and updates golden images |
 
+## Backup Browse
+
+Browse a backup and restore single files (issue #92). Added in phase 1 of `docs/specs/2026-10-22-backup-file-restore.md`.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `backupBrowse.enabled` | bool | `true` | Turns browse sessions on. When off, the controller gets no `--browse-image` and the chart renders no browse Role or NetworkPolicy |
+| `backupBrowse.image.repository` | string | `de.icr.io/ibm-vpc-file-pool-csi/browse` | The browse helper image (`Dockerfile.browse`) |
+| `backupBrowse.image.tag` | string | `""` | Empty means the tag of the driver image |
+| `backupBrowse.idle` | string | `15m` | A session ends after this long without use |
+| `backupBrowse.maxLife` | string | `2h` | A session ends after this long, even if in use |
+| `backupBrowse.maxSessions` | int | `5` | Open sessions in the cluster. More wait |
+| `backupBrowse.maxSessionsPerNamespace` | int | `2` | Open sessions for the claims of one namespace. More wait |
+
+The chart also makes a Role that lets the controller make and delete the session Secrets in the release namespace only, and a NetworkPolicy that lets only the backup gateway (a later part) reach the helper pods, on port 8443.
+
 ## Replication Receiver
 
 Configuration for the driver-to-driver cross-region replication receiver. Deploy this on the **destination** cluster. Source cluster sync-client Jobs upload data via HTTPS.

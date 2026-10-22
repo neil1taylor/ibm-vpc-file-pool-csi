@@ -36,9 +36,18 @@ It pools many volumes (PVCs) as folders on a few shared VPC file shares. A volum
 
 Built: `spec.export` on a `BackupPolicy` (Compliance object lock, a backup key wrapped by Key Protect), `kubectl backup cos-setup` to make the bucket and keys, `kubectl backup restore --from-cos`, `kubectl backup cos-list`, and [TUTORIAL-09-COS-BACKUP-BUCKET.md](TUTORIAL-09-COS-BACKUP-BUCKET.md).
 
-- **Proven:** the backup to a snapshot pool ran in release test stage 18 on the lab and found and fixed a real fault. The COS code passes unit tests against fakes, a fake Key Protect server, and a Kopia repository in a folder.
-- **Partly proven:** `cos-setup` has had one first run on real IBM Cloud. It found a policy that IBM adds for the HMAC key, and the command now removes it (issue #138). It has not been proven end to end.
-- **Not proven:** an export to a real bucket, a restore from one, and Key Protect unwrapping against a real instance. The COS part of stage 18 is written but has not been run on a cluster. Until it passes, do not treat the COS copy as your only backup.
+- **Proven (stage 18, quick run 1022-1215, image v0.13.2-109-gefdbbb2, lab cluster rovslab-prod-eude, a real COS bucket and Key Protect root key in eu-de):**
+  - Export of VM disks and a pod volume to COS, with Key Protect unwrapping and Kopia.
+  - `kubectl backup cos-list` shows one export per volume. The run found a fault here, fixed in PR #183.
+  - Restore from COS into the same cluster. The VM boots with no XFS errors and all logged checksums match. The pod volume restored at the first moment holds the first content, and at the latest moment holds the changed content. The cluster was left clean.
+  - `cos-setup` works on real IBM Cloud, after the fix for the extra instance-wide Writer policy that IBM adds (PR #149, issue #138).
+  - Each run leaves Compliance-locked objects for 25 hours. The cost is small.
+  - The backup to a snapshot pool also ran in the earlier full run 1022-0847, including the local (non-COS) restores. Quick mode skips the local restores.
+- **Not proven:**
+  - A restore from COS in the other (DR) cluster.
+  - Emergency restore with `--backup-key-file`. The readable backup key from the `cos-setup` run was not saved (lab only).
+  - Long-run behaviour of the 5-minute schedule at full size. Quick mode uses a 1-minute schedule and a 1 GB disk.
+- Until the three items above pass, do not treat the COS copy as your only backup.
 
 ## Install
 
