@@ -6,7 +6,7 @@ The meanings come from the code (`api/v1alpha1/` and `pkg/`). If a page disagree
 
 **Contents**
 
-- [Storage](#storage): pool, share, SubVolume, volume, plain volume, VM disk, tier, drain, StorageClass
+- [Storage](#storage): pool, share, mount target, SubVolume, volume, plain volume, VM disk, allocation strategy, auto-expand, tier, drain, StorageClass, staging, reclaim policy
 - [Copies in the same pool](#copies-in-the-same-pool): snapshot, file snapshot, QEMU copy, instant snapshot, chain, overlay file, VM hook, Sidecar gate, flatten, clone
 - [How good a copy is](#how-good-a-copy-is): moment, file-system consistent, crash consistent, file copy, guest freeze
 - [Backup](#backup): backup, BackupPolicy, snapshot pool, keep time, restore, BackupRestore, restore point, change list, COS export, lock, backup key
@@ -29,6 +29,12 @@ A **share** is one VPC file share: an NFS export that IBM Cloud runs for you. A 
 
 Example: `r006-1234...` is a share of 1000 GB. It holds the folders of 40 PVCs.
 
+### Mount target
+
+A **mount target** is the NFS address of a share inside your VPC. Nodes mount a share through it. The driver makes one mount target for each share. It sits in the pool's zone and serves nodes in every zone.
+
+Example: `10.240.64.5:/share_abc123`.
+
 ### SubVolume
 
 A **SubVolume** is the driver's record of one PVC: which share holds it, which folder it uses, and how big it is. It is a cluster-wide resource. It is named after the PersistentVolume (`pvc-<uuid>`).
@@ -37,7 +43,7 @@ Example: `kubectl get subvolume pvc-0a1b...` shows the pool, the share and the f
 
 ### Volume
 
-A **volume** is a PVC that uses a pool StorageClass. Its data is a folder (`/pvcs/pvc-<uuid>`) on one share. Many volumes share one NFS mount on a node; each pod sees only its own folder.
+A **volume** is a PVC that uses a pool StorageClass. Its data is a folder (`/pvcs/pvc-<uuid>`) on one share. The docs also call this folder the subdirectory or the `subPath`. Many volumes share one NFS mount on a node; each pod sees only its own folder.
 
 Example: the PVC `db-data` in the namespace `apps` is a volume of 20 GB.
 
@@ -53,6 +59,18 @@ A **VM disk** is a volume that a KubeVirt `VirtualMachine` uses as a disk. It is
 
 Example: the PVC `web-root` is the boot disk of the VM `web`. Its folder holds `disk.img`.
 
+### Allocation strategy
+
+The **allocation strategy** (`spec.allocationStrategy`) decides which share gets a new volume. `spread` picks the share with the most free space, so volumes spread out and one failure affects fewer of them. `binpack` picks the share with the least free space that still fits, so fewer shares are in use. The default is `spread`. Allocation only records a SubVolume and never calls the VPC.
+
+Example: with `spread`, three new 10 GB volumes go to three different shares.
+
+### Auto-expand
+
+**Auto-expand** (`spec.autoExpand`) lets the pool add a share by itself in the background. It starts when the space given to volumes crosses `expandThresholdPercent` (default 80) of the pool, and stops at `maxShares`. While it works, the pool phase is `Expanding`. If a request finds no room while the pool expands, it is told to retry shortly. If the pool is at `maxShares` and full, it is refused.
+
+Example: a pool of 2 shares of 1000 GB adds a third when volumes hold 1600 GB.
+
 ### Tier
 
 A **tier** is a named performance level inside one pool. Each tier has its own share size, IOPS and share count. The driver makes one StorageClass for each tier, named `<pool>-<tier>`, with the parameter `tier`.
@@ -64,6 +82,18 @@ Example: the pool has the tiers `standard` (100 IOPS) and `fast` (3000 IOPS).
 To **drain** a share is to stop putting new volumes on it. You list the share in `spec.drainShares`. The driver also drains a share by itself when the VPC reports it `failed` or `degraded`. Volumes already on a drained share keep working. The driver does not move them or delete the share. The share is **drained** when no volume and no snapshot is left on it.
 
 Example: you drain share A. It is drained once its last PVC and snapshot are gone. Then you can delete share A by hand.
+
+### Staging
+
+**Staging** is the one NFS mount of a whole share on a node. Each volume on that node is then a bind-mount of its own folder from the staging mount into the pod. Ten pods on one node that use one share make one NFS connection.
+
+Example: the node mounts share A once, and ten pods each see only their own folder.
+
+### Reclaim policy
+
+The **reclaim policy** is the Kubernetes setting on the StorageClass that says what happens to a volume when its PVC is deleted. With `Delete` (the default), the driver removes the folder and the SubVolume. With `Retain`, Kubernetes keeps the PersistentVolume, and the SubVolume and the folder stay until you clean them up by hand. The driver has no archive mode.
+
+Example: use `Retain` for a pool of data you must never lose by a mistaken delete.
 
 ### StorageClass
 
@@ -133,7 +163,9 @@ Example: flatten a VM before you turn the Sidecar gate off.
 
 ### Clone
 
-A **clone** is a new volume made from an existing volume. The copy always runs in the background, as a Kubernetes Job. A pod cannot mount the new volume until the copy ends: the node plugin answers `Unavailable` while `status.cloneStatus` is not `Complete`.
+A **clone** is a new volume made from an existing volume. The clone worker, a background loop in the controller, runs the copy as a Kubernetes Job. A pod cannot mount the new volume until the copy ends: the node plugin answers `Unavailable` while `status.cloneStatus` is not `Complete`.
+
+A clone is made for every volume size, and it prefers the share of its source.
 
 Example: a PVC with `dataSource: {kind: PersistentVolumeClaim, name: db-data}` is a clone of `db-data`.
 
@@ -167,7 +199,7 @@ Example: a backup of a volume that holds a log folder.
 
 ### Guest freeze
 
-A **guest freeze** is a request through the VM's guest agent that makes the guest write its pending data and hold new writes for a moment. The driver freezes a guest for the QEMU copy, and the guest thaws by itself after 30 seconds at most. OpenShift does its own freeze when you take a VM snapshot from the console, and the driver does not freeze again then.
+A **guest freeze** is a request through the VM's guest agent. The guest writes its pending data and holds new writes for a moment. The driver freezes a guest for the QEMU copy, and the guest thaws by itself after 30 seconds at most. OpenShift does its own freeze when you take a VM snapshot from the console, and the driver does not freeze again then.
 
 Example: a freeze of 0.15 seconds was measured in a lab test.
 
@@ -177,13 +209,13 @@ Example: a freeze of 0.15 seconds was measured in a lab test.
 
 ### Backup
 
-A **backup** is a copy of a volume or VM that the driver keeps on a different share (in a [snapshot pool](#snapshot-pool)), made on a schedule. It keeps many moments. A backup survives the loss of the data share. It does not survive the loss of the whole VPC unless you also [export it to COS](#cos-export).
+A **backup** is a copy of a volume or VM, made on a schedule. The driver keeps it on a different share, in a [snapshot pool](#snapshot-pool). It keeps many moments. A backup survives the loss of the data share. It does not survive the loss of the whole VPC unless you also [export it to COS](#cos-export).
 
 Example: a backup every 6 hours, kept for 14 days.
 
 ### BackupPolicy
 
-A **BackupPolicy** says what to back up (a label selector, optionally limited to namespaces), where (the snapshot pool), how often (`schedule`), and for how long (`keepFor`). If any disk of a VM matches the selector, all its disks are backed up together. The controller makes the matching `ReplicationPolicy` objects itself. Do not edit them.
+A **BackupPolicy** says what to back up: a label selector, optionally limited to namespaces. It also names the snapshot pool, the `schedule` and the `keepFor` time. If any disk of a VM matches the selector, all its disks are backed up together. The controller makes the matching `ReplicationPolicy` objects itself. Do not edit them.
 
 Example: `selector: {matchLabels: {backup: "yes"}}` backs up every PVC with the label `backup=yes`.
 
@@ -213,7 +245,7 @@ Example: `kubectl get backuprestore` shows `restore-web-root-lq3x9a  Done`.
 
 ### Restore point
 
-A **restore point** is an earlier moment of a volume that you can still go back to. For a VM disk, the latest copy is whole and each earlier moment is kept as an undo file: it holds the old contents of the blocks that the next copy changed. For a plain volume, each earlier moment is a folder of hard links, so a file that did not change takes no extra space. Restore points older than the keep time are removed.
+A **restore point** is an earlier moment of a volume that you can still go back to. For a VM disk, the latest copy is whole. Each earlier moment is an undo file. It holds the old contents of the blocks that the next copy changed. For a plain volume, each earlier moment is a folder of hard links, so a file that did not change takes no extra space. Restore points older than the keep time are removed.
 
 Example: with a copy every 6 hours and a keep time of 24 hours, a disk has about 4 restore points.
 
@@ -247,13 +279,13 @@ Example: restore with `--backup-key-file ./backup-key.txt` if Key Protect is gon
 
 ### Replication
 
-**Replication** copies volumes to a destination (another pool or another cluster) on a schedule, so you can start the workload there if the source site is lost. By default it keeps only the latest copy of a plain volume (a backup keeps more moments). A running VM is copied with a QEMU copy, all disks at one moment. The destination keeps restore points of VM disks for `restorePointKeepHours` (default 24).
+**Replication** copies volumes to a destination on a schedule. The destination is another pool or another cluster. If the source site is lost, you can start the workload there. By default it keeps only the latest copy of a plain volume (a backup keeps more moments). A plain volume is copied with rsync, and only the files that changed cross the network (`incrementalSync`, on by default). A running VM is copied with a QEMU copy, all disks at one moment. The destination keeps restore points of VM disks for `restorePointKeepHours` (default 24).
 
 Example: replicate the pool `production` in Frankfurt to a pool in London every 15 minutes.
 
 ### ReplicationPolicy
 
-A **ReplicationPolicy** says which pool to copy (`sourcePoolName`, optionally a label selector), where to (a destination NFS server, or a receiver's URL), and how often (`schedule`). It also sets the speed limit for VM copies (`vmCopySpeedLimitMBps`, default 20) and optional lifecycle hooks.
+A **ReplicationPolicy** names the pool to copy (`sourcePoolName`, with an optional label selector). It names the destination, which is an NFS server or a receiver's URL. It also sets the `schedule`. It also sets the speed limit for VM copies (`vmCopySpeedLimitMBps`, default 20) and optional lifecycle hooks.
 
 Example: `schedule: 15m`.
 
@@ -293,7 +325,7 @@ Example: the DataVolume `golden-centos-stream9` in a target namespace.
 
 ### Lifecycle hook
 
-A **lifecycle hook** is an action the controller runs before or after a replication sync. It is either a command run in a pod (`exec`) or a web call (`http`). `onError` is `Abort` (the default) or `Continue`. Do not confuse it with the [VM hook](#vm-hook).
+A **lifecycle hook** is an action the hook orchestrator in the controller runs before or after a replication sync. It is either a command run in a pod (`exec`) or a web call (`http`). `onError` is `Abort` (the default) or `Continue`. Do not confuse it with the [VM hook](#vm-hook).
 
 Example: an `http` hook that asks an application to flush its data before a sync.
 
