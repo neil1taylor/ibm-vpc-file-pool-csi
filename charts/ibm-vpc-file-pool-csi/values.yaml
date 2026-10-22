@@ -66,6 +66,23 @@ goldenImageSyncer:
   # Interval between golden image syncer poll cycles (Go duration string).
   interval: 5m
 
+# Browse a backup and restore single files (issue #92). The controller starts a
+# read-only helper pod for each open session. The helper image is built from
+# Dockerfile.browse.
+backupBrowse:
+  enabled: true
+  image:
+    repository: de.icr.io/ibm-vpc-file-pool-csi/browse
+    # Empty means the same tag as the driver image.
+    tag: ""
+  # A session ends after this long without use.
+  idle: 15m
+  # A session ends after this long, even if in use.
+  maxLife: 2h
+  # Open sessions in the cluster, and for the claims of one namespace. More wait.
+  maxSessions: 5
+  maxSessionsPerNamespace: 2
+
 cdi:
   # The controller keeps the memory limit of CDI's copy pods (OpenShift
   # Virtualization HyperConverged spec.resourceRequirements.storageWorkloads)

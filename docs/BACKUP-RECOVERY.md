@@ -539,7 +539,8 @@ Not tested against a real bucket or a real Key Protect instance. The Jobs read t
 The goal (issue #92) is to look inside a backup and get back one file or folder without restoring the whole volume. The design is in `docs/specs/2026-10-22-backup-file-restore.md`. Only the first part exists:
 
 - **The browse helper** (`cmd/browse`, image `browse`). It reads one backup folder, read-only. It lists a folder in pages of 1000 names, describes a name, reads a byte range of a file, and streams a folder as a tar. It never follows a symbolic link: a link is listed with its text, a download of a link is refused, and a tar keeps it as a link. A path is a list of names, so a name with a newline or bytes that are not text works. Every call needs the session token. The helper ends by itself after 15 minutes without use, or after 2 hours.
-- **Not built yet:** the resource that starts a helper, the gateway that checks Kubernetes access, `kubectl backup ls/get/browse/restore-files`, the console pages, COS backups and VM disks.
+- **Browse sessions (part 2).** A `BackupBrowse` resource per open session; the controller starts the helper pod for it, with a random token and a per-session TLS certificate in a Secret, and removes everything when the session ends. The helper serves only over TLS. Defaults: 15 minutes idle, 2 hours hard limit, 5 open sessions in the cluster and 2 for each namespace; all are Helm values (`backupBrowse.*`).
+- **Not built yet:** the gateway that checks Kubernetes access, `kubectl backup ls/get/browse/restore-files`, the console pages, COS backups and VM disks.
 
 ### Can the helper read other users' files?
 

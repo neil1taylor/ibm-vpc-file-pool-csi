@@ -49,6 +49,13 @@ spec:
             {{- end }}
             - "--cdi-copy-pod-memory-limit={{ .Values.cdi.copyPodMemoryLimit }}"
             - "--driver-image={{ .Values.image.repository }}:{{ .Values.image.tag }}"
+            {{- if .Values.backupBrowse.enabled }}
+            - "--browse-image={{ .Values.backupBrowse.image.repository }}:{{ .Values.backupBrowse.image.tag | default .Values.image.tag }}"
+            - "--browse-idle={{ .Values.backupBrowse.idle }}"
+            - "--browse-max-life={{ .Values.backupBrowse.maxLife }}"
+            - "--browse-max-sessions={{ .Values.backupBrowse.maxSessions }}"
+            - "--browse-max-sessions-per-namespace={{ .Values.backupBrowse.maxSessionsPerNamespace }}"
+            {{- end }}
             {{- if not (has .Values.vmSnapshots.method (list "auto" "copy")) }}
             {{- fail "vmSnapshots.method must be auto or copy" }}
             {{- end }}

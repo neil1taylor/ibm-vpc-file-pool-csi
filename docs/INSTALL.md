@@ -410,12 +410,25 @@ kubectl apply -f config/deploy/node.yaml
 | `--vm-group` | `""` | `namespace/name` of the VM that owns the disk (send-vm-disk mode). Set by the replication controller |
 | `--copy-id` | `""` | Name of this copy attempt; a repeat with the same name resumes it (send-vm-disk mode). Set by the replication controller |
 
+**Browse session flags of the controller** (set by the `backupBrowse.*` chart values):
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--browse-image` | `""` | Image of the browse helper. Empty turns browse sessions off |
+| `--browse-idle` | `15m` | End a session after this long without use |
+| `--browse-max-life` | `2h` | End a session after this long, even if in use |
+| `--browse-max-sessions` | `5` | Open sessions in the cluster. More wait |
+| `--browse-max-sessions-per-namespace` | `2` | Open sessions for the claims of one namespace. More wait |
+
 **Browse helper flags** (`browse`, its own image; the driver starts it, you do not run it by hand):
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--mode` | (required) | `browse-server` |
-| `--root` | (required) | The backup folder, mounted read-only |
+| `--root` | (required) | The latest copy of the backup, mounted read-only |
+| `--moments` | `""` | The folder of earlier moments (`20261022T091500Z`, ...). Needed for `--at` |
+| `--at` | `""` | Read the newest moment at or before this time (RFC 3339) instead of the latest copy |
+| `--tls-cert-file`, `--tls-key-file` | (required) | The session certificate and key. The API is never served in plain HTTP |
 | `--token-file` | (required) | File that holds the session token (at least 16 characters) |
 | `--listen` | `:8080` | Address to listen on |
 | `--idle` | `15m` | End the session after this long without use |

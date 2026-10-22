@@ -1455,6 +1455,37 @@ The controller makes the PVC (like the backed-up claim: same size, `ReadWriteMan
 
 ---
 
+## BackupBrowse
+
+Cluster-scoped. One open session on one backup of one volume, for browsing files (issue #92). **Users never make or see it:** the backup gateway makes it after it checks the user's rights, and the backup controller runs it. Short name `bb`.
+
+```go
+type BackupBrowseSpec struct {
+    Policy       string       `json:"policy"`
+    PVCNamespace string       `json:"pvcNamespace"`           // the claim that was backed up; it may be gone
+    PVCName      string       `json:"pvcName"`
+    Moment       *metav1.Time `json:"moment,omitempty"`       // the newest backup at or before it; unset: the latest copy
+    RequestedBy  string       `json:"requestedBy,omitempty"`  // the user, for the audit trail; decides nothing
+    Close        bool         `json:"close,omitempty"`        // end the session
+}
+
+type BackupBrowseStatus struct {
+    Phase      string       `json:"phase,omitempty"`      // Pending, Starting, Ready, Closed, Failed
+    Message    string       `json:"message,omitempty"`
+    PodIP      string       `json:"podIP,omitempty"`      // where the helper answers, over TLS
+    Port       int32        `json:"port,omitempty"`
+    SecretName string       `json:"secretName,omitempty"` // token, tls.crt, tls.key; owned by this resource
+    EndReason  string       `json:"endReason,omitempty"`  // idle, max-life, closed, stopped
+    EndedTime  *metav1.Time `json:"endedTime,omitempty"`
+}
+```
+
+For each session the controller makes a Secret with a random token and a new self-signed TLS certificate and key, and a Job whose one pod (the browse image) mounts only this volume's backup folder, and its moments folder if it has earlier moments, read-only down to the NFS export. The pod has no service account token, runs as root with every capability dropped on a read-only root file system, and serves its API over TLS. The gateway trusts exactly that certificate. Every object of a session (Job, share volume and claim, Secret) is named and labelled with the **UID** of the `BackupBrowse`, never its name, and owned by it, so a session deleted and made again with the same name cannot get the old session's Secret or pod, which still mounts the old volume.
+
+A session ends when the helper stops by itself (idle, default 15 minutes), when it is 2 hours old (the hard limit, counted from creation, so a controller restart does not extend it), when `spec.close` is set, or when the helper fails. The controller stops the Job, removes the Secret, and removes the record 10 minutes later. `Pending` means the session waits for a free slot (5 in the cluster and 2 for the claims of one namespace by default) or for a ready share in the snapshot pool. A request for a policy or a claim that has no backup fails at once. A moment before the first earlier moment, or any moment of a volume with no earlier moments yet, reads the latest copy, as a restore does. Helper Jobs and Secrets whose session is gone are removed on the next pass, also after a restart. See `docs/specs/2026-10-22-backup-file-restore.md`.
+
+---
+
 ## ReplicationPolicy
 
 Cluster-scoped resource. Defines a replication relationship between a source FileSharePool on the local cluster and a destination NFS server for cross-region disaster recovery. Uses rsync-based incremental replication over Transit Gateway or VPN.
