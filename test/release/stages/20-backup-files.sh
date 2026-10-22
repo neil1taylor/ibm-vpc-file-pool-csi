@@ -7,14 +7,22 @@
 # 0600 and 0700, refuses a link, cannot write, and tars everything.
 # test/e2e/test-backup-files.sh does the work and logs a "PASS:" line for each
 # outcome, or one "FAIL:" line and exit 1. This stage runs it and checks the log.
+# Part 2, browse sessions: test/e2e/test-backup-browse-session.sh backs up a pod
+# volume twice, opens BackupBrowse sessions by hand (as the gateway will), and
+# checks TLS with the pinned certificate, the token, the latest copy and the
+# first moment, the locked-down helper pod, the NetworkPolicy, and that closing
+# or deleting a session leaves nothing behind.
 
 # A pool takes 5 to 15 minutes to become ready; the rest is under 5 minutes.
-RT_STAGE_TIMEOUT=2700
+RT_STAGE_TIMEOUT=7200
 
 HERE_STAGE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 E2E="$HERE_STAGE/../../e2e/test-backup-files.sh"
 PREFIX=$(rt_name files)
 E2E_LOG="$RT_OUT/backup-files-e2e.log"
+E2E_SESSION="$HERE_STAGE/../../e2e/test-backup-browse-session.sh"
+SESSION_PREFIX=$(rt_name bsess)
+SESSION_LOG="$RT_OUT/backup-browse-session-e2e.log"
 
 run() {
     local tool rc fail_line
@@ -41,6 +49,27 @@ run() {
     check "a path through a link is refused" log_has_pass "$E2E_LOG" "a path through a link to /etc is refused"
     check "a tar of the volume holds every entry" log_has_pass "$E2E_LOG" "a tar of the volume holds all"
     check "the helper cannot write to the backup and has no capabilities" log_has_pass "$E2E_LOG" "has no capabilities"
+
+    [ -f "$E2E_SESSION" ] || skip "no end-to-end script at $E2E_SESSION"
+    rt_log "running $E2E_SESSION"
+    env PREFIX="$SESSION_PREFIX" bash "$E2E_SESSION" >"$SESSION_LOG" 2>&1
+    rc=$?
+    cat "$SESSION_LOG"
+    if fail_line=$(first_fail_line "$SESSION_LOG"); then
+        check "the browse session script reported: $fail_line" false
+    elif [ "$rc" -ne 0 ]; then
+        check "the browse session script exited with $rc and no FAIL line (see backup-browse-session-e2e.log)" false
+    else
+        check "the browse session script ended without a FAIL line" true
+    fi
+    check "a session starts and answers over TLS" log_has_pass "$SESSION_LOG" "both sessions are Ready"
+    check "the latest session reads the changed file" log_has_pass "$SESSION_LOG" "reads the changed file"
+    check "a session at the first moment reads the first content" log_has_pass "$SESSION_LOG" "reads the first content"
+    check "a wrong token and another session's certificate are refused" log_has_pass "$SESSION_LOG" "certificate of another session"
+    check "the helper pod is locked down and mounts the backup read-only" log_has_pass "$SESSION_LOG" "read-only"
+    check "another pod cannot reach the helper" log_has_pass "$SESSION_LOG" "NetworkPolicy"
+    check "closing a session leaves nothing behind" log_has_pass "$SESSION_LOG" "closing a session removes"
+    check "deleting a session leaves nothing behind" log_has_pass "$SESSION_LOG" "deleting a session removes"
 }
 
 cleanup() {
@@ -50,4 +79,8 @@ cleanup() {
     oc delete secret "$PREFIX-token" -n "$RT_DRIVER_NS" --ignore-not-found
     oc delete namespace "$PREFIX-test" --ignore-not-found --wait=true --timeout=900s
     oc delete filesharepool "$PREFIX-pool" --ignore-not-found --wait=false
+    oc delete backupbrowse -l "$SESSION_PREFIX-test=yes" --ignore-not-found --wait=false
+    oc delete backuppolicy "$SESSION_PREFIX-policy" --ignore-not-found --wait=false
+    oc delete namespace "$SESSION_PREFIX-test" --ignore-not-found --wait=true --timeout=900s
+    oc delete filesharepool "$SESSION_PREFIX-src" "$SESSION_PREFIX-snap" --ignore-not-found --wait=false
 }

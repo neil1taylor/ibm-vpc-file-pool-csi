@@ -9,7 +9,7 @@ The meanings come from the code (`api/v1alpha1/` and `pkg/`). If a page disagree
 - [Storage](#storage): pool, share, mount target, SubVolume, volume, plain volume, VM disk, allocation strategy, auto-expand, tier, drain, StorageClass, staging, reclaim policy
 - [Copies in the same pool](#copies-in-the-same-pool): snapshot, file snapshot, QEMU copy, instant snapshot, chain, overlay file, VM hook, Sidecar gate, flatten, clone
 - [How good a copy is](#how-good-a-copy-is): moment, file-system consistent, crash consistent, file copy, guest freeze
-- [Backup](#backup): backup, BackupPolicy, snapshot pool, keep time, restore, BackupRestore, restore point, change list, COS export, lock, backup key, browse helper
+- [Backup](#backup): backup, BackupPolicy, snapshot pool, keep time, restore, BackupRestore, restore point, change list, COS export, lock, backup key, browse session, browse helper
 - [Replication and failover](#replication-and-failover): replication, ReplicationPolicy, destination, receiver, rewind, failover
 - [Other words](#other-words): golden image, lifecycle hook, group snapshot, user workload monitoring, command-line plugins
 
@@ -272,6 +272,12 @@ Example: `keepFor: 30d` with `lock: Compliance` holds each exported backup for 3
 The **backup key** encrypts exported backups. The driver stores it only wrapped by an IBM Key Protect root key. The readable key is shown once, by `kubectl backup cos-setup`, and you must keep a copy outside IBM Cloud.
 
 Example: restore with `--backup-key-file ./backup-key.txt` if Key Protect is gone.
+
+### Browse session
+
+A **browse session** is one open look into one backup, kept as a `BackupBrowse` resource. Users never make or see it: the backup gateway makes it after checking their rights. The backup controller runs a browse helper for it and ends it when idle, at the hard limit, or when it is closed.
+
+Example: session for the backup of `apps/db`, open for 20 minutes, closed because it was idle.
 
 ### Browse helper
 

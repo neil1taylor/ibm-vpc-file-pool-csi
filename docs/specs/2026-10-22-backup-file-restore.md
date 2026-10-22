@@ -46,18 +46,18 @@ Three parts: a **browse session** (a helper pod per open backup), a **gateway** 
 A new cluster-scoped resource, `BackupBrowse`, describes one open session: the policy, the volume (`namespace/name` of the claim), the moment (default: latest), whether it reads the snapshot pool or COS, and for a VM disk which guest file system (see below). **Users never create or see this resource.** The gateway makes it after the access check. The backup controller (the same leader that runs backups) reconciles it:
 
 1. It starts a **helper pod** (a Job with one pod, in the driver namespace) that mounts only this volume's folders, read-only, down to the NFS export. For COS it mounts nothing from NFS and gets the COS and Key Protect Secrets as read-only files, as the export Job does.
-2. The pod runs the driver binary in a new mode, `browse-server`. It serves a small API on a private port with a random session token: list a folder (paged, 1000 entries), stat, read a byte range, stream a file, stream a folder as a tar. The API takes paths **relative to the volume only**. It cannot be asked for anything outside it.
+2. The pod runs the browse binary (`cmd/browse`, mode `browse-server`). It serves a small API on a private port **over TLS**, with a random session token and a certificate made for this session alone (the controller makes a key and a self-signed certificate, keeps them with the token in a Secret that the `BackupBrowse` owns, and mounts it into the pod; the gateway trusts exactly that certificate, no other and no CA): list a folder (paged, 1000 entries), stat, read a byte range, stream a file, stream a folder as a tar. The API takes paths **relative to the volume only**. It cannot be asked for anything outside it.
 3. The controller writes `status.phase` (`Starting`, `Ready`, `Closed`, `Failed`), the pod address and a message. A session ends when it is idle for 15 minutes (default), when it has lived 2 hours (hard limit), or when the gateway closes it. Then the Job is deleted.
 
 **Path safety in the helper** (the main risk for a plain volume, since a backup is attacker-supplied data):
 - Symbolic links are listed as links, with their text, and are **never followed**. A download of a link is refused. A restore copies it as a link.
 - Every open goes through a folder handle that refuses links and `..` (the same method as `openVolume`; Linux `openat2` with `RESOLVE_BENEATH`). A test uses a backup that holds a link to `/etc` and to `../../other-volume`.
 - File names are sent as raw bytes encoded in the API, shown escaped in the console, and never put into a shell command. The restore Job gets paths as a list in a file, not as arguments.
-- The pod has no service account token (`automountServiceAccountToken: false`), no host paths, no extra capabilities, a read-only root file system, and a NetworkPolicy that lets only the gateway reach its port.
+- The pod has no service account token (`automountServiceAccountToken: false`), no host paths, no extra capabilities, a read-only root file system, and a NetworkPolicy that lets only the gateway reach its port, and traffic to it is encrypted with TLS (no plain HTTP in the cluster).
 
 **Files that the pod cannot read.** NFS on VPC always squashes root to an ordinary user. A backup file with mode 0600 owned by another user may then be unreadable to the helper. This must be tested in Phase 1 on the lab before the design is called done. The list shows such files as "not readable" instead of failing. The same question applies to the existing restore Job, which copies as root; Phase 1 settles both.
 
-**Idle and cleanup.** Pods carry a label and an owner reference to the `BackupBrowse`. The controller removes sessions past their limits, pods whose session is gone, and any session older than 2 hours after a restart. A limit on open sessions (default 5 in the cluster, 2 per namespace) makes extra requests wait with a clear message.
+**Idle and cleanup.** Every object of a session (the Job, its share volume and claim, the Secret) is named and labelled with the UID of the `BackupBrowse`, never its name, so a session deleted and made again with the same name cannot get the old session's Secret or pod. Pods carry a label and an owner reference to the `BackupBrowse`. The controller removes sessions past their limits, pods whose session is gone, and any session older than 2 hours after a restart. A limit on open sessions (default 5 in the cluster, 2 per namespace) makes extra requests wait with a clear message.
 
 ### 2. Plain volumes
 
@@ -174,7 +174,7 @@ Command line (`kubectl backup`, same plugin as today):
 - **COS.** Kopia against a local repository and MinIO in CI: list, one file, one volume's path only, a hostile snapshot name, a range read of a large file, the cache size.
 - **Chart tests (`make test-scripts`).** The gateway and its NetworkPolicy render; the two ClusterRoles and the aggregation; the SCC only when asked for; the console proxy entry; Helm values documented.
 - **Console tests.** The new pages: list, breadcrumb, selection, the picker, disabled states, the warning texts; no file content is put into a URL.
-- **Release test, new stage 19** in `test/e2e`, run on the lab pair:
+- **Release test, new stage 20** (stage 19 is the instant snapshots stage) in `test/e2e`, run on the lab pair:
   1. Plain pod volume with a known tree (links, a 0600 file owned by another user, a name with spaces and an accented letter). Two backup moments. Browse both, download a file and check its checksum, restore a folder to a new claim and to an existing one, and compare checksums. Check that the backup folder is byte-identical before and after (a recorded hash of the tree).
   2. Linux VM with an XFS root on LVM and an ext4 data disk, with a log of files and checksums (as stage 18). Browse the latest and the first moment without starting the VM; stop the VM first for one run. Restore a file; compare. Check the disk image is byte-identical after.
   3. A Windows or NTFS disk image (a small prepared image; the lab has no Windows licence, so the image is made with `ntfs-3g` tools and checked as a disk, not as a boot).
@@ -186,7 +186,7 @@ Command line (`kubectl backup`, same plugin as today):
 
 ## Build plan: phases, one PR each
 
-Sizes: S is a day or less of work, M a few days, L a week or more. Each PR has its tests, updates `FEATURES.md`, `BACKUP-RECOVERY.md`, `HELM-VALUES.md`, `CRD-SPEC.md`, `MONITORING.md` and `CHANGELOG.md`, and extends stage 19 for its part.
+Sizes: S is a day or less of work, M a few days, L a week or more. Each PR has its tests, updates `FEATURES.md`, `BACKUP-RECOVERY.md`, `HELM-VALUES.md`, `CRD-SPEC.md`, `MONITORING.md` and `CHANGELOG.md`, and extends stage 20 for its part.
 
 0. **Spike on the lab (S, risk check).** Run the libguestfs image in a pod on ROVS with and without the KVM device. Measure: start time, listing, reading a file, memory. Try XFS, ext4, NTFS, LVM, a crash copy, a hibernated NTFS, and a disk served over a socket from a small test server. Decide the image and how to find it. Results are added to this spec in a PR that holds no product code. **If it fails (for example the appliance cannot start in a pod under the cluster's rules), the VM part of the goal is re-stated with the real gap before more is built.**
 1. **Plain volumes, snapshot pool, command line (L).** `BackupBrowse`, the helper in `cmd/browse` and its image, the controller part, the gateway, the access rules and ClusterRoles, `kubectl backup ls/get/browse`, limits, cleanup, audit Events. Settles the "squashed root cannot read 0600 files" question.
@@ -195,9 +195,9 @@ Sizes: S is a day or less of work, M a few days, L a week or more. Each PR has i
 4. **COS, plain volumes (M).** Kopia read-only helper, `--from-cos` for ls/get/restore-files, the tests that block reaching another volume.
 5. **VM disks in the snapshot pool (L, the riskiest).** The disk server with undo-file rebuild and its property tests; the lease and the backup wait; the appliance helper; the file system picker; `norecovery` handling; the console picker; the crash-copy notices; the unreadable-volume list.
 6. **VM disks in COS (M).** Kopia library range reads and the cache; speed measurements; the fall-back decision if needed.
-7. **Release test stage 19 final and docs (S).** The stage is extended per phase; this PR makes it one run for the lab pair, adds the two-cluster COS run and the cleanup checks, and writes the user tutorial.
+7. **Release test stage 20 final and docs (S).** The stage is extended per phase; this PR makes it one run for the lab pair, adds the two-cluster COS run and the cleanup checks, and writes the user tutorial.
 
-Total: about 4 to 6 weeks of agent work, with the lab as the slowest part (stage 19 runs about an hour). Phases 1 to 4 deliver the whole plain-volume goal and can be deployed and tested before phases 5 and 6 are done.
+Total: about 4 to 6 weeks of agent work, with the lab as the slowest part (stage 20 runs about an hour). Phases 1 to 4 deliver the whole plain-volume goal and can be deployed and tested before phases 5 and 6 are done.
 
 ## Cost and risk
 
@@ -256,3 +256,10 @@ Not yet tested: a real Windows disk with BitLocker or a hibernated system, btrfs
 
 - **Nothing blocks phases 1 to 4.** Phase 0 is done.
 - Whether phases 5 and 6 (VM disks) must be in the first deployment, or can follow it. I assumed they follow.
+
+## Changes made while building (23 Oct 2026)
+
+- The helper API is served over TLS with a per-session self-signed certificate, pinned by the gateway. Decided by the coordinator after a security review: the stream carries other namespaces' file contents and the token, and pod traffic is not encrypted by default.
+- Objects of a session are named by the UID of the `BackupBrowse`, not its name (security review: a reused name must never reuse an old Secret or pod).
+- The release test stage is 20, not 19.
+- The helper image is separate; the gateway runs in the driver image.

@@ -82,6 +82,7 @@ func main() {
 
 		// VM disk snapshot flags.
 		vmSnapshots vmSnapshotOptions
+		browse      browseOptions
 
 		// Sync-client mode flags.
 		receiverEndpoint string
@@ -123,6 +124,14 @@ func main() {
 	flag.DurationVar(&cloneWorkerInterval, "clone-worker-interval", pool.DefaultCloneWorkerInterval, "Interval between clone worker poll cycles")
 	flag.DurationVar(&goldenImageSyncInterval, "golden-image-sync-interval", pool.DefaultGoldenImageInterval, "Interval between golden image syncer poll cycles")
 	flag.StringVar(&cdiCopyPodMemoryLimit, "cdi-copy-pod-memory-limit", "8Gi", "Keep the memory limit of CDI's copy pods (OpenShift Virtualization) at least this high; empty turns the check off")
+
+	// Browse sessions (single-file restore, issue #92).
+	flag.StringVar(&browse.image, "browse-image", "", "Image of the browse helper; empty turns browse sessions off (controller mode)")
+	flag.StringVar(&browse.pullSecrets, "browse-image-pull-secrets", "", "Comma-separated names of the Secrets, in the driver namespace, that pull the browse image from a private registry")
+	flag.DurationVar(&browse.cfg.Idle, "browse-idle", 15*time.Minute, "End a browse session after this long without use")
+	flag.DurationVar(&browse.cfg.MaxLife, "browse-max-life", 2*time.Hour, "End a browse session after this long, even if in use")
+	flag.IntVar(&browse.cfg.MaxSessions, "browse-max-sessions", 5, "Open browse sessions in the cluster; more wait")
+	flag.IntVar(&browse.cfg.MaxPerNamespace, "browse-max-sessions-per-namespace", 2, "Open browse sessions for the claims of one namespace; more wait")
 
 	// Replication controller flags.
 	flag.StringVar(&driverImage, "driver-image", "", "Driver container image for receiver-mode sync-client Jobs")
@@ -194,7 +203,7 @@ func main() {
 			klog.ErrorS(err, "Invalid flag")
 			os.Exit(1)
 		}
-		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, controllerMetricsCertDir, mon, cloneWorkerInterval, goldenImageSyncInterval, cdiCopyPodMemoryLimit, driverImage, webhooks, vmSnapshots)
+		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, controllerMetricsCertDir, mon, cloneWorkerInterval, goldenImageSyncInterval, cdiCopyPodMemoryLimit, driverImage, webhooks, vmSnapshots, browse)
 	case "receiver":
 		runReceiver(receiverBasePath, receiverAuthTokenFile, receiverListenAddr, receiverTLSCertFile, receiverTLSKeyFile)
 	case "sync-client":
@@ -260,6 +269,13 @@ func runConsolePlugin(mode, name string) {
 	klog.InfoS("Console plugins updated", "mode", mode, "plugin", name)
 }
 
+// browseOptions are the flags for browse sessions.
+type browseOptions struct {
+	image       string
+	pullSecrets string
+	cfg         pool.BrowseConfig
+}
+
 // webhookOptions configures the admission webhook server.
 type webhookOptions struct {
 	enabled bool
@@ -295,7 +311,7 @@ func (o monitoringOptions) config(driverNS string) (monitoring.Config, error) {
 	return cfg, nil
 }
 
-func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metricsCertDir string, mon monitoringOptions, cloneWorkerInterval, goldenImageSyncInterval time.Duration, cdiCopyPodMemoryLimit, driverImage string, webhooks webhookOptions, vmSnapshots vmSnapshotOptions) {
+func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metricsCertDir string, mon monitoringOptions, cloneWorkerInterval, goldenImageSyncInterval time.Duration, cdiCopyPodMemoryLimit, driverImage string, webhooks webhookOptions, vmSnapshots vmSnapshotOptions, browse browseOptions) {
 	scheme := runtime.NewScheme()
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
 		klog.ErrorS(err, "Failed to add CRD types to scheme")
@@ -553,6 +569,14 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metric
 	// ReplicationPolicy for each source pool. Runs on the leader only.
 	backupController := pool.NewBackupController(replClient)
 	backupController.SetShareData(shareRunner)
+	if browse.image != "" {
+		shareRunner.SetBrowseImage(browse.image)
+		if browse.pullSecrets != "" {
+			shareRunner.SetBrowsePullSecrets(strings.Split(browse.pullSecrets, ","))
+		}
+		browse.cfg.Namespace = driverNamespace
+		backupController.SetBrowse(shareRunner, browse.cfg)
+	}
 	if addErr := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
 		backupController.Run(ctx)
 		return nil
