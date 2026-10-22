@@ -20,6 +20,8 @@ To make a release:
 ## [Unreleased]
 
 - **Release test stage 16: browser tests for draining a share, migrating a claim and cloning a volume (issue #46, items 5 to 7).** Each drives the console page with a token that has only the rights of that page, then checks the cluster. Found issue #196 (migrate fails for a user without the root right on OpenShift).
+- **Instant VM snapshot of a disk owned by another user (issue #191).** Before, it failed after the snapshot was taken with `chmod: changing permissions ... Operation not permitted` and left an extra overlay file in the disk chain. Now the driver checks the owner of `disk.img` first and refuses before changing anything, with a message that names the owner and the fix. The Snapshot is marked Failed with that message. If a step fails after the new overlay file is made, the driver merges the file back and deletes it, so the chain is as it was.
+
 - **Console: the restore page no longer spins forever without the right to read VolumeSnapshotContents (issue #186).** It now says which right is missing.
 
 - **Console: the delete backups dialog gives an administrator the safe command.** When the user lacks the rights, the dialog now shows `kubectl backup delete --policy <policy> --pvc <namespace>/<name>`, which measures first and asks for the typed claim name. Before, it showed raw YAML that removed the backups with neither step.
@@ -31,6 +33,12 @@ To make a release:
 - **Console says when Red Hat does not support a VM copy.** The replication policy pages (when the policy holds a running VM's disk) and the Snapshots page now say that copies and snapshots of running VMs work directly with QEMU, not through OpenShift, so an OpenShift update could stop them until the driver is updated. The Snapshots page adds that instant snapshots also need a KubeVirt setting Red Hat does not support.
 
 - **Sidecar gate Job has fewer rights (issue #154).** The hook Job that `vmSnapshots.enableSidecarGate` runs may now only get and update the `HyperConverged` object named `kubevirt-hyperconverged` in `openshift-cnv`; before, it could list and update every `HyperConverged`. SECURITY.md now says what the gate opens up.
+
+### Security
+- **Image hardening (issue #90).** The driver image now runs as user 65532 (`USER` in the Dockerfile). The chart sets security contexts: the controller is non-root with no privilege escalation, all capabilities dropped and the `RuntimeDefault` seccomp profile; its sidecars get no escalation and no capabilities; the console plugin and replication receiver get the same limits. The node agent explicitly stays root and privileged (it mounts NFS), and Jobs the controller creates keep the users they already set. All of it can be overridden with `controller.securityContext`, `controller.podSecurityContext`, `controller.sidecarSecurityContext`, `node.securityContext`, `replicationReceiver.securityContext` and `consolePlugin.securityContext`. **Not lab tested.** Off OpenShift the chart adds `fsGroup: 65532` to the controller so it can read the webhook key.
+
+### Changed
+- **The default image tag is `v` plus the chart `appVersion`, not `latest` (issue #90).** `image.tag` and `consolePlugin.image.tag` are empty by default. `make deploy`-style installs that set `--set image.tag=...` are unchanged. The chart `appVersion` must be set at release (it is `0.1.0` until then), so an install without `image.tag` before a release asks for an image that does not exist.
 
 ### Fixed
 - `kubectl backup delete`, found by the lab test of issue #124: a shell whose input is `/dev/null` (a script, CI) counted as interactive, so the command measured the backup and then asked a question nobody could answer, instead of stopping at once as documented; and the size it showed counted every hard-linked file twice for plain volumes. The size is now one `du` run over both folders. `BACKUP-RECOVERY.md` lists every right the command needs.

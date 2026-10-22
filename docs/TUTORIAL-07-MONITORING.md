@@ -15,10 +15,10 @@ Verify the CSI driver is running:
 
 ```bash
 # Controller pod (6/6 Running)
-oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi -l app.kubernetes.io/component=controller
+oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller
 
 # Node pods (3/3 Running on each schedulable node)
-oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi -l app.kubernetes.io/component=node
+oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node
 
 # CSI Driver registered
 oc get csidriver vpc-file-pool.csi.ibm.io
@@ -61,14 +61,15 @@ spec:
   iops: 100
   maxShares: 3
   initialShares: 1
-  autoExpand: true
-  expandThresholdPercent: 80
+  autoExpand: false
   allocationStrategy: spread
   defaultPermissions: "0777"
   defaultUID: 107
   defaultGID: 107
 EOF
 ```
+
+`autoExpand` is off so that the pool stays at 100 GB. In Step 5 you fill it past 85%. With `autoExpand: true` the pool would add a second share at 80% and the alert would never fire.
 
 Wait for the pool to reach `Ready`:
 
@@ -127,10 +128,10 @@ The controller serves Prometheus metrics on `:8080/metrics`. A ServiceMonitor te
 
 ### Method A: Helm Values (Recommended)
 
-The chart creates the ServiceMonitor by default (`metrics.serviceMonitor.enabled` is `true`). It does so only when the cluster has the Prometheus Operator API, which OpenShift has. Check that it exists:
+The chart creates the ServiceMonitors by default (`metrics.serviceMonitor.enabled` is `true`). It does so only when the cluster has the Prometheus Operator API, which OpenShift has. On OpenShift the chart puts them in its own namespace, `ibm-vpc-file-pool-csi-monitoring` (`metrics.monitoring.namespace`), and OpenShift's user workload monitoring must be on. See [MONITORING.md](MONITORING.md). Check that they exist:
 
 ```bash
-oc get servicemonitors -n kube-system
+oc get servicemonitors -n ibm-vpc-file-pool-csi-monitoring
 ```
 
 If you turned it off, enable it again:
@@ -144,34 +145,12 @@ helm upgrade ibm-vpc-file-pool-csi charts/ibm-vpc-file-pool-csi \
 ```
 
 **What this does:**
-- Creates a ServiceMonitor CR in the `kube-system` namespace
+- Creates the ServiceMonitors for the controller and the node agents
 - Tells Prometheus to scrape the controller's `:8080/metrics` endpoint every 30 seconds
 
-### Method B: Manual ServiceMonitor
+### Method B: Without Helm
 
-If you do not use Helm, apply the ServiceMonitor directly. It selects the metrics Service that the chart creates (`ibm-vpc-file-pool-csi-metrics`). Skip this method if the chart already made the ServiceMonitor.
-
-```bash
-cat <<EOF | oc apply -f -
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: vpc-file-pool-csi
-  namespace: kube-system
-spec:
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: ibm-vpc-file-pool-csi
-      app.kubernetes.io/component: controller
-  endpoints:
-    - port: metrics
-      interval: 30s
-      path: /metrics
-  namespaceSelector:
-    matchNames:
-      - kube-system
-EOF
-```
+The controller serves its metrics over HTTPS and wants a bearer token that may `get` `/metrics`, so a plain ServiceMonitor with no TLS or token settings does not work. Copy the settings from the chart's `servicemonitor.yaml`, or see [MONITORING.md](MONITORING.md).
 
 ### Verify Scraping
 
@@ -182,12 +161,15 @@ oc port-forward -n kube-system deploy/ibm-vpc-file-pool-csi-controller 8080:8080
 PF_PID=$!
 sleep 2
 
-curl -s http://localhost:8080/metrics | grep vpc_file_pool | head -20
+# The endpoint is HTTPS and needs a token that may "get" /metrics.
+# A plain http:// call fails with "Client sent an HTTP request to an HTTPS server".
+TOKEN=$(oc create token prometheus-k8s -n openshift-monitoring --duration=10m)
+curl -sk -H "Authorization: Bearer ${TOKEN}" https://localhost:8080/metrics | grep vpc_file_pool | head -20
 
 kill $PF_PID
 ```
 
-Expected output (after allocating 3 PVCs):
+Expected output (after allocating 3 PVCs; the `allocated_gb` and `pvc_count` gauges can lag a minute behind):
 
 ```
 # HELP vpc_file_pool_allocations_total Total number of subvolume allocations
@@ -331,10 +313,10 @@ pool_csi_replication_consecutive_failures
 The chart already ships a PrometheusRule named `ibm-vpc-file-pool-csi` (`metrics.alerts.enabled` is `true` by default). Its alerts are named `VPCFilePool...`, for example `VPCFilePoolUtilizationWarning`. See [MONITORING.md](MONITORING.md) for the full list. Check it:
 
 ```bash
-oc get prometheusrules -n kube-system
+oc get prometheusrules -n ibm-vpc-file-pool-csi-monitoring
 ```
 
-The rules below are examples to show how an alert is written. If the chart rules are active, you do not need them, and applying both sends two alerts for one problem. Apply them only for learning, and delete them in Cleanup.
+The rules below are examples to show how an alert is written. If the chart rules are active, you do not need them, and applying both sends two alerts for one problem. Apply them only for learning, and delete them in Cleanup. They go in the chart's monitoring namespace: user workload monitoring limits a rule to the metrics of its own namespace, and the driver's metrics are in that one.
 
 ### Critical Alerts
 
@@ -344,7 +326,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: vpc-file-pool-csi-critical
-  namespace: kube-system
+  namespace: ibm-vpc-file-pool-csi-monitoring
   labels:
     app: vpc-file-pool-csi
 spec:
@@ -402,7 +384,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: vpc-file-pool-csi-warning
-  namespace: kube-system
+  namespace: ibm-vpc-file-pool-csi-monitoring
   labels:
     app: vpc-file-pool-csi
 spec:
@@ -432,7 +414,7 @@ EOF
 Verify the rules were created:
 
 ```bash
-oc get prometheusrules -n kube-system -l app=vpc-file-pool-csi
+oc get prometheusrules -n ibm-vpc-file-pool-csi-monitoring -l app=vpc-file-pool-csi
 ```
 
 Expected output:
@@ -472,18 +454,19 @@ Verify the pool utilization:
 
 ```bash
 oc get filesharepools ${POOL_NAME}
-# ALLOCATED should show 90, which is 90% of 100 GB
+# ALLOCATED should show 90, which is 90% of 100 GB (SHARES stays 1)
 ```
 
 After the `for: 10m` hold-off period, the `PoolNearCapacity` alert fires. The chart's `VPCFilePoolUtilizationWarning` alert (default threshold 80%, hold-off 5 minutes) fires too. Check in the OpenShift Console under Observe > Alerting, or query Prometheus directly:
 
 ```bash
-# Port-forward to Prometheus (OpenShift thanos-querier)
-oc port-forward -n openshift-monitoring svc/thanos-querier 9090:9090 &
+# Port-forward to Prometheus (OpenShift thanos-querier: HTTPS on 9091, needs a token)
+oc port-forward -n openshift-monitoring svc/thanos-querier 9091:9091 &
 PQ_PID=$!
 sleep 2
 
-curl -s 'http://localhost:9090/api/v1/rules' | \
+TOKEN=$(oc create token prometheus-k8s -n openshift-monitoring --duration=10m)
+curl -sk -H "Authorization: Bearer ${TOKEN}" 'https://localhost:9091/api/v1/rules' | \
   python3 -c "import sys,json; rules=json.load(sys.stdin); [print(r['name'],r.get('state','')) for g in rules['data']['groups'] for r in g['rules'] if 'Pool' in r['name']]"
 
 kill $PQ_PID
@@ -726,11 +709,10 @@ oc delete filesharepool ${POOL_NAME} --timeout=60s || {
 }
 
 # 5. Delete the example alerting rules from Step 5
-oc delete prometheusrule vpc-file-pool-csi-critical -n kube-system --ignore-not-found
-oc delete prometheusrule vpc-file-pool-csi-warning -n kube-system --ignore-not-found
+oc delete prometheusrule vpc-file-pool-csi-critical -n ibm-vpc-file-pool-csi-monitoring --ignore-not-found
+oc delete prometheusrule vpc-file-pool-csi-warning -n ibm-vpc-file-pool-csi-monitoring --ignore-not-found
 
-# 6. Delete the ServiceMonitor made by Method B (the chart's own stays)
-oc delete servicemonitor vpc-file-pool-csi -n kube-system --ignore-not-found
+# 6. The chart's own ServiceMonitors stay
 
 # 7. Delete namespace
 oc delete namespace ${TUTORIAL_NS} --timeout=60s
@@ -745,11 +727,11 @@ ibmcloud is shares
 
 | What | Command |
 |------|---------|
-| Raw metrics endpoint | `curl -s http://localhost:8080/metrics \| grep vpc_file_pool` |
+| Raw metrics endpoint | `curl -sk -H "Authorization: Bearer $TOKEN" https://localhost:8080/metrics \| grep vpc_file_pool` |
 | Port-forward to controller | `oc port-forward -n kube-system deploy/ibm-vpc-file-pool-csi-controller 8080:8080` |
-| List ServiceMonitors | `oc get servicemonitors -n kube-system` |
-| List PrometheusRules | `oc get prometheusrules -n kube-system -l app=vpc-file-pool-csi` |
-| Check active alerts | `oc get prometheusrules -n kube-system -o yaml` |
+| List ServiceMonitors | `oc get servicemonitors -n ibm-vpc-file-pool-csi-monitoring` |
+| List PrometheusRules | `oc get prometheusrules -n ibm-vpc-file-pool-csi-monitoring -l app=vpc-file-pool-csi` |
+| Check active alerts | `oc get prometheusrules -n ibm-vpc-file-pool-csi-monitoring -o yaml` |
 | Pool utilization query | `vpc_file_pool_allocated_gb / vpc_file_pool_capacity_gb * 100` |
 | Replication lag query | `pool_csi_replication_lag_seconds` |
 | P99 allocation latency | `histogram_quantile(0.99, rate(vpc_file_pool_allocation_duration_seconds_bucket[5m]))` |

@@ -15,10 +15,10 @@ Verify the CSI driver is running:
 
 ```bash
 # Controller pod (6/6 Running)
-oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi -l app.kubernetes.io/component=controller
+oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller
 
 # Node pods (2/2 Running on each schedulable node)
-oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi -l app.kubernetes.io/component=node
+oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node
 
 # CSI Driver registered
 oc get csidriver vpc-file-pool.csi.ibm.io
@@ -218,10 +218,10 @@ Expected output (checksums will differ):
 
 ```
 Total files written:
--rw-r--r--    1 root     root            25 ... config.txt
--rw-r--r--    1 root     root            27 ... db-dump.txt
--rw-r--r--    1 root     root            22 ... uploads.txt
--rw-r--r--    1 root     root       5242880 ... binary-blob.bin
+-rw-r--r--    1 99       99              25 ... config.txt
+-rw-r--r--    1 99       99              27 ... db-dump.txt
+-rw-r--r--    1 99       99              22 ... uploads.txt
+-rw-r--r--    1 99       99         5242880 ... binary-blob.bin
 Checksums:
 a1b2c3d4...  /data/config.txt
 e5f6a7b8...  /data/db-dump.txt
