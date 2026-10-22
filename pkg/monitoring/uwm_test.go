@@ -22,12 +22,12 @@ func TestUserWorkloadMonitoringEnabled(t *testing.T) {
 		cs   *fake.Clientset
 		want bool
 	}{
-		{"on", fake.NewSimpleClientset(monitoringConfig("enableUserWorkload: true\nprometheusK8s:\n  retentionSize: 10GB\n")), true},
-		{"off", fake.NewSimpleClientset(monitoringConfig("enableUserWorkload: false\n")), false},
-		{"not set", fake.NewSimpleClientset(monitoringConfig("prometheusK8s:\n  retentionSize: 10GB\n")), false},
-		{"no config map", fake.NewSimpleClientset(), false},
-		{"no config.yaml key", fake.NewSimpleClientset(&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "cluster-monitoring-config", Namespace: "openshift-monitoring"}}), false},
-		{"unreadable yaml", fake.NewSimpleClientset(monitoringConfig("enableUserWorkload: [")), false},
+		{"on", fake.NewClientset(monitoringConfig("enableUserWorkload: true\nprometheusK8s:\n  retentionSize: 10GB\n")), true},
+		{"off", fake.NewClientset(monitoringConfig("enableUserWorkload: false\n")), false},
+		{"not set", fake.NewClientset(monitoringConfig("prometheusK8s:\n  retentionSize: 10GB\n")), false},
+		{"no config map", fake.NewClientset(), false},
+		{"no config.yaml key", fake.NewClientset(&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "cluster-monitoring-config", Namespace: "openshift-monitoring"}}), false},
+		{"unreadable yaml", fake.NewClientset(monitoringConfig("enableUserWorkload: [")), false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -41,7 +41,7 @@ func TestUserWorkloadMonitoringEnabled(t *testing.T) {
 func TestWarnIfAlertsNotEvaluated(t *testing.T) {
 	ctx := context.Background()
 
-	off := fake.NewSimpleClientset(monitoringConfig("enableUserWorkload: false\n"))
+	off := fake.NewClientset(monitoringConfig("enableUserWorkload: false\n"))
 	WarnIfAlertsNotEvaluated(ctx, off, "mon")
 	evs, _ := off.CoreV1().Events("mon").List(ctx, metav1.ListOptions{})
 	if len(evs.Items) != 1 || evs.Items[0].Reason != "UserWorkloadMonitoringOff" || evs.Items[0].Type != corev1.EventTypeWarning ||
@@ -50,7 +50,7 @@ func TestWarnIfAlertsNotEvaluated(t *testing.T) {
 		t.Fatalf("want one warning event on the monitoring namespace, got %+v", evs.Items)
 	}
 
-	on := fake.NewSimpleClientset(monitoringConfig("enableUserWorkload: true\n"))
+	on := fake.NewClientset(monitoringConfig("enableUserWorkload: true\n"))
 	WarnIfAlertsNotEvaluated(ctx, on, "mon")
 	evs, _ = on.CoreV1().Events("mon").List(ctx, metav1.ListOptions{})
 	if len(evs.Items) != 0 {

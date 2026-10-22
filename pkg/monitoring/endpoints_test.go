@@ -38,7 +38,7 @@ func testConfig() Config {
 }
 
 func TestSync_CreatesEndpointsForReadyPodsOnly(t *testing.T) {
-	cs := fake.NewSimpleClientset(
+	cs := fake.NewClientset(
 		pod("c1", "controller", "10.1.0.5", true),
 		pod("n2", "node", "10.0.0.2", true),
 		pod("n1", "node", "10.0.0.1", true),
@@ -73,7 +73,7 @@ func TestSync_CreatesEndpointsForReadyPodsOnly(t *testing.T) {
 }
 
 func TestSync_NoPodsGivesEmptyEndpoints(t *testing.T) {
-	cs := fake.NewSimpleClientset()
+	cs := fake.NewClientset()
 	if err := NewSyncer(cs, testConfig()).Sync(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestSync_NoPodsGivesEmptyEndpoints(t *testing.T) {
 }
 
 func TestSync_UpdatesOnlyWhenPodsChange(t *testing.T) {
-	cs := fake.NewSimpleClientset(pod("n1", "node", "10.0.0.1", true))
+	cs := fake.NewClientset(pod("n1", "node", "10.0.0.1", true))
 	s := NewSyncer(cs, testConfig())
 	ctx := context.Background()
 	if err := s.Sync(ctx); err != nil {
@@ -114,7 +114,7 @@ func TestSync_UpdatesOnlyWhenPodsChange(t *testing.T) {
 }
 
 func TestSync_ListErrorChangesNothing(t *testing.T) {
-	cs := fake.NewSimpleClientset()
+	cs := fake.NewClientset()
 	cs.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, errors.New("api down")
 	})

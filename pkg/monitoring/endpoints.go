@@ -75,9 +75,9 @@ func (s *Syncer) syncTarget(ctx context.Context, t Target, pods []corev1.Pod) er
 	}
 	sort.Slice(addrs, func(i, j int) bool { return addrs[i].IP < addrs[j].IP })
 
-	var subsets []corev1.EndpointSubset
+	var subsets []corev1.EndpointSubset //nolint:staticcheck // see the Syncer comment: Prometheus reads Endpoints
 	if len(addrs) > 0 {
-		subsets = []corev1.EndpointSubset{{
+		subsets = []corev1.EndpointSubset{{ //nolint:staticcheck // Prometheus reads Endpoints
 			Addresses: addrs,
 			Ports:     []corev1.EndpointPort{{Name: "metrics", Port: t.Port, Protocol: corev1.ProtocolTCP}},
 		}}
@@ -86,7 +86,7 @@ func (s *Syncer) syncTarget(ctx context.Context, t Target, pods []corev1.Pod) er
 	eps := s.cs.CoreV1().Endpoints(s.cfg.MonitoringNamespace)
 	cur, err := eps.Get(ctx, t.Service, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
-		_, err = eps.Create(ctx, &corev1.Endpoints{
+		_, err = eps.Create(ctx, &corev1.Endpoints{ //nolint:staticcheck // Prometheus reads Endpoints
 			ObjectMeta: metav1.ObjectMeta{Name: t.Service, Namespace: s.cfg.MonitoringNamespace,
 				Labels: map[string]string{"app.kubernetes.io/managed-by": "ibm-vpc-file-pool-csi-controller"}},
 			Subsets: subsets,
