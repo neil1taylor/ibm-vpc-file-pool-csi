@@ -447,7 +447,7 @@ func (m *Manager) takeInstant(ctx context.Context, snap *v1alpha1.Snapshot, sv *
 	target := vmcopy.VM{Namespace: pod.Namespace, Pod: pod.Name, Name: vmi}
 	freeze := !m.guestFrozen(ctx, pod.Namespace, vmi)
 	res, err := m.instant.snap.Take(ctx, target, plan.volume, newFile, freeze)
-	if errors.Is(err, vmsnap.ErrChainFull) {
+	if errors.Is(err, vmsnap.ErrChainFull) || errors.Is(err, vmsnap.ErrDiskNotOwned) {
 		m.failVMSnapshot(ctx, snap, err.Error())
 		return fmt.Errorf("%w: %s", ErrSnapshotFailed, err)
 	}

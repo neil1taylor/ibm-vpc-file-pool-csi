@@ -24,7 +24,10 @@ type fakeLauncher struct {
 	chains  map[string][]string // volume -> file names, newest first
 	targets map[string]string   // volume -> target dev
 	files   map[string]string   // path -> mode ("0644", "0444")
-	backing map[string]string   // path -> backing file name, as written in the file
+	// owners is the owner UID of a file; a file not listed is owned by the
+	// QEMU user. Only the owner can chmod a file, as on NFS.
+	owners  map[string]int
+	backing map[string]string // path -> backing file name, as written in the file
 
 	quiesceErr string // snapshot-create-as --quiesce fails with this
 	// agentFrozen: someone else has frozen the guest. The guest agent then
@@ -37,6 +40,7 @@ type fakeLauncher struct {
 	snapshotErrAfter string
 	quiesceErrAfter  string // the same, for the --quiesce try only
 	commitErr        string // blockcommit fails with this
+	chmodFrozenErr   string // chmod to the frozen mode fails with this
 	pivotErr         string // blockjob --pivot fails with this
 	// jobPolls is how many --info calls a started commit job runs for
 	// before it is ready (active) or done (not active).
@@ -60,6 +64,7 @@ func newFakeLauncher() *fakeLauncher {
 		chains:  map[string][]string{"rootdisk": {"disk.img"}, "data": {"disk.img"}},
 		targets: map[string]string{"rootdisk": "vda", "data": "vdb"},
 		files:   map[string]string{},
+		owners:  map[string]int{},
 		backing: map[string]string{},
 		jobs:    map[string]*fakeJob{},
 	}
@@ -105,8 +110,29 @@ func (f *fakeLauncher) Exec(_ context.Context, ns, pod, container string, cmd []
 		if _, ok := f.files[cmd[2]]; !ok {
 			return fail("No such file or directory")
 		}
+		if cmd[1] == modeFrozen && f.chmodFrozenErr != "" {
+			return fail(f.chmodFrozenErr)
+		}
+		if f.ownerOf(cmd[2]) != qemuUID {
+			return fail("chmod: changing permissions of '" + cmd[2] + "': Operation not permitted")
+		}
 		f.files[cmd[2]] = cmd[1]
 		return "", "", nil
+	case "id":
+		// id -u
+		if len(cmd) != 2 || cmd[1] != "-u" {
+			return "", "", fmt.Errorf("bad id args %v", cmd)
+		}
+		return fmt.Sprintf("%d\n", qemuUID), "", nil
+	case "stat":
+		// stat -c %u -- <path>
+		if len(cmd) != 5 || cmd[1] != "-c" || cmd[2] != "%u" || cmd[3] != "--" {
+			return "", "", fmt.Errorf("bad stat args %v", cmd)
+		}
+		if _, ok := f.files[cmd[4]]; !ok {
+			return fail("stat: cannot statx '" + cmd[4] + "': No such file or directory")
+		}
+		return fmt.Sprintf("%d\n", f.ownerOf(cmd[4])), "", nil
 	case "rm":
 		// rm -f -- <path>
 		if len(cmd) != 4 || cmd[1] != "-f" || cmd[2] != "--" {
@@ -116,6 +142,16 @@ func (f *fakeLauncher) Exec(_ context.Context, ns, pod, container string, cmd []
 		return "", "", nil
 	}
 	return "", "", fmt.Errorf("unknown command %v", cmd)
+}
+
+// qemuUID is the user the compute container runs as.
+const qemuUID = 107
+
+func (f *fakeLauncher) ownerOf(p string) int {
+	if u, ok := f.owners[p]; ok {
+		return u
+	}
+	return qemuUID
 }
 
 func (f *fakeLauncher) virsh(args []string, fail func(string) (string, string, error)) (string, string, error) {
@@ -858,5 +894,55 @@ func TestMerge_WaitsForAnotherBlockJob(t *testing.T) {
 	}
 	if strings.Contains(strings.Join(f.log, "\n"), "blockcommit") || len(f.aborts) != 0 {
 		t.Error("Merge must not start a commit or stop another job")
+	}
+}
+
+func TestTake_RefusesADiskOwnedByAnotherUserBeforeChangingAnything(t *testing.T) {
+	f := newFakeLauncher()
+	f.owners[dir+"/rootdisk/disk.img"] = 65534
+	s := newTestSnapshotter(f)
+
+	_, err := s.Take(context.Background(), testVM, "rootdisk", "snap-1.qcow2", true)
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !errors.Is(err, ErrDiskNotOwned) {
+		t.Errorf("error = %v, want ErrDiskNotOwned", err)
+	}
+	for _, want := range []string{"disk.img", "65534", "107"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the message should name %q: %v", want, err)
+		}
+	}
+	if got := fmt.Sprint(f.chains["rootdisk"]); got != "[disk.img]" {
+		t.Errorf("chain = %s", got)
+	}
+	if _, made := f.files[dir+"/rootdisk/snap-1.qcow2"]; made {
+		t.Error("no new file may be made")
+	}
+	for _, c := range f.log {
+		if strings.Contains(c, "snapshot-create-as") || strings.HasPrefix(c, "qemu-img") {
+			t.Errorf("nothing may change before the refusal, but ran: %s", c)
+		}
+	}
+}
+
+func TestTake_ChmodFailsAfterTheSnapshotRollsTheNewFileBack(t *testing.T) {
+	f := newFakeLauncher()
+	f.chmodFrozenErr = "chmod: changing permissions: Operation not permitted"
+	s := newTestSnapshotter(f)
+
+	_, err := s.Take(context.Background(), testVM, "rootdisk", "snap-1.qcow2", false)
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if got := fmt.Sprint(f.chains["rootdisk"]); got != "[disk.img]" {
+		t.Errorf("chain = %s, want the chain as it was", got)
+	}
+	if _, left := f.files[dir+"/rootdisk/snap-1.qcow2"]; left {
+		t.Error("the new overlay must be removed")
+	}
+	if f.files[dir+"/rootdisk/disk.img"] != "0644" {
+		t.Errorf("disk.img must stay live and writable, mode %s", f.files[dir+"/rootdisk/disk.img"])
 	}
 }

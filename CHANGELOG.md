@@ -19,6 +19,8 @@ To make a release:
 
 ## [Unreleased]
 
+- **Instant VM snapshot of a disk owned by another user (issue #191).** Before, it failed after the snapshot was taken with `chmod: changing permissions ... Operation not permitted` and left an extra overlay file in the disk chain. Now the driver checks the owner of `disk.img` first and refuses before changing anything, with a message that names the owner and the fix. The Snapshot is marked Failed with that message. If a step fails after the new overlay file is made, the driver merges the file back and deletes it, so the chain is as it was.
+
 - **Console: the restore page no longer spins forever without the right to read VolumeSnapshotContents (issue #186).** It now says which right is missing.
 
 - **Console: the delete backups dialog gives an administrator the safe command.** When the user lacks the rights, the dialog now shows `kubectl backup delete --policy <policy> --pvc <namespace>/<name>`, which measures first and asks for the typed claim name. Before, it showed raw YAML that removed the backups with neither step.
