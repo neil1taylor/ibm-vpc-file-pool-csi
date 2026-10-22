@@ -410,6 +410,19 @@ kubectl apply -f config/deploy/node.yaml
 | `--vm-group` | `""` | `namespace/name` of the VM that owns the disk (send-vm-disk mode). Set by the replication controller |
 | `--copy-id` | `""` | Name of this copy attempt; a repeat with the same name resumes it (send-vm-disk mode). Set by the replication controller |
 
+**Browse helper flags** (`browse`, its own image; the driver starts it, you do not run it by hand):
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--mode` | (required) | `browse-server` |
+| `--root` | (required) | The backup folder, mounted read-only |
+| `--token-file` | (required) | File that holds the session token (at least 16 characters) |
+| `--listen` | `:8080` | Address to listen on |
+| `--idle` | `15m` | End the session after this long without use |
+| `--max-life` | `2h` | End the session after this long, even if in use |
+| `--max-streams` | `8` | Downloads at once |
+| `--termination-log` | `/dev/termination-log` | File that gets the reason the session ended (`idle`, `max-life` or `stopped`) |
+
 ---
 
 ### On ROKS and ROVS: turn on user workload monitoring (required for alerts)
