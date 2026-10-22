@@ -20,7 +20,7 @@ spec:
     spec:
       serviceAccountName: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-controller
       {{- $podSC := deepCopy (.Values.controller.podSecurityContext | default dict) }}
-      {{- if and (not (.Capabilities.APIVersions.Has "security.openshift.io/v1")) (not (hasKey $podSC "fsGroup")) }}
+      {{- if and (or (not (.Capabilities.APIVersions.Has "security.openshift.io/v1")) (eq .Release.Namespace "kube-system")) (not (hasKey $podSC "fsGroup")) }}
       {{- $_ := set $podSC "fsGroup" 65532 }}
       {{- end }}
       securityContext:

@@ -22,7 +22,8 @@ controller:
   healthPort: 8081
   # Pod and container security contexts. The image runs as user 65532, so the
   # controller needs no root. Outside OpenShift the chart adds fsGroup 65532 so
-  # the user can read the webhook key (mode 0400); OpenShift assigns its own.
+  # the user can read the webhook key (mode 0400); OpenShift assigns its own,
+  # except in kube-system, where no SCC applies and the chart adds it too.
   podSecurityContext:
     seccompProfile:
       type: RuntimeDefault

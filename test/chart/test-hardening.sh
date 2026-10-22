@@ -60,8 +60,10 @@ check "controller: drops ALL capabilities" "$(field "$OUT" controller "$CTRL.cap
 check "controller: seccomp RuntimeDefault" "$(field "$OUT" controller '.spec.template.spec.securityContext.seccompProfile.type')" "RuntimeDefault"
 check "controller: fsGroup set off OpenShift (webhook key is mode 0400)" \
     "$(field "$OUT" controller '.spec.template.spec.securityContext.fsGroup')" "65532"
-check "controller: no fixed fsGroup on OpenShift" \
-    "$(field "$(render --api-versions security.openshift.io/v1)" controller '.spec.template.spec.securityContext.fsGroup')" "null"
+check "controller: fsGroup set on OpenShift in kube-system (no SCC assigns one there)" \
+    "$(field "$(render --api-versions security.openshift.io/v1)" controller '.spec.template.spec.securityContext.fsGroup')" "65532"
+check "controller: no fixed fsGroup on OpenShift in an ordinary namespace" \
+    "$(field "$(render --namespace csi-test --api-versions security.openshift.io/v1)" controller '.spec.template.spec.securityContext.fsGroup')" "null"
 check "controller: security context can be overridden" \
     "$(field "$(render --set controller.securityContext.runAsNonRoot=false)" controller "$CTRL.runAsNonRoot")" "false"
 for sc in csi-provisioner csi-resizer csi-snapshotter liveness-probe storage-secret-sidecar; do
