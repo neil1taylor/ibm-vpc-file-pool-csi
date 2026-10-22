@@ -8,8 +8,12 @@ import {
   TabTitleText,
   Spinner,
   Bullseye,
+  Split,
+  SplitItem,
 } from '@patternfly/react-core';
 import { ROUTES } from '../constants';
+import { helpUrlForPath } from '../utils/help-links';
+import HelpLink from './common/HelpLink';
 
 // Lazy-load all sub-pages for webpack code-splitting
 const DashboardPage = React.lazy(
@@ -109,6 +113,10 @@ const VPCFilePoolsPage: React.FC = () => {
   // Detail/create pages render standalone (no tabs)
   if (!isTabPath) {
     return (
+      <>
+      <PageSection style={{ paddingBottom: 0, textAlign: 'right' }}>
+        <HelpLink href={helpUrlForPath(location.pathname)} />
+      </PageSection>
       <Suspense fallback={<Loading />}>
         <Switch>
           {/* Create pages (must come before detail :name routes) */}
@@ -126,6 +134,7 @@ const VPCFilePoolsPage: React.FC = () => {
           <Route exact path={ROUTES.REPLICATION_DETAIL} component={ReplicationPolicyDetailsPage} />
         </Switch>
       </Suspense>
+      </>
     );
   }
 
@@ -133,9 +142,14 @@ const VPCFilePoolsPage: React.FC = () => {
   return (
     <>
       <PageSection style={{ paddingBottom: 0 }}>
-        <Title headingLevel="h1" style={{ marginBottom: 16 }}>
-          IBM VPC File Pools
-        </Title>
+        <Split style={{ marginBottom: 16 }}>
+          <SplitItem isFilled>
+            <Title headingLevel="h1">IBM VPC File Pools</Title>
+          </SplitItem>
+          <SplitItem>
+            <HelpLink href={helpUrlForPath(location.pathname)} />
+          </SplitItem>
+        </Split>
         <Tabs
           activeKey={activeTab}
           onSelect={(_e, key) => history.push(key as string)}

@@ -37,6 +37,8 @@ test-scripts:
 	bash test/chart/test-servicemonitor.sh
 	bash test/chart/test-receiver.sh
 	bash test/chart/test-alerts.sh
+	bash test/chart/test-diagnostics.sh
+	bash test/chart/test-doc-links.sh
 	bash test/chart/test-vm-snapshots.sh
 	bash test/chart/test-clusterrole.sh
 	bash test/chart/test-console-plugin.sh

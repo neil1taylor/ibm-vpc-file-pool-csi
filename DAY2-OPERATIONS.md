@@ -397,75 +397,13 @@ kubectl debug node/<node-name> -it --image=busybox -- sh -c \
 
 ## Log Collection for Support
 
-Collect diagnostics before opening a support ticket:
+Collect diagnostics before you open a support ticket:
 
 ```bash
-#!/bin/bash
-# Save as collect-diagnostics.sh
-OUTPUT="csi-diagnostics-$(date +%Y%m%d-%H%M%S).txt"
-
-{
-  echo "=== Collection Time ==="
-  date -u
-
-  echo -e "\n=== Driver Version ==="
-  kubectl get deployment -n kube-system vpc-file-pool-csi-controller \
-    -o jsonpath='{.spec.template.spec.containers[0].image}'
-
-  echo -e "\n\n=== Cluster Version ==="
-  kubectl version --short 2>/dev/null || kubectl version
-
-  echo -e "\n=== Node Info ==="
-  kubectl get nodes -o wide
-
-  echo -e "\n=== CSI Driver Registration ==="
-  kubectl get csidriver vpc-file-pool.csi.ibm.io -o yaml
-
-  echo -e "\n=== Pool Status ==="
-  kubectl get filesharepools -o yaml
-
-  echo -e "\n=== SubVolumes ==="
-  kubectl get subvolumes -o wide
-
-  echo -e "\n=== Pending PVCs ==="
-  kubectl get pvc --all-namespaces | grep Pending
-
-  echo -e "\n=== Controller Pods ==="
-  kubectl get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -o wide
-
-  echo -e "\n=== Node Agent Pods ==="
-  kubectl get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node -o wide
-
-  echo -e "\n=== Controller Logs (last 500 lines) ==="
-  kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller \
-    -c csi-controller --tail=500
-
-  echo -e "\n=== Node Agent Logs (last 200 lines per pod) ==="
-  for pod in $(kubectl get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node \
-    -o jsonpath='{.items[*].metadata.name}'); do
-    echo "--- Pod: $pod ---"
-    kubectl logs -n kube-system "$pod" -c csi-node --tail=200
-  done
-
-  echo -e "\n=== Events (last 1 hour) ==="
-  kubectl get events --all-namespaces --sort-by='.lastTimestamp' \
-    --field-selector reason!=Pulling,reason!=Pulled | tail -100
-
-  echo -e "\n=== Replication Policies ==="
-  kubectl get replicationpolicies -o yaml 2>/dev/null || echo "No replication policies"
-
-  echo -e "\n=== Leader Lease ==="
-  kubectl get lease -n kube-system vpc-file-pool-csi-leader -o yaml 2>/dev/null || echo "No lease found"
-} > "$OUTPUT"
-
-echo "Diagnostics saved to $OUTPUT"
-echo "IMPORTANT: Review the file and redact any API keys or secrets before sharing."
+bash scripts/collect-diagnostics.sh
 ```
 
-```bash
-chmod +x collect-diagnostics.sh
-./collect-diagnostics.sh
-```
+The script writes `csi-diagnostics-<time>.txt` in the current directory. It holds driver versions, pools, volumes, snapshots, backup and replication policies, controller and node logs, and recent events. It never reads a Secret and it removes values that look like keys or tokens. Read the file before you send it. Set `NS` if the driver is not in `kube-system`.
 
 ---
 

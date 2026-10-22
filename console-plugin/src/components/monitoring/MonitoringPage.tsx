@@ -30,6 +30,8 @@ import { metricQueries } from '../../utils/metric-queries';
 import TimeSeriesChart from './TimeSeriesChart';
 import CapacityDonut from '../dashboard/CapacityDonut';
 import CapacityBar from '../common/CapacityBar';
+import HelpLink from '../common/HelpLink';
+import { TROUBLESHOOTING } from '../../utils/help-links';
 
 const MonitoringPage: React.FC = () => {
   const [range, setRange] = useState<TimeRange>(TIME_RANGES[0]);
@@ -145,6 +147,9 @@ const MonitoringPage: React.FC = () => {
               </code>
             </>
           )}
+          <div style={{ marginTop: 8 }}>
+            <HelpLink href={TROUBLESHOOTING.metrics} label="Troubleshooting" testId="banner-help" />
+          </div>
         </Alert>
       )}
 

@@ -28,6 +28,9 @@ import { FileSharePool, SubVolume, ReplicationPolicy } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
 import PoolPhase from '../common/PoolPhase';
 import CapacityBar from '../common/CapacityBar';
+import GetHelpCard from '../common/GetHelpCard';
+import HelpLink from '../common/HelpLink';
+import { TROUBLESHOOTING } from '../../utils/help-links';
 import CapacityDonut from './CapacityDonut';
 import { utilizationPercent, formatAge } from '../../utils/resource-helpers';
 import { usePoolMetrics } from '../../utils/use-pool-metrics';
@@ -102,7 +105,8 @@ const DashboardPage: React.FC = () => {
     return (
       <PageSection>
         <Alert variant="danger" title="Error loading resources" isInline>
-          {String(error)}
+          {String(error)}{' '}
+          <HelpLink href={TROUBLESHOOTING.controller} label="Troubleshooting" testId="banner-help" />
         </Alert>
       </PageSection>
     );
@@ -561,6 +565,13 @@ const DashboardPage: React.FC = () => {
               )}
             </CardBody>
           </Card>
+        </StackItem>
+        <StackItem>
+          <Grid hasGutter>
+            <GridItem sm={12} md={6} lg={4}>
+              <GetHelpCard />
+            </GridItem>
+          </Grid>
         </StackItem>
       </Stack>
     </PageSection>

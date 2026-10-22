@@ -756,6 +756,46 @@ To request a quota increase, open an IBM Cloud support ticket.
 
 ---
 
+## Backup and Replication Issues
+
+### Backups stopped: the snapshot pool is above 85% full
+
+**Symptom:** `kubectl get backuppolicies` shows phase `Error`, and no new backups appear.
+
+```bash
+kubectl get backuppolicy <name> -o jsonpath='{.status.phase}{"\n"}{.status.message}{"\n"}'
+```
+
+The message says how full the share is. At 85% the policy stops new backups. It never deletes backups to make room.
+
+**Fix:** make room, and the backups resume by themselves when use falls to 85% or less.
+- Shorten `spec.keepFor` on the policy, or remove the backups of a volume you no longer need (`kubectl backup delete`, see [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md)).
+- Or add shares to the snapshot pool.
+
+The alert `VPCFilePoolSnapshotPoolNearlyFull` fires at 75% so you can act first.
+
+### A volume has no recent backup
+
+```bash
+kubectl backup list --policy <name>
+kubectl get backuppolicy <name> -o yaml    # status.volumes[].lastError is the last error of each volume
+```
+
+Check `status.phase` first (a `Suspended` policy makes no backups). Then read `status.volumes[].lastError` for the volume. The controller log has the line `Failed to create replication resources` when a copy could not start.
+
+### Replication is late or failing
+
+```bash
+kubectl get replicationpolicies
+kubectl get replicationpolicy <name> -o jsonpath='{.status.phase}{"\n"}{.status.consecutiveFailures}{"\n"}{.status.lastError}{"\n"}'
+```
+
+- Phase `Paused` with the annotation `storage.ibmcloud.io/paused: "true"` was paused by a person. Remove it with `kubectl annotate replicationpolicy <name> storage.ibmcloud.io/paused-`.
+- A high `consecutiveFailures` with a `lastError` is a failing copy. The error names the cause (for example the destination is not reachable).
+- Check the destination, then look at the controller log for the policy name.
+
+---
+
 ## Metrics Issues
 
 ### Prometheus not scraping metrics
@@ -870,34 +910,18 @@ kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.
 
 ## Getting Help
 
-If you can't resolve the issue:
+If you cannot resolve the issue:
 
-1. Collect diagnostics:
+1. Collect diagnostics with the script from the repository:
 ```bash
-# Save to a file for sharing
-{
-  echo "=== Driver version ==="
-  kubectl get deployment -n kube-system vpc-file-pool-csi-controller -o jsonpath='{.spec.template.spec.containers[0].image}'
-  echo
-  echo "=== Cluster version ==="
-  kubectl version --short
-  echo
-  echo "=== Pool status ==="
-  kubectl get filesharepools -o yaml
-  echo
-  echo "=== SubVolumes ==="
-  kubectl get subvolumes -o wide
-  echo
-  echo "=== Controller logs (last 200 lines) ==="
-  kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller --tail=200
-  echo
-  echo "=== Node agent logs (last 100 lines per node) ==="
-  kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node -c csi-node --tail=100
-} > csi-diagnostics.txt
+bash scripts/collect-diagnostics.sh
 ```
+It writes `csi-diagnostics-<time>.txt`. It holds driver versions, pools, volumes, snapshots, backup and replication policies, driver logs and recent events. It never reads a Secret and it removes values that look like keys or tokens. Read the file before you send it.
 
 2. Open a GitHub issue with:
    - Cluster type (IKS/ROKS/ROVS) and version
    - Driver version (image tag)
-   - The `csi-diagnostics.txt` output (redact any sensitive info)
+   - The `csi-diagnostics-<time>.txt` file
    - Steps to reproduce
+
+See [SUPPORT.md](SUPPORT.md) for where to start.
