@@ -21,6 +21,8 @@ To make a release:
 
 - **Replication and backup status follow the copy Jobs within seconds (issue #192).** Before, a policy looked at its Jobs only when its schedule was next due, so `sync in progress` stayed for the whole schedule (a first backup took about 13 minutes to show LAST BACKUP). Now a policy with a cycle in progress is checked on every poll (30 seconds), the controllers also watch the Jobs in the driver namespace and wake when one finishes, and the backup controller wakes after each replication pass. Pre-sync hooks still run once at the start of a cycle, and the cycle's duration is measured from its start.
 
+- **Instant VM snapshot of a disk owned by another user (issue #191).** Before, it failed after the snapshot was taken with `chmod: changing permissions ... Operation not permitted` and left an extra overlay file in the disk chain. Now the driver checks the owner of `disk.img` first and refuses before changing anything, with a message that names the owner and the fix. The Snapshot is marked Failed with that message. If a step fails after the new overlay file is made, the driver merges the file back and deletes it, so the chain is as it was.
+
 - **Console: the restore page no longer spins forever without the right to read VolumeSnapshotContents (issue #186).** It now says which right is missing.
 
 - **Console: the delete backups dialog gives an administrator the safe command.** When the user lacks the rights, the dialog now shows `kubectl backup delete --policy <policy> --pvc <namespace>/<name>`, which measures first and asks for the typed claim name. Before, it showed raw YAML that removed the backups with neither step.

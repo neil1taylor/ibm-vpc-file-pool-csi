@@ -59,6 +59,10 @@ var (
 	// ErrChainFull means the disk has MaxSnapshots snapshots already.
 	ErrChainFull = fmt.Errorf("the disk has %d snapshots, the most allowed", MaxSnapshots)
 
+	// ErrDiskNotOwned means the VM's user does not own a file of the disk,
+	// so the driver cannot make it read-only.
+	ErrDiskNotOwned = errors.New("the VM's user does not own the disk file")
+
 	volumeNameRe = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
 	// FileNameRe is the name of a snapshot file.
 	FileNameRe = regexp.MustCompile(`^snap-[a-z0-9]{1,32}\.qcow2$`)
@@ -139,6 +143,9 @@ func (s *Snapshotter) Take(ctx context.Context, vm vmcopy.VM, volume, newFile st
 		return nil, ErrChainFull
 	}
 	top := d.chain[0]
+	if err = s.checkOwner(ctx, vm, folder+"/"+top.Name); err != nil {
+		return nil, err
+	}
 	newPath := folder + "/" + newFile
 	if _, err = s.run(ctx, vm, "qemu-img", "create", "-q", "-f", "qcow2", "-F", top.Format, "-b", top.Name, newPath); err != nil {
 		return nil, fmt.Errorf("making %s: %w", newFile, err)
@@ -195,9 +202,46 @@ func (s *Snapshotter) Take(ctx context.Context, vm vmcopy.VM, volume, newFile st
 	res.Moment = s.now()
 	res.Chain = append([]File{{Name: newFile, Format: "qcow2"}}, d.chain...)
 	if _, err = s.run(ctx, vm, "chmod", modeFrozen, folder+"/"+top.Name); err != nil {
-		return nil, fmt.Errorf("making %s read-only: %w", top.Name, err)
+		err = fmt.Errorf("making %s read-only: %w", top.Name, err)
+		if rbErr := s.rollBack(ctx, vm, d, folder, top.Name, newFile); rbErr != nil {
+			return nil, fmt.Errorf("%w (and the new file %s could not be taken out of the chain: %v)", err, newFile, rbErr)
+		}
+		return nil, err
 	}
 	return res, nil
+}
+
+// checkOwner refuses before anything changes when the compute container's
+// user does not own the file. Only the owner can make a file read-only, and
+// a snapshot whose frozen file stays writable is not safe.
+func (s *Snapshotter) checkOwner(ctx context.Context, vm vmcopy.VM, filePath string) error {
+	owner, err := s.run(ctx, vm, "stat", "-c", "%u", "--", filePath)
+	if err != nil {
+		return err
+	}
+	me, err := s.run(ctx, vm, "id", "-u")
+	if err != nil {
+		return err
+	}
+	owner, me = strings.TrimSpace(owner), strings.TrimSpace(me)
+	if owner != me {
+		return fmt.Errorf("%w: %s is owned by UID %s, but the VM runs as UID %s and only the owner can make the file read-only; "+
+			"no snapshot was taken and nothing was changed. Change the owner of the file to UID %s (chown %s:%s), then take the snapshot again",
+			ErrDiskNotOwned, path.Base(filePath), owner, me, me, me, me)
+	}
+	return nil
+}
+
+// rollBack takes newFile out of the chain again after a failure that came
+// once the snapshot was made: the writes since then are merged back into the
+// file that was on top, and newFile is deleted.
+func (s *Snapshotter) rollBack(ctx context.Context, vm vmcopy.VM, d disk, folder, top, newFile string) error {
+	if _, err := s.run(ctx, vm, "virsh", "blockcommit", vm.Domain(), d.target, "--base", folder+"/"+top,
+		"--keep-relative", "--wait", "--active", "--pivot"); err != nil {
+		return err
+	}
+	_, err := s.run(ctx, vm, "rm", "-f", "--", folder+"/"+newFile)
+	return err
 }
 
 // Merge deletes the snapshot held in file: child, the next newer file of the

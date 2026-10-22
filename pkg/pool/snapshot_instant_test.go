@@ -383,6 +383,19 @@ func TestInstantSnapshot_FailedTakeIsRetried(t *testing.T) {
 	}
 }
 
+func TestInstantSnapshot_DiskOwnedByAnotherUserFailsWithTheReason(t *testing.T) {
+	e := newInstantEnv(t)
+	e.startVM(false)
+	e.snap.takeErr = fmt.Errorf("%w: disk.img is owned by UID 65534, but the VM runs as UID 107", vmsnap.ErrDiskNotOwned)
+	if _, err := e.create("snap-one"); !errors.Is(err, ErrSnapshotFailed) {
+		t.Fatalf("error = %v, want ErrSnapshotFailed: retrying cannot help until the owner is changed", err)
+	}
+	s := e.k.getSnapshot("snap-one")
+	if s == nil || s.Status.Phase != "Failed" || !strings.Contains(s.Status.Message, "UID 65534") {
+		t.Errorf("the failed Snapshot must say why, got %+v", s)
+	}
+}
+
 func TestInstantSnapshot_GateOffFallsBackToTheCopy(t *testing.T) {
 	e := newInstantEnv(t)
 	e.setGate(false)
