@@ -1,33 +1,50 @@
 {{- if .Values.backupBrowse.enabled }}
-# The controller makes and deletes the Secrets of browse sessions (a token, a
-# certificate and a key). It may do so only in this namespace, so the
-# cluster-wide role does not carry these verbs.
+{{- $ns := .Values.backupBrowse.namespace }}
+{{- $fullname := include "ibm-vpc-file-pool-csi.fullname" . }}
+# Browse sessions run in their own namespace, which holds nothing else: the
+# helper pods and one Secret for each session (a token and a certificate). The
+# gateway may read Secrets only here, so a compromised gateway cannot reach the
+# driver's own Secrets in {{ .Release.Namespace }}. The helper reads backups made
+# by other users, so it runs as root with every capability dropped, which the
+# "baseline" level allows and "restricted" does not.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $ns }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline
+---
+# The controller makes and deletes the session Secrets, and keeps copies of the
+# image pull Secrets, here only.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-browse
-  namespace: {{ .Release.Namespace }}
+  name: {{ $fullname }}-browse
+  namespace: {{ $ns }}
   labels:
     {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
 rules:
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get", "list", "watch", "create", "delete"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-browse
-  namespace: {{ .Release.Namespace }}
+  name: {{ $fullname }}-browse
+  namespace: {{ $ns }}
   labels:
     {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-browse
+  name: {{ $fullname }}-browse
 subjects:
   - kind: ServiceAccount
-    name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-controller
+    name: {{ $fullname }}-controller
     namespace: {{ .Release.Namespace }}
 ---
 # Only the backup gateway may reach a helper pod, and only on the helper's
@@ -35,8 +52,8 @@ subjects:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-browse
-  namespace: {{ .Release.Namespace }}
+  name: {{ $fullname }}-browse
+  namespace: {{ $ns }}
   labels:
     {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
 spec:
@@ -47,11 +64,53 @@ spec:
   policyTypes: ["Ingress"]
   ingress:
     - from:
-        - podSelector:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+          podSelector:
             matchLabels:
               app.kubernetes.io/name: {{ include "ibm-vpc-file-pool-csi.name" . }}
               app.kubernetes.io/component: backup-gateway
       ports:
         - protocol: TCP
           port: 8443
+{{- if .Capabilities.APIVersions.Has "security.openshift.io/v1" }}
+---
+# On OpenShift the helper pod needs to run as root. This SCC allows that and
+# nothing else: no capability, no privilege escalation, no host path. It is given
+# to the default account of the browse namespace only.
+apiVersion: security.openshift.io/v1
+kind: SecurityContextConstraints
+metadata:
+  name: {{ $fullname }}-browse
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+allowHostDirVolumePlugin: false
+allowHostIPC: false
+allowHostNetwork: false
+allowHostPID: false
+allowHostPorts: false
+allowPrivilegedContainer: false
+allowPrivilegeEscalation: false
+readOnlyRootFilesystem: false
+requiredDropCapabilities:
+  - ALL
+runAsUser:
+  type: RunAsAny
+seLinuxContext:
+  type: MustRunAs
+fsGroup:
+  type: RunAsAny
+supplementalGroups:
+  type: RunAsAny
+volumes:
+  - configMap
+  - downwardAPI
+  - emptyDir
+  - persistentVolumeClaim
+  - projected
+  - secret
+users:
+  - system:serviceaccount:{{ $ns }}:default
+{{- end }}
 {{- end }}

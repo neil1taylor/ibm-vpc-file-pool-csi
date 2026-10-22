@@ -365,7 +365,7 @@ kubectl apply -f config/deploy/node.yaml
 |------|---------|-------------|
 | `--endpoint` | `unix:///csi/csi.sock` | CSI gRPC endpoint |
 | `--node-id` | (required) | Kubernetes node name |
-| `--mode` | `controller` | `controller`, `node`, `receiver`, `sync-client`, `check-receiver`, `apply-vm-disk`, `send-vm-disk`, or `restore-vm-disk`, `unwrap-backup-key`, `register-console-plugin`, or `unregister-console-plugin`, or `enable-sidecar-gate` (all but the first three are run as Jobs; `check-receiver` is run by the console's receiver setup; `register-console-plugin`, `unregister-console-plugin` and `enable-sidecar-gate` are the chart's hook Jobs) |
+| `--mode` | `controller` | `controller`, `node`, `receiver`, `sync-client`, `check-receiver`, `apply-vm-disk`, `send-vm-disk`, or `restore-vm-disk`, `unwrap-backup-key`, `backup-gateway`, `register-console-plugin`, or `unregister-console-plugin`, or `enable-sidecar-gate` (all but the first three are run as Jobs; `check-receiver` is run by the console's receiver setup; `register-console-plugin`, `unregister-console-plugin` and `enable-sidecar-gate` are the chart's hook Jobs) |
 | `--region` | Auto-discovered | IBM Cloud region |
 | `--vpc-id` | Auto-discovered | VPC ID for mount targets |
 | `--subnet-id` | Auto-discovered | Worker subnet IDs for mount targets, comma-separated; the controller uses the one in each pool's zone |
@@ -410,11 +410,24 @@ kubectl apply -f config/deploy/node.yaml
 | `--vm-group` | `""` | `namespace/name` of the VM that owns the disk (send-vm-disk mode). Set by the replication controller |
 | `--copy-id` | `""` | Name of this copy attempt; a repeat with the same name resumes it (send-vm-disk mode). Set by the replication controller |
 
+**Backup gateway flags** (mode `backup-gateway`, set by the `backupGateway.*` chart values):
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--gateway-listen` | `:8443` | Address to listen on |
+| `--gateway-tls-cert-file`, `--gateway-tls-key-file` | (required) | The serving certificate. It is read again when the files change. The gateway is never served in plain HTTP |
+| `--gateway-browse-namespace` | `ibm-vpc-file-pool-csi-browse` | Where the session Secrets are |
+| `--gateway-session-wait` | `60s` | How long a request to open a session waits for it to be ready |
+| `--gateway-max-download-bytes` | `53687091200` | Largest single file or tar |
+| `--gateway-auth-cache` | `10s` | How long a token review is kept; `0` checks every call. The right on the namespace is checked on every call regardless |
+
 **Browse session flags of the controller** (set by the `backupBrowse.*` chart values):
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--browse-image` | `""` | Image of the browse helper. Empty turns browse sessions off |
+| `--browse-namespace` | `ibm-vpc-file-pool-csi-browse` | Namespace of the helper pods and the session Secrets |
+| `--browse-image-pull-secrets` | `""` | Names of Secrets in the driver namespace that the controller copies into the browse namespace, for the helper image |
 | `--browse-idle` | `15m` | End a session after this long without use |
 | `--browse-max-life` | `2h` | End a session after this long, even if in use |
 | `--browse-max-sessions` | `5` | Open sessions in the cluster. More wait |

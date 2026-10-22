@@ -25,7 +25,10 @@ import (
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
-const driverNS = "kube-system"
+const (
+	driverNS = "kube-system"
+	browseNS = "ibm-vpc-file-pool-csi-browse"
+)
 
 // fakeAuthn knows a few tokens.
 type fakeAuthn struct{ users map[string]User }
@@ -183,8 +186,11 @@ func newEnv(t *testing.T, cfg Config, tree browse.Tree) *env {
 		"alice-token": {Name: "alice", UID: "u-alice", Groups: []string{"devs"}, Extra: map[string][]string{"scopes": {"a"}}},
 		"bob-token":   {Name: "bob"},
 	}}
-	if cfg.Namespace == "" {
-		cfg.Namespace = driverNS
+	if cfg.SessionNamespace == "" {
+		cfg.SessionNamespace = browseNS
+	}
+	if cfg.EventNamespace == "" {
+		cfg.EventNamespace = driverNS
 	}
 	if cfg.PollInterval == 0 {
 		cfg.PollInterval = 10 * time.Millisecond
@@ -233,7 +239,7 @@ func (e *env) readySession(name, user, ns, pvc string) *v1alpha1.BackupBrowse {
 		e.t.Fatal(err)
 	}
 	e.create(&corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "browse-uid-" + name, Namespace: driverNS},
+		ObjectMeta: metav1.ObjectMeta{Name: "browse-uid-" + name, Namespace: browseNS},
 		Data:       map[string][]byte{"token": []byte(e.h.token), "tls.crt": e.h.cert, "tls.key": e.h.key},
 	})
 	return bb
@@ -573,7 +579,7 @@ func TestAHelperWithAnotherCertificateIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	sec := &corev1.Secret{}
-	_ = e.c.Get(context.Background(), types.NamespacedName{Namespace: driverNS, Name: "browse-uid-s1"}, sec)
+	_ = e.c.Get(context.Background(), types.NamespacedName{Namespace: browseNS, Name: "browse-uid-s1"}, sec)
 	sec.Data["tls.crt"] = other
 	if err := e.c.Update(context.Background(), sec); err != nil {
 		t.Fatal(err)

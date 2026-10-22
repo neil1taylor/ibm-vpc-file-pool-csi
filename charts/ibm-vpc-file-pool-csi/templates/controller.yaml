@@ -69,6 +69,7 @@ spec:
             {{- if .Values.imagePullSecrets }}
             - "--browse-image-pull-secrets={{ range $i, $s := .Values.imagePullSecrets }}{{ if $i }},{{ end }}{{ $s.name }}{{ end }}"
             {{- end }}
+            - "--browse-namespace={{ .Values.backupBrowse.namespace }}"
             - "--browse-idle={{ .Values.backupBrowse.idle }}"
             - "--browse-max-life={{ .Values.backupBrowse.maxLife }}"
             - "--browse-max-sessions={{ .Values.backupBrowse.maxSessions }}"

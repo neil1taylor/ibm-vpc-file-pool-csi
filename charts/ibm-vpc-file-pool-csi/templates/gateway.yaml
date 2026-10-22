@@ -1,6 +1,7 @@
 {{- if and .Values.backupGateway.enabled .Values.backupBrowse.enabled }}
 {{- $name := printf "%s-gateway" (include "ibm-vpc-file-pool-csi.fullname" .) }}
 {{- $tlsSecret := .Values.backupGateway.tls.secretName | default (printf "%s-tls" $name) }}
+{{- $openshift := .Capabilities.APIVersions.Has "route.openshift.io/v1" }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -61,10 +62,6 @@ metadata:
     {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
     app.kubernetes.io/component: backup-gateway
 rules:
-  # The token and the certificate of a session, to talk to its helper pod.
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get"]
   # The audit trail.
   - apiGroups: [""]
     resources: ["events"]
@@ -82,6 +79,38 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+# The token and the certificate of a session, to talk to its helper pod. Only in
+# the browse namespace, which holds nothing else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-secrets
+  namespace: {{ .Values.backupBrowse.namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup-gateway
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-secrets
+  namespace: {{ .Values.backupBrowse.namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup-gateway
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}-secrets
 subjects:
   - kind: ServiceAccount
     name: {{ $name }}
@@ -124,7 +153,7 @@ metadata:
   labels:
     {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
     app.kubernetes.io/component: backup-gateway
-  {{- if not .Values.backupGateway.tls.secretName }}
+  {{- if and $openshift (not .Values.backupGateway.tls.secretName) }}
   annotations:
     service.beta.openshift.io/serving-cert-secret-name: {{ $tlsSecret }}
   {{- end }}
@@ -178,6 +207,7 @@ spec:
           args:
             - --mode=backup-gateway
             - --gateway-listen=:8443
+            - --gateway-browse-namespace={{ .Values.backupBrowse.namespace }}
             - --gateway-tls-cert-file=/etc/gateway-tls/tls.crt
             - --gateway-tls-key-file=/etc/gateway-tls/tls.key
             - --gateway-session-wait={{ .Values.backupGateway.sessionWait }}
@@ -220,7 +250,7 @@ metadata:
   labels:
     {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
     app.kubernetes.io/component: backup-gateway
-  {{- if not .Values.backupGateway.tls.secretName }}
+  {{- if and $openshift (not .Values.backupGateway.tls.secretName) }}
   annotations:
     service.beta.openshift.io/inject-cabundle: "true"
   {{- end }}
@@ -266,7 +296,7 @@ subjects:
   - apiGroup: rbac.authorization.k8s.io
     kind: Group
     name: system:authenticated
-{{- if and .Values.backupGateway.route.enabled (.Capabilities.APIVersions.Has "route.openshift.io/v1") }}
+{{- if and .Values.backupGateway.route.enabled $openshift }}
 ---
 # Passthrough: the traffic stays encrypted to the gateway, which holds the
 # certificate that the service CA made.

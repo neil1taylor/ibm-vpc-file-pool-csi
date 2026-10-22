@@ -95,6 +95,11 @@ goldenImageSyncer:
 # Dockerfile.browse.
 backupBrowse:
   enabled: true
+  # The namespace of browse sessions: their helper pods and Secrets. The chart
+  # makes it. It holds nothing else, so the gateway's right to read Secrets there
+  # reaches nothing else. It allows root pods without capabilities (the helper
+  # reads backups made by other users); on OpenShift the chart adds one SCC.
+  namespace: ibm-vpc-file-pool-csi-browse
   image:
     repository: de.icr.io/ibm-vpc-file-pool-csi/browse
     # Empty means the same tag as the driver image.
@@ -120,8 +125,9 @@ backupGateway:
   # users pass --gateway.
   url: ""
   tls:
-    # Empty: on OpenShift the service CA makes the certificate. Elsewhere, name a
-    # Secret (tls.crt, tls.key) that holds the gateway's serving certificate.
+    # Empty: on OpenShift the service CA makes the certificate. Elsewhere you
+    # must name a Secret (tls.crt, tls.key) that holds the gateway's serving
+    # certificate, or the gateway pod cannot start.
     secretName: ""
   # A passthrough Route, made only where the OpenShift Route API exists.
   route:

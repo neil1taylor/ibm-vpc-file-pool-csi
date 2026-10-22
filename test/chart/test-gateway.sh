@@ -22,13 +22,14 @@ fail() { echo "FAIL  $*"; FAILED=1; }
 check() { if grep -qF -- "$3" "$2"; then pass "$1"; else fail "$1 (missing: $3)"; fi; }
 absent() { if grep -qF -- "$3" "$2"; then fail "$1 (found: $3)"; else pass "$1"; fi; }
 
-ON="$(mktemp)"; OFF="$(mktemp)"; OS="$(mktemp)"; OWN="$(mktemp)"; NOBROWSE="$(mktemp)"
-trap 'find "$ON" "$OFF" "$OS" "$OWN" "$NOBROWSE" -delete' EXIT
-helm template test "$CHART" --namespace kube-system > "$ON"
+PLAIN="$(mktemp)"; ON="$(mktemp)"; OFF="$(mktemp)"; OS="$(mktemp)"; OWN="$(mktemp)"; NOBROWSE="$(mktemp)"
+trap 'find "$PLAIN" "$ON" "$OFF" "$OS" "$OWN" "$NOBROWSE" -delete' EXIT
+helm template test "$CHART" --namespace kube-system > "$PLAIN"
+helm template test "$CHART" --namespace kube-system --api-versions route.openshift.io/v1 > "$ON"
 helm template test "$CHART" --namespace kube-system --set backupGateway.enabled=false > "$OFF"
 helm template test "$CHART" --namespace kube-system --api-versions route.openshift.io/v1 \
     --set backupGateway.route.host=backups.example.com > "$OS"
-helm template test "$CHART" --namespace kube-system --set backupGateway.tls.secretName=my-cert \
+helm template test "$CHART" --namespace kube-system --api-versions route.openshift.io/v1 --set backupGateway.tls.secretName=my-cert \
     --set backupGateway.url=https://gw.example.com > "$OWN"
 helm template test "$CHART" --namespace kube-system --set backupBrowse.enabled=false > "$NOBROWSE"
 
@@ -43,6 +44,17 @@ check "the gateway may review access" "$ON" 'subjectaccessreviews'
 check "the gateway may read policies" "$ON" 'resources: ["backuppolicies"]'
 check "the gateway may make sessions" "$ON" 'resources: ["backupbrowses"]'
 check "the gateway reads session Secrets by a Role" "$ON" 'resources: ["secrets"]'
+check "the gateway is told the browse namespace" "$ON" '--gateway-browse-namespace=ibm-vpc-file-pool-csi-browse'
+if awk -v RS='\n---\n' '/\nkind: Role\n/ && /name: test-ibm-vpc-file-pool-csi-gateway\n/ && /secrets/ && /namespace: kube-system\n/' "$ON" | grep -q .; then
+    fail "a gateway Role in kube-system grants Secrets"
+else
+    pass "no gateway Role in kube-system grants Secrets"
+fi
+if awk -v RS='\n---\n' '/\nkind: Role\n/ && /secrets/ && /namespace: ibm-vpc-file-pool-csi-browse\n/ && /-gateway-secrets\n/' "$ON" | grep -q .; then
+    pass "the gateway reads Secrets in the browse namespace only"
+else
+    fail "the gateway has no Secrets Role in the browse namespace"
+fi
 check "the gateway writes audit Events" "$ON" 'resources: ["events"]'
 check "backup-file-reader exists" "$ON" 'name: backup-file-reader'
 check "backup-file-restorer exists" "$ON" 'name: backup-file-restorer'
@@ -51,7 +63,8 @@ check "the reader aggregates into admin" "$ON" 'rbac.authorization.k8s.io/aggreg
 check "the address ConfigMap" "$ON" 'name: backup-gateway-info'
 check "everyone signed in may read only that ConfigMap" "$ON" 'resourceNames: ["backup-gateway-info"]'
 check "system:authenticated is bound" "$ON" 'name: system:authenticated'
-absent "no Route without the OpenShift API" "$ON" 'kind: Route'
+absent "no Route without the OpenShift API" "$PLAIN" 'kind: Route'
+absent "no OpenShift annotations without the OpenShift API" "$PLAIN" 'service.beta.openshift.io'
 check "a passthrough Route on OpenShift" "$OS" 'termination: passthrough'
 check "the Route has the host" "$OS" 'host: backups.example.com'
 check "the address ConfigMap has the Route's address" "$OS" 'url: "https://backups.example.com"'

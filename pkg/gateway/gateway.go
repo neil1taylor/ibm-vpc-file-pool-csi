@@ -36,8 +36,11 @@ type Authorizer interface {
 
 // Config sets the gateway's limits.
 type Config struct {
-	// Namespace is the driver namespace: where session Secrets and Events live.
-	Namespace string
+	// SessionNamespace is where the session Secrets live. It holds nothing else,
+	// so the gateway's right to read Secrets reaches nothing else.
+	SessionNamespace string
+	// EventNamespace is where the audit Events are written.
+	EventNamespace string
 	// SessionWait is how long a request to open a session waits for it to be Ready.
 	SessionWait time.Duration
 	// PollInterval is how often it looks while waiting.
@@ -395,7 +398,7 @@ func (g *Gateway) handleClose(w http.ResponseWriter, r *http.Request, u User) {
 // and the session token.
 func (g *Gateway) helperClient(ctx context.Context, bb *v1alpha1.BackupBrowse) (*http.Client, string, error) {
 	sec := &corev1.Secret{}
-	if err := g.c.Get(ctx, types.NamespacedName{Namespace: g.cfg.Namespace, Name: bb.Status.SecretName}, sec); err != nil {
+	if err := g.c.Get(ctx, types.NamespacedName{Namespace: g.cfg.SessionNamespace, Name: bb.Status.SecretName}, sec); err != nil {
 		return nil, "", err
 	}
 	cert := sec.Data["tls.crt"]
@@ -567,7 +570,7 @@ func (g *Gateway) audit(ctx context.Context, bb *v1alpha1.BackupBrowse, reason, 
 	klog.InfoS("Browse audit", "session", bb.Name, "reason", reason, "message", msg)
 	now := metav1.NewTime(time.Now())
 	ev := &corev1.Event{
-		ObjectMeta: metav1.ObjectMeta{GenerateName: "browse-audit-", Namespace: g.cfg.Namespace},
+		ObjectMeta: metav1.ObjectMeta{GenerateName: "browse-audit-", Namespace: g.cfg.EventNamespace},
 		InvolvedObject: corev1.ObjectReference{APIVersion: v1alpha1.GroupVersion.String(), Kind: "BackupBrowse",
 			Name: bb.Name, UID: bb.UID},
 		Reason: reason, Message: msg, Type: corev1.EventTypeNormal,

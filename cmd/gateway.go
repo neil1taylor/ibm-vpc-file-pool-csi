@@ -26,6 +26,8 @@ type gatewayOptions struct {
 	sessionWait time.Duration
 	maxDownload int64
 	authCache   time.Duration
+	// browseNamespace holds the session Secrets and helper pods.
+	browseNamespace string
 }
 
 // runGateway serves the browse API for users. It checks every caller with the
@@ -60,7 +62,8 @@ func runGateway(o gatewayOptions) {
 	}
 	auth := gateway.NewKubeAuth(cs)
 	g := gateway.New(c, auth, auth, gateway.Config{
-		Namespace:        driverNamespace,
+		SessionNamespace: o.browseNamespace,
+		EventNamespace:   driverNamespace,
 		SessionWait:      o.sessionWait,
 		MaxDownloadBytes: o.maxDownload,
 		AuthCacheTTL:     o.authCache,
