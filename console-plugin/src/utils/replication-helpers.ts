@@ -1,4 +1,4 @@
-import { ReplicationPolicySpec, SubVolumeReplicationStatus } from '../types';
+import { ReplicationPolicy, ReplicationPolicySpec, SubVolumeReplicationStatus } from '../types';
 import { formatAge } from './resource-helpers';
 
 interface DestinationInput {
@@ -119,4 +119,23 @@ export function describeVolumeStatus(s: SubVolumeReplicationStatus): VolumeStatu
     severity,
     message,
   };
+}
+
+export interface ReceiverReachableView {
+  label: string;
+  color: 'grey' | 'green' | 'red';
+  /** The reason in plain words when the receiver is not reachable. */
+  detail: string;
+}
+
+/**
+ * What the pages show for the controller's `ReceiverReachable` check, or null for a policy that
+ * does not use a receiver.
+ */
+export function describeReceiverReachable(policy: ReplicationPolicy): ReceiverReachableView | null {
+  if (!policy.spec?.destinationEndpoint) return null;
+  const cond = policy.status?.conditions?.find((c) => c.type === 'ReceiverReachable');
+  if (!cond) return { label: 'Checking...', color: 'grey', detail: '' };
+  if (cond.status === 'True') return { label: 'Reachable', color: 'green', detail: '' };
+  return { label: 'Not reachable', color: 'red', detail: cond.message || cond.reason || '' };
 }
