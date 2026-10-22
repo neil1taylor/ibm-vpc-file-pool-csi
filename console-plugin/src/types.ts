@@ -146,6 +146,9 @@ export interface SubVolumeStatus {
   createdAt?: string;
   cloneStatus?: string;
   cloneProgress?: CloneProgress;
+  /** Instant-snapshot chain of the VM disk, newest file first; the last file is disk.img. */
+  diskChain?: string[];
+  chainOperation?: string;
 }
 
 export interface CloneProgress {

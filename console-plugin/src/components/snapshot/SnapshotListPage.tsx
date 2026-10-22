@@ -24,6 +24,7 @@ import { Bullseye, Spinner, Label } from '@patternfly/react-core';
 import { SnapshotModel, VolumeSnapshotContentModel, VolumeSnapshotModel } from '../../models';
 import { Snapshot } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
+import InstantSnapshotStatus from '../common/InstantSnapshotStatus';
 import DeleteModal from '../common/DeleteModal';
 import { ROUTES } from '../../constants';
 import { VolumeSnapshotContent } from '../../utils/k8s-objects';
@@ -153,6 +154,9 @@ const SnapshotListPage: React.FC = () => {
       <p style={{ padding: '0 24px', color: 'var(--pf-t--global--color--subtle)', margin: '0 0 8px 0' }}>
         These are records written by the driver. This list is read-only: to take a snapshot, create a VolumeSnapshot.
       </p>
+      <div style={{ padding: '0 24px', margin: '0 0 16px 0' }}>
+        <InstantSnapshotStatus />
+      </div>
       <ListPageBody>
         <ListPageFilter
           data={data}
