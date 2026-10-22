@@ -20,7 +20,7 @@ Said first, so there is no surprise later. Size of each gap:
 | Part of the Veeam experience | Can we meet it? | Gap |
 |---|---|---|
 | Plain volumes, local and COS | Yes, fully | None |
-| VM guest: ext4, XFS, btrfs, NTFS, LVM | Yes, in a helper pod with no special rights, by running a tiny read-only appliance VM (see "VM disks"). Needs a proof on the lab first (Phase 0) | Start takes about 1 to 3 minutes with KVM, longer without it (to be measured) |
+| VM guest: ext4, XFS, btrfs, NTFS, LVM | Yes, in a helper pod with no special rights, by running a tiny read-only appliance VM (see "VM disks"). Proven on the lab on 22 Oct 2026 (see "Phase 0 results") | A disk opens and a file reads in about 1.5 seconds with KVM, and about 12 seconds without it |
 | Older moments of a VM disk, instantly | Yes, with a small read-only disk server that rebuilds the old view on the fly | New code, the riskiest part of this spec |
 | VM guest file systems that need a key: BitLocker, LUKS | **No.** Without the guest's key nobody can read them, Veeam included | You can only restore the whole disk (works today) |
 | VM guest: ReFS, Storage Spaces, ZFS | **No.** Linux has no safe reader for them | Same: whole disk only. Veeam reads ReFS through a Windows helper. We have none |
@@ -67,7 +67,7 @@ The helper reads the latest copy at `.../pvcs/<volume>` or a moment folder under
 
 A backup of a VM disk is one raw disk. The file systems are inside it, so something must understand partitions, LVM and the guest's file systems, without starting the VM and without root on the node.
 
-**Recommended: a small read-only appliance VM inside the helper pod (libguestfs).** libguestfs is the library that KubeVirt's own `virtctl guestfs` and Red Hat's VM migration tool use. It starts a tiny VM with its own Linux kernel, attaches the disk read-only, and that kernel reads XFS, ext4, btrfs, NTFS (read-only) and LVM. The pod needs **no extra rights**: no privileged mode, no loop devices, no `CAP_SYS_ADMIN`, no FUSE, no host paths. It runs as root only inside its own pod, like today's Jobs, and works under the OpenShift rules if the driver namespace has them (see "OpenShift rules"). With the KVM device (`devices.kubevirt.io/kvm`, the device KubeVirt already uses) the appliance is fast. Without KVM (a ROKS cluster with virtual workers) it works with software emulation, slower. Both are tested in Phase 0.
+**Recommended: a small read-only appliance VM inside the helper pod (libguestfs).** libguestfs is the library that KubeVirt's own `virtctl guestfs` and Red Hat's VM migration tool use. It starts a tiny VM with its own Linux kernel, attaches the disk read-only, and that kernel reads XFS, ext4, btrfs, NTFS (read-only) and LVM. The pod needs **no extra rights**: no privileged mode, no loop devices, no `CAP_SYS_ADMIN`, no FUSE, no host paths. It runs as root only inside its own pod, like today's Jobs, and works under the OpenShift rules if the driver namespace has them (see "OpenShift rules"). With the KVM device (`devices.kubevirt.io/kvm`, the device KubeVirt already uses) the appliance is fast. Without KVM (a ROKS cluster with virtual workers) it works with software emulation, slower. Both were tested in Phase 0 (see "Phase 0 results").
 
 How it is wired:
 1. **A disk server (new code).** The pod starts a read-only disk server in Go that shows the VM disk to the appliance as a network block device on a local socket. For the latest moment it reads `disk.img`. For an older moment it reads `disk.img` and the undo files newer than that moment, newest first, and returns the old contents of each changed block. This is the same rule as `Rewind`, but without writing a copy. No scratch space and no wait, however big the disk is. The server only answers reads; its export is marked read-only.
@@ -81,7 +81,7 @@ Why not the cheaper routes:
 
 **Safety of reading a guest file system.** The disk is read-only at four layers: the NFS mount, the disk server, the appliance's drive flag, and the mount flag. The appliance is thrown away when the session ends. A broken or hostile file system can crash the appliance, not the node. The appliance has no network.
 
-**Dirty file systems.** A backup of a running VM is a crash copy unless the freeze worked (the status says which: `FileSystemConsistent` or crash-consistent). A read-only mount of a crash copy may not be allowed to replay the journal. The helper then mounts with the "do not replay" option (`norecovery` for XFS, `noload` for ext4). The page shows a notice: "this copy was taken while the VM was running; the newest changes may be missing." Phase 0 checks what libguestfs does by itself.
+**Dirty file systems.** A backup of a running VM is a crash copy unless the freeze worked (the status says which: `FileSystemConsistent` or crash-consistent). A read-only mount of a crash copy may not be allowed to replay the journal. The helper then mounts with the "do not replay" option (`norecovery` for XFS, `noload` for ext4). The page shows a notice: "this copy was taken while the VM was running; the newest changes may be missing." Phase 0 showed that a read-only XFS mount with `norecovery` works in the appliance.
 
 **Not read: encrypted and unusual file systems.** If the helper finds BitLocker, LUKS, ReFS, Storage Spaces or ZFS it lists the volume as "cannot be read here" with the reason. Nothing is skipped silently.
 
@@ -135,8 +135,8 @@ A person in namespace B who wants a file from the backup of namespace A, to put 
 | Folder listing page | 1000 entries | Large folders stay fast |
 | Session idle time | 15 min | Frees the pod and the lease |
 | Session hard limit | 2 hours | Stops a forgotten session from holding backups |
-| Open sessions | 5 in the cluster, 2 per namespace | Each VM session needs about 1.5 GiB memory |
-| Helper pod | plain: 200m CPU, 256 MiB; VM guest: 2 CPU, 2 GiB | Appliance memory |
+| Open sessions | 5 in the cluster, 2 per namespace | Each VM session used about 550 MiB in the lab (Phase 0) |
+| Helper pod | plain: 200m CPU, 256 MiB; VM guest: 1 CPU, 1 GiB | Appliance memory (lab peak 550 MiB) |
 | One file download | 50 GiB | Stream, no temporary copy |
 | One restore | 200 GiB or the free space of the target, whichever is less | The Job checks first |
 | Appliance start | 10 minutes, then the session fails with the reason | Software emulation is slow |
@@ -147,7 +147,7 @@ All defaults are Helm values (`backupBrowse.*`) and are listed in `HELM-VALUES.m
 ### 8. User stories
 
 Console:
-1. As a namespace admin, I open **Backups**, pick a policy, see my volumes, pick a volume and a moment, and press **Browse files**. A plain volume opens at once. A VM disk shows "Starting the reader, about 1 to 3 minutes" and then a picker of the disk's file systems.
+1. As a namespace admin, I open **Backups**, pick a policy, see my volumes, pick a volume and a moment, and press **Browse files**. A plain volume opens at once. A VM disk shows "Starting the reader" for a few seconds and then a picker of the disk's file systems.
 2. I click into folders, search the current folder by name, tick files and folders, and press **Download** (one file, or a tar for several) or **Restore to a claim** (new claim, or a folder in an existing one).
 3. I see the status of the restore (copying, done, failed) and a link to the new claim.
 4. A VM backup shows the notice about a crash copy, and a lock icon on volumes that cannot be read, with the reason.
@@ -164,7 +164,8 @@ Command line (`kubectl backup`, same plugin as today):
 - **Plain volume helper:** runs as root in its pod with all capabilities dropped, on a read-only NFS mount. No special rule. It is the same as today's share Jobs.
 - **VM guest helper:** also unprivileged. It asks for the KVM device through the KubeVirt device plugin (`devices.kubevirt.io/kvm: 1`) when the node has it. Without it, no request, and software emulation. It needs a writable `/tmp` and `/var/tmp` (an `emptyDir` with a size limit). It needs no SCC beyond what the driver namespace already allows.
 - **If the driver is installed in a namespace where OpenShift does apply SCCs** (not `kube-system`), the chart ships one SCC, `pool-csi-browse`, that allows running as root with no capabilities and no host access, and the controller gets `use` on it only. The release test checks that this SCC and the pod pass admission.
-- **Image.** The VM helper image is the libguestfs image of OpenShift Virtualization, pinned by digest, with our static Go binary copied in (`CGO_ENABLED=0`). It is not built from UBI: UBI repositories do not have the qemu and libguestfs packages (the same reason the converter pod uses the CentOS image). Phase 0 confirms which image to use and how the controller finds it, as it finds the virt-launcher image today.
+- **Image.** The VM helper image is our own image, built from CentOS Stream 9 with the `libguestfs`, `libguestfs-winsupport` and `guestfs-tools` packages, pinned by digest, with our static Go binary copied in (`CGO_ENABLED=0`). Phase 0 ruled out the libguestfs image of OpenShift Virtualization: it has no NTFS support. It is not built from UBI: UBI repositories do not have the qemu and libguestfs packages (the same reason the converter pod uses the CentOS image).
+- **NTFS rule.** The RHEL and CentOS builds of libguestfs read NTFS only when one of the `virt-` tools runs it (for example `virt-ls` and `virt-cat`). A program that uses the library directly gets "unsupported filesystem type". So the helper reads Windows disks by running `virt-ls` and `virt-cat`, as the packaging intends. It must not pretend to be one of those tools.
 - **Never:** privileged pods, `hostPath`, loop devices, FUSE, or kernel mounts of a guest file system on the node.
 
 ## Tests
@@ -200,13 +201,34 @@ Total: about 4 to 6 weeks of agent work, with the lab as the slowest part (stage
 
 ## Cost and risk
 
-- **Biggest technical risk:** the VM path (phases 5 and 6). It has three new parts: the disk server, the appliance in a pod, and the COS range reads. Phase 0 removes the first doubt early. If the appliance cannot run in a pod on ROVS, the fall-back is a helper that restores one volume to scratch space and then reads it. That does not meet the goal; the gap would be shown to you before we build it.
+- **Biggest technical risk:** the VM path (phases 5 and 6). It has three new parts: the disk server, the appliance in a pod, and the COS range reads. Phase 0 removed the first doubt: the appliance runs in an ordinary pod on ROVS. If that ever changes, the fall-back is a helper that restores one volume to scratch space and then reads it. That does not meet the goal; the gap would be shown to you before we build it.
 - **Security risk:** reading hostile data (a backup of a compromised VM). The appliance is the main defence. For plain volumes the risk is path tricks, handled by handle-based opens and tests.
 - **Backups held back:** a VM session delays that volume's next backup by up to 2 hours. A noisy user could do it repeatedly; the per-namespace limit and the audit trail bound it.
 - **Resources:** each VM session takes about 2 CPU and 2 GiB on a worker for its life. The limit of 5 open sessions bounds it.
 - **COS cost:** reads from COS cost egress and requests. Browsing one file is cheap; browsing a VM disk reads only the blocks the file system asks for, but a first mount reads a lot of metadata. Measured in phase 6 and added here.
 - **New dependencies:** the libguestfs image (pinned, from Red Hat's own OpenShift Virtualization release) and, in phase 6 only, Kopia as a library in the browse binary. Nothing new in the controller.
 - **Time to first value:** the end of phase 2 gives command-line browse and restore of plain volumes.
+
+## Phase 0 results (22 Oct 2026, rovslab-dr-eude)
+
+The test ran in a new namespace, in a pod with no special rights: a random non-root user, all capabilities dropped, no privilege escalation, the default seccomp profile, and only `/tmp` and `/var/tmp` as `emptyDir` folders. The pod asked for the KVM device (`devices.kubevirt.io/kvm: 1`). The workers are bare-metal `bx2d.metal.96x384` nodes, each with the KVM device.
+
+| Check | Result |
+|---|---|
+| The appliance starts in an ordinary pod | Yes. No privileged mode, no host paths, no extra rights |
+| Open a disk, mount read-only and read one file, with KVM | About 1.3 to 1.6 seconds for XFS, ext4 on LVM, and LVM listing |
+| The same without KVM (software only) | About 12 seconds |
+| Memory | The appliance used about 260 MiB; the whole container peaked at about 550 MiB |
+| XFS, ext4, LVM | Read correctly with the OpenShift Virtualization image |
+| NTFS with the OpenShift Virtualization image | **No.** The image has no NTFS support: no `libguestfs-winsupport`, no `ntfs-3g`, and its kernel has no NTFS driver |
+| NTFS with CentOS Stream 9 packages (`libguestfs-winsupport`) | Yes, through `virt-ls` and `virt-cat`. A direct library call is refused by design ("unsupported filesystem type") |
+| `virt-copy-out` and `virt-tar-out` on an NTFS data disk with no operating system | No: they need to find an operating system. Use `virt-ls` and `virt-cat` per file for data disks |
+| Read-only XFS mount with `norecovery` | Works |
+| Disk served over a local socket by `nbdkit -r` | Reads work. A write through it is refused |
+
+What this changes in the spec: the VM path is proven to start quickly; the helper image is our own CentOS Stream 9 image; Windows disks go through the `virt-` tools; the VM helper needs 1 CPU and 1 GiB, not 2 and 2.
+
+Not yet tested: a real Windows disk with BitLocker or a hibernated system, btrfs, and very large disks. Phase 5 covers them.
 
 ## Decisions I made for you
 
@@ -223,12 +245,14 @@ Total: about 4 to 6 weeks of agent work, with the lab as the slowest part (stage
 - Symbolic links in a backup are shown and copied as links and never followed.
 - Defaults: 15 minutes idle, 2 hours hard limit, 5 sessions in the cluster and 2 per namespace, 50 GiB for one download, a listing page of 1000 entries.
 - The browse helper is a separate binary and image. Kopia stays out of the controller. Kopia as a library is allowed in the browse image only.
-- A short spike (phase 0) comes before any VM work, and the VM part is re-stated with a real gap if the spike fails.
+- A short spike (phase 0) came before any VM work. It passed on 22 Oct 2026.
+- The VM helper image is built by us from CentOS Stream 9, because the OpenShift Virtualization libguestfs image cannot read NTFS.
+- Windows disks are read through the `virt-ls` and `virt-cat` tools, which is the use the packaging allows.
 - The Backups pages in the console are built by the backup screens spec (`2026-10-22-console-backup-ui.md`). This work adds the file browser to them.
 - Plain volumes are finished and usable (phases 1 to 4) before VM disks start.
 - No restore of single mail items or database rows (Veeam's application-level explorers). Files and folders only.
 
 ## Needs from you
 
-- **Nothing blocks phases 1 to 4.** Phase 0 needs the lab (ROVS, with bare-metal workers that have KVM) for one to two hours, and a pull of the libguestfs image from the Red Hat registry (the cluster's pull secret should already allow it).
+- **Nothing blocks phases 1 to 4.** Phase 0 is done.
 - Whether phases 5 and 6 (VM disks) must be in the first deployment, or can follow it. I assumed they follow.
