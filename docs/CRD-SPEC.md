@@ -632,8 +632,11 @@ type SubVolumeSpec struct {
     ShareExportPath string `json:"shareExportPath,omitempty"`
 
     // SubPath is the subdirectory path within the share (e.g., "/pvcs/pvc-abc123").
+    // A failover to an earlier restore point uses the folder
+    // "/pvcs/pvc-abc123.rewind-<epoch>"; no other suffix is allowed.
+    // The pattern must equal SubPathPattern.
     // +kubebuilder:validation:Required
-    // +kubebuilder:validation:Pattern=`^/pvcs/pvc-[a-f0-9-]+$`
+    // +kubebuilder:validation:Pattern=`^/pvcs/pvc-[a-f0-9-]+(\.rewind-[0-9]{1,12})?$`
     SubPath string `json:"subPath"`
 
     // RequestedGB is the capacity requested by the PVC.
