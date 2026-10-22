@@ -5,7 +5,7 @@ import { ROUTES } from '../constants';
  * change GUIDE_BASE and the paths here; nothing else needs to change.
  * test/chart/test-doc-links.sh checks that each path and heading exists.
  */
-export const GUIDE_BASE = 'https://github.com/neil1taylor/ibm-vpc-file-pool-csi/blob/main/';
+export const GUIDE_BASE = 'https://github.com/neil1taylor/ibm-vpc-file-pool-csi/blob/main/docs/';
 
 export const SUPPORT_URL = `${GUIDE_BASE}SUPPORT.md`;
 export const DIAGNOSTICS_URL = `${GUIDE_BASE}SUPPORT.md#3-collect-diagnostics-for-a-support-case`;
