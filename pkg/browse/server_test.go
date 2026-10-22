@@ -544,3 +544,23 @@ func TestTooManyListsAtOnce(t *testing.T) {
 		t.Errorf("third list: status %d, want 503", resp.StatusCode)
 	}
 }
+
+func TestInfoReportsTheMoment(t *testing.T) {
+	s, err := NewServer(&fakeTree{}, testToken, Options{Info: Info{Moment: "20261022T100000Z", Latest: false}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	if resp := post(t, ts, "/v1/info", "", map[string]any{}); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("info without a token: %d", resp.StatusCode)
+	}
+	resp := post(t, ts, "/v1/info", testToken, map[string]any{})
+	var got Info
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil || resp.StatusCode != 200 {
+		t.Fatalf("info: %d %v", resp.StatusCode, err)
+	}
+	if got.Moment != "20261022T100000Z" || got.Latest {
+		t.Errorf("info = %+v", got)
+	}
+}
