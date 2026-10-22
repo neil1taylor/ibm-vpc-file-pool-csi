@@ -352,7 +352,6 @@ type fakeLister struct {
 	repo    pool.ExportRepo
 	volume  string
 	pending int
-	image   string
 }
 
 func (f *fakeLister) ListCOS(_ context.Context, _ string, repo pool.ExportRepo, volume string) (bool, pool.COSListing, error) {
