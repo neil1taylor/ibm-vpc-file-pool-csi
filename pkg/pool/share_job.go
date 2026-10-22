@@ -98,6 +98,7 @@ type ShareJobRunner struct {
 	image         string
 	driverImage   string
 	launcherImage string
+	browseImage   string
 }
 
 // SetLauncherImage sets KubeVirt's virt-launcher image, which has qemu-img,
@@ -173,6 +174,19 @@ type jobShape struct {
 	mounts  []corev1.VolumeMount
 	// resources replaces the default limits of the main container.
 	resources *corev1.ResourceRequirements
+	// labels are added to the Job, its pod and the share objects.
+	labels map[string]string
+	// owner, if set, owns the Job, the share PVs and the claims, so that
+	// deleting the owner removes them.
+	owner *metav1.OwnerReference
+	// hardened gives the main container no privilege escalation, no
+	// capabilities and a read-only root file system.
+	hardened bool
+	// session makes a pod that runs once, with a deadline, and never restarts.
+	session        bool
+	activeDeadline int64
+	// readiness is the main container's readiness probe.
+	readiness *corev1.Probe
 }
 
 // folderMount mounts subPath of share number share at at.
@@ -368,15 +382,22 @@ func podSecurityContext(uid int64) *corev1.PodSecurityContext {
 
 func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []ShareMount, shape jobShape) error {
 	labels := map[string]string{shareJobLabel: jobName}
+	for k, v := range shape.labels {
+		labels[k] = v
+	}
+	var owners []metav1.OwnerReference
+	if shape.owner != nil {
+		owners = []metav1.OwnerReference{*shape.owner}
+	}
 	var volumes []corev1.Volume
 	var mounts []corev1.VolumeMount
 
 	for i, share := range shares {
 		name := fmt.Sprintf("%s-s%d", jobName, i)
-		if err := r.ensureSharePV(ctx, name, share, labels, shape.readOnly); err != nil {
+		if err := r.ensureSharePV(ctx, name, share, labels, owners, shape.readOnly); err != nil {
 			return err
 		}
-		if err := r.ensureShareClaim(ctx, name, labels); err != nil {
+		if err := r.ensureShareClaim(ctx, name, labels, owners); err != nil {
 			return err
 		}
 		volName := fmt.Sprintf("share%d", i)
@@ -424,25 +445,41 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 		}}
 	}
 	backoffLimit := shareJobBackoffLimit
+	restart := corev1.RestartPolicyOnFailure
+	var deadline *int64
+	if shape.session {
+		backoffLimit, restart, deadline = 0, corev1.RestartPolicyNever, &shape.activeDeadline
+	}
+	var containerSecurity *corev1.SecurityContext
+	if shape.hardened {
+		containerSecurity = &corev1.SecurityContext{
+			AllowPrivilegeEscalation: boolPtr(false),
+			ReadOnlyRootFilesystem:   boolPtr(true),
+			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+		}
+	}
 	job := &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{Name: jobName, Namespace: r.namespace, Labels: labels},
+		ObjectMeta: metav1.ObjectMeta{Name: jobName, Namespace: r.namespace, Labels: labels, OwnerReferences: owners},
 		Spec: batchv1.JobSpec{
-			BackoffLimit: &backoffLimit,
+			BackoffLimit:          &backoffLimit,
+			ActiveDeadlineSeconds: deadline,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
 					// A Job that opens VM disk files needs no API access.
 					AutomountServiceAccountToken: boolPtr(shape.folders == nil),
-					RestartPolicy:                corev1.RestartPolicyOnFailure,
+					RestartPolicy:                restart,
 					SecurityContext:              podSecurityContext(shape.runAsUser),
 					InitContainers:               initContainers,
 					Containers: []corev1.Container{{
-						Name:         "share-data",
-						Image:        shape.image,
-						Command:      shape.command,
-						Env:          shape.env,
-						Resources:    mainResources,
-						VolumeMounts: mainMounts,
+						Name:            "share-data",
+						Image:           shape.image,
+						Command:         shape.command,
+						Env:             shape.env,
+						Resources:       mainResources,
+						VolumeMounts:    mainMounts,
+						SecurityContext: containerSecurity,
+						ReadinessProbe:  shape.readiness,
 					}},
 					Volumes: volumes,
 				},
@@ -456,13 +493,13 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 	return nil
 }
 
-func (r *ShareJobRunner) ensureSharePV(ctx context.Context, name string, share ShareMount, labels map[string]string, readOnly bool) error {
+func (r *ShareJobRunner) ensureSharePV(ctx context.Context, name string, share ShareMount, labels map[string]string, owners []metav1.OwnerReference, readOnly bool) error {
 	exportPath := share.ExportPath
 	if exportPath == "" {
 		exportPath = "/"
 	}
 	pv := &corev1.PersistentVolume{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels, OwnerReferences: owners},
 		Spec: corev1.PersistentVolumeSpec{
 			Capacity:    corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")},
 			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
@@ -481,10 +518,10 @@ func (r *ShareJobRunner) ensureSharePV(ctx context.Context, name string, share S
 	return nil
 }
 
-func (r *ShareJobRunner) ensureShareClaim(ctx context.Context, name string, labels map[string]string) error {
+func (r *ShareJobRunner) ensureShareClaim(ctx context.Context, name string, labels map[string]string, owners []metav1.OwnerReference) error {
 	emptyClass := ""
 	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: r.namespace, Labels: labels},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: r.namespace, Labels: labels, OwnerReferences: owners},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
 			StorageClassName: &emptyClass,
