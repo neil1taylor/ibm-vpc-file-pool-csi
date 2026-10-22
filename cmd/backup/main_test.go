@@ -208,7 +208,7 @@ func TestIsTerminal_DevNullIsNotATerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if isTerminal(f) {
 		t.Error("/dev/null is a character device but nobody can type an answer there")
 	}
@@ -219,8 +219,8 @@ func TestIsTerminal_PipeIsNotATerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer r.Close()
-	defer w.Close()
+	defer func() { _ = r.Close() }()
+	defer func() { _ = w.Close() }()
 	if isTerminal(r) {
 		t.Error("a pipe is not a terminal")
 	}
