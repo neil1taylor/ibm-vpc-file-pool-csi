@@ -19,6 +19,8 @@ To make a release:
 
 ## [Unreleased]
 
+- **Console: the restore page no longer spins forever without the right to read VolumeSnapshotContents (issue #186).** It now says which right is missing.
+
 - **Console: the delete backups dialog gives an administrator the safe command.** When the user lacks the rights, the dialog now shows `kubectl backup delete --policy <policy> --pvc <namespace>/<name>`, which measures first and asks for the typed claim name. Before, it showed raw YAML that removed the backups with neither step.
 - **The documents moved into `docs/` (issue #116, part 1).** README, CHANGELOG, CONTRIBUTING, CLAUDE.md and SKILL.md stay in the root; every other guide is now in `docs/`, and the research notes are in `docs/archive/`. All links, the console's help links, the docs site and the code comments point to the new places. A branch that still edits a guide at its old place: after `git merge origin/main` stops, run `hack/follow-docs-move.sh` to carry the edits over.
 
