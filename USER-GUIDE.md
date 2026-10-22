@@ -522,6 +522,8 @@ Every clone is asynchronous, whatever the volume size. The PVC binds immediately
 
 ## Volume Group Snapshots
 
+> **Not active (issue #100).** The driver does not act on `VolumeGroupSnapshot` records. The hooks never run and there is no plan to turn them on. The examples below do nothing. A running VM with several disks does not need group snapshots: its snapshots show one moment already (see [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md)).
+
 Group snapshots coordinate the snapshot of multiple related PVCs in a single operation.
 
 ### Creating a Group Snapshot
