@@ -549,6 +549,8 @@ kubectl get snapshots.storage.ibmcloud.io -o json |
 # Find the VolumeSnapshot of each one through its VolumeSnapshotContent, and delete it.
 ```
 
+A `Snapshot` that failed or never finished, and whose VolumeSnapshot is already deleted, is removed by the controller within a few minutes. A `Snapshot` that is ready is never removed this way: delete its VolumeSnapshot.
+
 **Fix:**
 ```bash
 # List SubVolumes in the pool
