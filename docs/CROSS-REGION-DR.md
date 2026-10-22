@@ -294,7 +294,7 @@ Replication cycle with quiesce:
 
 The replication controller is a background goroutine in the CSI controller pod (with leader election) that:
 
-1. Polls `ReplicationPolicy` CRs every 30 seconds.
+1. Polls `ReplicationPolicy` CRs every 30 seconds. A policy starts a cycle when its schedule is due. While a cycle runs, the controller looks at the policy on every poll, and it also watches the Jobs in the driver namespace, so the policy status changes within seconds after a copy Job ends (not at the next scheduled cycle). Pre-sync hooks run once, when the cycle starts; post-sync hooks run once, when it ends.
 2. For each policy, resolves the source `FileSharePool` and its SubVolumes (filtered by label selector).
 3. Determines the replication mode based on the policy spec:
    - **Direct NFS mode** (`destinationNFSServer` set): Creates rsync Jobs that mount both source and destination NFS shares.

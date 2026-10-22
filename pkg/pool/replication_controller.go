@@ -101,6 +101,17 @@ type ReplicationController struct {
 	// in the current cycle. See processPolicy.
 	results map[string]map[string]cycleResult
 
+	// running holds, per policy, when the cycle that is in progress started.
+	// A policy in this map is looked at on every tick, not only when its
+	// schedule is due, so the status follows its Jobs within seconds.
+	running map[string]time.Time
+
+	// kick wakes Run before the next tick. See Kick.
+	kick chan struct{}
+
+	// onProcessed is called after a pass that looked at a policy's Jobs.
+	onProcessed func()
+
 	mu sync.Mutex
 
 	// nowFunc is used for time operations (injectable for tests).
@@ -119,6 +130,8 @@ func NewReplicationController(k8sClient k8s.Client, directClient client.Client, 
 		lastSubVolumeSyncTimes: make(map[string]time.Time),
 		lastReceiverChecks:     make(map[string]time.Time),
 		results:                make(map[string]map[string]cycleResult),
+		running:                make(map[string]time.Time),
+		kick:                   make(chan struct{}, 1),
 		nowFunc:                time.Now,
 	}
 }
@@ -147,6 +160,21 @@ func (rc *ReplicationController) SetInterval(d time.Duration) {
 	rc.interval = d
 }
 
+// Kick asks the controller to look at its policies now instead of at the next
+// tick. It never blocks.
+func (rc *ReplicationController) Kick() {
+	select {
+	case rc.kick <- struct{}{}:
+	default:
+	}
+}
+
+// SetOnProcessed sets a function the controller calls after a pass that
+// looked at a policy's Jobs, so the backup controller can follow at once.
+func (rc *ReplicationController) SetOnProcessed(f func()) {
+	rc.onProcessed = f
+}
+
 // SetNowFunc overrides the time source. Useful for tests.
 func (rc *ReplicationController) SetNowFunc(f func() time.Time) {
 	rc.nowFunc = f
@@ -165,6 +193,8 @@ func (rc *ReplicationController) Run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			rc.processOnce(ctx)
+		case <-rc.kick:
+			rc.processOnce(ctx)
 		}
 	}
 }
@@ -176,6 +206,16 @@ func (rc *ReplicationController) processOnce(ctx context.Context) {
 		klog.ErrorS(err, "Replication controller failed to list policies")
 		return
 	}
+	rc.forgetGonePolicies(policies)
+
+	processed := false
+	defer func() {
+		if processed && rc.onProcessed != nil {
+			rc.onProcessed()
+		}
+	}()
+
+	rc.cleanupOrphanedTempResources(ctx, policies)
 
 	for i := range policies {
 		policy := &policies[i]
@@ -193,6 +233,7 @@ func (rc *ReplicationController) processOnce(ctx context.Context) {
 
 		if annotationPaused {
 			// Pause requested — update status if needed and skip.
+			rc.endCycle(policy.Name)
 			if policy.Status.Phase != "Paused" {
 				policy.Status.Phase = "Paused"
 				if err := rc.k8sClient.UpdateReplicationPolicyStatus(ctx, policy); err != nil {
@@ -229,14 +270,17 @@ func (rc *ReplicationController) processOnce(ctx context.Context) {
 			continue
 		}
 
-		// Check if it's time to sync. Copies of running VM disks move forward
-		// on every tick.
-		if !rc.isDue(policy.Name, scheduleInterval) {
+		// Check if it's time to sync. A cycle in progress is looked at on
+		// every tick, so the status changes soon after its Jobs finish and
+		// not at the next scheduled cycle. Copies of running VM disks move
+		// forward on every tick.
+		if !rc.cycleRunning(policy.Name) && !rc.isDue(policy.Name, scheduleInterval) {
 			rc.advanceVMCopies(ctx, policy)
 			continue
 		}
 
 		// Process this policy (poll-based: create or check Jobs).
+		processed = true
 		rc.processPolicy(ctx, policy)
 	}
 }
@@ -264,6 +308,47 @@ func (rc *ReplicationController) clearCycleResults(policyName string) {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
 	delete(rc.results, policyName)
+}
+
+// cycleRunning reports whether the policy has a cycle in progress.
+func (rc *ReplicationController) cycleRunning(policyName string) bool {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	_, ok := rc.running[policyName]
+	return ok
+}
+
+// beginCycle marks a cycle as in progress and returns when it started. A
+// cycle that is already in progress keeps its start.
+func (rc *ReplicationController) beginCycle(policyName string, now time.Time) (start time.Time, continuing bool) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	if t, ok := rc.running[policyName]; ok {
+		return t, true
+	}
+	rc.running[policyName] = now
+	return now, false
+}
+
+func (rc *ReplicationController) endCycle(policyName string) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	delete(rc.running, policyName)
+}
+
+// forgetGonePolicies drops the cycles of policies that no longer exist.
+func (rc *ReplicationController) forgetGonePolicies(policies []v1alpha1.ReplicationPolicy) {
+	known := make(map[string]bool, len(policies))
+	for i := range policies {
+		known[policies[i].Name] = true
+	}
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	for name := range rc.running {
+		if !known[name] {
+			delete(rc.running, name)
+		}
+	}
 }
 
 // isDue returns true if the policy is due for a replication cycle.
@@ -313,17 +398,22 @@ func (rc *ReplicationController) sortByLastSyncTime(policyName string, svs []v1a
 //   - If Job succeeded → record success, cleanup temp resources
 //   - If Job failed → record failure, cleanup, increment failure count
 func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1alpha1.ReplicationPolicy) {
-	start := rc.nowFunc()
 	policyName := policy.Name
 	sourcePool := policy.Spec.SourcePoolName
+	start, continuing := rc.beginCycle(policyName, rc.nowFunc())
+	// The cycle is in progress again only if it ends with Jobs still running.
+	rc.endCycle(policyName)
 
-	klog.V(2).InfoS("Starting replication cycle",
-		"policy", policyName,
-		"sourcePool", sourcePool,
-	)
-
-	// Always record that we attempted a sync (to prevent tight retry loops).
-	rc.recordSyncTime(policyName)
+	if continuing {
+		klog.V(4).InfoS("Checking the replication cycle in progress", "policy", policyName)
+	} else {
+		klog.V(2).InfoS("Starting replication cycle",
+			"policy", policyName,
+			"sourcePool", sourcePool,
+		)
+		// Always record that we attempted a sync (to prevent tight retry loops).
+		rc.recordSyncTime(policyName)
+	}
 
 	// Set phase to Active if not already.
 	if policy.Status.Phase == "" {
@@ -348,8 +438,8 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 	metrics.ReplicationSubVolumeCount.WithLabelValues(policyName, sourcePool).Set(float64(len(matched)))
 	total := len(matched)
 
-	// 2a. Run pre-sync hooks.
-	if rc.orchestrator != nil && len(policy.Spec.PreSyncHooks) > 0 {
+	// 2a. Run pre-sync hooks, once at the start of a cycle.
+	if !continuing && rc.orchestrator != nil && len(policy.Spec.PreSyncHooks) > 0 {
 		_, hookErr := rc.orchestrator.RunPreHooks(ctx, policy.Spec.PreSyncHooks)
 		if hookErr != nil {
 			rc.handleFailure(ctx, policy, fmt.Sprintf("pre-sync hooks: %v", hookErr), start)
@@ -540,6 +630,9 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 	}
 
 	if !allComplete {
+		rc.mu.Lock()
+		rc.running[policyName] = start
+		rc.mu.Unlock()
 		// Some Jobs still running or deferred — don't count as a fully completed cycle.
 		// However, update LastSyncTime incrementally if any SubVolumes succeeded,
 		// so the policy status reflects progress rather than staying permanently empty.
@@ -1318,6 +1411,70 @@ func (rc *ReplicationController) checkReplicationJob(ctx context.Context, policy
 	}
 
 	return false, false, replJobResult{}, nil // still running
+}
+
+// replicationJobExists reports whether the replication Job of a SubVolume exists.
+func (rc *ReplicationController) replicationJobExists(ctx context.Context, policyName, svName string) (bool, error) {
+	job := &batchv1.Job{}
+	err := rc.directClient.Get(ctx, types.NamespacedName{Namespace: replJobNamespace, Name: replJobName(policyName, svName)}, job)
+	if errors.IsNotFound(err) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// cleanupOrphanedTempResources deletes the temporary Jobs, PVCs and PVs of
+// policies that no longer exist. Deleting a policy while copies are in flight
+// leaves them, and nothing else would remove them.
+func (rc *ReplicationController) cleanupOrphanedTempResources(ctx context.Context, policies []v1alpha1.ReplicationPolicy) {
+	if rc.directClient == nil {
+		return
+	}
+	live := make(map[string]bool, len(policies))
+	for i := range policies {
+		live[policies[i].Name] = true
+	}
+	orphan := func(obj metav1.Object) bool {
+		name, ok := obj.GetLabels()[replPolicyLabel]
+		return ok && !live[name]
+	}
+	sel := client.MatchingLabels{replTempLabel: "true"}
+	ns := client.InNamespace(replJobNamespace)
+	propagation := metav1.DeletePropagationBackground
+
+	jobs := &batchv1.JobList{}
+	if err := rc.directClient.List(ctx, jobs, sel, ns); err != nil {
+		klog.ErrorS(err, "Failed to list temporary replication Jobs")
+	}
+	for i := range jobs.Items {
+		if orphan(&jobs.Items[i]) {
+			if err := rc.directClient.Delete(ctx, &jobs.Items[i], &client.DeleteOptions{PropagationPolicy: &propagation}); err != nil && !errors.IsNotFound(err) {
+				klog.ErrorS(err, "Failed to delete the Job of a deleted replication policy", "job", jobs.Items[i].Name)
+			}
+		}
+	}
+	pvcs := &corev1.PersistentVolumeClaimList{}
+	if err := rc.directClient.List(ctx, pvcs, sel, ns); err != nil {
+		klog.ErrorS(err, "Failed to list temporary replication PVCs")
+	}
+	for i := range pvcs.Items {
+		if orphan(&pvcs.Items[i]) {
+			if err := rc.directClient.Delete(ctx, &pvcs.Items[i]); err != nil && !errors.IsNotFound(err) {
+				klog.ErrorS(err, "Failed to delete the PVC of a deleted replication policy", "pvc", pvcs.Items[i].Name)
+			}
+		}
+	}
+	pvs := &corev1.PersistentVolumeList{}
+	if err := rc.directClient.List(ctx, pvs, sel); err != nil {
+		klog.ErrorS(err, "Failed to list temporary replication PVs")
+	}
+	for i := range pvs.Items {
+		if orphan(&pvs.Items[i]) {
+			if err := rc.directClient.Delete(ctx, &pvs.Items[i]); err != nil && !errors.IsNotFound(err) {
+				klog.ErrorS(err, "Failed to delete the PV of a deleted replication policy", "pv", pvs.Items[i].Name)
+			}
+		}
+	}
 }
 
 // replJobResult is what a finished replication Job reports in its pod's

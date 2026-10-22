@@ -90,6 +90,15 @@ The image runs as user 65532 by default (`USER` in the Dockerfile). The chart se
 
 The default image tag is `v` plus the chart `appVersion`, not `latest`.
 
+### Replication Receiver Transport
+
+The receiver's own TLS (`replicationReceiver.tls.enabled`) is **off by default**. This is a deliberate choice, not an oversight.
+
+- On OpenShift the Route still encrypts the traffic from the source cluster: the router terminates TLS (`edge`) and refuses plain HTTP. The unencrypted part is only the hop from the router to the receiver pod inside the destination cluster.
+- Turning it on needs cert-manager, and the source cluster must trust the receiver certificate (the self-signed default needs a CA Secret on the source). Making it the default would break installs that work today.
+- Turn it on when the receiver is reached without an OpenShift Route (for example a LoadBalancer or Ingress that passes traffic through), or when you do not trust the destination cluster's pod network. See `CROSS-REGION-DR.md`.
+- The receiver also checks a bearer token (compared in constant time, at least 32 characters) and accepts only `pvc-<uuid>` folders. It runs under its own ServiceAccount with no API token.
+
 ### KubeVirt Sidecar Feature Gate
 
 Instant VM snapshots need the KubeVirt `Sidecar` feature gate. The Helm value `vmSnapshots.enableSidecarGate` (off by default) turns it on.

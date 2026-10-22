@@ -73,6 +73,8 @@ type BackupController struct {
 	// policy; exportReported holds the policies that have export metric series.
 	exports        map[string]*exportState
 	exportReported map[string]bool
+	// kick wakes Run before the next tick. See Kick.
+	kick chan struct{}
 	// browseJobs and browse run browse sessions; nil browseJobs means off.
 	browseJobs BrowseJobs
 	browse     BrowseConfig
@@ -83,11 +85,19 @@ type BackupController struct {
 // replication controller does.
 func NewBackupController(c client.Client) *BackupController {
 	return &BackupController{client: c, interval: DefaultBackupInterval, nowFunc: time.Now, reported: map[string]bool{}, usage: map[string]*poolUsage{},
-		exports: map[string]*exportState{}, exportReported: map[string]bool{}}
+		exports: map[string]*exportState{}, exportReported: map[string]bool{}, kick: make(chan struct{}, 1)}
 }
 
 // SetNowFunc replaces the clock (for tests).
 func (bc *BackupController) SetNowFunc(f func() time.Time) { bc.nowFunc = f }
+
+// Kick asks the controller to look at all policies now. It never blocks.
+func (bc *BackupController) Kick() {
+	select {
+	case bc.kick <- struct{}{}:
+	default:
+	}
+}
 
 // Run looks at all BackupPolicies every interval until ctx ends.
 func (bc *BackupController) Run(ctx context.Context) {
@@ -99,6 +109,7 @@ func (bc *BackupController) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		case <-bc.kick:
 		}
 	}
 }

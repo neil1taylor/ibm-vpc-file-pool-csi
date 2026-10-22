@@ -357,6 +357,8 @@ replicationReceiver:
   # TLS configuration for the receiver HTTPS endpoint.
   tls:
     # Enable native TLS on the receiver (certificates provisioned by cert-manager).
+    # Off by default: it needs cert-manager and a CA the source cluster trusts. On OpenShift the
+    # Route already encrypts traffic into the cluster. Turn it on without a Route. See SECURITY.md.
     enabled: false
     # Extra DNS SANs for the receiver TLS certificate (e.g. custom ingress hostnames).
     # On OpenShift, the Route hostname is added automatically via cluster ingress lookup.

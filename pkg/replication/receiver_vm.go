@@ -152,6 +152,9 @@ func (r *Receiver) openVMCall(w http.ResponseWriter, req *http.Request) *vmCall 
 		return nil
 	}
 	dir, err := r.resolveDestPath(q.Get("basePath"), q.Get("subPath"))
+	if err == nil && filepath.Base(dir) != c.sv {
+		err = fmt.Errorf("the destination %q is not the folder of volume %s", dir, c.sv)
+	}
 	if err != nil {
 		c.fail(http.StatusBadRequest, "%v", err)
 		return nil
