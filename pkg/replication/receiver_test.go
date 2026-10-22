@@ -529,10 +529,10 @@ func TestResolveDestPath(t *testing.T) {
 		sub     string
 		wantErr bool
 	}{
-		{"/pvcs", "pvc-abc", false},
+		{"/pvcs", "pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab", false},
 		{"../../etc", "passwd", true},
 		{"/pvcs", "../../../etc/passwd", true},
-		{"/pvcs", "valid-path", false},
+		{"/pvcs", "valid/pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab", false},
 	}
 
 	for _, tt := range tests {
@@ -888,5 +888,148 @@ func TestExtractTar_SymlinkEscapes(t *testing.T) {
 				t.Errorf("file was written outside the dest dir: %s", tt.escaped)
 			}
 		})
+	}
+}
+
+func TestReceiver_Authenticate_EmptyConfiguredTokenRefusesEveryone(t *testing.T) {
+	r := NewReceiver(t.TempDir(), "", ":0")
+	for _, header := range []string{"Bearer ", "Bearer", "Bearer  ", ""} {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+		if header != "" {
+			req.Header.Set("Authorization", header)
+		}
+		if r.authenticate(req) {
+			t.Errorf("header %q was accepted although the receiver has no token", header)
+		}
+	}
+}
+
+func TestReceiver_Authenticate_ExactTokenOnly(t *testing.T) {
+	token := strings.Repeat("a", 40)
+	r := NewReceiver(t.TempDir(), token, ":0")
+	tests := map[string]bool{
+		"Bearer " + token:                   true,
+		"Bearer  " + token + " ":            true, // surrounding spaces are trimmed
+		"Bearer " + token + "b":             false,
+		"Bearer " + token[:39]:              false,
+		"Bearer " + strings.Repeat("b", 40): false,
+		"bearer " + token:                   false,
+		token:                               false,
+		"Bearer " + token + "\x00":          false,
+		"Bearer " + strings.ToUpper(token):  false,
+		"Basic " + token:                    false,
+	}
+	for header, want := range tests {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+		req.Header.Set("Authorization", header)
+		if got := r.authenticate(req); got != want {
+			t.Errorf("authenticate(%q) = %v, want %v", header, got, want)
+		}
+	}
+}
+
+func TestValidateToken(t *testing.T) {
+	if err := ValidateToken(strings.Repeat("x", MinTokenLength)); err != nil {
+		t.Errorf("a token of %d characters was refused: %v", MinTokenLength, err)
+	}
+	for _, bad := range []string{"", "short", strings.Repeat("x", MinTokenLength-1), strings.Repeat("x", 31) + " "} {
+		if err := ValidateToken(bad); err == nil {
+			t.Errorf("token %q was accepted", bad)
+		}
+	}
+}
+
+func TestReceiver_ResolveDestPath_OnlyVolumeFolders(t *testing.T) {
+	r := NewReceiver(t.TempDir(), strings.Repeat("a", 40), ":0")
+	const pv = "pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"
+	for _, ok := range []struct{ base, sub string }{
+		{"/pvcs", "/pvcs/" + pv},
+		{"/pvcs", "/" + pv},
+		{"/dr/site1", "/dr/site1/" + pv},
+	} {
+		if _, err := r.resolveDestPath(ok.base, ok.sub); err != nil {
+			t.Errorf("resolveDestPath(%q, %q) refused: %v", ok.base, ok.sub, err)
+		}
+	}
+	for _, bad := range []struct{ base, sub string }{
+		{"/pvcs", "/pvcs/.snapshots"},
+		{"/pvcs", "/pvcs/other-folder"},
+		{"/pvcs", "/pvcs"},
+		{"/", "/"},
+		{"/pvcs", "/pvcs/" + pv + "/inner"},
+		{"/pvcs", "/pvcs/PVC-a1b2c3d4-5678-90ab-cdef-1234567890ab"},
+	} {
+		if _, err := r.resolveDestPath(bad.base, bad.sub); err == nil {
+			t.Errorf("resolveDestPath(%q, %q) was accepted: only pvc-<uuid> folders may be written", bad.base, bad.sub)
+		}
+	}
+}
+
+func TestReceiver_ResolveDestPath_NoHiddenFolders(t *testing.T) {
+	r := NewReceiver(t.TempDir(), strings.Repeat("a", 40), ":0")
+	const pv = "pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"
+	for _, bad := range []struct{ base, sub string }{
+		{"/.snapshots", "/.snapshots/" + pv},
+		{"/pvcs", "/pvcs/.hidden/" + pv},
+		{"/.pvcs", "/.pvcs/" + pv},
+	} {
+		if _, err := r.resolveDestPath(bad.base, bad.sub); err == nil {
+			t.Errorf("resolveDestPath(%q, %q) was accepted: a folder that starts with a dot may not be written", bad.base, bad.sub)
+		}
+	}
+}
+
+func TestReceiver_Sync_PathMustNameTheVolumeInTheURL(t *testing.T) {
+	r, _ := createTestReceiver(t)
+	body := createTarStream(t, map[string]string{"f": "x"})
+	const urlPV = "pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"
+	const otherPV = "pvc-b2b2b2b2-5678-90ab-cdef-1234567890ab"
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/sync/"+urlPV+"?basePath=/pvcs&subPath=/pvcs/"+otherPV, body)
+	req.Header.Set("Authorization", "Bearer test-token-123")
+	rec := httptest.NewRecorder()
+	r.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400: the subPath names another volume than the URL", rec.Code)
+	}
+}
+
+func TestReceiver_ResolveDestPath_SymlinkedParentCannotLeaveTheBase(t *testing.T) {
+	base := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(base, "pvcs")); err != nil {
+		t.Fatal(err)
+	}
+	r := NewReceiver(base, strings.Repeat("a", 40), ":0")
+	const pv = "pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"
+	if dir, err := r.resolveDestPath("/pvcs", "/pvcs/"+pv); err == nil {
+		t.Errorf("resolveDestPath accepted %q although /pvcs is a symlink to a folder outside the base", dir)
+	}
+}
+
+func TestReceiver_ResolveDestPath_SymlinkInsideTheBaseIsStillRefusedForHiddenTargets(t *testing.T) {
+	base := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(base, ".snapshots"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(base, ".snapshots"), filepath.Join(base, "pvcs")); err != nil {
+		t.Fatal(err)
+	}
+	r := NewReceiver(base, strings.Repeat("a", 40), ":0")
+	const pv = "pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"
+	if dir, err := r.resolveDestPath("/pvcs", "/pvcs/"+pv); err == nil {
+		t.Errorf("resolveDestPath accepted %q although /pvcs is a symlink to .snapshots", dir)
+	}
+}
+
+func TestReceiver_ResolveDestPath_HiddenFoldersRefusedEvenWhenTheBaseIsMissing(t *testing.T) {
+	r := NewReceiver("/nonexistent/receiver/base", strings.Repeat("a", 40), ":0")
+	const pv = "pvc-a1b2c3d4-5678-90ab-cdef-1234567890ab"
+	for _, bad := range []struct{ base, sub string }{
+		{"/.snapshots", "/.snapshots/" + pv},
+		{"/pvcs", "/pvcs/.hidden/" + pv},
+	} {
+		if dir, err := r.resolveDestPath(bad.base, bad.sub); err == nil {
+			t.Errorf("resolveDestPath(%q, %q) accepted %q", bad.base, bad.sub, dir)
+		}
 	}
 }

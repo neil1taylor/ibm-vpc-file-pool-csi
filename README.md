@@ -25,6 +25,36 @@ VPC File Share (1 TB)
 
 This reduces VPC API calls, speeds up PVC provisioning (mkdir vs. 30-90s share creation), and lowers cost by consolidating storage.
 
+## Use cases and status
+
+**Included** means it is in the latest release (the first one to have it is in the Since column) and in the driver today, with its maturity: **GA** (ready for production), **Beta** (tested, may change) or **Experimental** (works in the lab; use only for data you can lose). **In progress** means it is being built. **Proposed** means a spec exists and nothing is built yet. Details are in [FEATURES.md](docs/FEATURES.md).
+
+| Use case | Status | Since | Notes |
+|---|---|---|---|
+| Many volumes on a few shared file shares | Included, GA | v0.1.0 | The core of the driver. A volume is ready in under a second. |
+| A pool grows by itself when it fills | Included, GA | v0.1.0 | New shares are added in the background. Pools are in one zone. |
+| Several pools and speed tiers in one cluster | Included, Beta | v0.2.0 | One StorageClass per pool or tier. |
+| Take a share out of service (drain) | Included, GA | v0.4.0 | From the command line or the console. |
+| VMs from the OpenShift catalog on a pool | Included, Beta | v0.14.0 | The driver raises the memory limit of OpenShift's disk copy pods, which otherwise run out of memory on NFS. |
+| Snapshot and restore one volume | Included, Beta | v0.4.0 | A full copy on the same share. |
+| Snapshot of a running VM, all disks at one moment | Included, Beta | v0.14.0 | A short guest freeze. Red Hat does not support the method. |
+| Instant VM snapshots (no copy) | Included, Experimental | v0.14.0 | Needs a KubeVirt setting that Red Hat does not support. |
+| Clone a volume | Included, Beta | v0.4.0 | |
+| Move volumes from another storage class into a pool | Included, Beta | v0.4.0 | Known bug for normal users on OpenShift (issue #196). |
+| Scheduled backups to a backup pool, with restore points | Included, Experimental | v0.14.0 | Restore and delete from the command line or the console. |
+| A second backup copy in IBM Cloud Object Storage | Included, Experimental | v0.14.0 | Locked bucket; key held in Key Protect. |
+| Browse a backup and restore single files | In progress |  | Spec: [backup-file-restore](docs/specs/2026-10-22-backup-file-restore.md). |
+| Copy volumes to another cluster on a schedule | Included, Beta | v0.5.0 | Direct NFS or HTTPS receiver. |
+| Copy running VMs to another cluster, rewind and fail over | Included, Experimental | v0.14.0 | Restore points; `kubectl failover`. Red Hat does not support the method. |
+| Recover from a replication in the console | In progress |  | Issue #44. |
+| Continuous protection of VMs, recovery point of seconds | Proposed |  | Like Zerto or Veeam CDP. Spec being written. |
+| Survive the loss of a zone | Proposed |  | Spec in PR #199. |
+| Snapshot of a whole pool | Proposed |  | Spec in PR #198. |
+| Metrics and alerts | Included, GA | v0.2.0 | On OpenShift, user workload monitoring must be on ([MONITORING.md](docs/MONITORING.md)). |
+| OpenShift console pages | Included, Beta | v0.12.0 | Pools, volumes, snapshots, replication, backups, monitoring, with help on each card and column. |
+| Group snapshots (`VolumeGroupSnapshot`) | Not active |  | The code exists; nothing acts on it. A VM snapshot already gives one moment for all its disks. |
+| Golden image syncer | Hidden |  | Use the standard OpenShift catalog instead. |
+
 ## Architecture
 
 ```

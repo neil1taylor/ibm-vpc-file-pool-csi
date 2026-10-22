@@ -3,6 +3,8 @@ package replication
 import (
 	"archive/tar"
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -209,6 +211,9 @@ func (r *Receiver) handleSync(w http.ResponseWriter, req *http.Request) {
 	}
 
 	destDir, err := r.resolveDestPath(destBasePath, subPath)
+	if err == nil && filepath.Base(destDir) != svName {
+		err = fmt.Errorf("the destination %q is not the folder of volume %s", destDir, svName)
+	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -288,6 +293,9 @@ func (r *Receiver) handleMetadata(w http.ResponseWriter, req *http.Request) {
 	}
 
 	destDir, err := r.resolveDestPath(destBasePath, subPath)
+	if err == nil && filepath.Base(destDir) != svName {
+		err = fmt.Errorf("the destination %q is not the folder of volume %s", destDir, svName)
+	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -355,7 +363,33 @@ func (r *Receiver) authenticate(req *http.Request) bool {
 	if !strings.HasPrefix(auth, prefix) {
 		return false
 	}
-	return strings.TrimSpace(auth[len(prefix):]) == r.authToken
+	// An empty configured token must never match an empty header token.
+	if r.authToken == "" {
+		return false
+	}
+	// Compare digests in constant time, so the time taken does not show how
+	// much of a guessed token was right.
+	got := sha256.Sum256([]byte(strings.TrimSpace(auth[len(prefix):])))
+	want := sha256.Sum256([]byte(r.authToken))
+	return subtle.ConstantTimeCompare(got[:], want[:]) == 1
+}
+
+// MinTokenLength is the shortest bearer token the receiver accepts. A token
+// from `openssl rand -hex 32` has 64 characters.
+const MinTokenLength = 32
+
+// ValidateToken checks that a bearer token is long enough and has no space or
+// control character.
+func ValidateToken(token string) error {
+	if len(token) < MinTokenLength {
+		return fmt.Errorf("the token has %d characters; use at least %d, for example `openssl rand -hex 32`", len(token), MinTokenLength)
+	}
+	for _, c := range token {
+		if c <= ' ' || c == 0x7f {
+			return fmt.Errorf("the token contains a space or control character")
+		}
+	}
+	return nil
 }
 
 // extractSubVolumeName extracts and validates the SubVolume name from the URL path.
@@ -404,7 +438,69 @@ func (r *Receiver) resolveDestPath(basePath, subPath string) (string, error) {
 		return "", fmt.Errorf("resolved path %q escapes base path %q", cleanDest, cleanBase)
 	}
 
+	// The receiver writes volume folders only. A token holder must not be able
+	// to write anywhere else under the base path, for example .snapshots.
+	if !subVolumeNamePattern.MatchString(filepath.Base(cleanDest)) {
+		return "", fmt.Errorf("the destination %q is not a pvc-<uuid> folder", cleanDest)
+	}
+	// No folder on the way may start with a dot (.snapshots and the like).
+	if err := checkNoDotFolders(cleanBase, cleanDest); err != nil {
+		return "", err
+	}
+	// No folder on the way may be a symlink to somewhere else. This runs on the
+	// real path of the deepest folder that exists.
+	if err := checkRealDest(cleanBase, cleanDest); err != nil {
+		return "", err
+	}
+
 	return cleanDest, nil
+}
+
+// checkRealDest resolves the symlinks in dest (as far as dest exists) and
+// checks that the real path is under the real base path and that no folder
+// below the base starts with a dot.
+func checkRealDest(base, dest string) error {
+	realBase, err := filepath.EvalSymlinks(base)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil // nothing below a missing base can be a symlink
+	}
+	if err != nil {
+		return fmt.Errorf("the receiver's base path is not usable: %w", err)
+	}
+	// Find the deepest part of dest that exists, and resolve it.
+	existing, tail := dest, ""
+	for {
+		if _, statErr := os.Lstat(existing); statErr == nil {
+			break
+		}
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			return fmt.Errorf("no part of %q exists", dest)
+		}
+		tail = filepath.Join(filepath.Base(existing), tail)
+		existing = parent
+	}
+	realExisting, err := filepath.EvalSymlinks(existing)
+	if err != nil {
+		return fmt.Errorf("resolving %q: %w", existing, err)
+	}
+	realDest := filepath.Join(realExisting, tail)
+	if realDest != realBase && !strings.HasPrefix(realDest, realBase+"/") {
+		return fmt.Errorf("the destination %q leads outside the base path through a symlink", dest)
+	}
+	return checkNoDotFolders(realBase, realDest)
+}
+
+// checkNoDotFolders refuses a destination that has a folder starting with a dot
+// below the base path.
+func checkNoDotFolders(base, dest string) error {
+	rel := strings.TrimPrefix(strings.TrimPrefix(dest, base), "/")
+	for _, part := range strings.Split(rel, "/") {
+		if strings.HasPrefix(part, ".") {
+			return fmt.Errorf("the destination %q has a folder that starts with a dot", dest)
+		}
+	}
+	return nil
 }
 
 // extractTar reads a tar stream and extracts files to destDir.
