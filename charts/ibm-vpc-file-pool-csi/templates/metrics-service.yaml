@@ -6,6 +6,10 @@ metadata:
   labels:
     {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
     app.kubernetes.io/component: controller
+  {{- if eq .Values.webhook.certProvider "openshift" }}
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-metrics-certs
+  {{- end }}
 spec:
   type: ClusterIP
   ports:
