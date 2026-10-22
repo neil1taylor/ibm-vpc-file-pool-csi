@@ -23,6 +23,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"golang.org/x/term"
+
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/pool"
 
@@ -87,10 +89,11 @@ func main() {
 }
 
 // stdinIsTerminal says if a person can type an answer.
-func stdinIsTerminal() bool {
-	fi, err := os.Stdin.Stat()
-	return err == nil && fi.Mode()&os.ModeCharDevice != 0
-}
+func stdinIsTerminal() bool { return isTerminal(os.Stdin) }
+
+// isTerminal says if f is a terminal. A character device is not enough:
+// /dev/null is one, and scripts and CI often run with it as input.
+func isTerminal(f *os.File) bool { return term.IsTerminal(int(f.Fd())) }
 
 func printUsage(w io.Writer) {
 	_, _ = fmt.Fprint(w, `kubectl-backup — backups of volumes and VMs

@@ -47,14 +47,22 @@ func (r *ShareJobRunner) MeasureBackup(ctx context.Context, key string, share Sh
 	if err := checkBackupFolders(backupPath, momentsPath); err != nil {
 		return false, 0, err
 	}
+	// One du run over both folders: each moment of a plain volume is a folder
+	// of hard links to the backup folder's files, and a single run counts each
+	// file once.
 	script := fmt.Sprintf(`set -eu
-total=0
+set --
 for d in "/share0%s" "/share0%s"; do
   if [ -d "$d" ]; then
-    kb=$(du -sk "$d" | cut -f1)
-    total=$((total + kb))
+    set -- "$@" "$d"
   fi
 done
+total=0
+if [ "$#" -gt 0 ]; then
+  for kb in $(du -sk "$@" | cut -f1); do
+    total=$((total + kb))
+  done
+fi
 echo "$total" > /dev/termination-log
 `, backupPath, momentsPath)
 	done, msg, err := r.runMessage(ctx, key, []ShareMount{share}, r.scriptShape(script))
