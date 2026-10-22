@@ -256,3 +256,8 @@ export function backupRestoreProgress(br: BackupRestore | undefined): BackupRest
       return { state: 'waiting', title: 'Restoring: the request is starting', text: status?.message || 'The driver has not started the restore yet.' };
   }
 }
+
+/** The JSON patch that suspends or resumes a policy. "add" also replaces, so it works with or without the field. */
+export function suspendPatch(suspend: boolean): Array<{ op: 'add'; path: string; value: boolean }> {
+  return [{ op: 'add', path: '/spec/suspend', value: suspend }];
+}

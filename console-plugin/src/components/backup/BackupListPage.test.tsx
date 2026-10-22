@@ -1,6 +1,6 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
-import { useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { k8sPatch, useAccessReview, useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk';
 import BackupListPage from './BackupListPage';
 
 jest.mock('react-router-dom', () => ({
@@ -9,7 +9,7 @@ jest.mock('react-router-dom', () => ({
 
 const ago = (hours: number) => new Date(Date.now() - hours * 3600 * 1000).toISOString();
 
-const policies = [
+const makePolicies = () => [
   {
     metadata: { name: 'nightly' },
     spec: { snapshotPool: 'snaps', schedule: '6h', keepFor: '14d', selector: {}, export: { bucket: 'b' } },
@@ -33,7 +33,13 @@ const policies = [
   },
 ];
 
+let policies = makePolicies();
+
 beforeEach(() => {
+  jest.clearAllMocks();
+  policies = makePolicies();
+  (useAccessReview as jest.Mock).mockReturnValue([true, false]);
+  (k8sPatch as jest.Mock).mockResolvedValue({});
   (useK8sWatchResource as jest.Mock).mockImplementation((req: unknown) => [req ? policies : undefined, true, undefined]);
 });
 
@@ -81,5 +87,58 @@ describe('BackupListPage', () => {
     (useK8sWatchResource as jest.Mock).mockImplementation(() => [[], true, undefined]);
     render(<BackupListPage />);
     expect(screen.getByText('No BackupPolicies found')).toBeTruthy();
+  });
+});
+
+describe('BackupListPage actions', () => {
+  const openMenu = (policyName: string) => {
+    const row = screen.getByRole('link', { name: policyName }).closest('tr')!;
+    fireEvent.click(within(row).getByRole('button', { name: 'Kebab toggle' }));
+  };
+
+  it('has a create link', () => {
+    render(<BackupListPage />);
+    expect(screen.getByText('Create BackupPolicy')).toBeTruthy();
+  });
+
+  it('has Edit, Suspend and Delete in the menu of a row', () => {
+    render(<BackupListPage />);
+    openMenu('nightly');
+    expect(screen.getByRole('link', { name: 'Edit' }).getAttribute('href')).toBe('/vpc-file-pools/backups/nightly/edit');
+    expect(screen.getByRole('menuitem', { name: 'Suspend' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeTruthy();
+  });
+
+  it('suspends a policy with a patch of spec.suspend', async () => {
+    render(<BackupListPage />);
+    openMenu('nightly');
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Suspend' }));
+    await waitFor(() => expect(k8sPatch).toHaveBeenCalledTimes(1));
+    const arg = (k8sPatch as jest.Mock).mock.calls[0][0];
+    expect(arg.data).toEqual([{ op: 'add', path: '/spec/suspend', value: true }]);
+    expect(arg.resource.metadata.name).toBe('nightly');
+  });
+
+  it('offers Resume for a suspended policy', () => {
+    policies[0].status.phase = 'Suspended';
+    (policies[0].spec as { suspend?: boolean }).suspend = true;
+    render(<BackupListPage />);
+    openMenu('nightly');
+    expect(screen.getByRole('menuitem', { name: 'Resume' })).toBeTruthy();
+  });
+
+  it('asks before it deletes, and says the backups stay', () => {
+    render(<BackupListPage />);
+    openMenu('nightly');
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+    expect(screen.getByText(/backups already made stay/i)).toBeTruthy();
+  });
+
+  it('turns the changing actions off, and names the rights, without the rights', () => {
+    (useAccessReview as jest.Mock).mockReturnValue([false, false]);
+    render(<BackupListPage />);
+    openMenu('nightly');
+    expect(screen.getByRole('menuitem', { name: /Suspend.*update BackupPolicy/ })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: /Delete.*delete BackupPolicy/ })).toBeTruthy();
   });
 });

@@ -13,6 +13,7 @@ import {
   policyProblem,
   restorePath,
   restoreRequestName,
+  suspendPatch,
   stalestBackupAge,
   validateBackupRestore,
 } from './backup-helpers';
@@ -342,5 +343,12 @@ describe('backupRestoreProgress', () => {
   it('says so when the moment is not known', () => {
     const done = backupRestoreProgress({ metadata: { name: 'r' }, spec: {} as never, status: { phase: 'Done' } });
     expect(done.text).toMatch(/not known/);
+  });
+});
+
+describe('suspendPatch', () => {
+  it('sets spec.suspend with a JSON patch that works whether or not the field is there', () => {
+    expect(suspendPatch(true)).toEqual([{ op: 'add', path: '/spec/suspend', value: true }]);
+    expect(suspendPatch(false)).toEqual([{ op: 'add', path: '/spec/suspend', value: false }]);
   });
 });
