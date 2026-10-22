@@ -19,14 +19,29 @@ spec:
         app.kubernetes.io/component: controller
     spec:
       serviceAccountName: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-controller
+      {{- $podSC := deepCopy (.Values.controller.podSecurityContext | default dict) }}
+      {{- $fixedIDs := or (not (.Capabilities.APIVersions.Has "security.openshift.io/v1")) (eq .Release.Namespace "kube-system") }}
+      {{- if and $fixedIDs (not (hasKey $podSC "fsGroup")) }}
+      {{- $_ := set $podSC "fsGroup" 65532 }}
+      {{- end }}
+      {{- $sidecarSC := deepCopy (.Values.controller.sidecarSecurityContext | default dict) }}
+      {{- if and $fixedIDs (not (hasKey $sidecarSC "runAsUser")) }}
+      {{- $_ := set $sidecarSC "runAsUser" 65532 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml $podSC | nindent 8 }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       containers:
         - name: csi-controller
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ include "ibm-vpc-file-pool-csi.driverImage" . }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.controller.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           args:
             - "--mode=controller"
             - "--endpoint=unix:///csi/csi.sock"
@@ -48,9 +63,9 @@ spec:
             - "--golden-image-sync-interval={{ .Values.goldenImageSyncer.interval }}"
             {{- end }}
             - "--cdi-copy-pod-memory-limit={{ .Values.cdi.copyPodMemoryLimit }}"
-            - "--driver-image={{ .Values.image.repository }}:{{ .Values.image.tag }}"
+            - "--driver-image={{ include "ibm-vpc-file-pool-csi.driverImage" . }}"
             {{- if .Values.backupBrowse.enabled }}
-            - "--browse-image={{ .Values.backupBrowse.image.repository }}:{{ .Values.backupBrowse.image.tag | default .Values.image.tag }}"
+            - "--browse-image={{ .Values.backupBrowse.image.repository }}:{{ .Values.backupBrowse.image.tag | default (include "ibm-vpc-file-pool-csi.imageTag" .) }}"
             {{- if .Values.imagePullSecrets }}
             - "--browse-image-pull-secrets={{ range $i, $s := .Values.imagePullSecrets }}{{ if $i }},{{ end }}{{ $s.name }}{{ end }}"
             {{- end }}
@@ -149,6 +164,10 @@ spec:
 
         - name: csi-provisioner
           image: {{ .Values.sidecars.provisioner.image }}
+          {{- with $sidecarSC }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           args:
             - "--csi-address=/csi/csi.sock"
             - "--feature-gates=Topology=true"
@@ -174,6 +193,10 @@ spec:
 
         - name: csi-resizer
           image: {{ .Values.sidecars.resizer.image }}
+          {{- with $sidecarSC }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           args:
             - "--csi-address=/csi/csi.sock"
             - "--leader-election"
@@ -196,6 +219,10 @@ spec:
 
         - name: csi-snapshotter
           image: {{ .Values.sidecars.snapshotter.image }}
+          {{- with $sidecarSC }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           args:
             - "--csi-address=/csi/csi.sock"
             - "--leader-election"
@@ -218,6 +245,10 @@ spec:
 
         - name: liveness-probe
           image: {{ .Values.sidecars.liveness.image }}
+          {{- with $sidecarSC }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           args:
             - "--csi-address=/csi/csi.sock"
           {{- with .Values.sidecars.liveness.resources }}
@@ -231,6 +262,10 @@ spec:
         {{- if .Values.secretProvider.managed }}
         - name: storage-secret-sidecar
           image: {{ .Values.secretProvider.sidecar.image }}
+          {{- with $sidecarSC }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           args:
             - "--endpoint=$(ENDPOINT)"
           env:

@@ -15,10 +15,10 @@ Verify the CSI driver is running:
 
 ```bash
 # Controller pod (6/6 Running)
-oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi -l app.kubernetes.io/component=controller
+oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller
 
 # Node pods (2/2 Running on each schedulable node)
-oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi -l app.kubernetes.io/component=node
+oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node
 
 # CSI Driver registered
 oc get csidriver vpc-file-pool.csi.ibm.io
@@ -119,11 +119,13 @@ Expected:
 ```yaml
 # tiered-pool-standard
 parameters:
+  permissions: "0755"
   pool: tiered-pool
   tier: standard
 
 # tiered-pool-premium
 parameters:
+  permissions: "0755"
   pool: tiered-pool
   tier: premium
 ```
@@ -195,10 +197,15 @@ pvc-bbbb...   tiered-pool   r010-premium-..    5      premium-data    pool-tutor
 The share IDs will differ because each tier has its own set of VPC file shares. Confirm the tier field in the pool status:
 
 ```bash
-oc get filesharepool tiered-pool -o yaml | grep -A8 "shares:"
+oc get filesharepool tiered-pool -o jsonpath='{range .status.shares[*]}{.shareName} tier={.tier}{"\n"}{end}'
 ```
 
-You should see two shares, each with a different `tier` value (`standard` and `premium`).
+Expected:
+
+```
+tiered-pool-standard-share-1 tier=standard
+tiered-pool-premium-share-1 tier=premium
+```
 
 ### Step 1e: Verify Pool Capacity
 
@@ -646,6 +653,8 @@ Expected:
     drainStartedAt: "2026-02-25T..."
 ```
 
+While a share drains, the pool phase is `Degraded`. This is by design: a draining share counts as not fully healthy. The phase returns to `Ready` after you remove the share from `spec.drainShares`.
+
 Check the share state changed to `draining`:
 
 ```bash
@@ -700,10 +709,9 @@ for pvc in ${DRAIN_PVCS}; do
 done
 ```
 
-Wait a few seconds for SubVolume cascades, then check the drain status:
+Then check the drain status. The status changes on the next pool reconcile, which can take a few minutes, so repeat the command until `drained` is `true`:
 
 ```bash
-sleep 5
 oc get filesharepool expand-pool -o yaml | grep -A15 "drainStatus:"
 ```
 

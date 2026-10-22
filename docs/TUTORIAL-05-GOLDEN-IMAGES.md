@@ -17,10 +17,10 @@ Verify the CSI driver is running:
 
 ```bash
 # Controller pod (6/6 Running)
-oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi -l app.kubernetes.io/component=controller
+oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller
 
 # Node pods (3/3 Running on each schedulable node)
-oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi -l app.kubernetes.io/component=node
+oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node
 
 # CSI Driver registered
 oc get csidriver vpc-file-pool.csi.ibm.io
@@ -362,7 +362,11 @@ NAME                               PHASE       PROGRESS   RESTARTS   AGE
 golden-centos-stream9-image-cron   Succeeded   100.0%                1m
 ```
 
-On rovslab, a CentOS Stream 9 import took about 40 seconds.
+On rovslab, a CentOS Stream 9 import took from 40 seconds to 5 minutes. The progress can stay near 99% for a few minutes while CDI finishes the image.
+
+`imageFilter: [centos]` is a substring match, so it also picks up `centos-stream10-image-cron`. You get two DataVolumes, PVCs and Templates (`centos-stream9-nfs-pool` and `centos-stream10-nfs-pool`). Use `centos-stream9` as the filter to get only one.
+
+The pool status and the Template of an image appear on the next syncer cycle after its DataVolume succeeds. With two images, one can show `Syncing` for a few minutes after the other is `Ready`. Run the next steps with a Template that exists.
 
 If the phase is `Failed`, run `oc describe dv golden-centos-stream9-image-cron -n ${TUTORIAL_NS}` to see the events. To retry, delete the DataVolume. The syncer makes a new one on the next cycle.
 

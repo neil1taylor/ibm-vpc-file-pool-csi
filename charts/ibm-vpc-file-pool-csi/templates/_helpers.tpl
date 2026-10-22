@@ -63,6 +63,22 @@ its hook Jobs can be installed there.
 {{- end }}
 
 {{/*
+Driver image tag: image.tag, or "v" plus the chart appVersion when it is empty.
+Never "latest": that tag moves under a running release.
+*/}}
+{{- define "ibm-vpc-file-pool-csi.imageTag" -}}
+{{- .Values.image.tag | default (printf "v%s" .Chart.AppVersion) -}}
+{{- end }}
+
+{{- define "ibm-vpc-file-pool-csi.driverImage" -}}
+{{ .Values.image.repository }}:{{ include "ibm-vpc-file-pool-csi.imageTag" . }}
+{{- end }}
+
+{{- define "ibm-vpc-file-pool-csi.consolePluginImage" -}}
+{{ .Values.consolePlugin.image.repository }}:{{ .Values.consolePlugin.image.tag | default (printf "v%s" .Chart.AppVersion) }}
+{{- end }}
+
+{{/*
 "true" when the alerts and scraping go in the monitoring namespace that
 OpenShift's user workload monitoring reads. Platform monitoring reads only
 namespaces labelled openshift.io/cluster-monitoring=true, and Red Hat says not

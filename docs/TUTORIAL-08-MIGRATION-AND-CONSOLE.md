@@ -15,10 +15,10 @@ Verify the CSI driver is running:
 
 ```bash
 # Controller pod (6/6 Running)
-oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi -l app.kubernetes.io/component=controller
+oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller
 
 # Node pods (2/2 Running on each schedulable node)
-oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi -l app.kubernetes.io/component=node
+oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node
 
 # CSI Driver registered
 oc get csidriver vpc-file-pool.csi.ibm.io
@@ -215,7 +215,7 @@ PVCs found:         1
 Total size:         10 GiB
 
 NAME              SIZE (GiB)  PHASE   SHARE ID        PODS
-legacy-app-data   10          Bound   r010-xxxxxxxx   (none)
+legacy-app-data   10          Bound   r010-xxxxxxxx#r010-yyyyyyyy   (none)
 
 To migrate a PVC, run:
   kubectl migrate execute --namespace pool-tutorial-ops --pvc <PVC_NAME> --target-pool ops-pool --target-storage-class <POOL_SC>
@@ -253,6 +253,8 @@ Expected output:
 [dry-run] Would create migration pod pool-tutorial-ops/migrate-legacy-app-data
 [dry-run] Would rsync data from legacy-app-data to legacy-app-data-pooled
 [dry-run] Source PVC would NOT be deleted
+
+SUCCESS: dry-run completed
 ```
 
 ---
@@ -275,7 +277,13 @@ kubectl migrate execute \
 - Uses rsync to copy all data from the source PVC to the target PVC, then compares file counts
 - Reports success when the copy completes
 
-Watch the migration pod progress:
+The command waits for the new PVC, starts the pod, streams the rsync log, and ends with the `SUCCESS` line:
+
+```
+SUCCESS: Migration completed in 27s. New PVC: pool-tutorial-ops/legacy-app-data-pooled. Update your workloads to use the new PVC, then delete the old PVC when ready.
+```
+
+If you stop the command early, or run it in another terminal, watch the migration pod with:
 
 ```bash
 kubectl migrate status --namespace ${TUTORIAL_NS}
@@ -284,8 +292,8 @@ kubectl migrate status --namespace ${TUTORIAL_NS}
 Expected output during migration:
 
 ```
-POD                              SOURCE PVC       TARGET PVC            PHASE      STARTED
-migrate-legacy-app-data-xxxxx    legacy-app-data  legacy-app-data-pooled  Running    2026-02-25 10:30:15
+POD                         SOURCE PVC       TARGET PVC              PHASE      STARTED
+migrate-legacy-app-data     legacy-app-data  legacy-app-data-pooled  Running    2026-02-25 10:30:15
 ```
 
 Wait for the phase to show `Succeeded`:
@@ -302,10 +310,8 @@ kubectl migrate status --namespace ${TUTORIAL_NS}
 Expected output on completion:
 
 ```
-POD                              SOURCE PVC       TARGET PVC            PHASE       STARTED
-migrate-legacy-app-data-xxxxx    legacy-app-data  legacy-app-data-pooled  Succeeded   2026-02-25 10:30:15
-
-SUCCESS: Migration completed in 42s. New PVC: pool-tutorial-ops/legacy-app-data-pooled. Update your workloads to use the new PVC, then delete the old PVC when ready.
+POD                         SOURCE PVC       TARGET PVC              PHASE      STARTED
+migrate-legacy-app-data     legacy-app-data  legacy-app-data-pooled  Succeeded  2026-02-25 10:30:15
 ```
 
 ### Verify Data Integrity
