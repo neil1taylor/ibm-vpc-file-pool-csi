@@ -796,6 +796,8 @@ kubectl get replicationpolicy <name> -o jsonpath='{.status.phase}{"\n"}{.status.
 
 - Phase `Paused` with the annotation `storage.ibmcloud.io/paused: "true"` was paused by a person. Remove it with `kubectl annotate replicationpolicy <name> storage.ibmcloud.io/paused-`.
 - A high `consecutiveFailures` with a `lastError` is a failing copy. The error names the cause (for example the destination is not reachable).
+- A volume error "apply Job was gone before its result was read" means the finished apply Job was deleted (its time limit is 10 minutes) before the controller read it, for example after a long pause. The controller runs the Job again by itself and the copy finishes on the next cycle. No action is needed.
+- Deleting a policy while copies run removes their temporary Jobs, PVCs and PVs in `kube-system` within one controller cycle.
 - Check the destination, then look at the controller log for the policy name.
 
 ---

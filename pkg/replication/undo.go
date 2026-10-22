@@ -620,6 +620,42 @@ func pruneUndo(v *volume, cutoff time.Time) error {
 	return nil
 }
 
+// CopyApplied reports whether the disk already shows the copy that opts
+// describes, so a run whose staging file is gone can count as done. It is
+// true if a restore point records a change to opts.To. For a first copy
+// (opts.From is zero) it is also true if the disk exists and has no undo
+// files at all, since a first copy makes the disk in one step and leaves none.
+func CopyApplied(disk string, opts ApplyOptions) (bool, error) {
+	v, err := openVolume(disk)
+	if err != nil {
+		return false, err
+	}
+	defer v.close()
+	if _, err = v.diskInfo(); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	files, err := appliedUndo(v)
+	if err != nil {
+		return false, err
+	}
+	for _, u := range files {
+		if u.hdr.to.Equal(opts.To) {
+			return true, nil
+		}
+	}
+	if !opts.From.IsZero() {
+		return false, nil
+	}
+	entries, err := v.undoEntries()
+	if err != nil {
+		return false, err
+	}
+	return len(entries) == 0, nil
+}
+
 // RestorePoints lists the moments the disk can be rewound to, oldest first.
 // The latest copy, in the disk itself, is not included.
 func RestorePoints(disk string) ([]time.Time, error) {

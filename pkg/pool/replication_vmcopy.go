@@ -356,7 +356,7 @@ func (rc *ReplicationController) advanceVMCopy(ctx context.Context, policy *v1al
 
 	case vmCopyPhaseSending:
 		allDone := true
-		var failedNames, wrongBase []string
+		var failedNames, wrongBase, gone []string
 		results := make([]replJobResult, len(g.members))
 		for i, sv := range g.members {
 			done, ok, jr, err := rc.checkReplicationJob(ctx, policy.Name, sv.Name)
@@ -366,6 +366,13 @@ func (rc *ReplicationController) advanceVMCopy(ctx context.Context, policy *v1al
 			}
 			if !done {
 				allDone = false
+				// The Job was made when the copy moved to Sending. If it is
+				// missing now, it finished and expired (or was deleted)
+				// before its result was read. Running it again is safe:
+				// the apply step sees that the disk already shows the copy.
+				if exists, gerr := rc.replicationJobExists(ctx, policy.Name, sv.Name); gerr == nil && !exists {
+					gone = append(gone, sv.Name)
+				}
 				// Recreate anything that went missing; this does nothing if
 				// the Job exists.
 				if err := rc.createVMApplyResources(ctx, policy, sv, g.states[i], prev[sv.Name].CopyMoment); err != nil {
@@ -383,7 +390,12 @@ func (rc *ReplicationController) advanceVMCopy(ctx context.Context, policy *v1al
 			results[i] = jr
 		}
 		if !allDone {
-			keep("")
+			note := ""
+			if len(gone) > 0 {
+				note = fmt.Sprintf("apply Job was gone before its result was read (%s); running it again", strings.Join(gone, ", "))
+				klog.InfoS("VM disk apply Job missing; running it again", "policy", policy.Name, "vm", klog.KRef(ns, st.VMIName), "copy", st.ID, "subVolumes", gone)
+			}
+			keep(note)
 			return
 		}
 		// The new change list becomes the base only when every disk of the VM

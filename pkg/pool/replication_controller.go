@@ -172,6 +172,8 @@ func (rc *ReplicationController) processOnce(ctx context.Context) {
 		return
 	}
 
+	rc.cleanupOrphanedTempResources(ctx, policies)
+
 	for i := range policies {
 		policy := &policies[i]
 
@@ -1305,6 +1307,70 @@ func (rc *ReplicationController) checkReplicationJob(ctx context.Context, policy
 	}
 
 	return false, false, replJobResult{}, nil // still running
+}
+
+// replicationJobExists reports whether the replication Job of a SubVolume exists.
+func (rc *ReplicationController) replicationJobExists(ctx context.Context, policyName, svName string) (bool, error) {
+	job := &batchv1.Job{}
+	err := rc.directClient.Get(ctx, types.NamespacedName{Namespace: replJobNamespace, Name: replJobName(policyName, svName)}, job)
+	if errors.IsNotFound(err) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// cleanupOrphanedTempResources deletes the temporary Jobs, PVCs and PVs of
+// policies that no longer exist. Deleting a policy while copies are in flight
+// leaves them, and nothing else would remove them.
+func (rc *ReplicationController) cleanupOrphanedTempResources(ctx context.Context, policies []v1alpha1.ReplicationPolicy) {
+	if rc.directClient == nil {
+		return
+	}
+	live := make(map[string]bool, len(policies))
+	for i := range policies {
+		live[policies[i].Name] = true
+	}
+	orphan := func(obj metav1.Object) bool {
+		name, ok := obj.GetLabels()[replPolicyLabel]
+		return ok && !live[name]
+	}
+	sel := client.MatchingLabels{replTempLabel: "true"}
+	ns := client.InNamespace(replJobNamespace)
+	propagation := metav1.DeletePropagationBackground
+
+	jobs := &batchv1.JobList{}
+	if err := rc.directClient.List(ctx, jobs, sel, ns); err != nil {
+		klog.ErrorS(err, "Failed to list temporary replication Jobs")
+	}
+	for i := range jobs.Items {
+		if orphan(&jobs.Items[i]) {
+			if err := rc.directClient.Delete(ctx, &jobs.Items[i], &client.DeleteOptions{PropagationPolicy: &propagation}); err != nil && !errors.IsNotFound(err) {
+				klog.ErrorS(err, "Failed to delete the Job of a deleted replication policy", "job", jobs.Items[i].Name)
+			}
+		}
+	}
+	pvcs := &corev1.PersistentVolumeClaimList{}
+	if err := rc.directClient.List(ctx, pvcs, sel, ns); err != nil {
+		klog.ErrorS(err, "Failed to list temporary replication PVCs")
+	}
+	for i := range pvcs.Items {
+		if orphan(&pvcs.Items[i]) {
+			if err := rc.directClient.Delete(ctx, &pvcs.Items[i]); err != nil && !errors.IsNotFound(err) {
+				klog.ErrorS(err, "Failed to delete the PVC of a deleted replication policy", "pvc", pvcs.Items[i].Name)
+			}
+		}
+	}
+	pvs := &corev1.PersistentVolumeList{}
+	if err := rc.directClient.List(ctx, pvs, sel); err != nil {
+		klog.ErrorS(err, "Failed to list temporary replication PVs")
+	}
+	for i := range pvs.Items {
+		if orphan(&pvs.Items[i]) {
+			if err := rc.directClient.Delete(ctx, &pvs.Items[i]); err != nil && !errors.IsNotFound(err) {
+				klog.ErrorS(err, "Failed to delete the PV of a deleted replication policy", "pv", pvs.Items[i].Name)
+			}
+		}
+	}
 }
 
 // replJobResult is what a finished replication Job reports in its pod's

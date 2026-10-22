@@ -914,3 +914,88 @@ func TestVMCopy_PlainVolumeIsCopiedAgainWhileTheVMAlwaysCopies(t *testing.T) {
 		t.Fatal("expected a new Job for the plain volume in the third cycle")
 	}
 }
+
+// The apply Job has a TTL. If the controller was paused for longer, the
+// finished Job is gone before its result is read (#160). The copy must say so,
+// run the Job again, and finish.
+func TestVMCopy_ApplyJobGoneBeforeResultIsRead(t *testing.T) {
+	e := newVMCopyEnv(t)
+	e.tick()
+	e.cop.state = vmcopy.Done
+	e.tick()
+	for _, sv := range []string{vmGuardSV1, vmGuardSV2} {
+		if err := e.dc.Delete(e.ctx, e.job(t, sv)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	e.tick()
+	for _, sv := range []string{vmGuardSV1, vmGuardSV2} {
+		s := e.status(t, sv)
+		if s.VMCopy == nil || s.VMCopy.Phase != "Sending" {
+			t.Fatalf("%s VMCopy = %+v, want still Sending", sv, s.VMCopy)
+		}
+		if !strings.Contains(s.LastError, "apply Job was gone") {
+			t.Errorf("%s LastError = %q, want a message that the apply Job was gone and runs again", sv, s.LastError)
+		}
+		if e.job(t, sv) == nil {
+			t.Errorf("expected the apply Job for %s to be made again", sv)
+		}
+	}
+
+	e.succeedJobs(t)
+	e.tick()
+	for _, sv := range []string{vmGuardSV1, vmGuardSV2} {
+		s := e.status(t, sv)
+		if s.VMCopy != nil || s.LastSyncTime == nil || s.LastError != "" {
+			t.Errorf("%s status = %+v, want the copy finished with no error", sv, s)
+		}
+	}
+}
+
+func (e *vmCopyEnv) tempObjectCount(t *testing.T) int {
+	t.Helper()
+	sel := client.MatchingLabels{replTempLabel: "true"}
+	jobs, pvcs, pvs := &batchv1.JobList{}, &corev1.PersistentVolumeClaimList{}, &corev1.PersistentVolumeList{}
+	for _, l := range []client.ObjectList{jobs, pvcs, pvs} {
+		if err := e.dc.List(e.ctx, l, sel); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return len(jobs.Items) + len(pvcs.Items) + len(pvs.Items)
+}
+
+// Deleting a policy while copies are in flight must not leave the temporary
+// Jobs, PVCs and PVs behind (#160).
+func TestVMCopy_PolicyDeletedCleansTemporaryResources(t *testing.T) {
+	e := newVMCopyEnv(t)
+	e.tick()
+	e.cop.state = vmcopy.Done
+	e.tick()
+	if n := e.tempObjectCount(t); n == 0 {
+		t.Fatal("expected temporary resources while the apply Job is in flight")
+	}
+
+	if err := e.k.DeleteReplicationPolicy(e.ctx, e.policy); err != nil {
+		t.Fatal(err)
+	}
+	e.tick()
+	if n := e.tempObjectCount(t); n != 0 {
+		t.Errorf("%d temporary resources left after the policy was deleted", n)
+	}
+}
+
+func TestVMCopy_CleanupKeepsResourcesOfOtherPolicies(t *testing.T) {
+	e := newVMCopyEnv(t)
+	e.tick()
+	e.cop.state = vmcopy.Done
+	e.tick()
+	before := e.tempObjectCount(t)
+
+	other := newTestReplicationPolicy("other", "prod-pool", "1h")
+	e.k.addPolicy(other)
+	e.tick()
+	if n := e.tempObjectCount(t); n != before {
+		t.Errorf("temporary resources = %d, want %d: a live policy's resources must stay", n, before)
+	}
+}
