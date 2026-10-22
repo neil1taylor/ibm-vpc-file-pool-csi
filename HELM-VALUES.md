@@ -51,6 +51,8 @@ Settings for the CSI node agent DaemonSet (runs on every worker node).
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `node.kubeletDir` | string | `/var/data/kubelet` | Kubelet root directory. ROKS/ROVS/IKS uses `/var/data/kubelet` (the real path). Standard Kubernetes uses `/var/lib/kubelet` |
+| `node.metricsPort` | int | `9810` | Port of the node agent's HTTPS metrics endpoint (per-share used bytes, NFS latency and IOPS). Its certificate follows `webhook.certProvider` (`manual` needs the secret `<release>-ibm-vpc-file-pool-csi-node-metrics-certs`). The node agent uses the host network, so the port must be free on the node. `0` turns the endpoint, its Service and its ServiceMonitor off |
+| `node.shareStatsInterval` | string | `30s` | How often the node agent reads the NFS statistics of its shares |
 | `node.registrarHealthPort` | int | `9809` | Port for the node-driver-registrar health endpoint. Must not conflict with other hostNetwork services. Stock IBM VPC file CSI uses 9808 |
 | `node.resources.requests.cpu` | string | `50m` | Node agent CPU request |
 | `node.resources.requests.memory` | string | `64Mi` | Node agent memory request |
@@ -169,6 +171,13 @@ Prometheus metrics and alerting configuration.
 | `metrics.port` | int | `8080` | Port for the `/metrics` endpoint |
 | `metrics.serviceMonitor.enabled` | bool | `true` | Create a Prometheus ServiceMonitor. The chart creates it only when the cluster has the `monitoring.coreos.com/v1` API. The console plugin's charts need it |
 | `metrics.serviceMonitor.interval` | string | `30s` | Scrape interval for the ServiceMonitor |
+| `metrics.scraper.serviceAccount` | string | `prometheus-k8s` | Service account bound to the chart's `metrics-reader` ClusterRole (`get` on `/metrics`) so it can scrape the node agents. Empty creates no binding |
+| `metrics.scraper.namespace` | string | `openshift-monitoring` | Namespace of that service account |
+| `metrics.alerts.shareUsedWarning` | int | `85` | Percent of one share's size written (real used bytes) that triggers a warning |
+| `metrics.alerts.shareUsedCritical` | int | `95` | Percent of one share's size written that triggers a critical alert |
+| `metrics.alerts.nfsLatencySeconds` | number | `0.1` | Average seconds per NFS read or write request on one share that triggers a warning |
+| `metrics.alerts.nfsMinOpsPerSecond` | number | `1` | The latency alert is judged only while the share does at least this many read or write requests a second |
+| `metrics.alerts.shareIOPSWarning` | int | `0` | Read plus write operations a second on one share (all nodes) that trigger a warning. `0` turns the alert off |
 | `metrics.alerts.enabled` | bool | `true` | Create the PrometheusRule (only when the cluster has the Prometheus Operator API) |
 | `metrics.alerts.allocationFailuresPerSecond` | number | `0.1` | Failed volume allocations per second that trigger a critical alert |
 | `metrics.alerts.allocationP99Seconds` | number | `5` | P99 allocation time in seconds that triggers a warning |

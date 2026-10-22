@@ -1,14 +1,23 @@
 {{- if .Values.node.metricsPort }}
+{{- $svc := printf "%s-node-metrics" (include "ibm-vpc-file-pool-csi.fullname" .) }}
+{{- $secret := printf "%s-certs" $svc }}
 # The node agents serve per-share used bytes and NFS latency and IOPS over HTTPS.
 # They have no other Service, so this headless one gives the ServiceMonitor its endpoints.
+# The certificate comes from webhook.certProvider, as for the webhooks: "openshift" asks
+# the service CA, "cert-manager" makes a Certificate, "manual" needs a secret of that
+# name (tls.crt, tls.key, ca.crt) made by you. The ServiceMonitor checks it.
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-node-metrics
+  name: {{ $svc }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
     app.kubernetes.io/component: node
+  {{- if eq .Values.webhook.certProvider "openshift" }}
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: {{ $secret }}
+  {{- end }}
 spec:
   clusterIP: None
   ports:
@@ -38,9 +47,46 @@ spec:
       interval: {{ .Values.metrics.serviceMonitor.interval }}
       scheme: https
       bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
-      # The node agent makes its own certificate; callers are checked by token.
       tlsConfig:
-        insecureSkipVerify: true
+        serverName: {{ $svc }}.{{ .Release.Namespace }}.svc
+        {{- if eq .Values.webhook.certProvider "openshift" }}
+        caFile: /etc/prometheus/configmaps/serving-certs-ca-bundle/service-ca.crt
+        {{- else }}
+        ca:
+          secret:
+            name: {{ $secret }}
+            key: ca.crt
+        {{- end }}
+{{- end }}
+{{- if eq .Values.webhook.certProvider "cert-manager" }}
+{{- if not .Values.webhook.certManager.issuerName }}
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $svc }}-selfsigned
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+{{- end }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $svc }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+spec:
+  secretName: {{ $secret }}
+  dnsNames:
+    - {{ $svc }}.{{ .Release.Namespace }}.svc
+    - {{ $svc }}.{{ .Release.Namespace }}.svc.cluster.local
+  issuerRef:
+    kind: {{ default "Issuer" .Values.webhook.certManager.issuerKind }}
+    name: {{ default (printf "%s-selfsigned" $svc) .Values.webhook.certManager.issuerName }}
 {{- end }}
 ---
 # Whoever scrapes the node agents needs "get" on /metrics.

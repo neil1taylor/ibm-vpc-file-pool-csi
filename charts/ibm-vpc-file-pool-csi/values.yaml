@@ -186,6 +186,16 @@ metrics:
     utilizationCritical: 95
     # One share, in percent of its size allocated to PVCs
     shareUtilizationWarning: 90
+    # One share, in percent of its size written (real used bytes, from the node agents)
+    shareUsedWarning: 85
+    shareUsedCritical: 95
+    # NFS requests on one share (read or write): average seconds per request.
+    # Judged only while the share does at least nfsMinOpsPerSecond requests a second.
+    nfsLatencySeconds: 0.1
+    nfsMinOpsPerSecond: 1
+    # Read and write operations a second on one share, all nodes together.
+    # 0 turns the alert off. Set it near the IOPS of the share profile.
+    shareIOPSWarning: 0
     # Failed volume allocations per second
     allocationFailuresPerSecond: 0.1
     # Slowest 1% of volume allocations, in seconds

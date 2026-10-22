@@ -59,6 +59,37 @@ check "node metrics Service: selects the node pods" "$(has 'component: node' "$S
 check "node metrics Service: port 9810" "$(has 'port: 9810' "$SVC")"
 check "port 0: no node metrics Service" "$([ -z "$(render --set node.metricsPort=0 | awk 'BEGIN{RS="---\n"} /kind: Service\n/ && /-node-metrics\n/ {print}')" ] && echo yes || echo no)"
 
+# The scraper sends its own token, so it must check who answers: the certificate has to be
+# one it can verify, for every certificate provider. Never skip the check.
+SVCNAME="test-ibm-vpc-file-pool-csi-node-metrics"
+SECRET="test-ibm-vpc-file-pool-csi-node-metrics-certs"
+for provider in cert-manager openshift manual; do
+    OUT="$(render --api-versions "$SM_API" --set webhook.certProvider=$provider --set webhook.caBundle=Q0E=)"
+    SM="$(node_sm <<<"$OUT")"
+    DSP="$(node_doc <<<"$OUT")"
+    check "$provider: ServiceMonitor does not skip certificate checks" "$([ "$(has 'insecureSkipVerify' "$SM")" = no ] && echo yes || echo no)"
+    check "$provider: ServiceMonitor checks the Service name" "$(has "serverName: $SVCNAME.kube-system.svc" "$SM")"
+    check "$provider: node agent reads its certificate from the secret" "$(has "secretName: $SECRET" "$DSP")"
+    check "$provider: node agent gets --node-metrics-cert-dir" "$(has '--node-metrics-cert-dir=/etc/node-metrics-certs' "$DSP")"
+done
+
+OUT="$(render --api-versions "$SM_API" --set webhook.certProvider=openshift)"
+check "openshift: Service asks the service CA for a certificate" "$(has "service.beta.openshift.io/serving-cert-secret-name: $SECRET" "$OUT")"
+check "openshift: ServiceMonitor trusts the service CA bundle" "$(has 'caFile: /etc/prometheus/configmaps/serving-certs-ca-bundle/service-ca.crt' "$(node_sm <<<"$OUT")")"
+check "openshift: no cert-manager Certificate for the node metrics" "$([ "$(has "$SVCNAME" "$(awk 'BEGIN{RS="---\n"} /kind: Certificate/ {print}' <<<"$OUT")")" = no ] && echo yes || echo no)"
+
+OUT="$(render --api-versions "$SM_API")"
+check "cert-manager: Certificate for the Service name" "$(has "$SVCNAME.kube-system.svc" "$(awk 'BEGIN{RS="---\n"} /kind: Certificate/ {print}' <<<"$OUT")")"
+check "cert-manager: ServiceMonitor trusts ca.crt of the secret" "$(has "name: $SECRET" "$(node_sm <<<"$OUT")")"
+check "cert-manager: no OpenShift annotation on the node metrics Service" "$([ "$(has 'serving-cert-secret-name: '$SECRET "$OUT")" = no ] && echo yes || echo no)"
+
+OUT="$(render --api-versions "$SM_API" --set webhook.certProvider=manual --set webhook.caBundle=Q0E=)"
+check "manual: no Certificate for the node metrics" "$([ "$(has "$SVCNAME" "$(awk 'BEGIN{RS="---\n"} /kind: Certificate/ {print}' <<<"$OUT")")" = no ] && echo yes || echo no)"
+check "manual: ServiceMonitor trusts ca.crt of the secret" "$(has "name: $SECRET" "$(node_sm <<<"$OUT")")"
+
+# Port 0: no certificate mount either.
+check "port 0: no certificate volume" "$([ "$(has "$SECRET" "$(render --set node.metricsPort=0 | node_doc)")" = no ] && echo yes || echo no)"
+
 # The node agent checks the caller's token and rights, so it may create TokenReviews and
 # SubjectAccessReviews; the scraper's role may get /metrics.
 NODEROLE="$(render | awk 'BEGIN{RS="---\n"} /kind: ClusterRole\n/ && /-node\n/ {print}')"

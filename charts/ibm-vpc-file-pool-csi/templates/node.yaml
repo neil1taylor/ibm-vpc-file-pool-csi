@@ -41,6 +41,7 @@ spec:
             {{- if .Values.node.metricsPort }}
             - "--node-metrics-addr=:{{ .Values.node.metricsPort }}"
             - "--share-stats-interval={{ .Values.node.shareStatsInterval }}"
+            - "--node-metrics-cert-dir=/etc/node-metrics-certs"
             {{- else }}
             - "--node-metrics-addr="
             {{- end }}
@@ -83,6 +84,11 @@ spec:
             - name: kubelet-dir
               mountPath: {{ .Values.node.kubeletDir }}
               mountPropagation: Bidirectional
+            {{- if .Values.node.metricsPort }}
+            - name: metrics-certs
+              mountPath: /etc/node-metrics-certs
+              readOnly: true
+            {{- end }}
 
         - name: node-driver-registrar
           image: {{ .Values.sidecars.registrar.image }}
@@ -119,6 +125,11 @@ spec:
           hostPath:
             path: {{ .Values.node.kubeletDir }}/plugins_registry
             type: Directory
+        {{- if .Values.node.metricsPort }}
+        - name: metrics-certs
+          secret:
+            secretName: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-node-metrics-certs
+        {{- end }}
       {{- with .Values.node.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

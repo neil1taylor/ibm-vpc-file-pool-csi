@@ -2,12 +2,21 @@ package nodemetrics
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -66,7 +75,7 @@ func TestSecureServer_RefusesUnauthenticatedAndUnauthorised(t *testing.T) {
 	addr := l.Addr().String()
 	_ = l.Close()
 
-	srv, err := NewSecureServer(addr, cfg, hc)
+	srv, err := NewSecureServer(addr, "", cfg, hc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,5 +117,84 @@ func TestSecureServer_RefusesUnauthenticatedAndUnauthorised(t *testing.T) {
 	code, body := get("good")
 	if code != http.StatusOK || !strings.Contains(body, "vpc_file_pool_share_used_bytes") {
 		t.Errorf("good token: want 200 with metrics, got %d", code)
+	}
+}
+
+// writeCert makes a CA and a certificate for dnsName in dir (tls.crt, tls.key)
+// and returns a pool holding the CA.
+func writeCert(t *testing.T, dir, dnsName string) *x509.CertPool {
+	t.Helper()
+	caKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	caTmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "test-ca"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), IsCA: true,
+		KeyUsage: x509.KeyUsageCertSign, BasicConstraintsValid: true}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caCert, _ := x509.ParseCertificate(caDER)
+
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: dnsName}, DNSNames: []string{dnsName},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, caCert, &key.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyDER, _ := x509.MarshalECPrivateKey(key)
+	must := func(err error) {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	must(os.WriteFile(filepath.Join(dir, "tls.crt"), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600))
+	must(os.WriteFile(filepath.Join(dir, "tls.key"), pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600))
+	pool := x509.NewCertPool()
+	pool.AddCert(caCert)
+	return pool
+}
+
+func TestSecureServer_UsesTheGivenCertificate(t *testing.T) {
+	api := fakeAPI(t)
+	defer api.Close()
+	cfg := &rest.Config{Host: api.URL}
+	hc, err := rest.HTTPClientFor(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	pool := writeCert(t, dir, "node-metrics.kube-system.svc")
+
+	l, _ := net.Listen("tcp", "127.0.0.1:0")
+	addr := l.Addr().String()
+	_ = l.Close()
+	srv, err := NewSecureServer(addr, dir, cfg, hc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Start(ctx) }()
+
+	// A client that checks the certificate against the CA and the service name,
+	// as Prometheus does, must be able to connect.
+	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{RootCAs: pool, ServerName: "node-metrics.kube-system.svc", MinVersion: tls.VersionTLS12}}}
+	var resp *http.Response
+	for i := 0; i < 50; i++ {
+		req, _ := http.NewRequest(http.MethodGet, "https://"+addr+"/metrics", nil)
+		req.Header.Set("Authorization", "Bearer good")
+		if resp, err = client.Do(req); err == nil {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("verified TLS connection failed: %v", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("want 200, got %d", resp.StatusCode)
 	}
 }

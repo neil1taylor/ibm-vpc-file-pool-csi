@@ -65,6 +65,7 @@ func main() {
 
 		// Node mode metrics flags.
 		nodeMetricsAddr    string
+		nodeMetricsCertDir string
 		shareStatsInterval time.Duration
 
 		// Receiver mode flags.
@@ -126,6 +127,7 @@ func main() {
 	flag.StringVar(&vmSnapshots.method, "vm-snapshot-method", "auto", "Snapshots of VM disks: auto (instant where the KubeVirt Sidecar feature gate is on) or copy (never instant)")
 	flag.StringVar(&vmSnapshots.launcherImage, "virt-launcher-image", "", "KubeVirt virt-launcher image for VM disk snapshot Jobs; empty reads it from virt-operator")
 	flag.StringVar(&nodeMetricsAddr, "node-metrics-addr", ":9810", "Listen address of the node agent's metrics endpoint (per-share used bytes and NFS latency and IOPS); empty turns it off (node mode)")
+	flag.StringVar(&nodeMetricsCertDir, "node-metrics-cert-dir", "", "Directory with tls.crt and tls.key for the node metrics endpoint; empty makes a self-signed certificate (node mode)")
 	flag.DurationVar(&shareStatsInterval, "share-stats-interval", 30*time.Second, "How often the node agent reads the NFS statistics of its shares (node mode)")
 	flag.BoolVar(&webhooks.enabled, "enable-webhooks", true, "Serve the validating admission webhooks (needs a serving certificate)")
 	flag.IntVar(&webhooks.port, "webhook-port", 9443, "Port of the admission webhook server")
@@ -203,7 +205,7 @@ func main() {
 	case "enable-sidecar-gate":
 		runEnableSidecarGate()
 	default:
-		runNode(endpoint, nodeID, mode, nodeMetricsAddr, shareStatsInterval)
+		runNode(endpoint, nodeID, mode, nodeMetricsAddr, nodeMetricsCertDir, shareStatsInterval)
 	}
 }
 
@@ -658,7 +660,7 @@ func runCheckReceiver(endpoint, authTokenFile, caCertFile string) {
 	}
 }
 
-func runNode(endpoint, nodeID, mode, metricsAddr string, statsInterval time.Duration) {
+func runNode(endpoint, nodeID, mode, metricsAddr, metricsCertDir string, statsInterval time.Duration) {
 	scheme := runtime.NewScheme()
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
 		klog.ErrorS(err, "Failed to add CRD types to scheme")
@@ -682,7 +684,7 @@ func runNode(endpoint, nodeID, mode, metricsAddr string, statsInterval time.Dura
 	k8sClient := k8s.NewClient(ctrlClient)
 
 	if metricsAddr != "" {
-		startShareMetrics(metricsAddr, statsInterval, restConfig, k8sClient)
+		startShareMetrics(metricsAddr, metricsCertDir, statsInterval, restConfig, k8sClient)
 	}
 
 	d, err := driver.NewDriver(driver.Config{
@@ -708,13 +710,13 @@ func runNode(endpoint, nodeID, mode, metricsAddr string, statsInterval time.Dura
 // node on addr over HTTPS, in the background. Callers need a token that the API
 // server accepts and may "get" /metrics. If it cannot start it logs and carries
 // on: missing metrics must not stop volumes from mounting.
-func startShareMetrics(addr string, interval time.Duration, restConfig *rest.Config, k8sClient k8s.Client) {
+func startShareMetrics(addr, certDir string, interval time.Duration, restConfig *rest.Config, k8sClient k8s.Client) {
 	httpClient, err := rest.HTTPClientFor(restConfig)
 	if err != nil {
 		klog.ErrorS(err, "Cannot serve node metrics; continuing without them")
 		return
 	}
-	srv, err := nodemetrics.NewSecureServer(addr, restConfig, httpClient)
+	srv, err := nodemetrics.NewSecureServer(addr, certDir, restConfig, httpClient)
 	if err != nil {
 		klog.ErrorS(err, "Cannot serve node metrics; continuing without them")
 		return
