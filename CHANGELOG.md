@@ -19,6 +19,8 @@ To make a release:
 
 ## [Unreleased]
 
+- **Migrating a claim works for a user with only the edit role (issue #196).** The copy pod (`kubectl migrate execute` and the console page "Migrate volumes into a pool") ran `apk add rsync` at start, which fails for the random user id that OpenShift gives a normal user. It now uses the OpenShift `tools` image (`openshift/tools:latest` in the cluster's registry), which already holds rsync, and it follows the restricted rules (no user id set, no extra rights, all capabilities dropped). The copy runs as the namespace's user, so it no longer sets owners or folder times: the new files belong to that user. The release test for the console migrate page no longer grants the `anyuid` right.
+
 - **Replication receiver TLS stays off by default; the reason is now written down (issue #89).** Turning it on needs cert-manager and a trusted CA on the source cluster, so a new default would break working installs. On OpenShift the Route already encrypts traffic into the cluster. See `SECURITY.md`. All other items of #89 and #90 were already done.
 - **README: a table of every use case and its status** (included with its maturity, in progress, proposed, not active).
 
