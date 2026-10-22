@@ -84,6 +84,10 @@ rules:
   - apiGroups: ["storage.ibmcloud.io"]
     resources: ["*"]
     verbs: ["get", "list", "watch"]
+  # cluster-reader does not cover snapshot contents, and the restore page waits for them.
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshotcontents"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
