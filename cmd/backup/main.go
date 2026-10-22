@@ -122,7 +122,7 @@ Delete flags:
   restore of the volume may be running. It removes the volume's backup folder and
   its earlier moments from the snapshot pool's share, after showing how much.
 
-cos-setup flags (run on your machine; it needs no cluster; it never deletes anything):
+cos-setup flags (run on your machine; it needs no cluster; it deletes only the instance-wide policy that IBM Cloud adds for the new HMAC key):
   --region, --resource-group, --bucket   Where to make the bucket (required)
   --root-key        CRN of the Key Protect root key that wraps the backup key (required; not made here)
   --vpc-crn, --admin-address   The cluster VPC and your admin addresses (comma separated), for a new CBR zone.

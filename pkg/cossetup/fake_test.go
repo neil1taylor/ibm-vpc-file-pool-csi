@@ -31,6 +31,9 @@ type fakeCloud struct {
 	// broadPolicyOnKey makes a new resource key add a policy on the whole
 	// instance to the service ID, as a service key might.
 	broadPolicyOnKey bool
+	// hideKeySecret makes a read of an existing resource key leave out the
+	// credentials, as IBM Cloud does not show an HMAC secret a second time.
+	hideKeySecret bool
 }
 
 type fakeBucket struct {
@@ -122,6 +125,9 @@ func (f *fakeCloud) resourceController(w http.ResponseWriter, r *http.Request, i
 	case r.URL.Path == "/rc/v2/resource_keys" && r.Method == http.MethodGet:
 		var out []any
 		if k, ok := f.keys[r.URL.Query().Get("name")]; ok {
+			if f.hideKeySecret {
+				k = map[string]any{"id": k["id"], "name": k["name"]}
+			}
 			out = append(out, k)
 		}
 		jsonOut(w, 200, map[string]any{"resources": out})
@@ -133,9 +139,11 @@ func (f *fakeCloud) resourceController(w http.ResponseWriter, r *http.Request, i
 		f.keys[nameOf(in)] = k
 		if f.broadPolicyOnKey {
 			f.policies = append(f.policies, map[string]any{"id": f.id("pol"), "type": "access",
-				"subjects":  []any{map[string]any{"attributes": []any{map[string]any{"name": "iam_id", "value": "iam-ServiceId-1"}}}},
-				"roles":     []any{map[string]any{"role_id": "crn:v1:bluemix:public:iam::::serviceRole:Writer"}},
-				"resources": []any{map[string]any{"attributes": []any{map[string]any{"name": "serviceName", "value": "cloud-object-storage"}}}}})
+				"subjects": []any{map[string]any{"attributes": []any{map[string]any{"name": "iam_id", "value": "iam-ServiceId-1"}}}},
+				"roles":    []any{map[string]any{"role_id": "crn:v1:bluemix:public:iam::::serviceRole:Writer"}},
+				"resources": []any{map[string]any{"attributes": []any{
+					map[string]any{"name": "serviceName", "value": "cloud-object-storage"},
+					map[string]any{"name": "serviceInstance", "value": in["source"]}}}}})
 		}
 		jsonOut(w, 201, k)
 	default:
@@ -184,6 +192,16 @@ func (f *fakeCloud) iam(w http.ResponseWriter, r *http.Request, in map[string]an
 		in["id"] = f.id("pol")
 		f.policies = append(f.policies, in)
 		jsonOut(w, 201, in)
+	case strings.HasPrefix(r.URL.Path, "/iam/v1/policies/") && r.Method == http.MethodDelete:
+		id := strings.TrimPrefix(r.URL.Path, "/iam/v1/policies/")
+		for i, pol := range f.policies {
+			if pol["id"] == id {
+				f.policies = append(f.policies[:i], f.policies[i+1:]...)
+				w.WriteHeader(204)
+				return
+			}
+		}
+		http.NotFound(w, r)
 	default:
 		http.NotFound(w, r)
 	}
