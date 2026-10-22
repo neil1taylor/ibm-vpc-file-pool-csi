@@ -54,7 +54,7 @@ export function parseNamespaces(text: string): string[] {
 }
 
 /** A keep time in milliseconds: a whole number of days such as "30d", or a Go duration. Undefined if it is neither. */
-function keepForMs(value: string): number | undefined {
+export function keepForMs(value: string): number | undefined {
   const days = value.match(/^(\d+)d$/);
   return days ? parseInt(days[1], 10) * DAY_MS : parseGoDuration(value);
 }

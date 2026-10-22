@@ -8,6 +8,10 @@ jest.mock('react-router-dom', () => ({
   useHistory: () => ({ push: mockPush }),
   Link: ({ to, children }: { to: string; children: React.ReactNode }) => <a href={to}>{children}</a>,
 }));
+jest.mock('./ExportSetupGuide', () => ({
+  __esModule: true,
+  default: ({ policy }: { policy: { metadata: { name: string } } }) => <div>Setup guide for {policy.metadata.name}</div>,
+}));
 let mockProps: { repo?: { bucket: string; prefix: string }; unavailable?: string; onPick?: (v: string, m: string) => void } = {};
 jest.mock('./COSContents', () => ({
   __esModule: true,
@@ -95,5 +99,13 @@ describe('BackupCOSTab', () => {
     expect(screen.getByText(/does not export to COS/)).toBeTruthy();
     expect(screen.getByText('COS contents for nothing')).toBeTruthy();
     expect(mockProps.unavailable).toMatch(/does not export to COS/);
+  });
+
+  it('has the setup guide, whether or not the policy exports', () => {
+    const { unmount } = render(<BackupCOSTab policy={policy()} />);
+    expect(screen.getByText('Setup guide for nightly')).toBeTruthy();
+    unmount();
+    render(<BackupCOSTab policy={policy(false)} />);
+    expect(screen.getByText('Setup guide for nightly')).toBeTruthy();
   });
 });
