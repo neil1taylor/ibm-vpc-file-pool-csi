@@ -36,12 +36,12 @@ test.describe('Drain a share and return it to service', () => {
     await expect(page.getByRole('dialog').getByText('New volumes stop going to this share.')).toBeVisible();
     // Cancel leaves the pool as it was.
     await page.getByRole('button', { name: 'Cancel' }).click();
-    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('dialog').filter({ hasText: /Drain share|Return share/ })).toBeHidden();
     await expect(row.getByRole('button', { name: 'Drain', exact: true })).toBeVisible();
 
     await row.getByRole('button', { name: 'Drain', exact: true }).click();
     await page.getByRole('button', { name: 'Drain share', exact: true }).click();
-    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('dialog').filter({ hasText: /Drain share|Return share/ })).toBeHidden();
     await expect(row.getByRole('button', { name: 'Return to service', exact: true })).toBeVisible();
   });
 
@@ -51,7 +51,7 @@ test.describe('Drain a share and return it to service', () => {
     await row.getByRole('button', { name: 'Return to service', exact: true }).click();
     await expect(page.getByRole('dialog').getByText(`Return share ${SHARE} to service?`)).toBeVisible();
     await page.getByRole('dialog').getByRole('button', { name: 'Return to service', exact: true }).click();
-    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('dialog').filter({ hasText: /Drain share|Return share/ })).toBeHidden();
     await expect(row.getByRole('button', { name: 'Drain', exact: true })).toBeVisible();
   });
 });

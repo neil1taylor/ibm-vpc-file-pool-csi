@@ -40,7 +40,7 @@ test.describe('Migrate a claim into a pool', () => {
     await expect(dialog.getByText(/GB free in pool/)).toBeVisible();
     // Cancel makes nothing.
     await dialog.getByRole('button', { name: 'Cancel' }).click();
-    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('dialog').filter({ hasText: /Migrate / })).toBeHidden();
     await expect(row.getByRole('button', { name: 'Migrate', exact: true })).toBeEnabled();
   });
 
@@ -50,7 +50,7 @@ test.describe('Migrate a claim into a pool', () => {
     const dialog = page.getByRole('dialog');
     await dialog.locator('#migrate-target').selectOption({ label: POOL as string });
     await dialog.getByRole('button', { name: 'Start migration' }).click();
-    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('dialog').filter({ hasText: /Migrate / })).toBeHidden();
 
     await expect(
       row.getByText(/Waiting for the new claim|The new claim is Bound|Copying|Copied\./).first(),

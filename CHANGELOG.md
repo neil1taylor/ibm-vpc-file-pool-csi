@@ -19,6 +19,7 @@ To make a release:
 
 ## [Unreleased]
 
+- **Release test stage 16: browser tests for draining a share, migrating a claim and cloning a volume (issue #46, items 5 to 7).** Each drives the console page with a token that has only the rights of that page, then checks the cluster. Found issue #196 (migrate fails for a user without the root right on OpenShift).
 - **Console: the restore page no longer spins forever without the right to read VolumeSnapshotContents (issue #186).** It now says which right is missing.
 
 - **Console: the delete backups dialog gives an administrator the safe command.** When the user lacks the rights, the dialog now shows `kubectl backup delete --policy <policy> --pvc <namespace>/<name>`, which measures first and asks for the typed claim name. Before, it showed raw YAML that removed the backups with neither step.
