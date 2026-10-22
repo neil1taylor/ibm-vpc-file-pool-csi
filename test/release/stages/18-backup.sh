@@ -17,7 +17,7 @@
 # and the wrapped backup key manifest, read from ~/.config/pool-csi), the same
 # script also exports the policy to COS (Compliance lock, 25 hours, a prefix new
 # for each run), checks exportedTime and exportedBytes, runs `kubectl backup
-# cos-list`, and restores the three volumes from COS into a second namespace: the
+# cos-list` (one export of each volume is enough: an export holds the earlier moments as undo files), and restores the three volumes from COS into a second namespace: the
 # VM boots with matching checksums and the pod volume holds the first and the
 # changed content. COS_DR_KUBECONFIG repeats the restore in the other cluster of
 # the lab pair. Without settings these checks are reported as not checked.
@@ -26,7 +26,7 @@
 # The e2e script waits for two backups of every volume (up to 90 minutes each
 # wait) after a CentOS image copy and a VM boot. Measured on rovslab it takes
 # 60 to 90 minutes, so the stage gets 100.
-# With the COS part it adds the export wait (up to an hour), one restore of three
+# With the COS part it adds the export waits (up to 30 minutes each), one restore of three
 # volumes and a VM boot here, and the same in the other cluster: 180 minutes.
 RT_STAGE_TIMEOUT=10800
 
@@ -89,7 +89,7 @@ run() {
     if cos_wanted; then
         check "COS export: all three volumes have exportedTime and exportedBytes above 0" \
             log_has_pass "$E2E_LOG" "COS export: all three volumes"
-        check "COS export: kubectl backup cos-list shows two moments of each volume" \
+        check "COS export: kubectl backup cos-list shows an export of each volume (an export holds the earlier moments as undo files)" \
             log_has_pass "$E2E_LOG" "COS export: kubectl backup cos-list"
         cos_restore_checks "local cluster"
         if [ -n "${COS_DR_KUBECONFIG:-}" ]; then

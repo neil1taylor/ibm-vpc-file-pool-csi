@@ -192,24 +192,57 @@ cos_diagnose() {
     $COS_ON || return 0
     log "COS diagnostics (no secret values are shown)"
     oc get backuppolicy "$POLICY" -o json 2>/dev/null | jq -c '[.status.volumes[]? | {pvc: .pvcName, exportedTime, exportedBytes, exportError}]' || true
+    [ -z "${COS_LIST_REPORT:-}" ] || echo "$COS_LIST_REPORT"
     oc get backuprestore -o json 2>/dev/null | jq -c --arg ns "$COS_NS" '.items[] | select(.spec.targetNamespace == $ns) | {name: .metadata.name, phase: .status.phase, fetched: .status.fetched, copied: .status.copied, message: .status.message}' || true
     oc get jobs,pods -n "$DRIVER_NS" -o wide 2>/dev/null | grep -Ei "export|cos|maint|share-job" || true
     oc logs -n "$DRIVER_NS" deploy/ibm-vpc-file-pool-csi-controller -c csi-controller --since=3h 2>/dev/null | grep -Ei "export|cos" | tail -30 || true
 }
 
-# cos_export_wait — wait for every volume to be exported and for two moments of each in the bucket.
+# cos_exports_ready — has every volume of the policy an exportedTime and exportedBytes?
 cos_exports_ready() {
     local json
     json=$(oc get backuppolicy "$POLICY" -o json 2>/dev/null) || return 1
     cos_volumes_exported "$json"
 }
 
-cos_two_moments_listed() {
-    local pv listing
+# cos_exports_listed — does `kubectl backup cos-list --volume V` show at least one export of each of
+# the three volumes? One export is enough for "two moments": an export holds the newest copy and the
+# earlier moments as undo files, and cos-list prints one line for each export. A pod volume that
+# does not change after its first backup is exported once. The output and exit status of each
+# listing go to COS_LIST_REPORT, so a failure can be read without a rerun.
+cos_exports_listed() {
+    local pv listing rc ok=0
+    COS_LIST_REPORT=""
     for pv in "$COS_PV_ROOT" "$COS_PV_DATA" "$COS_PV_FILES"; do
-        listing=$("$BACKUP_BIN" cos-list "${COS_SOURCE_FLAGS[@]}" --volume "$pv" --timeout 20m 2>&1) || return 1
-        [ "$(cos_moment_count "$listing" "$pv")" -ge 2 ] || return 1
+        rc=0
+        listing=$("$BACKUP_BIN" cos-list "${COS_SOURCE_FLAGS[@]}" --volume "$pv" --timeout 10m 2>&1) || rc=$?
+        COS_LIST_REPORT+="cos-list --volume $pv (exit $rc)"$'\n'"$listing"$'\n'
+        if [ "$rc" -ne 0 ] || [ "$(cos_moment_count "$listing" "$pv")" -lt 1 ]; then ok=1; fi
     done
+    return "$ok"
+}
+
+# cos_wait_listed SECONDS — wait until cos_exports_listed passes. Returns 1 at the limit and prints
+# the last report. It does not end the script: the restore checks can still run for what is there.
+cos_wait_listed() {
+    local end=$((SECONDS + $1))
+    until cos_exports_listed; do
+        if [ "$SECONDS" -ge "$end" ]; then
+            echo "timed out after ${1}s; the last listings:"
+            echo "$COS_LIST_REPORT"
+            return 1
+        fi
+        sleep "${COS_POLL_SECONDS:-10}"
+    done
+}
+
+# cos_list_diagnose — the whole-policy listing with its exit status, then the last per-volume report.
+cos_list_diagnose() {
+    local out rc=0
+    out=$("$BACKUP_BIN" cos-list "${COS_SOURCE_FLAGS[@]}" --timeout 5m 2>&1) || rc=$?
+    echo "kubectl backup cos-list (exit $rc)"
+    echo "$out"
+    echo "${COS_LIST_REPORT:-}"
 }
 
 cos_source_flags() {
@@ -267,21 +300,28 @@ cos_restore_phase() {
 # cos_phase — the whole second part: wait for the exports, list, restore here and, if
 # COS_DR_KUBECONFIG is set, in the other cluster too.
 cos_phase() {
-    local json
+    local json soft_failed=false
     # COS_PV_ROOT, COS_PV_DATA and COS_PV_FILES are set by test-backup.sh before it deletes the claim "files".
     : "${COS_PV_ROOT:?}" "${COS_PV_DATA:?}" "${COS_PV_FILES:?}"
     cos_source_flags
 
     log "waiting for the export of every volume (exportedTime, exportedBytes)"
-    wait_until "${COS_EXPORT_TIMEOUT:-3600}" "an export of every volume" cos_exports_ready
+    wait_until "${COS_EXPORT_TIMEOUT:-1800}" "an export of every volume" cos_exports_ready
     json=$(oc get backuppolicy "$POLICY" -o json)
     echo "$json" | jq -c '.status.volumes[] | {pvc: .pvcName, exportedTime, exportedBytes, exportError}'
     log "PASS: COS export: all three volumes have exportedTime and exportedBytes above 0"
 
-    log "waiting for two moments of every volume in the bucket"
-    wait_until "${COS_EXPORT_TIMEOUT:-3600}" "two exported moments of every volume (kubectl backup cos-list)" cos_two_moments_listed
-    "$BACKUP_BIN" cos-list "${COS_SOURCE_FLAGS[@]}"
-    log "PASS: COS export: kubectl backup cos-list shows two moments of each of the three volumes"
+    # VM disks export every ~5 minutes, so 30 minutes is plenty. If this check fails, say why and go on:
+    # the restores below pick the newest export when no export is at or after the moment.
+    log "waiting for an export of every volume in the bucket (kubectl backup cos-list)"
+    if cos_wait_listed "${COS_LIST_TIMEOUT:-1800}"; then
+        echo "$COS_LIST_REPORT"
+        log "PASS: COS export: kubectl backup cos-list shows an export of each of the three volumes (each export holds the earlier moments as undo files)"
+    else
+        cos_list_diagnose
+        log "FAIL: COS export: kubectl backup cos-list does not show an export of each volume; going on with the restore checks"
+        soft_failed=true
+    fi
 
     cos_restore_phase "local cluster"
     if [ -n "${COS_DR_KUBECONFIG:-}" ]; then
@@ -290,6 +330,7 @@ cos_phase() {
         cos_with_kubeconfig "$COS_DR_KUBECONFIG" cos_restore_phase "other cluster"
     fi
     cos_locked_note "$COS_PREFIX"
+    ! $soft_failed || fail "a COS check failed (see the FAIL line above); the restore checks ran for what was in the bucket"
 }
 
 # cos_with_kubeconfig KUBECONFIG COMMAND... — run COMMAND against another cluster.
