@@ -45,20 +45,20 @@ All facts in this section come from the code and the docs in this repository.
 - IBM file share replication runs at most every 15 minutes (the FAQ says hourly; verify). It does not meet this goal. `docs/specs/2026-10-22-zone-loss.md` (PR #199) says the same.
 - `CROSS-REGION-DR.md` rejects file-level streaming (inotify) because NFS gives no write events. That reasoning does not apply here. We tap writes inside QEMU or in a mount that we control, not on the share.
 
-## Corrections to what the owner was told
+## Key questions this design answers
 
-| Statement | Verdict |
+| Question | Answer |
 |---|---|
-| QEMU can mirror every write of a running disk to an NBD target, in `background` or `write-blocking` copy mode | True. Docs: "blockdev-mirror: Start mirroring a block device's writes to a new destination." `write-blocking`: "when data is written to the source, write it (synchronously) to the target as well." `background`: "copy data in background only." A running job can switch from `background` to `write-blocking` only, not back (QEMU commit "mirror: implement mirror_change method", 2023). |
-| A mirror gives us a journal | **Partly wrong.** A mirror makes the target a copy of the disk. It sends no log of writes, no order and no time. The journal comes from the server on the other end of the connection, which must be our own code. |
-| `background` mode is good enough | **No.** It copies blocks later, from a bitmap. It gives no order across disks and no history. Only `write-blocking` gives a usable order. |
-| The receiver's restore points could grow into a journal | **Partly true.** The model (the disk holds the newest data, undo records go back in time) stays. The format and the call model are new. Today one undo file covers one copy. The journal needs thousands of small records an hour, and a way to stop in the middle of a file. |
-| Ordering and time-stamping gives multi-disk consistency | True only if all disks' writes pass one sequencer on the source node, and the mirror runs in `write-blocking` mode. Separate mirror jobs have no shared order. The relay (below) provides it. |
-| VM disks only | True for the QEMU tap. A file-system tap could also see plain volumes, but a folder of files also needs create, rename and delete in the journal. That is a much larger job. Out of scope. |
-| Not supported by Red Hat | True for the QEMU tap (same as the copies today). The sidecar tap also needs the `Sidecar` gate. The file-system tap changes nothing in KubeVirt or QEMU. We must ask Red Hat whether a CSI driver that serves files through a user-space mount is supported (to verify). |
-| The link must keep up | True. With a node-local relay, `write-blocking` waits for the relay, not for the DR site. The link then decides how far the DR site lags, not how fast the VM writes. |
-| A live migration stops the mirror and needs a resync | Probably true for the QEMU tap. Not proven. The QEMU docs say dirty bitmaps can migrate, but our lab lost the change list, so the capability is probably off under libvirt. Phase 0 tests this. |
-| IBM share replication is 15 minutes or more | True (IBM docs). |
+| Can QEMU send every write of a running disk somewhere else? | Yes. `blockdev-mirror` copies a disk's writes to a target over NBD, in `background` or `write-blocking` mode. Docs: "blockdev-mirror: Start mirroring a block device's writes to a new destination." `write-blocking`: "when data is written to the source, write it (synchronously) to the target as well." `background`: "copy data in background only." A running job can switch from `background` to `write-blocking`, but not back (QEMU commit "mirror: implement mirror_change method", 2023). |
+| Does a mirror give us a journal? | No. A mirror makes the target a copy of the disk. It sends no log of writes, no order and no time. The journal must come from our own server at the other end of the connection. |
+| Is `background` mode enough? | No. It copies blocks later, from a list of changed blocks. It gives no order across disks and no history. Only `write-blocking` gives a usable order. |
+| Can today's restore points grow into a journal? | Partly. The model stays: the disk holds the newest data, and undo records go back in time. The format and the calls are new. Today one undo file covers one copy. A journal needs thousands of small records an hour, and a way to stop in the middle of a file. |
+| How do all disks of a VM stay at the same second? | All disks' writes must pass one sequencer on the source node, with the mirror in `write-blocking` mode. Separate mirror jobs have no shared order. The relay (below) is that sequencer. |
+| Does it work for plain volumes, not only VM disks? | Not in this design. The QEMU tap sees only VM disks. A file-system tap could also see plain volumes, but a folder of files also needs create, rename and delete in the journal. That is a much larger job, and it is out of scope. |
+| Does Red Hat support it? | Not the QEMU tap: the driver works with QEMU directly, as today's VM copies do. The sidecar tap would also need the `Sidecar` gate. The file-system tap changes nothing in KubeVirt or QEMU, but we must ask Red Hat whether a CSI driver that serves files through a user-space mount is supported (to verify). |
+| What if the link to DR is slow? | With a relay on the same node, `write-blocking` waits for the relay, not for the DR site. The link then decides how far the DR site lags, not how fast the VM writes. |
+| What happens on a live migration? | Probably the mirror stops and a resync is needed (not proven). The QEMU docs say lists of changed blocks can move with a VM, but our lab lost them, so this is probably off under libvirt. Phase 0 tests it. |
+| Can IBM share replication do this instead? | No. It copies every 15 minutes or more (IBM docs). |
 
 ## Research: QEMU and KubeVirt facts
 
