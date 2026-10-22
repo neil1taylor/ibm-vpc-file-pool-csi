@@ -1,14 +1,14 @@
-# Pilot Notes: IBM VPC File Pool CSI Driver on ROVS
+# Deployment Notes: IBM VPC File Pool CSI Driver on ROVS
 
-One page for a customer pilot on Red Hat OpenShift Virtualization Service (ROVS). It says what the pilot covers, what is not ready, and where to look. It links to the full documents instead of repeating them.
+One page for a deployment on Red Hat OpenShift Virtualization Service (ROVS), and the test that follows it. It says what is ready, what is not ready, and where to look. It links to the full documents instead of repeating them.
 
-Status: draft for the pilot. Fill in the version after the release is tagged.
+Status: draft. Fill in the version after the release is tagged.
 
 ## What the driver does
 
 It pools many volumes (PVCs) as folders on a few shared VPC file shares. A volume is made in under a second, because it is a folder on a share that already exists. See [OVERVIEW.md](OVERVIEW.md) and [FEATURES.md](FEATURES.md).
 
-## What the pilot covers
+## What is ready
 
 | Area | Maturity | Notes |
 |------|----------|-------|
@@ -27,7 +27,7 @@ It pools many volumes (PVCs) as folders on a few shared VPC file shares. A volum
 
 ## What does not work yet
 
-- **Group snapshots (`VolumeGroupSnapshot`) are not active.** The code and the record type exist, but nothing acts on them and the console does not show them. This is a decision, not a gap in the pilot: there is no plan to turn them on (issue #100). You do not need them for VMs, because a KubeVirt snapshot of a VM with several disks already shows one moment (see the table). See [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md#volume-group-snapshots).
+- **Group snapshots (`VolumeGroupSnapshot`) are not active.** The code and the record type exist, but nothing acts on them and the console does not show them. This is a decision, not a gap: there is no plan to turn them on (issue #100). You do not need them for VMs, because a KubeVirt snapshot of a VM with several disks already shows one moment (see the table). See [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md#volume-group-snapshots).
 - **By default a snapshot is a full copy, not an instant one.** (Instant VM snapshots exist, but they are Experimental, need the KubeVirt `Sidecar` feature gate, which Red Hat does not support, and are off unless you turn them on: [VM-INSTANT-SNAPSHOTS.md](VM-INSTANT-SNAPSHOTS.md).) A copy takes minutes for a large disk and uses as much space as the disk holds. KubeVirt marks a `VirtualMachineSnapshot` done after a few seconds, but each disk's `VolumeSnapshot` is ready only when its copy ends. Wait for every `VolumeSnapshot` before you restore. A snapshot of one disk of a multi-disk VM also copies the other disks to temporary files, which are deleted after 10 minutes, so each share needs free room for them.
 - **A snapshot of a running VM's disk is consistent only when the driver can freeze the guest** (the guest agent must answer). The snapshot's `status.consistency` says which kind it is.
 - **Golden images** are hidden. Use the standard catalog.
@@ -62,11 +62,11 @@ IBM only accepts some share size and IOPS pairs (for example, 3,000 IOPS needs a
 - **Support is GitHub issues only.** Open an issue at <https://github.com/neil1taylor/ibm-vpc-file-pool-csi/issues> and attach the diagnostics. There is no other support contact.
 - Never send the API key. Share IDs and mount target addresses are fine to send.
 
-## What we ask of the pilot
+## During the test
 
-- Tell us the cluster, the pool settings, and what the workload does (VMs, files, both).
-- Keep to the Beta and GA rows for anything that holds important data. Use the Experimental row only for copies you can lose.
-- Send us what surprised you, including docs that were unclear.
+- Record the cluster, the pool settings, and what the workload does (VMs, files, both).
+- Keep to the Beta and GA rows for anything that holds important data. Use the Experimental rows only for copies you can lose.
+- Note anything that surprised you, including docs that were unclear.
 
 ## Decisions I made for you
 
