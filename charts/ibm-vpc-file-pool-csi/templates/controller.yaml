@@ -20,7 +20,8 @@ spec:
     spec:
       serviceAccountName: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-controller
       {{- $podSC := deepCopy (.Values.controller.podSecurityContext | default dict) }}
-      {{- if and (or (not (.Capabilities.APIVersions.Has "security.openshift.io/v1")) (eq .Release.Namespace "kube-system")) (not (hasKey $podSC "fsGroup")) }}
+      {{- $fixedIDs := or (not (.Capabilities.APIVersions.Has "security.openshift.io/v1")) (eq .Release.Namespace "kube-system") }}
+      {{- if and $fixedIDs (not (hasKey $podSC "fsGroup")) }}
       {{- $_ := set $podSC "fsGroup" 65532 }}
       {{- end }}
       securityContext:
@@ -247,7 +248,11 @@ spec:
         {{- if .Values.secretProvider.managed }}
         - name: storage-secret-sidecar
           image: {{ .Values.secretProvider.sidecar.image }}
-          {{- with .Values.controller.sidecarSecurityContext }}
+          {{- $secretSC := deepCopy (.Values.controller.sidecarSecurityContext | default dict) }}
+          {{- if and $fixedIDs (not (hasKey $secretSC "runAsUser")) }}
+          {{- $_ := set $secretSC "runAsUser" 65532 }}
+          {{- end }}
+          {{- with $secretSC }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
