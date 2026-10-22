@@ -102,11 +102,13 @@ describe('DeleteBackupsDialog refusals', () => {
     expect(k8sCreate).not.toHaveBeenCalled();
   });
 
-  it('names the missing rights and shows the YAML for an administrator, and starts no Job', async () => {
+  it('names the missing rights and gives an administrator the safe command, not a raw delete, and starts no Job', async () => {
     (useAccessReview as jest.Mock).mockReturnValue([false, false]);
     show();
     expect(await screen.findByText(/You are not allowed to make and remove Jobs, claims and volumes/)).toBeTruthy();
-    expect(screen.getByText(/kind: Job/)).toBeTruthy();
+    expect(screen.getByText('kubectl backup delete --policy nightly --pvc apps/old')).toBeTruthy();
+    expect(screen.getByText(/measures first/)).toBeTruthy();
+    expect(screen.queryByText(/kind: Job/)).toBeNull();
     expect(k8sCreate).not.toHaveBeenCalled();
   });
 });
