@@ -87,6 +87,7 @@ nav:
       - Known Limitations: KNOWN-LIMITATIONS.md
   - Architecture:
       - Overview: OVERVIEW.md
+      - Context (the words we use): CONTEXT.md
       - System Design: ARCHITECTURE.md
       - Consistency Model: CONSISTENCY-MODEL.md
       - VPC Networking: VPC-NETWORKING.md
