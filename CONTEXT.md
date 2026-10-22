@@ -11,7 +11,7 @@ The meanings come from the code (`api/v1alpha1/` and `pkg/`). If a page disagree
 - [How good a copy is](#how-good-a-copy-is): moment, file-system consistent, crash consistent, file copy, guest freeze
 - [Backup](#backup): backup, BackupPolicy, snapshot pool, keep time, restore, BackupRestore, restore point, change list, COS export, lock, backup key
 - [Replication and failover](#replication-and-failover): replication, ReplicationPolicy, destination, receiver, rewind, failover
-- [Other words](#other-words): golden image, lifecycle hook, group snapshot, command-line plugins
+- [Other words](#other-words): golden image, lifecycle hook, group snapshot, user workload monitoring, command-line plugins
 
 ---
 
@@ -334,6 +334,12 @@ Example: an `http` hook that asks an application to flush its data before a sync
 A **group snapshot** (`VolumeGroupSnapshot`) was meant to snapshot several volumes together. It is **not active**. Nothing acts on the resource. A snapshot of a running VM already covers all its disks at one moment. See [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md#volume-group-snapshots).
 
 Example: do not create one; use a VM snapshot instead.
+
+### User workload monitoring
+
+**User workload monitoring** is the part of OpenShift's monitoring that reads your own projects. OpenShift's platform monitoring reads only the platform projects, and Red Hat does not support adding your own projects to it. The driver runs in `kube-system`, so its alerts and scraping are in a small namespace, `ibm-vpc-file-pool-csi-monitoring`, that only user workload monitoring reads. An admin turns it on once with `enableUserWorkload: true` in `openshift-monitoring/cluster-monitoring-config`. Without it **no alert fires**. See [MONITORING.md](MONITORING.md#where-alerts-run-on-openshift).
+
+Example: `oc -n openshift-user-workload-monitoring get pods` lists `prometheus-user-workload` when it is on.
 
 ### Command-line plugins
 

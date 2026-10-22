@@ -19,7 +19,11 @@ kubectl get filesharepools
 # 3. Check for pending PVCs using pool StorageClasses
 kubectl get pvc --all-namespaces -o wide | grep -E "Pending.*ibm-vpc-file-pool"
 
-# 4. Check for controller errors in the last 24h
+# 4. OpenShift: alerts are being evaluated (user workload monitoring is on)
+oc -n openshift-user-workload-monitoring get pods
+oc -n ibm-vpc-file-pool-csi-monitoring get events | grep UserWorkloadMonitoringOff   # no output is good
+
+# 5. Check for controller errors in the last 24h
 kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller \
   -c csi-controller --since=24h | grep -c -i "error"
 ```

@@ -265,6 +265,10 @@ Since ROKS and ROVS worker nodes run RHCOS, encryption in transit cannot be enab
 
 **Roadmap:** No change planned — platform quota.
 
+## Alerts Need User Workload Monitoring (OpenShift)
+
+The driver runs in `kube-system`, which OpenShift's platform monitoring does not read, and Red Hat does not support labelling it so that it does. The chart puts the `ServiceMonitor` objects and the alerts in the namespace `ibm-vpc-file-pool-csi-monitoring` for user workload monitoring. **If user workload monitoring is off, there are no alerts at all** (and the controller logs a warning at start). The cluster admin must set `enableUserWorkload: true` in `openshift-monitoring/cluster-monitoring-config`; see [MONITORING.md](MONITORING.md#where-alerts-run-on-openshift). The monitoring namespace needs `webhook.certProvider=openshift`; with another provider the chart keeps the older layout in the release namespace.
+
 ## Backups to a Snapshot Pool
 
 **What:** a `BackupPolicy` backs up selected PVCs and VMs into a snapshot pool (see `BACKUP-RECOVERY.md`).

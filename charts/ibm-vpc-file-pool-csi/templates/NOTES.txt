@@ -33,6 +33,19 @@ gate off. See VM-INSTANT-SNAPSHOTS.md, "Turning it on".
 VolumeSnapshotClass "{{ .Values.volumeSnapshotClass.name }}" has been created.
 {{- end }}
 
+{{- if include "ibm-vpc-file-pool-csi.uwm" . }}
+
+Alerts and metrics scraping live in the namespace "{{ .Values.metrics.monitoring.namespace }}".
+They work only if OpenShift's user workload monitoring is on. This chart does not
+change that setting. An admin turns it on with:
+
+  oc -n openshift-monitoring edit configmap cluster-monitoring-config
+  # add under config.yaml:  enableUserWorkload: true
+
+Check: oc -n openshift-user-workload-monitoring get pods
+See MONITORING.md, "Where alerts run on OpenShift".
+{{- end }}
+
 Note: CRDs (FileSharePool, SubVolume, Snapshot) must be installed separately:
 
   kubectl apply -f config/crd/

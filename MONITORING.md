@@ -6,7 +6,7 @@ Complete metrics reference, alerting rules, and dashboard templates for operatin
 
 ## Overview
 
-The controller exposes Prometheus metrics on `:8080/metrics`. All metrics use the `vpc_file_pool_` or `pool_csi_` prefix and follow the [Prometheus naming conventions](https://prometheus.io/docs/practices/naming/).
+The controller exposes Prometheus metrics on `:8080/metrics` over HTTPS (callers need a token that may `get` `/metrics`). All metrics use the `vpc_file_pool_` or `pool_csi_` prefix and follow the [Prometheus naming conventions](https://prometheus.io/docs/practices/naming/).
 
 The driver emits 37 metrics across nine categories:
 
@@ -26,11 +26,62 @@ The driver emits 37 metrics across nine categories:
 
 ## Scrape Configuration
 
+### Where alerts run on OpenShift
+
+**On OpenShift (ROKS and ROVS) the alerts and the scraping need user workload monitoring to be on. If it is off, nothing evaluates the alerts, and no alert ever fires.**
+
+Why: the driver must stay in `kube-system` (the managed API key secret `storage-secret-store` lives there). OpenShift's platform monitoring reads only namespaces labelled `openshift.io/cluster-monitoring=true`, and Red Hat says not to put that label on namespaces that are not part of the platform, and not to create your own `ServiceMonitor` or `PrometheusRule` objects in `kube-*` or `openshift-*` namespaces. So platform monitoring cannot read the driver where it lives.
+
+What the chart does instead (`metrics.monitoring.mode: auto`, which applies when the cluster has the Prometheus Operator API and the OpenShift console and `webhook.certProvider=openshift`):
+
+- It makes a small namespace, `ibm-vpc-file-pool-csi-monitoring` (change it with `metrics.monitoring.namespace`). It has no platform monitoring label.
+- The two `ServiceMonitor` objects (controller and node agents) and the `PrometheusRule` live in that namespace. User workload monitoring reads them.
+- Two Services there have no selector. The controller keeps their `Endpoints` up to date every minute (the controller pod's IP, and the IP of each ready node agent; node agents use the host network). Kubernetes mirrors them to EndpointSlices.
+- The `ServiceMonitor` objects send the token of a service account in that namespace (kept in a Secret, because user workload monitoring does not read files) and trust the OpenShift service CA from a ConfigMap in that namespace. They check the certificate against the names of the Services in `kube-system`, which is what the service CA issued it for.
+- The chart never changes `cluster-monitoring-config`.
+
+**The admin step.** Turn user workload monitoring on once per cluster. The chart does not do this, because it is a cluster-wide setting that belongs to the cluster admin:
+
+```bash
+# If the ConfigMap does not exist yet:
+cat <<'YAML' | oc apply -f -
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-monitoring-config
+  namespace: openshift-monitoring
+data:
+  config.yaml: |
+    enableUserWorkload: true
+YAML
+# If it exists, add "enableUserWorkload: true" to its config.yaml instead:
+oc -n openshift-monitoring edit configmap cluster-monitoring-config
+```
+
+**How to check that alerts are evaluated:**
+
+```bash
+oc -n openshift-user-workload-monitoring get pods          # prometheus-user-workload and thanos-ruler-user-workload are Running
+oc -n ibm-vpc-file-pool-csi-monitoring get servicemonitor,prometheusrule,endpoints
+oc -n ibm-vpc-file-pool-csi-monitoring get events           # no UserWorkloadMonitoringOff warning
+```
+
+In the console, Observe > Alerting shows the driver's alerts under "Alerting rules" (choose the monitoring project). The controller also checks at start: if user workload monitoring is off it logs a warning and records a `UserWorkloadMonitoringOff` event on the monitoring namespace. It checks only at start, so restart the controller after you turn it on to clear the warning.
+
+On clusters without OpenShift (or with `metrics.monitoring.mode=disabled`) the `ServiceMonitor` objects and the `PrometheusRule` stay in the release namespace, as before, and your Prometheus must read that namespace.
+
+Red Hat sources:
+
+- Turning on user workload monitoring (`enableUserWorkload: true` in `cluster-monitoring-config`; needs cluster-admin; then check that the `prometheus-operator`, `prometheus-user-workload` and `thanos-ruler-user-workload` pods run in `openshift-user-workload-monitoring`): OpenShift 4.18 documentation (the setting is the same in 4.21, as tested on rovslab-dr-eude running 4.21.31), [Configuring user workload monitoring](https://docs.redhat.com/documentation/openshift_container_platform/4.18/html/monitoring/configuring-user-workload-monitoring).
+- Support guidance that you should not create your own `ServiceMonitor` objects in `openshift-*` or `kube-*` projects: <https://access.redhat.com/node/7024333>.
+- Support guidance that you should not put the `openshift.io/cluster-monitoring` label on your own namespaces: <https://access.redhat.com/solutions/6992399>.
+- Keeping a project out of user workload monitoring (label `openshift.io/user-monitoring=false`; the monitoring namespace of this chart must not have it): [Disabling monitoring for user-defined projects](https://docs.openshift.com/rosa/observability/monitoring/sd-disabling-monitoring-for-user-defined-projects.html) (Red Hat OpenShift Service on AWS documentation; the label works the same way in OpenShift Container Platform).
+
 ### Prometheus Operator (ServiceMonitor)
 
 The node agents serve their own metrics (the "Share Metrics (Node Agent)" section) over HTTPS on port `node.metricsPort` (`9810`). The caller must send a bearer token that the API server accepts, and its user must be allowed to `get` the URL `/metrics`. The chart makes a headless Service and a second `ServiceMonitor` (`<release>-node`) that send the pod's service account token, and it binds a `<release>-metrics-reader` ClusterRole to `metrics.scraper.serviceAccount` (`prometheus-k8s` in `openshift-monitoring`). The node agent serves a certificate that Prometheus checks (the token it sends is its own, so it must not go to a stranger). The certificate comes from `webhook.certProvider`, as for the webhooks: `openshift` asks the service CA (the `ServiceMonitor` trusts the service CA bundle that OpenShift's Prometheus mounts); `cert-manager` makes a `Certificate`; `manual` needs a secret `<release>-ibm-vpc-file-pool-csi-node-metrics-certs` with `tls.crt`, `tls.key` and `ca.crt`, made by you, in the release namespace. With the last two the `ServiceMonitor` trusts `ca.crt` of that secret. The name it checks is `<release>-ibm-vpc-file-pool-csi-node-metrics.<namespace>.svc`. The node agents need to read FileSharePools to name the shares. Set `node.metricsPort=0` to turn the endpoint off.
 
-The controller's own `:8080/metrics` is plain HTTP without a login. That is how it was before; it is not changed here.
+The controller's `:8080/metrics` is HTTPS with the same token login and a certificate Prometheus checks, from `webhook.certProvider` (secret `<release>-ibm-vpc-file-pool-csi-metrics-certs` for `manual`). Anything that scraped it over plain HTTP, such as your own Prometheus config, must now use `https`, a bearer token and the CA.
 
 The Helm chart creates a `ServiceMonitor` for the controller when the cluster has the Prometheus Operator API (`monitoring.coreos.com/v1`). OpenShift has it. To turn it off, set `metrics.serviceMonitor.enabled=false`.
 
