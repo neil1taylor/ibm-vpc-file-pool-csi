@@ -18,11 +18,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	ctrlwebhook "sigs.k8s.io/controller-runtime/pkg/webhook"
 
@@ -33,6 +35,7 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/k8s"
 	_ "github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics" // Register Prometheus collectors via init()
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/nodemetrics"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/pool"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/replication"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/vmcopy"
@@ -59,6 +62,11 @@ func main() {
 		goldenImageSyncInterval time.Duration
 		cdiCopyPodMemoryLimit   string
 		webhooks                webhookOptions
+
+		// Node mode metrics flags.
+		nodeMetricsAddr    string
+		nodeMetricsCertDir string
+		shareStatsInterval time.Duration
 
 		// Receiver mode flags.
 		receiverBasePath      string
@@ -118,6 +126,9 @@ func main() {
 	flag.StringVar(&driverImage, "driver-image", "", "Driver container image for receiver-mode sync-client Jobs")
 	flag.StringVar(&vmSnapshots.method, "vm-snapshot-method", "auto", "Snapshots of VM disks: auto (instant where the KubeVirt Sidecar feature gate is on) or copy (never instant)")
 	flag.StringVar(&vmSnapshots.launcherImage, "virt-launcher-image", "", "KubeVirt virt-launcher image for VM disk snapshot Jobs; empty reads it from virt-operator")
+	flag.StringVar(&nodeMetricsAddr, "node-metrics-addr", ":9810", "Listen address of the node agent's metrics endpoint (per-share used bytes and NFS latency and IOPS); empty turns it off (node mode)")
+	flag.StringVar(&nodeMetricsCertDir, "node-metrics-cert-dir", "", "Directory with tls.crt and tls.key for the node metrics endpoint; empty makes a self-signed certificate (node mode)")
+	flag.DurationVar(&shareStatsInterval, "share-stats-interval", 30*time.Second, "How often the node agent reads the NFS statistics of its shares (node mode)")
 	flag.BoolVar(&webhooks.enabled, "enable-webhooks", true, "Serve the validating admission webhooks (needs a serving certificate)")
 	flag.IntVar(&webhooks.port, "webhook-port", 9443, "Port of the admission webhook server")
 
@@ -194,7 +205,7 @@ func main() {
 	case "enable-sidecar-gate":
 		runEnableSidecarGate()
 	default:
-		runNode(endpoint, nodeID, mode)
+		runNode(endpoint, nodeID, mode, nodeMetricsAddr, nodeMetricsCertDir, shareStatsInterval)
 	}
 }
 
@@ -649,7 +660,7 @@ func runCheckReceiver(endpoint, authTokenFile, caCertFile string) {
 	}
 }
 
-func runNode(endpoint, nodeID, mode string) {
+func runNode(endpoint, nodeID, mode, metricsAddr, metricsCertDir string, statsInterval time.Duration) {
 	scheme := runtime.NewScheme()
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
 		klog.ErrorS(err, "Failed to add CRD types to scheme")
@@ -672,6 +683,10 @@ func runNode(endpoint, nodeID, mode string) {
 	}
 	k8sClient := k8s.NewClient(ctrlClient)
 
+	if metricsAddr != "" {
+		startShareMetrics(metricsAddr, metricsCertDir, statsInterval, restConfig, k8sClient)
+	}
+
 	d, err := driver.NewDriver(driver.Config{
 		Name:      driver.DriverName,
 		Version:   version,
@@ -689,6 +704,41 @@ func runNode(endpoint, nodeID, mode string) {
 		klog.ErrorS(err, "Driver failed")
 		os.Exit(1)
 	}
+}
+
+// startShareMetrics serves the per-share used bytes and NFS statistics of this
+// node on addr over HTTPS, in the background. Callers need a token that the API
+// server accepts and may "get" /metrics. If it cannot start it logs and carries
+// on: missing metrics must not stop volumes from mounting.
+func startShareMetrics(addr, certDir string, interval time.Duration, restConfig *rest.Config, k8sClient k8s.Client) {
+	httpClient, err := rest.HTTPClientFor(restConfig)
+	if err != nil {
+		klog.ErrorS(err, "Cannot serve node metrics; continuing without them")
+		return
+	}
+	srv, err := nodemetrics.NewSecureServer(addr, certDir, restConfig, httpClient)
+	if err != nil {
+		klog.ErrorS(err, "Cannot serve node metrics; continuing without them")
+		return
+	}
+	c := nodemetrics.NewCollector(nodemetrics.Config{
+		DriverName:     driver.DriverName,
+		ReadMountStats: nodemetrics.ReadProcMountStats,
+		Statfs:         nodemetrics.Statfs,
+		Resolve:        nodemetrics.ResolverFromPools(k8sClient.ListFileSharePools),
+	})
+	if err := ctrlmetrics.Registry.Register(c); err != nil {
+		klog.ErrorS(err, "Cannot register node metrics; continuing without them")
+		return
+	}
+	ctx := context.Background()
+	go c.Run(ctx, interval)
+	go func() {
+		if err := srv.Start(ctx); err != nil {
+			klog.ErrorS(err, "Node metrics server stopped")
+		}
+	}()
+	klog.InfoS("Serving node metrics over HTTPS", "addr", addr)
 }
 
 // networkConfig is the cluster network that share mount targets join.

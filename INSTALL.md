@@ -372,6 +372,9 @@ kubectl apply -f config/deploy/node.yaml
 | `--kubelet-dir` | `/var/lib/kubelet` | Kubelet root directory (ROKS/ROVS: use `/var/data/kubelet`) |
 | `--clone-worker-interval` | `10s` | Clone worker poll interval |
 | `--golden-image-sync-interval` | `1h` | Golden image syncer poll interval (the Helm chart sets `5m`) |
+| `--node-metrics-addr` | `:9810` | Node mode: listen address of the HTTPS metrics endpoint with per-share used bytes and NFS statistics. Callers need a token that may `get` `/metrics`. Empty turns it off. Helm sets it from `node.metricsPort` |
+| `--node-metrics-cert-dir` | `""` | Node mode: directory with `tls.crt` and `tls.key` for the metrics endpoint; empty makes a self-signed certificate that Prometheus cannot check. Helm mounts a secret there |
+| `--share-stats-interval` | `30s` | Node mode: how often the node agent reads the NFS statistics of its shares. Helm sets it from `node.shareStatsInterval` |
 | `--cdi-copy-pod-memory-limit` | `8Gi` | Keep the memory limit of CDI's copy pods at least this high (OpenShift Virtualization `HyperConverged`); empty turns the check off |
 | `--console-plugin-name` | `ibm-vpc-file-pool-csi` | ConsolePlugin that `register-console-plugin` adds to, and `unregister-console-plugin` removes from, the console's plugin list |
 | `--driver-image` | `""` | Driver container image for receiver-mode sync-client Jobs (auto-set by Helm) |
