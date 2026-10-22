@@ -402,7 +402,21 @@ The **Backups** tab of the IBM VPC File Pools page shows the same facts as `kube
 - The list has one row for each policy: snapshot pool, schedule, keep time, phase, number of volumes, the age of the stalest backup, and whether the COS export is on.
 - A policy page shows its settings and one row for each volume: the claim, the VM, the newest and oldest backup, the restore points, the size of the newest backup, the consistency, the last error and the export state. A volume the policy no longer backs up is marked with the date its backups are kept until. A crash consistent copy has an orange label.
 - When new backups are stopped because the snapshot pool is more than 85% full, a banner says so on both pages and links to the pool. Nothing is deleted to make room; see [Backups stopped](TROUBLESHOOTING.md#backups-stopped-the-snapshot-pool-is-above-85-full).
-- The console only reads the policy so far. Restore, changing a policy, deleting backups and the COS tab come in later steps, each with its own section here.
+- Restore is in the console too (next section). Changing a policy, deleting backups and the COS tab come in later steps, each with its own section here.
+
+#### Restore a backup in the console
+
+Open a policy, and choose **Restore** in the menu of a volume. This does what `kubectl backup restore` does: it makes one `BackupRestore` object, and the driver makes the new claim and copies the backup into it.
+
+- **Volume.** Any volume the policy has backups of, including a volume that is gone (marked "no longer backed up").
+- **Latest backup, or a moment.** For a moment, choose a time in your time zone. The restore uses the newest backup at or before it, and the banner tells you which backup it used. The page shows the oldest and the newest backup, and refuses a time before the oldest. It cannot list the moments one by one, because the policy status holds only the count of restore points.
+- **Namespace and new claim name.** The name must not exist; the page checks the namespace live and refuses a name that is taken, as a restore never writes over a volume.
+- **Storage class.** The default is the class of the backed-up claim. Only classes of this driver are offered.
+- A confirmation says that a new claim is made, that nothing is overwritten, and that the copy takes time.
+- The page then follows the restore: Pending, Provisioning, Restoring, Done (with the restored moment) or Failed (with the message). The new claim cannot be used until it is Done.
+- A crash consistent VM disk shows a warning: the guest may need a file system check when it starts.
+- If your account may not create `BackupRestore` objects, the button is off, the page names the missing right, and it shows the YAML an administrator can apply for you.
+- Other pages can link to the page with `?claim=<namespace>/<name>` and `?moment=<time>`.
 
 ### Export to COS (built; the release test is written and not yet run)
 

@@ -1,4 +1,6 @@
 import React from 'react';
+import { useAccessReview } from '@openshift-console/dynamic-plugin-sdk';
+import { Link } from 'react-router-dom';
 import { Table, Thead, Tr, Th, Tbody, Td, ActionsColumn, IAction } from '@patternfly/react-table';
 import { Alert, Card, CardBody, Label } from '@patternfly/react-core';
 import { BackupPolicy, BackupVolumeStatus } from '../../types';
@@ -8,7 +10,9 @@ import {
   describeBackupVolume,
   exportStateText,
 } from '../../utils/backup-helpers';
+import { restorePath } from '../../utils/backup-helpers';
 import { columnInfo } from '../../utils/column-help';
+import { API_GROUP } from '../../constants';
 import CardHelpTitle from '../common/CardHelpTitle';
 
 interface Props {
@@ -22,8 +26,17 @@ const EXPORT_COLOR = { ok: 'green', warning: 'orange', danger: 'red' } as const;
 /** One row for each volume the policy backs up, or still keeps backups of. */
 const BackupVolumesTable: React.FC<Props> = ({ policy, settings }) => {
   const volumes = policy.status?.volumes || [];
-  const rowActions = (_volume: BackupVolumeStatus): IAction[] => {
-    const actions: IAction[] = [];
+  const [canRestore] = useAccessReview({ group: API_GROUP, resource: 'backuprestores', verb: 'create' });
+  const rowActions = (volume: BackupVolumeStatus): IAction[] => {
+    const actions: IAction[] = [
+      canRestore
+        ? {
+            title: (
+              <Link to={restorePath(policy.metadata?.name || '', `${volume.pvcNamespace}/${volume.pvcName}`)}>Restore</Link>
+            ),
+          }
+        : { title: 'Restore (needs the right to create BackupRestore objects)', isDisabled: true },
+    ];
     if (browseFilesAvailable(settings)) {
       actions.push({ title: 'Browse files' });
     }
