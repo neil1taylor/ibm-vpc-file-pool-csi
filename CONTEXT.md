@@ -199,7 +199,7 @@ Example: a backup of a volume that holds a log folder.
 
 ### Guest freeze
 
-A **guest freeze** is a request through the VM's guest agent. The guest writes its pending data and holds new writes for a moment. The driver freezes a guest for the QEMU copy, and the guest thaws by itself after 30 seconds at most. OpenShift does its own freeze when you take a VM snapshot from the console, and the driver does not freeze again then.
+A **guest freeze** is a request through the VM's guest agent. The guest writes its pending data and holds new writes for a moment. The driver freezes a guest for the QEMU copy, and the guest thaws by itself after 30 seconds at most. OpenShift does its own freeze when you take a VM snapshot from the console. For an instant snapshot, the driver then does not freeze again.
 
 Example: a freeze of 0.15 seconds was measured in a lab test.
 
@@ -233,7 +233,7 @@ Example: `keepFor: 14d`.
 
 ### Restore
 
-To **restore** is to make a new PVC from a backup. A restore never writes over a volume that exists. The new PVC is held back from pods until the copy ends. You can restore after the source volume is gone. Run `kubectl backup restore`, or use the console to restore a snapshot.
+To **restore** is to make a new PVC from a backup or a snapshot. A restore never writes over a volume that exists. The new PVC is held back from pods until the copy ends. Run `kubectl backup restore` for a backup, which also works after the source volume is gone. Use a PVC `dataSource` or the console for a snapshot.
 
 Example: restore `vms/web-root` as it was at 09:00 into the new PVC `vms/web-root-restored`.
 
