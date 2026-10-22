@@ -189,11 +189,11 @@ Configuration for the default StorageClass created by the chart.
 
 ## Console Plugin
 
-OpenShift Console dynamic plugin for visual pool management. Requires OpenShift 4.14+ with the ConsolePlugin v1 API. Disabled by default.
+OpenShift Console dynamic plugin for visual pool management. On by default, and installed only on clusters with the OpenShift console (ConsolePlugin v1 API, OpenShift 4.14+). On other clusters the chart leaves it out.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `consolePlugin.enabled` | bool | `false` | Enable the OpenShift Console dynamic plugin |
+| `consolePlugin.enabled` | bool | `true` | Install the OpenShift Console dynamic plugin and turn it on in the console. Set `false` to leave it out |
 | `consolePlugin.image.repository` | string | `de.icr.io/ibm-vpc-file-pool-csi/console-plugin` | Plugin container image repository |
 | `consolePlugin.image.tag` | string | `latest` | Plugin image tag |
 | `consolePlugin.replicas` | int | `2` | Number of plugin pod replicas |
@@ -202,14 +202,7 @@ OpenShift Console dynamic plugin for visual pool management. Requires OpenShift 
 | `consolePlugin.resources.requests.memory` | string | `50Mi` | Memory request |
 | `consolePlugin.resources.limits.memory` | string | `128Mi` | Memory limit |
 
-After installing with `consolePlugin.enabled=true`, register the plugin with the OpenShift console:
-
-```bash
-# Adds this plugin to the list and keeps the other plugins enabled.
-# (A merge patch with a "plugins" list would replace the whole list.)
-oc patch console.operator.openshift.io cluster --type=json \
-  -p '[{"op":"add","path":"/spec/plugins/-","value":"ibm-vpc-file-pool-csi"}]'
-```
+The chart turns the plugin on in the console for you. A hook Job runs after each install and upgrade and adds `ibm-vpc-file-pool-csi` to the console's plugin list (`console.operator.openshift.io/cluster`, `spec.plugins`). It keeps every other plugin. Before `helm uninstall`, a second hook Job removes only this plugin from the list. If you upgrade with `consolePlugin.enabled=false`, the same Job removes it after the upgrade. The Jobs use the driver image and a service account that can only read and update that one object.
 
 ## Example Overrides
 
@@ -265,24 +258,14 @@ kubectl create secret generic ibm-cloud-credentials \
 
 ### Console Plugin
 
-Enable the OpenShift Console dynamic plugin:
+Pin the OpenShift Console plugin image (the plugin is on by default):
 
 ```yaml
 consolePlugin:
-  enabled: true
   image:
     repository: de.icr.io/ibm-vpc-file-pool-csi/console-plugin
     tag: v0.12.0
   replicas: 2
-```
-
-After install, register the plugin:
-
-```bash
-# Adds this plugin to the list and keeps the other plugins enabled.
-# (A merge patch with a "plugins" list would replace the whole list.)
-oc patch console.operator.openshift.io cluster --type=json \
-  -p '[{"op":"add","path":"/spec/plugins/-","value":"ibm-vpc-file-pool-csi"}]'
 ```
 
 ### Custom Metrics

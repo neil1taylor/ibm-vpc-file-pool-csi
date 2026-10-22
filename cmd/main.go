@@ -27,6 +27,7 @@ import (
 	ctrlwebhook "sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/consoleplugin"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/driver"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/hooks"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud"
@@ -95,11 +96,15 @@ func main() {
 		backupDisk    string
 		outDisk       string
 		restoreMoment string
+
+		// Console plugin modes.
+		consolePluginName string
 	)
 
 	flag.StringVar(&endpoint, "endpoint", "unix:///csi/csi.sock", "CSI endpoint")
 	flag.StringVar(&nodeID, "node-id", "", "Node ID")
-	flag.StringVar(&mode, "mode", "controller", "Driver mode: controller, node, receiver, sync-client, check-receiver, apply-vm-disk, send-vm-disk, or restore-vm-disk")
+	flag.StringVar(&mode, "mode", "controller", "Driver mode: controller, node, receiver, sync-client, check-receiver, apply-vm-disk, send-vm-disk, restore-vm-disk, register-console-plugin, or unregister-console-plugin")
+	flag.StringVar(&consolePluginName, "console-plugin-name", "ibm-vpc-file-pool-csi", "ConsolePlugin to turn on or off in the OpenShift console (register-console-plugin and unregister-console-plugin modes)")
 	flag.StringVar(&region, "region", "", "IBM Cloud region (e.g. us-south); auto-discovered from secret provider if omitted")
 	flag.StringVar(&vpcID, "vpc-id", "", "IBM Cloud VPC ID for creating file share mount targets")
 	flag.StringVar(&subnetID, "subnet-id", "", "Comma-separated IBM Cloud worker subnet IDs; each share's mount target goes in the one in the pool's zone")
@@ -172,9 +177,34 @@ func main() {
 		runRestoreVMDisk(backupDisk, outDisk, restoreMoment)
 	case "send-vm-disk":
 		runSendVMDisk(receiverEndpoint, authTokenFile, caCertFile, stagingPath, destBasePath, subPath, subvolumeName, copyID, vmGroup, metadataJSON, vmCopy)
+	case "register-console-plugin", "unregister-console-plugin":
+		runConsolePlugin(mode, consolePluginName)
 	default:
 		runNode(endpoint, nodeID, mode)
 	}
+}
+
+// runConsolePlugin turns the console plugin on or off in the OpenShift console.
+// The Helm chart runs it as post-install, post-upgrade and pre-delete hook Jobs.
+func runConsolePlugin(mode, name string) {
+	c, err := client.New(ctrl.GetConfigOrDie(), client.Options{})
+	if err != nil {
+		klog.ErrorS(err, "Failed to create Kubernetes client")
+		os.Exit(1)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	if mode == "register-console-plugin" {
+		err = consoleplugin.Register(ctx, c, name)
+	} else {
+		err = consoleplugin.Unregister(ctx, c, name)
+	}
+	if err != nil {
+		klog.ErrorS(err, "Failed to change the console plugins", "mode", mode, "plugin", name)
+		os.Exit(1)
+	}
+	klog.InfoS("Console plugins updated", "mode", mode, "plugin", name)
 }
 
 // webhookOptions configures the admission webhook server.

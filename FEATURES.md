@@ -206,7 +206,7 @@ CLI tool for migrating PVCs from the stock IBM VPC File CSI driver.
 
 Visual management of file share pools through the OpenShift Console.
 
-- **Dynamic console plugin** — Registers as an OpenShift ConsolePlugin (v1 API, requires OpenShift 4.14+). Gated by `consolePlugin.enabled` in the Helm chart (default `false`).
+- **Dynamic console plugin** — Registers as an OpenShift ConsolePlugin (v1 API, requires OpenShift 4.14+). On by default where the cluster has the OpenShift console; the chart turns it on in the console. Turn it off with `consolePlugin.enabled=false`.
 - **Single tabbed navigation** — One "IBM VPC File Pools" item under Storage in the console sidebar opens a tabbed interface (Overview, Pools, SubVolumes, Snapshots, Group Snapshots, Replication, Monitoring). Detail and create pages render standalone without tabs.
 - **Pool dashboard** — Overview tab showing all FileSharePools with status, capacity gauges, share count, SubVolume count, and recent activity table.
 - **CRUD for all 5 CRDs** — List, detail, create, edit, and delete views for FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, and ReplicationPolicy resources. Create buttons route to custom form wizards (not the YAML editor).

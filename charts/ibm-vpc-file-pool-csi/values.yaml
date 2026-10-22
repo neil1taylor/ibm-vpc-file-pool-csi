@@ -217,9 +217,11 @@ replication:
   image: ""
 
 consolePlugin:
-  # Enable the OpenShift Console dynamic plugin for visual pool management.
-  # Requires OpenShift 4.14+ with ConsolePlugin v1 API.
-  enabled: false
+  # The OpenShift Console dynamic plugin for visual pool management.
+  # Installed only on clusters with the OpenShift console (ConsolePlugin v1
+  # API, OpenShift 4.14+). A hook Job turns it on in the console; set false to
+  # leave it out (an upgrade then turns it off in the console).
+  enabled: true
   image:
     repository: de.icr.io/ibm-vpc-file-pool-csi/console-plugin
     tag: latest
