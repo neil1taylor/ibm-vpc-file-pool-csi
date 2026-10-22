@@ -20,14 +20,24 @@ What the failover tool does and does not do:
 ## Prerequisites
 
 - The destination cluster from Part 12: the receiver, the pool `dr-vm-pool`, and the volume `repl-destination-data` in `kube-system`.
-- A host that can reach the destination share over NFS and reach the DR cluster's API. A VSI in the VPC works. The tool reads the replicated folders from a mounted share, so it must run where the share is mounted.
-- The failover tool, built for that host:
+- A place to run the failover tool where the destination share is mounted. The tool reads the replicated folders from a mounted share. There are two ways:
+  - **A host** that can reach the destination share over NFS and the DR cluster's API. A VSI in the destination VPC works. A host in another VPC usually cannot reach the share (the NFS port times out).
+  - **The receiver pod.** It already mounts the share at `/data` and has a service account for the DR cluster, so it needs no NFS route and no kubeconfig. This is the way used in the steps below.
+- The failover tool, built for Linux x86 (the receiver pod and most hosts):
 
 ```bash
-make build-failover        # makes bin/kubectl-failover; set GOOS and GOARCH for another system
-sudo cp bin/kubectl-failover /usr/local/bin/
-kubectl failover version
+make build-failover        # makes bin/kubectl-failover; set GOOS=linux GOARCH=amd64 on another system
 ```
+
+For a host, copy it to `/usr/local/bin/` and check `kubectl failover version`. For the receiver pod, copy it in (the driver image does not contain it):
+
+```bash
+RECEIVER_POD=$(dr get pods -n kube-system -l app.kubernetes.io/component=replication-receiver -o jsonpath='{.items[0].metadata.name}')
+dr exec -i -n kube-system ${RECEIVER_POD} -- sh -c 'cat > /tmp/kubectl-failover && chmod +x /tmp/kubectl-failover' < bin/kubectl-failover
+failover() { dr exec -n kube-system ${RECEIVER_POD} -- /tmp/kubectl-failover "$@"; }
+```
+
+Below, `failover <args>` is the receiver-pod way. On a host, read `kubectl failover <args>` instead, and add `--kubeconfig ${DR_KUBECONFIG}` to `execute` and `status`.
 
 Set the names from Part 12:
 
@@ -51,7 +61,7 @@ If the source cluster is lost, skip this step.
 
 ---
 
-## Step 2: Mount the destination share
+## Step 2: Find the destination share
 
 Find the share's address and the folder of the receiver volume on the DR cluster:
 
@@ -63,26 +73,30 @@ export RECV_SUB=$(dr get subvolume ${RECV_PV} -o jsonpath='{.spec.subPath}')
 echo "${DR_IP} export='${DR_EXPORT}' receiver folder=${RECV_SUB}"
 ```
 
-Mount the whole share on the host. The share needs `sec=sys`:
+**In the receiver pod,** the share is already mounted. The receiver volume is mounted at `/data`, so the replicated folders are in `/data/repl/pvcs`:
+
+```bash
+dr exec -n kube-system ${RECEIVER_POD} -- ls /data/repl/pvcs
+export FAILOVER_PATH=/data/repl
+```
+
+**On a host,** mount the whole share. The share needs `sec=sys`:
 
 ```bash
 sudo mkdir -p /mnt/dr
 sudo mount -t nfs4 -o nfsvers=4.1,sec=sys,soft,timeo=600,retrans=3 ${DR_IP}:${DR_EXPORT:-/} /mnt/dr
 ls /mnt/dr${RECV_SUB}/repl/pvcs
-```
-
-**Expected:** one folder `pvc-<uuid>` for each replicated volume. In Part 12 the policy used `destinationBasePath: /repl`, so the failover path is the receiver folder plus `/repl`:
-
-```bash
 export FAILOVER_PATH=/mnt/dr${RECV_SUB}/repl
 ```
+
+**Expected:** one folder `pvc-<uuid>` for each replicated volume. In Part 12 the policy used `destinationBasePath: /repl`, so the failover path is the receiver folder plus `/repl`.
 
 ---
 
 ## Step 3: Plan the failover
 
 ```bash
-kubectl failover plan --nfs-mount-path ${FAILOVER_PATH}
+failover plan --nfs-mount-path ${FAILOVER_PATH}
 ```
 
 **Expected:** a table with one row for each volume. The columns are SubVolume, PVC, namespace, size, age of the last copy and policy. Then the RPO (the age of the oldest last copy) and a list of the VMs with the moment each will show:
@@ -99,14 +113,14 @@ Running VM disks
 To use an earlier moment, list the moments that all disks of each VM can show (newest first):
 
 ```bash
-kubectl failover plan --nfs-mount-path ${FAILOVER_PATH} --list-moments
+failover plan --nfs-mount-path ${FAILOVER_PATH} --list-moments
 ```
 
 The list reaches back as far as `restorePointKeepHours` of the policy (24 hours by default). Choose one:
 
 ```bash
 export MOMENT=2026-10-22T10:45:00Z
-kubectl failover plan --nfs-mount-path ${FAILOVER_PATH} --rewind-to ${MOMENT}
+failover plan --nfs-mount-path ${FAILOVER_PATH} --rewind-to ${MOMENT}
 ```
 
 **Expected:** the plan now says `rewind (copies the whole disk into a new folder)` for the disks that are ahead of the moment. The tool uses the newest moment at or before `--rewind-to`.
@@ -118,14 +132,16 @@ kubectl failover plan --nfs-mount-path ${FAILOVER_PATH} --rewind-to ${MOMENT}
 Skip this step if the plan says `in place` for every disk and you want the newest moment.
 
 ```bash
-kubectl failover execute --nfs-mount-path ${FAILOVER_PATH} --prepare-only --rewind-to ${MOMENT}
+failover execute --nfs-mount-path ${FAILOVER_PATH} --prepare-only --rewind-to ${MOMENT}
 ```
 
-`--prepare-only` rolls back unfinished copies and rewinds the disks, then stops. It needs no cluster and no pool name. Each rewound disk goes into a new folder next to the original, named `<volume>.rewind-<epoch>`. The latest disk is not changed. A rewind copies the whole disk, so it can take minutes.
+`--prepare-only` rolls back unfinished copies and rewinds the disks, then stops. It needs no cluster and no pool name. Each rewound disk goes into a new folder next to the original, named `<volume>.rewind-<epoch>`. The latest disk is not changed. A rewind copies the whole disk, so it can take minutes (about 2.5 minutes for 14 GiB in a lab test).
+
+**Expected:** one line for each rewound disk: `pvc-... rewound into /pvcs/pvc-....rewind-<epoch>`. The tool prints `Warning: skipping ...rewind-...: metadata file not found` for these folders in later commands. This is harmless.
 
 ---
 
-## Step 5: Run the dry run, then execute
+## Step 5: Make the volumes on the DR cluster
 
 Each PV must name its folder by the path from the root of the share. The replicated volumes are inside the receiver volume's folder, so pass that path with `--dr-export-path`. The tool adds `/pvcs/pvc-<uuid>` to it.
 
@@ -133,35 +149,76 @@ Each PV must name its folder by the path from the root of the share. The replica
 export DR_EXPORT_PATH="${DR_EXPORT%/}${RECV_SUB}/repl"
 ```
 
-```bash
-kubectl failover execute --nfs-mount-path ${FAILOVER_PATH} \
-  --dr-pool ${DR_POOL} --dr-share-ip ${DR_IP} --dr-export-path "${DR_EXPORT_PATH}" \
-  --rewind-to ${MOMENT} --kubeconfig ${DR_KUBECONFIG} --dry-run
-```
-
-**Expected:** for each volume, three lines: the SubVolume, the PV (with `nfs://` and the full path) and the PVC it binds to. Check that every PV path ends in `.../repl/pvcs/pvc-<uuid>` or `...rewind-<epoch>`. Nothing is made in a dry run.
-
-Leave out `--rewind-to` if you want the newest moment. Run it for real:
+The tool makes each PVC in the namespace it had on the source cluster, so make that namespace first (or pass `--namespace` to put every PVC in one namespace):
 
 ```bash
-kubectl failover execute --nfs-mount-path ${FAILOVER_PATH} \
-  --dr-pool ${DR_POOL} --dr-share-ip ${DR_IP} --dr-export-path "${DR_EXPORT_PATH}" \
-  --rewind-to ${MOMENT} --kubeconfig ${DR_KUBECONFIG}
-kubectl failover status --kubeconfig ${DR_KUBECONFIG}
+dr create namespace vms --dry-run=client -o yaml | dr apply -f -
 ```
 
-**Expected:** `Created SubVolume`, `Created PV` and `Created PVC` for each volume. The status table shows each PVC as `Bound`. The PVs have the prefix `dr-`. The PVCs keep the namespace and name they had on the source cluster. Running `execute` again skips what exists.
+### The newest moment
 
-The tool creates the PVCs in the namespaces they had on the source cluster. Make sure those namespaces exist first, or pass `--namespace` to put them all in one namespace.
+```bash
+failover execute --nfs-mount-path ${FAILOVER_PATH} \
+  --dr-pool ${DR_POOL} --dr-share-ip ${DR_IP} --dr-export-path "${DR_EXPORT_PATH}" --dry-run
+
+failover execute --nfs-mount-path ${FAILOVER_PATH} \
+  --dr-pool ${DR_POOL} --dr-share-ip ${DR_IP} --dr-export-path "${DR_EXPORT_PATH}"
+failover status
+```
+
+**Expected:** `Created SubVolume`, `Created PV` and `Created PVC` for each volume (the dry run shows three lines for each volume and makes nothing). The PV path ends in `.../repl/pvcs/pvc-<uuid>`. The status table shows each PVC as `Bound` after a few seconds. The PVs have the prefix `dr-`. The PVCs keep the namespace and name they had on the source cluster. Running `execute` again skips what exists.
+
+The PVs that the tool makes have no mount options, and the NFS mount must use `sec=sys`. Without it, QEMU cannot open the disk: the VM does not start and its events say `Could not open '.../disk.img': Permission denied`. Add the mount options to each PV before you start the VM:
+
+```bash
+for pv in $(dr get pv -o name | grep '/dr-pvc-'); do
+  dr patch ${pv} --type=merge -p '{"spec":{"mountOptions":["nfsvers=4.1","sec=sys","soft","timeo=600","retrans=3"]}}'
+done
+```
+
+(The loop picks every PV whose name starts with `dr-pvc-`. On a cluster that has other such PVs, name yours.) The PVCs may also show the cluster's default StorageClass, because the tool does not set one. They are bound to their PVs by name, so this does no harm.
+
+### An earlier moment (after Step 4)
+
+`failover execute --rewind-to ${MOMENT}` fails at the moment, because the SubVolume it tries to make has a path with `.rewind-<epoch>` in it, and the SubVolume CRD only accepts `/pvcs/pvc-<uuid>`:
+
+```
+Error: failover SubVolume pvc-...: create SubVolume CR: SubVolume.storage.ibmcloud.io "pvc-..." is invalid: spec.subPath: Invalid value: "/pvcs/pvc-....rewind-1792684470": spec.subPath in body should match '^/pvcs/pvc-[a-f0-9-]+$'
+```
+
+(The dry run does not show this, and shows the path of the latest disk.) Until this is fixed, make the PV and the PVC of a rewound disk yourself. Do this for each disk. `<volume>` is the source folder name `pvc-<uuid>` from the plan, `<epoch>` the number in the `.rewind-<epoch>` folder name, and `<name>` and `<size>` the PVC name and size from the plan:
+
+```bash
+cat <<EOF | dr apply -f -
+apiVersion: v1
+kind: PersistentVolume
+metadata: {name: rewind-<name>}
+spec:
+  capacity: {storage: <size>Gi}
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  mountOptions: [nfsvers=4.1, sec=sys, soft, timeo=600, retrans=3]
+  nfs: {server: "${DR_IP}", path: "${DR_EXPORT_PATH}/pvcs/<volume>.rewind-<epoch>"}
+  claimRef: {namespace: vms, name: <name>}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: <name>, namespace: vms}
+spec:
+  storageClassName: ""
+  volumeName: rewind-<name>
+  accessModes: [ReadWriteMany]
+  resources: {requests: {storage: <size>Gi}}
+EOF
+```
 
 ---
 
 ## Step 6: Start the VM
 
-Apply the VM definition on the DR cluster. Keep these in version control, or export them from the source cluster while it is alive. Remove `status`, `metadata.uid`, `metadata.resourceVersion` and the `macAddress` of the interface. Every volume must name the PVC that the failover made.
+Apply the VM definition on the DR cluster. Keep these in version control, or export them from the source cluster while it is alive. Remove `status`, `metadata.uid`, `metadata.resourceVersion` and the `macAddress` of the interface, and set `spec.runStrategy` to `Halted`, so the VM does not start before you say so. Every volume must name the PVC that you made above.
 
 ```bash
-dr create namespace vms --dry-run=client -o yaml | dr apply -f -
 dr apply -n vms -f my-vm.yaml
 virtctl start my-vm -n vms --kubeconfig ${DR_KUBECONFIG}
 dr get vmi -n vms -w
@@ -169,9 +226,9 @@ dr get vmi -n vms -w
 
 **Expected:** the VM boots. The guest agent connects. The kernel log shows no file-system errors if the copy was `FileSystemConsistent`.
 
-Check your data. For a VM that logs files, count the files and compare their checksums to the log.
+Check your data. For a VM that logs files, count the files and compare their checksums to the log. In a lab test with a VM that wrote a file and logged its checksum every 2 seconds, a VM started from the rewound disk had exactly the files up to the chosen moment (and not the file written later), and a VM started from the newest moment had all the files up to the last copy. All checksums matched. Both VMs started in under a minute.
 
-> **After the VM runs, the disk no longer fits its restore points.** `kubectl failover execute --prepare-only --rewind-to ...` now refuses with "has changed since its last copy". To try another moment, fail over again from copies that no VM has used.
+> **After the VM runs, the disk no longer fits its restore points.** `failover execute --prepare-only --rewind-to ...` now refuses with "has changed since its last copy". To try another moment, fail over again from copies that no VM has used.
 
 ---
 
@@ -180,10 +237,10 @@ Check your data. For a VM that logs files, count the files and compare their che
 ```bash
 dr delete vm -n vms my-vm
 dr delete pvc -n vms --all
-sudo umount /mnt/dr
+sudo umount /mnt/dr      # only if you mounted the share on a host
 ```
 
-The PVs that failover made have names that start with `dr-`. Their SubVolumes have the label `storage.ibmcloud.io/failover-source`. Both have the reclaim policy `Retain`, so deleting a PVC keeps the data on the share. Delete the PVs and SubVolumes last, when you no longer need the data.
+The PVs that failover made have names that start with `dr-`. Their SubVolumes have the label `storage.ibmcloud.io/failover-source`. Both have the reclaim policy `Retain`, so deleting a PVC keeps the data on the share. Delete the PVs and SubVolumes last, when you no longer need the data. The PVs you made yourself for a rewound disk are named in your manifest. The data of the rewound disks is in the `.rewind-<epoch>` folders of the receiver volume. They are deleted with the receiver volume.
 
 ---
 
