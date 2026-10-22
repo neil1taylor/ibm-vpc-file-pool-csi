@@ -19,6 +19,8 @@ To make a release:
 
 ## [Unreleased]
 
+- **Browse helper for single-file restore, part 1 (issue #92).** A new image (`browse`, built by `make docker-build-browse`) and program (`cmd/browse`) that read one backup folder read-only: list, stat, read a byte range, or stream a tar, over HTTP with a session token. Links are listed and never followed, names are raw bytes, and a pipe or device is never opened. It ends when idle or at a time limit. Nothing in the driver starts it yet, so users see no change. Lab result: with root, no capabilities and a read-only mount, it reads another user's files with mode 0600 and folders with mode 0700, so the restore Job that copies as root can too. Release test stage 20 (the spec calls it 19; 19 is taken) checks this on a real share.
+
 - **Console: the VM warnings on the restore and clone pages are correct again.** The restore page no longer says a snapshot of a running VM may not boot; it says the disk was copied at one moment, and what a crash consistent copy means. The clone page points to a VM snapshot for a safe copy.
 
 - **Console says when Red Hat does not support a VM copy.** The replication policy pages (when the policy holds a running VM's disk) and the Snapshots page now say that copies and snapshots of running VMs work directly with QEMU, not through OpenShift, so an OpenShift update could stop them until the driver is updated. The Snapshots page adds that instant snapshots also need a KubeVirt setting Red Hat does not support.

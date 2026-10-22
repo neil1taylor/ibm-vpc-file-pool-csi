@@ -516,6 +516,17 @@ Not tested against a real bucket or a real Key Protect instance. The Jobs read t
 
 ---
 
+## Browse a backup and restore files (in development)
+
+The goal (issue #92) is to look inside a backup and get back one file or folder without restoring the whole volume. The design is in `docs/specs/2026-10-22-backup-file-restore.md`. Only the first part exists:
+
+- **The browse helper** (`cmd/browse`, image `browse`). It reads one backup folder, read-only. It lists a folder in pages of 1000 names, describes a name, reads a byte range of a file, and streams a folder as a tar. It never follows a symbolic link: a link is listed with its text, a download of a link is refused, and a tar keeps it as a link. A path is a list of names, so a name with a newline or bytes that are not text works. Every call needs the session token. The helper ends by itself after 15 minutes without use, or after 2 hours.
+- **Not built yet:** the resource that starts a helper, the gateway that checks Kubernetes access, `kubectl backup ls/get/browse/restore-files`, the console pages, COS backups and VM disks.
+
+### Can the helper read other users' files?
+
+Yes. VPC file shares map root to an ordinary user, so this was a real question. It was tested on the lab (22 Oct 2026) with a volume filled by users 1000, 2000 and root: files with mode 0600, folders with mode 0700, a link to `/etc`, a name with a newline. The helper (user 0, no capabilities, read-only NFS mount with `sec=sys`) listed and read all of them. A `cp -a` as root, which is how the restore Job copies, read all of them too. The only failures in that copy were changes of owner into a scratch folder that was not on the share, which the restore Job does on the share. A pipe could not be created on the share by a normal user (`mkfifo` is refused), so the share holds none.
+
 ## Cross-Region Replication
 
 Schedule-based replication for disaster recovery. See [CROSS-REGION-DR.md](CROSS-REGION-DR.md) for architecture and consistency analysis.
