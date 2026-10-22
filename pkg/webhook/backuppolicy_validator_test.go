@@ -75,6 +75,51 @@ func TestBackupPolicyValidator_Refuses(t *testing.T) {
 	}
 }
 
+func TestBackupPolicyValidator_Export(t *testing.T) {
+	good := func() *v1alpha1.BackupExport {
+		return &v1alpha1.BackupExport{Bucket: "b-ucket", Endpoint: "s3.example.com", CredentialsSecret: "cos", BackupKeySecret: "key",
+			KeyProtect: v1alpha1.KeyProtectRef{InstanceID: "11111111-2222-3333-4444-555555555555", Region: "eu-de", RootKeyID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", APIKeySecret: "kp-apikey"}}
+	}
+	p := validBackupPolicy()
+	p.Spec.Export = good()
+	if _, err := (&BackupPolicyValidator{}).ValidateCreate(context.Background(), p); err != nil {
+		t.Fatalf("a valid export block: %v", err)
+	}
+	cases := map[string]func(*v1alpha1.BackupExport){
+		"no bucket":               func(e *v1alpha1.BackupExport) { e.Bucket = "" },
+		"no endpoint":             func(e *v1alpha1.BackupExport) { e.Endpoint = "" },
+		"no credentials":          func(e *v1alpha1.BackupExport) { e.CredentialsSecret = "" },
+		"no key secret":           func(e *v1alpha1.BackupExport) { e.BackupKeySecret = "" },
+		"no key protect instance": func(e *v1alpha1.BackupExport) { e.KeyProtect.InstanceID = "" },
+		"no key protect region":   func(e *v1alpha1.BackupExport) { e.KeyProtect.Region = "" },
+		"no root key":             func(e *v1alpha1.BackupExport) { e.KeyProtect.RootKeyID = "" },
+		"no api key secret":       func(e *v1alpha1.BackupExport) { e.KeyProtect.APIKeySecret = "" },
+		"bad lock":                func(e *v1alpha1.BackupExport) { e.Lock = "Governance" },
+		"24h compliance":          func(e *v1alpha1.BackupExport) { e.KeepFor = "24h" },
+	}
+	for name, mutate := range cases {
+		bad := validBackupPolicy()
+		bad.Spec.Export = good()
+		mutate(bad.Spec.Export)
+		if _, err := (&BackupPolicyValidator{}).ValidateCreate(context.Background(), bad); err == nil || !strings.Contains(err.Error(), "spec.export") {
+			t.Errorf("%s: err = %v, want an error that names spec.export", name, err)
+		}
+		if _, err := (&BackupPolicyValidator{}).ValidateUpdate(context.Background(), validBackupPolicy(), bad); err == nil {
+			t.Errorf("%s: an update must be refused too", name)
+		}
+	}
+	p = validBackupPolicy()
+	p.Spec.Export = good()
+	p.Spec.Export.KeepFor = "25h"
+	if _, err := (&BackupPolicyValidator{}).ValidateCreate(context.Background(), p); err != nil {
+		t.Errorf("25h with Compliance: %v", err)
+	}
+	p.Spec.Export.KeepFor = "3650d"
+	if _, err := (&BackupPolicyValidator{}).ValidateCreate(context.Background(), p); err != nil {
+		t.Errorf("a long keep time needs no check in the webhook: %v", err)
+	}
+}
+
 func TestBackupPolicyValidator_NameMustFitALabelValue(t *testing.T) {
 	p := validBackupPolicy()
 	p.Name = strings.Repeat("a", 64)

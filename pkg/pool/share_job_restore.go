@@ -46,12 +46,21 @@ func (r *ShareJobRunner) RestoreBackup(ctx context.Context, key string, backup S
 		at = moment.UTC().Format(time.RFC3339)
 		momentFlag = " --restore-moment=" + at
 	}
+	// A restore from COS reads its scratch copy from the share it writes to.
+	shares, dstRoot := []ShareMount{backup, dst}, "/share1"
+	if backup == dst {
+		shares, dstRoot = []ShareMount{backup}, "/share0"
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, `set -eu
 src="/share0%s"
 moments="/share0%s"
-dst="/share1%s"
+dst="%s%s"
 at="%s"
+if [ -L "$src" ] || [ -L "$src/disk.img" ]; then
+  echo "refusing a backup folder or disk that is a symlink" >&2
+  exit 1
+fi
 if [ -f "$src/disk.img" ]; then
   # A retry finds the disk of the first try; the target is a new volume, so
   # this removes only our own earlier output.
@@ -88,11 +97,15 @@ if [ -n "$at" ]; then
 else
   stamp="$newest"
 fi
+if [ -L "$pick" ]; then
+  echo "refusing a moment folder that is a symlink" >&2
+  exit 1
+fi
 rm -r -f -- "$dst"
 mkdir -p "$dst"
 cp -a "$pick/." "$dst/"
 rm -f "$dst/.subvolume-metadata.json"
-`, volPath, momentsPath, dstPath, at, momentFlag)
+`, volPath, momentsPath, dstRoot, dstPath, at, momentFlag)
 	writeOwnerScript(&b, "$dst", owner)
 	b.WriteString(`iso=""
 if [ -n "$stamp" ]; then
@@ -105,7 +118,7 @@ printf '{"moment":"%s","latest":%s}' "$iso" "$latest" > /dev/termination-log
 		command:   []string{"/bin/bash", "-c", b.String()},
 		runAsUser: 0,
 	}
-	done, msg, err := r.runMessage(ctx, key, []ShareMount{backup, dst}, shape)
+	done, msg, err := r.runMessage(ctx, key, shares, shape)
 	if err != nil || !done {
 		return false, RestoreOutcome{}, err
 	}

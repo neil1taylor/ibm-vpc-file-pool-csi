@@ -37,6 +37,20 @@ type fakeShareData struct {
 	// what a finished restore reports.
 	restoreErr     error
 	restoreOutcome RestoreOutcome
+	// usagePercent is what ShareUsage reports; usageErr makes it fail as a
+	// failed Job; usageCalls counts the calls.
+	usagePercent int
+	usageErr     error
+	usageCalls   int
+	// usageByIP overrides usagePercent for the share with that mount target IP;
+	// usageSeen lists the mount target IPs ShareUsage was asked about.
+	usageByIP map[string]int
+	usageSeen []string
+	// export holds what the COS export Jobs report (see export_fake_test.go).
+	export fakeExport
+	// cos holds what the Jobs of a restore from COS report (see
+	// cosrestore_fake_test.go).
+	cos fakeCOSRestore
 }
 
 type restoreCall struct {
@@ -45,6 +59,7 @@ type restoreCall struct {
 	momentsPath string
 	dstPath     string
 	moment      time.Time
+	srcIP       string
 }
 
 type applyCall struct {
@@ -117,9 +132,9 @@ func (f *fakeShareData) ApplyVMDisk(_ context.Context, key string, _ ShareMount,
 
 // RestoreBackup records the call and reports done when the call is not held
 // up. The outcome is the latest backup, unless restoreOutcome says otherwise.
-func (f *fakeShareData) RestoreBackup(_ context.Context, key string, _ ShareMount, volPath, momentsPath string, _ ShareMount, dstPath string, moment time.Time, _ *Ownership) (bool, RestoreOutcome, error) {
+func (f *fakeShareData) RestoreBackup(_ context.Context, key string, src ShareMount, volPath, momentsPath string, _ ShareMount, dstPath string, moment time.Time, _ *Ownership) (bool, RestoreOutcome, error) {
 	f.mu.Lock()
-	f.restores = append(f.restores, restoreCall{key: key, volPath: volPath, momentsPath: momentsPath, dstPath: dstPath, moment: moment})
+	f.restores = append(f.restores, restoreCall{key: key, volPath: volPath, momentsPath: momentsPath, dstPath: dstPath, moment: moment, srcIP: src.MountTargetIP})
 	inProgress, apiErr, restoreErr, outcome := f.inProgress, f.apiErr, f.restoreErr, f.restoreOutcome
 	f.mu.Unlock()
 	if apiErr != nil {
@@ -132,6 +147,26 @@ func (f *fakeShareData) RestoreBackup(_ context.Context, key string, _ ShareMoun
 		return false, RestoreOutcome{}, nil
 	}
 	return true, outcome, nil
+}
+
+func (f *fakeShareData) ShareUsage(_ context.Context, _ string, share ShareMount) (bool, int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.usageCalls++
+	f.usageSeen = append(f.usageSeen, share.MountTargetIP)
+	if f.apiErr != nil {
+		return false, 0, f.apiErr
+	}
+	if f.usageErr != nil {
+		return false, 0, fmt.Errorf("%w: %v", ErrShareJobFailed, f.usageErr)
+	}
+	if f.inProgress {
+		return false, 0, nil
+	}
+	if p, ok := f.usageByIP[share.MountTargetIP]; ok {
+		return true, p, nil
+	}
+	return true, f.usagePercent, nil
 }
 
 // Stop reports done once no Job runs for key. The first call on a running

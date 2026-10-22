@@ -42,3 +42,13 @@ describe('latencyColor', () => {
     expect(latencyColor(5)).toBe('red'); // 5000ms
   });
 });
+
+describe('no data from Prometheus (NaN)', () => {
+  it('formatLatencyMs shows a dash', () => {
+    expect(formatLatencyMs(NaN)).toBe('-');
+  });
+
+  it('latencyColor is grey', () => {
+    expect(latencyColor(NaN)).toBe('grey');
+  });
+});

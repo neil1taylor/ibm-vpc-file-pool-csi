@@ -108,6 +108,7 @@ export interface GoldenImageNamespaceStatus {
 export interface ShareDrainStatus {
   shareID: string;
   remainingSubVolumes: number;
+  remainingSnapshots?: number;
   drained: boolean;
   drainStartedAt?: string;
 }
@@ -145,6 +146,9 @@ export interface SubVolumeStatus {
   createdAt?: string;
   cloneStatus?: string;
   cloneProgress?: CloneProgress;
+  /** Instant-snapshot chain of the VM disk, newest file first; the last file is disk.img. */
+  diskChain?: string[];
+  chainOperation?: string;
 }
 
 export interface CloneProgress {
@@ -243,6 +247,10 @@ export interface ReplicationPolicySpec {
   destinationAuthSecretRef?: string;
   /** Secret name in kube-system with a "ca.crt" key. Used in driver-to-driver mode when the receiver has a self-signed certificate. */
   destinationCACertSecretRef?: string;
+  /** Speed limit for copying a running VM's disk, in MB/s for each disk. 0 is unlimited. Default 20. */
+  vmCopySpeedLimitMBps?: number;
+  /** How long the destination keeps restore points of a running VM's disks. Default 24. */
+  restorePointKeepHours?: number;
 }
 
 export interface ReplicationPolicyStatus {
@@ -252,6 +260,8 @@ export interface ReplicationPolicyStatus {
   subVolumeStatuses?: SubVolumeReplicationStatus[];
   consecutiveFailures: number;
   lastError?: string;
+  /** `ReceiverReachable` is set by the controller for driver-to-driver policies. */
+  conditions?: Condition[];
 }
 
 export interface SubVolumeReplicationStatus {
@@ -259,6 +269,18 @@ export interface SubVolumeReplicationStatus {
   lastSyncTime?: string;
   bytesSynced?: number;
   lastError?: string;
+  /** Running VM disks only: the moment the last good copy shows. */
+  copyMoment?: string;
+  consistency?: 'FileSystemConsistent' | 'CrashConsistent';
+  /** Why a copy is only crash consistent. */
+  consistencyReason?: string;
+  /** Empty means the next copy is a full copy. */
+  vmChangeList?: string;
+  /** How many earlier copies the destination keeps, and the moment of the oldest. */
+  restorePoints?: number;
+  oldestRestorePoint?: string;
+  /** A copy that is not finished. */
+  vmCopy?: { id: string; phase: string };
 }
 
 // ── Hooks ──
@@ -314,4 +336,112 @@ export interface LabelSelectorRequirement {
   key: string;
   operator: 'In' | 'NotIn' | 'Exists' | 'DoesNotExist';
   values?: string[];
+}
+
+// ── BackupPolicy ──
+
+export interface BackupPolicy extends K8sResourceCommon {
+  spec: BackupPolicySpec;
+  status?: BackupPolicyStatus;
+}
+
+export interface BackupPolicySpec {
+  snapshotPool: string;
+  schedule: string;
+  selector: LabelSelector;
+  namespaces?: string[];
+  /** A Go duration or a number of days such as "30d". Default 7d. */
+  keepFor?: string;
+  /** MB/s for each disk of a running VM. 0 is unlimited. Default 20. */
+  vmCopySpeedLimitMBps?: number;
+  suspend?: boolean;
+  export?: BackupExport;
+}
+
+export interface BackupExport {
+  bucket: string;
+  endpoint: string;
+  prefix?: string;
+  credentialsSecret: string;
+  backupKeySecret: string;
+  keyProtect: {
+    instanceID: string;
+    region: string;
+    rootKeyID: string;
+    apiKeySecret: string;
+  };
+  emergencyKeySecret?: string;
+  keepFor?: string;
+  lock?: 'Compliance' | 'None';
+  schedule?: string;
+}
+
+export interface BackupPolicyStatus {
+  phase?: string;
+  message?: string;
+  volumeCount?: number;
+  replicationPolicies?: string[];
+  volumes?: BackupVolumeStatus[];
+}
+
+export interface BackupVolumeStatus {
+  pvcNamespace: string;
+  pvcName: string;
+  subVolumeName: string;
+  vmName?: string;
+  subPath?: string;
+  shareID?: string;
+  requestedGB?: number;
+  storageClassName?: string;
+  retained?: boolean;
+  lastBackupTime?: string;
+  oldestBackupTime?: string;
+  restorePoints?: number;
+  bytesWritten?: number;
+  /** FileSystemConsistent or CrashConsistent for a VM disk, FileCopy for any other volume. */
+  consistency?: string;
+  lastError?: string;
+  exportedTime?: string;
+  exportedBytes?: number;
+  exportError?: string;
+}
+
+// ── BackupRestore ──
+
+export interface BackupRestore extends K8sResourceCommon {
+  spec: BackupRestoreSpec;
+  status?: BackupRestoreStatus;
+}
+
+export interface BackupRestoreSpec {
+  policy: string;
+  sourceNamespace?: string;
+  sourceName?: string;
+  moment?: string;
+  targetNamespace: string;
+  targetName: string;
+  storageClassName?: string;
+  fromCOS?: RestoreFromCOS;
+}
+
+export interface RestoreFromCOS {
+  bucket: string;
+  endpoint: string;
+  prefix?: string;
+  credentialsSecret: string;
+  volume: string;
+  sizeGB: number;
+  backupKeySecret?: string;
+  keyProtect?: { instanceID: string; region: string; rootKeyID: string; apiKeySecret: string };
+  emergencyKeySecret?: string;
+  emergencyKeyOnly?: boolean;
+}
+
+export interface BackupRestoreStatus {
+  phase?: 'Pending' | 'Provisioning' | 'Restoring' | 'Done' | 'Failed';
+  message?: string;
+  restoredMoment?: string;
+  latest?: boolean;
+  fetched?: boolean;
+  copied?: boolean;
 }

@@ -38,7 +38,7 @@ func newBackupEnv(t *testing.T) *backupEnv {
 	s.AddKnownTypeWithName(vmGVK, &unstructured.Unstructured{})
 	s.AddKnownTypeWithName(vmGVK.GroupVersion().WithKind("VirtualMachineList"), &unstructured.UnstructuredList{})
 	c := fakeclient.NewClientBuilder().WithScheme(s).
-		WithStatusSubresource(&v1alpha1.BackupPolicy{}, &v1alpha1.ReplicationPolicy{}, &v1alpha1.BackupRestore{}).Build()
+		WithStatusSubresource(&v1alpha1.BackupPolicy{}, &v1alpha1.ReplicationPolicy{}, &v1alpha1.BackupRestore{}, &v1alpha1.BackupBrowse{}).Build()
 	e := &backupEnv{t: t, c: c, bc: NewBackupController(c), ctx: context.Background()}
 	e.addPool("backups", "10.240.9.9", "/export_backups")
 	e.addPool("data-a", "10.240.1.1", "/export_a")
@@ -159,7 +159,7 @@ func TestBackupController_MakesAnOwnedReplicationPolicy(t *testing.T) {
 		t.Fatalf("replication policies = %d, want 1", len(rps))
 	}
 	rp := rps[0]
-	if rp.Name != backupReplicationName("nightly", "data-a") {
+	if rp.Name != backupReplicationName("nightly", "data-a", "backups-share", "backups-share") {
 		t.Errorf("name = %q", rp.Name)
 	}
 	sp := rp.Spec
@@ -310,13 +310,6 @@ func TestBackupController_SnapshotPoolProblemsAreReported(t *testing.T) {
 			e.addClaim("apps", "intruder", "backups", nil)
 			e.policy("nightly", nil)
 		}, "claim"},
-		{"pool with two shares", func(e *backupEnv) {
-			p := &v1alpha1.FileSharePool{}
-			_ = e.c.Get(e.ctx, types.NamespacedName{Name: "backups"}, p)
-			p.Status.Shares = append(p.Status.Shares, v1alpha1.PoolShareStatus{ShareID: "second", MountTargetIP: "10.0.0.5", State: "stable"})
-			_ = e.c.Update(e.ctx, p)
-			e.policy("nightly", nil)
-		}, "one share"},
 	}
 	for _, tc := range cases {
 		e := newBackupEnv(t)

@@ -35,6 +35,9 @@ theme:
   icon:
     repo: fontawesome/brands/github
 
+hooks:
+  - hack/mkdocs_hooks.py
+
 plugins:
   - search
 
@@ -69,6 +72,13 @@ nav:
       - Tutorial 6 - Replication and Failover: TUTORIAL-06-REPLICATION-AND-FAILOVER.md
       - Tutorial 7 - Monitoring: TUTORIAL-07-MONITORING.md
       - Tutorial 8 - Migration and Console: TUTORIAL-08-MIGRATION-AND-CONSOLE.md
+      - Tutorial 9 - COS Bucket for Backups: TUTORIAL-09-COS-BACKUP-BUCKET.md
+      - Tutorial 10 - Backup and Restore: TUTORIAL-10-BACKUP-AND-RESTORE.md
+      - Tutorial 11 - Instant VM Snapshots: TUTORIAL-11-INSTANT-VM-SNAPSHOTS.md
+      - Tutorial 12 - Replicating Running VMs: TUTORIAL-12-REPLICATING-RUNNING-VMS.md
+      - Tutorial 13 - Failover of Running VMs: TUTORIAL-13-FAILOVER-OF-RUNNING-VMS.md
+      - Tutorial 14 - Restore a Snapshot in the Console: TUTORIAL-14-CONSOLE-RESTORE.md
+      - Deployment Notes: DEPLOYMENT-NOTES.md
       - Features: FEATURES.md
       - Upgrade Guide: UPGRADE-GUIDE.md
       - FAQ: FAQ.md
@@ -85,6 +95,7 @@ nav:
       - Known Limitations: KNOWN-LIMITATIONS.md
   - Architecture:
       - Overview: OVERVIEW.md
+      - Context (the words we use): CONTEXT.md
       - System Design: ARCHITECTURE.md
       - Consistency Model: CONSISTENCY-MODEL.md
       - VPC Networking: VPC-NETWORKING.md

@@ -62,6 +62,103 @@ spec:
             description: BackupPolicySpec defines what is backed up, where, how often
               and for how long.
             properties:
+              export:
+                description: |-
+                  Export also sends the backups to an IBM Cloud Object Storage bucket.
+                  Without it, backups stay in the snapshot pool. An export problem never
+                  stops the backups to the snapshot pool. See
+                  docs/specs/2026-10-21-backup-cos-export.md.
+                properties:
+                  backupKeySecret:
+                    description: |-
+                      BackupKeySecret names the Secret with the backup key, wrapped by Key
+                      Protect (wrappedKey). The readable key is never stored. The controller
+                      never reads the Secret: only the Jobs do, and they unwrap the key in memory.
+                    minLength: 1
+                    type: string
+                  bucket:
+                    description: Bucket is the name of the COS bucket.
+                    minLength: 1
+                    type: string
+                  credentialsSecret:
+                    description: |-
+                      CredentialsSecret names the Secret with the driver's COS key (an HMAC key:
+                      access_key_id and secret_access_key).
+                    minLength: 1
+                    type: string
+                  emergencyKeySecret:
+                    description: |-
+                      EmergencyKeySecret names an optional Secret (key: backupKey) with the
+                      readable backup key. The Jobs use it only when Key Protect cannot be
+                      reached. Storing it in the cluster weakens the Key Protect protection; most
+                      users keep the emergency copy outside the cluster and leave this empty.
+                    type: string
+                  endpoint:
+                    description: |-
+                      Endpoint is the S3 host of the bucket, such as
+                      s3.eu-de.cloud-object-storage.appdomain.cloud.
+                    minLength: 1
+                    type: string
+                  keepFor:
+                    default: 30d
+                    description: |-
+                      KeepFor is how long exported backups are kept: a Go duration, or a number
+                      of days such as "30d". With a Compliance lock it is at least 25 hours.
+                    type: string
+                  keyProtect:
+                    description: KeyProtect says which root key unwraps the backup
+                      key and how to log in.
+                    properties:
+                      apiKeySecret:
+                        description: |-
+                          APIKeySecret names the Secret (key: apikey) with the IBM Cloud API key that
+                          has the Reader role on the root key.
+                        minLength: 1
+                        type: string
+                      instanceID:
+                        description: InstanceID is the GUID of the Key Protect instance.
+                        minLength: 1
+                        type: string
+                      region:
+                        description: Region is the region of the Key Protect instance,
+                          such as eu-de.
+                        minLength: 1
+                        type: string
+                      rootKeyID:
+                        description: RootKeyID is the ID of the root key that wrapped
+                          the backup key.
+                        minLength: 1
+                        type: string
+                    required:
+                    - apiKeySecret
+                    - instanceID
+                    - region
+                    - rootKeyID
+                    type: object
+                  lock:
+                    default: Compliance
+                    description: Lock is Compliance (nobody can delete or shorten
+                      the keep time) or None.
+                    enum:
+                    - Compliance
+                    - None
+                    type: string
+                  prefix:
+                    description: Prefix is a folder in the bucket. The policy's own
+                      area is below it.
+                    type: string
+                  schedule:
+                    description: |-
+                      Schedule is a Go duration such as "6h": the most often a volume is sent.
+                      Empty means after each local backup.
+                    type: string
+                required:
+                - backupKeySecret
+                - bucket
+                - credentialsSecret
+                - endpoint
+                - keyProtect
+                type: object
               keepFor:
                 default: 7d
                 description: |-
@@ -188,6 +285,22 @@ spec:
                         Consistency is FileSystemConsistent or CrashConsistent for a VM disk
                         and FileCopy for any other volume.
                       type: string
+                    exportError:
+                      description: |-
+                        ExportError is the last error of the volume's export. The export is tried
+                        again; the local backup is not affected.
+                      type: string
+                    exportedBytes:
+                      description: ExportedBytes is how much the newest export sent
+                        to COS.
+                      format: int64
+                      type: integer
+                    exportedTime:
+                      description: |-
+                        ExportedTime is the moment of the newest copy in COS. Set only when the
+                        policy has an export block.
+                      format: date-time
+                      type: string
                     lastBackupTime:
                       description: LastBackupTime is the moment of the newest backup.
                       format: date-time
@@ -222,6 +335,14 @@ spec:
                         deleted, or no longer matches the selector). Its existing backups stay
                         until the keep time has passed since the last backup.
                       type: boolean
+                    shareID:
+                      description: |-
+                        ShareID is the share of the snapshot pool that holds the backups of this
+                        volume. It is chosen when the volume is first backed up and never changes,
+                        because the backups stay where they are. A restore reads from it. An entry
+                        with no ShareID was made when the snapshot pool had one share; it belongs
+                        to the first share of the pool.
+                      type: string
                     storageClassName:
                       type: string
                     subPath:

@@ -4,7 +4,7 @@ description: Run health checks on the pool CSI driver — pod status, pool phase
 allowed-tools: Bash(kubectl *)
 ---
 
-Run the daily health check from DAY2-OPERATIONS.md and summarize the results:
+Run the daily health check from docs/DAY2-OPERATIONS.md and summarize the results:
 
 ```bash
 # 1. Driver pods

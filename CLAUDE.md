@@ -17,48 +17,48 @@ Read the relevant doc before implementing any component:
 | Document | Covers |
 |----------|--------|
 | `SKILL.md` | Task-specific build guidance — read this first for any implementation task |
-| `ARCHITECTURE.md` | System design, component diagram, data flows |
-| `CRD-SPEC.md` | All CRD definitions (FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, ReplicationPolicy) |
-| `CSI-INTERFACE.md` | CSI gRPC method implementations |
-| `IBM-VPC-API.md` | VPC API client wrapper design |
-| `CODING-GUIDELINES.md` | Go conventions, error handling, concurrency, metrics |
-| `TESTING.md` | Testing strategy, fakes/mocks, coverage targets |
+| `docs/ARCHITECTURE.md` | System design, component diagram, data flows |
+| `docs/CRD-SPEC.md` | All CRD definitions (FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, ReplicationPolicy) |
+| `docs/CSI-INTERFACE.md` | CSI gRPC method implementations |
+| `docs/IBM-VPC-API.md` | VPC API client wrapper design |
+| `docs/CODING-GUIDELINES.md` | Go conventions, error handling, concurrency, metrics |
+| `docs/TESTING.md` | Testing strategy, fakes/mocks, coverage targets |
 
 ### Features & Data Protection
 
 | Document | Covers |
 |----------|--------|
-| `FEATURES.md` | Complete feature catalog with maturity badges and comparison table |
-| `VOLUME-CLONING.md` | Async Job-based clone design (Phase 4b) |
-| `VOLUME-GROUP-SNAPSHOTS.md` | Coordinated multi-PVC snapshots (Phase 4c) |
-| `VM-INSTANT-SNAPSHOTS.md` | Instant VM snapshots with overlay files (design; spec `docs/specs/2026-10-21-instant-vm-snapshots.md`) |
-| `CROSS-REGION-DR.md` | Replication architecture and consistency analysis (Phase 4d) |
-| `CONSISTENCY-MODEL.md` | NFS consistency guarantees and limitations |
-| `GOLDEN-IMAGE-WORKFLOW.md` | KubeVirt golden image syncer modes and setup |
+| `docs/FEATURES.md` | Complete feature catalog with maturity badges and comparison table |
+| `docs/VOLUME-CLONING.md` | Async Job-based clone design (Phase 4b) |
+| `docs/VOLUME-GROUP-SNAPSHOTS.md` | Coordinated multi-PVC snapshots (Phase 4c) |
+| `docs/VM-INSTANT-SNAPSHOTS.md` | Instant VM snapshots with overlay files (design; spec `docs/specs/2026-10-21-instant-vm-snapshots.md`) |
+| `docs/CROSS-REGION-DR.md` | Replication architecture and consistency analysis (Phase 4d) |
+| `docs/CONSISTENCY-MODEL.md` | NFS consistency guarantees and limitations |
+| `docs/GOLDEN-IMAGE-WORKFLOW.md` | KubeVirt golden image syncer modes and setup |
 
 ### Operations & Configuration
 
 | Document | Covers |
 |----------|--------|
-| `INSTALL.md` | Build, deploy, Helm chart |
-| `UPGRADE-GUIDE.md` | Version upgrade procedures and compatibility matrix |
-| `HELM-VALUES.md` | Complete Helm chart values reference |
-| `API-KEY-SETUP.md` | Authentication via secret-common-lib |
-| `MONITORING.md` | All 25 Prometheus metrics, alerting rules, Grafana dashboard |
-| `DAY2-OPERATIONS.md` | Production runbook: health checks, draining, failover |
-| `CAPACITY-PLANNING.md` | Sizing guidance, cost estimation, example configs |
-| `BACKUP-RECOVERY.md` | Snapshot scheduling, DR setup, recovery runbooks |
-| `TROUBLESHOOTING.md` | Comprehensive troubleshooting guide |
-| `PERFORMANCE-TUNING.md` | NFS tuning, IOPS planning, benchmarking |
+| `docs/INSTALL.md` | Build, deploy, Helm chart |
+| `docs/UPGRADE-GUIDE.md` | Version upgrade procedures and compatibility matrix |
+| `docs/HELM-VALUES.md` | Complete Helm chart values reference |
+| `docs/API-KEY-SETUP.md` | Authentication via secret-common-lib |
+| `docs/MONITORING.md` | All 31 Prometheus metrics, alerting rules, Grafana dashboard |
+| `docs/DAY2-OPERATIONS.md` | Production runbook: health checks, draining, failover |
+| `docs/CAPACITY-PLANNING.md` | Sizing guidance, cost estimation, example configs |
+| `docs/BACKUP-RECOVERY.md` | Snapshot scheduling, DR setup, recovery runbooks |
+| `docs/TROUBLESHOOTING.md` | Comprehensive troubleshooting guide |
+| `docs/PERFORMANCE-TUNING.md` | NFS tuning, IOPS planning, benchmarking |
 
 ### Platform & Security
 
 | Document | Covers |
 |----------|--------|
-| `VPC-NETWORKING.md` | VPC network configuration for NFS |
-| `VM-DISK-FORMATS.md` | KubeVirt disk image format requirements |
-| `SECURITY.md` | Security policy and hardening guide |
-| `KNOWN-LIMITATIONS.md` | Platform constraints and workarounds |
+| `docs/VPC-NETWORKING.md` | VPC network configuration for NFS |
+| `docs/VM-DISK-FORMATS.md` | KubeVirt disk image format requirements |
+| `docs/SECURITY.md` | Security policy and hardening guide |
+| `docs/KNOWN-LIMITATIONS.md` | Platform constraints and workarounds |
 
 ## Skills (Slash Commands)
 
@@ -136,7 +136,7 @@ pkg/k8s/           → Kubernetes client and CRD reconcilers
 pkg/util/          → Mount helpers, path validation, quota tracking
 pkg/hooks/         → Lifecycle hook orchestrator (exec + HTTP)
 pkg/webhook/       → Validating admission webhooks for all CRDs
-pkg/metrics/       → Prometheus metric definitions (25 metrics)
+pkg/metrics/       → Prometheus metric definitions (31 metrics)
 pkg/migrate/       → PVC migration logic
 api/v1alpha1/      → CRD Go types and generated code
 config/            → Kubernetes manifests (CRDs, RBAC, deployments, webhooks)
@@ -155,7 +155,7 @@ test/              → Integration and e2e tests (unit tests live next to code)
 
 ## Testing Conventions
 
-- **Go 1.25+**, module path: `github.com/IBM/ibm-vpc-file-pool-csi`
+- **Go 1.26+**, module path: `github.com/IBM/ibm-vpc-file-pool-csi`
 - Unit tests live next to code (`_test.go`), use table-driven tests
 - Race detector mandatory: `-race` flag
 - Fake VPC client: `pkg/ibmcloud/fake/fake_client.go`
@@ -180,11 +180,11 @@ test/              → Integration and e2e tests (unit tests live next to code)
 
 ## After Making Changes
 
-- **CRD type changes** (`api/v1alpha1/`) → run `make generate`, then update `CRD-SPEC.md`
-- **New metrics** (`pkg/metrics/`) → update `MONITORING.md` metric reference table
-- **Helm value changes** (`charts/*/values.yaml`) → update `HELM-VALUES.md`
-- **New CLI flags** (`cmd/main.go`) → update `INSTALL.md`
-- **New features** → update `FEATURES.md` maturity badge, add to `CHANGELOG.md`
+- **CRD type changes** (`api/v1alpha1/`) → run `make generate`, then update `docs/CRD-SPEC.md`
+- **New metrics** (`pkg/metrics/`) → update `docs/MONITORING.md` metric reference table
+- **Helm value changes** (`charts/*/values.yaml`) → update `docs/HELM-VALUES.md`
+- **New CLI flags** (`cmd/main.go`) → update `docs/INSTALL.md`
+- **New features** → update `docs/FEATURES.md` maturity badge, add to `CHANGELOG.md`
 - **Any code change** → run `/test` to verify tests pass
 - **Before committing** → consider running `/docs-audit` to check doc accuracy
 

@@ -1,0 +1,103 @@
+{{- if include "ibm-vpc-file-pool-csi.hasConsole" . }}
+{{- $fullname := include "ibm-vpc-file-pool-csi.fullname" . }}
+{{- $enabled := include "ibm-vpc-file-pool-csi.consolePlugin" . }}
+# The OpenShift console shows a plugin only when the plugin is listed in the
+# console operator configuration. These hook Jobs add the plugin after install
+# and upgrade, and remove it before delete (or after an upgrade that turns it
+# off). They never touch other plugins.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $fullname }}-console-plugin-register
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $fullname }}-console-plugin-register
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["operator.openshift.io"]
+    resources: ["consoles"]
+    resourceNames: ["cluster"]
+    verbs: ["get", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $fullname }}-console-plugin-register
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $fullname }}-console-plugin-register
+subjects:
+  - kind: ServiceAccount
+    name: {{ $fullname }}-console-plugin-register
+    namespace: {{ .Release.Namespace }}
+{{- if $enabled }}
+---
+{{ include "ibm-vpc-file-pool-csi.consolePluginJob" (dict "ctx" . "action" "register" "hook" "post-install,post-upgrade") }}
+{{- end }}
+---
+{{ include "ibm-vpc-file-pool-csi.consolePluginJob" (dict "ctx" . "action" "unregister" "hook" (ternary "pre-delete" "post-upgrade,pre-delete" (eq $enabled "true"))) }}
+{{- end }}
+
+{{- define "ibm-vpc-file-pool-csi.consolePluginJob" -}}
+{{- $ := .ctx }}
+{{- $fullname := include "ibm-vpc-file-pool-csi.fullname" $ }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-console-plugin-{{ .action }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: console-plugin-{{ .action }}
+  annotations:
+    "helm.sh/hook": {{ .hook }}
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        {{- include "ibm-vpc-file-pool-csi.selectorLabels" $ | nindent 8 }}
+        app.kubernetes.io/component: console-plugin-{{ .action }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ $fullname }}-console-plugin-register
+      {{- with $.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: {{ .action }}
+          image: "{{ include "ibm-vpc-file-pool-csi.driverImage" $ }}"
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          args:
+            - "--mode={{ .action }}-console-plugin"
+            - "--console-plugin-name=ibm-vpc-file-pool-csi"
+            - "--v={{ $.Values.logLevel }}"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+{{- end }}

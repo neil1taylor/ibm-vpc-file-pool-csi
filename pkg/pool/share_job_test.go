@@ -3,6 +3,7 @@ package pool
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -429,6 +430,54 @@ func TestShareJobRunner_ScriptJobsKeepTheirSecurityContext(t *testing.T) {
 	sc := getShareJob(t, c, "rm-a").Spec.Template.Spec.SecurityContext
 	if sc.RunAsUser == nil || *sc.RunAsUser != 0 || sc.RunAsGroup != nil {
 		t.Errorf("a script Job must run as root and set no group, as before: %+v", sc)
+	}
+}
+
+func TestShareJobRunner_RunChainScript(t *testing.T) {
+	r, c := newApplyRunner()
+	ctx := context.Background()
+	folders := []ShareFolder{{Share: testShareA, Path: testVolPath}, {Share: testShareA, Path: testSnapPath}}
+	if _, err := r.RunChainScript(ctx, "chain-a", folders, "set -eu\nqemu-img info x\n", "mkdir -p /vol1/x\n"); err == nil {
+		t.Fatal("without the launcher image the Job must be refused")
+	}
+	r.SetLauncherImage("registry.redhat.io/cnv/virt-launcher@sha256:abc")
+	done, err := r.RunChainScript(ctx, "chain-a", folders, "set -eu\nqemu-img info x\n", "mkdir -p /vol1/x\n")
+	if err != nil || done {
+		t.Fatalf("RunChainScript() = %v, %v; want false, nil", done, err)
+	}
+	spec := getShareJob(t, c, "chain-a").Spec.Template.Spec
+	mainC := spec.Containers[0]
+	if mainC.Image != "registry.redhat.io/cnv/virt-launcher@sha256:abc" || !strings.Contains(strings.Join(mainC.Command, " "), "qemu-img info x") {
+		t.Errorf("main container = %s %v", mainC.Image, mainC.Command)
+	}
+	if *spec.SecurityContext.RunAsUser != qemuUID || *spec.SecurityContext.RunAsGroup != qemuUID {
+		t.Errorf("the Job must run as the QEMU user")
+	}
+	if len(spec.InitContainers) != 1 || *spec.InitContainers[0].SecurityContext.RunAsUser != 0 || spec.InitContainers[0].Image == mainC.Image ||
+		!strings.Contains(strings.Join(spec.InitContainers[0].Command, " "), "mkdir -p /vol1/x") {
+		t.Errorf("init containers = %+v", spec.InitContainers)
+	}
+	// Each folder is mounted alone, from the one share volume.
+	for _, c := range append(spec.InitContainers, spec.Containers...) {
+		got := fmt.Sprint(c.VolumeMounts)
+		want := fmt.Sprint([]corev1.VolumeMount{{Name: "share0", MountPath: "/vol0", SubPath: strings.TrimPrefix(testVolPath, "/")},
+			{Name: "share0", MountPath: "/vol1", SubPath: strings.TrimPrefix(testSnapPath, "/")}})
+		if got != want {
+			t.Errorf("%s mounts %s, want %s", c.Name, got, want)
+		}
+	}
+	if len(spec.Volumes) != 1 {
+		t.Errorf("one share needs one volume, got %d", len(spec.Volumes))
+	}
+	if spec.AutomountServiceAccountToken == nil || *spec.AutomountServiceAccountToken {
+		t.Error("a Job that opens VM disk files must not get API credentials")
+	}
+	if _, badErr := r.RunChainScript(ctx, "chain-b", []ShareFolder{{Share: testShareA, Path: "/pvcs/../etc"}}, "x", ""); badErr == nil {
+		t.Error("a bad folder path must be refused")
+	}
+	setJobStatus(t, c, "chain-a", 1, 0)
+	if done, err = r.RunChainScript(ctx, "chain-a", folders, "x", ""); err != nil || !done {
+		t.Fatalf("RunChainScript() = %v, %v; want true, nil", done, err)
 	}
 }
 

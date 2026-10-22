@@ -52,6 +52,34 @@ var (
 		[]string{"pool"},
 	)
 
+	// PoolMaxShares reports the most shares the pool may have (spec.maxShares).
+	PoolMaxShares = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "vpc_file_pool_max_shares",
+			Help: "Most shares the pool may have (spec.maxShares)",
+		},
+		[]string{"pool"},
+	)
+
+	// ShareTotalGB reports the provisioned size of one share of a pool.
+	ShareTotalGB = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "vpc_file_pool_share_total_gb",
+			Help: "Provisioned size of one share of the pool in GB",
+		},
+		[]string{"pool", "share"},
+	)
+
+	// ShareAllocatedGB reports the capacity promised to PVCs on one share.
+	// It is what PVCs asked for, not what they wrote.
+	ShareAllocatedGB = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "vpc_file_pool_share_allocated_gb",
+			Help: "Capacity allocated to PVCs on one share of the pool in GB",
+		},
+		[]string{"pool", "share"},
+	)
+
 	// PoolPVCCount reports the number of PVCs in the pool.
 	PoolPVCCount = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -232,6 +260,37 @@ var (
 		[]string{"policy"},
 	)
 
+	// BackupExportOldestUnexportedAgeSeconds is the age of the oldest moment
+	// that is in the snapshot pool and not yet in COS. 0 when all is exported.
+	BackupExportOldestUnexportedAgeSeconds = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "vpc_file_pool_backup_export_oldest_unexported_age_seconds",
+			Help: "Age in seconds of the oldest backup moment of a policy that is not yet exported to COS",
+		},
+		[]string{"policy"},
+	)
+
+	// BackupExportNewestAgeSeconds is the age of the newest export to COS. With
+	// backups to export and no export yet, it counts from the time the policy
+	// was made.
+	BackupExportNewestAgeSeconds = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "vpc_file_pool_backup_export_newest_age_seconds",
+			Help: "Age in seconds of the newest export of a policy to COS",
+		},
+		[]string{"policy"},
+	)
+
+	// BackupSnapshotPoolUsedPercent is how full a share of a snapshot pool was
+	// when a Job last read it.
+	BackupSnapshotPoolUsedPercent = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "vpc_file_pool_backup_snapshot_pool_used_percent",
+			Help: "Percent of a share of a snapshot pool that is used, as last read by a Job",
+		},
+		[]string{"pool", "share"},
+	)
+
 	// CDICopyLimitRaisedTotal counts how often the controller raised CDI's
 	// copy pod memory limit. More than one raise means something resets it.
 	CDICopyLimitRaisedTotal = prometheus.NewCounter(
@@ -249,6 +308,9 @@ func init() {
 		PoolCapacityGB,
 		PoolAllocatedGB,
 		PoolShareCount,
+		PoolMaxShares,
+		ShareTotalGB,
+		ShareAllocatedGB,
 		PoolPVCCount,
 		VPCAPICallsTotal,
 		VPCAPICallDuration,
@@ -268,6 +330,9 @@ func init() {
 		BackupVolumes,
 		BackupStalestAgeSeconds,
 		BackupOldestAgeSeconds,
+		BackupSnapshotPoolUsedPercent,
+		BackupExportOldestUnexportedAgeSeconds,
+		BackupExportNewestAgeSeconds,
 		CDICopyLimitRaisedTotal,
 	)
 }

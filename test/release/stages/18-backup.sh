@@ -10,14 +10,38 @@
 # those outcomes, or one "FAIL:" line and exit 1. This stage runs it and checks
 # the log for each outcome. The restores use the kubectl-backup plugin, which
 # remote.sh builds into test/release/bin.
+#
+# Second part, the COS export (docs/specs/2026-10-21-backup-cos-export.md, part 6).
+# When COS settings are present (test/e2e/lib/backup-cos.sh lists them: an
+# existing COS bucket, an HMAC key file, a Key Protect API key file and root key,
+# and the wrapped backup key manifest, read from ~/.config/pool-csi), the same
+# script also exports the policy to COS (Compliance lock, 25 hours, a prefix new
+# for each run), checks exportedTime and exportedBytes, runs `kubectl backup
+# cos-list` (one export of each volume is enough: an export holds the earlier moments as undo files), and restores the three volumes from COS into a second namespace: the
+# VM boots with matching checksums and the pod volume holds the first and the
+# changed content. COS_DR_KUBECONFIG repeats the restore in the other cluster of
+# the lab pair. Without settings these checks are reported as not checked.
+# Objects locked by Compliance cannot be deleted: they stay in the bucket.
+#
+# Fast mode for fix/test cycles: COS_QUICK=1 RT_STAGES=18 bash test/release/remote.sh start CLUSTER TAG
+# (about 25 minutes; the full stage takes 2 to 3 hours). It needs the COS settings. The e2e
+# script then leaves out the local restore checks (reported as not checked), uses a 1 minute
+# schedule, a 1 hour local keep time and a 1 GB data disk, waits for one export of each volume,
+# and runs the COS restore checks. The VM still has a root and a data disk (the checksum check
+# needs both), and the Compliance lock stays at 25 hours, the shortest the product allows.
+# The full mode is unchanged.
 
 # The e2e script waits for two backups of every volume (up to 90 minutes each
 # wait) after a CentOS image copy and a VM boot. Measured on rovslab it takes
 # 60 to 90 minutes, so the stage gets 100.
-RT_STAGE_TIMEOUT=6000
+# With the COS part it adds the export waits (up to 30 minutes each), one restore of three
+# volumes and a VM boot here, and the same in the other cluster: 180 minutes.
+RT_STAGE_TIMEOUT=10800
 
 HERE_STAGE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 E2E="$HERE_STAGE/../../e2e/test-backup.sh"
+# shellcheck source=../../e2e/lib/backup-cos.sh
+source "$HERE_STAGE/../../e2e/lib/backup-cos.sh"
 BACKUP_BIN="${RT_BACKUP_BIN:-$(dirname "$RT_LIB")/bin/kubectl-backup}"
 PREFIX=$(rt_name backup)
 # cleanup runs in its own shell, so the key lives at a path both can compute.
@@ -33,6 +57,17 @@ run() {
     oc get crd backuppolicies.storage.ibmcloud.io >/dev/null 2>&1 || skip "the BackupPolicy CRD is not installed"
     [ -x "$BACKUP_BIN" ] || skip "no kubectl-backup binary at $BACKUP_BIN"
     [ -f "$E2E" ] || skip "no end-to-end script at $E2E"
+
+    cos_load_settings "$(cos_config_dir)/cos-stage.env"
+    if [ "${COS_QUICK:-0}" = 1 ] && ! cos_wanted; then
+        check "COS_QUICK=1 needs the COS settings (COS_BUCKET); the fast run has nothing else to test" false
+        return 0
+    fi
+    if cos_wanted && ! cos_missing_config >"$RT_OUT/backup-cos-missing.txt"; then
+        check "the COS settings are complete (see backup-cos-missing.txt)" false
+        cat "$RT_OUT/backup-cos-missing.txt"
+        return 0
+    fi
 
     mkdir -p "$KEY_DIR" && chmod 700 "$KEY_DIR"
     ssh-keygen -q -t ed25519 -N '' -f "$KEY_DIR/key" || skip "cannot make an ssh key"
@@ -54,14 +89,51 @@ run() {
 
     check "the policy backs up three volumes: two VM disks FileSystemConsistent, the pod volume FileCopy, two moments each" \
         log_has_pass "$E2E_LOG" "three volumes backed up"
-    check "the VM restored at the first moment boots with no XFS errors and every logged file has its checksum" \
-        log_has_pass "$E2E_LOG" "the VM restored at"
-    check "the pod volume restored at the first moment holds the first content" \
-        log_has_pass "$E2E_LOG" "holds the first content"
-    check "the pod volume restored at the latest moment holds the changed content" \
-        log_has_pass "$E2E_LOG" "the latest restore holds the changed content"
-    check "a pod volume whose claim was deleted can be restored from its backup" \
-        log_has_pass "$E2E_LOG" "a volume that was deleted can be restored"
+    if [ "${COS_QUICK:-0}" = 1 ]; then
+        not_checked "the local restores (VM disks, pod volume, deleted claim)" "COS_QUICK=1 is the fast run"
+    else
+        check "the VM restored at the first moment boots with no XFS errors and every logged file has its checksum" \
+            log_has_pass "$E2E_LOG" "the VM restored at"
+        check "the pod volume restored at the first moment holds the first content" \
+            log_has_pass "$E2E_LOG" "holds the first content"
+        check "the pod volume restored at the latest moment holds the changed content" \
+            log_has_pass "$E2E_LOG" "the latest restore holds the changed content"
+        check "a pod volume whose claim was deleted can be restored from its backup" \
+            log_has_pass "$E2E_LOG" "a volume that was deleted can be restored"
+    fi
+
+    if cos_wanted; then
+        check "COS export: all three volumes have exportedTime and exportedBytes above 0" \
+            log_has_pass "$E2E_LOG" "COS export: all three volumes"
+        check "COS export: kubectl backup cos-list shows an export of each volume (an export holds the earlier moments as undo files)" \
+            log_has_pass "$E2E_LOG" "COS export: kubectl backup cos-list"
+        cos_restore_checks "local cluster"
+        if [ -n "${COS_DR_KUBECONFIG:-}" ]; then
+            cos_restore_checks "other cluster"
+        else
+            not_checked "restore from COS in the other cluster" "COS_DR_KUBECONFIG is not set"
+        fi
+        log_note_locked
+    else
+        not_checked "export to COS and restore from COS" "no COS settings (COS_BUCKET); see test/e2e/lib/backup-cos.sh"
+    fi
+}
+
+# cos_restore_checks LABEL — the three outcomes of a restore from COS.
+cos_restore_checks() {
+    check "COS restore, $1: the VM restored from COS boots with no XFS errors and every logged file has its checksum" \
+        log_has_pass "$E2E_LOG" "COS restore, $1: the VM restored at"
+    check "COS restore, $1: the pod volume restored at the first moment holds the first content" \
+        log_has_pass "$E2E_LOG" "COS restore, $1: the pod volume restored at"
+    check "COS restore, $1: the pod volume restored at the latest moment holds the changed content" \
+        log_has_pass "$E2E_LOG" "COS restore, $1: the latest restore"
+}
+
+# log_note_locked — say, in the stage report, that the locked objects stay.
+log_note_locked() {
+    local prefix
+    prefix=$(grep -m1 -o 'COS prefix: [^ ]*' "$E2E_LOG" | cut -d' ' -f3)
+    [ -z "$prefix" ] || _record NOTE "objects under s3://$COS_BUCKET/$prefix/ are locked (Compliance, 25h) and were left in the bucket"
 }
 
 cleanup() {
@@ -72,4 +144,13 @@ cleanup() {
     oc delete namespace "$PREFIX-test" --ignore-not-found --wait=true --timeout=900s
     oc delete filesharepool "$PREFIX-src" "$PREFIX-snap" --ignore-not-found --wait=false
     rm -rf "$KEY_DIR"
+    # The e2e script cleans up after itself unless it was killed by the time limit.
+    # The COS objects stay in the bucket: a Compliance lock cannot be removed.
+    COS_NS="$PREFIX-test-cos" COSR_POOL="$PREFIX-cosr" DRIVER_NS="$RT_DRIVER_NS"
+    cos_load_settings "$(cos_config_dir)/cos-stage.env"
+    cos_cleanup_cluster
+    if [ -n "${COS_DR_KUBECONFIG:-}" ] && [ -r "$COS_DR_KUBECONFIG" ]; then
+        COS_HOME_KC_SET=${KUBECONFIG+x} COS_HOME_KC=${KUBECONFIG:-}
+        cos_with_kubeconfig "$COS_DR_KUBECONFIG" cos_cleanup_cluster || true
+    fi
 }

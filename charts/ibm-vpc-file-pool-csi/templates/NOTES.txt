@@ -19,9 +19,31 @@ Verify the installation:
 StorageClass "{{ .Values.storageClass.name }}" has been created.
 {{- end }}
 
+{{- if .Values.vmSnapshots.enableSidecarGate }}
+
+Instant VM snapshots: this release turns on the KubeVirt Sidecar feature gate
+(a hook Job adds it to the HyperConverged kubevirt.kubevirt.io/jsonpatch
+annotation). Red Hat does not support settings made through that annotation.
+Uninstalling or setting vmSnapshots.enableSidecarGate=false does not turn the
+gate off. See docs/VM-INSTANT-SNAPSHOTS.md, "Turning it on".
+{{- end }}
+
 {{- if .Values.volumeSnapshotClass.create }}
 
 VolumeSnapshotClass "{{ .Values.volumeSnapshotClass.name }}" has been created.
+{{- end }}
+
+{{- if include "ibm-vpc-file-pool-csi.uwm" . }}
+
+Alerts and metrics scraping live in the namespace "{{ .Values.metrics.monitoring.namespace }}".
+They work only if OpenShift's user workload monitoring is on. This chart does not
+change that setting. An admin turns it on with:
+
+  oc -n openshift-monitoring edit configmap cluster-monitoring-config
+  # add under config.yaml:  enableUserWorkload: true
+
+Check: oc -n openshift-user-workload-monitoring get pods
+See docs/MONITORING.md, "Where alerts run on OpenShift".
 {{- end }}
 
 Note: CRDs (FileSharePool, SubVolume, Snapshot) must be installed separately:

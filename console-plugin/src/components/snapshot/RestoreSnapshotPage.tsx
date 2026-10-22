@@ -49,6 +49,7 @@ import {
 } from '../../utils/restore-helpers';
 import FieldPopover from '../common/FieldPopover';
 import RestoreProgressBanner from './RestoreProgressBanner';
+import NoAccessNote from '../common/NoAccessNote';
 
 const gvk = (model: { apiGroup?: string; apiVersion: string; kind: string }) => ({
   group: model.apiGroup,
@@ -68,7 +69,7 @@ const RestoreSnapshotPage: React.FC = () => {
     groupVersionKind: gvk(SnapshotModel),
     name,
   });
-  const [contents, contentsLoaded] = useK8sWatchResource<VolumeSnapshotContent[]>({
+  const [contents, contentsLoaded, contentsError] = useK8sWatchResource<VolumeSnapshotContent[]>({
     groupVersionKind: gvk(VolumeSnapshotContentModel),
     isList: true,
   });
@@ -114,6 +115,14 @@ const RestoreSnapshotPage: React.FC = () => {
         <Alert variant="danger" title="Error loading Snapshot" isInline>
           {snapshotError.message || 'An unexpected error occurred.'}
         </Alert>
+      </PageSection>
+    );
+  }
+
+  if (contentsError) {
+    return (
+      <PageSection>
+        <NoAccessNote right="read VolumeSnapshotContents, which the page needs to find the snapshot's VolumeSnapshot" />
       </PageSection>
     );
   }
@@ -199,9 +208,10 @@ const RestoreSnapshotPage: React.FC = () => {
         {showVMWarning && (
           <StackItem>
             <Alert variant="warning" title="A VM uses the source claim" isInline>
-              This snapshot is of a claim that a VM uses. If it was taken while a VM was running, it is a plain file
-              copy, and the restored disk may not boot. Safe snapshots of running VMs come in step 7 of the VM-safe
-              replication spec.
+              This snapshot is of a claim that a VM uses. If it was taken while a VM was running, the driver froze the
+              guest and copied the disk at one moment. If the guest could not freeze, the copy is crash consistent: like
+              a sudden power cut, so the guest may need to repair its file system when it starts. The snapshot&apos;s
+              status says which.
             </Alert>
           </StackItem>
         )}

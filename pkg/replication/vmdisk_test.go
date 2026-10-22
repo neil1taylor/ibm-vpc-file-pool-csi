@@ -190,3 +190,66 @@ func TestApplyVMDisk_MatchesQemuImg(t *testing.T) {
 		}
 	}
 }
+
+// A finished apply Job whose result was lost is run again. The staging file is
+// gone then, but the disk already shows the copy, so the second run must
+// succeed instead of failing for good (#160).
+func TestApplyVMDisk_StagingGoneAfterApplied(t *testing.T) {
+	src := t.TempDir()
+	dst := t.TempDir()
+	staging := filepath.Join(src, ".repl-staging-c3.qcow2")
+	disk := filepath.Join(dst, "disk.img")
+	writeDisk(t, disk, bytes.Repeat([]byte{0x11}, 1049088))
+	copyTestImage(t, "v3.qcow2", staging)
+	opts := ApplyOptions{From: t0, To: t1, Full: true}
+	if _, err := ApplyVMDisk(staging, disk, opts); err != nil {
+		t.Fatalf("first ApplyVMDisk: %v", err)
+	}
+
+	res, err := ApplyVMDisk(staging, disk, opts)
+	if err != nil {
+		t.Fatalf("second ApplyVMDisk with the staging file gone: %v", err)
+	}
+	if !bytes.Equal(readDisk(t, disk), v3Contents()) {
+		t.Error("disk.img changed on the second run")
+	}
+	if res.RestorePoints != 1 || res.OldestRestorePoint == nil || !res.OldestRestorePoint.Equal(t0) {
+		t.Errorf("result = %+v, want one restore point at %v", res, t0)
+	}
+}
+
+func TestApplyVMDisk_StagingGoneAfterFirstCopy(t *testing.T) {
+	src := t.TempDir()
+	dst := t.TempDir()
+	staging := filepath.Join(src, ".repl-staging-d4.qcow2")
+	disk := filepath.Join(dst, "disk.img")
+	copyTestImage(t, "v3.qcow2", staging)
+	opts := ApplyOptions{To: t1, Full: true}
+	if _, err := ApplyVMDisk(staging, disk, opts); err != nil {
+		t.Fatalf("first ApplyVMDisk: %v", err)
+	}
+	if _, err := ApplyVMDisk(staging, disk, opts); err != nil {
+		t.Fatalf("second ApplyVMDisk with the staging file gone: %v", err)
+	}
+	if !bytes.Equal(readDisk(t, disk), v3Contents()) {
+		t.Error("disk.img changed on the second run")
+	}
+}
+
+// A missing staging file is not proof of a finished copy: if the disk does
+// not show this copy's moment, the run must still fail.
+func TestApplyVMDisk_StagingGoneNotApplied(t *testing.T) {
+	src := t.TempDir()
+	dst := t.TempDir()
+	staging := filepath.Join(src, ".repl-staging-e5.qcow2")
+	disk := filepath.Join(dst, "disk.img")
+	writeDisk(t, disk, bytes.Repeat([]byte{0x11}, 1049088))
+	copyTestImage(t, "v3.qcow2", staging)
+	if _, err := ApplyVMDisk(staging, disk, ApplyOptions{From: t0, To: t1, Full: true}); err != nil {
+		t.Fatalf("first ApplyVMDisk: %v", err)
+	}
+
+	if _, err := ApplyVMDisk(staging, disk, ApplyOptions{From: t1, To: t2, Full: true}); err == nil {
+		t.Error("expected an error for a different copy moment with no staging file")
+	}
+}
