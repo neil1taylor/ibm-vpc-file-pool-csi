@@ -9,8 +9,8 @@ Data protection strategy using the driver's snapshot, clone, group snapshot, and
 | Method | RPO | RTO | Scope | Best For |
 |--------|-----|-----|-------|----------|
 | [Volume Snapshots](#volume-snapshots) | Point-in-time | Minutes (copy speed) | Single PVC | Regular backups of individual volumes |
-| [Volume Clones](#volume-clones) | Point-in-time | Seconds (sync) to minutes (async) | Single PVC | Dev/test copies, pre-migration backup |
-| [Group Snapshots](#group-snapshots) | Coordinated point-in-time | Minutes | Multiple PVCs | Multi-volume application backups |
+| [Volume Clones](#volume-clones) | Point-in-time | Minutes (the time to copy the data) | Single PVC | Dev/test copies, pre-migration backup |
+| [Group Snapshots](#group-snapshots) (not active) | Coordinated point-in-time | Minutes | Multiple PVCs | Multi-volume application backups |
 | [Backups to a Snapshot Pool](#backups-to-a-snapshot-pool) | Schedule-based (minutes to hours) | Minutes to hours (copy speed) | Selected PVCs and VMs, all disks of a VM together | Keeping many moments of a volume or VM in the same region, on shares of their own |
 | [Cross-Region Replication](#cross-region-replication) | Schedule-based (minutes to hours) | Manual failover | Full pool or label-selected | Disaster recovery |
 | [Application-Level Backup](#application-level-backup) | Varies | Varies | Application-specific | Databases, VMs, crash-consistent workloads |
@@ -55,7 +55,7 @@ spec:
                       app: myapp
                       snapshot-type: scheduled
                   spec:
-                    volumeSnapshotClassName: ibm-vpc-file-pool-snapclass
+                    volumeSnapshotClassName: ibm-vpc-file-pool
                     source:
                       persistentVolumeClaimName: myapp-data
                   SNAP
@@ -201,7 +201,9 @@ spec:
 EOF
 
 # 2. Wait for clone to complete
-kubectl get subvolumes myapp-data-backup -w
+# The SubVolume is named after the new PV (pvc-<uuid>)
+PV=$(kubectl get pvc myapp-data-backup -o jsonpath='{.spec.volumeName}')
+kubectl get subvolume ${PV} -w
 # Wait for cloneStatus to show "Complete"
 
 # 3. Proceed with the risky operation
@@ -247,6 +249,10 @@ The console can do the same without YAML. Open a snapshot in the IBM VPC File Po
 
 ## Group Snapshots
 
+> **Not active (issue #100).** The driver does not act on `VolumeGroupSnapshot` records. The hooks never run and there is no plan to turn them on. The examples below do nothing. A running VM with several disks does not need group snapshots: its snapshots show one moment already (see [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md)).
+
+> **Not active (issue #100).** The driver does not act on `VolumeGroupSnapshot` records: nothing watches them, the hooks below never run, and the CSI group snapshot service is not registered, so Kubernetes' own group snapshot API cannot reach the driver. There is no plan to turn it on. A running VM with several disks does not need it: its snapshots show one moment already (see [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md)). This page describes the design, not a working feature.
+
 Coordinated multi-PVC snapshots for applications with related volumes. See [USER-GUIDE.md — Volume Group Snapshots](USER-GUIDE.md#volume-group-snapshots) and [VOLUME-GROUP-SNAPSHOTS.md](VOLUME-GROUP-SNAPSHOTS.md) for design details.
 
 ### Application-Consistent Group Snapshot with Hooks
@@ -271,22 +277,22 @@ spec:
       type: exec
       exec:
         podSelector:
-          matchLabels:
-            app: mydb
+          app: mydb
+        namespace: default
         container: db
         command: ["pg_ctl", "stop", "-m", "fast"]
-      timeout: 30s
+      timeoutSeconds: 30
       onError: Abort
   postSnapshotHooks:
     - name: resume-db
       type: exec
       exec:
         podSelector:
-          matchLabels:
-            app: mydb
+          app: mydb
+        namespace: default
         container: db
         command: ["pg_ctl", "start"]
-      timeout: 30s
+      timeoutSeconds: 30
       onError: Continue
 ```
 
@@ -379,7 +385,7 @@ It refuses, and changes nothing, in these cases:
 
 If the policy is already deleted, its status can no longer say where the backup is. Name the snapshot pool and the volume yourself: `--pool backups --volume pvc-...`. The volume name is the folder under `/backup/<policy>/pvcs/` on the share.
 
-### Export to COS (building; not usable end to end yet)
+### Export to COS (built; the release test is written and not yet run)
 
 A policy can also send its backups to an IBM Cloud Object Storage bucket, encrypted before they leave the cluster, with a lock that nobody can shorten. The controller does this with the `spec.export` block:
 
@@ -404,7 +410,7 @@ spec:
 
 After each local backup of a volume, an export Job reads the snapshot pool's share (read-only, so a running VM is never slowed) and sends the changes to the bucket. `kubectl get backuppolicy NAME -o yaml` shows `exportedTime`, `exportedBytes` and `exportError` for each volume. A failed export is tried again after 5 minutes and never stops the backups to the snapshot pool. A maintenance Job runs once a day (hourly for the shortest keep time of 25 hours) and deletes snapshots older than `keepFor`. Alert rules for a late export are in [MONITORING.md](MONITORING.md#backup-metrics).
 
-**`kubectl backup cos-setup`** makes the IBM Cloud side with your own login (`IBMCLOUD_API_KEY`, `IBMCLOUD_IAM_TOKEN` or your `ibmcloud` login; it needs no cluster and never deletes anything). Run it with `--dry-run` first: it prints every step and the exact objects.
+**`kubectl backup cos-setup`** makes the IBM Cloud side with your own login (`IBMCLOUD_API_KEY`, `IBMCLOUD_IAM_TOKEN` or your `ibmcloud` login; it needs no cluster; it deletes only the instance-wide policy that IBM Cloud adds for the new HMAC key). Run it with `--dry-run` first: it prints every step and the exact objects.
 
 ```bash
 kubectl backup cos-setup --dry-run \
@@ -418,7 +424,36 @@ It makes (or reuses, by name) the COS instance, a versioned bucket with object l
 
 **Backup key handling.** The readable backup key is never stored in the cluster or in the bucket. Only the copy wrapped by Key Protect is: in the Secret `backupKeySecret` (key `wrappedKey`) and next to the backups in the bucket. Each export and maintenance Job asks Key Protect to unwrap it with the API key in the Secret `keyProtect.apiKeySecret` (key `apikey`; `cos-setup` does not make this Secret, it prints the command), keeps the readable key in memory (a memory-backed folder, mode 0400, removed as soon as Kopia has read it) and never logs it. The controller never reads these Secrets and never calls Key Protect. If you remove the API key's access in Key Protect, exports and maintenance stop. Key Protect runs in one region. If it is unreachable, a Job fails with a message that says so, and tries again later; to keep exporting through a Key Protect outage, set `emergencyKeySecret` to a Secret (key `backupKey`) with the readable key: the Job then uses it and logs that it did. That Secret is a readable copy in the cluster, so it weakens the protection against someone who takes over the cluster; the safer emergency copy is the one `cos-setup` shows you once, kept outside IBM Cloud, and used by the restore. A wrong root key or a bad API key is always an error, never a reason to use the emergency key. Tested with a fake Key Protect server; not tested against a real Key Protect instance.
 
-Not built yet: the restore from COS. For the bucket and its lock, see [TUTORIAL-09-COS-BACKUP-BUCKET.md](TUTORIAL-09-COS-BACKUP-BUCKET.md). The design is in `docs/specs/2026-10-21-backup-cos-export.md`.
+#### Restore from COS
+
+This is the way back when the pools are gone. It works in any cluster that runs the driver: it needs no `BackupPolicy` and no snapshot pool, only a pool to restore into, the bucket, and the keys.
+
+1. In the new cluster, make the two Secrets in the driver namespace that `cos-setup` wrote manifests for: the COS key (`cos-credentials`) and the Key Protect API key (`keyprotect-apikey`). The wrapped backup key Secret is made for you from the copy in the bucket if it does not exist.
+2. List what is in the bucket:
+
+```bash
+kubectl backup cos-list --policy nightly --bucket my-backups-0123 \
+  --endpoint s3.eu-de.cloud-object-storage.appdomain.cloud --prefix lab \
+  --kp-instance <GUID> --kp-region eu-de --kp-root-key <ID>
+```
+
+   It prints each volume (`pvc-<uuid>`) and the moment of each export. It runs a read-only Job in the driver namespace, so the cluster must be able to reach the bucket. The answer is cut at about 3.5 KB; add `--volume pvc-...` to see every moment of one volume. COS keeps no claim names, so the volume name is how you identify a backup; the size and the class are not kept either.
+3. Restore one volume to a new PVC:
+
+```bash
+kubectl backup restore --from-cos --policy nightly --volume pvc-11111111-2222-3333-4444-555555555555 \
+  --to apps/db-restored --storage-class ibmc-vpc-file-pool --size-gb 40 \
+  --bucket my-backups-0123 --endpoint s3.eu-de.cloud-object-storage.appdomain.cloud --prefix lab \
+  --kp-instance <GUID> --kp-region eu-de --kp-root-key <ID> --moment 2026-10-21T09:30:00Z --wait
+```
+
+   The same flags as `cos-list`, plus the new PVC, its class and size, and an optional `--moment`. With your own IBM Cloud login (`IBMCLOUD_API_KEY`, `IBMCLOUD_IAM_TOKEN` or the `ibmcloud` login) the command first **removes delete markers** in the policy's area of the bucket: a delete made with the driver's key only hides data, and a hidden chunk looks missing to Kopia. It removes markers only, by version, and never a real version. The endpoint must be a COS S3 host (`s3.[direct.|private.]<region>.cloud-object-storage.appdomain.cloud`); your token is sent to no other host. Symlinks in a backup are removed from the scratch copy, and the restore Job refuses a symlinked backup folder, disk or moment folder. Use `--skip-marker-cleanup` if nothing was deleted and your login cannot reach the bucket.
+
+   The restore makes a `BackupRestore` with `spec.fromCOS`. It reuses the restore of a local backup: the export is copied from the bucket into a scratch folder on the share of the new volume, the restore Job copies it into the volume (a VM disk is rewound to the moment), and the scratch folder is removed. The new PVC is held back from pods until the copy ends, and the restore never writes over a PVC that exists. The share needs room for a second copy of the volume while the restore runs.
+
+**If Key Protect or the root key is gone**, restore with the readable backup key that `cos-setup` showed you once: `--backup-key-file ./backup-key.txt`, and leave out the `--kp-*` flags. The command puts the key in a temporary Secret, never calls Key Protect, waits for the restore, and removes the Secret when the restore ends. If the wait times out, the Secret stays for the running Jobs and the command prints the `kubectl delete secret` line to run when the restore ends. This path needs the COS key Secret too. `--backup-key-file` is for restore only; `cos-list` uses Key Protect.
+
+Not tested against a real bucket or a real Key Protect instance. The Jobs read the Kopia list with `sed` and `awk`; the tests ran them with the macOS tools, not with the ones in the driver image. For the bucket and its lock, see [TUTORIAL-09-COS-BACKUP-BUCKET.md](TUTORIAL-09-COS-BACKUP-BUCKET.md). The design is in `docs/specs/2026-10-21-backup-cos-export.md`.
 
 **A Compliance lock cannot be undone**, not even by IBM. Locked data is billed until its lock ends, also after you delete the policy.
 
@@ -441,14 +476,14 @@ kind: ReplicationPolicy
 metadata:
   name: prod-to-dr
 spec:
-  sourcePool: production
+  sourcePoolName: production
   schedule: "15m"                    # Sync every 15 minutes
   incrementalSync: true              # Use rsync for delta-only transfer
   maxRetries: 3                      # Pause after 3 consecutive failures
-  destination:
-    nfsServer: "10.245.0.100"        # DR region mount target IP
-    basePath: "/pvcs"                # Base path on destination share
-  selector:                          # Optional: replicate only labeled SubVolumes
+  destinationNFSServer: "10.245.0.100"   # DR region mount target IP
+  destinationExportPath: "/"
+  destinationBasePath: "/pvcs"       # Base path on destination share
+  subVolumeSelector:                 # Optional: replicate only labeled SubVolumes
     matchLabels:
       backup: required
   preSyncHooks:                      # Optional: quiesce before sync
@@ -457,7 +492,7 @@ spec:
       http:
         url: "http://myapp:8080/quiesce"
         method: POST
-      timeout: 60s
+      timeoutSeconds: 60
       onError: Abort
   postSyncHooks:
     - name: resume-apps
@@ -465,7 +500,7 @@ spec:
       http:
         url: "http://myapp:8080/resume"
         method: POST
-      timeout: 60s
+      timeoutSeconds: 60
       onError: Continue
 ```
 
@@ -495,7 +530,7 @@ kubectl get replicationpolicy prod-to-dr -o jsonpath='{.status.lastSyncTime}'
 
 # 2. On the DR cluster, verify data exists
 kubectl debug node/<dr-node> -it --image=busybox -- sh -c \
-  "ls /var/data/kubelet/plugins/vpc-file-pool.csi.ibm.io/staging/<dr-share-id>/pvcs/"
+  "ls /host/var/data/kubelet/plugins/vpc-file-pool.csi.ibm.io/staging/<dr-share-id>/pvcs/"
 
 # 3. Create test PVCs on the DR cluster pointing to replicated data
 # 4. Deploy a test workload and verify data integrity
@@ -570,7 +605,7 @@ For ongoing VM protection, use application-level backup tools (e.g., Velero with
 | **Config data** | Scheduled snapshots (daily) | Cross-region replication | Low RPO tolerance |
 | **Application data** | Scheduled snapshots (6h) + clone before changes | Cross-region replication | Label-select critical PVCs |
 | **Databases** | Application-level backup (pg_dump, etc.) | Pool snapshots as secondary | Never rely solely on NFS snapshots |
-| **KubeVirt VMs** | Stop VM + snapshot | Application-level backup | Never snapshot running VMs |
+| **KubeVirt VMs** | Snapshot of the running VM (all pool disks are copied at one moment), or a `BackupPolicy` | Application-level backup | See [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md) |
 | **ML training data** | Group snapshots (model + checkpoints) | Cross-region for final models | Intermediate checkpoints are expendable |
 | **CI/CD artifacts** | None or short-lived snapshots | — | Easily reproducible |
 

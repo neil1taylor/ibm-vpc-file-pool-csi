@@ -48,6 +48,9 @@ type fakeShareData struct {
 	usageSeen []string
 	// export holds what the COS export Jobs report (see export_fake_test.go).
 	export fakeExport
+	// cos holds what the Jobs of a restore from COS report (see
+	// cosrestore_fake_test.go).
+	cos fakeCOSRestore
 }
 
 type restoreCall struct {

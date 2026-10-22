@@ -80,7 +80,11 @@ type ExportRepo struct {
 	// EmergencyKeySecret is optional. It holds the readable backup key
 	// (ExportEmergencyKeyKey), used only when Key Protect cannot be reached.
 	EmergencyKeySecret string
-	LockMode           ExportLockMode
+	// EmergencyOnly makes the Job use the readable key in EmergencyKeySecret and
+	// never call Key Protect. Restores use it when Key Protect or its root key
+	// is gone. BackupKeySecret and KeyProtect are then not used.
+	EmergencyOnly bool
+	LockMode      ExportLockMode
 	// KeepFor is the lock time of Compliance mode. It is used only when a
 	// repository is created.
 	KeepFor time.Duration
@@ -100,31 +104,10 @@ type ExportOutcome struct {
 	Bytes int64
 }
 
-// validate checks the repository settings.
+// validate checks the repository settings of an export or maintenance Job.
 func (e ExportRepo) validate() error {
-	if !exportEndpointPattern.MatchString(e.Endpoint) {
-		return fmt.Errorf("export endpoint %q is not a host name with an optional port", e.Endpoint)
-	}
-	if !exportBucketPattern.MatchString(e.Bucket) {
-		return fmt.Errorf("export bucket %q is not a valid bucket name", e.Bucket)
-	}
-	if !exportPrefixPattern.MatchString(e.Prefix) || strings.Contains(e.Prefix, "..") {
-		return fmt.Errorf("export prefix %q has characters that are not allowed", e.Prefix)
-	}
-	secrets := map[string]string{"credentials": e.CredentialsSecret, "backup key": e.BackupKeySecret, "Key Protect API key": e.KeyProtect.APIKeySecret}
-	if e.EmergencyKeySecret != "" {
-		secrets["emergency key"] = e.EmergencyKeySecret
-	}
-	for what, name := range secrets {
-		if !secretNamePattern.MatchString(name) {
-			return fmt.Errorf("the %s Secret name %q is not a valid name", what, name)
-		}
-	}
-	if !exportRegionPattern.MatchString(e.KeyProtect.Region) {
-		return fmt.Errorf("the Key Protect region %q is not a region name such as eu-de", e.KeyProtect.Region)
-	}
-	if !exportKeyIDPattern.MatchString(e.KeyProtect.InstanceID) || !exportKeyIDPattern.MatchString(e.KeyProtect.RootKeyID) {
-		return errors.New("the Key Protect instance ID and root key ID are required and must be IDs")
+	if err := e.validateLocation(); err != nil {
+		return err
 	}
 	if e.MaintenanceInterval < v1alpha1.MinExportMaintenanceInterval {
 		return fmt.Errorf("the maintenance interval %s is shorter than %s", e.MaintenanceInterval, v1alpha1.MinExportMaintenanceInterval)
@@ -137,6 +120,47 @@ func (e ExportRepo) validate() error {
 		}
 	default:
 		return fmt.Errorf("unknown lock mode %q (use Compliance or None)", e.LockMode)
+	}
+	return nil
+}
+
+// validateRead checks the settings of a Job that only reads the repository.
+func (e ExportRepo) validateRead() error { return e.validateLocation() }
+
+// validateLocation checks where the repository is and how its key is reached.
+func (e ExportRepo) validateLocation() error {
+	if !exportEndpointPattern.MatchString(e.Endpoint) {
+		return fmt.Errorf("export endpoint %q is not a host name with an optional port", e.Endpoint)
+	}
+	if !exportBucketPattern.MatchString(e.Bucket) {
+		return fmt.Errorf("export bucket %q is not a valid bucket name", e.Bucket)
+	}
+	if !exportPrefixPattern.MatchString(e.Prefix) || strings.Contains(e.Prefix, "..") {
+		return fmt.Errorf("export prefix %q has characters that are not allowed", e.Prefix)
+	}
+	secrets := map[string]string{"credentials": e.CredentialsSecret}
+	if !e.EmergencyOnly {
+		secrets["backup key"], secrets["Key Protect API key"] = e.BackupKeySecret, e.KeyProtect.APIKeySecret
+	}
+	if e.EmergencyOnly || e.EmergencyKeySecret != "" {
+		secrets["emergency key"] = e.EmergencyKeySecret
+	}
+	for what, name := range secrets {
+		if !secretNamePattern.MatchString(name) {
+			return fmt.Errorf("the %s Secret name %q is not a valid name", what, name)
+		}
+	}
+	if e.EmergencyOnly {
+		if e.EmergencyKeySecret == "" {
+			return errors.New("an emergency-only repository needs the emergency key Secret")
+		}
+		return nil
+	}
+	if !exportRegionPattern.MatchString(e.KeyProtect.Region) {
+		return fmt.Errorf("the Key Protect region %q is not a region name such as eu-de", e.KeyProtect.Region)
+	}
+	if !exportKeyIDPattern.MatchString(e.KeyProtect.InstanceID) || !exportKeyIDPattern.MatchString(e.KeyProtect.RootKeyID) {
+		return errors.New("the Key Protect instance ID and root key ID are required and must be IDs")
 	}
 	return nil
 }

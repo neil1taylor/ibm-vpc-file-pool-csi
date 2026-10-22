@@ -116,6 +116,8 @@ ibmcloud resource service-key-create pool-csi-backup-test-hmac \
 chmod 600 ~/.config/pool-csi/cos-key.json
 ```
 
+IBM Cloud also adds a policy to the service ID by itself when it makes the HMAC key: the Writer role on the **whole** COS instance, not on one bucket. Delete it, or this key can write to every bucket in the instance (`ibmcloud iam service-policies $SID`, then `ibmcloud iam service-policy-delete $SID <policy-id>` for the one with no resource type and no resource). `kubectl backup cos-setup` finds this one policy, which did not exist before the HMAC key, and deletes it; it leaves any other wide policy for you to remove. The secret is shown once, so `cos-setup` writes the key file the moment the key is made.
+
 The access key and secret are in `.credentials.cos_hmac_keys` of that file. Later they go into a Kubernetes Secret in the driver namespace (`spec.export.credentialsSecret`). Never put them in a repository or a log.
 
 ---

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -174,7 +175,7 @@ func TestFirstRunMakesEverything(t *testing.T) {
 		}
 	}
 	if f.hasWrite("DELETE ") {
-		t.Error("the command must never delete anything")
+		t.Error("the command must delete nothing when IBM Cloud added no policy")
 	}
 }
 
@@ -454,12 +455,126 @@ func TestRoleWithOtherActionsIsNotChanged(t *testing.T) {
 	}
 }
 
-func TestBroadServiceIDPolicyIsReported(t *testing.T) {
+// widePolicy is an instance-wide COS policy for the service ID that was there
+// before the HMAC key was made.
+func widePolicy(id, instance string) map[string]any {
+	return map[string]any{"id": id, "type": "access",
+		"subjects":  []any{map[string]any{"attributes": []any{map[string]any{"name": "iam_id", "value": "iam-ServiceId-1"}}}},
+		"roles":     []any{map[string]any{"role_id": "crn:v1:bluemix:public:iam::::serviceRole:Manager"}},
+		"resources": []any{map[string]any{"attributes": []any{map[string]any{"name": "serviceName", "value": "cloud-object-storage"}, map[string]any{"name": "serviceInstance", "value": instance}}}}}
+}
+
+func (e *env) policyIDs() []string {
+	var ids []string
+	for _, p := range e.fake.policies {
+		ids = append(ids, fmt.Sprint(p["id"]))
+	}
+	return ids
+}
+
+func TestPolicyIBMAddsForTheHMACKeyIsRemoved(t *testing.T) {
 	e := newEnv(t, testSaved)
 	e.fake.broadPolicyOnKey = true
+	if err := e.run(); err != nil {
+		t.Fatalf("run: %v\n%s", err, e.out)
+	}
+	if !e.fake.hasWrite("DELETE /iam/v1/policies/") {
+		t.Error("the policy that IBM Cloud added was not deleted")
+	}
+	n := 0
+	for _, w := range e.fake.writes {
+		if strings.HasPrefix(w, "DELETE ") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("want exactly one delete, got %d: %v", n, e.fake.writes)
+	}
+	for _, p := range e.fake.policies {
+		if p["type"] == "access" && !strings.Contains(fmt.Sprint(p["resources"]), "resourceType") && !strings.Contains(fmt.Sprint(p["resources"]), "kms") {
+			t.Errorf("an instance-wide policy is left: %v", p)
+		}
+	}
+	if !strings.Contains(e.out.String(), "instance-wide") {
+		t.Errorf("the steps do not say that a policy was removed:\n%s", e.out)
+	}
+	key, _ := os.ReadFile(e.opts.KeyFile)
+	if !strings.Contains(string(key), "SECRETHMACFAKE") {
+		t.Error("key file lacks the HMAC secret")
+	}
+}
+
+func TestKeyFileIsWrittenBeforeTheWidePolicyCheck(t *testing.T) {
+	e := newEnv(t, testSaved)
+	e.withInstance()
+	e.fake.policies = append(e.fake.policies, widePolicy("pol-old", "guid-old"))
+	e.fake.broadPolicyOnKey = true
+	err := e.run()
+	if err == nil || !strings.Contains(err.Error(), "whole") || !strings.Contains(err.Error(), "pol-old") {
+		t.Fatalf("want a refusal about the policy that was there before, got %v", err)
+	}
+	key, _ := os.ReadFile(e.opts.KeyFile)
+	if !strings.Contains(string(key), "SECRETHMACFAKE") {
+		t.Error("the HMAC secret was lost: the key file was not written before the check")
+	}
+	found := false
+	for _, id := range e.policyIDs() {
+		if id == "pol-old" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("deleted a policy that was there before the HMAC key was made")
+	}
+	if e.fake.hasWrite("DELETE /iam/v1/policies/pol-old") {
+		t.Error("sent a delete for the old policy")
+	}
+}
+
+func TestOtherWidePolicyIsReported(t *testing.T) {
+	e := newEnv(t, testSaved)
+	e.withInstance()
+	e.fake.policies = append(e.fake.policies, widePolicy("pol-old", "guid-old"))
 	err := e.run()
 	if err == nil || !strings.Contains(err.Error(), "whole") {
 		t.Fatalf("want an error that the service ID has access to more than the bucket, got %v", err)
+	}
+	if e.fake.hasWrite("DELETE ") {
+		t.Error("deleted something")
+	}
+}
+
+func TestExistingHMACKeyWithHiddenSecretIsNotMadeAgain(t *testing.T) {
+	e := newEnv(t, testSaved)
+	if err := e.run(); err != nil {
+		t.Fatalf("first run: %v\n%s", err, e.out)
+	}
+	if err := os.Remove(e.opts.KeyFile); err != nil {
+		t.Fatal(err)
+	}
+	e.fake.hideKeySecret = true
+	n := e.fake.writeCount()
+	e.setup.In = strings.NewReader("")
+	err := e.run()
+	if err == nil || !strings.Contains(err.Error(), "cannot be shown again") || !strings.Contains(err.Error(), "delete the HMAC key") {
+		t.Fatalf("want a message that the secret cannot be shown again and the key must be deleted, got %v", err)
+	}
+	if e.fake.writeCount() != n {
+		t.Errorf("made a change: %v", e.fake.writes[n:])
+	}
+}
+
+func TestExistingKeyFileStopsBeforeAnotherHMACKeyIsMade(t *testing.T) {
+	e := newEnv(t, testSaved)
+	if err := os.WriteFile(e.opts.KeyFile, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := e.run()
+	if err == nil || !strings.Contains(err.Error(), e.opts.KeyFile) {
+		t.Fatalf("want a refusal that names the key file, got %v", err)
+	}
+	if e.fake.hasWrite("/rc/v2/resource_keys") {
+		t.Error("made an HMAC key whose secret could not be saved")
 	}
 }
 

@@ -65,3 +65,30 @@ describe('MonitoringPage group snapshot and CDI section', () => {
     expect(screen.getByText(/something reset the limit/i)).toBeTruthy();
   });
 });
+
+describe('MonitoringPage help', () => {
+  it('gives every card a labelled help button', () => {
+    render(<MonitoringPage />);
+    fireEvent.click(screen.getByText('Show Group Snapshot and CDI Activity'));
+    fireEvent.click(screen.getByText('Show Allocation Activity'));
+    const titles = [
+      'Pool Capacity Overview',
+      'Total PVCs',
+      'Utilization',
+      'VPC API Health',
+      'Replication Status',
+      'Capacity Utilization Over Time',
+      'PVC Count Over Time',
+      'VPC API Call Rate',
+      'VPC API P95 Latency',
+      'Allocation Rate Over Time',
+      'P95 Allocation Latency Over Time',
+      'Group Snapshot Inconsistency Window (P95)',
+      'Group Snapshot Members (average)',
+      'CDI Copy Limit Raises (per hour)',
+    ];
+    for (const t of titles) {
+      expect(screen.getByRole('button', { name: `About ${t}` })).toBeTruthy();
+    }
+  });
+});

@@ -8,11 +8,11 @@ Complete metrics reference, alerting rules, and dashboard templates for operatin
 
 The controller exposes Prometheus metrics on `:8080/metrics`. All metrics use the `vpc_file_pool_` or `pool_csi_` prefix and follow the [Prometheus naming conventions](https://prometheus.io/docs/practices/naming/).
 
-The driver emits 28 metrics across eight categories:
+The driver emits 31 metrics across eight categories:
 
 | Category | Metrics | Purpose |
 |----------|---------|---------|
-| Allocation | 6 | PVC provisioning health and capacity |
+| Allocation | 9 | PVC provisioning health and capacity |
 | VPC API | 2 | API call success rate and latency |
 | Snapshots | 2 | Snapshot operation tracking |
 | Clones | 2 | Clone operation tracking |
@@ -29,7 +29,7 @@ The driver emits 28 metrics across eight categories:
 
 The Helm chart creates a `ServiceMonitor` for the controller when the cluster has the Prometheus Operator API (`monitoring.coreos.com/v1`). OpenShift has it. To turn it off, set `metrics.serviceMonitor.enabled=false`.
 
-The console plugin's charts read these metrics. Without the `ServiceMonitor`, they show no data. The console queries 19 of the first 22 metrics on its other pages, and the other three are charted in the Monitoring tab's "Group Snapshot and CDI Activity" section; the VM copy metrics named in the VM-safe replication spec do not exist yet, so they have no panel.
+The console plugin's charts read these metrics. Without the `ServiceMonitor`, they show no data. The console queries 19 of the first 22 metrics on its other pages, and the other three are charted in the Monitoring tab's "Group Snapshot and CDI Activity" section; the two per-share metrics are used by the `VPCFilePoolShareNearlyFull` alert and have no panel; the VM copy metrics named in the VM-safe replication spec do not exist yet, so they have no panel.
 
 ### OpenShift User Workload Monitoring
 
@@ -58,8 +58,8 @@ scrape_configs:
         namespaces:
           names: ['kube-system']
     relabel_configs:
-      - source_labels: [__meta_kubernetes_pod_label_app]
-        regex: vpc-file-pool-csi-controller
+      - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component]
+        regex: controller
         action: keep
       - source_labels: [__meta_kubernetes_pod_container_port_number]
         regex: "8080"
@@ -74,7 +74,7 @@ scrape_configs:
 
 ```bash
 # Port-forward to the metrics endpoint
-kubectl port-forward -n kube-system svc/vpc-file-pool-csi-controller 8080:8080 &
+kubectl port-forward -n kube-system svc/ibm-vpc-file-pool-csi-metrics 8080:8080 &
 
 # Check that metrics are being exported
 curl -s http://localhost:8080/metrics | grep vpc_file_pool | head -20
@@ -91,11 +91,14 @@ kill %1
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `vpc_file_pool_allocations_total` | Counter | `pool`, `status` | Total subvolume allocations. `status` is `success` or `error`. |
+| `vpc_file_pool_allocations_total` | Counter | `pool`, `status` | Total subvolume allocations. `status` is `success`, `error`, `deallocate_success` or `deallocate_error`. |
 | `vpc_file_pool_allocation_duration_seconds` | Histogram | `pool` | Time to allocate a subvolume. Buckets: 10ms to ~163s (exponential). |
 | `vpc_file_pool_capacity_gb` | Gauge | `pool` | Total pool capacity in GB across all shares. |
 | `vpc_file_pool_allocated_gb` | Gauge | `pool` | Total allocated (requested) capacity in GB. |
 | `vpc_file_pool_share_count` | Gauge | `pool` | Number of VPC file shares in the pool. |
+| `vpc_file_pool_max_shares` | Gauge | `pool` | Most shares the pool may have (`spec.maxShares`). |
+| `vpc_file_pool_share_total_gb` | Gauge | `pool`, `share` | Provisioned size of one share of the pool in GB. `share` is the VPC share name. |
+| `vpc_file_pool_share_allocated_gb` | Gauge | `pool`, `share` | Capacity allocated to PVCs on one share, in GB. This is what PVCs asked for, not what they wrote. |
 | `vpc_file_pool_pvc_count` | Gauge | `pool` | Number of active PVCs (SubVolumes) in the pool. |
 
 **Normal ranges:**
@@ -148,7 +151,7 @@ kill %1
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `pool_csi_replication_sync_total` | Counter | `policy`, `source_pool`, `result` | Replication sync attempts. `result`: `success`, `error`, `skipped`. |
+| `pool_csi_replication_sync_total` | Counter | `policy`, `source_pool`, `result` | Replication sync attempts. `result`: `success` or `failure`. |
 | `pool_csi_replication_sync_duration_seconds` | Histogram | `policy`, `source_pool` | Duration of replication sync cycles. |
 | `pool_csi_replication_lag_seconds` | Gauge | `policy`, `source_pool` | Current replication lag (seconds since last successful sync). This is your RPO indicator. |
 | `pool_csi_replication_consecutive_failures` | Gauge | `policy`, `source_pool` | Current consecutive failure count. Policy pauses after exceeding `maxRetries`. |
@@ -207,7 +210,7 @@ Alert when the copy in COS is late, using twice the export schedule as the limit
     summary: "Backup policy {{ $labels.policy }} has a backup moment that has waited over 12 hours to go to COS"
 ```
 
-An export problem never stops the backups to the snapshot pool. `status.volumes[].exportError` says what failed. The chart does not ship these two rules yet (issue #117).
+An export problem never stops the backups to the snapshot pool. `status.volumes[].exportError` says what failed.
 
 Alert before the snapshot pool reaches the limit, and when it has. At 85% the policies on the pool stop new backups; they never delete backups to make room, so the fix is more space or a shorter `keepFor`:
 
@@ -232,6 +235,30 @@ Alert before the snapshot pool reaches the limit, and when it has. At 85% the po
 ---
 
 ## Alerting Rules
+
+The chart ships these alerts as a `PrometheusRule` (on by default; it is made only when the cluster has the Prometheus Operator API). Set the limits under `metrics.alerts` (see [HELM-VALUES.md](HELM-VALUES.md)). A pool with no capacity, or a driver with no traffic, gives no alert. The rules are tested with `promtool` in `make test-scripts`.
+
+| Alert | Severity | Fires when |
+|-------|----------|------------|
+| `VPCFilePoolUtilizationWarning` / `Critical` | warning / critical | Pool use is above 80% / 95% |
+| `VPCFilePoolOverCommitted` | critical | More is allocated than the pool has |
+| `VPCFilePoolShareNearlyFull` | warning | One share has more than 90% of its size allocated for 15 minutes. With the `binpack` strategy shares fill one after another on purpose, so expect this alert there; raise `metrics.alerts.shareUtilizationWarning` or turn it off by setting it to 100. |
+| `VPCFilePoolAtMaxShares` | warning | The pool has its most shares and use is above the warning limit |
+| `VPCFilePoolControllerDown` | critical | No metrics from the controller for 5 minutes |
+| `VPCFilePoolAllocationFailures` | critical | More than 0.1 failed allocations per second |
+| `VPCFilePoolAllocationSlow` | warning | P99 allocation time above 5 s |
+| `VPCFilePoolAPIErrors` | warning | More than 0.05 failed VPC API calls per second |
+| `VPCFilePoolSnapshotFailures` | warning | Snapshot operations fail |
+| `VPCFilePoolReplicationLagHigh` / `ReplicationFailing` | warning / critical | Lag over 2 h, or more than 3 failures in a row |
+| `VPCFilePoolBackupLate` | warning | A volume has no backup for over 12 h |
+| `VPCFilePoolExportLate` / `ExportMomentWaiting` | warning | The COS copy is over 12 h late |
+| `VPCFilePoolSnapshotPoolNearlyFull` / `Full` | warning / critical | A snapshot pool share is above 75% / 85% |
+
+**Per-share NFS latency and IOPS are not available.** The driver does not measure them: the node agent only mounts shares and keeps no read or write counters, and the controller never touches the NFS data. The two per-share metrics show how much of a share is promised to PVCs, not how much is written or how fast it answers. Use the node exporter's NFS client metrics for latency and IOPS until the node agent reports them.
+
+**Console dashboard.** The dashboard's "Firing Alerts" card asks the cluster Prometheus (`/api/prometheus`) for firing alerts named `VPCFilePool*`. It also asks which alert rules that Prometheus has loaded; if it has none of the driver's, the card says so and does not claim that no alert is firing. OpenShift's platform Prometheus loads rules only from namespaces it watches (`openshift-*`, or `kube-*` with the `openshift.io/cluster-monitoring` label); if the chart is installed in another namespace, the rules need user workload monitoring, which the console queries through a different route that this card does not use.
+
+The examples below are older hand-written rules, kept to show how to write your own. They use different names; if you load them as well as the chart's, you get two alerts for the same problem.
 
 ### Critical Alerts
 
@@ -284,7 +311,7 @@ spec:
             runbook_url: "TROUBLESHOOTING.md#pvc-issues"
 
         - alert: ControllerDown
-          expr: absent(up{job="vpc-file-pool-csi"} == 1)
+          expr: absent(up{job="ibm-vpc-file-pool-csi-metrics"} == 1)
           for: 5m
           labels:
             severity: critical
@@ -672,7 +699,7 @@ Route CSI driver alerts to the storage team:
 route:
   routes:
     - match:
-        job: vpc-file-pool-csi
+        job: ibm-vpc-file-pool-csi-metrics
       receiver: storage-team
       group_by: ['alertname', 'pool']
       group_wait: 30s

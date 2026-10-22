@@ -52,6 +52,34 @@ var (
 		[]string{"pool"},
 	)
 
+	// PoolMaxShares reports the most shares the pool may have (spec.maxShares).
+	PoolMaxShares = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "vpc_file_pool_max_shares",
+			Help: "Most shares the pool may have (spec.maxShares)",
+		},
+		[]string{"pool"},
+	)
+
+	// ShareTotalGB reports the provisioned size of one share of a pool.
+	ShareTotalGB = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "vpc_file_pool_share_total_gb",
+			Help: "Provisioned size of one share of the pool in GB",
+		},
+		[]string{"pool", "share"},
+	)
+
+	// ShareAllocatedGB reports the capacity promised to PVCs on one share.
+	// It is what PVCs asked for, not what they wrote.
+	ShareAllocatedGB = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "vpc_file_pool_share_allocated_gb",
+			Help: "Capacity allocated to PVCs on one share of the pool in GB",
+		},
+		[]string{"pool", "share"},
+	)
+
 	// PoolPVCCount reports the number of PVCs in the pool.
 	PoolPVCCount = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -280,6 +308,9 @@ func init() {
 		PoolCapacityGB,
 		PoolAllocatedGB,
 		PoolShareCount,
+		PoolMaxShares,
+		ShareTotalGB,
+		ShareAllocatedGB,
 		PoolPVCCount,
 		VPCAPICallsTotal,
 		VPCAPICallDuration,

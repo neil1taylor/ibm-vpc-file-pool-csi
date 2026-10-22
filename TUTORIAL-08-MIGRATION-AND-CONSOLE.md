@@ -17,7 +17,7 @@ Verify the CSI driver is running:
 # Controller pod (6/6 Running)
 oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi -l app.kubernetes.io/component=controller
 
-# Node pods (3/3 Running on each schedulable node)
+# Node pods (2/2 Running on each schedulable node)
 oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi -l app.kubernetes.io/component=node
 
 # CSI Driver registered
@@ -133,7 +133,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteMany
-  storageClassName: ibm-vpc-block-5iops-tier
+  storageClassName: ibmc-vpc-file-1000-iops
   resources:
     requests:
       storage: 10Gi
@@ -199,7 +199,7 @@ Discover which PVCs are eligible for migration:
 ```bash
 kubectl migrate plan \
   --namespace ${TUTORIAL_NS} \
-  --storage-class ibm-vpc-block-5iops-tier \
+  --storage-class ibmc-vpc-file-1000-iops \
   --target-pool ${POOL_NAME}
 ```
 
@@ -209,7 +209,7 @@ Expected output:
 Migration Plan
 ==============
 Namespace:          pool-tutorial-ops
-Source StorageClass: ibm-vpc-block-5iops-tier
+Source StorageClass: ibmc-vpc-file-1000-iops
 Target Pool:        ops-pool
 PVCs found:         1
 Total size:         10 GiB
@@ -380,33 +380,24 @@ The page never deletes the old claim. Delete it yourself when you are sure the n
 
 ## Step 8: Console Plugin -- Enable
 
-The OpenShift Console dynamic plugin provides a visual interface for managing pools, SubVolumes, snapshots, group snapshots, and replication policies.
+The OpenShift Console dynamic plugin provides a visual interface for managing pools, SubVolumes, snapshots, and replication policies.
 
 ### Enable via Helm
+
+The plugin is on by default. If you installed the chart with `consolePlugin.enabled=false`, turn it on:
 
 ```bash
 helm upgrade ibm-vpc-file-pool-csi charts/ibm-vpc-file-pool-csi \
   -n kube-system \
   --reuse-values \
-  --set consolePlugin.enabled=true \
-  --set consolePlugin.replicas=2
+  --set consolePlugin.enabled=true
 ```
 
 **What this does:**
 - Deploys the console plugin as a 2-replica Deployment in `kube-system`
 - Creates a Service on port 9443 with TLS certificates auto-provisioned by the OpenShift service-ca operator
 - Registers a ConsolePlugin CR with the OpenShift Console
-
-### Register the Plugin
-
-Enable the plugin in the OpenShift Console operator:
-
-```bash
-# Adds this plugin to the list and keeps the other plugins enabled.
-# (A merge patch with a "plugins" list would replace the whole list.)
-oc patch console.operator.openshift.io cluster --type=json \
-  -p '[{"op":"add","path":"/spec/plugins/-","value":"ibm-vpc-file-pool-csi"}]'
-```
+- Runs a hook Job that adds the plugin to the console's plugin list and keeps the other plugins
 
 ### Verify
 
@@ -427,23 +418,23 @@ Expected output:
 ["ibm-vpc-file-pool-csi"]
 ```
 
-After a few seconds, refresh the OpenShift Console. A new "VPC File Pools" navigation group appears in the left sidebar.
+After a few seconds, refresh the OpenShift Console. A new "IBM VPC File Pools" item appears under Storage in the left sidebar.
 
 ---
 
 ## Step 9: Console Plugin -- Tour
 
-The console plugin adds the following pages to the OpenShift Console. Each page is accessible from the "VPC File Pools" navigation group.
+The console plugin adds the following pages to the OpenShift Console. The pages are tabs of one "IBM VPC File Pools" page under Storage.
 
-### Dashboard
+### Overview
 
-The landing page shows a high-level overview of all pools:
+The first tab shows a high-level overview of all pools:
 
 - **Stat cards** at the top: Total Pools (with health indicator), Total Capacity (allocated vs total), Total SubVolumes, and Active Alerts (pools not in Ready state)
 - **Performance metrics row**: Allocation rate (per hour), P95 allocation latency (color-coded: green < 100ms, yellow < 500ms, red > 500ms), and VPC API health (calls/min, error rate, P95 latency)
 - **Capacity breakdown**: Aggregate capacity donut chart on the left, per-pool capacity bars on the right with share count indicators
 - **Replication status** (conditional -- only shown when ReplicationPolicy CRs exist): Replication lag per policy (color-coded), sync rate, and consecutive failures
-- **Operations activity**: Snapshot count, clone count with average duration, and group snapshot count
+- **Operations activity**: Snapshot count and clone count with average duration
 - **Recent activity table**: The 10 most recently created SubVolumes with name, pool, PVC, size, phase, and age
 
 ### Pools (FileSharePool)
@@ -464,16 +455,10 @@ The landing page shows a high-level overview of all pools:
 - **Create page**: Select a SubVolume to snapshot, provide a name, and create. Validates that the source SubVolume exists and is in a healthy state.
 - **Details page**: Snapshot metadata, source SubVolume reference, creation timestamp, and restore action.
 
-### Group Snapshots (VolumeGroupSnapshot)
-
-- **List page**: All VolumeGroupSnapshot CRs with member count, phase, and creation time.
-- **Create page**: Multi-step wizard to select PVCs for coordinated snapshots. Optionally configure lifecycle hooks (exec commands or HTTP webhooks) for pre-snapshot quiescing and post-snapshot actions.
-- **Details page**: Member list with individual snapshot status, inconsistency window, hook execution results, and conditions table.
-
 ### Replication Policies
 
-- **List page**: All ReplicationPolicy CRs with source pool, destination, mode (direct-nfs or driver-to-driver), schedule, lag indicator (color-coded), and phase.
-- **Create page**: Wizard for configuring replication mode, source and destination pools, schedule (cron expression), parallel sync count, and hook configuration. Validates destination connectivity.
+- **List page**: All ReplicationPolicy CRs with source pool, destination, mode (direct NFS or driver to driver), schedule, lag indicator (color-coded), and phase.
+- **Create page**: Wizard for configuring replication mode, source and destination pools, schedule (an interval such as `15m`), parallel sync count, and hook configuration. Validates destination connectivity.
 - **Details page**: Policy spec, current lag (gauge), last sync time, consecutive failure count, replicated SubVolume list, and conditions table.
 
 ### Monitoring
@@ -523,12 +508,8 @@ oc delete namespace ${TUTORIAL_NS} --timeout=60s
 ibmcloud is shares
 ```
 
-> **Note:** The console plugin remains enabled after cleanup. To disable it:
+> **Note:** The console plugin remains enabled after cleanup. To disable it, upgrade with the plugin off. A hook Job removes only this plugin from the console's plugin list:
 > ```bash
-> # Removes only this plugin; the other plugins stay enabled.
-> i=$(oc get console.operator.openshift.io cluster -o json | jq '.spec.plugins | index("ibm-vpc-file-pool-csi")')
-> oc patch console.operator.openshift.io cluster --type=json \
->   -p "[{\"op\":\"remove\",\"path\":\"/spec/plugins/$i\"}]"
 > helm upgrade ibm-vpc-file-pool-csi charts/ibm-vpc-file-pool-csi \
 >   -n kube-system \
 >   --reuse-values \
@@ -547,7 +528,6 @@ ibmcloud is shares
 | Migrate PVC | `kubectl migrate execute --namespace <ns> --pvc <name> --target-pool <pool> --target-storage-class <sc>` |
 | Migration status | `kubectl migrate status --namespace <ns>` |
 | Enable console plugin | `helm upgrade ... --set consolePlugin.enabled=true` |
-| Register plugin | `oc patch console.operator.openshift.io cluster --type=json -p '[{"op":"add","path":"/spec/plugins/-","value":"ibm-vpc-file-pool-csi"}]'` |
 | Check plugin status | `oc get consoleplugin ibm-vpc-file-pool-csi` |
 | Plugin pods | `oc get pods -n kube-system -l app.kubernetes.io/component=console-plugin` |
 | Disable plugin | Remove only this entry from `spec.plugins` (see the note above); never set the list to `[]`, which disables every plugin |
@@ -558,7 +538,7 @@ ibmcloud is shares
 
 ```yaml
 consolePlugin:
-  enabled: false                    # Enable the console plugin
+  enabled: true                     # The console plugin is on by default
   image:
     repository: de.icr.io/ibm-vpc-file-pool-csi/console-plugin
     tag: latest
@@ -582,7 +562,7 @@ This concludes the 8-part tutorial series for the IBM VPC File Pool CSI Driver. 
 |------|----------|------------------|
 | 1 | [Pool Creation, PVCs, and KubeVirt VMs](TUTORIAL-01-POOL-CREATION.md) | Created a pool, provisioned PVCs, launched a VM with NFS-backed disks |
 | 2 | [Snapshots and Clones](TUTORIAL-02-SNAPSHOTS-AND-CLONES.md) | Point-in-time snapshots, restore from snapshot, clones |
-| 3 | [Group Snapshots and Hooks](TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md) | Coordinated multi-PVC snapshots with exec and HTTP lifecycle hooks |
+| 3 | [Group Snapshots and Hooks](TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md) | Not active: the driver does not act on group snapshots |
 | 4 | [Pool Configuration](TUTORIAL-04-POOL-CONFIGURATION.md) | Multi-tier pools, allocation strategies, auto-expansion, share draining |
 | 5 | [Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md) | Automatic KubeVirt golden image provisioning from CDI and OCI sources |
 | 6 | [Replication and Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md) | Cross-region DR with direct NFS and driver-to-driver modes, failover |

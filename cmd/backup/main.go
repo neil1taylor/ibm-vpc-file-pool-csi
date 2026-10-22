@@ -7,6 +7,8 @@
 //	kubectl backup restore --policy NAME --pvc NAMESPACE/NAME --to NAMESPACE/NAME [--moment TIME] [--storage-class CLASS] [--wait]
 //	kubectl backup delete  --policy NAME --pvc NAMESPACE/NAME [--yes]
 //	kubectl backup cos-setup --region R --resource-group G --bucket B --root-key CRN ... [--dry-run]
+//	kubectl backup restore --from-cos --policy NAME --volume pvc-... --to NAMESPACE/NAME --bucket B --endpoint HOST --storage-class CLASS --size-gb N ...
+//	kubectl backup cos-list --policy NAME --bucket B --endpoint HOST ... [--volume pvc-...]
 //
 // A restore makes a BackupRestore resource. The driver makes the new PVC and
 // copies the backup into it; it never writes over a volume that exists.
@@ -63,7 +65,7 @@ func main() {
 			os.Exit(1)
 		}
 		return
-	case "list", "restore", "delete":
+	case "list", "restore", "delete", "cos-list":
 	default:
 		_, _ = fmt.Fprintf(os.Stderr, "Unknown subcommand: %s\n\n", os.Args[1])
 		printUsage(os.Stderr)
@@ -79,6 +81,10 @@ func main() {
 			namespace = pool.DefaultDriverNamespace
 		}
 		err = runDelete(context.Background(), c, os.Stdout, os.Stdin, stdinIsTerminal(), pool.NewShareJobRunner(c, namespace, ""), flags)
+	case os.Args[1] == "cos-list":
+		err = runCOSList(context.Background(), c, os.Stdout, newCOSAdmin(), newCOSLister(c, driverNamespace(flags)), flags)
+	case os.Args[1] == "restore" && flags["from-cos"] == "true":
+		err = runRestoreFromCOS(context.Background(), c, os.Stdout, newCOSAdmin(), flags, time.Now)
 	default:
 		err = run(context.Background(), c, os.Stdout, os.Args[1:], time.Now)
 	}
@@ -103,6 +109,8 @@ Usage:
   kubectl backup restore [flags]                    Make a new PVC from a backup
   kubectl backup delete  [flags]                    Remove all backups of one volume, for good
   kubectl backup cos-setup [flags]                  Make the COS bucket, keys and lock for the export (your own IBM Cloud login)
+  kubectl backup cos-list [flags]                   List the volumes and moments in the COS bucket of a policy
+  kubectl backup restore --from-cos [flags]         Make a new PVC from a backup in COS, in any cluster that runs the driver
   kubectl backup version                            Print version
 
 Delete flags:
@@ -117,7 +125,7 @@ Delete flags:
   restore of the volume may be running. It removes the volume's backup folder and
   its earlier moments from the snapshot pool's share, after showing how much.
 
-cos-setup flags (run on your machine; it needs no cluster; it never deletes anything):
+cos-setup flags (run on your machine; it needs no cluster; it deletes only the instance-wide policy that IBM Cloud adds for the new HMAC key):
   --region, --resource-group, --bucket   Where to make the bucket (required)
   --root-key        CRN of the Key Protect root key that wraps the backup key (required; not made here)
   --vpc-crn, --admin-address   The cluster VPC and your admin addresses (comma separated), for a new CBR zone.
@@ -143,6 +151,25 @@ Restore flags:
   --wait            Wait until the restore is done, and report the moment that was restored
   --timeout         How long --wait waits (default 2h)
 
+Restore from COS (restore --from-cos). It needs no BackupPolicy and no snapshot pool in this cluster:
+  --policy, --bucket, --endpoint   The policy's area in the bucket, and where the bucket is (required)
+  --prefix          The prefix set in the policy's spec.export (default: none)
+  --volume          The backed-up volume, pvc-<uuid>, as cos-list shows it (required). COS does not keep claim names
+  --to              The new PVC, as NAMESPACE/NAME (required). It must not exist
+  --storage-class, --size-gb   Class and size of the new PVC (required): COS does not keep them
+  --moment          Restore the newest backup at or before this time (RFC 3339). Default: the latest
+  --credentials-secret   Secret with the COS key in the driver namespace (default cos-credentials)
+  --backup-key-secret    Secret with the wrapped backup key (default cos-backup-key). Made from the bucket if missing
+  --kp-instance, --kp-region, --kp-root-key   The Key Protect root key that wraps the backup key (required)
+  --kp-api-key-secret    Secret with the IBM Cloud API key for Key Protect (default keyprotect-apikey)
+  --backup-key-file      Use this readable backup key and never call Key Protect (for when Key Protect is gone).
+                    Its Secret is removed when the restore ends; the command waits for that
+  --skip-marker-cleanup  Do not remove delete markers in the policy's area (this needs your IBM Cloud login)
+  --driver-namespace, --wait, --timeout   As for the other restore
+  The command removes delete markers with your own IBM Cloud login (IBMCLOUD_IAM_TOKEN, IBMCLOUD_API_KEY or the ibmcloud CLI login).
+  cos-list takes the same source flags and --volume (optional) and --driver-image (default: the controller's image).
+  It runs a read-only Job in the cluster, so the cluster must be able to reach the bucket
+
 All commands:
   --kubeconfig      Path to kubeconfig (default: ~/.kube/config)
 `)
@@ -161,7 +188,7 @@ func parseFlags(args []string) map[string]string {
 			flags[arg[:idx]] = arg[idx+1:]
 			continue
 		}
-		if arg == "wait" || arg == "yes" || arg == "dry-run" || arg == "existing-bucket" {
+		if arg == "wait" || arg == "yes" || arg == "dry-run" || arg == "existing-bucket" || arg == "from-cos" || arg == "skip-marker-cleanup" {
 			flags[arg] = "true"
 			continue
 		}

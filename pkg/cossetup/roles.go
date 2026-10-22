@@ -5,7 +5,8 @@
 //
 // It runs only on a person's machine, with that person's own IBM Cloud login.
 // The driver never calls it. It follows TUTORIAL-09-COS-BACKUP-BUCKET.md step
-// by step, and it never deletes anything. Design: docs/specs/2026-10-21-backup-cos-export.md.
+// by step, and it deletes only the instance-wide policy that IBM Cloud adds
+// for the HMAC key. Design: docs/specs/2026-10-21-backup-cos-export.md.
 package cossetup
 
 const (
