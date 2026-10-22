@@ -70,7 +70,12 @@ In the console, Observe > Alerting shows the driver's alerts under "Alerting rul
 
 On clusters without OpenShift (or with `metrics.monitoring.mode=disabled`) the `ServiceMonitor` objects and the `PrometheusRule` stay in the release namespace, as before, and your Prometheus must read that namespace.
 
-Red Hat documentation, OpenShift Container Platform 4.21 "Monitoring" book: <https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/monitoring/index>. The statements above rest on these parts of it: "Understanding the monitoring stack" (platform monitoring covers the platform projects; user-defined projects are covered by user workload monitoring), "Enabling monitoring for user-defined projects" (`enableUserWorkload: true` in `cluster-monitoring-config`), and the cautions in the monitoring configuration chapters not to add `openshift.io/cluster-monitoring` to your own projects and not to create user-defined monitoring objects in `openshift-*` projects. The links go to the book's index; check the section names against your cluster's version.
+Red Hat sources:
+
+- Turning on user workload monitoring (`enableUserWorkload: true` in `cluster-monitoring-config`; needs cluster-admin; then check that the `prometheus-operator`, `prometheus-user-workload` and `thanos-ruler-user-workload` pods run in `openshift-user-workload-monitoring`): OpenShift 4.18 documentation, [Configuring user workload monitoring](https://docs.redhat.com/documentation/openshift_container_platform/4.18/html/monitoring/configuring-user-workload-monitoring).
+- Support guidance that you should not create your own `ServiceMonitor` objects in `openshift-*` or `kube-*` projects: <https://access.redhat.com/node/7024333>.
+- Support guidance that you should not put the `openshift.io/cluster-monitoring` label on your own namespaces: <https://access.redhat.com/solutions/6992399>.
+- Keeping a project out of user workload monitoring (label `openshift.io/user-monitoring=false`; the monitoring namespace of this chart must not have it): [Disabling monitoring for user-defined projects](https://docs.openshift.com/rosa/observability/monitoring/sd-disabling-monitoring-for-user-defined-projects.html) (Red Hat OpenShift Service on AWS documentation; the label works the same way in OpenShift Container Platform).
 
 ### Prometheus Operator (ServiceMonitor)
 
