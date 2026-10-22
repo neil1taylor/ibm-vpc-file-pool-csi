@@ -85,6 +85,11 @@ jobs:
         with:
           version: v3.19.0
 
+      - name: Install promtool
+        run: |
+          curl -sSL https://github.com/prometheus/prometheus/releases/download/v3.5.0/prometheus-3.5.0.linux-amd64.tar.gz \
+            | tar -xz --strip-components=1 -C /usr/local/bin prometheus-3.5.0.linux-amd64/promtool
+
       - name: Run chart and script tests
         run: make test-scripts
 

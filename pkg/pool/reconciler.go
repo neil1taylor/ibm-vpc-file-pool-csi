@@ -685,6 +685,7 @@ func (r *FileSharePoolReconciler) reconcileMetrics(ctx context.Context, pool *v1
 	metrics.PoolCapacityGB.WithLabelValues(pool.Name).Set(float64(pool.Status.TotalCapacityGB))
 	metrics.PoolAllocatedGB.WithLabelValues(pool.Name).Set(float64(pool.Status.TotalAllocatedGB))
 	metrics.PoolShareCount.WithLabelValues(pool.Name).Set(float64(pool.Status.ShareCount))
+	metrics.PoolMaxShares.WithLabelValues(pool.Name).Set(float64(pool.Spec.MaxShares))
 	metrics.PoolPVCCount.WithLabelValues(pool.Name).Set(float64(pool.Status.TotalPVCCount))
 }
 
