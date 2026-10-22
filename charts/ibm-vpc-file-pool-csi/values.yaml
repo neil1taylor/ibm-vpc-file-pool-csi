@@ -306,12 +306,17 @@ replicationReceiver:
       drop: ["ALL"]
     seccompProfile:
       type: RuntimeDefault
+  # Memory: the receiver itself needs about 100 MiB. Pages of files on NFS count
+  # against the limit and the kernel drops them as it needs room, so the memory
+  # use of a busy receiver stays near the limit; that is normal. It forces its
+  # data out and drops cached pages, so a 512Mi limit also survived the send of
+  # an 11 GiB VM disk in a lab test. 1Gi leaves room.
   resources:
     requests:
       cpu: 100m
       memory: 256Mi
     limits:
-      memory: 512Mi
+      memory: 1Gi
   # TLS configuration for the receiver HTTPS endpoint.
   tls:
     # Enable native TLS on the receiver (certificates provisioned by cert-manager).
