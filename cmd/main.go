@@ -27,6 +27,7 @@ import (
 	ctrlwebhook "sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/consoleplugin"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/driver"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/hooks"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud"
@@ -35,6 +36,7 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/pool"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/replication"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/vmcopy"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/vmsnap"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/webhook"
 )
 
@@ -68,6 +70,9 @@ func main() {
 		// Replication controller flags.
 		driverImage string
 
+		// VM disk snapshot flags.
+		vmSnapshots vmSnapshotOptions
+
 		// Sync-client mode flags.
 		receiverEndpoint string
 		authTokenFile    string
@@ -91,11 +96,16 @@ func main() {
 		backupDisk    string
 		outDisk       string
 		restoreMoment string
+		unwrap        unwrapOptions
+
+		// Console plugin modes.
+		consolePluginName string
 	)
 
 	flag.StringVar(&endpoint, "endpoint", "unix:///csi/csi.sock", "CSI endpoint")
 	flag.StringVar(&nodeID, "node-id", "", "Node ID")
-	flag.StringVar(&mode, "mode", "controller", "Driver mode: controller, node, receiver, sync-client, check-receiver, apply-vm-disk, send-vm-disk, or restore-vm-disk")
+	flag.StringVar(&mode, "mode", "controller", "Driver mode: controller, node, receiver, sync-client, check-receiver, apply-vm-disk, send-vm-disk, restore-vm-disk, unwrap-backup-key, register-console-plugin, unregister-console-plugin, or enable-sidecar-gate")
+	flag.StringVar(&consolePluginName, "console-plugin-name", "ibm-vpc-file-pool-csi", "ConsolePlugin to turn on or off in the OpenShift console (register-console-plugin and unregister-console-plugin modes)")
 	flag.StringVar(&region, "region", "", "IBM Cloud region (e.g. us-south); auto-discovered from secret provider if omitted")
 	flag.StringVar(&vpcID, "vpc-id", "", "IBM Cloud VPC ID for creating file share mount targets")
 	flag.StringVar(&subnetID, "subnet-id", "", "Comma-separated IBM Cloud worker subnet IDs; each share's mount target goes in the one in the pool's zone")
@@ -106,6 +116,8 @@ func main() {
 
 	// Replication controller flags.
 	flag.StringVar(&driverImage, "driver-image", "", "Driver container image for receiver-mode sync-client Jobs")
+	flag.StringVar(&vmSnapshots.method, "vm-snapshot-method", "auto", "Snapshots of VM disks: auto (instant where the KubeVirt Sidecar feature gate is on) or copy (never instant)")
+	flag.StringVar(&vmSnapshots.launcherImage, "virt-launcher-image", "", "KubeVirt virt-launcher image for VM disk snapshot Jobs; empty reads it from virt-operator")
 	flag.BoolVar(&webhooks.enabled, "enable-webhooks", true, "Serve the validating admission webhooks (needs a serving certificate)")
 	flag.IntVar(&webhooks.port, "webhook-port", 9443, "Port of the admission webhook server")
 
@@ -139,6 +151,15 @@ func main() {
 	flag.StringVar(&outDisk, "out-disk", "", "New disk image to write; it must not exist (restore-vm-disk mode)")
 	flag.StringVar(&restoreMoment, "restore-moment", "", "Moment to restore, RFC 3339; empty for the latest backup (restore-vm-disk mode)")
 
+	// Unwrap-backup-key flags.
+	flag.StringVar(&unwrap.region, "kp-region", "", "Key Protect region (unwrap-backup-key mode)")
+	flag.StringVar(&unwrap.instance, "kp-instance", "", "Key Protect instance ID (unwrap-backup-key mode)")
+	flag.StringVar(&unwrap.rootKey, "kp-root-key", "", "Key Protect root key ID (unwrap-backup-key mode)")
+	flag.StringVar(&unwrap.wrappedKeyFile, "wrapped-key-file", "", "File with the backup key wrapped by Key Protect (unwrap-backup-key mode)")
+	flag.StringVar(&unwrap.apiKeyFile, "api-key-file", "", "File with the IBM Cloud API key for Key Protect (unwrap-backup-key mode)")
+	flag.StringVar(&unwrap.emergencyKeyFile, "emergency-key-file", "", "Optional file with the readable backup key, used only when Key Protect is down (unwrap-backup-key mode)")
+	flag.StringVar(&unwrap.keyOut, "key-out", "", "File to write the readable key to, mode 0400; it must not exist (unwrap-backup-key mode)")
+
 	flag.StringVar(&vmGroup, "vm-group", "", "namespace/name of the VM that owns the disk (send-vm-disk mode)")
 	flag.StringVar(&copyID, "copy-id", "", "Name of this copy attempt; a repeat with the same name resumes (send-vm-disk mode)")
 
@@ -149,7 +170,11 @@ func main() {
 
 	switch mode {
 	case "controller":
-		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, cloneWorkerInterval, goldenImageSyncInterval, cdiCopyPodMemoryLimit, driverImage, webhooks)
+		if err := vmSnapshots.check(); err != nil {
+			klog.ErrorS(err, "Invalid flag")
+			os.Exit(1)
+		}
+		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, cloneWorkerInterval, goldenImageSyncInterval, cdiCopyPodMemoryLimit, driverImage, webhooks, vmSnapshots)
 	case "receiver":
 		runReceiver(receiverBasePath, receiverAuthTokenFile, receiverListenAddr, receiverTLSCertFile, receiverTLSKeyFile)
 	case "sync-client":
@@ -160,11 +185,59 @@ func main() {
 		runApplyVMDisk(stagingPath, diskPath, vmCopy)
 	case "restore-vm-disk":
 		runRestoreVMDisk(backupDisk, outDisk, restoreMoment)
+	case "unwrap-backup-key":
+		runUnwrapBackupKey(unwrap)
 	case "send-vm-disk":
 		runSendVMDisk(receiverEndpoint, authTokenFile, caCertFile, stagingPath, destBasePath, subPath, subvolumeName, copyID, vmGroup, metadataJSON, vmCopy)
+	case "register-console-plugin", "unregister-console-plugin":
+		runConsolePlugin(mode, consolePluginName)
+	case "enable-sidecar-gate":
+		runEnableSidecarGate()
 	default:
 		runNode(endpoint, nodeID, mode)
 	}
+}
+
+// runEnableSidecarGate turns on the KubeVirt Sidecar feature gate that instant
+// VM snapshots need. The Helm chart runs it as a post-install and post-upgrade
+// hook Job when vmSnapshots.enableSidecarGate is true.
+func runEnableSidecarGate() {
+	c, err := client.New(ctrl.GetConfigOrDie(), client.Options{})
+	if err != nil {
+		klog.ErrorS(err, "Failed to create Kubernetes client")
+		os.Exit(1)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	if err := pool.EnableSidecarGate(ctx, c); err != nil {
+		klog.ErrorS(err, "Failed to turn on the KubeVirt Sidecar feature gate")
+		os.Exit(1)
+	}
+	klog.InfoS("KubeVirt Sidecar feature gate is on")
+}
+
+// runConsolePlugin turns the console plugin on or off in the OpenShift console.
+// The Helm chart runs it as post-install, post-upgrade and pre-delete hook Jobs.
+func runConsolePlugin(mode, name string) {
+	c, err := client.New(ctrl.GetConfigOrDie(), client.Options{})
+	if err != nil {
+		klog.ErrorS(err, "Failed to create Kubernetes client")
+		os.Exit(1)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	if mode == "register-console-plugin" {
+		err = consoleplugin.Register(ctx, c, name)
+	} else {
+		err = consoleplugin.Unregister(ctx, c, name)
+	}
+	if err != nil {
+		klog.ErrorS(err, "Failed to change the console plugins", "mode", mode, "plugin", name)
+		os.Exit(1)
+	}
+	klog.InfoS("Console plugins updated", "mode", mode, "plugin", name)
 }
 
 // webhookOptions configures the admission webhook server.
@@ -173,7 +246,7 @@ type webhookOptions struct {
 	port    int
 }
 
-func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string, cloneWorkerInterval, goldenImageSyncInterval time.Duration, cdiCopyPodMemoryLimit, driverImage string, webhooks webhookOptions) {
+func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string, cloneWorkerInterval, goldenImageSyncInterval time.Duration, cdiCopyPodMemoryLimit, driverImage string, webhooks webhookOptions, vmSnapshots vmSnapshotOptions) {
 	scheme := runtime.NewScheme()
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
 		klog.ErrorS(err, "Failed to add CRD types to scheme")
@@ -253,6 +326,11 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 	reconciler := pool.NewFileSharePoolReconciler(k8sClient, nil)
 	if err = reconciler.SetupWithManager(mgr); err != nil {
 		klog.ErrorS(err, "Failed to set up reconciler")
+		os.Exit(1)
+	}
+	rebind := &pool.ClaimRebindReconciler{Reader: mgr.GetClient(), K8sClient: k8sClient, DriverName: driver.DriverName}
+	if err = rebind.SetupWithManager(mgr); err != nil {
+		klog.ErrorS(err, "Failed to set up the claim rebind reconciler")
 		os.Exit(1)
 	}
 
@@ -399,6 +477,23 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 	// Snapshots of running VM disks are QEMU copies. The same commands run in
 	// the VM pod; a timer on the leader moves each copy forward.
 	poolManager.SetVMSnapshots(vmCopier, replClient)
+
+	// Instant snapshots of VM disks change the disk's file chain in the VM
+	// pod, or with a Job in the virt-launcher image when the VM is stopped.
+	// See VM-INSTANT-SNAPSHOTS.md.
+	if vmSnapshots.method == "auto" {
+		image := vmSnapshots.launcherImage
+		if image == "" {
+			image = discoverLauncherImage(signalCtx, clientset, replClient)
+		}
+		if image == "" {
+			klog.InfoS("No KubeVirt virt-launcher image found; VM disk snapshots are copies")
+		} else {
+			shareRunner.SetLauncherImage(image)
+			poolManager.SetInstantSnapshots(vmsnap.New(hooks.NewPodExecer(clientset, restConfig)), shareRunner, replClient)
+			klog.V(2).InfoS("Instant VM disk snapshots are on where the KubeVirt Sidecar feature gate is on", "launcherImage", image)
+		}
+	}
 	if addErr := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
 		poolManager.RunVMSnapshots(ctx, pool.DefaultVMSnapshotInterval)
 		return nil
@@ -668,6 +763,9 @@ func registerWebhooks(mgr ctrl.Manager) error {
 		WithValidator(&webhook.VolumeGroupSnapshotValidator{}).Complete(); err != nil {
 		return fmt.Errorf("register VolumeGroupSnapshot webhook: %w", err)
 	}
+	// The VM hook webhook reads without the cache: a VM must start with the
+	// newest chain of its disks.
+	mgr.GetWebhookServer().Register(webhook.VMIHookPath, &ctrlwebhook.Admission{Handler: &webhook.VMIHookInjector{Client: mgr.GetAPIReader()}})
 	return nil
 }
 

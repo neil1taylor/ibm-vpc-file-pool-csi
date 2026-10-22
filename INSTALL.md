@@ -148,6 +148,8 @@ podman build -t ${IMAGE} .
 # Note: Do NOT include a tag in IMAGE_NAME — the Makefile appends :$(VERSION) automatically.
 ```
 
+The image also holds the Kopia command-line program (pinned in the `Dockerfile` by version and SHA-256; the build stops if the checksum does not match). Only the COS export Jobs run it. The driver does not link it, and the image build needs to reach `github.com` to fetch it. To move to another Kopia version, change `KOPIA_VERSION` and `KOPIA_SHA256` together, using the checksum in `checksums.txt` of the official release.
+
 Push the image to IBM Cloud Container Registry so your cluster nodes can pull it:
 
 ```bash
@@ -363,7 +365,7 @@ kubectl apply -f config/deploy/node.yaml
 |------|---------|-------------|
 | `--endpoint` | `unix:///csi/csi.sock` | CSI gRPC endpoint |
 | `--node-id` | (required) | Kubernetes node name |
-| `--mode` | `controller` | `controller`, `node`, `receiver`, `sync-client`, `check-receiver`, `apply-vm-disk`, `send-vm-disk`, or `restore-vm-disk` (all but the first three are run as Jobs; `check-receiver` is run by the console's receiver setup) |
+| `--mode` | `controller` | `controller`, `node`, `receiver`, `sync-client`, `check-receiver`, `apply-vm-disk`, `send-vm-disk`, or `restore-vm-disk`, `unwrap-backup-key`, `register-console-plugin`, or `unregister-console-plugin`, or `enable-sidecar-gate` (all but the first three are run as Jobs; `check-receiver` is run by the console's receiver setup; `register-console-plugin`, `unregister-console-plugin` and `enable-sidecar-gate` are the chart's hook Jobs) |
 | `--region` | Auto-discovered | IBM Cloud region |
 | `--vpc-id` | Auto-discovered | VPC ID for mount targets |
 | `--subnet-id` | Auto-discovered | Worker subnet IDs for mount targets, comma-separated; the controller uses the one in each pool's zone |
@@ -371,7 +373,10 @@ kubectl apply -f config/deploy/node.yaml
 | `--clone-worker-interval` | `10s` | Clone worker poll interval |
 | `--golden-image-sync-interval` | `1h` | Golden image syncer poll interval (the Helm chart sets `5m`) |
 | `--cdi-copy-pod-memory-limit` | `8Gi` | Keep the memory limit of CDI's copy pods at least this high (OpenShift Virtualization `HyperConverged`); empty turns the check off |
+| `--console-plugin-name` | `ibm-vpc-file-pool-csi` | ConsolePlugin that `register-console-plugin` adds to, and `unregister-console-plugin` removes from, the console's plugin list |
 | `--driver-image` | `""` | Driver container image for receiver-mode sync-client Jobs (auto-set by Helm) |
+| `--vm-snapshot-method` | `auto` | `auto`: instant VM disk snapshots where the KubeVirt `Sidecar` feature gate is on; `copy`: VM disk snapshots are always copies. Helm sets it from `vmSnapshots.method`. See [VM-INSTANT-SNAPSHOTS.md](VM-INSTANT-SNAPSHOTS.md) |
+| `--virt-launcher-image` | `""` | KubeVirt virt-launcher image for VM disk snapshot Jobs; empty reads it from virt-operator. Helm sets it from `vmSnapshots.launcherImage` |
 | `--enable-webhooks` | `true` | Serve the validating admission webhooks. Helm sets `false` when `webhook.enabled=false` |
 | `--webhook-port` | `9443` | Port of the admission webhook server. Helm sets it from `webhook.port` |
 | `--receiver-tls-cert-file` | `""` | TLS certificate file for receiver HTTPS. Empty = plain HTTP |
@@ -562,7 +567,7 @@ The tests create resources with an `e2e-` prefix and clean them up automatically
 
 ---
 
-## OpenShift Console Plugin (Optional)
+## OpenShift Console Plugin
 
 The driver includes an OpenShift Console dynamic plugin that provides a visual dashboard for managing file share pools, SubVolumes, snapshots, and replication policies directly from the OpenShift web console.
 
@@ -571,31 +576,13 @@ The driver includes an OpenShift Console dynamic plugin that provides a visual d
 - OpenShift 4.14+ with the ConsolePlugin v1 API
 - The CSI driver must already be installed (Steps 1-4 above)
 
-### Enable the Console Plugin
+### Install
 
-Add the `consolePlugin.enabled` flag during Helm install or upgrade:
+The plugin is on by default. On a cluster with the OpenShift console, a plain Helm install deploys it as a separate Deployment with its own Service. TLS certificates are auto-provisioned by the OpenShift service-ca operator (no cert-manager dependency for the plugin). On a cluster without the OpenShift console, the chart leaves the plugin out.
 
-```bash
-helm upgrade --install ibm-vpc-file-pool-csi \
-  charts/ibm-vpc-file-pool-csi/ \
-  --namespace kube-system \
-  --set image.repository=${REGISTRY}/${NAMESPACE}/vpc-file-pool-csi \
-  --set image.tag=${VERSION} \
-  --set consolePlugin.enabled=true
-```
+The chart also turns the plugin on in the console. A hook Job adds `ibm-vpc-file-pool-csi` to the console's plugin list after each install and upgrade, and keeps the other plugins. Before `helm uninstall`, a hook Job removes only this plugin from the list.
 
-This deploys the plugin as a separate Deployment with its own Service. TLS certificates are auto-provisioned by the OpenShift service-ca operator (no cert-manager dependency for the plugin).
-
-### Register the Plugin
-
-After install, register the plugin with the OpenShift console:
-
-```bash
-# Adds this plugin to the list and keeps the other plugins enabled.
-# (A merge patch with a "plugins" list would replace the whole list.)
-oc patch console.operator.openshift.io cluster --type=json \
-  -p '[{"op":"add","path":"/spec/plugins/-","value":"ibm-vpc-file-pool-csi"}]'
-```
+To leave the plugin out, set `consolePlugin.enabled=false`. If it was on before, the upgrade removes it from the console's plugin list.
 
 ### Verify
 

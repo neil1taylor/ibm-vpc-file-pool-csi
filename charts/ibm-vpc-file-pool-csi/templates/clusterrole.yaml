@@ -44,6 +44,28 @@ rules:
   - apiGroups: ["kubevirt.io"]
     resources: ["virtualmachineinstancemigrations"]
     verbs: ["list"]
+  # Instant VM snapshots (VM-INSTANT-SNAPSHOTS.md): the controller reads the
+  # Sidecar feature gate and a stopped VM's disks, records each disk's
+  # newest snapshot file on the running VMI, and keeps the hook script in a
+  # ConfigMap in the VM's namespace. It reads virt-operator to find the
+  # virt-launcher image, which has qemu-img, for Jobs on stopped VMs' disks.
+  - apiGroups: ["kubevirt.io"]
+    resources: ["kubevirts", "virtualmachines"]
+    verbs: ["get", "list"]
+  - apiGroups: ["kubevirt.io"]
+    resources: ["virtualmachineinstances"]
+    verbs: ["get", "list", "patch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["ibm-vpc-file-pool-vm-hook"]
+    verbs: ["update"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["virt-operator"]
+    verbs: ["get"]
   # OpenShift allows exec into a pod only to a user who could create that
   # pod. VM pods run under the kubevirt-controller SCC, so replication needs
   # "use" on it to freeze a VM and start a disk copy. This adds no power to

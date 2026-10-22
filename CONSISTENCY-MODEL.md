@@ -32,9 +32,9 @@ IBM VPC file shares are fully managed NFS services. We do not have:
 - Access to the underlying block device
 - Access to the server-side filesystem
 - Administrative commands on the NFS server
-- Any API to create share-level or directory-level snapshots
+- Any API to create directory-level or file-level snapshots (the VPC API can snapshot a whole share, see below)
 
-The VPC API provides `CreateShare`, `DeleteShare`, `UpdateShare`, `ListShares`, and mount target management. There is no `CreateShareSnapshot` operation.
+The VPC API provides `CreateShare`, `DeleteShare`, `UpdateShare`, `ListShares`, and mount target management. It also has `CreateShareSnapshot`, `ListShareSnapshots` and `DeleteShareSnapshot`, but a share snapshot covers the whole share, not one volume, and IBM does not offer it for shares in `vpc` access mode. This driver does not use share snapshots: a pool share holds many volumes, so a share snapshot could not restore one volume without touching the others.
 
 ### The Only Mechanism Is Recursive File Copy
 

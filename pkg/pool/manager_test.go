@@ -14,6 +14,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	storagev1 "k8s.io/api/storage/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -224,7 +225,7 @@ func (f *fakeK8sClient) GetFileSharePool(_ context.Context, name string) (*v1alp
 	}
 	p, ok := f.pools[name]
 	if !ok {
-		return nil, fmt.Errorf("pool %q not found", name)
+		return nil, apierrors.NewNotFound(v1alpha1.GroupVersion.WithResource("filesharepools").GroupResource(), name)
 	}
 	return p.DeepCopy(), nil
 }
@@ -261,7 +262,7 @@ func (f *fakeK8sClient) GetSubVolume(_ context.Context, name string) (*v1alpha1.
 	}
 	sv, ok := f.subVolumes[name]
 	if !ok {
-		return nil, fmt.Errorf("subvolume %q not found", name)
+		return nil, apierrors.NewNotFound(v1alpha1.GroupVersion.WithResource("subvolumes").GroupResource(), name)
 	}
 	return sv.DeepCopy(), nil
 }

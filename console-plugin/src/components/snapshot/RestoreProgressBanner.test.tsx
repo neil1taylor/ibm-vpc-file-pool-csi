@@ -77,3 +77,14 @@ describe('RestoreProgressBanner', () => {
     expect(screen.getByText(/The cloned volume is ready/)).toBeTruthy();
   });
 });
+
+describe('RestoreProgressBanner help link', () => {
+  it('links the troubleshooting guide when the copy failed', () => {
+    watch({
+      PersistentVolumeClaim: pvc('Pending', 'pvc-x'),
+      SubVolume: { metadata: { name: 'pvc-x' }, status: { cloneStatus: 'Failed', cloneProgress: { bytesCopied: 0, totalBytes: 20, error: 'rsync failed' } } },
+    });
+    render(<RestoreProgressBanner namespace="apps" name="data-restored" />);
+    expect(screen.getByTestId('banner-help').getAttribute('href')).toContain('TROUBLESHOOTING.md#pvc-issues');
+  });
+});

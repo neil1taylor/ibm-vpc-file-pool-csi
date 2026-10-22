@@ -108,6 +108,7 @@ export interface GoldenImageNamespaceStatus {
 export interface ShareDrainStatus {
   shareID: string;
   remainingSubVolumes: number;
+  remainingSnapshots?: number;
   drained: boolean;
   drainStartedAt?: string;
 }
@@ -145,6 +146,9 @@ export interface SubVolumeStatus {
   createdAt?: string;
   cloneStatus?: string;
   cloneProgress?: CloneProgress;
+  /** Instant-snapshot chain of the VM disk, newest file first; the last file is disk.img. */
+  diskChain?: string[];
+  chainOperation?: string;
 }
 
 export interface CloneProgress {
@@ -243,6 +247,10 @@ export interface ReplicationPolicySpec {
   destinationAuthSecretRef?: string;
   /** Secret name in kube-system with a "ca.crt" key. Used in driver-to-driver mode when the receiver has a self-signed certificate. */
   destinationCACertSecretRef?: string;
+  /** Speed limit for copying a running VM's disk, in MB/s for each disk. 0 is unlimited. Default 20. */
+  vmCopySpeedLimitMBps?: number;
+  /** How long the destination keeps restore points of a running VM's disks. Default 24. */
+  restorePointKeepHours?: number;
 }
 
 export interface ReplicationPolicyStatus {
@@ -259,6 +267,18 @@ export interface SubVolumeReplicationStatus {
   lastSyncTime?: string;
   bytesSynced?: number;
   lastError?: string;
+  /** Running VM disks only: the moment the last good copy shows. */
+  copyMoment?: string;
+  consistency?: 'FileSystemConsistent' | 'CrashConsistent';
+  /** Why a copy is only crash consistent. */
+  consistencyReason?: string;
+  /** Empty means the next copy is a full copy. */
+  vmChangeList?: string;
+  /** How many earlier copies the destination keeps, and the moment of the oldest. */
+  restorePoints?: number;
+  oldestRestorePoint?: string;
+  /** A copy that is not finished. */
+  vmCopy?: { id: string; phase: string };
 }
 
 // ── Hooks ──

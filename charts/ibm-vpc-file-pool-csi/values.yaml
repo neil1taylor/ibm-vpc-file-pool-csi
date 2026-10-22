@@ -67,6 +67,26 @@ cdi:
   # NFS, and 2Gi failed for a 25 GB disk. Empty turns the check off.
   copyPodMemoryLimit: 8Gi
 
+vmSnapshots:
+  # How snapshots of KubeVirt VM disks are made. See VM-INSTANT-SNAPSHOTS.md.
+  # auto: instant snapshots (a new overlay file per snapshot, nothing copied)
+  #   where the KubeVirt Sidecar feature gate is on, and a copy elsewhere. It
+  #   adds a webhook that gives each VM with snapshots a hook when it starts.
+  #   Red Hat does not support the Sidecar feature gate.
+  # copy: every VM disk snapshot is a copy.
+  method: auto
+  # KubeVirt's virt-launcher image, for the Jobs that change a stopped VM's
+  # snapshot files. Empty reads it from the virt-operator Deployment.
+  launcherImage: ""
+  # Turn on the KubeVirt Sidecar feature gate, which instant snapshots need,
+  # with a hook Job after each install and upgrade. It adds one entry to the
+  # HyperConverged kubevirt.kubevirt.io/jsonpatch annotation and keeps the
+  # others. Red Hat does not support settings made through that annotation.
+  # Setting this back to false or uninstalling does not turn the gate off: VMs
+  # with instant snapshots cannot start without it. To turn it off, flatten
+  # those VMs first (kubectl pool-snapshots flatten), then remove the entry.
+  enableSidecarGate: false
+
 webhook:
   # Enable validating admission webhooks for CRD resources.
   enabled: true
@@ -144,9 +164,27 @@ metrics:
     enabled: true
     interval: 30s
   alerts:
-    enabled: false
+    # Created only when the cluster has the Prometheus Operator API.
+    enabled: true
+    # Pool use, in percent of capacity
     utilizationWarning: 80
     utilizationCritical: 95
+    # Failed volume allocations per second
+    allocationFailuresPerSecond: 0.1
+    # Slowest 1% of volume allocations, in seconds
+    allocationP99Seconds: 5
+    # Failed VPC API calls per second
+    apiErrorsPerSecond: 0.05
+    # Replication: seconds behind, and failures in a row
+    replicationLagSeconds: 7200
+    replicationFailures: 3
+    # Backups: a volume with no backup for this long (twice the schedule is a good value)
+    backupLateSeconds: 43200
+    # Copy in COS: the newest export, or a moment waiting, this old
+    exportLateSeconds: 43200
+    # Snapshot pool share use, in percent. New backups stop at 85.
+    snapshotPoolWarning: 75
+    snapshotPoolCritical: 85
 
 volumeSnapshotClass:
   create: true
@@ -205,9 +243,11 @@ replication:
   image: ""
 
 consolePlugin:
-  # Enable the OpenShift Console dynamic plugin for visual pool management.
-  # Requires OpenShift 4.14+ with ConsolePlugin v1 API.
-  enabled: false
+  # The OpenShift Console dynamic plugin for visual pool management.
+  # Installed only on clusters with the OpenShift console (ConsolePlugin v1
+  # API, OpenShift 4.14+). A hook Job turns it on in the console; set false to
+  # leave it out (an upgrade then turns it off in the console).
+  enabled: true
   image:
     repository: de.icr.io/ibm-vpc-file-pool-csi/console-plugin
     tag: latest

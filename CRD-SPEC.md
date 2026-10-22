@@ -332,7 +332,12 @@ type ShareDrainStatus struct {
     // RemainingSubVolumes is the number of SubVolumes still on this share.
     RemainingSubVolumes int32 `json:"remainingSubVolumes"`
 
-    // Drained is true when the share has zero SubVolumes remaining.
+    // RemainingSnapshots is the number of snapshots whose data is still on
+    // this share. Deleting the share deletes them.
+    // +optional
+    RemainingSnapshots int32 `json:"remainingSnapshots,omitempty"`
+
+    // Drained is true when the share has no SubVolumes and no snapshots left.
     Drained bool `json:"drained"`
 
     // DrainStartedAt is when the drain was initiated.
@@ -707,6 +712,19 @@ type SubVolumeStatus struct {
     // CloneProgress tracks bytes copied during a clone operation.
     // +optional
     CloneProgress *CloneProgress `json:"cloneProgress,omitempty"`
+
+    // DiskChain is the instant-snapshot chain of the VM disk in the volume
+    // folder, newest file first. The last file is disk.img. It is empty for a
+    // volume that has no instant snapshots.
+    // +optional
+    DiskChain []string `json:"diskChain,omitempty"`
+
+    // ChainOperation names the work that changes DiskChain: a Job while the
+    // VM is stopped, or a merge that QEMU runs in a running VM. Nothing else
+    // changes the disk, and a VM that uses the disk is not started, while it
+    // is set.
+    // +optional
+    ChainOperation string `json:"chainOperation,omitempty"`
 }
 
 // CloneProgress tracks the data copy progress for a clone operation.
@@ -915,6 +933,22 @@ type SnapshotStatus struct {
     // +optional
     CreationTime *metav1.Time `json:"creationTime,omitempty"`
 
+    // ChainFile is the file of the source disk's chain that holds an instant
+    // snapshot. It changes when a newer snapshot of the disk is merged into it.
+    // See VM-INSTANT-SNAPSHOTS.md.
+    // +optional
+    ChainFile string `json:"chainFile,omitempty"`
+
+    // MergeChild is the newer file that is merged into ChainFile while the
+    // snapshot is deleted.
+    // +optional
+    MergeChild string `json:"mergeChild,omitempty"`
+
+    // MethodReason says why a snapshot of a VM disk is a copy and not an
+    // instant snapshot.
+    // +optional
+    MethodReason string `json:"methodReason,omitempty"`
+
     // The fields below are used only for a snapshot of a disk that a running
     // VM uses. See "Snapshots of running VMs" below.
 
@@ -1016,6 +1050,8 @@ Snapshots reside on the same VPC file share as the source SubVolume and are stor
 ---
 
 ## VolumeGroupSnapshot
+
+> **Not active (issue #100).** The type is installed, but nothing acts on a `VolumeGroupSnapshot`. There is no plan to turn it on.
 
 Cluster-scoped resource. Coordinates a group of SubVolume snapshots to achieve application-consistent or crash-consistent point-in-time copies across multiple volumes.
 
@@ -1318,7 +1354,7 @@ Cluster-scoped. Backs up the PVCs it selects, and the VMs whose disks it selects
 
 ```go
 type BackupPolicySpec struct {
-    // SnapshotPool holds the backups. It must hold no workload claims and have exactly one ready share.
+    // SnapshotPool holds the backups. It must hold no workload claims and have at least one ready share.
     SnapshotPool string `json:"snapshotPool"`
     // Schedule is a Go duration of at least 1 minute, such as "6h".
     Schedule string `json:"schedule"`
@@ -1333,14 +1369,54 @@ type BackupPolicySpec struct {
     VMCopySpeedLimitMBps *int32 `json:"vmCopySpeedLimitMBps,omitempty"`
     // Suspend stops new backups. Existing backups stay.
     Suspend bool `json:"suspend,omitempty"`
+    // Export also sends the backups to an IBM Cloud Object Storage bucket (see below). Optional.
+    Export *BackupExport `json:"export,omitempty"`
+}
+
+type BackupExport struct {
+    Bucket   string `json:"bucket"`             // the COS bucket
+    Endpoint string `json:"endpoint"`           // S3 host, e.g. s3.eu-de.cloud-object-storage.appdomain.cloud
+    Prefix   string `json:"prefix,omitempty"`   // folder in the bucket; the policy's own area is <prefix>/<policy>/
+    // CredentialsSecret names a Secret in the driver namespace with the driver's COS HMAC key:
+    // access_key_id and secret_access_key.
+    CredentialsSecret string `json:"credentialsSecret"`
+    // BackupKeySecret names a Secret in the driver namespace with the backup key, wrapped
+    // by Key Protect (key "wrappedKey"). The readable key is never stored. Only the Jobs read
+    // the Secret, never the controller; a Job asks Key Protect to unwrap the key and keeps it
+    // in memory.
+    BackupKeySecret string `json:"backupKeySecret"`
+    // KeyProtect says which root key unwraps the backup key. All four fields are required.
+    KeyProtect KeyProtectRef `json:"keyProtect"`
+    // EmergencyKeySecret is optional: a Secret (key "backupKey") with the readable backup key,
+    // used only when Key Protect cannot be reached.
+    EmergencyKeySecret string `json:"emergencyKeySecret,omitempty"`
+    // KeepFor is a Go duration or a number of days. Default "30d". At least one hour; with a
+    // Compliance lock, at least 25 hours.
+    KeepFor string `json:"keepFor,omitempty"`
+    // Lock is "Compliance" (default: nobody can delete or shorten the keep time) or "None".
+    Lock string `json:"lock,omitempty"`
+    // Schedule is a Go duration of at least 1 minute: the most often a volume is sent.
+    // Empty: after each local backup.
+    Schedule string `json:"schedule,omitempty"`
+}
+
+type KeyProtectRef struct {
+    InstanceID   string `json:"instanceID"`   // GUID of the Key Protect instance
+    Region       string `json:"region"`       // e.g. eu-de
+    RootKeyID    string `json:"rootKeyID"`    // the root key that wrapped the backup key
+    // APIKeySecret names a Secret (key "apikey") with an IBM Cloud API key that has the Reader
+    // role on the root key.
+    APIKeySecret string `json:"apiKeySecret"`
 }
 ```
 
-Status: `phase` (`Active`, `Suspended`, `Error`), `message`, `volumeCount`, `replicationPolicies`, and `volumes`. Each volume has the claim, the VM, `lastBackupTime`, `oldestBackupTime`, `restorePoints` (moments before the newest that can be restored), `bytesWritten`, `consistency` (`FileSystemConsistent` or `CrashConsistent` for a VM disk, `FileCopy` for any other volume) and `lastError`. It also keeps what a restore needs (`subPath`, `requestedGB`, `storageClassName`). A volume that was deleted, or no longer matches the selector, stays in the list with `retained: true` until the keep time has passed since its last backup.
+Status: `phase` (`Active`, `Suspended`, `Error`; `Error` is also set, with the usage in `message`, while the snapshot pool's share is more than 85% full and new backups are stopped), `message`, `volumeCount`, `replicationPolicies`, and `volumes`. Each volume has the claim, the VM, `lastBackupTime`, `oldestBackupTime`, `restorePoints` (moments before the newest that can be restored), `bytesWritten`, `consistency` (`FileSystemConsistent` or `CrashConsistent` for a VM disk, `FileCopy` for any other volume) and `lastError`. It also keeps what a restore needs (`subPath`, `requestedGB`, `storageClassName`). A volume that was deleted, or no longer matches the selector, stays in the list with `retained: true` until the keep time has passed since its last backup.
+
+**Export to COS.** With `spec.export`, when the local backup of a volume has a moment newer than the last one exported, the controller starts an export Job for the volume (one at a time for each policy). The Job mounts the snapshot pool's share read-only and sends the backup folder and the moments folder to a Kopia repository in the bucket, in the area `<prefix>/<policy>/`. Each volume's status then has `exportedTime` (the moment of the newest copy in COS), `exportedBytes` (what the last export sent) and `exportError` (the last error; the export is tried again after 5 minutes). Once a volume is exported, a maintenance Job runs once every maintenance interval (a day, or less for a short keep time; one hour at the least): it extends the locks of chunks still in use and deletes the Kopia snapshots older than `keepFor`. The rule for the shortest Compliance lock is in one helper (`v1alpha1.MinComplianceKeepFor`): the keep time must be at least the maintenance interval plus 24 hours, so 25 hours at the least; the webhook and the controller both use it. An export problem never changes `phase` and never stops the backups to the snapshot pool. Removing `spec.export` clears the three export fields; backups already in COS stay until their lock ends. **Key handling.** The backup key is stored only as a Key Protect-wrapped copy (in `backupKeySecret`, and next to the backups in the bucket). Each export and maintenance Job mounts the wrapped key, the API key and the optional emergency key as read-only Secret files, runs the driver in mode `unwrap-backup-key` (which asks Key Protect to unwrap the key and writes it, mode 0400, to a memory-backed folder), lets Kopia read it, and removes the file. The controller never reads these Secrets and never calls Key Protect. If Key Protect is unreachable and `emergencyKeySecret` is set, the Job uses that key and logs that it did; a refusal from Key Protect (a wrong root key, a bad API key) is an error and never falls back. `kubectl backup cos-setup` makes the wrapped key; see'; see `docs/specs/2026-10-21-backup-cos-export.md`.
 
 A volume belongs to one policy. A second policy that selects it skips it and says so in its `message`. The policy name goes into a label value, so it has at most 63 characters.
 
-Limits: one share in the snapshot pool (issue #71); no check yet that the snapshot pool is full (issue #69); no command yet to remove the backups of a volume (issue #70).
+A snapshot pool may have several shares. A volume gets a share when it is first backed up (the one with room that holds the fewest volumes) and keeps it; `status.volumes[].shareID` names it, and a restore reads from it. An entry with no `shareID` was made when the pool had one share and belongs to the first share. A policy makes one ReplicationPolicy for each source pool and share (the SubVolumes carry `storage.ibmcloud.io/backup-share`). A new volume that no ready share below 85% can take waits, with its `lastError` saying so.
 
 ## BackupRestore
 
@@ -1349,16 +1425,33 @@ Cluster-scoped. A request to make a new PVC from a backup. `kubectl backup resto
 ```go
 type BackupRestoreSpec struct {
     Policy          string        `json:"policy"`
-    SourceNamespace string        `json:"sourceNamespace"` // the claim that was backed up; it may be gone
-    SourceName      string        `json:"sourceName"`
+    SourceNamespace string        `json:"sourceNamespace,omitempty"` // the claim that was backed up; it may be gone. Required unless fromCOS is set
+    SourceName      string        `json:"sourceName,omitempty"`
     Moment          *metav1.Time  `json:"moment,omitempty"` // the newest backup at or before it; unset: the latest
     TargetNamespace string        `json:"targetNamespace"`  // the new PVC; it must not exist
     TargetName      string        `json:"targetName"`
-    StorageClassName string       `json:"storageClassName,omitempty"` // default: the class of the backed-up claim
+    StorageClassName string       `json:"storageClassName,omitempty"` // default: the class of the backed-up claim; required with fromCOS
+    FromCOS         *RestoreFromCOS `json:"fromCOS,omitempty"` // read the backup from a COS bucket, not from a snapshot pool
+}
+
+// RestoreFromCOS needs no BackupPolicy and no snapshot pool in this cluster.
+type RestoreFromCOS struct {
+    Bucket             string          `json:"bucket"`
+    Endpoint           string          `json:"endpoint"`
+    Prefix             string          `json:"prefix,omitempty"`             // the prefix set in the policy's spec.export; spec.policy names the policy's area below it
+    CredentialsSecret  string          `json:"credentialsSecret"`            // access_key_id, secret_access_key
+    Volume             string          `json:"volume"`                       // pvc-<uuid>, as `kubectl backup cos-list` shows it
+    SizeGB             int32           `json:"sizeGB"`                       // size of the new PVC; COS does not keep it
+    BackupKeySecret    string          `json:"backupKeySecret,omitempty"`    // key wrappedKey; not used with emergencyKeyOnly
+    KeyProtect         *KeyProtectRef  `json:"keyProtect,omitempty"`         // not used with emergencyKeyOnly
+    EmergencyKeySecret string          `json:"emergencyKeySecret,omitempty"` // key backupKey: the readable backup key
+    EmergencyKeyOnly   bool            `json:"emergencyKeyOnly,omitempty"`   // never call Key Protect
 }
 ```
 
 The controller makes the PVC (like the backed-up claim: same size, `ReadWriteMany`, `Filesystem`), waits for the driver to bind it, and runs a Job that copies the backup into it. Until the copy ends, the SubVolume carries the label `storage.ibmcloud.io/restore-pending` and the node plugin refuses to mount the volume, so no pod or VM sees a half-written disk. A VM disk is written by the driver's `restore-vm-disk` mode, which rewinds it to the moment; the Job never rolls back a copy that is being written (the restore waits and says so). Status: `phase` (`Pending`, `Provisioning`, `Restoring`, `Done`, `Failed`), `message`, `restoredMoment` and `latest`. A restore never writes over a volume that exists; a failed copy leaves the new PVC held back, and you delete it and ask again.
+
+**With `spec.fromCOS`** the backup comes from the Kopia repository in a COS bucket (`kubectl backup restore --from-cos`). `spec.policy` names the policy's area in the bucket (below `fromCOS.prefix`); the policy need not exist in the cluster. The new PVC gets `spec.storageClassName` and `fromCOS.sizeGB`, because COS keeps neither. Three Jobs run on the share of the new volume: one opens the repository read-only and restores the export for the moment into a scratch folder (`/backup/cosrestore-<name>` on that share), the restore Job of a local restore copies the scratch folder into the volume, and a third removes the scratch folder. `spec.moment` picks the oldest export made at or after it (it holds the earlier moments as undo files), or the newest export if there is none; the existing restore Job then picks the moment inside it. Status adds `fetched` and `copied`, which record the finished steps because a finished Job is removed. The scratch folder needs room for one full copy of the volume on the share. The webhook requires `storageClassName`, a `pvc-<uuid>` volume, a `sizeGB`, and either `backupKeySecret` with `keyProtect` or `emergencyKeyOnly` with `emergencyKeySecret`. A scratch folder that cannot be removed is logged and left; the restore is still `Done`.
 
 ---
 
@@ -1791,7 +1884,6 @@ The CSI driver reads these from the StorageClass `parameters` map:
 | `uid` | No | Pool default | Unix UID for the subdirectory |
 | `gid` | No | Pool default | Unix GID for the subdirectory |
 | `permissions` | No | Pool default | Unix permissions (e.g., "0755") |
-| `reclaimAction` | No | `delete` | `delete`, `retain`, or `archive` |
 
 Example auto-created StorageClass (for a pool named `general-purpose`):
 ```yaml

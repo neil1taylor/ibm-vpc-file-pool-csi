@@ -77,6 +77,13 @@ rt_namespace() {
     oc create namespace "$1" >/dev/null && oc label namespace "$1" "$(rt_labels)" >/dev/null
 }
 
+# sidecar_gate_on — is the KubeVirt Sidecar feature gate on? Instant VM disk
+# snapshots need it; without it a VM disk snapshot is a QEMU copy.
+sidecar_gate_on() {
+    oc get kubevirt -A -o jsonpath='{.items[*].spec.configuration.developerConfiguration.featureGates}' 2>/dev/null |
+        grep -q '"Sidecar"'
+}
+
 # pool_field POOL JSONPATH — print one field of a FileSharePool.
 pool_field() { oc get filesharepool "$1" -o jsonpath="{$2}" 2>/dev/null; }
 

@@ -362,6 +362,8 @@ func (d *Driver) createVolumeFromSnapshot(ctx context.Context, req *csi.CreateVo
 		switch {
 		case errors.Is(err, pool.ErrSnapshotNotFound):
 			return nil, status.Errorf(codes.NotFound, "snapshot %q not found", snapshotName)
+		case errors.Is(err, pool.ErrRestoreTooSmall):
+			return nil, status.Error(codes.OutOfRange, err.Error())
 		default:
 			return nil, status.Errorf(codes.Internal, "restore snapshot failed: %v", err)
 		}
@@ -423,6 +425,8 @@ func (d *Driver) createVolumeFromClone(ctx context.Context, req *csi.CreateVolum
 		switch {
 		case errors.Is(err, pool.ErrSourceNotFound):
 			return nil, status.Errorf(codes.NotFound, "source volume not found")
+		case errors.Is(err, pool.ErrSnapshotUnsupported):
+			return nil, status.Error(codes.FailedPrecondition, err.Error())
 		default:
 			return nil, status.Errorf(codes.Internal, "clone failed: %v", err)
 		}
@@ -474,6 +478,10 @@ func (d *Driver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotRequ
 	result, err := d.poolManager.CreateSnapshot(ctx, req.GetName(), req.GetSourceVolumeId(), req.GetParameters())
 	if err != nil {
 		switch {
+		case errors.Is(err, pool.ErrOperationInProgress):
+			return nil, status.Error(codes.Aborted, err.Error())
+		case errors.Is(err, pool.ErrInsufficientShareCapacity):
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		case errors.Is(err, pool.ErrSourceNotFound):
 			return nil, status.Errorf(codes.NotFound, "source volume not found")
 		case errors.Is(err, pool.ErrSnapshotUnsupported), errors.Is(err, pool.ErrSnapshotFailed):

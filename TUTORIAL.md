@@ -16,8 +16,9 @@ Hands-on tutorials covering every major capability of the pool CSI driver. Each 
 | 4 | [Pool Configuration](TUTORIAL-04-POOL-CONFIGURATION.md) | Multi-tier pools, spread vs binpack strategies, auto-expansion, share draining |
 | 5 | [Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md) | CDI native mode and custom syncer for automatic KubeVirt golden image provisioning |
 | 6 | [Replication and Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md) | Direct NFS and driver-to-driver cross-region replication, pause/resume, failover CLI |
-| 7 | [Monitoring](TUTORIAL-07-MONITORING.md) | Prometheus metrics (21 metrics), ServiceMonitor, alerting rules, Grafana dashboard |
+| 7 | [Monitoring](TUTORIAL-07-MONITORING.md) | Prometheus metrics (28 metrics), ServiceMonitor, alerting rules, Grafana dashboard |
 | 8 | [Migration and Console Plugin](TUTORIAL-08-MIGRATION-AND-CONSOLE.md) | PVC migration from stock driver, OpenShift console plugin walkthrough |
+| 9 | [COS Bucket for Backups](TUTORIAL-09-COS-BACKUP-BUCKET.md) | Locked COS bucket, a key that cannot delete or unlock, a CBR rule that limits it to the cluster |
 
 ---
 
@@ -31,10 +32,11 @@ Part 1 (foundation — do this first)
 │   └── Part 5 (golden images)
 ├── Part 6 (replication/failover)
 ├── Part 7 (monitoring)
-└── Part 8 (migration/console)
+├── Part 8 (migration/console)
+└── Part 9 (COS bucket for backups)
 ```
 
-Parts 2-8 are independent of each other — pick whichever is relevant to your use case.
+Parts 2-9 are independent of each other — pick whichever is relevant to your use case.
 
 ---
 

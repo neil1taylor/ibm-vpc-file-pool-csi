@@ -237,6 +237,22 @@ func (r *FileSharePoolReconciler) handleDeletion(ctx context.Context, pool *v1al
 		return reconcile.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
+	// Snapshot data lives on the pool's shares; deleting a share deletes it.
+	snapshots, err := r.k8sClient.ListSnapshots(ctx, pool.Name)
+	if err != nil {
+		klog.ErrorS(err, "Failed to list snapshots during deletion", "pool", pool.Name)
+		return reconcile.Result{}, err
+	}
+	if len(snapshots) > 0 {
+		klog.V(2).InfoS("Deletion blocked: snapshots exist",
+			"pool", pool.Name, "snapshotCount", len(snapshots))
+		r.setCondition(pool, "DeletionBlocked", metav1.ConditionTrue,
+			"SnapshotsExist", fmt.Sprintf("%d snapshots still exist; delete their VolumeSnapshots first", len(snapshots)))
+		pool.Status.LastReconcileTime = timeNow()
+		_ = r.k8sClient.UpdateFileSharePoolStatus(ctx, pool)
+		return reconcile.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
 	// Delete all VPC shares
 	for _, share := range pool.Status.Shares {
 		if err := r.vpcClient.DeleteFileShare(ctx, share.ShareID); err != nil {
@@ -557,12 +573,20 @@ func (r *FileSharePoolReconciler) processDrainRequests(ctx context.Context, pool
 			continue
 		}
 
-		remaining := int32(len(subVolumes)) //nolint:gosec // len bounded by MaxShares * PVCs-per-share, well within int32
-		drained := remaining == 0
+		snapshots, err := r.k8sClient.ListSnapshotsByShare(ctx, shareID)
+		if err != nil {
+			klog.ErrorS(err, "Failed to list snapshots for draining share", "shareID", shareID)
+			continue
+		}
+
+		remaining := int32(len(subVolumes))         //nolint:gosec // len bounded by MaxShares * PVCs-per-share, well within int32
+		remainingSnapshots := int32(len(snapshots)) //nolint:gosec // bounded like the SubVolumes
+		drained := remaining == 0 && remainingSnapshots == 0
 
 		ds := v1alpha1.ShareDrainStatus{
 			ShareID:             shareID,
 			RemainingSubVolumes: remaining,
+			RemainingSnapshots:  remainingSnapshots,
 			Drained:             drained,
 		}
 
@@ -581,7 +605,7 @@ func (r *FileSharePoolReconciler) processDrainRequests(ctx context.Context, pool
 				"pool", pool.Name, "shareID", shareID)
 		} else {
 			klog.V(4).InfoS("Share drain in progress",
-				"pool", pool.Name, "shareID", shareID, "remaining", remaining)
+				"pool", pool.Name, "shareID", shareID, "remaining", remaining, "remainingSnapshots", remainingSnapshots)
 		}
 	}
 
@@ -590,12 +614,13 @@ func (r *FileSharePoolReconciler) processDrainRequests(ctx context.Context, pool
 	// Set a condition summarizing drain progress
 	totalDraining := len(pool.Spec.DrainShares)
 	drainedCount := 0
-	totalRemaining := int32(0)
+	totalRemaining, totalSnapshots := int32(0), int32(0)
 	for _, ds := range updatedDrainStatus {
 		if ds.Drained {
 			drainedCount++
 		}
 		totalRemaining += ds.RemainingSubVolumes
+		totalSnapshots += ds.RemainingSnapshots
 	}
 
 	if drainedCount == totalDraining {
@@ -603,16 +628,22 @@ func (r *FileSharePoolReconciler) processDrainRequests(ctx context.Context, pool
 			fmt.Sprintf("All %d shares fully drained", totalDraining))
 	} else {
 		r.setCondition(pool, "DrainComplete", metav1.ConditionFalse, "DrainInProgress",
-			fmt.Sprintf("%d/%d shares drained, %d SubVolumes remaining",
-				drainedCount, totalDraining, totalRemaining))
+			fmt.Sprintf("%d/%d shares drained, %d SubVolumes and %d snapshots remaining",
+				drainedCount, totalDraining, totalRemaining, totalSnapshots))
 	}
 }
 
-// reconcileMetrics recalculates per-share and pool totals from SubVolume CRs.
+// reconcileMetrics recalculates per-share and pool totals from SubVolume and
+// Snapshot CRs. A snapshot uses space on its share but is not a PVC.
 func (r *FileSharePoolReconciler) reconcileMetrics(ctx context.Context, pool *v1alpha1.FileSharePool) {
 	subVolumes, err := r.k8sClient.ListSubVolumes(ctx, pool.Name)
 	if err != nil {
 		klog.ErrorS(err, "Failed to list SubVolumes for metrics reconciliation", "pool", pool.Name)
+		return
+	}
+	snapshots, err := r.k8sClient.ListSnapshots(ctx, pool.Name)
+	if err != nil {
+		klog.ErrorS(err, "Failed to list snapshots for metrics reconciliation", "pool", pool.Name)
 		return
 	}
 
@@ -622,6 +653,9 @@ func (r *FileSharePoolReconciler) reconcileMetrics(ctx context.Context, pool *v1
 	for _, sv := range subVolumes {
 		shareAllocated[sv.Spec.ShareID] += sv.Spec.RequestedGB
 		sharePVCCount[sv.Spec.ShareID]++
+	}
+	for i := range snapshots {
+		shareAllocated[snapshots[i].Spec.ShareID] += snapshotChargeGB(&snapshots[i])
 	}
 
 	// Update per-share values
@@ -651,6 +685,7 @@ func (r *FileSharePoolReconciler) reconcileMetrics(ctx context.Context, pool *v1
 	metrics.PoolCapacityGB.WithLabelValues(pool.Name).Set(float64(pool.Status.TotalCapacityGB))
 	metrics.PoolAllocatedGB.WithLabelValues(pool.Name).Set(float64(pool.Status.TotalAllocatedGB))
 	metrics.PoolShareCount.WithLabelValues(pool.Name).Set(float64(pool.Status.ShareCount))
+	metrics.PoolMaxShares.WithLabelValues(pool.Name).Set(float64(pool.Spec.MaxShares))
 	metrics.PoolPVCCount.WithLabelValues(pool.Name).Set(float64(pool.Status.TotalPVCCount))
 }
 

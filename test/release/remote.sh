@@ -5,6 +5,9 @@
 # Usage:
 #   bash test/release/remote.sh start CLUSTER [VERSION]   start a run, print its ID
 #     (set RT_STAGES=01,08 to run only some stages)
+#     Stage 18 also exports to COS when ~/.config/pool-csi/cos-stage.env exists (see
+#     test/e2e/lib/backup-cos.sh): its files are copied for this run only and deleted
+#     when it ends. Set COS_DR_CLUSTER=NAME to repeat the restore in that cluster.
 #   bash test/release/remote.sh report RUN_ID             copy the report folder back and print it
 #
 # Needs: ibmcloud (logged in), go, ssh access to the build server.
@@ -29,10 +32,12 @@ ensure_server() {
 }
 
 start() {
-    local cluster="$1" version="${2:-}" id kubeconfig profile_id
+    local cluster="$1" version="${2:-}" id kubeconfig profile_id cos_dir cos_env
     id="$(date -u +%m%d-%H%M)"
     ensure_server
     build 'command -v jq >/dev/null || sudo apt-get install -y -q jq >/dev/null'
+    # Stages 06 and 18 drive VMs with virtctl and skip without it.
+    build 'command -v virtctl >/dev/null || { curl -sSfL -o /tmp/virtctl https://github.com/kubevirt/kubevirt/releases/download/v1.9.1/virtctl-v1.9.1-linux-amd64 && sudo install -m 0755 /tmp/virtctl /usr/local/bin/virtctl; }'
 
     echo "Building kubectl-migrate for the build server..."
     mkdir -p "$ROOT/test/release/bin"
@@ -50,16 +55,32 @@ start() {
     build "umask 077 && cat > ~/release-test/kubeconfig-$id" <"$kubeconfig/config"
     rm -rf "$kubeconfig"
 
+    # Settings and keys for the COS part of stage 18, for this run only. Nothing is printed.
+    cos_dir="${COS_CONFIG_DIR:-$HOME/.config/pool-csi}"
+    cos_env=""
+    if [ -r "$cos_dir/cos-stage.env" ] && [ "${COS_EXPORT:-1}" != "0" ]; then
+        (cd "$cos_dir" && tar -czf - cos-stage.env cos-key.json kp-apikey.json backup-key-secret.yaml) |
+            build "umask 077 && mkdir -p ~/release-test/cos-$id && tar -xzf - -C ~/release-test/cos-$id"
+        cos_env="COS_CONFIG_DIR=\$HOME/release-test/cos-$id"
+        if [ -n "${COS_DR_CLUSTER:-}" ]; then
+            kubeconfig=$(mktemp -d)
+            ibmcloud ks cluster config --cluster "$COS_DR_CLUSTER" --admin --output yaml >"$kubeconfig/config"
+            build "umask 077 && cat > ~/release-test/kubeconfig-dr-$id" <"$kubeconfig/config"
+            find "$kubeconfig" -type f -delete; rmdir "$kubeconfig"
+            cos_env="$cos_env COS_DR_KUBECONFIG=\$HOME/release-test/kubeconfig-dr-$id"
+        fi
+    fi
+
     # The metadata service needs the trusted profile's ID. Without it the VPC
     # checks report "not checked" and the run goes on.
     profile_id=$(ibmcloud iam trusted-profile "$VPC_PROFILE" --id 2>/dev/null | tail -1 | grep '^Profile-' || true)
 
     # Only the run goes to the background, with every stream redirected, so
     # this SSH session can end at once.
-    build "cd ~/release-test/src || exit 1; nohup bash -c 'KUBECONFIG=\$HOME/release-test/kubeconfig-$id RT_ID=$id \
+    build "cd ~/release-test/src || exit 1; nohup bash -c 'KUBECONFIG=\$HOME/release-test/kubeconfig-$id RT_ID=$id $cos_env \
         RT_VPC_PROFILE_ID=$profile_id \
         bash test/release/run.sh --cluster $cluster ${version:+--version $version} ${RT_STAGES:+--stages $RT_STAGES} --out \$HOME/release-test/out/$id; \
-        rm -f \$HOME/release-test/kubeconfig-$id' >\$HOME/release-test/out/$id.log 2>&1 </dev/null &"
+        rm -f \$HOME/release-test/kubeconfig-$id \$HOME/release-test/kubeconfig-dr-$id; find \$HOME/release-test/cos-$id -type f -delete 2>/dev/null; rmdir \$HOME/release-test/cos-$id 2>/dev/null' >\$HOME/release-test/out/$id.log 2>&1 </dev/null &"
     echo "Started run $id on $cluster."
     echo "Report: bash test/release/remote.sh report $id"
 }

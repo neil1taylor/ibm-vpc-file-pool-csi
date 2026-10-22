@@ -58,6 +58,97 @@ spec:
           spec:
             description: BackupRestoreSpec says what to restore, and where to.
             properties:
+              fromCOS:
+                description: |-
+                  FromCOS reads the backup from a COS bucket, not from a snapshot pool. The
+                  storage class is then required, because COS does not keep it.
+                properties:
+                  backupKeySecret:
+                    description: |-
+                      BackupKeySecret names the Secret with the backup key wrapped by Key
+                      Protect (wrappedKey). Not used with emergencyKeyOnly.
+                    type: string
+                  bucket:
+                    description: Bucket is the name of the COS bucket.
+                    minLength: 1
+                    type: string
+                  credentialsSecret:
+                    description: |-
+                      CredentialsSecret names the Secret (in the driver's namespace) with the
+                      COS key: access_key_id and secret_access_key.
+                    minLength: 1
+                    type: string
+                  emergencyKeyOnly:
+                    description: |-
+                      EmergencyKeyOnly makes the Jobs use the readable key in
+                      emergencyKeySecret and never call Key Protect. It is for when Key Protect
+                      or its root key is gone.
+                    type: boolean
+                  emergencyKeySecret:
+                    description: |-
+                      EmergencyKeySecret names a Secret (key: backupKey) with the readable
+                      backup key.
+                    type: string
+                  endpoint:
+                    description: Endpoint is the S3 host of the bucket.
+                    minLength: 1
+                    type: string
+                  keyProtect:
+                    description: |-
+                      KeyProtect says which root key unwraps the backup key. Not used with
+                      emergencyKeyOnly.
+                    properties:
+                      apiKeySecret:
+                        description: |-
+                          APIKeySecret names the Secret (key: apikey) with the IBM Cloud API key that
+                          has the Reader role on the root key.
+                        minLength: 1
+                        type: string
+                      instanceID:
+                        description: InstanceID is the GUID of the Key Protect instance.
+                        minLength: 1
+                        type: string
+                      region:
+                        description: Region is the region of the Key Protect instance,
+                          such as eu-de.
+                        minLength: 1
+                        type: string
+                      rootKeyID:
+                        description: RootKeyID is the ID of the root key that wrapped
+                          the backup key.
+                        minLength: 1
+                        type: string
+                    required:
+                    - apiKeySecret
+                    - instanceID
+                    - region
+                    - rootKeyID
+                    type: object
+                  prefix:
+                    description: |-
+                      Prefix is the folder in the bucket that was set on the policy's export
+                      block. The area of the policy (spec.policy) is below it.
+                    type: string
+                  sizeGB:
+                    description: |-
+                      SizeGB is the size of the new PVC. COS holds the data, not the size of the
+                      claim.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  volume:
+                    description: |-
+                      Volume is the backed-up volume, as `kubectl backup cos-list` shows it
+                      (pvc- and a UUID). The claim name is not kept in COS.
+                    minLength: 1
+                    type: string
+                required:
+                - bucket
+                - credentialsSecret
+                - endpoint
+                - sizeGB
+                - volume
+                type: object
               moment:
                 description: |-
                   Moment is the time to restore. The newest backup at or before it is
@@ -65,7 +156,9 @@ spec:
                 format: date-time
                 type: string
               policy:
-                description: Policy is the BackupPolicy that holds the backup.
+                description: |-
+                  Policy is the BackupPolicy that holds the backup. With fromCOS it need not
+                  exist: it only names the policy's area in the bucket.
                 type: string
               sourceName:
                 type: string
@@ -73,6 +166,7 @@ spec:
                 description: |-
                   SourceNamespace and SourceName name the claim that was backed up. The
                   claim may be gone: the policy remembers its backups until the keep time.
+                  They are required unless fromCOS is set (COS does not keep claim names).
                 type: string
               storageClassName:
                 description: |-
@@ -87,14 +181,21 @@ spec:
                 type: string
             required:
             - policy
-            - sourceName
-            - sourceNamespace
             - targetName
             - targetNamespace
             type: object
           status:
             description: BackupRestoreStatus reports how far the restore is.
             properties:
+              copied:
+                description: Copied is true once the scratch copy has been written
+                  into the new volume.
+                type: boolean
+              fetched:
+                description: |-
+                  Fetched is true once a restore from COS has copied the backup out of the
+                  bucket into a scratch folder on the new volume's share.
+                type: boolean
               latest:
                 description: Latest is true if the newest backup was written.
                 type: boolean

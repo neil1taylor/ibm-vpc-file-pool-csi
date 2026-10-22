@@ -46,6 +46,7 @@ Share selection and capacity management across the pool.
 Directory-level point-in-time copies via the standard CSI snapshot interface.
 
 - **CreateSnapshot** — A Job in the driver's namespace copies the SubVolume directory to a snapshot path on the same share. The Snapshot CR reads `readyToUse: false` until the copy has finished. If a running VM uses the claim, the snapshot is a QEMU copy of that disk at one moment instead (guest frozen for a moment; `status.consistency` says if it worked; `vmCopySpeedLimitMBps` on the VolumeSnapshotClass sets the speed, default 20 MB/s). Experimental, like the VM disk copy for replication.
+- **Instant VM disk snapshots** — Experimental — Where the KubeVirt `Sidecar` feature gate is on, a snapshot of a VM disk is a new overlay file and nothing is copied: it is ready in seconds, whatever the disk size, and an OpenShift VM snapshot gives all disks of a VM at the moment OpenShift froze the guest. Deleting a snapshot merges its file back while the VM runs. A webhook gives a VM with snapshots the driver's hook when it starts. Red Hat does not support the `Sidecar` gate. See [VM-INSTANT-SNAPSHOTS.md](VM-INSTANT-SNAPSHOTS.md).
 - **DeleteSnapshot** — A Job removes the snapshot directory; then the CR is deleted and the pool capacity is given back.
 - **ListSnapshots** — Lists snapshots filtered by source volume with pagination support.
 - **Restore from snapshot** — A Job copies the snapshot directory into the new volume and sets the pool's owner and permissions. The claim stays Pending until the copy has finished.
@@ -68,11 +69,14 @@ One `BackupPolicy` backs up the volumes and VMs it selects into a pool that hold
 - **Selection** — By PVC label and namespace. If any disk of a VM matches, all its disks are backed up.
 - **Moments** — The latest backup of a VM disk is whole; earlier moments are undo files (restore points). Other volumes keep each sync as a folder of hard links, so an unchanged file takes no extra space. Moments older than `keepFor` (default 7 days) go.
 - **Restore** — `kubectl backup restore --policy P --pvc NS/NAME --to NS/NEW [--moment TIME]` makes a new PVC and copies the backup into it; the volume is held back from pods until the copy ends. It never writes over a volume that exists, and works after the source volume is deleted.
-- **Not yet** — one share in the snapshot pool (#71), a stop at 85% full (#69), a command to remove the backups of a volume (#70), export to COS (step 9).
+- **More than one share** — A snapshot pool may have several shares. A new volume goes to the ready share with room that holds the fewest volumes and stays there; a restore reads from it.
+- **Full share** — Above 85% full, a share of the snapshot pool gets no new backups and the policy reports `Error`. The other shares go on, and new volumes avoid the full one. Backups are never deleted to make room; they resume when usage falls.
+- **Delete** — `kubectl backup delete --policy P --pvc NS/NAME` removes the backup and all earlier moments of one volume, after a typed confirmation (or `--yes`). It refuses while the policy still backs up the volume or a restore of it runs, and the controller never runs it.
+- **Export to COS (part 2: controller)** — With `spec.export` (bucket, endpoint, prefix, credentials and backup-key Secrets, `keepFor` default 30d, `lock` Compliance or None, optional `schedule`), the controller sends each new backup moment of a volume to a Kopia repository in a COS bucket, one Job at a time for each policy, reading the snapshot pool read-only. Status per volume: `exportedTime`, `exportedBytes`, `exportError`. A maintenance Job extends locks and deletes snapshots older than `keepFor`. An export problem never stops the backups to the snapshot pool. `kubectl backup cos-setup` (part 4, not yet run against real IBM Cloud) makes the instance, the locked bucket, the write-only role, the key limited to one bucket, the CBR rule and the wrapped backup key, and prints the `spec.export` block. Key handling (part 3): the backup key is stored only wrapped by Key Protect; the Jobs unwrap it in memory, with an optional emergency key if Key Protect is down (tested with a fake Key Protect, not a real one). Restore from COS (part 5): `kubectl backup restore --from-cos` and `kubectl backup cos-list` work in a cluster with no policy and no snapshot pool; if Key Protect is gone, `--backup-key-file` restores with the readable key. Built, not tested against a real bucket; the release test (part 6) is not built.
 
-### Volume Group Snapshots — Beta
+### Volume Group Snapshots — Not active
 
-Multi-PVC coordinated snapshots for application-consistent backups.
+The code and the record type exist, but nothing acts on a `VolumeGroupSnapshot` record, the hooks never run, and the console no longer shows it. There is no plan to turn it on (issue #100). A running VM with several disks does not need it. What the code was built to do:
 
 - **Coordinated snapshot creation** — CreateVolumeGroupSnapshot takes a list of PVCs and snapshots them in order, tracking per-member state (Pending, Creating, Ready, Failed).
 - **Failure policies** — `Abort` (default) rolls back completed snapshots on first failure. `Continue` finishes all members and marks the group as PartialFailure.
@@ -158,7 +162,7 @@ Thin wrapper around the VPC file share API with operational guardrails.
 Defense-in-depth controls for a storage driver running with host access.
 
 - **Path traversal validation** — All mkdir/rm operations validate paths against `^/pvcs/pvc-[a-f0-9-]{36}$` and reject traversal attempts.
-- **Validating admission webhooks** — Beta — Five webhook validators cover all CRD types (FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, ReplicationPolicy).
+- **Validating admission webhooks** — Beta — Seven validating webhooks cover the CRD types (FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, ReplicationPolicy, BackupPolicy, BackupRestore). A mutating webhook adds the VM hook to VMs with instant snapshots.
 - **RBAC minimal permissions** — Controller and node service accounts use least-privilege roles.
 - **No secrets in logs** — API keys and tokens are never logged. Share IDs and mount target IPs are safe to log.
 
@@ -166,7 +170,7 @@ Defense-in-depth controls for a storage driver running with host access.
 
 Prometheus metrics and structured logging for operational visibility.
 
-- **Prometheus metrics** — 25 metrics covering allocation (count, duration, capacity), VPC API calls (count, latency), snapshots, clones, group snapshots, replication, and backups.
+- **Prometheus metrics** — 29 metrics covering allocation (count, duration, capacity), VPC API calls (count, latency), snapshots, clones, group snapshots, replication, and backups.
 - **Structured logging** — `klog/v2` with `InfoS`/`ErrorS` and key-value pairs. V(2) for normal operations, V(4) for detailed flow, V(6) for trace-level.
 - **Key metrics:**
   - `vpc_file_pool_allocations_total` — allocation/deallocation counts by pool and status
@@ -202,10 +206,10 @@ CLI tool for migrating PVCs from the stock IBM VPC File CSI driver.
 
 Visual management of file share pools through the OpenShift Console.
 
-- **Dynamic console plugin** — Registers as an OpenShift ConsolePlugin (v1 API, requires OpenShift 4.14+). Gated by `consolePlugin.enabled` in the Helm chart (default `false`).
-- **Single tabbed navigation** — One "IBM VPC File Pools" item under Storage in the console sidebar opens a tabbed interface (Overview, Pools, SubVolumes, Snapshots, Group Snapshots, Replication, Monitoring). Detail and create pages render standalone without tabs.
+- **Dynamic console plugin** — Registers as an OpenShift ConsolePlugin (v1 API, requires OpenShift 4.14+). On by default where the cluster has the OpenShift console; the chart turns it on in the console. Turn it off with `consolePlugin.enabled=false`.
+- **Single tabbed navigation** — One "IBM VPC File Pools" item under Storage in the console sidebar opens a tabbed interface (Overview, Pools, SubVolumes, Snapshots, Replication, Monitoring). Detail and create pages render standalone without tabs.
 - **Pool dashboard** — Overview tab showing all FileSharePools with status, capacity gauges, share count, SubVolume count, and recent activity table.
-- **CRUD for all 5 CRDs** — List, detail, create, edit, and delete views for FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, and ReplicationPolicy resources. Create buttons route to custom form wizards (not the YAML editor).
+- **CRUD for 4 CRDs** — List, detail, create, edit, and delete views for FileSharePool, SubVolume, Snapshot, and ReplicationPolicy resources. Create buttons route to custom form wizards (not the YAML editor).
 - **FileSharePool creation wizard** — 6-step guided wizard for creating pools: zone/profile selection, capacity configuration, allocation strategy, directory ownership, and review. The form no longer offers golden images.
 - **IOPS column in pool table** — Displays `spec.iops`, or "VPC default" when it is not set.
 - **Restore a snapshot to a new PVC** — A "Restore to new PVC" action on the snapshot details page and in the list row menu opens a form (name, size, storage class, access and volume mode) and creates a claim whose data source is the snapshot's `VolumeSnapshot`. A banner follows the copy. It never replaces an existing volume. See [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md#restore-in-the-console).
@@ -256,7 +260,7 @@ How this driver compares to the two most common alternatives for NFS-based Kuber
 | ExpandVolume | ✅ (pool-level) | ✅ (share-level) | ❌ |
 | Volume snapshots | ✅ (directory copy) | ❌ | ❌ |
 | Volume clones | ✅ (async, Job-based) | ❌ | ❌ |
-| Volume group snapshots | ✅ (beta) | ❌ | ❌ |
+| Volume group snapshots | ❌ (not active) | ❌ | ❌ |
 | Clone status gate | ✅ | — | — |
 | **NFS** | | | |
 | `sec=sys` enforcement | ✅ | ✅ | ❌ |
@@ -287,7 +291,7 @@ How this driver compares to the two most common alternatives for NFS-based Kuber
 | Config auto-discovery | ✅ | ✅ | ❌ |
 | API rate limiting | ✅ | ✅ | — |
 | **Observability** | | | |
-| Prometheus metrics | ✅ (25 metrics) | ✅ | ❌ |
+| Prometheus metrics | ✅ (29 metrics) | ✅ | ❌ |
 | Structured logging (klog) | ✅ | ✅ | ✅ |
 | OpenShift Console plugin | ✅ (beta) | ❌ | ❌ |
 | **Deployment** | | | |

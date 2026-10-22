@@ -82,6 +82,10 @@ func (bc *BackupController) failRestore(ctx context.Context, br *v1alpha1.Backup
 }
 
 func (bc *BackupController) reconcileRestore(ctx context.Context, br *v1alpha1.BackupRestore) {
+	if br.Spec.FromCOS != nil {
+		bc.reconcileRestoreFromCOS(ctx, br)
+		return
+	}
 	sp := br.Spec
 	policy := &v1alpha1.BackupPolicy{}
 	if err := bc.client.Get(ctx, types.NamespacedName{Name: sp.Policy}, policy); err != nil {
@@ -114,7 +118,7 @@ func (bc *BackupController) reconcileRestore(ctx context.Context, br *v1alpha1.B
 		bc.setRestoreStatus(ctx, br, restorePhasePending, fmt.Sprintf("list SubVolumes: %v", err))
 		return
 	}
-	backupShare, err := bc.snapshotShare(ctx, policy, svs.Items)
+	backupShare, err := bc.backupShareOf(ctx, policy, svs.Items, entry)
 	if err != nil {
 		bc.setRestoreStatus(ctx, br, restorePhasePending, err.Error())
 		return

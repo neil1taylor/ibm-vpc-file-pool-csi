@@ -159,7 +159,7 @@ func TestBackupController_MakesAnOwnedReplicationPolicy(t *testing.T) {
 		t.Fatalf("replication policies = %d, want 1", len(rps))
 	}
 	rp := rps[0]
-	if rp.Name != backupReplicationName("nightly", "data-a") {
+	if rp.Name != backupReplicationName("nightly", "data-a", "backups-share", "backups-share") {
 		t.Errorf("name = %q", rp.Name)
 	}
 	sp := rp.Spec
@@ -310,13 +310,6 @@ func TestBackupController_SnapshotPoolProblemsAreReported(t *testing.T) {
 			e.addClaim("apps", "intruder", "backups", nil)
 			e.policy("nightly", nil)
 		}, "claim"},
-		{"pool with two shares", func(e *backupEnv) {
-			p := &v1alpha1.FileSharePool{}
-			_ = e.c.Get(e.ctx, types.NamespacedName{Name: "backups"}, p)
-			p.Status.Shares = append(p.Status.Shares, v1alpha1.PoolShareStatus{ShareID: "second", MountTargetIP: "10.0.0.5", State: "stable"})
-			_ = e.c.Update(e.ctx, p)
-			e.policy("nightly", nil)
-		}, "one share"},
 	}
 	for _, tc := range cases {
 		e := newBackupEnv(t)

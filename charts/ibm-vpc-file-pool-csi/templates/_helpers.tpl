@@ -46,3 +46,18 @@ Selector labels.
 app.kubernetes.io/name: {{ include "ibm-vpc-file-pool-csi.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
+
+{{/*
+"true" when the cluster has the OpenShift console, so the console plugin and
+its hook Jobs can be installed there.
+*/}}
+{{- define "ibm-vpc-file-pool-csi.hasConsole" -}}
+{{- if .Capabilities.APIVersions.Has "console.openshift.io/v1/ConsolePlugin" }}true{{- end }}
+{{- end }}
+
+{{/*
+"true" when the console plugin is enabled and the cluster has the OpenShift console.
+*/}}
+{{- define "ibm-vpc-file-pool-csi.consolePlugin" -}}
+{{- if and .Values.consolePlugin.enabled (include "ibm-vpc-file-pool-csi.hasConsole" .) }}true{{- end }}
+{{- end }}

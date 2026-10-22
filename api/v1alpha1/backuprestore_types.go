@@ -26,16 +26,18 @@ type BackupRestore struct {
 
 // BackupRestoreSpec says what to restore, and where to.
 type BackupRestoreSpec struct {
-	// Policy is the BackupPolicy that holds the backup.
+	// Policy is the BackupPolicy that holds the backup. With fromCOS it need not
+	// exist: it only names the policy's area in the bucket.
 	// +kubebuilder:validation:Required
 	Policy string `json:"policy"`
 
 	// SourceNamespace and SourceName name the claim that was backed up. The
 	// claim may be gone: the policy remembers its backups until the keep time.
-	// +kubebuilder:validation:Required
-	SourceNamespace string `json:"sourceNamespace"`
-	// +kubebuilder:validation:Required
-	SourceName string `json:"sourceName"`
+	// They are required unless fromCOS is set (COS does not keep claim names).
+	// +optional
+	SourceNamespace string `json:"sourceNamespace,omitempty"`
+	// +optional
+	SourceName string `json:"sourceName,omitempty"`
 
 	// Moment is the time to restore. The newest backup at or before it is
 	// used. Unset means the latest backup.
@@ -52,6 +54,11 @@ type BackupRestoreSpec struct {
 	// the backed-up claim.
 	// +optional
 	StorageClassName string `json:"storageClassName,omitempty"`
+
+	// FromCOS reads the backup from a COS bucket, not from a snapshot pool. The
+	// storage class is then required, because COS does not keep it.
+	// +optional
+	FromCOS *RestoreFromCOS `json:"fromCOS,omitempty"`
 }
 
 // BackupRestoreStatus reports how far the restore is.
@@ -74,6 +81,15 @@ type BackupRestoreStatus struct {
 	// Latest is true if the newest backup was written.
 	// +optional
 	Latest bool `json:"latest,omitempty"`
+
+	// Fetched is true once a restore from COS has copied the backup out of the
+	// bucket into a scratch folder on the new volume's share.
+	// +optional
+	Fetched bool `json:"fetched,omitempty"`
+
+	// Copied is true once the scratch copy has been written into the new volume.
+	// +optional
+	Copied bool `json:"copied,omitempty"`
 }
 
 // +kubebuilder:object:root=true

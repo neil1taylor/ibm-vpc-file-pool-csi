@@ -99,11 +99,11 @@ func TestBackupRestore_SweepKeepsTheGateOfARunningRestore(t *testing.T) {
 }
 
 func TestBackupReplicationName_DoesNotCollide(t *testing.T) {
-	if a, b := backupReplicationName("a-b", "c"), backupReplicationName("a", "b-c"); a == b {
+	if a, b := backupReplicationName("a-b", "c", "s1", "s1"), backupReplicationName("a", "b-c", "s1", "s1"); a == b {
 		t.Errorf("both give %q", a)
 	}
-	first := backupReplicationName("nightly", "data-a")
-	if again := backupReplicationName("nightly", "data-a"); first != again {
+	first := backupReplicationName("nightly", "data-a", "s1", "s1")
+	if again := backupReplicationName("nightly", "data-a", "s1", "s1"); first != again {
 		t.Error("the name must be stable")
 	}
 }

@@ -158,6 +158,45 @@ webhooks:
         operations: ["CREATE", "UPDATE"]
         resources: ["volumegroupsnapshots"]
 ---
+{{- if eq .Values.vmSnapshots.method "auto" }}
+# Gives each starting VM that has instant snapshots the driver's hook, which
+# opens its disks at the newest snapshot file. A VM without instant snapshots
+# is not changed. If the webhook is down, VMs start as usual; a VM with
+# snapshots then fails to start, because its frozen disk file is read-only.
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-vm-hook
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+  annotations:
+    {{- if eq .Values.webhook.certProvider "cert-manager" }}
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "ibm-vpc-file-pool-csi.fullname" . }}-webhook
+    {{- else if eq .Values.webhook.certProvider "openshift" }}
+    service.beta.openshift.io/inject-cabundle: "true"
+    {{- end }}
+webhooks:
+  - name: vm-hook.storage.ibmcloud.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Ignore
+    timeoutSeconds: 5
+    reinvocationPolicy: IfNeeded
+    clientConfig:
+      {{- with $caBundle }}
+      caBundle: {{ . }}
+      {{- end }}
+      service:
+        name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-webhook
+        namespace: {{ .Release.Namespace }}
+        path: /mutate-kubevirt-io-v1-virtualmachineinstance
+    rules:
+      - apiGroups: ["kubevirt.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["virtualmachineinstances"]
+---
+{{- end }}
 {{- if and (eq .Values.webhook.certProvider "cert-manager") (not .Values.webhook.certManager.issuerName) }}
 apiVersion: cert-manager.io/v1
 kind: Issuer

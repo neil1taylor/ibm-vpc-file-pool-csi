@@ -145,6 +145,13 @@ spec:
                   subdirectory.
                 format: int64
                 type: integer
+              chainOperation:
+                description: |-
+                  ChainOperation names the work that changes DiskChain: a Job while the
+                  VM is stopped, or a merge that QEMU runs in a running VM. Nothing else
+                  changes the disk, and a VM that uses the disk is not started, while it
+                  is set.
+                type: string
               cloneProgress:
                 description: CloneProgress tracks bytes copied during a clone operation.
                 properties:
@@ -246,6 +253,14 @@ spec:
                   share.
                 format: date-time
                 type: string
+              diskChain:
+                description: |-
+                  DiskChain is the instant-snapshot chain of the VM disk in the volume
+                  folder, newest file first. The last file is disk.img. It is empty for a
+                  volume that has no instant snapshots.
+                items:
+                  type: string
+                type: array
               lastUsageCheck:
                 description: LastUsageCheck is when ActualUsageBytes was last updated.
                 format: date-time
