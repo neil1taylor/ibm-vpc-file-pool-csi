@@ -25,8 +25,8 @@ const browseLabel = "storage.ibmcloud.io/browse"
 
 // BrowseJobRequest asks for the helper pod of one browse session.
 type BrowseJobRequest struct {
-	// Name is the name of the BackupBrowse.
-	Name  string
+	// ID is the UID of the BackupBrowse. It names every object of the session.
+	ID    string
 	Share ShareMount
 	// LatestPath and MomentsPath are the backup folder of the volume and its
 	// earlier moments, on the share. MomentsPath may be empty.
@@ -85,8 +85,8 @@ func (r *ShareJobRunner) StartBrowse(ctx context.Context, req BrowseJobRequest) 
 	if r.browseImage == "" {
 		return errors.New("no browse image set")
 	}
-	if req.Name == "" || req.SecretName == "" {
-		return errors.New("a browse session needs a name and a Secret")
+	if req.ID == "" || req.SecretName == "" {
+		return errors.New("a browse session needs an ID and a Secret")
 	}
 	if req.Idle <= 0 || req.MaxLife <= 0 {
 		return errors.New("a browse session needs an idle limit and a hard limit")
@@ -124,7 +124,7 @@ func (r *ShareJobRunner) StartBrowse(ctx context.Context, req BrowseJobRequest) 
 			Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("50m"), corev1.ResourceMemory: resource.MustParse("64Mi")},
 			Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("200m"), corev1.ResourceMemory: resource.MustParse("256Mi")},
 		},
-		labels:         map[string]string{browseLabel: req.Name},
+		labels:         map[string]string{browseLabel: req.ID},
 		owner:          &owner,
 		hardened:       true,
 		session:        true,
@@ -135,7 +135,7 @@ func (r *ShareJobRunner) StartBrowse(ctx context.Context, req BrowseJobRequest) 
 			PeriodSeconds: 2,
 		},
 	}
-	key := browseKey(req.Name)
+	key := browseKey(req.ID)
 	err := r.client.Get(ctx, types.NamespacedName{Namespace: r.namespace, Name: shareJobName(key)}, &batchv1.Job{})
 	if err == nil {
 		return nil

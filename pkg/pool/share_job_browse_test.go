@@ -18,7 +18,7 @@ const testBrowseImage = "de.icr.io/x/browse:v1"
 
 func browseRequest() BrowseJobRequest {
 	return BrowseJobRequest{
-		Name: "bb-1", Share: testShareA, LatestPath: testBackupPath, MomentsPath: testMomentsPath,
+		ID: "bb-1", Share: testShareA, LatestPath: testBackupPath, MomentsPath: testMomentsPath,
 		SecretName: "browse-bb-1", Idle: 15 * time.Minute, MaxLife: 2 * time.Hour,
 		Owner: metav1.OwnerReference{APIVersion: "storage.ibmcloud.io/v1alpha1", Kind: "BackupBrowse", Name: "bb-1", UID: "uid-1"},
 	}
@@ -154,7 +154,7 @@ func TestStartBrowse_RefusesUnsafeInput(t *testing.T) {
 			q.MomentsPath = "/backup/weekly/.moments/pvcs/pvc-11111111-2222-3333-4444-555555555555"
 		},
 		"no secret": func(q *BrowseJobRequest) { q.SecretName = "" },
-		"no name":   func(q *BrowseJobRequest) { q.Name = "" },
+		"no id":     func(q *BrowseJobRequest) { q.ID = "" },
 		"no limits": func(q *BrowseJobRequest) { q.Idle, q.MaxLife = 0, 0 },
 	}
 	for name, mutate := range cases {
@@ -271,7 +271,7 @@ func TestBrowseSessions(t *testing.T) {
 	ctx := context.Background()
 	_ = r.StartBrowse(ctx, browseRequest())
 	other := browseRequest()
-	other.Name = "bb-2"
+	other.ID = "bb-2"
 	other.SecretName = "browse-bb-2"
 	_ = r.StartBrowse(ctx, other)
 	_, _ = r.RemoveDir(ctx, "rm-x", testShareA, testVolPath) // a share Job that is not a session

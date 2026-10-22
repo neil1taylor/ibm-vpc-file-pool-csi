@@ -19,7 +19,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// A BackupBrowse is one open session on one backup. The controller starts a
+// A BackupBrowse is one open session on one backup. Everything made for a
+// session (the helper Job, its share objects and its Secret) is named and
+// labelled with the UID of the BackupBrowse, never its name, so a session that
+// is deleted and made again with the same name can never get the old session's
+// Secret or helper, which still mounts the old volume. The controller starts a
 // read-only helper pod for it (the browse image), keeps its token and TLS
 // certificate in a Secret that the BackupBrowse owns, and ends the session when
 // the helper stops, when the session is closed, or at the hard limit. The
@@ -109,7 +113,7 @@ func (bc *BackupController) reconcileBrowses(ctx context.Context) {
 	known := map[string]bool{}
 	counts := &browseCounts{perNS: map[string]int{}}
 	for i := range items {
-		known[items[i].Name] = true
+		known[string(items[i].UID)] = true
 		if browseOpen(items[i].Status.Phase) {
 			counts.add(items[i].Spec.PVCNamespace)
 		}
@@ -180,7 +184,7 @@ func (bc *BackupController) endBrowse(ctx context.Context, bb *v1alpha1.BackupBr
 // tidyEndedBrowse makes sure the helper and the Secret of an ended session are
 // gone, and removes the record after ClosedKeep.
 func (bc *BackupController) tidyEndedBrowse(ctx context.Context, bb *v1alpha1.BackupBrowse) {
-	done, err := bc.browseJobs.StopBrowse(ctx, bb.Name)
+	done, err := bc.browseJobs.StopBrowse(ctx, string(bb.UID))
 	if err != nil {
 		klog.ErrorS(err, "Failed to stop a browse helper", "session", bb.Name)
 		return
@@ -188,7 +192,7 @@ func (bc *BackupController) tidyEndedBrowse(ctx context.Context, bb *v1alpha1.Ba
 	if !done {
 		return
 	}
-	bc.deleteBrowseSecret(ctx, browseSecretName(bb.Name))
+	bc.deleteBrowseSecret(ctx, browseSecretName(string(bb.UID)))
 	if bb.Status.EndedTime != nil && bc.nowFunc().Sub(bb.Status.EndedTime.Time) >= bc.browse.ClosedKeep {
 		if err := bc.client.Delete(ctx, bb); err != nil && !apierrors.IsNotFound(err) {
 			klog.ErrorS(err, "Failed to delete an ended BackupBrowse", "session", bb.Name)
@@ -213,7 +217,7 @@ func (bc *BackupController) reconcileBrowse(ctx context.Context, bb *v1alpha1.Ba
 		if !bb.Spec.Close {
 			reason = "max-life"
 		}
-		done, err := bc.browseJobs.StopBrowse(ctx, bb.Name)
+		done, err := bc.browseJobs.StopBrowse(ctx, string(bb.UID))
 		if err != nil || !done {
 			bc.setBrowseStatus(ctx, bb, bb.Status.Phase, "closing the session")
 			return
@@ -263,7 +267,7 @@ func (bc *BackupController) startBrowse(ctx context.Context, bb *v1alpha1.Backup
 
 // watchBrowse follows the helper pod of a session that has started.
 func (bc *BackupController) watchBrowse(ctx context.Context, bb *v1alpha1.BackupBrowse, counts *browseCounts) {
-	st, err := bc.browseJobs.BrowseState(ctx, bb.Name)
+	st, err := bc.browseJobs.BrowseState(ctx, string(bb.UID))
 	if err != nil {
 		klog.ErrorS(err, "Failed to read the state of a browse helper", "session", bb.Name)
 		return
@@ -327,10 +331,10 @@ func (bc *BackupController) browseRequest(ctx context.Context, bb *v1alpha1.Back
 	}
 	policyBase := backupBasePath + "/" + policy.Name
 	req := BrowseJobRequest{
-		Name:       bb.Name,
+		ID:         string(bb.UID),
 		Share:      shareMountOf(share),
 		LatestPath: policyBase + entry.SubPath,
-		SecretName: browseSecretName(bb.Name),
+		SecretName: browseSecretName(string(bb.UID)),
 		Idle:       bc.browse.Idle,
 		MaxLife:    bc.browse.MaxLife,
 		Owner:      browseOwner(bb),
@@ -352,7 +356,7 @@ func browseOwner(bb *v1alpha1.BackupBrowse) metav1.OwnerReference {
 // key. It leaves an existing one alone, so a restart of the controller does not
 // change a running session's token. The Secret is owned by the BackupBrowse.
 func (bc *BackupController) ensureBrowseSecret(ctx context.Context, bb *v1alpha1.BackupBrowse) error {
-	name := browseSecretName(bb.Name)
+	name := browseSecretName(string(bb.UID))
 	err := bc.client.Get(ctx, types.NamespacedName{Namespace: bc.browse.Namespace, Name: name}, &corev1.Secret{})
 	if err == nil {
 		return nil
@@ -371,7 +375,7 @@ func (bc *BackupController) ensureBrowseSecret(ctx context.Context, bb *v1alpha1
 	s := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: bc.browse.Namespace, Name: name,
-			Labels:          map[string]string{browseLabel: bb.Name},
+			Labels:          map[string]string{browseLabel: string(bb.UID)},
 			OwnerReferences: []metav1.OwnerReference{browseOwner(bb)},
 		},
 		Type: corev1.SecretTypeOpaque,
