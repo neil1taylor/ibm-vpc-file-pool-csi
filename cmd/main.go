@@ -95,11 +95,12 @@ func main() {
 		backupDisk    string
 		outDisk       string
 		restoreMoment string
+		unwrap        unwrapOptions
 	)
 
 	flag.StringVar(&endpoint, "endpoint", "unix:///csi/csi.sock", "CSI endpoint")
 	flag.StringVar(&nodeID, "node-id", "", "Node ID")
-	flag.StringVar(&mode, "mode", "controller", "Driver mode: controller, node, receiver, sync-client, check-receiver, apply-vm-disk, send-vm-disk, or restore-vm-disk")
+	flag.StringVar(&mode, "mode", "controller", "Driver mode: controller, node, receiver, sync-client, check-receiver, apply-vm-disk, send-vm-disk, restore-vm-disk, or unwrap-backup-key")
 	flag.StringVar(&region, "region", "", "IBM Cloud region (e.g. us-south); auto-discovered from secret provider if omitted")
 	flag.StringVar(&vpcID, "vpc-id", "", "IBM Cloud VPC ID for creating file share mount targets")
 	flag.StringVar(&subnetID, "subnet-id", "", "Comma-separated IBM Cloud worker subnet IDs; each share's mount target goes in the one in the pool's zone")
@@ -145,6 +146,15 @@ func main() {
 	flag.StringVar(&outDisk, "out-disk", "", "New disk image to write; it must not exist (restore-vm-disk mode)")
 	flag.StringVar(&restoreMoment, "restore-moment", "", "Moment to restore, RFC 3339; empty for the latest backup (restore-vm-disk mode)")
 
+	// Unwrap-backup-key flags.
+	flag.StringVar(&unwrap.region, "kp-region", "", "Key Protect region (unwrap-backup-key mode)")
+	flag.StringVar(&unwrap.instance, "kp-instance", "", "Key Protect instance ID (unwrap-backup-key mode)")
+	flag.StringVar(&unwrap.rootKey, "kp-root-key", "", "Key Protect root key ID (unwrap-backup-key mode)")
+	flag.StringVar(&unwrap.wrappedKeyFile, "wrapped-key-file", "", "File with the backup key wrapped by Key Protect (unwrap-backup-key mode)")
+	flag.StringVar(&unwrap.apiKeyFile, "api-key-file", "", "File with the IBM Cloud API key for Key Protect (unwrap-backup-key mode)")
+	flag.StringVar(&unwrap.emergencyKeyFile, "emergency-key-file", "", "Optional file with the readable backup key, used only when Key Protect is down (unwrap-backup-key mode)")
+	flag.StringVar(&unwrap.keyOut, "key-out", "", "File to write the readable key to, mode 0400; it must not exist (unwrap-backup-key mode)")
+
 	flag.StringVar(&vmGroup, "vm-group", "", "namespace/name of the VM that owns the disk (send-vm-disk mode)")
 	flag.StringVar(&copyID, "copy-id", "", "Name of this copy attempt; a repeat with the same name resumes (send-vm-disk mode)")
 
@@ -170,6 +180,8 @@ func main() {
 		runApplyVMDisk(stagingPath, diskPath, vmCopy)
 	case "restore-vm-disk":
 		runRestoreVMDisk(backupDisk, outDisk, restoreMoment)
+	case "unwrap-backup-key":
+		runUnwrapBackupKey(unwrap)
 	case "send-vm-disk":
 		runSendVMDisk(receiverEndpoint, authTokenFile, caCertFile, stagingPath, destBasePath, subPath, subvolumeName, copyID, vmGroup, metadataJSON, vmCopy)
 	default:

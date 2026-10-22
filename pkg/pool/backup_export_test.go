@@ -21,11 +21,19 @@ type cosEnv struct {
 	a, b *v1alpha1.SubVolume
 }
 
+func testKeyProtect() v1alpha1.KeyProtectRef {
+	return v1alpha1.KeyProtectRef{
+		InstanceID: "11111111-2222-3333-4444-555555555555", Region: "eu-de",
+		RootKeyID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", APIKeySecret: "kp-apikey",
+	}
+}
+
 func testBackupExport() *v1alpha1.BackupExport {
 	return &v1alpha1.BackupExport{
 		Bucket: "pool-backups", Endpoint: "s3.eu-de.cloud-object-storage.appdomain.cloud", Prefix: "lab",
 		CredentialsSecret: "cos-credentials", BackupKeySecret: "cos-backup-key",
-		KeepFor: "30d", Lock: v1alpha1.ExportLockCompliance,
+		KeyProtect: testKeyProtect(),
+		KeepFor:    "30d", Lock: v1alpha1.ExportLockCompliance,
 	}
 }
 
@@ -127,7 +135,7 @@ func TestBackupExport_StartsAJobForAFinishedBackupAndRecordsTheResult(t *testing
 	}
 	want := ExportRepo{
 		Endpoint: "s3.eu-de.cloud-object-storage.appdomain.cloud", Bucket: "pool-backups", Prefix: "lab/nightly/",
-		CredentialsSecret: "cos-credentials", BackupKeySecret: "cos-backup-key",
+		CredentialsSecret: "cos-credentials", BackupKeySecret: "cos-backup-key", KeyProtect: testKeyProtect(),
 		LockMode: ExportLockCompliance, KeepFor: 30 * 24 * time.Hour, MaintenanceInterval: 24 * time.Hour,
 	}
 	if c.repo != want {

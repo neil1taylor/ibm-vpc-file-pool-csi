@@ -390,7 +390,13 @@ spec:
     endpoint: s3.eu-de.cloud-object-storage.appdomain.cloud
     prefix: lab
     credentialsSecret: cos-credentials   # in the driver namespace
-    backupKeySecret: cos-backup-key      # in the driver namespace
+    backupKeySecret: cos-backup-key      # in the driver namespace: the backup key, wrapped by Key Protect
+    keyProtect:                          # which root key unwraps it (all four are required)
+      instanceID: <Key Protect instance GUID>
+      region: eu-de
+      rootKeyID: <root key ID>
+      apiKeySecret: keyprotect-apikey    # Secret, key "apikey": an API key with the Reader role on the root key
+    emergencyKeySecret: ""               # optional; see "Backup key handling" below
     keepFor: 30d                         # default; at least 25h with lock Compliance
     lock: Compliance                     # or None
     schedule: 6h                         # optional; default: after each local backup
@@ -410,7 +416,9 @@ kubectl backup cos-setup --dry-run \
 
 It makes (or reuses, by name) the COS instance, a versioned bucket with object lock and no default keep time, the `PoolCsiBackupWriter` role, a service ID limited to that one bucket, an HMAC key, a CBR zone and rule, and a backup key wrapped by your Key Protect root key. You must give an existing Key Protect root key; it does not make one. It refuses to run with `--cbr-mode enabled` (the default) when your own address is not in the zone, so you cannot lock yourself out; use `--zone-id` to reuse a zone. It refuses a bucket it did not make unless you pass `--existing-bucket`. It writes the COS key to `--key-file` (a Secret manifest, mode 0600, never printed), shows the readable backup key once and waits until you type that you saved a copy outside IBM Cloud, then stores only the wrapped copy in the bucket and in `--secret-file`. A keep time above 90 days needs a typed confirmation because a Compliance lock cannot be undone. Run it again at any time: what exists is left as it is. It prints the `spec.export` block to paste. Not run against real IBM Cloud yet.
 
-Not built yet: the handling of the backup key in the Jobs (part 3: the interim Job still reads `backupKey` from the Secret, so the Secret `cos-setup` writes needs part 3 to be used), and the restore from COS. For the bucket and its lock, see [TUTORIAL-09-COS-BACKUP-BUCKET.md](TUTORIAL-09-COS-BACKUP-BUCKET.md). The design is in `docs/specs/2026-10-21-backup-cos-export.md`.
+**Backup key handling.** The readable backup key is never stored in the cluster or in the bucket. Only the copy wrapped by Key Protect is: in the Secret `backupKeySecret` (key `wrappedKey`) and next to the backups in the bucket. Each export and maintenance Job asks Key Protect to unwrap it with the API key in the Secret `keyProtect.apiKeySecret` (key `apikey`; `cos-setup` does not make this Secret, it prints the command), keeps the readable key in memory (a memory-backed folder, mode 0400, removed as soon as Kopia has read it) and never logs it. The controller never reads these Secrets and never calls Key Protect. If you remove the API key's access in Key Protect, exports and maintenance stop. Key Protect runs in one region. If it is unreachable, a Job fails with a message that says so, and tries again later; to keep exporting through a Key Protect outage, set `emergencyKeySecret` to a Secret (key `backupKey`) with the readable key: the Job then uses it and logs that it did. That Secret is a readable copy in the cluster, so it weakens the protection against someone who takes over the cluster; the safer emergency copy is the one `cos-setup` shows you once, kept outside IBM Cloud, and used by the restore. A wrong root key or a bad API key is always an error, never a reason to use the emergency key. Tested with a fake Key Protect server; not tested against a real Key Protect instance.
+
+Not built yet: the restore from COS. For the bucket and its lock, see [TUTORIAL-09-COS-BACKUP-BUCKET.md](TUTORIAL-09-COS-BACKUP-BUCKET.md). The design is in `docs/specs/2026-10-21-backup-cos-export.md`.
 
 **A Compliance lock cannot be undone**, not even by IBM. Locked data is billed until its lock ends, also after you delete the policy.
 

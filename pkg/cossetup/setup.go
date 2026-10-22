@@ -34,6 +34,7 @@ type Options struct {
 	ExportEndpoint                     string // the endpoint of the printed block
 	Namespace                          string // namespace of the Secrets
 	CredentialsSecret, BackupKeySecret string
+	APIKeySecret                       string // the Secret (key apikey) the Jobs read for Key Protect
 	KeyFile, SecretFile                string
 	DryRun, Yes                        bool
 	ConfirmKeepFor                     string
@@ -90,6 +91,9 @@ func (o *Options) defaults() {
 	if o.BackupKeySecret == "" {
 		o.BackupKeySecret = "cos-backup-key"
 	}
+	if o.APIKeySecret == "" {
+		o.APIKeySecret = "keyprotect-apikey"
+	}
 	if o.Namespace == "" {
 		o.Namespace = "kube-system"
 	}
@@ -108,8 +112,10 @@ func (o *Options) defaults() {
 }
 
 func (o *Options) export() *v1alpha1.BackupExport {
+	kp, _ := parseRootKey(o.RootKeyCRN) // Run has checked it
 	return &v1alpha1.BackupExport{
-		Bucket: o.Bucket, Endpoint: o.ExportEndpoint, Prefix: o.Prefix,
+		KeyProtect: v1alpha1.KeyProtectRef{InstanceID: kp.instance, Region: kp.region, RootKeyID: kp.id, APIKeySecret: o.APIKeySecret},
+		Bucket:     o.Bucket, Endpoint: o.ExportEndpoint, Prefix: o.Prefix,
 		CredentialsSecret: o.CredentialsSecret, BackupKeySecret: o.BackupKeySecret,
 		KeepFor: o.KeepFor, Lock: o.Lock,
 	}
@@ -226,6 +232,7 @@ func printExport(out io.Writer, o *Options) error {
 	}
 	_, _ = fmt.Fprintf(out, "\nPaste this into your BackupPolicy:\n\n%s\n", indent(string(block), "  "))
 	_, _ = fmt.Fprintf(out, "Then make the two Secrets in the driver namespace:\n  kubectl apply -f %s -f %s\n", o.KeyFile, o.SecretFile)
+	_, _ = fmt.Fprintf(out, "The Jobs also read the Secret %s (key apikey): an IBM Cloud API key with the Reader role on the root key. cos-setup does not make it:\n  kubectl create secret generic %s -n %s --from-literal=apikey=\"$KEY_PROTECT_API_KEY\"\n", o.APIKeySecret, o.APIKeySecret, o.Namespace)
 	_, _ = fmt.Fprintf(out, "The COS key file holds a secret: keep it private and delete it after you apply it.\n")
 	_, _ = fmt.Fprintf(out, "For real backups, also make a virtual private endpoint gateway for COS in the cluster's VPC (TUTORIAL-09-COS-BACKUP-BUCKET.md).\n")
 	return nil

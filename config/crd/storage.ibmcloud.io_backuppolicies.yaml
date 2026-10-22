@@ -71,8 +71,9 @@ spec:
                 properties:
                   backupKeySecret:
                     description: |-
-                      BackupKeySecret names the Secret with the key that encrypts the backups
-                      (backupKey). The controller never reads it: only the Jobs do.
+                      BackupKeySecret names the Secret with the backup key, wrapped by Key
+                      Protect (wrappedKey). The readable key is never stored. The controller
+                      never reads the Secret: only the Jobs do, and they unwrap the key in memory.
                     minLength: 1
                     type: string
                   bucket:
@@ -84,6 +85,13 @@ spec:
                       CredentialsSecret names the Secret with the driver's COS key (an HMAC key:
                       access_key_id and secret_access_key).
                     minLength: 1
+                    type: string
+                  emergencyKeySecret:
+                    description: |-
+                      EmergencyKeySecret names an optional Secret (key: backupKey) with the
+                      readable backup key. The Jobs use it only when Key Protect cannot be
+                      reached. Storing it in the cluster weakens the Key Protect protection; most
+                      users keep the emergency copy outside the cluster and leave this empty.
                     type: string
                   endpoint:
                     description: |-
@@ -97,6 +105,36 @@ spec:
                       KeepFor is how long exported backups are kept: a Go duration, or a number
                       of days such as "30d". With a Compliance lock it is at least 25 hours.
                     type: string
+                  keyProtect:
+                    description: KeyProtect says which root key unwraps the backup
+                      key and how to log in.
+                    properties:
+                      apiKeySecret:
+                        description: |-
+                          APIKeySecret names the Secret (key: apikey) with the IBM Cloud API key that
+                          has the Reader role on the root key.
+                        minLength: 1
+                        type: string
+                      instanceID:
+                        description: InstanceID is the GUID of the Key Protect instance.
+                        minLength: 1
+                        type: string
+                      region:
+                        description: Region is the region of the Key Protect instance,
+                          such as eu-de.
+                        minLength: 1
+                        type: string
+                      rootKeyID:
+                        description: RootKeyID is the ID of the root key that wrapped
+                          the backup key.
+                        minLength: 1
+                        type: string
+                    required:
+                    - apiKeySecret
+                    - instanceID
+                    - region
+                    - rootKeyID
+                    type: object
                   lock:
                     default: Compliance
                     description: Lock is Compliance (nobody can delete or shorten
@@ -119,6 +157,7 @@ spec:
                 - bucket
                 - credentialsSecret
                 - endpoint
+                - keyProtect
                 type: object
               keepFor:
                 default: 7d

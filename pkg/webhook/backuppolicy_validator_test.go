@@ -77,7 +77,8 @@ func TestBackupPolicyValidator_Refuses(t *testing.T) {
 
 func TestBackupPolicyValidator_Export(t *testing.T) {
 	good := func() *v1alpha1.BackupExport {
-		return &v1alpha1.BackupExport{Bucket: "b-ucket", Endpoint: "s3.example.com", CredentialsSecret: "cos", BackupKeySecret: "key"}
+		return &v1alpha1.BackupExport{Bucket: "b-ucket", Endpoint: "s3.example.com", CredentialsSecret: "cos", BackupKeySecret: "key",
+			KeyProtect: v1alpha1.KeyProtectRef{InstanceID: "11111111-2222-3333-4444-555555555555", Region: "eu-de", RootKeyID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", APIKeySecret: "kp-apikey"}}
 	}
 	p := validBackupPolicy()
 	p.Spec.Export = good()
@@ -85,12 +86,16 @@ func TestBackupPolicyValidator_Export(t *testing.T) {
 		t.Fatalf("a valid export block: %v", err)
 	}
 	cases := map[string]func(*v1alpha1.BackupExport){
-		"no bucket":      func(e *v1alpha1.BackupExport) { e.Bucket = "" },
-		"no endpoint":    func(e *v1alpha1.BackupExport) { e.Endpoint = "" },
-		"no credentials": func(e *v1alpha1.BackupExport) { e.CredentialsSecret = "" },
-		"no key secret":  func(e *v1alpha1.BackupExport) { e.BackupKeySecret = "" },
-		"bad lock":       func(e *v1alpha1.BackupExport) { e.Lock = "Governance" },
-		"24h compliance": func(e *v1alpha1.BackupExport) { e.KeepFor = "24h" },
+		"no bucket":               func(e *v1alpha1.BackupExport) { e.Bucket = "" },
+		"no endpoint":             func(e *v1alpha1.BackupExport) { e.Endpoint = "" },
+		"no credentials":          func(e *v1alpha1.BackupExport) { e.CredentialsSecret = "" },
+		"no key secret":           func(e *v1alpha1.BackupExport) { e.BackupKeySecret = "" },
+		"no key protect instance": func(e *v1alpha1.BackupExport) { e.KeyProtect.InstanceID = "" },
+		"no key protect region":   func(e *v1alpha1.BackupExport) { e.KeyProtect.Region = "" },
+		"no root key":             func(e *v1alpha1.BackupExport) { e.KeyProtect.RootKeyID = "" },
+		"no api key secret":       func(e *v1alpha1.BackupExport) { e.KeyProtect.APIKeySecret = "" },
+		"bad lock":                func(e *v1alpha1.BackupExport) { e.Lock = "Governance" },
+		"24h compliance":          func(e *v1alpha1.BackupExport) { e.KeepFor = "24h" },
 	}
 	for name, mutate := range cases {
 		bad := validBackupPolicy()
