@@ -17,6 +17,19 @@ render() {
     helm template test "$CHART" --namespace kube-system "$@"
 }
 
+# render_notes renders the chart's NOTES.txt. "helm template" leaves NOTES.txt
+# out and Helm 3 needs a cluster for "helm install --dry-run", so a copy of the
+# chart renders it through a wrapper template.
+render_notes() {
+    local tmp
+    tmp=$(mktemp -d)
+    cp -R "$CHART" "$tmp/chart"
+    cp "$tmp/chart/templates/NOTES.txt" "$tmp/chart/notes-for-test.txt"
+    printf '%s\n' 'notes: |' '{{ tpl (.Files.Get "notes-for-test.txt") . | indent 2 }}' >"$tmp/chart/templates/notes-for-test.yaml"
+    helm template test "$tmp/chart" --namespace kube-system --show-only templates/notes-for-test.yaml "$@"
+    find "$tmp" -delete
+}
+
 expect_contains() {
     local desc="$1" out="$2" needle="$3"
     if grep -qF -- "$needle" <<<"$out"; then pass "$desc"; else fail "$desc (missing: $needle)"; fi
@@ -69,10 +82,10 @@ expect_contains "gate on: Job uses its own service account" "$gate" "serviceAcco
 role=$(awk '/^---/{if (doc ~ /kind: ClusterRole\n/ && doc ~ /sidecar-gate/) print doc; doc=""; next} {doc = doc $0 "\n"} END{if (doc ~ /kind: ClusterRole\n/ && doc ~ /sidecar-gate/) print doc}' <<<"$out")
 expect_contains "gate on: RBAC on HyperConverged only" "$role" 'resources: ["hyperconvergeds"]'
 expect_contains "gate on: RBAC get, list and update only" "$role" 'verbs: ["get", "list", "update"]'
-notes=$(helm install test "$CHART" --namespace kube-system --dry-run=client --set vmSnapshots.enableSidecarGate=true 2>&1 | sed -n "/^NOTES:/,\$p")
+notes=$(render_notes --set vmSnapshots.enableSidecarGate=true)
 expect_contains "gate on: install notes say the gate is on" "$notes" "turns on the KubeVirt Sidecar feature gate"
 expect_contains "gate on: install notes say Red Hat does not support it" "$notes" "Red Hat does not support"
-notes=$(helm install test "$CHART" --namespace kube-system --dry-run=client 2>&1 | sed -n "/^NOTES:/,\$p")
+notes=$(render_notes)
 expect_absent "default: install notes do not mention the gate" "$notes" "Sidecar feature gate"
 
 if render --set vmSnapshots.method=copy --set vmSnapshots.enableSidecarGate=true >/dev/null 2>&1; then
