@@ -414,4 +414,4 @@ spec:
 - [USER-GUIDE.md](USER-GUIDE.md) — Pool creation and management
 - [MONITORING.md](MONITORING.md) — Capacity metrics and alerting
 - [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md) — VPC quota and platform constraints
-- [examples/](examples/) — Ready-to-use pool configurations
+- [examples/](../examples) — Ready-to-use pool configurations

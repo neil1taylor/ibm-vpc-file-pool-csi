@@ -527,7 +527,7 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metric
 
 	// Instant snapshots of VM disks change the disk's file chain in the VM
 	// pod, or with a Job in the virt-launcher image when the VM is stopped.
-	// See VM-INSTANT-SNAPSHOTS.md.
+	// See docs/VM-INSTANT-SNAPSHOTS.md.
 	if vmSnapshots.method == "auto" {
 		image := vmSnapshots.launcherImage
 		if image == "" {

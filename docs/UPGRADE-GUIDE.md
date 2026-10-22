@@ -8,7 +8,7 @@ This guide covers upgrading the driver between versions without data loss or dow
 
 Before upgrading, complete every item:
 
-- [ ] **Read the [CHANGELOG.md](CHANGELOG.md)** entry for the target version — note breaking changes, new CRD fields, and required actions
+- [ ] **Read the [CHANGELOG.md](../CHANGELOG.md)** entry for the target version — note breaking changes, new CRD fields, and required actions
 - [ ] **Verify pool health** — all pools should be in `Ready` phase:
   ```bash
   kubectl get filesharepools
@@ -489,7 +489,7 @@ kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.
 
 ## See Also
 
-- [CHANGELOG.md](CHANGELOG.md) — Full version history
+- [CHANGELOG.md](../CHANGELOG.md) — Full version history
 - [INSTALL.md](INSTALL.md) — First-time installation
 - [HELM-VALUES.md](HELM-VALUES.md) — Helm chart configuration reference
 - [CRD-SPEC.md](CRD-SPEC.md) — CRD field definitions

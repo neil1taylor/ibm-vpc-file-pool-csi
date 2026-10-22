@@ -704,5 +704,5 @@ This driver targets IBM Cloud VPC infrastructure specifically (it uses the VPC A
 
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — Comprehensive troubleshooting guide
 - [PERFORMANCE-TUNING.md](PERFORMANCE-TUNING.md) — NFS mount optimization, IOPS planning, benchmarking
-- [CONTRIBUTING.md](CONTRIBUTING.md) — Developer guide for contributing to the project
-- [examples/](examples/) — Ready-to-use YAML examples for common deployment patterns
+- [CONTRIBUTING.md](../CONTRIBUTING.md) — Developer guide for contributing to the project
+- [examples/](../examples) — Ready-to-use YAML examples for common deployment patterns

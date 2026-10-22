@@ -236,7 +236,7 @@ func printExport(out io.Writer, o *Options) error {
 	_, _ = fmt.Fprintf(out, "Then make the two Secrets in the driver namespace:\n  kubectl apply -f %s -f %s\n", o.KeyFile, o.SecretFile)
 	_, _ = fmt.Fprintf(out, "The Jobs also read the Secret %s (key apikey): an IBM Cloud API key with the Reader role on the root key. cos-setup does not make it:\n  kubectl create secret generic %s -n %s --from-literal=apikey=\"$KEY_PROTECT_API_KEY\"\n", o.APIKeySecret, o.APIKeySecret, o.Namespace)
 	_, _ = fmt.Fprintf(out, "The COS key file holds a secret: keep it private and delete it after you apply it.\n")
-	_, _ = fmt.Fprintf(out, "For real backups, also make a virtual private endpoint gateway for COS in the cluster's VPC (TUTORIAL-09-COS-BACKUP-BUCKET.md).\n")
+	_, _ = fmt.Fprintf(out, "For real backups, also make a virtual private endpoint gateway for COS in the cluster's VPC (docs/TUTORIAL-09-COS-BACKUP-BUCKET.md).\n")
 	return nil
 }
 
