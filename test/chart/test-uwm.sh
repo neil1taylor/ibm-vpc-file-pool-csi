@@ -84,6 +84,9 @@ DEP="$(awk 'BEGIN{RS="---\n"} /kind: Deployment/ && /component: controller/ {pri
 check "uwm: controller gets --monitoring-namespace" "$(has "--monitoring-namespace=$MON" "$DEP")"
 check "uwm: controller gets the node agent port" "$(has '--monitoring-node-port=9810' "$DEP")"
 
+# OpenShift refuses Endpoints that point at pod IPs unless the writer may create endpoints/restricted.
+check "uwm: controller may write Endpoints with pod addresses (endpoints/restricted)" "$(has 'endpoints/restricted' "$(awk -v m="namespace: $MON" 'BEGIN{RS="---\n"} /kind: Role\n/ && index($0,m) {print}' <<<"$OUT")")"
+
 # Fallbacks keep the in-namespace path.
 check "no console API (not OpenShift): ServiceMonitors stay in kube-system" "$(hasnt "$MON" "$(render --api-versions "$SM" --api-versions "$PR" --set webhook.certProvider=openshift)")"
 check "cert-manager provider: ServiceMonitors stay in kube-system" "$(hasnt "$MON" "$(render --api-versions "$SM" --api-versions "$PR" --api-versions "$CP")")"

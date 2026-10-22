@@ -74,6 +74,11 @@ rules:
   - apiGroups: [""]
     resources: ["endpoints"]
     verbs: ["get", "list", "create", "update"]
+  # OpenShift refuses Endpoints that point at pod IPs unless the writer may also create
+  # "endpoints/restricted".
+  - apiGroups: [""]
+    resources: ["endpoints/restricted"]
+    verbs: ["create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

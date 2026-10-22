@@ -40,7 +40,7 @@ func WarnIfAlertsNotEvaluated(ctx context.Context, cs kubernetes.Interface, moni
 	klog.Warning(msg)
 	_, err := cs.CoreV1().Events(monitoringNS).Create(ctx, &corev1.Event{
 		ObjectMeta:     metav1.ObjectMeta{GenerateName: "user-workload-monitoring-off-", Namespace: monitoringNS},
-		InvolvedObject: corev1.ObjectReference{Kind: "Namespace", Name: monitoringNS, APIVersion: "v1"},
+		InvolvedObject: corev1.ObjectReference{Kind: "Namespace", Name: monitoringNS, Namespace: monitoringNS, APIVersion: "v1"},
 		Reason:         "UserWorkloadMonitoringOff",
 		Message:        msg,
 		Type:           corev1.EventTypeWarning,

@@ -45,7 +45,8 @@ func TestWarnIfAlertsNotEvaluated(t *testing.T) {
 	WarnIfAlertsNotEvaluated(ctx, off, "mon")
 	evs, _ := off.CoreV1().Events("mon").List(ctx, metav1.ListOptions{})
 	if len(evs.Items) != 1 || evs.Items[0].Reason != "UserWorkloadMonitoringOff" || evs.Items[0].Type != corev1.EventTypeWarning ||
-		evs.Items[0].InvolvedObject.Kind != "Namespace" || evs.Items[0].InvolvedObject.Name != "mon" {
+		evs.Items[0].InvolvedObject.Kind != "Namespace" || evs.Items[0].InvolvedObject.Name != "mon" ||
+		evs.Items[0].InvolvedObject.Namespace != "mon" { // the API server requires it to match the event namespace
 		t.Fatalf("want one warning event on the monitoring namespace, got %+v", evs.Items)
 	}
 
