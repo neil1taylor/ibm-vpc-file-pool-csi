@@ -1,6 +1,6 @@
 # Part 6: Replication and Failover
 
-> **Tutorial Series:** [Index](TUTORIAL.md) | [Part 1: Pool Creation](TUTORIAL-01-POOL-CREATION.md) | [Part 2: Snapshots & Clones](TUTORIAL-02-SNAPSHOTS-AND-CLONES.md) | [Part 3: Group Snapshots & Hooks](TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md) | [Part 4: Pool Configuration](TUTORIAL-04-POOL-CONFIGURATION.md) | [Part 5: Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md) | **Part 6** | [Part 7: Monitoring](TUTORIAL-07-MONITORING.md) | [Part 8: Migration & Console](TUTORIAL-08-MIGRATION-AND-CONSOLE.md)
+> **Tutorial Series:** [Index](TUTORIAL.md) | [Part 1: Pool Creation](TUTORIAL-01-POOL-CREATION.md) | [Part 2: Snapshots & Clones](TUTORIAL-02-SNAPSHOTS-AND-CLONES.md) | [Part 3: Group Snapshots & Hooks](TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md) | [Part 4: Pool Configuration](TUTORIAL-04-POOL-CONFIGURATION.md) | [Part 5: Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md) | **Part 6** | [Part 7: Monitoring](TUTORIAL-07-MONITORING.md) | [Part 8: Migration & Console](TUTORIAL-08-MIGRATION-AND-CONSOLE.md) | [Part 9: COS Backup Bucket](TUTORIAL-09-COS-BACKUP-BUCKET.md)
 
 Step-by-step guide to setting up cross-region disaster recovery replication between two clusters, pausing and resuming sync, using lifecycle hooks, inspecting metadata, and performing failover to bring workloads online at the DR site.
 
@@ -67,6 +67,8 @@ The CSI driver supports two replication modes, each suited to different network 
 **Direct NFS mode** -- The source cluster mounts the destination NFS share and uses rsync to transfer SubVolume data. This requires NFS reachability between clusters (Transit Gateway or VPN). Supports rsync incremental sync for bandwidth efficiency.
 
 **Driver-to-driver mode** -- The source cluster creates Jobs that tar SubVolume data and upload it via HTTPS PUT to a receiver pod on the destination cluster. Works across any network that allows HTTPS. The receiver extracts the tar stream to the destination NFS share.
+
+The rsync and tar copies apply to volumes that are not disks of a running VM. The controller copies a running VM's disks with QEMU instead. See [Running VMs](#running-vms).
 
 ---
 
@@ -611,16 +613,8 @@ oc config use-context source-cluster
 Create the CA certificate Secret on the source cluster:
 
 ```bash
-cat <<EOF | oc apply -f -
-apiVersion: v1
-kind: Secret
-metadata:
-  name: repl-receiver-ca
-  namespace: kube-system
-type: Opaque
-data:
-  ca.crt: $(cat /tmp/receiver-ca.crt | base64 -w0)
-EOF
+oc create secret generic repl-receiver-ca -n kube-system \
+  --from-file=ca.crt=/tmp/receiver-ca.crt
 ```
 
 Create the auth token Secret on the source cluster (same token):
@@ -966,7 +960,7 @@ Created PVC pool-tutorial-repl/repl-app-config
 - All operations are idempotent -- running execute again skips already-existing resources
 
 Optional flags:
-- `--dr-export-path /export_path` -- for VPC access-mode shares that use an NFS export path
+- `--dr-export-path /export_path` -- only for older shares in VPC access mode, which use an NFS export path. New shares use security group mode and do not need it
 - `--namespace override-ns` -- override the PVC namespace (useful when DR uses a different namespace layout)
 
 ### Step 9d: Check Failover Status
@@ -1016,7 +1010,9 @@ kubectl failover plan --nfs-mount-path /data --list-moments
 kubectl failover execute --nfs-mount-path /data --prepare-only --rewind-to 2026-10-20T10:30:00Z
 ```
 
-See `CROSS-REGION-DR.md`, "Running VM disks", for the details and the lab results.
+The policy fields `vmCopySpeedLimitMBps` (default 20) and `restorePointKeepHours` (default 24) control the copy speed and how long the destination keeps restore points.
+
+See [CROSS-REGION-DR.md](CROSS-REGION-DR.md), "Running VM disks", for the details and the lab results.
 
 ---
 
@@ -1129,6 +1125,7 @@ oc delete namespace pool-tutorial-repl --timeout=60s --ignore-not-found
 | Failover dry-run | `kubectl failover execute --nfs-mount-path <path> --dr-pool <pool> --dr-share-ip <ip> --dry-run` |
 | Failover execute | `kubectl failover execute --nfs-mount-path <path> --dr-pool <pool> --dr-share-ip <ip>` |
 | Failover status | `kubectl failover status` |
+| List VM moments | `kubectl failover plan --nfs-mount-path <path> --list-moments` |
 | Controller logs | `oc logs -n kube-system -l app.kubernetes.io/component=controller -c csi-controller --tail=50` |
 
 ---
