@@ -38,6 +38,7 @@ test-scripts:
 	bash test/chart/test-receiver.sh
 	bash test/chart/test-vm-snapshots.sh
 	bash test/chart/test-clusterrole.sh
+	bash test/chart/test-console-plugin.sh
 	bash test/release/test-runner.sh
 	bash test/e2e/lib/test-detect-zone.sh
 

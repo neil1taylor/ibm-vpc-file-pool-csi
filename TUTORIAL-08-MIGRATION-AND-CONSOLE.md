@@ -384,29 +384,20 @@ The OpenShift Console dynamic plugin provides a visual interface for managing po
 
 ### Enable via Helm
 
+The plugin is on by default. If you installed the chart with `consolePlugin.enabled=false`, turn it on:
+
 ```bash
 helm upgrade ibm-vpc-file-pool-csi charts/ibm-vpc-file-pool-csi \
   -n kube-system \
   --reuse-values \
-  --set consolePlugin.enabled=true \
-  --set consolePlugin.replicas=2
+  --set consolePlugin.enabled=true
 ```
 
 **What this does:**
 - Deploys the console plugin as a 2-replica Deployment in `kube-system`
 - Creates a Service on port 9443 with TLS certificates auto-provisioned by the OpenShift service-ca operator
 - Registers a ConsolePlugin CR with the OpenShift Console
-
-### Register the Plugin
-
-Enable the plugin in the OpenShift Console operator:
-
-```bash
-# Adds this plugin to the list and keeps the other plugins enabled.
-# (A merge patch with a "plugins" list would replace the whole list.)
-oc patch console.operator.openshift.io cluster --type=json \
-  -p '[{"op":"add","path":"/spec/plugins/-","value":"ibm-vpc-file-pool-csi"}]'
-```
+- Runs a hook Job that adds the plugin to the console's plugin list and keeps the other plugins
 
 ### Verify
 
@@ -523,12 +514,8 @@ oc delete namespace ${TUTORIAL_NS} --timeout=60s
 ibmcloud is shares
 ```
 
-> **Note:** The console plugin remains enabled after cleanup. To disable it:
+> **Note:** The console plugin remains enabled after cleanup. To disable it, upgrade with the plugin off. A hook Job removes only this plugin from the console's plugin list:
 > ```bash
-> # Removes only this plugin; the other plugins stay enabled.
-> i=$(oc get console.operator.openshift.io cluster -o json | jq '.spec.plugins | index("ibm-vpc-file-pool-csi")')
-> oc patch console.operator.openshift.io cluster --type=json \
->   -p "[{\"op\":\"remove\",\"path\":\"/spec/plugins/$i\"}]"
 > helm upgrade ibm-vpc-file-pool-csi charts/ibm-vpc-file-pool-csi \
 >   -n kube-system \
 >   --reuse-values \
@@ -547,7 +534,6 @@ ibmcloud is shares
 | Migrate PVC | `kubectl migrate execute --namespace <ns> --pvc <name> --target-pool <pool> --target-storage-class <sc>` |
 | Migration status | `kubectl migrate status --namespace <ns>` |
 | Enable console plugin | `helm upgrade ... --set consolePlugin.enabled=true` |
-| Register plugin | `oc patch console.operator.openshift.io cluster --type=json -p '[{"op":"add","path":"/spec/plugins/-","value":"ibm-vpc-file-pool-csi"}]'` |
 | Check plugin status | `oc get consoleplugin ibm-vpc-file-pool-csi` |
 | Plugin pods | `oc get pods -n kube-system -l app.kubernetes.io/component=console-plugin` |
 | Disable plugin | Remove only this entry from `spec.plugins` (see the note above); never set the list to `[]`, which disables every plugin |
