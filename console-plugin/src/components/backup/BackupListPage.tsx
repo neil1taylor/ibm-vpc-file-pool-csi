@@ -1,21 +1,27 @@
 import React, { useMemo, useState } from 'react';
 import {
+  k8sPatch,
+  useAccessReview,
   useK8sWatchResource,
   ListPageHeader,
   ListPageBody,
+  ListPageCreateLink,
   ListPageFilter,
   useListPageFilter,
 } from '@openshift-console/dynamic-plugin-sdk';
 import { Link } from 'react-router-dom';
-import { Table, Thead, Tr, Th, ThProps, Td, Tbody } from '@patternfly/react-table';
-import { Bullseye, Spinner } from '@patternfly/react-core';
+import { Table, Thead, Tr, Th, ThProps, Td, Tbody, ActionsColumn, IAction } from '@patternfly/react-table';
+import { Alert, Bullseye, Spinner } from '@patternfly/react-core';
 import { BackupPolicyModel } from '../../models';
 import { BackupPolicy } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
+import DeleteModal from '../common/DeleteModal';
+import { BACKUP_DELETE_NOTE } from './backup-texts';
 import BackupProblemBanner from './BackupProblemBanner';
-import { stalestBackupAge } from '../../utils/backup-helpers';
+import { stalestBackupAge, suspendPatch } from '../../utils/backup-helpers';
+import { errorMessage } from '../../utils/k8s-objects';
 import { columnInfo } from '../../utils/column-help';
-import { ROUTES } from '../../constants';
+import { API_GROUP, ROUTES } from '../../constants';
 
 const DEFAULT_KEEP_FOR = '7d';
 
@@ -33,6 +39,37 @@ const BackupListPage: React.FC = () => {
   });
 
   const [data, filteredData, onFilterChange] = useListPageFilter(policies);
+  const [canUpdate] = useAccessReview({ group: API_GROUP, resource: 'backuppolicies', verb: 'update' });
+  const [canDelete] = useAccessReview({ group: API_GROUP, resource: 'backuppolicies', verb: 'delete' });
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [actionError, setActionError] = useState('');
+
+  const toggleSuspend = async (p: BackupPolicy) => {
+    setActionError('');
+    try {
+      await k8sPatch({ model: BackupPolicyModel, resource: p, data: suspendPatch(!p.spec?.suspend) });
+    } catch (err) {
+      setActionError(errorMessage(err, 'Failed to change the policy'));
+    }
+  };
+
+  const rowActions = (p: BackupPolicy): IAction[] => {
+    const name = p.metadata?.name || '';
+    const needUpdate = ' (needs the right to update BackupPolicy objects)';
+    const needDelete = ' (needs the right to delete BackupPolicy objects)';
+    return [
+      { title: <Link to={ROUTES.BACKUP_DETAIL.replace(':name', name)}>View Details</Link> },
+      canUpdate
+        ? { title: <Link to={ROUTES.BACKUP_EDIT.replace(':name', name)}>Edit</Link> }
+        : { title: `Edit${needUpdate}`, isDisabled: true },
+      canUpdate
+        ? { title: p.spec?.suspend ? 'Resume' : 'Suspend', onClick: () => toggleSuspend(p) }
+        : { title: `${p.spec?.suspend ? 'Resume' : 'Suspend'}${needUpdate}`, isDisabled: true },
+      canDelete
+        ? { title: 'Delete', onClick: () => setDeleteTarget(name) }
+        : { title: `Delete${needDelete}`, isDisabled: true },
+    ];
+  };
 
   const sortValues = (p: BackupPolicy): (string | number)[] => [
     p.metadata?.name || '',
@@ -67,7 +104,14 @@ const BackupListPage: React.FC = () => {
 
   return (
     <>
-      <ListPageHeader title="Backups" />
+      <ListPageHeader title="Backups">
+        <ListPageCreateLink
+          to={ROUTES.BACKUP_CREATE}
+          createAccessReview={{ groupVersionKind: { group: BackupPolicyModel.apiGroup!, version: BackupPolicyModel.apiVersion, kind: BackupPolicyModel.kind } }}
+        >
+          Create BackupPolicy
+        </ListPageCreateLink>
+      </ListPageHeader>
       <p style={{ padding: '0 24px', color: 'var(--pf-t--global--color--subtle)', margin: '0 0 8px 0' }}>
         A backup policy copies the volumes it selects into a snapshot pool on a schedule, and keeps the copies for a set time.
         Open a policy to see each volume and the moments you can restore to.
@@ -76,6 +120,11 @@ const BackupListPage: React.FC = () => {
         {(policies || []).map((p) => (
           <BackupProblemBanner key={p.metadata?.name} policy={p} showName />
         ))}
+        {actionError && (
+          <Alert variant="danger" isInline title="The change failed" style={{ marginBottom: 16 }}>
+            {actionError}
+          </Alert>
+        )}
         <ListPageFilter data={data} loaded={loaded} onFilterChange={onFilterChange} />
         {!loaded && (
           <Bullseye style={{ padding: '48px 0' }}>
@@ -104,6 +153,7 @@ const BackupListPage: React.FC = () => {
                 <Th sort={getSortParams(5)}>Volumes</Th>
                 <Th info={columnInfo('backupStalest')}>Stalest Backup</Th>
                 <Th info={columnInfo('backupListExport')}>Export</Th>
+                <Th></Th>
               </Tr>
             </Thead>
             <Tbody>
@@ -123,6 +173,9 @@ const BackupListPage: React.FC = () => {
                     <Td dataLabel="Volumes">{p.status?.volumeCount ?? 0}</Td>
                     <Td dataLabel="Stalest Backup">{stalestBackupAge(p)}</Td>
                     <Td dataLabel="Export">{p.spec?.export ? 'On' : 'Off'}</Td>
+                    <Td isActionCell>
+                      <ActionsColumn items={rowActions(p)} />
+                    </Td>
                   </Tr>
                 );
               })}
@@ -130,6 +183,17 @@ const BackupListPage: React.FC = () => {
           </Table>
         )}
       </ListPageBody>
+      {deleteTarget && (
+        <DeleteModal
+          isOpen
+          resourceName={deleteTarget}
+          resourceKind="BackupPolicy"
+          model={BackupPolicyModel}
+          note={BACKUP_DELETE_NOTE}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={() => setDeleteTarget(null)}
+        />
+      )}
     </>
   );
 };

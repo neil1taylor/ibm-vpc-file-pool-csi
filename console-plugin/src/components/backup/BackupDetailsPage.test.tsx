@@ -1,17 +1,20 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
-import { useAccessReview, useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { k8sPatch, useAccessReview, useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk';
 import BackupDetailsPage from './BackupDetailsPage';
 import BackupVolumesTable from './BackupVolumesTable';
 import { BackupPolicy } from '../../types';
 
 jest.mock('react-router-dom', () => ({
   useParams: () => ({ name: 'nightly' }),
+  useHistory: () => ({ push: jest.fn() }),
   Link: ({ to, children }: { to: string; children: React.ReactNode }) => <a href={to}>{children}</a>,
 }));
 
 beforeEach(() => {
+  jest.clearAllMocks();
   (useAccessReview as jest.Mock).mockReturnValue([true, false]);
+  (k8sPatch as jest.Mock).mockResolvedValue({});
 });
 
 const ago = (hours: number) => new Date(Date.now() - hours * 3600 * 1000).toISOString();
@@ -113,6 +116,59 @@ describe('BackupDetailsPage', () => {
     watch(undefined);
     render(<BackupDetailsPage />);
     expect(screen.getByText(/was not found/)).toBeTruthy();
+  });
+});
+
+describe('BackupDetailsPage actions', () => {
+  it('has Edit, Suspend and Delete', () => {
+    watch(policy());
+    render(<BackupDetailsPage />);
+    expect(screen.getByRole('link', { name: 'Edit' }).getAttribute('href')).toBe('/vpc-file-pools/backups/nightly/edit');
+    expect(screen.getByRole('button', { name: 'Suspend' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeTruthy();
+  });
+
+  it('suspends and resumes with a patch', async () => {
+    watch(policy());
+    const { unmount } = render(<BackupDetailsPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Suspend' }));
+    await waitFor(() => expect(k8sPatch).toHaveBeenCalledTimes(1));
+    expect((k8sPatch as jest.Mock).mock.calls[0][0].data).toEqual([{ op: 'add', path: '/spec/suspend', value: true }]);
+    unmount();
+
+    const p = policy();
+    p.spec.suspend = true;
+    p.status!.phase = 'Suspended';
+    watch(p);
+    render(<BackupDetailsPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
+    await waitFor(() => expect(k8sPatch).toHaveBeenCalledTimes(2));
+    expect((k8sPatch as jest.Mock).mock.calls[1][0].data).toEqual([{ op: 'add', path: '/spec/suspend', value: false }]);
+  });
+
+  it('shows the error when the patch is refused', async () => {
+    (k8sPatch as jest.Mock).mockRejectedValue(new Error('forbidden'));
+    watch(policy());
+    render(<BackupDetailsPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Suspend' }));
+    expect(await screen.findByText(/forbidden/)).toBeTruthy();
+  });
+
+  it('asks before it deletes, and says the backups stay on the snapshot pool', () => {
+    watch(policy());
+    render(<BackupDetailsPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(screen.getByText(/backups already made stay/i)).toBeTruthy();
+  });
+
+  it('turns the actions off and names the rights without them', () => {
+    (useAccessReview as jest.Mock).mockReturnValue([false, false]);
+    watch(policy());
+    render(<BackupDetailsPage />);
+    expect((screen.getByRole('button', { name: 'Suspend' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Delete' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/You are not allowed to update BackupPolicy objects/)).toBeTruthy();
+    expect(screen.getByText(/You are not allowed to delete BackupPolicy objects/)).toBeTruthy();
   });
 });
 
