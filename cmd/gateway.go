@@ -45,8 +45,8 @@ func runGateway(o gatewayOptions) {
 	cfg := ctrl.GetConfigOrDie()
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
-	if err := v1alpha1.AddToScheme(scheme); err != nil {
-		klog.ErrorS(err, "Failed to add CRD types to scheme")
+	if serr := v1alpha1.AddToScheme(scheme); serr != nil {
+		klog.ErrorS(serr, "Failed to add CRD types to scheme")
 		os.Exit(1)
 	}
 	// No cache: the gateway reads a few objects per call and must see them now.

@@ -415,8 +415,8 @@ func (bc *BackupController) copyPullSecrets(ctx context.Context) {
 				ObjectMeta: metav1.ObjectMeta{Namespace: bc.browse.Namespace, Name: name, Labels: map[string]string{browsePullSecretLabel: "true"}},
 				Type:       src.Type, Data: src.Data,
 			}
-			if err := bc.client.Create(ctx, dst); err != nil {
-				klog.ErrorS(err, "Failed to copy a pull secret", "secret", name)
+			if cerr := bc.client.Create(ctx, dst); cerr != nil {
+				klog.ErrorS(cerr, "Failed to copy a pull secret", "secret", name)
 			}
 		case err != nil:
 			klog.ErrorS(err, "Failed to read the copy of a pull secret", "secret", name)

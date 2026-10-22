@@ -13,10 +13,10 @@ import (
 )
 
 func TestKubeAuthenticate(t *testing.T) {
-	cs := fake.NewSimpleClientset()
+	cs := fake.NewClientset()
 	var seen string
 	cs.PrependReactor("create", "tokenreviews", func(a k8stesting.Action) (bool, runtime.Object, error) {
-		tr := a.(k8stesting.CreateAction).GetObject().(*authnv1.TokenReview)
+		tr, _ := a.(k8stesting.CreateAction).GetObject().(*authnv1.TokenReview)
 		seen = tr.Spec.Token
 		switch tr.Spec.Token {
 		case "good":
@@ -48,11 +48,11 @@ func TestKubeAuthenticate(t *testing.T) {
 }
 
 func TestKubeCanReadBackups(t *testing.T) {
-	cs := fake.NewSimpleClientset()
+	cs := fake.NewClientset()
 	var got authzv1.SubjectAccessReviewSpec
 	allowed := true
 	cs.PrependReactor("create", "subjectaccessreviews", func(a k8stesting.Action) (bool, runtime.Object, error) {
-		sar := a.(k8stesting.CreateAction).GetObject().(*authzv1.SubjectAccessReview)
+		sar, _ := a.(k8stesting.CreateAction).GetObject().(*authzv1.SubjectAccessReview)
 		got = sar.Spec
 		sar.Status = authzv1.SubjectAccessReviewStatus{Allowed: allowed}
 		return true, sar, nil
@@ -75,7 +75,7 @@ func TestKubeCanReadBackups(t *testing.T) {
 		t.Error("a denied review was taken as allowed")
 	}
 	// An error is never a yes.
-	cs2 := fake.NewSimpleClientset()
+	cs2 := fake.NewClientset()
 	cs2.PrependReactor("create", "subjectaccessreviews", func(k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, errors.New("api down")
 	})

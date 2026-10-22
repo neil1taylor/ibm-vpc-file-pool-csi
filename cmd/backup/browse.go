@@ -8,18 +8,19 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/browse"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/gateway"
@@ -391,10 +392,10 @@ func saveTo(r io.Reader, stdout io.Writer, outFlag, defaultName string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(f, r); err != nil {
+	if _, cerr := io.Copy(f, r); cerr != nil { //nolint:gosec // G703/G110: the user chose the destination; the size is the server's, limited by the gateway
 		_ = f.Close()
-		_ = os.Remove(dest)
-		return err
+		_ = os.Remove(dest) //nolint:gosec // G703: removes the file this command just made
+		return cerr
 	}
 	return f.Close()
 }
@@ -469,9 +470,9 @@ func extractTar(r io.Reader, dest string, out io.Writer) error {
 				skip("outside the folder, or it exists", hdr.Name)
 				continue
 			}
-			_, cerr := io.Copy(f, tr)
-			if err := f.Close(); cerr == nil {
-				cerr = err
+			_, cerr := io.CopyN(f, tr, hdr.Size)
+			if clerr := f.Close(); cerr == nil {
+				cerr = clerr
 			}
 			if cerr != nil {
 				return fmt.Errorf("writing %s: %w", browse.Escape([]byte(name)), cerr)
@@ -524,18 +525,18 @@ func newGatewayClient(ctx context.Context, flags map[string]string) (*gwClient, 
 		base = os.Getenv("KUBECTL_BACKUP_GATEWAY")
 	}
 	if base == "" {
-		c, err := client.New(cfg, client.Options{Scheme: newScheme()})
-		if err != nil {
-			return nil, err
+		c, cerr := client.New(cfg, client.Options{Scheme: newScheme()})
+		if cerr != nil {
+			return nil, cerr
 		}
-		if base, ca, err = gatewayInfo(ctx, c, driverNamespace(flags)); err != nil {
-			return nil, err
+		if base, ca, cerr = gatewayInfo(ctx, c, driverNamespace(flags)); cerr != nil {
+			return nil, cerr
 		}
 	}
 	if f := flags["gateway-ca-file"]; f != "" {
-		b, err := os.ReadFile(f) //nolint:gosec // the user chose the file
-		if err != nil {
-			return nil, err
+		b, rerr := os.ReadFile(f) //nolint:gosec // the user chose the file
+		if rerr != nil {
+			return nil, rerr
 		}
 		ca = string(b)
 	}

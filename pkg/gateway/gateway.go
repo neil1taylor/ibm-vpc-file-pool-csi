@@ -82,8 +82,6 @@ func New(c client.Client, authn Authenticator, authz Authorizer, cfg Config) *Ga
 		cache: map[[sha256.Size]byte]cachedUser{}, helpers: map[[sha256.Size]byte]*http.Client{}}
 }
 
-type ctxKey struct{}
-
 // Handler is the HTTP handler.
 func (g *Gateway) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -483,10 +481,10 @@ func (g *Gateway) handleOp(w http.ResponseWriter, r *http.Request, u User) {
 		return
 	}
 	url := "https://" + net.JoinHostPort(bb.Status.PodIP, strconv.Itoa(int(bb.Status.Port))) + "/v1/" + op
-	req, _ := http.NewRequestWithContext(r.Context(), http.MethodPost, url, strings.NewReader(string(body)))
+	req, _ := http.NewRequestWithContext(r.Context(), http.MethodPost, url, strings.NewReader(string(body))) //nolint:gosec // G704: the address is the pod IP the controller wrote, not user input
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := hc.Do(req)
+	resp, err := hc.Do(req) //nolint:gosec // G704: the address is the pod IP the controller wrote, not user input
 	if err != nil {
 		// The handshake failed, or the helper is gone. The reason may name an address.
 		klog.V(2).InfoS("Helper call failed", "session", bb.Name, "op", op)
