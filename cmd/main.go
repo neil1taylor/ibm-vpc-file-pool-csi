@@ -83,6 +83,7 @@ func main() {
 		// VM disk snapshot flags.
 		vmSnapshots vmSnapshotOptions
 		browse      browseOptions
+		gw          gatewayOptions
 
 		// Sync-client mode flags.
 		receiverEndpoint string
@@ -132,6 +133,14 @@ func main() {
 	flag.DurationVar(&browse.cfg.MaxLife, "browse-max-life", 2*time.Hour, "End a browse session after this long, even if in use")
 	flag.IntVar(&browse.cfg.MaxSessions, "browse-max-sessions", 5, "Open browse sessions in the cluster; more wait")
 	flag.IntVar(&browse.cfg.MaxPerNamespace, "browse-max-sessions-per-namespace", 2, "Open browse sessions for the claims of one namespace; more wait")
+
+	// Backup gateway flags (gateway mode).
+	flag.StringVar(&gw.listen, "gateway-listen", ":8443", "Address the backup gateway listens on (backup-gateway mode)")
+	flag.StringVar(&gw.certFile, "gateway-tls-cert-file", "", "Serving certificate of the backup gateway (PEM); read again when it changes")
+	flag.StringVar(&gw.keyFile, "gateway-tls-key-file", "", "Serving key of the backup gateway (PEM)")
+	flag.DurationVar(&gw.sessionWait, "gateway-session-wait", 60*time.Second, "How long a request to open a browse session waits for it to be ready")
+	flag.Int64Var(&gw.maxDownload, "gateway-max-download-bytes", 50<<30, "Largest single file or tar a user may download")
+	flag.DurationVar(&gw.authCache, "gateway-auth-cache", 10*time.Second, "How long a token review is kept; 0 checks every call")
 
 	// Replication controller flags.
 	flag.StringVar(&driverImage, "driver-image", "", "Driver container image for receiver-mode sync-client Jobs")
@@ -204,6 +213,8 @@ func main() {
 			os.Exit(1)
 		}
 		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, controllerMetricsCertDir, mon, cloneWorkerInterval, goldenImageSyncInterval, cdiCopyPodMemoryLimit, driverImage, webhooks, vmSnapshots, browse)
+	case "backup-gateway":
+		runGateway(gw)
 	case "receiver":
 		runReceiver(receiverBasePath, receiverAuthTokenFile, receiverListenAddr, receiverTLSCertFile, receiverTLSKeyFile)
 	case "sync-client":

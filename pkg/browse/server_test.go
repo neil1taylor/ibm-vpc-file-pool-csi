@@ -564,3 +564,35 @@ func TestInfoReportsTheMoment(t *testing.T) {
 		t.Errorf("info = %+v", got)
 	}
 }
+
+func TestMomentsListsTheMomentNames(t *testing.T) {
+	s, err := NewServer(&fakeTree{}, testToken, Options{Moments: func() ([]string, error) {
+		return []string{"20261022T090000Z", "20261022T100000Z"}, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	if resp := post(t, ts, "/v1/moments", "", map[string]any{}); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("moments without a token: %d", resp.StatusCode)
+	}
+	resp := post(t, ts, "/v1/moments", testToken, map[string]any{})
+	var got struct{ Moments []string }
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil || resp.StatusCode != 200 {
+		t.Fatalf("moments: %d %v", resp.StatusCode, err)
+	}
+	if len(got.Moments) != 2 || got.Moments[1] != "20261022T100000Z" {
+		t.Errorf("moments = %v", got.Moments)
+	}
+	// With no function the list is empty, not an error.
+	s2, _ := NewServer(&fakeTree{}, testToken, Options{})
+	ts2 := httptest.NewServer(s2.Handler())
+	defer ts2.Close()
+	resp2 := post(t, ts2, "/v1/moments", testToken, map[string]any{})
+	got.Moments = nil
+	_ = json.NewDecoder(resp2.Body).Decode(&got)
+	if resp2.StatusCode != 200 || len(got.Moments) != 0 {
+		t.Errorf("no function: %d %v", resp2.StatusCode, got.Moments)
+	}
+}
