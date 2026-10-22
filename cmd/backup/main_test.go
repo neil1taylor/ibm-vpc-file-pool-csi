@@ -225,3 +225,10 @@ func TestIsTerminal_PipeIsNotATerminal(t *testing.T) {
 		t.Error("a pipe is not a terminal")
 	}
 }
+
+func TestNewScheme_ListsDeploymentsForFindDriverImage(t *testing.T) {
+	c := fakeclient.NewClientBuilder().WithScheme(newScheme()).Build()
+	if _, err := findDriverImage(context.Background(), c, "ns"); err == nil || strings.Contains(err.Error(), "no kind is registered") {
+		t.Fatalf("the real scheme cannot list Deployments: %v", err)
+	}
+}
