@@ -191,6 +191,7 @@ func (m *Manager) RunVMSnapshots(ctx context.Context, interval time.Duration) {
 			return
 		case <-t.C:
 			m.AdvanceVMSnapshots(ctx)
+			m.RemoveOrphanSnapshots(ctx)
 		}
 	}
 }

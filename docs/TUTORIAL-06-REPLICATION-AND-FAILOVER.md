@@ -31,7 +31,15 @@ oc get crd replicationpolicies.storage.ibmcloud.io
 
 Verify the same on the **destination** cluster (switch kubeconfig or context as needed).
 
-For **direct NFS mode**, the destination NFS share must be reachable from the source cluster over IBM Transit Gateway or VPN. For **driver-to-driver mode**, only HTTPS connectivity between clusters is required.
+For **direct NFS mode**, the destination NFS share must be reachable from the source cluster over IBM Transit Gateway or VPN. For **driver-to-driver mode**, only HTTPS connectivity between clusters is required: the source cluster's nodes must be able to reach the destination cluster's Route address. On ROKS and ROVS the Route is on the cluster's public ingress address, so the nodes need outbound internet access.
+
+Driver-to-driver mode also needs a pool on the **destination** cluster for the receiver's volume, and either cert-manager (for the receiver's own certificate) or the Route's TLS (see [Step 6c](#step-6c-enable-the-receiver-via-helm)). Check cert-manager on the destination cluster:
+
+```bash
+oc get crd certificates.cert-manager.io
+```
+
+A new ROKS or ROVS cluster does not have it.
 
 ---
 
@@ -82,8 +90,9 @@ REPL_NS=pool-tutorial-repl
 oc delete pods --all -n ${REPL_NS} --force --grace-period=0 --ignore-not-found
 oc delete pvc --all -n ${REPL_NS} --timeout=60s --ignore-not-found
 
-# 2. Delete ReplicationPolicies
-oc delete replicationpolicies --all --ignore-not-found
+# 2. Delete this tutorial's ReplicationPolicies, by name.
+# ReplicationPolicy is cluster-wide. Never use --all on a cluster that others share.
+oc delete replicationpolicy dr-driver dr-with-hooks dr-with-http-hooks --ignore-not-found
 
 # 3. Grace period for CSI to cascade SubVolume deletes
 sleep 5
@@ -249,15 +258,15 @@ spec:
         - sh
         - -c
         - |
-          echo "Application database export - $(date)" > /data/db-dump.sql
+          echo "Application database export - \$(date)" > /data/db-dump.sql
           dd if=/dev/urandom of=/data/payload.bin bs=1M count=10 2>/dev/null
-          echo "Data written: $(ls -lh /data/)"
-          echo "Access log entry - $(date)" > /logs/access.log
-          echo "Error log entry - $(date)" > /logs/error.log
-          echo "Logs written: $(ls -lh /logs/)"
+          echo "Data written: \$(ls -lh /data/)"
+          echo "Access log entry - \$(date)" > /logs/access.log
+          echo "Error log entry - \$(date)" > /logs/error.log
+          echo "Logs written: \$(ls -lh /logs/)"
           echo "app.replicas=3" > /config/app.properties
           echo "db.host=10.0.0.5" >> /config/app.properties
-          echo "Config written: $(cat /config/app.properties)"
+          echo "Config written: \$(cat /config/app.properties)"
           echo "All test data written successfully."
       volumeMounts:
         - name: data
@@ -519,7 +528,33 @@ EOF
 - Creates a Secret in `kube-system` containing the bearer token
 - The receiver pod reads this token file and validates incoming requests
 
-You also need a destination PVC -- either use a pool-backed PVC on the destination cluster or a pre-existing NFS PVC:
+You also need a destination PVC. It is the receiver's data volume, so it lives on a pool on the **destination** cluster. The pool `repl-pool` exists only on the source cluster, so make a pool on the destination cluster first. Use a zone of the destination cluster. The pool can be small: the volume only has to hold the data you replicate.
+
+```bash
+export DR_POOL=dr-repl-pool
+
+cat <<EOF | oc apply -f -
+apiVersion: storage.ibmcloud.io/v1alpha1
+kind: FileSharePool
+metadata:
+  name: ${DR_POOL}
+spec:
+  zone: eu-de-3      # a zone of the destination cluster
+  profile: dp2
+  shareSizeGB: 20
+  iops: 100
+  maxShares: 1
+  initialShares: 1
+  autoExpand: false
+  defaultPermissions: "0777"
+  defaultUID: 107
+  defaultGID: 107
+EOF
+
+oc get filesharepool ${DR_POOL}    # wait for PHASE Ready
+```
+
+Then make the volume on that pool:
 
 ```bash
 cat <<EOF | oc apply -f -
@@ -531,18 +566,20 @@ metadata:
 spec:
   accessModes:
     - ReadWriteMany
-  storageClassName: ${REPL_POOL}
+  storageClassName: ${DR_POOL}
   resources:
     requests:
-      storage: 50Gi
+      storage: 10Gi
 EOF
 ```
 
-> **Note:** If you are testing on the same cluster, you can use any RWX PVC. For a real DR setup, this PVC would be on a pool in the destination region.
+> **Note:** If you are testing on the same cluster, you can use any RWX PVC. For a real DR setup, this PVC would be on a pool in the destination region. Make it big enough for everything you replicate.
 
 ### Step 6c: Enable the Receiver via Helm
 
-Upgrade the Helm release on the **destination** cluster to enable the replication receiver:
+Upgrade the Helm release on the **destination** cluster to enable the replication receiver. Use the chart that matches the image you run (the chart in the same release as the driver image). A chart that is newer than the image can stop the controller from starting.
+
+**Option A: the receiver has its own certificate (needs cert-manager).**
 
 ```bash
 helm upgrade ibm-vpc-file-pool-csi charts/ibm-vpc-file-pool-csi \
@@ -561,6 +598,22 @@ helm upgrade ibm-vpc-file-pool-csi charts/ibm-vpc-file-pool-csi \
 - Creates a Service (`ibm-vpc-file-pool-csi-replication-receiver`) on port 8443
 - Creates an OpenShift Route with TLS passthrough (auto-detected on OpenShift clusters)
 - Provisions a cert-manager Certificate with SANs for the Service and Route hostnames
+
+Without cert-manager, this command fails with `no matches for kind "Certificate" in version "cert-manager.io/v1"`, and nothing is changed.
+
+**Option B: the Route provides the TLS (no cert-manager).** Set `tls.enabled=false`. The receiver then speaks plain HTTP inside the cluster, and the OpenShift Route ends the TLS with the cluster's ingress certificate. A ROKS or ROVS ingress certificate is signed by a public CA, so the source cluster trusts it without a CA Secret (skip Step 6d, and leave `destinationCACertSecretRef` out of the policy). The bearer token still protects the receiver.
+
+```bash
+helm upgrade ibm-vpc-file-pool-csi charts/ibm-vpc-file-pool-csi \
+  -n kube-system \
+  --reuse-values \
+  --set replicationReceiver.enabled=true \
+  --set replicationReceiver.pvcName=repl-destination-data \
+  --set replicationReceiver.authSecretName=repl-receiver-token \
+  --set replicationReceiver.tls.enabled=false
+```
+
+The Route is now of type `edge` instead of `passthrough`.
 
 Verify the receiver is running:
 
@@ -590,9 +643,16 @@ export RECEIVER_HOST=$(oc get route -n kube-system \
 echo "Receiver endpoint: https://${RECEIVER_HOST}"
 ```
 
+Check that the receiver answers (with Option B this also shows that the Route certificate is trusted). The first call needs no token and returns `200`. The second shows that the token is needed: `401`.
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" https://${RECEIVER_HOST}/api/v1/health
+curl -s -o /dev/null -w "%{http_code}\n" https://${RECEIVER_HOST}/api/v1/auth-check
+```
+
 ### Step 6d: Extract the CA Certificate
 
-The self-signed CA certificate must be trusted by the source cluster. Extract it from the cert-manager Secret:
+**Option A only.** (With Option B, skip this step and Step 6e's CA Secret.) The self-signed CA certificate must be trusted by the source cluster. Extract it from the cert-manager Secret:
 
 ```bash
 oc get secret ibm-vpc-file-pool-csi-receiver-certs -n kube-system \
@@ -610,7 +670,7 @@ Switch back to the source cluster context:
 oc config use-context source-cluster
 ```
 
-Create the CA certificate Secret on the source cluster:
+Create the CA certificate Secret on the source cluster (Option A only):
 
 ```bash
 oc create secret generic repl-receiver-ca -n kube-system \
@@ -648,14 +708,14 @@ spec:
   maxRetries: 3
   destinationEndpoint: "https://${RECEIVER_HOST}"
   destinationAuthSecretRef: "repl-source-token"
-  destinationCACertSecretRef: "repl-receiver-ca"
+  destinationCACertSecretRef: "repl-receiver-ca"   # Option A only: leave this line out with Option B
 EOF
 ```
 
 **What this does:**
 - Sets `destinationEndpoint` to the receiver's HTTPS URL, which triggers driver-to-driver mode
 - References the auth token Secret (`repl-source-token`) for Bearer token authentication
-- References the CA certificate Secret (`repl-receiver-ca`) for TLS verification
+- References the CA certificate Secret (`repl-receiver-ca`) for TLS verification (Option A only; with Option B the source trusts the Route's public certificate)
 - Omits `destinationNFSServer` because data is uploaded via HTTPS, not mounted via NFS
 - The controller creates Jobs that tar each SubVolume directory and PUT it to the receiver
 
@@ -673,6 +733,17 @@ dr-driver   repl-pool          5m         Active   2026-02-25T15:00:00Z
 ```
 
 > **Note:** The `DEST` column is blank because driver-to-driver mode uses `destinationEndpoint` instead of `destinationNFSServer`.
+
+**How long this takes.** Expect 10 to 15 minutes for the three volumes, not seconds:
+
+- `maxParallelSyncs: 2` starts two volumes at once. The third waits for the next check of the policy (`deferred: parallel limit` in the status).
+- The controller looks at a running cycle only on its schedule (every 5 minutes here). The data of a small volume is at the destination within a minute, but the policy shows `sync in progress` and an empty `LAST SYNC` until the next check.
+
+Follow the Jobs while you wait: `oc get jobs -n kube-system | grep repl-`. To see the per-volume status:
+
+```bash
+oc get replicationpolicy dr-driver -o json | jq -c '.status.subVolumeStatuses[] | {sv: .subVolumeName, last: .lastSyncTime, err: .lastError, bytes: .bytesSynced}'
+```
 
 Verify data arrived on the destination cluster by switching context and checking the receiver pod's NFS mount:
 
@@ -701,6 +772,41 @@ oc config use-context source-cluster
 
 ReplicationPolicy supports pre-sync and post-sync hooks that run before and after each replication cycle. Use hooks to freeze application I/O, notify external systems, or validate replicated data.
 
+Two things to do before you try the examples:
+
+1. Pause the `dr-driver` policy from Step 6, so two policies do not copy the same pool at the same time:
+
+   ```bash
+   oc annotate replicationpolicy dr-driver storage.ibmcloud.io/paused=true
+   ```
+
+2. An exec hook runs in a running pod that matches its `podSelector`. The writer pod from Step 3 is gone and had no labels. Start a pod that the hook can find. If no pod matches, the hook fails with `no pod found in <namespace> matching labels`, and with `onError: Abort` the cycle fails.
+
+   ```bash
+   cat <<EOF | oc apply -f -
+   apiVersion: v1
+   kind: Pod
+   metadata:
+     name: repl-app
+     namespace: ${REPL_NS}
+     labels:
+       app: repl-demo
+   spec:
+     containers:
+       - name: app
+         image: busybox
+         command: ["sleep", "3600"]
+         securityContext:
+           allowPrivilegeEscalation: false
+           runAsNonRoot: true
+           runAsUser: 107
+           capabilities:
+             drop: ["ALL"]
+           seccompProfile:
+             type: RuntimeDefault
+   EOF
+   ```
+
 ### Exec Hook Example: Freeze Application Before Sync
 
 ```bash
@@ -716,7 +822,7 @@ spec:
   maxRetries: 3
   destinationEndpoint: "https://${RECEIVER_HOST}"
   destinationAuthSecretRef: "repl-source-token"
-  destinationCACertSecretRef: "repl-receiver-ca"
+  destinationCACertSecretRef: "repl-receiver-ca"   # Option A only: leave this line out with Option B
   preSyncHooks:
     - name: freeze-app
       type: exec
@@ -747,10 +853,18 @@ EOF
 ```
 
 **What this does:**
-- `preSyncHooks` runs `freeze-app` before each sync -- executes a command in the first pod matching `app: repl-demo` in the `pool-tutorial-repl` namespace
+- `preSyncHooks` runs `freeze-app` before each sync -- executes a command in the first pod matching `app: repl-demo` in the `${REPL_NS}` namespace
 - If the pre-sync hook fails, `onError: Abort` cancels the sync cycle
 - `postSyncHooks` runs `thaw-app` after the sync completes
 - If the post-sync hook fails, `onError: Continue` logs the error but does not affect the sync result
+
+The pre-sync hook runs when a cycle starts, and the post-sync hook runs when the whole cycle has finished. With three volumes and one sync at a time, a cycle spans several checks of the policy, so the two hooks can be many minutes apart (see the timing note in Step 6f). Check that they ran in the controller log:
+
+```bash
+oc logs -n kube-system -l app.kubernetes.io/component=controller -c csi-controller --tail=3000 | grep -E 'Running hook|Hook (succeeded|failed)'
+```
+
+A hook that works logs `Hook succeeded` for `freeze-app` (phase `Pre`) and for `thaw-app` (phase `Post`).
 
 ### HTTP Hook Example: Notify a Webhook Endpoint
 
@@ -767,7 +881,7 @@ spec:
   maxRetries: 3
   destinationEndpoint: "https://${RECEIVER_HOST}"
   destinationAuthSecretRef: "repl-source-token"
-  destinationCACertSecretRef: "repl-receiver-ca"
+  destinationCACertSecretRef: "repl-receiver-ca"   # Option A only: leave this line out with Option B
   postSyncHooks:
     - name: notify-slack
       type: http
@@ -786,10 +900,13 @@ EOF
 - The `headers` field sets the Content-Type for the request
 - `onError: Continue` ensures a notification failure does not affect replication status
 
+The URL above is a placeholder. The Slack service answers it with `404`, so the controller log shows `Hook failed ... HTTP POST returned 404` and the cycle still finishes. Use your own webhook URL.
+
 Clean up the hook-based policies:
 
 ```bash
 oc delete replicationpolicy dr-with-hooks dr-with-http-hooks --ignore-not-found
+oc delete pod repl-app -n ${REPL_NS} --ignore-not-found
 ```
 
 ---
@@ -811,7 +928,7 @@ RECEIVER_POD=$(oc get pods -n kube-system \
 oc exec -n kube-system ${RECEIVER_POD} -- ls /data/pvcs/
 
 # Read the metadata file for one SubVolume (replace pvc-xxx with actual name)
-oc exec -n kube-system ${RECEIVER_POD} -- cat /data/pvcs/pvc-aaa11111-2222-3333-4444-555566667777/.subvolume-metadata.json
+oc exec -n kube-system ${RECEIVER_POD} -- cat /data/pvcs/pvc-xxx/.subvolume-metadata.json
 ```
 
 Example metadata output:
@@ -823,6 +940,7 @@ Example metadata output:
     "poolName": "repl-pool",
     "shareID": "r010-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
     "shareMountTargetIP": "10.240.1.10",
+    "shareExportPath": "/xxxxxxxx_xxxx_xxxx_xxxx_xxxxxxxxxxxx",
     "subPath": "/pvcs/pvc-aaa11111-2222-3333-4444-555566667777",
     "requestedGB": 5,
     "pvName": "pvc-aaa11111-2222-3333-4444-555566667777",
@@ -834,7 +952,8 @@ Example metadata output:
     "reclaimPolicy": "Delete"
   },
   "labels": {
-    "app": "repl-demo"
+    "storage.ibmcloud.io/pool": "repl-pool",
+    "storage.ibmcloud.io/share-id": "r010-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
   },
   "lastSyncTime": "2026-02-25T15:00:02Z",
   "replicationPolicy": "dr-driver"
@@ -846,8 +965,10 @@ Example metadata output:
 - `spec.pvcName` and `spec.pvcNamespace` -- the original PVC name and namespace (used by failover to recreate PVCs)
 - `spec.requestedGB` -- the PVC size to recreate
 - `spec.subPath` -- the subdirectory path within the NFS share
+- `spec.shareID`, `spec.shareMountTargetIP` and `spec.shareExportPath` -- where the volume lived on the **source** share. Failover does not use them: the DR PV points at the DR share
+- `labels` -- the labels of the SubVolume, not of the PVC
 - `lastSyncTime` -- when this SubVolume was last synced (used to calculate RPO)
-- `replicationPolicy` -- which ReplicationPolicy produced this replica
+- `replicationPolicy` -- which ReplicationPolicy produced this replica. If two policies copy the same pool, this is the one that wrote last
 
 Switch back to the source cluster:
 
@@ -861,17 +982,31 @@ oc config use-context source-cluster
 
 When the source cluster or region is unavailable, use the `kubectl failover` CLI to bring workloads online at the DR site. The CLI reads `.subvolume-metadata.json` files from the destination NFS mount and creates matching SubVolume CRs, PVs, and PVCs on the DR cluster.
 
+If the source cluster is still alive, stop replication first, so no copy arrives while you fail over (skip this if the source is lost):
+
+```bash
+oc config use-context source-cluster
+oc annotate replicationpolicy dr-driver storage.ibmcloud.io/paused=true --overwrite
+```
+
 ### Step 9a: Plan the Failover
 
-On the destination cluster, mount the destination NFS share (or exec into the receiver pod) and run:
+The tool reads the replicated folders from where the destination share is mounted. The receiver pod already mounts it at `/data`. The driver image does not contain the tool, so put the tool in the receiver pod (the binary is for Linux x86; `make build-failover` makes it, with `GOOS=linux GOARCH=amd64` on another system):
 
 ```bash
 oc config use-context dest-cluster
 
-kubectl failover plan --nfs-mount-path /data
+RECEIVER_POD=$(oc get pods -n kube-system \
+    -l app.kubernetes.io/component=replication-receiver \
+    -o jsonpath='{.items[0].metadata.name}')
+
+oc exec -i -n kube-system ${RECEIVER_POD} -- \
+    sh -c 'cat > /tmp/kubectl-failover && chmod +x /tmp/kubectl-failover' < bin/kubectl-failover
+
+oc exec -n kube-system ${RECEIVER_POD} -- /tmp/kubectl-failover plan --nfs-mount-path /data
 ```
 
-> **Note:** If running from outside the receiver pod, mount the destination NFS share locally first. If running from within the receiver pod (e.g., via `oc exec`), use `/data` as the mount path.
+> **Note:** You can also run the tool on any host that mounts the destination share over NFS (a VSI in the VPC, for example) and reaches the DR cluster's API. The commands below then read `kubectl failover ...` and `--nfs-mount-path` is where you mounted the share. [Part 13](TUTORIAL-13-FAILOVER-OF-RUNNING-VMS.md) shows that way. From the receiver pod, the tool uses the pod's own service account to talk to the cluster, so no kubeconfig is needed.
 
 Example output:
 
@@ -896,15 +1031,29 @@ To execute failover, run:
 - Lists each discoverable SubVolume with its PVC name, namespace, size, and age since last sync
 - Calculates the RPO (recovery point objective) as the age of the oldest last sync time
 
-### Step 9b: Dry-Run the Failover
+### Step 9b: Find the DR Share and Dry-Run the Failover
+
+Failover makes a PV for each volume. A PV must name its folder by the path **from the root of the DR share**. The replicated volumes are not at the root of the share: the receiver's data volume `repl-destination-data` is itself a folder on the DR pool's share, and the replicated volumes are inside it. So you need the share's address, its export path and the folder of the receiver volume:
+
+```bash
+export DR_IP=$(oc get filesharepool ${DR_POOL} -o jsonpath='{.status.shares[0].mountTargetIP}')
+export DR_EXPORT=$(oc get filesharepool ${DR_POOL} -o jsonpath='{.status.shares[0].exportPath}')
+RECV_PV=$(oc get pvc -n kube-system repl-destination-data -o jsonpath='{.spec.volumeName}')
+RECV_SUB=$(oc get subvolume ${RECV_PV} -o jsonpath='{.spec.subPath}')
+
+# The tool adds /pvcs/pvc-<uuid> to this path.
+export DR_EXPORT_PATH="${DR_EXPORT%/}${RECV_SUB}"
+echo "${DR_IP} ${DR_EXPORT_PATH}"
+```
 
 Preview what resources would be created without making changes:
 
 ```bash
-kubectl failover execute \
+oc exec -n kube-system ${RECEIVER_POD} -- /tmp/kubectl-failover execute \
     --nfs-mount-path /data \
-    --dr-pool dr-repl-pool \
-    --dr-share-ip 10.245.3.8 \
+    --dr-pool ${DR_POOL} \
+    --dr-share-ip ${DR_IP} \
+    --dr-export-path "${DR_EXPORT_PATH}" \
     --dry-run
 ```
 
@@ -912,14 +1061,9 @@ Example output:
 
 ```
 [dry-run] Would create SubVolume pvc-aaa11111-2222-3333-4444-555566667777
-[dry-run] Would create PV dr-pvc-aaa11111-2222-3333-4444-555566667777 (nfs://10.245.3.8/pvcs/pvc-aaa11111-2222-3333-4444-555566667777)
+[dry-run] Would create PV dr-pvc-aaa11111-2222-3333-4444-555566667777 (nfs://10.245.3.8/8fbb32db_4f8e_4012_b074_27fbae9536be/pvcs/pvc-cfc98075-51ab-4cdf-98e1-ca5307debf19/pvcs/pvc-aaa11111-2222-3333-4444-555566667777)
 [dry-run] Would create PVC pool-tutorial-repl/repl-app-data (bound to dr-pvc-aaa11111-2222-3333-4444-555566667777)
-[dry-run] Would create SubVolume pvc-bbb11111-2222-3333-4444-555566667777
-[dry-run] Would create PV dr-pvc-bbb11111-2222-3333-4444-555566667777 (nfs://10.245.3.8/pvcs/pvc-bbb11111-2222-3333-4444-555566667777)
-[dry-run] Would create PVC pool-tutorial-repl/repl-app-logs (bound to dr-pvc-bbb11111-2222-3333-4444-555566667777)
-[dry-run] Would create SubVolume pvc-ccc11111-2222-3333-4444-555566667777
-[dry-run] Would create PV dr-pvc-ccc11111-2222-3333-4444-555566667777 (nfs://10.245.3.8/pvcs/pvc-ccc11111-2222-3333-4444-555566667777)
-[dry-run] Would create PVC pool-tutorial-repl/repl-app-config (bound to dr-pvc-ccc11111-2222-3333-4444-555566667777)
+...
 ```
 
 **What this does:**
@@ -928,47 +1072,50 @@ Example output:
 - PVCs retain their original names and namespaces from the metadata
 - No resources are created in dry-run mode
 
+**Check the PV path.** It must end in `/pvcs/pvc-<uuid>` after the receiver's folder. Without `--dr-export-path`, the path is `/pvcs/pvc-<uuid>` from the root of the share, which is not where the receiver wrote the data, and the volume would be empty or would not mount.
+
 ### Step 9c: Execute the Failover
 
-When satisfied with the plan, execute the failover:
+The tool creates each PVC in the namespace it had on the source cluster. Make that namespace on the DR cluster first (or pass `--namespace` to put every PVC in one namespace). Then run the failover:
 
 ```bash
-kubectl failover execute \
+oc create namespace ${REPL_NS}
+
+oc exec -n kube-system ${RECEIVER_POD} -- /tmp/kubectl-failover execute \
     --nfs-mount-path /data \
-    --dr-pool dr-repl-pool \
-    --dr-share-ip 10.245.3.8
+    --dr-pool ${DR_POOL} \
+    --dr-share-ip ${DR_IP} \
+    --dr-export-path "${DR_EXPORT_PATH}"
 ```
 
 Example output:
 
 ```
+Preparing running VM disks (rolling back unfinished copies, rewinding where needed)...
 Created SubVolume pvc-aaa11111-2222-3333-4444-555566667777
 Created PV dr-pvc-aaa11111-2222-3333-4444-555566667777
 Created PVC pool-tutorial-repl/repl-app-data
-Created SubVolume pvc-bbb11111-2222-3333-4444-555566667777
-Created PV dr-pvc-bbb11111-2222-3333-4444-555566667777
-Created PVC pool-tutorial-repl/repl-app-logs
-Created SubVolume pvc-ccc11111-2222-3333-4444-555566667777
-Created PV dr-pvc-ccc11111-2222-3333-4444-555566667777
-Created PVC pool-tutorial-repl/repl-app-config
+...
 ```
 
 **What this does:**
 - Creates SubVolume CRs on the DR cluster matching the source metadata
-- Creates PVs that point to the DR share's NFS mount target IP and the original SubVolume sub-paths
+- Creates PVs that point to the DR share's NFS mount target IP and the path of each volume inside the receiver's folder
 - Creates PVCs in the original namespaces, pre-bound to the new PVs
-- All operations are idempotent -- running execute again skips already-existing resources
+- All operations are idempotent -- running execute again skips already-existing resources (if the namespace was missing, create it and run `execute` again)
 
 Optional flags:
-- `--dr-export-path /export_path` -- only for older shares in VPC access mode, which use an NFS export path. New shares use security group mode and do not need it
 - `--namespace override-ns` -- override the PVC namespace (useful when DR uses a different namespace layout)
+- `--dr-export-path` is also what you use for older shares in VPC access mode, which have an NFS export path of their own. Here it is needed for a different reason: the receiver's folder
+
+> **Note:** The PVCs that the tool makes do not name a StorageClass, so a cluster with a default StorageClass shows that class in the PVC (for example `ocs-storagecluster-ceph-rbd`). The PVC is bound to its PV by name, so this does not change where the data is.
 
 ### Step 9d: Check Failover Status
 
 Verify the failover resources were created correctly:
 
 ```bash
-kubectl failover status
+oc exec -n kube-system ${RECEIVER_POD} -- /tmp/kubectl-failover status
 ```
 
 Example output:
@@ -988,8 +1135,10 @@ pvc-ccc11111-2222-3333-4444-555566667777      repl-app-config   pool-tutorial-re
 Verify PVCs are bound:
 
 ```bash
-oc get pvc -n pool-tutorial-repl
+oc get pvc -n ${REPL_NS}
 ```
+
+To check the data, start a pod that mounts a PVC and compare a file with the source. For example, `cksum /data/payload.bin` gives the same numbers on the source volume and on the DR volume.
 
 At this point, you can deploy your application workloads on the DR cluster using the same PVC names, and they will access the replicated data.
 
@@ -1026,15 +1175,18 @@ oc config use-context source-cluster
 REPL_POOL=repl-pool
 REPL_NS=pool-tutorial-repl
 
-# 1. Delete ReplicationPolicies
-oc delete replicationpolicies --all --ignore-not-found
+# 1. Delete this tutorial's ReplicationPolicies, by name (they are cluster-wide:
+#    never use --all on a cluster that others share)
+oc delete replicationpolicy dr-driver dr-with-hooks dr-with-http-hooks --ignore-not-found
 
-# 2. Delete replication Jobs
-oc delete jobs -n kube-system -l storage.ibmcloud.io/repl-temp=true --ignore-not-found
-
-# 3. Delete replication temp PVCs/PVs
-oc delete pvc -n kube-system -l storage.ibmcloud.io/repl-temp=true --ignore-not-found
-oc delete pv -l storage.ibmcloud.io/repl-temp=true --ignore-not-found
+# 2. Delete replication Jobs, temp PVCs and temp PVs of these policies. The
+#    controller removes them when a cycle ends; check that none are left.
+#    (The label repl-temp=true marks the temp objects of EVERY policy, so do not
+#    delete by that label alone.)
+for pol in dr-driver dr-with-hooks dr-with-http-hooks; do
+    oc delete jobs,pvc -n kube-system -l storage.ibmcloud.io/repl-policy=${pol} --ignore-not-found
+    oc delete pv -l storage.ibmcloud.io/repl-policy=${pol} --ignore-not-found
+done
 
 # 4. Delete source Secrets
 oc delete secret repl-source-token -n kube-system --ignore-not-found
@@ -1073,7 +1225,7 @@ oc delete filesharepool ${REPL_POOL} --timeout=60s --ignore-not-found || {
 oc delete namespace ${REPL_NS} --timeout=60s --ignore-not-found
 
 # 11. Verify VPC shares are being deleted
-ibmcloud is shares
+ibmcloud is shares --all-resource-groups
 ```
 
 ### Destination Cluster
@@ -1081,27 +1233,29 @@ ibmcloud is shares
 ```bash
 oc config use-context dest-cluster
 
-# 1. Disable the receiver via Helm
+# 1. Delete the failover resources (if you ran failover). The tool labels the
+#    SubVolumes but not the PVs; its PVs are named dr-<SubVolume name>.
+oc delete pvc --all -n ${REPL_NS} --timeout=60s --ignore-not-found
+for sv in $(oc get subvolumes.storage.ibmcloud.io \
+    -l storage.ibmcloud.io/failover-source -o name 2>/dev/null); do
+    oc delete pv "dr-${sv#*/}" --ignore-not-found
+    oc delete "$sv" --ignore-not-found
+done
+oc delete namespace ${REPL_NS} --timeout=60s --ignore-not-found
+
+# 2. Disable the receiver via Helm
 helm upgrade ibm-vpc-file-pool-csi charts/ibm-vpc-file-pool-csi \
   -n kube-system \
   --reuse-values \
   --set replicationReceiver.enabled=false
 
-# 2. Delete destination Secrets
+# 3. Delete the destination Secret, the receiver's volume and the destination pool
 oc delete secret repl-receiver-token -n kube-system --ignore-not-found
-
-# 3. Delete destination PVC
 oc delete pvc repl-destination-data -n kube-system --ignore-not-found
+oc delete filesharepool ${DR_POOL} --timeout=120s --ignore-not-found
 
-# 4. Delete failover resources (if you ran failover)
-for sv in $(oc get subvolumes.storage.ibmcloud.io \
-    -l storage.ibmcloud.io/failover-source -o name 2>/dev/null); do
-    oc patch "$sv" --type=merge -p '{"metadata":{"finalizers":null}}'
-done
-oc delete subvolumes.storage.ibmcloud.io -l storage.ibmcloud.io/failover-source --ignore-not-found
-oc delete pv -l storage.ibmcloud.io/failover-source --ignore-not-found 2>/dev/null || true
-oc delete pvc --all -n pool-tutorial-repl --timeout=60s --ignore-not-found
-oc delete namespace pool-tutorial-repl --timeout=60s --ignore-not-found
+# 4. Verify the VPC shares are being deleted
+ibmcloud is shares --all-resource-groups
 ```
 
 ---
@@ -1122,8 +1276,8 @@ oc delete namespace pool-tutorial-repl --timeout=60s --ignore-not-found
 | Receiver token check (needs the token) | `curl -k -H "Authorization: Bearer $TOKEN" https://<receiver-route>/api/v1/auth-check` |
 | Receiver logs | `oc logs -n kube-system -l app.kubernetes.io/component=replication-receiver` |
 | Failover plan | `kubectl failover plan --nfs-mount-path <path>` |
-| Failover dry-run | `kubectl failover execute --nfs-mount-path <path> --dr-pool <pool> --dr-share-ip <ip> --dry-run` |
-| Failover execute | `kubectl failover execute --nfs-mount-path <path> --dr-pool <pool> --dr-share-ip <ip>` |
+| Failover dry-run | `kubectl failover execute --nfs-mount-path <path> --dr-pool <pool> --dr-share-ip <ip> --dr-export-path <path> --dry-run` |
+| Failover execute | `kubectl failover execute --nfs-mount-path <path> --dr-pool <pool> --dr-share-ip <ip> --dr-export-path <path>` |
 | Failover status | `kubectl failover status` |
 | List VM moments | `kubectl failover plan --nfs-mount-path <path> --list-moments` |
 | Controller logs | `oc logs -n kube-system -l app.kubernetes.io/component=controller -c csi-controller --tail=50` |

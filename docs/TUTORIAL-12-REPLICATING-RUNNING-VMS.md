@@ -21,7 +21,9 @@ How it works, in short:
 
 - Two clusters, with the driver on both: the **source** (where the VM runs) and the **destination** (the DR cluster). The clusters reach each other over HTTPS. The source cluster needs no NFS route to the destination.
 - A running VM on a pool StorageClass on the source cluster, with the guest agent (`qemu-guest-agent`) running. Without the guest agent, copies are crash consistent.
-- `oc`, `helm`, `jq`, `openssl`, and the repository checkout (for the chart).
+- `oc`, `helm`, `jq`, `openssl`, `virtctl`, and the repository checkout (for the chart). Use the chart from the same release as the driver image that runs on the destination cluster.
+- The source nodes must be able to reach the receiver's address on the destination cluster. The address is a Route on the destination cluster's ingress, which on ROKS and ROVS is a public address, so the nodes need outbound internet access.
+- A pool on the destination cluster with room for the receiver volume (Step 1) and a pool zone that exists on the destination cluster.
 
 Set the names. This tutorial calls the VM `my-vm` in the namespace `vms` and the source pool `vm-pool`:
 
@@ -112,10 +114,17 @@ helm upgrade ibm-vpc-file-pool-csi charts/ibm-vpc-file-pool-csi \
   --set replicationReceiver.enabled=true \
   --set replicationReceiver.pvcName=repl-destination-data \
   --set replicationReceiver.authSecretName=repl-receiver-token \
-  --set replicationReceiver.tls.enabled=true
+  --set replicationReceiver.tls.enabled=true \
+  --set replicationReceiver.resources.limits.memory=2Gi
 ```
 
-The chart makes a Deployment, a Service, a TLS certificate (it needs cert-manager) and, on OpenShift, a Route. Check them and get the address:
+The memory limit matters. The receiver writes the whole disk through NFS, and the kernel keeps the written pages in memory that counts against the container limit. With the default limit of `512Mi`, the receiver was killed (`OOMKilled`) during the first copy of an 11 GiB disk, and the copy could not be resumed (see the note in Step 4). With `2Gi`, the same copy ran with the memory use rising to the limit (almost all of it cache) and no restart.
+
+The chart makes a Deployment, a Service, a TLS certificate (it needs cert-manager) and, on OpenShift, a Route.
+
+**No cert-manager?** A new ROKS or ROVS cluster has none, and the command above then fails with `no matches for kind "Certificate" in version "cert-manager.io/v1"` (nothing is changed). Use the Route's TLS instead: set `--set replicationReceiver.tls.enabled=false`. The Route then ends the TLS with the cluster's ingress certificate, which is signed by a public CA. The source trusts it without a CA Secret, so skip the `repl-receiver-ca` Secret below and leave `destinationCACertSecretRef` out of the policy in Step 3. See [Part 6, Step 6c](TUTORIAL-06-REPLICATION-AND-FAILOVER.md#step-6c-enable-the-receiver-via-helm).
+
+Check the receiver and get the address:
 
 ```bash
 dr get pods -n kube-system -l app.kubernetes.io/component=replication-receiver
@@ -125,12 +134,14 @@ echo https://${RECEIVER_HOST}
 
 **Expected:** one pod `1/1 Running`, and a host name.
 
-Copy the CA certificate and the token to the **source** cluster:
+Copy the token (and, if the receiver has its own certificate, the CA certificate) to the **source** cluster:
 
 ```bash
+# Only with the receiver's own certificate (cert-manager):
 dr get secret ibm-vpc-file-pool-csi-receiver-certs -n kube-system -o jsonpath='{.data.ca\.crt}' | base64 -d > /tmp/receiver-ca.crt
-
 src create secret generic repl-receiver-ca -n kube-system --from-file=ca.crt=/tmp/receiver-ca.crt
+
+# Always:
 src create secret generic repl-source-token -n kube-system --from-literal=token="${REPL_TOKEN}"
 ```
 
@@ -152,7 +163,7 @@ spec:
   sourcePoolName: ${SRC_POOL}
   destinationEndpoint: https://${RECEIVER_HOST}
   destinationAuthSecretRef: repl-source-token
-  destinationCACertSecretRef: repl-receiver-ca
+  destinationCACertSecretRef: repl-receiver-ca   # leave this line out if the Route provides the TLS
   destinationBasePath: /repl
   schedule: 15m
   maxRetries: 3
@@ -181,6 +192,10 @@ The phase of a copy is `Copying` while QEMU writes the staging file, and `Sendin
 
 **Expected after the first copy:** every disk of the VM has the same `copyMoment`, `consistency` is `FileSystemConsistent`, and `vmCopy` is empty.
 
+Plan on this: in a lab test, a 12 GiB root disk and a 2 GiB data disk took 10 minutes to copy at 20 MB/s, and 4 more minutes to send. The first status can appear several minutes after you create the policy.
+
+> **If a copy stays in `Sending` for a long time** and `lastError` is empty, look at the Jobs: `src get jobs -n kube-system | grep vm-to-dr`. A Job in `Failed` state means the send failed. Read the reason from a pod while it runs (`src logs -n kube-system <pod>`). If the receiver was restarted during an upload (for example `OOMKilled`), the receiver may answer `the upload record file is damaged`, and the copy cannot continue by itself. What worked in the lab to start over: delete the policy, delete its Jobs and temporary PVCs and PVs (see Clean up), delete the folder `<receiver volume>/repl` on the receiver, delete the `.repl-staging-*` file in the source volumes, restart the VM (this drops the change list), and make the policy again.
+
 `consistency` can also be `CrashConsistent`. Then `consistencyReason` says why, for example that the guest agent did not answer. A VM that starts from a crash consistent copy may need a file-system check, as after a power loss.
 
 ---
@@ -190,11 +205,11 @@ The phase of a copy is `Copying` while QEMU writes the staging file, and `Sendin
 Write something in the guest, and wait for the next cycle (15 minutes):
 
 ```bash
-virtctl ssh -n ${NS} cloud-user@vmi/${VM} --kubeconfig ${SRC_KUBECONFIG} -c 'head -c 50000000 /dev/urandom | sudo tee /var/tmp/big >/dev/null; sync'
+KUBECONFIG=${SRC_KUBECONFIG} virtctl ssh -n ${NS} cloud-user@vmi/${VM} -c 'head -c 50000000 /dev/urandom | sudo tee /var/tmp/big >/dev/null; sync'
 src get replicationpolicy vm-to-dr -o json | jq -c '.status.subVolumeStatuses[] | {sv: .subVolumeName[0:16], moment: .copyMoment, bytes: .bytesSynced, points: .restorePoints, oldest: .oldestRestorePoint}'
 ```
 
-Change `cloud-user` to the user of your guest image.
+Change `cloud-user` to the user of your guest image. Set the cluster with the `KUBECONFIG` variable, as above. With `virtctl ssh --kubeconfig ...` the connection helper reads the default kubeconfig instead, and the command fails with `virtualmachineinstance ... "my-vm" not found`. If `ssh` says `Too many authentication failures`, add `-i <key> -t "-o IdentitiesOnly=yes"`.
 
 **Expected:** the second copy sends far less than the disk size (about the 50 MB you wrote, plus whatever the guest wrote). `restorePoints` is now `1`, and `oldestRestorePoint` is the first moment. Each further copy adds a restore point, until `restorePointKeepHours` passes.
 
@@ -221,7 +236,14 @@ On the source cluster:
 
 ```bash
 src delete replicationpolicy vm-to-dr
-src delete secret -n kube-system repl-receiver-ca repl-source-token
+src delete secret -n kube-system repl-receiver-ca repl-source-token --ignore-not-found
+```
+
+Delete the temporary objects of a policy if any are left (the controller removes them when a copy ends). Use the policy name, because other policies have temporary objects too:
+
+```bash
+src delete jobs,pvc -n kube-system -l storage.ibmcloud.io/repl-policy=vm-to-dr --ignore-not-found
+src delete pv -l storage.ibmcloud.io/repl-policy=vm-to-dr --ignore-not-found
 ```
 
 On the destination cluster, keep the receiver and the data if you go on to [Part 13](TUTORIAL-13-FAILOVER-OF-RUNNING-VMS.md). To remove them:
