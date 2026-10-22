@@ -14,6 +14,8 @@ Status: **built, Experimental.** Tested by hand on rovslab on 21 October 2026 (r
    **Red Hat does not support this setting**, and `HyperConverged` then reports `TaintedConfiguration=True`.
 3. Take a snapshot from the console's VM Snapshots tab, or with a `VirtualMachineSnapshot`. The VolumeSnapshots are ready at once.
 
+The console's Pools and Snapshots pages show whether instant snapshots are on, and which VMs have them.
+
 To stop: delete the VMs' snapshots (`kubectl pool-snapshots flatten <vm> -n <namespace>` for each VM), then remove the operation from the annotation. A VM with snapshots does not start while the gate is off. The chart never removes the gate, not when you uninstall and not when you set `vmSnapshots.enableSidecarGate=false`, so turning it off is always a step you take on purpose.
 
 ## In one paragraph
