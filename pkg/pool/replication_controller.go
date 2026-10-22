@@ -93,6 +93,10 @@ type ReplicationController struct {
 	// by sorting SubVolumes oldest-first when parallelism limits apply.
 	lastSubVolumeSyncTimes map[string]time.Time
 
+	// lastReceiverChecks tracks when each receiver-mode policy's receiver was last
+	// checked, keyed by policy name.
+	lastReceiverChecks map[string]time.Time
+
 	// results holds, per policy, the results of volumes whose Job finished
 	// in the current cycle. See processPolicy.
 	results map[string]map[string]cycleResult
@@ -113,6 +117,7 @@ func NewReplicationController(k8sClient k8s.Client, directClient client.Client, 
 		interval:               DefaultReplicationInterval,
 		lastSyncTimes:          make(map[string]time.Time),
 		lastSubVolumeSyncTimes: make(map[string]time.Time),
+		lastReceiverChecks:     make(map[string]time.Time),
 		results:                make(map[string]map[string]cycleResult),
 		nowFunc:                time.Now,
 	}
@@ -176,6 +181,14 @@ func (rc *ReplicationController) processOnce(ctx context.Context) {
 
 	for i := range policies {
 		policy := &policies[i]
+
+		// Check the receiver of a receiver-mode policy: at once for a new policy, then
+		// once per schedule. The result only explains; it never stops a sync.
+		checkEvery := DefaultReplicationInterval
+		if d, perr := time.ParseDuration(policy.Spec.Schedule); perr == nil {
+			checkEvery = d
+		}
+		rc.maybeCheckReceiver(ctx, policy, checkEvery)
 
 		// Handle pause/resume via annotation.
 		annotationPaused := policy.Annotations[pausedAnnotation] == "true"

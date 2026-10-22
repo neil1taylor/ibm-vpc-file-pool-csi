@@ -1,4 +1,5 @@
 import {
+  describeReceiverReachable,
   describeVolumeStatus,
   destinationSpecFields,
   replicationDestination,
@@ -180,5 +181,38 @@ describe('describeVolumeStatus', () => {
     expect(d.nextCopy).toBe('full');
     const e = describeVolumeStatus({ ...base, copyMoment: '2026-10-20T10:00:00Z', consistency: 'FileSystemConsistent', vmChangeList: 'repl-abc' });
     expect(e.nextCopy).toBe('changes only');
+  });
+});
+
+describe('describeReceiverReachable', () => {
+  const rp = (spec: object, conditions?: object[]) =>
+    ({ spec, status: { conditions } }) as never;
+
+  it('says nothing for a direct NFS policy', () => {
+    expect(describeReceiverReachable(rp({ destinationNFSServer: '10.0.0.5' }))).toBeNull();
+  });
+
+  it('says Checking until the controller has a result', () => {
+    expect(describeReceiverReachable(rp({ destinationEndpoint: 'https://r' }))).toEqual({
+      label: 'Checking...',
+      color: 'grey',
+      detail: '',
+    });
+  });
+
+  it('says Reachable when the condition is True', () => {
+    const view = describeReceiverReachable(
+      rp({ destinationEndpoint: 'https://r' }, [{ type: 'ReceiverReachable', status: 'True', message: 'ok' }]),
+    );
+    expect(view).toEqual({ label: 'Reachable', color: 'green', detail: '' });
+  });
+
+  it('says Not reachable with the reason in plain words when it is False', () => {
+    const view = describeReceiverReachable(
+      rp({ destinationEndpoint: 'https://r' }, [
+        { type: 'ReceiverReachable', status: 'False', reason: 'TokenRefused', message: 'token refused' },
+      ]),
+    );
+    expect(view).toEqual({ label: 'Not reachable', color: 'red', detail: 'token refused' });
   });
 });

@@ -1,11 +1,12 @@
 {{- if and .Values.metrics.alerts.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PrometheusRule") }}
 {{- $a := .Values.metrics.alerts }}
+{{- $ruleNS := ternary .Values.metrics.monitoring.namespace .Release.Namespace (not (empty (include "ibm-vpc-file-pool-csi.uwm" .))) }}
 {{- $job := printf "%s-metrics" (include "ibm-vpc-file-pool-csi.fullname" .) }}
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ $ruleNS }}
   labels:
     {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
 spec:
@@ -78,10 +79,75 @@ spec:
               Share {{`{{ $labels.share }}`}} of pool {{`{{ $labels.pool }}`}} has
               {{`{{ printf "%.0f" $value }}`}}% of its size allocated.
               Volumes placed on it can fail.
+    # Per-share rules use the node agents' metrics. A share is mounted on several
+    # nodes, so used space takes the max over nodes (they all see the same share)
+    # and traffic sums over nodes (each node does its own operations). Idle shares
+    # and missing series give no result: the divisions drop zero denominators.
+    - name: vpc-file-pool-csi.shares
+      rules:
+        - alert: VPCFilePoolShareUsedHigh
+          expr: |
+            max by (pool, share) (vpc_file_pool_share_used_bytes)
+            / on (pool, share) max by (pool, share) (vpc_file_pool_share_size_bytes > 0) * 100
+            > {{ $a.shareUsedWarning }}
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "A share of a VPC file pool is filling up"
+            description: >-
+              Share {{`{{ $labels.share }}`}} of pool {{`{{ $labels.pool }}`}} is
+              {{`{{ printf "%.0f" $value }}`}}% full (bytes written). Writes fail when it is full.
+        - alert: VPCFilePoolShareUsedCritical
+          expr: |
+            max by (pool, share) (vpc_file_pool_share_used_bytes)
+            / on (pool, share) max by (pool, share) (vpc_file_pool_share_size_bytes > 0) * 100
+            > {{ $a.shareUsedCritical }}
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "A share of a VPC file pool is almost full"
+            description: >-
+              Share {{`{{ $labels.share }}`}} of pool {{`{{ $labels.pool }}`}} is
+              {{`{{ printf "%.0f" $value }}`}}% full (bytes written). Writes fail when it is full.
+        - alert: VPCFilePoolShareNFSLatencyHigh
+          expr: |
+            (
+              sum by (pool, share, op) (rate(vpc_file_pool_share_nfs_execute_seconds_total{op=~"read|write"}[5m]))
+              / (sum by (pool, share, op) (rate(vpc_file_pool_share_nfs_operations_total{op=~"read|write"}[5m])) > 0)
+              > {{ $a.nfsLatencySeconds }}
+            )
+            and on (pool, share, op)
+            sum by (pool, share, op) (rate(vpc_file_pool_share_nfs_operations_total{op=~"read|write"}[5m])) >= {{ $a.nfsMinOpsPerSecond }}
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "NFS requests on a VPC file pool share are slow"
+            description: >-
+              Share {{`{{ $labels.share }}`}} of pool {{`{{ $labels.pool }}`}} takes
+              {{`{{ $value | humanizeDuration }}`}} per {{`{{ $labels.op }}`}} request.
+              Check the share's IOPS and the node network.
+{{- if $a.shareIOPSWarning }}
+        - alert: VPCFilePoolShareIOPSHigh
+          expr: |
+            sum by (pool, share) (rate(vpc_file_pool_share_nfs_operations_total{op=~"read|write"}[5m]))
+            > {{ $a.shareIOPSWarning }}
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "A VPC file pool share is near its IOPS limit"
+            description: >-
+              Share {{`{{ $labels.share }}`}} of pool {{`{{ $labels.pool }}`}} does
+              {{`{{ printf "%.0f" $value }}`}} read and write operations a second, over the
+              {{ $a.shareIOPSWarning }} set in metrics.alerts.shareIOPSWarning.
+{{- end }}
     - name: vpc-file-pool-csi.service
       rules:
         - alert: VPCFilePoolControllerDown
-          expr: absent(up{job="{{ $job }}",namespace="{{ .Release.Namespace }}"} == 1)
+          expr: absent(up{job="{{ $job }}",namespace="{{ $ruleNS }}"} == 1)
           for: 5m
           labels:
             severity: critical

@@ -115,6 +115,20 @@ func TestMeasureBackup_ReadsTheSizeFromTheTerminationMessage(t *testing.T) {
 	}
 }
 
+func TestMeasureBackup_CountsHardLinkedFilesOnce(t *testing.T) {
+	r, c := newShareJobTestRunner()
+	_, _, _ = r.MeasureBackup(context.Background(), "bk-du", testShareA, testBackupPath, testMomentsPath)
+	script := jobScript(getShareJob(t, c, "bk-du"))
+	// Each moment of a plain volume is a folder of hard links to the files in
+	// the backup folder. One du run over both folders counts each file once;
+	// a run for each folder would count every file twice.
+	for _, line := range strings.Split(script, "\n") {
+		if strings.Contains(line, "du -sk") && !strings.Contains(line, `"$@"`) {
+			t.Errorf("du must run once over all folders (du -sk \"$@\"), got %q:\n%s", line, script)
+		}
+	}
+}
+
 func TestMeasureBackup_AnUnreadableSizeIsAnError(t *testing.T) {
 	r, c := newShareJobTestRunner()
 	ctx := context.Background()

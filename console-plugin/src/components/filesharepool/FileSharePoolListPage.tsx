@@ -28,6 +28,7 @@ import PoolPhase from '../common/PoolPhase';
 import InlineCapacityBar from '../common/InlineCapacityBar';
 import DeleteModal from '../common/DeleteModal';
 import { ROUTES } from '../../constants';
+import { columnInfo } from '../../utils/column-help';
 
 /** IOPS display: spec.iops if set; otherwise the VPC chooses the IOPS when it creates the share. */
 export function getIOPS(pool: FileSharePool): string {
@@ -190,7 +191,7 @@ const FileSharePoolListPage: React.FC = () => {
                 <Th sort={getSortParams(4)}>Shares</Th>
                 <Th>Capacity</Th>
                 <Th sort={getSortParams(6)}>PVCs</Th>
-                <Th sort={getSortParams(7)}>Phase</Th>
+                <Th sort={getSortParams(7)} info={columnInfo('poolPhase')}>Phase</Th>
                 <Th sort={getSortParams(8)}>Age</Th>
                 <Th></Th>
               </Tr>

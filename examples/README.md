@@ -5,7 +5,7 @@ Ready-to-use examples for common deployment patterns. Each example can be applie
 ## Prerequisites
 
 Before using these examples, ensure:
-1. The CSI driver is installed ([INSTALL.md](../INSTALL.md))
+1. The CSI driver is installed ([INSTALL.md](../docs/INSTALL.md))
 2. At least one `FileSharePool` is `Ready` (the `basic/` example creates one)
 3. A StorageClass exists for the pool (the `basic/` example creates one)
 

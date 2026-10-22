@@ -47,6 +47,7 @@ import {
   destinationSpecFields,
   vmCopySpecFields,
 } from '../../utils/replication-helpers';
+import RunningVMCopyNote from '../common/RunningVMCopyNote';
 
 const SCHEDULE_PRESETS = [
   { label: '5m', value: '5m' },
@@ -452,6 +453,10 @@ const ReplicationPolicyCreatePage: React.FC = () => {
               }}
             />
           </FieldPopover>
+        </StackItem>
+
+        <StackItem>
+          <RunningVMCopyNote />
         </StackItem>
 
         <StackItem>

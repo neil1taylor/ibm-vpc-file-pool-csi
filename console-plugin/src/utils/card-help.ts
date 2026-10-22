@@ -22,7 +22,11 @@ export const CARD_HELP = {
   },
   activeAlerts: {
     title: 'Active Alerts',
-    text: 'Pools that are not Ready, listed by name; normal is 0. This card does not show Prometheus alerts: see Observe, Alerting, for those. Open a listed pool to see why it is not Ready.',
+    text: 'Pools that are not Ready, listed by name; normal is 0. Prometheus alerts are in the Firing Alerts card. Open a listed pool to see why it is not Ready.',
+  },
+  firingAlerts: {
+    title: 'Firing Alerts',
+    text: 'Alerts from the driver alert rules that are firing now in the cluster Prometheus; normal is none. Each alert names what is wrong, such as a nearly full share or late replication. Observe, Alerting, in the console shows all alerts and their history.',
   },
   allocationRate: {
     title: 'Allocation Rate',
@@ -54,7 +58,7 @@ export const CARD_HELP = {
   },
   consecutiveFailures: {
     title: 'Consecutive Failures',
-    text: 'How many syncs in a row have failed, for each replication policy; normal is 0. The next sync tries again by itself. If the number keeps rising, open the policy and read its last error.',
+    text: 'How many syncs in a row have failed, for each replication policy; normal is 0. When a policy reaches its retry limit (3 by default), it pauses and stops syncing. Open the policy, read its last error, fix the cause, then resume it.',
   },
   snapshots: {
     title: 'Snapshots',
@@ -123,6 +127,14 @@ export const CARD_HELP = {
   replicationSyncRateOverTime: {
     title: 'Replication Sync Rate',
     text: 'Sync runs per minute for all replication policies, split by result, over the chosen time range. Failed runs that do not stop need a look at the policy.',
+  },
+  backupPolicy: {
+    title: 'Backup Policy',
+    text: 'Which volumes are backed up, how often, for how long, and into which snapshot pool. A VM is picked through its disks: if one disk matches, all its disks are backed up.',
+  },
+  backupVolumes: {
+    title: 'Backed-up Volumes',
+    text: 'Each volume the policy backs up, with the restore points you can go back to. A volume marked "no longer backed up" keeps its backups until the keep time has passed.',
   },
 } satisfies Record<string, CardHelp>;
 

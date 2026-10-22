@@ -1,5 +1,6 @@
 import React from 'react';
-import { Alert, Card, CardBody, CardTitle, Label, Spinner } from '@patternfly/react-core';
+import { Alert, Card, CardBody, Label, Spinner } from '@patternfly/react-core';
+import CardHelpTitle from '../common/CardHelpTitle';
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import { FiringAlert } from '../../utils/firing-alerts';
 
@@ -16,7 +17,7 @@ const severityColor = (severity: string): 'red' | 'orange' | 'grey' =>
 /** Alerts of the driver that Prometheus reports as firing. */
 const FiringAlertsCard: React.FC<Props> = ({ loading, error, rulesLoaded, firing }) => (
   <Card isFullHeight>
-    <CardTitle>Firing Alerts</CardTitle>
+    <CardHelpTitle helpKey="firingAlerts" />
     <CardBody>
       {loading ? (
         <Spinner size="md" />

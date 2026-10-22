@@ -191,8 +191,8 @@ const CloneVolumePage: React.FC = () => {
         {showVMWarning && (
           <StackItem>
             <Alert variant="warning" title="A VM uses this claim" isInline>
-              A clone is a plain file copy made while the VM is running, so the cloned disk may not boot. Safe copies
-              of running VMs come in step 7 of the VM-safe replication spec.
+              A clone is a plain file copy made while the VM is running, so the cloned disk may not boot. For a safe
+              copy, take a snapshot of the VM and restore it: a snapshot copies the disk at one moment.
             </Alert>
           </StackItem>
         )}
