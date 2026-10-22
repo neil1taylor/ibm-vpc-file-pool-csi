@@ -19,6 +19,8 @@ To make a release:
 
 ## [Unreleased]
 
+- **Console: the delete backups dialog gives an administrator the safe command.** When the user lacks the rights, the dialog now shows `kubectl backup delete --policy <policy> --pvc <namespace>/<name>`, which measures first and asks for the typed claim name. Before, it showed raw YAML that removed the backups with neither step.
+
 - **Receiver check on the policy: `ReceiverReachable` (issue #46, item 4).** For a policy in driver-to-driver mode, the replication controller now checks the receiver (it answers, the certificate is trusted, the token is accepted) when it first sees the policy and then once per schedule, and sets the `ReceiverReachable` condition on `status.conditions` with a plain reason such as "certificate not trusted" or "token refused". The Replication Policies list has a Receiver column with help text, and the policy page a Receiver Status line. A failing check does not stop replication. The controller reads the two Secrets in `kube-system` with the rights it already has.
 - **Console: the VM warnings on the restore and clone pages are correct again.** The restore page no longer says a snapshot of a running VM may not boot; it says the disk was copied at one moment, and what a crash consistent copy means. The clone page points to a VM snapshot for a safe copy.
 
