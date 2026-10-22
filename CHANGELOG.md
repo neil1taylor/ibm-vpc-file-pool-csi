@@ -31,6 +31,12 @@ To make a release:
 
 - **Sidecar gate Job has fewer rights (issue #154).** The hook Job that `vmSnapshots.enableSidecarGate` runs may now only get and update the `HyperConverged` object named `kubevirt-hyperconverged` in `openshift-cnv`; before, it could list and update every `HyperConverged`. SECURITY.md now says what the gate opens up.
 
+### Security
+- **Image hardening (issue #90).** The driver image now runs as user 65532 (`USER` in the Dockerfile). The chart sets security contexts: the controller is non-root with no privilege escalation, all capabilities dropped and the `RuntimeDefault` seccomp profile; its sidecars get no escalation and no capabilities; the console plugin and replication receiver get the same limits. The node agent explicitly stays root and privileged (it mounts NFS), and Jobs the controller creates keep the users they already set. All of it can be overridden with `controller.securityContext`, `controller.podSecurityContext`, `controller.sidecarSecurityContext`, `node.securityContext`, `replicationReceiver.securityContext` and `consolePlugin.securityContext`. **Not lab tested.** Off OpenShift the chart adds `fsGroup: 65532` to the controller so it can read the webhook key.
+
+### Changed
+- **The default image tag is `v` plus the chart `appVersion`, not `latest` (issue #90).** `image.tag` and `consolePlugin.image.tag` are empty by default. `make deploy`-style installs that set `--set image.tag=...` are unchanged. The chart `appVersion` must be set at release (it is `0.1.0` until then), so an install without `image.tag` before a release asks for an image that does not exist.
+
 ### Fixed
 - `kubectl backup delete`, found by the lab test of issue #124: a shell whose input is `/dev/null` (a script, CI) counted as interactive, so the command measured the backup and then asked a question nobody could answer, instead of stopping at once as documented; and the size it showed counted every hard-linked file twice for plain volumes. The size is now one `du` run over both folders. `BACKUP-RECOVERY.md` lists every right the command needs.
 - **Dashboard numbers that did not match their labels.** The Allocation Rate cards (dashboard and pool page) showed new volumes per second under a "/hr" label; they now show per hour. The Snapshots card counted every snapshot operation, including deletes and failures; it now counts snapshots taken. The Clones card counted failed clones too, and labelled the median clone time "Avg duration"; it now counts finished clones and says "Median duration".

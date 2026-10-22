@@ -42,7 +42,7 @@ reg=$(job test-ibm-vpc-file-pool-csi-console-plugin-register "$out")
 expect_contains "register Job runs the register mode" "$reg" '"--mode=register-console-plugin"'
 expect_contains "register Job names the plugin" "$reg" '"--console-plugin-name=ibm-vpc-file-pool-csi"'
 expect_contains "register Job runs after install and upgrade" "$reg" '"helm.sh/hook": post-install,post-upgrade'
-expect_contains "register Job uses the driver image" "$reg" 'image: "de.icr.io/ibm-vpc-file-pool-csi/driver:latest"'
+expect_contains "register Job uses the driver image" "$reg" 'image: "de.icr.io/ibm-vpc-file-pool-csi/driver:v'
 unreg=$(job test-ibm-vpc-file-pool-csi-console-plugin-unregister "$out")
 expect_contains "unregister Job runs the unregister mode" "$unreg" '"--mode=unregister-console-plugin"'
 expect_contains "unregister Job runs before delete" "$unreg" '"helm.sh/hook": pre-delete'

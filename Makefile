@@ -41,6 +41,7 @@ test-scripts:
 	bash test/chart/test-doc-links.sh
 	bash test/chart/test-vm-snapshots.sh
 	bash test/chart/test-clusterrole.sh
+	bash test/chart/test-hardening.sh
 	bash test/chart/test-node-metrics.sh
 	bash test/chart/test-uwm.sh
 	bash test/chart/test-console-plugin.sh
