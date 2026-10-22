@@ -365,8 +365,8 @@ func (bc *BackupController) ensureBrowseSecret(ctx context.Context, bb *v1alpha1
 		return err
 	}
 	raw := make([]byte, 32)
-	if _, err := rand.Read(raw); err != nil {
-		return err
+	if _, rerr := rand.Read(raw); rerr != nil {
+		return rerr
 	}
 	cert, key, err := browse.NewSessionCert(bc.browse.MaxLife + 30*time.Minute)
 	if err != nil {

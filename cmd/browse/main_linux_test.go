@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/browse"
 	"net"
 	"net/http"
 	"os"
@@ -14,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/browse"
 )
 
 func TestRunServesAndEndsWhenIdle(t *testing.T) {

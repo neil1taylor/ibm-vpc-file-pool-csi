@@ -1,15 +1,15 @@
 package main
 
 import (
-	"time"
-
 	"bytes"
 	"context"
-	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/browse"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/browse"
 )
 
 func writeToken(t *testing.T, tok string) string {

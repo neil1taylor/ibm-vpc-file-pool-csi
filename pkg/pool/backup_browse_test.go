@@ -498,8 +498,8 @@ func TestBrowse_AReusedNameNeverGetsTheOldSessionsSecretOrHelper(t *testing.T) {
 
 	// The record is deleted before the controller tidies up, and a new one with
 	// the same name is made for another namespace's volume.
-	if err := e.c.Delete(e.ctx, e.bb("x")); err != nil {
-		t.Fatal(err)
+	if derr := e.c.Delete(e.ctx, e.bb("x")); derr != nil {
+		t.Fatal(derr)
 	}
 	e.open("x", func(b *v1alpha1.BackupBrowse) {
 		b.UID = "uid-y"
