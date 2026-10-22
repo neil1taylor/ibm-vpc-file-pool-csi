@@ -333,7 +333,7 @@ The chart ships these alerts as a `PrometheusRule` (on by default; it is made on
 | `VPCFilePoolExportLate` / `ExportMomentWaiting` | warning | The COS copy is over 12 h late |
 | `VPCFilePoolSnapshotPoolNearlyFull` / `Full` | warning / critical | A snapshot pool share is above 75% / 85% |
 
-**Per-share NFS latency and IOPS are not available.** The driver does not measure them: the node agent only mounts shares and keeps no read or write counters, and the controller never touches the NFS data. The two per-share metrics show how much of a share is promised to PVCs, not how much is written or how fast it answers. Use the node exporter's NFS client metrics for latency and IOPS until the node agent reports them.
+**Per-share NFS latency and IOPS** come from the node agents, which read the NFS client counters of each staged share (the `vpc_file_pool_share_nfs_*` metrics). The two alerts for them judge only a share that has real traffic.
 
 **Console dashboard.** The dashboard's "Firing Alerts" card asks the cluster Prometheus (`/api/prometheus`) for firing alerts named `VPCFilePool*`. It also asks which alert rules that Prometheus has loaded; if it has none of the driver's, the card says so and does not claim that no alert is firing. OpenShift's platform Prometheus loads rules only from namespaces it watches (`openshift-*`, or `kube-*` with the `openshift.io/cluster-monitoring` label); if the chart is installed in another namespace, the rules need user workload monitoring, which the console queries through a different route that this card does not use.
 
