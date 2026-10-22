@@ -33,7 +33,6 @@ import {
 import { errorMessage } from '../../utils/k8s-objects';
 import { cleanUpShareObjects, createShareObjects, useShareJob } from '../../utils/use-share-job';
 import { humanizeBytes } from '../../utils/resource-helpers';
-import { toYAML } from '../../utils/yaml-lite';
 import NoAccessNote from '../common/NoAccessNote';
 
 interface Props {
@@ -149,7 +148,10 @@ const DeleteBackupsDialog: React.FC<Props> = ({ policy, volume, onClose }) => {
 
   const moments = momentsCount(volume);
   const working = step === 'start' || step === 'measuring' || step === 'removing';
-  const adminYaml = remove ? [remove.pv, remove.pvc, remove.job].map((o) => toYAML(o)).join('---\n') : undefined;
+  const adminCommand = {
+    text: `kubectl backup delete --policy ${policy.metadata?.name} --pvc ${claim}`,
+    note: 'It measures first, shows what would go, and asks them to type the claim name before anything is removed.',
+  };
 
   let body: React.ReactNode;
   if (refusal || shareError || !folders) {
@@ -162,7 +164,7 @@ const DeleteBackupsDialog: React.FC<Props> = ({ policy, volume, onClose }) => {
     body = (
       <NoAccessNote
         right={`make and remove Jobs, claims and volumes in ${DRIVER_NAMESPACE} (missing: ${missing.join(', ')})`}
-        yaml={adminYaml}
+        command={adminCommand}
       />
     );
   } else if (step === 'error') {

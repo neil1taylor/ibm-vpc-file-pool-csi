@@ -74,7 +74,7 @@ cdi:
   copyPodMemoryLimit: 8Gi
 
 vmSnapshots:
-  # How snapshots of KubeVirt VM disks are made. See VM-INSTANT-SNAPSHOTS.md.
+  # How snapshots of KubeVirt VM disks are made. See docs/VM-INSTANT-SNAPSHOTS.md.
   # auto: instant snapshots (a new overlay file per snapshot, nothing copied)
   #   where the KubeVirt Sidecar feature gate is on, and a copy elsewhere. It
   #   adds a webhook that gives each VM with snapshots a hook when it starts.
@@ -178,7 +178,7 @@ metrics:
   # makes its own namespace for the ServiceMonitors, the PrometheusRule and Services
   # whose Endpoints the controller keeps. OpenShift's user workload monitoring must be
   # on (enableUserWorkload: true in openshift-monitoring/cluster-monitoring-config);
-  # the chart never changes that. See MONITORING.md.
+  # the chart never changes that. See docs/MONITORING.md.
   monitoring:
     # auto: use it when the cluster has the Prometheus Operator API and the OpenShift
     # console and webhook.certProvider=openshift. enabled: always (needs certProvider

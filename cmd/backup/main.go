@@ -30,6 +30,7 @@ import (
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/pool"
 
+	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -210,11 +211,17 @@ func buildClient(kubeconfig string) (client.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to build kubeconfig: %w", err)
 	}
+	return client.New(config, client.Options{Scheme: newScheme()})
+}
+
+// newScheme holds every type the backup command reads or writes.
+func newScheme() *runtime.Scheme {
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
+	_ = appsv1.AddToScheme(scheme)
 	_ = batchv1.AddToScheme(scheme)
 	_ = v1alpha1.AddToScheme(scheme)
-	return client.New(config, client.Options{Scheme: scheme})
+	return scheme
 }
 
 // run does one command. args[0] is the subcommand.

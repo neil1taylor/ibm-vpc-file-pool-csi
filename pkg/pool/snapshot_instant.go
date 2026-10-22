@@ -51,7 +51,7 @@ const (
 // before the VM starts. It opens each disk named in the disk-tops annotation
 // as the top qcow2 file of its chain instead of the raw disk.img.
 const VMHookScript = `#!/usr/bin/env python3
-# Written by the ibm-vpc-file-pool-csi driver. See VM-INSTANT-SNAPSHOTS.md.
+# Written by the ibm-vpc-file-pool-csi driver. See docs/VM-INSTANT-SNAPSHOTS.md.
 import json, re, sys
 args = dict(zip(sys.argv[1::2], sys.argv[2::2]))
 vmi, domain = json.loads(args["--vmi"]), args["--domain"]
