@@ -19,6 +19,7 @@ import { cosRestorePath, describeExport, exportRepoOf } from '../../utils/backup
 import { exportStateText } from '../../utils/backup-helpers';
 import { columnInfo } from '../../utils/column-help';
 import COSContents from './COSContents';
+import ExportSetupGuide from './ExportSetupGuide';
 
 const EXPORT_COLOR = { ok: 'green', warning: 'orange', danger: 'red' } as const;
 const NOT_EXPORTING = 'This policy does not export to COS, so there is nothing to list.';
@@ -97,6 +98,9 @@ const BackupCOSTab: React.FC<{ policy: BackupPolicy }> = ({ policy }) => {
           </Card>
         </StackItem>
       )}
+      <StackItem>
+        <ExportSetupGuide policy={policy} />
+      </StackItem>
       <StackItem>
         <Card>
           <CardTitle>What is in the bucket</CardTitle>

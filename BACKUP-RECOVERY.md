@@ -450,6 +450,14 @@ The **COS** tab of a policy page shows what `kubectl backup cos-list` shows, wit
 - **Export state of each volume.** When the newest copy in COS was sent and how big it was, or the export error. A failed export is tried again by itself and never stops the local backups.
 - **List COS contents.** Runs the same read-only Job as `cos-list` in the driver namespace and shows the volumes and their moments. It needs the right to make and remove a Job there and to list pods; without it the button is off, the missing right is named and the Job YAML is shown for an administrator. A long list is cut: enter one volume to see all its moments.
 
+**Set up the export** is a guide at the top of the COS tab. The console does not run `cos-setup`: it needs your own IBM Cloud login, and the console has none and must not hold an IBM Cloud API key. So the guide shows the command with your names filled in and what each flag means (run it with `--dry-run` first). After it has run, you paste what it wrote:
+
+1. The contents of the two Secret files (the COS key and the wrapped backup key), and the Key Protect API key. The console makes the Secrets in the driver namespace from them. It sends each once, never reads a Secret back, and leaves a Secret that exists already as it is. It refuses Secrets in another namespace, Secrets with other keys, and the readable backup key (keep that outside IBM Cloud).
+2. The `spec.export` block that the command printed. The console checks it with the same rules as the admission webhook, shows the webhook's message if it still refuses, and writes it into the policy.
+3. A line then says whether the export works: how many volumes have been sent to COS, or that a volume has an export error. The first export runs after the next local backup.
+
+Without the rights to make Secrets or to change the policy, the buttons are off and the missing right is named.
+
 **Restore from COS** (link on the Backups list and on the COS tab) makes one `BackupRestore` with `spec.fromCOS`, as `kubectl backup restore --from-cos` does, and works in a cluster that has no policy and no snapshot pool. Fill the settings from a policy of this cluster, or type them for another cluster's bucket. COS keeps neither the claim name, the storage class nor the size, so you give them. The Secrets (COS key, wrapped backup key, Key Protect API key) must already exist in the driver namespace. Two things the console cannot do, because it has no IBM Cloud login: it does not remove delete markers in the bucket (use the command if a backup you can see is not found), and it does not fetch the wrapped backup key from the bucket into a missing Secret. The readable emergency key as a file (`--backup-key-file`) is a command-line option only. The page takes `?policy=`, `?volume=` and `?moment=`.
 
 ### Export to COS (built; the release test is written and not yet run)
