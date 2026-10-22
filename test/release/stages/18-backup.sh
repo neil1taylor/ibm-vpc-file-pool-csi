@@ -22,6 +22,14 @@
 # changed content. COS_DR_KUBECONFIG repeats the restore in the other cluster of
 # the lab pair. Without settings these checks are reported as not checked.
 # Objects locked by Compliance cannot be deleted: they stay in the bucket.
+#
+# Fast mode for fix/test cycles: COS_QUICK=1 RT_STAGES=18 bash test/release/remote.sh start CLUSTER TAG
+# (about 25 minutes; the full stage takes 2 to 3 hours). It needs the COS settings. The e2e
+# script then leaves out the local restore checks (reported as not checked), uses a 1 minute
+# schedule, a 1 hour local keep time and a 1 GB data disk, waits for one export of each volume,
+# and runs the COS restore checks. The VM still has a root and a data disk (the checksum check
+# needs both), and the Compliance lock stays at 25 hours, the shortest the product allows.
+# The full mode is unchanged.
 
 # The e2e script waits for two backups of every volume (up to 90 minutes each
 # wait) after a CentOS image copy and a VM boot. Measured on rovslab it takes
@@ -51,6 +59,10 @@ run() {
     [ -f "$E2E" ] || skip "no end-to-end script at $E2E"
 
     cos_load_settings "$(cos_config_dir)/cos-stage.env"
+    if [ "${COS_QUICK:-0}" = 1 ] && ! cos_wanted; then
+        check "COS_QUICK=1 needs the COS settings (COS_BUCKET); the fast run has nothing else to test" false
+        return 0
+    fi
     if cos_wanted && ! cos_missing_config >"$RT_OUT/backup-cos-missing.txt"; then
         check "the COS settings are complete (see backup-cos-missing.txt)" false
         cat "$RT_OUT/backup-cos-missing.txt"
@@ -77,14 +89,18 @@ run() {
 
     check "the policy backs up three volumes: two VM disks FileSystemConsistent, the pod volume FileCopy, two moments each" \
         log_has_pass "$E2E_LOG" "three volumes backed up"
-    check "the VM restored at the first moment boots with no XFS errors and every logged file has its checksum" \
-        log_has_pass "$E2E_LOG" "the VM restored at"
-    check "the pod volume restored at the first moment holds the first content" \
-        log_has_pass "$E2E_LOG" "holds the first content"
-    check "the pod volume restored at the latest moment holds the changed content" \
-        log_has_pass "$E2E_LOG" "the latest restore holds the changed content"
-    check "a pod volume whose claim was deleted can be restored from its backup" \
-        log_has_pass "$E2E_LOG" "a volume that was deleted can be restored"
+    if [ "${COS_QUICK:-0}" = 1 ]; then
+        not_checked "the local restores (VM disks, pod volume, deleted claim)" "COS_QUICK=1 is the fast run"
+    else
+        check "the VM restored at the first moment boots with no XFS errors and every logged file has its checksum" \
+            log_has_pass "$E2E_LOG" "the VM restored at"
+        check "the pod volume restored at the first moment holds the first content" \
+            log_has_pass "$E2E_LOG" "holds the first content"
+        check "the pod volume restored at the latest moment holds the changed content" \
+            log_has_pass "$E2E_LOG" "the latest restore holds the changed content"
+        check "a pod volume whose claim was deleted can be restored from its backup" \
+            log_has_pass "$E2E_LOG" "a volume that was deleted can be restored"
+    fi
 
     if cos_wanted; then
         check "COS export: all three volumes have exportedTime and exportedBytes above 0" \

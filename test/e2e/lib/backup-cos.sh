@@ -274,7 +274,7 @@ cos_restore_phase() {
 
     log "COS restore, $label: VM disks at $first_vm"
     cos_restore "$COS_PV_ROOT" "$NS/root-c" 20 "$first_vm"
-    cos_restore "$COS_PV_DATA" "$NS/data-c" 10 "$first_vm"
+    cos_restore "$COS_PV_DATA" "$NS/data-c" "${COS_DATA_GB:-10}" "$first_vm"
     vm_yaml cosvm root-c data-c no | oc apply -f -
     wait_until 900 "COS-restored guest agent" agent_connected cosvm
     cos_ssh_ok() { vssh cosvm true >/dev/null 2>&1; }
