@@ -2,6 +2,9 @@ export const API_GROUP = 'storage.ibmcloud.io';
 export const API_VERSION = 'v1alpha1';
 export const API_GROUP_VERSION = `${API_GROUP}/${API_VERSION}`;
 
+/** Where the Helm chart installs the driver by default, and where its share Jobs run (pkg/pool DefaultDriverNamespace). */
+export const DRIVER_NAMESPACE = 'kube-system';
+
 export const PLUGIN_NAME = 'ibm-vpc-file-pool-csi';
 
 // Routes

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { k8sPatch, useAccessReview, useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk';
-import { Link, useHistory, useParams } from 'react-router-dom';
+import { Link, useHistory, useLocation, useParams } from 'react-router-dom';
 import {
   Alert,
   Bullseye,
@@ -43,6 +43,7 @@ const Term: React.FC<{ term: string; children: React.ReactNode }> = ({ term, chi
 const BackupDetailsPage: React.FC = () => {
   const { name } = useParams<{ name: string }>();
   const history = useHistory();
+  const location = useLocation();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [actionError, setActionError] = useState('');
   const [canUpdate] = useAccessReview({ group: API_GROUP, resource: 'backuppolicies', verb: 'update' });
@@ -195,7 +196,13 @@ const BackupDetailsPage: React.FC = () => {
             </DescriptionList>
           </CardBody>
         </Card>
-        <BackupVolumesTable policy={policy} />
+        <BackupVolumesTable
+          policy={policy}
+          deleteClaim={new URLSearchParams(location.search).get('claim') || undefined}
+          onDeleteClosed={() => {
+            if (location.search) history.replace(ROUTES.BACKUP_DETAIL.replace(':name', name));
+          }}
+        />
       </PageSection>
       <DeleteModal
         isOpen={deleteOpen}
