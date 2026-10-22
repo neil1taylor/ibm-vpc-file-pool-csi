@@ -28,7 +28,7 @@ RUN microdnf install -y util-linux-core rsync && microdnf clean all
 COPY --from=builder /vpc-file-pool-csi /usr/local/bin/vpc-file-pool-csi
 COPY --from=builder /kopia /usr/local/bin/kopia
 
-# Node agent runs privileged and needs mount/umount for NFS.
+# Node agent runs privileged (as root, set in the chart) and needs mount/umount for NFS.
 # nfs-utils is not available in UBI repos, so we use nsenter to call
 # the host's mount binary (which has access to mount.nfs4) for NFS mounts.
 # Bind mounts and unmounts use the container's own mount/umount binary
@@ -36,5 +36,9 @@ COPY --from=builder /kopia /usr/local/bin/kopia
 # need the container's filesystem view.
 RUN printf '#!/bin/sh\ncase "$*" in\n  *"-t nfs"*) exec nsenter --mount=/proc/1/ns/mnt --root=/proc/1/root -- /bin/mount "$@" ;;\n  *) exec /usr/bin/mount "$@" ;;\nesac\n' > /usr/local/bin/mount && \
     chmod +x /usr/local/bin/mount
+
+# Run as a non-root user by default. The node agent needs root and sets
+# runAsUser: 0 in the chart; Jobs the controller creates set their own user.
+USER 65532:65532
 
 ENTRYPOINT ["/usr/local/bin/vpc-file-pool-csi"]

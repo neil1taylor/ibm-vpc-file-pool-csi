@@ -19,6 +19,12 @@ To make a release:
 
 ## [Unreleased]
 
+### Security
+- **Image hardening (issue #90).** The driver image now runs as user 65532 (`USER` in the Dockerfile). The chart sets security contexts: the controller is non-root with no privilege escalation, all capabilities dropped and the `RuntimeDefault` seccomp profile; its sidecars get no escalation and no capabilities; the console plugin and replication receiver get the same limits. The node agent explicitly stays root and privileged (it mounts NFS), and Jobs the controller creates keep the users they already set. All of it can be overridden with `controller.securityContext`, `controller.podSecurityContext`, `controller.sidecarSecurityContext`, `node.securityContext`, `replicationReceiver.securityContext` and `consolePlugin.securityContext`. **Not lab tested.** Off OpenShift the chart adds `fsGroup: 65532` to the controller so it can read the webhook key.
+
+### Changed
+- **The default image tag is `v` plus the chart `appVersion`, not `latest` (issue #90).** `image.tag` and `consolePlugin.image.tag` are empty by default. `make deploy`-style installs that set `--set image.tag=...` are unchanged. The chart `appVersion` must be set at release (it is `0.1.0` until then), so an install without `image.tag` before a release asks for an image that does not exist.
+
 ### Fixed
 - **`kubectl backup cos-setup` could never finish a first run, and lost the HMAC secret (issue #138).** IBM Cloud adds an instance-wide Writer policy to the service ID when the HMAC key is made; the safety check then stopped the command before the key file was written. Now the key file is written the moment the key is made, the command deletes that one implicit policy (found by comparing the service ID's policies before and after; it says so in the steps) and then runs the check, which still refuses any other wide policy. A rerun with an HMAC key that exists makes no second key and says its secret cannot be shown again (delete the key to get a new one). A key file with no HMAC key stops the command before a key is made. Found in the first live run; tested with fakes, not rerun on IBM Cloud.
 

@@ -31,7 +31,7 @@ spec:
       {{- end }}
       containers:
         - name: csi-node
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ include "ibm-vpc-file-pool-csi.driverImage" . }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - "--mode=node"
@@ -43,8 +43,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+          {{- with .Values.node.securityContext }}
           securityContext:
-            privileged: true
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           startupProbe:
             exec:
               command: [test, -S, /csi/csi.sock]

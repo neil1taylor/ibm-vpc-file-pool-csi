@@ -61,3 +61,19 @@ its hook Jobs can be installed there.
 {{- define "ibm-vpc-file-pool-csi.consolePlugin" -}}
 {{- if and .Values.consolePlugin.enabled (include "ibm-vpc-file-pool-csi.hasConsole" .) }}true{{- end }}
 {{- end }}
+
+{{/*
+Driver image tag: image.tag, or "v" plus the chart appVersion when it is empty.
+Never "latest": that tag moves under a running release.
+*/}}
+{{- define "ibm-vpc-file-pool-csi.imageTag" -}}
+{{- .Values.image.tag | default (printf "v%s" .Chart.AppVersion) -}}
+{{- end }}
+
+{{- define "ibm-vpc-file-pool-csi.driverImage" -}}
+{{ .Values.image.repository }}:{{ include "ibm-vpc-file-pool-csi.imageTag" . }}
+{{- end }}
+
+{{- define "ibm-vpc-file-pool-csi.consolePluginImage" -}}
+{{ .Values.consolePlugin.image.repository }}:{{ .Values.consolePlugin.image.tag | default (printf "v%s" .Chart.AppVersion) }}
+{{- end }}

@@ -14,7 +14,7 @@ Complete reference for all configurable parameters in the `ibm-vpc-file-pool-csi
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `image.repository` | string | `de.icr.io/ibm-vpc-file-pool-csi/driver` | Container image repository for the CSI driver |
-| `image.tag` | string | `latest` | Image tag. Pin to a specific version or digest in production |
+| `image.tag` | string | `""` | Image tag. Empty means `v` plus the chart `appVersion` (never `latest`). Pin to a specific version or digest in production |
 | `image.pullPolicy` | string | `IfNotPresent` | Image pull policy (`Always`, `IfNotPresent`, `Never`) |
 | `imagePullSecrets` | list | `[]` | List of image pull secret names for private registries |
 
@@ -37,6 +37,9 @@ Settings for the CSI controller Deployment (runs the Pool Manager and CSI contro
 |-----------|------|---------|-------------|
 | `controller.replicas` | int | `1` | Number of controller replicas. Only 1 is active (leader election) |
 | `controller.healthPort` | int | `8081` | Port for `/healthz` and `/readyz` endpoints |
+| `controller.podSecurityContext` | object | `{seccompProfile: {type: RuntimeDefault}}` | Pod security context of the controller. Off OpenShift the chart adds `fsGroup: 65532` unless you set one, so the non-root user can read the webhook key |
+| `controller.securityContext` | object | no escalation, `runAsNonRoot`, drop ALL | Container security context of `csi-controller`. The image runs as user 65532 |
+| `controller.sidecarSecurityContext` | object | no escalation, drop ALL | Container security context of the controller sidecars (provisioner, resizer, snapshotter, liveness probe, secret provider). Their user is not changed |
 | `controller.resources.requests.cpu` | string | `50m` | Controller CPU request |
 | `controller.resources.requests.memory` | string | `128Mi` | Controller memory request |
 | `controller.resources.limits.memory` | string | `512Mi` | Controller memory limit |
@@ -52,6 +55,7 @@ Settings for the CSI node agent DaemonSet (runs on every worker node).
 |-----------|------|---------|-------------|
 | `node.kubeletDir` | string | `/var/data/kubelet` | Kubelet root directory. ROKS/ROVS/IKS uses `/var/data/kubelet` (the real path). Standard Kubernetes uses `/var/lib/kubelet` |
 | `node.registrarHealthPort` | int | `9809` | Port for the node-driver-registrar health endpoint. Must not conflict with other hostNetwork services. Stock IBM VPC file CSI uses 9808 |
+| `node.securityContext` | object | `{privileged: true, runAsUser: 0}` | Container security context of `csi-node`. It must stay privileged and root to mount NFS on the host |
 | `node.resources.requests.cpu` | string | `50m` | Node agent CPU request |
 | `node.resources.requests.memory` | string | `64Mi` | Node agent memory request |
 | `node.resources.limits.memory` | string | `256Mi` | Node agent memory limit |
@@ -98,6 +102,7 @@ Configuration for the driver-to-driver cross-region replication receiver. Deploy
 | `replicationReceiver.authSecretName` | string | `""` | Secret name containing a `token` key for bearer token authentication |
 | `replicationReceiver.runAsUser` | int | `107` | User the receiver runs as. It writes destination VM disks, and KubeVirt runs QEMU as 107 |
 | `replicationReceiver.runAsGroup` | int | `107` | Group the receiver runs as |
+| `replicationReceiver.securityContext` | object | no escalation, `runAsNonRoot`, drop ALL, seccomp `RuntimeDefault` | Container security context of the receiver |
 | `replicationReceiver.resources.requests.cpu` | string | `100m` | Receiver CPU request |
 | `replicationReceiver.resources.requests.memory` | string | `256Mi` | Receiver memory request |
 | `replicationReceiver.resources.limits.memory` | string | `512Mi` | Receiver memory limit |
@@ -205,7 +210,8 @@ OpenShift Console dynamic plugin for visual pool management. On by default, and 
 |-----------|------|---------|-------------|
 | `consolePlugin.enabled` | bool | `true` | Install the OpenShift Console dynamic plugin and turn it on in the console. Set `false` to leave it out |
 | `consolePlugin.image.repository` | string | `de.icr.io/ibm-vpc-file-pool-csi/console-plugin` | Plugin container image repository |
-| `consolePlugin.image.tag` | string | `latest` | Plugin image tag |
+| `consolePlugin.image.tag` | string | `""` | Plugin image tag. Empty means `v` plus the chart `appVersion` |
+| `consolePlugin.securityContext` | object | no escalation, `runAsNonRoot`, drop ALL, seccomp `RuntimeDefault` | Container security context of the plugin (its image already runs as user 1001) |
 | `consolePlugin.replicas` | int | `2` | Number of plugin pod replicas |
 | `consolePlugin.port` | int | `9443` | HTTPS port for the plugin Service. TLS certs are auto-provisioned by the OpenShift service-ca operator |
 | `consolePlugin.resources.requests.cpu` | string | `10m` | CPU request |

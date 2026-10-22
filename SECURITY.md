@@ -73,7 +73,22 @@ Lock down the security group attached to VPC file share mount targets:
 
 ### Pod Security Standards
 
-Run the CSI driver pods under the `restricted` Pod Security Standard where possible. The node agent requires `privileged` for mount operations, but the controller does not.
+The image runs as user 65532 by default (`USER` in the Dockerfile). The chart sets a security context on each workload; every value can be overridden (see `HELM-VALUES.md`).
+
+| Workload | Runs as | Hardening | Why |
+|----------|---------|-----------|-----|
+| Controller (`csi-controller`, includes the webhooks) | non-root (65532, or the OpenShift-assigned user) | no privilege escalation, drop ALL capabilities, `runAsNonRoot`, seccomp `RuntimeDefault` | It needs no root: it talks to the Kubernetes and VPC APIs only |
+| Controller sidecars | unchanged | no privilege escalation, drop ALL capabilities | Their user is left alone so the sockets they share keep working |
+| Node agent (`csi-node`) | root, privileged | none; `runAsUser: 0` is explicit | It mounts NFS on the host and needs root and mount propagation |
+| Node driver registrar | root, unchanged | none | It writes into the root-owned kubelet registration directory |
+| Console plugin | 1001 (nginx image) | no privilege escalation, drop ALL, `runAsNonRoot`, seccomp | Already non-root |
+| Replication receiver | 107 | no privilege escalation, drop ALL, `runAsNonRoot`, seccomp | 107 is required to own the VM disks |
+| Hook Jobs (sidecar gate, console plugin register) | 65534 | already hardened, read-only root | Unchanged |
+| Jobs the controller creates (clone, copy, replication, backup, export, restore, Kopia, rsync) | root or the QEMU user (107), set in the Job | none | They read and write the NFS share under `root_squash` and `sec=sys`, which needs root or UID 107, and the OpenShift `anyuid` SCC. Locking them down is not safe without a lab test |
+
+`readOnlyRootFilesystem` is not set on the controller, node agent, console plugin or receiver: it has not been tested that they write nowhere else.
+
+The default image tag is `v` plus the chart `appVersion`, not `latest`.
 
 ### Image Pinning
 
