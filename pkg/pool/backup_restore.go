@@ -82,6 +82,10 @@ func (bc *BackupController) failRestore(ctx context.Context, br *v1alpha1.Backup
 }
 
 func (bc *BackupController) reconcileRestore(ctx context.Context, br *v1alpha1.BackupRestore) {
+	if br.Spec.FromCOS != nil {
+		bc.reconcileRestoreFromCOS(ctx, br)
+		return
+	}
 	sp := br.Spec
 	policy := &v1alpha1.BackupPolicy{}
 	if err := bc.client.Get(ctx, types.NamespacedName{Name: sp.Policy}, policy); err != nil {

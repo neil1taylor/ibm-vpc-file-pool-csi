@@ -39,10 +39,13 @@ func (v *BackupRestoreValidator) ValidateDelete(_ context.Context, _ *v1alpha1.B
 func validateBackupRestoreSpec(spec *v1alpha1.BackupRestoreSpec) error {
 	required := []struct{ field, value string }{
 		{"policy", spec.Policy},
-		{"sourceNamespace", spec.SourceNamespace},
-		{"sourceName", spec.SourceName},
 		{"targetNamespace", spec.TargetNamespace},
 		{"targetName", spec.TargetName},
+	}
+	if spec.FromCOS == nil {
+		required = append(required,
+			struct{ field, value string }{"sourceNamespace", spec.SourceNamespace},
+			struct{ field, value string }{"sourceName", spec.SourceName})
 	}
 	for _, r := range required {
 		if r.value == "" {
@@ -55,5 +58,22 @@ func validateBackupRestoreSpec(spec *v1alpha1.BackupRestoreSpec) error {
 	if errs := validation.IsDNS1123Subdomain(spec.TargetName); len(errs) > 0 {
 		return fmt.Errorf("spec.targetName is not a PVC name: %v", errs)
 	}
+	if spec.FromCOS != nil {
+		return validateRestoreFromCOS(spec)
+	}
 	return nil
+}
+
+// validateRestoreFromCOS checks a restore that reads from a COS bucket. The
+// policy name is the folder of the policy in the bucket, so it must be a name a
+// BackupPolicy could have. The storage class is required because COS does not
+// keep it.
+func validateRestoreFromCOS(spec *v1alpha1.BackupRestoreSpec) error {
+	if errs := validation.IsDNS1123Subdomain(spec.Policy); len(errs) > 0 || len(spec.Policy) > 63 {
+		return fmt.Errorf("spec.policy %q is not a policy name (up to 63 characters)", spec.Policy)
+	}
+	if spec.StorageClassName == "" {
+		return fmt.Errorf("spec.storageClassName is required with spec.fromCOS: COS does not keep the class")
+	}
+	return spec.FromCOS.Validate()
 }

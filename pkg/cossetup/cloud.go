@@ -262,6 +262,10 @@ func checkHost(raw string) error {
 	return nil
 }
 
+// CheckHost is checkHost for other packages that send the caller's token to
+// COS: only an https address on an IBM Cloud domain passes.
+func CheckHost(raw string) error { return checkHost(raw) }
+
 func redactURL(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil {

@@ -1423,16 +1423,33 @@ Cluster-scoped. A request to make a new PVC from a backup. `kubectl backup resto
 ```go
 type BackupRestoreSpec struct {
     Policy          string        `json:"policy"`
-    SourceNamespace string        `json:"sourceNamespace"` // the claim that was backed up; it may be gone
-    SourceName      string        `json:"sourceName"`
+    SourceNamespace string        `json:"sourceNamespace,omitempty"` // the claim that was backed up; it may be gone. Required unless fromCOS is set
+    SourceName      string        `json:"sourceName,omitempty"`
     Moment          *metav1.Time  `json:"moment,omitempty"` // the newest backup at or before it; unset: the latest
     TargetNamespace string        `json:"targetNamespace"`  // the new PVC; it must not exist
     TargetName      string        `json:"targetName"`
-    StorageClassName string       `json:"storageClassName,omitempty"` // default: the class of the backed-up claim
+    StorageClassName string       `json:"storageClassName,omitempty"` // default: the class of the backed-up claim; required with fromCOS
+    FromCOS         *RestoreFromCOS `json:"fromCOS,omitempty"` // read the backup from a COS bucket, not from a snapshot pool
+}
+
+// RestoreFromCOS needs no BackupPolicy and no snapshot pool in this cluster.
+type RestoreFromCOS struct {
+    Bucket             string          `json:"bucket"`
+    Endpoint           string          `json:"endpoint"`
+    Prefix             string          `json:"prefix,omitempty"`             // the prefix set in the policy's spec.export; spec.policy names the policy's area below it
+    CredentialsSecret  string          `json:"credentialsSecret"`            // access_key_id, secret_access_key
+    Volume             string          `json:"volume"`                       // pvc-<uuid>, as `kubectl backup cos-list` shows it
+    SizeGB             int32           `json:"sizeGB"`                       // size of the new PVC; COS does not keep it
+    BackupKeySecret    string          `json:"backupKeySecret,omitempty"`    // key wrappedKey; not used with emergencyKeyOnly
+    KeyProtect         *KeyProtectRef  `json:"keyProtect,omitempty"`         // not used with emergencyKeyOnly
+    EmergencyKeySecret string          `json:"emergencyKeySecret,omitempty"` // key backupKey: the readable backup key
+    EmergencyKeyOnly   bool            `json:"emergencyKeyOnly,omitempty"`   // never call Key Protect
 }
 ```
 
 The controller makes the PVC (like the backed-up claim: same size, `ReadWriteMany`, `Filesystem`), waits for the driver to bind it, and runs a Job that copies the backup into it. Until the copy ends, the SubVolume carries the label `storage.ibmcloud.io/restore-pending` and the node plugin refuses to mount the volume, so no pod or VM sees a half-written disk. A VM disk is written by the driver's `restore-vm-disk` mode, which rewinds it to the moment; the Job never rolls back a copy that is being written (the restore waits and says so). Status: `phase` (`Pending`, `Provisioning`, `Restoring`, `Done`, `Failed`), `message`, `restoredMoment` and `latest`. A restore never writes over a volume that exists; a failed copy leaves the new PVC held back, and you delete it and ask again.
+
+**With `spec.fromCOS`** the backup comes from the Kopia repository in a COS bucket (`kubectl backup restore --from-cos`). `spec.policy` names the policy's area in the bucket (below `fromCOS.prefix`); the policy need not exist in the cluster. The new PVC gets `spec.storageClassName` and `fromCOS.sizeGB`, because COS keeps neither. Three Jobs run on the share of the new volume: one opens the repository read-only and restores the export for the moment into a scratch folder (`/backup/cosrestore-<name>` on that share), the restore Job of a local restore copies the scratch folder into the volume, and a third removes the scratch folder. `spec.moment` picks the oldest export made at or after it (it holds the earlier moments as undo files), or the newest export if there is none; the existing restore Job then picks the moment inside it. Status adds `fetched` and `copied`, which record the finished steps because a finished Job is removed. The scratch folder needs room for one full copy of the volume on the share. The webhook requires `storageClassName`, a `pvc-<uuid>` volume, a `sizeGB`, and either `backupKeySecret` with `keyProtect` or `emergencyKeyOnly` with `emergencyKeySecret`. A scratch folder that cannot be removed is logged and left; the restore is still `Done`.
 
 ---
 
