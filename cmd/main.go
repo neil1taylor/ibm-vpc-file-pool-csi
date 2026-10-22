@@ -104,7 +104,7 @@ func main() {
 
 	flag.StringVar(&endpoint, "endpoint", "unix:///csi/csi.sock", "CSI endpoint")
 	flag.StringVar(&nodeID, "node-id", "", "Node ID")
-	flag.StringVar(&mode, "mode", "controller", "Driver mode: controller, node, receiver, sync-client, check-receiver, apply-vm-disk, send-vm-disk, restore-vm-disk, unwrap-backup-key, register-console-plugin, or unregister-console-plugin")
+	flag.StringVar(&mode, "mode", "controller", "Driver mode: controller, node, receiver, sync-client, check-receiver, apply-vm-disk, send-vm-disk, restore-vm-disk, unwrap-backup-key, register-console-plugin, unregister-console-plugin, or enable-sidecar-gate")
 	flag.StringVar(&consolePluginName, "console-plugin-name", "ibm-vpc-file-pool-csi", "ConsolePlugin to turn on or off in the OpenShift console (register-console-plugin and unregister-console-plugin modes)")
 	flag.StringVar(&region, "region", "", "IBM Cloud region (e.g. us-south); auto-discovered from secret provider if omitted")
 	flag.StringVar(&vpcID, "vpc-id", "", "IBM Cloud VPC ID for creating file share mount targets")
@@ -191,9 +191,30 @@ func main() {
 		runSendVMDisk(receiverEndpoint, authTokenFile, caCertFile, stagingPath, destBasePath, subPath, subvolumeName, copyID, vmGroup, metadataJSON, vmCopy)
 	case "register-console-plugin", "unregister-console-plugin":
 		runConsolePlugin(mode, consolePluginName)
+	case "enable-sidecar-gate":
+		runEnableSidecarGate()
 	default:
 		runNode(endpoint, nodeID, mode)
 	}
+}
+
+// runEnableSidecarGate turns on the KubeVirt Sidecar feature gate that instant
+// VM snapshots need. The Helm chart runs it as a post-install and post-upgrade
+// hook Job when vmSnapshots.enableSidecarGate is true.
+func runEnableSidecarGate() {
+	c, err := client.New(ctrl.GetConfigOrDie(), client.Options{})
+	if err != nil {
+		klog.ErrorS(err, "Failed to create Kubernetes client")
+		os.Exit(1)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	if err := pool.EnableSidecarGate(ctx, c); err != nil {
+		klog.ErrorS(err, "Failed to turn on the KubeVirt Sidecar feature gate")
+		os.Exit(1)
+	}
+	klog.InfoS("KubeVirt Sidecar feature gate is on")
 }
 
 // runConsolePlugin turns the console plugin on or off in the OpenShift console.
