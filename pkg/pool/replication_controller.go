@@ -553,7 +553,11 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 				rc.cleanupReplicationResources(ctx, policy, svCopy.Name)
 			} else {
 				// Job failed.
-				finish(carry(svCopy.Name, "replication Job failed after retries"), fmt.Sprintf("%s: replication Job failed", svCopy.Name))
+				msg := "replication Job failed after retries"
+				if jobRes.Failure != "" {
+					msg += " (" + jobRes.Failure + ")"
+				}
+				finish(carry(svCopy.Name, msg), fmt.Sprintf("%s: replication Job failed", svCopy.Name))
 				rc.cleanupReplicationResources(ctx, policy, svCopy.Name)
 			}
 			continue
@@ -1406,11 +1410,21 @@ func (rc *ReplicationController) checkReplicationJob(ctx context.Context, policy
 	if job.Spec.BackoffLimit != nil {
 		backoffLimit = *job.Spec.BackoffLimit
 	}
-	if job.Status.Failed >= backoffLimit+1 {
-		return true, false, replJobResult{}, nil
+	if job.Status.Failed >= backoffLimit+1 || jobHasFailed(job) {
+		return true, false, replJobResult{Failure: jobFailure(job)}, nil
 	}
 
 	return false, false, replJobResult{}, nil // still running
+}
+
+// jobFailure says why Kubernetes failed a Job, from its Failed condition.
+func jobFailure(job *batchv1.Job) string {
+	for _, c := range job.Status.Conditions {
+		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue {
+			return strings.TrimSuffix(c.Reason+": "+c.Message, ": ")
+		}
+	}
+	return ""
 }
 
 // replicationJobExists reports whether the replication Job of a SubVolume exists.
@@ -1487,6 +1501,8 @@ type replJobResult struct {
 	// another moment than the copy starts from, and DiskMoment says which.
 	WrongBase  bool   `json:"wrongBase,omitempty"`
 	DiskMoment string `json:"diskMoment,omitempty"`
+	// Failure says why a Job failed (not part of the pod message).
+	Failure string `json:"-"`
 }
 
 // readJobResult reads the result from the completed pod's termination

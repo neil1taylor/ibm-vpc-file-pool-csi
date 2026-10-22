@@ -65,6 +65,11 @@ type Receiver struct {
 
 	// maxVMDiskBytes is the largest VM disk accepted; 0 means the default.
 	maxVMDiskBytes int64
+	// cacheDropEvery is how many bytes of a file are stored or read before the
+	// receiver drops its cached pages; 0 means the default. onCacheDrop runs
+	// after each drop (tests only).
+	cacheDropEvery int64
+	onCacheDrop    func()
 }
 
 // NewReceiver creates a new replication receiver HTTP server.

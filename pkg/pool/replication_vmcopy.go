@@ -357,6 +357,7 @@ func (rc *ReplicationController) advanceVMCopy(ctx context.Context, policy *v1al
 	case vmCopyPhaseSending:
 		allDone := true
 		var failedNames, wrongBase, gone []string
+		var failures []string
 		results := make([]replJobResult, len(g.members))
 		for i, sv := range g.members {
 			done, ok, jr, err := rc.checkReplicationJob(ctx, policy.Name, sv.Name)
@@ -383,6 +384,9 @@ func (rc *ReplicationController) advanceVMCopy(ctx context.Context, policy *v1al
 			}
 			if !ok {
 				failedNames = append(failedNames, sv.Name)
+				if jr.Failure != "" {
+					failures = append(failures, jr.Failure)
+				}
 			} else if jr.WrongBase {
 				failedNames = append(failedNames, sv.Name)
 				wrongBase = append(wrongBase, fmt.Sprintf("%s shows %s", sv.Name, jr.DiskMoment))
@@ -425,8 +429,12 @@ func (rc *ReplicationController) advanceVMCopy(ctx context.Context, policy *v1al
 			s := vmStatus(prev, sv.Name, "")
 			s.VMChangeList = changeList
 			if len(failedNames) > 0 {
-				s.LastError = fmt.Sprintf("apply Job failed for %s; the destination disks of this VM may now show different moments",
-					strings.Join(failedNames, ", "))
+				why := ""
+				if len(failures) > 0 {
+					why = " (" + failures[0] + ")"
+				}
+				s.LastError = fmt.Sprintf("apply Job failed for %s%s; the destination disks of this VM may now show different moments",
+					strings.Join(failedNames, ", "), why)
 			}
 			if len(wrongBase) > 0 {
 				s.LastError = fmt.Sprintf("the far-site disk is not at the moment of the last copy (%s); the next copy is a full copy",
@@ -494,6 +502,9 @@ func (rc *ReplicationController) advanceVMCopies(ctx context.Context, policy *v1
 	byName := map[string]int{}
 	for i, s := range policy.Status.SubVolumeStatuses {
 		byName[s.SubVolumeName] = i
+	}
+	if res.failed > 0 {
+		policy.Status.LastError = vmProblemsError(0, res.failed)
 	}
 	synced := false
 	for _, s := range res.statuses {
