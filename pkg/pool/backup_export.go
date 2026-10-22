@@ -79,6 +79,7 @@ func exportRepoOf(bp *v1alpha1.BackupPolicy) (ExportRepo, time.Duration, error) 
 	repo := ExportRepo{
 		Endpoint: ex.Endpoint, Bucket: ex.Bucket, Prefix: exportPrefix(ex.Prefix, bp.Name),
 		CredentialsSecret: ex.CredentialsSecret, BackupKeySecret: ex.BackupKeySecret,
+		KeyProtect: ex.KeyProtect, EmergencyKeySecret: ex.EmergencyKeySecret,
 		LockMode: ExportLockMode(ex.EffectiveLock()), KeepFor: keep,
 		MaintenanceInterval: v1alpha1.ExportMaintenanceInterval(keep),
 	}

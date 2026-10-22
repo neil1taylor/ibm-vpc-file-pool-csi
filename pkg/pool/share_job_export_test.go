@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -19,11 +20,15 @@ var testExportMoment = time.Date(2026, 10, 21, 9, 30, 0, 0, time.UTC)
 
 func testExportRepo() ExportRepo {
 	return ExportRepo{
-		Endpoint:            "s3.eu-de.cloud-object-storage.appdomain.cloud",
-		Bucket:              "pool-backups",
-		Prefix:              "policy-nightly/",
-		CredentialsSecret:   "cos-credentials",
-		BackupKeySecret:     "cos-backup-key",
+		Endpoint:          "s3.eu-de.cloud-object-storage.appdomain.cloud",
+		Bucket:            "pool-backups",
+		Prefix:            "policy-nightly/",
+		CredentialsSecret: "cos-credentials",
+		BackupKeySecret:   "cos-backup-key",
+		KeyProtect: v1alpha1.KeyProtectRef{
+			InstanceID: "11111111-2222-3333-4444-555555555555", Region: "eu-de",
+			RootKeyID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", APIKeySecret: "kp-apikey",
+		},
 		LockMode:            ExportLockCompliance,
 		KeepFor:             25 * time.Hour,
 		MaintenanceInterval: time.Hour,
@@ -42,13 +47,19 @@ func TestExportToCOS_JobMountsTheShareReadOnly(t *testing.T) {
 	if spec.Containers[0].Image != "registry.example/driver:test" {
 		t.Errorf("image = %q; want the driver image (it holds kopia)", spec.Containers[0].Image)
 	}
+	// The key volumes (Secrets and the memory folder) are not shares.
+	shareVolumes := map[string]bool{}
 	for _, v := range spec.Volumes {
+		if v.Secret != nil || v.EmptyDir != nil {
+			continue
+		}
+		shareVolumes[v.Name] = true
 		if v.PersistentVolumeClaim == nil || !v.PersistentVolumeClaim.ReadOnly {
 			t.Errorf("volume %s is not a read-only claim", v.Name)
 		}
 	}
 	for _, m := range spec.Containers[0].VolumeMounts {
-		if !m.ReadOnly {
+		if shareVolumes[m.Name] && !m.ReadOnly {
 			t.Errorf("mount %s is not read-only", m.MountPath)
 		}
 	}
@@ -111,7 +122,6 @@ func TestExportToCOS_SecretsComeFromSecretReferencesNotTheScript(t *testing.T) {
 	want := map[string][2]string{
 		"AWS_ACCESS_KEY_ID":     {"cos-credentials", "access_key_id"},
 		"AWS_SECRET_ACCESS_KEY": {"cos-credentials", "secret_access_key"},
-		"KOPIA_PASSWORD":        {"cos-backup-key", "backupKey"},
 	}
 	for _, e := range ctr.Env {
 		w, ok := want[e.Name]
