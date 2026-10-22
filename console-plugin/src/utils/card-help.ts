@@ -22,7 +22,11 @@ export const CARD_HELP = {
   },
   activeAlerts: {
     title: 'Active Alerts',
-    text: 'Pools that are not Ready, listed by name; normal is 0. This card does not show Prometheus alerts: see Observe, Alerting, for those. Open a listed pool to see why it is not Ready.',
+    text: 'Pools that are not Ready, listed by name; normal is 0. Prometheus alerts are in the Firing Alerts card. Open a listed pool to see why it is not Ready.',
+  },
+  firingAlerts: {
+    title: 'Firing Alerts',
+    text: 'Alerts from the driver alert rules that are firing now in the cluster Prometheus; normal is none. Each alert names what is wrong, such as a nearly full share or late replication. Observe, Alerting, in the console shows all alerts and their history.',
   },
   allocationRate: {
     title: 'Allocation Rate',

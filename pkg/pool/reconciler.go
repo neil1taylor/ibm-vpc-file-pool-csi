@@ -14,6 +14,7 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/k8s"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
+	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -262,6 +263,8 @@ func (r *FileSharePoolReconciler) handleDeletion(ctx context.Context, pool *v1al
 		}
 		klog.V(2).InfoS("Deleted VPC share", "pool", pool.Name, "shareID", share.ShareID)
 	}
+
+	dropShareMetrics(pool.Name)
 
 	// Remove finalizer
 	removeFinalizer(pool)
@@ -687,6 +690,24 @@ func (r *FileSharePoolReconciler) reconcileMetrics(ctx context.Context, pool *v1
 	metrics.PoolShareCount.WithLabelValues(pool.Name).Set(float64(pool.Status.ShareCount))
 	metrics.PoolMaxShares.WithLabelValues(pool.Name).Set(float64(pool.Spec.MaxShares))
 	metrics.PoolPVCCount.WithLabelValues(pool.Name).Set(float64(pool.Status.TotalPVCCount))
+	emitShareMetrics(pool)
+}
+
+// dropShareMetrics removes the per-share series of a pool.
+func dropShareMetrics(poolName string) {
+	labels := prometheus.Labels{"pool": poolName}
+	metrics.ShareTotalGB.DeletePartialMatch(labels)
+	metrics.ShareAllocatedGB.DeletePartialMatch(labels)
+}
+
+// emitShareMetrics sets the per-share gauges of a pool. It first drops the
+// pool's old series, so a share that left the pool does not keep a value.
+func emitShareMetrics(pool *v1alpha1.FileSharePool) {
+	dropShareMetrics(pool.Name)
+	for _, s := range pool.Status.Shares {
+		metrics.ShareTotalGB.WithLabelValues(pool.Name, s.ShareName).Set(float64(s.TotalGB))
+		metrics.ShareAllocatedGB.WithLabelValues(pool.Name, s.ShareName).Set(float64(s.AllocatedGB))
+	}
 }
 
 // proactiveExpansion creates a new share if utilization exceeds the threshold.

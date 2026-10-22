@@ -172,3 +172,30 @@ tests:
             exp_annotations:
               summary: "The VPC file pool CSI controller is not reporting metrics"
               description: "No metrics for 5 minutes. New volume operations can be blocked."
+
+  - name: one share above 90 percent allocated warns, an empty share and a zero size share do not
+    interval: 1m
+    input_series:
+      - series: 'vpc_file_pool_share_allocated_gb{pool="gp",share="s1"}'
+        values: '950+0x40'
+      - series: 'vpc_file_pool_share_total_gb{pool="gp",share="s1"}'
+        values: '1000+0x40'
+      - series: 'vpc_file_pool_share_allocated_gb{pool="gp",share="s2"}'
+        values: '100+0x40'
+      - series: 'vpc_file_pool_share_total_gb{pool="gp",share="s2"}'
+        values: '1000+0x40'
+      - series: 'vpc_file_pool_share_allocated_gb{pool="gp",share="s3"}'
+        values: '0+0x40'
+      - series: 'vpc_file_pool_share_total_gb{pool="gp",share="s3"}'
+        values: '0+0x40'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: VPCFilePoolShareNearlyFull
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: VPCFilePoolShareNearlyFull
+        exp_alerts:
+          - exp_labels: {severity: warning, pool: gp, share: s1}
+            exp_annotations:
+              summary: "A share of a VPC file pool is nearly full"
+              description: "Share s1 of pool gp has 95% of its size allocated. Volumes placed on it can fail."

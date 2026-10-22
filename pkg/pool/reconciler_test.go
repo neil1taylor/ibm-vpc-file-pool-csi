@@ -11,6 +11,7 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud/fake"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
+	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -645,6 +646,104 @@ func TestReconcile_EmitsMaxSharesGauge(t *testing.T) {
 	if *m.Gauge.Value != 7 {
 		t.Errorf("expected PoolMaxShares=7, got %f", *m.Gauge.Value)
 	}
+}
+
+// Per-share gauges let an alert find one share that is nearly full.
+func TestReconcile_EmitsPerShareGauges(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	vpc.AddShare(&ibmcloud.ShareInfo{
+		ID: "share-1", Name: "s1", LifecycleState: "stable", SizeGB: 1000,
+		MountTargets: []ibmcloud.MountTargetInfo{{ID: "mt-1", IPAddress: "10.0.0.1"}},
+	})
+	vpc.AddShare(&ibmcloud.ShareInfo{
+		ID: "share-2", Name: "s2", LifecycleState: "stable", SizeGB: 2000,
+		MountTargets: []ibmcloud.MountTargetInfo{{ID: "mt-2", IPAddress: "10.0.0.2"}},
+	})
+	pool := newTestPool("pershare-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 0, 0),
+		newStableShare("share-2", "s2", 2000, 0, 0),
+	)
+	pool.Spec.InitialShares = 2
+	k.addPool(pool)
+	k.addSubVolume(newTestSubVolume("pvc-p1", "pershare-pool", "share-1", 50))
+	k.addSubVolume(newTestSubVolume("pvc-p2", "pershare-pool", "share-1", 30))
+	k.addSubVolume(newTestSubVolume("pvc-p3", "pershare-pool", "share-2", 70))
+
+	r := newReconciler(k, vpc)
+	if _, err := reconcilePool(r, "pershare-pool"); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	want := []struct {
+		share            string
+		totalGB, allocGB float64
+	}{{"s1", 1000, 80}, {"s2", 2000, 70}}
+	for _, w := range want {
+		var m dto.Metric
+		if err := metrics.ShareTotalGB.WithLabelValues("pershare-pool", w.share).Write(&m); err != nil {
+			t.Fatalf("failed to read ShareTotalGB: %v", err)
+		}
+		if *m.Gauge.Value != w.totalGB {
+			t.Errorf("share %s: expected ShareTotalGB=%v, got %v", w.share, w.totalGB, *m.Gauge.Value)
+		}
+		if err := metrics.ShareAllocatedGB.WithLabelValues("pershare-pool", w.share).Write(&m); err != nil {
+			t.Fatalf("failed to read ShareAllocatedGB: %v", err)
+		}
+		if *m.Gauge.Value != w.allocGB {
+			t.Errorf("share %s: expected ShareAllocatedGB=%v, got %v", w.share, w.allocGB, *m.Gauge.Value)
+		}
+	}
+}
+
+// A share that leaves the pool must not keep its series.
+func TestEmitShareMetrics_DropsRemovedShares(t *testing.T) {
+	pool := newTestPool("drop-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 10, 1),
+		newStableShare("share-2", "s2", 1000, 20, 1),
+	)
+	emitShareMetrics(pool)
+	pool.Status.Shares = pool.Status.Shares[:1]
+	emitShareMetrics(pool)
+
+	got := shareLabelsForPool(t, metrics.ShareTotalGB, "drop-pool")
+	if len(got) != 1 || got[0] != "s1" {
+		t.Errorf("expected only share s1, got %v", got)
+	}
+}
+
+// A deleted pool must not leave per-share series that keep an alert firing.
+func TestDropShareMetrics_RemovesPoolSeries(t *testing.T) {
+	pool := newTestPool("gone-pool", "spread", 1000, newStableShare("share-1", "s1", 1000, 10, 1))
+	emitShareMetrics(pool)
+	dropShareMetrics(pool.Name)
+
+	if got := shareLabelsForPool(t, metrics.ShareAllocatedGB, "gone-pool"); len(got) != 0 {
+		t.Errorf("expected no series, got %v", got)
+	}
+}
+
+// shareLabelsForPool returns the share label of every series of c for a pool.
+func shareLabelsForPool(t *testing.T, c prometheus.Collector, pool string) []string {
+	t.Helper()
+	ch := make(chan prometheus.Metric, 1024)
+	c.Collect(ch)
+	close(ch)
+	var shares []string
+	for m := range ch {
+		var d dto.Metric
+		if err := m.Write(&d); err != nil {
+			t.Fatal(err)
+		}
+		labels := map[string]string{}
+		for _, l := range d.Label {
+			labels[l.GetName()] = l.GetValue()
+		}
+		if labels["pool"] == pool {
+			shares = append(shares, labels["share"])
+		}
+	}
+	return shares
 }
 
 // ---------------------------------------------------------------------------
