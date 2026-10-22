@@ -373,6 +373,11 @@ kubectl apply -f config/deploy/node.yaml
 | `--clone-worker-interval` | `10s` | Clone worker poll interval |
 | `--golden-image-sync-interval` | `1h` | Golden image syncer poll interval (the Helm chart sets `5m`) |
 | `--node-metrics-addr` | `:9810` | Node mode: listen address of the HTTPS metrics endpoint with per-share used bytes and NFS statistics. Callers need a token that may `get` `/metrics`. Empty turns it off. Helm sets it from `node.metricsPort` |
+| `--metrics-cert-dir` | `""` | Controller mode: directory with `tls.crt` and `tls.key` for the HTTPS metrics endpoint on `:8080`; empty makes a self-signed certificate that Prometheus cannot check. Helm mounts a secret there |
+| `--monitoring-namespace` | `""` | Controller mode: namespace of the metrics Services that user workload monitoring scrapes. The controller keeps their Endpoints and warns if user workload monitoring is off. Empty turns this off. Helm sets it with the other `--monitoring-*` flags |
+| `--monitoring-controller-service`, `--monitoring-node-service` | `""` | Names of the two Services in the monitoring namespace |
+| `--monitoring-controller-port`, `--monitoring-node-port` | `8080`, `0` | Metrics ports to put in the Endpoints; `0` leaves the node agents out |
+| `--monitoring-selector` | `""` | `key=value,key=value` labels shared by all driver pods |
 | `--node-metrics-cert-dir` | `""` | Node mode: directory with `tls.crt` and `tls.key` for the metrics endpoint; empty makes a self-signed certificate that Prometheus cannot check. Helm mounts a secret there |
 | `--share-stats-interval` | `30s` | Node mode: how often the node agent reads the NFS statistics of its shares. Helm sets it from `node.shareStatsInterval` |
 | `--cdi-copy-pod-memory-limit` | `8Gi` | Keep the memory limit of CDI's copy pods at least this high (OpenShift Virtualization `HyperConverged`); empty turns the check off |
@@ -404,6 +409,20 @@ kubectl apply -f config/deploy/node.yaml
 | `--restore-moment` | `""` | Moment to restore, RFC 3339; empty for the latest (restore-vm-disk mode). Set by the backup restore Job |
 | `--vm-group` | `""` | `namespace/name` of the VM that owns the disk (send-vm-disk mode). Set by the replication controller |
 | `--copy-id` | `""` | Name of this copy attempt; a repeat with the same name resumes it (send-vm-disk mode). Set by the replication controller |
+
+---
+
+### On ROKS and ROVS: turn on user workload monitoring (required for alerts)
+
+The driver's alerts and scraping live in the namespace `ibm-vpc-file-pool-csi-monitoring`, which only OpenShift's user workload monitoring reads. Without it nothing evaluates the alerts. An admin turns it on once (the chart does not change this setting):
+
+```bash
+oc -n openshift-monitoring get configmap cluster-monitoring-config -o jsonpath='{.data.config\.yaml}'   # look for enableUserWorkload: true
+# If it is missing, add "enableUserWorkload: true" to config.yaml:
+oc -n openshift-monitoring edit configmap cluster-monitoring-config
+```
+
+See "Where alerts run on OpenShift" in [MONITORING.md](MONITORING.md) for why, and how to check it works.
 
 ---
 

@@ -171,6 +171,8 @@ Prometheus metrics and alerting configuration.
 | `metrics.port` | int | `8080` | Port for the `/metrics` endpoint |
 | `metrics.serviceMonitor.enabled` | bool | `true` | Create a Prometheus ServiceMonitor. The chart creates it only when the cluster has the `monitoring.coreos.com/v1` API. The console plugin's charts need it |
 | `metrics.serviceMonitor.interval` | string | `30s` | Scrape interval for the ServiceMonitor |
+| `metrics.monitoring.mode` | string | `auto` | Where scraping and alerts live on OpenShift. `auto`: in the monitoring namespace when the cluster has the Prometheus Operator API and the OpenShift console and `webhook.certProvider=openshift`; `enabled`: always (needs `certProvider=openshift`, else the render fails); `disabled`: in the release namespace. Needs user workload monitoring on: see [MONITORING.md](MONITORING.md#where-alerts-run-on-openshift) |
+| `metrics.monitoring.namespace` | string | `ibm-vpc-file-pool-csi-monitoring` | Namespace for the `ServiceMonitor` objects, the `PrometheusRule` and the metrics Services. The chart creates it, without a platform monitoring label |
 | `metrics.scraper.serviceAccount` | string | `prometheus-k8s` | Service account bound to the chart's `metrics-reader` ClusterRole (`get` on `/metrics`) so it can scrape the node agents. Empty creates no binding |
 | `metrics.scraper.namespace` | string | `openshift-monitoring` | Namespace of that service account |
 | `metrics.alerts.shareUsedWarning` | int | `85` | Percent of one share's size written (real used bytes) that triggers a warning |
