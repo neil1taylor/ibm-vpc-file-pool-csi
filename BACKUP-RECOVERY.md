@@ -383,7 +383,7 @@ It refuses, and changes nothing, in these cases:
 
 If the policy is already deleted, its status can no longer say where the backup is. Name the snapshot pool and the volume yourself: `--pool backups --volume pvc-...`. The volume name is the folder under `/backup/<policy>/pvcs/` on the share.
 
-### Export to COS (built; the release test is not yet run)
+### Export to COS (built; the release test is written and not yet run)
 
 A policy can also send its backups to an IBM Cloud Object Storage bucket, encrypted before they leave the cluster, with a lock that nobody can shorten. The controller does this with the `spec.export` block:
 
