@@ -38,6 +38,10 @@ export const COLUMN_HELP = {
     title: 'Last Sync',
     text: 'How long ago the last sync of the whole policy finished. Much older than the schedule means syncs are late or failing.',
   },
+  replicationReceiver: {
+    title: 'Receiver',
+    text: 'Only for a policy that copies to a receiver on another cluster. Reachable means the receiver answers, its certificate is trusted and it accepts the token. Not reachable gives the reason (for example the token or the certificate is wrong): fix it on the policy page, because syncs will fail until then.',
+  },
   replicationFailures: {
     title: 'Failures',
     text: 'Syncs in a row that failed; normal is 0. When it reaches the retry limit of the policy (3 by default), the policy pauses and stops syncing until it is resumed.',

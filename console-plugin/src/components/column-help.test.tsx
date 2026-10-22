@@ -19,7 +19,7 @@ const items: Record<string, unknown[]> = {
   Snapshot: [{ metadata: { name: 's1' }, spec: { poolName: 'p', sourceSubVolume: 'pvc-1', sizeGB: 1 }, status: { phase: 'Ready', readyToUse: true } }],
   SubVolume: [{ metadata: { name: 'pvc-1' }, spec: { poolName: 'p', pvcName: 'c', pvcNamespace: 'n', requestedGB: 1 }, status: { phase: 'Bound' } }],
   FileSharePool: [{ metadata: { name: 'p' }, spec: { zone: 'z', profile: 'dp2', maxShares: 2 }, status: { phase: 'Ready' } }],
-  ReplicationPolicy: [{ metadata: { name: 'rp' }, spec: { sourcePoolName: 'p', schedule: '1h' }, status: { phase: 'Active' } }],
+  ReplicationPolicy: [{ metadata: { name: 'rp' }, spec: { sourcePoolName: 'p', schedule: '1h', destinationEndpoint: 'https://r' }, status: { phase: 'Active' } }],
 };
 
 beforeEach(() => {
@@ -54,7 +54,7 @@ describe('status column help', () => {
 
   it('explains the replication Phase, Last Sync and Failures columns', () => {
     render(<ReplicationPolicyListPage />);
-    expectColumnHelp('Phase', 'Last Sync', 'Failures');
+    expectColumnHelp('Phase', 'Last Sync', 'Failures', 'Receiver');
   });
 
   it('explains the per-volume replication status columns', () => {

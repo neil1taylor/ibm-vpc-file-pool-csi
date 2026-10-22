@@ -19,6 +19,7 @@ To make a release:
 
 ## [Unreleased]
 
+- **Receiver check on the policy: `ReceiverReachable` (issue #46, item 4).** For a policy in driver-to-driver mode, the replication controller now checks the receiver (it answers, the certificate is trusted, the token is accepted) when it first sees the policy and then once per schedule, and sets the `ReceiverReachable` condition on `status.conditions` with a plain reason such as "certificate not trusted" or "token refused". The Replication Policies list has a Receiver column with help text, and the policy page a Receiver Status line. A failing check does not stop replication. The controller reads the two Secrets in `kube-system` with the rights it already has.
 - **Sidecar gate Job has fewer rights (issue #154).** The hook Job that `vmSnapshots.enableSidecarGate` runs may now only get and update the `HyperConverged` object named `kubevirt-hyperconverged` in `openshift-cnv`; before, it could list and update every `HyperConverged`. SECURITY.md now says what the gate opens up.
 
 ### Fixed

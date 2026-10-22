@@ -1633,6 +1633,10 @@ type ReplicationPolicyStatus struct {
     // LastError is the error message from the most recent failure.
     // +optional
     LastError string `json:"lastError,omitempty"`
+
+    // Conditions holds ReceiverReachable for a receiver-mode policy (see below).
+    // +optional
+    Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // SubVolumeReplicationStatus tracks the replication state of a single SubVolume.
@@ -1865,6 +1869,7 @@ kubectl annotate replicationpolicy <name> storage.ibmcloud.io/paused-
 - Each replication cycle iterates over all SubVolumes matching the `subVolumeSelector` (or all SubVolumes in the pool if no selector is set).
 - For each SubVolume, an incremental rsync copies changed files from the source subdirectory to the destination NFS server at `destinationBasePath/<subPath>`.
 - `consecutiveFailures` increments on each failed cycle and resets to 0 on success. When it reaches `maxRetries`, the policy transitions to `Paused`.
+- `conditions` has `ReceiverReachable` for a policy with `destinationEndpoint` (driver-to-driver mode); direct-NFS policies have none. The controller reads the token and CA Secrets in `kube-system`, calls the receiver's `/api/v1/health` and `/api/v1/auth-check`, and records `True` (reason `Reachable`) or `False` with one reason and a plain message: `CertificateNotTrusted`, `TokenRefused`, `StorageNotReachable`, `ReceiverTooOld`, `CannotConnect`, `TimedOut`, `SecretMissing` or `BadInput`. It checks when it first sees the policy and then once per `schedule`. A `False` result does not pause or stop replication; it explains why a sync fails.
 - Per-SubVolume status in `subVolumeStatuses` allows operators to identify which volumes are failing independently.
 
 ---

@@ -45,3 +45,19 @@ describe('ReplicationPolicyDetailsPage delete', () => {
     expect(screen.queryByRole('checkbox')).toBeNull();
   });
 });
+
+describe('ReplicationPolicyDetailsPage receiver status', () => {
+  it('shows why the receiver is not reachable', () => {
+    const dr = {
+      ...policy('dr', 'dr-receiver-token', 'dr-receiver-ca'),
+      status: {
+        consecutiveFailures: 0,
+        conditions: [{ type: 'ReceiverReachable', status: 'False', reason: 'TokenRefused', message: 'token refused' }],
+      },
+    };
+    watch(dr, [dr]);
+    render(<ReplicationPolicyDetailsPage />);
+    expect(screen.getByText('Not reachable')).toBeTruthy();
+    expect(screen.getByText(/token refused/)).toBeTruthy();
+  });
+});

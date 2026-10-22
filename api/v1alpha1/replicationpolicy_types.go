@@ -168,6 +168,13 @@ type ReplicationPolicyStatus struct {
 	// LastError is the error message from the most recent failure.
 	// +optional
 	LastError string `json:"lastError,omitempty"`
+
+	// Conditions holds the receiver check. ReceiverReachable is True when the
+	// receiver answers, its certificate is trusted and it accepts the token. It is
+	// set only for policies in driver-to-driver (receiver) mode. A False result
+	// does not stop replication; it explains why a sync fails.
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // SubVolumeReplicationStatus tracks the replication state of a single SubVolume.

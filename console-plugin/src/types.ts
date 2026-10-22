@@ -260,6 +260,8 @@ export interface ReplicationPolicyStatus {
   subVolumeStatuses?: SubVolumeReplicationStatus[];
   consecutiveFailures: number;
   lastError?: string;
+  /** `ReceiverReachable` is set by the controller for driver-to-driver policies. */
+  conditions?: Condition[];
 }
 
 export interface SubVolumeReplicationStatus {

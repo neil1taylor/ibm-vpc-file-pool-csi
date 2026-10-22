@@ -198,7 +198,7 @@ CLI tool for migrating PVCs from the stock IBM VPC File CSI driver.
 - **`kubectl migrate execute`** — Creates a migration pod that copies data from the source PVC to a new SubVolume in the target pool.
 - **`kubectl migrate status`** — Checks migration pod progress.
 - **Migrate volumes in the console** — A "Migrate volumes into a pool" link on the Pools tab opens a page that lists the claims of another storage class, refuses a claim a pod uses or a move that does not fit the pool, asks for confirmation, and then makes the same new claim and pod as `kubectl migrate execute`. It follows the copy and never deletes the old claim. See [TUTORIAL-08-MIGRATION-AND-CONSOLE.md](TUTORIAL-08-MIGRATION-AND-CONSOLE.md#migrate-in-the-console).
-- **Receiver setup in the console** — The replication form, in Driver-to-Driver mode, makes the token and CA Secrets from what you paste, runs a short check Job in the source cluster (the address answers, the certificate is trusted, the token is accepted), and turns Create on only when it passes. See [CROSS-REGION-DR.md](CROSS-REGION-DR.md#set-up-the-receiver-in-the-console).
+- **Receiver setup in the console** — The replication form, in Driver-to-Driver mode, makes the token and CA Secrets from what you paste, runs a short check Job in the source cluster (the address answers, the certificate is trusted, the token is accepted), and turns Create on only when it passes. See [CROSS-REGION-DR.md](CROSS-REGION-DR.md#set-up-the-receiver-in-the-console). Afterwards the controller keeps checking the receiver and shows "Reachable" or the reason it is not on the policy list and page.
 - **Dry-run mode** — Preview migration plan without making changes.
 - **Idempotent and resumable** — Safe to re-run after interruption.
 

@@ -383,6 +383,7 @@ Notes:
 - The check Job deletes itself after ten minutes.
 - When you delete the policy in the console, the dialog has a box, off by default: "Also delete the Secrets the receiver setup made". It appears only for Secrets named `<policy name>-receiver-token` and `<policy name>-receiver-ca` that the policy uses and no other policy uses. The console deletes a Secret only after it proves the Secret carries the label the setup put on it, so a Secret you made yourself with the same name is left alone and named in a message.
 - A user who may not make Jobs in `kube-system` sees a warning and can still make the policy without the check. A user who may not make Secrets there is told to ask an administrator and use existing Secrets.
+- After the policy exists, the replication controller repeats the same checks (health call, certificate, token) once per schedule and sets the `ReceiverReachable` condition on the policy. The Replication Policies list has a Receiver column and the policy page a Receiver Status line: Reachable, Not reachable with the reason, or Checking... until the first result. `kubectl get replicationpolicy <name> -o jsonpath='{.status.conditions}'` shows the same. A failing check does not stop replication.
 - The same test from a terminal: `curl -H "Authorization: Bearer $TOKEN" https://<receiver>/api/v1/auth-check` (add `--cacert ca.crt` for a self-signed receiver).
 
 ### Replication Data Flow
