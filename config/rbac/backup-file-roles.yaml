@@ -1,0 +1,23 @@
+# The rights-only name "backupfiles": no object of that kind exists. It lets RBAC
+# say "may read the backups of this namespace" (issue #92). The reader is added to
+# the built-in "admin" role, so a namespace admin can read their own namespace's
+# backups. Another namespace's backups need a RoleBinding to one of these roles.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: backup-file-reader
+  labels:
+    rbac.authorization.k8s.io/aggregate-to-admin: "true"
+rules:
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["backupfiles"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: backup-file-restorer
+rules:
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["backupfiles"]
+    verbs: ["get"]
