@@ -190,7 +190,7 @@ Sizes: S is a day or less of work, M a few days, L a week or more. Each PR has i
 0. **Spike on the lab (S, risk check).** Run the libguestfs image in a pod on ROVS with and without the KVM device. Measure: start time, listing, reading a file, memory. Try XFS, ext4, NTFS, LVM, a crash copy, a hibernated NTFS, and a disk served over a socket from a small test server. Decide the image and how to find it. Results are added to this spec in a PR that holds no product code. **If it fails (for example the appliance cannot start in a pod under the cluster's rules), the VM part of the goal is re-stated with the real gap before more is built.**
 1. **Plain volumes, snapshot pool, command line (L).** `BackupBrowse`, the helper in `cmd/browse` and its image, the controller part, the gateway, the access rules and ClusterRoles, `kubectl backup ls/get/browse`, limits, cleanup, audit Events. Settles the "squashed root cannot read 0600 files" question.
 2. **Restore of files (M).** `BackupFileRestore`, the Job, the three targets, `kubectl backup restore-files`, the space check, ownership.
-3. **Console (L).** The Backups pages that do not exist yet (policies, volumes, moments), the browser, download, the restore dialog, help texts, the plugin proxy entry.
+3. **Console (L).** The file browser, download, the file restore dialog, help texts and the plugin proxy entry. The Backups pages themselves (policies, volumes, moments) come from `2026-10-22-console-backup-ui.md`, which reserves a "Browse files" action on each volume row and moment for this phase. Build those pages first.
 4. **COS, plain volumes (M).** Kopia read-only helper, `--from-cos` for ls/get/restore-files, the tests that block reaching another volume.
 5. **VM disks in the snapshot pool (L, the riskiest).** The disk server with undo-file rebuild and its property tests; the lease and the backup wait; the appliance helper; the file system picker; `norecovery` handling; the console picker; the crash-copy notices; the unreadable-volume list.
 6. **VM disks in COS (M).** Kopia library range reads and the cache; speed measurements; the fall-back decision if needed.
@@ -224,7 +224,7 @@ Total: about 4 to 6 weeks of agent work, with the lab as the slowest part (stage
 - Defaults: 15 minutes idle, 2 hours hard limit, 5 sessions in the cluster and 2 per namespace, 50 GiB for one download, a listing page of 1000 entries.
 - The browse helper is a separate binary and image. Kopia stays out of the controller. Kopia as a library is allowed in the browse image only.
 - A short spike (phase 0) comes before any VM work, and the VM part is re-stated with a real gap if the spike fails.
-- The Backups pages in the console are built as part of this work, since none exist today.
+- The Backups pages in the console are built by the backup screens spec (`2026-10-22-console-backup-ui.md`). This work adds the file browser to them.
 - Plain volumes are finished and usable (phases 1 to 4) before VM disks start.
 - No restore of single mail items or database rows (Veeam's application-level explorers). Files and folders only.
 
