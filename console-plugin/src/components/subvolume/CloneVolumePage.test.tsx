@@ -117,6 +117,21 @@ describe('CloneVolumePage', () => {
     expect(screen.queryByText(/while the VM is running/i)).toBeNull();
   });
 
+  it('suggests a VM snapshot for a safe copy and points to no future step', () => {
+    watch({
+      ...base(),
+      VirtualMachine: [
+        {
+          metadata: { name: 'vm1', namespace: 'apps' },
+          spec: { template: { spec: { volumes: [{ persistentVolumeClaim: { claimName: 'data' } }] } } },
+        },
+      ],
+    });
+    render(<CloneVolumePage />);
+    expect(screen.getByText(/take a snapshot of the VM and restore it/i)).toBeTruthy();
+    expect(screen.queryByText(/step 7/i)).toBeNull();
+  });
+
   it('shows the pool free space and warns when the size is more than that', () => {
     watch(base());
     render(<CloneVolumePage />);
