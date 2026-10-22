@@ -1,6 +1,6 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { consoleFetchJSON } from '@openshift-console/dynamic-plugin-sdk';
-import { checkPrometheusConnection, usePoolMetrics } from './use-pool-metrics';
+import { checkPrometheusConnection, usePoolMetrics, resultToNumber, resultSum } from './use-pool-metrics';
 
 const mockFetch = consoleFetchJSON as jest.MockedFunction<typeof consoleFetchJSON>;
 
@@ -172,5 +172,31 @@ describe('usePoolMetrics replication lag', () => {
     const urls = mockFetch.mock.calls.map((c) => decodeURIComponent(c[0] as string));
     expect(urls.some((u) => u.includes('allocation_duration_seconds_bucket'))).toBe(true);
     expect(urls.some((u) => /_seconds\[/.test(u))).toBe(false);
+  });
+});
+
+const r = (pool: string, value: string) => ({ metric: { pool }, value: [0, value] as [number, string] });
+
+describe('resultToNumber', () => {
+  it('reads the value of the pool', () => {
+    expect(resultToNumber([r('a', '0.25')], 'a')).toBe(0.25);
+  });
+
+  it('returns 0 when Prometheus has no data for the pool (NaN)', () => {
+    expect(resultToNumber([r('a', 'NaN')], 'a')).toBe(0);
+  });
+
+  it('returns 0 for an infinite value', () => {
+    expect(resultToNumber([r('a', '+Inf')], 'a')).toBe(0);
+  });
+
+  it('returns 0 when the pool is missing', () => {
+    expect(resultToNumber([r('a', '1')], 'b')).toBe(0);
+  });
+});
+
+describe('resultSum', () => {
+  it('ignores NaN values', () => {
+    expect(resultSum([r('a', '2'), r('b', 'NaN')])).toBe(2);
   });
 });
