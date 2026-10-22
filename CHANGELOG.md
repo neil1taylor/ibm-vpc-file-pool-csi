@@ -19,6 +19,8 @@ To make a release:
 
 ## [Unreleased]
 
+- **Deleting the VolumeSnapshot of a failed snapshot no longer leaves a record that blocks the pool (issue #201).** When a snapshot failed (for example an instant snapshot of a disk the VM user does not own), the snapshot sidecar had no snapshot ID, so deleting the VolumeSnapshot never reached the driver and the `Snapshot` record stayed, which kept the pool in `SnapshotsExist`. The controller now removes a `Snapshot` record that is not ready, is at least 2 minutes old, is named by the sidecar (`<prefix>-<VolumeSnapshot UID>`) and has no VolumeSnapshotContent, with the normal delete (Jobs stopped, files merged away, space given back). This also cleans up records left by older versions. Ready snapshots and records made by group snapshots are never touched.
+
 - **Replication receiver TLS stays off by default; the reason is now written down (issue #89).** Turning it on needs cert-manager and a trusted CA on the source cluster, so a new default would break working installs. On OpenShift the Route already encrypts traffic into the cluster. See `SECURITY.md`. All other items of #89 and #90 were already done.
 - **README: a table of every use case and its status** (included with its maturity, in progress, proposed, not active).
 
