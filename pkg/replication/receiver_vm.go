@@ -251,12 +251,24 @@ func (v *volume) removeOldUploads(age time.Duration) error {
 	return nil
 }
 
+// valid reports whether a manifest entry can be one that appendSeg wrote.
+func (s seg) valid() bool {
+	return s.kind <= segSame && s.off >= 0 && s.pos >= 0 && s.length > 0 && s.length <= compareChunk
+}
+
 // loadSession reads what is stored for the copy, later entries winning for the
 // same offset. Entries whose data is not in the staging file are dropped: they
 // were cut off by a stop.
+//
+// A receiver that was killed while it wrote leaves an entry cut off, or a
+// stretch of zeros. loadSession keeps the entries before the first one that
+// cannot be right and cuts the record file off there, so that the next entries
+// are written in step. The client sends what is missing again. The digest at
+// commit still guards the result.
 func (c *vmCall) loadSession() (map[int64]seg, error) {
 	segs := map[int64]seg{}
-	f, err := c.v.root.Open(filepath.Join(c.sessionDir(), manifestName))
+	name := filepath.Join(c.sessionDir(), manifestName)
+	f, err := c.v.root.Open(name)
 	if errors.Is(err, os.ErrNotExist) {
 		return segs, nil
 	}
@@ -270,6 +282,8 @@ func (c *vmCall) loadSession() (map[int64]seg, error) {
 	}
 	br := bufio.NewReaderSize(f, 1<<20)
 	var buf [manifestEntrySize]byte
+	var good int64 // bytes of entries that can be right
+	damaged := false
 	for {
 		if _, err = io.ReadFull(br, buf[:]); err != nil {
 			break // end, or a torn last entry
@@ -280,22 +294,62 @@ func (c *vmCall) loadSession() (map[int64]seg, error) {
 			length: binary.BigEndian.Uint32(buf[9:13]),
 			pos:    int64(binary.BigEndian.Uint64(buf[13:21])), // #nosec G115 -- written by us, checked below
 		}
-		if s.off < 0 || s.pos < 0 || s.kind > segSame {
-			return nil, fmt.Errorf("the upload record file is damaged")
+		if !s.valid() {
+			damaged = true
+			break
 		}
+		good += manifestEntrySize
 		if s.kind == segData && s.pos+int64(s.length) > dataSize {
 			continue
 		}
 		segs[s.off] = s
 	}
-	if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+	if !damaged && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
 		return nil, err
+	}
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if fi.Size() != good {
+		klog.InfoS("Cutting off the damaged end of an upload record file", "disk", c.disk, "copy", c.copyID,
+			"size", fi.Size(), "kept", good, "damaged", damaged)
+		if err = c.truncateManifest(name, good); err != nil {
+			return nil, err
+		}
 	}
 	return segs, nil
 }
 
+func (c *vmCall) truncateManifest(name string, size int64) error {
+	w, err := c.v.root.OpenFile(name, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	err = w.Truncate(size)
+	if err == nil {
+		err = w.Sync()
+	}
+	if cerr := w.Close(); err == nil {
+		err = cerr
+	}
+	return err
+}
+
+// discardSession removes everything stored for the copy, so the next try
+// starts clean.
+func (c *vmCall) discardSession() {
+	if err := c.v.root.RemoveAll(c.sessionDir()); err != nil {
+		klog.ErrorS(err, "Could not remove the upload folder", "dir", c.sessionDir())
+	}
+}
+
 func (c *vmCall) openSession() (manifest, staging *os.File, err error) {
 	if err = c.v.root.MkdirAll(c.sessionDir(), 0o770); err != nil { // #nosec G301 -- shared with the QEMU user
+		return nil, nil, err
+	}
+	// Cut off a damaged end first, so new entries follow good ones.
+	if _, err = c.loadSession(); err != nil {
 		return nil, nil, err
 	}
 	manifest, err = c.v.root.OpenFile(filepath.Join(c.sessionDir(), manifestName), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o660)
@@ -686,7 +740,11 @@ func (c *vmCall) commit() {
 		defer func() { _ = staging.Close() }()
 	}
 	if err = checkDigest(staging, segs, cr.Digest); err != nil {
-		c.fail(http.StatusBadRequest, "%v", err)
+		// What is stored does not fit the digest, so it must not be kept: the
+		// client would skip the stored records and fail the same way for ever.
+		klog.ErrorS(err, "Discarding an upload that does not match its digest", "disk", c.disk, "copy", c.copyID)
+		c.discardSession()
+		c.fail(http.StatusBadRequest, "%v; the upload was discarded, send the copy again", err)
 		return
 	}
 
