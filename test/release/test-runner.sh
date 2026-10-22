@@ -153,4 +153,17 @@ printf '#!/usr/bin/env bash\necho "[00:00:00] PASS: three volumes backed up"\n' 
 ) >"$SKIPDIR/run.log" 2>&1
 expect_contains "stage 18 reports the COS part as not checked without settings" "$SKIPDIR/out/results.tsv" "not checked: export to COS and restore from COS"
 
+# COS_QUICK=1 without COS settings fails the stage with a clear check; with settings the local restores are not checked.
+(
+    export PATH="$SKIPDIR/bin:$PATH" RT_OUT="$SKIPDIR/out" RT_STAGE=18-backup RT_ID=t2 RT_LIB="$HERE/lib.sh"
+    export COS_CONFIG_DIR="$SKIPDIR/none" COS_BUCKET="" HOME="$SKIPDIR" COS_QUICK=1
+    source "$HERE/lib.sh"; source "$HERE/stages/18-backup.sh"
+    E2E="$SKIPDIR/e2e.sh"; BACKUP_BIN="$SKIPDIR/bin/oc"
+    run
+) >"$SKIPDIR/run-quick.log" 2>&1
+expect_contains "COS_QUICK=1 without COS settings fails with a clear check" "$SKIPDIR/out/results.tsv" "COS_QUICK=1 needs the COS settings"
+expect_contains "stage 18 documents COS_QUICK" "$HERE/stages/18-backup.sh" "COS_QUICK=1 RT_STAGES=18 bash test/release/remote.sh start"
+expect_contains "remote.sh passes COS_QUICK to the run" "$HERE/remote.sh" 'cos_env="COS_QUICK=1"'
+expect_contains "the e2e script has the quick mode" "$HERE/../e2e/test-backup.sh" 'COS_QUICK:-0'
+
 exit "$FAILED"
