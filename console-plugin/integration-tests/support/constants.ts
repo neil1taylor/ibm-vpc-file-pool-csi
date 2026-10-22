@@ -15,8 +15,8 @@ export const TAB_NAMES = [
   'Pools',
   'SubVolumes',
   'Snapshots',
-  'Group Snapshots',
   'Replication',
+  'Backups',
   'Monitoring',
 ] as const;
 
