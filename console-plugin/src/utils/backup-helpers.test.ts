@@ -1,12 +1,20 @@
 import { BackupPolicy, BackupVolumeStatus } from '../types';
 import {
+  backupRestoreProgress,
   browseFilesAvailable,
+  buildBackupRestore,
   describeBackupVolume,
   exportStateText,
   keptUntil,
+  localInputToISO,
+  momentToLocalInput,
   parseKeepFor,
+  parseRestoreQuery,
   policyProblem,
+  restorePath,
+  restoreRequestName,
   stalestBackupAge,
+  validateBackupRestore,
 } from './backup-helpers';
 
 const HOUR = 3600 * 1000;
@@ -186,5 +194,153 @@ describe('browseFilesAvailable', () => {
     expect(browseFilesAvailable(undefined)).toBe(false);
     expect(browseFilesAvailable({})).toBe(false);
     expect(browseFilesAvailable({ fileRestore: true })).toBe(true);
+  });
+});
+
+describe('restoreRequestName', () => {
+  it('is restore-<claim>-<seconds in base 36>, like the command line', () => {
+    expect(restoreRequestName('data', 1761000000000)).toBe(`restore-data-${(1761000000).toString(36)}`);
+  });
+
+  it('is cut to 63 characters with no dash or dot at the end', () => {
+    const name = restoreRequestName('a'.repeat(80), 1761000000000);
+    expect(name.length).toBeLessThanOrEqual(63);
+    expect(name).toMatch(/[a-z0-9]$/);
+    expect(restoreRequestName('a'.repeat(51) + '-', 1761000000000).endsWith('-')).toBe(false);
+  });
+});
+
+describe('buildBackupRestore', () => {
+  const input = {
+    policy: 'nightly',
+    sourceNamespace: 'apps',
+    sourceName: 'data',
+    targetNamespace: 'apps',
+    targetName: 'data-restored',
+  };
+
+  it('asks for the latest backup with no moment and no class', () => {
+    const br = buildBackupRestore(input, 1761000000000);
+    expect(br).toEqual({
+      apiVersion: 'storage.ibmcloud.io/v1alpha1',
+      kind: 'BackupRestore',
+      metadata: { name: restoreRequestName('data', 1761000000000) },
+      spec: {
+        policy: 'nightly',
+        sourceNamespace: 'apps',
+        sourceName: 'data',
+        targetNamespace: 'apps',
+        targetName: 'data-restored',
+      },
+    });
+  });
+
+  it('adds the moment as an RFC 3339 time without fractions, and the class when one is chosen', () => {
+    const br = buildBackupRestore(
+      { ...input, moment: '2026-10-20T09:00:00.000Z', storageClass: 'fast' },
+      1761000000000,
+    );
+    expect(br.spec.moment).toBe('2026-10-20T09:00:00Z');
+    expect(br.spec.storageClassName).toBe('fast');
+  });
+});
+
+describe('validateBackupRestore', () => {
+  const ok = { targetNamespace: 'apps', targetName: 'data-restored', moment: '' };
+  const ctx = {
+    existingNames: ['data'],
+    oldestBackupTime: '2026-10-01T00:00:00Z',
+  };
+
+  it('has no errors for a good request', () => {
+    expect(validateBackupRestore(ok, ctx)).toEqual({});
+  });
+
+  it('refuses a bad namespace or claim name', () => {
+    expect(validateBackupRestore({ ...ok, targetNamespace: 'Apps' }, ctx).targetNamespace).toBeTruthy();
+    expect(validateBackupRestore({ ...ok, targetName: 'Data_1' }, ctx).targetName).toBeTruthy();
+    expect(validateBackupRestore({ ...ok, targetName: '' }, ctx).targetName).toBeTruthy();
+  });
+
+  it('refuses a claim that exists, as a restore never writes over a volume', () => {
+    expect(validateBackupRestore({ ...ok, targetName: 'data' }, ctx).targetName).toMatch(/already exists/);
+  });
+
+  it('refuses a moment before the oldest backup, and a moment that is not a time', () => {
+    expect(validateBackupRestore({ ...ok, moment: '2026-09-01T00:00:00Z' }, ctx).moment).toMatch(/oldest backup/);
+    expect(validateBackupRestore({ ...ok, moment: 'soon' }, ctx).moment).toBeTruthy();
+    expect(validateBackupRestore({ ...ok, moment: '2026-10-05T00:00:00Z' }, ctx).moment).toBeUndefined();
+  });
+
+  it('does not check the moment when the oldest backup is not known', () => {
+    expect(validateBackupRestore({ ...ok, moment: '2020-01-01T00:00:00Z' }, { existingNames: [] }).moment).toBeUndefined();
+  });
+});
+
+describe('moments in the form', () => {
+  it('round-trips a time through the local input', () => {
+    const iso = '2026-10-20T09:30:00.000Z';
+    expect(localInputToISO(momentToLocalInput(iso))).toBe(iso);
+  });
+
+  it('gives empty text for an empty or bad value', () => {
+    expect(momentToLocalInput('')).toBe('');
+    expect(momentToLocalInput('nonsense')).toBe('');
+    expect(localInputToISO('')).toBe('');
+  });
+});
+
+describe('restorePath and parseRestoreQuery', () => {
+  it('builds the restore link with the claim and the moment as query values', () => {
+    expect(restorePath('nightly', 'apps/data')).toBe('/vpc-file-pools/backups/nightly/restore?claim=apps%2Fdata');
+    expect(restorePath('nightly', 'apps/data', '2026-10-20T09:00:00Z')).toBe(
+      '/vpc-file-pools/backups/nightly/restore?claim=apps%2Fdata&moment=2026-10-20T09%3A00%3A00Z',
+    );
+    expect(restorePath('nightly')).toBe('/vpc-file-pools/backups/nightly/restore');
+  });
+
+  it('reads them back', () => {
+    expect(parseRestoreQuery('?claim=apps%2Fdata&moment=2026-10-20T09%3A00%3A00Z')).toEqual({
+      claim: 'apps/data',
+      moment: '2026-10-20T09:00:00Z',
+    });
+    expect(parseRestoreQuery('')).toEqual({ claim: '', moment: '' });
+  });
+});
+
+describe('backupRestoreProgress', () => {
+  it('waits while there is no status', () => {
+    expect(backupRestoreProgress(undefined).state).toBe('waiting');
+    expect(backupRestoreProgress({ metadata: { name: 'r' }, spec: {} as never }).state).toBe('waiting');
+  });
+
+  it('follows the phases', () => {
+    const at = (phase: string, extra = {}) =>
+      backupRestoreProgress({ metadata: { name: 'r' }, spec: {} as never, status: { phase: phase as never, ...extra } });
+    expect(at('Pending', { message: 'waiting for the policy' })).toMatchObject({ state: 'waiting', text: 'waiting for the policy' });
+    expect(at('Provisioning').state).toBe('working');
+    expect(at('Restoring').state).toBe('working');
+    expect(at('Failed', { message: 'no backup' })).toMatchObject({ state: 'failed', text: 'no backup' });
+  });
+
+  it('says which moment was restored when it is done', () => {
+    const done = backupRestoreProgress({
+      metadata: { name: 'r' },
+      spec: {} as never,
+      status: { phase: 'Done', restoredMoment: '2026-10-20T09:00:00Z', latest: false },
+    });
+    expect(done.state).toBe('done');
+    expect(done.text).toContain('2026-10-20T09:00:00Z');
+    const latest = backupRestoreProgress({
+      metadata: { name: 'r' },
+      spec: {} as never,
+      status: { phase: 'Done', latest: true, restoredMoment: '2026-10-21T09:00:00Z' },
+    });
+    expect(latest.text).toContain('latest');
+  });
+
+  it('says so when the moment is not known', () => {
+    const done = backupRestoreProgress({ metadata: { name: 'r' }, spec: {} as never, status: { phase: 'Done' } });
+    expect(done.text).toMatch(/not known/);
   });
 });

@@ -1,6 +1,6 @@
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk';
+import { useAccessReview, useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk';
 import BackupDetailsPage from './BackupDetailsPage';
 import BackupVolumesTable from './BackupVolumesTable';
 import { BackupPolicy } from '../../types';
@@ -9,6 +9,10 @@ jest.mock('react-router-dom', () => ({
   useParams: () => ({ name: 'nightly' }),
   Link: ({ to, children }: { to: string; children: React.ReactNode }) => <a href={to}>{children}</a>,
 }));
+
+beforeEach(() => {
+  (useAccessReview as jest.Mock).mockReturnValue([true, false]);
+});
 
 const ago = (hours: number) => new Date(Date.now() - hours * 3600 * 1000).toISOString();
 
@@ -161,8 +165,24 @@ describe('BackupVolumesTable', () => {
 
   it('hides the Browse files action until the file-restore feature is present', () => {
     render(<BackupVolumesTable policy={policy()} />);
-    expect(screen.queryByRole('button', { name: 'Kebab toggle' })).toBeNull();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Kebab toggle' })[0]);
     expect(screen.queryByText('Browse files')).toBeNull();
+  });
+
+  it('has a Restore action on each volume that links to the restore page with the claim', () => {
+    render(<BackupVolumesTable policy={policy()} />);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Kebab toggle' })[0]);
+    expect(screen.getByRole('link', { name: 'Restore' }).getAttribute('href')).toBe(
+      '/vpc-file-pools/backups/nightly/restore?claim=apps%2Fdisk-1',
+    );
+  });
+
+  it('turns Restore off and names the right when the user may not create BackupRestore objects', () => {
+    (useAccessReview as jest.Mock).mockReturnValue([false, false]);
+    render(<BackupVolumesTable policy={policy()} />);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Kebab toggle' })[0]);
+    expect(screen.getByRole('menuitem', { name: /Restore.*create BackupRestore/ }).hasAttribute('disabled') ||
+      screen.getByRole('menuitem', { name: /Restore.*create BackupRestore/ }).getAttribute('aria-disabled') === 'true').toBe(true);
   });
 
   it('shows the Browse files action on each volume when the feature is present', () => {

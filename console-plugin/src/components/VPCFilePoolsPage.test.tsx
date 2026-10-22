@@ -30,6 +30,7 @@ jest.mock('./replicationpolicy/ReplicationPolicyListPage', () => ({ __esModule: 
 jest.mock('./replicationpolicy/ReplicationPolicyDetailsPage', () => ({ __esModule: true, default: () => null }));
 jest.mock('./replicationpolicy/ReplicationPolicyCreatePage', () => ({ __esModule: true, default: () => null }));
 jest.mock('./backup/BackupListPage', () => ({ __esModule: true, default: () => null }));
+jest.mock('./backup/BackupRestorePage', () => ({ __esModule: true, default: () => null }));
 jest.mock('./backup/BackupDetailsPage', () => ({ __esModule: true, default: () => null }));
 jest.mock('./monitoring/MonitoringPage', () => ({ __esModule: true, default: () => null }));
 
@@ -41,6 +42,7 @@ const cases: Array<[string, string]> = [
   ['/vpc-file-pools/replication', 'TUTORIAL-06-REPLICATION-AND-FAILOVER.md'],
   ['/vpc-file-pools/backups', 'TUTORIAL-10-BACKUP-AND-RESTORE.md'],
   ['/vpc-file-pools/backups/nightly', 'TUTORIAL-10-BACKUP-AND-RESTORE.md'],
+  ['/vpc-file-pools/backups/nightly/restore', 'TUTORIAL-10-BACKUP-AND-RESTORE.md'],
   ['/vpc-file-pools/monitoring', 'MONITORING.md'],
   ['/vpc-file-pools/pools/~new', 'TUTORIAL-01-POOL-CREATION.md'],
   ['/vpc-file-pools/pools/general-purpose', 'TUTORIAL-01-POOL-CREATION.md'],
