@@ -175,7 +175,7 @@ The controller makes a `ReplicationPolicy` named `backup-${POLICY}-...` for each
 kubectl backup list --policy ${POLICY}
 ```
 
-Repeat until the row for `${NS}/files` shows a time under `LAST BACKUP`. This takes a few minutes.
+Repeat until the row for `${NS}/files` shows a time under `LAST BACKUP`. This takes a few minutes. The row shows `sync in progress` in the `ERROR` column until the first copy ends.
 
 **Expected:**
 
@@ -207,7 +207,7 @@ Wait for `POINTS` to reach `1`:
 kubectl backup list --policy ${POLICY}
 ```
 
-**Expected:** `POINTS` is `1`, and `OLDEST` is the first moment. The volume now has two moments.
+**Expected:** `POINTS` is `1`, and `OLDEST` is the first moment. The volume now has two moments. A new moment is made every 5 minutes whether or not the files change, so `POINTS` is higher if you waited longer. Restore a moment from before the change: `FIRST`, or `OLDEST`.
 
 ---
 
@@ -281,7 +281,7 @@ Delete the backups. The command measures them, shows the paths and the size, and
 kubectl backup delete --policy ${POLICY} --pvc ${NS}/files
 ```
 
-Use `--yes` instead of the typed answer in a script. The controller never deletes backups by itself before the keep time. The command refuses while the policy still backs up the volume, and while a restore of the volume runs.
+Use `--yes` instead of the typed answer in a script. Without a terminal, the command refuses to continue unless you pass `--yes`. The controller never deletes backups by itself before the keep time. The command refuses while the policy still backs up the volume, and while a restore of the volume runs.
 
 ---
 
