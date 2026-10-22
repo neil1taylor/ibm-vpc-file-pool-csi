@@ -85,6 +85,9 @@ vmSnapshots:
   # Setting this back to false or uninstalling does not turn the gate off: VMs
   # with instant snapshots cannot start without it. To turn it off, flatten
   # those VMs first (kubectl pool-snapshots flatten), then remove the entry.
+  # The gate is cluster-wide: anyone who can create or edit a VM can then add
+  # a hook sidecar container to that VM's pod. The hook Job may only read and
+  # update the HyperConverged object named kubevirt-hyperconverged.
   enableSidecarGate: false
 
 webhook:

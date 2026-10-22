@@ -19,6 +19,8 @@ To make a release:
 
 ## [Unreleased]
 
+- **Sidecar gate Job has fewer rights (issue #154).** The hook Job that `vmSnapshots.enableSidecarGate` runs may now only get and update the `HyperConverged` object named `kubevirt-hyperconverged` in `openshift-cnv`; before, it could list and update every `HyperConverged`. SECURITY.md now says what the gate opens up.
+
 ### Fixed
 - `kubectl backup delete`, found by the lab test of issue #124: a shell whose input is `/dev/null` (a script, CI) counted as interactive, so the command measured the backup and then asked a question nobody could answer, instead of stopping at once as documented; and the size it showed counted every hard-linked file twice for plain volumes. The size is now one `du` run over both folders. `BACKUP-RECOVERY.md` lists every right the command needs.
 - **Dashboard numbers that did not match their labels.** The Allocation Rate cards (dashboard and pool page) showed new volumes per second under a "/hr" label; they now show per hour. The Snapshots card counted every snapshot operation, including deletes and failures; it now counts snapshots taken. The Clones card counted failed clones too, and labelled the median clone time "Avg duration"; it now counts finished clones and says "Median duration".
