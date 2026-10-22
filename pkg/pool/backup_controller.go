@@ -75,6 +75,9 @@ type BackupController struct {
 	exportReported map[string]bool
 	// kick wakes Run before the next tick. See Kick.
 	kick chan struct{}
+	// browseJobs and browse run browse sessions; nil browseJobs means off.
+	browseJobs BrowseJobs
+	browse     BrowseConfig
 }
 
 // NewBackupController returns a controller that reads and writes with c. It
@@ -153,6 +156,7 @@ func (bc *BackupController) ReconcileAll(ctx context.Context) {
 		bc.reconcile(ctx, &list.Items[i])
 	}
 	bc.reconcileRestores(ctx)
+	bc.reconcileBrowses(ctx)
 }
 
 // tidyDeleted removes the labels and the ReplicationPolicies of policies that

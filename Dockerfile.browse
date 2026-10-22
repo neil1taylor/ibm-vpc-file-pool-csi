@@ -1,0 +1,24 @@
+# The browse helper: reads one backup, read-only, for the browse feature.
+# It is a separate image from the driver so that the helper holds nothing else
+# (no Kopia, no VPC client). See docs/specs/2026-10-22-backup-file-restore.md.
+# This image reads plain volumes. The VM disk helper (libguestfs, CentOS) is a
+# later image.
+FROM docker.io/library/golang:1.26 AS builder
+
+WORKDIR /workspace
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY pkg/browse/ pkg/browse/
+COPY cmd/browse/ cmd/browse/
+ARG VERSION=dev
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.version=${VERSION}" -o /browse ./cmd/browse
+
+FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
+
+COPY --from=builder /browse /usr/local/bin/browse
+
+# The pod runs this as root with every capability dropped, on a read-only mount.
+# The chart sets that; root here only means the image does not forbid it.
+USER 0
+ENTRYPOINT ["/usr/local/bin/browse"]
