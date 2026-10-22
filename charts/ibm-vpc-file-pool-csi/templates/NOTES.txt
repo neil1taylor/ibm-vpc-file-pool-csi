@@ -19,6 +19,15 @@ Verify the installation:
 StorageClass "{{ .Values.storageClass.name }}" has been created.
 {{- end }}
 
+{{- if .Values.vmSnapshots.enableSidecarGate }}
+
+Instant VM snapshots: this release turns on the KubeVirt Sidecar feature gate
+(a hook Job adds it to the HyperConverged kubevirt.kubevirt.io/jsonpatch
+annotation). Red Hat does not support settings made through that annotation.
+Uninstalling or setting vmSnapshots.enableSidecarGate=false does not turn the
+gate off. See VM-INSTANT-SNAPSHOTS.md, "Turning it on".
+{{- end }}
+
 {{- if .Values.volumeSnapshotClass.create }}
 
 VolumeSnapshotClass "{{ .Values.volumeSnapshotClass.name }}" has been created.

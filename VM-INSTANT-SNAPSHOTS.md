@@ -4,8 +4,8 @@ Status: **built, Experimental.** Tested by hand on rovslab on 21 October 2026 (r
 
 ## Turning it on
 
-1. Install the driver with `vmSnapshots.method=auto` (the default) and webhooks on.
-2. Turn on the KubeVirt `Sidecar` feature gate. On OpenShift, add one operation to the `kubevirt.kubevirt.io/jsonpatch` annotation of `HyperConverged`. Keep any operations that are there already:
+1. Install the driver with `vmSnapshots.method=auto` (the default), webhooks on, and `vmSnapshots.enableSidecarGate=true`. After each install and upgrade, a hook Job turns on the KubeVirt `Sidecar` feature gate (step 2) for you.
+2. Without the Helm value, turn on the gate by hand. On OpenShift, add one operation to the `kubevirt.kubevirt.io/jsonpatch` annotation of `HyperConverged`. Keep any operations that are there already:
    ```bash
    cur=$(oc get hyperconverged kubevirt-hyperconverged -n openshift-cnv -o jsonpath='{.metadata.annotations.kubevirt\.kubevirt\.io/jsonpatch}')
    new=$(echo "${cur:-[]}" | jq -c '. + [{"op":"add","path":"/spec/configuration/developerConfiguration/featureGates/-","value":"Sidecar"}]')
@@ -14,7 +14,7 @@ Status: **built, Experimental.** Tested by hand on rovslab on 21 October 2026 (r
    **Red Hat does not support this setting**, and `HyperConverged` then reports `TaintedConfiguration=True`.
 3. Take a snapshot from the console's VM Snapshots tab, or with a `VirtualMachineSnapshot`. The VolumeSnapshots are ready at once.
 
-To stop: delete the VMs' snapshots (`kubectl pool-snapshots flatten <vm> -n <namespace>` for each VM), then remove the operation from the annotation. A VM with snapshots does not start while the gate is off.
+To stop: delete the VMs' snapshots (`kubectl pool-snapshots flatten <vm> -n <namespace>` for each VM), then remove the operation from the annotation. A VM with snapshots does not start while the gate is off. The chart never removes the gate, not when you uninstall and not when you set `vmSnapshots.enableSidecarGate=false`, so turning it off is always a step you take on purpose.
 
 ## In one paragraph
 

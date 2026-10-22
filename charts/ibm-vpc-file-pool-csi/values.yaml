@@ -78,6 +78,14 @@ vmSnapshots:
   # KubeVirt's virt-launcher image, for the Jobs that change a stopped VM's
   # snapshot files. Empty reads it from the virt-operator Deployment.
   launcherImage: ""
+  # Turn on the KubeVirt Sidecar feature gate, which instant snapshots need,
+  # with a hook Job after each install and upgrade. It adds one entry to the
+  # HyperConverged kubevirt.kubevirt.io/jsonpatch annotation and keeps the
+  # others. Red Hat does not support settings made through that annotation.
+  # Setting this back to false or uninstalling does not turn the gate off: VMs
+  # with instant snapshots cannot start without it. To turn it off, flatten
+  # those VMs first (kubectl pool-snapshots flatten), then remove the entry.
+  enableSidecarGate: false
 
 webhook:
   # Enable validating admission webhooks for CRD resources.

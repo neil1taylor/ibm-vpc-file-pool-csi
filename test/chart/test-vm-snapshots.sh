@@ -54,6 +54,33 @@ expect_absent "copy: no VM hook webhook" "$out" "kind: MutatingWebhookConfigurat
 out=$(render --set webhook.enabled=false)
 expect_absent "webhooks off: no VM hook webhook" "$out" "kind: MutatingWebhookConfiguration"
 
+# The Sidecar gate Job: off by default.
+out=$(render)
+expect_absent "default: no Sidecar gate Job" "$out" '"--mode=enable-sidecar-gate"'
+expect_absent "default: no HyperConverged update right for a gate Job" "$out" "sidecar-gate"
+
+# On: a hook Job after install and upgrade turns the gate on; nothing turns it off.
+out=$(render --set vmSnapshots.enableSidecarGate=true)
+gate=$(awk '/^---/{if (doc ~ /kind: Job/ && doc ~ /enable-sidecar-gate/) print doc; doc=""; next} {doc = doc $0 "\n"} END{if (doc ~ /kind: Job/ && doc ~ /enable-sidecar-gate/) print doc}' <<<"$out")
+expect_contains "gate on: Job runs the enable-sidecar-gate mode" "$gate" '"--mode=enable-sidecar-gate"'
+expect_contains "gate on: Job runs after install and upgrade" "$gate" '"helm.sh/hook": post-install,post-upgrade'
+expect_absent "gate on: the Job never runs on delete" "$gate" "pre-delete"
+expect_contains "gate on: Job uses its own service account" "$gate" "serviceAccountName: test-ibm-vpc-file-pool-csi-sidecar-gate"
+role=$(awk '/^---/{if (doc ~ /kind: ClusterRole\n/ && doc ~ /sidecar-gate/) print doc; doc=""; next} {doc = doc $0 "\n"} END{if (doc ~ /kind: ClusterRole\n/ && doc ~ /sidecar-gate/) print doc}' <<<"$out")
+expect_contains "gate on: RBAC on HyperConverged only" "$role" 'resources: ["hyperconvergeds"]'
+expect_contains "gate on: RBAC get, list and update only" "$role" 'verbs: ["get", "list", "update"]'
+notes=$(helm install test "$CHART" --namespace kube-system --dry-run=client --set vmSnapshots.enableSidecarGate=true 2>&1 | sed -n "/^NOTES:/,\$p")
+expect_contains "gate on: install notes say the gate is on" "$notes" "turns on the KubeVirt Sidecar feature gate"
+expect_contains "gate on: install notes say Red Hat does not support it" "$notes" "Red Hat does not support"
+notes=$(helm install test "$CHART" --namespace kube-system --dry-run=client 2>&1 | sed -n "/^NOTES:/,\$p")
+expect_absent "default: install notes do not mention the gate" "$notes" "Sidecar feature gate"
+
+if render --set vmSnapshots.method=copy --set vmSnapshots.enableSidecarGate=true >/dev/null 2>&1; then
+    fail "the gate with method copy must fail to render (it would do nothing)"
+else
+    pass "the gate with method copy fails to render"
+fi
+
 if render --set vmSnapshots.method=fast >/dev/null 2>&1; then
     fail "an unknown method must fail to render"
 else
