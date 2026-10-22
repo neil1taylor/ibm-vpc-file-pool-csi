@@ -3,24 +3,23 @@ package pool
 import (
 	"context"
 	"errors"
-	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"fmt"
 	"testing"
 	"time"
 
-	"fmt"
+	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/vmsnap"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 const (
-	orphanUID   = "0a1b2c3d-1111-2222-3333-444455556666"
-	orphanName  = "snapshot-" + orphanUID
-	orphanOther = "snapshot-9f9f9f9f-1111-2222-3333-444455556666"
+	orphanUID  = "0a1b2c3d-1111-2222-3333-444455556666"
+	orphanName = "snapshot-" + orphanUID
 )
 
 var vscTestGVK = schema.GroupVersionKind{Group: "snapshot.storage.k8s.io", Version: "v1", Kind: "VolumeSnapshotContent"}
