@@ -7,18 +7,13 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
 )
-
-// MaxDirEntries is the most names one folder may hold for a listing. The names
-// of a folder are read and sorted in memory, so a folder of millions of names
-// is refused instead of using all of the helper's memory.
-const MaxDirEntries = 5_000_000
 
 const defaultListLimit = 1000
 
@@ -33,6 +28,9 @@ const defaultListLimit = 1000
 type DirTree struct {
 	root int
 	walk bool
+
+	dirReads    atomic.Int64 // folders opened for reading, for tests
+	lastMaxHeld atomic.Int64 // most names a listing held at once, for tests
 }
 
 // NewTree opens root. The root itself may be reached through a link, because
@@ -270,16 +268,14 @@ func (t *DirTree) List(path [][]byte, cursor []byte, limit int) (ListPage, error
 	dir := os.NewFile(uintptr(fd), "folder")
 	defer func() { _ = dir.Close() }()
 
-	var names []string
+	t.dirReads.Add(1)
+	col := newPageCollector(cursor, limit)
 	for {
 		batch, err := dir.Readdirnames(10000)
 		for _, n := range batch {
-			if len(cursor) == 0 || n > string(cursor) {
-				names = append(names, n)
+			if cerr := col.add(n); cerr != nil {
+				return ListPage{}, cerr
 			}
-		}
-		if len(names) > MaxDirEntries {
-			return ListPage{}, &Error{Code: CodeInternal, Msg: fmt.Sprintf("the folder has more than %d names", MaxDirEntries)}
 		}
 		if errors.Is(err, io.EOF) {
 			break
@@ -288,13 +284,10 @@ func (t *DirTree) List(path [][]byte, cursor []byte, limit int) (ListPage, error
 			return ListPage{}, mapErr(err)
 		}
 	}
-	sort.Strings(names)
+	t.lastMaxHeld.Store(int64(col.maxHeld))
+	names, more := col.result()
 	page := ListPage{Entries: []Entry{}}
 	for _, n := range names {
-		if len(page.Entries) == limit {
-			page.Next = []byte(page.Entries[limit-1].Name)
-			break
-		}
 		e, err := statAt(fd, n)
 		if err != nil {
 			var ae *Error
@@ -305,7 +298,47 @@ func (t *DirTree) List(path [][]byte, cursor []byte, limit int) (ListPage, error
 		}
 		page.Entries = append(page.Entries, e)
 	}
+	if more && len(names) > 0 {
+		page.Next = []byte(names[len(names)-1])
+	}
 	return page, nil
+}
+
+// Walk calls fn for every entry of the folder at path, reading the folder once
+// and keeping only one batch of names in memory. The order is the folder's own.
+func (t *DirTree) Walk(path [][]byte, fn func(Entry) error) error {
+	fd, err := t.openDir(path)
+	if err != nil {
+		return err
+	}
+	dir := os.NewFile(uintptr(fd), "folder")
+	defer func() { _ = dir.Close() }()
+	t.dirReads.Add(1)
+	for count := 0; ; {
+		batch, err := dir.Readdirnames(1000)
+		for _, n := range batch {
+			if count++; count > MaxDirEntries {
+				return &Error{Code: CodeInternal, Msg: fmt.Sprintf("the folder has more than %d names", MaxDirEntries)}
+			}
+			e, serr := statAt(fd, n)
+			if serr != nil {
+				var ae *Error
+				if errors.As(serr, &ae) && ae.Code == CodeNotFound {
+					continue
+				}
+				return serr
+			}
+			if ferr := fn(e); ferr != nil {
+				return ferr
+			}
+		}
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return mapErr(err)
+		}
+	}
 }
 
 // Stat describes the name at path. A link is described, not followed.

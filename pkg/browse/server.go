@@ -27,6 +27,8 @@ type Options struct {
 	MaxLife time.Duration
 	// MaxStreams is how many file and tar streams may run at once. Zero means 8.
 	MaxStreams int
+	// MaxLists is how many folder listings may run at once. Zero means 4.
+	MaxLists int
 }
 
 // Why a session ended.
@@ -51,6 +53,7 @@ type Server struct {
 	tokenHash [sha256.Size]byte
 	opts      Options
 	streams   chan struct{}
+	lists     chan struct{}
 
 	active     atomic.Int32
 	lastActive atomic.Int64 // unix nanoseconds
@@ -64,7 +67,10 @@ func NewServer(tree Tree, token string, opts Options) (*Server, error) {
 	if opts.MaxStreams <= 0 {
 		opts.MaxStreams = 8
 	}
-	s := &Server{tree: tree, tokenHash: sha256.Sum256([]byte(token)), opts: opts, streams: make(chan struct{}, opts.MaxStreams)}
+	if opts.MaxLists <= 0 {
+		opts.MaxLists = 4
+	}
+	s := &Server{tree: tree, tokenHash: sha256.Sum256([]byte(token)), opts: opts, streams: make(chan struct{}, opts.MaxStreams), lists: make(chan struct{}, opts.MaxLists)}
 	s.lastActive.Store(time.Now().UnixNano())
 	return s, nil
 }
@@ -219,6 +225,13 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Limit <= 0 || req.Limit > maxListLimit {
 		req.Limit = maxListLimit
+	}
+	select {
+	case s.lists <- struct{}{}:
+		defer func() { <-s.lists }()
+	default:
+		writeJSON(w, http.StatusServiceUnavailable, errorBody{Code: CodeInternal, Message: "too many listings at once; try again"})
+		return
 	}
 	page, err := s.tree.List(req.Path, req.Cursor, req.Limit)
 	if err != nil {

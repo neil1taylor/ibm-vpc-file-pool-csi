@@ -521,3 +521,26 @@ func TestTooManyStreams(t *testing.T) {
 		t.Errorf("third stream: status %d, want 503", resp.StatusCode)
 	}
 }
+
+func TestTooManyListsAtOnce(t *testing.T) {
+	hold := make(chan struct{})
+	started := make(chan struct{}, 4)
+	tree := &fakeTree{list: func([][]byte, []byte, int) (ListPage, error) {
+		started <- struct{}{}
+		<-hold
+		return ListPage{}, nil
+	}}
+	ts, _ := newTestServer(t, tree, Options{MaxLists: 2})
+	defer close(hold)
+	for i := 0; i < 2; i++ {
+		go func() {
+			resp := post(t, ts, "/v1/list", testToken, map[string]any{"path": [][]byte{}})
+			_, _ = io.Copy(io.Discard, resp.Body)
+		}()
+		<-started
+	}
+	resp := post(t, ts, "/v1/list", testToken, map[string]any{"path": [][]byte{}})
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("third list: status %d, want 503", resp.StatusCode)
+	}
+}

@@ -73,24 +73,39 @@ func tarDir(t Tree, tw *tar.Writer, rep *TarReport, path [][]byte, name string, 
 			return err
 		}
 	}
+	child := func(c Entry) error {
+		childPath := append(append([][]byte{}, path...), c.Name)
+		childName := string(c.Name)
+		if name != "" {
+			childName = name + "/" + childName
+		}
+		return tarEntry(t, tw, rep, childPath, childName, c, false)
+	}
+	var err error
+	if wk, ok := t.(Walker); ok {
+		err = wk.Walk(path, child)
+	} else {
+		err = listPages(t, path, child)
+	}
+	var ae *Error
+	if errors.As(err, &ae) && ae.Code == CodeNotReadable && !top {
+		rep.Unreadable++
+		return nil
+	}
+	return err
+}
+
+// listPages calls fn for every entry of a folder, page by page. It is the way for
+// a Tree that cannot Walk.
+func listPages(t Tree, path [][]byte, fn func(Entry) error) error {
 	var cursor []byte
 	for {
 		page, err := t.List(path, cursor, 1000)
 		if err != nil {
-			var ae *Error
-			if errors.As(err, &ae) && ae.Code == CodeNotReadable && !top {
-				rep.Unreadable++
-				return nil
-			}
 			return err
 		}
 		for _, c := range page.Entries {
-			childPath := append(append([][]byte{}, path...), c.Name)
-			childName := string(c.Name)
-			if name != "" {
-				childName = name + "/" + childName
-			}
-			if err := tarEntry(t, tw, rep, childPath, childName, c, false); err != nil {
+			if err := fn(c); err != nil {
 				return err
 			}
 		}

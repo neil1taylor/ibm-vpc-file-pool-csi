@@ -23,6 +23,11 @@ const (
 	MaxPathDepth = 256
 )
 
+// MaxDirEntries is the most names one folder may hold for a listing. The names
+// of a folder are read and sorted in memory, so a folder of millions of names
+// is refused instead of using all of the helper's memory.
+const MaxDirEntries = 5_000_000
+
 // Entry describes one name in a folder. Names and link targets are raw bytes
 // (base64 in JSON), because a Linux file name is not always text.
 type Entry struct {
@@ -89,4 +94,11 @@ type Tree interface {
 	// Tar writes the file or folder at path to w as a tar stream. Links are
 	// written as links.
 	Tar(w io.Writer, path [][]byte) (TarReport, error)
+}
+
+// Walker is an optional part of a Tree: it calls fn once for every entry of a
+// folder, in no particular order, reading the folder once. A tar uses it so
+// that each folder is read once and not once per page.
+type Walker interface {
+	Walk(path [][]byte, fn func(Entry) error) error
 }

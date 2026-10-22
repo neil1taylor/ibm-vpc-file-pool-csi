@@ -343,11 +343,6 @@ func TestStatRoot(t *testing.T) {
 	})
 }
 
-type tarFile struct {
-	hdr  tar.Header
-	data string
-}
-
 func readTar(t *testing.T, b []byte) map[string]tarFile {
 	t.Helper()
 	out := map[string]tarFile{}
@@ -518,4 +513,39 @@ func snapshot(t *testing.T, dir string) string {
 		t.Fatal(err)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func TestTarOpensEachFolderOnce(t *testing.T) {
+	h := newHostile(t) // folders: root, docs, docs/deep, empty
+	treeModes(t, h.root, func(t *testing.T, tr *DirTree) {
+		before := tr.dirReads.Load()
+		if _, err := tr.Tar(io.Discard, nil); err != nil {
+			t.Fatal(err)
+		}
+		if n := tr.dirReads.Load() - before; n != 4 {
+			t.Errorf("folders read %d times, want 4 (once each)", n)
+		}
+	})
+}
+
+func TestListLongNamesStaysBounded(t *testing.T) {
+	dir := t.TempDir()
+	long := strings.Repeat("y", 200)
+	for i := 0; i < 3000; i++ {
+		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("%s%05d", long, i)), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	treeModes(t, dir, func(t *testing.T, tr *DirTree) {
+		page, err := tr.List(nil, nil, 5)
+		if err != nil || len(page.Entries) != 5 || len(page.Next) == 0 {
+			t.Fatalf("page %d next %q err %v", len(page.Entries), page.Next, err)
+		}
+		if got := string(page.Entries[0].Name); got != fmt.Sprintf("%s%05d", long, 0) {
+			t.Errorf("first = %q", got)
+		}
+		if tr.lastMaxHeld.Load() > 6 {
+			t.Errorf("held %d names at once, want at most 6", tr.lastMaxHeld.Load())
+		}
+	})
 }
