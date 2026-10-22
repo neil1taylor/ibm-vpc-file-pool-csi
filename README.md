@@ -62,7 +62,7 @@ Workload Pod
     │ bind-mount /data
     ▼
 CSI Node Agent (DaemonSet)
-    │ NFS mount per share, bind-mount per PVC
+    │ NFS mount per staged volume, bind-mount per pod
     │
 CSI Controller (Deployment)
     │ CreateVolume / DeleteVolume
@@ -140,7 +140,7 @@ The project's own words (pool, share, SubVolume, tier, drain, golden image, clon
 |------|-----------|
 | **Provisioner** | The CSI driver identifier in a StorageClass (e.g., `vpc-file-pool.csi.ibm.io`); determines which driver handles PVC requests |
 | **Sidecars** | Standard Kubernetes CSI helper containers (csi-provisioner, csi-resizer, csi-snapshotter, liveness-probe, node-driver-registrar) that translate Kubernetes events into CSI gRPC calls |
-| **NodeStageVolume** | CSI RPC that mounts the entire NFS share to a staging directory on the node; called once per share per node |
+| **NodeStageVolume** | CSI RPC that mounts the entire NFS share at the staging folder kubelet gives for the volume; called once per staged volume on a node |
 | **NodePublishVolume** | CSI RPC that bind-mounts a SubVolume's subdirectory from the staging path into the pod's volume path |
 | **VolumeContentSource** | Field in `CreateVolume` indicating the new volume should be populated from an existing snapshot or volume (clone) |
 | **fsGroupPolicy** | CSI driver spec field controlling whether kubelet recursively `chown`s mounts to the pod's `fsGroup`; set to `None` to avoid failures with root_squash |

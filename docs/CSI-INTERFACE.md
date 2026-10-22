@@ -830,7 +830,7 @@ func (d *Driver) NodeGetCapabilities(ctx context.Context, req *csi.NodeGetCapabi
 
 ### NodeStageVolume
 
-Mounts the whole NFS share to a staging directory. Called once per share per node (not once per PVC).
+Mounts the whole NFS share at the staging folder kubelet gives for the volume. Called once per staged volume on a node (the volume ID includes the PV name, so a different volume on the same share is mounted again). A second pod on the same volume reuses the mount.
 
 ```go
 func (d *Driver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {

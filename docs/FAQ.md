@@ -76,7 +76,7 @@ The boot disk is in qcow2 format instead of raw. KubeVirt requires raw format fo
 
 ### Why doesn't CDI work with this driver?
 
-It does. CDI registry import onto a pool StorageClass works, and the pool's golden image syncer uses it. A CDI host-assisted clone onto the pool from other storage (such as Ceph) ran out of memory in CDI's upload pod. See [KNOWN-LIMITATIONS.md — CDI Compatibility](KNOWN-LIMITATIONS.md#cdi-containerized-data-importer-compatibility).
+It does. CDI registry import onto a pool StorageClass works, and the pool's golden image syncer (a Hidden feature) uses it. A CDI host-assisted clone onto the pool from other storage (such as Ceph) ran out of memory in CDI's upload pod. See [KNOWN-LIMITATIONS.md — CDI Compatibility](KNOWN-LIMITATIONS.md#cdi-containerized-data-importer-compatibility).
 
 ---
 

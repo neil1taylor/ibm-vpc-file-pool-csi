@@ -7,7 +7,7 @@ Design document for cross-region replication of pooled file share data.
 **Last updated:** 2026-02-17
 
 > **Implementation note:** The implementation simplifies several aspects of this design:
-> - Uses `SyncDir` (rsync-based incremental) by default, with `CopyDir` (full copy) as fallback when `incrementalSync` is disabled
+> - Direct NFS mode uses `SyncDir` (rsync-based incremental) by default, with `CopyDir` (full copy) as fallback when `incrementalSync` is disabled. Receiver mode (`destinationEndpoint`) does not use rsync: it tars and uploads the whole folder each cycle
 > - Uses `time.Duration` schedule intervals instead of cron expressions
 > - Destination is specified via `DestinationNFSServer` IP rather than a pool reference with share mappings
 > - Pre/post-sync lifecycle hooks are implemented (Phase 5) — supports both exec (pod command) and HTTP hook types with configurable abort/continue-on-error policies
@@ -961,7 +961,7 @@ Failover is a manual process. Automated failover is explicitly out of scope for 
 
 ### Failback
 
-Failback reverses the process: create a ReplicationPolicy on the DR cluster pointing back to the original region. Sync data from DR to primary, then shift workloads back.
+There is no failback command. `kubectl failover` works in one direction only: it turns replicated data on a destination into live PVCs. To go back, you do the steps by hand: create a ReplicationPolicy on the DR cluster that points back to the original region, wait for the data to arrive, stop the workload on the DR cluster, run `kubectl failover` on the original cluster, and start the workload there. A `Failover` resource that would automate this is only a proposal (a draft pull request) and does not exist.
 
 ---
 

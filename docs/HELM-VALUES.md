@@ -88,6 +88,8 @@ Controls how the IBM Cloud API key is injected into the controller.
 
 ## Golden Image Syncer
 
+> **Hidden feature.** The code is kept for possible later use. The recommended way to make VMs is the standard OpenShift Virtualization catalog.
+
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `cdi.copyPodMemoryLimit` | string | `8Gi` | The controller keeps the memory limit of CDI's copy pods at least this high, through the OpenShift Virtualization `HyperConverged` setting `spec.resourceRequirements.storageWorkloads`. CDI's default of 600M is too small for copies onto NFS: the pod is killed. On rovslab, a 25 GB copy failed with 2Gi and finished with 8Gi. Empty turns the check off |

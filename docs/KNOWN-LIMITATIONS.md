@@ -279,5 +279,5 @@ The driver runs in `kube-system`, which OpenShift's platform monitoring does not
 - Above 85% full, the policies stop new backups of that share and never delete backups to make room. Free space with `kubectl backup delete` or a shorter `keepFor`.
 - Backups of a deleted volume stay on the share, and can be restored, until the keep time has passed since the last backup. `kubectl backup delete` removes the backups of a volume.
 - A backup of a volume that is not a VM disk is a file copy. It is as consistent as the files are.
-- Backups are in the same VPC as the data, and are not encrypted or locked beyond what the file share does. Export to a COS bucket with a lock (`spec.export`) is built, and has not yet been tested against real IBM Cloud (issue #138).
+- Backups are in the same VPC as the data, and are not encrypted or locked beyond what the file share does. Export to a COS bucket with a lock (`spec.export`) is built. Export and restore into the same cluster were proved against real IBM Cloud in stage 18 of the release test. Not yet proved: the emergency-key restore and a restore in the other (DR) cluster.
 - A restore needs the snapshot pool to be ready, and waits while a copy is being written to the backup of that volume.
