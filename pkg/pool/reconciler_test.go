@@ -621,6 +621,32 @@ func TestReconcile_EmitsPrometheusGauges(t *testing.T) {
 	}
 }
 
+// The max shares gauge lets an alert compare the share count with the limit.
+func TestReconcile_EmitsMaxSharesGauge(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	vpc.AddShare(&ibmcloud.ShareInfo{
+		ID: "share-1", Name: "s1", LifecycleState: "stable", SizeGB: 1000,
+		MountTargets: []ibmcloud.MountTargetInfo{{ID: "mt-1", IPAddress: "10.0.0.1"}},
+	})
+	pool := newTestPool("maxshares-pool", "spread", 1000, newStableShare("share-1", "s1", 1000, 0, 0))
+	pool.Spec.MaxShares = 7
+	k.addPool(pool)
+
+	r := newReconciler(k, vpc)
+	if _, err := reconcilePool(r, "maxshares-pool"); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	var m dto.Metric
+	if err := metrics.PoolMaxShares.WithLabelValues("maxshares-pool").Write(&m); err != nil {
+		t.Fatalf("failed to read PoolMaxShares: %v", err)
+	}
+	if *m.Gauge.Value != 7 {
+		t.Errorf("expected PoolMaxShares=7, got %f", *m.Gauge.Value)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // 15. Initial Provisioning with Tiers
 // ---------------------------------------------------------------------------
