@@ -6,7 +6,7 @@ argument-hint: "[share-size-gb] (default: 2000)"
 allowed-tools: Bash(kubectl *), Bash(sleep *), Bash(bash -c *)
 ---
 
-Run an end-to-end storage benchmark using the procedure from PERFORMANCE-TUNING.md.
+Run an end-to-end storage benchmark using the procedure from docs/PERFORMANCE-TUNING.md.
 
 Share size: $ARGUMENTS (default to 2000 GB if no argument provided).
 
@@ -75,7 +75,7 @@ Parse the fio JSON output and present a summary table:
 | Random read IOPS | |
 | Random read avg latency (ms) | |
 
-Compare against expected ranges from PERFORMANCE-TUNING.md.
+Compare against expected ranges from docs/PERFORMANCE-TUNING.md.
 
 ### 6. Clean up
 

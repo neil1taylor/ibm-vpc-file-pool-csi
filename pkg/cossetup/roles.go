@@ -4,7 +4,7 @@
 // context-based restriction (CBR) rule, and the wrapped backup key.
 //
 // It runs only on a person's machine, with that person's own IBM Cloud login.
-// The driver never calls it. It follows TUTORIAL-09-COS-BACKUP-BUCKET.md step
+// The driver never calls it. It follows docs/TUTORIAL-09-COS-BACKUP-BUCKET.md step
 // by step, and it deletes only the instance-wide policy that IBM Cloud adds
 // for the HMAC key. Design: docs/specs/2026-10-21-backup-cos-export.md.
 package cossetup
@@ -24,7 +24,7 @@ const (
 )
 
 // writerActions is the one place that holds the role's action list. It is the
-// list of step 3 in TUTORIAL-09-COS-BACKUP-BUCKET.md. It leaves out
+// list of step 3 in docs/TUTORIAL-09-COS-BACKUP-BUCKET.md. It leaves out
 // object.delete_version, object.bypass_governance_retention and every
 // bucket.put_* and bucket.delete_* action, on purpose.
 var writerActions = []string{

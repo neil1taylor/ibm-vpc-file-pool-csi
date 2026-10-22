@@ -4,7 +4,7 @@ description: Collect full diagnostics bundle for the pool CSI driver and save to
 allowed-tools: Bash(kubectl *), Bash(date *), Write
 ---
 
-Collect the full diagnostics bundle from DAY2-OPERATIONS.md and save it to `csi-diagnostics-<timestamp>.txt` in the current directory.
+Collect the full diagnostics bundle from docs/DAY2-OPERATIONS.md and save it to `csi-diagnostics-<timestamp>.txt` in the current directory.
 
 Run these commands and capture all output into a single file:
 

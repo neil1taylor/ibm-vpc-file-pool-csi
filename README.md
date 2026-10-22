@@ -69,13 +69,13 @@ IBM VPC Client ──► VPC File Share API
 - **BackupRestore** (cluster-scoped) — one request to restore a backup into a new PVC
 - **VolumeGroupSnapshot** (cluster-scoped) — not active; nothing acts on it
 
-The words used here (pool, share, moment, snapshot pool and others) are defined once in [CONTEXT.md](CONTEXT.md).
+The words used here (pool, share, moment, snapshot pool and others) are defined once in [CONTEXT.md](docs/CONTEXT.md).
 
 ## Glossary
 
 ### Core Concepts
 
-The project's own words (pool, share, SubVolume, tier, drain, golden image, clone, hook and the rest) are defined once in [CONTEXT.md](CONTEXT.md).
+The project's own words (pool, share, SubVolume, tier, drain, golden image, clone, hook and the rest) are defined once in [CONTEXT.md](docs/CONTEXT.md).
 
 ### IBM Cloud VPC
 
@@ -161,7 +161,7 @@ make deploy
 make helm-install
 ```
 
-See [INSTALL.md](INSTALL.md) for full setup instructions including IBM Cloud API key configuration.
+See [INSTALL.md](docs/INSTALL.md) for full setup instructions including IBM Cloud API key configuration.
 
 ### Create a Pool
 
@@ -230,60 +230,60 @@ go test ./pkg/pool/ -v -race -run TestAllocate_SpreadStrategy
 
 | Document | Description |
 |----------|-------------|
-| [INSTALL.md](INSTALL.md) | Build, deploy, and Helm chart |
-| [USER-GUIDE.md](USER-GUIDE.md) | End-user guide: pools, PVCs, snapshots, clones |
-| [FAQ.md](FAQ.md) | Frequently asked questions |
+| [INSTALL.md](docs/INSTALL.md) | Build, deploy, and Helm chart |
+| [USER-GUIDE.md](docs/USER-GUIDE.md) | End-user guide: pools, PVCs, snapshots, clones |
+| [FAQ.md](docs/FAQ.md) | Frequently asked questions |
 | [examples/](examples/) | Ready-to-use YAML examples |
 
 ### Operations
 
 | Document | Description |
 |----------|-------------|
-| [UPGRADE-GUIDE.md](UPGRADE-GUIDE.md) | Version upgrade procedures and compatibility matrix |
-| [DAY2-OPERATIONS.md](DAY2-OPERATIONS.md) | Production runbook: health checks, draining, failover |
-| [MONITORING.md](MONITORING.md) | Metrics reference, alerting rules, Grafana dashboard |
-| [CAPACITY-PLANNING.md](CAPACITY-PLANNING.md) | Sizing guidance, cost estimation, example configurations |
-| [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md) | Snapshot scheduling, DR setup, recovery runbooks |
-| [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Comprehensive troubleshooting guide |
-| [PERFORMANCE-TUNING.md](PERFORMANCE-TUNING.md) | NFS tuning, IOPS planning, benchmarking |
+| [UPGRADE-GUIDE.md](docs/UPGRADE-GUIDE.md) | Version upgrade procedures and compatibility matrix |
+| [DAY2-OPERATIONS.md](docs/DAY2-OPERATIONS.md) | Production runbook: health checks, draining, failover |
+| [MONITORING.md](docs/MONITORING.md) | Metrics reference, alerting rules, Grafana dashboard |
+| [CAPACITY-PLANNING.md](docs/CAPACITY-PLANNING.md) | Sizing guidance, cost estimation, example configurations |
+| [BACKUP-RECOVERY.md](docs/BACKUP-RECOVERY.md) | Snapshot scheduling, DR setup, recovery runbooks |
+| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Comprehensive troubleshooting guide |
+| [PERFORMANCE-TUNING.md](docs/PERFORMANCE-TUNING.md) | NFS tuning, IOPS planning, benchmarking |
 
 ### Configuration Reference
 
 | Document | Description |
 |----------|-------------|
-| [HELM-VALUES.md](HELM-VALUES.md) | Complete Helm chart values reference |
-| [CRD-SPEC.md](CRD-SPEC.md) | FileSharePool and SubVolume CRD definitions |
-| [API-KEY-SETUP.md](API-KEY-SETUP.md) | Authentication via secret-common-lib |
+| [HELM-VALUES.md](docs/HELM-VALUES.md) | Complete Helm chart values reference |
+| [CRD-SPEC.md](docs/CRD-SPEC.md) | FileSharePool and SubVolume CRD definitions |
+| [API-KEY-SETUP.md](docs/API-KEY-SETUP.md) | Authentication via secret-common-lib |
 
 ### Architecture & Design
 
 | Document | Description |
 |----------|-------------|
-| [FEATURES.md](FEATURES.md) | Complete feature catalog with comparison table |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | System design and data flows |
-| [CSI-INTERFACE.md](CSI-INTERFACE.md) | CSI gRPC method implementations |
-| [IBM-VPC-API.md](IBM-VPC-API.md) | VPC API client wrapper design |
-| [CONSISTENCY-MODEL.md](CONSISTENCY-MODEL.md) | NFS consistency guarantees and limitations |
-| [VOLUME-CLONING.md](VOLUME-CLONING.md) | Volume cloning design and usage |
-| [VOLUME-GROUP-SNAPSHOTS.md](VOLUME-GROUP-SNAPSHOTS.md) | Multi-PVC coordinated snapshots |
-| [CROSS-REGION-DR.md](CROSS-REGION-DR.md) | Cross-region disaster recovery |
+| [FEATURES.md](docs/FEATURES.md) | Complete feature catalog with comparison table |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design and data flows |
+| [CSI-INTERFACE.md](docs/CSI-INTERFACE.md) | CSI gRPC method implementations |
+| [IBM-VPC-API.md](docs/IBM-VPC-API.md) | VPC API client wrapper design |
+| [CONSISTENCY-MODEL.md](docs/CONSISTENCY-MODEL.md) | NFS consistency guarantees and limitations |
+| [VOLUME-CLONING.md](docs/VOLUME-CLONING.md) | Volume cloning design and usage |
+| [VOLUME-GROUP-SNAPSHOTS.md](docs/VOLUME-GROUP-SNAPSHOTS.md) | Multi-PVC coordinated snapshots |
+| [CROSS-REGION-DR.md](docs/CROSS-REGION-DR.md) | Cross-region disaster recovery |
 
 ### Platform-Specific
 
 | Document | Description |
 |----------|-------------|
-| [VPC-NETWORKING.md](VPC-NETWORKING.md) | VPC network configuration for NFS |
-| [VM-DISK-FORMATS.md](VM-DISK-FORMATS.md) | KubeVirt disk image format requirements |
-| [GOLDEN-IMAGE-WORKFLOW.md](GOLDEN-IMAGE-WORKFLOW.md) | Automated VM golden image provisioning |
-| [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md) | Known limitations and workarounds |
-| [SECURITY.md](SECURITY.md) | Security policy and hardening guide |
+| [VPC-NETWORKING.md](docs/VPC-NETWORKING.md) | VPC network configuration for NFS |
+| [VM-DISK-FORMATS.md](docs/VM-DISK-FORMATS.md) | KubeVirt disk image format requirements |
+| [GOLDEN-IMAGE-WORKFLOW.md](docs/GOLDEN-IMAGE-WORKFLOW.md) | Automated VM golden image provisioning |
+| [KNOWN-LIMITATIONS.md](docs/KNOWN-LIMITATIONS.md) | Known limitations and workarounds |
+| [SECURITY.md](docs/SECURITY.md) | Security policy and hardening guide |
 
 ### Development
 
 | Document | Description |
 |----------|-------------|
-| [CODING-GUIDELINES.md](CODING-GUIDELINES.md) | Go conventions and patterns |
-| [TESTING.md](TESTING.md) | Testing strategy and coverage targets |
+| [CODING-GUIDELINES.md](docs/CODING-GUIDELINES.md) | Go conventions and patterns |
+| [TESTING.md](docs/TESTING.md) | Testing strategy and coverage targets |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Developer guide and contribution process |
 
 ### Release

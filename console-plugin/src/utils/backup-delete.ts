@@ -99,7 +99,7 @@ export interface AccessRight {
   namespace?: string;
 }
 
-/** What the measure and delete Jobs need, as `kubectl backup delete` needs it (BACKUP-RECOVERY.md). */
+/** What the measure and delete Jobs need, as `kubectl backup delete` needs it (docs/BACKUP-RECOVERY.md). */
 export function deleteAccessRights(driverNamespace: string): AccessRight[] {
   return [
     { group: 'batch', resource: 'jobs', verb: 'create', namespace: driverNamespace },

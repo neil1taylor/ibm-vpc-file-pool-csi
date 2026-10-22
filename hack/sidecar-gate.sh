@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # sidecar-gate.sh — Turn the KubeVirt "Sidecar" feature gate on or off.
 #
-# Instant VM snapshots need this gate (see VM-INSTANT-SNAPSHOTS.md). The
+# Instant VM snapshots need this gate (see docs/VM-INSTANT-SNAPSHOTS.md). The
 # script edits only its own entry in the HyperConverged jsonpatch annotation;
 # other entries stay. It refuses to run on a cluster other than CLUSTER.
 #
