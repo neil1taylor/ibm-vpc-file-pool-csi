@@ -4,6 +4,7 @@ import { Alert, Card, CardBody, CardTitle, Label } from '@patternfly/react-core'
 import { SubVolumeReplicationStatus } from '../../types';
 import { describeVolumeStatus } from '../../utils/replication-helpers';
 import { formatAge, humanizeBytes } from '../../utils/resource-helpers';
+import { columnInfo } from '../../utils/column-help';
 
 interface Props {
   statuses: SubVolumeReplicationStatus[] | undefined;
@@ -33,12 +34,12 @@ const VolumeStatusTable: React.FC<Props> = ({ statuses }) => {
           <Thead>
             <Tr>
               <Th>SubVolume Name</Th>
-              <Th>Last Sync / Copy Moment</Th>
-              <Th>Consistency</Th>
-              <Th>Restore Points</Th>
-              <Th>Next Copy</Th>
+              <Th info={columnInfo('syncCopyMoment')}>Last Sync / Copy Moment</Th>
+              <Th info={columnInfo('syncConsistency')}>Consistency</Th>
+              <Th info={columnInfo('syncRestorePoints')}>Restore Points</Th>
+              <Th info={columnInfo('syncNextCopy')}>Next Copy</Th>
               <Th>Bytes Synced</Th>
-              <Th>Status</Th>
+              <Th info={columnInfo('syncStatus')}>Status</Th>
             </Tr>
           </Thead>
           <Tbody>

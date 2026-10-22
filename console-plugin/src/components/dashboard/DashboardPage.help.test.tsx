@@ -56,6 +56,7 @@ describe('DashboardPage help', () => {
       'Snapshots',
       'Clones',
       'Group Snapshots',
+      'Firing Alerts',
     ];
     for (const t of titles) {
       expect(screen.getByRole('button', { name: `About ${t}` })).toBeTruthy();

@@ -22,7 +22,11 @@ export const CARD_HELP = {
   },
   activeAlerts: {
     title: 'Active Alerts',
-    text: 'Pools that are not Ready, listed by name; normal is 0. This card does not show Prometheus alerts: see Observe, Alerting, for those. Open a listed pool to see why it is not Ready.',
+    text: 'Pools that are not Ready, listed by name; normal is 0. Prometheus alerts are in the Firing Alerts card. Open a listed pool to see why it is not Ready.',
+  },
+  firingAlerts: {
+    title: 'Firing Alerts',
+    text: 'Alerts from the driver alert rules that are firing now in the cluster Prometheus; normal is none. Each alert names what is wrong, such as a nearly full share or late replication. Observe, Alerting, in the console shows all alerts and their history.',
   },
   allocationRate: {
     title: 'Allocation Rate',
@@ -54,7 +58,7 @@ export const CARD_HELP = {
   },
   consecutiveFailures: {
     title: 'Consecutive Failures',
-    text: 'How many syncs in a row have failed, for each replication policy; normal is 0. The next sync tries again by itself. If the number keeps rising, open the policy and read its last error.',
+    text: 'How many syncs in a row have failed, for each replication policy; normal is 0. When a policy reaches its retry limit (3 by default), it pauses and stops syncing. Open the policy, read its last error, fix the cause, then resume it.',
   },
   snapshots: {
     title: 'Snapshots',
