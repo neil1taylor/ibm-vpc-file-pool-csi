@@ -18,12 +18,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	ctrlwebhook "sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
@@ -33,6 +34,8 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/k8s"
 	_ "github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics" // Register Prometheus collectors via init()
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/monitoring"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/nodemetrics"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/pool"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/replication"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/vmcopy"
@@ -59,6 +62,13 @@ func main() {
 		goldenImageSyncInterval time.Duration
 		cdiCopyPodMemoryLimit   string
 		webhooks                webhookOptions
+
+		// Node mode metrics flags.
+		nodeMetricsAddr          string
+		nodeMetricsCertDir       string
+		controllerMetricsCertDir string
+		mon                      monitoringOptions
+		shareStatsInterval       time.Duration
 
 		// Receiver mode flags.
 		receiverBasePath      string
@@ -118,6 +128,16 @@ func main() {
 	flag.StringVar(&driverImage, "driver-image", "", "Driver container image for receiver-mode sync-client Jobs")
 	flag.StringVar(&vmSnapshots.method, "vm-snapshot-method", "auto", "Snapshots of VM disks: auto (instant where the KubeVirt Sidecar feature gate is on) or copy (never instant)")
 	flag.StringVar(&vmSnapshots.launcherImage, "virt-launcher-image", "", "KubeVirt virt-launcher image for VM disk snapshot Jobs; empty reads it from virt-operator")
+	flag.StringVar(&nodeMetricsAddr, "node-metrics-addr", ":9810", "Listen address of the node agent's metrics endpoint (per-share used bytes and NFS latency and IOPS); empty turns it off (node mode)")
+	flag.StringVar(&nodeMetricsCertDir, "node-metrics-cert-dir", "", "Directory with tls.crt and tls.key for the node metrics endpoint; empty makes a self-signed certificate (node mode)")
+	flag.StringVar(&controllerMetricsCertDir, "metrics-cert-dir", "", "Directory with tls.crt and tls.key for the controller metrics endpoint (HTTPS on :8080, token login); empty makes a self-signed certificate (controller mode)")
+	flag.StringVar(&mon.namespace, "monitoring-namespace", "", "Namespace of the metrics Services that user workload monitoring scrapes; the controller keeps their Endpoints and warns if user workload monitoring is off. Empty turns this off (controller mode)")
+	flag.StringVar(&mon.controllerService, "monitoring-controller-service", "", "Name of the controller metrics Service in the monitoring namespace (controller mode)")
+	flag.StringVar(&mon.nodeService, "monitoring-node-service", "", "Name of the node agent metrics Service in the monitoring namespace (controller mode)")
+	flag.StringVar(&mon.selector, "monitoring-selector", "", "Labels shared by all driver pods, key=value,key=value (controller mode)")
+	flag.IntVar(&mon.controllerPort, "monitoring-controller-port", 8080, "Port of the controller metrics endpoint (controller mode)")
+	flag.IntVar(&mon.nodePort, "monitoring-node-port", 0, "Port of the node agent metrics endpoint; 0 leaves the node agents out (controller mode)")
+	flag.DurationVar(&shareStatsInterval, "share-stats-interval", 30*time.Second, "How often the node agent reads the NFS statistics of its shares (node mode)")
 	flag.BoolVar(&webhooks.enabled, "enable-webhooks", true, "Serve the validating admission webhooks (needs a serving certificate)")
 	flag.IntVar(&webhooks.port, "webhook-port", 9443, "Port of the admission webhook server")
 
@@ -174,7 +194,7 @@ func main() {
 			klog.ErrorS(err, "Invalid flag")
 			os.Exit(1)
 		}
-		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, cloneWorkerInterval, goldenImageSyncInterval, cdiCopyPodMemoryLimit, driverImage, webhooks, vmSnapshots)
+		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, controllerMetricsCertDir, mon, cloneWorkerInterval, goldenImageSyncInterval, cdiCopyPodMemoryLimit, driverImage, webhooks, vmSnapshots)
 	case "receiver":
 		runReceiver(receiverBasePath, receiverAuthTokenFile, receiverListenAddr, receiverTLSCertFile, receiverTLSKeyFile)
 	case "sync-client":
@@ -194,7 +214,7 @@ func main() {
 	case "enable-sidecar-gate":
 		runEnableSidecarGate()
 	default:
-		runNode(endpoint, nodeID, mode)
+		runNode(endpoint, nodeID, mode, nodeMetricsAddr, nodeMetricsCertDir, shareStatsInterval)
 	}
 }
 
@@ -246,7 +266,36 @@ type webhookOptions struct {
 	port    int
 }
 
-func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string, cloneWorkerInterval, goldenImageSyncInterval time.Duration, cdiCopyPodMemoryLimit, driverImage string, webhooks webhookOptions, vmSnapshots vmSnapshotOptions) {
+// monitoringOptions configures the metrics Endpoints and the user workload
+// monitoring check. An empty namespace turns both off.
+type monitoringOptions struct {
+	namespace         string
+	controllerService string
+	nodeService       string
+	selector          string
+	controllerPort    int
+	nodePort          int
+}
+
+// config turns the flags into the syncer's configuration.
+func (o monitoringOptions) config(driverNS string) (monitoring.Config, error) {
+	sel := map[string]string{}
+	for _, kv := range strings.Split(o.selector, ",") {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || k == "" {
+			return monitoring.Config{}, fmt.Errorf("--monitoring-selector %q: want key=value,key=value", o.selector)
+		}
+		sel[k] = v
+	}
+	cfg := monitoring.Config{DriverNamespace: driverNS, MonitoringNamespace: o.namespace, Selector: sel}
+	cfg.Targets = append(cfg.Targets, monitoring.Target{Service: o.controllerService, Component: "controller", Port: int32(o.controllerPort)}) //nolint:gosec // a port number
+	if o.nodePort != 0 {
+		cfg.Targets = append(cfg.Targets, monitoring.Target{Service: o.nodeService, Component: "node", Port: int32(o.nodePort)}) //nolint:gosec // a port number
+	}
+	return cfg, nil
+}
+
+func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metricsCertDir string, mon monitoringOptions, cloneWorkerInterval, goldenImageSyncInterval time.Duration, cdiCopyPodMemoryLimit, driverImage string, webhooks webhookOptions, vmSnapshots vmSnapshotOptions) {
 	scheme := runtime.NewScheme()
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
 		klog.ErrorS(err, "Failed to add CRD types to scheme")
@@ -278,9 +327,7 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 		LeaderElectionID:        "ibm-vpc-file-pool-csi-leader",
 		LeaderElectionNamespace: driverNamespace,
 		HealthProbeBindAddress:  ":8081",
-		Metrics: metricsserver.Options{
-			BindAddress: ":8080",
-		},
+		Metrics:                 nodemetrics.SecureOptions(":8080", metricsCertDir),
 		WebhookServer: ctrlwebhook.NewServer(ctrlwebhook.Options{
 			Port:    webhooks.port,
 			CertDir: "/tmp/k8s-webhook-server/serving-certs",
@@ -480,7 +527,7 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 
 	// Instant snapshots of VM disks change the disk's file chain in the VM
 	// pod, or with a Job in the virt-launcher image when the VM is stopped.
-	// See VM-INSTANT-SNAPSHOTS.md.
+	// See docs/VM-INSTANT-SNAPSHOTS.md.
 	if vmSnapshots.method == "auto" {
 		image := vmSnapshots.launcherImage
 		if image == "" {
@@ -512,6 +559,24 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 	})); addErr != nil {
 		klog.ErrorS(addErr, "Failed to add the backup policy controller")
 		os.Exit(1)
+	}
+
+	// Metrics for OpenShift's user workload monitoring: keep the Endpoints of the
+	// Services in the monitoring namespace, and say if nothing will evaluate alerts.
+	if mon.namespace != "" {
+		monCfg, cfgErr := mon.config(driverNamespace)
+		if cfgErr != nil {
+			klog.ErrorS(cfgErr, "Invalid monitoring flags")
+			os.Exit(1)
+		}
+		if addErr := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+			monitoring.WarnIfAlertsNotEvaluated(ctx, clientset, mon.namespace)
+			monitoring.NewSyncer(clientset, monCfg).Run(ctx, time.Minute)
+			return nil
+		})); addErr != nil {
+			klog.ErrorS(addErr, "Failed to add the monitoring Endpoints sync")
+			os.Exit(1)
+		}
 	}
 
 	// mgr.Start blocks until signal or error
@@ -649,7 +714,7 @@ func runCheckReceiver(endpoint, authTokenFile, caCertFile string) {
 	}
 }
 
-func runNode(endpoint, nodeID, mode string) {
+func runNode(endpoint, nodeID, mode, metricsAddr, metricsCertDir string, statsInterval time.Duration) {
 	scheme := runtime.NewScheme()
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
 		klog.ErrorS(err, "Failed to add CRD types to scheme")
@@ -672,6 +737,10 @@ func runNode(endpoint, nodeID, mode string) {
 	}
 	k8sClient := k8s.NewClient(ctrlClient)
 
+	if metricsAddr != "" {
+		startShareMetrics(metricsAddr, metricsCertDir, statsInterval, restConfig, k8sClient)
+	}
+
 	d, err := driver.NewDriver(driver.Config{
 		Name:      driver.DriverName,
 		Version:   version,
@@ -689,6 +758,41 @@ func runNode(endpoint, nodeID, mode string) {
 		klog.ErrorS(err, "Driver failed")
 		os.Exit(1)
 	}
+}
+
+// startShareMetrics serves the per-share used bytes and NFS statistics of this
+// node on addr over HTTPS, in the background. Callers need a token that the API
+// server accepts and may "get" /metrics. If it cannot start it logs and carries
+// on: missing metrics must not stop volumes from mounting.
+func startShareMetrics(addr, certDir string, interval time.Duration, restConfig *rest.Config, k8sClient k8s.Client) {
+	httpClient, err := rest.HTTPClientFor(restConfig)
+	if err != nil {
+		klog.ErrorS(err, "Cannot serve node metrics; continuing without them")
+		return
+	}
+	srv, err := nodemetrics.NewSecureServer(addr, certDir, restConfig, httpClient)
+	if err != nil {
+		klog.ErrorS(err, "Cannot serve node metrics; continuing without them")
+		return
+	}
+	c := nodemetrics.NewCollector(nodemetrics.Config{
+		DriverName:     driver.DriverName,
+		ReadMountStats: nodemetrics.ReadProcMountStats,
+		Statfs:         nodemetrics.Statfs,
+		Resolve:        nodemetrics.ResolverFromPools(k8sClient.ListFileSharePools),
+	})
+	if err := ctrlmetrics.Registry.Register(c); err != nil {
+		klog.ErrorS(err, "Cannot register node metrics; continuing without them")
+		return
+	}
+	ctx := context.Background()
+	go c.Run(ctx, interval)
+	go func() {
+		if err := srv.Start(ctx); err != nil {
+			klog.ErrorS(err, "Node metrics server stopped")
+		}
+	}()
+	klog.InfoS("Serving node metrics over HTTPS", "addr", addr)
 }
 
 // networkConfig is the cluster network that share mount targets join.

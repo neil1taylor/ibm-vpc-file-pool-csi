@@ -18,7 +18,7 @@ const (
 	testSaved   = "I saved the backup key\n"
 )
 
-// The list from TUTORIAL-09-COS-BACKUP-BUCKET.md, step 3, written out again so
+// The list from docs/TUTORIAL-09-COS-BACKUP-BUCKET.md, step 3, written out again so
 // that a change to the role must change this test too.
 var tutorialActions = []string{
 	"cloud-object-storage.account.get_account_buckets",

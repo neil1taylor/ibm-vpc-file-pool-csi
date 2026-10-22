@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test-doc-links.sh — Every guide link in SUPPORT.md, and every guide link in the console's
+# test-doc-links.sh — Every guide link in docs/SUPPORT.md, and every guide link in the console's
 # help-links file, must point at a file and a heading that exist in this repository.
 #
 # Usage: bash test/chart/test-doc-links.sh
@@ -30,11 +30,10 @@ def anchors(path):
             out.add(slug(line.lstrip("#")))
     return out
 
-def check(source, target):
+def check(source, target, base):
     global failed
     path, _, frag = target.partition("#")
-    if not path:
-        path = source
+    path = os.path.normpath(os.path.join(base, path)) if path else source
     if not os.path.isfile(path):
         print(f"FAIL  {source}: no file {path}")
         failed = 1
@@ -45,19 +44,24 @@ def check(source, target):
         return
     print(f"PASS  {source}: {target}")
 
-# 1. SUPPORT.md: [text](FILE.md) and [text](FILE.md#heading) links, and bare https links to this repo.
-for m in re.finditer(r"\]\(([^)\s]+)\)", open("SUPPORT.md", encoding="utf-8").read()):
+# 1. docs/SUPPORT.md: [text](FILE.md) and [text](FILE.md#heading) links, and bare https links to this repo.
+for m in re.finditer(r"\]\(([^)\s]+)\)", open("docs/SUPPORT.md", encoding="utf-8").read()):
     t = m.group(1)
     if t.startswith("http"):
         continue
-    check("SUPPORT.md", t)
+    check("docs/SUPPORT.md", t, "docs")
 
 # 2. The console's help links file.
 links = "console-plugin/src/utils/help-links.ts"
 if os.path.isfile(links):
-    for m in re.finditer(r"'(" + re.escape(REPO_URL) + r"[^']*)'|`\$\{GUIDE_BASE\}([^`]*)`", open(links, encoding="utf-8").read()):
-        t = m.group(1)[len(REPO_URL):] if m.group(1) else m.group(2)
-        check(links, t)
+    text = open(links, encoding="utf-8").read()
+    gb = re.search(r"GUIDE_BASE = '([^']*)'", text)
+    prefix = gb.group(1)[len(REPO_URL):] if gb and gb.group(1).startswith(REPO_URL) else ""
+    for m in re.finditer(r"'(" + re.escape(REPO_URL) + r"[^']*)'|`\$\{GUIDE_BASE\}([^`]*)`", text):
+        t = m.group(1)[len(REPO_URL):] if m.group(1) else prefix + m.group(2)
+        if t.endswith("/"):
+            continue  # the GUIDE_BASE definition itself names a folder, not a guide
+        check(links, t, ".")
 
 sys.exit(failed)
 PY

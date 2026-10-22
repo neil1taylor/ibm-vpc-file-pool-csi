@@ -5,7 +5,7 @@ import { ROUTES } from '../constants';
  * change GUIDE_BASE and the paths here; nothing else needs to change.
  * test/chart/test-doc-links.sh checks that each path and heading exists.
  */
-export const GUIDE_BASE = 'https://github.com/neil1taylor/ibm-vpc-file-pool-csi/blob/main/';
+export const GUIDE_BASE = 'https://github.com/neil1taylor/ibm-vpc-file-pool-csi/blob/main/docs/';
 
 export const SUPPORT_URL = `${GUIDE_BASE}SUPPORT.md`;
 export const DIAGNOSTICS_URL = `${GUIDE_BASE}SUPPORT.md#3-collect-diagnostics-for-a-support-case`;
@@ -25,6 +25,7 @@ const AREA_GUIDES: Array<[string, string]> = [
   [ROUTES.SUBVOLUMES, `${GUIDE_BASE}USER-GUIDE.md`],
   [ROUTES.SNAPSHOTS, `${GUIDE_BASE}TUTORIAL-02-SNAPSHOTS-AND-CLONES.md`],
   [ROUTES.REPLICATION, `${GUIDE_BASE}TUTORIAL-06-REPLICATION-AND-FAILOVER.md`],
+  [ROUTES.BACKUPS, `${GUIDE_BASE}TUTORIAL-10-BACKUP-AND-RESTORE.md`],
   [ROUTES.MONITORING, `${GUIDE_BASE}MONITORING.md`],
   [ROUTES.MIGRATE, `${GUIDE_BASE}TUTORIAL-08-MIGRATION-AND-CONSOLE.md`],
 ];

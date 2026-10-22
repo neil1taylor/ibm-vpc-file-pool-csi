@@ -1,0 +1,40 @@
+{{- if eq .Values.webhook.certProvider "cert-manager" }}
+{{- $name := include "ibm-vpc-file-pool-csi.fullname" . }}
+{{- $issuer := default (printf "%s-metrics-selfsigned" $name) .Values.webhook.certManager.issuerName }}
+# Certificates for the controller and node agent metrics endpoints. With
+# webhook.certProvider=openshift the service CA makes them (annotations on the Services);
+# with "manual" you make the secrets <release>-ibm-vpc-file-pool-csi-metrics-certs and
+# <release>-ibm-vpc-file-pool-csi-node-metrics-certs (tls.crt, tls.key, ca.crt).
+{{- if not .Values.webhook.certManager.issuerName }}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $issuer }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+{{- end }}
+{{- range $svc := list (printf "%s-metrics" $name) (printf "%s-node-metrics" $name) }}
+{{- if or (ne $svc (printf "%s-node-metrics" $name)) $.Values.node.metricsPort }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $svc }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" $ | nindent 4 }}
+spec:
+  secretName: {{ $svc }}-certs
+  dnsNames:
+    - {{ $svc }}.{{ $.Release.Namespace }}.svc
+    - {{ $svc }}.{{ $.Release.Namespace }}.svc.cluster.local
+  issuerRef:
+    kind: {{ default "Issuer" $.Values.webhook.certManager.issuerKind }}
+    name: {{ $issuer }}
+---
+{{- end }}
+{{- end }}
+{{- end }}

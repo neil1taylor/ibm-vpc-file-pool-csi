@@ -13,7 +13,7 @@
 // does not depend on where the folder is mounted.
 //
 // Red Hat does not support changing a KubeVirt VM's disks this way. The
-// design and lab results are in VM-INSTANT-SNAPSHOTS.md and
+// design and lab results are in docs/VM-INSTANT-SNAPSHOTS.md and
 // docs/specs/2026-10-21-instant-vm-snapshots.md.
 package vmsnap
 

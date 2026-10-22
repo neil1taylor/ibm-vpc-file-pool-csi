@@ -8,6 +8,7 @@
 #     Stage 18 also exports to COS when ~/.config/pool-csi/cos-stage.env exists (see
 #     test/e2e/lib/backup-cos.sh): its files are copied for this run only and deleted
 #     when it ends. Set COS_DR_CLUSTER=NAME to repeat the restore in that cluster.
+#     COS_QUICK=1 RT_STAGES=18 gives the fast COS run (about 25 minutes; see stage 18).
 #   bash test/release/remote.sh report RUN_ID             copy the report folder back and print it
 #
 # Needs: ibmcloud (logged in), go, ssh access to the build server.
@@ -58,10 +59,11 @@ start() {
     # Settings and keys for the COS part of stage 18, for this run only. Nothing is printed.
     cos_dir="${COS_CONFIG_DIR:-$HOME/.config/pool-csi}"
     cos_env=""
+    [ "${COS_QUICK:-0}" != 1 ] || cos_env="COS_QUICK=1"
     if [ -r "$cos_dir/cos-stage.env" ] && [ "${COS_EXPORT:-1}" != "0" ]; then
         (cd "$cos_dir" && tar -czf - cos-stage.env cos-key.json kp-apikey.json backup-key-secret.yaml) |
             build "umask 077 && mkdir -p ~/release-test/cos-$id && tar -xzf - -C ~/release-test/cos-$id"
-        cos_env="COS_CONFIG_DIR=\$HOME/release-test/cos-$id"
+        cos_env="$cos_env COS_CONFIG_DIR=\$HOME/release-test/cos-$id"
         if [ -n "${COS_DR_CLUSTER:-}" ]; then
             kubeconfig=$(mktemp -d)
             ibmcloud ks cluster config --cluster "$COS_DR_CLUSTER" --admin --output yaml >"$kubeconfig/config"

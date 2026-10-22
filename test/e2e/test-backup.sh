@@ -37,7 +37,20 @@ POLICY=$PREFIX-policy
 SSH_KEY=${SSH_KEY:?set SSH_KEY to a private key file}
 BACKUP_BIN=${BACKUP_BIN:-kubectl-backup}
 IMAGE_URL=${IMAGE_URL:-https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2}
-SCHEDULE=${SCHEDULE:-5m}
+# COS_QUICK=1: a fast run for fix/test cycles. It leaves out the local restore checks, uses the
+# shortest schedule and keep time, and a 1 GB data disk, and goes on to the COS checks.
+QUICK=false
+[ "${COS_QUICK:-0}" = 1 ] && QUICK=true
+if $QUICK; then
+    SCHEDULE=${SCHEDULE:-1m}
+    LOCAL_KEEP_FOR=1h
+    DATA_GB=1
+else
+    SCHEDULE=${SCHEDULE:-5m}
+    LOCAL_KEEP_FOR=48h
+    DATA_GB=10
+fi
+export COS_DATA_GB=$DATA_GB
 BACKUP_TIMEOUT=${BACKUP_TIMEOUT:-5400}
 # A small pod volume is copied in the first few cycles; a longer wait means the copy fails.
 FIRST_FILES_TIMEOUT=${FIRST_FILES_TIMEOUT:-1200}
@@ -79,6 +92,8 @@ cleanup() {
 }
 trap cleanup EXIT
 cos_init
+if $QUICK && ! $COS_ON; then fail "COS_QUICK=1 needs the COS settings (COS_BUCKET); it skips the local restore checks"; fi
+$QUICK && log "COS_QUICK=1: local restore checks are skipped; schedule $SCHEDULE, keep $LOCAL_KEEP_FOR, data disk ${DATA_GB}Gi"
 
 zone() {
     oc get nodes -o jsonpath='{range .items[*]}{.metadata.labels.topology\.kubernetes\.io/zone}{"\n"}{end}' |
@@ -135,7 +150,7 @@ spec:
   storageClassName: $SRC
   accessModes: [ReadWriteMany]
   volumeMode: Filesystem
-  resources: {requests: {storage: 10Gi}}
+  resources: {requests: {storage: ${DATA_GB}Gi}}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -297,7 +312,7 @@ metadata: {name: $POLICY}
 spec:
   snapshotPool: $SNAP
   schedule: $SCHEDULE
-  keepFor: 48h
+  keepFor: $LOCAL_KEEP_FOR
   vmCopySpeedLimitMBps: 50
   namespaces: [$NS]
   selector: {matchLabels: {backup: "yes"}}
@@ -340,7 +355,16 @@ first_vm=$(vol_field root .oldestBackupTime)
 first_files=$(vol_field files .oldestBackupTime)
 log "oldest moments: VM disks $first_vm, pod volume $first_files"
 
+# check_files <pod> <claim> <manifest> <must be absent file or empty>: restore check on the pod volume.
+check_files() {
+    files_pod "$1" "$2" "cd /data && sha256sum -c $3 && $4"
+    wait_until 600 "pod $1 to end" pod_succeeded "$1" || true
+    oc logs -n "$NS" "$1" || true
+    pod_succeeded "$1" || fail "the restored pod volume $2 does not match $3"
+}
+if ! $QUICK; then
 restore() { # restore <pvc> <to> [moment]
+
     local moment=()
     [ -z "${3:-}" ] || moment=(--moment "$3")
     "$BACKUP_BIN" restore --policy "$POLICY" --pvc "$NS/$1" --to "$NS/$2" ${moment[@]+"${moment[@]}"} --wait --timeout 1h
@@ -360,14 +384,6 @@ echo "$result"
 echo "$result" | grep -q CHECKSUMS_OK || fail "files on the restored data disk do not match the log on the restored root disk"
 log "PASS: the VM restored at $first_vm booted; $(echo "$result" | head -1) files logged, all checksums match"
 
-# check_files <pod> <claim> <manifest> <must be absent file or empty>: restore check on the pod volume.
-check_files() {
-    files_pod "$1" "$2" "cd /data && sha256sum -c $3 && $4"
-    wait_until 600 "pod $1 to end" pod_succeeded "$1" || true
-    oc logs -n "$NS" "$1" || true
-    pod_succeeded "$1" || fail "the restored pod volume $2 does not match $3"
-}
-
 log "restoring the pod volume at $first_files (the first content)"
 restore files files-r1 "$first_files"
 check_files check-r1 files-r1 manifest-A.sha256 'test ! -e /data/b'
@@ -384,6 +400,8 @@ oc delete pvc -n "$NS" files --wait=true --timeout=10m
 restore files files-gone
 check_files check-gone files-gone manifest-B.sha256 'test -e /data/b'
 log "PASS: a volume that was deleted can be restored from its backup"
+
+fi # ! $QUICK
 
 if $COS_ON; then
     cos_phase

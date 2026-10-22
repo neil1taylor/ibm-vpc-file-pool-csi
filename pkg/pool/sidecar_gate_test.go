@@ -6,9 +6,12 @@ import (
 	"reflect"
 	"testing"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 const testGateOp = `{"op":"add","path":"/spec/configuration/developerConfiguration/featureGates/-","value":"Sidecar"}`
@@ -97,5 +100,22 @@ func TestEnableSidecarGate_NoHyperConverged(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(hcoScheme()).Build()
 	if err := EnableSidecarGate(context.Background(), c); err == nil {
 		t.Fatal("a cluster without OpenShift Virtualization must be an error")
+	}
+}
+
+// The chart gives the gate Job get and update on the one HyperConverged
+// object only, so the Job must not need to list HyperConverged objects.
+func TestEnableSidecarGate_NeedsNoListRight(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(hcoScheme()).WithObjects(hcoWithJSONPatch("")).
+		WithInterceptorFuncs(interceptor.Funcs{
+			List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+				return apierrors.NewForbidden(schema.GroupResource{Group: "hco.kubevirt.io", Resource: "hyperconvergeds"}, "", nil)
+			},
+		}).Build()
+	if err := EnableSidecarGate(context.Background(), c); err != nil {
+		t.Fatalf("EnableSidecarGate: %v", err)
+	}
+	if got := readJSONPatch(t, c); !reflect.DeepEqual(got, mustJSON(t, "["+testGateOp+"]")) {
+		t.Errorf("jsonpatch = %v, want the gate entry", got)
 	}
 }

@@ -202,3 +202,33 @@ func TestBuildClient_UsesKUBECONFIGVariable(t *testing.T) {
 		t.Fatalf("buildClient did not use KUBECONFIG: %v", err)
 	}
 }
+
+func TestIsTerminal_DevNullIsNotATerminal(t *testing.T) {
+	f, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	if isTerminal(f) {
+		t.Error("/dev/null is a character device but nobody can type an answer there")
+	}
+}
+
+func TestIsTerminal_PipeIsNotATerminal(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+	defer func() { _ = w.Close() }()
+	if isTerminal(r) {
+		t.Error("a pipe is not a terminal")
+	}
+}
+
+func TestNewScheme_ListsDeploymentsForFindDriverImage(t *testing.T) {
+	c := fakeclient.NewClientBuilder().WithScheme(newScheme()).Build()
+	if _, err := findDriverImage(context.Background(), c, "ns"); err == nil || strings.Contains(err.Error(), "no kind is registered") {
+		t.Fatalf("the real scheme cannot list Deployments: %v", err)
+	}
+}

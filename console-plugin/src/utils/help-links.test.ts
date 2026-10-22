@@ -19,6 +19,8 @@ describe('helpUrlForPath', () => {
     ['/vpc-file-pools/snapshots/snap-1/restore', 'TUTORIAL-02-SNAPSHOTS-AND-CLONES.md'],
     [ROUTES.REPLICATION, 'TUTORIAL-06-REPLICATION-AND-FAILOVER.md'],
     ['/vpc-file-pools/replication/dr', 'TUTORIAL-06-REPLICATION-AND-FAILOVER.md'],
+    [ROUTES.BACKUPS, 'TUTORIAL-10-BACKUP-AND-RESTORE.md'],
+    ['/vpc-file-pools/backups/nightly', 'TUTORIAL-10-BACKUP-AND-RESTORE.md'],
     [ROUTES.MONITORING, 'MONITORING.md'],
     [ROUTES.MIGRATE, 'TUTORIAL-08-MIGRATION-AND-CONSOLE.md'],
   ];

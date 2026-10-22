@@ -1,5 +1,5 @@
 // Command pool-snapshots is a kubectl plugin for the instant VM snapshots of
-// the pool driver (see VM-INSTANT-SNAPSHOTS.md).
+// the pool driver (see docs/VM-INSTANT-SNAPSHOTS.md).
 //
 // Usage:
 //
