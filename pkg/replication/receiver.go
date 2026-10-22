@@ -650,8 +650,8 @@ func writeFile(root *os.Root, name string, reader io.Reader, mode os.FileMode, s
 		return 0, err
 	}
 	defer func() {
-		if err := f.Close(); err != nil && retErr == nil {
-			retErr = err
+		if cerr := f.Close(); cerr != nil && retErr == nil {
+			retErr = cerr
 		}
 	}()
 
