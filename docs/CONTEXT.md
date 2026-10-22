@@ -9,7 +9,7 @@ The meanings come from the code (`api/v1alpha1/` and `pkg/`). If a page disagree
 - [Storage](#storage): pool, share, mount target, SubVolume, volume, plain volume, VM disk, allocation strategy, auto-expand, tier, drain, StorageClass, staging, reclaim policy
 - [Copies in the same pool](#copies-in-the-same-pool): snapshot, file snapshot, QEMU copy, instant snapshot, chain, overlay file, VM hook, Sidecar gate, flatten, clone
 - [How good a copy is](#how-good-a-copy-is): moment, file-system consistent, crash consistent, file copy, guest freeze
-- [Backup](#backup): backup, BackupPolicy, snapshot pool, keep time, restore, BackupRestore, restore point, change list, COS export, lock, backup key
+- [Backup](#backup): backup, BackupPolicy, snapshot pool, keep time, restore, BackupRestore, restore point, change list, COS export, lock, backup key, browse helper
 - [Replication and failover](#replication-and-failover): replication, ReplicationPolicy, destination, receiver, rewind, failover
 - [Other words](#other-words): golden image, lifecycle hook, group snapshot, user workload monitoring, command-line plugins
 
@@ -272,6 +272,12 @@ Example: `keepFor: 30d` with `lock: Compliance` holds each exported backup for 3
 The **backup key** encrypts exported backups. The driver stores it only wrapped by an IBM Key Protect root key. The readable key is shown once, by `kubectl backup cos-setup`, and you must keep a copy outside IBM Cloud.
 
 Example: restore with `--backup-key-file ./backup-key.txt` if Key Protect is gone.
+
+### Browse helper
+
+The **browse helper** is a small program in its own image (`browse`) that reads one backup folder, read-only, for the browse feature. It runs in a pod as root with no capabilities, on a read-only mount. It never follows a link, and it ends by itself when idle or after a time limit. Users never talk to it directly.
+
+Example: it lists `/var/www` of last night's backup of the volume `web-data`.
 
 ---
 
