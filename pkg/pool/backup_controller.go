@@ -73,6 +73,9 @@ type BackupController struct {
 	// policy; exportReported holds the policies that have export metric series.
 	exports        map[string]*exportState
 	exportReported map[string]bool
+	// browseJobs and browse run browse sessions; nil browseJobs means off.
+	browseJobs BrowseJobs
+	browse     BrowseConfig
 }
 
 // NewBackupController returns a controller that reads and writes with c. It
@@ -142,6 +145,7 @@ func (bc *BackupController) ReconcileAll(ctx context.Context) {
 		bc.reconcile(ctx, &list.Items[i])
 	}
 	bc.reconcileRestores(ctx)
+	bc.reconcileBrowses(ctx)
 }
 
 // tidyDeleted removes the labels and the ReplicationPolicies of policies that
