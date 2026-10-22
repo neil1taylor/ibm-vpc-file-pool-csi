@@ -49,6 +49,7 @@ import {
 } from '../../utils/restore-helpers';
 import FieldPopover from '../common/FieldPopover';
 import RestoreProgressBanner from './RestoreProgressBanner';
+import NoAccessNote from '../common/NoAccessNote';
 
 const gvk = (model: { apiGroup?: string; apiVersion: string; kind: string }) => ({
   group: model.apiGroup,
@@ -68,7 +69,7 @@ const RestoreSnapshotPage: React.FC = () => {
     groupVersionKind: gvk(SnapshotModel),
     name,
   });
-  const [contents, contentsLoaded] = useK8sWatchResource<VolumeSnapshotContent[]>({
+  const [contents, contentsLoaded, contentsError] = useK8sWatchResource<VolumeSnapshotContent[]>({
     groupVersionKind: gvk(VolumeSnapshotContentModel),
     isList: true,
   });
@@ -114,6 +115,14 @@ const RestoreSnapshotPage: React.FC = () => {
         <Alert variant="danger" title="Error loading Snapshot" isInline>
           {snapshotError.message || 'An unexpected error occurred.'}
         </Alert>
+      </PageSection>
+    );
+  }
+
+  if (contentsError) {
+    return (
+      <PageSection>
+        <NoAccessNote right="read VolumeSnapshotContents, which the page needs to find the snapshot's VolumeSnapshot" />
       </PageSection>
     );
   }

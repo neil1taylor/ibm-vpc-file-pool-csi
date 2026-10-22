@@ -17,10 +17,10 @@ Verify the CSI driver is running on the **source** cluster:
 
 ```bash
 # Controller pod (6/6 Running)
-oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi -l app.kubernetes.io/component=controller
+oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller
 
 # Node pods (Running on each schedulable node)
-oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi -l app.kubernetes.io/component=node
+oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node
 
 # CSI Driver registered
 oc get csidriver vpc-file-pool.csi.ibm.io
@@ -308,7 +308,7 @@ oc delete pod repl-writer -n ${REPL_NS}
 
 Direct NFS mode uses rsync Jobs to transfer SubVolume data from the source pool's NFS share to a destination NFS share. The destination share must be reachable from source cluster worker nodes over Transit Gateway or VPN.
 
-> **Note:** Replace `10.240.0.50` with the actual NFS mount target IP of your destination share. You can find it with `ibmcloud is share-mount-targets <DEST_SHARE_ID>`.
+> **Note:** Replace `10.240.0.50` with the actual NFS mount target IP of your destination share, and `destinationExportPath` with its export path. A share in security group mode (the only mode for new shares) exports a path such as `/299a1485_593a_403d_98da_b0958e446b16`, not `/`. With `/` the sync Jobs fail. Both values are in the destination pool's status (`status.shares[].mountTargetIP` and `status.shares[].exportPath`), or in the `mount_path` of `ibmcloud is share-mount-target <DEST_SHARE_ID> <MOUNT_TARGET_ID>` (`<ip>:<export path>`).
 
 Create a ReplicationPolicy:
 
@@ -321,7 +321,7 @@ metadata:
 spec:
   sourcePoolName: ${REPL_POOL}
   destinationNFSServer: "10.240.0.50"
-  destinationExportPath: "/"
+  destinationExportPath: "/299a1485_593a_403d_98da_b0958e446b16"   # the export path of your destination share
   destinationBasePath: "/pvcs"
   schedule: "5m"
   incrementalSync: true
@@ -426,7 +426,7 @@ To temporarily stop replication (for example, during maintenance), annotate the 
 oc annotate replicationpolicy dr-direct storage.ibmcloud.io/paused=true
 ```
 
-Verify the phase changes to `Paused`:
+Verify the phase changes to `Paused`. The controller checks the annotation about every 30 seconds, so wait a minute:
 
 ```bash
 oc get replicationpolicies
