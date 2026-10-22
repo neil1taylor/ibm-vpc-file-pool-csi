@@ -1,6 +1,6 @@
 # Backup & Recovery Guide — IBM VPC File Pool CSI Driver
 
-Data protection strategy using the driver's snapshot, clone, group snapshot, and replication features.
+Data protection strategy using the driver's snapshot, clone, backup, and replication features. For the meaning of words such as moment, restore point and snapshot pool, see [CONTEXT.md](CONTEXT.md).
 
 ---
 
@@ -10,7 +10,7 @@ Data protection strategy using the driver's snapshot, clone, group snapshot, and
 |--------|-----|-----|-------|----------|
 | [Volume Snapshots](#volume-snapshots) | Point-in-time | Minutes (copy speed) | Single PVC | Regular backups of individual volumes |
 | [Volume Clones](#volume-clones) | Point-in-time | Minutes (the time to copy the data) | Single PVC | Dev/test copies, pre-migration backup |
-| [Group Snapshots](#group-snapshots) (not active) | Coordinated point-in-time | Minutes | Multiple PVCs | Multi-volume application backups |
+| [Group Snapshots](#group-snapshots) (not active) | None: the driver does not act on them | None | Multiple PVCs | Do not use. A snapshot of a running VM already covers all its disks |
 | [Backups to a Snapshot Pool](#backups-to-a-snapshot-pool) | Schedule-based (minutes to hours) | Minutes to hours (copy speed) | Selected PVCs and VMs, all disks of a VM together | Keeping many moments of a volume or VM in the same region, on shares of their own |
 | [Cross-Region Replication](#cross-region-replication) | Schedule-based (minutes to hours) | Manual failover | Full pool or label-selected | Disaster recovery |
 | [Application-Level Backup](#application-level-backup) | Varies | Varies | Application-specific | Databases, VMs, crash-consistent workloads |
@@ -19,7 +19,7 @@ Data protection strategy using the driver's snapshot, clone, group snapshot, and
 
 ## Volume Snapshots
 
-Directory-level point-in-time copies on the same NFS share. See [USER-GUIDE.md — Snapshots](USER-GUIDE.md#snapshots) for basic usage.
+A snapshot is a copy of one volume that stays on the same share as the volume (see [CONTEXT.md](CONTEXT.md#snapshot)). It does not protect you from the loss of the share. See [USER-GUIDE.md — Snapshots](USER-GUIDE.md#snapshots) for basic usage.
 
 ### Scheduled Snapshots with CronJob
 
@@ -158,7 +158,7 @@ spec:
 
 ### Snapshot Performance
 
-Snapshots are full directory copies (`cp -a`). Performance depends on data size:
+A snapshot of a plain volume is a full directory copy (`cp -a`). Performance depends on data size. A snapshot of a VM disk is faster: it is a QEMU copy, or an instant snapshot where the Sidecar gate is on (see [VM-INSTANT-SNAPSHOTS.md](VM-INSTANT-SNAPSHOTS.md)).
 
 | Data Size | Approximate Snapshot Time |
 |-----------|--------------------------|
@@ -243,7 +243,7 @@ The console can do the same without YAML. Open a snapshot in the IBM VPC File Po
 - The action only creates a new claim. It never replaces an existing volume.
 - The page then shows the copy: the percent copied while the claim is `Pending`, then "ready" when it is `Bound`. If the copy fails, it shows the error, and the claim is not deleted.
 - The action is off, with a reason, when the snapshot is not ready or when no `VolumeSnapshot` points to it. A snapshot made directly as a `Snapshot` object has no `VolumeSnapshot`: create one first.
-- **A snapshot of a running VM's disk is a plain file copy, and the restored disk may not boot.** The form warns when a VM uses the source claim.
+- **The form warns when a VM uses the source claim.** The warning text says a snapshot of a running VM is a plain file copy that may not boot. That text is older than the driver: a snapshot of a running VM's disk is now a QEMU copy or an instant snapshot (see the [KubeVirt VMs](#kubevirt-vms) section). Check `status.consistency` on the `Snapshot` before you restore.
 
 ---
 
@@ -324,6 +324,16 @@ The inconsistency window (time between first and last member copy) is tracked in
 ## Backups to a Snapshot Pool
 
 A `BackupPolicy` backs up the PVCs and VMs you select into a pool that holds only backups. The pool has its own VPC file share, so losing or filling a data share does not take the backups with it. A running VM is backed up at one moment for all its disks, with the guest file systems frozen for a fraction of a second, and only changed blocks are copied after the first backup.
+
+### What a backup looks like
+
+A backup is a set of files on a share of the snapshot pool. You cannot browse backups from the cluster or the console yet (issue #92). `kubectl backup list` shows what exists. The folders are below `/backup/<policy>/` on the share. Each volume has a folder named after its PersistentVolume (`pvc-<uuid>`), not after its claim.
+
+- **A plain volume is a folder of files.** `/backup/<policy>/pvcs/pvc-<uuid>/` holds the files as they were at the latest backup. Each earlier moment is a folder of hard links, named by its UTC time (for example `20261021T093000Z`), in `/backup/<policy>/.moments/pvcs/pvc-<uuid>/`. A file that did not change takes no extra space.
+- **A VM disk is one file, `disk.img`.** The folder `/backup/<policy>/pvcs/pvc-<uuid>/` holds the latest backup as a whole raw disk. Earlier moments are not separate disks. They are undo files in the folder `.repl-undo` next to the disk. Each undo file holds the old contents of the blocks that the next backup changed. A restore of an earlier moment applies the undo files, newest first.
+- **A VM with several disks has one folder for each disk.** All its disks show the same moment, so a restore at that moment gives a VM that boots.
+
+The words moment and restore point are defined in [CONTEXT.md](CONTEXT.md#moment).
 
 ```yaml
 apiVersion: storage.ibmcloud.io/v1alpha1
@@ -593,7 +603,7 @@ To match the disks of a VM today, or if you cannot use the QEMU copy:
 2. **Create a volume snapshot** of each disk PVC
 3. **Restart the VM** with `virtctl start <vm-name>`
 
-For ongoing VM protection, use application-level backup tools (e.g., Velero with KubeVirt plugin, Trilio) or shut down VMs before replication cycles via pre-sync hooks.
+For ongoing VM protection, use a [`BackupPolicy`](#backups-to-a-snapshot-pool) or [replication](#cross-region-replication). Both copy a running VM at one moment for all its disks. You can also use application-level backup tools such as Velero with the KubeVirt plugin, or Trilio.
 
 ---
 
@@ -606,7 +616,7 @@ For ongoing VM protection, use application-level backup tools (e.g., Velero with
 | **Application data** | Scheduled snapshots (6h) + clone before changes | Cross-region replication | Label-select critical PVCs |
 | **Databases** | Application-level backup (pg_dump, etc.) | Pool snapshots as secondary | Never rely solely on NFS snapshots |
 | **KubeVirt VMs** | Snapshot of the running VM (all pool disks are copied at one moment), or a `BackupPolicy` | Application-level backup | See [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md) |
-| **ML training data** | Group snapshots (model + checkpoints) | Cross-region for final models | Intermediate checkpoints are expendable |
+| **ML training data** | Scheduled snapshots (model + checkpoints) | Cross-region for final models | Intermediate checkpoints are expendable |
 | **CI/CD artifacts** | None or short-lived snapshots | — | Easily reproducible |
 
 ---
@@ -671,9 +681,10 @@ See the [DR Failover Procedure](#failover-procedure) section above.
 
 ## See Also
 
-- [USER-GUIDE.md](USER-GUIDE.md) — Snapshot, clone, and group snapshot usage
+- [CONTEXT.md](CONTEXT.md) — What the words in this guide mean
+- [USER-GUIDE.md](USER-GUIDE.md) — Snapshot and clone usage
 - [VOLUME-CLONING.md](VOLUME-CLONING.md) — Clone design (asynchronous, Job-based)
-- [VOLUME-GROUP-SNAPSHOTS.md](VOLUME-GROUP-SNAPSHOTS.md) — Group snapshot consistency model
+- [VOLUME-GROUP-SNAPSHOTS.md](VOLUME-GROUP-SNAPSHOTS.md) — Group snapshot design (not active)
 - [CROSS-REGION-DR.md](CROSS-REGION-DR.md) — Replication architecture and constraints
 - [CONSISTENCY-MODEL.md](CONSISTENCY-MODEL.md) — NFS consistency guarantees
 - [MONITORING.md](MONITORING.md) — Snapshot, clone, and replication metrics

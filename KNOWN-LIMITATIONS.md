@@ -1,6 +1,6 @@
 # Known Limitations
 
-Explicit list of what the IBM VPC File Pool CSI Driver does not support, why, and available workarounds.
+Explicit list of what the IBM VPC File Pool CSI Driver does not support, why, and available workarounds. For the meaning of project words, see [CONTEXT.md](CONTEXT.md).
 
 ## Quota Enforcement
 
@@ -67,7 +67,7 @@ The notes below describe the design, not a working feature.
 
 ## Cross-Region Replication and Disaster Recovery
 
-**What:** The driver includes a built-in replication controller (Phase 4d) for cross-region disaster recovery. A `ReplicationPolicy` CRD defines which SubVolumes to replicate, the destination NFS server (reachable over Transit Gateway), and a schedule interval. The controller periodically copies SubVolume data from the source pool to the destination using `cp -a` (CopyDir).
+**What:** The driver includes a built-in replication controller (Phase 4d) for cross-region disaster recovery. A `ReplicationPolicy` CRD defines which SubVolumes to replicate, the destination NFS server (reachable over Transit Gateway), and a schedule interval. The controller periodically copies SubVolume data from the source pool to the destination with rsync (direct NFS) or tar over HTTPS (receiver).
 
 **How it works:** The replication controller runs as a background goroutine alongside the CSI controller. For each active `ReplicationPolicy` on schedule:
 1. Lists SubVolumes in the source pool (optionally filtered by label selector)
