@@ -90,6 +90,16 @@ export const PersistentVolumeClaimModel: K8sModel = {
   namespaced: true,
 };
 
+export const PersistentVolumeModel: K8sModel = {
+  apiVersion: 'v1',
+  kind: 'PersistentVolume',
+  plural: 'persistentvolumes',
+  abbr: 'PV',
+  label: 'PersistentVolume',
+  labelPlural: 'PersistentVolumes',
+  namespaced: false,
+};
+
 export const DeploymentModel: K8sModel = {
   apiGroup: 'apps',
   apiVersion: 'v1',

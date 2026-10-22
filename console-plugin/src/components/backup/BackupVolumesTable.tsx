@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useAccessReview } from '@openshift-console/dynamic-plugin-sdk';
 import { Link } from 'react-router-dom';
 import { Table, Thead, Tr, Th, Tbody, Td, ActionsColumn, IAction } from '@patternfly/react-table';
@@ -14,18 +14,26 @@ import { restorePath } from '../../utils/backup-helpers';
 import { columnInfo } from '../../utils/column-help';
 import { API_GROUP } from '../../constants';
 import CardHelpTitle from '../common/CardHelpTitle';
+import DeleteBackupsDialog from './DeleteBackupsDialog';
 
 interface Props {
   policy: BackupPolicy;
   /** What the console knows about the driver. The Browse files action shows only when file restore is present. */
   settings?: DriverSettings;
+  /** A claim ("namespace/name") whose Delete backups dialog opens at once, as when a link names it. */
+  deleteClaim?: string;
+  /** Called when the Delete backups dialog is closed. */
+  onDeleteClosed?: () => void;
 }
 
 const EXPORT_COLOR = { ok: 'green', warning: 'orange', danger: 'red' } as const;
 
 /** One row for each volume the policy backs up, or still keeps backups of. */
-const BackupVolumesTable: React.FC<Props> = ({ policy, settings }) => {
+const BackupVolumesTable: React.FC<Props> = ({ policy, settings, deleteClaim, onDeleteClosed }) => {
   const volumes = policy.status?.volumes || [];
+  const [deleting, setDeleting] = useState<BackupVolumeStatus | undefined>(() =>
+    deleteClaim ? volumes.find((v) => `${v.pvcNamespace}/${v.pvcName}` === deleteClaim) : undefined,
+  );
   const [canRestore] = useAccessReview({ group: API_GROUP, resource: 'backuprestores', verb: 'create' });
   const rowActions = (volume: BackupVolumeStatus): IAction[] => {
     const actions: IAction[] = [
@@ -36,6 +44,7 @@ const BackupVolumesTable: React.FC<Props> = ({ policy, settings }) => {
             ),
           }
         : { title: 'Restore (needs the right to create BackupRestore objects)', isDisabled: true },
+      { title: 'Delete backups', onClick: () => setDeleting(volume) },
     ];
     if (browseFilesAvailable(settings)) {
       actions.push({ title: 'Browse files' });
@@ -118,6 +127,16 @@ const BackupVolumesTable: React.FC<Props> = ({ policy, settings }) => {
           </Table>
         )}
       </CardBody>
+      {deleting && (
+        <DeleteBackupsDialog
+          policy={policy}
+          volume={deleting}
+          onClose={() => {
+            setDeleting(undefined);
+            onDeleteClosed?.();
+          }}
+        />
+      )}
     </Card>
   );
 };
