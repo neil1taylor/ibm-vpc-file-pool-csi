@@ -250,10 +250,6 @@ metadata:
   labels:
     {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
     app.kubernetes.io/component: backup-gateway
-  {{- if and $openshift (not .Values.backupGateway.tls.secretName) }}
-  annotations:
-    service.beta.openshift.io/inject-cabundle: "true"
-  {{- end }}
 data:
   {{- $route := lookup "route.openshift.io/v1" "Route" .Release.Namespace $name }}
   {{- $host := .Values.backupGateway.route.host }}
@@ -298,8 +294,11 @@ subjects:
     name: system:authenticated
 {{- if and .Values.backupGateway.route.enabled $openshift }}
 ---
-# Passthrough: the traffic stays encrypted to the gateway, which holds the
-# certificate that the service CA made.
+# Reencrypt: the router answers with the cluster's ingress certificate, which is
+# for the Route's host, and encrypts again to the gateway, whose service
+# certificate (made by the service CA, which the router trusts) is for the
+# service name. A passthrough Route would show the service certificate to the
+# client, and the host name would not match.
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
@@ -318,7 +317,7 @@ spec:
   port:
     targetPort: https
   tls:
-    termination: passthrough
+    termination: reencrypt
     insecureEdgeTerminationPolicy: Redirect
 {{- end }}
 {{- end }}

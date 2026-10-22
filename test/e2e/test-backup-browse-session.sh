@@ -264,11 +264,11 @@ ALICE=$(user_kubeconfig alice "$NS"); VIEWER=$(user_kubeconfig viewer "$NS"); MA
 
 GW_ROUTE=$(oc get route -n "$DRIVER_NS" -l app.kubernetes.io/component=backup-gateway -o jsonpath='{.items[0].spec.host}' 2>/dev/null || true)
 [ -n "$GW_ROUTE" ] || fail "the gateway has no Route"
-oc get cm backup-gateway-info -n "$DRIVER_NS" -o jsonpath='{.data.service-ca\.crt}' > "$WORK/gateway-ca.crt"
-[ -s "$WORK/gateway-ca.crt" ] || fail "the address ConfigMap has no CA bundle"
+GW_CA=()
+[ -n "${GATEWAY_CA_FILE:-}" ] && GW_CA=(--gateway-ca-file "$GATEWAY_CA_FILE")
 bk() { # bk <kubeconfig> <args...>
     local kc=$1; shift
-    "$BACKUP_BIN" "$1" --kubeconfig "$kc" --gateway "https://$GW_ROUTE" --gateway-ca-file "$WORK/gateway-ca.crt" "${@:2}"
+    "$BACKUP_BIN" "$1" --kubeconfig "$kc" --gateway "https://$GW_ROUTE" "${GW_CA[@]}" "${@:2}"
 }
 wait_until 120 "the gateway to answer" bk "$ALICE" ls --policy "$POLICY" --pvc "$NS/data" --timeout 4m
 
@@ -296,7 +296,7 @@ expect_forbidden "a user whose binding was removed" "$ALICE"
 oc create rolebinding alice-reader -n "$NS" --clusterrole=backup-file-reader --serviceaccount="$NS:alice" >/dev/null
 bk "$ALICE" ls --policy "$POLICY" --pvc "$NS/data" / >/dev/null && pass "the backup-file-reader role alone is enough" || fail "reader role"
 
-if curl -sk -m 10 "https://$GW_ROUTE/v1/volumes?namespace=$NS" | jq -e '.code == "unauthenticated"' >/dev/null; then
+if curl -s -m 10 "https://$GW_ROUTE/v1/volumes?namespace=$NS" | jq -e '.code == "unauthenticated"' >/dev/null; then
     pass "a call with no token is refused"
 else
     fail "an anonymous call was not refused"

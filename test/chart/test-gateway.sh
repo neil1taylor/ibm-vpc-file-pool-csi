@@ -5,7 +5,7 @@
 # token review and a SubjectAccessReview on the rights-only name "backupfiles".
 # The chart ships two ClusterRoles for people (backup-file-reader aggregates into
 # "admin"), a gateway ServiceAccount with only the rights it needs (Secrets only
-# by a Role in its own namespace), a Service, a passthrough Route on OpenShift,
+# by a Role in its own namespace), a Service, a reencrypt Route on OpenShift,
 # and a ConfigMap with the gateway address that every signed-in user may read.
 #
 # Usage: bash test/chart/test-gateway.sh
@@ -65,10 +65,11 @@ check "everyone signed in may read only that ConfigMap" "$ON" 'resourceNames: ["
 check "system:authenticated is bound" "$ON" 'name: system:authenticated'
 absent "no Route without the OpenShift API" "$PLAIN" 'kind: Route'
 absent "no OpenShift annotations without the OpenShift API" "$PLAIN" 'service.beta.openshift.io'
-check "a passthrough Route on OpenShift" "$OS" 'termination: passthrough'
+check "a reencrypt Route on OpenShift" "$OS" 'termination: reencrypt'
+absent "the Route is not passthrough (the service certificate is for the service name, not the Route host)" "$OS" 'termination: passthrough'
 check "the Route has the host" "$OS" 'host: backups.example.com'
 check "the address ConfigMap has the Route's address" "$OS" 'url: "https://backups.example.com"'
-check "the CA bundle is injected" "$OS" 'service.beta.openshift.io/inject-cabundle: "true"'
+absent "no CA bundle is injected (clients use the router certificate)" "$OS" 'inject-cabundle'
 check "an own certificate Secret is used" "$OWN" 'secretName: my-cert'
 absent "no serving-cert annotation with an own certificate" "$OWN" 'service.beta.openshift.io/serving-cert-secret-name'
 check "the address can be set" "$OWN" 'url: "https://gw.example.com"'

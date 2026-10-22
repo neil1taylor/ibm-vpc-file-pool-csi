@@ -129,7 +129,8 @@ backupGateway:
     # must name a Secret (tls.crt, tls.key) that holds the gateway's serving
     # certificate, or the gateway pod cannot start.
     secretName: ""
-  # A passthrough Route, made only where the OpenShift Route API exists.
+  # A reencrypt Route, made only where the OpenShift Route API exists. The router
+  # answers with its own certificate for the host, then encrypts again to the gateway.
   route:
     enabled: true
     # Empty lets OpenShift choose the host.

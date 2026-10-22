@@ -503,11 +503,7 @@ func gatewayInfo(ctx context.Context, c client.Client, namespace string) (url, c
 	if cm.Data["url"] == "" {
 		return "", "", fmt.Errorf("ConfigMap %s/%s has no url; give the address with --gateway https://HOST", namespace, gatewayInfoName)
 	}
-	ca = cm.Data["ca.crt"]
-	if ca == "" {
-		ca = cm.Data["service-ca.crt"] // injected by the OpenShift service CA
-	}
-	return cm.Data["url"], ca, nil
+	return cm.Data["url"], cm.Data["ca.crt"], nil
 }
 
 // newGatewayClient makes a client for the gateway that sends the user's own

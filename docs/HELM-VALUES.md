@@ -120,7 +120,7 @@ The one door to browse sessions (issue #92). Users talk to it with their own Kub
 | `backupGateway.replicas` | int | `1` | The gateway keeps no state |
 | `backupGateway.url` | string | `""` | The address that goes in the ConfigMap `backup-gateway-info`, which `kubectl backup` reads. Empty uses `https://<route.host>` or the host of the existing Route; if neither is known, users pass `--gateway` |
 | `backupGateway.tls.secretName` | string | `""` | Empty: on OpenShift the service CA makes the serving certificate. Elsewhere you must name a Secret (`tls.crt`, `tls.key`) in the release namespace, or the gateway pod cannot start |
-| `backupGateway.route.enabled` | bool | `true` | A passthrough Route, made only where the OpenShift Route API exists. The traffic stays encrypted to the gateway |
+| `backupGateway.route.enabled` | bool | `true` | A reencrypt Route, made only where the OpenShift Route API exists. The router answers with the cluster's ingress certificate for the host, then encrypts again to the gateway (the service CA certificate, which the router trusts). Traffic is encrypted on both legs |
 | `backupGateway.route.host` | string | `""` | Empty lets OpenShift choose the host |
 | `backupGateway.sessionWait` | string | `60s` | How long a request to open a session waits for the helper pod to be ready |
 | `backupGateway.maxDownloadBytes` | int | `53687091200` | The largest single file or tar a user may download (50 GiB) |
