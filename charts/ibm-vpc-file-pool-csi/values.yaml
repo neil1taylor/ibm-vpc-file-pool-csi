@@ -13,7 +13,7 @@ config:
   # Only set these for unmanaged clusters or to override auto-discovery.
   region: ""      # Auto-discovered from secret provider endpoint
   vpcID: ""       # Auto-discovered from ibm-cloud-provider-data configmap
-  subnetID: ""    # Auto-discovered from ibm-cloud-provider-data configmap
+  subnetID: ""    # Comma-separated worker subnets; auto-discovered from ibm-cloud-provider-data configmap
   resourceGroupID: ""
 
 controller:
@@ -41,6 +41,12 @@ node:
   # Must not conflict with other hostNetwork services on the node.
   # Stock IBM VPC file CSI uses 9808; we default to 9809.
   registrarHealthPort: 9809
+  # Port of the node agent's metrics endpoint (per-share used bytes, NFS latency
+  # and IOPS). The node agent uses the host network, so the port must be free on
+  # the node. 0 turns the endpoint off.
+  metricsPort: 9810
+  # How often the node agent reads the NFS statistics of its shares.
+  shareStatsInterval: 30s
   resources:
     requests:
       cpu: 50m
@@ -60,6 +66,36 @@ goldenImageSyncer:
   # Interval between golden image syncer poll cycles (Go duration string).
   interval: 5m
 
+cdi:
+  # The controller keeps the memory limit of CDI's copy pods (OpenShift
+  # Virtualization HyperConverged spec.resourceRequirements.storageWorkloads)
+  # at least this high. CDI's default of 600M is too small for copies onto
+  # NFS, and 2Gi failed for a 25 GB disk. Empty turns the check off.
+  copyPodMemoryLimit: 8Gi
+
+vmSnapshots:
+  # How snapshots of KubeVirt VM disks are made. See VM-INSTANT-SNAPSHOTS.md.
+  # auto: instant snapshots (a new overlay file per snapshot, nothing copied)
+  #   where the KubeVirt Sidecar feature gate is on, and a copy elsewhere. It
+  #   adds a webhook that gives each VM with snapshots a hook when it starts.
+  #   Red Hat does not support the Sidecar feature gate.
+  # copy: every VM disk snapshot is a copy.
+  method: auto
+  # KubeVirt's virt-launcher image, for the Jobs that change a stopped VM's
+  # snapshot files. Empty reads it from the virt-operator Deployment.
+  launcherImage: ""
+  # Turn on the KubeVirt Sidecar feature gate, which instant snapshots need,
+  # with a hook Job after each install and upgrade. It adds one entry to the
+  # HyperConverged kubevirt.kubevirt.io/jsonpatch annotation and keeps the
+  # others. Red Hat does not support settings made through that annotation.
+  # Setting this back to false or uninstalling does not turn the gate off: VMs
+  # with instant snapshots cannot start without it. To turn it off, flatten
+  # those VMs first (kubectl pool-snapshots flatten), then remove the entry.
+  # The gate is cluster-wide: anyone who can create or edit a VM can then add
+  # a hook sidecar container to that VM's pod. The hook Job may only read and
+  # update the HyperConverged object named kubevirt-hyperconverged.
+  enableSidecarGate: false
+
 webhook:
   # Enable validating admission webhooks for CRD resources.
   enabled: true
@@ -69,8 +105,11 @@ webhook:
   # cert-manager: auto-provisions TLS certs via cert-manager (must be installed).
   # openshift: uses the built-in OpenShift service CA. No extra operator needed.
   #   Use this on ROKS and ROVS clusters that do not have cert-manager.
-  # manual: you must create the TLS secret yourself before deploying.
+  # manual: you must create the TLS secret <release>-ibm-vpc-file-pool-csi-webhook-certs
+  #   yourself before deploying, and set caBundle to the base64-encoded CA that signed it.
   certProvider: cert-manager
+  # Base64-encoded PEM CA bundle for the webhook config. Required when certProvider=manual.
+  caBundle: ""
   # cert-manager issuer configuration (only used when certProvider=cert-manager).
   certManager:
     # Use a self-signed issuer by default.
@@ -129,12 +168,63 @@ sidecars:
 metrics:
   port: 8080
   serviceMonitor:
-    enabled: false
+    # Created only when the cluster has the Prometheus Operator API
+    # (OpenShift has it). The console plugin's charts read these metrics.
+    enabled: true
     interval: 30s
+  # Where scraping and alerts live on OpenShift. Platform monitoring reads only
+  # namespaces labelled openshift.io/cluster-monitoring=true, and Red Hat says not to
+  # label other namespaces or to put your own ServiceMonitors in kube-*. So the chart
+  # makes its own namespace for the ServiceMonitors, the PrometheusRule and Services
+  # whose Endpoints the controller keeps. OpenShift's user workload monitoring must be
+  # on (enableUserWorkload: true in openshift-monitoring/cluster-monitoring-config);
+  # the chart never changes that. See MONITORING.md.
+  monitoring:
+    # auto: use it when the cluster has the Prometheus Operator API and the OpenShift
+    # console and webhook.certProvider=openshift. enabled: always (needs certProvider
+    # openshift). disabled: ServiceMonitors and rules stay in the release namespace.
+    mode: auto
+    namespace: ibm-vpc-file-pool-csi-monitoring
+  # The service account that scrapes the node agents' metrics (they need a token
+  # that may "get" /metrics). The defaults are OpenShift's Prometheus. Empty
+  # serviceAccount creates no binding; then bind the chart's metrics-reader role yourself.
+  scraper:
+    serviceAccount: prometheus-k8s
+    namespace: openshift-monitoring
   alerts:
-    enabled: false
+    # Created only when the cluster has the Prometheus Operator API.
+    enabled: true
+    # Pool use, in percent of capacity
     utilizationWarning: 80
     utilizationCritical: 95
+    # One share, in percent of its size allocated to PVCs
+    shareUtilizationWarning: 90
+    # One share, in percent of its size written (real used bytes, from the node agents)
+    shareUsedWarning: 85
+    shareUsedCritical: 95
+    # NFS requests on one share (read or write): average seconds per request.
+    # Judged only while the share does at least nfsMinOpsPerSecond requests a second.
+    nfsLatencySeconds: 0.1
+    nfsMinOpsPerSecond: 1
+    # Read and write operations a second on one share, all nodes together.
+    # 0 turns the alert off. Set it near the IOPS of the share profile.
+    shareIOPSWarning: 0
+    # Failed volume allocations per second
+    allocationFailuresPerSecond: 0.1
+    # Slowest 1% of volume allocations, in seconds
+    allocationP99Seconds: 5
+    # Failed VPC API calls per second
+    apiErrorsPerSecond: 0.05
+    # Replication: seconds behind, and failures in a row
+    replicationLagSeconds: 7200
+    replicationFailures: 3
+    # Backups: a volume with no backup for this long (twice the schedule is a good value)
+    backupLateSeconds: 43200
+    # Copy in COS: the newest export, or a moment waiting, this old
+    exportLateSeconds: 43200
+    # Snapshot pool share use, in percent. New backups stop at 85.
+    snapshotPoolWarning: 75
+    snapshotPoolCritical: 85
 
 volumeSnapshotClass:
   create: true
@@ -163,6 +253,11 @@ replicationReceiver:
   pvcName: ""
   # Secret name containing a "token" key for bearer token authentication.
   authSecretName: ""
+  # User and group the receiver runs as. It writes the destination VM disks, and
+  # KubeVirt runs QEMU as 107, so a failed-over VM can open a disk only if 107
+  # owns it.
+  runAsUser: 107
+  runAsGroup: 107
   resources:
     requests:
       cpu: 100m
@@ -188,9 +283,11 @@ replication:
   image: ""
 
 consolePlugin:
-  # Enable the OpenShift Console dynamic plugin for visual pool management.
-  # Requires OpenShift 4.14+ with ConsolePlugin v1 API.
-  enabled: false
+  # The OpenShift Console dynamic plugin for visual pool management.
+  # Installed only on clusters with the OpenShift console (ConsolePlugin v1
+  # API, OpenShift 4.14+). A hook Job turns it on in the console; set false to
+  # leave it out (an upgrade then turns it off in the console).
+  enabled: true
   image:
     repository: de.icr.io/ibm-vpc-file-pool-csi/console-plugin
     tag: latest

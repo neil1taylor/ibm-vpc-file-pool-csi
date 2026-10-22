@@ -21,6 +21,12 @@ setup('authenticate with OpenShift console', async ({ page, context }) => {
     throw new Error('CONSOLE_URL env var is required (e.g. https://console-openshift-console.apps.cluster.cloud.ibm.com)');
   }
 
+  // A console run with user sign-in switched off (the release test) needs no login.
+  if (process.env.CONSOLE_AUTH === 'none') {
+    await page.context().storageState({ path: STORAGE_STATE_PATH });
+    return;
+  }
+
   // --- Try token-based auth first (works with ROKS IAM passkey) ---
   const token = getOCPToken();
   if (token) {

@@ -1,52 +1,268 @@
-{{- if .Values.metrics.alerts.enabled }}
+{{- if and .Values.metrics.alerts.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PrometheusRule") }}
+{{- $a := .Values.metrics.alerts }}
+{{- $ruleNS := ternary .Values.metrics.monitoring.namespace .Release.Namespace (not (empty (include "ibm-vpc-file-pool-csi.uwm" .))) }}
+{{- $job := printf "%s-metrics" (include "ibm-vpc-file-pool-csi.fullname" .) }}
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ $ruleNS }}
   labels:
     {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
 spec:
   groups:
-    - name: vpc-file-pool-csi
+    # Every rule gives no result, and so no alert, when there is no data:
+    # a pool with no capacity or an idle driver makes NaN or no series.
+    - name: vpc-file-pool-csi.capacity
       rules:
         - alert: VPCFilePoolUtilizationWarning
           expr: |
-            (vpc_file_pool_allocated_gb / vpc_file_pool_capacity_gb) * 100
-            > {{ .Values.metrics.alerts.utilizationWarning }}
+            vpc_file_pool_allocated_gb / (vpc_file_pool_capacity_gb > 0) * 100
+            > {{ $a.utilizationWarning }}
           for: 5m
           labels:
             severity: warning
           annotations:
-            summary: "VPC file pool utilization above {{ .Values.metrics.alerts.utilizationWarning }}%"
+            summary: "VPC file pool utilization above {{ $a.utilizationWarning }}%"
             description: >-
               Pool {{`{{ $labels.pool }}`}} is at
               {{`{{ printf "%.0f" $value }}`}}% utilization.
         - alert: VPCFilePoolUtilizationCritical
           expr: |
-            (vpc_file_pool_allocated_gb / vpc_file_pool_capacity_gb) * 100
-            > {{ .Values.metrics.alerts.utilizationCritical }}
+            vpc_file_pool_allocated_gb / (vpc_file_pool_capacity_gb > 0) * 100
+            > {{ $a.utilizationCritical }}
           for: 5m
           labels:
             severity: critical
           annotations:
-            summary: "VPC file pool utilization above {{ .Values.metrics.alerts.utilizationCritical }}%"
+            summary: "VPC file pool utilization above {{ $a.utilizationCritical }}%"
             description: >-
               Pool {{`{{ $labels.pool }}`}} is at
               {{`{{ printf "%.0f" $value }}`}}% utilization. Immediate action required.
+        - alert: VPCFilePoolOverCommitted
+          expr: |
+            vpc_file_pool_allocated_gb / (vpc_file_pool_capacity_gb > 0) * 100 > 100
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "VPC file pool has more allocated than it has capacity"
+            description: >-
+              Pool {{`{{ $labels.pool }}`}} has {{`{{ printf "%.0f" $value }}`}}% of its capacity allocated.
+              New volumes in this pool can fail.
         - alert: VPCFilePoolAtMaxShares
           expr: |
-            vpc_file_pool_share_count >= on(pool) group_left
-            (vpc_file_pool_capacity_gb * 0 + vpc_file_pool_share_count)
-            and
-            (vpc_file_pool_allocated_gb / vpc_file_pool_capacity_gb) * 100
-            > {{ .Values.metrics.alerts.utilizationWarning }}
+            (
+              vpc_file_pool_share_count >= on(pool) vpc_file_pool_max_shares
+              and on(pool) vpc_file_pool_max_shares > 0
+            )
+            and on(pool)
+            (vpc_file_pool_allocated_gb / (vpc_file_pool_capacity_gb > 0) * 100 > {{ $a.utilizationWarning }})
           for: 10m
           labels:
             severity: warning
           annotations:
             summary: "VPC file pool at maximum shares with high utilization"
             description: >-
-              Pool {{`{{ $labels.pool }}`}} has reached its share limit
-              with {{`{{ printf "%.0f" $value }}`}}% utilization. No further auto-expansion is possible.
+              Pool {{`{{ $labels.pool }}`}} has reached its share limit and is above
+              {{ $a.utilizationWarning }}% utilization. No further auto-expansion is possible.
+        - alert: VPCFilePoolShareNearlyFull
+          expr: |
+            vpc_file_pool_share_allocated_gb / (vpc_file_pool_share_total_gb > 0) * 100
+            > {{ $a.shareUtilizationWarning }}
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "A share of a VPC file pool is nearly full"
+            description: >-
+              Share {{`{{ $labels.share }}`}} of pool {{`{{ $labels.pool }}`}} has
+              {{`{{ printf "%.0f" $value }}`}}% of its size allocated.
+              Volumes placed on it can fail.
+    # Per-share rules use the node agents' metrics. A share is mounted on several
+    # nodes, so used space takes the max over nodes (they all see the same share)
+    # and traffic sums over nodes (each node does its own operations). Idle shares
+    # and missing series give no result: the divisions drop zero denominators.
+    - name: vpc-file-pool-csi.shares
+      rules:
+        - alert: VPCFilePoolShareUsedHigh
+          expr: |
+            max by (pool, share) (vpc_file_pool_share_used_bytes)
+            / on (pool, share) max by (pool, share) (vpc_file_pool_share_size_bytes > 0) * 100
+            > {{ $a.shareUsedWarning }}
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "A share of a VPC file pool is filling up"
+            description: >-
+              Share {{`{{ $labels.share }}`}} of pool {{`{{ $labels.pool }}`}} is
+              {{`{{ printf "%.0f" $value }}`}}% full (bytes written). Writes fail when it is full.
+        - alert: VPCFilePoolShareUsedCritical
+          expr: |
+            max by (pool, share) (vpc_file_pool_share_used_bytes)
+            / on (pool, share) max by (pool, share) (vpc_file_pool_share_size_bytes > 0) * 100
+            > {{ $a.shareUsedCritical }}
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "A share of a VPC file pool is almost full"
+            description: >-
+              Share {{`{{ $labels.share }}`}} of pool {{`{{ $labels.pool }}`}} is
+              {{`{{ printf "%.0f" $value }}`}}% full (bytes written). Writes fail when it is full.
+        - alert: VPCFilePoolShareNFSLatencyHigh
+          expr: |
+            (
+              sum by (pool, share, op) (rate(vpc_file_pool_share_nfs_execute_seconds_total{op=~"read|write"}[5m]))
+              / (sum by (pool, share, op) (rate(vpc_file_pool_share_nfs_operations_total{op=~"read|write"}[5m])) > 0)
+              > {{ $a.nfsLatencySeconds }}
+            )
+            and on (pool, share, op)
+            sum by (pool, share, op) (rate(vpc_file_pool_share_nfs_operations_total{op=~"read|write"}[5m])) >= {{ $a.nfsMinOpsPerSecond }}
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "NFS requests on a VPC file pool share are slow"
+            description: >-
+              Share {{`{{ $labels.share }}`}} of pool {{`{{ $labels.pool }}`}} takes
+              {{`{{ $value | humanizeDuration }}`}} per {{`{{ $labels.op }}`}} request.
+              Check the share's IOPS and the node network.
+{{- if $a.shareIOPSWarning }}
+        - alert: VPCFilePoolShareIOPSHigh
+          expr: |
+            sum by (pool, share) (rate(vpc_file_pool_share_nfs_operations_total{op=~"read|write"}[5m]))
+            > {{ $a.shareIOPSWarning }}
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "A VPC file pool share is near its IOPS limit"
+            description: >-
+              Share {{`{{ $labels.share }}`}} of pool {{`{{ $labels.pool }}`}} does
+              {{`{{ printf "%.0f" $value }}`}} read and write operations a second, over the
+              {{ $a.shareIOPSWarning }} set in metrics.alerts.shareIOPSWarning.
+{{- end }}
+    - name: vpc-file-pool-csi.service
+      rules:
+        - alert: VPCFilePoolControllerDown
+          expr: absent(up{job="{{ $job }}",namespace="{{ $ruleNS }}"} == 1)
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "The VPC file pool CSI controller is not reporting metrics"
+            description: No metrics for 5 minutes. New volume operations can be blocked.
+        - alert: VPCFilePoolAllocationFailures
+          expr: sum by (pool) (rate(vpc_file_pool_allocations_total{status="error"}[5m])) > {{ $a.allocationFailuresPerSecond }}
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Volume allocations are failing"
+            description: >-
+              Pool {{`{{ $labels.pool }}`}} has {{`{{ printf "%.2f" $value }}`}} failed allocations per second.
+        - alert: VPCFilePoolAllocationSlow
+          expr: |
+            histogram_quantile(0.99, sum by (pool, le) (rate(vpc_file_pool_allocation_duration_seconds_bucket[5m])))
+            > {{ $a.allocationP99Seconds }}
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Volume allocations are slow"
+            description: >-
+              Pool {{`{{ $labels.pool }}`}} has a P99 allocation time of {{`{{ printf "%.1f" $value }}`}} s.
+        - alert: VPCFilePoolAPIErrors
+          expr: sum by (operation) (rate(vpc_file_pool_api_calls_total{status="error"}[10m])) > {{ $a.apiErrorsPerSecond }}
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "VPC API calls are failing"
+            description: >-
+              Operation {{`{{ $labels.operation }}`}} fails {{`{{ printf "%.2f" $value }}`}} times per second.
+              Check the API key and the VPC service status.
+        - alert: VPCFilePoolSnapshotFailures
+          expr: sum by (pool, operation) (rate(vpc_file_pool_snapshots_total{status="error"}[10m])) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Snapshot operations are failing"
+            description: >-
+              Snapshot {{`{{ $labels.operation }}`}} fails in pool {{`{{ $labels.pool }}`}}.
+    - name: vpc-file-pool-csi.replication
+      rules:
+        - alert: VPCFilePoolReplicationLagHigh
+          expr: pool_csi_replication_lag_seconds > {{ $a.replicationLagSeconds }}
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Replication is behind"
+            description: >-
+              Policy {{`{{ $labels.policy }}`}} is {{`{{ $value | humanizeDuration }}`}} behind. Recovery data is old.
+        - alert: VPCFilePoolReplicationFailing
+          expr: pool_csi_replication_consecutive_failures > {{ $a.replicationFailures }}
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Replication keeps failing"
+            description: >-
+              Policy {{`{{ $labels.policy }}`}} has {{`{{ printf "%.0f" $value }}`}} failures in a row and may be paused.
+    - name: vpc-file-pool-csi.backup
+      rules:
+        - alert: VPCFilePoolBackupLate
+          expr: vpc_file_pool_backup_stalest_age_seconds > {{ $a.backupLateSeconds }}
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "A volume has no recent backup"
+            description: >-
+              Backup policy {{`{{ $labels.policy }}`}} has a volume with no backup for {{`{{ $value | humanizeDuration }}`}}.
+        - alert: VPCFilePoolExportLate
+          expr: vpc_file_pool_backup_export_newest_age_seconds > {{ $a.exportLateSeconds }}
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "The copy of backups in COS is late"
+            description: >-
+              Backup policy {{`{{ $labels.policy }}`}} has not exported to COS for {{`{{ $value | humanizeDuration }}`}}.
+        - alert: VPCFilePoolExportMomentWaiting
+          expr: vpc_file_pool_backup_export_oldest_unexported_age_seconds > {{ $a.exportLateSeconds }}
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "A backup moment waits to go to COS"
+            description: >-
+              Backup policy {{`{{ $labels.policy }}`}} has a backup moment that has waited {{`{{ $value | humanizeDuration }}`}}.
+        - alert: VPCFilePoolSnapshotPoolNearlyFull
+          expr: |
+            vpc_file_pool_backup_snapshot_pool_used_percent > {{ $a.snapshotPoolWarning }}
+            and
+            vpc_file_pool_backup_snapshot_pool_used_percent <= {{ $a.snapshotPoolCritical }}
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "A snapshot pool share is nearly full"
+            description: >-
+              Share {{`{{ $labels.share }}`}} of snapshot pool {{`{{ $labels.pool }}`}} is
+              {{`{{ printf "%.0f" $value }}`}}% full. New backups stop at 85%.
+        - alert: VPCFilePoolSnapshotPoolFull
+          expr: vpc_file_pool_backup_snapshot_pool_used_percent > {{ $a.snapshotPoolCritical }}
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "A snapshot pool share is full and new backups are stopped"
+            description: >-
+              Share {{`{{ $labels.share }}`}} of snapshot pool {{`{{ $labels.pool }}`}} is
+              {{`{{ printf "%.0f" $value }}`}}% full. Add space or shorten keepFor.
 {{- end }}

@@ -7,7 +7,6 @@ import {
   ListPageCreateLink,
   ListPageFilter,
   useListPageFilter,
-  Timestamp,
 } from '@openshift-console/dynamic-plugin-sdk';
 import { Link } from 'react-router-dom';
 import {
@@ -21,13 +20,15 @@ import {
   ActionsColumn,
   IAction,
 } from '@patternfly/react-table';
-import { Bullseye, Spinner } from '@patternfly/react-core';
+import { Bullseye, Label, Spinner } from '@patternfly/react-core';
 import { ReplicationPolicyModel } from '../../models';
 import { ReplicationPolicy } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
 import DeleteModal from '../common/DeleteModal';
 import { formatAge } from '../../utils/resource-helpers';
+import { describeReceiverReachable, replicationDestination } from '../../utils/replication-helpers';
 import { ROUTES } from '../../constants';
+import { columnInfo } from '../../utils/column-help';
 
 const ReplicationPolicyRow: React.FC<{
   policy: ReplicationPolicy;
@@ -37,6 +38,7 @@ const ReplicationPolicyRow: React.FC<{
   const detailPath = ROUTES.REPLICATION_DETAIL.replace(':name', name);
   const currentPhase = policy.status?.phase || '';
   const isPaused = currentPhase === 'Paused';
+  const receiver = describeReceiverReachable(policy);
 
   const handlePauseResume = async () => {
     const annotations = { ...(policy.metadata?.annotations || {}) };
@@ -80,11 +82,20 @@ const ReplicationPolicyRow: React.FC<{
       <Td dataLabel="Name"><Link to={detailPath}>{name}</Link></Td>
       <Td dataLabel="Source Pool">{policy.spec?.sourcePoolName || '-'}</Td>
       <Td dataLabel="Destination">
-        <code>{policy.spec?.destinationNFSServer || '-'}:{policy.spec?.destinationBasePath || '/pvcs'}</code>
+        <code>{replicationDestination(policy.spec)}</code>
       </Td>
       <Td dataLabel="Schedule">{policy.spec?.schedule || '-'}</Td>
       <Td dataLabel="Phase"><PhaseStatus phase={policy.status?.phase} /></Td>
       <Td dataLabel="Last Sync">{formatAge(policy.status?.lastSyncTime)}</Td>
+      <Td dataLabel="Receiver">
+        {receiver ? (
+          <Label color={receiver.color} title={receiver.detail || undefined}>
+            {receiver.label}
+          </Label>
+        ) : (
+          '-'
+        )}
+      </Td>
       <Td dataLabel="Failures">{policy.status?.consecutiveFailures ?? 0}</Td>
       <Td isActionCell>
         <ActionsColumn items={rowActions} />
@@ -182,9 +193,10 @@ const ReplicationPolicyListPage: React.FC = () => {
                 <Th sort={getSortParams(1)}>Source Pool</Th>
                 <Th>Destination</Th>
                 <Th sort={getSortParams(2)}>Schedule</Th>
-                <Th sort={getSortParams(3)}>Phase</Th>
-                <Th sort={getSortParams(4)}>Last Sync</Th>
-                <Th sort={getSortParams(5)}>Failures</Th>
+                <Th sort={getSortParams(3)} info={columnInfo('replicationPhase')}>Phase</Th>
+                <Th sort={getSortParams(4)} info={columnInfo('replicationLastSync')}>Last Sync</Th>
+                <Th info={columnInfo('replicationReceiver')}>Receiver</Th>
+                <Th sort={getSortParams(5)} info={columnInfo('replicationFailures')}>Failures</Th>
                 <Th></Th>
               </Tr>
             </Thead>

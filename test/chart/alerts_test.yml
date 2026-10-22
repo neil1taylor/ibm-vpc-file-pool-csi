@@ -1,0 +1,306 @@
+# promtool unit tests for the alert rules the chart renders (test/chart/test-alerts.sh).
+rule_files:
+  - rendered-rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: pool above 80 percent warns, a pool with no capacity gives no alert
+    interval: 1m
+    input_series:
+      - series: 'vpc_file_pool_allocated_gb{pool="busy"}'
+        values: '850+0x30'
+      - series: 'vpc_file_pool_capacity_gb{pool="busy"}'
+        values: '1000+0x30'
+      - series: 'vpc_file_pool_allocated_gb{pool="empty"}'
+        values: '0+0x30'
+      - series: 'vpc_file_pool_capacity_gb{pool="empty"}'
+        values: '0+0x30'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: VPCFilePoolUtilizationWarning
+        exp_alerts:
+          - exp_labels: {severity: warning, pool: busy}
+            exp_annotations:
+              summary: "VPC file pool utilization above 80%"
+              description: "Pool busy is at 85% utilization."
+      - eval_time: 10m
+        alertname: VPCFilePoolUtilizationCritical
+        exp_alerts: []
+
+  - name: allocated above capacity is over-committed and critical
+    interval: 1m
+    input_series:
+      - series: 'vpc_file_pool_allocated_gb{pool="ovl"}'
+        values: '1200+0x30'
+      - series: 'vpc_file_pool_capacity_gb{pool="ovl"}'
+        values: '1000+0x30'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: VPCFilePoolOverCommitted
+        exp_alerts:
+          - exp_labels: {severity: critical, pool: ovl}
+            exp_annotations:
+              summary: "VPC file pool has more allocated than it has capacity"
+              description: "Pool ovl has 120% of its capacity allocated. New volumes in this pool can fail."
+      - eval_time: 10m
+        alertname: VPCFilePoolUtilizationCritical
+        exp_alerts:
+          - exp_labels: {severity: critical, pool: ovl}
+            exp_annotations:
+              summary: "VPC file pool utilization above 95%"
+              description: "Pool ovl is at 120% utilization. Immediate action required."
+
+  - name: at the share limit and busy, the max shares alert fires only for that pool
+    interval: 1m
+    input_series:
+      - series: 'vpc_file_pool_share_count{pool="full"}'
+        values: '5+0x30'
+      - series: 'vpc_file_pool_max_shares{pool="full"}'
+        values: '5+0x30'
+      - series: 'vpc_file_pool_allocated_gb{pool="full"}'
+        values: '900+0x30'
+      - series: 'vpc_file_pool_capacity_gb{pool="full"}'
+        values: '1000+0x30'
+      - series: 'vpc_file_pool_share_count{pool="roomy"}'
+        values: '2+0x30'
+      - series: 'vpc_file_pool_max_shares{pool="roomy"}'
+        values: '5+0x30'
+      - series: 'vpc_file_pool_allocated_gb{pool="roomy"}'
+        values: '900+0x30'
+      - series: 'vpc_file_pool_capacity_gb{pool="roomy"}'
+        values: '1000+0x30'
+      - series: 'vpc_file_pool_share_count{pool="nolimit"}'
+        values: '3+0x30'
+      - series: 'vpc_file_pool_max_shares{pool="nolimit"}'
+        values: '0+0x30'
+      - series: 'vpc_file_pool_allocated_gb{pool="nolimit"}'
+        values: '900+0x30'
+      - series: 'vpc_file_pool_capacity_gb{pool="nolimit"}'
+        values: '1000+0x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: VPCFilePoolAtMaxShares
+        exp_alerts:
+          - exp_labels: {severity: warning, pool: full}
+            exp_annotations:
+              summary: "VPC file pool at maximum shares with high utilization"
+              description: "Pool full has reached its share limit and is above 80% utilization. No further auto-expansion is possible."
+
+  - name: no allocation traffic gives no slowness alert, slow allocations do
+    interval: 1m
+    input_series:
+      - series: 'vpc_file_pool_allocation_duration_seconds_bucket{pool="slow",le="1"}'
+        values: '0+0x30'
+      - series: 'vpc_file_pool_allocation_duration_seconds_bucket{pool="slow",le="10"}'
+        values: '0+30x30'
+      - series: 'vpc_file_pool_allocation_duration_seconds_bucket{pool="slow",le="+Inf"}'
+        values: '0+30x30'
+      - series: 'vpc_file_pool_allocation_duration_seconds_bucket{pool="idle",le="1"}'
+        values: '4+0x30'
+      - series: 'vpc_file_pool_allocation_duration_seconds_bucket{pool="idle",le="+Inf"}'
+        values: '4+0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: VPCFilePoolAllocationSlow
+        exp_alerts:
+          - exp_labels: {severity: warning, pool: slow}
+            exp_annotations:
+              summary: "Volume allocations are slow"
+              description: "Pool slow has a P99 allocation time of 9.9 s."
+
+  - name: failed allocations and failed API calls alert
+    interval: 1m
+    input_series:
+      - series: 'vpc_file_pool_allocations_total{pool="p",status="error"}'
+        values: '0+60x30'
+      - series: 'vpc_file_pool_allocations_total{pool="p",status="success"}'
+        values: '0+600x30'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: VPCFilePoolAllocationFailures
+        exp_alerts:
+          - exp_labels: {severity: critical, pool: p}
+            exp_annotations:
+              summary: "Volume allocations are failing"
+              description: "Pool p has 1.00 failed allocations per second."
+
+  - name: a late backup and a snapshot pool share near and over the limit
+    interval: 1m
+    input_series:
+      - series: 'vpc_file_pool_backup_stalest_age_seconds{policy="nightly"}'
+        values: '50000+0x60'
+      - series: 'vpc_file_pool_backup_stalest_age_seconds{policy="fresh"}'
+        values: '1000+0x60'
+      - series: 'vpc_file_pool_backup_snapshot_pool_used_percent{pool="snap",share="a"}'
+        values: '80+0x60'
+      - series: 'vpc_file_pool_backup_snapshot_pool_used_percent{pool="snap",share="b"}'
+        values: '90+0x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: VPCFilePoolBackupLate
+        exp_alerts:
+          - exp_labels: {severity: warning, policy: nightly}
+            exp_annotations:
+              summary: "A volume has no recent backup"
+              description: "Backup policy nightly has a volume with no backup for 13h 53m 20s."
+      - eval_time: 45m
+        alertname: VPCFilePoolSnapshotPoolNearlyFull
+        exp_alerts:
+          - exp_labels: {severity: warning, pool: snap, share: a}
+            exp_annotations:
+              summary: "A snapshot pool share is nearly full"
+              description: "Share a of snapshot pool snap is 80% full. New backups stop at 85%."
+      - eval_time: 45m
+        alertname: VPCFilePoolSnapshotPoolFull
+        exp_alerts:
+          - exp_labels: {severity: critical, pool: snap, share: b}
+            exp_annotations:
+              summary: "A snapshot pool share is full and new backups are stopped"
+              description: "Share b of snapshot pool snap is 90% full. Add space or shorten keepFor."
+
+  - name: the controller down alert fires when the metrics service has no up series
+    interval: 1m
+    input_series:
+      - series: 'up{job="other",namespace="kube-system"}'
+        values: '1+0x30'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: VPCFilePoolControllerDown
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "The VPC file pool CSI controller is not reporting metrics"
+              description: "No metrics for 5 minutes. New volume operations can be blocked."
+
+  - name: one share above 90 percent allocated warns, an empty share and a zero size share do not
+    interval: 1m
+    input_series:
+      - series: 'vpc_file_pool_share_allocated_gb{pool="gp",share="s1"}'
+        values: '950+0x40'
+      - series: 'vpc_file_pool_share_total_gb{pool="gp",share="s1"}'
+        values: '1000+0x40'
+      - series: 'vpc_file_pool_share_allocated_gb{pool="gp",share="s2"}'
+        values: '100+0x40'
+      - series: 'vpc_file_pool_share_total_gb{pool="gp",share="s2"}'
+        values: '1000+0x40'
+      - series: 'vpc_file_pool_share_allocated_gb{pool="gp",share="s3"}'
+        values: '0+0x40'
+      - series: 'vpc_file_pool_share_total_gb{pool="gp",share="s3"}'
+        values: '0+0x40'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: VPCFilePoolShareNearlyFull
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: VPCFilePoolShareNearlyFull
+        exp_alerts:
+          - exp_labels: {severity: warning, pool: gp, share: s1}
+            exp_annotations:
+              summary: "A share of a VPC file pool is nearly full"
+              description: "Share s1 of pool gp has 95% of its size allocated. Volumes placed on it can fail."
+
+  - name: share used bytes warn above 85 percent and go critical above 95, two nodes are not counted twice, no size gives no alert
+    interval: 1m
+    input_series:
+      # s1 is mounted on two nodes, both report 90 of 100
+      - series: 'vpc_file_pool_share_used_bytes{pool="gp",share="s1",instance="n1"}'
+        values: '90+0x40'
+      - series: 'vpc_file_pool_share_size_bytes{pool="gp",share="s1",instance="n1"}'
+        values: '100+0x40'
+      - series: 'vpc_file_pool_share_used_bytes{pool="gp",share="s1",instance="n2"}'
+        values: '90+0x40'
+      - series: 'vpc_file_pool_share_size_bytes{pool="gp",share="s1",instance="n2"}'
+        values: '100+0x40'
+      # s2 is at 97 percent
+      - series: 'vpc_file_pool_share_used_bytes{pool="gp",share="s2",instance="n1"}'
+        values: '97+0x40'
+      - series: 'vpc_file_pool_share_size_bytes{pool="gp",share="s2",instance="n1"}'
+        values: '100+0x40'
+      # s3 has a zero size (no NaN, no alert)
+      - series: 'vpc_file_pool_share_used_bytes{pool="gp",share="s3",instance="n1"}'
+        values: '0+0x40'
+      - series: 'vpc_file_pool_share_size_bytes{pool="gp",share="s3",instance="n1"}'
+        values: '0+0x40'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: VPCFilePoolShareUsedHigh
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: VPCFilePoolShareUsedHigh
+        exp_alerts:
+          - exp_labels: {severity: warning, pool: gp, share: s1}
+            exp_annotations:
+              summary: "A share of a VPC file pool is filling up"
+              description: "Share s1 of pool gp is 90% full (bytes written). Writes fail when it is full."
+          - exp_labels: {severity: warning, pool: gp, share: s2}
+            exp_annotations:
+              summary: "A share of a VPC file pool is filling up"
+              description: "Share s2 of pool gp is 97% full (bytes written). Writes fail when it is full."
+      - eval_time: 20m
+        alertname: VPCFilePoolShareUsedCritical
+        exp_alerts:
+          - exp_labels: {severity: critical, pool: gp, share: s2}
+            exp_annotations:
+              summary: "A share of a VPC file pool is almost full"
+              description: "Share s2 of pool gp is 97% full (bytes written). Writes fail when it is full."
+
+  - name: slow NFS on a busy share alerts, a fast share, a slow idle share, a share with no traffic and a missing series do not
+    interval: 1m
+    input_series:
+      # slow: 5 ops a second, 0.5 s each (read)
+      - series: 'vpc_file_pool_share_nfs_operations_total{pool="gp",share="slow",op="read",instance="n1"}'
+        values: '0+300x60'
+      - series: 'vpc_file_pool_share_nfs_execute_seconds_total{pool="gp",share="slow",op="read",instance="n1"}'
+        values: '0+150x60'
+      # fast: 5 ops a second, 5 ms each
+      - series: 'vpc_file_pool_share_nfs_operations_total{pool="gp",share="fast",op="read",instance="n1"}'
+        values: '0+300x60'
+      - series: 'vpc_file_pool_share_nfs_execute_seconds_total{pool="gp",share="fast",op="read",instance="n1"}'
+        values: '0+1.5x60'
+      # trickle: 1 op every 10 s, 2 s each: slow but below the traffic floor
+      - series: 'vpc_file_pool_share_nfs_operations_total{pool="gp",share="trickle",op="write",instance="n1"}'
+        values: '0+6x60'
+      - series: 'vpc_file_pool_share_nfs_execute_seconds_total{pool="gp",share="trickle",op="write",instance="n1"}'
+        values: '0+12x60'
+      # idle: counters do not move (0/0 would be NaN)
+      - series: 'vpc_file_pool_share_nfs_operations_total{pool="gp",share="idle",op="write",instance="n1"}'
+        values: '500+0x60'
+      - series: 'vpc_file_pool_share_nfs_execute_seconds_total{pool="gp",share="idle",op="write",instance="n1"}'
+        values: '90+0x60'
+      # metadata calls are slow but only read and write are judged
+      - series: 'vpc_file_pool_share_nfs_operations_total{pool="gp",share="meta",op="other",instance="n1"}'
+        values: '0+300x60'
+      - series: 'vpc_file_pool_share_nfs_execute_seconds_total{pool="gp",share="meta",op="other",instance="n1"}'
+        values: '0+150x60'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: VPCFilePoolShareNFSLatencyHigh
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: VPCFilePoolShareNFSLatencyHigh
+        exp_alerts:
+          - exp_labels: {severity: warning, pool: gp, share: slow, op: read}
+            exp_annotations:
+              summary: "NFS requests on a VPC file pool share are slow"
+              description: "Share slow of pool gp takes 500ms per read request. Check the share's IOPS and the node network."
+
+  - name: IOPS alert is off by default and fires above the value when it is set
+    interval: 1m
+    input_series:
+      - series: 'vpc_file_pool_share_nfs_operations_total{pool="gp",share="hot",op="read",instance="n1"}'
+        values: '0+6000x60'
+      - series: 'vpc_file_pool_share_nfs_operations_total{pool="gp",share="hot",op="write",instance="n1"}'
+        values: '0+3000x60'
+      - series: 'vpc_file_pool_share_nfs_operations_total{pool="gp",share="hot",op="write",instance="n2"}'
+        values: '0+3000x60'
+      - series: 'vpc_file_pool_share_nfs_operations_total{pool="gp",share="calm",op="read",instance="n1"}'
+        values: '0+600x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: VPCFilePoolShareIOPSHigh
+        exp_alerts:
+          - exp_labels: {severity: warning, pool: gp, share: hot}
+            exp_annotations:
+              summary: "A VPC file pool share is near its IOPS limit"
+              description: "Share hot of pool gp does 200 read and write operations a second, over the 150 set in metrics.alerts.shareIOPSWarning."

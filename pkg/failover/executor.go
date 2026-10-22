@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -41,6 +42,14 @@ type Executor struct {
 // NewExecutor creates a new failover executor.
 func NewExecutor(c client.Client, out io.Writer) *Executor {
 	return &Executor{client: c, out: out}
+}
+
+// printf writes progress output. A failed write to the progress writer must not
+// abort a failover that is already creating resources, so it is logged only.
+func (e *Executor) printf(format string, args ...any) {
+	if _, err := fmt.Fprintf(e.out, format, args...); err != nil {
+		klog.V(4).InfoS("Failed to write progress output", "err", err)
+	}
 }
 
 // Execute creates SubVolume CRs, PVs, and PVCs for each SubVolume in the plan.
@@ -136,9 +145,9 @@ func (e *Executor) executeOne(ctx context.Context, sv FailoverSubVolumePlan, nam
 	}
 
 	if opts.DryRun {
-		fmt.Fprintf(e.out, "[dry-run] Would create SubVolume %s\n", svName)
-		fmt.Fprintf(e.out, "[dry-run] Would create PV %s (nfs://%s%s)\n", pvName, opts.DRShareIP, nfsPath)
-		fmt.Fprintf(e.out, "[dry-run] Would create PVC %s/%s (bound to %s)\n", namespace, pvcName, pvName)
+		e.printf("[dry-run] Would create SubVolume %s\n", svName)
+		e.printf("[dry-run] Would create PV %s (nfs://%s%s)\n", pvName, opts.DRShareIP, nfsPath)
+		e.printf("[dry-run] Would create PVC %s/%s (bound to %s)\n", namespace, pvcName, pvName)
 		return nil
 	}
 
@@ -147,9 +156,9 @@ func (e *Executor) executeOne(ctx context.Context, sv FailoverSubVolumePlan, nam
 		if !errors.IsAlreadyExists(err) {
 			return fmt.Errorf("create SubVolume CR: %w", err)
 		}
-		fmt.Fprintf(e.out, "SubVolume %s already exists, skipping\n", svName)
+		e.printf("SubVolume %s already exists, skipping\n", svName)
 	} else {
-		fmt.Fprintf(e.out, "Created SubVolume %s\n", svName)
+		e.printf("Created SubVolume %s\n", svName)
 	}
 
 	// Create PV (idempotent).
@@ -157,9 +166,9 @@ func (e *Executor) executeOne(ctx context.Context, sv FailoverSubVolumePlan, nam
 		if !errors.IsAlreadyExists(err) {
 			return fmt.Errorf("create PV: %w", err)
 		}
-		fmt.Fprintf(e.out, "PV %s already exists, skipping\n", pvName)
+		e.printf("PV %s already exists, skipping\n", pvName)
 	} else {
-		fmt.Fprintf(e.out, "Created PV %s\n", pvName)
+		e.printf("Created PV %s\n", pvName)
 	}
 
 	// Create PVC (idempotent).
@@ -167,9 +176,9 @@ func (e *Executor) executeOne(ctx context.Context, sv FailoverSubVolumePlan, nam
 		if !errors.IsAlreadyExists(err) {
 			return fmt.Errorf("create PVC: %w", err)
 		}
-		fmt.Fprintf(e.out, "PVC %s/%s already exists, skipping\n", namespace, pvcName)
+		e.printf("PVC %s/%s already exists, skipping\n", namespace, pvcName)
 	} else {
-		fmt.Fprintf(e.out, "Created PVC %s/%s\n", namespace, pvcName)
+		e.printf("Created PVC %s/%s\n", namespace, pvcName)
 	}
 
 	return nil

@@ -4,7 +4,7 @@
 
 ```
                     ┌─────────┐
-                    │  E2E    │  Real ROKS cluster + real VPC shares
+                    │  E2E    │  Real ROKS or ROVS cluster + real VPC shares
                     │  Tests  │  `make test-e2e` (requires live cluster)
                    ─┼─────────┼─
                   / │ Integr. │ \  Fake-based: fakeK8sClient, fake VPC,
@@ -32,7 +32,7 @@
 | Unit | `pkg/ibmcloud/vpc_client_test.go` | 68 | httptest servers, fakeSecretProvider |
 | Unit | `pkg/migrate/` | 22 | In-memory fakes |
 | Integration | `test/integration/` | 82 | Full stack with fakes (fakeK8sClient, fake VPC, fakeNFSOperations) |
-| E2E | `test/e2e/` | 4 | Real ROKS cluster, real VPC shares |
+| E2E | `test/e2e/` | 4 | Real ROKS or ROVS cluster, real VPC shares |
 | **Total** | | **429+** | |
 
 ---
@@ -376,7 +376,7 @@ go tool cover -func=coverage.out
 | `make test` | `go test ./... -v -race -count=1` (unit tests only) |
 | `make test-integration` | `go test ./test/integration/ -v -race -count=1 -tags=integration` |
 | `make test-coverage` | Unit tests with coverage report |
-| `make test-e2e` | E2E tests (requires live ROKS cluster + env vars) |
+| `make test-e2e` | E2E tests (requires live ROKS or ROVS cluster + env vars) |
 
 ### Coverage Targets
 
@@ -424,6 +424,20 @@ jobs:
 
 ---
 
+## Console and Go Job specs: golden files
+
+The console creates some of the same Jobs as the command-line tools. To keep the Go and TypeScript Job specs in step, a Go test writes the objects to a golden JSON file, and a console test builds them again from the same input and compares them. If one side changes alone, one of the tests fails.
+
+| Objects | Go test and golden file | Console builder and test |
+|---|---|---|
+| Migration claim and pod | `pkg/migrate/golden_test.go`, `pkg/migrate/testdata/migration-objects.golden.json` | `console-plugin/src/utils/migrate-objects.ts` |
+| Receiver check Job | `pkg/replication/checkjob_test.go`, `pkg/replication/testdata/check-job.golden.json` | `console-plugin/src/utils/receiver-objects.ts` |
+| Backup measure, delete and COS list Jobs | `pkg/pool/share_job_backup_golden_test.go`, `pkg/pool/testdata/backup-jobs.golden.json` | `console-plugin/src/utils/backup-jobs.ts` |
+
+To change a Job on purpose, change the Go builder, rewrite the golden file (for the backup Jobs: `go test ./pkg/pool -run BackupJobs_MatchGolden -update-backup-jobs`), then change the TypeScript builder until `yarn jest` passes.
+
+---
+
 ## Integration Tests
 
 Integration tests exercise the full CSI controller stack (CSI driver -> Pool Manager -> fakes) without any external dependencies. They use the `integration` build tag and are located in `test/integration/`.
@@ -446,7 +460,7 @@ All integration tests use **in-memory fakes** — no Docker, no NFS server, no K
 | `concurrent_allocation_test.go` | 6 | Parallel CreateVolume, race condition safety, capacity correctness |
 | `error_recovery_test.go` | 14 | NFS failures, K8s client errors, VPC API errors, partial failure recovery |
 | `snapshot_lifecycle_test.go` | 14 | Create/delete/list/restore snapshots, idempotency, error mapping |
-| `clone_lifecycle_test.go` | 14 | Sync/async clones, same-share/cross-share, threshold-based routing, error handling |
+| `clone_lifecycle_test.go` | 14 | Async clones, same-share/cross-share, error handling |
 | `clone_worker_test.go` | 7 | End-to-end async clone processing through pool manager + clone worker |
 | `group_snapshot_test.go` | 8 | Create/delete group snapshots, abort/continue policies, partial failures |
 
@@ -464,9 +478,62 @@ Integration tests are fully deterministic and fast (no I/O, no network). They ru
 
 ---
 
+## Release Test Run
+
+One command checks the driver on a live cluster after a release update, and writes a pass or fail report. It runs on the build server, so the laptop can sleep. The design is in `docs/specs/2026-10-19-release-test-run.md`.
+
+```bash
+make test-release CLUSTER=rovslab-prod-eude VERSION=v0.9.0-45-gabc1234   # start; prints the run ID
+bash test/release/remote.sh report <run ID>                                # copy back and print the report
+```
+
+To run it from the current machine instead, with your own kubeconfig: `bash test/release/run.sh --cluster <name> [--stages 01,02]`. Set `RT_VPC_TOKEN` to an IAM token so that the VPC checks can run.
+
+**Stages so far:**
+
+| Stage | Proves |
+|---|---|
+| `01-preflight` | Controller and node agents ready, expected version, CRDs installed, webhook refuses a bad pool, CDI's copy pod memory limit is at least 8Gi, no leftovers from an earlier run |
+| `02-pool` | A pool reaches `Ready`; its share uses security group access mode and its mount target is in the pool's zone (read from the VPC API); its StorageClass exists; a pool with a missing security group says why and makes no share |
+| `03-volumes` | Pods on two workers share a volume; owner and mode follow the pool; deleting the claim removes the PV, the SubVolume and the directory on the share |
+| `04-growth` | A resized claim reports its new size, and its SubVolume and the pool count it; a pool with auto-expand above its threshold adds a usable second share (also in the VPC), stops at its share limit, and puts new volumes on the new share. A pod cannot see a claim's size: an NFS folder shows the whole share |
+| `05-snapshots` | A snapshot becomes ready and its folder is on the share; a claim restored from it has the files as they were at snapshot time (the source is changed after the snapshot), with the pool's owner and mode; deleting the snapshot removes its folder |
+| `07-clones` | A clone in a namespace with no extra permissions has the source's files and the pool's owner and mode; a pod using it starts only after the copy; the copy leaves nothing in the app's namespace; deleting the clone removes its folder |
+| `08-vms` | A VM made from the standard catalog (CentOS Stream 9) with its boot disk on a pool boots and its guest agent connects; it live-migrates to another worker without a restart; CDI copies 25 GB of random data from Ceph onto the pool and the checksum matches |
+| `11-draining` | A share on the drain list gets no new volumes and the pool counts the volumes left on it; taken off the list, it takes new volumes again |
+| `12-restarts` | The controller pod is deleted: a new one takes over, every pool and volume is unchanged, and a new volume can still be made. A node agent pod is deleted: a pod that writes a numbered line each second keeps writing, and no number is missing. **This stage restarts the driver, so run it only when nobody else uses the driver on the cluster** |
+| `13-webhooks` | Bad pools, SubVolumes and replication policies are refused with a message that names the problem; a good one of each kind is accepted. All requests are server-side dry runs |
+| `14-migration` | `kubectl-migrate` copies a claim from IBM's `ibmc-vpc-file-3000-iops` class (200 Gi, the size that class needs for 3000 IOPS) into a new pool; the new claim is bound on the pool, a pod on it sees the same files (checksums match), and the source claim is unchanged. The runner builds the tool and ships it to the build server |
+| `15-metrics` | Prometheus has the driver's metrics with non-zero allocation and VPC API counts; each pool reconciles about once a minute (at most 3) |
+| `16-console` | The console plugin's Playwright tests pass against the cluster's console, and a screenshot of each plugin tab is saved in the run folder (`console-screenshots/`). The stage makes a read-only ServiceAccount token (no IBMid sign-in), runs the console and the deployed plugin image in podman on the build server, and checks the cluster's certificate (the kubeconfig's CA, or the system trust store). The tests run in Microsoft's Playwright container image. It also makes a pool, a namespace and a 1Gi volume, and removes them |
+| `17-speed` | fio runs 5 tests of 60 s (sequential 1 MB read and write, random 4 KB read and write, 70/30 mix) on a pool volume, on IBM's `ibmc-vpc-file-3000-iops` class as the baseline, and inside a VM on a pool disk. Results go to `speed.csv` in the run folder and to `history.csv` next to the run folders; more than 20% below the last run is a NOTE |
+
+**Rules for every stage:**
+- A stage file in `test/release/stages/` defines `run` and `cleanup`.
+- It records each result with `check`, `skip` or `not_checked`.
+- A failed check does not stop the stage, and a failed stage does not stop the run.
+- `cleanup` always runs, also after a timeout.
+- Every object the run makes is named `rt-<run ID>-...` and labelled `release-test-run=<run ID>`. The final sweep deletes them, and then checks that nothing is left on the cluster or in the VPC.
+- The run refuses to start if the current cluster is not the one you named.
+- `make test-scripts` tests the runner itself, with fake stages and no cluster.
+
+**One-time setup for the VPC checks.** On the build server, the VPC checks get a token from the server's metadata service through a read-only trusted profile, so no key is stored. Run these commands once:
+
+```bash
+CRN=$(ibmcloud is instance pool-csi-build --output json | jq -r .crn)
+ibmcloud iam trusted-profile-create pool-csi-build-vpc-reader -d "Read-only VPC access for the release test run"
+ibmcloud iam trusted-profile-policy-create pool-csi-build-vpc-reader --roles Viewer --service-name is --resource-group-name rovslab-prod-eude-rg
+ibmcloud iam trusted-profile-link-create pool-csi-build-vpc-reader --name pool-csi-build --cr-type VSI --link-crn "$CRN"
+ibmcloud is instance-update pool-csi-build --metadata-service true
+```
+
+Undo: `ibmcloud iam trusted-profile-delete pool-csi-build-vpc-reader -f` and `ibmcloud is instance-update pool-csi-build --metadata-service false`. Without this setup, the VPC checks report "not checked" and the rest of the run still works.
+
+The metadata service accepts a trusted profile by ID, not by name, so `remote.sh` looks up the ID of `pool-csi-build-vpc-reader` (or `RT_VPC_PROFILE`) on your machine and passes it to the run.
+
 ## E2E Tests
 
-End-to-end tests run against a real ROKS cluster with live VPC file shares. They validate the full CreateVolume -> PVC Bound -> Pod mount flow.
+End-to-end tests run against a real ROKS or ROVS cluster with live VPC file shares. They validate the full CreateVolume -> PVC Bound -> Pod mount flow.
 
 ### Running E2E Tests
 
@@ -501,7 +568,7 @@ All files use `//go:build e2e` — `make test` never runs them.
 
 ### VM Clone E2E Test
 
-`test/e2e/test-vm-clone.sh` validates the full syncer-driven KubeVirt golden image clone pipeline. The test creates a pool with `goldenImages.enabled=true` and lets the golden image syncer handle image discovery from CDI DataImportCrons, PVC creation, qcow2-to-raw converter Jobs, and OpenShift Template creation. It then creates a VM from the syncer-generated template, verifies the CSI clone Job completes, and checks VM boot with connectivity tests.
+`test/e2e/test-vm-clone.sh` validates the full syncer-driven KubeVirt golden image clone pipeline. The test creates a pool with `goldenImages.enabled=true` and lets the golden image syncer handle image discovery from CDI DataImportCrons, CDI DataVolume creation, and OpenShift Template creation. It then creates a VM from the syncer-generated template, verifies the CSI clone Job completes, and checks VM boot with connectivity tests.
 
 ```bash
 # Via make
@@ -514,12 +581,12 @@ make test-vm
 #   --keep          Don't clean up on success
 #   --namespace NS  Override namespace (default: e2e-vm-test)
 #   --pool POOL     Override pool name (default: e2e-vm-pool)
-#   --zone ZONE     Override zone (default: eu-de-1)
+#   --zone ZONE     Override zone (default: the zone with the most workers)
 #   --image FILTER  Override image filter (default: centos-stream-9)
 #   --timeout SECS  Override total timeout (default: 900)
 ```
 
-Requires: ROKS cluster with OpenShift Virtualization + CDI installed, `oc`, `virtctl`, `kubectl`, `jq`. Takes approximately 13-14 minutes.
+Requires: ROKS or ROVS cluster with OpenShift Virtualization + CDI installed, `oc`, `virtctl`, `kubectl`, `jq`. Takes approximately 13-14 minutes.
 
 **Stage flow (11 stages):**
 
@@ -530,14 +597,14 @@ Requires: ROKS cluster with OpenShift Virtualization + CDI installed, `oc`, `vir
 | 3. create_namespace | Create test namespace | — |
 | 4. create_pool | StorageClass + FileSharePool with goldenImages.enabled | — |
 | 5. wait_pool_ready | Poll Phase=Ready | 180s |
-| 6. wait_golden_images_ready | Syncer creates PVCs + converter Jobs + templates | 900s |
+| 6. wait_golden_images_ready | Syncer creates DataVolumes + templates | 900s |
 | 7. pick_ready_image | Find first ready template in namespace | — |
 | 8. create_vm_from_template | `oc process` template, apply VM + PVCs | — |
 | 9. wait_clone_complete | Poll SubVolume cloneStatus=Complete | 300s |
 | 10. wait_vm_running | Poll VMI Phase=Running + Ready=True | 180s |
 | 11. verify_vm_connectivity | virtctl console + guest agent (best-effort) | 30s |
 
-Automatic diagnostic collection on failure: pool YAML + goldenImages status, SubVolumes, PVC status, clone/converter Job logs, controller/node agent logs, VM events.
+Automatic diagnostic collection on failure: pool YAML + goldenImages status, SubVolumes, PVC status, clone Job logs, golden DataVolumes, controller/node agent logs, VM events.
 
 ### Cleanup
 
@@ -586,7 +653,8 @@ oc delete subvolumes.storage.ibmcloud.io \
     -l storage.ibmcloud.io/pool=$POOL
 
 # Step 5: Delete pool-owned PVs
-oc delete pv -l storage.ibmcloud.io/clone-temp=true
+oc delete job,pvc -n kube-system -l storage.ibmcloud.io/share-data-job
+oc delete pv -l storage.ibmcloud.io/share-data-job
 oc get pv -o json | jq -r "
     .items[]
     | select(.spec.csi.driver == \"vpc-file-pool.csi.ibm.io\")

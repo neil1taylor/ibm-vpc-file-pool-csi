@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
@@ -16,37 +18,57 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	ctrlwebhook "sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/consoleplugin"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/driver"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/hooks"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/k8s"
 	_ "github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics" // Register Prometheus collectors via init()
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/monitoring"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/nodemetrics"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/pool"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/replication"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/vmcopy"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/vmsnap"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/webhook"
 )
 
 var version = "dev"
 
+// driverNamespace is where the Helm chart installs the driver. Leader
+// election and share data Jobs use it.
+const driverNamespace = pool.DefaultDriverNamespace
+
 func main() {
 	var (
-		endpoint            string
-		nodeID              string
-		mode                string
-		region              string
-		vpcID               string
-		subnetID            string
-		kubeletDir          string
-		cloneWorkerInterval      time.Duration
-		goldenImageSyncInterval  time.Duration
+		endpoint                string
+		nodeID                  string
+		mode                    string
+		region                  string
+		vpcID                   string
+		subnetID                string
+		kubeletDir              string
+		cloneWorkerInterval     time.Duration
+		goldenImageSyncInterval time.Duration
+		cdiCopyPodMemoryLimit   string
+		webhooks                webhookOptions
+
+		// Node mode metrics flags.
+		nodeMetricsAddr          string
+		nodeMetricsCertDir       string
+		controllerMetricsCertDir string
+		mon                      monitoringOptions
+		shareStatsInterval       time.Duration
 
 		// Receiver mode flags.
 		receiverBasePath      string
@@ -58,6 +80,9 @@ func main() {
 		// Replication controller flags.
 		driverImage string
 
+		// VM disk snapshot flags.
+		vmSnapshots vmSnapshotOptions
+
 		// Sync-client mode flags.
 		receiverEndpoint string
 		authTokenFile    string
@@ -67,20 +92,54 @@ func main() {
 		subPath          string
 		subvolumeName    string
 		metadataJSON     string
+
+		// Apply-vm-disk mode flags.
+		stagingPath string
+		diskPath    string
+		vmCopy      vmCopyFlags
+
+		// Send-vm-disk mode flags (it also uses the sync-client flags).
+		vmGroup string
+		copyID  string
+
+		// Restore-vm-disk mode flags.
+		backupDisk    string
+		outDisk       string
+		restoreMoment string
+		unwrap        unwrapOptions
+
+		// Console plugin modes.
+		consolePluginName string
 	)
 
 	flag.StringVar(&endpoint, "endpoint", "unix:///csi/csi.sock", "CSI endpoint")
 	flag.StringVar(&nodeID, "node-id", "", "Node ID")
-	flag.StringVar(&mode, "mode", "controller", "Driver mode: controller, node, receiver, or sync-client")
+	flag.StringVar(&mode, "mode", "controller", "Driver mode: controller, node, receiver, sync-client, check-receiver, apply-vm-disk, send-vm-disk, restore-vm-disk, unwrap-backup-key, register-console-plugin, unregister-console-plugin, or enable-sidecar-gate")
+	flag.StringVar(&consolePluginName, "console-plugin-name", "ibm-vpc-file-pool-csi", "ConsolePlugin to turn on or off in the OpenShift console (register-console-plugin and unregister-console-plugin modes)")
 	flag.StringVar(&region, "region", "", "IBM Cloud region (e.g. us-south); auto-discovered from secret provider if omitted")
 	flag.StringVar(&vpcID, "vpc-id", "", "IBM Cloud VPC ID for creating file share mount targets")
-	flag.StringVar(&subnetID, "subnet-id", "", "IBM Cloud subnet ID for creating file share mount targets")
+	flag.StringVar(&subnetID, "subnet-id", "", "Comma-separated IBM Cloud worker subnet IDs; each share's mount target goes in the one in the pool's zone")
 	flag.StringVar(&kubeletDir, "kubelet-dir", "/var/lib/kubelet", "Kubelet root directory (ROKS uses /var/data/kubelet)")
 	flag.DurationVar(&cloneWorkerInterval, "clone-worker-interval", pool.DefaultCloneWorkerInterval, "Interval between clone worker poll cycles")
 	flag.DurationVar(&goldenImageSyncInterval, "golden-image-sync-interval", pool.DefaultGoldenImageInterval, "Interval between golden image syncer poll cycles")
+	flag.StringVar(&cdiCopyPodMemoryLimit, "cdi-copy-pod-memory-limit", "8Gi", "Keep the memory limit of CDI's copy pods (OpenShift Virtualization) at least this high; empty turns the check off")
 
 	// Replication controller flags.
 	flag.StringVar(&driverImage, "driver-image", "", "Driver container image for receiver-mode sync-client Jobs")
+	flag.StringVar(&vmSnapshots.method, "vm-snapshot-method", "auto", "Snapshots of VM disks: auto (instant where the KubeVirt Sidecar feature gate is on) or copy (never instant)")
+	flag.StringVar(&vmSnapshots.launcherImage, "virt-launcher-image", "", "KubeVirt virt-launcher image for VM disk snapshot Jobs; empty reads it from virt-operator")
+	flag.StringVar(&nodeMetricsAddr, "node-metrics-addr", ":9810", "Listen address of the node agent's metrics endpoint (per-share used bytes and NFS latency and IOPS); empty turns it off (node mode)")
+	flag.StringVar(&nodeMetricsCertDir, "node-metrics-cert-dir", "", "Directory with tls.crt and tls.key for the node metrics endpoint; empty makes a self-signed certificate (node mode)")
+	flag.StringVar(&controllerMetricsCertDir, "metrics-cert-dir", "", "Directory with tls.crt and tls.key for the controller metrics endpoint (HTTPS on :8080, token login); empty makes a self-signed certificate (controller mode)")
+	flag.StringVar(&mon.namespace, "monitoring-namespace", "", "Namespace of the metrics Services that user workload monitoring scrapes; the controller keeps their Endpoints and warns if user workload monitoring is off. Empty turns this off (controller mode)")
+	flag.StringVar(&mon.controllerService, "monitoring-controller-service", "", "Name of the controller metrics Service in the monitoring namespace (controller mode)")
+	flag.StringVar(&mon.nodeService, "monitoring-node-service", "", "Name of the node agent metrics Service in the monitoring namespace (controller mode)")
+	flag.StringVar(&mon.selector, "monitoring-selector", "", "Labels shared by all driver pods, key=value,key=value (controller mode)")
+	flag.IntVar(&mon.controllerPort, "monitoring-controller-port", 8080, "Port of the controller metrics endpoint (controller mode)")
+	flag.IntVar(&mon.nodePort, "monitoring-node-port", 0, "Port of the node agent metrics endpoint; 0 leaves the node agents out (controller mode)")
+	flag.DurationVar(&shareStatsInterval, "share-stats-interval", 30*time.Second, "How often the node agent reads the NFS statistics of its shares (node mode)")
+	flag.BoolVar(&webhooks.enabled, "enable-webhooks", true, "Serve the validating admission webhooks (needs a serving certificate)")
+	flag.IntVar(&webhooks.port, "webhook-port", 9443, "Port of the admission webhook server")
 
 	// Receiver flags.
 	flag.StringVar(&receiverBasePath, "receiver-base-path", "/data", "NFS mount point inside receiver container")
@@ -99,6 +158,31 @@ func main() {
 	flag.StringVar(&subvolumeName, "subvolume-name", "", "SubVolume CR name for sync-client mode")
 	flag.StringVar(&metadataJSON, "metadata-json", "", "Serialized SubVolumeMetadata JSON for sync-client mode")
 
+	// Apply-vm-disk flags.
+	flag.StringVar(&stagingPath, "staging-path", "", "VM disk copy staging file for apply-vm-disk mode")
+	flag.StringVar(&diskPath, "disk-path", "", "Disk image to replace in apply-vm-disk mode")
+	flag.StringVar(&vmCopy.from, "from", "", "Moment the far-site disk shows now, RFC 3339 (apply-vm-disk mode; empty for a first copy)")
+	flag.StringVar(&vmCopy.to, "to", "", "Moment the copy shows, RFC 3339 (apply-vm-disk mode)")
+	flag.BoolVar(&vmCopy.full, "full", false, "The copy holds the whole disk (apply-vm-disk mode)")
+	flag.DurationVar(&vmCopy.keep, "keep", 24*time.Hour, "How long restore points are kept (apply-vm-disk mode)")
+
+	// Restore-vm-disk flags.
+	flag.StringVar(&backupDisk, "backup-disk", "", "Backed-up VM disk image to restore from (restore-vm-disk mode)")
+	flag.StringVar(&outDisk, "out-disk", "", "New disk image to write; it must not exist (restore-vm-disk mode)")
+	flag.StringVar(&restoreMoment, "restore-moment", "", "Moment to restore, RFC 3339; empty for the latest backup (restore-vm-disk mode)")
+
+	// Unwrap-backup-key flags.
+	flag.StringVar(&unwrap.region, "kp-region", "", "Key Protect region (unwrap-backup-key mode)")
+	flag.StringVar(&unwrap.instance, "kp-instance", "", "Key Protect instance ID (unwrap-backup-key mode)")
+	flag.StringVar(&unwrap.rootKey, "kp-root-key", "", "Key Protect root key ID (unwrap-backup-key mode)")
+	flag.StringVar(&unwrap.wrappedKeyFile, "wrapped-key-file", "", "File with the backup key wrapped by Key Protect (unwrap-backup-key mode)")
+	flag.StringVar(&unwrap.apiKeyFile, "api-key-file", "", "File with the IBM Cloud API key for Key Protect (unwrap-backup-key mode)")
+	flag.StringVar(&unwrap.emergencyKeyFile, "emergency-key-file", "", "Optional file with the readable backup key, used only when Key Protect is down (unwrap-backup-key mode)")
+	flag.StringVar(&unwrap.keyOut, "key-out", "", "File to write the readable key to, mode 0400; it must not exist (unwrap-backup-key mode)")
+
+	flag.StringVar(&vmGroup, "vm-group", "", "namespace/name of the VM that owns the disk (send-vm-disk mode)")
+	flag.StringVar(&copyID, "copy-id", "", "Name of this copy attempt; a repeat with the same name resumes (send-vm-disk mode)")
+
 	klog.InitFlags(nil)
 	flag.Parse()
 
@@ -106,17 +190,112 @@ func main() {
 
 	switch mode {
 	case "controller":
-		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, cloneWorkerInterval, goldenImageSyncInterval, driverImage)
+		if err := vmSnapshots.check(); err != nil {
+			klog.ErrorS(err, "Invalid flag")
+			os.Exit(1)
+		}
+		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, controllerMetricsCertDir, mon, cloneWorkerInterval, goldenImageSyncInterval, cdiCopyPodMemoryLimit, driverImage, webhooks, vmSnapshots)
 	case "receiver":
 		runReceiver(receiverBasePath, receiverAuthTokenFile, receiverListenAddr, receiverTLSCertFile, receiverTLSKeyFile)
 	case "sync-client":
 		runSyncClient(receiverEndpoint, authTokenFile, sourcePath, destBasePath, subPath, subvolumeName, metadataJSON, caCertFile)
+	case "check-receiver":
+		runCheckReceiver(receiverEndpoint, authTokenFile, caCertFile)
+	case "apply-vm-disk":
+		runApplyVMDisk(stagingPath, diskPath, vmCopy)
+	case "restore-vm-disk":
+		runRestoreVMDisk(backupDisk, outDisk, restoreMoment)
+	case "unwrap-backup-key":
+		runUnwrapBackupKey(unwrap)
+	case "send-vm-disk":
+		runSendVMDisk(receiverEndpoint, authTokenFile, caCertFile, stagingPath, destBasePath, subPath, subvolumeName, copyID, vmGroup, metadataJSON, vmCopy)
+	case "register-console-plugin", "unregister-console-plugin":
+		runConsolePlugin(mode, consolePluginName)
+	case "enable-sidecar-gate":
+		runEnableSidecarGate()
 	default:
-		runNode(endpoint, nodeID, mode)
+		runNode(endpoint, nodeID, mode, nodeMetricsAddr, nodeMetricsCertDir, shareStatsInterval)
 	}
 }
 
-func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string, cloneWorkerInterval, goldenImageSyncInterval time.Duration, driverImage string) {
+// runEnableSidecarGate turns on the KubeVirt Sidecar feature gate that instant
+// VM snapshots need. The Helm chart runs it as a post-install and post-upgrade
+// hook Job when vmSnapshots.enableSidecarGate is true.
+func runEnableSidecarGate() {
+	c, err := client.New(ctrl.GetConfigOrDie(), client.Options{})
+	if err != nil {
+		klog.ErrorS(err, "Failed to create Kubernetes client")
+		os.Exit(1)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	if err := pool.EnableSidecarGate(ctx, c); err != nil {
+		klog.ErrorS(err, "Failed to turn on the KubeVirt Sidecar feature gate")
+		os.Exit(1)
+	}
+	klog.InfoS("KubeVirt Sidecar feature gate is on")
+}
+
+// runConsolePlugin turns the console plugin on or off in the OpenShift console.
+// The Helm chart runs it as post-install, post-upgrade and pre-delete hook Jobs.
+func runConsolePlugin(mode, name string) {
+	c, err := client.New(ctrl.GetConfigOrDie(), client.Options{})
+	if err != nil {
+		klog.ErrorS(err, "Failed to create Kubernetes client")
+		os.Exit(1)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	if mode == "register-console-plugin" {
+		err = consoleplugin.Register(ctx, c, name)
+	} else {
+		err = consoleplugin.Unregister(ctx, c, name)
+	}
+	if err != nil {
+		klog.ErrorS(err, "Failed to change the console plugins", "mode", mode, "plugin", name)
+		os.Exit(1)
+	}
+	klog.InfoS("Console plugins updated", "mode", mode, "plugin", name)
+}
+
+// webhookOptions configures the admission webhook server.
+type webhookOptions struct {
+	enabled bool
+	port    int
+}
+
+// monitoringOptions configures the metrics Endpoints and the user workload
+// monitoring check. An empty namespace turns both off.
+type monitoringOptions struct {
+	namespace         string
+	controllerService string
+	nodeService       string
+	selector          string
+	controllerPort    int
+	nodePort          int
+}
+
+// config turns the flags into the syncer's configuration.
+func (o monitoringOptions) config(driverNS string) (monitoring.Config, error) {
+	sel := map[string]string{}
+	for _, kv := range strings.Split(o.selector, ",") {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || k == "" {
+			return monitoring.Config{}, fmt.Errorf("--monitoring-selector %q: want key=value,key=value", o.selector)
+		}
+		sel[k] = v
+	}
+	cfg := monitoring.Config{DriverNamespace: driverNS, MonitoringNamespace: o.namespace, Selector: sel}
+	cfg.Targets = append(cfg.Targets, monitoring.Target{Service: o.controllerService, Component: "controller", Port: int32(o.controllerPort)}) //nolint:gosec // a port number
+	if o.nodePort != 0 {
+		cfg.Targets = append(cfg.Targets, monitoring.Target{Service: o.nodeService, Component: "node", Port: int32(o.nodePort)}) //nolint:gosec // a port number
+	}
+	return cfg, nil
+}
+
+func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metricsCertDir string, mon monitoringOptions, cloneWorkerInterval, goldenImageSyncInterval time.Duration, cdiCopyPodMemoryLimit, driverImage string, webhooks webhookOptions, vmSnapshots vmSnapshotOptions) {
 	scheme := runtime.NewScheme()
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
 		klog.ErrorS(err, "Failed to add CRD types to scheme")
@@ -146,13 +325,11 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 		Scheme:                  scheme,
 		LeaderElection:          true,
 		LeaderElectionID:        "ibm-vpc-file-pool-csi-leader",
-		LeaderElectionNamespace: "kube-system",
+		LeaderElectionNamespace: driverNamespace,
 		HealthProbeBindAddress:  ":8081",
-		Metrics: metricsserver.Options{
-			BindAddress: ":8080",
-		},
+		Metrics:                 nodemetrics.SecureOptions(":8080", metricsCertDir),
 		WebhookServer: ctrlwebhook.NewServer(ctrlwebhook.Options{
-			Port:    9443,
+			Port:    webhooks.port,
 			CertDir: "/tmp/k8s-webhook-server/serving-certs",
 		}),
 	})
@@ -162,11 +339,11 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 	}
 
 	// Register health checks.
-	if err := mgr.AddHealthzCheck("ping", healthz.Ping); err != nil {
+	if err = mgr.AddHealthzCheck("ping", healthz.Ping); err != nil {
 		klog.ErrorS(err, "Failed to register healthz check")
 		os.Exit(1)
 	}
-	if err := mgr.AddReadyzCheck("vpc-client", func(_ *http.Request) error {
+	if err = mgr.AddReadyzCheck("vpc-client", func(_ *http.Request) error {
 		select {
 		case <-readyCh:
 			return nil
@@ -187,70 +364,51 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 		os.Exit(1)
 	}
 
-	// Auto-discover VPC config from ibm-cloud-provider-data configmap.
-	// Use clientset (not mgr.GetClient()) because the manager cache isn't started yet.
 	ctx := context.Background()
-	if vpcID == "" || subnetID == "" {
-		if cm, cmErr := clientset.CoreV1().ConfigMaps("kube-system").Get(ctx, "ibm-cloud-provider-data", metav1.GetOptions{}); cmErr == nil {
-			if vpcID == "" {
-				if v := cm.Data["vpc_id"]; v != "" {
-					vpcID = v
-					klog.V(2).InfoS("Auto-discovered VPC ID", "source", "ibm-cloud-provider-data", "vpcID", vpcID)
-				}
-			}
-			if subnetID == "" {
-				if v := cm.Data["vpc_subnet_ids"]; v != "" {
-					subnetID = strings.Split(strings.TrimSpace(v), ",")[0]
-					klog.V(2).InfoS("Auto-discovered subnet ID", "source", "ibm-cloud-provider-data", "subnetID", subnetID)
-				}
-			}
-		}
-	}
+	netCfg := discoverNetworkConfig(ctx, clientset, vpcID, subnetID)
+	network := pool.NewShareNetwork(netCfg.vpcID, netCfg.subnetIDs, netCfg.clusterID)
 
 	// Create reconciler and pool manager with nil VPC client — will be set
 	// once the secret-provider sidecar is ready.
 	reconciler := pool.NewFileSharePoolReconciler(k8sClient, nil)
-	if err := reconciler.SetupWithManager(mgr); err != nil {
+	if err = reconciler.SetupWithManager(mgr); err != nil {
 		klog.ErrorS(err, "Failed to set up reconciler")
 		os.Exit(1)
 	}
+	rebind := &pool.ClaimRebindReconciler{Reader: mgr.GetClient(), K8sClient: k8sClient, DriverName: driver.DriverName}
+	if err = rebind.SetupWithManager(mgr); err != nil {
+		klog.ErrorS(err, "Failed to set up the claim rebind reconciler")
+		os.Exit(1)
+	}
 
-	// Register validating webhooks for CRD resources.
-	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.FileSharePool{}).
-		WithValidator(&webhook.FileSharePoolValidator{}).
-		Complete(); err != nil {
-		klog.ErrorS(err, "Failed to register FileSharePool webhook")
-		os.Exit(1)
+	// Register validating webhooks for CRD resources. The manager starts the
+	// webhook server only when a webhook is registered, so with webhooks
+	// disabled the controller needs no serving certificate.
+	if webhooks.enabled {
+		if err = registerWebhooks(mgr); err != nil {
+			klog.ErrorS(err, "Failed to register webhooks")
+			os.Exit(1)
+		}
+		klog.V(2).InfoS("Registered validating webhooks for all CRD types", "port", webhooks.port)
+	} else {
+		klog.InfoS("Admission webhooks disabled")
 	}
-	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.SubVolume{}).
-		WithValidator(&webhook.SubVolumeValidator{}).
-		Complete(); err != nil {
-		klog.ErrorS(err, "Failed to register SubVolume webhook")
-		os.Exit(1)
-	}
-	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.ReplicationPolicy{}).
-		WithValidator(&webhook.ReplicationPolicyValidator{}).
-		Complete(); err != nil {
-		klog.ErrorS(err, "Failed to register ReplicationPolicy webhook")
-		os.Exit(1)
-	}
-	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.Snapshot{}).
-		WithValidator(&webhook.SnapshotValidator{}).
-		Complete(); err != nil {
-		klog.ErrorS(err, "Failed to register Snapshot webhook")
-		os.Exit(1)
-	}
-	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.VolumeGroupSnapshot{}).
-		WithValidator(&webhook.VolumeGroupSnapshotValidator{}).
-		Complete(); err != nil {
-		klog.ErrorS(err, "Failed to register VolumeGroupSnapshot webhook")
-		os.Exit(1)
-	}
-	klog.V(2).InfoS("Registered validating webhooks for all CRD types")
 
 	stagingBasePath := filepath.Join(kubeletDir, "plugins/vpc-file-pool.csi.ibm.io/staging")
 
 	poolManager := pool.NewManager(k8sClient, nil, nil, stagingBasePath)
+	// The controller has no NFS access, so folder removal and copies on
+	// shares run as Jobs in the driver's namespace. The runner reads without
+	// the cache: a stale read could report a copy as stopped too early.
+	shareJobClient, err := client.New(restConfig, client.Options{Scheme: mgr.GetScheme()})
+	if err != nil {
+		klog.ErrorS(err, "Failed to create the share data Job client")
+		os.Exit(1)
+	}
+	shareRunner := pool.NewShareJobRunner(shareJobClient, driverNamespace, pool.DefaultCloneImage)
+	// Snapshots of running VM disks run the driver itself in a Job.
+	shareRunner.SetDriverImage(driverImage)
+	poolManager.SetShareData(shareRunner)
 
 	// Run CSI gRPC server in a goroutine — serves immediately, but controller
 	// methods return Unavailable until readyCh is closed.
@@ -270,8 +428,8 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 	}
 
 	go func() {
-		if err := d.Run(); err != nil {
-			klog.ErrorS(err, "CSI gRPC server failed")
+		if runErr := d.Run(); runErr != nil {
+			klog.ErrorS(runErr, "CSI gRPC server failed")
 			os.Exit(1)
 		}
 	}()
@@ -307,8 +465,9 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 
 		poolManager.SetVPCClient(vpcClient)
 		poolManager.SetDefaultResourceGroup(defaultResourceGroup)
+		poolManager.SetShareNetwork(network)
 		reconciler.SetVPCClient(vpcClient)
-		reconciler.SetVPCConfig(vpcID, subnetID, defaultResourceGroup)
+		reconciler.SetVPCConfig(network, defaultResourceGroup)
 
 		close(readyCh)
 		klog.InfoS("VPC client initialized, controller is ready")
@@ -319,7 +478,7 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 	// The signal context ensures graceful shutdown alongside the manager.
 	signalCtx := ctrl.SetupSignalHandler()
 	nfsOps := pool.NewRealNFSOperations()
-	cloneWorker := pool.NewCloneWorker(k8sClient, mgr.GetClient(), pool.DefaultCloneImage)
+	cloneWorker := pool.NewCloneWorker(k8sClient, shareJobClient, pool.DefaultCloneImage)
 	if cloneWorkerInterval > 0 {
 		cloneWorker.SetInterval(cloneWorkerInterval)
 	}
@@ -330,10 +489,26 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 	if goldenImageSyncInterval > 0 {
 		goldenImageSyncer.SetInterval(goldenImageSyncInterval)
 	}
+	reconciler.SetGoldenImageRemover(goldenImageSyncer)
+
+	// Keep CDI's copy pods big enough to write onto NFS. Runs on the leader only.
+	if cdiCopyPodMemoryLimit != "" {
+		if addErr := mgr.Add(pool.NewCDILimitKeeper(shareJobClient, cdiCopyPodMemoryLimit)); addErr != nil {
+			klog.ErrorS(addErr, "Failed to add the CDI copy limit check")
+			os.Exit(1)
+		}
+	}
 	go goldenImageSyncer.Run(signalCtx)
 
-	// Start the background replication controller for cross-region DR.
-	replController := pool.NewReplicationController(k8sClient, mgr.GetClient(), nfsOps)
+	// Start the background replication controller for cross-region DR. It
+	// reads without the cache: the cache would watch every pod in the cluster,
+	// and the controller may only get and list pods.
+	replClient, err := client.New(restConfig, client.Options{Scheme: mgr.GetScheme()})
+	if err != nil {
+		klog.ErrorS(err, "Failed to create the replication client")
+		os.Exit(1)
+	}
+	replController := pool.NewReplicationController(k8sClient, replClient, nfsOps)
 	hookOrchestrator := hooks.NewOrchestrator(
 		hooks.NewExecHook(clientset, restConfig),
 		hooks.NewHTTPHook(nil),
@@ -341,7 +516,68 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 	replController.SetOrchestrator(hookOrchestrator)
 	replController.SetDriverImage(driverImage)
 	replController.SetReplicationImage(driverImage)
+	// Copies of running VM disks run commands in the VM pods, as hooks do.
+	vmCopier := vmcopy.NewCopier(hooks.NewPodExecer(clientset, restConfig))
+	replController.SetVMCopier(vmCopier)
 	go replController.Run(signalCtx)
+
+	// Snapshots of running VM disks are QEMU copies. The same commands run in
+	// the VM pod; a timer on the leader moves each copy forward.
+	poolManager.SetVMSnapshots(vmCopier, replClient)
+
+	// Instant snapshots of VM disks change the disk's file chain in the VM
+	// pod, or with a Job in the virt-launcher image when the VM is stopped.
+	// See VM-INSTANT-SNAPSHOTS.md.
+	if vmSnapshots.method == "auto" {
+		image := vmSnapshots.launcherImage
+		if image == "" {
+			image = discoverLauncherImage(signalCtx, clientset, replClient)
+		}
+		if image == "" {
+			klog.InfoS("No KubeVirt virt-launcher image found; VM disk snapshots are copies")
+		} else {
+			shareRunner.SetLauncherImage(image)
+			poolManager.SetInstantSnapshots(vmsnap.New(hooks.NewPodExecer(clientset, restConfig)), shareRunner, replClient)
+			klog.V(2).InfoS("Instant VM disk snapshots are on where the KubeVirt Sidecar feature gate is on", "launcherImage", image)
+		}
+	}
+	if addErr := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		poolManager.RunVMSnapshots(ctx, pool.DefaultVMSnapshotInterval)
+		return nil
+	})); addErr != nil {
+		klog.ErrorS(addErr, "Failed to add the VM snapshot loop")
+		os.Exit(1)
+	}
+
+	// Backup policies: label the volumes they select and keep one
+	// ReplicationPolicy for each source pool. Runs on the leader only.
+	backupController := pool.NewBackupController(replClient)
+	backupController.SetShareData(shareRunner)
+	if addErr := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		backupController.Run(ctx)
+		return nil
+	})); addErr != nil {
+		klog.ErrorS(addErr, "Failed to add the backup policy controller")
+		os.Exit(1)
+	}
+
+	// Metrics for OpenShift's user workload monitoring: keep the Endpoints of the
+	// Services in the monitoring namespace, and say if nothing will evaluate alerts.
+	if mon.namespace != "" {
+		monCfg, cfgErr := mon.config(driverNamespace)
+		if cfgErr != nil {
+			klog.ErrorS(cfgErr, "Invalid monitoring flags")
+			os.Exit(1)
+		}
+		if addErr := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+			monitoring.WarnIfAlertsNotEvaluated(ctx, clientset, mon.namespace)
+			monitoring.NewSyncer(clientset, monCfg).Run(ctx, time.Minute)
+			return nil
+		})); addErr != nil {
+			klog.ErrorS(addErr, "Failed to add the monitoring Endpoints sync")
+			os.Exit(1)
+		}
+	}
 
 	// mgr.Start blocks until signal or error
 	klog.InfoS("Starting controller-runtime manager with leader election")
@@ -353,7 +589,7 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir string,
 
 func runReceiver(basePath, authTokenFile, listenAddr, tlsCertFile, tlsKeyFile string) {
 	// Read auth token from file.
-	tokenBytes, err := os.ReadFile(authTokenFile)
+	tokenBytes, err := os.ReadFile(authTokenFile) //nolint:gosec // G304: path comes from the operator-set --auth-token-file flag
 	if err != nil {
 		klog.ErrorS(err, "Failed to read receiver auth token file", "path", authTokenFile)
 		os.Exit(1)
@@ -377,6 +613,37 @@ func runReceiver(basePath, authTokenFile, listenAddr, tlsCertFile, tlsKeyFile st
 	}
 }
 
+// newSyncClient reads the auth token and the optional CA certificate and makes
+// the client. It exits if either file is not usable.
+func newSyncClient(endpoint, authTokenFile, caCertFile string) *replication.SyncClient {
+	// Read auth token from file.
+	tokenBytes, err := os.ReadFile(authTokenFile) //nolint:gosec // G304: path comes from the operator-set --auth-token-file flag
+	if err != nil {
+		klog.ErrorS(err, "Failed to read auth token file", "path", authTokenFile)
+		os.Exit(1)
+	}
+	token := strings.TrimSpace(string(tokenBytes))
+	if token == "" {
+		klog.ErrorS(nil, "Auth token file is empty", "path", authTokenFile)
+		os.Exit(1)
+	}
+	if caCertFile == "" {
+		return replication.NewSyncClient(endpoint, token)
+	}
+	caCertPEM, err := os.ReadFile(caCertFile) //nolint:gosec // G304: path comes from the operator-set CA cert flag
+	if err != nil {
+		klog.ErrorS(err, "Failed to read CA cert file", "path", caCertFile)
+		os.Exit(1)
+	}
+	client, err := replication.NewSyncClientWithCA(endpoint, token, caCertPEM)
+	if err != nil {
+		klog.ErrorS(err, "Invalid CA cert file", "path", caCertFile)
+		os.Exit(1)
+	}
+	klog.V(2).InfoS("Using custom CA certificate for receiver TLS", "caCertFile", caCertFile)
+	return client
+}
+
 func runSyncClient(endpoint, authTokenFile, sourcePath, destBasePath, subPath, svName, metadataJSON, caCertFile string) {
 	if endpoint == "" {
 		klog.ErrorS(nil, "receiver-endpoint is required for sync-client mode")
@@ -387,30 +654,7 @@ func runSyncClient(endpoint, authTokenFile, sourcePath, destBasePath, subPath, s
 		os.Exit(1)
 	}
 
-	// Read auth token from file.
-	tokenBytes, err := os.ReadFile(authTokenFile)
-	if err != nil {
-		klog.ErrorS(err, "Failed to read auth token file", "path", authTokenFile)
-		os.Exit(1)
-	}
-	token := strings.TrimSpace(string(tokenBytes))
-	if token == "" {
-		klog.ErrorS(nil, "Auth token file is empty", "path", authTokenFile)
-		os.Exit(1)
-	}
-
-	var client *replication.SyncClient
-	if caCertFile != "" {
-		caCertPEM, readErr := os.ReadFile(caCertFile)
-		if readErr != nil {
-			klog.ErrorS(readErr, "Failed to read CA cert file", "path", caCertFile)
-			os.Exit(1)
-		}
-		client = replication.NewSyncClientWithCA(endpoint, token, caCertPEM)
-		klog.V(2).InfoS("Using custom CA certificate for receiver TLS", "caCertFile", caCertFile)
-	} else {
-		client = replication.NewSyncClient(endpoint, token)
-	}
+	client := newSyncClient(endpoint, authTokenFile, caCertFile)
 
 	var metadata []byte
 	if metadataJSON != "" {
@@ -436,10 +680,41 @@ func runSyncClient(endpoint, authTokenFile, sourcePath, destBasePath, subPath, s
 
 	// Write bytesWritten to termination-log so the replication controller can
 	// read it from the completed pod's container status.
-	_ = os.WriteFile("/dev/termination-log", []byte(fmt.Sprintf(`{"bytesWritten":%d}`, bytesWritten)), 0644)
+	_ = os.WriteFile("/dev/termination-log", []byte(fmt.Sprintf(`{"bytesWritten":%d}`, bytesWritten)), 0o600)
 }
 
-func runNode(endpoint, nodeID, mode string) {
+// checkReceiverResult is the one result line of a receiver check ("ok", or the short reason) and the exit code.
+func checkReceiverResult(err error) (string, int) {
+	if err == nil {
+		return "ok", 0
+	}
+	var checkErr *replication.CheckError
+	if errors.As(err, &checkErr) {
+		return checkErr.Reason, 1
+	}
+	return err.Error(), 1
+}
+
+// runCheckReceiver tests a receiver the way a replication Job reaches it: the address, the
+// certificate and the token. It writes one result line to the output and to the termination log
+// (so the console can read it from the Pod status), and exits 1 when the check fails.
+func runCheckReceiver(endpoint, authTokenFile, caCertFile string) {
+	if endpoint == "" {
+		klog.ErrorS(nil, "receiver-endpoint is required for check-receiver mode")
+		os.Exit(1)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	line, code := checkReceiverResult(replication.CheckReceiver(ctx, endpoint, authTokenFile, caCertFile))
+	fmt.Println(line)
+	_ = os.WriteFile("/dev/termination-log", []byte(line), 0o600)
+	if code != 0 {
+		os.Exit(code)
+	}
+}
+
+func runNode(endpoint, nodeID, mode, metricsAddr, metricsCertDir string, statsInterval time.Duration) {
 	scheme := runtime.NewScheme()
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
 		klog.ErrorS(err, "Failed to add CRD types to scheme")
@@ -462,6 +737,10 @@ func runNode(endpoint, nodeID, mode string) {
 	}
 	k8sClient := k8s.NewClient(ctrlClient)
 
+	if metricsAddr != "" {
+		startShareMetrics(metricsAddr, metricsCertDir, statsInterval, restConfig, k8sClient)
+	}
+
 	d, err := driver.NewDriver(driver.Config{
 		Name:      driver.DriverName,
 		Version:   version,
@@ -479,4 +758,243 @@ func runNode(endpoint, nodeID, mode string) {
 		klog.ErrorS(err, "Driver failed")
 		os.Exit(1)
 	}
+}
+
+// startShareMetrics serves the per-share used bytes and NFS statistics of this
+// node on addr over HTTPS, in the background. Callers need a token that the API
+// server accepts and may "get" /metrics. If it cannot start it logs and carries
+// on: missing metrics must not stop volumes from mounting.
+func startShareMetrics(addr, certDir string, interval time.Duration, restConfig *rest.Config, k8sClient k8s.Client) {
+	httpClient, err := rest.HTTPClientFor(restConfig)
+	if err != nil {
+		klog.ErrorS(err, "Cannot serve node metrics; continuing without them")
+		return
+	}
+	srv, err := nodemetrics.NewSecureServer(addr, certDir, restConfig, httpClient)
+	if err != nil {
+		klog.ErrorS(err, "Cannot serve node metrics; continuing without them")
+		return
+	}
+	c := nodemetrics.NewCollector(nodemetrics.Config{
+		DriverName:     driver.DriverName,
+		ReadMountStats: nodemetrics.ReadProcMountStats,
+		Statfs:         nodemetrics.Statfs,
+		Resolve:        nodemetrics.ResolverFromPools(k8sClient.ListFileSharePools),
+	})
+	if err := ctrlmetrics.Registry.Register(c); err != nil {
+		klog.ErrorS(err, "Cannot register node metrics; continuing without them")
+		return
+	}
+	ctx := context.Background()
+	go c.Run(ctx, interval)
+	go func() {
+		if err := srv.Start(ctx); err != nil {
+			klog.ErrorS(err, "Node metrics server stopped")
+		}
+	}()
+	klog.InfoS("Serving node metrics over HTTPS", "addr", addr)
+}
+
+// networkConfig is the cluster network that share mount targets join.
+type networkConfig struct {
+	vpcID     string
+	subnetIDs []string
+	clusterID string
+}
+
+// discoverNetworkConfig fills in the VPC ID and worker subnets from the
+// ibm-cloud-provider-data configmap unless the flags set them, and the cluster
+// ID from the cluster-info configmap. Both configmaps exist on ROKS and ROVS.
+// Uses the clientset (not the manager client) because the manager cache is not
+// started yet.
+func discoverNetworkConfig(ctx context.Context, clientset kubernetes.Interface, vpcID, subnetIDs string) networkConfig {
+	if vpcID == "" || subnetIDs == "" {
+		if cm, err := clientset.CoreV1().ConfigMaps("kube-system").Get(ctx, "ibm-cloud-provider-data", metav1.GetOptions{}); err == nil {
+			if vpcID == "" {
+				vpcID = cm.Data["vpc_id"]
+			}
+			if subnetIDs == "" {
+				subnetIDs = cm.Data["vpc_subnet_ids"]
+			}
+		} else {
+			klog.ErrorS(err, "Cannot read ibm-cloud-provider-data; set --vpc-id and --subnet-id")
+		}
+	}
+
+	cfg := networkConfig{vpcID: vpcID}
+	for _, id := range strings.Split(subnetIDs, ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			cfg.subnetIDs = append(cfg.subnetIDs, id)
+		}
+	}
+	if cm, err := clientset.CoreV1().ConfigMaps("kube-system").Get(ctx, "cluster-info", metav1.GetOptions{}); err == nil {
+		cfg.clusterID = cm.Data["cluster_id"]
+	} else {
+		klog.ErrorS(err, "Cannot read cluster-info; pools must set securityGroupIDs")
+	}
+
+	klog.V(2).InfoS("Share network", "vpcID", cfg.vpcID, "subnetIDs", cfg.subnetIDs, "clusterID", cfg.clusterID)
+	return cfg
+}
+
+// registerWebhooks registers the validating webhook for each CRD type.
+func registerWebhooks(mgr ctrl.Manager) error {
+	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.FileSharePool{}).
+		WithValidator(&webhook.FileSharePoolValidator{}).Complete(); err != nil {
+		return fmt.Errorf("register FileSharePool webhook: %w", err)
+	}
+	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.SubVolume{}).
+		WithValidator(&webhook.SubVolumeValidator{}).Complete(); err != nil {
+		return fmt.Errorf("register SubVolume webhook: %w", err)
+	}
+	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.ReplicationPolicy{}).
+		WithValidator(&webhook.ReplicationPolicyValidator{}).Complete(); err != nil {
+		return fmt.Errorf("register ReplicationPolicy webhook: %w", err)
+	}
+	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.BackupPolicy{}).
+		WithValidator(&webhook.BackupPolicyValidator{}).Complete(); err != nil {
+		return fmt.Errorf("register BackupPolicy webhook: %w", err)
+	}
+	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.BackupRestore{}).
+		WithValidator(&webhook.BackupRestoreValidator{}).Complete(); err != nil {
+		return fmt.Errorf("register BackupRestore webhook: %w", err)
+	}
+	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.Snapshot{}).
+		WithValidator(&webhook.SnapshotValidator{}).Complete(); err != nil {
+		return fmt.Errorf("register Snapshot webhook: %w", err)
+	}
+	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.VolumeGroupSnapshot{}).
+		WithValidator(&webhook.VolumeGroupSnapshotValidator{}).Complete(); err != nil {
+		return fmt.Errorf("register VolumeGroupSnapshot webhook: %w", err)
+	}
+	// The VM hook webhook reads without the cache: a VM must start with the
+	// newest chain of its disks.
+	mgr.GetWebhookServer().Register(webhook.VMIHookPath, &ctrlwebhook.Admission{Handler: &webhook.VMIHookInjector{Client: mgr.GetAPIReader()}})
+	return nil
+}
+
+// vmCopyFlags are the apply-vm-disk flags that describe the copy.
+type vmCopyFlags struct {
+	from, to string
+	full     bool
+	keep     time.Duration
+}
+
+// applyOptions turns the flags into replication.ApplyOptions.
+func (f vmCopyFlags) applyOptions(now time.Time) (replication.ApplyOptions, error) {
+	opts := replication.ApplyOptions{Full: f.full, Keep: f.keep, Now: now}
+	var err error
+	if opts.To, err = time.Parse(time.RFC3339Nano, f.to); err != nil {
+		return opts, fmt.Errorf("--to: %w", err)
+	}
+	if f.from != "" {
+		if opts.From, err = time.Parse(time.RFC3339Nano, f.from); err != nil {
+			return opts, fmt.Errorf("--from: %w", err)
+		}
+	}
+	return opts, nil
+}
+
+// applyVMDiskMessage is the termination message of an apply-vm-disk Job.
+func applyVMDiskMessage(res replication.VMDiskResult) string {
+	msg := struct {
+		BytesWritten       int64      `json:"bytesWritten"`
+		RestorePoints      int        `json:"restorePoints"`
+		OldestRestorePoint *time.Time `json:"oldestRestorePoint,omitempty"`
+	}{res.ChangedBytes, res.RestorePoints, res.OldestRestorePoint}
+	b, _ := json.Marshal(msg)
+	return string(b)
+}
+
+// runApplyVMDisk applies a staged VM disk copy to the far-site disk. A
+// replication Job runs it.
+func runApplyVMDisk(stagingPath, diskPath string, f vmCopyFlags) {
+	if stagingPath == "" || diskPath == "" {
+		klog.ErrorS(nil, "staging-path and disk-path are required for apply-vm-disk mode")
+		os.Exit(1)
+	}
+	opts, err := f.applyOptions(time.Now())
+	if err != nil {
+		klog.ErrorS(err, "Invalid apply-vm-disk flags")
+		os.Exit(1)
+	}
+	res, err := replication.ApplyVMDisk(stagingPath, diskPath, opts)
+	if err != nil {
+		klog.ErrorS(err, "Failed to apply VM disk copy", "staging", stagingPath, "disk", diskPath)
+		os.Exit(1)
+	}
+	klog.InfoS("Applied VM disk copy", "disk", diskPath, "changedBytes", res.ChangedBytes,
+		"rolledBack", res.RolledBack, "restorePoints", res.RestorePoints)
+	// The replication controller reads the result from the termination log.
+	_ = os.WriteFile("/dev/termination-log", []byte(applyVMDiskMessage(res)), 0o600)
+}
+
+// sendVMDiskArgs turns the flags into the arguments of replication.SendVMDisk.
+func sendVMDiskArgs(f vmCopyFlags, destBasePath, subPath, svName, copyID, vmGroup string) (replication.VMSendArgs, error) {
+	opts, err := f.applyOptions(time.Now())
+	if err != nil {
+		return replication.VMSendArgs{}, err
+	}
+	a := replication.VMSendArgs{DestBasePath: destBasePath, SubPath: subPath, SVName: svName, CopyID: copyID,
+		Full: f.full, To: opts.To, VMGroup: vmGroup, Keep: f.keep}
+	if f.from != "" {
+		a.From = &opts.From
+	}
+	return a, nil
+}
+
+// sendVMDiskMessage is the termination message of a send-vm-disk Job. A copy
+// the receiver refused because its disk is at another moment is reported, not
+// failed, so the Job is not retried: the controller makes the next copy full.
+func sendVMDiskMessage(res replication.VMSendResult, wrongBase *replication.WrongBaseError) string {
+	msg := struct {
+		BytesWritten       int64      `json:"bytesWritten"`
+		RestorePoints      int32      `json:"restorePoints"`
+		OldestRestorePoint *time.Time `json:"oldestRestorePoint,omitempty"`
+		WrongBase          bool       `json:"wrongBase,omitempty"`
+		DiskMoment         string     `json:"diskMoment,omitempty"`
+	}{res.SentBytes, res.RestorePoints, res.OldestRestorePoint, false, ""}
+	if wrongBase != nil {
+		msg.WrongBase, msg.DiskMoment = true, wrongBase.DiskMoment
+	}
+	b, _ := json.Marshal(msg)
+	return string(b)
+}
+
+// runSendVMDisk sends a staged VM disk copy to a receiver at the far site, and
+// the volume's metadata file. A replication Job runs it.
+func runSendVMDisk(endpoint, authTokenFile, caCertFile, stagingPath, destBasePath, subPath, svName, copyID, vmGroup, metadataJSON string, f vmCopyFlags) {
+	if endpoint == "" || stagingPath == "" || destBasePath == "" || subPath == "" || svName == "" || copyID == "" {
+		klog.ErrorS(nil, "receiver-endpoint, staging-path, dest-base-path, sub-path, subvolume-name and copy-id are required for send-vm-disk mode")
+		os.Exit(1)
+	}
+	args, err := sendVMDiskArgs(f, destBasePath, subPath, svName, copyID, vmGroup)
+	if err != nil {
+		klog.ErrorS(err, "Invalid send-vm-disk flags")
+		os.Exit(1)
+	}
+	client := newSyncClient(endpoint, authTokenFile, caCertFile)
+	ctx := context.Background()
+	// The metadata goes first, as in direct NFS mode. If the Job is retried
+	// after the staging file was deleted, nothing is left to send.
+	if metadataJSON != "" {
+		if err = client.UploadVMMetadata(ctx, destBasePath, subPath, svName, []byte(metadataJSON)); err != nil {
+			klog.ErrorS(err, "Failed to upload the volume metadata", "subVolume", svName)
+			os.Exit(1)
+		}
+	}
+	res, err := replication.SendVMDiskFile(ctx, client, stagingPath, args)
+	var wrongBase *replication.WrongBaseError
+	if errors.As(err, &wrongBase) {
+		klog.ErrorS(err, "The far-site disk is not at the moment this copy starts from; the next copy will be a full copy", "subVolume", svName)
+		_ = os.WriteFile("/dev/termination-log", []byte(sendVMDiskMessage(res, wrongBase)), 0o600)
+		return
+	}
+	if err != nil {
+		klog.ErrorS(err, "Failed to send VM disk copy", "staging", stagingPath, "subVolume", svName)
+		os.Exit(1)
+	}
+	klog.InfoS("Sent VM disk copy", "subVolume", svName, "sentBytes", res.SentBytes, "changedBytes", res.ChangedBytes,
+		"restorePoints", res.RestorePoints, "alreadyApplied", res.AlreadyApplied)
+	_ = os.WriteFile("/dev/termination-log", []byte(sendVMDiskMessage(res, nil)), 0o600)
 }

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 IBM VPC File Pool CSI Driver (`ibm-vpc-file-pool-csi`) — a Kubernetes CSI driver that pools multiple PVCs as subdirectories within shared VPC file shares, instead of the traditional 1:1 PVC-to-share mapping. Think of it like VMware: one NFS datastore holds many VMDKs.
 
-**Current state:** The Go implementation is built and deployed on ROKS clusters. The repository contains specification documents, working code, and operational documentation.
+**Current state:** The Go implementation is built and deployed on ROKS and ROVS clusters. The repository contains specification documents, working code, and operational documentation.
 
 ## Reference Documents
 
@@ -29,8 +29,9 @@ Read the relevant doc before implementing any component:
 | Document | Covers |
 |----------|--------|
 | `FEATURES.md` | Complete feature catalog with maturity badges and comparison table |
-| `VOLUME-CLONING.md` | Sync/async clone design (Phase 4b) |
+| `VOLUME-CLONING.md` | Async Job-based clone design (Phase 4b) |
 | `VOLUME-GROUP-SNAPSHOTS.md` | Coordinated multi-PVC snapshots (Phase 4c) |
+| `VM-INSTANT-SNAPSHOTS.md` | Instant VM snapshots with overlay files (design; spec `docs/specs/2026-10-21-instant-vm-snapshots.md`) |
 | `CROSS-REGION-DR.md` | Replication architecture and consistency analysis (Phase 4d) |
 | `CONSISTENCY-MODEL.md` | NFS consistency guarantees and limitations |
 | `GOLDEN-IMAGE-WORKFLOW.md` | KubeVirt golden image syncer modes and setup |
@@ -43,7 +44,7 @@ Read the relevant doc before implementing any component:
 | `UPGRADE-GUIDE.md` | Version upgrade procedures and compatibility matrix |
 | `HELM-VALUES.md` | Complete Helm chart values reference |
 | `API-KEY-SETUP.md` | Authentication via secret-common-lib |
-| `MONITORING.md` | All 21 Prometheus metrics, alerting rules, Grafana dashboard |
+| `MONITORING.md` | All 31 Prometheus metrics, alerting rules, Grafana dashboard |
 | `DAY2-OPERATIONS.md` | Production runbook: health checks, draining, failover |
 | `CAPACITY-PLANNING.md` | Sizing guidance, cost estimation, example configs |
 | `BACKUP-RECOVERY.md` | Snapshot scheduling, DR setup, recovery runbooks |
@@ -81,10 +82,11 @@ make test               # Unit tests: go test ./... -v -race -count=1
 make test-coverage      # Unit tests with coverage report
 make lint               # golangci-lint run ./...
 make generate           # controller-gen for CRD types and DeepCopy
-make docker-build       # Container image (UBI9-based)
+make docker-build       # Container image (UBI9-based, x86); run it on the build server, see /deploy
 make deploy             # Apply CRDs + RBAC + manifests to cluster
 make helm-install       # Helm chart installation
-make test-e2e           # E2E tests (requires live ROKS cluster + env vars)
+make test-scripts       # Helm chart and shell script tests (needs helm)
+make test-e2e           # E2E tests (requires live ROKS or ROVS cluster + env vars)
 make run-local          # Run controller locally in dry-run mode
 
 # Console Plugin (React/TypeScript — OpenShift Console dynamic plugin)
@@ -104,7 +106,7 @@ Run a single test: `go test ./pkg/pool/ -v -race -run TestPoolManager_Allocate`
 
 **Pool Manager** — Core brain. Runs as a controller-runtime reconciler watching FileSharePool CRs. Exposes synchronous `Allocate()` for the CSI controller. Handles share selection (spread vs binpack strategy), capacity tracking, auto-expansion.
 
-**Clone Worker** — Background goroutine that processes async clone operations for volumes >10 GB. Discovers pending clones, copies data, updates SubVolume status.
+**Clone Worker** — Background goroutine that processes every volume clone (all clones are async). Discovers pending clones, runs a Kubernetes Job that copies the data (the controller has no NFS access), updates SubVolume status.
 
 **Replication Controller** — Background controller that syncs SubVolume data to a remote region's NFS pool on a configurable schedule. Uses rsync for incremental transfer.
 
@@ -112,7 +114,7 @@ Run a single test: `go test ./pkg/pool/ -v -race -run TestPoolManager_Allocate`
 
 **Hook Orchestrator** (`pkg/hooks/`) — Executes lifecycle hooks (exec commands or HTTP webhooks) before/after replication syncs and group snapshots.
 
-**Admission Webhooks** (`pkg/webhook/`) — Five validating webhooks covering FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, and ReplicationPolicy CRDs.
+**Admission Webhooks** (`pkg/webhook/`) — Seven validating webhooks covering FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, ReplicationPolicy, BackupPolicy, and BackupRestore CRDs.
 
 **CSI Node Agent** (DaemonSet) — Mounts NFS shares once per node, bind-mounts subdirectories into pod paths. Maintains mount cache.
 
@@ -134,7 +136,7 @@ pkg/k8s/           → Kubernetes client and CRD reconcilers
 pkg/util/          → Mount helpers, path validation, quota tracking
 pkg/hooks/         → Lifecycle hook orchestrator (exec + HTTP)
 pkg/webhook/       → Validating admission webhooks for all CRDs
-pkg/metrics/       → Prometheus metric definitions (21 metrics)
+pkg/metrics/       → Prometheus metric definitions (31 metrics)
 pkg/migrate/       → PVC migration logic
 api/v1alpha1/      → CRD Go types and generated code
 config/            → Kubernetes manifests (CRDs, RBAC, deployments, webhooks)
@@ -153,7 +155,7 @@ test/              → Integration and e2e tests (unit tests live next to code)
 
 ## Testing Conventions
 
-- **Go 1.25+**, module path: `github.com/IBM/ibm-vpc-file-pool-csi`
+- **Go 1.26+**, module path: `github.com/IBM/ibm-vpc-file-pool-csi`
 - Unit tests live next to code (`_test.go`), use table-driven tests
 - Race detector mandatory: `-race` flag
 - Fake VPC client: `pkg/ibmcloud/fake/fake_client.go`

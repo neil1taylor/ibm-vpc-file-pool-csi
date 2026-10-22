@@ -4,13 +4,16 @@ import (
 	"archive/tar"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"k8s.io/klog/v2"
@@ -25,6 +28,11 @@ const (
 
 	// DefaultMaxMetadataBytes is the maximum size of a metadata JSON upload (1 MB).
 	DefaultMaxMetadataBytes = 1 * 1024 * 1024
+
+	// dataDirMode is the mode for directories that hold replicated volume data.
+	// Workloads run as non-root UIDs (KubeVirt uses 107) and must be able to
+	// traverse them after failover, so they are world-readable.
+	dataDirMode os.FileMode = 0o755
 
 	// metadataFileName is the sidecar metadata file written alongside replicated data.
 	metadataFileName = ".subvolume-metadata.json"
@@ -45,6 +53,16 @@ type Receiver struct {
 	maxTotalBytes int64
 	tlsCertFile   string
 	tlsKeyFile    string
+
+	// destLocks holds one *sync.Mutex per destination directory, so uploads
+	// into the same subvolume run one at a time instead of interleaving.
+	destLocks sync.Map
+
+	// vmLocks holds one *sync.Mutex per VM disk: one call at a time.
+	vmLocks sync.Map
+
+	// maxVMDiskBytes is the largest VM disk accepted; 0 means the default.
+	maxVMDiskBytes int64
 }
 
 // NewReceiver creates a new replication receiver HTTP server.
@@ -59,7 +77,9 @@ func NewReceiver(basePath, authToken, listenAddr string) *Receiver {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/sync/", r.handleSync)
 	mux.HandleFunc("/api/v1/metadata/", r.handleMetadata)
+	mux.HandleFunc("/api/v1/vmcopy/", r.handleVMCopy)
 	mux.HandleFunc("/api/v1/health", r.handleHealth)
+	mux.HandleFunc("/api/v1/auth-check", r.handleAuthCheck)
 
 	r.httpServer = &http.Server{
 		Addr:              listenAddr,
@@ -121,6 +141,28 @@ func (r *Receiver) Stop(ctx context.Context) error {
 	return r.httpServer.Shutdown(ctx)
 }
 
+// handleAuthCheck tells a client whether its token is accepted and the receiver's
+// storage is reachable. It changes nothing. The console's receiver setup uses it
+// (through the sync client's Check) before a policy is made.
+func (r *Receiver) handleAuthCheck(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !r.authenticate(req) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if _, err := os.Stat(r.basePath); err != nil {
+		klog.ErrorS(err, "Auth check failed: base path not accessible", "basePath", r.basePath)
+		http.Error(w, "NFS mount not accessible", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	writeResponse(w, `{"status":"ok","basePath":%q}`, r.basePath)
+}
+
 // handleHealth checks that the NFS base path is accessible.
 func (r *Receiver) handleHealth(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
@@ -136,7 +178,7 @@ func (r *Receiver) handleHealth(w http.ResponseWriter, req *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{"status":"ok","basePath":%q}`, r.basePath)
+	writeResponse(w, `{"status":"ok","basePath":%q}`, r.basePath)
 }
 
 // handleSync receives a tar stream and extracts it to the destination directory.
@@ -178,14 +220,23 @@ func (r *Receiver) handleSync(w http.ResponseWriter, req *http.Request) {
 	)
 
 	// Create destination directory.
-	if err := os.MkdirAll(destDir, 0755); err != nil {
+	if err := os.MkdirAll(destDir, dataDirMode); err != nil {
 		klog.ErrorS(err, "Failed to create destination directory", "destDir", destDir)
 		http.Error(w, "failed to create destination directory", http.StatusInternalServerError)
 		return
 	}
 
-	// Extract tar stream.
+	// Extract tar stream, one upload per destination at a time.
+	lock := &sync.Mutex{}
+	if existing, loaded := r.destLocks.LoadOrStore(destDir, lock); loaded {
+		// destLocks only ever stores *sync.Mutex values.
+		if m, ok := existing.(*sync.Mutex); ok {
+			lock = m
+		}
+	}
+	lock.Lock()
 	filesExtracted, bytesWritten, extractErr := r.extractTar(req.Body, destDir)
+	lock.Unlock()
 	if extractErr != nil {
 		klog.ErrorS(extractErr, "Tar extraction failed",
 			"subVolume", svName,
@@ -206,7 +257,7 @@ func (r *Receiver) handleSync(w http.ResponseWriter, req *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{"status":"ok","filesExtracted":%d,"bytesWritten":%d}`, filesExtracted, bytesWritten)
+	writeResponse(w, `{"status":"ok","filesExtracted":%d,"bytesWritten":%d}`, filesExtracted, bytesWritten)
 }
 
 // handleMetadata receives JSON metadata and writes it as a sidecar file.
@@ -260,7 +311,7 @@ func (r *Receiver) handleMetadata(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Ensure destination directory exists.
-	if err := os.MkdirAll(destDir, 0755); err != nil {
+	if err := os.MkdirAll(destDir, dataDirMode); err != nil {
 		klog.ErrorS(err, "Failed to create destination directory for metadata", "destDir", destDir)
 		http.Error(w, "failed to create destination directory", http.StatusInternalServerError)
 		return
@@ -268,7 +319,8 @@ func (r *Receiver) handleMetadata(w http.ResponseWriter, req *http.Request) {
 
 	// Write metadata file.
 	metaPath := filepath.Join(destDir, metadataFileName)
-	if err := os.WriteFile(metaPath, data, 0644); err != nil {
+	// Volume names and sizes, read by the failover tool: same mode as writeMetadata.
+	if err := os.WriteFile(metaPath, data, 0644); err != nil { //nolint:gosec // G306: see comment above
 		klog.ErrorS(err, "Failed to write metadata file", "path", metaPath)
 		http.Error(w, "failed to write metadata", http.StatusInternalServerError)
 		return
@@ -282,7 +334,15 @@ func (r *Receiver) handleMetadata(w http.ResponseWriter, req *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{"status":"ok","path":%q}`, metaPath)
+	writeResponse(w, `{"status":"ok","path":%q}`, metaPath)
+}
+
+// writeResponse writes a formatted response body. A write error means the
+// client went away, so it is logged and not returned.
+func writeResponse(w http.ResponseWriter, format string, args ...any) {
+	if _, err := fmt.Fprintf(w, format, args...); err != nil {
+		klog.V(2).InfoS("Failed to write response", "err", err)
+	}
 }
 
 // authenticate checks the Bearer token in the Authorization header.
@@ -349,7 +409,19 @@ func (r *Receiver) resolveDestPath(basePath, subPath string) (string, error) {
 
 // extractTar reads a tar stream and extracts files to destDir.
 // Returns the number of files extracted, total bytes written, and any error.
-func (r *Receiver) extractTar(reader io.Reader, destDir string) (int, int64, error) {
+func (r *Receiver) extractTar(reader io.Reader, destDir string) (_ int, _ int64, retErr error) {
+	// All writes go through an os.Root, which refuses any path that leaves
+	// destDir, including a path that passes through a symlink.
+	root, err := os.OpenRoot(destDir)
+	if err != nil {
+		return 0, 0, fmt.Errorf("opening dest dir: %w", err)
+	}
+	defer func() {
+		if err := root.Close(); err != nil && retErr == nil {
+			retErr = fmt.Errorf("closing dest dir: %w", err)
+		}
+	}()
+
 	tr := tar.NewReader(reader)
 	fileCount := 0
 	var totalBytes int64
@@ -370,7 +442,7 @@ func (r *Receiver) extractTar(reader io.Reader, destDir string) (int, int64, err
 
 		// Validate: no traversal.
 		cleanName := filepath.Clean(header.Name)
-		if strings.HasPrefix(cleanName, "..") || strings.Contains(cleanName, "/..") {
+		if !filepath.IsLocal(cleanName) {
 			return fileCount, totalBytes, fmt.Errorf("path traversal in tar: %s", header.Name)
 		}
 
@@ -380,18 +452,10 @@ func (r *Receiver) extractTar(reader io.Reader, destDir string) (int, int64, err
 			return fileCount, totalBytes, fmt.Errorf("too many files in tar (limit %d)", r.maxFileCount)
 		}
 
-		target := filepath.Join(destDir, cleanName)
-
-		// Ensure target is under destDir.
-		cleanTarget := filepath.Clean(target)
-		if !strings.HasPrefix(cleanTarget, filepath.Clean(destDir)+string(filepath.Separator)) && cleanTarget != filepath.Clean(destDir) {
-			return fileCount, totalBytes, fmt.Errorf("tar entry %q resolves outside dest dir", header.Name)
-		}
-
 		switch header.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(target, os.FileMode(header.Mode)|0700); err != nil {
-				return fileCount, totalBytes, fmt.Errorf("creating dir %s: %w", target, err)
+			if err := root.MkdirAll(cleanName, tarMode(header.Mode)|0700); err != nil {
+				return fileCount, totalBytes, fmt.Errorf("creating dir %s: %w", cleanName, err)
 			}
 
 		case tar.TypeReg:
@@ -401,36 +465,44 @@ func (r *Receiver) extractTar(reader io.Reader, destDir string) (int, int64, err
 			}
 
 			// Ensure parent directory exists.
-			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-				return fileCount, totalBytes, fmt.Errorf("creating parent dir for %s: %w", target, err)
+			if err := root.MkdirAll(filepath.Dir(cleanName), dataDirMode); err != nil {
+				return fileCount, totalBytes, fmt.Errorf("creating parent dir for %s: %w", cleanName, err)
 			}
 
-			written, writeErr := writeFile(target, tr, os.FileMode(header.Mode))
+			written, writeErr := writeFile(root, cleanName, tr, tarMode(header.Mode))
 			totalBytes += written
 			if writeErr != nil {
-				return fileCount, totalBytes, fmt.Errorf("writing file %s: %w", target, writeErr)
+				return fileCount, totalBytes, fmt.Errorf("writing file %s: %w", cleanName, writeErr)
 			}
 
 		case tar.TypeSymlink:
-			// Validate symlink target doesn't escape destDir.
 			linkTarget := header.Linkname
 			if filepath.IsAbs(linkTarget) {
 				return fileCount, totalBytes, fmt.Errorf("absolute symlink target in tar: %s -> %s", header.Name, linkTarget)
 			}
-			resolved := filepath.Clean(filepath.Join(filepath.Dir(target), linkTarget))
-			if !strings.HasPrefix(resolved, filepath.Clean(destDir)) {
+
+			// Ensure parent directory exists.
+			parent := filepath.Dir(cleanName)
+			if err := root.MkdirAll(parent, dataDirMode); err != nil {
+				return fileCount, totalBytes, fmt.Errorf("creating parent dir for symlink %s: %w", cleanName, err)
+			}
+
+			// Validate the link target against the parent's real location, so a
+			// symlinked parent cannot make an escaping target look local.
+			escapes, err := symlinkEscapes(destDir, parent, linkTarget)
+			if err != nil {
+				return fileCount, totalBytes, fmt.Errorf("checking symlink %s: %w", cleanName, err)
+			}
+			if escapes {
 				return fileCount, totalBytes, fmt.Errorf("symlink %q -> %q escapes dest dir", header.Name, linkTarget)
 			}
 
-			// Ensure parent directory exists.
-			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-				return fileCount, totalBytes, fmt.Errorf("creating parent dir for symlink %s: %w", target, err)
+			// Replace an existing entry, if any.
+			if err := root.Remove(cleanName); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return fileCount, totalBytes, fmt.Errorf("removing existing %s: %w", cleanName, err)
 			}
-
-			// Remove existing symlink if any.
-			os.Remove(target)
-			if err := os.Symlink(linkTarget, target); err != nil {
-				return fileCount, totalBytes, fmt.Errorf("creating symlink %s: %w", target, err)
+			if err := root.Symlink(linkTarget, cleanName); err != nil {
+				return fileCount, totalBytes, fmt.Errorf("creating symlink %s: %w", cleanName, err)
 			}
 
 		default:
@@ -445,17 +517,42 @@ func (r *Receiver) extractTar(reader io.Reader, destDir string) (int, int64, err
 	return fileCount, totalBytes, nil
 }
 
-// writeFile writes data from reader to a file at path with the given mode.
-func writeFile(path string, reader io.Reader, mode os.FileMode) (int64, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode|0600)
+// symlinkEscapes reports whether a symlink at parent/<name> with the given
+// relative target would point outside destDir. parent is relative to destDir
+// and must already exist; symlinks in destDir and parent are resolved first.
+func symlinkEscapes(destDir, parent, linkTarget string) (bool, error) {
+	realDest, err := filepath.EvalSymlinks(destDir)
+	if err != nil {
+		return false, err
+	}
+	realParent, err := filepath.EvalSymlinks(filepath.Join(destDir, parent))
+	if err != nil {
+		return false, err
+	}
+	rel, err := filepath.Rel(realDest, filepath.Join(realParent, linkTarget))
+	if err != nil {
+		return true, nil
+	}
+	return !filepath.IsLocal(rel) && rel != ".", nil
+}
+
+// tarMode returns the permission bits of a tar header mode. Setuid, setgid and
+// sticky bits are dropped.
+func tarMode(mode int64) os.FileMode {
+	return os.FileMode(mode & 0o777) //nolint:gosec // G115: masked to 9 bits, cannot overflow
+}
+
+// writeFile writes data from reader to the file name inside root with the given mode.
+func writeFile(root *os.Root, name string, reader io.Reader, mode os.FileMode) (_ int64, retErr error) {
+	f, err := root.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode|0600)
 	if err != nil {
 		return 0, err
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil && retErr == nil {
+			retErr = err
+		}
+	}()
 
-	written, err := io.Copy(f, reader)
-	if err != nil {
-		return written, err
-	}
-	return written, f.Close()
+	return io.Copy(f, reader)
 }

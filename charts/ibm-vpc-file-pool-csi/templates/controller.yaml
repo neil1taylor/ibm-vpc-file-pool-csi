@@ -47,7 +47,29 @@ spec:
             {{- if .Values.goldenImageSyncer.interval }}
             - "--golden-image-sync-interval={{ .Values.goldenImageSyncer.interval }}"
             {{- end }}
+            - "--cdi-copy-pod-memory-limit={{ .Values.cdi.copyPodMemoryLimit }}"
             - "--driver-image={{ .Values.image.repository }}:{{ .Values.image.tag }}"
+            {{- if not (has .Values.vmSnapshots.method (list "auto" "copy")) }}
+            {{- fail "vmSnapshots.method must be auto or copy" }}
+            {{- end }}
+            - "--vm-snapshot-method={{ .Values.vmSnapshots.method }}"
+            {{- with .Values.vmSnapshots.launcherImage }}
+            - "--virt-launcher-image={{ . }}"
+            {{- end }}
+            - "--metrics-cert-dir=/etc/metrics-certs"
+            {{- if include "ibm-vpc-file-pool-csi.uwm" . }}
+            - "--monitoring-namespace={{ .Values.metrics.monitoring.namespace }}"
+            - "--monitoring-controller-service={{ include "ibm-vpc-file-pool-csi.fullname" . }}-metrics"
+            - "--monitoring-controller-port={{ .Values.metrics.port }}"
+            - "--monitoring-node-service={{ include "ibm-vpc-file-pool-csi.fullname" . }}-node-metrics"
+            - "--monitoring-node-port={{ .Values.node.metricsPort }}"
+            - "--monitoring-selector=app.kubernetes.io/name={{ include "ibm-vpc-file-pool-csi.name" . }},app.kubernetes.io/instance={{ .Release.Name }}"
+            {{- end }}
+            {{- if .Values.webhook.enabled }}
+            - "--webhook-port={{ .Values.webhook.port }}"
+            {{- else }}
+            - "--enable-webhooks=false"
+            {{- end }}
             {{- if .Values.secretProvider.managed }}
             - "--sidecarEndpoint=/csi/providerfile.sock"
             {{- end }}
@@ -92,6 +114,9 @@ spec:
           volumeMounts:
             - name: socket-dir
               mountPath: /csi
+            - name: metrics-certs
+              mountPath: /etc/metrics-certs
+              readOnly: true
             {{- if .Values.webhook.enabled }}
             - name: webhook-certs
               mountPath: /tmp/k8s-webhook-server/serving-certs
@@ -220,6 +245,10 @@ spec:
       volumes:
         - name: socket-dir
           emptyDir: {}
+        - name: metrics-certs
+          secret:
+            secretName: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-metrics-certs
+            defaultMode: 0400
         {{- if .Values.webhook.enabled }}
         - name: webhook-certs
           secret:

@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,11 +48,10 @@ type mockPoolManager struct {
 	lastRestoreSnapshotReq     pool.AllocationRequest
 
 	// Clone fields
-	cloneVolumeResult        *pool.AllocationResult
-	cloneVolumeErr           error
-	lastCloneSourceVolumeID  string
-	lastCloneReq             pool.AllocationRequest
-	lastCloneSyncThresholdGB int64
+	cloneVolumeResult       *pool.AllocationResult
+	cloneVolumeErr          error
+	lastCloneSourceVolumeID string
+	lastCloneReq            pool.AllocationRequest
 
 	// Group snapshot fields
 	createGroupSnapshotResult *pool.GroupSnapshotResult
@@ -112,10 +112,9 @@ func (m *mockPoolManager) RestoreSnapshot(_ context.Context, snapshotName string
 	return m.restoreSnapshotResult, nil
 }
 
-func (m *mockPoolManager) CloneVolume(_ context.Context, sourceVolumeID string, req pool.AllocationRequest, syncThresholdGB int64) (*pool.AllocationResult, error) {
+func (m *mockPoolManager) CloneVolume(_ context.Context, sourceVolumeID string, req pool.AllocationRequest) (*pool.AllocationResult, error) {
 	m.lastCloneSourceVolumeID = sourceVolumeID
 	m.lastCloneReq = req
-	m.lastCloneSyncThresholdGB = syncThresholdGB
 	if m.cloneVolumeErr != nil {
 		return nil, m.cloneVolumeErr
 	}
@@ -144,6 +143,9 @@ type mockK8sClient struct {
 	snapshots      map[string]*v1alpha1.Snapshot
 	groupSnapshots map[string]*v1alpha1.VolumeGroupSnapshot
 	getErr         error
+	// openRestore and openRestoreErr answer HasOpenRestore.
+	openRestore    bool
+	openRestoreErr error
 }
 
 func newMockK8sClient() *mockK8sClient {
@@ -187,6 +189,10 @@ func (m *mockK8sClient) ListSubVolumes(_ context.Context, _ string) ([]v1alpha1.
 
 func (m *mockK8sClient) ListSubVolumesByShare(_ context.Context, _ string) ([]v1alpha1.SubVolume, error) {
 	return nil, nil
+}
+
+func (m *mockK8sClient) HasOpenRestore(_ context.Context, _, _ string) (bool, error) {
+	return m.openRestore, m.openRestoreErr
 }
 
 func (m *mockK8sClient) ListCloneSubVolumes(_ context.Context) ([]v1alpha1.SubVolume, error) {
@@ -278,6 +284,9 @@ func (m *mockK8sClient) ListReplicationPolicies(_ context.Context) ([]v1alpha1.R
 	return nil, nil
 }
 func (m *mockK8sClient) CreateReplicationPolicy(_ context.Context, _ *v1alpha1.ReplicationPolicy) error {
+	return nil
+}
+func (m *mockK8sClient) UpdateReplicationPolicy(_ context.Context, _ *v1alpha1.ReplicationPolicy) error {
 	return nil
 }
 func (m *mockK8sClient) UpdateReplicationPolicyStatus(_ context.Context, _ *v1alpha1.ReplicationPolicy) error {
@@ -1866,47 +1875,6 @@ func TestCreateVolume_FromClone_InternalError(t *testing.T) {
 	assertGRPCCode(t, err, codes.Internal)
 }
 
-func TestCreateVolume_FromClone_CustomSyncThreshold(t *testing.T) {
-	pm := &mockPoolManager{
-		cloneVolumeResult: &pool.AllocationResult{
-			ShareID:       "share-1",
-			MountTargetIP: "10.240.0.1",
-			SubPath:       "/pvcs/pvc-clone",
-			SharePath:     "/",
-		},
-	}
-	d := newTestDriver(pm, nil)
-
-	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
-		Name: "pvc-clone",
-		Parameters: map[string]string{
-			"pool":                 "test-pool",
-			"cloneSyncThresholdGB": "20",
-		},
-		CapacityRange: &csi.CapacityRange{
-			RequiredBytes: gbToBytes(10),
-		},
-		VolumeContentSource: &csi.VolumeContentSource{
-			Type: &csi.VolumeContentSource_Volume{
-				Volume: &csi.VolumeContentSource_VolumeSource{
-					VolumeId: "pool/share/pvc-source",
-				},
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("CreateVolume from clone failed: %v", err)
-	}
-
-	if pm.lastCloneSyncThresholdGB != 20 {
-		t.Errorf("expected sync threshold 20, got %d", pm.lastCloneSyncThresholdGB)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Group Snapshot CSI Handler Tests
-// ---------------------------------------------------------------------------
-
 func TestCreateVolumeGroupSnapshot_MissingName(t *testing.T) {
 	pm := &mockPoolManager{}
 	d := newTestDriver(pm, nil)
@@ -2220,5 +2188,124 @@ func TestReadinessGuard_ValidateVolumeCapabilities_AlwaysWorks(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("ValidateVolumeCapabilities should work even when not ready: %v", err)
+	}
+}
+
+// TestCreateVolume_Idempotent_FailedCloneIsAnError verifies that a repeated
+// CreateVolume for a volume whose clone failed reports the failure instead of
+// returning the empty volume as a success.
+func TestCreateVolume_Idempotent_FailedCloneIsAnError(t *testing.T) {
+	pm := &mockPoolManager{} // not called
+	k := newMockK8sClient()
+
+	k.subVolumes["pvc-failed-clone"] = &v1alpha1.SubVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: "pvc-failed-clone"},
+		Spec: v1alpha1.SubVolumeSpec{
+			PoolName:           "test-pool",
+			ShareID:            "share-1",
+			ShareMountTargetIP: "10.240.0.1",
+			SubPath:            "/pvcs/pvc-failed-clone",
+			RequestedGB:        10,
+			PVName:             "pvc-failed-clone",
+		},
+		Status: v1alpha1.SubVolumeStatus{
+			CloneStatus:   "Failed",
+			CloneProgress: &v1alpha1.CloneProgress{Error: "source share unreachable"},
+		},
+	}
+
+	d := newTestDriver(pm, k)
+
+	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name:          "pvc-failed-clone",
+		Parameters:    map[string]string{"pool": "test-pool"},
+		CapacityRange: &csi.CapacityRange{RequiredBytes: gbToBytes(10)},
+	})
+	if status.Code(err) != codes.Internal {
+		t.Fatalf("expected codes.Internal for a failed clone, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "source share unreachable") {
+		t.Errorf("expected the clone error in the message, got %v", err)
+	}
+}
+
+// A retried CreateVolume must return the same mount details as the first call,
+// because the provisioner may build the PV from the retry's response.
+func TestCreateVolume_Idempotent_ReturnsFullVolumeContext(t *testing.T) {
+	k := newMockK8sClient()
+	uid, gid := int64(107), int64(107)
+	k.subVolumes["pvc-existing"] = &v1alpha1.SubVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: "pvc-existing"},
+		Spec: v1alpha1.SubVolumeSpec{
+			PoolName:           "test-pool",
+			ShareID:            "share-1",
+			ShareMountTargetIP: "10.250.0.48",
+			ShareExportPath:    "/f15f1a9d_4ce6_460b_ae8d_31d025a4ef27",
+			SubPath:            "/pvcs/pvc-existing",
+			RequestedGB:        10,
+			PVName:             "pvc-existing",
+			UID:                &uid,
+			GID:                &gid,
+			Permissions:        "0777",
+		},
+	}
+	d := newTestDriver(&mockPoolManager{}, k)
+
+	resp, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name:          "pvc-existing",
+		Parameters:    map[string]string{"pool": "test-pool"},
+		CapacityRange: &csi.CapacityRange{RequiredBytes: gbToBytes(10)},
+	})
+	if err != nil {
+		t.Fatalf("idempotent CreateVolume failed: %v", err)
+	}
+
+	want := map[string]string{
+		"server":      "10.250.0.48",
+		"share":       "/f15f1a9d_4ce6_460b_ae8d_31d025a4ef27",
+		"subDir":      "/pvcs/pvc-existing",
+		"permissions": "0777",
+		"uid":         "107",
+		"gid":         "107",
+	}
+	for key, value := range want {
+		if got := resp.GetVolume().VolumeContext[key]; got != value {
+			t.Errorf("VolumeContext[%q] = %q, want %q", key, got, value)
+		}
+	}
+}
+
+func TestCreateVolume_HoldsAVolumeThatABackupRestoreIsFilling(t *testing.T) {
+	pm := &mockPoolManager{allocateResult: &pool.AllocationResult{ShareID: "share-1", MountTargetIP: "10.240.0.1", SubPath: "/pvcs/pvc-test", SharePath: "/"}}
+	k := newMockK8sClient()
+	k.openRestore = true
+	d := newTestDriver(pm, k)
+	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name: "pvc-test",
+		Parameters: map[string]string{
+			"pool": "my-pool", "csi.storage.k8s.io/pvc/name": "my-pvc", "csi.storage.k8s.io/pvc/namespace": "my-ns",
+		},
+		CapacityRange: &csi.CapacityRange{RequiredBytes: gbToBytes(5)},
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume failed: %v", err)
+	}
+	if !pm.lastAllocateReq.RestorePending {
+		t.Error("the volume must be made held back: a pod could mount it before the copy starts")
+	}
+}
+
+func TestCreateVolume_RefusesWhenItCannotTellIfARestoreIsOpen(t *testing.T) {
+	pm := &mockPoolManager{allocateResult: &pool.AllocationResult{ShareID: "share-1", MountTargetIP: "10.240.0.1", SubPath: "/pvcs/pvc-test", SharePath: "/"}}
+	k := newMockK8sClient()
+	k.openRestoreErr = fmt.Errorf("api down")
+	d := newTestDriver(pm, k)
+	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name:          "pvc-test",
+		Parameters:    map[string]string{"pool": "my-pool", "csi.storage.k8s.io/pvc/name": "my-pvc", "csi.storage.k8s.io/pvc/namespace": "my-ns"},
+		CapacityRange: &csi.CapacityRange{RequiredBytes: gbToBytes(5)},
+	})
+	if status.Code(err) != codes.Unavailable {
+		t.Errorf("code = %v, want Unavailable (a retry is safe)", status.Code(err))
 	}
 }

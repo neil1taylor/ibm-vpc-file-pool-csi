@@ -80,9 +80,9 @@ CDI handles:
 - Conversion to raw
 - Writing to the PVC's filesystem as `disk.img`
 
-### Manual Import (Bypassing CDI)
+### Manual Import (Without CDI)
 
-When bypassing CDI (required for the pool CSI driver — see [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md#cdi-containerized-data-importer-compatibility)), you must convert qcow2 to raw manually:
+CDI registry import works on pool StorageClasses, and the pool's golden images are made by CDI (see [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md#cdi-containerized-data-importer-compatibility)). Convert qcow2 to raw by hand only if you write images to the pool yourself:
 
 ```bash
 # Use a container with qemu-img (e.g., quay.io/centos/centos:stream9)
@@ -119,13 +119,13 @@ VM boot disks are typically larger and have different I/O patterns than applicat
 | Workload | Typical PVC Size | I/O Pattern | IOPS Profile |
 |----------|-----------------|-------------|-------------|
 | App container | 1-50 GB | Sequential or light random | `dp2` (standard) |
-| VM boot disk | 40-200 GB | Heavy random (OS activity) | `dp2` or `custom` (higher IOPS) |
-| VM data disk | 100-1000 GB | Depends on workload | `custom` recommended |
+| VM boot disk | 40-200 GB | Heavy random (OS activity) | `dp2` with a higher `spec.iops` |
+| VM data disk | 100-1000 GB | Depends on workload | `dp2` with `spec.iops` set |
 
 When creating pools for VM workloads, consider:
 
 - **Larger share sizes** — fewer VMs fit per share due to larger disk images
-- **Higher IOPS profiles** — VM boot disks generate more random I/O than typical container workloads
+- **Higher IOPS** — VM boot disks generate more random I/O than typical container workloads. Set `spec.iops` on the pool; higher IOPS costs more
 - **Dedicated pools** — separate VM pools from application pools to avoid I/O contention
 
 ```yaml
@@ -135,7 +135,7 @@ metadata:
   name: vm-boot-disks
 spec:
   zone: us-south-1
-  profile: custom
+  profile: dp2
   iops: 10000
   shareSizeGB: 1000
   maxShares: 10

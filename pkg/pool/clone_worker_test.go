@@ -66,15 +66,6 @@ func newPendingClone(pvName, poolName, shareID, sourceVolume string, requestedGB
 	}
 }
 
-// newInProgressClone creates a SubVolume CR representing a clone in InProgress state.
-func newInProgressClone(pvName, poolName, shareID, sourceVolume string, requestedGB int64) *v1alpha1.SubVolume {
-	sv := newPendingClone(pvName, poolName, shareID, sourceVolume, requestedGB)
-	sv.Status.CloneStatus = "InProgress"
-	now := metav1.Now()
-	sv.Status.CloneProgress.StartedAt = &now
-	return sv
-}
-
 func newCloneWorkerForTest(k8s *fakeK8sClient, dc client.Client) *CloneWorker {
 	w := NewCloneWorker(k8s, dc, DefaultCloneImage)
 	w.SetInterval(50 * time.Millisecond)
@@ -119,7 +110,7 @@ func readCloneCounterValue(pool, status string) float64 {
 func simulateJobSucceeded(t *testing.T, dc client.Client, svName, namespace string) {
 	t.Helper()
 	ctx := context.Background()
-	jobName := cloneJobName(svName)
+	jobName := shareJobName("clone-" + svName)
 
 	// Poll until the Job exists.
 	deadline := time.After(3 * time.Second)
@@ -148,7 +139,7 @@ func simulateJobSucceeded(t *testing.T, dc client.Client, svName, namespace stri
 func simulateJobFailed(t *testing.T, dc client.Client, svName, namespace string) {
 	t.Helper()
 	ctx := context.Background()
-	jobName := cloneJobName(svName)
+	jobName := shareJobName("clone-" + svName)
 
 	deadline := time.After(3 * time.Second)
 	ticker := time.NewTicker(10 * time.Millisecond)
@@ -209,7 +200,7 @@ func TestCloneWorker_CreatesJobForPendingClone(t *testing.T) {
 	go w.Run(ctx)
 
 	// Simulate Job success.
-	simulateJobSucceeded(t, dc, "pvc-22222222-2222-2222-2222-222222222222", "default")
+	simulateJobSucceeded(t, dc, "pvc-22222222-2222-2222-2222-222222222222", DefaultDriverNamespace)
 
 	// Wait for clone to complete.
 	waitForCloneStatus(t, k, "pvc-22222222-2222-2222-2222-222222222222", "Complete", 5*time.Second)
@@ -260,7 +251,7 @@ func TestCloneWorker_CompletesWhenJobSucceeds(t *testing.T) {
 
 	go w.Run(ctx)
 
-	simulateJobSucceeded(t, dc, "pvc-33333333-3333-3333-3333-333333333333", "default")
+	simulateJobSucceeded(t, dc, "pvc-33333333-3333-3333-3333-333333333333", DefaultDriverNamespace)
 	waitForCloneStatus(t, k, "pvc-33333333-3333-3333-3333-333333333333", "Complete", 5*time.Second)
 
 	sv, _ := k.GetSubVolume(context.Background(), "pvc-33333333-3333-3333-3333-333333333333")
@@ -298,7 +289,7 @@ func TestCloneWorker_FailsWhenJobFails(t *testing.T) {
 
 	go w.Run(ctx)
 
-	simulateJobFailed(t, dc, "pvc-44444444-4444-4444-4444-444444444444", "default")
+	simulateJobFailed(t, dc, "pvc-44444444-4444-4444-4444-444444444444", DefaultDriverNamespace)
 	waitForCloneStatus(t, k, "pvc-44444444-4444-4444-4444-444444444444", "Failed", 5*time.Second)
 
 	sv, _ := k.GetSubVolume(context.Background(), "pvc-44444444-4444-4444-4444-444444444444")
@@ -339,7 +330,7 @@ func TestCloneWorker_CleansUpTempResources(t *testing.T) {
 
 	go w.Run(ctx)
 
-	simulateJobSucceeded(t, dc, svName, "default")
+	simulateJobSucceeded(t, dc, svName, DefaultDriverNamespace)
 	waitForCloneStatus(t, k, svName, "Complete", 5*time.Second)
 
 	// Give cleanup a moment.
@@ -347,21 +338,21 @@ func TestCloneWorker_CleansUpTempResources(t *testing.T) {
 
 	// Verify temp PV was deleted.
 	pv := &corev1.PersistentVolume{}
-	err := dc.Get(ctx, types.NamespacedName{Name: clonePVName(svName)}, pv)
+	err := dc.Get(ctx, types.NamespacedName{Name: shareJobName("clone-"+svName) + "-s0"}, pv)
 	if err == nil {
 		t.Error("expected temp PV to be deleted after completion")
 	}
 
 	// Verify temp PVC was deleted.
 	pvc := &corev1.PersistentVolumeClaim{}
-	err = dc.Get(ctx, types.NamespacedName{Namespace: "default", Name: clonePVCName(svName)}, pvc)
+	err = dc.Get(ctx, types.NamespacedName{Namespace: DefaultDriverNamespace, Name: shareJobName("clone-"+svName) + "-s0"}, pvc)
 	if err == nil {
 		t.Error("expected temp PVC to be deleted after completion")
 	}
 
 	// Verify Job was deleted.
 	job := &batchv1.Job{}
-	err = dc.Get(ctx, types.NamespacedName{Namespace: "default", Name: cloneJobName(svName)}, job)
+	err = dc.Get(ctx, types.NamespacedName{Namespace: DefaultDriverNamespace, Name: shareJobName("clone-" + svName)}, job)
 	if err == nil {
 		t.Error("expected clone Job to be deleted after completion")
 	}
@@ -403,7 +394,7 @@ func TestCloneWorker_IdempotentJobCreation(t *testing.T) {
 			t.Fatal("timed out waiting for Job creation")
 		case <-ticker.C:
 			job := &batchv1.Job{}
-			if err := dc.Get(ctx, types.NamespacedName{Namespace: "default", Name: cloneJobName(svName)}, job); err == nil {
+			if err := dc.Get(ctx, types.NamespacedName{Namespace: DefaultDriverNamespace, Name: shareJobName("clone-" + svName)}, job); err == nil {
 				goto found
 			}
 		}
@@ -415,12 +406,12 @@ found:
 
 	// List all Jobs to verify only one exists.
 	jobList := &batchv1.JobList{}
-	if err := dc.List(ctx, jobList, client.InNamespace("default")); err != nil {
+	if err := dc.List(ctx, jobList, client.InNamespace(DefaultDriverNamespace)); err != nil {
 		t.Fatalf("failed to list Jobs: %v", err)
 	}
 	cloneJobs := 0
 	for _, j := range jobList.Items {
-		if j.Labels[cloneTempLabel] == "true" {
+		if j.Labels[shareJobLabel] != "" {
 			cloneJobs++
 		}
 	}
@@ -469,7 +460,7 @@ func TestCloneWorker_JobMountOptions(t *testing.T) {
 		case <-deadline:
 			t.Fatal("timed out waiting for PV creation")
 		case <-ticker.C:
-			if err := dc.Get(ctx, types.NamespacedName{Name: clonePVName(svName)}, &pv); err == nil {
+			if err := dc.Get(ctx, types.NamespacedName{Name: shareJobName("clone-"+svName) + "-s0"}, &pv); err == nil {
 				goto foundPV
 			}
 		}
@@ -541,7 +532,7 @@ func TestCloneWorker_JobSetsOwnership(t *testing.T) {
 		case <-deadline:
 			t.Fatal("timed out waiting for Job creation")
 		case <-ticker.C:
-			if err := dc.Get(ctx, types.NamespacedName{Namespace: "default", Name: cloneJobName(svName)}, &job); err == nil {
+			if err := dc.Get(ctx, types.NamespacedName{Namespace: DefaultDriverNamespace, Name: shareJobName("clone-" + svName)}, &job); err == nil {
 				goto foundJob
 			}
 		}
@@ -645,7 +636,7 @@ func TestCloneWorker_SkipsCompleteClones(t *testing.T) {
 
 	// No Jobs should have been created.
 	jobList := &batchv1.JobList{}
-	if err := dc.List(context.Background(), jobList, client.InNamespace("default")); err != nil {
+	if err := dc.List(context.Background(), jobList); err != nil {
 		t.Fatalf("failed to list jobs: %v", err)
 	}
 	if len(jobList.Items) != 0 {
@@ -718,7 +709,7 @@ func TestCloneWorker_MetricsRecorded(t *testing.T) {
 
 	go w.Run(ctx)
 
-	simulateJobSucceeded(t, dc, "pvc-cccccccc-cccc-cccc-cccc-cccccccccccc", "default")
+	simulateJobSucceeded(t, dc, "pvc-cccccccc-cccc-cccc-cccc-cccccccccccc", DefaultDriverNamespace)
 	waitForCloneStatus(t, k, "pvc-cccccccc-cccc-cccc-cccc-cccccccccccc", "Complete", 5*time.Second)
 
 	val := readCloneCounterValue("test-pool", "async_success")
@@ -758,7 +749,7 @@ func TestCloneWorker_MetricsRecordedOnFailure(t *testing.T) {
 
 	go w.Run(ctx)
 
-	simulateJobFailed(t, dc, "pvc-dddddddd-dddd-dddd-dddd-dddddddddddd", "default")
+	simulateJobFailed(t, dc, "pvc-dddddddd-dddd-dddd-dddd-dddddddddddd", DefaultDriverNamespace)
 	waitForCloneStatus(t, k, "pvc-dddddddd-dddd-dddd-dddd-dddddddddddd", "Failed", 5*time.Second)
 
 	val := readCloneCounterValue("test-pool", "async_error")
@@ -779,4 +770,58 @@ func searchStr(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// Clone Jobs run in the driver's namespace and mount the shares directly, so
+// the claim's namespace needs no extra permissions and gets no temporary
+// objects.
+func TestCloneWorker_RunsJobInDriverNamespace(t *testing.T) {
+	k := newFakeK8sClient()
+	dc := fakeclient.NewClientBuilder().WithScheme(newCloneTestScheme()).
+		WithStatusSubresource(&batchv1.Job{}).
+		Build()
+
+	source := newTestSubVolume("pvc-11111111-1111-1111-1111-111111111111", "test-pool", "share-1", 5)
+	source.Spec.PVCName = "source-pvc"
+	source.Spec.PVCNamespace = "default"
+	source.Spec.ShareExportPath = "/share_abc123"
+	k.addSubVolume(source)
+
+	svName := "pvc-99999999-9999-9999-9999-999999999999"
+	clone := newPendingClone(svName, "test-pool", "share-1", "pvc-11111111-1111-1111-1111-111111111111", 5)
+	k.addSubVolume(clone)
+
+	w := newCloneWorkerForTest(k, dc)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	var job batchv1.Job
+	deadline := time.After(3 * time.Second)
+	for dc.Get(ctx, types.NamespacedName{Namespace: DefaultDriverNamespace, Name: shareJobName("clone-" + svName)}, &job) != nil {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for the clone Job in the driver's namespace")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	script := job.Spec.Template.Spec.Containers[0].Command[2]
+	want := `cp -a "/share0/pvcs/pvc-11111111-1111-1111-1111-111111111111/." "/share0/pvcs/` + svName + `/"`
+	if !containsStr(script, want) {
+		t.Errorf("script does not copy between the share folders (want %q):\n%s", want, script)
+	}
+	for _, v := range job.Spec.Template.Spec.Volumes {
+		if v.PersistentVolumeClaim != nil && v.PersistentVolumeClaim.ClaimName == "source-pvc" {
+			t.Error("clone Job mounts the user's source claim")
+		}
+	}
+
+	jobs := &batchv1.JobList{}
+	_ = dc.List(ctx, jobs, client.InNamespace("default"))
+	pvcs := &corev1.PersistentVolumeClaimList{}
+	_ = dc.List(ctx, pvcs, client.InNamespace("default"))
+	if len(jobs.Items) != 0 || len(pvcs.Items) != 0 {
+		t.Errorf("clone made %d Jobs and %d claims in the claim's namespace, want none", len(jobs.Items), len(pvcs.Items))
+	}
 }

@@ -121,6 +121,19 @@ type SubVolumeStatus struct {
 	// CloneProgress tracks bytes copied during a clone operation.
 	// +optional
 	CloneProgress *CloneProgress `json:"cloneProgress,omitempty"`
+
+	// DiskChain is the instant-snapshot chain of the VM disk in the volume
+	// folder, newest file first. The last file is disk.img. It is empty for a
+	// volume that has no instant snapshots.
+	// +optional
+	DiskChain []string `json:"diskChain,omitempty"`
+
+	// ChainOperation names the work that changes DiskChain: a Job while the
+	// VM is stopped, or a merge that QEMU runs in a running VM. Nothing else
+	// changes the disk, and a VM that uses the disk is not started, while it
+	// is set.
+	// +optional
+	ChainOperation string `json:"chainOperation,omitempty"`
 }
 
 // CloneProgress tracks the data copy progress for a clone operation.

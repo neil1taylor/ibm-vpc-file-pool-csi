@@ -36,8 +36,13 @@ type ExecHook struct {
 func NewExecHook(clientset kubernetes.Interface, config *rest.Config) *ExecHook {
 	return &ExecHook{
 		podFinder: &realPodFinder{clientset: clientset},
-		podExecer: &realPodExecer{clientset: clientset, config: config},
+		podExecer: NewPodExecer(clientset, config),
 	}
+}
+
+// NewPodExecer returns a PodExecer that uses the Kubernetes exec API.
+func NewPodExecer(clientset kubernetes.Interface, config *rest.Config) PodExecer {
+	return &realPodExecer{clientset: clientset, config: config}
 }
 
 // NewExecHookWithDeps creates an ExecHook with injectable dependencies for testing.

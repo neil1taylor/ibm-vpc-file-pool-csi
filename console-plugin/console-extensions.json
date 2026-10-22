@@ -11,6 +11,17 @@
     }
   },
   {
+    "type": "console.navigation/href",
+    "properties": {
+      "id": "vpc-file-pools-virt-perspective",
+      "name": "IBM VPC File Pools",
+      "href": "/vpc-file-pools",
+      "perspective": "virtualization-perspective",
+      "section": "storage-virt-perspective",
+      "insertAfter": "persistentvolumes-virt-perspective"
+    }
+  },
+  {
     "type": "console.page/route",
     "properties": {
       "exact": false,

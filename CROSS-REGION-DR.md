@@ -54,7 +54,7 @@ This section documents what the IBM VPC platform does and does not provide. Thes
 | Capability | Status | Impact |
 |------------|--------|--------|
 | **Native cross-region replication** | Not available | No async/sync mirror, no replica shares across regions. All replication must be built at the application layer. |
-| **Share-level snapshots** | Not available | No atomic point-in-time capture of an entire file share. The VPC API has no snapshot operation for file shares. |
+| **Share-level snapshots** | Available, not used | The VPC API can snapshot a whole file share, but not for shares in `vpc` access mode. A pool share holds many volumes, so the driver does not use it: one volume could not be restored without touching the others. |
 | **Directory-level snapshots** | Not available | No way to atomically capture a subdirectory within a share. |
 | **File-level snapshots** | Not available | No copy-on-write or reflink support at the NFS protocol level. |
 | **Change tracking / changelog** | Not available | No journal, delta stream, or inotify-equivalent at the share level. Change detection requires full directory traversal. |
@@ -128,7 +128,7 @@ Result on destination:
 
 ## Unsupported Workload Types
 
-The following workloads MUST NOT use Phase 4d replication. Using this feature for these workloads will produce corrupted or unusable replicas in the DR region.
+The following workloads MUST NOT be copied with rsync. A file copy of them produces corrupted or unusable replicas in the DR region. The controller never copies a running VM's disk with rsync: it uses a QEMU copy instead, as the VM section below describes.
 
 ### VM Boot and Data Disks (qcow2, vmdk, raw)
 
@@ -157,7 +157,11 @@ Destination disk.img after rsync:
 
 This is NOT a file-level consistency problem (rsync is reading one file). It is an intra-file consistency problem: the file's internal structure (filesystem metadata, journal, block allocation tables) requires all blocks to be from the same point in time, and rsync cannot provide that for a file being actively mutated by a VM.
 
-**What to use instead:** IBM Cloud VPC block storage volume snapshots and replication for VM workloads. Block storage provides crash-consistent snapshots at the storage layer.
+**What the controller does:** in direct NFS mode, it copies a running VM's disks with QEMU, all at one moment, and never with rsync. The details are in `CRD-SPEC.md`, "Running VM disks". In receiver mode it does the same, and the receiver at the destination applies each copy, so each changed block crosses the network once. Hot-plugged disks are skipped, as described next.
+
+**Skipped volumes:** it never copies a volume that a running or starting VM uses with rsync. Before each copy it looks for a KubeVirt pod (`kubevirt.io=virt-launcher` or `kubevirt.io=hotplug-disk`) in the claim's namespace that mounts the claim. If it finds one, it skips the volume and sets the volume's status error to `skipped: in use by running VM <namespace>/<pod>; ...`. The policy's `lastError` counts the skipped volumes. A skipped volume does not count as a failed cycle, so it does not pause the policy for the other volumes. If a VM starts while a copy runs, the controller does not record that copy as a sync. If the controller cannot list the pods, it does not copy the volume. Volumes of stopped VMs are copied as before; rsync leaves out any staging files left by an earlier VM copy.
+
+**What to use instead:** the QEMU copy that the controller makes of a running VM (above). Its status says `FileSystemConsistent` or `CrashConsistent`. IBM Cloud VPC block storage snapshots and replication are another option for VM workloads.
 
 ### Databases with Write-Ahead Logs
 
@@ -363,6 +367,24 @@ kubectl create secret generic repl-receiver-ca \
 ```
 
 The replication controller mounts this Secret into sync-client Job pods and passes `--ca-cert-file` to the sync-client binary, which creates an HTTPS client with a custom CA trust pool.
+
+### Set up the receiver in the console
+
+The console can make the two Secrets and test the receiver before it makes the policy. On the Replication tab, choose **Create ReplicationPolicy**, set the mode to **Driver-to-Driver**, and fill in:
+
+1. **Receiver Endpoint.** The `https://` address of the receiver. The form refuses `http://`.
+2. **Token and certificate.** Choose "Make new Secrets from what I paste" and paste the token (it is in the receiver's Secret on the destination cluster) and, for a self-signed receiver, the CA certificate in PEM form. The console makes the Secrets `<policy name>-receiver-token` and `<policy name>-receiver-ca` in `kube-system`. Or choose "Use Secrets that already exist" and give their names.
+3. **Check connection.** The console runs a short Job in `kube-system`, with the driver image, that tests three things in order: the receiver answers, its certificate is trusted, and it accepts the token. The form shows the result: *The receiver is ready*, or one reason (`cannot connect`, `certificate not trusted`, `token refused`, `receiver storage not reachable`, or `receiver has no auth-check call; update it`).
+4. **Create** turns on when the check passes. Change any field and the check must run again.
+
+Notes:
+
+- The token goes once from the browser to this cluster's API server. The console never reads a Secret back. If a Secret of the same name exists and the console did not make it, the form stops and says so.
+- The check Job deletes itself after ten minutes.
+- When you delete the policy in the console, the dialog has a box, off by default: "Also delete the Secrets the receiver setup made". It appears only for Secrets named `<policy name>-receiver-token` and `<policy name>-receiver-ca` that the policy uses and no other policy uses. The console deletes a Secret only after it proves the Secret carries the label the setup put on it, so a Secret you made yourself with the same name is left alone and named in a message.
+- A user who may not make Jobs in `kube-system` sees a warning and can still make the policy without the check. A user who may not make Secrets there is told to ask an administrator and use existing Secrets.
+- After the policy exists, the replication controller repeats the same checks (health call, certificate, token) once per schedule and sets the `ReceiverReachable` condition on the policy. The Replication Policies list has a Receiver column and the policy page a Receiver Status line: Reachable, Not reachable with the reason, or Checking... until the first result. `kubectl get replicationpolicy <name> -o jsonpath='{.status.conditions}'` shows the same. A failing check does not stop replication.
+- The same test from a terminal: `curl -H "Authorization: Bearer $TOKEN" https://<receiver>/api/v1/auth-check` (add `--cacert ca.crt` for a self-signed receiver).
 
 ### Replication Data Flow
 
@@ -849,7 +871,7 @@ Phase 4d is not the right tool for every DR scenario. This section documents whe
 
 ### Use IBM VPC Block Storage Replication When:
 
-- Workloads require crash-consistent snapshots (VMs, databases)
+- Workloads require crash-consistent snapshots (databases)
 - RPO must be near-zero (seconds)
 - The workload uses ReadWriteOnce volumes (block is the natural fit)
 
@@ -984,7 +1006,7 @@ Future (snapshot + ship):
 | No crash consistency | Storage-layer snapshot is crash-consistent by definition |
 | Full directory scan every cycle | Snapshot delta tracking (changed blocks only) |
 | rsync CPU overhead | Block-level delta eliminates checksum computation |
-| Cannot replicate VM disks safely | Crash-consistent snapshots make VM replication viable |
+| A running VM disk needs a QEMU copy | A storage-layer snapshot would not need QEMU (the QEMU copy is built today) |
 
 ### What Would Change in the CRD
 
@@ -1008,7 +1030,7 @@ The ReplicationPolicy CRD and controller interface would remain the same -- only
 ### Impact on Supported Workloads
 
 With native snapshots, Phase 4d would expand to support:
-- VM boot/data disks (crash-consistent replicas)
+- VM boot/data disks without QEMU (today a running VM is copied with QEMU)
 - Databases (crash-consistent, WAL+data file consistency guaranteed)
 - Any workload requiring cross-file transactional consistency
 
@@ -1116,6 +1138,26 @@ kubectl failover execute \
 #   pvc-c3d4e5f6-... SubVolume created, PV created, PVC created
 # Failover complete. 3 PVCs ready in namespace "production".
 ```
+
+#### Running VM disks
+
+The destination keeps the disks of a running VM with restore points (see `CRD-SPEC.md`, "Running VM disks"). A VM with several disks must start from one moment, so `plan` and `execute` choose it for you:
+
+- They find the disks of each VM from the `.repl-moment` file the receiver writes next to the disk.
+- They choose the newest moment that all the VM's disks can show. If a copy reached one disk and not the other, the newer disk is rewound to the older moment. Disks of different VMs are chosen separately.
+- A disk that shows the chosen moment is used in place, after any copy that stopped half way is rolled back from its undo file. This needs nothing from the source region.
+- A disk that must be rewound is written into a new folder next to the old one (`<volume>.rewind-<time>`), and the PV points to it. This copies the whole disk, so it takes minutes for a large disk. The latest disk is not changed, so you can run it again with another moment.
+- **Tested.** Tested on 21 October 2026 between two ROVS clusters (`rovslab-prod-eude` to `rovslab-dr-eude`, both in Frankfurt), with the receiver reached through an OpenShift Route: a CentOS Stream 9 VM and a Windows Server 2022 VM, each with a root disk and a data disk and a program that wrote a file every 0.1 s. The first copy of the Linux VM took 1,149 s and the next copy sent 81 MB. The status said `FileSystemConsistent` for both guests (for Windows the freeze uses VSS through the guest agent). The copy at the latest moment and the copy rewound to the first restore point both booted at the destination with no file-system errors (Windows: no NTFS events, volumes not dirty) and every logged file matched its checksum. Failover refused to rewind a disk after a VM had written to it. The test is `test/e2e/test-vm-replication.sh` with `DR_KUBECONFIG` (two clusters) and `GUEST=windows`.
+- **Rewind before you start the VM.** After a VM runs on the latest disk, the disk no longer matches the copy, and the restore points no longer fit it. The receiver seals each disk when a copy ends (the modification time, in the `.repl-moment` file). Failover refuses to rewind a disk that changed since, and says so. Using that disk in place still works. To keep the option of an earlier moment, rewind with `execute --prepare-only --rewind-to` first and boot from the rewound folder.
+- If no moment is shared by all disks of a VM, failover stops and lists the moments of each disk. It never mixes moments.
+- While the receiver applies a copy it keeps a lease file in the disk's folder. Failover stops and names the disk while the lease is live (up to 1 hour). `--force` goes on anyway; rolling back first makes that safe.
+
+```bash
+kubectl failover plan --nfs-mount-path /data --list-moments       # moments each VM can show, newest first
+kubectl failover execute --nfs-mount-path /data ... --rewind-to 2026-10-20T10:30:00Z   # newest moment at or before this time
+```
+
+`execute --prepare-only` does the roll-back and the rewinds and stops: it needs no cluster and no `--dr-pool`, so you can prepare the disks before the cutover. `--rewind-to` takes an RFC 3339 time. The restore points reach back as far as the policy's `restorePointKeepHours` (24 hours by default).
 
 #### `kubectl failover status`
 

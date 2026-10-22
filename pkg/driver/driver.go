@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path"
 	"strings"
 	"sync"
 
@@ -147,8 +148,28 @@ func (d *Driver) isNode() bool {
 	return d.mode == "node"
 }
 
+// routineCalls are health and capability calls that the CSI sidecars and the
+// kubelet make several times a second. They are logged at trace level.
+var routineCalls = map[string]bool{
+	"Probe":                     true,
+	"GetPluginInfo":             true,
+	"GetPluginCapabilities":     true,
+	"ControllerGetCapabilities": true,
+	"NodeGetCapabilities":       true,
+	"NodeGetInfo":               true,
+}
+
+// callLogLevel returns the klog level for a gRPC method such as
+// "/csi.v1.Identity/Probe".
+func callLogLevel(fullMethod string) klog.Level {
+	if routineCalls[path.Base(fullMethod)] {
+		return 6
+	}
+	return 4
+}
+
 func logInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-	klog.V(4).InfoS("gRPC call", "method", info.FullMethod)
+	klog.V(callLogLevel(info.FullMethod)).InfoS("gRPC call", "method", info.FullMethod)
 	resp, err := handler(ctx, req)
 	if err != nil {
 		klog.ErrorS(err, "gRPC call failed", "method", info.FullMethod)

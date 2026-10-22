@@ -1,6 +1,6 @@
 # Frequently Asked Questions — IBM VPC File Pool CSI Driver
 
-Quick answers with links to authoritative documentation for deeper reading.
+Quick answers with links to authoritative documentation for deeper reading. For the meaning of project words such as pool, share, moment and snapshot pool, see [CONTEXT.md](CONTEXT.md).
 
 ---
 
@@ -14,7 +14,7 @@ The stock driver creates one VPC file share per PVC (1:1 mapping). This driver p
 
 Yes. The pool driver uses provisioner name `vpc-file-pool.csi.ibm.io` while the stock driver uses `vpc.file.csi.ibm.io`. They run independently with separate StorageClasses. Use the stock driver for workloads needing dedicated IOPS isolation (e.g., databases), and the pool driver for everything else. See [USER-GUIDE.md — Coexistence](USER-GUIDE.md#coexistence-with-the-stock-ibm-csi-driver).
 
-### Does this work on OpenShift (ROKS)?
+### Does this work on OpenShift (ROKS or ROVS)?
 
 Yes, fully supported. The driver is tested on ROKS 4.14 through 4.17. The node agent requires the `privileged` SCC (standard for CSI drivers), and the Helm chart includes the necessary configuration. See [USER-GUIDE.md — Compatibility Matrix](USER-GUIDE.md#compatibility-matrix).
 
@@ -44,7 +44,7 @@ No. Kubernetes does not support PVC shrinking (this is a platform-wide constrain
 
 ### What happens to data when I delete a PVC?
 
-It depends on the StorageClass reclaim policy: `Delete` removes the subdirectory and data, `Retain` keeps data for manual recovery, and `Archive` moves data to `.archived/` on the share. See [USER-GUIDE.md — Deleting a PVC](USER-GUIDE.md#deleting-a-pvc).
+It depends on the StorageClass reclaim policy: `Delete` removes the subdirectory and data, and `Retain` keeps the PersistentVolume, the SubVolume and the data for manual clean-up. There is no archive mode. See [USER-GUIDE.md — Deleting a PVC](USER-GUIDE.md#deleting-a-pvc).
 
 ---
 
@@ -68,7 +68,7 @@ Deploy an `fio` pod with a PVC from the pool and run sequential and random I/O t
 
 ### How do I set up VMs with pool storage?
 
-Configure the pool with `defaultUID: 107`, `defaultGID: 107`, and `defaultPermissions: "0777"`. Create PVCs directly (bypass CDI), download cloud images, convert from qcow2 to raw format, and reference PVCs in the VM spec using `persistentVolumeClaim`. See [KNOWN-LIMITATIONS.md — CDI Compatibility](KNOWN-LIMITATIONS.md#cdi-containerized-data-importer-compatibility) for the full workflow.
+Configure the pool with `defaultUID: 107`, `defaultGID: 107`, and `defaultPermissions: "0777"`. Import cloud images with a CDI DataVolume (registry source) on the pool StorageClass, or create PVCs directly, write raw images to them, and reference the PVCs in the VM spec using `persistentVolumeClaim`. See [KNOWN-LIMITATIONS.md — CDI Compatibility](KNOWN-LIMITATIONS.md#cdi-containerized-data-importer-compatibility) for the full workflow.
 
 ### My VM shows "No bootable device" — what's wrong?
 
@@ -76,7 +76,7 @@ The boot disk is in qcow2 format instead of raw. KubeVirt requires raw format fo
 
 ### Why doesn't CDI work with this driver?
 
-CDI's VolumePopulator mechanism is incompatible with subdirectory-based CSI provisioning. CDI sets a `dataSource` that the `csi-provisioner` doesn't recognize, causing it to back off. The driver includes a golden image syncer (v0.11.0+) that provides an alternative workflow. See [KNOWN-LIMITATIONS.md — CDI Compatibility](KNOWN-LIMITATIONS.md#cdi-containerized-data-importer-compatibility).
+It does. CDI registry import onto a pool StorageClass works, and the pool's golden image syncer uses it. A CDI host-assisted clone onto the pool from other storage (such as Ceph) ran out of memory in CDI's upload pod. See [KNOWN-LIMITATIONS.md — CDI Compatibility](KNOWN-LIMITATIONS.md#cdi-containerized-data-importer-compatibility).
 
 ---
 
@@ -88,7 +88,7 @@ Under normal operation, no. Each PVC is bind-mounted at its own subdirectory, an
 
 ### Is NFS traffic encrypted?
 
-NFS traffic is not encrypted in transit on ROKS clusters because IBM Cloud's encryption-in-transit (IPsec) is not supported on RHCOS-based worker nodes. VPC network traffic is already isolated at the hypervisor level, and data at rest is always encrypted (provider-managed or customer-managed keys). See [KNOWN-LIMITATIONS.md — NFS Encryption in Transit](KNOWN-LIMITATIONS.md#nfs-encryption-in-transit) and [SECURITY.md](SECURITY.md).
+NFS traffic is not encrypted in transit on ROKS or ROVS clusters because IBM Cloud's encryption-in-transit (IPsec) is not supported on RHCOS-based worker nodes. VPC network traffic is already isolated at the hypervisor level, and data at rest is always encrypted (provider-managed or customer-managed keys). See [KNOWN-LIMITATIONS.md — NFS Encryption in Transit](KNOWN-LIMITATIONS.md#nfs-encryption-in-transit) and [SECURITY.md](SECURITY.md).
 
 ---
 
@@ -96,11 +96,11 @@ NFS traffic is not encrypted in transit on ROKS clusters because IBM Cloud's enc
 
 ### How fast are snapshots?
 
-Snapshots are full directory copies (`cp -a`), not instantaneous COW snapshots. Speed is proportional to data size: ~1 GB takes 5-15 seconds, ~100 GB takes 5-15 minutes. Snapshots consume share capacity equal to the source data. See [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md) for scheduling and retention strategies.
+A snapshot of a plain volume is a full directory copy (`cp -a`). Speed is proportional to data size: ~1 GB takes 5-15 seconds, ~100 GB takes 5-15 minutes. A snapshot of a VM disk is a QEMU copy, or an instant snapshot (nothing is copied) where the KubeVirt `Sidecar` feature gate is on. A snapshot uses share capacity: a copy uses as much as the source data. A snapshot stays on the same share as its volume, so it does not protect you from losing the share. See [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md) for scheduling and retention strategies.
 
 ### What's the best backup strategy?
 
-It depends on your workload. For application data, use scheduled snapshots + cross-region replication. For databases, use application-level backup (pg_dump, etc.) with pool snapshots as a secondary layer. For VMs, stop the VM before snapshotting. See [BACKUP-RECOVERY.md — Strategy Recommendations](BACKUP-RECOVERY.md#strategy-recommendations-by-workload-type).
+It depends on your workload. For application data, use scheduled snapshots + cross-region replication. For databases, use application-level backup (pg_dump, etc.) with pool snapshots as a secondary layer. For VMs, use a snapshot of the running VM (all its disks show one moment) or a `BackupPolicy`. You do not need to stop the VM. See [BACKUP-RECOVERY.md — Strategy Recommendations](BACKUP-RECOVERY.md#strategy-recommendations-by-workload-type).
 
 ---
 

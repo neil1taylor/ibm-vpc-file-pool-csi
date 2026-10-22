@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
@@ -12,13 +13,13 @@ func validFileSharePool() *v1alpha1.FileSharePool {
 	return &v1alpha1.FileSharePool{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-pool"},
 		Spec: v1alpha1.FileSharePoolSpec{
-			Zone:                  "us-south-1",
-			Profile:               "dp2",
-			ShareSizeGB:           1000,
-			MaxShares:             10,
-			InitialShares:         1,
+			Zone:                   "us-south-1",
+			Profile:                "dp2",
+			ShareSizeGB:            1000,
+			MaxShares:              10,
+			InitialShares:          1,
 			ExpandThresholdPercent: 80,
-			AllocationStrategy:    "spread",
+			AllocationStrategy:     "spread",
 		},
 	}
 }
@@ -166,5 +167,109 @@ func TestFileSharePoolValidator_Delete(t *testing.T) {
 	_, err := v.ValidateDelete(context.Background(), validFileSharePool())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// The node agent silently falls back to its default when the permissions
+// string is not octal, so the webhook must refuse it up front.
+func TestFileSharePoolValidator_Create_DefaultPermissions(t *testing.T) {
+	tests := []struct {
+		perms   string
+		wantErr bool
+	}{
+		{"", false},
+		{"0755", false},
+		{"0777", false},
+		{"755", false},
+		{"2775", false},
+		{"not-octal", true},
+		{"0789", true},
+		{"17777", true},
+		{"-755", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.perms, func(t *testing.T) {
+			pool := validFileSharePool()
+			pool.Spec.DefaultPermissions = tt.perms
+			_, err := (&FileSharePoolValidator{}).ValidateCreate(context.Background(), pool)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("defaultPermissions %q: err = %v, wantErr %v", tt.perms, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// The webhook allows exactly what the CRD schema allows, so a pool it accepts
+// is never refused by the API server, and its messages give the real range.
+func TestFileSharePoolValidator_Create_MatchesSchemaLimits(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*v1alpha1.FileSharePoolSpec)
+		wantErr bool
+	}{
+		{"threshold 49", func(s *v1alpha1.FileSharePoolSpec) { s.ExpandThresholdPercent = 49 }, true},
+		{"threshold 50", func(s *v1alpha1.FileSharePoolSpec) { s.ExpandThresholdPercent = 50 }, false},
+		{"threshold 95", func(s *v1alpha1.FileSharePoolSpec) { s.ExpandThresholdPercent = 95 }, false},
+		{"threshold 96", func(s *v1alpha1.FileSharePoolSpec) { s.ExpandThresholdPercent = 96 }, true},
+		{"maxShares 100", func(s *v1alpha1.FileSharePoolSpec) { s.MaxShares = 100 }, false},
+		{"maxShares 101", func(s *v1alpha1.FileSharePoolSpec) { s.MaxShares = 101 }, true},
+	}
+	v := &FileSharePoolValidator{}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pool := validFileSharePool()
+			tt.mutate(&pool.Spec)
+			_, err := v.ValidateCreate(context.Background(), pool)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateCreate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func int64Ptr(v int64) *int64 { return &v }
+
+func TestFileSharePoolValidator_IOPSMatchesSize(t *testing.T) {
+	tests := []struct {
+		name    string
+		sizeGB  int64
+		iops    *int64
+		wantErr bool
+	}{
+		{"no IOPS is allowed", 100, nil, false},
+		{"3000 IOPS on 100 GB is allowed", 100, int64Ptr(3000), false},
+		{"3000 IOPS on 10 GB is refused", 10, int64Ptr(3000), true},
+		{"over the maximum for the size is refused", 100, int64Ptr(6001), true},
+		{"under the minimum for the size is refused", 2000, int64Ptr(100), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := &FileSharePoolValidator{}
+			pool := validFileSharePool()
+			pool.Spec.ShareSizeGB = tt.sizeGB
+			pool.Spec.IOPS = tt.iops
+			_, err := v.ValidateCreate(context.Background(), pool)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil && !strings.Contains(err.Error(), "spec.iops") {
+				t.Errorf("error should name spec.iops: %v", err)
+			}
+		})
+	}
+}
+
+func TestFileSharePoolValidator_TierIOPSMatchesSize(t *testing.T) {
+	v := &FileSharePoolValidator{}
+	pool := validFileSharePool()
+	pool.Spec.Tiers = []v1alpha1.ShareTier{
+		{Name: "fast", Profile: "dp2", ShareSizeGB: 10, IOPS: int64Ptr(3000), MaxShares: 1},
+	}
+	_, err := v.ValidateCreate(context.Background(), pool)
+	if err == nil {
+		t.Fatal("expected an error for a tier with 3000 IOPS on 10 GB")
+	}
+	if !strings.Contains(err.Error(), "fast") {
+		t.Errorf("error should name the tier: %v", err)
 	}
 }

@@ -1,6 +1,10 @@
 package migrate
 
 import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -209,5 +213,46 @@ func TestBuildMigrationPod_Resources(t *testing.T) {
 	memLimit := container.Resources.Limits["memory"]
 	if memLimit.String() != "256Mi" {
 		t.Errorf("expected memory limit 256Mi, got %s", memLimit.String())
+	}
+}
+
+// The copy script must exit non-zero when the file counts differ, so the pod
+// fails and the tool reports the migration as failed.
+func TestBuildMigrationPod_ScriptFailsWhenCountsDiffer(t *testing.T) {
+	pod := BuildMigrationPod(MigrationPodSpec{Name: "m", Namespace: "default", SourcePVC: "s", TargetPVC: "t"})
+	script := pod.Spec.Containers[0].Command[2]
+
+	tests := []struct {
+		name     string
+		files    map[string]int // file count in the source and target folders
+		wantExit bool           // true when the script must exit non-zero
+	}{
+		{name: "counts match", files: map[string]int{"source": 3, "target": 3}, wantExit: false},
+		{name: "target is missing files", files: map[string]int{"source": 3, "target": 2}, wantExit: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for side, n := range tt.files {
+				if err := os.MkdirAll(filepath.Join(dir, side), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				for i := 0; i < n; i++ {
+					if err := os.WriteFile(filepath.Join(dir, side, fmt.Sprintf("f%d", i)), nil, 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			// Use the test folders, and replace the package install and the copy
+			// with no-ops, so only the file count check runs.
+			s := strings.ReplaceAll(script, "/source", filepath.Join(dir, "source"))
+			s = strings.ReplaceAll(s, "/target", filepath.Join(dir, "target"))
+			s = strings.ReplaceAll(s, "apk add", "true")
+			s = strings.ReplaceAll(s, "rsync -avz --progress", "true")
+			err := exec.Command("sh", "-c", s).Run()
+			if (err != nil) != tt.wantExit {
+				t.Errorf("script error = %v, want non-zero exit %v", err, tt.wantExit)
+			}
+		})
 	}
 }

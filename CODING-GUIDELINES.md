@@ -2,7 +2,7 @@
 
 ## Language & Toolchain
 
-- **Go 1.25+** (match the version used by kubernetes/kubernetes at the time of development)
+- **Go 1.26+** (match the version used by kubernetes/kubernetes at the time of development)
 - **Module path:** `github.com/IBM/ibm-vpc-file-pool-csi`
 - **Linter:** `golangci-lint` with the config below
 - **Code generation:** `controller-gen` for CRD types and DeepCopy
@@ -155,6 +155,8 @@ func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (*Allocat
     // The CRD update uses optimistic locking (resourceVersion) as a second safety net
 }
 ```
+
+Never hold the Manager's lock while a call waits on something slow: a command in a VM pod, a Job, or many Kubernetes API calls. Every other volume would wait behind it. Snapshot, restore and clone calls hold the lock of the one volume they change (`volumeLocks` in `pkg/pool/volume_locks.go`) for their whole run, and take the Manager's lock only for the short pool bookkeeping, on a fresh copy of the pool (`bookShare`, `unbookShare`). Lock order: a volume lock, then the Manager's lock, then `vmMu`.
 
 ### Path Validation (CRITICAL)
 
@@ -481,7 +483,7 @@ var (
 
 ```dockerfile
 # Build stage
-FROM golang:1.25 AS builder
+FROM golang:1.26 AS builder
 
 WORKDIR /workspace
 COPY go.mod go.sum ./

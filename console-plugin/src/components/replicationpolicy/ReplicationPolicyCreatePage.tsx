@@ -40,6 +40,14 @@ import { ROUTES } from '../../constants';
 import FieldPopover from '../common/FieldPopover';
 import SchedulePresets from '../common/SchedulePresets';
 import HookEditor from '../common/HookEditor';
+import ReceiverSetup from './ReceiverSetup';
+import {
+  DEFAULT_RESTORE_POINT_KEEP_HOURS,
+  DEFAULT_VM_COPY_SPEED_MBPS,
+  destinationSpecFields,
+  vmCopySpecFields,
+} from '../../utils/replication-helpers';
+import RunningVMCopyNote from '../common/RunningVMCopyNote';
 
 const SCHEDULE_PRESETS = [
   { label: '5m', value: '5m' },
@@ -60,14 +68,19 @@ const ReplicationPolicyCreatePage: React.FC = () => {
   const [destinationBasePath, setDestinationBasePath] = useState('/pvcs');
   const [destinationEndpoint, setDestinationEndpoint] = useState('');
   const [destinationAuthSecretRef, setDestinationAuthSecretRef] = useState('');
+  const [destinationCACertSecretRef, setDestinationCACertSecretRef] = useState('');
   const [schedule, setSchedule] = useState('15m');
   const [maxRetries, setMaxRetries] = useState(3);
   const [incrementalSync, setIncrementalSync] = useState(true);
   const [bandwidthLimitMbps, setBandwidthLimitMbps] = useState(0);
   const [maxParallelSyncs, setMaxParallelSyncs] = useState(1);
+  const [vmCopySpeedLimitMBps, setVmCopySpeedLimitMBps] = useState(DEFAULT_VM_COPY_SPEED_MBPS);
+  const [restorePointKeepHours, setRestorePointKeepHours] = useState(DEFAULT_RESTORE_POINT_KEEP_HOURS);
   const [rsyncOptions, setRsyncOptions] = useState('');
 
   const isDriverToDriver = replicationMode === 'driver-to-driver';
+  // The receiver passed the check (or the user cannot run it). A policy for a receiver is not made before that.
+  const [receiverChecked, setReceiverChecked] = useState(false);
 
   // Label selector as key-value pairs
   const [labelPairs, setLabelPairs] = useState<Array<{ key: string; value: string }>>([]);
@@ -106,7 +119,7 @@ const ReplicationPolicyCreatePage: React.FC = () => {
     destinationBasePath.length > 0 &&
     schedule.length > 0 &&
     (isDriverToDriver
-      ? destinationEndpoint.length > 0 && destinationAuthSecretRef.length > 0
+      ? destinationEndpoint.length > 0 && destinationAuthSecretRef.length > 0 && receiverChecked
       : destinationNFSServer.length > 0);
 
   const handleCreate = async () => {
@@ -115,7 +128,6 @@ const ReplicationPolicyCreatePage: React.FC = () => {
     try {
       const spec: ReplicationPolicySpec = {
         sourcePoolName,
-        destinationNFSServer: isDriverToDriver ? '' : destinationNFSServer,
         destinationExportPath: isDriverToDriver ? undefined : (destinationExportPath !== '/' ? destinationExportPath : undefined),
         destinationBasePath,
         schedule,
@@ -124,8 +136,14 @@ const ReplicationPolicyCreatePage: React.FC = () => {
         bandwidthLimitMbps: isDriverToDriver ? undefined : (bandwidthLimitMbps > 0 ? bandwidthLimitMbps : undefined),
         maxParallelSyncs: maxParallelSyncs > 1 ? maxParallelSyncs : undefined,
         rsyncOptions: isDriverToDriver ? undefined : (rsyncOptions.trim() ? rsyncOptions.trim().split('\n').filter(Boolean) : undefined),
-        destinationEndpoint: isDriverToDriver ? destinationEndpoint : undefined,
-        destinationAuthSecretRef: isDriverToDriver ? destinationAuthSecretRef : undefined,
+        ...vmCopySpecFields({ speedLimitMBps: vmCopySpeedLimitMBps, restorePointKeepHours }),
+        ...destinationSpecFields({
+          isDriverToDriver,
+          nfsServer: destinationNFSServer,
+          endpoint: destinationEndpoint,
+          authSecretRef: destinationAuthSecretRef,
+          caCertSecretRef: destinationCACertSecretRef,
+        }),
       };
 
       if (labelPairs.length > 0) {
@@ -233,7 +251,11 @@ const ReplicationPolicyCreatePage: React.FC = () => {
             <FormSelect
               id="rp-mode"
               value={replicationMode}
-              onChange={(_event, value) => setReplicationMode(value as 'direct' | 'driver-to-driver')}
+              onChange={(_event, value) => {
+                setReplicationMode(value as 'direct' | 'driver-to-driver');
+                // The receiver setup starts over when it is shown again.
+                setReceiverChecked(false);
+              }}
             >
               <FormSelectOption value="direct" label="Direct NFS" />
               <FormSelectOption value="driver-to-driver" label="Driver-to-Driver (cross-region)" />
@@ -288,51 +310,18 @@ const ReplicationPolicyCreatePage: React.FC = () => {
         )}
 
         {isDriverToDriver && (
-          <>
-            <StackItem>
-              <FieldPopover
-                fieldId="rp-dest-endpoint"
-                label="Receiver Endpoint"
-                description="HTTPS URL of the replication receiver service on the destination cluster. This is typically an OpenShift Route URL."
-                isRequired
-              >
-                <TextInput
-                  id="rp-dest-endpoint"
-                  value={destinationEndpoint}
-                  onChange={(_event, value) => setDestinationEndpoint(value)}
-                  isRequired
-                  placeholder="https://repl-receiver.apps.cluster.example.com"
-                />
-                <FormHelperText>
-                  <HelperText>
-                    <HelperTextItem>HTTPS URL of the receiver on the destination cluster</HelperTextItem>
-                  </HelperText>
-                </FormHelperText>
-              </FieldPopover>
-            </StackItem>
-
-            <StackItem>
-              <FieldPopover
-                fieldId="rp-dest-auth-secret"
-                label="Auth Secret Name"
-                description="Name of a Secret in kube-system containing a 'token' key with the bearer token for authenticating to the receiver."
-                isRequired
-              >
-                <TextInput
-                  id="rp-dest-auth-secret"
-                  value={destinationAuthSecretRef}
-                  onChange={(_event, value) => setDestinationAuthSecretRef(value)}
-                  isRequired
-                  placeholder="replication-auth"
-                />
-                <FormHelperText>
-                  <HelperText>
-                    <HelperTextItem>Secret name with bearer token for receiver authentication</HelperTextItem>
-                  </HelperText>
-                </FormHelperText>
-              </FieldPopover>
-            </StackItem>
-          </>
+          <StackItem>
+            <ReceiverSetup
+              policyName={name}
+              endpoint={destinationEndpoint}
+              onEndpointChange={setDestinationEndpoint}
+              authSecretRef={destinationAuthSecretRef}
+              onAuthSecretRefChange={setDestinationAuthSecretRef}
+              caCertSecretRef={destinationCACertSecretRef}
+              onCaCertSecretRefChange={setDestinationCACertSecretRef}
+              onCheckedChange={setReceiverChecked}
+            />
+          </StackItem>
         )}
 
         <StackItem>
@@ -461,6 +450,52 @@ const ReplicationPolicyCreatePage: React.FC = () => {
               onChange={(event) => {
                 const val = parseInt((event.target as HTMLInputElement).value, 10);
                 if (!isNaN(val)) setMaxParallelSyncs(val);
+              }}
+            />
+          </FieldPopover>
+        </StackItem>
+
+        <StackItem>
+          <RunningVMCopyNote />
+        </StackItem>
+
+        <StackItem>
+          <FieldPopover
+            fieldId="rp-vm-speed"
+            label="VM Copy Speed Limit (MB/s per disk)"
+            description="How fast a running VM's disk is copied. A higher limit gives a shorter copy and a lower recovery point, but slows the VM's own disk writes more. 0 means unlimited. Default 20."
+          >
+            <NumberInput
+              id="rp-vm-speed"
+              value={vmCopySpeedLimitMBps}
+              min={0}
+              max={10000}
+              onMinus={() => setVmCopySpeedLimitMBps(Math.max(0, vmCopySpeedLimitMBps - 5))}
+              onPlus={() => setVmCopySpeedLimitMBps(Math.min(10000, vmCopySpeedLimitMBps + 5))}
+              onChange={(event) => {
+                const val = parseInt((event.target as HTMLInputElement).value, 10);
+                if (!isNaN(val)) setVmCopySpeedLimitMBps(val);
+              }}
+            />
+          </FieldPopover>
+        </StackItem>
+
+        <StackItem>
+          <FieldPopover
+            fieldId="rp-vm-keep"
+            label="Restore Point Keep Time (hours)"
+            description="How long the destination keeps earlier copies of a running VM's disks, so you can recover to an earlier moment. Longer needs more space at the destination. Default 24."
+          >
+            <NumberInput
+              id="rp-vm-keep"
+              value={restorePointKeepHours}
+              min={1}
+              max={8760}
+              onMinus={() => setRestorePointKeepHours(Math.max(1, restorePointKeepHours - 1))}
+              onPlus={() => setRestorePointKeepHours(Math.min(8760, restorePointKeepHours + 1))}
+              onChange={(event) => {
+                const val = parseInt((event.target as HTMLInputElement).value, 10);
+                if (!isNaN(val)) setRestorePointKeepHours(val);
               }}
             />
           </FieldPopover>

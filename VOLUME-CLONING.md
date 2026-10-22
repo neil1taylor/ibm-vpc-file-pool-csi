@@ -59,7 +59,7 @@ The CSI specification defines volume cloning through `CreateVolume` with a `volu
        - Validates source SubVolume exists
        - Selects target share (prefer same share)
        - Creates target SubVolume CR with clone tracking fields
-       - Initiates data copy (sync or async based on size)
+       - Records the clone intent (cloneStatus=Pending); the clone worker copies the data later in a Job
        - Returns AllocationResult
        │
        ▼
@@ -85,6 +85,17 @@ spec:
     kind: PersistentVolumeClaim
     name: my-original-pvc     # Source PVC in the same namespace
 ```
+
+### Clone in the console
+
+The console can clone without YAML. Open a volume in the IBM VPC File Pools page (SubVolumes tab) and choose **Clone to new PVC**, on the details page or in the row menu.
+
+- The form has defaults: the name is `<source claim>-clone`, the size is the volume's size (you can make it bigger, not smaller), and the storage class, access mode and volume mode come from the source claim.
+- The namespace is fixed to the namespace of the source claim. This is a Kubernetes rule.
+- The action only creates a new claim. It never changes the source volume.
+- The page then shows the copy: the percent copied while the claim is `Pending`, then "ready" when it is `Bound`. If the copy fails, it shows the error, and the claim is not deleted.
+- The action is off, with a reason, when the volume is not `Bound`, when a copy into it is still running, or when its claim no longer exists.
+- **A clone of a running VM's disk is a plain file copy, and the cloned disk may not boot.** The form warns when a VM uses the source claim.
 
 ### CSI CreateVolume Request (from csi-provisioner)
 
@@ -230,22 +241,23 @@ The node agent gates pod access on clone completion. Kubelet retries `NodePublis
 
 The controller pod runs as a Deployment with no NFS mounts. It cannot directly execute `cp -a` against share filesystems. The Job-based approach:
 
-1. **Works without controller NFS access** — the Job pod mounts the share via a temp NFS PV/PVC.
+1. **Works without controller NFS access** — the Job pod mounts the share roots via temp NFS PVs/PVCs.
+5. **Needs no permissions in the user's namespace** — the Job runs in the driver's namespace (`kube-system`), so app namespaces need no `anyuid` grant.
 2. **Survives controller restarts** — Jobs are Kubernetes-managed; the CloneWorker re-discovers in-progress clones on startup.
 3. **Observable** — `kubectl get jobs` and `kubectl logs` provide standard debugging.
 4. **Resource-isolated** — clone CPU/memory usage does not affect the controller.
 
 ### Temporary Clone Resources
 
-Each clone operation creates three temporary resources, all labeled `storage.ibmcloud.io/clone-temp=true`:
+Each clone runs as a share data Job, the same mechanism that copies snapshots and restores. The Job and its claims are in the driver's namespace (`kube-system`); all resources carry the label `storage.ibmcloud.io/share-data-job=<job name>`:
 
 | Resource | Name Pattern | Purpose |
 |----------|-------------|---------|
-| PV | `clone-tgt-<subvolume>` | NFS mount to target share root |
-| PVC | `clone-tgt-<subvolume>` | Binds to the temp PV |
-| Job | `clone-<subvolume>` | Runs `cp -a` + chown/chmod |
+| PV | `share-data-clone-<subvolume>-s0` (and `-s1` when source and target are on different shares) | NFS mount of a share root, reclaim policy `Retain` so deleting it never touches the share |
+| PVC | same as the PV, in `kube-system` | Binds to the temp PV |
+| Job | `share-data-clone-<subvolume>` | Runs `cp -a` from the source folder to the clone's folder, then `chown -R` and `chmod` |
 
-All three are cleaned up after the clone completes (success or failure). Jobs have `ttlSecondsAfterFinished: 600` as a safety net.
+Long names are shortened with a hash. All of them are removed after the clone completes (success or failure). If the clone is deleted while its copy runs, the delete first stops the Job and waits until its pod is gone.
 
 ### Architecture Diagram
 
@@ -268,8 +280,8 @@ All three are cleaned up after the clone completes (success or failure). Jobs ha
 │                                                                       │
 │   Polls every 10s for SubVolumes with cloneStatus=Pending/InProgress │
 │       │                                                               │
-│       ├── Create temp NFS PV + PVC for target share                  │
-│       ├── Create clone Job (cp -a + chown)                           │
+│       ├── Create temp NFS PVs + PVCs for the share roots (kube-system)│
+│       ├── Create share data Job (cp -a + chown)                      │
 │       ├── Poll Job until succeeded/failed                            │
 │       ├── Update SubVolume: Complete or Failed                       │
 │       └── Cleanup temp resources                                     │
@@ -324,7 +336,7 @@ type SubVolumeStatus struct {
     // ... existing fields ...
 
     // CloneStatus tracks the progress of an asynchronous clone operation.
-    // Empty for non-clone SubVolumes and completed synchronous clones.
+    // Empty for non-clone SubVolumes.
     // +kubebuilder:validation:Enum=Pending;InProgress;Complete;Failed
     // +optional
     CloneStatus string `json:"cloneStatus,omitempty"`
@@ -559,17 +571,16 @@ type PoolManager interface {
     // ... existing methods ...
 
     // CloneVolume creates a new SubVolume that is a copy of an existing one.
-    // For small volumes (below syncThreshold), the copy completes before returning.
-    // For large volumes, the copy runs asynchronously -- the SubVolume CR is
-    // created with cloneStatus=Pending and the background worker completes the copy.
-    CloneVolume(ctx context.Context, sourceVolumeID string, req AllocationRequest, syncThresholdGB int64) (*AllocationResult, error)
+    // The copy always runs asynchronously -- the SubVolume CR is created with
+    // cloneStatus=Pending and the clone worker completes the copy with a Job.
+    CloneVolume(ctx context.Context, sourceVolumeID string, req AllocationRequest) (*AllocationResult, error)
 }
 ```
 
 ### CloneVolume Implementation (Pseudocode)
 
 ```go
-func (m *Manager) CloneVolume(ctx context.Context, sourceVolumeID string, req AllocationRequest, syncThresholdGB int64) (*AllocationResult, error) {
+func (m *Manager) CloneVolume(ctx context.Context, sourceVolumeID string, req AllocationRequest) (*AllocationResult, error) {
     m.mu.Lock()
     defer m.mu.Unlock()
 
@@ -610,31 +621,11 @@ func (m *Manager) CloneVolume(ctx context.Context, sourceVolumeID string, req Al
         return nil, err
     }
 
-    // 5. Determine sync vs async
-    isSameShare := share.ShareID == sourceSV.Spec.ShareID
-    isSmallEnough := sourceSV.Spec.RequestedGB <= syncThresholdGB
-    doSync := isSameShare && isSmallEnough && m.nfsOps != nil
+    // 5. Create SubVolume CR with cloneStatus=Pending.
+    //    The clone worker picks it up and runs a copy Job.
 
-    subPath := fmt.Sprintf("/pvcs/%s", req.PVName)
-
-    if doSync {
-        // 6a. Synchronous clone
-        srcPath, _ := util.SafeJoin(m.stagingBasePath, sourceSV.Spec.SubPath)
-        dstPath, _ := util.SafeJoin(m.stagingBasePath, subPath)
-        if err := m.nfsOps.CopyDir(srcPath, dstPath); err != nil {
-            return nil, fmt.Errorf("clone copy: %w", err)
-        }
-        // Create SubVolume CR with cloneStatus=Complete
-        // ...
-    } else {
-        // 6b. Asynchronous clone
-        // Create SubVolume CR with cloneStatus=Pending
-        // Launch background worker
-        // ...
-    }
-
-    // 7. Update pool capacity tracking
-    // 8. Return AllocationResult
+    // 6. Update pool capacity tracking
+    // 7. Return AllocationResult
 }
 ```
 
@@ -664,13 +655,6 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 func (d *Driver) createVolumeFromClone(ctx context.Context, req *csi.CreateVolumeRequest, sourceVolumeID, poolName string, requiredGB int64, zone string) (*csi.CreateVolumeResponse, error) {
     params := req.GetParameters()
 
-    syncThreshold := int64(10) // default 10 GB
-    if t := params["cloneSyncThresholdGB"]; t != "" {
-        if parsed, err := strconv.ParseInt(t, 10, 64); err == nil {
-            syncThreshold = parsed
-        }
-    }
-
     allocReq := pool.AllocationRequest{
         PVName:       req.GetName(),
         PVCName:      params["csi.storage.k8s.io/pvc/name"],
@@ -684,7 +668,7 @@ func (d *Driver) createVolumeFromClone(ctx context.Context, req *csi.CreateVolum
         Permissions:  params["permissions"],
     }
 
-    result, err := d.poolManager.CloneVolume(ctx, sourceVolumeID, allocReq, syncThreshold)
+    result, err := d.poolManager.CloneVolume(ctx, sourceVolumeID, allocReq)
     if err != nil {
         switch {
         case errors.Is(err, pool.ErrSourceNotFound):
@@ -894,8 +878,7 @@ New Prometheus metrics for clone operations:
 ```go
 // Clone operation counters
 pool_csi_clones_total{pool, status}           // Total clone operations (success/error)
-pool_csi_clone_duration_seconds{pool}          // Time taken for synchronous clones
-pool_csi_clone_async_duration_seconds{pool}    // Time taken for async clones (start to complete)
+pool_csi_clone_duration_seconds{pool}          // Time from the clone worker picking up a clone to the end of its copy Job
 
 // Clone state gauges
 pool_csi_clones_pending{pool}                  // Number of clones in Pending state
@@ -913,8 +896,7 @@ pool_csi_clones_failed{pool}                   // Number of clones in Failed sta
 
 | Test Case | Description |
 |-----------|-------------|
-| `TestCloneVolume_SyncPath` | Clone of a small volume completes synchronously, SubVolume CR has `cloneStatus=Complete` |
-| `TestCloneVolume_AsyncPath` | Clone of a large volume returns immediately, SubVolume CR has `cloneStatus=Pending` |
+| `TestCloneVolume_AsyncPath` | Clone returns immediately, SubVolume CR has `cloneStatus=Pending` |
 | `TestCloneVolume_SameShare` | Clone lands on the same share when source share has capacity |
 | `TestCloneVolume_CrossShare` | Clone lands on a different share when source share is full |
 | `TestCloneVolume_SourceNotFound` | Returns `ErrSourceNotFound` when source SubVolume does not exist |
@@ -955,7 +937,7 @@ All tests use `FakeNFSOperations` and the fake K8s client. The `FakeNFSOperation
 
 ### Integration Tests (E2E)
 
-These require a live ROKS cluster with the driver deployed:
+These require a live ROKS or ROVS cluster with the driver deployed:
 
 | Test Case | Description |
 |-----------|-------------|
@@ -977,7 +959,7 @@ Volume cloning is **independent of Phase 4a (snapshots)**. Cloning does not requ
 | `NFSOperations.CopyDir` | Yes | Yes | Yes -- same `cp -a` mechanism |
 | `SubVolume.Status.CloneStatus` | No | Yes | No -- new field |
 | `Snapshot` CRD | Yes | No | No |
-| Background worker | No (snapshots are sync) | Yes (for async clones) | No |
+| Background worker | No (snapshots are sync) | Yes | No |
 | `CLONE_VOLUME` capability | No | Yes | No |
 | Node publish gate | No | Yes | No |
 | Share selection preference | No | Yes (prefer source share) | No |
@@ -998,7 +980,7 @@ The following must exist before implementing cloning:
 3. CSI Controller: createVolumeFromClone() handler
 4. CSI Controller: Add CLONE_VOLUME capability
 5. Node Agent: Clone status gate in NodePublishVolume
-6. Background clone worker (for async path)
+6. Background clone worker
 7. Unit tests for all components
 8. E2E tests
 ```
@@ -1007,11 +989,7 @@ The following must exist before implementing cloning:
 
 ## StorageClass Parameters
 
-New parameters for clone behavior:
-
-| Parameter | Required | Default | Description |
-|-----------|----------|---------|-------------|
-| `cloneSyncThresholdGB` | No | `10` | SubVolumes at or below this size (in GB) are cloned synchronously. Above this size, cloning is asynchronous. Set to `0` to force all clones async. Set to `32000` to force all clones sync (use with caution). |
+There are no clone-specific StorageClass parameters. Earlier versions had a synchronous path for small volumes, controlled by `cloneSyncThresholdGB`; it was removed because the controller has no NFS access. If a StorageClass still sets `cloneSyncThresholdGB`, it is ignored.
 
 ---
 
@@ -1021,7 +999,7 @@ New parameters for clone behavior:
 
 2. **Full data copy, not copy-on-write.** Every clone doubles the storage consumption. NFS does not support reflinks, snapshots, or any deduplication mechanism that would make cloning space-efficient.
 
-3. **Async clones delay pod startup.** When a large SubVolume is cloned asynchronously, the pod referencing the clone PVC will stay in `ContainerCreating` until the copy completes. This can be minutes for large data sets.
+3. **Clones delay pod startup.** Every clone is asynchronous, so the pod referencing the clone PVC will stay in `ContainerCreating` until the copy completes. This can be minutes for large data sets.
 
 4. **Cross-share clones are slower.** Data must traverse the network twice (NFS read from source share, NFS write to target share). Performance depends on VPC network bandwidth between the NFS servers and the node performing the copy.
 

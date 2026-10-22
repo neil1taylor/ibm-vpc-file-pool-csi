@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/hooks"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/k8s"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/util"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -45,6 +47,18 @@ const (
 
 	// replJobNamespace is the namespace where replication Jobs are created.
 	replJobNamespace = "kube-system"
+
+	// pausedAnnotation pauses a policy while it is set to "true". The controller
+	// sets it after maxRetries; a person removes it to resume.
+	pausedAnnotation = "storage.ibmcloud.io/paused"
+
+	// skippedRunningVMPrefix starts the status error of a volume that the
+	// controller did not copy because a running VM uses it.
+	skippedRunningVMPrefix = "skipped: in use by running VM"
+
+	// kubevirtPodLabel marks KubeVirt pods. Its value is "virt-launcher" for a
+	// VM pod and "hotplug-disk" for a pod that holds a hot-plugged disk.
+	kubevirtPodLabel = "kubevirt.io"
 )
 
 // ReplicationController manages cross-region replication of SubVolume data.
@@ -56,6 +70,10 @@ type ReplicationController struct {
 	directClient client.Client
 	nfsOps       NFSOperations
 	orchestrator *hooks.Orchestrator
+
+	// vmCopier copies the disks of running VMs. If nil, their volumes are
+	// skipped.
+	vmCopier VMCopier
 
 	// replicationImage is the container image used for direct-NFS replication Jobs (rsync).
 	replicationImage string
@@ -75,6 +93,14 @@ type ReplicationController struct {
 	// by sorting SubVolumes oldest-first when parallelism limits apply.
 	lastSubVolumeSyncTimes map[string]time.Time
 
+	// lastReceiverChecks tracks when each receiver-mode policy's receiver was last
+	// checked, keyed by policy name.
+	lastReceiverChecks map[string]time.Time
+
+	// results holds, per policy, the results of volumes whose Job finished
+	// in the current cycle. See processPolicy.
+	results map[string]map[string]cycleResult
+
 	mu sync.Mutex
 
 	// nowFunc is used for time operations (injectable for tests).
@@ -91,6 +117,8 @@ func NewReplicationController(k8sClient k8s.Client, directClient client.Client, 
 		interval:               DefaultReplicationInterval,
 		lastSyncTimes:          make(map[string]time.Time),
 		lastSubVolumeSyncTimes: make(map[string]time.Time),
+		lastReceiverChecks:     make(map[string]time.Time),
+		results:                make(map[string]map[string]cycleResult),
 		nowFunc:                time.Now,
 	}
 }
@@ -152,8 +180,16 @@ func (rc *ReplicationController) processOnce(ctx context.Context) {
 	for i := range policies {
 		policy := &policies[i]
 
+		// Check the receiver of a receiver-mode policy: at once for a new policy, then
+		// once per schedule. The result only explains; it never stops a sync.
+		checkEvery := DefaultReplicationInterval
+		if d, perr := time.ParseDuration(policy.Spec.Schedule); perr == nil {
+			checkEvery = d
+		}
+		rc.maybeCheckReceiver(ctx, policy, checkEvery)
+
 		// Handle pause/resume via annotation.
-		annotationPaused := policy.Annotations["storage.ibmcloud.io/paused"] == "true"
+		annotationPaused := policy.Annotations[pausedAnnotation] == "true"
 
 		if annotationPaused {
 			// Pause requested — update status if needed and skip.
@@ -168,9 +204,11 @@ func (rc *ReplicationController) processOnce(ctx context.Context) {
 			continue
 		}
 
-		// Resume: annotation removed but status still Paused.
+		// Resume: annotation removed but status still Paused. Start counting
+		// failures afresh, or one new failure would pause the policy again.
 		if policy.Status.Phase == "Paused" {
 			policy.Status.Phase = "Active"
+			policy.Status.ConsecutiveFailures = 0
 			if err := rc.k8sClient.UpdateReplicationPolicyStatus(ctx, policy); err != nil {
 				klog.ErrorS(err, "Failed to resume policy", "policy", policy.Name)
 			} else {
@@ -191,14 +229,41 @@ func (rc *ReplicationController) processOnce(ctx context.Context) {
 			continue
 		}
 
-		// Check if it's time to sync.
+		// Check if it's time to sync. Copies of running VM disks move forward
+		// on every tick.
 		if !rc.isDue(policy.Name, scheduleInterval) {
+			rc.advanceVMCopies(ctx, policy)
 			continue
 		}
 
 		// Process this policy (poll-based: create or check Jobs).
 		rc.processPolicy(ctx, policy)
 	}
+}
+
+// cycleResult is the result of one volume's Job in the current cycle.
+type cycleResult struct {
+	status  v1alpha1.SubVolumeReplicationStatus
+	syncErr string // "" if the copy succeeded
+}
+
+// cycleResults returns the results recorded so far in the policy's current
+// cycle. Only the controller goroutine uses it.
+func (rc *ReplicationController) cycleResults(policyName string) map[string]cycleResult {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	r := rc.results[policyName]
+	if r == nil {
+		r = make(map[string]cycleResult)
+		rc.results[policyName] = r
+	}
+	return r
+}
+
+func (rc *ReplicationController) clearCycleResults(policyName string) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	delete(rc.results, policyName)
 }
 
 // isDue returns true if the policy is due for a replication cycle.
@@ -281,6 +346,7 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 
 	// Update SubVolume count metric.
 	metrics.ReplicationSubVolumeCount.WithLabelValues(policyName, sourcePool).Set(float64(len(matched)))
+	total := len(matched)
 
 	// 2a. Run pre-sync hooks.
 	if rc.orchestrator != nil && len(policy.Spec.PreSyncHooks) > 0 {
@@ -300,25 +366,82 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 	var svStatuses []v1alpha1.SubVolumeReplicationStatus
 	var syncErrors []string
 	activeJobs := int32(0)
+	skipped := 0
+
+	// Disks of running VMs take the VM copy path, if it is on.
+	matched, vmRes := rc.processVMVolumes(ctx, policy, matched, true)
+	svStatuses = append(svStatuses, vmRes.statuses...)
+
+	// A volume whose Job finished in this cycle keeps its result, and gets no
+	// new Job, until every volume of the cycle has finished. Otherwise a
+	// cycle with all Jobs finished at once might never come, and failures
+	// would never be counted.
+	// A status keeps the volume's last good sync, so the age of the last good
+	// copy stays visible while a new copy runs or after one fails.
+	prevStatus := map[string]v1alpha1.SubVolumeReplicationStatus{}
+	for _, st := range policy.Status.SubVolumeStatuses {
+		prevStatus[st.SubVolumeName] = st
+	}
+	carry := func(name, lastError string) v1alpha1.SubVolumeReplicationStatus {
+		st := prevStatus[name]
+		st.SubVolumeName = name
+		st.LastError = lastError
+		st.VMCopy = nil
+		return st
+	}
+
+	round := rc.cycleResults(policyName)
+	finish := func(st v1alpha1.SubVolumeReplicationStatus, syncErr string) {
+		round[st.SubVolumeName] = cycleResult{status: st, syncErr: syncErr}
+		svStatuses = append(svStatuses, st)
+		if syncErr != "" {
+			syncErrors = append(syncErrors, syncErr)
+		}
+	}
 
 	for _, sv := range matched {
 		svCopy := sv
 
+		// A stopped VM's disk with instant snapshots is a chain of files; a
+		// copy of its folder would give the far site an old disk.img. It is
+		// copied by the VM path while its VM runs.
+		if len(svCopy.Status.DiskChain) > 0 {
+			finish(carry(svCopy.Name, "the disk has instant snapshots, so it is copied only while its VM runs; or remove them with kubectl pool-snapshots flatten"), "")
+			continue
+		}
+
+		if r, ok := round[svCopy.Name]; ok {
+			svStatuses = append(svStatuses, r.status)
+			if r.syncErr != "" {
+				syncErrors = append(syncErrors, r.syncErr)
+			}
+			continue
+		}
+
 		// Check if a Job already exists for this SubVolume.
-		done, succeeded, bytesWritten, checkErr := rc.checkReplicationJob(ctx, policyName, svCopy.Name)
+		done, succeeded, jobRes, checkErr := rc.checkReplicationJob(ctx, policyName, svCopy.Name)
+		bytesWritten := jobRes.BytesWritten
 		if checkErr != nil {
 			klog.ErrorS(checkErr, "Failed to check replication Job status",
 				"policy", policyName, "subVolume", svCopy.Name)
 			syncErrors = append(syncErrors, fmt.Sprintf("%s: check job: %v", svCopy.Name, checkErr))
-			svStatuses = append(svStatuses, v1alpha1.SubVolumeReplicationStatus{
-				SubVolumeName: svCopy.Name,
-				LastError:     fmt.Sprintf("check job: %v", checkErr),
-			})
+			svStatuses = append(svStatuses, carry(svCopy.Name, fmt.Sprintf("check job: %v", checkErr)))
 			continue
 		}
 
 		if done {
 			if succeeded {
+				// A VM that started during the copy wrote to the disk while it
+				// was read, so the copy may not boot.
+				if vmPod, vmErr := rc.runningVMPod(ctx, &svCopy); vmErr != nil || vmPod != "" {
+					msg := fmt.Sprintf("VM pod %s/%s started during the copy; the copy may not boot", svCopy.Spec.PVCNamespace, vmPod)
+					if vmErr != nil {
+						msg = fmt.Sprintf("check for a running VM after the copy: %v", vmErr)
+					}
+					finish(carry(svCopy.Name, msg), fmt.Sprintf("%s: %s", svCopy.Name, msg))
+					rc.cleanupReplicationResources(ctx, policy, svCopy.Name)
+					continue
+				}
 				// Job succeeded — record success and cleanup.
 				now := metav1.NewTime(rc.nowFunc())
 				svStatus := v1alpha1.SubVolumeReplicationStatus{
@@ -328,16 +451,19 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 				if bytesWritten > 0 {
 					svStatus.BytesSynced = &bytesWritten
 				}
-				svStatuses = append(svStatuses, svStatus)
+				if jobRes.RestorePoints > 0 {
+					svStatus.RestorePoints = jobRes.RestorePoints
+					if jobRes.OldestRestorePoint != nil {
+						t := metav1.NewTime(*jobRes.OldestRestorePoint)
+						svStatus.OldestRestorePoint = &t
+					}
+				}
+				finish(svStatus, "")
 				rc.recordSubVolumeSyncTime(policyName, svCopy.Name)
 				rc.cleanupReplicationResources(ctx, policy, svCopy.Name)
 			} else {
 				// Job failed.
-				syncErrors = append(syncErrors, fmt.Sprintf("%s: replication Job failed", svCopy.Name))
-				svStatuses = append(svStatuses, v1alpha1.SubVolumeReplicationStatus{
-					SubVolumeName: svCopy.Name,
-					LastError:     "replication Job failed after retries",
-				})
+				finish(carry(svCopy.Name, "replication Job failed after retries"), fmt.Sprintf("%s: replication Job failed", svCopy.Name))
 				rc.cleanupReplicationResources(ctx, policy, svCopy.Name)
 			}
 			continue
@@ -354,10 +480,7 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 			activeJobs++
 			klog.V(6).InfoS("Replication Job still running",
 				"policy", policyName, "subVolume", svCopy.Name, "job", jobName)
-			svStatuses = append(svStatuses, v1alpha1.SubVolumeReplicationStatus{
-				SubVolumeName: svCopy.Name,
-				LastError:     "sync in progress",
-			})
+			svStatuses = append(svStatuses, carry(svCopy.Name, "sync in progress"))
 			continue
 		}
 
@@ -366,35 +489,48 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 			klog.V(4).InfoS("Parallel sync limit reached, deferring SubVolume",
 				"policy", policyName, "subVolume", svCopy.Name,
 				"activeJobs", activeJobs, "maxParallel", maxParallel)
-			svStatuses = append(svStatuses, v1alpha1.SubVolumeReplicationStatus{
-				SubVolumeName: svCopy.Name,
-				LastError:     "deferred: parallel limit",
-			})
+			svStatuses = append(svStatuses, carry(svCopy.Name, "deferred: parallel limit"))
+			continue
+		}
+
+		// A file copy of a running VM's disk mixes data from different
+		// moments and may not boot, so the controller never makes one.
+		vmPod, vmErr := rc.runningVMPod(ctx, &svCopy)
+		if vmErr != nil {
+			syncErrors = append(syncErrors, fmt.Sprintf("%s: check for a running VM: %v", svCopy.Name, vmErr))
+			svStatuses = append(svStatuses, carry(svCopy.Name, fmt.Sprintf("check for a running VM: %v", vmErr)))
+			continue
+		}
+		if vmPod != "" {
+			klog.InfoS("Skipping replication of a volume in use by a running VM",
+				"policy", policyName, "subVolume", svCopy.Name,
+				"pod", klog.KRef(svCopy.Spec.PVCNamespace, vmPod))
+			skipped++
+			svStatuses = append(svStatuses, carry(svCopy.Name, fmt.Sprintf("%s %s/%s; a file copy of a running VM disk may not boot",
+				skippedRunningVMPrefix, svCopy.Spec.PVCNamespace, vmPod)))
 			continue
 		}
 
 		// Create PV/PVC/Job for this SubVolume.
 		if createErr := rc.createReplicationResources(ctx, policy, &svCopy); createErr != nil {
+			klog.ErrorS(createErr, "Failed to create replication resources", "policy", policyName, "subVolume", svCopy.Name)
 			syncErrors = append(syncErrors, fmt.Sprintf("%s: create resources: %v", svCopy.Name, createErr))
-			svStatuses = append(svStatuses, v1alpha1.SubVolumeReplicationStatus{
-				SubVolumeName: svCopy.Name,
-				LastError:     fmt.Sprintf("create resources: %v", createErr),
-			})
+			svStatuses = append(svStatuses, carry(svCopy.Name, fmt.Sprintf("create resources: %v", createErr)))
 			rc.cleanupReplicationResources(ctx, policy, svCopy.Name)
 			continue
 		}
 
 		activeJobs++
-		svStatuses = append(svStatuses, v1alpha1.SubVolumeReplicationStatus{
-			SubVolumeName: svCopy.Name,
-			LastError:     "sync in progress",
-		})
+		svStatuses = append(svStatuses, carry(svCopy.Name, "sync in progress"))
 	}
 
 	// 4. Update policy status.
 	duration := rc.nowFunc().Sub(start)
 
-	// Check if all Jobs completed (no active or deferred).
+	// Check if all Jobs completed (no active or deferred). A VM disk copy in
+	// flight does not count: it moves forward on every tick, and a new one
+	// starts at every due tick, so waiting for it would hold the results of
+	// the other volumes for ever and they would never be copied again.
 	allComplete := true
 	for _, svs := range svStatuses {
 		if svs.LastError == "sync in progress" || svs.LastError == "deferred: parallel limit" {
@@ -430,17 +566,15 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 		return
 	}
 
-	// All SubVolumes processed — evaluate results.
-	// Filter out non-error statuses from syncErrors count.
-	realErrors := filterRealErrors(syncErrors)
-
-	if len(realErrors) > 0 {
-		combinedErr := fmt.Sprintf("%d/%d SubVolumes failed to sync", len(realErrors), len(matched))
-		rc.handleFailure(ctx, policy, combinedErr, start)
+	// All SubVolumes processed — evaluate results. The next cycle starts
+	// afresh.
+	rc.clearCycleResults(policyName)
+	if len(syncErrors) > 0 {
+		combinedErr := fmt.Sprintf("%d/%d SubVolumes failed to sync", len(syncErrors), total)
+		// Set the per-volume statuses first, so the one status write in
+		// handleFailure carries them with the failure count.
 		policy.Status.SubVolumeStatuses = svStatuses
-		if err := rc.k8sClient.UpdateReplicationPolicyStatus(ctx, policy); err != nil {
-			klog.ErrorS(err, "Failed to update policy status after partial failure", "policy", policyName)
-		}
+		rc.handleFailure(ctx, policy, combinedErr, start)
 		return
 	}
 
@@ -452,14 +586,15 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 		}
 	}
 
-	// All succeeded.
+	// All succeeded, apart from skipped VM volumes. Those do not count as a
+	// failed cycle, so they never pause the policy for the other volumes.
 	now := metav1.NewTime(rc.nowFunc())
 	policy.Status.Phase = "Active"
 	policy.Status.LastSyncTime = &now
 	policy.Status.LastSyncDuration = duration.String()
 	policy.Status.SubVolumeStatuses = svStatuses
 	policy.Status.ConsecutiveFailures = 0
-	policy.Status.LastError = ""
+	policy.Status.LastError = vmProblemsError(skipped, vmRes.failed)
 
 	if err := rc.k8sClient.UpdateReplicationPolicyStatus(ctx, policy); err != nil {
 		klog.ErrorS(err, "Failed to update policy status after successful sync", "policy", policyName)
@@ -474,18 +609,45 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 	klog.V(2).InfoS("Replication cycle completed",
 		"policy", policyName,
 		"sourcePool", sourcePool,
-		"subVolumes", len(matched),
+		"subVolumes", total,
 		"duration", duration.String(),
 	)
 }
 
-// filterRealErrors returns only errors that are actual failures (not in-progress markers).
-func filterRealErrors(errors []string) []string {
-	var real []string
-	for _, e := range errors {
-		real = append(real, e)
+// runningVMPod returns the name of a KubeVirt pod that is running or starting
+// and mounts the SubVolume's PVC, or "" if there is none.
+func (rc *ReplicationController) runningVMPod(ctx context.Context, sv *v1alpha1.SubVolume) (string, error) {
+	pod, _, err := rc.vmPodForClaim(ctx, sv.Spec.PVCNamespace, sv.Spec.PVCName)
+	if err != nil || pod == nil {
+		return "", err
 	}
-	return real
+	return pod.Name, nil
+}
+
+// vmPodForClaim returns a KubeVirt pod that is running or starting and mounts
+// the claim, and the pod's volume name for it, or nil if there is none. Both a
+// VM pod and a hot-plug disk pod count, because both mean a running VM writes
+// to the disk; a VM pod is preferred.
+func (rc *ReplicationController) vmPodForClaim(ctx context.Context, namespace, claim string) (*corev1.Pod, string, error) {
+	return findVMPodForClaim(ctx, rc.directClient, namespace, claim)
+}
+
+// vmProblemsError is the policy error for a cycle that skipped VM volumes or
+// whose VM disk copies failed. Neither counts as a failed cycle, so neither
+// pauses the policy for its other volumes.
+func vmProblemsError(skipped, failed int) string {
+	var parts []string
+	switch skipped {
+	case 0:
+	case 1:
+		parts = append(parts, "1 SubVolume skipped: in use by a running VM")
+	default:
+		parts = append(parts, fmt.Sprintf("%d SubVolumes skipped: in use by a running VM", skipped))
+	}
+	if failed > 0 {
+		parts = append(parts, fmt.Sprintf("%d VM disk copies failed; see subVolumeStatuses", failed))
+	}
+	return strings.Join(parts, "; ")
 }
 
 // isReceiverMode returns true if the policy uses driver-to-driver replication.
@@ -531,7 +693,7 @@ func (rc *ReplicationController) createDirectNFSResources(ctx context.Context, p
 
 	// 5. Create the replication Job.
 	if err := rc.ensureReplicationJob(ctx, policy, sv); err != nil {
-		return fmt.Errorf("Job: %w", err)
+		return fmt.Errorf("job: %w", err)
 	}
 
 	klog.V(2).InfoS("Created replication Job",
@@ -562,7 +724,7 @@ func (rc *ReplicationController) createReceiverModeResources(ctx context.Context
 
 	// 3. Create the sync-client Job (no dest PV/PVC needed).
 	if err := rc.ensureReceiverModeJob(ctx, policy, sv); err != nil {
-		return fmt.Errorf("Job: %w", err)
+		return fmt.Errorf("job: %w", err)
 	}
 
 	klog.V(2).InfoS("Created receiver-mode replication Job",
@@ -915,6 +1077,48 @@ func (rc *ReplicationController) ensureReplicationPVC(ctx context.Context, pvNam
 	return nil
 }
 
+// metadataScript writes the metadata file of a volume at the destination. With
+// atomic set it writes a new file and renames it, so a moment that links the
+// old file keeps its contents.
+func metadataScript(destBasePath, subPath, metaJSON string, atomic bool) string {
+	file := "/dest" + destBasePath + subPath + "/.subvolume-metadata.json"
+	if !atomic {
+		return fmt.Sprintf("echo \"Writing metadata sidecar...\"\ncat > %s <<'METADATA'\n%s\nMETADATA\n", util.ShellQuote(file), metaJSON)
+	}
+	return fmt.Sprintf("echo \"Writing metadata sidecar...\"\ncat > %[1]s <<'METADATA'\n%[2]s\nMETADATA\nmv %[1]s %[3]s\n",
+		util.ShellQuote(file+".tmp"), metaJSON, util.ShellQuote(file))
+}
+
+// momentsScript keeps the synced volume as a moment: a folder of hard links in
+// .moments next to the destination. It removes moments older than the keep
+// time, and reports in the Job's termination message how many earlier moments
+// are left besides the newest (as a VM disk counts its restore points) and the
+// time of the oldest moment. It returns "" when moments are off.
+func momentsScript(destBasePath, subPath string, keepHours *int32) string {
+	if keepHours == nil || *keepHours <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(`echo "Keeping a moment..."
+moments=%[1]s
+mkdir -p "$moments"
+stamp=$(date -u +%%Y%%m%%dT%%H%%M%%SZ)
+[ -e "$moments/$stamp" ] || cp -a -l %[2]s "$moments/$stamp"
+cutoff=$(date -u -d "-%[3]d hours" +%%Y%%m%%dT%%H%%M%%SZ)
+for d in "$moments"/*; do
+  [ -d "$d" ] || continue
+  if [[ "$(basename "$d")" < "$cutoff" ]]; then rm -r -f -- "$d"; fi
+done
+count=$(find "$moments" -mindepth 1 -maxdepth 1 -type d | wc -l)
+older=$((count - 1))
+oldest=""
+for d in "$moments"/*; do
+  [ -d "$d" ] && { oldest=$(basename "$d"); break; }
+done
+oldest_iso=$(date -u -d "${oldest:0:4}-${oldest:4:2}-${oldest:6:2} ${oldest:9:2}:${oldest:11:2}:${oldest:13:2}" +%%Y-%%m-%%dT%%H:%%M:%%SZ)
+printf '{"bytesWritten":0,"restorePoints":%%s,"oldestRestorePoint":"%%s"}' "$older" "$oldest_iso" > /dev/termination-log
+`, util.ShellQuote("/dest"+destBasePath+"/.moments"+subPath), util.ShellQuote("/dest"+destBasePath+subPath), *keepHours)
+}
+
 // ensureReplicationJob creates a Job that runs rsync from source to destination.
 func (rc *ReplicationController) ensureReplicationJob(ctx context.Context, policy *v1alpha1.ReplicationPolicy, sv *v1alpha1.SubVolume) error {
 	policyName := policy.Name
@@ -928,8 +1132,10 @@ func (rc *ReplicationController) ensureReplicationJob(ctx context.Context, polic
 		return nil // already exists
 	}
 
-	// Build rsync options.
-	useIncremental := policy.Spec.IncrementalSync == nil || *policy.Spec.IncrementalSync
+	// Build rsync options. Moments are hard links, so the copy must write a
+	// changed file as a new file: rsync does, cp does not.
+	keepMoments := policy.Spec.MomentKeepHours != nil && *policy.Spec.MomentKeepHours > 0
+	useIncremental := policy.Spec.IncrementalSync == nil || *policy.Spec.IncrementalSync || keepMoments
 
 	bwlimit := ""
 	if policy.Spec.BandwidthLimitMbps > 0 {
@@ -940,7 +1146,7 @@ func (rc *ReplicationController) ensureReplicationJob(ctx context.Context, polic
 
 	extraArgs := ""
 	for _, arg := range policy.Spec.RsyncOptions {
-		extraArgs += " " + arg
+		extraArgs += " " + util.ShellQuote(arg)
 	}
 
 	// Build metadata JSON for the sidecar file.
@@ -957,37 +1163,33 @@ func (rc *ReplicationController) ensureReplicationJob(ctx context.Context, polic
 	destBasePath := policy.Spec.DestinationBasePath
 
 	var script string
+	destDir := util.ShellQuote("/dest" + destBasePath + subPath)
+	destSync := util.ShellQuote("/dest" + destBasePath + subPath + "/")
 	if useIncremental {
 		script = fmt.Sprintf(`set -euo pipefail
-echo "Replication: syncing %s -> %s%s"
-mkdir -p "/dest%s%s"
-rsync -a --delete %s %s %s "/source%s/" "/dest%s%s/"
-echo "Writing metadata sidecar..."
-cat > "/dest%s%s/.subvolume-metadata.json" <<'METADATA'
-%s
-METADATA
+echo %s
+mkdir -p %s
+rsync -a --delete --exclude=/.repl-staging-* %s%s %s %s
+%s%s
 echo "Replication complete."
-`, subPath, destBasePath, subPath,
-			destBasePath, subPath,
-			bwlimit, extraArgs, "", // empty string placeholder for cleaner formatting
-			subPath, destBasePath, subPath,
-			destBasePath, subPath,
-			string(metaJSON))
+`, util.ShellQuote("Replication: syncing "+subPath+" -> "+destBasePath+subPath),
+			destDir,
+			bwlimit, extraArgs, util.ShellQuote("/source"+subPath+"/"), destSync,
+			metadataScript(destBasePath, subPath, string(metaJSON), keepMoments),
+			momentsScript(destBasePath, subPath, policy.Spec.MomentKeepHours))
 	} else {
 		script = fmt.Sprintf(`set -euo pipefail
-echo "Replication: copying %s -> %s%s"
-mkdir -p "/dest%s%s"
-cp -a "/source%s/." "/dest%s%s/"
-echo "Writing metadata sidecar..."
-cat > "/dest%s%s/.subvolume-metadata.json" <<'METADATA'
+echo %s
+mkdir -p %s
+cp -a %s %s
+find %s -maxdepth 1 -name '.repl-staging-*' -delete
 %s
-METADATA
 echo "Replication complete."
-`, subPath, destBasePath, subPath,
-			destBasePath, subPath,
-			subPath, destBasePath, subPath,
-			destBasePath, subPath,
-			string(metaJSON))
+`, util.ShellQuote("Replication: copying "+subPath+" -> "+destBasePath+subPath),
+			destDir,
+			util.ShellQuote("/source"+subPath+"/."), destSync,
+			destDir,
+			metadataScript(destBasePath, subPath, string(metaJSON), false))
 	}
 
 	backoffLimit := int32(3)
@@ -1085,9 +1287,9 @@ echo "Replication complete."
 }
 
 // checkReplicationJob checks the status of a replication Job.
-// Returns (done, succeeded, bytesWritten, error). If done=false, the Job is still running or doesn't exist.
+// Returns (done, succeeded, result, error). If done=false, the Job is still running or doesn't exist.
 // bytesWritten is parsed from the pod's termination message (only for receiver-mode Jobs).
-func (rc *ReplicationController) checkReplicationJob(ctx context.Context, policyName, svName string) (bool, bool, int64, error) {
+func (rc *ReplicationController) checkReplicationJob(ctx context.Context, policyName, svName string) (bool, bool, replJobResult, error) {
 	jobName := replJobName(policyName, svName)
 
 	job := &batchv1.Job{}
@@ -1097,14 +1299,13 @@ func (rc *ReplicationController) checkReplicationJob(ctx context.Context, policy
 	}, job)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			return false, false, 0, nil // no Job yet
+			return false, false, replJobResult{}, nil // no Job yet
 		}
-		return false, false, 0, fmt.Errorf("getting replication Job %s/%s: %w", replJobNamespace, jobName, err)
+		return false, false, replJobResult{}, fmt.Errorf("getting replication Job %s/%s: %w", replJobNamespace, jobName, err)
 	}
 
 	if job.Status.Succeeded > 0 {
-		bytesWritten := rc.readBytesWrittenFromJob(ctx, job)
-		return true, true, bytesWritten, nil
+		return true, true, rc.readJobResult(ctx, job), nil
 	}
 
 	// Check if all retries exhausted.
@@ -1113,37 +1314,47 @@ func (rc *ReplicationController) checkReplicationJob(ctx context.Context, policy
 		backoffLimit = *job.Spec.BackoffLimit
 	}
 	if job.Status.Failed >= backoffLimit+1 {
-		return true, false, 0, nil
+		return true, false, replJobResult{}, nil
 	}
 
-	return false, false, 0, nil // still running
+	return false, false, replJobResult{}, nil // still running
 }
 
-// readBytesWrittenFromJob reads the bytesWritten value from the completed pod's
-// termination message. The sync-client writes JSON to /dev/termination-log.
-func (rc *ReplicationController) readBytesWrittenFromJob(ctx context.Context, job *batchv1.Job) int64 {
+// replJobResult is what a finished replication Job reports in its pod's
+// termination message (sync-client and apply-vm-disk modes).
+type replJobResult struct {
+	BytesWritten       int64      `json:"bytesWritten"`
+	RestorePoints      int32      `json:"restorePoints"`
+	OldestRestorePoint *time.Time `json:"oldestRestorePoint,omitempty"`
+	// WrongBase is true if a send-vm-disk Job found the far-site disk at
+	// another moment than the copy starts from, and DiskMoment says which.
+	WrongBase  bool   `json:"wrongBase,omitempty"`
+	DiskMoment string `json:"diskMoment,omitempty"`
+}
+
+// readJobResult reads the result from the completed pod's termination
+// message, which the Job writes as JSON to /dev/termination-log.
+func (rc *ReplicationController) readJobResult(ctx context.Context, job *batchv1.Job) replJobResult {
 	// List pods for this Job.
 	podList := &corev1.PodList{}
 	labels := job.Spec.Template.Labels
 	matchLabels := client.MatchingLabels(labels)
 	if err := rc.directClient.List(ctx, podList, matchLabels, client.InNamespace(job.Namespace)); err != nil {
 		klog.V(4).InfoS("Could not list pods for replication Job", "job", job.Name, "err", err)
-		return 0
+		return replJobResult{}
 	}
 
 	for _, pod := range podList.Items {
 		for _, cs := range pod.Status.ContainerStatuses {
 			if cs.State.Terminated != nil && cs.State.Terminated.Message != "" {
-				var msg struct {
-					BytesWritten int64 `json:"bytesWritten"`
-				}
-				if err := json.Unmarshal([]byte(cs.State.Terminated.Message), &msg); err == nil && msg.BytesWritten > 0 {
-					return msg.BytesWritten
+				var msg replJobResult
+				if err := json.Unmarshal([]byte(cs.State.Terminated.Message), &msg); err == nil && (msg.BytesWritten > 0 || msg.RestorePoints > 0 || msg.WrongBase) {
+					return msg
 				}
 			}
 		}
 	}
-	return 0
+	return replJobResult{}
 }
 
 // cleanupReplicationResources deletes the temporary PV, PVC, and Job for a replication sync.
@@ -1221,7 +1432,8 @@ func (rc *ReplicationController) handleFailure(ctx context.Context, policy *v1al
 	if maxRetries <= 0 {
 		maxRetries = 3 // default
 	}
-	if policy.Status.ConsecutiveFailures >= maxRetries {
+	autoPause := policy.Status.ConsecutiveFailures >= maxRetries
+	if autoPause {
 		policy.Status.Phase = "Paused"
 		klog.ErrorS(nil, "Replication policy paused after max retries exceeded",
 			"policy", policyName,
@@ -1232,6 +1444,19 @@ func (rc *ReplicationController) handleFailure(ctx context.Context, policy *v1al
 
 	if err := rc.k8sClient.UpdateReplicationPolicyStatus(ctx, policy); err != nil {
 		klog.ErrorS(err, "Failed to update policy status after failure", "policy", policyName)
+	}
+
+	// Set the pause annotation too, so the pause holds until a person removes
+	// it. Without it the next cycle would read the policy as resumed. This runs
+	// after the status update, because Update returns the stored status.
+	if autoPause {
+		if policy.Annotations == nil {
+			policy.Annotations = map[string]string{}
+		}
+		policy.Annotations[pausedAnnotation] = "true"
+		if err := rc.k8sClient.UpdateReplicationPolicy(ctx, policy); err != nil {
+			klog.ErrorS(err, "Failed to set pause annotation after max retries", "policy", policyName)
+		}
 	}
 
 	// Record metrics.

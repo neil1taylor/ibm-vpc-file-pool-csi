@@ -55,9 +55,21 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 	if d.k8sClient != nil {
 		existing, err := d.k8sClient.GetSubVolume(ctx, req.GetName())
 		if err == nil && existing != nil {
-			return &csi.CreateVolumeResponse{
-				Volume: subVolumeToCSIVolume(existing),
-			}, nil
+			// A failed clone has no usable data; do not report it as a volume.
+			if existing.Status.CloneStatus == "Failed" {
+				errMsg := "clone failed"
+				if existing.Status.CloneProgress != nil && existing.Status.CloneProgress.Error != "" {
+					errMsg = existing.Status.CloneProgress.Error
+				}
+				return nil, status.Errorf(codes.Internal, "clone previously failed for %s: %s", req.GetName(), errMsg)
+			}
+			// A restore or clone goes on to the pool manager, which checks
+			// its copy and answers with the content source.
+			if req.GetVolumeContentSource() == nil {
+				return &csi.CreateVolumeResponse{
+					Volume: subVolumeToCSIVolume(existing),
+				}, nil
+			}
 		}
 	}
 
@@ -82,31 +94,40 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 		}
 	}
 
+	// A volume that a backup restore is about to fill is held back from the
+	// start: a pod must not mount it empty.
+	restorePending := false
+	if d.k8sClient != nil && params["csi.storage.k8s.io/pvc/name"] != "" {
+		open, err := d.k8sClient.HasOpenRestore(ctx, params["csi.storage.k8s.io/pvc/namespace"], params["csi.storage.k8s.io/pvc/name"])
+		if err != nil {
+			return nil, status.Errorf(codes.Unavailable, "check for a backup restore: %v", err)
+		}
+		restorePending = open
+	}
+
 	// Delegate to Pool Manager
 	allocReq := pool.AllocationRequest{
-		PVName:       req.GetName(),
-		PVCName:      params["csi.storage.k8s.io/pvc/name"],
-		PVCNamespace: params["csi.storage.k8s.io/pvc/namespace"],
-		PoolName:     poolName,
-		RequestedGB:  requiredGB,
-		Zone:         zone,
-		Tier:         params["tier"],
-		UID:          parseOptionalInt64(params["uid"]),
-		GID:          parseOptionalInt64(params["gid"]),
-		Permissions:  params["permissions"],
+		PVName:         req.GetName(),
+		RestorePending: restorePending,
+		PVCName:        params["csi.storage.k8s.io/pvc/name"],
+		PVCNamespace:   params["csi.storage.k8s.io/pvc/namespace"],
+		PoolName:       poolName,
+		RequestedGB:    requiredGB,
+		Zone:           zone,
+		Tier:           params["tier"],
+		UID:            parseOptionalInt64(params["uid"]),
+		GID:            parseOptionalInt64(params["gid"]),
+		Permissions:    params["permissions"],
 	}
 
 	result, err := d.poolManager.Allocate(ctx, allocReq)
 	if err != nil {
+		if poolErr := poolCapacityError(poolName, err); poolErr != nil {
+			return nil, poolErr
+		}
 		switch {
 		case errors.Is(err, pool.ErrPoolNotFound):
 			return nil, status.Errorf(codes.NotFound, "pool %q not found", poolName)
-		case errors.Is(err, pool.ErrPoolExhausted):
-			return nil, status.Errorf(codes.ResourceExhausted, "pool %q has no available capacity", poolName)
-		case errors.Is(err, pool.ErrPoolExpanding):
-			return nil, status.Errorf(codes.Unavailable, "pool %q is expanding, retry shortly", poolName)
-		case errors.Is(err, pool.ErrShareCreationPending):
-			return nil, status.Errorf(codes.Unavailable, "pool %q is expanding, retry shortly", poolName)
 		default:
 			return nil, status.Errorf(codes.Internal, "allocation failed: %v", err)
 		}
@@ -194,6 +215,9 @@ func (d *Driver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest)
 		if errors.Is(err, pool.ErrSubVolumeNotFound) {
 			return &csi.DeleteVolumeResponse{}, nil
 		}
+		if retryErr := shareDataRetryError(err); retryErr != nil {
+			return nil, retryErr
+		}
 		return nil, status.Errorf(codes.Internal, "deallocation failed: %v", err)
 	}
 
@@ -271,16 +295,26 @@ func (d *Driver) ValidateVolumeCapabilities(_ context.Context, req *csi.Validate
 // subVolumeToCSIVolume converts a SubVolume CR to a CSI Volume for idempotent responses.
 func subVolumeToCSIVolume(sv *v1alpha1.SubVolume) *csi.Volume {
 	volumeID := fmt.Sprintf("%s/%s/%s", sv.Spec.PoolName, sv.Spec.ShareID, sv.Spec.PVName)
+	volCtx := map[string]string{
+		"server":  sv.Spec.ShareMountTargetIP,
+		"share":   sv.Spec.ShareExportPath,
+		"subDir":  sv.Spec.SubPath,
+		"pool":    sv.Spec.PoolName,
+		"shareID": sv.Spec.ShareID,
+	}
+	if sv.Spec.Permissions != "" {
+		volCtx["permissions"] = sv.Spec.Permissions
+	}
+	if sv.Spec.UID != nil {
+		volCtx["uid"] = strconv.FormatInt(*sv.Spec.UID, 10)
+	}
+	if sv.Spec.GID != nil {
+		volCtx["gid"] = strconv.FormatInt(*sv.Spec.GID, 10)
+	}
 	return &csi.Volume{
 		VolumeId:      volumeID,
 		CapacityBytes: sv.Spec.RequestedGB * (1 << 30),
-		VolumeContext: map[string]string{
-			"server":  sv.Spec.ShareMountTargetIP,
-			"share":   "/",
-			"subDir":  sv.Spec.SubPath,
-			"pool":    sv.Spec.PoolName,
-			"shareID": sv.Spec.ShareID,
-		},
+		VolumeContext: volCtx,
 	}
 }
 
@@ -319,11 +353,17 @@ func (d *Driver) createVolumeFromSnapshot(ctx context.Context, req *csi.CreateVo
 
 	result, err := d.poolManager.RestoreSnapshot(ctx, snapshotName, allocReq)
 	if err != nil {
+		if poolErr := poolCapacityError(poolName, err); poolErr != nil {
+			return nil, poolErr
+		}
+		if retryErr := shareDataRetryError(err); retryErr != nil {
+			return nil, retryErr
+		}
 		switch {
 		case errors.Is(err, pool.ErrSnapshotNotFound):
 			return nil, status.Errorf(codes.NotFound, "snapshot %q not found", snapshotName)
-		case errors.Is(err, pool.ErrPoolExhausted):
-			return nil, status.Errorf(codes.ResourceExhausted, "pool %q has no available capacity", poolName)
+		case errors.Is(err, pool.ErrRestoreTooSmall):
+			return nil, status.Error(codes.OutOfRange, err.Error())
 		default:
 			return nil, status.Errorf(codes.Internal, "restore snapshot failed: %v", err)
 		}
@@ -364,13 +404,6 @@ func (d *Driver) createVolumeFromSnapshot(ctx context.Context, req *csi.CreateVo
 func (d *Driver) createVolumeFromClone(ctx context.Context, req *csi.CreateVolumeRequest, sourceVolumeID, poolName string, requiredGB int64, zone string) (*csi.CreateVolumeResponse, error) {
 	params := req.GetParameters()
 
-	syncThreshold := int64(10) // default 10 GB
-	if t := params["cloneSyncThresholdGB"]; t != "" {
-		if parsed, err := strconv.ParseInt(t, 10, 64); err == nil {
-			syncThreshold = parsed
-		}
-	}
-
 	allocReq := pool.AllocationRequest{
 		PVName:       req.GetName(),
 		PVCName:      params["csi.storage.k8s.io/pvc/name"],
@@ -384,15 +417,16 @@ func (d *Driver) createVolumeFromClone(ctx context.Context, req *csi.CreateVolum
 		Permissions:  params["permissions"],
 	}
 
-	result, err := d.poolManager.CloneVolume(ctx, sourceVolumeID, allocReq, syncThreshold)
+	result, err := d.poolManager.CloneVolume(ctx, sourceVolumeID, allocReq)
 	if err != nil {
+		if poolErr := poolCapacityError(poolName, err); poolErr != nil {
+			return nil, poolErr
+		}
 		switch {
 		case errors.Is(err, pool.ErrSourceNotFound):
 			return nil, status.Errorf(codes.NotFound, "source volume not found")
-		case errors.Is(err, pool.ErrPoolExhausted):
-			return nil, status.Errorf(codes.ResourceExhausted, "pool %q has no available capacity", poolName)
-		case errors.Is(err, pool.ErrPoolExpanding):
-			return nil, status.Errorf(codes.Unavailable, "pool %q is expanding, retry shortly", poolName)
+		case errors.Is(err, pool.ErrSnapshotUnsupported):
+			return nil, status.Error(codes.FailedPrecondition, err.Error())
 		default:
 			return nil, status.Errorf(codes.Internal, "clone failed: %v", err)
 		}
@@ -444,8 +478,16 @@ func (d *Driver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotRequ
 	result, err := d.poolManager.CreateSnapshot(ctx, req.GetName(), req.GetSourceVolumeId(), req.GetParameters())
 	if err != nil {
 		switch {
+		case errors.Is(err, pool.ErrOperationInProgress):
+			return nil, status.Error(codes.Aborted, err.Error())
+		case errors.Is(err, pool.ErrInsufficientShareCapacity):
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		case errors.Is(err, pool.ErrSourceNotFound):
 			return nil, status.Errorf(codes.NotFound, "source volume not found")
+		case errors.Is(err, pool.ErrSnapshotUnsupported), errors.Is(err, pool.ErrSnapshotFailed):
+			return nil, status.Error(codes.FailedPrecondition, err.Error())
+		case errors.Is(err, pool.ErrInvalidSnapshotParameter):
+			return nil, status.Error(codes.InvalidArgument, err.Error())
 		default:
 			return nil, status.Errorf(codes.Internal, "create snapshot failed: %v", err)
 		}
@@ -488,6 +530,9 @@ func (d *Driver) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotRequ
 	if err != nil {
 		if errors.Is(err, pool.ErrSnapshotNotFound) {
 			return &csi.DeleteSnapshotResponse{}, nil
+		}
+		if retryErr := shareDataRetryError(err); retryErr != nil {
+			return nil, retryErr
 		}
 		return nil, status.Errorf(codes.Internal, "delete snapshot failed: %v", err)
 	}
@@ -802,4 +847,34 @@ func newControllerCap(cap csi.ControllerServiceCapability_RPC_Type) *csi.Control
 			},
 		},
 	}
+}
+
+// poolCapacityError maps the pool errors that every volume source shares (new,
+// snapshot restore, clone) to gRPC errors. It returns nil for other errors.
+// A pool that is growing, or whose shares have no mount target yet, is
+// retriable, so the provisioner tries again.
+func poolCapacityError(poolName string, err error) error {
+	switch {
+	case errors.Is(err, pool.ErrPoolExhausted):
+		return status.Errorf(codes.ResourceExhausted, "pool %q has no available capacity", poolName)
+	case errors.Is(err, pool.ErrPoolExpanding), errors.Is(err, pool.ErrShareCreationPending):
+		return status.Errorf(codes.Unavailable, "pool %q is expanding, retry shortly", poolName)
+	case errors.Is(err, pool.ErrNoUsableShare):
+		return status.Errorf(codes.Unavailable, "pool %q cannot serve volumes yet: %v", poolName, err)
+	default:
+		return nil
+	}
+}
+
+// shareDataRetryError maps share data work that is still running, or that
+// failed and will be started again, to codes the CSI sidecars retry without
+// treating the operation as finished. It returns nil for other errors.
+func shareDataRetryError(err error) error {
+	switch {
+	case errors.Is(err, pool.ErrOperationInProgress):
+		return status.Error(codes.Aborted, err.Error())
+	case errors.Is(err, pool.ErrShareJobFailed):
+		return status.Errorf(codes.Unavailable, "%v; the next retry starts it again", err)
+	}
+	return nil
 }

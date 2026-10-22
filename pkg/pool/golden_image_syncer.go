@@ -8,10 +8,9 @@ import (
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/k8s"
-	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -24,12 +23,17 @@ const (
 	// DefaultGoldenImageInterval is how often the syncer checks for golden images.
 	DefaultGoldenImageInterval = 1 * time.Hour
 
-	defaultConverterImage = "quay.io/centos/centos:stream9"
-	defaultPVCSizeGB      = int64(15)
+	defaultPVCSizeGB = int64(15)
 
 	goldenImageLabel = "pool.storage.ibmcloud.io/golden-image"
 	goldenPoolLabel  = "pool.storage.ibmcloud.io/pool"
 	goldenNameLabel  = "pool.storage.ibmcloud.io/image"
+)
+
+var (
+	dataVolumeGVK = schema.GroupVersionKind{Group: "cdi.kubevirt.io", Version: "v1beta1", Kind: "DataVolume"}
+	templateGVK   = schema.GroupVersionKind{Group: "template.openshift.io", Version: "v1", Kind: "Template"}
+	dataSourceGVK = schema.GroupVersionKind{Group: "cdi.kubevirt.io", Version: "v1beta1", Kind: "DataSource"}
 )
 
 // goldenImageInfo holds discovered image metadata from CDI DataImportCrons.
@@ -108,7 +112,7 @@ func (s *GoldenImageSyncer) processOnce(ctx context.Context) {
 
 	for i := range pools {
 		pool := &pools[i]
-		if pool.Spec.GoldenImages == nil || !pool.Spec.GoldenImages.Enabled {
+		if pool.Spec.GoldenImages == nil || !pool.Spec.GoldenImages.Enabled || pool.DeletionTimestamp != nil {
 			continue
 		}
 		s.syncPool(ctx, pool)
@@ -155,31 +159,9 @@ func (s *GoldenImageSyncer) syncPool(ctx context.Context, pool *v1alpha1.FileSha
 		return
 	}
 
-	converterImage := cfg.ConverterImage
-	if converterImage == "" {
-		converterImage = defaultConverterImage
-	}
 	pvcSizeGB := cfg.PVCSizeGB
 	if pvcSizeGB <= 0 {
 		pvcSizeGB = defaultPVCSizeGB
-	}
-
-	// If any image uses the internal registry (ImageStream source), ensure the
-	// image-puller RoleBinding exists so converter Jobs can pull images.
-	hasInternalRegistry := false
-	for _, img := range images {
-		if isInternalRegistryURL(img.RegistryURL) {
-			hasInternalRegistry = true
-			break
-		}
-	}
-	if hasInternalRegistry {
-		for _, ns := range cfg.TargetNamespaces {
-			if err := s.ensureImagePullerRoleBinding(ctx, ns); err != nil {
-				klog.ErrorS(err, "Failed to ensure image-puller RoleBinding",
-					"pool", pool.Name, "namespace", ns)
-			}
-		}
 	}
 
 	// Determine the StorageClass name for this pool.
@@ -193,7 +175,7 @@ func (s *GoldenImageSyncer) syncPool(ctx context.Context, pool *v1alpha1.FileSha
 		}
 
 		for _, ns := range cfg.TargetNamespaces {
-			nsStatus := s.syncImageInNamespace(ctx, pool.Name, scName, ns, img, converterImage, pvcSizeGB)
+			nsStatus := s.syncImageInNamespace(ctx, pool.Name, scName, ns, img, pvcSizeGB)
 			imgStatus.Namespaces = append(imgStatus.Namespaces, nsStatus)
 		}
 		statusList = append(statusList, imgStatus)
@@ -263,8 +245,10 @@ func (s *GoldenImageSyncer) discoverImages(ctx context.Context, imageFilter []st
 }
 
 // resolveImageStreamURL looks up an ImageStream reference from a DataImportCron
-// and returns the internal registry URL. RHEL DataImportCrons use imageStream
-// references instead of direct URLs. Returns empty string if not applicable.
+// and returns the external registry address the ImageStream imports from.
+// RHEL DataImportCrons use imageStream references instead of direct URLs.
+// The node can pull the external address with the cluster pull secret.
+// Returns empty string if not applicable.
 func (s *GoldenImageSyncer) resolveImageStreamURL(ctx context.Context, dic unstructured.Unstructured, name string) string {
 	isName, isFound, _ := unstructured.NestedString(dic.Object,
 		"spec", "template", "spec", "source", "registry", "imageStream")
@@ -284,76 +268,24 @@ func (s *GoldenImageSyncer) resolveImageStreamURL(ctx context.Context, dic unstr
 		return ""
 	}
 
-	repo, _, _ := unstructured.NestedString(is.Object, "status", "dockerImageRepository")
-	if repo == "" {
-		klog.V(4).InfoS("ImageStream has no dockerImageRepository",
-			"dataimportcron", name, "imagestream", isName)
-		return ""
-	}
-
-	url := "docker://" + repo + ":latest"
-	klog.V(4).InfoS("Resolved ImageStream to internal registry URL",
-		"dataimportcron", name, "imagestream", isName, "url", url)
-	return url
-}
-
-// ensureImagePullerRoleBinding creates a RoleBinding in openshift-virtualization-os-images
-// that grants system:image-puller to all service accounts in the target namespace.
-// This allows converter Jobs to pull images from the internal registry.
-func (s *GoldenImageSyncer) ensureImagePullerRoleBinding(ctx context.Context, targetNS string) error {
-	rbName := fmt.Sprintf("pool-csi-image-puller-%s", targetNS)
-	rbNamespace := "openshift-virtualization-os-images"
-
-	rb := &unstructured.Unstructured{}
-	rb.SetGroupVersionKind(schema.GroupVersionKind{
-		Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "RoleBinding",
-	})
-
-	// Check if it already exists.
-	err := s.directClient.Get(ctx, types.NamespacedName{Namespace: rbNamespace, Name: rbName}, rb)
-	if err == nil {
-		return nil // already exists
-	}
-	if !errors.IsNotFound(err) {
-		return fmt.Errorf("checking RoleBinding %s/%s: %w", rbNamespace, rbName, err)
-	}
-
-	newRB := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "rbac.authorization.k8s.io/v1",
-			"kind":       "RoleBinding",
-			"metadata": map[string]interface{}{
-				"name":      rbName,
-				"namespace": rbNamespace,
-				"labels": map[string]interface{}{
-					goldenImageLabel: "true",
-				},
-			},
-			"roleRef": map[string]interface{}{
-				"apiGroup": "rbac.authorization.k8s.io",
-				"kind":     "ClusterRole",
-				"name":     "system:image-puller",
-			},
-			"subjects": []interface{}{
-				map[string]interface{}{
-					"kind":      "Group",
-					"apiGroup":  "rbac.authorization.k8s.io",
-					"name":      fmt.Sprintf("system:serviceaccounts:%s", targetNS),
-				},
-			},
-		},
-	}
-
-	if err := s.directClient.Create(ctx, newRB); err != nil {
-		if errors.IsAlreadyExists(err) {
-			return nil
+	tags, _, _ := unstructured.NestedSlice(is.Object, "spec", "tags")
+	for _, t := range tags {
+		tag, ok := t.(map[string]interface{})
+		if !ok || tag["name"] != "latest" {
+			continue
 		}
-		return fmt.Errorf("creating RoleBinding %s/%s: %w", rbNamespace, rbName, err)
+		kind, _, _ := unstructured.NestedString(tag, "from", "kind")
+		from, _, _ := unstructured.NestedString(tag, "from", "name")
+		if kind == "DockerImage" && from != "" {
+			url := "docker://" + from
+			klog.V(4).InfoS("Resolved ImageStream to its source registry",
+				"dataimportcron", name, "imagestream", isName, "url", url)
+			return url
+		}
 	}
-
-	klog.V(2).InfoS("Created image-puller RoleBinding for converter Jobs",
-		"rolebinding", rbName, "namespace", rbNamespace, "targetNamespace", targetNS)
-	return nil
+	klog.V(4).InfoS("ImageStream has no external latest tag",
+		"dataimportcron", name, "imagestream", isName)
+	return ""
 }
 
 // syncImageInNamespace ensures the golden PVC, converter Job, and Template
@@ -362,7 +294,6 @@ func (s *GoldenImageSyncer) syncImageInNamespace(
 	ctx context.Context,
 	poolName, scName, ns string,
 	img goldenImageInfo,
-	converterImage string,
 	pvcSizeGB int64,
 ) v1alpha1.GoldenImageNamespaceStatus {
 	cleanName := cleanImageName(img.Name)
@@ -376,27 +307,24 @@ func (s *GoldenImageSyncer) syncImageInNamespace(
 		TemplateName: templateName,
 	}
 
-	// 1. Ensure PVC exists.
-	pvcReady, err := s.ensureGoldenPVC(ctx, ns, pvcName, img.Name, poolName, scName, pvcSizeGB)
+	// 1. Ensure the golden DataVolume. CDI downloads the image and converts it
+	// to a raw disk on the pool.
+	phase, err := s.ensureGoldenDataVolume(ctx, ns, pvcName, img, poolName, scName, pvcSizeGB)
 	if err != nil {
 		status.Phase = "Failed"
-		status.Message = fmt.Sprintf("PVC: %v", err)
+		status.Message = fmt.Sprintf("DataVolume: %v", err)
 		return status
 	}
-
-	// 2. Ensure converter Job (if PVC is not yet populated).
-	if !pvcReady {
-		jobDone, err := s.ensureConverterJob(ctx, ns, img, poolName, pvcName, converterImage, pvcSizeGB)
-		if err != nil {
-			status.Phase = "Failed"
-			status.Message = fmt.Sprintf("Job: %v", err)
-			return status
-		}
-		if !jobDone {
-			status.Phase = "Syncing"
-			status.Message = "Converter job running"
-			return status
-		}
+	switch phase {
+	case "Succeeded":
+	case "Failed":
+		status.Phase = "Failed"
+		status.Message = "CDI import failed; see the DataVolume's events"
+		return status
+	default:
+		status.Phase = "Syncing"
+		status.Message = "CDI import in progress"
+		return status
 	}
 
 	// 3. Ensure CDI DataSource (for InstanceTypes catalog tab).
@@ -408,7 +336,7 @@ func (s *GoldenImageSyncer) syncImageInNamespace(
 	status.DataSourceName = dsName
 
 	// 4. Ensure OpenShift Template (for Template catalog tab).
-	if err := s.ensureTemplate(ctx, ns, img.Name, templateName, poolName, scName, pvcName); err != nil {
+	if err := s.ensureTemplate(ctx, ns, img.Name, templateName, poolName, scName, pvcName, pvcSizeGB); err != nil {
 		status.Phase = "Failed"
 		status.Message = fmt.Sprintf("Template: %v", err)
 		return status
@@ -421,314 +349,73 @@ func (s *GoldenImageSyncer) syncImageInNamespace(
 	return status
 }
 
-// ensureGoldenPVC creates the golden image PVC if it doesn't exist.
-// Returns true if the PVC already has the "ready" annotation (disk.img populated).
-func (s *GoldenImageSyncer) ensureGoldenPVC(
+// ensureGoldenDataVolume creates the golden image DataVolume if it does not
+// exist, and returns its phase. The DataVolume's claim has the same name.
+func (s *GoldenImageSyncer) ensureGoldenDataVolume(
 	ctx context.Context,
-	ns, pvcName, imageName, poolName, scName string,
-	sizeGB int64,
-) (bool, error) {
-	existing := &corev1.PersistentVolumeClaim{}
-	err := s.directClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: pvcName}, existing)
-	if err == nil {
-		// PVC exists — check if marked ready.
-		return existing.Annotations["pool.storage.ibmcloud.io/golden-ready"] == "true", nil
-	}
-	if !errors.IsNotFound(err) {
-		return false, fmt.Errorf("getting PVC %s/%s: %w", ns, pvcName, err)
-	}
-
-	// Create the PVC.
-	accessMode := corev1.ReadWriteMany
-	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      pvcName,
-			Namespace: ns,
-			Labels: map[string]string{
-				goldenImageLabel: "true",
-				goldenPoolLabel:  poolName,
-			},
-		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes:      []corev1.PersistentVolumeAccessMode{accessMode},
-			StorageClassName: &scName,
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: resource.MustParse(fmt.Sprintf("%dGi", sizeGB)),
-				},
-			},
-		},
-	}
-	if err := s.directClient.Create(ctx, pvc); err != nil {
-		if errors.IsAlreadyExists(err) {
-			return false, nil
-		}
-		return false, fmt.Errorf("creating PVC %s/%s: %w", ns, pvcName, err)
-	}
-
-	klog.V(2).InfoS("Created golden image PVC", "namespace", ns, "pvc", pvcName, "pool", poolName)
-	return false, nil
-}
-
-// ensureConverterJob creates or checks the converter Job for a golden image.
-// Returns true if the Job has completed successfully.
-func (s *GoldenImageSyncer) ensureConverterJob(
-	ctx context.Context,
-	ns string,
+	ns, name string,
 	img goldenImageInfo,
-	poolName, pvcName, converterImage string,
-	pvcSizeGB int64,
-) (bool, error) {
-	jobName := fmt.Sprintf("golden-convert-%s", img.Name)
-
-	// Check if Job already exists.
-	existing := &batchv1.Job{}
-	err := s.directClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: jobName}, existing)
+	poolName, scName string,
+	sizeGB int64,
+) (string, error) {
+	dv := &unstructured.Unstructured{}
+	dv.SetGroupVersionKind(dataVolumeGVK)
+	err := s.directClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, dv)
 	if err == nil {
-		// Job exists — check status.
-		if existing.Status.Succeeded > 0 {
-			// Mark PVC as ready.
-			s.markPVCReady(ctx, ns, pvcName)
-			return true, nil
+		// Anyone who can write in the namespace could have made this
+		// DataVolume. Publish it only if it is the one this pool would make.
+		url, _, _ := unstructured.NestedString(dv.Object, "spec", "source", "registry", "url")
+		sc, _, _ := unstructured.NestedString(dv.Object, "spec", "pvc", "storageClassName")
+		labels := dv.GetLabels()
+		if labels[goldenImageLabel] != "true" || labels[goldenPoolLabel] != poolName || url != img.RegistryURL || sc != scName {
+			return "", fmt.Errorf("DataVolume %s/%s was not made by pool %s for %s; delete it to let the pool make it", ns, name, poolName, img.RegistryURL)
 		}
-		if existing.Status.Failed > 0 && existing.Status.Active == 0 {
-			// Delete the failed job so the next sync cycle recreates it.
-			klog.V(2).InfoS("Deleting failed converter job for retry",
-				"namespace", ns, "job", jobName)
-			propagation := metav1.DeletePropagationBackground
-			if delErr := s.directClient.Delete(ctx, existing, &client.DeleteOptions{
-				PropagationPolicy: &propagation,
-			}); delErr != nil && !errors.IsNotFound(delErr) {
-				klog.ErrorS(delErr, "Failed to delete failed converter job",
-					"namespace", ns, "job", jobName)
-			}
-			return false, fmt.Errorf("converter job %s/%s failed (deleted for retry)", ns, jobName)
-		}
-		return false, nil // still running
+		phase, _, _ := unstructured.NestedString(dv.Object, "status", "phase")
+		return phase, nil
 	}
 	if !errors.IsNotFound(err) {
-		return false, fmt.Errorf("getting job %s/%s: %w", ns, jobName, err)
+		return "", fmt.Errorf("getting DataVolume %s/%s: %w", ns, name, err)
 	}
 
-	// Create the converter Job.
-	backoffLimit := int32(3)
-	ttl := int32(3600)
-	stagingSizeGB := pvcSizeGB
-	if stagingSizeGB < 12 {
-		stagingSizeGB = 12
-	}
-
-	script := fmt.Sprintf(`set -euo pipefail
-echo "Installing tools..."
-dnf install -y skopeo qemu-img jq file tar
-
-REGISTRY_URL="%s"
-echo "Downloading OCI image from $REGISTRY_URL..."
-mkdir -p /staging/oci
-
-# If pulling from the internal OpenShift registry, configure auth using the SA token.
-SKOPEO_AUTH=""
-if echo "$REGISTRY_URL" | grep -q "image-registry.openshift-image-registry.svc"; then
-  echo "Detected internal registry, configuring auth..."
-  TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
-  AUTH_B64=$(printf 'serviceaccount:%%s' "$TOKEN" | base64 -w0)
-  REGISTRY_HOST=$(echo "$REGISTRY_URL" | sed 's|docker://||' | cut -d/ -f1)
-  printf '{"auths":{"%%s":{"auth":"%%s"}}}' "$REGISTRY_HOST" "$AUTH_B64" > /tmp/auth.json
-  SKOPEO_AUTH="--authfile=/tmp/auth.json --src-tls-verify=false"
-fi
-
-skopeo copy $SKOPEO_AUTH $REGISTRY_URL dir:/staging/oci
-
-echo "Extracting disk layer..."
-MANIFEST=/staging/oci/manifest.json
-LAYER=$(jq -r '.layers[-1].digest' "$MANIFEST" | cut -d: -f2)
-LAYER_FILE="/staging/oci/$LAYER"
-
-# OCI layers are gzip-compressed tar archives containing the container filesystem.
-# For containerdisks, the disk image is at disk/disk.img inside the tar.
-# Decompress directly to NFS PVC (/data) to avoid OOM on emptyDir (tmpfs).
-echo "Processing OCI layer..."
-LAYER_EXTRACTED="/data/disk-layer.raw"
-if file "$LAYER_FILE" | grep -q gzip; then
-  echo "Decompressing gzip layer directly to PVC..."
-  gunzip -c "$LAYER_FILE" > "$LAYER_EXTRACTED"
-  rm -f "$LAYER_FILE"
-else
-  echo "Layer is not compressed, moving..."
-  mv "$LAYER_FILE" "$LAYER_EXTRACTED"
-fi
-
-# OCI layers are tar archives. Extract the disk image from inside.
-DISK_RAW="/data/disk-extracted.raw"
-if file "$LAYER_EXTRACTED" | grep -q "tar archive"; then
-  echo "OCI layer is a tar archive, extracting disk image..."
-  # containerdisks store the image at disk/disk.img inside the tar
-  tar xf "$LAYER_EXTRACTED" -C /data/ --strip-components=0 2>/dev/null || true
-  if [ -f /data/disk/disk.img ]; then
-    mv /data/disk/disk.img "$DISK_RAW"
-    rm -rf /data/disk
-  else
-    # Fallback: find the largest file in the tar
-    echo "disk/disk.img not found in tar, searching for disk image..."
-    LARGEST=$(tar tf "$LAYER_EXTRACTED" | while read f; do
-      tar xf "$LAYER_EXTRACTED" -O "$f" 2>/dev/null | wc -c | tr -d ' '
-    done | sort -rn | head -1)
-    # Just extract everything and find the largest regular file
-    mkdir -p /data/tar-tmp
-    tar xf "$LAYER_EXTRACTED" -C /data/tar-tmp 2>/dev/null || true
-    DISK_FILE=$(find /data/tar-tmp -type f -name "*.img" -o -name "*.raw" -o -name "*.qcow2" | head -1)
-    if [ -z "$DISK_FILE" ]; then
-      DISK_FILE=$(find /data/tar-tmp -type f -printf '%%s %%p\n' 2>/dev/null | sort -rn | head -1 | awk '{print $2}')
-    fi
-    if [ -n "$DISK_FILE" ]; then
-      mv "$DISK_FILE" "$DISK_RAW"
-    else
-      echo "ERROR: Could not find disk image in tar archive"
-      tar tf "$LAYER_EXTRACTED" | head -20
-      exit 1
-    fi
-    rm -rf /data/tar-tmp
-  fi
-  rm -f "$LAYER_EXTRACTED"
-else
-  echo "Layer is not a tar archive, treating as disk image directly..."
-  mv "$LAYER_EXTRACTED" "$DISK_RAW"
-fi
-
-echo "Detecting image format..."
-FORMAT=$(qemu-img info --output=json "$DISK_RAW" | jq -r '.format')
-echo "Detected format: $FORMAT"
-
-if [ "$FORMAT" = "qcow2" ]; then
-  echo "Converting qcow2 to raw..."
-  qemu-img convert -f qcow2 -O raw "$DISK_RAW" /data/disk.img
-  rm -f "$DISK_RAW"
-elif [ "$FORMAT" = "raw" ]; then
-  echo "Image is already raw..."
-  mv "$DISK_RAW" /data/disk.img
-else
-  echo "Unknown format $FORMAT, attempting qcow2 conversion..."
-  qemu-img convert -f qcow2 -O raw "$DISK_RAW" /data/disk.img
-  rm -f "$DISK_RAW"
-fi
-chmod 0666 /data/disk.img
-
-# Ensure the MBR has the bootable/active flag set on partition 1.
-# Cloud images with GPT often have a "protective MBR" where no partition
-# is marked active (boot indicator = 0x00). SeaBIOS requires at least one
-# active partition to boot. Setting byte at offset 446 (first partition
-# entry's status byte) to 0x80 makes the disk bootable by both BIOS and
-# UEFI firmware. This is safe for MBR disks too.
-echo "Setting MBR active/bootable flag..."
-printf '\x80' | dd of=/data/disk.img bs=1 seek=446 count=1 conv=notrunc 2>&1
-
-echo "Cleaning up staging..."
-rm -rf /staging/oci
-
-echo "Golden image ready."
-ls -la /data/disk.img
-file /data/disk.img
-`, img.RegistryURL)
-
-	job := &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      jobName,
-			Namespace: ns,
-			Labels: map[string]string{
+	dv = &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "cdi.kubevirt.io/v1beta1",
+		"kind":       "DataVolume",
+		"metadata": map[string]interface{}{
+			"name":      name,
+			"namespace": ns,
+			"labels": map[string]interface{}{
 				goldenImageLabel: "true",
 				goldenPoolLabel:  poolName,
 				goldenNameLabel:  img.Name,
 			},
 		},
-		Spec: batchv1.JobSpec{
-			BackoffLimit:            &backoffLimit,
-			TTLSecondsAfterFinished: &ttl,
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						goldenImageLabel: "true",
-						goldenPoolLabel:  poolName,
-						goldenNameLabel:  img.Name,
-					},
+		"spec": map[string]interface{}{
+			"source": map[string]interface{}{
+				"registry": map[string]interface{}{
+					"url":        img.RegistryURL,
+					"pullMethod": "node",
 				},
-				Spec: corev1.PodSpec{
-					RestartPolicy: corev1.RestartPolicyOnFailure,
-					SecurityContext: &corev1.PodSecurityContext{
-						RunAsUser: int64Ptr(0),
-					},
-					Containers: []corev1.Container{
-						{
-							Name:    "converter",
-							Image:   converterImage,
-							Command: []string{"/bin/bash", "-c", script},
-							Resources: corev1.ResourceRequirements{
-								Requests: corev1.ResourceList{
-									corev1.ResourceCPU:    resource.MustParse("500m"),
-									corev1.ResourceMemory: resource.MustParse("512Mi"),
-								},
-								Limits: corev1.ResourceList{
-									corev1.ResourceCPU:    resource.MustParse("2"),
-									corev1.ResourceMemory: resource.MustParse("2Gi"),
-								},
-							},
-							VolumeMounts: []corev1.VolumeMount{
-								{Name: "data", MountPath: "/data"},
-								{Name: "staging", MountPath: "/staging"},
-							},
-						},
-					},
-					Volumes: []corev1.Volume{
-						{
-							Name: "data",
-							VolumeSource: corev1.VolumeSource{
-								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-									ClaimName: pvcName,
-								},
-							},
-						},
-						{
-							Name: "staging",
-							VolumeSource: corev1.VolumeSource{
-								EmptyDir: &corev1.EmptyDirVolumeSource{
-									SizeLimit: resource.NewQuantity(stagingSizeGB*(1<<30), resource.BinarySI),
-								},
-							},
-						},
+			},
+			// spec.pvc, not spec.storage: the claim gets exactly sizeGB, so
+			// the template's boot disk of the same size can be copied from it.
+			"pvc": map[string]interface{}{
+				"accessModes":      []interface{}{"ReadWriteMany"},
+				"volumeMode":       "Filesystem",
+				"storageClassName": scName,
+				"resources": map[string]interface{}{
+					"requests": map[string]interface{}{
+						"storage": fmt.Sprintf("%dGi", sizeGB),
 					},
 				},
 			},
 		},
+	}}
+	if err := s.directClient.Create(ctx, dv); err != nil && !errors.IsAlreadyExists(err) {
+		return "", fmt.Errorf("creating DataVolume %s/%s: %w", ns, name, err)
 	}
-
-	if err := s.directClient.Create(ctx, job); err != nil {
-		if errors.IsAlreadyExists(err) {
-			return false, nil
-		}
-		return false, fmt.Errorf("creating converter job %s/%s: %w", ns, jobName, err)
-	}
-
-	klog.V(2).InfoS("Created golden image converter job",
-		"namespace", ns, "job", jobName, "image", img.Name, "registryURL", img.RegistryURL)
-	return false, nil
-}
-
-// markPVCReady annotates the golden PVC to indicate disk.img is populated.
-func (s *GoldenImageSyncer) markPVCReady(ctx context.Context, ns, pvcName string) {
-	pvc := &corev1.PersistentVolumeClaim{}
-	if err := s.directClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: pvcName}, pvc); err != nil {
-		klog.ErrorS(err, "Failed to get PVC for ready annotation", "namespace", ns, "pvc", pvcName)
-		return
-	}
-	if pvc.Annotations == nil {
-		pvc.Annotations = make(map[string]string)
-	}
-	if pvc.Annotations["pool.storage.ibmcloud.io/golden-ready"] == "true" {
-		return
-	}
-	pvc.Annotations["pool.storage.ibmcloud.io/golden-ready"] = "true"
-	if err := s.directClient.Update(ctx, pvc); err != nil {
-		klog.ErrorS(err, "Failed to mark PVC ready", "namespace", ns, "pvc", pvcName)
-	}
+	klog.V(2).InfoS("Created golden image DataVolume", "namespace", ns, "dataVolume", name,
+		"pool", poolName, "url", img.RegistryURL)
+	return "", nil
 }
 
 // ensureTemplate creates an OpenShift Template for VM creation from a golden image.
@@ -740,13 +427,15 @@ func (s *GoldenImageSyncer) markPVCReady(ctx context.Context, ns, pvcName string
 func (s *GoldenImageSyncer) ensureTemplate(
 	ctx context.Context,
 	ns, imageName, templateName, poolName, scName, goldenPVCName string,
+	sizeGB int64,
 ) error {
-	return s.createTemplateInNamespace(ctx, ns, imageName, templateName, poolName, scName, goldenPVCName)
+	return s.createTemplateInNamespace(ctx, ns, imageName, templateName, poolName, scName, goldenPVCName, sizeGB)
 }
 
 func (s *GoldenImageSyncer) createTemplateInNamespace(
 	ctx context.Context,
 	ns, imageName, templateName, poolName, scName, goldenPVCName string,
+	sizeGB int64,
 ) error {
 	template := &unstructured.Unstructured{}
 	template.SetGroupVersionKind(schema.GroupVersionKind{
@@ -763,7 +452,7 @@ func (s *GoldenImageSyncer) createTemplateInNamespace(
 		return fmt.Errorf("getting template %s/%s: %w", ns, templateName, err)
 	}
 
-	tmpl := buildVMTemplate(imageName, templateName, ns, poolName, scName, goldenPVCName)
+	tmpl := buildVMTemplate(imageName, templateName, ns, poolName, scName, goldenPVCName, sizeGB)
 	if err := s.directClient.Create(ctx, tmpl); err != nil {
 		if errors.IsAlreadyExists(err) {
 			return nil
@@ -828,7 +517,9 @@ func osDisplayName(imageName string) string {
 }
 
 // buildVMTemplate constructs an OpenShift Template for a golden image VM.
-func buildVMTemplate(imageName, templateName, ns, poolName, scName, goldenPVCName string) *unstructured.Unstructured {
+// The boot disk defaults to the golden image's size, because a copy cannot be
+// smaller than its source.
+func buildVMTemplate(imageName, templateName, ns, poolName, scName, goldenPVCName string, sizeGB int64) *unstructured.Unstructured {
 	osLabelKey := cleanImageName(imageName)
 	displayName := osDisplayName(imageName)
 	iconClass := osIconClass(imageName)
@@ -841,29 +532,29 @@ func buildVMTemplate(imageName, templateName, ns, poolName, scName, goldenPVCNam
 				"name":      templateName,
 				"namespace": ns,
 				"labels": map[string]interface{}{
-					"template.kubevirt.io/type":                         "base",
-					"template.kubevirt.io/version":                      "v1alpha1",
-					"template.kubevirt.io/architecture":                 "amd64",
-					"os.template.kubevirt.io/" + osLabelKey:             "true",
-					"flavor.template.kubevirt.io/medium":                "true",
-					"workload.template.kubevirt.io/server":              "true",
-					goldenImageLabel:                                    "true",
-					goldenPoolLabel:                                     poolName,
-					goldenNameLabel:                                     imageName,
+					"template.kubevirt.io/type":             "base",
+					"template.kubevirt.io/version":          "v1alpha1",
+					"template.kubevirt.io/architecture":     "amd64",
+					"os.template.kubevirt.io/" + osLabelKey: "true",
+					"flavor.template.kubevirt.io/medium":    "true",
+					"workload.template.kubevirt.io/server":  "true",
+					goldenImageLabel:                        "true",
+					goldenPoolLabel:                         poolName,
+					goldenNameLabel:                         imageName,
 				},
 				"annotations": map[string]interface{}{
-					"description":                                        fmt.Sprintf("%s VM with boot disk on IBM VPC NFS pool storage (%s). Clone from golden image for fast provisioning.", displayName, poolName),
-					"openshift.io/display-name":                          fmt.Sprintf("%s Server (NFS Pool: %s)", displayName, poolName),
-					"openshift.io/provider-display-name":                 "IBM VPC File Pool CSI",
-					"iconClass":                                          iconClass,
-					"tags":                                               "kubevirt,virtualmachine,linux," + osLabelKey,
-					"template.kubevirt.io/provider":                      "IBM VPC File Pool CSI",
-					"template.kubevirt.io/provider-url":                  "https://github.com/IBM/ibm-vpc-file-pool-csi",
-					"template.kubevirt.io/provider-support-level":        "Community",
-					"template.kubevirt.io/version":                       "v1alpha1",
-					"name.os.template.kubevirt.io/" + osLabelKey:         displayName,
-					"defaults.template.kubevirt.io/disk":                 "boot-disk",
-					"template.openshift.io/bindable":                     "false",
+					"description":                                 fmt.Sprintf("%s VM with boot disk on IBM VPC NFS pool storage (%s). Clone from golden image for fast provisioning.", displayName, poolName),
+					"openshift.io/display-name":                   fmt.Sprintf("%s Server (NFS Pool: %s)", displayName, poolName),
+					"openshift.io/provider-display-name":          "IBM VPC File Pool CSI",
+					"iconClass":                                   iconClass,
+					"tags":                                        "kubevirt,virtualmachine,linux," + osLabelKey,
+					"template.kubevirt.io/provider":               "IBM VPC File Pool CSI",
+					"template.kubevirt.io/provider-url":           "https://github.com/IBM/ibm-vpc-file-pool-csi",
+					"template.kubevirt.io/provider-support-level": "Community",
+					"template.kubevirt.io/version":                "v1alpha1",
+					"name.os.template.kubevirt.io/" + osLabelKey:  displayName,
+					"defaults.template.kubevirt.io/disk":          "boot-disk",
+					"template.openshift.io/bindable":              "false",
 					"openshift.kubevirt.io/pronounceable-suffix-for-name-expression": "true",
 				},
 			},
@@ -877,7 +568,7 @@ func buildVMTemplate(imageName, templateName, ns, poolName, scName, goldenPVCNam
 				map[string]interface{}{
 					"name":        "BOOT_DISK_SIZE",
 					"description": "Boot disk size",
-					"value":       "15Gi",
+					"value":       fmt.Sprintf("%dGi", sizeGB),
 				},
 				map[string]interface{}{
 					"name":        "DATA_DISK_SIZE",
@@ -937,9 +628,9 @@ func buildVMTemplate(imageName, templateName, ns, poolName, scName, goldenPVCNam
 					"metadata": map[string]interface{}{
 						"name": "${NAME}",
 						"labels": map[string]interface{}{
-							"app":                      "${NAME}",
-							"vm.kubevirt.io/name":      "${NAME}",
-							goldenPoolLabel:             poolName,
+							"app":                 "${NAME}",
+							"vm.kubevirt.io/name": "${NAME}",
+							goldenPoolLabel:       poolName,
 						},
 					},
 					"spec": map[string]interface{}{
@@ -955,7 +646,7 @@ func buildVMTemplate(imageName, templateName, ns, poolName, scName, goldenPVCNam
 									"cpu": map[string]interface{}{
 										"cores":   int64(1),
 										"sockets": int64(1),
-										"threads":  int64(1),
+										"threads": int64(1),
 									},
 									"resources": map[string]interface{}{
 										"requests": map[string]interface{}{
@@ -1001,7 +692,7 @@ func buildVMTemplate(imageName, templateName, ns, poolName, scName, goldenPVCNam
 									map[string]interface{}{
 										"name": "cloudinit",
 										"cloudInitNoCloud": map[string]interface{}{
-											"userData": fmt.Sprintf("#cloud-config\npassword: ${CLOUD_USER_PASSWORD}\nchpasswd:\n  expire: false\nssh_pwauth: true\n"),
+											"userData": "#cloud-config\npassword: ${CLOUD_USER_PASSWORD}\nchpasswd:\n  expire: false\nssh_pwauth: true\n",
 										},
 									},
 								},
@@ -1029,8 +720,10 @@ func (s *GoldenImageSyncer) ensureDataSource(
 	ctx context.Context,
 	imageName, poolName, goldenPVCName, targetNamespace string,
 ) (string, error) {
+	// One DataSource per golden claim, so every target namespace gets its own
+	// catalog entry.
 	cleanName := cleanImageName(imageName)
-	dsName := fmt.Sprintf("%s-nfs-pool", cleanName)
+	dsName := fmt.Sprintf("%s-%s-nfs-pool", cleanName, targetNamespace)
 	dsNamespace := "openshift-virtualization-os-images"
 
 	ds := &unstructured.Unstructured{}
@@ -1095,6 +788,63 @@ func (s *GoldenImageSyncer) ensureDataSource(
 	return dsName, nil
 }
 
+// RemovePoolImages deletes the golden DataVolumes, claims and Templates made
+// for pool in its target namespaces, and its catalog DataSources. It reports
+// done=true once none are left, or the ones left are already being deleted.
+func (s *GoldenImageSyncer) RemovePoolImages(ctx context.Context, pool *v1alpha1.FileSharePool) (bool, error) {
+	poolName := pool.Name
+	selector := client.MatchingLabels{goldenImageLabel: "true", goldenPoolLabel: poolName}
+	newList := func(gvk schema.GroupVersionKind) client.ObjectList {
+		list := &unstructured.UnstructuredList{}
+		list.SetGroupVersionKind(gvk.GroupVersion().WithKind(gvk.Kind + "List"))
+		return list
+	}
+	type search struct {
+		list client.ObjectList
+		ns   string
+	}
+	// Labels can be set by anyone who can write in a namespace, so only the
+	// pool's target namespaces are searched. Only admins write in the shared
+	// images namespace.
+	searches := []search{{newList(dataSourceGVK), "openshift-virtualization-os-images"}}
+	if pool.Spec.GoldenImages != nil {
+		for _, ns := range pool.Spec.GoldenImages.TargetNamespaces {
+			searches = append(searches,
+				search{newList(dataVolumeGVK), ns},
+				search{&corev1.PersistentVolumeClaimList{}, ns},
+				search{newList(templateGVK), ns})
+		}
+	}
+
+	done := true
+	for _, sr := range searches {
+		list := sr.list
+		if err := s.directClient.List(ctx, list, selector, client.InNamespace(sr.ns)); err != nil {
+			if isNoMatchError(err) {
+				continue
+			}
+			return false, fmt.Errorf("listing golden image objects of pool %s: %w", poolName, err)
+		}
+		objs, err := meta.ExtractList(list)
+		if err != nil {
+			return false, err
+		}
+		for _, o := range objs {
+			obj, ok := o.(client.Object)
+			if !ok || obj.GetDeletionTimestamp() != nil {
+				continue
+			}
+			done = false
+			if err := s.directClient.Delete(ctx, obj); err != nil && !errors.IsNotFound(err) {
+				return false, fmt.Errorf("deleting %s/%s of pool %s: %w", obj.GetNamespace(), obj.GetName(), poolName, err)
+			}
+			klog.V(2).InfoS("Deleted golden image object of deleted pool", "pool", poolName,
+				"namespace", obj.GetNamespace(), "name", obj.GetName())
+		}
+	}
+	return done, nil
+}
+
 // matchesFilter checks if a name matches any of the filter substrings.
 func matchesFilter(name string, filters []string) bool {
 	for _, f := range filters {
@@ -1103,11 +853,6 @@ func matchesFilter(name string, filters []string) bool {
 		}
 	}
 	return false
-}
-
-// isInternalRegistryURL returns true if the URL points to the OpenShift internal registry.
-func isInternalRegistryURL(url string) bool {
-	return strings.Contains(url, "image-registry.openshift-image-registry.svc")
 }
 
 func int64Ptr(v int64) *int64 { return &v }

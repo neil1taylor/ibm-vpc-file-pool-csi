@@ -6,8 +6,8 @@ Run these five commands first when investigating any issue:
 
 ```bash
 # 1. Are the driver pods running?
-kubectl get pods -n kube-system -l app=vpc-file-pool-csi-controller
-kubectl get pods -n kube-system -l app=vpc-file-pool-csi-node
+kubectl get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller
+kubectl get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node
 
 # 2. What state are the pools in?
 kubectl get filesharepools
@@ -16,11 +16,12 @@ kubectl get filesharepools
 kubectl describe pvc <pvc-name>
 
 # 4. Controller logs (last 100 lines)
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller --tail=100
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller --tail=100
 
 # 5. Node agent logs on the affected node
 NODE=$(kubectl get pod <pod-name> -o jsonpath='{.spec.nodeName}')
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-node --field-selector spec.nodeName=${NODE} -c csi-node --tail=100
+NODE_POD=$(kubectl get pod -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node --field-selector spec.nodeName=${NODE} -o name)
+kubectl logs -n kube-system ${NODE_POD} -c csi-node --tail=100
 ```
 
 ---
@@ -56,15 +57,14 @@ Ensure the pool name in the StorageClass's `parameters.pool` exactly matches the
 ```bash
 # Check pool utilization
 kubectl get filesharepools
-kubectl get filesharespool <pool-name> -o jsonpath='{.status.totalAllocatedGB}/{.status.totalCapacityGB}'
+kubectl get filesharepool <pool-name> -o jsonpath='{.status.totalAllocatedGB}/{.status.totalCapacityGB}'
 
 # Option 1: Increase maxShares to allow more shares
-kubectl patch filesharespool <pool-name> --type merge -p '{"spec":{"maxShares":20}}'
+kubectl patch filesharepool <pool-name> --type merge -p '{"spec":{"maxShares":20}}'
 
-# Option 2: Increase share size (triggers VPC API call, takes 30-90s)
-kubectl patch filesharespool <pool-name> --type merge -p '{"spec":{"shareSizeGB":4000}}'
-
-# Option 3: Delete unused PVCs to free capacity
+# Option 2: Delete unused PVCs to free capacity
+# (Changing spec.shareSizeGB only sets the size of shares created afterwards.
+#  Existing shares keep their size.)
 kubectl get subvolumes -l storage.ibmcloud.io/pool=<pool-name> -o wide
 ```
 
@@ -79,7 +79,7 @@ kubectl get subvolumes -l storage.ibmcloud.io/pool=<pool-name> -o wide
 **Fix:** Wait 2-3 minutes. If still pending after 5 minutes, check controller logs:
 
 ```bash
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller --tail=100 | grep -i "error\|fail\|share"
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller --tail=100 | grep -i "error\|fail\|share"
 ```
 
 Common sub-causes for prolonged expansion:
@@ -98,7 +98,7 @@ Common sub-causes for prolonged expansion:
 **Fix:**
 ```bash
 # Check available tiers in the pool
-kubectl get filesharespool <pool-name> -o jsonpath='{.spec.tiers[*].name}'
+kubectl get filesharepool <pool-name> -o jsonpath='{.spec.tiers[*].name}'
 
 # Check the StorageClass tier parameter
 kubectl get storageclass <sc-name> -o jsonpath='{.parameters.tier}'
@@ -128,7 +128,7 @@ ibmcloud login --apikey <key> --no-region
 ibmcloud is shares --output json | jq length
 ```
 
-On managed clusters (ROKS/IKS), the `storage-secret-store` secret is maintained by the platform. If it's missing, contact IBM Cloud support. On self-managed clusters, recreate the secret per the instructions in [API-KEY-SETUP.md](API-KEY-SETUP.md).
+On managed clusters (ROKS/ROVS/IKS), the `storage-secret-store` secret is maintained by the platform. If it's missing, contact IBM Cloud support. On self-managed clusters, recreate the secret per the instructions in [API-KEY-SETUP.md](API-KEY-SETUP.md).
 
 ---
 
@@ -140,7 +140,7 @@ On managed clusters (ROKS/IKS), the `storage-secret-store` secret is maintained 
 
 **Cause:** The boot disk image is in **qcow2 format** instead of raw. KubeVirt passes filesystem-PVC images to QEMU with `"driver":"file"` (raw protocol, no qcow2 format layer). QEMU reads the qcow2 headers (`QFI\xfb` magic) as raw MBR/GPT data and finds no valid boot sector.
 
-This happens when cloud images (distributed as qcow2) are downloaded directly to the PVC without converting to raw — which is what CDI does automatically.
+This happens when cloud images (distributed as qcow2) are written directly to the PVC without converting to raw. CDI converts the image automatically, and the pool's golden images are made by CDI.
 
 **Diagnosis:**
 ```bash
@@ -151,15 +151,31 @@ kubectl exec -n <namespace> ${LAUNCHER} -c compute -- \
 # If output shows: 51 46 49 fb → qcow2 format (QFI magic). Should be raw.
 ```
 
-**Fix:** Stop the VM, re-run the image downloader pod with qcow2→raw conversion, then restart:
+**Fix:** If the image came from CDI or from the pool's golden images, check the DataVolume with `kubectl describe dv`. If you wrote the image yourself, stop the VM, re-run your downloader pod with qcow2→raw conversion, then restart:
 ```bash
 virtctl stop <vm-name> -n <namespace>
-# Run a pod with qemu-img to convert (see TUTORIAL.md Step 8b):
+# Run a pod with qemu-img to convert (see TUTORIAL-01-POOL-CREATION.md, Step 8b):
 # qemu-img convert -f qcow2 -O raw /boot/disk.qcow2 /boot/disk.img
 virtctl start <vm-name> -n <namespace>
 ```
 
-See [TUTORIAL.md](TUTORIAL.md) Step 8b and [VM-DISK-FORMATS.md](VM-DISK-FORMATS.md) for details.
+See [TUTORIAL-01-POOL-CREATION.md](TUTORIAL-01-POOL-CREATION.md#step-8b-download-the-os-image-to-the-boot-pvc) and [VM-DISK-FORMATS.md](VM-DISK-FORMATS.md) for details.
+
+---
+
+### VM with instant snapshots does not start
+
+**Symptoms and causes:**
+- `admission webhook "vm-hook.storage.ibmcloud.io" denied the request: ... need the KubeVirt Sidecar feature gate`: the VM's disks have instant snapshots and the `Sidecar` gate is off. Turn it on (see [VM-INSTANT-SNAPSHOTS.md](VM-INSTANT-SNAPSHOTS.md)), or remove the snapshots with `kubectl pool-snapshots flatten <vm> -n <namespace>`.
+- `... a snapshot Job changes the disk now`: a Job adds or merges a snapshot file of the stopped VM. KubeVirt starts the VM when it is done.
+- `sidecar feature gate is not enabled in kubevirt-config, invalid entry metadata.annotations.hooks.kubevirt.io/hookSidecars`: the gate was turned off after the VM got its hook. As above.
+- `Could not open '/var/run/kubevirt-private/vmi-disks/<volume>/disk.img': Permission denied` (VMI event `SyncFailed`): the VM started without the hook, so it tried to write a frozen snapshot file. This is the safety stop: nothing was written. Check that the controller and its webhook run (`kubectl get mutatingwebhookconfiguration | grep vm-hook`), and that the ConfigMap `ibm-vpc-file-pool-vm-hook` exists in the VM's namespace, then restart the VM.
+
+**Diagnosis:**
+```bash
+kubectl get subvolume <pv-name> -o jsonpath='{.status.diskChain}{"\n"}{.status.chainOperation}{"\n"}'
+kubectl get vmi <vm> -n <ns> -o jsonpath='{.metadata.annotations.storage\.ibmcloud\.io/disk-tops}{"\n"}'
+```
 
 ---
 
@@ -212,6 +228,33 @@ kubectl get storageprofile <name> -o jsonpath='{.spec.claimPropertySets}'
 # Should output: [{"accessModes":["ReadWriteMany"],"volumeMode":"Filesystem"}]
 ```
 
+### CDI copy pod OOMKilled when a VM disk is copied onto a pool
+
+**Symptom:** A VM made from a catalog image with its boot disk on a pool does not start. The DataVolume keeps restarting. The CDI copy pod shows `OOMKilled`. The progress goes back to zero each time.
+
+**Cause:** CDI's copy pods have a default memory limit of 600 MB. When they write onto NFS, the file cache counts against that limit, so the pod is killed. The controller keeps the limit at least 8Gi through `HyperConverged` `spec.resourceRequirements.storageWorkloads`. The limit is too low if the check is off (`cdi.copyPodMemoryLimit` is empty), if the controller cannot patch `HyperConverged`, or if something put the old value back, such as an update of IBM's add-on on ROVS.
+
+**Check:**
+```bash
+# The limit CDI uses (should show limits.memory of 8Gi or more)
+oc get cdi -o jsonpath='{.items[0].spec.config.podResourceRequirements}'
+
+# The HyperConverged setting the controller manages
+oc get hyperconverged -n openshift-cnv kubevirt-hyperconverged \
+  -o jsonpath='{.spec.resourceRequirements.storageWorkloads}'
+
+# Did the controller raise the limit? Look for a warning in its log, and check the metric
+# vpc_file_pool_cdi_copy_limit_raised_total
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller | grep -i "CDI copy pod memory limit"
+```
+
+**Fix:**
+1. Check that `cdi.copyPodMemoryLimit` is not empty (default `8Gi`).
+2. Check the controller's ClusterRole allows `get`, `list` and `patch` on `hco.kubevirt.io` `hyperconvergeds`.
+3. The controller corrects the limit within 5 minutes. Restart the controller to make it check at once.
+4. If a raise happens again and again, something resets the value. On ROVS, IBM says the add-on cannot be modified, so ask IBM support.
+5. Delete the failed DataVolume and create the VM again. The copy starts from zero.
+
 ---
 
 ## Share Issues
@@ -220,22 +263,24 @@ kubectl get storageprofile <name> -o jsonpath='{.spec.claimPropertySets}'
 
 **Symptom:** A share in pool status shows `ipAddress: null` or empty `mountTargetIP`. PVCs allocated to this share have PVs with an empty `server` field, causing NFS mount failures.
 
-**Cause:** The share was created before VPC auto-discovery completed (vpcID was empty), so no inline mount target was created during `CreateFileShare`. VPC may have defaulted the share to `security_group` access mode.
+**Cause:** The share's mount target was never created, failed, or does not yet have a mount path. Before this release, shares created by auto-expansion had no mount target at all. The pool shows phase `Degraded`, and its `SharesReady` condition has reason `NoMountTarget` and names the shares. Volume requests get a retriable error and the pool does not add shares.
 
-**Automatic recovery (v0.11.0+):** The reconciler detects stable shares with no mount target IP and attempts to create one. If mount target creation fails (e.g., the share uses security_group access mode, which is incompatible with VPC mount targets), the share is automatically marked as `draining` to prevent new allocations.
+**Automatic recovery:** The reconciler finds stable shares with no mount target and creates one in security group access mode, in the worker subnet of the pool's zone. If that fails, it tries again on the next reconcile and logs `Failed to create mount target for share`.
 
 **Manual check:**
 ```bash
-# Find shares with empty mount target IP
-kubectl get fsp <pool-name> -o jsonpath='{range .status.shares[*]}{.shareID}{"\t"}{.mountTargetIP}{"\t"}{.state}{"\n"}{end}'
+# Shares and their mount target addresses
+kubectl get fsp <pool-name> -o jsonpath='{range .status.shares[*]}{.shareID}{"\t"}{.mountTargetIP}{"\t"}{.exportPath}{"\t"}{.state}{"\n"}{end}'
+kubectl get fsp <pool-name> -o jsonpath='{.status.conditions[?(@.type=="SharesReady")].message}'
 
-# Check VPC share access mode
-ibmcloud is share <share-id> --output json | jq '.access_control_mode'
-# "vpc" = VPC access mode (can have VPC mount targets)
-# "security_group" = security group mode (incompatible with VPC mount targets)
+# The share's access mode and mount targets
+ibmcloud is share <share-id> --output json | jq '.access_control_mode, .mount_targets'
 ```
 
-**If the share is in security_group mode:** It cannot be recovered. The reconciler marks it as `draining`. Existing PVCs on this share must be recreated on a healthy share. Delete the affected PVCs and let the CSI provisioner reallocate them.
+**Common causes of a failed mount target:**
+- No worker subnet in the pool's zone. The controller log says `no cluster subnet in the pool's zone`. Set `spec.zone` to a zone that has workers.
+- The cluster security group cannot be found (`security group "kube-<id>" not found`). Set `spec.securityGroupIDs` on the pool.
+- The share uses **VPC access mode** (`access_control_mode` is `vpc`). IBM no longer allows new VPC-mode mount targets. The share must be converted to security group mode.
 
 ---
 
@@ -280,7 +325,9 @@ ibmcloud is security-group-rules <sg-id> --output json | jq '.[] | select(.port_
 2. **Test connectivity from the node**:
 ```bash
 # Get the mount target IP for the share
-kubectl get subvolume <pvc-name> -o jsonpath='{.spec.mountTargetIP}'
+# A SubVolume is named after the PV (pvc-<uuid>), not the claim
+PV=$(kubectl get pvc <pvc-name> -n <namespace> -o jsonpath='{.spec.volumeName}')
+kubectl get subvolume ${PV} -o jsonpath='{.spec.shareMountTargetIP}'
 
 # Debug from the worker node
 kubectl debug node/<node-name> -it --image=busybox -- sh -c "nc -zv <mount-target-ip> 2049"
@@ -297,7 +344,7 @@ ibmcloud is subnet <subnet-id> --output json | jq '.network_acl'
 
 **Symptom:** Pod stuck in `ContainerCreating` with event `MountVolume.SetUp failed ... mkdir .../globalmount/pvcs: permission denied`.
 
-**Cause (pre-v0.9.0):** The driver was mounting the NFS server root (`server:/`) instead of the share-specific export path (`server:/share_abc123`). In VPC access mode, all shares resolve to the same FQDN — the export path differentiates them. The NFS server root is owned by UID 99, mode 0711, so the CSI node (mapped to UID 65534 by root_squash) cannot create directories there.
+**Cause (pre-v0.9.0, and security group mode before this release):** The driver was mounting the NFS server root (`server:/`) instead of the share-specific export path (`server:/share_abc123`). The export path is specific to each share in both access modes. The NFS server root is owned by UID 99, mode 0711, so the CSI node (mapped to UID 65534 by root_squash) cannot create directories there.
 
 **Fix:** Upgrade to v0.9.0+. The driver now correctly parses and uses the export path from the VPC API's `MountPath` field. Existing shares are automatically backfilled during health checks.
 
@@ -322,7 +369,8 @@ kubectl get filesharepool <pool-name> -o jsonpath='{.status.shares[0].exportPath
 **Fix:**
 ```bash
 # Check what UID/GID the subdirectory was created with
-kubectl get subvolume <pvc-name> -o jsonpath='uid={.spec.uid} gid={.spec.gid}'
+PV=$(kubectl get pvc <pvc-name> -n <namespace> -o jsonpath='{.spec.volumeName}')
+kubectl get subvolume ${PV} -o jsonpath='uid={.spec.uid} gid={.spec.gid}'
 
 # Check the pod's security context
 kubectl get pod <pod-name> -o jsonpath='{.spec.containers[0].securityContext}'
@@ -347,7 +395,8 @@ Solutions:
 NODE=$(kubectl get pod <pod-name> -o jsonpath='{.spec.nodeName}')
 
 # Check the node agent logs for the mount state
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-node --field-selector spec.nodeName=${NODE} -c csi-node --tail=50
+NODE_POD=$(kubectl get pod -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node --field-selector spec.nodeName=${NODE} -o name)
+kubectl logs -n kube-system ${NODE_POD} -c csi-node --tail=50
 
 # The simplest fix is to delete the pod — the kubelet will re-mount on restart
 kubectl delete pod <pod-name>
@@ -410,10 +459,10 @@ kubectl delete pod <pod-name> --force --grace-period=0
 **Fix:**
 ```bash
 # Check pool events
-kubectl describe filesharespool <pool-name>
+kubectl describe filesharepool <pool-name>
 
 # Check controller logs for VPC API errors
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller --tail=100 | grep -i "error\|fail"
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller --tail=100 | grep -i "error\|fail"
 ```
 
 Common causes:
@@ -436,7 +485,7 @@ Common causes:
 **Fix:**
 ```bash
 # Identify the unhealthy share(s)
-kubectl get filesharespool <pool-name> -o jsonpath='{range .status.shares[*]}{.shareID}{"\t"}{.state}{"\n"}{end}'
+kubectl get filesharepool <pool-name> -o jsonpath='{range .status.shares[*]}{.shareID}{"\t"}{.state}{"\n"}{end}'
 
 # Check the share in VPC
 ibmcloud is share <share-id> --output json | jq '{lifecycle_state, health_state, health_reasons}'
@@ -457,7 +506,7 @@ If the share is permanently failed, the pool manager will eventually need to mig
 **Fix:**
 ```bash
 # Check controller logs for the expansion status
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller --tail=200 | grep -i "expand\|share\|create"
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller --tail=200 | grep -i "expand\|share\|create"
 
 # Check if the share was created in VPC but not yet detected
 ibmcloud is shares --output json | jq '.[] | select(.name | contains("<pool-name>"))'
@@ -477,36 +526,42 @@ The controller retries share creation automatically. If it's stuck, check VPC AP
 ```bash
 # Option 1: Increase maxShares (check your VPC quota first)
 ibmcloud is shares --output json | jq length  # Current total shares
-kubectl patch filesharespool <pool-name> --type merge -p '{"spec":{"maxShares":20}}'
+kubectl patch filesharepool <pool-name> --type merge -p '{"spec":{"maxShares":20}}'
 
-# Option 2: Increase share size (existing shares grow)
-kubectl patch filesharespool <pool-name> --type merge -p '{"spec":{"shareSizeGB":4000}}'
-
-# Option 3: Identify and remove unused PVCs
+# Option 2: Identify and remove unused PVCs
+# (Changing spec.shareSizeGB only sets the size of shares created afterwards.
+#  Existing shares keep their size.)
 kubectl get subvolumes -l storage.ibmcloud.io/pool=<pool-name> --sort-by=.metadata.creationTimestamp
 ```
 
 ---
 
-### Pool deletion blocked by active SubVolumes
+### Pool deletion blocked by active SubVolumes or snapshots
 
-**Symptom:** `kubectl delete filesharespool <name>` hangs or the pool stays in `Terminating`.
+**Symptom:** `kubectl delete filesharepool <name>` hangs or the pool stays in `Terminating`. The pool's `DeletionBlocked` condition says why: `ActiveSubVolumes` or `SnapshotsExist`.
 
-**Cause:** The pool has a finalizer that prevents deletion while SubVolumes still reference its shares.
+**Cause:** The pool has a finalizer that prevents deletion while SubVolumes still reference its shares, or while snapshots keep their data on them. Deleting the shares would delete that data.
+
+If the reason is `SnapshotsExist`, delete the pool's VolumeSnapshots first:
+```bash
+kubectl get snapshots.storage.ibmcloud.io -o json |
+  jq -r '.items[] | select(.spec.poolName=="<pool-name>") | .metadata.name'
+# Find the VolumeSnapshot of each one through its VolumeSnapshotContent, and delete it.
+```
 
 **Fix:**
 ```bash
 # List SubVolumes in the pool
 kubectl get subvolumes -l storage.ibmcloud.io/pool=<pool-name>
 
-# Delete all PVCs backed by this pool first
-kubectl delete pvc -l storageClassName=<sc-name> --all-namespaces
+# Delete all PVCs backed by this pool first: list them, then delete each one
+kubectl get pvc -A -o json | jq -r '.items[] | select(.spec.storageClassName=="<sc-name>") | "\(.metadata.namespace) \(.metadata.name)"'
 
 # Wait for SubVolumes to be cleaned up
 kubectl get subvolumes -l storage.ibmcloud.io/pool=<pool-name> -w
 
 # Then retry pool deletion
-kubectl delete filesharespool <pool-name>
+kubectl delete filesharepool <pool-name>
 ```
 
 If SubVolumes are stuck in a finalizer loop, check the controller logs for errors during cleanup.
@@ -548,15 +603,15 @@ Common causes:
 **Fix:**
 ```bash
 # Check which pod holds the leader lease
-kubectl get lease -n kube-system vpc-file-pool-csi-leader -o yaml
+kubectl get lease -n kube-system ibm-vpc-file-pool-csi-leader -o yaml
 
 # Check controller logs for leader election messages
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller --tail=50 | grep -i "leader"
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller --tail=50 | grep -i "leader"
 ```
 
 If the leader lease is held by a dead pod, delete the lease to force re-election:
 ```bash
-kubectl delete lease -n kube-system vpc-file-pool-csi-leader
+kubectl delete lease -n kube-system ibm-vpc-file-pool-csi-leader
 ```
 
 ---
@@ -632,7 +687,8 @@ kubectl get subvolume <name> -o jsonpath='Share: {.spec.shareID}, Path: {.spec.s
 ```bash
 # Mount the share and list subdirectories (from a debug pod)
 kubectl debug node/<node-name> -it --image=busybox -- sh
-ls /var/lib/kubelet/plugins/vpc-file-pool.csi.ibm.io/staging/<share-id>/pvcs/
+# The node's file system is under /host. On ROKS the kubelet directory is /var/data/kubelet.
+ls /host/var/data/kubelet/plugins/vpc-file-pool.csi.ibm.io/staging/<share-id>/pvcs/
 
 # Compare with known SubVolumes
 kubectl get subvolumes -l storage.ibmcloud.io/share-id=<share-id> -o jsonpath='{.items[*].spec.subPath}'
@@ -704,6 +760,46 @@ To request a quota increase, open an IBM Cloud support ticket.
 
 ---
 
+## Backup and Replication Issues
+
+### Backups stopped: the snapshot pool is above 85% full
+
+**Symptom:** `kubectl get backuppolicies` shows phase `Error`, and no new backups appear.
+
+```bash
+kubectl get backuppolicy <name> -o jsonpath='{.status.phase}{"\n"}{.status.message}{"\n"}'
+```
+
+The message says how full the share is. At 85% the policy stops new backups. It never deletes backups to make room.
+
+**Fix:** make room, and the backups resume by themselves when use falls to 85% or less.
+- Shorten `spec.keepFor` on the policy, or remove the backups of a volume you no longer need (`kubectl backup delete`, see [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md)).
+- Or add shares to the snapshot pool.
+
+The alert `VPCFilePoolSnapshotPoolNearlyFull` fires at 75% so you can act first.
+
+### A volume has no recent backup
+
+```bash
+kubectl backup list --policy <name>
+kubectl get backuppolicy <name> -o yaml    # status.volumes[].lastError is the last error of each volume
+```
+
+Check `status.phase` first (a `Suspended` policy makes no backups). Then read `status.volumes[].lastError` for the volume. The controller log has the line `Failed to create replication resources` when a copy could not start.
+
+### Replication is late or failing
+
+```bash
+kubectl get replicationpolicies
+kubectl get replicationpolicy <name> -o jsonpath='{.status.phase}{"\n"}{.status.consecutiveFailures}{"\n"}{.status.lastError}{"\n"}'
+```
+
+- Phase `Paused` with the annotation `storage.ibmcloud.io/paused: "true"` was paused by a person. Remove it with `kubectl annotate replicationpolicy <name> storage.ibmcloud.io/paused-`.
+- A high `consecutiveFailures` with a `lastError` is a failing copy. The error names the cause (for example the destination is not reachable).
+- Check the destination, then look at the controller log for the policy name.
+
+---
+
 ## Metrics Issues
 
 ### Prometheus not scraping metrics
@@ -714,13 +810,13 @@ To request a quota increase, open an IBM Cloud support ticket.
 
 1. **Verify the metrics endpoint is up:**
 ```bash
-kubectl port-forward -n kube-system svc/vpc-file-pool-csi-controller 8080:8080
+kubectl port-forward -n kube-system svc/ibm-vpc-file-pool-csi-metrics 8080:8080
 curl http://localhost:8080/metrics | grep vpc_file_pool
 ```
 
 2. **Check ServiceMonitor** (if using Prometheus Operator):
 ```bash
-kubectl get servicemonitor -n kube-system vpc-file-pool-csi
+kubectl get servicemonitor -n kube-system ibm-vpc-file-pool-csi
 ```
 
 3. **Check Prometheus targets** — look for the controller's metrics endpoint in the Prometheus UI under Status > Targets
@@ -733,8 +829,8 @@ kubectl get servicemonitor -n kube-system vpc-file-pool-csi
       namespaces:
         names: ['kube-system']
   relabel_configs:
-    - source_labels: [__meta_kubernetes_pod_label_app]
-      regex: vpc-file-pool-csi-controller
+    - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component]
+      regex: controller
       action: keep
     - source_labels: [__meta_kubernetes_pod_container_port_number]
       regex: "8080"
@@ -752,10 +848,10 @@ kubectl get servicemonitor -n kube-system vpc-file-pool-csi
 **Fix:**
 ```bash
 # Check the last reconciliation time
-kubectl get filesharespool <pool-name> -o jsonpath='{.status.lastReconcileTime}'
+kubectl get filesharepool <pool-name> -o jsonpath='{.status.lastReconcileTime}'
 
 # Force reconciliation by annotating the pool
-kubectl annotate filesharespool <pool-name> reconcile-trigger=$(date +%s) --overwrite
+kubectl annotate filesharepool <pool-name> reconcile-trigger=$(date +%s) --overwrite
 ```
 
 ---
@@ -785,7 +881,7 @@ helm upgrade ibm-vpc-file-pool-csi charts/ibm-vpc-file-pool-csi/ \
 **Raw manifests:**
 ```bash
 # Edit the controller deployment
-kubectl edit deployment -n kube-system vpc-file-pool-csi-controller
+kubectl edit deployment -n kube-system ibm-vpc-file-pool-csi-controller
 # Add --v=4 to the container args
 ```
 
@@ -799,53 +895,37 @@ kubectl edit deployment -n kube-system vpc-file-pool-csi-controller
 
 ```bash
 # Allocation events
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller | grep "Allocated\|Deallocated"
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller | grep "Allocated\|Deallocated"
 
 # VPC API calls
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller | grep "vpc\|api\|share"
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller | grep "vpc\|api\|share"
 
 # Errors only
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller | grep -i "error\|fail\|panic"
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller | grep -i "error\|fail\|panic"
 
 # Specific PVC
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller | grep "pvc-<uuid>"
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller | grep "pvc-<uuid>"
 
 # Node mount operations
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-node -c csi-node | grep "mount\|stage\|publish"
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node -c csi-node | grep "mount\|stage\|publish"
 ```
 
 ---
 
 ## Getting Help
 
-If you can't resolve the issue:
+If you cannot resolve the issue:
 
-1. Collect diagnostics:
+1. Collect diagnostics with the script from the repository:
 ```bash
-# Save to a file for sharing
-{
-  echo "=== Driver version ==="
-  kubectl get deployment -n kube-system vpc-file-pool-csi-controller -o jsonpath='{.spec.template.spec.containers[0].image}'
-  echo
-  echo "=== Cluster version ==="
-  kubectl version --short
-  echo
-  echo "=== Pool status ==="
-  kubectl get filesharepools -o yaml
-  echo
-  echo "=== SubVolumes ==="
-  kubectl get subvolumes -o wide
-  echo
-  echo "=== Controller logs (last 200 lines) ==="
-  kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller --tail=200
-  echo
-  echo "=== Node agent logs (last 100 lines per node) ==="
-  kubectl logs -n kube-system -l app=vpc-file-pool-csi-node -c csi-node --tail=100
-} > csi-diagnostics.txt
+bash scripts/collect-diagnostics.sh
 ```
+It writes `csi-diagnostics-<time>.txt`. It holds driver versions, pools, volumes, snapshots, backup and replication policies, driver logs and recent events. It never reads a Secret and it removes values that look like keys or tokens. Read the file before you send it.
 
 2. Open a GitHub issue with:
-   - Cluster type (IKS/ROKS) and version
+   - Cluster type (IKS/ROKS/ROVS) and version
    - Driver version (image tag)
-   - The `csi-diagnostics.txt` output (redact any sensitive info)
+   - The `csi-diagnostics-<time>.txt` file
    - Steps to reproduce
+
+See [SUPPORT.md](SUPPORT.md) for where to start.

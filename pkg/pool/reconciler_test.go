@@ -11,6 +11,7 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud/fake"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
+	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,7 +23,9 @@ import (
 )
 
 func newReconciler(k8s *fakeK8sClient, vpc *fake.FakeVPCClient) *FileSharePoolReconciler {
-	return NewFileSharePoolReconciler(k8s, vpc)
+	r := NewFileSharePoolReconciler(k8s, vpc)
+	r.SetVPCConfig(testNetwork(vpc), "")
+	return r
 }
 
 func reconcilePool(r *FileSharePoolReconciler, name string) (ctrl.Result, error) {
@@ -619,6 +622,130 @@ func TestReconcile_EmitsPrometheusGauges(t *testing.T) {
 	}
 }
 
+// The max shares gauge lets an alert compare the share count with the limit.
+func TestReconcile_EmitsMaxSharesGauge(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	vpc.AddShare(&ibmcloud.ShareInfo{
+		ID: "share-1", Name: "s1", LifecycleState: "stable", SizeGB: 1000,
+		MountTargets: []ibmcloud.MountTargetInfo{{ID: "mt-1", IPAddress: "10.0.0.1"}},
+	})
+	pool := newTestPool("maxshares-pool", "spread", 1000, newStableShare("share-1", "s1", 1000, 0, 0))
+	pool.Spec.MaxShares = 7
+	k.addPool(pool)
+
+	r := newReconciler(k, vpc)
+	if _, err := reconcilePool(r, "maxshares-pool"); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	var m dto.Metric
+	if err := metrics.PoolMaxShares.WithLabelValues("maxshares-pool").Write(&m); err != nil {
+		t.Fatalf("failed to read PoolMaxShares: %v", err)
+	}
+	if *m.Gauge.Value != 7 {
+		t.Errorf("expected PoolMaxShares=7, got %f", *m.Gauge.Value)
+	}
+}
+
+// Per-share gauges let an alert find one share that is nearly full.
+func TestReconcile_EmitsPerShareGauges(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	vpc.AddShare(&ibmcloud.ShareInfo{
+		ID: "share-1", Name: "s1", LifecycleState: "stable", SizeGB: 1000,
+		MountTargets: []ibmcloud.MountTargetInfo{{ID: "mt-1", IPAddress: "10.0.0.1"}},
+	})
+	vpc.AddShare(&ibmcloud.ShareInfo{
+		ID: "share-2", Name: "s2", LifecycleState: "stable", SizeGB: 2000,
+		MountTargets: []ibmcloud.MountTargetInfo{{ID: "mt-2", IPAddress: "10.0.0.2"}},
+	})
+	pool := newTestPool("pershare-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 0, 0),
+		newStableShare("share-2", "s2", 2000, 0, 0),
+	)
+	pool.Spec.InitialShares = 2
+	k.addPool(pool)
+	k.addSubVolume(newTestSubVolume("pvc-p1", "pershare-pool", "share-1", 50))
+	k.addSubVolume(newTestSubVolume("pvc-p2", "pershare-pool", "share-1", 30))
+	k.addSubVolume(newTestSubVolume("pvc-p3", "pershare-pool", "share-2", 70))
+
+	r := newReconciler(k, vpc)
+	if _, err := reconcilePool(r, "pershare-pool"); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	want := []struct {
+		share            string
+		totalGB, allocGB float64
+	}{{"s1", 1000, 80}, {"s2", 2000, 70}}
+	for _, w := range want {
+		var m dto.Metric
+		if err := metrics.ShareTotalGB.WithLabelValues("pershare-pool", w.share).Write(&m); err != nil {
+			t.Fatalf("failed to read ShareTotalGB: %v", err)
+		}
+		if *m.Gauge.Value != w.totalGB {
+			t.Errorf("share %s: expected ShareTotalGB=%v, got %v", w.share, w.totalGB, *m.Gauge.Value)
+		}
+		if err := metrics.ShareAllocatedGB.WithLabelValues("pershare-pool", w.share).Write(&m); err != nil {
+			t.Fatalf("failed to read ShareAllocatedGB: %v", err)
+		}
+		if *m.Gauge.Value != w.allocGB {
+			t.Errorf("share %s: expected ShareAllocatedGB=%v, got %v", w.share, w.allocGB, *m.Gauge.Value)
+		}
+	}
+}
+
+// A share that leaves the pool must not keep its series.
+func TestEmitShareMetrics_DropsRemovedShares(t *testing.T) {
+	pool := newTestPool("drop-pool", "spread", 1000,
+		newStableShare("share-1", "s1", 1000, 10, 1),
+		newStableShare("share-2", "s2", 1000, 20, 1),
+	)
+	emitShareMetrics(pool)
+	pool.Status.Shares = pool.Status.Shares[:1]
+	emitShareMetrics(pool)
+
+	got := shareLabelsForPool(t, metrics.ShareTotalGB, "drop-pool")
+	if len(got) != 1 || got[0] != "s1" {
+		t.Errorf("expected only share s1, got %v", got)
+	}
+}
+
+// A deleted pool must not leave per-share series that keep an alert firing.
+func TestDropShareMetrics_RemovesPoolSeries(t *testing.T) {
+	pool := newTestPool("gone-pool", "spread", 1000, newStableShare("share-1", "s1", 1000, 10, 1))
+	emitShareMetrics(pool)
+	dropShareMetrics(pool.Name)
+
+	if got := shareLabelsForPool(t, metrics.ShareAllocatedGB, "gone-pool"); len(got) != 0 {
+		t.Errorf("expected no series, got %v", got)
+	}
+}
+
+// shareLabelsForPool returns the share label of every series of c for a pool.
+func shareLabelsForPool(t *testing.T, c prometheus.Collector, pool string) []string {
+	t.Helper()
+	ch := make(chan prometheus.Metric, 1024)
+	c.Collect(ch)
+	close(ch)
+	var shares []string
+	for m := range ch {
+		var d dto.Metric
+		if err := m.Write(&d); err != nil {
+			t.Fatal(err)
+		}
+		labels := map[string]string{}
+		for _, l := range d.Label {
+			labels[l.GetName()] = l.GetValue()
+		}
+		if labels["pool"] == pool {
+			shares = append(shares, labels["share"])
+		}
+	}
+	return shares
+}
+
 // ---------------------------------------------------------------------------
 // 15. Initial Provisioning with Tiers
 // ---------------------------------------------------------------------------
@@ -752,7 +879,7 @@ func TestReconcile_EnsureAccessorMountTargets(t *testing.T) {
 	k.addPool(pool)
 
 	r := newReconciler(k, vpc)
-	r.SetVPCConfig("vpc-1", "subnet-1", "rg-1")
+	r.SetVPCConfig(testNetwork(vpc), "rg-1")
 	_, err := reconcilePool(r, "test-pool")
 	if err != nil {
 		t.Fatalf("Reconcile failed: %v", err)
@@ -807,7 +934,7 @@ func TestReconcile_EnsureAccessorMountTargets_AlreadyExists(t *testing.T) {
 	k.addPool(pool)
 
 	r := newReconciler(k, vpc)
-	r.SetVPCConfig("vpc-1", "subnet-1", "rg-1")
+	r.SetVPCConfig(testNetwork(vpc), "rg-1")
 	_, err := reconcilePool(r, "test-pool")
 	if err != nil {
 		t.Fatalf("Reconcile failed: %v", err)
@@ -840,7 +967,7 @@ func TestReconcile_EnsureAccessorMountTargets_SkipsCreatingShares(t *testing.T) 
 	k.addPool(pool)
 
 	r := newReconciler(k, vpc)
-	r.SetVPCConfig("vpc-1", "subnet-1", "rg-1")
+	r.SetVPCConfig(testNetwork(vpc), "rg-1")
 	_, err := reconcilePool(r, "test-pool")
 	if err != nil {
 		t.Fatalf("Reconcile failed: %v", err)
@@ -1015,7 +1142,7 @@ func TestReconcile_DrainRequests_ProgressTracking(t *testing.T) {
 	vpc := fake.NewFakeVPCClient()
 
 	shareInfo1, _ := vpc.CreateFileShare(context.Background(), ibmcloudInput("test-pool", 1000))
-	shareInfo2, _ := vpc.CreateFileShare(context.Background(), ibmcloud.CreateShareInput{
+	shareInfo2, _ := vpc.CreateFileShare(context.Background(), ibmcloud.CreateShareInput{SubnetID: "subnet-us-south-1",
 		Name: "test-pool-share-2", Zone: "us-south-1", Profile: "dp2", SizeGB: 1000,
 	})
 
@@ -1529,12 +1656,15 @@ func TestEnsureStorageProfiles_PatchesEmptyProfile(t *testing.T) {
 		t.Fatal("expected claimPropertySets to be patched")
 	}
 
-	entry := cps[0].(map[string]interface{})
-	modes := entry["accessModes"].([]interface{})
-	if len(modes) != 1 || modes[0].(string) != "ReadWriteMany" {
-		t.Errorf("expected accessModes=[ReadWriteMany], got %v", modes)
+	entry, ok := cps[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected claimPropertySets entry to be a map, got %T", cps[0])
 	}
-	volMode := entry["volumeMode"].(string)
+	modes, ok := entry["accessModes"].([]interface{})
+	if !ok || len(modes) != 1 || modes[0] != "ReadWriteMany" {
+		t.Errorf("expected accessModes=[ReadWriteMany], got %v", entry["accessModes"])
+	}
+	volMode := entry["volumeMode"]
 	if volMode != "Filesystem" {
 		t.Errorf("expected volumeMode=Filesystem, got %s", volMode)
 	}
@@ -1574,10 +1704,13 @@ func TestEnsureStorageProfiles_SkipsPopulatedProfile(t *testing.T) {
 	if len(cps) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(cps))
 	}
-	entry := cps[0].(map[string]interface{})
-	modes := entry["accessModes"].([]interface{})
-	if modes[0].(string) != "ReadWriteOnce" {
-		t.Errorf("expected original accessMode ReadWriteOnce preserved, got %v", modes[0])
+	entry, ok := cps[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected claimPropertySets entry to be a map, got %T", cps[0])
+	}
+	modes, ok := entry["accessModes"].([]interface{})
+	if !ok || len(modes) != 1 || modes[0] != "ReadWriteOnce" {
+		t.Errorf("expected original accessMode ReadWriteOnce preserved, got %v", entry["accessModes"])
 	}
 }
 
@@ -1793,14 +1926,14 @@ func (c *fakeDirectClient) Patch(_ context.Context, obj client.Object, patch cli
 		return err
 	}
 
-	// Simple merge: decode the patch JSON and set claimPropertySets
+	// Simple merge: decode the patch JSON and set each spec field
 	var patchMap map[string]interface{}
 	if err := json.Unmarshal(patchData, &patchMap); err != nil {
 		return err
 	}
 	if specPatch, ok := patchMap["spec"].(map[string]interface{}); ok {
-		if cps, ok := specPatch["claimPropertySets"]; ok {
-			_ = unstructured.SetNestedField(sp.Object, cps, "spec", "claimPropertySets")
+		for field, value := range specPatch {
+			_ = unstructured.SetNestedField(sp.Object, value, "spec", field)
 		}
 	}
 	return nil
@@ -1836,7 +1969,6 @@ func TestReconcile_HealthCheck_CreatesMissingMountTarget(t *testing.T) {
 	k.addPool(pool)
 
 	r := newReconciler(k, vpc)
-	r.vpcID = "vpc-test-001"
 
 	_, err := reconcilePool(r, "test-pool")
 	if err != nil {
@@ -1859,7 +1991,7 @@ func TestReconcile_HealthCheck_CreatesMissingMountTarget(t *testing.T) {
 	}
 }
 
-func TestReconcile_HealthCheck_SkipsMountTargetRecoveryWhenNoVPCID(t *testing.T) {
+func TestReconcile_HealthCheck_SkipsMountTargetRecoveryWhenNoNetwork(t *testing.T) {
 	k := newFakeK8sClient()
 	vpc := fake.NewFakeVPCClient()
 
@@ -1879,17 +2011,16 @@ func TestReconcile_HealthCheck_SkipsMountTargetRecoveryWhenNoVPCID(t *testing.T)
 	pool.Spec.InitialShares = 1
 	k.addPool(pool)
 
-	r := newReconciler(k, vpc)
-	// r.vpcID is empty — VPC config not yet set
+	r := NewFileSharePoolReconciler(k, vpc) // cluster network not yet set
 
 	_, err := reconcilePool(r, "test-pool")
 	if err != nil {
 		t.Fatalf("Reconcile failed: %v", err)
 	}
 
-	// Should not attempt to create mount target without VPC ID
+	// Should not attempt to create mount target without the cluster network
 	if vpc.CreateMountTargetCalls != 0 {
-		t.Errorf("expected 0 CreateShareMountTarget calls without vpcID, got %d", vpc.CreateMountTargetCalls)
+		t.Errorf("expected 0 CreateShareMountTarget calls without a network, got %d", vpc.CreateMountTargetCalls)
 	}
 }
 
@@ -1958,9 +2089,61 @@ func TestReconcile_HealthCheck_DeletedShareWithPVCsKept(t *testing.T) {
 
 func ibmcloudInput(poolName string, sizeGB int64) ibmcloud.CreateShareInput {
 	return ibmcloud.CreateShareInput{
-		Name:    fmt.Sprintf("%s-share-1", poolName),
-		Zone:    "us-south-1",
-		Profile: "dp2",
-		SizeGB:  sizeGB,
+		Name:     fmt.Sprintf("%s-share-1", poolName),
+		Zone:     "us-south-1",
+		Profile:  "dp2",
+		SizeGB:   sizeGB,
+		SubnetID: "subnet-us-south-1",
+	}
+}
+
+// CDI's own copy pods run out of memory when they write onto NFS (rovslab,
+// 20 October), so CDI must ask the driver to make clones.
+func TestEnsureStorageProfiles_ClonesWithTheDriver(t *testing.T) {
+	k := newFakeK8sClient()
+	r := newReconciler(k, fake.NewFakeVPCClient())
+	fakeClient := newFakeDirectClient()
+	r.directClient = fakeClient
+	r.restMapper = newFakeRESTMapper(true)
+	fakeClient.addStorageProfile("test-pool", nil)
+	pool := newTestPool("test-pool", "spread", 1000)
+	pool.Spec.InitialShares = 0
+	k.addPool(pool)
+
+	r.ensureStorageProfiles(context.Background(), pool)
+
+	got, _, _ := unstructured.NestedString(fakeClient.getStorageProfile("test-pool").Object, "spec", "cloneStrategy")
+	if got != "csi-clone" {
+		t.Errorf("cloneStrategy = %q, want csi-clone", got)
+	}
+}
+
+// A share that is no longer on the drain list, and that the VPC reports as
+// healthy, takes new volumes again. Before, it stayed "draining" for good.
+func TestReconcile_DrainRequests_RemovedShareReturnsToService(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	shareInfo, _ := vpc.CreateFileShare(context.Background(), ibmcloudInput("test-pool", 1000))
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		v1alpha1.PoolShareStatus{
+			ShareID:       shareInfo.ID,
+			ShareName:     shareInfo.Name,
+			MountTargetIP: "10.240.0.1",
+			TotalGB:       1000,
+			State:         "draining",
+			Zone:          "us-south-1",
+		},
+	)
+	pool.Spec.InitialShares = 1
+	k.addPool(pool)
+
+	r := newReconciler(k, vpc)
+	if _, err := reconcilePool(r, "test-pool"); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	if got := k.getPool("test-pool").Status.Shares[0].State; got != "stable" {
+		t.Errorf("share state = %q, want stable once it is off the drain list and healthy", got)
 	}
 }

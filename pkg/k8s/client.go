@@ -27,6 +27,9 @@ type Client interface {
 	ListSubVolumes(ctx context.Context, poolName string) ([]v1alpha1.SubVolume, error)
 	ListSubVolumesByShare(ctx context.Context, shareID string) ([]v1alpha1.SubVolume, error)
 	ListCloneSubVolumes(ctx context.Context) ([]v1alpha1.SubVolume, error)
+	// HasOpenRestore reports whether a BackupRestore that has not ended is
+	// making the PVC with this namespace and name.
+	HasOpenRestore(ctx context.Context, pvcNamespace, pvcName string) (bool, error)
 	CreateSubVolume(ctx context.Context, sv *v1alpha1.SubVolume) error
 	UpdateSubVolume(ctx context.Context, sv *v1alpha1.SubVolume) error
 	UpdateSubVolumeStatus(ctx context.Context, sv *v1alpha1.SubVolume) error
@@ -53,6 +56,7 @@ type Client interface {
 	GetReplicationPolicy(ctx context.Context, name string) (*v1alpha1.ReplicationPolicy, error)
 	ListReplicationPolicies(ctx context.Context) ([]v1alpha1.ReplicationPolicy, error)
 	CreateReplicationPolicy(ctx context.Context, rp *v1alpha1.ReplicationPolicy) error
+	UpdateReplicationPolicy(ctx context.Context, rp *v1alpha1.ReplicationPolicy) error
 	UpdateReplicationPolicyStatus(ctx context.Context, rp *v1alpha1.ReplicationPolicy) error
 	DeleteReplicationPolicy(ctx context.Context, name string) error
 

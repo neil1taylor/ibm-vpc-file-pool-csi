@@ -74,15 +74,15 @@ spec:
                     have additional mount targets.
                   properties:
                     subnetID:
-                      description: SubnetID is the VPC subnet in the accessor zone
-                        to create mount targets in.
+                      description: |-
+                        SubnetID is not used. Shares use security group access mode, and one mount
+                        target in the home zone serves every zone. Kept so existing pools still apply.
                       type: string
                     zone:
                       description: Zone is the VPC availability zone (e.g., "us-south-2").
                       pattern: ^[a-z]{2}-[a-z]+-\d+$
                       type: string
                   required:
-                  - subnetID
                   - zone
                   type: object
                 type: array
@@ -144,11 +144,6 @@ spec:
                   and maintains ready-to-clone golden image PVCs in target namespaces.
                   Not needed when the pool StorageClass is the cluster default (CDI handles natively).
                 properties:
-                  converterImage:
-                    default: quay.io/centos/centos:stream9
-                    description: ConverterImage is the container image used for qcow2-to-raw
-                      conversion jobs.
-                    type: string
                   enabled:
                     description: Enabled activates the golden image syncer for this
                       pool.
@@ -190,8 +185,8 @@ spec:
                 minimum: 0
                 type: integer
               iops:
-                description: IOPS is the IOPS allocation per share. Only used with
-                  custom profiles.
+                description: IOPS is the IOPS per share. If unset, the VPC chooses
+                  it (100 for dp2).
                 format: int64
                 minimum: 100
                 type: integer
@@ -210,13 +205,21 @@ spec:
                   type: string
                 type: array
               profile:
-                description: Profile is the VPC file storage profile (e.g., "dp2",
-                  "custom").
+                description: Profile is the VPC file share profile. "dp2" is the only
+                  one VPC offers.
                 type: string
               resourceGroup:
                 description: ResourceGroup is the IBM Cloud resource group ID for
                   created shares.
                 type: string
+              securityGroupIDs:
+                description: |-
+                  SecurityGroupIDs are the VPC security groups for each share's mount target.
+                  When empty, the driver uses the cluster's own security group,
+                  kube-<cluster ID>, which already lets every worker reach NFS.
+                items:
+                  type: string
+                type: array
               shareSizeGB:
                 default: 1000
                 description: ShareSizeGB is the size in GB for each share created
@@ -247,8 +250,8 @@ spec:
                       minimum: 0
                       type: integer
                     iops:
-                      description: IOPS is the IOPS allocation per share. Only used
-                        with custom profiles.
+                      description: IOPS is the IOPS per share. If unset, the VPC chooses
+                        it (100 for dp2).
                       format: int64
                       type: integer
                     maxShares:
@@ -264,8 +267,8 @@ spec:
                       pattern: ^[a-z0-9-]+$
                       type: string
                     profile:
-                      description: Profile is the VPC file storage profile (e.g.,
-                        "dp2", "custom").
+                      description: Profile is the VPC file share profile. "dp2" is
+                        the only one VPC offers.
                       type: string
                     shareSizeGB:
                       description: ShareSizeGB is the size in GB for shares in this
@@ -370,9 +373,15 @@ spec:
                       format: date-time
                       type: string
                     drained:
-                      description: Drained is true when the share has zero SubVolumes
-                        remaining.
+                      description: Drained is true when the share has no SubVolumes
+                        and no snapshots left.
                       type: boolean
+                    remainingSnapshots:
+                      description: |-
+                        RemainingSnapshots is the number of snapshots whose data is still on
+                        this share. Deleting the share deletes them.
+                      format: int32
+                      type: integer
                     remainingSubVolumes:
                       description: RemainingSubVolumes is the number of SubVolumes
                         still on this share.

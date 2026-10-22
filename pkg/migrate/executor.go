@@ -51,14 +51,17 @@ type MigrationStatus struct {
 type Executor struct {
 	clientset kubernetes.Interface
 	output    io.Writer
+	// deleteWait is how long to wait after deleting an earlier migration pod of the same name.
+	deleteWait time.Duration
 }
 
 // NewExecutor creates an Executor with the given Kubernetes client.
 // The output writer receives progress messages (typically os.Stdout).
 func NewExecutor(clientset kubernetes.Interface, output io.Writer) *Executor {
 	return &Executor{
-		clientset: clientset,
-		output:    output,
+		clientset:  clientset,
+		output:     output,
+		deleteWait: 2 * time.Second,
 	}
 }
 
@@ -112,28 +115,14 @@ func (e *Executor) Execute(ctx context.Context, namespace, sourcePVC, targetPool
 	_, _ = fmt.Fprintf(e.output, "Creating target PVC %s/%s (size: %s, storageClass: %s)...\n",
 		namespace, targetPVCName, storageSize.String(), targetStorageClass)
 
-	targetPVC := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      targetPVCName,
-			Namespace: namespace,
-			Labels: map[string]string{
-				LabelMigration: "true",
-			},
-			Annotations: map[string]string{
-				AnnotationSourcePVC:             sourcePVC,
-				"vpc-file-pool-csi.ibm.io/pool": targetPool,
-			},
-		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
-			StorageClassName: &targetStorageClass,
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: storageSize,
-				},
-			},
-		},
-	}
+	targetPVC := BuildTargetPVC(TargetPVCSpec{
+		Name:         targetPVCName,
+		Namespace:    namespace,
+		SourcePVC:    sourcePVC,
+		Pool:         targetPool,
+		StorageClass: targetStorageClass,
+		Size:         storageSize,
+	})
 
 	_, err = e.clientset.CoreV1().PersistentVolumeClaims(namespace).Create(ctx, targetPVC, metav1.CreateOptions{})
 	if err != nil {
@@ -146,7 +135,7 @@ func (e *Executor) Execute(ctx context.Context, namespace, sourcePVC, targetPool
 
 	// Wait for target PVC to bind.
 	_, _ = fmt.Fprintf(e.output, "Waiting for target PVC to bind...\n")
-	if err := e.waitForPVCBound(ctx, namespace, targetPVCName, 2*time.Minute); err != nil {
+	if err = e.waitForPVCBound(ctx, namespace, targetPVCName, 2*time.Minute); err != nil {
 		return nil, fmt.Errorf("target PVC did not bind: %w", err)
 	}
 	_, _ = fmt.Fprintf(e.output, "Target PVC is Bound.\n")
@@ -164,7 +153,7 @@ func (e *Executor) Execute(ctx context.Context, namespace, sourcePVC, targetPool
 	// Clean up any previous migration pod with the same name.
 	_ = e.clientset.CoreV1().Pods(namespace).Delete(ctx, migrationPodName, metav1.DeleteOptions{})
 	// Brief pause to let the delete propagate.
-	time.Sleep(2 * time.Second)
+	time.Sleep(e.deleteWait)
 
 	_, err = e.clientset.CoreV1().Pods(namespace).Create(ctx, migrationPod, metav1.CreateOptions{})
 	if err != nil {
@@ -173,7 +162,7 @@ func (e *Executor) Execute(ctx context.Context, namespace, sourcePVC, targetPool
 
 	// 4. Wait for the pod to start running, then stream logs.
 	_, _ = fmt.Fprintf(e.output, "Waiting for migration pod to start...\n")
-	if err := e.waitForPodRunning(ctx, namespace, migrationPodName, 5*time.Minute); err != nil {
+	if err = e.waitForPodRunning(ctx, namespace, migrationPodName, 5*time.Minute); err != nil {
 		// Attempt cleanup.
 		e.cleanupPod(ctx, namespace, migrationPodName)
 		return nil, fmt.Errorf("migration pod did not start: %w", err)
@@ -182,7 +171,7 @@ func (e *Executor) Execute(ctx context.Context, namespace, sourcePVC, targetPool
 	_, _ = fmt.Fprintf(e.output, "Migration pod is running. Streaming logs:\n")
 	_, _ = fmt.Fprintf(e.output, "---\n")
 
-	if err := e.streamPodLogs(ctx, namespace, migrationPodName); err != nil {
+	if err = e.streamPodLogs(ctx, namespace, migrationPodName); err != nil {
 		_, _ = fmt.Fprintf(e.output, "---\n")
 		_, _ = fmt.Fprintf(e.output, "Warning: failed to stream logs: %v\n", err)
 	} else {

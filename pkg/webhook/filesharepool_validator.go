@@ -3,8 +3,10 @@ package webhook
 import (
 	"context"
 	"fmt"
+	"regexp"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
@@ -51,17 +53,37 @@ func validateFileSharePoolSpec(spec *v1alpha1.FileSharePoolSpec) error {
 	if spec.ShareSizeGB < 10 || spec.ShareSizeGB > 32000 {
 		return fmt.Errorf("spec.shareSizeGB must be between 10 and 32000, got %d", spec.ShareSizeGB)
 	}
-	if spec.MaxShares < 1 || spec.MaxShares > 1000 {
-		return fmt.Errorf("spec.maxShares must be between 1 and 1000, got %d", spec.MaxShares)
+	if spec.IOPS != nil {
+		if err := ibmcloud.ValidateShareIOPS(spec.Profile, spec.ShareSizeGB, *spec.IOPS); err != nil {
+			return fmt.Errorf("spec.iops: %w", err)
+		}
+	}
+	for i := range spec.Tiers {
+		t := &spec.Tiers[i]
+		if t.IOPS == nil {
+			continue
+		}
+		if err := ibmcloud.ValidateShareIOPS(t.Profile, t.ShareSizeGB, *t.IOPS); err != nil {
+			return fmt.Errorf("spec.tiers[%d] (%s) iops: %w", i, t.Name, err)
+		}
+	}
+	if spec.MaxShares < 1 || spec.MaxShares > 100 {
+		return fmt.Errorf("spec.maxShares must be between 1 and 100, got %d", spec.MaxShares)
 	}
 	if spec.InitialShares > spec.MaxShares {
 		return fmt.Errorf("spec.initialShares (%d) must not exceed spec.maxShares (%d)", spec.InitialShares, spec.MaxShares)
 	}
-	if spec.ExpandThresholdPercent < 1 || spec.ExpandThresholdPercent > 99 {
-		return fmt.Errorf("spec.expandThresholdPercent must be between 1 and 99, got %d", spec.ExpandThresholdPercent)
+	if spec.ExpandThresholdPercent < 50 || spec.ExpandThresholdPercent > 95 {
+		return fmt.Errorf("spec.expandThresholdPercent must be between 50 and 95, got %d", spec.ExpandThresholdPercent)
 	}
 	if spec.AllocationStrategy != "" && spec.AllocationStrategy != "spread" && spec.AllocationStrategy != "binpack" {
 		return fmt.Errorf("spec.allocationStrategy must be 'spread' or 'binpack', got %q", spec.AllocationStrategy)
 	}
+	if spec.DefaultPermissions != "" && !octalMode.MatchString(spec.DefaultPermissions) {
+		return fmt.Errorf("spec.defaultPermissions must be an octal mode such as \"0755\", got %q", spec.DefaultPermissions)
+	}
 	return nil
 }
+
+// octalMode matches a Unix file mode in octal, with an optional leading zero.
+var octalMode = regexp.MustCompile(`^0?[0-7]{3,4}$`)

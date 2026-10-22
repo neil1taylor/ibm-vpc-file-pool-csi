@@ -2,26 +2,38 @@ export const API_GROUP = 'storage.ibmcloud.io';
 export const API_VERSION = 'v1alpha1';
 export const API_GROUP_VERSION = `${API_GROUP}/${API_VERSION}`;
 
+/** Where the Helm chart installs the driver by default, and where its share Jobs run (pkg/pool DefaultDriverNamespace). */
+export const DRIVER_NAMESPACE = 'kube-system';
+
 export const PLUGIN_NAME = 'ibm-vpc-file-pool-csi';
 
 // Routes
 export const ROUTES = {
   DASHBOARD: '/vpc-file-pools',
   POOLS: '/vpc-file-pools/pools',
+  MIGRATE: '/vpc-file-pools/migrate',
   POOL_CREATE: '/vpc-file-pools/pools/~new',
   POOL_DETAIL: '/vpc-file-pools/pools/:name',
   SUBVOLUMES: '/vpc-file-pools/subvolumes',
   SUBVOLUME_CREATE: '/vpc-file-pools/subvolumes/~new',
   SUBVOLUME_DETAIL: '/vpc-file-pools/subvolumes/:name',
+  SUBVOLUME_CLONE: '/vpc-file-pools/subvolumes/:name/clone',
   SNAPSHOTS: '/vpc-file-pools/snapshots',
   SNAPSHOT_CREATE: '/vpc-file-pools/snapshots/~new',
   SNAPSHOT_DETAIL: '/vpc-file-pools/snapshots/:name',
+  SNAPSHOT_RESTORE: '/vpc-file-pools/snapshots/:name/restore',
   GROUP_SNAPSHOTS: '/vpc-file-pools/group-snapshots',
   GROUP_SNAPSHOT_CREATE: '/vpc-file-pools/group-snapshots/~new',
   GROUP_SNAPSHOT_DETAIL: '/vpc-file-pools/group-snapshots/:name',
   REPLICATION: '/vpc-file-pools/replication',
   REPLICATION_CREATE: '/vpc-file-pools/replication/~new',
   REPLICATION_DETAIL: '/vpc-file-pools/replication/:name',
+  BACKUPS: '/vpc-file-pools/backups',
+  BACKUP_CREATE: '/vpc-file-pools/backups/~new',
+  BACKUP_COS_RESTORE: '/vpc-file-pools/backups/~cos-restore',
+  BACKUP_DETAIL: '/vpc-file-pools/backups/:name',
+  BACKUP_EDIT: '/vpc-file-pools/backups/:name/edit',
+  BACKUP_RESTORE: '/vpc-file-pools/backups/:name/restore',
   MONITORING: '/vpc-file-pools/monitoring',
 } as const;
 
@@ -41,6 +53,9 @@ export const METRICS = {
   CLONE_DURATION: 'vpc_file_pool_clone_duration_seconds',
   GROUP_SNAPSHOTS_TOTAL: 'vpc_file_pool_group_snapshots_total',
   GROUP_SNAPSHOT_DURATION: 'vpc_file_pool_group_snapshot_duration_seconds',
+  GROUP_SNAPSHOT_MEMBER_COUNT: 'vpc_file_pool_group_snapshot_member_count',
+  GROUP_SNAPSHOT_INCONSISTENCY_WINDOW_MS: 'vpc_file_pool_group_snapshot_inconsistency_window_ms',
+  CDI_COPY_LIMIT_RAISED_TOTAL: 'vpc_file_pool_cdi_copy_limit_raised_total',
   REPLICATION_SYNC_TOTAL: 'pool_csi_replication_sync_total',
   REPLICATION_SYNC_DURATION: 'pool_csi_replication_sync_duration_seconds',
   REPLICATION_LAG: 'pool_csi_replication_lag_seconds',

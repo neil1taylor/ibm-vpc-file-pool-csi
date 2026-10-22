@@ -32,7 +32,7 @@ Cluster-scoped resource. Defines a pool of VPC file shares that back PVC subdire
 ### Go Type Definition
 
 ```go
-// api/v1alpha1/filesharespool_types.go
+// api/v1alpha1/filesharepool_types.go
 package v1alpha1
 
 import (
@@ -63,7 +63,7 @@ type FileSharePoolSpec struct {
     // +kubebuilder:validation:Pattern=`^[a-z]{2}-[a-z]+-\d+$`
     Zone string `json:"zone"`
 
-    // Profile is the VPC file storage profile (e.g., "dp2", "custom").
+    // Profile is the VPC file share profile. "dp2" is the only one VPC offers.
     // +kubebuilder:validation:Required
     Profile string `json:"profile"`
 
@@ -73,7 +73,7 @@ type FileSharePoolSpec struct {
     // +kubebuilder:default=1000
     ShareSizeGB int64 `json:"shareSizeGB"`
 
-    // IOPS is the IOPS allocation per share. Only used with custom profiles.
+    // IOPS per share. If unset, the VPC chooses it (100 for dp2).
     // +kubebuilder:validation:Minimum=100
     // +optional
     IOPS *int64 `json:"iops,omitempty"`
@@ -134,6 +134,12 @@ type FileSharePoolSpec struct {
     // +optional
     Tags []string `json:"tags,omitempty"`
 
+    // SecurityGroupIDs are the VPC security groups for each share's mount target.
+    // When empty, the driver uses the cluster's own security group,
+    // kube-<cluster ID>, which already lets every worker reach NFS.
+    // +optional
+    SecurityGroupIDs []string `json:"securityGroupIDs,omitempty"`
+
     // MountOptions are additional NFS mount options applied by the node agent.
     // +optional
     MountOptions []string `json:"mountOptions,omitempty"`
@@ -184,11 +190,6 @@ type GoldenImageConfig struct {
     // +optional
     RefreshInterval string `json:"refreshInterval,omitempty"`
 
-    // ConverterImage is the container image used for qcow2-to-raw conversion jobs.
-    // +kubebuilder:default="quay.io/centos/centos:stream9"
-    // +optional
-    ConverterImage string `json:"converterImage,omitempty"`
-
     // PVCSizeGB is the size of golden image PVCs in GB.
     // +kubebuilder:validation:Minimum=5
     // +kubebuilder:default=15
@@ -203,9 +204,10 @@ type AccessorZone struct {
     // +kubebuilder:validation:Pattern=`^[a-z]{2}-[a-z]+-\d+$`
     Zone string `json:"zone"`
 
-    // SubnetID is the VPC subnet in the accessor zone for mount target IP allocation.
-    // +kubebuilder:validation:Required
-    SubnetID string `json:"subnetID"`
+    // SubnetID is not used. Shares use security group access mode, and one mount
+    // target in the home zone serves every zone. Kept so existing pools still apply.
+    // +optional
+    SubnetID string `json:"subnetID,omitempty"`
 }
 
 // ShareTier defines the VPC share configuration for a performance tier within the pool.
@@ -215,7 +217,7 @@ type ShareTier struct {
     // +kubebuilder:validation:Pattern=`^[a-z0-9-]+$`
     Name string `json:"name"`
 
-    // Profile is the VPC file storage profile (e.g., "dp2", "custom").
+    // Profile is the VPC file share profile. "dp2" is the only one VPC offers.
     // +kubebuilder:validation:Required
     Profile string `json:"profile"`
 
@@ -224,7 +226,7 @@ type ShareTier struct {
     // +kubebuilder:validation:Maximum=32000
     ShareSizeGB int64 `json:"shareSizeGB"`
 
-    // IOPS is the IOPS allocation per share. Only used with custom profiles.
+    // IOPS per share. If unset, the VPC chooses it (100 for dp2).
     // +optional
     IOPS *int64 `json:"iops,omitempty"`
 
@@ -313,6 +315,10 @@ type GoldenImageNamespaceStatus struct {
     // +optional
     TemplateName string `json:"templateName,omitempty"`
 
+    // DataSourceName is the CDI DataSource for the InstanceTypes catalog.
+    // +optional
+    DataSourceName string `json:"dataSourceName,omitempty"`
+
     // LastSyncTime is when this image was last synced.
     // +optional
     LastSyncTime *metav1.Time `json:"lastSyncTime,omitempty"`
@@ -326,7 +332,12 @@ type ShareDrainStatus struct {
     // RemainingSubVolumes is the number of SubVolumes still on this share.
     RemainingSubVolumes int32 `json:"remainingSubVolumes"`
 
-    // Drained is true when the share has zero SubVolumes remaining.
+    // RemainingSnapshots is the number of snapshots whose data is still on
+    // this share. Deleting the share deletes them.
+    // +optional
+    RemainingSnapshots int32 `json:"remainingSnapshots,omitempty"`
+
+    // Drained is true when the share has no SubVolumes and no snapshots left.
     Drained bool `json:"drained"`
 
     // DrainStartedAt is when the drain was initiated.
@@ -449,14 +460,14 @@ spec:
   expandThresholdPercent: 80
   allocationStrategy: spread
   defaultPermissions: "0755"
-  accessorZones:                     # Mount targets created in these zones too
+  accessorZones:                     # Nodes in these zones mount the share across zones
     - zone: us-south-2
-      subnetID: "0717-xxxx-yyyy"     # Subnet in us-south-2
+      subnetID: "0717-xxxx-yyyy"     # Optional and not used
     - zone: us-south-3
-      subnetID: "0727-aaaa-bbbb"     # Subnet in us-south-3
+      subnetID: "0727-aaaa-bbbb"     # Optional and not used
 ```
 
-When a share is created, mount targets are provisioned in the home zone and all accessor zones.
+When a share is created, it gets one mount target, in the home zone. Nodes in the accessor zones mount it across zones, and the pool status records its address for each accessor zone. The `subnetID` of an accessor zone is not used.
 The PV volumeAttributes include zone-keyed server IPs: `server.us-south-1`, `server.us-south-2`, etc.
 The node agent selects the IP matching its own zone for NFS mounts.
 
@@ -485,7 +496,7 @@ spec:
       maxShares: 10
       initialShares: 2
     - name: high-iops
-      profile: custom
+      profile: dp2
       shareSizeGB: 1000
       iops: 10000
       maxShares: 5
@@ -522,14 +533,13 @@ spec:
       - fedora
       - centos-stream9
     refreshInterval: "24h"
-    converterImage: "quay.io/centos/centos:stream9"
     pvcSizeGB: 15
 ```
 
 When `goldenImages.enabled` is `true`, the golden image syncer discovers CDI DataImportCrons
-matching the filter, creates golden PVCs on the pool's StorageClass, runs converter Jobs
-(download + qcow2-to-raw conversion), and creates OpenShift VM Templates. Status is tracked
-in `status.goldenImages`.
+matching the filter, creates a CDI DataVolume `golden-<image>` on the pool's StorageClass in
+each target namespace (CDI imports the image and converts it to raw), and creates a DataSource
+and an OpenShift VM Template. Status is tracked in `status.goldenImages`.
 
 ### Example FileSharePool CR with DrainShares
 
@@ -556,7 +566,8 @@ spec:
 Shares listed in `drainShares` are marked with `state: draining` in the pool status and excluded
 from new allocations. The controller tracks drain progress in `status.drainStatus`. Once all
 SubVolumes have been removed from a draining share (either by deletion or migration), the share
-is considered fully drained.
+is considered fully drained. A share that is not on the list, and that the VPC reports as healthy,
+takes new volumes, so keep a share on the list until it has been deleted.
 
 ### Reconciler Behavior
 
@@ -701,6 +712,19 @@ type SubVolumeStatus struct {
     // CloneProgress tracks bytes copied during a clone operation.
     // +optional
     CloneProgress *CloneProgress `json:"cloneProgress,omitempty"`
+
+    // DiskChain is the instant-snapshot chain of the VM disk in the volume
+    // folder, newest file first. The last file is disk.img. It is empty for a
+    // volume that has no instant snapshots.
+    // +optional
+    DiskChain []string `json:"diskChain,omitempty"`
+
+    // ChainOperation names the work that changes DiskChain: a Job while the
+    // VM is stopped, or a merge that QEMU runs in a running VM. Nothing else
+    // changes the disk, and a VM that uses the disk is not started, while it
+    // is set.
+    // +optional
+    ChainOperation string `json:"chainOperation,omitempty"`
 }
 
 // CloneProgress tracks the data copy progress for a clone operation.
@@ -908,8 +932,80 @@ type SnapshotStatus struct {
     // CreationTime is when the snapshot was created.
     // +optional
     CreationTime *metav1.Time `json:"creationTime,omitempty"`
+
+    // ChainFile is the file of the source disk's chain that holds an instant
+    // snapshot. It changes when a newer snapshot of the disk is merged into it.
+    // See VM-INSTANT-SNAPSHOTS.md.
+    // +optional
+    ChainFile string `json:"chainFile,omitempty"`
+
+    // MergeChild is the newer file that is merged into ChainFile while the
+    // snapshot is deleted.
+    // +optional
+    MergeChild string `json:"mergeChild,omitempty"`
+
+    // MethodReason says why a snapshot of a VM disk is a copy and not an
+    // instant snapshot.
+    // +optional
+    MethodReason string `json:"methodReason,omitempty"`
+
+    // The fields below are used only for a snapshot of a disk that a running
+    // VM uses. See "Snapshots of running VMs" below.
+
+    // VMCopy is the state of the QEMU copy while it runs.
+    // +optional
+    VMCopy *VMCopyState `json:"vmCopy,omitempty"`
+
+    // CopyID names the QEMU copy that made the snapshot. Snapshots of the disks
+    // of one VM that show the same moment have the same CopyID.
+    // +optional
+    CopyID string `json:"copyID,omitempty"`
+
+    // VMCopySet lists the disks of the QEMU copy while other Snapshots of the
+    // same VM may join it. It is on the Snapshot that started the copy.
+    // +optional
+    VMCopySet *VMCopySet `json:"vmCopySet,omitempty"`
+
+    // VMCopyAttempts counts copies that were cancelled or failed. After 3 the snapshot fails.
+    // +optional
+    VMCopyAttempts int32 `json:"vmCopyAttempts,omitempty"`
+
+    // VMCopyStarted is when the current try started.
+    // +optional
+    VMCopyStarted *metav1.Time `json:"vmCopyStarted,omitempty"`
+
+    // VMCopyRetryAfter is the earliest time of the next try.
+    // +optional
+    VMCopyRetryAfter *metav1.Time `json:"vmCopyRetryAfter,omitempty"`
+
+    // CopyMoment is the moment the snapshot shows.
+    // +optional
+    CopyMoment *metav1.Time `json:"copyMoment,omitempty"`
+
+    // Consistency is FileSystemConsistent (the guest was frozen) or CrashConsistent.
+    // +optional
+    Consistency string `json:"consistency,omitempty"`
+
+    // ConsistencyReason says why a snapshot is only crash consistent.
+    // +optional
+    ConsistencyReason string `json:"consistencyReason,omitempty"`
+
+    // Message says what the snapshot waits for or why it failed.
+    // +optional
+    Message string `json:"message,omitempty"`
 }
 ```
+
+### Snapshots of running VMs
+
+If a running (or starting) KubeVirt VM uses the source claim, the snapshot is a QEMU copy of that one disk, not a file copy. The Snapshot gets the annotation `storage.ibmcloud.io/snapshot-method: vm`. The controller freezes the guest for a moment, has QEMU copy the disk to a staging file, and an `apply-vm-disk` Job writes a raw `disk.img` into the snapshot folder. The snapshot is ready when the Job ends. `status.consistency` says whether the guest was frozen.
+
+- The `VolumeSnapshotClass` parameter `vmCopySpeedLimitMBps` (whole number, default 20) limits how much the copy slows the VM. The value is kept in the annotation `storage.ibmcloud.io/vm-copy-speed-mbps`.
+- A live migration cancels the copy. A cancelled or failed copy is tried again after a minute; after 3 tries the snapshot is `Failed` and `status.message` says why.
+- A copy that runs much longer than the disk needs (2 hours plus twice the time at the speed limit) is cancelled and counts as one try.
+- If the VM stops before the copy starts, the snapshot is a file copy. If a VM starts during a file copy, the folder is discarded and the snapshot is copied again with QEMU.
+- Each Snapshot covers one claim, but the controller copies all the pool disks of the VM at one moment. The first Snapshot of a VM starts the QEMU copy of every pool disk and records the set in `status.vmCopySet` (disks, staging files, and `joinUntil`, 10 minutes after the start). A Snapshot of another disk of the same VM that starts before `joinUntil` joins the copy: its `status.vmCopy.leader` names the first Snapshot, and it shows the same moment. `status.copyID` is the same on all of them. After `joinUntil`, the controller deletes the staging files of the disks no Snapshot claimed, and clears `status.vmCopySet`. If the first Snapshot's copy is cancelled, the joined Snapshots try again.
+- While a snapshot copies a VM, replication of the same VM waits (and the other way round).
 
 ### Example Snapshot CR
 
@@ -954,6 +1050,8 @@ Snapshots reside on the same VPC file share as the source SubVolume and are stor
 ---
 
 ## VolumeGroupSnapshot
+
+> **Not active (issue #100).** The type is installed, but nothing acts on a `VolumeGroupSnapshot`. There is no plan to turn it on.
 
 Cluster-scoped resource. Coordinates a group of SubVolume snapshots to achieve application-consistent or crash-consistent point-in-time copies across multiple volumes.
 
@@ -1078,6 +1176,118 @@ type GroupSnapshotMember struct {
 }
 ```
 
+The hook types are shared by VolumeGroupSnapshot and ReplicationPolicy
+(`api/v1alpha1/hook_types.go`):
+
+```go
+// HookType is the type of hook to execute.
+// +kubebuilder:validation:Enum=exec;http
+type HookType string
+
+const (
+    HookTypeExec HookType = "exec"
+    HookTypeHTTP HookType = "http"
+)
+
+// HookOnError defines the behavior when a hook fails.
+// +kubebuilder:validation:Enum=Continue;Abort
+type HookOnError string
+
+const (
+    HookOnErrorContinue HookOnError = "Continue"
+    HookOnErrorAbort    HookOnError = "Abort"
+)
+
+// Hook defines a pre or post action to execute around snapshot/replication operations.
+type Hook struct {
+    // Name is a unique identifier for this hook within the hook list.
+    // +kubebuilder:validation:Required
+    Name string `json:"name"`
+
+    // Type is the hook execution type: "exec" (pod exec) or "http" (HTTP call).
+    // +kubebuilder:validation:Required
+    Type HookType `json:"type"`
+
+    // Exec specifies a command to run in a pod container.
+    // Required when type is "exec".
+    // +optional
+    Exec *ExecHookSpec `json:"exec,omitempty"`
+
+    // HTTP specifies an HTTP endpoint to call.
+    // Required when type is "http".
+    // +optional
+    HTTP *HTTPHookSpec `json:"http,omitempty"`
+
+    // TimeoutSeconds is the maximum time to wait for the hook to complete.
+    // +kubebuilder:validation:Minimum=1
+    // +kubebuilder:default=30
+    TimeoutSeconds int32 `json:"timeoutSeconds,omitempty"`
+
+    // OnError controls behavior when this hook fails.
+    // "Continue" proceeds with the operation; "Abort" stops it.
+    // +kubebuilder:default=Abort
+    OnError HookOnError `json:"onError,omitempty"`
+}
+
+// ExecHookSpec defines a command to execute in a pod container via the Kubernetes exec API.
+type ExecHookSpec struct {
+    // PodSelector selects pods by labels. The hook runs in the first matching pod.
+    // +kubebuilder:validation:Required
+    PodSelector map[string]string `json:"podSelector"`
+
+    // Namespace is the namespace to search for matching pods.
+    // +kubebuilder:validation:Required
+    Namespace string `json:"namespace"`
+
+    // Container is the container name to exec into. If empty, the first container is used.
+    // +optional
+    Container string `json:"container,omitempty"`
+
+    // Command is the command and arguments to execute.
+    // +kubebuilder:validation:MinItems=1
+    Command []string `json:"command"`
+}
+
+// HTTPHookSpec defines an HTTP request to make as a hook action.
+type HTTPHookSpec struct {
+    // URL is the HTTP endpoint to call.
+    // +kubebuilder:validation:Required
+    // +kubebuilder:validation:Pattern=`^https?://`
+    URL string `json:"url"`
+
+    // Method is the HTTP method. Defaults to POST.
+    // +kubebuilder:validation:Enum=GET;POST;PUT
+    // +kubebuilder:default=POST
+    Method string `json:"method,omitempty"`
+
+    // Headers are additional HTTP headers to include in the request.
+    // +optional
+    Headers map[string]string `json:"headers,omitempty"`
+}
+
+// HookResult records the outcome of a single hook execution.
+type HookResult struct {
+    // Name is the hook name that was executed.
+    Name string `json:"name"`
+
+    // Phase is whether this was a "Pre" or "Post" hook.
+    Phase string `json:"phase"`
+
+    // Success indicates whether the hook completed without error.
+    Success bool `json:"success"`
+
+    // Message contains details about the hook outcome or error.
+    // +optional
+    Message string `json:"message,omitempty"`
+
+    // StartedAt is when the hook execution began.
+    StartedAt metav1.Time `json:"startedAt"`
+
+    // Duration is how long the hook took as a Go duration string.
+    Duration string `json:"duration"`
+}
+```
+
 ### Example VolumeGroupSnapshot CR
 
 ```yaml
@@ -1135,6 +1345,113 @@ The `consistencyLevel` status field reports what was achieved:
 3. **Complete**: All member snapshots are `Ready`.
 4. **PartialFailure**: Some members succeeded and some failed (only with `failurePolicy: Continue`).
 5. **Failed**: The operation failed and was rolled back (with `failurePolicy: Abort`), or all members failed.
+
+---
+
+## BackupPolicy
+
+Cluster-scoped. Backs up the PVCs it selects, and the VMs whose disks it selects, into a pool that holds only backups. The controller labels the SubVolumes it selects (`storage.ibmcloud.io/backup-policy`) and makes one `ReplicationPolicy` for each source pool (`backup-<policy>-<pool>`, owned by the BackupPolicy), aimed at the snapshot pool's share. Replication does the copying: QEMU for running VM disks at one moment for all disks of a VM, changed blocks only, with restore points for the keep time; other volumes are synced with rsync and each sync is kept as a folder of hard links. Do not edit the owned policies: the controller sets them back.
+
+```go
+type BackupPolicySpec struct {
+    // SnapshotPool holds the backups. It must hold no workload claims and have at least one ready share.
+    SnapshotPool string `json:"snapshotPool"`
+    // Schedule is a Go duration of at least 1 minute, such as "6h".
+    Schedule string `json:"schedule"`
+    // Selector selects PVCs by label. A VM is selected through its disks: if any disk matches,
+    // all disks of the VM are backed up. An empty selector is refused.
+    Selector *metav1.LabelSelector `json:"selector"`
+    // Namespaces limits the PVCs to these namespaces. Empty means all.
+    Namespaces []string `json:"namespaces,omitempty"`
+    // KeepFor is a Go duration or a number of days ("30d"), at least one hour. Default "7d".
+    KeepFor string `json:"keepFor,omitempty"`
+    // VMCopySpeedLimitMBps limits the QEMU copy of each VM disk. Default 20; 0 means no limit.
+    VMCopySpeedLimitMBps *int32 `json:"vmCopySpeedLimitMBps,omitempty"`
+    // Suspend stops new backups. Existing backups stay.
+    Suspend bool `json:"suspend,omitempty"`
+    // Export also sends the backups to an IBM Cloud Object Storage bucket (see below). Optional.
+    Export *BackupExport `json:"export,omitempty"`
+}
+
+type BackupExport struct {
+    Bucket   string `json:"bucket"`             // the COS bucket
+    Endpoint string `json:"endpoint"`           // S3 host, e.g. s3.eu-de.cloud-object-storage.appdomain.cloud
+    Prefix   string `json:"prefix,omitempty"`   // folder in the bucket; the policy's own area is <prefix>/<policy>/
+    // CredentialsSecret names a Secret in the driver namespace with the driver's COS HMAC key:
+    // access_key_id and secret_access_key.
+    CredentialsSecret string `json:"credentialsSecret"`
+    // BackupKeySecret names a Secret in the driver namespace with the backup key, wrapped
+    // by Key Protect (key "wrappedKey"). The readable key is never stored. Only the Jobs read
+    // the Secret, never the controller; a Job asks Key Protect to unwrap the key and keeps it
+    // in memory.
+    BackupKeySecret string `json:"backupKeySecret"`
+    // KeyProtect says which root key unwraps the backup key. All four fields are required.
+    KeyProtect KeyProtectRef `json:"keyProtect"`
+    // EmergencyKeySecret is optional: a Secret (key "backupKey") with the readable backup key,
+    // used only when Key Protect cannot be reached.
+    EmergencyKeySecret string `json:"emergencyKeySecret,omitempty"`
+    // KeepFor is a Go duration or a number of days. Default "30d". At least one hour; with a
+    // Compliance lock, at least 25 hours.
+    KeepFor string `json:"keepFor,omitempty"`
+    // Lock is "Compliance" (default: nobody can delete or shorten the keep time) or "None".
+    Lock string `json:"lock,omitempty"`
+    // Schedule is a Go duration of at least 1 minute: the most often a volume is sent.
+    // Empty: after each local backup.
+    Schedule string `json:"schedule,omitempty"`
+}
+
+type KeyProtectRef struct {
+    InstanceID   string `json:"instanceID"`   // GUID of the Key Protect instance
+    Region       string `json:"region"`       // e.g. eu-de
+    RootKeyID    string `json:"rootKeyID"`    // the root key that wrapped the backup key
+    // APIKeySecret names a Secret (key "apikey") with an IBM Cloud API key that has the Reader
+    // role on the root key.
+    APIKeySecret string `json:"apiKeySecret"`
+}
+```
+
+Status: `phase` (`Active`, `Suspended`, `Error`; `Error` is also set, with the usage in `message`, while the snapshot pool's share is more than 85% full and new backups are stopped), `message`, `volumeCount`, `replicationPolicies`, and `volumes`. Each volume has the claim, the VM, `lastBackupTime`, `oldestBackupTime`, `restorePoints` (moments before the newest that can be restored), `bytesWritten`, `consistency` (`FileSystemConsistent` or `CrashConsistent` for a VM disk, `FileCopy` for any other volume) and `lastError`. It also keeps what a restore needs (`subPath`, `requestedGB`, `storageClassName`). A volume that was deleted, or no longer matches the selector, stays in the list with `retained: true` until the keep time has passed since its last backup.
+
+**Export to COS.** With `spec.export`, when the local backup of a volume has a moment newer than the last one exported, the controller starts an export Job for the volume (one at a time for each policy). The Job mounts the snapshot pool's share read-only and sends the backup folder and the moments folder to a Kopia repository in the bucket, in the area `<prefix>/<policy>/`. Each volume's status then has `exportedTime` (the moment of the newest copy in COS), `exportedBytes` (what the last export sent) and `exportError` (the last error; the export is tried again after 5 minutes). Once a volume is exported, a maintenance Job runs once every maintenance interval (a day, or less for a short keep time; one hour at the least): it extends the locks of chunks still in use and deletes the Kopia snapshots older than `keepFor`. The rule for the shortest Compliance lock is in one helper (`v1alpha1.MinComplianceKeepFor`): the keep time must be at least the maintenance interval plus 24 hours, so 25 hours at the least; the webhook and the controller both use it. An export problem never changes `phase` and never stops the backups to the snapshot pool. Removing `spec.export` clears the three export fields; backups already in COS stay until their lock ends. **Key handling.** The backup key is stored only as a Key Protect-wrapped copy (in `backupKeySecret`, and next to the backups in the bucket). Each export and maintenance Job mounts the wrapped key, the API key and the optional emergency key as read-only Secret files, runs the driver in mode `unwrap-backup-key` (which asks Key Protect to unwrap the key and writes it, mode 0400, to a memory-backed folder), lets Kopia read it, and removes the file. The controller never reads these Secrets and never calls Key Protect. If Key Protect is unreachable and `emergencyKeySecret` is set, the Job uses that key and logs that it did; a refusal from Key Protect (a wrong root key, a bad API key) is an error and never falls back. `kubectl backup cos-setup` makes the wrapped key; see'; see `docs/specs/2026-10-21-backup-cos-export.md`.
+
+A volume belongs to one policy. A second policy that selects it skips it and says so in its `message`. The policy name goes into a label value, so it has at most 63 characters.
+
+A snapshot pool may have several shares. A volume gets a share when it is first backed up (the one with room that holds the fewest volumes) and keeps it; `status.volumes[].shareID` names it, and a restore reads from it. An entry with no `shareID` was made when the pool had one share and belongs to the first share. A policy makes one ReplicationPolicy for each source pool and share (the SubVolumes carry `storage.ibmcloud.io/backup-share`). A new volume that no ready share below 85% can take waits, with its `lastError` saying so.
+
+## BackupRestore
+
+Cluster-scoped. A request to make a new PVC from a backup. `kubectl backup restore` makes one.
+
+```go
+type BackupRestoreSpec struct {
+    Policy          string        `json:"policy"`
+    SourceNamespace string        `json:"sourceNamespace,omitempty"` // the claim that was backed up; it may be gone. Required unless fromCOS is set
+    SourceName      string        `json:"sourceName,omitempty"`
+    Moment          *metav1.Time  `json:"moment,omitempty"` // the newest backup at or before it; unset: the latest
+    TargetNamespace string        `json:"targetNamespace"`  // the new PVC; it must not exist
+    TargetName      string        `json:"targetName"`
+    StorageClassName string       `json:"storageClassName,omitempty"` // default: the class of the backed-up claim; required with fromCOS
+    FromCOS         *RestoreFromCOS `json:"fromCOS,omitempty"` // read the backup from a COS bucket, not from a snapshot pool
+}
+
+// RestoreFromCOS needs no BackupPolicy and no snapshot pool in this cluster.
+type RestoreFromCOS struct {
+    Bucket             string          `json:"bucket"`
+    Endpoint           string          `json:"endpoint"`
+    Prefix             string          `json:"prefix,omitempty"`             // the prefix set in the policy's spec.export; spec.policy names the policy's area below it
+    CredentialsSecret  string          `json:"credentialsSecret"`            // access_key_id, secret_access_key
+    Volume             string          `json:"volume"`                       // pvc-<uuid>, as `kubectl backup cos-list` shows it
+    SizeGB             int32           `json:"sizeGB"`                       // size of the new PVC; COS does not keep it
+    BackupKeySecret    string          `json:"backupKeySecret,omitempty"`    // key wrappedKey; not used with emergencyKeyOnly
+    KeyProtect         *KeyProtectRef  `json:"keyProtect,omitempty"`         // not used with emergencyKeyOnly
+    EmergencyKeySecret string          `json:"emergencyKeySecret,omitempty"` // key backupKey: the readable backup key
+    EmergencyKeyOnly   bool            `json:"emergencyKeyOnly,omitempty"`   // never call Key Protect
+}
+```
+
+The controller makes the PVC (like the backed-up claim: same size, `ReadWriteMany`, `Filesystem`), waits for the driver to bind it, and runs a Job that copies the backup into it. Until the copy ends, the SubVolume carries the label `storage.ibmcloud.io/restore-pending` and the node plugin refuses to mount the volume, so no pod or VM sees a half-written disk. A VM disk is written by the driver's `restore-vm-disk` mode, which rewinds it to the moment; the Job never rolls back a copy that is being written (the restore waits and says so). Status: `phase` (`Pending`, `Provisioning`, `Restoring`, `Done`, `Failed`), `message`, `restoredMoment` and `latest`. A restore never writes over a volume that exists; a failed copy leaves the new PVC held back, and you delete it and ask again.
+
+**With `spec.fromCOS`** the backup comes from the Kopia repository in a COS bucket (`kubectl backup restore --from-cos`). `spec.policy` names the policy's area in the bucket (below `fromCOS.prefix`); the policy need not exist in the cluster. The new PVC gets `spec.storageClassName` and `fromCOS.sizeGB`, because COS keeps neither. Three Jobs run on the share of the new volume: one opens the repository read-only and restores the export for the moment into a scratch folder (`/backup/cosrestore-<name>` on that share), the restore Job of a local restore copies the scratch folder into the volume, and a third removes the scratch folder. `spec.moment` picks the oldest export made at or after it (it holds the earlier moments as undo files), or the newest export if there is none; the existing restore Job then picks the moment inside it. Status adds `fetched` and `copied`, which record the finished steps because a finished Job is removed. The scratch folder needs room for one full copy of the volume on the share. The webhook requires `storageClassName`, a `pvc-<uuid>` volume, a `sizeGB`, and either `backupKeySecret` with `keyProtect` or `emergencyKeyOnly` with `emergencyKeySecret`. A scratch folder that cannot be removed is logged and left; the restore is still `Done`.
 
 ---
 
@@ -1235,9 +1552,34 @@ type ReplicationPolicySpec struct {
     // RsyncOptions allows passing extra rsync flags to customize transfer behavior.
     // These are appended to the default flags ["-a", "--delete", "--partial", "--timeout=300"].
     // Security: --daemon, --server, --rsh, and --rsync-path flags are blocked by validation.
+    // Each entry must be one plain flag (for example --compress or --bwlimit=100): no spaces, quotes or shell characters.
     // Only applies to direct NFS mode (not driver-to-driver mode).
     // +optional
     RsyncOptions []string `json:"rsyncOptions,omitempty"`
+
+    // VMCopySpeedLimitMBps limits how fast QEMU copies each disk of a running
+    // VM, in megabytes per second. 0 means no limit. The limit also counts
+    // empty disk space. See "Running VM disks" below.
+    // +kubebuilder:validation:Minimum=0
+    // +kubebuilder:default=20
+    // +optional
+    VMCopySpeedLimitMBps *int32 `json:"vmCopySpeedLimitMBps,omitempty"`
+
+    // RestorePointKeepHours is how long the destination keeps the restore
+    // points of running VM disks. See "Running VM disks" below.
+    // +kubebuilder:validation:Minimum=1
+    // +kubebuilder:default=24
+    // +optional
+    RestorePointKeepHours *int32 `json:"restorePointKeepHours,omitempty"`
+
+    // MomentKeepHours keeps earlier moments of volumes that are not VM disks,
+    // as folders of hard links (in .moments next to the destination). A file that
+    // did not change takes no extra space. A moment older than this many hours
+    // is removed after each sync. Unset or 0 keeps none. Needs rsync, even when
+    // IncrementalSync is false. BackupPolicy sets this.
+    // +kubebuilder:validation:Minimum=0
+    // +optional
+    MomentKeepHours *int32 `json:"momentKeepHours,omitempty"`
 
     // DestinationEndpoint is the HTTPS URL of the replication receiver service
     // on the destination cluster (e.g., "https://repl-receiver.apps.cluster.example.com").
@@ -1291,6 +1633,10 @@ type ReplicationPolicyStatus struct {
     // LastError is the error message from the most recent failure.
     // +optional
     LastError string `json:"lastError,omitempty"`
+
+    // Conditions holds ReceiverReachable for a receiver-mode policy (see below).
+    // +optional
+    Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // SubVolumeReplicationStatus tracks the replication state of a single SubVolume.
@@ -1309,8 +1655,129 @@ type SubVolumeReplicationStatus struct {
     // LastError recorded for this SubVolume's last sync attempt.
     // +optional
     LastError string `json:"lastError,omitempty"`
+
+    // CopyMoment is the moment the last good copy of a running VM's disk shows.
+    // All disks of the VM in this policy show the same moment.
+    // +optional
+    CopyMoment *metav1.Time `json:"copyMoment,omitempty"`
+
+    // Consistency of the last good copy of a running VM's disk:
+    // FileSystemConsistent or CrashConsistent.
+    // +optional
+    Consistency string `json:"consistency,omitempty"`
+
+    // ConsistencyReason says why a copy is only crash consistent.
+    // +optional
+    ConsistencyReason string `json:"consistencyReason,omitempty"`
+
+    // VMChangeList is the change list (QEMU dirty bitmap) of the last good
+    // copy of a running VM's disk; the next copy holds only blocks changed
+    // since then. Empty means the next copy is full.
+    // +optional
+    VMChangeList string `json:"vmChangeList,omitempty"`
+
+    // RestorePoints is how many earlier copies the destination keeps for a
+    // running VM's disk, and OldestRestorePoint the moment of the oldest.
+    // +optional
+    RestorePoints int32 `json:"restorePoints,omitempty"`
+    // +optional
+    OldestRestorePoint *metav1.Time `json:"oldestRestorePoint,omitempty"`
+
+    // VMCopy is the state of an unfinished running VM disk copy: copy ID,
+    // phase (Copying or Sending), VM pod name and UID, VMI name, pod volume
+    // name, disk index, staging file name, moment, freeze result, and the
+    // change lists it started and read.
+    // +optional
+    VMCopy *VMCopyState `json:"vmCopy,omitempty"`
 }
 ```
+
+`VMCopyState` (`api/v1alpha1/replicationpolicy_types.go`) holds the state of one
+unfinished running VM disk copy:
+
+```go
+// VMCopyState is the state of an unfinished copy of a running VM's disk.
+type VMCopyState struct {
+    // ID names the copy. It is the same for all disks of one VM copy.
+    ID string `json:"id"`
+
+    // Phase is Copying while QEMU writes the staging file, and Sending while
+    // a Job applies it at the destination.
+    // +kubebuilder:validation:Enum=Copying;Sending
+    Phase string `json:"phase"`
+
+    // PodNamespace is the namespace of the VM pod. A snapshot copy sets it so the
+    // copy can be watched and cancelled without its source volume.
+    // +optional
+    PodNamespace string `json:"podNamespace,omitempty"`
+
+    // PodName and PodUID identify the virt-launcher pod. If the pod changes,
+    // the VM restarted or moved and QEMU no longer has the copy.
+    PodName string `json:"podName"`
+    PodUID  string `json:"podUID"`
+
+    // VMIName is the VirtualMachineInstance name.
+    VMIName string `json:"vmiName"`
+
+    // Volume is the pod volume name of this disk, and DiskIndex its place in
+    // the copy.
+    Volume    string `json:"volume"`
+    DiskIndex int32  `json:"diskIndex"`
+
+    // StagingFile is the staging file name in the volume's root directory.
+    StagingFile string `json:"stagingFile"`
+
+    // Moment is the moment the copy shows.
+    Moment metav1.Time `json:"moment"`
+
+    // FileSystemConsistent is true if the guest was frozen for the copy.
+    FileSystemConsistent bool `json:"fileSystemConsistent"`
+
+    // FreezeError is the freeze error, if the freeze failed.
+    // +optional
+    FreezeError string `json:"freezeError,omitempty"`
+}
+```
+
+### Running VM disks
+
+In direct NFS mode, the controller copies the disks of a running VM without
+stopping it. It finds the VM from the virt-launcher pod that mounts the claim.
+On a scheduled cycle it freezes the guest file systems (KubeVirt's
+virt-freezer, with a 30 s automatic thaw), makes QEMU copy all of the VM's
+disks in the policy at one moment into sparse staging files in each volume,
+and thaws the guest. In the same step QEMU starts a change list for each
+disk. The next copy holds only the blocks changed since the last good copy;
+after a VM restart or move the lists are gone and the copy is full. Between
+scheduled cycles the controller checks the copy on every controller tick.
+When QEMU finishes, a Job per disk applies the copy to the destination
+`disk.img`: it first saves the old contents of every block it will change in
+an undo file in `.repl-undo/` next to the disk, then writes the new blocks.
+A copy that stops half way is rolled back from its undo file by the next Job.
+The undo files are restore points, kept for `restorePointKeepHours`. Only
+blocks whose contents differ are written and saved. The `lastSyncTime` of a
+VM disk is the moment the copy shows, not the time the copy finished.
+
+- If a live migration of the VM is requested, the controller cancels the copy,
+  because QEMU cannot migrate during a copy. The next cycle starts a new copy.
+- If the VM restarts or moves during a copy, the copy is lost and the next
+  cycle starts a new one.
+- If the guest cannot freeze (no guest agent, or a freeze error), the copy is
+  crash consistent, and `consistency` and `consistencyReason` say so.
+- A failed or skipped VM disk copy is reported in the volume's `lastError` and
+  counted in the policy's `lastError`. It does not count as a failed cycle, so
+  it does not pause the policy.
+- In receiver mode (`destinationEndpoint` set) the same copy is made, and a
+  `send-vm-disk` Job per disk sends it to the receiver instead of writing to
+  an NFS destination. For a full copy the Job first sends a hash of each 64 KiB
+  chunk, and the receiver answers which chunks differ from its own disk, so
+  only those cross the network. The receiver applies the copy with the same
+  undo-file method, at the destination. If the destination disk does not show
+  the moment the change copy starts from, the Job reports it, the status
+  `lastError` says so, and the next copy is a full copy.
+- Hot-plugged disks are skipped.
+- Red Hat does not support the QEMU commands this uses. See
+  `docs/specs/2026-10-20-vm-safe-replication.md`.
 
 ### Example ReplicationPolicy CR
 
@@ -1402,6 +1869,7 @@ kubectl annotate replicationpolicy <name> storage.ibmcloud.io/paused-
 - Each replication cycle iterates over all SubVolumes matching the `subVolumeSelector` (or all SubVolumes in the pool if no selector is set).
 - For each SubVolume, an incremental rsync copies changed files from the source subdirectory to the destination NFS server at `destinationBasePath/<subPath>`.
 - `consecutiveFailures` increments on each failed cycle and resets to 0 on success. When it reaches `maxRetries`, the policy transitions to `Paused`.
+- `conditions` has `ReceiverReachable` for a policy with `destinationEndpoint` (driver-to-driver mode); direct-NFS policies have none. The controller reads the token and CA Secrets in `kube-system`, calls the receiver's `/api/v1/health` and `/api/v1/auth-check`, and records `True` (reason `Reachable`) or `False` with one reason and a plain message: `CertificateNotTrusted`, `TokenRefused`, `StorageNotReachable`, `ReceiverTooOld`, `CannotConnect`, `TimedOut`, `SecretMissing` or `BadInput`. It checks when it first sees the policy and then once per `schedule`. A `False` result does not pause or stop replication; it explains why a sync fails.
 - Per-SubVolume status in `subVolumeStatuses` allows operators to identify which volumes are failing independently.
 
 ---
@@ -1421,7 +1889,6 @@ The CSI driver reads these from the StorageClass `parameters` map:
 | `uid` | No | Pool default | Unix UID for the subdirectory |
 | `gid` | No | Pool default | Unix GID for the subdirectory |
 | `permissions` | No | Pool default | Unix permissions (e.g., "0755") |
-| `reclaimAction` | No | `delete` | `delete`, `retain`, or `archive` |
 
 Example auto-created StorageClass (for a pool named `general-purpose`):
 ```yaml

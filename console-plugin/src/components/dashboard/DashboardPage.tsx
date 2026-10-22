@@ -26,15 +26,22 @@ import { Table, Thead, Tr, Th, Tbody, Td } from '@patternfly/react-table';
 import { FileSharePoolModel, SubVolumeModel, ReplicationPolicyModel } from '../../models';
 import { FileSharePool, SubVolume, ReplicationPolicy } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
+import PoolPhase from '../common/PoolPhase';
 import CapacityBar from '../common/CapacityBar';
+import GetHelpCard from '../common/GetHelpCard';
+import HelpLink from '../common/HelpLink';
+import { TROUBLESHOOTING } from '../../utils/help-links';
+import CardHelpTitle from '../common/CardHelpTitle';
 import CapacityDonut from './CapacityDonut';
+import FiringAlertsCard from './FiringAlertsCard';
+import { useFiringAlerts } from '../../utils/firing-alerts';
 import { utilizationPercent, formatAge } from '../../utils/resource-helpers';
 import { usePoolMetrics } from '../../utils/use-pool-metrics';
 import { ROUTES } from '../../constants';
 
 /** Format seconds to human-readable ms string. */
 export const formatLatencyMs = (seconds: number): string => {
-  if (seconds === 0) return '-';
+  if (!Number.isFinite(seconds) || seconds === 0) return '-';
   const ms = seconds * 1000;
   if (ms < 1) return '<1 ms';
   return `${ms.toFixed(0)} ms`;
@@ -42,7 +49,7 @@ export const formatLatencyMs = (seconds: number): string => {
 
 /** Color code for latency values. */
 export const latencyColor = (seconds: number): 'green' | 'gold' | 'red' | 'grey' => {
-  if (seconds === 0) return 'grey';
+  if (!Number.isFinite(seconds) || seconds === 0) return 'grey';
   const ms = seconds * 1000;
   if (ms < 100) return 'green';
   if (ms < 500) return 'gold';
@@ -83,6 +90,7 @@ const DashboardPage: React.FC = () => {
   );
 
   const { metrics: poolMetrics, aggregate } = usePoolMetrics(poolNames);
+  const firingAlerts = useFiringAlerts();
 
   const loaded = poolsLoaded && svLoaded;
   const error = poolsError || svError;
@@ -101,7 +109,8 @@ const DashboardPage: React.FC = () => {
     return (
       <PageSection>
         <Alert variant="danger" title="Error loading resources" isInline>
-          {String(error)}
+          {String(error)}{' '}
+          <HelpLink href={TROUBLESHOOTING.controller} label="Troubleshooting" testId="banner-help" />
         </Alert>
       </PageSection>
     );
@@ -155,7 +164,7 @@ const DashboardPage: React.FC = () => {
           <Grid hasGutter>
             <GridItem sm={12} md={6} lg={3}>
               <Card isFullHeight>
-                <CardTitle>Total Pools</CardTitle>
+                <CardHelpTitle helpKey="totalPools" />
                 <CardBody>
                   <Split hasGutter>
                     <SplitItem>
@@ -179,7 +188,7 @@ const DashboardPage: React.FC = () => {
 
             <GridItem sm={12} md={6} lg={3}>
               <Card isFullHeight>
-                <CardTitle>Total Capacity</CardTitle>
+                <CardHelpTitle helpKey="totalCapacity" />
                 <CardBody>
                   <DescriptionList isCompact>
                     <DescriptionListGroup>
@@ -201,7 +210,7 @@ const DashboardPage: React.FC = () => {
 
             <GridItem sm={12} md={6} lg={3}>
               <Card isFullHeight>
-                <CardTitle>Total SubVolumes</CardTitle>
+                <CardHelpTitle helpKey="totalSubVolumes" />
                 <CardBody>
                   <span style={{ fontSize: '2rem', fontWeight: 'bold' }}>
                     {totalSubVolumes}
@@ -212,7 +221,7 @@ const DashboardPage: React.FC = () => {
 
             <GridItem sm={12} md={6} lg={3}>
               <Card isFullHeight>
-                <CardTitle>Active Alerts</CardTitle>
+                <CardHelpTitle helpKey="activeAlerts" />
                 <CardBody>
                   <Split hasGutter>
                     <SplitItem>
@@ -231,10 +240,28 @@ const DashboardPage: React.FC = () => {
                       )}
                     </SplitItem>
                   </Split>
+                  {alertPools.map((p) => (
+                    <div key={p.metadata?.name} style={{ marginTop: 8 }}>
+                      <Link to={ROUTES.POOL_DETAIL.replace(':name', p.metadata?.name || '')}>
+                        {p.metadata?.name}
+                      </Link>{' '}
+                      <PoolPhase pool={p} />
+                    </div>
+                  ))}
                 </CardBody>
               </Card>
             </GridItem>
           </Grid>
+        </StackItem>
+
+        {/* Firing alerts from Prometheus */}
+        <StackItem>
+          <FiringAlertsCard
+            loading={firingAlerts.loading}
+            error={firingAlerts.error}
+            rulesLoaded={firingAlerts.rulesLoaded}
+            firing={firingAlerts.firing}
+          />
         </StackItem>
 
         {/* Row 2: Performance Metrics */}
@@ -242,7 +269,7 @@ const DashboardPage: React.FC = () => {
           <Grid hasGutter>
             <GridItem sm={12} md={4}>
               <Card isFullHeight>
-                <CardTitle>Allocation Rate</CardTitle>
+                <CardHelpTitle helpKey="allocationRate" />
                 <CardBody>
                   <span style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>
                     {Object.values(poolMetrics).reduce((sum, m) => sum + m.allocationRate1h, 0).toFixed(1)}
@@ -254,7 +281,7 @@ const DashboardPage: React.FC = () => {
 
             <GridItem sm={12} md={4}>
               <Card isFullHeight>
-                <CardTitle>P95 Allocation Latency</CardTitle>
+                <CardHelpTitle helpKey="p95AllocationLatency" />
                 <CardBody>
                   {(() => {
                     const maxLatency = Math.max(
@@ -283,7 +310,7 @@ const DashboardPage: React.FC = () => {
 
             <GridItem sm={12} md={4}>
               <Card isFullHeight>
-                <CardTitle>VPC API Health</CardTitle>
+                <CardHelpTitle helpKey="vpcApiHealth" />
                 <CardBody>
                   <DescriptionList isCompact>
                     <DescriptionListGroup>
@@ -318,7 +345,7 @@ const DashboardPage: React.FC = () => {
           <Grid hasGutter>
             <GridItem sm={12} md={4}>
               <Card isFullHeight>
-                <CardTitle>Aggregate Capacity</CardTitle>
+                <CardHelpTitle helpKey="aggregateCapacity" />
                 <CardBody>
                   <Bullseye>
                     <CapacityDonut used={totalAllocatedGB} total={totalCapacityGB} unit="GB" />
@@ -328,7 +355,7 @@ const DashboardPage: React.FC = () => {
             </GridItem>
             <GridItem sm={12} md={8}>
               <Card isFullHeight>
-                <CardTitle>Pool Capacity</CardTitle>
+                <CardHelpTitle helpKey="poolCapacity" />
                 <CardBody>
                   {pools.length === 0 ? (
                     <Bullseye>No pools configured.</Bullseye>
@@ -372,7 +399,7 @@ const DashboardPage: React.FC = () => {
             <Grid hasGutter>
               <GridItem sm={12} md={4}>
                 <Card isFullHeight>
-                  <CardTitle>Replication Lag</CardTitle>
+                  <CardHelpTitle helpKey="replicationLag" />
                   <CardBody>
                     {(replicationPolicies || []).map((rp) => {
                       const rpName = rp.metadata?.name || '';
@@ -400,7 +427,7 @@ const DashboardPage: React.FC = () => {
 
               <GridItem sm={12} md={4}>
                 <Card isFullHeight>
-                  <CardTitle>Sync Rate</CardTitle>
+                  <CardHelpTitle helpKey="syncRate" />
                   <CardBody>
                     <span style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>
                       {aggregate.replicationSyncRate5m.toFixed(1)}
@@ -412,7 +439,7 @@ const DashboardPage: React.FC = () => {
 
               <GridItem sm={12} md={4}>
                 <Card isFullHeight>
-                  <CardTitle>Consecutive Failures</CardTitle>
+                  <CardHelpTitle helpKey="consecutiveFailures" />
                   <CardBody>
                     {Object.keys(aggregate.replicationConsecutiveFailures).length === 0 ? (
                       <Label color="green">None</Label>
@@ -444,7 +471,7 @@ const DashboardPage: React.FC = () => {
           <Grid hasGutter>
             <GridItem sm={12} md={4}>
               <Card isFullHeight>
-                <CardTitle>Snapshots</CardTitle>
+                <CardHelpTitle helpKey="snapshots" />
                 <CardBody>
                   <span style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>
                     {Math.round(aggregate.snapshotCount)}
@@ -456,7 +483,7 @@ const DashboardPage: React.FC = () => {
 
             <GridItem sm={12} md={4}>
               <Card isFullHeight>
-                <CardTitle>Clones</CardTitle>
+                <CardHelpTitle helpKey="clones" />
                 <CardBody>
                   <DescriptionList isCompact>
                     <DescriptionListGroup>
@@ -466,7 +493,7 @@ const DashboardPage: React.FC = () => {
                       </DescriptionListDescription>
                     </DescriptionListGroup>
                     <DescriptionListGroup>
-                      <DescriptionListTerm>Avg duration</DescriptionListTerm>
+                      <DescriptionListTerm>Median duration</DescriptionListTerm>
                       <DescriptionListDescription>
                         {aggregate.cloneAvgDurationSeconds > 0
                           ? `${Math.round(aggregate.cloneAvgDurationSeconds)}s`
@@ -480,7 +507,7 @@ const DashboardPage: React.FC = () => {
 
             <GridItem sm={12} md={4}>
               <Card isFullHeight>
-                <CardTitle>Group Snapshots</CardTitle>
+                <CardHelpTitle helpKey="groupSnapshots" />
                 <CardBody>
                   <span style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>
                     {Math.round(aggregate.groupSnapshotCount)}
@@ -552,6 +579,13 @@ const DashboardPage: React.FC = () => {
               )}
             </CardBody>
           </Card>
+        </StackItem>
+        <StackItem>
+          <Grid hasGutter>
+            <GridItem sm={12} md={6} lg={4}>
+              <GetHelpCard />
+            </GridItem>
+          </Grid>
         </StackItem>
       </Stack>
     </PageSection>

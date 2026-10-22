@@ -1,0 +1,227 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: backuprestores.storage.ibmcloud.io
+spec:
+  group: storage.ibmcloud.io
+  names:
+    kind: BackupRestore
+    listKind: BackupRestoreList
+    plural: backuprestores
+    shortNames:
+    - br
+    singular: backuprestore
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.policy
+      name: Policy
+      type: string
+    - jsonPath: .spec.sourceName
+      name: Source
+      type: string
+    - jsonPath: .spec.targetName
+      name: Target
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          BackupRestore asks the driver to make a new PVC from a backup. The driver
+          makes the PVC, copies the backup into it with a Job, and holds back any pod
+          that mounts it until the copy has ended. It never writes over a volume that
+          exists. See docs/specs/2026-10-21-backup-to-snapshot-pool.md.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: BackupRestoreSpec says what to restore, and where to.
+            properties:
+              fromCOS:
+                description: |-
+                  FromCOS reads the backup from a COS bucket, not from a snapshot pool. The
+                  storage class is then required, because COS does not keep it.
+                properties:
+                  backupKeySecret:
+                    description: |-
+                      BackupKeySecret names the Secret with the backup key wrapped by Key
+                      Protect (wrappedKey). Not used with emergencyKeyOnly.
+                    type: string
+                  bucket:
+                    description: Bucket is the name of the COS bucket.
+                    minLength: 1
+                    type: string
+                  credentialsSecret:
+                    description: |-
+                      CredentialsSecret names the Secret (in the driver's namespace) with the
+                      COS key: access_key_id and secret_access_key.
+                    minLength: 1
+                    type: string
+                  emergencyKeyOnly:
+                    description: |-
+                      EmergencyKeyOnly makes the Jobs use the readable key in
+                      emergencyKeySecret and never call Key Protect. It is for when Key Protect
+                      or its root key is gone.
+                    type: boolean
+                  emergencyKeySecret:
+                    description: |-
+                      EmergencyKeySecret names a Secret (key: backupKey) with the readable
+                      backup key.
+                    type: string
+                  endpoint:
+                    description: Endpoint is the S3 host of the bucket.
+                    minLength: 1
+                    type: string
+                  keyProtect:
+                    description: |-
+                      KeyProtect says which root key unwraps the backup key. Not used with
+                      emergencyKeyOnly.
+                    properties:
+                      apiKeySecret:
+                        description: |-
+                          APIKeySecret names the Secret (key: apikey) with the IBM Cloud API key that
+                          has the Reader role on the root key.
+                        minLength: 1
+                        type: string
+                      instanceID:
+                        description: InstanceID is the GUID of the Key Protect instance.
+                        minLength: 1
+                        type: string
+                      region:
+                        description: Region is the region of the Key Protect instance,
+                          such as eu-de.
+                        minLength: 1
+                        type: string
+                      rootKeyID:
+                        description: RootKeyID is the ID of the root key that wrapped
+                          the backup key.
+                        minLength: 1
+                        type: string
+                    required:
+                    - apiKeySecret
+                    - instanceID
+                    - region
+                    - rootKeyID
+                    type: object
+                  prefix:
+                    description: |-
+                      Prefix is the folder in the bucket that was set on the policy's export
+                      block. The area of the policy (spec.policy) is below it.
+                    type: string
+                  sizeGB:
+                    description: |-
+                      SizeGB is the size of the new PVC. COS holds the data, not the size of the
+                      claim.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  volume:
+                    description: |-
+                      Volume is the backed-up volume, as `kubectl backup cos-list` shows it
+                      (pvc- and a UUID). The claim name is not kept in COS.
+                    minLength: 1
+                    type: string
+                required:
+                - bucket
+                - credentialsSecret
+                - endpoint
+                - sizeGB
+                - volume
+                type: object
+              moment:
+                description: |-
+                  Moment is the time to restore. The newest backup at or before it is
+                  used. Unset means the latest backup.
+                format: date-time
+                type: string
+              policy:
+                description: |-
+                  Policy is the BackupPolicy that holds the backup. With fromCOS it need not
+                  exist: it only names the policy's area in the bucket.
+                type: string
+              sourceName:
+                type: string
+              sourceNamespace:
+                description: |-
+                  SourceNamespace and SourceName name the claim that was backed up. The
+                  claim may be gone: the policy remembers its backups until the keep time.
+                  They are required unless fromCOS is set (COS does not keep claim names).
+                type: string
+              storageClassName:
+                description: |-
+                  StorageClassName is the class of the new PVC. Unset means the class of
+                  the backed-up claim.
+                type: string
+              targetName:
+                type: string
+              targetNamespace:
+                description: TargetNamespace and TargetName name the new PVC. It must
+                  not exist.
+                type: string
+            required:
+            - policy
+            - targetName
+            - targetNamespace
+            type: object
+          status:
+            description: BackupRestoreStatus reports how far the restore is.
+            properties:
+              copied:
+                description: Copied is true once the scratch copy has been written
+                  into the new volume.
+                type: boolean
+              fetched:
+                description: |-
+                  Fetched is true once a restore from COS has copied the backup out of the
+                  bucket into a scratch folder on the new volume's share.
+                type: boolean
+              latest:
+                description: Latest is true if the newest backup was written.
+                type: boolean
+              message:
+                description: Message says what the restore waits for, or why it failed.
+                type: string
+              phase:
+                description: |-
+                  Phase is Pending, Provisioning (the PVC is being made), Restoring (the
+                  copy runs), Done or Failed.
+                enum:
+                - Pending
+                - Provisioning
+                - Restoring
+                - Done
+                - Failed
+                type: string
+              restoredMoment:
+                description: |-
+                  RestoredMoment is the moment of the backup that was written. Unset if
+                  it is not known (the first copy of a volume).
+                format: date-time
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

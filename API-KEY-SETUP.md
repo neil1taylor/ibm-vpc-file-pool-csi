@@ -4,16 +4,16 @@
 
 The CSI driver authenticates to IBM Cloud using `secret-common-lib`, the same library used by the stock IBM block and file CSI drivers. This means:
 
-- **On managed ROKS/IKS clusters:** Credentials already exist. No setup required — the driver reuses the cluster's existing `storage-secret-store` or `ibm-cloud-credentials` secret.
+- **On managed ROKS/ROVS/IKS clusters:** Credentials already exist. No setup required — the driver reuses the cluster's existing `storage-secret-store` or `ibm-cloud-credentials` secret.
 - **On self-managed clusters:** You create an `ibm-cloud-credentials` secret manually (one-time setup).
 
 The library supports two authentication methods: API keys (traditional) and pod identity via Trusted Profiles (no long-lived secrets).
 
 ---
 
-## Managed Clusters (ROKS / IKS) — Zero Setup
+## Managed Clusters (ROKS / ROVS / IKS) — Zero Setup
 
-On managed ROKS/IKS clusters, the `storage-secret-store` secret in `kube-system` is pre-populated by the IBM Cloud add-on system. It contains the API key and VPC endpoint configuration that the stock IBM CSI drivers already use.
+On managed ROKS/ROVS/IKS clusters, the `storage-secret-store` secret in `kube-system` is pre-populated by the IBM Cloud add-on system. It contains the API key and VPC endpoint configuration that the stock IBM CSI drivers already use.
 
 Our driver reads the same secret via `secret-common-lib`. There is nothing to create.
 
@@ -187,7 +187,7 @@ The driver does NOT need:
 
 ### Managed Clusters
 
-On managed ROKS/IKS clusters, the `storage-secret-store` is managed by the IBM Cloud add-on system. If the cluster's API key is rotated (e.g., via `ibmcloud ks api-key reset`), the add-on system updates the secret automatically.
+On managed ROKS/ROVS/IKS clusters, the `storage-secret-store` is managed by the IBM Cloud add-on system. If the cluster's API key is rotated (e.g., via `ibmcloud ks api-key reset`), the add-on system updates the secret automatically.
 
 With the managed secret provider (`IKS_ENABLED=true`), the sidecar detects the secret change and refreshes tokens without a pod restart.
 
@@ -217,7 +217,7 @@ rm /tmp/ibm-credentials.env
 kubectl rollout restart deployment -n kube-system vpc-file-pool-csi-controller
 
 # 5. Verify and delete the old key
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller --tail=20
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller --tail=20
 ibmcloud iam service-api-key-delete vpc-file-pool-csi-key vpc-file-pool-csi
 ```
 
@@ -241,7 +241,7 @@ ibmcloud iam service-api-key-delete vpc-file-pool-csi-key vpc-file-pool-csi
 
 ```bash
 # Check controller logs for auth errors
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller --tail=50 | grep -i "auth\|token\|401\|403\|iam"
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller --tail=50 | grep -i "auth\|token\|401\|403\|iam"
 
 # Verify the secret exists
 kubectl get secret -n kube-system ibm-cloud-credentials storage-secret-store 2>/dev/null

@@ -60,13 +60,39 @@ nav:
   - Getting Started:
       - Installation: INSTALL.md
       - User Guide: USER-GUIDE.md
+      - Tutorial: TUTORIAL.md
+      - Tutorial 1 - Pool Creation: TUTORIAL-01-POOL-CREATION.md
+      - Tutorial 2 - Snapshots and Clones: TUTORIAL-02-SNAPSHOTS-AND-CLONES.md
+      - Tutorial 3 - Group Snapshots and Hooks: TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md
+      - Tutorial 4 - Pool Configuration: TUTORIAL-04-POOL-CONFIGURATION.md
+      - Tutorial 5 - Golden Images: TUTORIAL-05-GOLDEN-IMAGES.md
+      - Tutorial 6 - Replication and Failover: TUTORIAL-06-REPLICATION-AND-FAILOVER.md
+      - Tutorial 7 - Monitoring: TUTORIAL-07-MONITORING.md
+      - Tutorial 8 - Migration and Console: TUTORIAL-08-MIGRATION-AND-CONSOLE.md
+      - Tutorial 9 - COS Bucket for Backups: TUTORIAL-09-COS-BACKUP-BUCKET.md
+      - Tutorial 10 - Backup and Restore: TUTORIAL-10-BACKUP-AND-RESTORE.md
+      - Tutorial 11 - Instant VM Snapshots: TUTORIAL-11-INSTANT-VM-SNAPSHOTS.md
+      - Tutorial 12 - Replicating Running VMs: TUTORIAL-12-REPLICATING-RUNNING-VMS.md
+      - Tutorial 13 - Failover of Running VMs: TUTORIAL-13-FAILOVER-OF-RUNNING-VMS.md
+      - Tutorial 14 - Restore a Snapshot in the Console: TUTORIAL-14-CONSOLE-RESTORE.md
+      - Deployment Notes: DEPLOYMENT-NOTES.md
+      - Features: FEATURES.md
+      - Upgrade Guide: UPGRADE-GUIDE.md
+      - FAQ: FAQ.md
       - Helm Values Reference: HELM-VALUES.md
   - Operations:
+      - Day 2 Operations: DAY2-OPERATIONS.md
+      - Monitoring: MONITORING.md
+      - Capacity Planning: CAPACITY-PLANNING.md
+      - Backup and Recovery: BACKUP-RECOVERY.md
+      - Golden Image Workflow: GOLDEN-IMAGE-WORKFLOW.md
+      - Security: SECURITY.md
       - Troubleshooting: TROUBLESHOOTING.md
       - Performance Tuning: PERFORMANCE-TUNING.md
       - Known Limitations: KNOWN-LIMITATIONS.md
   - Architecture:
       - Overview: OVERVIEW.md
+      - Context (the words we use): CONTEXT.md
       - System Design: ARCHITECTURE.md
       - Consistency Model: CONSISTENCY-MODEL.md
       - VPC Networking: VPC-NETWORKING.md

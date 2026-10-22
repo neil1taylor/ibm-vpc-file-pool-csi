@@ -26,7 +26,7 @@ Each step is covered in detail below.
 
 ### Cluster Requirements
 
-- **IBM Cloud Kubernetes Service (IKS)** or **Red Hat OpenShift on IBM Cloud (ROKS)**, version 1.28+
+- **IBM Cloud Kubernetes Service (IKS)** or **Red Hat OpenShift on IBM Cloud (ROKS or ROVS)**, version 1.28+
 - **VPC Gen2 networking** (Classic infrastructure is not supported)
 - Worker nodes with `topology.kubernetes.io/zone` and `topology.kubernetes.io/region` labels (set automatically by IBM Cloud — you don't need to do anything)
 
@@ -55,7 +55,17 @@ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/do
 kubectl get pods -n cert-manager
 ```
 
-If you prefer to manage webhook TLS certificates manually, set `webhook.certProvider=manual` in the Helm values and populate the `ibm-vpc-file-pool-csi-webhook-certs` Secret yourself. To disable webhooks entirely, set `webhook.enabled=false`.
+If you prefer to manage webhook TLS certificates manually, set `webhook.certProvider=manual`. Create the Secret `<release>-ibm-vpc-file-pool-csi-webhook-certs` (keys `tls.crt` and `tls.key`, for the DNS name `<release>-ibm-vpc-file-pool-csi-webhook.<namespace>.svc`) before you install, and set `webhook.caBundle` to the base64-encoded PEM of the CA that signed it:
+
+```bash
+--set webhook.certProvider=manual --set webhook.caBundle="$(base64 < ca.crt | tr -d '\n')"
+```
+
+The chart refuses to render in manual mode without `webhook.caBundle`.
+
+When you switch between certificate modes on a running install, delete the old `<release>-ibm-vpc-file-pool-csi-webhook-certs` Secret first. For about a minute after the switch, until the controller reloads the new certificate, requests to the webhooks fail with `x509: certificate signed by unknown authority`, and creating or changing the driver's resources is refused. Seen on rovslab-prod-eude, 2026-10-19.
+
+To disable webhooks entirely, set `webhook.enabled=false`. The controller then serves no webhooks and needs no certificate. Invalid custom resources are then accepted without checks.
 
 ### Tooling
 
@@ -138,6 +148,8 @@ podman build -t ${IMAGE} .
 # Note: Do NOT include a tag in IMAGE_NAME — the Makefile appends :$(VERSION) automatically.
 ```
 
+The image also holds the Kopia command-line program (pinned in the `Dockerfile` by version and SHA-256; the build stops if the checksum does not match). Only the COS export Jobs run it. The driver does not link it, and the image build needs to reach `github.com` to fetch it. To move to another Kopia version, change `KOPIA_VERSION` and `KOPIA_SHA256` together, using the checksum in `checksums.txt` of the official release.
+
 Push the image to IBM Cloud Container Registry so your cluster nodes can pull it:
 
 ```bash
@@ -167,7 +179,7 @@ docker push default-route-openshift-image-registry.apps.<cluster>/kube-system/vp
 
 The driver uses `secret-common-lib` to authenticate — the same library used by the stock IBM CSI drivers. This means it reads credentials from secrets that already exist on your cluster.
 
-### Managed Clusters (ROKS / IKS) — Nothing to Do
+### Managed Clusters (ROKS / ROVS / IKS) — Nothing to Do
 
 On managed clusters, IBM Cloud automatically creates and maintains the credentials for you. Just verify they exist:
 
@@ -260,7 +272,7 @@ helm upgrade --install ibm-vpc-file-pool-csi \
 - A **CSIDriver** object — registers the driver with Kubernetes so it knows to route storage requests to it
 - A **StorageClass** — tells Kubernetes "when someone asks for storage of this type, use this CSI driver"
 
-**Image pull secrets:** Your cluster nodes need permission to download the driver image from IBM Cloud Container Registry. Managed ROKS/IKS clusters have a pre-configured secret called `all-icr-io` that handles this. Without it, pods fail to start with an `unauthorized` / `ErrImagePull` error. Verify it exists:
+**Image pull secrets:** Your cluster nodes need permission to download the driver image from IBM Cloud Container Registry. Managed ROKS/ROVS/IKS clusters have a pre-configured secret called `all-icr-io` that handles this. Without it, pods fail to start with an `unauthorized` / `ErrImagePull` error. Verify it exists:
 
 ```bash
 kubectl get secret all-icr-io -n kube-system
@@ -296,14 +308,14 @@ helm upgrade --install ibm-vpc-file-pool-csi \
 | `image.repository` | Yes | — | Container image registry path |
 | `image.tag` | Yes | — | Image tag |
 | `image.pullPolicy` | No | `IfNotPresent` | Image pull policy (`Always` recommended during iterative testing) |
-| `imagePullSecrets` | No | `[]` | Image pull secrets for private registries. On managed ROKS/IKS, set to `[{name: all-icr-io}]` |
-| `config.region` | No | Auto-discovered | IBM Cloud region (e.g., `us-south`). Auto-discovered from the secret provider RIAAS endpoint on managed ROKS/IKS clusters |
+| `imagePullSecrets` | No | `[]` | Image pull secrets for private registries. On managed ROKS/ROVS/IKS, set to `[{name: all-icr-io}]` |
+| `config.region` | No | Auto-discovered | IBM Cloud region (e.g., `us-south`). Auto-discovered from the secret provider RIAAS endpoint on managed ROKS/ROVS/IKS clusters |
 | `config.vpcID` | No | Auto-discovered | VPC ID where shares will be created. Auto-discovered from the `ibm-cloud-provider-data` ConfigMap on managed clusters |
-| `config.subnetID` | No | Auto-discovered | Subnet ID for NFS mount targets. Auto-discovered from `ibm-cloud-provider-data` on managed clusters (uses first subnet) |
+| `config.subnetID` | No | Auto-discovered | Worker subnet IDs for NFS mount targets, comma-separated. Auto-discovered from `ibm-cloud-provider-data` on managed clusters. Each share's mount target goes in the subnet in the pool's zone |
 | `config.resourceGroupID` | No | Auto-discovered | Resource group for billing. Auto-discovered from the secret provider on managed clusters |
 | `controller.replicas` | No | `1` | Controller replicas (leader-elected) |
 | `controller.resources` | No | `{requests: {cpu: 50m, memory: 128Mi}, limits: {memory: 512Mi}}` | Controller CPU/memory resource requests and limits |
-| `node.kubeletDir` | No | `/var/data/kubelet` | Kubelet root directory. ROKS uses `/var/data/kubelet` (the Helm default). The Go binary default is `/var/lib/kubelet` for raw manifest deployments |
+| `node.kubeletDir` | No | `/var/data/kubelet` | Kubelet root directory. ROKS and ROVS use `/var/data/kubelet` (the Helm default). The Go binary default is `/var/lib/kubelet` for raw manifest deployments |
 | `node.resources` | No | `{requests: {cpu: 50m, memory: 64Mi}, limits: {memory: 256Mi}}` | Node agent CPU/memory resource requests and limits |
 | `logLevel` | No | `4` | klog verbosity (2=normal, 4=detailed, 6=trace) |
 | `webhook.enabled` | No | `true` | Enable validating admission webhooks |
@@ -311,7 +323,8 @@ helm upgrade --install ibm-vpc-file-pool-csi \
 | `webhook.certProvider` | No | `cert-manager` | TLS certificate provider: `cert-manager`, `openshift` or `manual` |
 | `cloneWorker.interval` | No | `10s` | Background clone worker poll interval |
 | `goldenImageSyncer.interval` | No | `5m` | Golden image syncer poll interval |
-| `secretProvider.managed` | No | `true` | Enable managed secret provider sidecar (ROKS/IKS) |
+| `cdi.copyPodMemoryLimit` | No | `8Gi` | Minimum memory limit for CDI's copy pods; the controller raises it in the OpenShift Virtualization settings. Empty turns this off |
+| `secretProvider.managed` | No | `true` | Enable managed secret provider sidecar (ROKS/ROVS/IKS) |
 | `secretProvider.sidecar.image` | No | `icr.io/obs/armada-storage-secret:v1.2.75` | Secret provider sidecar container image |
 
 ### Option B: Raw Manifests
@@ -352,17 +365,64 @@ kubectl apply -f config/deploy/node.yaml
 |------|---------|-------------|
 | `--endpoint` | `unix:///csi/csi.sock` | CSI gRPC endpoint |
 | `--node-id` | (required) | Kubernetes node name |
-| `--mode` | `controller` | `controller`, `node`, `receiver`, or `sync-client` |
+| `--mode` | `controller` | `controller`, `node`, `receiver`, `sync-client`, `check-receiver`, `apply-vm-disk`, `send-vm-disk`, or `restore-vm-disk`, `unwrap-backup-key`, `register-console-plugin`, or `unregister-console-plugin`, or `enable-sidecar-gate` (all but the first three are run as Jobs; `check-receiver` is run by the console's receiver setup; `register-console-plugin`, `unregister-console-plugin` and `enable-sidecar-gate` are the chart's hook Jobs) |
 | `--region` | Auto-discovered | IBM Cloud region |
 | `--vpc-id` | Auto-discovered | VPC ID for mount targets |
-| `--subnet-id` | Auto-discovered | Subnet ID for mount targets |
-| `--kubelet-dir` | `/var/lib/kubelet` | Kubelet root directory (ROKS: use `/var/data/kubelet`) |
+| `--subnet-id` | Auto-discovered | Worker subnet IDs for mount targets, comma-separated; the controller uses the one in each pool's zone |
+| `--kubelet-dir` | `/var/lib/kubelet` | Kubelet root directory (ROKS/ROVS: use `/var/data/kubelet`) |
 | `--clone-worker-interval` | `10s` | Clone worker poll interval |
-| `--golden-image-sync-interval` | `5m` | Golden image syncer poll interval |
+| `--golden-image-sync-interval` | `1h` | Golden image syncer poll interval (the Helm chart sets `5m`) |
+| `--node-metrics-addr` | `:9810` | Node mode: listen address of the HTTPS metrics endpoint with per-share used bytes and NFS statistics. Callers need a token that may `get` `/metrics`. Empty turns it off. Helm sets it from `node.metricsPort` |
+| `--metrics-cert-dir` | `""` | Controller mode: directory with `tls.crt` and `tls.key` for the HTTPS metrics endpoint on `:8080`; empty makes a self-signed certificate that Prometheus cannot check. Helm mounts a secret there |
+| `--monitoring-namespace` | `""` | Controller mode: namespace of the metrics Services that user workload monitoring scrapes. The controller keeps their Endpoints and warns if user workload monitoring is off. Empty turns this off. Helm sets it with the other `--monitoring-*` flags |
+| `--monitoring-controller-service`, `--monitoring-node-service` | `""` | Names of the two Services in the monitoring namespace |
+| `--monitoring-controller-port`, `--monitoring-node-port` | `8080`, `0` | Metrics ports to put in the Endpoints; `0` leaves the node agents out |
+| `--monitoring-selector` | `""` | `key=value,key=value` labels shared by all driver pods |
+| `--node-metrics-cert-dir` | `""` | Node mode: directory with `tls.crt` and `tls.key` for the metrics endpoint; empty makes a self-signed certificate that Prometheus cannot check. Helm mounts a secret there |
+| `--share-stats-interval` | `30s` | Node mode: how often the node agent reads the NFS statistics of its shares. Helm sets it from `node.shareStatsInterval` |
+| `--cdi-copy-pod-memory-limit` | `8Gi` | Keep the memory limit of CDI's copy pods at least this high (OpenShift Virtualization `HyperConverged`); empty turns the check off |
+| `--console-plugin-name` | `ibm-vpc-file-pool-csi` | ConsolePlugin that `register-console-plugin` adds to, and `unregister-console-plugin` removes from, the console's plugin list |
 | `--driver-image` | `""` | Driver container image for receiver-mode sync-client Jobs (auto-set by Helm) |
+| `--vm-snapshot-method` | `auto` | `auto`: instant VM disk snapshots where the KubeVirt `Sidecar` feature gate is on; `copy`: VM disk snapshots are always copies. Helm sets it from `vmSnapshots.method`. See [VM-INSTANT-SNAPSHOTS.md](VM-INSTANT-SNAPSHOTS.md) |
+| `--virt-launcher-image` | `""` | KubeVirt virt-launcher image for VM disk snapshot Jobs; empty reads it from virt-operator. Helm sets it from `vmSnapshots.launcherImage` |
+| `--enable-webhooks` | `true` | Serve the validating admission webhooks. Helm sets `false` when `webhook.enabled=false` |
+| `--webhook-port` | `9443` | Port of the admission webhook server. Helm sets it from `webhook.port` |
 | `--receiver-tls-cert-file` | `""` | TLS certificate file for receiver HTTPS. Empty = plain HTTP |
 | `--receiver-tls-key-file` | `""` | TLS private key file for receiver HTTPS. Empty = plain HTTP |
-| `--ca-cert-file` | `""` | CA certificate file for verifying receiver TLS cert (sync-client mode). Empty = system trust store |
+| `--receiver-base-path` | `/data` | NFS mount point inside the receiver container (receiver mode). Set by the Helm chart |
+| `--receiver-auth-token-file` | `/etc/replication/token` | File with the bearer token the receiver requires (receiver mode) |
+| `--receiver-listen-addr` | `:8443` | Listen address of the receiver (receiver mode) |
+| `--receiver-endpoint` | `""` | URL of the destination receiver (sync-client and check-receiver modes). Set by the replication controller |
+| `--auth-token-file` | `/etc/replication/token` | File with the bearer token the sync client sends (sync-client and check-receiver modes) |
+| `--ca-cert-file` | `""` | CA certificate file for verifying receiver TLS cert (sync-client and check-receiver modes). Empty = system trust store |
+| `--source-path` | `""` | Mounted source NFS path (sync-client mode). Set by the replication controller |
+| `--dest-base-path` | `""` | Destination base path (sync-client mode). Set by the replication controller |
+| `--sub-path` | `""` | SubVolume sub path (sync-client mode). Set by the replication controller |
+| `--subvolume-name` | `""` | SubVolume CR name (sync-client mode). Set by the replication controller |
+| `--metadata-json` | `""` | Serialized SubVolume metadata (sync-client mode). Set by the replication controller |
+| `--staging-path` | `""` | VM disk copy staging file (apply-vm-disk mode). Set by the replication controller |
+| `--disk-path` | `""` | Disk image to replace (apply-vm-disk mode). Set by the replication controller |
+| `--from`, `--to` | `""` | Moments the destination disk and the copy show, RFC 3339 (apply-vm-disk mode). Set by the replication controller |
+| `--full` | `false` | The copy holds the whole disk (apply-vm-disk mode). Set by the replication controller |
+| `--keep` | `24h` | How long restore points are kept (apply-vm-disk and send-vm-disk modes). Set by the replication controller |
+| `--backup-disk`, `--out-disk` | `""` | The backed-up VM disk to read and the new disk to write (restore-vm-disk mode). Set by the backup restore Job |
+| `--restore-moment` | `""` | Moment to restore, RFC 3339; empty for the latest (restore-vm-disk mode). Set by the backup restore Job |
+| `--vm-group` | `""` | `namespace/name` of the VM that owns the disk (send-vm-disk mode). Set by the replication controller |
+| `--copy-id` | `""` | Name of this copy attempt; a repeat with the same name resumes it (send-vm-disk mode). Set by the replication controller |
+
+---
+
+### On ROKS and ROVS: turn on user workload monitoring (required for alerts)
+
+The driver's alerts and scraping live in the namespace `ibm-vpc-file-pool-csi-monitoring`, which only OpenShift's user workload monitoring reads. Without it nothing evaluates the alerts. An admin turns it on once (the chart does not change this setting):
+
+```bash
+oc -n openshift-monitoring get configmap cluster-monitoring-config -o jsonpath='{.data.config\.yaml}'   # look for enableUserWorkload: true
+# If it is missing, add "enableUserWorkload: true" to config.yaml:
+oc -n openshift-monitoring edit configmap cluster-monitoring-config
+```
+
+See "Where alerts run on OpenShift" in [MONITORING.md](MONITORING.md) for why, and how to check it works.
 
 ---
 
@@ -529,7 +589,7 @@ The tests create resources with an `e2e-` prefix and clean them up automatically
 
 ---
 
-## OpenShift Console Plugin (Optional)
+## OpenShift Console Plugin
 
 The driver includes an OpenShift Console dynamic plugin that provides a visual dashboard for managing file share pools, SubVolumes, snapshots, and replication policies directly from the OpenShift web console.
 
@@ -538,30 +598,13 @@ The driver includes an OpenShift Console dynamic plugin that provides a visual d
 - OpenShift 4.14+ with the ConsolePlugin v1 API
 - The CSI driver must already be installed (Steps 1-4 above)
 
-### Enable the Console Plugin
+### Install
 
-Add the `consolePlugin.enabled` flag during Helm install or upgrade:
+The plugin is on by default. On a cluster with the OpenShift console, a plain Helm install deploys it as a separate Deployment with its own Service. TLS certificates are auto-provisioned by the OpenShift service-ca operator (no cert-manager dependency for the plugin). On a cluster without the OpenShift console, the chart leaves the plugin out.
 
-```bash
-helm upgrade --install ibm-vpc-file-pool-csi \
-  charts/ibm-vpc-file-pool-csi/ \
-  --namespace kube-system \
-  --set image.repository=${REGISTRY}/${NAMESPACE}/vpc-file-pool-csi \
-  --set image.tag=${VERSION} \
-  --set consolePlugin.enabled=true
-```
+The chart also turns the plugin on in the console. A hook Job adds `ibm-vpc-file-pool-csi` to the console's plugin list after each install and upgrade, and keeps the other plugins. Before `helm uninstall`, a hook Job removes only this plugin from the list.
 
-This deploys the plugin as a separate Deployment with its own Service. TLS certificates are auto-provisioned by the OpenShift service-ca operator (no cert-manager dependency for the plugin).
-
-### Register the Plugin
-
-After install, register the plugin with the OpenShift console:
-
-```bash
-oc patch console.operator.openshift.io cluster \
-  --patch '{"spec":{"plugins":["ibm-vpc-file-pool-csi"]}}' \
-  --type=merge
-```
+To leave the plugin out, set `consolePlugin.enabled=false`. If it was on before, the upgrade removes it from the console's plugin list.
 
 ### Verify
 

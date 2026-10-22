@@ -36,6 +36,7 @@ type MigrationPodSpec struct {
 // and target PVCs and runs rsync to copy data from source to target.
 func BuildMigrationPod(spec MigrationPodSpec) *corev1.Pod {
 	return &corev1.Pod{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Pod"},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      spec.Name,
 			Namespace: spec.Namespace,
@@ -53,7 +54,7 @@ func BuildMigrationPod(spec MigrationPodSpec) *corev1.Pod {
 				{
 					Name:  "migrate",
 					Image: MigrationImage,
-					// Install rsync, run the copy, then report file counts for verification.
+					// Install rsync, run the copy, then report file counts for verification. A count mismatch fails the pod.
 					Command: []string{"sh", "-c", `
 set -e
 apk add --no-cache rsync >/dev/null 2>&1
@@ -70,8 +71,8 @@ if [ "$SOURCE_COUNT" = "$TARGET_COUNT" ]; then
   echo "VERIFICATION: OK (file counts match: $SOURCE_COUNT)"
   exit 0
 else
-  echo "VERIFICATION: WARNING (source=$SOURCE_COUNT target=$TARGET_COUNT)"
-  exit 0
+  echo "VERIFICATION: FAILED (source=$SOURCE_COUNT target=$TARGET_COUNT)"
+  exit 1
 fi
 `},
 					VolumeMounts: []corev1.VolumeMount{
@@ -114,6 +115,49 @@ fi
 							ClaimName: spec.TargetPVC,
 						},
 					},
+				},
+			},
+		},
+	}
+}
+
+// TargetPVCSpec holds the parameters for building the new claim a volume moves into.
+type TargetPVCSpec struct {
+	// Name is the new claim's name.
+	Name string
+	// Namespace is the new claim's namespace (the same as the source claim's).
+	Namespace string
+	// SourcePVC is the name of the old claim, recorded on the new one.
+	SourcePVC string
+	// Pool is the pool the new claim lands in, recorded on the new claim.
+	Pool string
+	// StorageClass is the pool's storage class.
+	StorageClass string
+	// Size is the requested size (the size of the source claim).
+	Size resource.Quantity
+}
+
+// BuildTargetPVC creates the claim on the pool driver that a migration pod copies into.
+func BuildTargetPVC(spec TargetPVCSpec) *corev1.PersistentVolumeClaim {
+	return &corev1.PersistentVolumeClaim{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "PersistentVolumeClaim"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      spec.Name,
+			Namespace: spec.Namespace,
+			Labels: map[string]string{
+				LabelMigration: "true",
+			},
+			Annotations: map[string]string{
+				AnnotationSourcePVC:             spec.SourcePVC,
+				"vpc-file-pool-csi.ibm.io/pool": spec.Pool,
+			},
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
+			StorageClassName: &spec.StorageClass,
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: spec.Size,
 				},
 			},
 		},

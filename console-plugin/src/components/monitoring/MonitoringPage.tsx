@@ -26,9 +26,13 @@ import { FileSharePool, ReplicationPolicy } from '../../types';
 import { usePoolMetrics, checkPrometheusConnection } from '../../utils/use-pool-metrics';
 import { TIME_RANGES, TimeRange } from '../../utils/use-pool-metrics';
 import { METRICS } from '../../constants';
+import { metricQueries } from '../../utils/metric-queries';
 import TimeSeriesChart from './TimeSeriesChart';
+import CardHelpTitle from '../common/CardHelpTitle';
 import CapacityDonut from '../dashboard/CapacityDonut';
 import CapacityBar from '../common/CapacityBar';
+import HelpLink from '../common/HelpLink';
+import { TROUBLESHOOTING } from '../../utils/help-links';
 
 const MonitoringPage: React.FC = () => {
   const [range, setRange] = useState<TimeRange>(TIME_RANGES[0]);
@@ -38,6 +42,7 @@ const MonitoringPage: React.FC = () => {
     error?: string;
   } | null>(null);
   const [allocationExpanded, setAllocationExpanded] = useState(false);
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
 
   useEffect(() => {
     checkPrometheusConnection().then(setConnStatus);
@@ -143,12 +148,15 @@ const MonitoringPage: React.FC = () => {
               </code>
             </>
           )}
+          <div style={{ marginTop: 8 }}>
+            <HelpLink href={TROUBLESHOOTING.metrics} label="Troubleshooting" testId="banner-help" />
+          </div>
         </Alert>
       )}
 
       {/* B. Pool Capacity Overview */}
       <Card style={{ marginBottom: 16 }}>
-        <CardTitle>Pool Capacity Overview</CardTitle>
+        <CardHelpTitle helpKey="poolCapacityOverview" />
         <CardBody>
           <Grid hasGutter>
             <GridItem sm={12} md={4} lg={3}>
@@ -196,7 +204,7 @@ const MonitoringPage: React.FC = () => {
       <Grid hasGutter style={{ marginBottom: 16 }}>
         <GridItem sm={12} md={6} lg={3}>
           <Card isFullHeight>
-            <CardTitle>Total PVCs</CardTitle>
+            <CardHelpTitle helpKey="totalPVCs" />
             <CardBody>
               <span style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>
                 {totalPVCs}
@@ -215,7 +223,7 @@ const MonitoringPage: React.FC = () => {
 
         <GridItem sm={12} md={6} lg={3}>
           <Card isFullHeight>
-            <CardTitle>Utilization</CardTitle>
+            <CardHelpTitle helpKey="utilization" />
             <CardBody>
               <Split hasGutter>
                 <SplitItem>
@@ -255,7 +263,7 @@ const MonitoringPage: React.FC = () => {
 
         <GridItem sm={12} md={6} lg={3}>
           <Card isFullHeight>
-            <CardTitle>VPC API Health</CardTitle>
+            <CardHelpTitle helpKey="vpcApiHealth" />
             <CardBody>
               <DescriptionList isCompact>
                 <DescriptionListGroup>
@@ -287,7 +295,7 @@ const MonitoringPage: React.FC = () => {
 
         <GridItem sm={12} md={6} lg={3}>
           <Card isFullHeight>
-            <CardTitle>Replication Status</CardTitle>
+            <CardHelpTitle helpKey="replicationStatus" />
             <CardBody>
               <Split hasGutter>
                 <SplitItem>
@@ -314,7 +322,7 @@ const MonitoringPage: React.FC = () => {
       <Grid hasGutter style={{ marginBottom: 16 }}>
         <GridItem sm={12} md={6}>
           <Card>
-            <CardTitle>Capacity Utilization Over Time</CardTitle>
+            <CardHelpTitle helpKey="capacityOverTime" />
             <CardBody>
               <TimeSeriesChart
                 query={`(${METRICS.POOL_ALLOCATED_GB} / (${METRICS.POOL_CAPACITY_GB} > 0)) * 100`}
@@ -328,7 +336,7 @@ const MonitoringPage: React.FC = () => {
 
         <GridItem sm={12} md={6}>
           <Card>
-            <CardTitle>PVC Count Over Time</CardTitle>
+            <CardHelpTitle helpKey="pvcCountOverTime" />
             <CardBody>
               <TimeSeriesChart
                 query={`sum(${METRICS.POOL_PVC_COUNT}) by (pool)`}
@@ -342,7 +350,7 @@ const MonitoringPage: React.FC = () => {
 
         <GridItem sm={12} md={6}>
           <Card>
-            <CardTitle>VPC API Call Rate</CardTitle>
+            <CardHelpTitle helpKey="vpcApiCallRate" />
             <CardBody>
               <TimeSeriesChart
                 query={`sum by (status) (rate(${METRICS.VPC_API_CALLS_TOTAL}[5m])) * 60`}
@@ -356,10 +364,10 @@ const MonitoringPage: React.FC = () => {
 
         <GridItem sm={12} md={6}>
           <Card>
-            <CardTitle>VPC API P95 Latency</CardTitle>
+            <CardHelpTitle helpKey="vpcApiP95Latency" />
             <CardBody>
               <TimeSeriesChart
-                query={`histogram_quantile(0.95, sum(rate(${METRICS.VPC_API_CALL_DURATION}[5m])) by (le)) * 1000`}
+                query={metricQueries.apiP95Ms}
                 range={range}
                 yLabel="ms"
                 chartType="line"
@@ -379,7 +387,7 @@ const MonitoringPage: React.FC = () => {
           <Grid hasGutter style={{ marginTop: 8 }}>
             <GridItem sm={12} md={6}>
               <Card>
-                <CardTitle>Allocation Rate Over Time</CardTitle>
+                <CardHelpTitle helpKey="allocationRateOverTime" />
                 <CardBody>
                   <TimeSeriesChart
                     query={`sum(rate(${METRICS.ALLOCATIONS_TOTAL}[5m])) * 3600`}
@@ -394,14 +402,74 @@ const MonitoringPage: React.FC = () => {
 
             <GridItem sm={12} md={6}>
               <Card>
-                <CardTitle>P95 Allocation Latency Over Time</CardTitle>
+                <CardHelpTitle helpKey="allocationLatencyOverTime" />
                 <CardBody>
                   <TimeSeriesChart
-                    query={`histogram_quantile(0.95, sum(rate(${METRICS.ALLOCATION_DURATION}[5m])) by (le)) * 1000`}
+                    query={metricQueries.allocationP95Ms}
                     range={range}
                     yLabel="ms"
                     chartType="line"
                     emptyMessage="No allocation latency data in this time range"
+                  />
+                </CardBody>
+              </Card>
+            </GridItem>
+          </Grid>
+        </ExpandableSection>
+      </div>
+
+      {/* E2. Group snapshots and CDI (expandable) */}
+      <div style={{ marginBottom: 16 }}>
+        <ExpandableSection
+          toggleText={detailsExpanded ? 'Hide Group Snapshot and CDI Activity' : 'Show Group Snapshot and CDI Activity'}
+          onToggle={(_event, isExpanded) => setDetailsExpanded(isExpanded)}
+          isExpanded={detailsExpanded}
+        >
+          <Grid hasGutter style={{ marginTop: 8 }}>
+            <GridItem sm={12} md={6}>
+              <Card>
+                <CardHelpTitle helpKey="groupSnapshotWindow" />
+                <CardBody>
+                  <TimeSeriesChart
+                    query={metricQueries.groupSnapshotWindowP95Ms}
+                    range={range}
+                    yLabel="ms"
+                    chartType="line"
+                    emptyMessage="No group snapshots in this time range"
+                  />
+                </CardBody>
+              </Card>
+            </GridItem>
+
+            <GridItem sm={12} md={6}>
+              <Card>
+                <CardHelpTitle helpKey="groupSnapshotMembers" />
+                <CardBody>
+                  <TimeSeriesChart
+                    query={metricQueries.groupSnapshotMembersAvg}
+                    range={range}
+                    yLabel="members"
+                    chartType="line"
+                    emptyMessage="No group snapshots in this time range"
+                  />
+                </CardBody>
+              </Card>
+            </GridItem>
+
+            <GridItem sm={12} md={6}>
+              <Card>
+                <CardHelpTitle helpKey="cdiLimitRaises" />
+                <CardBody>
+                  <p style={{ color: 'var(--pf-t--global--color--subtle)', margin: '0 0 8px 0' }}>
+                    The driver raises the memory limit of CDI&apos;s copy pod when it starts. A raise later on means
+                    something reset the limit, for example an add-on update.
+                  </p>
+                  <TimeSeriesChart
+                    query={metricQueries.cdiLimitRaises1h}
+                    range={range}
+                    yLabel="raises"
+                    chartType="line"
+                    emptyMessage="No raises in this time range"
                   />
                 </CardBody>
               </Card>
@@ -417,7 +485,7 @@ const MonitoringPage: React.FC = () => {
           <Grid hasGutter>
             <GridItem sm={12} md={6}>
               <Card>
-                <CardTitle>Replication Lag</CardTitle>
+                <CardHelpTitle helpKey="replicationLag" />
                 <CardBody>
                   <TimeSeriesChart
                     query={METRICS.REPLICATION_LAG}
@@ -432,7 +500,7 @@ const MonitoringPage: React.FC = () => {
 
             <GridItem sm={12} md={6}>
               <Card>
-                <CardTitle>Replication Sync Rate</CardTitle>
+                <CardHelpTitle helpKey="replicationSyncRateOverTime" />
                 <CardBody>
                   <TimeSeriesChart
                     query={`sum by (result) (rate(${METRICS.REPLICATION_SYNC_TOTAL}[5m])) * 60`}

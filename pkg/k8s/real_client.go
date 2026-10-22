@@ -88,6 +88,20 @@ func (r *realClient) ListCloneSubVolumes(ctx context.Context) ([]v1alpha1.SubVol
 	return list.Items, nil
 }
 
+func (r *realClient) HasOpenRestore(ctx context.Context, pvcNamespace, pvcName string) (bool, error) {
+	list := &v1alpha1.BackupRestoreList{}
+	if err := r.client.List(ctx, list); err != nil {
+		return false, err
+	}
+	for i := range list.Items {
+		sp, st := list.Items[i].Spec, list.Items[i].Status
+		if sp.TargetNamespace == pvcNamespace && sp.TargetName == pvcName && st.Phase != "Done" && st.Phase != "Failed" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (r *realClient) CreateSubVolume(ctx context.Context, sv *v1alpha1.SubVolume) error {
 	return r.client.Create(ctx, sv)
 }
@@ -256,6 +270,10 @@ func (r *realClient) ListReplicationPolicies(ctx context.Context) ([]v1alpha1.Re
 
 func (r *realClient) CreateReplicationPolicy(ctx context.Context, rp *v1alpha1.ReplicationPolicy) error {
 	return r.client.Create(ctx, rp)
+}
+
+func (r *realClient) UpdateReplicationPolicy(ctx context.Context, rp *v1alpha1.ReplicationPolicy) error {
+	return r.client.Update(ctx, rp)
 }
 
 func (r *realClient) UpdateReplicationPolicyStatus(ctx context.Context, rp *v1alpha1.ReplicationPolicy) error {

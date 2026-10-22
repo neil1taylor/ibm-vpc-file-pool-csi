@@ -37,7 +37,7 @@ test.describe('Plugin Dashboard (Overview)', () => {
 
   test('all 7 tabs are present', async ({ page }) => {
     for (const tabName of TAB_NAMES) {
-      await expect(page.getByRole('tab', { name: tabName })).toBeVisible();
+      await expect(page.getByRole('tab', { name: tabName, exact: true })).toBeVisible();
     }
   });
 
@@ -100,15 +100,6 @@ test.describe('Snapshots Tab', () => {
     await navigateTo(page, ROUTES.dashboard);
     await checkSessionValid(page);
     await clickTab(page, 'Snapshots');
-    await expectTableOrEmptyState(page);
-  });
-});
-
-test.describe('Group Snapshots Tab', () => {
-  test('page loads without error', async ({ page }) => {
-    await navigateTo(page, ROUTES.dashboard);
-    await checkSessionValid(page);
-    await clickTab(page, 'Group Snapshots');
     await expectTableOrEmptyState(page);
   });
 });

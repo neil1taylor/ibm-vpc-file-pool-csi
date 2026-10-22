@@ -3,7 +3,6 @@ package replication
 import (
 	"archive/tar"
 	"context"
-	"crypto/x509"
 	"encoding/pem"
 	"io"
 	"net/http"
@@ -55,7 +54,7 @@ func TestSyncClient_Upload(t *testing.T) {
 				receivedTarFiles = append(receivedTarFiles, hdr.Name)
 			}
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"status":"ok"}`))
+			writeBody(t, w, []byte(`{"status":"ok"}`))
 			return
 		}
 
@@ -63,7 +62,7 @@ func TestSyncClient_Upload(t *testing.T) {
 			body, _ := io.ReadAll(r.Body)
 			receivedMetadata = string(body)
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"status":"ok"}`))
+			writeBody(t, w, []byte(`{"status":"ok"}`))
 			return
 		}
 
@@ -118,9 +117,9 @@ func TestSyncClient_UploadNoMetadata(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/api/v1/sync/") {
 			// Drain tar body.
-			io.ReadAll(r.Body)
+			drainBody(t, r.Body)
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"status":"ok"}`))
+			writeBody(t, w, []byte(`{"status":"ok"}`))
 			return
 		}
 		if strings.Contains(r.URL.Path, "/api/v1/metadata/") {
@@ -135,8 +134,8 @@ func TestSyncClient_UploadNoMetadata(t *testing.T) {
 	sourceDir := t.TempDir()
 	subPath := "pvc-12345678-1234-1234-1234-123456789abc"
 	svDir := filepath.Join(sourceDir, subPath)
-	os.MkdirAll(svDir, 0755)
-	os.WriteFile(filepath.Join(svDir, "file.txt"), []byte("data"), 0644)
+	mustMkdirAll(t, svDir)
+	mustWriteFile(t, filepath.Join(svDir, "file.txt"), []byte("data"))
 
 	client := NewSyncClient(server.URL, "token")
 	_, err := client.SyncSubVolume(context.Background(), sourceDir, "/pvcs", subPath, "pvc-12345678-1234-1234-1234-123456789abc", nil)
@@ -153,8 +152,8 @@ func TestSyncClient_NetworkError(t *testing.T) {
 	sourceDir := t.TempDir()
 	subPath := "pvc-12345678-1234-1234-1234-123456789abc"
 	svDir := filepath.Join(sourceDir, subPath)
-	os.MkdirAll(svDir, 0755)
-	os.WriteFile(filepath.Join(svDir, "file.txt"), []byte("data"), 0644)
+	mustMkdirAll(t, svDir)
+	mustWriteFile(t, filepath.Join(svDir, "file.txt"), []byte("data"))
 
 	client := NewSyncClient(server.URL, "token")
 	_, err := client.SyncSubVolume(context.Background(), sourceDir, "/pvcs", subPath, "pvc-12345678-1234-1234-1234-123456789abc", nil)
@@ -165,7 +164,7 @@ func TestSyncClient_NetworkError(t *testing.T) {
 
 func TestSyncClient_ServerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.ReadAll(r.Body)
+		drainBody(t, r.Body)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 	}))
 	defer server.Close()
@@ -173,8 +172,8 @@ func TestSyncClient_ServerError(t *testing.T) {
 	sourceDir := t.TempDir()
 	subPath := "pvc-12345678-1234-1234-1234-123456789abc"
 	svDir := filepath.Join(sourceDir, subPath)
-	os.MkdirAll(svDir, 0755)
-	os.WriteFile(filepath.Join(svDir, "file.txt"), []byte("data"), 0644)
+	mustMkdirAll(t, svDir)
+	mustWriteFile(t, filepath.Join(svDir, "file.txt"), []byte("data"))
 
 	client := NewSyncClient(server.URL, "token")
 	_, err := client.SyncSubVolume(context.Background(), sourceDir, "/pvcs", subPath, "pvc-12345678-1234-1234-1234-123456789abc", nil)
@@ -188,10 +187,10 @@ func TestSyncClient_ServerError(t *testing.T) {
 
 func TestSyncClient_MetadataError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.ReadAll(r.Body)
+		drainBody(t, r.Body)
 		if strings.Contains(r.URL.Path, "/api/v1/sync/") {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"status":"ok"}`))
+			writeBody(t, w, []byte(`{"status":"ok"}`))
 			return
 		}
 		if strings.Contains(r.URL.Path, "/api/v1/metadata/") {
@@ -204,8 +203,8 @@ func TestSyncClient_MetadataError(t *testing.T) {
 	sourceDir := t.TempDir()
 	subPath := "pvc-12345678-1234-1234-1234-123456789abc"
 	svDir := filepath.Join(sourceDir, subPath)
-	os.MkdirAll(svDir, 0755)
-	os.WriteFile(filepath.Join(svDir, "file.txt"), []byte("data"), 0644)
+	mustMkdirAll(t, svDir)
+	mustWriteFile(t, filepath.Join(svDir, "file.txt"), []byte("data"))
 
 	client := NewSyncClient(server.URL, "token")
 	_, err := client.SyncSubVolume(context.Background(), sourceDir, "/pvcs", subPath, "pvc-12345678-1234-1234-1234-123456789abc", []byte(`{"test":true}`))
@@ -223,11 +222,11 @@ func TestSyncClient_StreamingNoBuffering(t *testing.T) {
 	sourceDir := t.TempDir()
 	subPath := "pvc-12345678-1234-1234-1234-123456789abc"
 	svDir := filepath.Join(sourceDir, subPath)
-	os.MkdirAll(svDir, 0755)
+	mustMkdirAll(t, svDir)
 
 	// Create a 1MB file.
 	bigContent := strings.Repeat("A", 1024*1024)
-	os.WriteFile(filepath.Join(svDir, "big.bin"), []byte(bigContent), 0644)
+	mustWriteFile(t, filepath.Join(svDir, "big.bin"), []byte(bigContent))
 
 	var receivedBytes int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -235,7 +234,7 @@ func TestSyncClient_StreamingNoBuffering(t *testing.T) {
 			n, _ := io.Copy(io.Discard, r.Body)
 			receivedBytes = n
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"status":"ok"}`))
+			writeBody(t, w, []byte(`{"status":"ok"}`))
 			return
 		}
 		http.NotFound(w, r)
@@ -258,7 +257,7 @@ func TestSyncClient_ContextCancellation(t *testing.T) {
 	// Server that blocks forever.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Read body so the client doesn't get a broken pipe before context cancels.
-		io.ReadAll(r.Body)
+		drainBody(t, r.Body)
 		select {} // block forever
 	}))
 	defer server.Close()
@@ -266,8 +265,8 @@ func TestSyncClient_ContextCancellation(t *testing.T) {
 	sourceDir := t.TempDir()
 	subPath := "pvc-12345678-1234-1234-1234-123456789abc"
 	svDir := filepath.Join(sourceDir, subPath)
-	os.MkdirAll(svDir, 0755)
-	os.WriteFile(filepath.Join(svDir, "file.txt"), []byte("data"), 0644)
+	mustMkdirAll(t, svDir)
+	mustWriteFile(t, filepath.Join(svDir, "file.txt"), []byte("data"))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately.
@@ -284,10 +283,10 @@ func TestSyncClient_ContextCancellation(t *testing.T) {
 func TestSyncClient_ReturnsBytesWritten(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/api/v1/sync/") {
-			io.ReadAll(r.Body)
+			drainBody(t, r.Body)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"status":"ok","filesExtracted":3,"bytesWritten":1048576}`))
+			writeBody(t, w, []byte(`{"status":"ok","filesExtracted":3,"bytesWritten":1048576}`))
 			return
 		}
 		http.NotFound(w, r)
@@ -297,8 +296,8 @@ func TestSyncClient_ReturnsBytesWritten(t *testing.T) {
 	sourceDir := t.TempDir()
 	subPath := "pvc-12345678-1234-1234-1234-123456789abc"
 	svDir := filepath.Join(sourceDir, subPath)
-	os.MkdirAll(svDir, 0755)
-	os.WriteFile(filepath.Join(svDir, "file.txt"), []byte("data"), 0644)
+	mustMkdirAll(t, svDir)
+	mustWriteFile(t, filepath.Join(svDir, "file.txt"), []byte("data"))
 
 	client := NewSyncClient(server.URL, "token")
 	bytesWritten, err := client.SyncSubVolume(context.Background(), sourceDir, "/pvcs", subPath, "pvc-12345678-1234-1234-1234-123456789abc", nil)
@@ -314,10 +313,10 @@ func TestSyncClient_ReturnsBytesWritten(t *testing.T) {
 func TestNewSyncClientWithCA_TrustedCA(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/api/v1/sync/") {
-			io.ReadAll(r.Body)
+			drainBody(t, r.Body)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"status":"ok","bytesWritten":42}`))
+			writeBody(t, w, []byte(`{"status":"ok","bytesWritten":42}`))
 			return
 		}
 		http.NotFound(w, r)
@@ -334,10 +333,13 @@ func TestNewSyncClientWithCA_TrustedCA(t *testing.T) {
 	sourceDir := t.TempDir()
 	subPath := "pvc-12345678-1234-1234-1234-123456789abc"
 	svDir := filepath.Join(sourceDir, subPath)
-	os.MkdirAll(svDir, 0755)
-	os.WriteFile(filepath.Join(svDir, "file.txt"), []byte("data"), 0644)
+	mustMkdirAll(t, svDir)
+	mustWriteFile(t, filepath.Join(svDir, "file.txt"), []byte("data"))
 
-	client := NewSyncClientWithCA(server.URL, "token", caCertPEM)
+	client, err := NewSyncClientWithCA(server.URL, "token", caCertPEM)
+	if err != nil {
+		t.Fatalf("NewSyncClientWithCA: %v", err)
+	}
 	bytesWritten, err := client.SyncSubVolume(context.Background(), sourceDir, "/pvcs", subPath, "pvc-12345678-1234-1234-1234-123456789abc", nil)
 	if err != nil {
 		t.Fatalf("SyncSubVolume with trusted CA failed: %v", err)
@@ -350,21 +352,24 @@ func TestNewSyncClientWithCA_TrustedCA(t *testing.T) {
 // TestNewSyncClientWithCA_UntrustedCA verifies the client fails when given no CA for a TLS server.
 func TestNewSyncClientWithCA_UntrustedCA(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.ReadAll(r.Body)
+		drainBody(t, r.Body)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
+		writeBody(t, w, []byte(`{"status":"ok"}`))
 	}))
 	defer server.Close()
 
 	sourceDir := t.TempDir()
 	subPath := "pvc-12345678-1234-1234-1234-123456789abc"
 	svDir := filepath.Join(sourceDir, subPath)
-	os.MkdirAll(svDir, 0755)
-	os.WriteFile(filepath.Join(svDir, "file.txt"), []byte("data"), 0644)
+	mustMkdirAll(t, svDir)
+	mustWriteFile(t, filepath.Join(svDir, "file.txt"), []byte("data"))
 
 	// Create client with empty CA — should fail TLS verification.
-	client := NewSyncClientWithCA(server.URL, "token", nil)
-	_, err := client.SyncSubVolume(context.Background(), sourceDir, "/pvcs", subPath, "pvc-12345678-1234-1234-1234-123456789abc", nil)
+	client, err := NewSyncClientWithCA(server.URL, "token", nil)
+	if err != nil {
+		t.Fatalf("NewSyncClientWithCA: %v", err)
+	}
+	_, err = client.SyncSubVolume(context.Background(), sourceDir, "/pvcs", subPath, "pvc-12345678-1234-1234-1234-123456789abc", nil)
 	if err == nil {
 		t.Fatal("expected TLS error for untrusted server, got nil")
 	}
@@ -376,7 +381,10 @@ func TestNewSyncClientWithCA_UntrustedCA(t *testing.T) {
 
 // TestNewSyncClientWithCA_EmptyCA verifies that empty CA PEM creates a default client.
 func TestNewSyncClientWithCA_EmptyCA(t *testing.T) {
-	client := NewSyncClientWithCA("https://example.com", "token", nil)
+	client, err := NewSyncClientWithCA("https://example.com", "token", nil)
+	if err != nil {
+		t.Fatalf("NewSyncClientWithCA: %v", err)
+	}
 	if client.httpClient == nil {
 		t.Fatal("expected non-nil httpClient")
 	}
@@ -385,50 +393,28 @@ func TestNewSyncClientWithCA_EmptyCA(t *testing.T) {
 	}
 }
 
-// TestNewSyncClientWithCA_ValidCAParsing verifies the CA cert pool is configured.
+// TestNewSyncClientWithCA_ValidCAParsing verifies the client trusts exactly the
+// given CA: a request to a server with that certificate succeeds.
 func TestNewSyncClientWithCA_ValidCAParsing(t *testing.T) {
-	// Use a real (but test-only) TLS server to get a valid cert.
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer server.Close()
 
-	serverCert := server.TLS.Certificates[0]
 	caCertPEM := pem.EncodeToMemory(&pem.Block{
 		Type:  "CERTIFICATE",
-		Bytes: serverCert.Certificate[0],
+		Bytes: server.TLS.Certificates[0].Certificate[0],
 	})
 
-	client := NewSyncClientWithCA("https://example.com", "token", caCertPEM)
-	if client.httpClient == nil {
-		t.Fatal("expected non-nil httpClient")
-	}
-
-	// Verify the transport has a custom TLS config.
-	transport, ok := client.httpClient.Transport.(*http.Transport)
-	if !ok {
-		t.Fatal("expected *http.Transport")
-	}
-	if transport.TLSClientConfig == nil {
-		t.Fatal("expected non-nil TLSClientConfig")
-	}
-	if transport.TLSClientConfig.RootCAs == nil {
-		t.Fatal("expected non-nil RootCAs")
-	}
-
-	// Verify the CA pool contains the expected cert.
-	cert, err := x509.ParseCertificate(serverCert.Certificate[0])
+	client, err := NewSyncClientWithCA(server.URL, "token", caCertPEM)
 	if err != nil {
-		t.Fatalf("parsing cert: %v", err)
+		t.Fatalf("NewSyncClientWithCA: %v", err)
 	}
-	subjects := transport.TLSClientConfig.RootCAs.Subjects()
-	found := false
-	for _, s := range subjects {
-		if string(s) == string(cert.RawSubject) {
-			found = true
-			break
-		}
+
+	resp, err := client.httpClient.Get(server.URL)
+	if err != nil {
+		t.Fatalf("request to a server signed by the given CA failed: %v", err)
 	}
-	if !found {
-		t.Error("CA cert not found in RootCAs pool")
+	if err := resp.Body.Close(); err != nil {
+		t.Errorf("closing response body: %v", err)
 	}
 }
 
@@ -437,9 +423,9 @@ func TestNewSyncClientWithCA_ValidCAParsing(t *testing.T) {
 func TestSyncClient_NoBytesWrittenInResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/api/v1/sync/") {
-			io.ReadAll(r.Body)
+			drainBody(t, r.Body)
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"status":"ok"}`))
+			writeBody(t, w, []byte(`{"status":"ok"}`))
 			return
 		}
 		http.NotFound(w, r)
@@ -449,8 +435,8 @@ func TestSyncClient_NoBytesWrittenInResponse(t *testing.T) {
 	sourceDir := t.TempDir()
 	subPath := "pvc-12345678-1234-1234-1234-123456789abc"
 	svDir := filepath.Join(sourceDir, subPath)
-	os.MkdirAll(svDir, 0755)
-	os.WriteFile(filepath.Join(svDir, "file.txt"), []byte("data"), 0644)
+	mustMkdirAll(t, svDir)
+	mustWriteFile(t, filepath.Join(svDir, "file.txt"), []byte("data"))
 
 	client := NewSyncClient(server.URL, "token")
 	bytesWritten, err := client.SyncSubVolume(context.Background(), sourceDir, "/pvcs", subPath, "pvc-12345678-1234-1234-1234-123456789abc", nil)
@@ -460,5 +446,46 @@ func TestSyncClient_NoBytesWrittenInResponse(t *testing.T) {
 	// Should be 0 when response doesn't include bytesWritten.
 	if bytesWritten != 0 {
 		t.Errorf("bytesWritten = %d, want 0", bytesWritten)
+	}
+}
+
+// TestNewSyncClientWithCA_InvalidPEM verifies that a CA bundle with no usable
+// certificate is reported, not silently replaced by an empty trust pool.
+func TestNewSyncClientWithCA_InvalidPEM(t *testing.T) {
+	if _, err := NewSyncClientWithCA("https://example.com", "token", []byte("not a certificate")); err == nil {
+		t.Fatal("expected an error for a CA bundle with no certificates")
+	}
+}
+
+// mustMkdirAll creates a directory tree or fails the test.
+func mustMkdirAll(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// mustWriteFile writes a file or fails the test.
+func mustWriteFile(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// drainBody reads a request body to the end. It is used from handler
+// goroutines, so it reports with Errorf rather than Fatal.
+func drainBody(t *testing.T, body io.Reader) {
+	t.Helper()
+	if _, err := io.ReadAll(body); err != nil {
+		t.Errorf("failed to read request body: %v", err)
+	}
+}
+
+// writeBody writes a response body from a handler goroutine and reports failures.
+func writeBody(t *testing.T, w http.ResponseWriter, body []byte) {
+	t.Helper()
+	if _, err := w.Write(body); err != nil {
+		t.Errorf("failed to write response body: %v", err)
 	}
 }

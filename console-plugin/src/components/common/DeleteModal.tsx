@@ -8,6 +8,7 @@ import {
   Button,
   TextInput,
   Alert,
+  Checkbox,
   Stack,
   StackItem,
 } from '@patternfly/react-core';
@@ -21,6 +22,10 @@ interface DeleteModalProps {
   onClose: () => void;
   onDeleted: () => void;
   requireConfirmation?: boolean;
+  /** An extra step the user may tick. It runs after the delete, and it is off by default. */
+  extraOption?: { label: string; run: () => Promise<void> };
+  /** A note under the question, for what the delete does not remove. */
+  note?: React.ReactNode;
 }
 
 const DeleteModal: React.FC<DeleteModalProps> = ({
@@ -31,10 +36,15 @@ const DeleteModal: React.FC<DeleteModalProps> = ({
   onClose,
   onDeleted,
   requireConfirmation = false,
+  extraOption,
+  note,
 }) => {
   const [confirmation, setConfirmation] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [extraTicked, setExtraTicked] = useState(false);
+  // The delete worked but the extra step did not: the dialog stays to say so, and Continue carries on.
+  const [deletedWithProblem, setDeletedWithProblem] = useState(false);
 
   const canDelete = !requireConfirmation || confirmation === resourceName;
 
@@ -43,9 +53,17 @@ const DeleteModal: React.FC<DeleteModalProps> = ({
     setError(null);
     try {
       await k8sDelete({ model, resource: { metadata: { name: resourceName } } });
-      onDeleted();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Delete failed');
+      setDeleting(false);
+      return;
+    }
+    try {
+      if (extraOption && extraTicked) await extraOption.run();
+      onDeleted();
+    } catch (err) {
+      setDeletedWithProblem(true);
+      setError(err instanceof Error ? err.message : 'The extra step failed');
     } finally {
       setDeleting(false);
     }
@@ -55,7 +73,7 @@ const DeleteModal: React.FC<DeleteModalProps> = ({
     <Modal
       variant={ModalVariant.small}
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={deletedWithProblem ? onDeleted : onClose}
     >
       <ModalHeader title={`Delete ${resourceKind}?`} />
       <ModalBody>
@@ -64,6 +82,7 @@ const DeleteModal: React.FC<DeleteModalProps> = ({
             Are you sure you want to delete <strong>{resourceName}</strong>? This action cannot be
             undone.
           </StackItem>
+          {note && <StackItem>{note}</StackItem>}
           {requireConfirmation && (
             <StackItem>
               <TextInput
@@ -74,9 +93,23 @@ const DeleteModal: React.FC<DeleteModalProps> = ({
               />
             </StackItem>
           )}
+          {extraOption && !deletedWithProblem && (
+            <StackItem>
+              <Checkbox
+                id="delete-extra-option"
+                label={extraOption.label}
+                isChecked={extraTicked}
+                onChange={(_event, checked) => setExtraTicked(checked)}
+              />
+            </StackItem>
+          )}
           {error && (
             <StackItem>
-              <Alert variant="danger" title="Delete failed" isInline>
+              <Alert
+                variant="danger"
+                title={deletedWithProblem ? `The ${resourceKind} was deleted, but` : 'Delete failed'}
+                isInline
+              >
                 {error}
               </Alert>
             </StackItem>
@@ -84,18 +117,26 @@ const DeleteModal: React.FC<DeleteModalProps> = ({
         </Stack>
       </ModalBody>
       <ModalFooter>
-        <Button
-          key="delete"
-          variant="danger"
-          onClick={handleDelete}
-          isDisabled={!canDelete || deleting}
-          isLoading={deleting}
-        >
-          Delete
-        </Button>
-        <Button key="cancel" variant="link" onClick={onClose}>
-          Cancel
-        </Button>
+        {deletedWithProblem ? (
+          <Button key="continue" variant="primary" onClick={onDeleted}>
+            Continue
+          </Button>
+        ) : (
+          <>
+            <Button
+              key="delete"
+              variant="danger"
+              onClick={handleDelete}
+              isDisabled={!canDelete || deleting}
+              isLoading={deleting}
+            >
+              Delete
+            </Button>
+            <Button key="cancel" variant="link" onClick={onClose}>
+              Cancel
+            </Button>
+          </>
+        )}
       </ModalFooter>
     </Modal>
   );

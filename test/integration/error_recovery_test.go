@@ -257,7 +257,7 @@ func TestErrorRecovery_ReconcilerShareHealthCheck_DegradedShare(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a share in VPC
-	shareInfo, _ := h.vpcClient.CreateFileShare(ctx, ibmcloud.CreateShareInput{
+	shareInfo, _ := h.vpcClient.CreateFileShare(ctx, ibmcloud.CreateShareInput{SubnetID: "subnet-us-south-1",
 		Name:    "s1",
 		Zone:    "us-south-1",
 		Profile: "dp2",
@@ -306,7 +306,7 @@ func TestErrorRecovery_ReconcilerShareHealthCheck_CreatingBecomesStable(t *testi
 	ctx := context.Background()
 
 	// Create a share in VPC (fake returns it as "stable")
-	shareInfo, _ := h.vpcClient.CreateFileShare(ctx, ibmcloud.CreateShareInput{
+	shareInfo, _ := h.vpcClient.CreateFileShare(ctx, ibmcloud.CreateShareInput{SubnetID: "subnet-us-south-1",
 		Name:    "s1",
 		Zone:    "us-south-1",
 		Profile: "dp2",
@@ -357,9 +357,10 @@ func TestErrorRecovery_ReconcilerHealthCheckGetShareFails(t *testing.T) {
 	h := newTestHarness(t)
 	ctx := context.Background()
 
-	// Pool has a share but VPC GetFileShare will fail
+	// Pool has a share in use but VPC GetFileShare will fail. A share with PVCs
+	// is kept; only an empty share missing from VPC is dropped.
 	pool := newTestPool("get-err-pool", "spread", 1000,
-		newStableShare("share-missing", "s1", 1000, 0, 0),
+		newStableShare("share-missing", "s1", 1000, 10, 1),
 	)
 	pool.Spec.InitialShares = 1
 	h.k8sClient.addPool(pool)
@@ -377,6 +378,38 @@ func TestErrorRecovery_ReconcilerHealthCheckGetShareFails(t *testing.T) {
 	p := h.k8sClient.getPool("get-err-pool")
 	if p.Status.Shares[0].State != "stable" {
 		t.Errorf("expected share state to remain 'stable' on health check error, got %q", p.Status.Shares[0].State)
+	}
+}
+
+func TestErrorRecovery_ReconcilerDropsEmptyShareDeletedInVPC(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	// Pool has an empty share that no longer exists in VPC
+	pool := newTestPool("gone-pool", "spread", 1000,
+		newStableShare("share-gone", "s1", 1000, 0, 0),
+	)
+	pool.Spec.InitialShares = 1
+	h.k8sClient.addPool(pool)
+
+	reconciler := newPoolReconciler(h)
+	_, err := reconciler.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "gone-pool"},
+	})
+	if err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	// The share has no PVCs, so it is removed from the pool status
+	p := h.k8sClient.getPool("gone-pool")
+	if len(p.Status.Shares) != 0 {
+		t.Errorf("expected the empty share to be removed, got %d shares", len(p.Status.Shares))
+	}
+	if p.Status.ShareCount != 0 {
+		t.Errorf("expected ShareCount=0, got %d", p.Status.ShareCount)
+	}
+	if p.Status.TotalCapacityGB != 0 {
+		t.Errorf("expected TotalCapacityGB=0, got %d", p.Status.TotalCapacityGB)
 	}
 }
 
@@ -435,7 +468,7 @@ func TestErrorRecovery_DeletionWithVPCDeleteFailure(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a share in VPC
-	shareInfo, _ := h.vpcClient.CreateFileShare(ctx, ibmcloud.CreateShareInput{
+	shareInfo, _ := h.vpcClient.CreateFileShare(ctx, ibmcloud.CreateShareInput{SubnetID: "subnet-us-south-1",
 		Name:    "s1",
 		Zone:    "us-south-1",
 		Profile: "dp2",

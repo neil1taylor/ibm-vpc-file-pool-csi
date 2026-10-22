@@ -198,26 +198,30 @@ vpc_file_pool_share_pvc_count
 
 ### VPC File Storage IOPS Model
 
-IBM VPC file shares use the `dp2` profile by default, which provides IOPS based on share size:
+VPC file shares have one profile, `dp2`. It accepts 100 to 96,000 IOPS per share and 10 to 32,000 GB. If you do not set `spec.iops`, the VPC gives each share 100 IOPS, whatever its size. IOPS does not grow with share size, and there is no burst IOPS.
 
-| Share Size | Base IOPS (dp2) | Max IOPS (custom) |
-|-----------|----------------|-------------------|
-| 10-39 GB | 100 | 1000 |
-| 40-79 GB | 100 | 2000 |
-| 80-99 GB | 100 | 4000 |
-| 100-499 GB | 100-1000 | 6000 |
-| 500-999 GB | 500-3000 | 10000 |
-| 1000-1999 GB | 1000-6000 | 20000 |
-| 2000-3999 GB | 2000-12000 | 40000 |
-| 4000-7999 GB | 4000-24000 | 48000 |
-| 8000-15999 GB | 8000-48000 | 48000 |
-| 16000-32000 GB | 16000-96000 | 96000 |
+Set `spec.iops` on the pool to get more. The driver passes it to the VPC. IBM limits the IOPS by share size, and the pool's admission check refuses a pair that is out of range, with a message that names the allowed range. The limits (IBM's [File Storage for VPC profiles](https://cloud.ibm.com/docs/vpc?topic=vpc-file-storage-profiles), `dp2`):
+
+| Share size (GB) | Allowed IOPS |
+|---|---|
+| 10 - 39 | 100 - 1,000 |
+| 40 - 79 | 100 - 2,000 |
+| 80 - 99 | 100 - 4,000 |
+| 100 - 499 | 100 - 6,000 |
+| 500 - 999 | 100 - 10,000 |
+| 1,000 - 1,999 | 100 - 20,000 |
+| 2,000 - 3,999 | 200 - 40,000 |
+| 4,000 - 7,999 | 300 - 40,000 |
+| 8,000 - 15,999 | 500 - 64,000 |
+| 16,000 - 32,000 | 2,000 - 96,000 |
+
+For example, 3,000 IOPS needs a share of at least 80 GB, and 10,000 IOPS needs at least 500 GB. IBM's API does not return this table, so the driver keeps its own copy (`pkg/ibmcloud/share_profiles.go`). Higher IOPS costs more.
 
 ### IOPS Sharing Model
 
 All PVCs on a share compete for the share's total IOPS. There is no per-PVC IOPS isolation.
 
-**Example:** A 2 TB `dp2` share provides ~6000 IOPS. If 100 PVCs are on that share, each PVC gets an average of 60 IOPS — enough for configs and logs, but not enough for a database.
+**Example:** A share with 6000 IOPS (`spec.iops: 6000`) and 100 PVCs gives each PVC an average of 60 IOPS — enough for configs and logs, but not enough for a database.
 
 ### Noisy Neighbor Risk
 
@@ -239,7 +243,7 @@ Example:
   5 database PVCs at 500 IOPS each  = 2,500 IOPS
   Total                              = 3,750 IOPS
 
-→ A 2 TB dp2 share (6,000 IOPS) handles this with headroom
+→ A share with `spec.iops: 6000` handles this with headroom
 → Put database PVCs on a separate high-IOPS pool for isolation
 ```
 
@@ -253,7 +257,8 @@ metadata:
   name: standard-pool
 spec:
   profile: dp2
-  shareSizeGB: 2000          # ~6,000 IOPS per share
+  shareSizeGB: 2000
+  # iops not set: the VPC gives each share 100 IOPS
   allocationStrategy: spread
   # ...
 
@@ -265,8 +270,8 @@ metadata:
   name: high-iops-pool
 spec:
   profile: dp2
-  shareSizeGB: 4000          # ~12,000 IOPS per share
-  iops: 24000                # Custom IOPS (costs more)
+  shareSizeGB: 4000
+  iops: 24000                # IOPS per share (costs more)
   maxShares: 5               # Limit quota usage
   allocationStrategy: spread
   # ...
@@ -355,7 +360,7 @@ echo 128 > /proc/sys/sunrpc/tcp_slot_table_entries
 
 This allows more concurrent NFS RPC calls per mount, which improves throughput for workloads with many parallel readers/writers.
 
-**On ROKS/IKS:** Worker node tuning requires a DaemonSet with privileged access to modify sysctl settings. Example:
+**On ROKS/ROVS/IKS:** Worker node tuning requires a DaemonSet with privileged access to modify sysctl settings. Example:
 
 ```yaml
 apiVersion: apps/v1
@@ -520,14 +525,7 @@ These ranges are for IBM VPC File Storage with the `dp2` profile, measured in-zo
 
 ### Benchmark Pool Setup
 
-Benchmarks need a share large enough to provide representative IOPS. The dp2 profile scales IOPS with share size, so a small share gives misleading results:
-
-| Share Size | dp2 IOPS | Suitable for Benchmarking? |
-|-----------|---------|---------------------------|
-| 100 GB | ~100 | No — IOPS floor, not representative of production |
-| 500 GB | ~1,500 | Minimal — only for quick smoke tests |
-| **2 TB** | **~6,000** | **Recommended — matches typical production size** |
-| 4 TB | ~12,000 | Use if testing high-IOPS or KubeVirt VM workloads |
+Benchmarks need a share large enough to provide representative IOPS. Without `spec.iops`, every share gets 100 IOPS, so results show only that floor. Set `spec.iops` to the value you plan to use in production. The VPC limits the maximum IOPS by share size (for example, 10,000 IOPS needs at least 500 GB), so pick a share size that allows it. Use a share size close to production, such as 2 TB.
 
 Create a dedicated benchmark pool with a single share and no auto-expansion to keep it simple and avoid burning VPC quota:
 
@@ -539,7 +537,8 @@ metadata:
 spec:
   zone: us-south-1          # Match your worker node zone
   profile: dp2
-  shareSizeGB: 2000          # 2 TB — gives ~6,000 IOPS baseline
+  shareSizeGB: 2000          # 2 TB
+  iops: 6000                 # Set the IOPS you plan to use in production
   maxShares: 1
   initialShares: 1
   autoExpand: false
@@ -559,7 +558,7 @@ Delete the pool when benchmarking is complete to free the VPC share quota:
 
 ```bash
 kubectl delete pvc bench-pvc -n default
-kubectl delete filesharespool bench-pool
+kubectl delete filesharepool bench-pool
 ```
 
 ### Benchmark PVC Setup

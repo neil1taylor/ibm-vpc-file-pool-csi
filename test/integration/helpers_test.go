@@ -8,6 +8,7 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/driver"
@@ -151,6 +152,10 @@ func (f *fakeK8sClient) ListCloneSubVolumes(_ context.Context) ([]v1alpha1.SubVo
 		}
 	}
 	return result, nil
+}
+
+func (f *fakeK8sClient) HasOpenRestore(_ context.Context, _, _ string) (bool, error) {
+	return false, nil
 }
 
 func (f *fakeK8sClient) CreateSubVolume(_ context.Context, sv *v1alpha1.SubVolume) error {
@@ -375,6 +380,18 @@ func (f *fakeK8sClient) CreateReplicationPolicy(_ context.Context, rp *v1alpha1.
 	return nil
 }
 
+func (f *fakeK8sClient) UpdateReplicationPolicy(_ context.Context, rp *v1alpha1.ReplicationPolicy) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	existing, ok := f.policies[rp.Name]
+	if !ok {
+		return fmt.Errorf("replication policy %q not found", rp.Name)
+	}
+	existing.ObjectMeta = *rp.ObjectMeta.DeepCopy()
+	existing.Spec = *rp.Spec.DeepCopy()
+	return nil
+}
+
 func (f *fakeK8sClient) UpdateReplicationPolicyStatus(_ context.Context, rp *v1alpha1.ReplicationPolicy) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -534,7 +551,7 @@ type fakeNFSOperations struct {
 	dirs          map[string]os.FileMode
 	chowns        map[string][2]int
 	copies        map[string]string // dst → src
-	copyCallCount int              // tracks total CopyDir calls
+	copyCallCount int               // tracks total CopyDir calls
 	files         map[string][]byte // path → data (for WriteFile/ReadFile)
 	MkdirErr      error
 	RemoveErr     error
@@ -663,12 +680,6 @@ func (f *fakeNFSOperations) copyCount() int {
 	return len(f.copies)
 }
 
-func (f *fakeNFSOperations) totalCopyCount() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.copyCallCount
-}
-
 func (f *fakeNFSOperations) dirCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -688,6 +699,65 @@ type testHarness struct {
 	driver    *driver.Driver
 }
 
+// nfsShareData applies the pool manager's share data calls to the fake NFS
+// file system rooted at base. Every call finishes at once. A failed fake copy
+// is reported as a failed Job, like the real runner.
+type nfsShareData struct {
+	nfs  *fakeNFSOperations
+	base string
+}
+
+func (s *nfsShareData) RemoveDir(_ context.Context, _ string, _ pool.ShareMount, path string) (bool, error) {
+	if err := s.nfs.RemoveAll(s.base + path); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *nfsShareData) CopyDir(_ context.Context, _ string, _ pool.ShareMount, srcPath string, _ pool.ShareMount, dstPath string, _ *pool.Ownership) (bool, error) {
+	if err := s.nfs.CopyDir(s.base+srcPath, s.base+dstPath); err != nil {
+		return false, fmt.Errorf("%w: %v", pool.ErrShareJobFailed, err)
+	}
+	return true, nil
+}
+
+func (s *nfsShareData) Stop(context.Context, string) (bool, error) { return true, nil }
+
+// RestoreBackup is not used: the integration tests make no backups.
+func (s *nfsShareData) RestoreBackup(context.Context, string, pool.ShareMount, string, string, pool.ShareMount, string, time.Time, *pool.Ownership) (bool, pool.RestoreOutcome, error) {
+	return true, pool.RestoreOutcome{}, nil
+}
+
+// ShareUsage is not used: the integration tests make no backups.
+func (s *nfsShareData) ShareUsage(context.Context, string, pool.ShareMount) (bool, int, error) {
+	return true, 0, nil
+}
+
+// ExportToCOS is not used: the integration tests make no backups.
+func (s *nfsShareData) ExportToCOS(context.Context, string, pool.ShareMount, pool.ExportRepo, string, string, time.Time) (bool, pool.ExportOutcome, error) {
+	return true, pool.ExportOutcome{}, nil
+}
+
+// FetchFromCOS is not used: the integration tests make no backups.
+func (s *nfsShareData) FetchFromCOS(context.Context, string, pool.ShareMount, pool.ExportRepo, pool.COSRestoreRequest) (bool, pool.COSRestoreOutcome, error) {
+	return true, pool.COSRestoreOutcome{}, nil
+}
+
+// RemoveCOSScratch is not used: the integration tests make no backups.
+func (s *nfsShareData) RemoveCOSScratch(context.Context, string, pool.ShareMount, string) (bool, error) {
+	return true, nil
+}
+
+// MaintainCOSRepo is not used: the integration tests make no backups.
+func (s *nfsShareData) MaintainCOSRepo(context.Context, string, pool.ExportRepo) (bool, error) {
+	return true, nil
+}
+
+// ApplyVMDisk is not used: the integration tests have no running VMs.
+func (s *nfsShareData) ApplyVMDisk(context.Context, string, pool.ShareMount, string, string, string, time.Time) (bool, error) {
+	return true, nil
+}
+
 func newTestHarness(t *testing.T) *testHarness {
 	t.Helper()
 
@@ -695,6 +765,10 @@ func newTestHarness(t *testing.T) *testHarness {
 	vpc := fake.NewFakeVPCClient()
 	nfs := newFakeNFSOperations()
 	mgr := pool.NewManager(k, vpc, nfs, "/mnt/staging")
+	mgr.SetShareData(&nfsShareData{nfs: nfs, base: "/mnt/staging"})
+	vpc.SetSubnetZone("subnet-1", "us-south-1")
+	vpc.AddSecurityGroup("kube-test-cluster", "sg-1")
+	mgr.SetShareNetwork(pool.NewShareNetwork("vpc-1", []string{"subnet-1"}, "test-cluster"))
 
 	d, err := driver.NewDriver(driver.Config{
 		Name:        driver.DriverName,

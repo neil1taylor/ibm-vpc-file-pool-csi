@@ -1,6 +1,6 @@
 # How the Driver Works
 
-This page explains what each component does in plain language. For the full technical reference, see [Architecture](ARCHITECTURE.md).
+This page explains what each component does in plain language. For the full technical reference, see [Architecture](ARCHITECTURE.md). For the meaning of project words such as pool, share and SubVolume, see [CONTEXT.md](CONTEXT.md).
 
 ## The Two Main Pieces
 
@@ -88,9 +88,10 @@ These run inside the controller pod but handle specialized tasks:
 | Component | What it does | More detail |
 |-----------|-------------|-------------|
 | **IBM VPC Client** | Thin wrapper around the VPC file share API. All VPC calls go through here. | [IBM VPC API](IBM-VPC-API.md) |
-| **Clone Worker** | Copies data for volume clones in the background. Small clones finish inline; large ones run async. | [Volume Cloning](VOLUME-CLONING.md) |
-| **Replication Controller** | Cross-region disaster recovery — rsyncs SubVolume data between pools on a schedule. | [Cross-Region DR](CROSS-REGION-DR.md) |
-| **Hook Orchestrator** | Runs pre/post lifecycle hooks (exec commands in pods, or HTTP webhooks) for replication and group snapshots. | [Architecture > Hook Orchestrator](ARCHITECTURE.md#8-hook-orchestrator) |
+| **Clone Worker** | Copies data for volume clones in the background. Every clone runs async, in a Kubernetes Job. | [Volume Cloning](VOLUME-CLONING.md) |
+| **Replication Controller** | Disaster recovery and backup copies. It copies plain volumes with rsync and running VMs with QEMU, on a schedule. | [Cross-Region DR](CROSS-REGION-DR.md) |
+| **Backup Controller** | Turns each `BackupPolicy` into replication policies that copy to a snapshot pool, and reports the state of each backed-up volume. | [Backup and Recovery](BACKUP-RECOVERY.md) |
+| **Hook Orchestrator** | Runs pre/post lifecycle hooks (exec commands in pods, or HTTP webhooks) for replication. | [Architecture > Hook Orchestrator](ARCHITECTURE.md#8-hook-orchestrator) |
 | **Admission Webhooks** | Validates CRD fields at admission time so bad configs are rejected immediately. | [Architecture > Admission Webhooks](ARCHITECTURE.md#9-admission-webhooks) |
 
 ## What Lives Where
@@ -101,9 +102,11 @@ All state is stored in Kubernetes CRDs — no external database, no ConfigMaps f
 |-----|---------|
 | **FileSharePool** | Defines a pool: zone, share size, max shares, allocation strategy, auto-expand settings |
 | **SubVolume** | Tracks one PVC's allocation: which share, subdirectory path, requested size |
-| **Snapshot** | Point-in-time copy of a SubVolume's subdirectory |
-| **VolumeGroupSnapshot** | Coordinates snapshots across multiple PVCs with lifecycle hooks |
-| **ReplicationPolicy** | Cross-region replication schedule and configuration |
+| **Snapshot** | A copy of one volume on the same share (see [CONTEXT.md](CONTEXT.md#snapshot)) |
+| **ReplicationPolicy** | Replication schedule and configuration |
+| **BackupPolicy** | What to back up, how often and for how long |
+| **BackupRestore** | One request to restore a backup into a new PVC |
+| **VolumeGroupSnapshot** | Not active. Nothing acts on it |
 
 For full CRD definitions, see [CRD Specification](CRD-SPEC.md).
 

@@ -73,6 +73,18 @@ func (f *replFakeK8sClient) CreateReplicationPolicy(_ context.Context, rp *v1alp
 	return nil
 }
 
+func (f *replFakeK8sClient) UpdateReplicationPolicy(_ context.Context, rp *v1alpha1.ReplicationPolicy) error {
+	f.replMu.Lock()
+	defer f.replMu.Unlock()
+	existing, ok := f.policies[rp.Name]
+	if !ok {
+		return fmt.Errorf("replication policy not found: %s", rp.Name)
+	}
+	existing.ObjectMeta = *rp.ObjectMeta.DeepCopy()
+	existing.Spec = *rp.Spec.DeepCopy()
+	return nil
+}
+
 func (f *replFakeK8sClient) UpdateReplicationPolicyStatus(_ context.Context, rp *v1alpha1.ReplicationPolicy) error {
 	f.replMu.Lock()
 	defer f.replMu.Unlock()
@@ -198,6 +210,37 @@ func waitForPolicySync(t *testing.T, k *replFakeK8sClient, policyName string, ti
 		case <-ticker.C:
 			rp := k.getPolicy(policyName)
 			if rp != nil && rp.Status.LastSyncTime != nil {
+				return
+			}
+		}
+	}
+}
+
+// waitForSubVolumesSynced polls until the policy shows a good sync for each of
+// the given number of SubVolumes. The policy's own LastSyncTime is set as soon
+// as one SubVolume has synced, so it is not proof that all have.
+func waitForSubVolumesSynced(t *testing.T, k *replFakeK8sClient, policyName string, count int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.After(timeout)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for %d SubVolumes of policy %q to sync", count, policyName)
+		case <-ticker.C:
+			rp := k.getPolicy(policyName)
+			if rp == nil || len(rp.Status.SubVolumeStatuses) != count {
+				continue
+			}
+			synced := 0
+			for _, svs := range rp.Status.SubVolumeStatuses {
+				if svs.LastSyncTime != nil && svs.LastError == "" {
+					synced++
+				}
+			}
+			if synced == count {
 				return
 			}
 		}
@@ -449,7 +492,7 @@ func TestReplicationController_BasicSyncCycle(t *testing.T) {
 	simulateReplJobSucceeded(t, dc, "prod-to-dr", "pvc-22222222-2222-2222-2222-222222222222")
 
 	// Wait for sync to complete.
-	waitForPolicySync(t, k, "prod-to-dr", 5*time.Second)
+	waitForSubVolumesSynced(t, k, "prod-to-dr", 2, 5*time.Second)
 
 	// Verify policy status.
 	rp := k.getPolicy("prod-to-dr")
@@ -2266,5 +2309,108 @@ func TestReplicationController_ReceiverMode_NoCACert(t *testing.T) {
 	}
 	if len(job.Spec.Template.Spec.Volumes) != 2 {
 		t.Errorf("expected 2 volumes, got %d", len(job.Spec.Template.Spec.Volumes))
+	}
+}
+
+// TestReplicationController_AutoPauseStaysPaused verifies that a policy paused
+// after maxRetries carries the pause annotation, so the next cycle does not
+// treat it as resumed and start new Jobs.
+func TestReplicationController_AutoPauseStaysPaused(t *testing.T) {
+	k := newReplFakeK8sClient()
+	dc := newReplFakeDirectClient()
+	nfs := newFakeNFSOperations()
+
+	sv1 := newTestSubVolume("pvc-11111111-1111-1111-1111-111111111111", "prod-pool", "share-1", 10)
+	k.addSubVolume(sv1)
+
+	policy := newTestReplicationPolicy("auto-paused", "prod-pool", "1ms")
+	policy.Spec.MaxRetries = 2
+	policy.Status.ConsecutiveFailures = 1
+	k.addPolicy(policy)
+
+	rc := newReplController(k, dc, nfs)
+	ctx := context.Background()
+
+	rc.handleFailure(ctx, k.getPolicy("auto-paused"), "sync failed", time.Now())
+
+	rp := k.getPolicy("auto-paused")
+	if rp.Status.Phase != "Paused" {
+		t.Fatalf("expected phase Paused after maxRetries, got %q", rp.Status.Phase)
+	}
+	if rp.Annotations["storage.ibmcloud.io/paused"] != "true" {
+		t.Fatalf("expected the pause annotation on an auto-paused policy, got %v", rp.Annotations)
+	}
+
+	rc.processOnce(ctx)
+
+	if phase := k.getPolicy("auto-paused").Status.Phase; phase != "Paused" {
+		t.Errorf("expected the policy to stay Paused on the next cycle, got %q", phase)
+	}
+	job := &batchv1.Job{}
+	jobName := replJobName("auto-paused", "pvc-11111111-1111-1111-1111-111111111111")
+	if err := dc.Get(ctx, types.NamespacedName{Namespace: replJobNamespace, Name: jobName}, job); err == nil {
+		t.Error("expected no Job for an auto-paused policy")
+	}
+}
+
+// TestReplicationController_ResumeResetsFailures verifies that removing the
+// pause annotation resumes the policy with a fresh failure count, so a single
+// new failure does not pause it again.
+func TestReplicationController_ResumeResetsFailures(t *testing.T) {
+	k := newReplFakeK8sClient()
+	dc := newReplFakeDirectClient()
+	nfs := newFakeNFSOperations()
+
+	policy := newTestReplicationPolicy("resumed", "prod-pool", "1h")
+	policy.Spec.MaxRetries = 2
+	policy.Status.Phase = "Paused"
+	policy.Status.ConsecutiveFailures = 2
+	k.addPolicy(policy)
+
+	rc := newReplController(k, dc, nfs)
+	rc.processOnce(context.Background())
+
+	rp := k.getPolicy("resumed")
+	if rp.Status.Phase != "Active" {
+		t.Errorf("expected phase Active after the annotation was removed, got %q", rp.Status.Phase)
+	}
+	if rp.Status.ConsecutiveFailures != 0 {
+		t.Errorf("expected consecutive failures reset to 0 on resume, got %d", rp.Status.ConsecutiveFailures)
+	}
+}
+
+// The webhook can be switched off, so the Job script must be safe on its own:
+// a hostile rsync option or base path must reach the shell only as quoted text.
+func TestReplicationController_JobScriptQuotesHostileValues(t *testing.T) {
+	k := newReplFakeK8sClient()
+	dc := newReplFakeDirectClient()
+	nfs := newFakeNFSOperations()
+
+	sv1 := newTestSubVolume("pvc-11111111-1111-1111-1111-111111111111", "prod-pool", "share-1", 10)
+	k.addSubVolume(sv1)
+
+	policy := newTestReplicationPolicy("hostile", "prod-pool", "1ms")
+	policy.Spec.RsyncOptions = []string{"--compress; touch /pwned #"}
+	policy.Spec.DestinationBasePath = "/pvcs\"; touch /pwned2; \""
+	k.addPolicy(policy)
+
+	rc := newReplController(k, dc, nfs)
+	ctx := context.Background()
+	rc.processOnce(ctx)
+
+	jobName := replJobName("hostile", "pvc-11111111-1111-1111-1111-111111111111")
+	job := &batchv1.Job{}
+	if err := dc.Get(ctx, types.NamespacedName{Namespace: replJobNamespace, Name: jobName}, job); err != nil {
+		// Refusing to make the Job is also safe.
+		return
+	}
+	script := job.Spec.Template.Spec.Containers[0].Command[2]
+	for _, want := range []string{`'--compress; touch /pwned #'`, `'/dest/pvcs"; touch /pwned2; "`} {
+		if !containsSubstring(script, want) {
+			t.Errorf("expected the quoted form %s in the script, got: %s", want, script)
+		}
+	}
+	if containsSubstring(script, `"/dest/pvcs"; touch`) {
+		t.Errorf("base path reached the shell inside double quotes: %s", script)
 	}
 }

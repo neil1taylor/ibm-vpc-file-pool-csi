@@ -1,0 +1,87 @@
+{
+  "input": {
+    "authSecret": "dr-receiver-token",
+    "caSecret": "dr-receiver-ca",
+    "endpoint": "https://repl.example.com",
+    "image": "icr.io/example/ibm-vpc-file-pool-csi:v1.0.0",
+    "name": "repl-check-dr",
+    "namespace": "kube-system"
+  },
+  "job": {
+    "apiVersion": "batch/v1",
+    "kind": "Job",
+    "metadata": {
+      "labels": {
+        "vpc-file-pool-csi.ibm.io/receiver-check": "true"
+      },
+      "name": "repl-check-dr",
+      "namespace": "kube-system"
+    },
+    "spec": {
+      "activeDeadlineSeconds": 60,
+      "backoffLimit": 0,
+      "template": {
+        "metadata": {
+          "labels": {
+            "vpc-file-pool-csi.ibm.io/receiver-check": "true"
+          }
+        },
+        "spec": {
+          "containers": [
+            {
+              "args": [
+                "--mode=check-receiver",
+                "--receiver-endpoint=https://repl.example.com",
+                "--auth-token-file=/etc/replication/token",
+                "--ca-cert-file=/etc/replication-ca/ca.crt"
+              ],
+              "image": "icr.io/example/ibm-vpc-file-pool-csi:v1.0.0",
+              "name": "check",
+              "resources": {
+                "limits": {
+                  "cpu": "500m",
+                  "memory": "128Mi"
+                },
+                "requests": {
+                  "cpu": "50m",
+                  "memory": "64Mi"
+                }
+              },
+              "volumeMounts": [
+                {
+                  "mountPath": "/etc/replication",
+                  "name": "auth-token",
+                  "readOnly": true
+                },
+                {
+                  "mountPath": "/etc/replication-ca",
+                  "name": "ca-cert",
+                  "readOnly": true
+                }
+              ]
+            }
+          ],
+          "restartPolicy": "Never",
+          "securityContext": {
+            "runAsUser": 0
+          },
+          "volumes": [
+            {
+              "name": "auth-token",
+              "secret": {
+                "secretName": "dr-receiver-token"
+              }
+            },
+            {
+              "name": "ca-cert",
+              "secret": {
+                "secretName": "dr-receiver-ca"
+              }
+            }
+          ]
+        }
+      },
+      "ttlSecondsAfterFinished": 600
+    }
+  }
+}

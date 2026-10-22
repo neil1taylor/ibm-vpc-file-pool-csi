@@ -32,7 +32,7 @@ type FileSharePoolSpec struct {
 	// +kubebuilder:validation:Pattern=`^[a-z]{2}-[a-z]+-\d+$`
 	Zone string `json:"zone"`
 
-	// Profile is the VPC file storage profile (e.g., "dp2", "custom").
+	// Profile is the VPC file share profile. "dp2" is the only one VPC offers.
 	// +kubebuilder:validation:Required
 	Profile string `json:"profile"`
 
@@ -42,7 +42,7 @@ type FileSharePoolSpec struct {
 	// +kubebuilder:default=1000
 	ShareSizeGB int64 `json:"shareSizeGB"`
 
-	// IOPS is the IOPS allocation per share. Only used with custom profiles.
+	// IOPS is the IOPS per share. If unset, the VPC chooses it (100 for dp2).
 	// +kubebuilder:validation:Minimum=100
 	// +optional
 	IOPS *int64 `json:"iops,omitempty"`
@@ -101,6 +101,12 @@ type FileSharePoolSpec struct {
 	// +optional
 	Tags []string `json:"tags,omitempty"`
 
+	// SecurityGroupIDs are the VPC security groups for each share's mount target.
+	// When empty, the driver uses the cluster's own security group,
+	// kube-<cluster ID>, which already lets every worker reach NFS.
+	// +optional
+	SecurityGroupIDs []string `json:"securityGroupIDs,omitempty"`
+
 	// MountOptions are additional NFS mount options applied by the node agent.
 	// +optional
 	MountOptions []string `json:"mountOptions,omitempty"`
@@ -150,11 +156,6 @@ type GoldenImageConfig struct {
 	// +kubebuilder:default="24h"
 	// +optional
 	RefreshInterval string `json:"refreshInterval,omitempty"`
-
-	// ConverterImage is the container image used for qcow2-to-raw conversion jobs.
-	// +kubebuilder:default="quay.io/centos/centos:stream9"
-	// +optional
-	ConverterImage string `json:"converterImage,omitempty"`
 
 	// PVCSizeGB is the size of golden image PVCs in GB.
 	// +kubebuilder:validation:Minimum=5
@@ -214,9 +215,10 @@ type AccessorZone struct {
 	// +kubebuilder:validation:Pattern=`^[a-z]{2}-[a-z]+-\d+$`
 	Zone string `json:"zone"`
 
-	// SubnetID is the VPC subnet in the accessor zone to create mount targets in.
-	// +kubebuilder:validation:Required
-	SubnetID string `json:"subnetID"`
+	// SubnetID is not used. Shares use security group access mode, and one mount
+	// target in the home zone serves every zone. Kept so existing pools still apply.
+	// +optional
+	SubnetID string `json:"subnetID,omitempty"`
 }
 
 // ZoneMountTarget records a mount target created in a specific zone.
@@ -242,7 +244,7 @@ type ShareTier struct {
 	// +kubebuilder:validation:Pattern=`^[a-z0-9-]+$`
 	Name string `json:"name"`
 
-	// Profile is the VPC file storage profile (e.g., "dp2", "custom").
+	// Profile is the VPC file share profile. "dp2" is the only one VPC offers.
 	// +kubebuilder:validation:Required
 	Profile string `json:"profile"`
 
@@ -251,7 +253,7 @@ type ShareTier struct {
 	// +kubebuilder:validation:Maximum=32000
 	ShareSizeGB int64 `json:"shareSizeGB"`
 
-	// IOPS is the IOPS allocation per share. Only used with custom profiles.
+	// IOPS is the IOPS per share. If unset, the VPC chooses it (100 for dp2).
 	// +optional
 	IOPS *int64 `json:"iops,omitempty"`
 
@@ -353,7 +355,12 @@ type ShareDrainStatus struct {
 	// RemainingSubVolumes is the number of SubVolumes still on this share.
 	RemainingSubVolumes int32 `json:"remainingSubVolumes"`
 
-	// Drained is true when the share has zero SubVolumes remaining.
+	// RemainingSnapshots is the number of snapshots whose data is still on
+	// this share. Deleting the share deletes them.
+	// +optional
+	RemainingSnapshots int32 `json:"remainingSnapshots,omitempty"`
+
+	// Drained is true when the share has no SubVolumes and no snapshots left.
 	Drained bool `json:"drained"`
 
 	// DrainStartedAt is when the drain was initiated.

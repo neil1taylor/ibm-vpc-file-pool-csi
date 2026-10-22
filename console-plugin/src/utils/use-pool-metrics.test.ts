@@ -1,6 +1,6 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { consoleFetchJSON } from '@openshift-console/dynamic-plugin-sdk';
-import { checkPrometheusConnection, usePoolMetrics } from './use-pool-metrics';
+import { checkPrometheusConnection, usePoolMetrics, resultToNumber, resultSum } from './use-pool-metrics';
 
 const mockFetch = consoleFetchJSON as jest.MockedFunction<typeof consoleFetchJSON>;
 
@@ -143,5 +143,80 @@ describe('usePoolMetrics', () => {
     unmount();
     expect(clearIntervalSpy).toHaveBeenCalled();
     clearIntervalSpy.mockRestore();
+  });
+});
+
+describe('usePoolMetrics replication lag', () => {
+  it('matches replication lag to a pool by the source_pool label', async () => {
+    mockFetch.mockImplementation(async (url: string) => {
+      const result = url.includes('replication_lag_seconds')
+        ? [{ metric: { policy: 'p1', source_pool: 'pool-a' }, value: [0, '42'] as [number, string] }]
+        : [];
+      return { status: 'success', data: { resultType: 'vector', result } };
+    });
+
+    const { result } = renderHook(() => usePoolMetrics(['pool-a', 'pool-b'], 60000));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.metrics['pool-a'].replicationLagSeconds).toBe(42);
+    expect(result.current.metrics['pool-b'].replicationLagSeconds).toBe(0);
+  });
+
+  it('queries latency from _bucket series', async () => {
+    mockFetch.mockImplementation(async () => ({
+      status: 'success',
+      data: { resultType: 'vector', result: [] },
+    }));
+    renderHook(() => usePoolMetrics(['pool-a'], 60000));
+    await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+    const urls = mockFetch.mock.calls.map((c) => decodeURIComponent(c[0] as string));
+    expect(urls.some((u) => u.includes('allocation_duration_seconds_bucket'))).toBe(true);
+    expect(urls.some((u) => /_seconds\[/.test(u))).toBe(false);
+  });
+
+  it('reports the allocation rate per hour, not per second', async () => {
+    mockFetch.mockImplementation(async (url: string) =>
+      decodeURIComponent(url).includes('rate(vpc_file_pool_allocations_total[1h])')
+        ? { status: 'success', data: { resultType: 'vector', result: [{ metric: { pool: 'pool-a' }, value: [0, '0.01'] }] } }
+        : { status: 'success', data: { resultType: 'vector', result: [] } },
+    );
+    const { result } = renderHook(() => usePoolMetrics(['pool-a'], 60000));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.metrics['pool-a'].allocationRate1h).toBeCloseTo(36);
+  });
+
+  it('counts only snapshots taken and clones finished, not deletes or errors', async () => {
+    mockFetch.mockImplementation(async () => ({ status: 'success', data: { resultType: 'vector', result: [] } }));
+    renderHook(() => usePoolMetrics(['pool-a'], 60000));
+    await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+    const urls = mockFetch.mock.calls.map((c) => decodeURIComponent(c[0] as string));
+    expect(urls.some((u) => u.includes('vpc_file_pool_snapshots_total{operation="create",status="success"}'))).toBe(true);
+    expect(urls.some((u) => u.includes('vpc_file_pool_clones_total{status="async_success"}'))).toBe(true);
+  });
+});
+
+const r = (pool: string, value: string) => ({ metric: { pool }, value: [0, value] as [number, string] });
+
+describe('resultToNumber', () => {
+  it('reads the value of the pool', () => {
+    expect(resultToNumber([r('a', '0.25')], 'a')).toBe(0.25);
+  });
+
+  it('returns 0 when Prometheus has no data for the pool (NaN)', () => {
+    expect(resultToNumber([r('a', 'NaN')], 'a')).toBe(0);
+  });
+
+  it('returns 0 for an infinite value', () => {
+    expect(resultToNumber([r('a', '+Inf')], 'a')).toBe(0);
+  });
+
+  it('returns 0 when the pool is missing', () => {
+    expect(resultToNumber([r('a', '1')], 'b')).toBe(0);
+  });
+});
+
+describe('resultSum', () => {
+  it('ignores NaN values', () => {
+    expect(resultSum([r('a', '2'), r('b', 'NaN')])).toBe(2);
   });
 });

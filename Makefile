@@ -8,7 +8,7 @@ GOBIN := $(shell go env GOPATH)/bin
 GOLANGCI_LINT := $(GOBIN)/golangci-lint
 CONTROLLER_GEN := $(GOBIN)/controller-gen
 
-.PHONY: build build-migrate build-failover test test-integration test-e2e test-vm test-coverage vet lint generate docker-build \
+.PHONY: build build-migrate build-failover build-pool-snapshots build-backup test test-scripts test-integration test-e2e test-release test-vm test-coverage vet lint generate docker-build \
         install-crds deploy helm-install helm-lint helm-template run-local tools clean \
         console-plugin-install console-plugin-build console-plugin-dev console-plugin-lint \
         console-plugin-test console-plugin-docker-build \
@@ -23,14 +23,40 @@ build-migrate:
 build-failover:
 	CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$(VERSION)" -o bin/kubectl-failover ./cmd/failover/
 
+build-pool-snapshots:
+	CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$(VERSION)" -o bin/kubectl-pool_snapshots ./cmd/poolsnapshots/
+
+build-backup:
+	CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$(VERSION)" -o bin/kubectl-backup ./cmd/backup/
+
 test:
 	go test ./... -v -race -count=1
+
+test-scripts:
+	bash test/chart/test-webhook-certs.sh
+	bash test/chart/test-servicemonitor.sh
+	bash test/chart/test-receiver.sh
+	bash test/chart/test-alerts.sh
+	bash test/chart/test-diagnostics.sh
+	bash test/chart/test-doc-links.sh
+	bash test/chart/test-vm-snapshots.sh
+	bash test/chart/test-clusterrole.sh
+	bash test/chart/test-node-metrics.sh
+	bash test/chart/test-uwm.sh
+	bash test/chart/test-console-plugin.sh
+	bash test/release/test-runner.sh
+	bash test/e2e/lib/test-detect-zone.sh
+	bash test/e2e/lib/test-backup-cos.sh
 
 test-integration:
 	go test ./test/integration/ -v -race -count=1 -tags=integration
 
 test-e2e:
 	go test ./test/e2e/ -v -tags e2e -timeout 10m -count=1
+
+test-release:
+	@test -n "$(CLUSTER)" || { echo "usage: make test-release CLUSTER=<name> [VERSION=<tag>]"; exit 2; }
+	bash test/release/remote.sh start $(CLUSTER) $(VERSION)
 
 test-vm:
 	bash test/e2e/test-vm-clone.sh
@@ -52,7 +78,7 @@ generate: tools
 CONTAINER_ENGINE := $(shell command -v docker 2>/dev/null || command -v podman 2>/dev/null)
 
 docker-build:
-	$(CONTAINER_ENGINE) build --platform linux/amd64 -t $(IMAGE_NAME):$(VERSION) .
+	$(CONTAINER_ENGINE) build --platform linux/amd64 --build-arg VERSION=$(VERSION) -t $(IMAGE_NAME):$(VERSION) .
 
 install-crds:
 	kubectl apply -f config/crd/

@@ -4,7 +4,9 @@ Definitive reference for understanding what this driver can and cannot guarantee
 
 **Audience:** Cluster operators, application developers, SREs evaluating whether their workload is safe with this driver.
 
-**Bottom line:** This driver provides **file-level consistency** only. If your workload requires cross-file transactional consistency, crash consistency, or intra-file point-in-time consistency, this driver's snapshot/clone/replication features are not safe for your data. Read on to understand exactly why.
+**Bottom line:** For plain volumes, this driver provides **file-level consistency** only. If your workload requires cross-file transactional consistency, crash consistency, or intra-file point-in-time consistency, the file-copy features (snapshot, clone, replication and backup of a plain volume) are not safe for your data. Read on to understand exactly why.
+
+**The exception is a running VM.** The driver copies all disks of a running VM with QEMU at one moment. The copy is file-system consistent when the guest could be frozen, and crash consistent when it could not. The status says which. See [CONTEXT.md](CONTEXT.md#how-good-a-copy-is) for the words.
 
 ---
 
@@ -32,9 +34,9 @@ IBM VPC file shares are fully managed NFS services. We do not have:
 - Access to the underlying block device
 - Access to the server-side filesystem
 - Administrative commands on the NFS server
-- Any API to create share-level or directory-level snapshots
+- Any API to create directory-level or file-level snapshots (the VPC API can snapshot a whole share, see below)
 
-The VPC API provides `CreateShare`, `DeleteShare`, `UpdateShare`, `ListShares`, and mount target management. There is no `CreateShareSnapshot` operation.
+The VPC API provides `CreateShare`, `DeleteShare`, `UpdateShare`, `ListShares`, and mount target management. It also has `CreateShareSnapshot`, `ListShareSnapshots` and `DeleteShareSnapshot`, but a share snapshot covers the whole share, not one volume, and IBM does not offer it for shares in `vpc` access mode. This driver does not use share snapshots: a pool share holds many volumes, so a share snapshot could not restore one volume without touching the others.
 
 ### The Only Mechanism Is Recursive File Copy
 
@@ -170,8 +172,7 @@ Application-consistent (with quiesce hooks):
 | Feature | File-Level | Cross-File | Crash | App (with hooks) |
 |---------|:----------:|:----------:|:-----:|:----------------:|
 | Snapshot (Phase 4a) | Yes | No | No | N/A |
-| Clone -- sync (Phase 4b) | Yes | No | No | N/A |
-| Clone -- async (Phase 4b) | Yes | No | No | N/A |
+| Clone (Phase 4b, always async) | Yes | No | No | N/A |
 | Group Snapshot (Phase 4c) | Yes (per member) | No (across members) | No | Yes (with hooks) |
 | DR Replication (Phase 4d+5) | Yes | No | No | Yes (with hooks) |
 
@@ -374,8 +375,7 @@ Phase 4a: Snapshot
 
 Phase 4b: Clone
   Snapshot concept + copy to new writable location.
-  Sync path (small): cp -a inline during CreateVolume.
-  Async path (large): cp -a in background, node agent gates mount.
+  cp -a runs in a Kubernetes Job (async), node agent gates mount.
 
       /pvcs/pvc-aaa/  ──cp -a──>  /pvcs/pvc-bbb/
       (source)                     (clone, fully independent)
@@ -475,4 +475,4 @@ Can the workload tolerate file-level consistency (each file
 | [Volume Group Snapshots](VOLUME-GROUP-SNAPSHOTS.md) | Consistency Model, Quiesce Hook Design |
 | [Cross-Region DR](CROSS-REGION-DR.md) | Consistency Guarantees, Unsupported Workload Types |
 | [Known Limitations](KNOWN-LIMITATIONS.md) | Snapshots and Clones, Volume Group Snapshots, Cross-Region Replication |
-| [VM Disk Formats](docs/vm-disk-formats.md) | Why Raw Not qcow2, runtime I/O patterns |
+| [VM Disk Formats](VM-DISK-FORMATS.md) | Why Raw Not qcow2, runtime I/O patterns |

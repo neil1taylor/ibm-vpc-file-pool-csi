@@ -106,6 +106,34 @@ type ReplicationPolicySpec struct {
 	// +optional
 	DestinationCACertSecretRef string `json:"destinationCACertSecretRef,omitempty"`
 
+	// VMCopySpeedLimitMBps limits how fast QEMU copies each disk of a running
+	// VM, in megabytes per second. A copy slows the VM's own disk writes; at
+	// 20 MB/s a VM kept 93% of its write speed in a lab test. The limit also
+	// counts empty disk space, so a full copy of a large disk takes long.
+	// 0 means no limit.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:default=20
+	// +optional
+	VMCopySpeedLimitMBps *int32 `json:"vmCopySpeedLimitMBps,omitempty"`
+
+	// RestorePointKeepHours is how long the destination keeps the restore
+	// points of running VM disks, so a failover can rewind to an earlier
+	// copy. Each restore point holds the old contents of the blocks the next
+	// copy changed.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default=24
+	// +optional
+	RestorePointKeepHours *int32 `json:"restorePointKeepHours,omitempty"`
+
+	// MomentKeepHours keeps earlier moments of volumes that are not VM disks, as
+	// folders of hard links next to the destination (in .moments). A file that
+	// did not change takes no extra space. A moment older than this many hours is
+	// removed after each sync. Unset or 0 keeps none. Needs rsync: it is used
+	// even when IncrementalSync is false. BackupPolicy sets this.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	MomentKeepHours *int32 `json:"momentKeepHours,omitempty"`
+
 	// PreSyncHooks are hooks executed before each replication sync cycle.
 	// +optional
 	PreSyncHooks []Hook `json:"preSyncHooks,omitempty"`
@@ -140,6 +168,13 @@ type ReplicationPolicyStatus struct {
 	// LastError is the error message from the most recent failure.
 	// +optional
 	LastError string `json:"lastError,omitempty"`
+
+	// Conditions holds the receiver check. ReceiverReachable is True when the
+	// receiver answers, its certificate is trusted and it accepts the token. It is
+	// set only for policies in driver-to-driver (receiver) mode. A False result
+	// does not stop replication; it explains why a sync fails.
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // SubVolumeReplicationStatus tracks the replication state of a single SubVolume.
@@ -158,6 +193,110 @@ type SubVolumeReplicationStatus struct {
 	// LastError recorded for this SubVolume's last sync attempt.
 	// +optional
 	LastError string `json:"lastError,omitempty"`
+
+	// CopyMoment is the moment the last good copy of a running VM's disk
+	// shows. All disks of the VM in this policy show the same moment.
+	// +optional
+	CopyMoment *metav1.Time `json:"copyMoment,omitempty"`
+
+	// Consistency of the last good copy of a running VM's disk.
+	// FileSystemConsistent means the guest file systems were frozen;
+	// CrashConsistent means they were not, as after a power loss.
+	// +kubebuilder:validation:Enum=FileSystemConsistent;CrashConsistent
+	// +optional
+	Consistency string `json:"consistency,omitempty"`
+
+	// ConsistencyReason says why a copy is only crash consistent.
+	// +optional
+	ConsistencyReason string `json:"consistencyReason,omitempty"`
+
+	// VMChangeList is the change list (QEMU dirty bitmap) of the last good
+	// copy of a running VM's disk. The next copy holds only the blocks
+	// changed since then. Empty means the next copy is a full copy.
+	// +optional
+	VMChangeList string `json:"vmChangeList,omitempty"`
+
+	// RestorePoints is how many earlier copies of a running VM's disk the
+	// destination keeps, and OldestRestorePoint the moment of the oldest.
+	// +optional
+	RestorePoints int32 `json:"restorePoints,omitempty"`
+	// +optional
+	OldestRestorePoint *metav1.Time `json:"oldestRestorePoint,omitempty"`
+
+	// VMCopy is the state of a running VM disk copy that is not finished.
+	// The controller uses it to continue the copy across cycles and restarts.
+	// +optional
+	VMCopy *VMCopyState `json:"vmCopy,omitempty"`
+}
+
+// VMCopyState is the state of an unfinished copy of a running VM's disk.
+type VMCopyState struct {
+	// ID names the copy. It is the same for all disks of one VM copy.
+	ID string `json:"id"`
+
+	// Phase is Copying while QEMU writes the staging file, and Sending while
+	// a Job applies it at the destination.
+	// +kubebuilder:validation:Enum=Copying;Sending
+	Phase string `json:"phase"`
+
+	// PodNamespace is the namespace of the VM pod. A snapshot copy sets it so
+	// the copy can be watched and cancelled without its source volume.
+	// +optional
+	PodNamespace string `json:"podNamespace,omitempty"`
+
+	// PodName and PodUID identify the virt-launcher pod. If the pod changes,
+	// the VM restarted or moved and QEMU no longer has the copy.
+	PodName string `json:"podName"`
+	PodUID  string `json:"podUID"`
+
+	// VMIName is the VirtualMachineInstance name.
+	VMIName string `json:"vmiName"`
+
+	// Volume is the pod volume name of this disk, and DiskIndex its place in
+	// the copy.
+	Volume    string `json:"volume"`
+	DiskIndex int32  `json:"diskIndex"`
+
+	// StagingFile is the staging file name in the volume's root directory.
+	StagingFile string `json:"stagingFile"`
+
+	// Moment is the moment the copy shows.
+	Moment metav1.Time `json:"moment"`
+
+	// FileSystemConsistent is true if the guest was frozen for the copy.
+	FileSystemConsistent bool `json:"fileSystemConsistent"`
+
+	// FreezeError is the freeze error, if the freeze failed.
+	// +optional
+	FreezeError string `json:"freezeError,omitempty"`
+
+	// Bitmap is the change list this copy started. Base is the change list it
+	// read, for a change copy; Incremental is true then.
+	Bitmap string `json:"bitmap"`
+	// +optional
+	Base string `json:"base,omitempty"`
+	// +optional
+	Incremental bool `json:"incremental,omitempty"`
+
+	// Leader names the Snapshot that owns the QEMU copy, when this Snapshot
+	// joined a copy that another Snapshot of the same VM started. It is empty
+	// on the owner. Only a snapshot copy sets it.
+	// +optional
+	Leader string `json:"leader,omitempty"`
+
+	// SetDisks lists every disk of the QEMU copy, in the order QEMU numbered
+	// them. Only a snapshot copy sets it, on the owner and on joined Snapshots.
+	// +optional
+	SetDisks []VMCopyDisk `json:"setDisks,omitempty"`
+}
+
+// VMCopyDisk is one disk of a QEMU copy that covers several disks of a VM.
+type VMCopyDisk struct {
+	// Volume is the pod volume name of the disk.
+	Volume string `json:"volume"`
+
+	// StagingFile is the staging file name in the volume's root directory.
+	StagingFile string `json:"stagingFile"`
 }
 
 // +kubebuilder:object:root=true

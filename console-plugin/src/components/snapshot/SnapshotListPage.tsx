@@ -8,7 +8,7 @@ import {
   useListPageFilter,
   Timestamp,
 } from '@openshift-console/dynamic-plugin-sdk';
-import { Link } from 'react-router-dom';
+import { Link, useHistory } from 'react-router-dom';
 import {
   Table,
   Thead,
@@ -21,22 +21,36 @@ import {
   IAction,
 } from '@patternfly/react-table';
 import { Bullseye, Spinner, Label } from '@patternfly/react-core';
-import { SnapshotModel } from '../../models';
+import { SnapshotModel, VolumeSnapshotContentModel, VolumeSnapshotModel } from '../../models';
 import { Snapshot } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
+import InstantSnapshotStatus from '../common/InstantSnapshotStatus';
+import RunningVMSnapshotNote from '../common/RunningVMSnapshotNote';
 import DeleteModal from '../common/DeleteModal';
 import { ROUTES } from '../../constants';
+import { VolumeSnapshotContent } from '../../utils/k8s-objects';
+import { findVolumeSnapshotRef, restoreDisabledReason } from '../../utils/restore-helpers';
+import { columnInfo } from '../../utils/column-help';
 
 const SnapshotRow: React.FC<{
   snap: Snapshot;
+  contents: VolumeSnapshotContent[];
   onDelete: (name: string) => void;
-}> = ({ snap, onDelete }) => {
+}> = ({ snap, contents, onDelete }) => {
+  const history = useHistory();
   const name = snap.metadata?.name || '';
   const detailPath = ROUTES.SNAPSHOT_DETAIL.replace(':name', name);
+  const restoreReason = restoreDisabledReason(snap, findVolumeSnapshotRef(snap, contents));
 
   const rowActions: IAction[] = [
     {
       title: <Link to={detailPath}>View Details</Link>,
+    },
+    {
+      title: 'Restore to new PVC',
+      isDisabled: !!restoreReason,
+      description: restoreReason,
+      onClick: () => history.push(ROUTES.SNAPSHOT_RESTORE.replace(':name', name)),
     },
     {
       title: 'Delete',
@@ -86,6 +100,15 @@ const SnapshotListPage: React.FC = () => {
     isList: true,
   });
 
+  const [contents] = useK8sWatchResource<VolumeSnapshotContent[]>({
+    groupVersionKind: {
+      group: VolumeSnapshotContentModel.apiGroup,
+      version: VolumeSnapshotContentModel.apiVersion,
+      kind: VolumeSnapshotContentModel.kind,
+    },
+    isList: true,
+  });
+
   const [data, filteredData, onFilterChange] = useListPageFilter(snapshots);
 
   const getSortableRowValues = (snap: Snapshot): (string | number)[] => [
@@ -125,14 +148,18 @@ const SnapshotListPage: React.FC = () => {
       <ListPageHeader title="Snapshots">
         <ListPageCreateLink
           to={ROUTES.SNAPSHOT_CREATE}
-          createAccessReview={{ groupVersionKind: { group: SnapshotModel.apiGroup!, version: SnapshotModel.apiVersion, kind: SnapshotModel.kind } }}
+          createAccessReview={{ groupVersionKind: { group: VolumeSnapshotModel.apiGroup!, version: VolumeSnapshotModel.apiVersion, kind: VolumeSnapshotModel.kind } }}
         >
-          Create Snapshot
+          Create snapshot
         </ListPageCreateLink>
       </ListPageHeader>
       <p style={{ padding: '0 24px', color: 'var(--pf-t--global--color--subtle)', margin: '0 0 8px 0' }}>
-        Snapshots capture point-in-time copies of SubVolume data for backup and recovery.
+        These are records written by the driver. This list is read-only: to take a snapshot, create a VolumeSnapshot.
       </p>
+      <div style={{ padding: '0 24px', margin: '0 0 16px 0' }}>
+        <InstantSnapshotStatus />
+        <RunningVMSnapshotNote />
+      </div>
       <ListPageBody>
         <ListPageFilter
           data={data}
@@ -162,8 +189,8 @@ const SnapshotListPage: React.FC = () => {
                 <Th sort={getSortParams(1)}>Pool</Th>
                 <Th sort={getSortParams(2)}>Source SubVolume</Th>
                 <Th sort={getSortParams(3)}>Size</Th>
-                <Th sort={getSortParams(4)}>Phase</Th>
-                <Th sort={getSortParams(5)}>Ready</Th>
+                <Th sort={getSortParams(4)} info={columnInfo('snapshotPhase')}>Phase</Th>
+                <Th sort={getSortParams(5)} info={columnInfo('snapshotReady')}>Ready</Th>
                 <Th sort={getSortParams(6)}>Age</Th>
                 <Th></Th>
               </Tr>
@@ -173,6 +200,7 @@ const SnapshotListPage: React.FC = () => {
                 <SnapshotRow
                   key={snap.metadata?.uid || snap.metadata?.name}
                   snap={snap}
+                  contents={contents || []}
                   onDelete={setDeleteTarget}
                 />
               ))}

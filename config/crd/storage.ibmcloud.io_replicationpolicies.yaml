@@ -124,6 +124,16 @@ spec:
                 format: int32
                 minimum: 0
                 type: integer
+              momentKeepHours:
+                description: |-
+                  MomentKeepHours keeps earlier moments of volumes that are not VM disks, as
+                  folders of hard links next to the destination (in .moments). A file that
+                  did not change takes no extra space. A moment older than this many hours is
+                  removed after each sync. Unset or 0 keeps none. Needs rsync: it is used
+                  even when IncrementalSync is false. BackupPolicy sets this.
+                format: int32
+                minimum: 0
+                type: integer
               postSyncHooks:
                 description: PostSyncHooks are hooks executed after each replication
                   sync cycle.
@@ -314,6 +324,16 @@ spec:
                   - type
                   type: object
                 type: array
+              restorePointKeepHours:
+                default: 24
+                description: |-
+                  RestorePointKeepHours is how long the destination keeps the restore
+                  points of running VM disks, so a failover can rewind to an earlier
+                  copy. Each restore point holds the old contents of the blocks the next
+                  copy changed.
+                format: int32
+                minimum: 1
+                type: integer
               rsyncOptions:
                 description: |-
                   RsyncOptions are extra rsync flags appended after the base flags (-a --delete).
@@ -380,6 +400,17 @@ spec:
                     type: object
                 type: object
                 x-kubernetes-map-type: atomic
+              vmCopySpeedLimitMBps:
+                default: 20
+                description: |-
+                  VMCopySpeedLimitMBps limits how fast QEMU copies each disk of a running
+                  VM, in megabytes per second. A copy slows the VM's own disk writes; at
+                  20 MB/s a VM kept 93% of its write speed in a lab test. The limit also
+                  counts empty disk space, so a full copy of a large disk takes long.
+                  0 means no limit.
+                format: int32
+                minimum: 0
+                type: integer
             required:
             - destinationBasePath
             - maxRetries
@@ -390,6 +421,67 @@ spec:
             description: ReplicationPolicyStatus describes the observed state of a
               replication policy.
             properties:
+              conditions:
+                description: |-
+                  Conditions holds the receiver check. ReceiverReachable is True when the
+                  receiver answers, its certificate is trusted and it accepts the token. It is
+                  set only for policies in driver-to-driver (receiver) mode. A False result
+                  does not stop replication; it explains why a sync fails.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
               consecutiveFailures:
                 description: |-
                   ConsecutiveFailures counts sequential failed replication cycles.
@@ -425,6 +517,25 @@ spec:
                       description: BytesSynced in the last sync for this SubVolume.
                       format: int64
                       type: integer
+                    consistency:
+                      description: |-
+                        Consistency of the last good copy of a running VM's disk.
+                        FileSystemConsistent means the guest file systems were frozen;
+                        CrashConsistent means they were not, as after a power loss.
+                      enum:
+                      - FileSystemConsistent
+                      - CrashConsistent
+                      type: string
+                    consistencyReason:
+                      description: ConsistencyReason says why a copy is only crash
+                        consistent.
+                      type: string
+                    copyMoment:
+                      description: |-
+                        CopyMoment is the moment the last good copy of a running VM's disk
+                        shows. All disks of the VM in this policy show the same moment.
+                      format: date-time
+                      type: string
                     lastError:
                       description: LastError recorded for this SubVolume's last sync
                         attempt.
@@ -433,9 +544,129 @@ spec:
                       description: LastSyncTime for this specific SubVolume.
                       format: date-time
                       type: string
+                    oldestRestorePoint:
+                      format: date-time
+                      type: string
+                    restorePoints:
+                      description: |-
+                        RestorePoints is how many earlier copies of a running VM's disk the
+                        destination keeps, and OldestRestorePoint the moment of the oldest.
+                      format: int32
+                      type: integer
                     subVolumeName:
                       description: SubVolumeName is the SubVolume CR name.
                       type: string
+                    vmChangeList:
+                      description: |-
+                        VMChangeList is the change list (QEMU dirty bitmap) of the last good
+                        copy of a running VM's disk. The next copy holds only the blocks
+                        changed since then. Empty means the next copy is a full copy.
+                      type: string
+                    vmCopy:
+                      description: |-
+                        VMCopy is the state of a running VM disk copy that is not finished.
+                        The controller uses it to continue the copy across cycles and restarts.
+                      properties:
+                        base:
+                          type: string
+                        bitmap:
+                          description: |-
+                            Bitmap is the change list this copy started. Base is the change list it
+                            read, for a change copy; Incremental is true then.
+                          type: string
+                        diskIndex:
+                          format: int32
+                          type: integer
+                        fileSystemConsistent:
+                          description: FileSystemConsistent is true if the guest was
+                            frozen for the copy.
+                          type: boolean
+                        freezeError:
+                          description: FreezeError is the freeze error, if the freeze
+                            failed.
+                          type: string
+                        id:
+                          description: ID names the copy. It is the same for all disks
+                            of one VM copy.
+                          type: string
+                        incremental:
+                          type: boolean
+                        leader:
+                          description: |-
+                            Leader names the Snapshot that owns the QEMU copy, when this Snapshot
+                            joined a copy that another Snapshot of the same VM started. It is empty
+                            on the owner. Only a snapshot copy sets it.
+                          type: string
+                        moment:
+                          description: Moment is the moment the copy shows.
+                          format: date-time
+                          type: string
+                        phase:
+                          description: |-
+                            Phase is Copying while QEMU writes the staging file, and Sending while
+                            a Job applies it at the destination.
+                          enum:
+                          - Copying
+                          - Sending
+                          type: string
+                        podName:
+                          description: |-
+                            PodName and PodUID identify the virt-launcher pod. If the pod changes,
+                            the VM restarted or moved and QEMU no longer has the copy.
+                          type: string
+                        podNamespace:
+                          description: |-
+                            PodNamespace is the namespace of the VM pod. A snapshot copy sets it so
+                            the copy can be watched and cancelled without its source volume.
+                          type: string
+                        podUID:
+                          type: string
+                        setDisks:
+                          description: |-
+                            SetDisks lists every disk of the QEMU copy, in the order QEMU numbered
+                            them. Only a snapshot copy sets it, on the owner and on joined Snapshots.
+                          items:
+                            description: VMCopyDisk is one disk of a QEMU copy that
+                              covers several disks of a VM.
+                            properties:
+                              stagingFile:
+                                description: StagingFile is the staging file name
+                                  in the volume's root directory.
+                                type: string
+                              volume:
+                                description: Volume is the pod volume name of the
+                                  disk.
+                                type: string
+                            required:
+                            - stagingFile
+                            - volume
+                            type: object
+                          type: array
+                        stagingFile:
+                          description: StagingFile is the staging file name in the
+                            volume's root directory.
+                          type: string
+                        vmiName:
+                          description: VMIName is the VirtualMachineInstance name.
+                          type: string
+                        volume:
+                          description: |-
+                            Volume is the pod volume name of this disk, and DiskIndex its place in
+                            the copy.
+                          type: string
+                      required:
+                      - bitmap
+                      - diskIndex
+                      - fileSystemConsistent
+                      - id
+                      - moment
+                      - phase
+                      - podName
+                      - podUID
+                      - stagingFile
+                      - vmiName
+                      - volume
+                      type: object
                   required:
                   - subVolumeName
                   type: object

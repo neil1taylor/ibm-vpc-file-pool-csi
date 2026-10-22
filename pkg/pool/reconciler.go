@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/k8s"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
+	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -19,7 +22,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
@@ -44,8 +49,7 @@ const (
 type FileSharePoolReconciler struct {
 	k8sClient            k8s.Client
 	vpcClient            ibmcloud.VPCFileClient
-	vpcID                string
-	subnetID             string
+	network              *ShareNetwork
 	defaultResourceGroup string
 	mu                   sync.Mutex
 
@@ -55,6 +59,18 @@ type FileSharePoolReconciler struct {
 	restMapper   meta.RESTMapper
 	cdiChecked   bool
 	cdiInstalled bool
+
+	goldenImages GoldenImageRemover
+}
+
+// GoldenImageRemover deletes the golden image objects made for a pool.
+type GoldenImageRemover interface {
+	RemovePoolImages(ctx context.Context, pool *v1alpha1.FileSharePool) (bool, error)
+}
+
+// SetGoldenImageRemover sets what removes a deleted pool's golden images.
+func (r *FileSharePoolReconciler) SetGoldenImageRemover(g GoldenImageRemover) {
+	r.goldenImages = g
 }
 
 // NewFileSharePoolReconciler creates a new reconciler with the given dependencies.
@@ -65,12 +81,11 @@ func NewFileSharePoolReconciler(k8sClient k8s.Client, vpcClient ibmcloud.VPCFile
 	}
 }
 
-// SetVPCConfig sets the VPC ID, subnet ID, and default resource group used when creating shares.
-func (r *FileSharePoolReconciler) SetVPCConfig(vpcID, subnetID, defaultResourceGroup string) {
+// SetVPCConfig sets the cluster network and default resource group used when creating shares.
+func (r *FileSharePoolReconciler) SetVPCConfig(network *ShareNetwork, defaultResourceGroup string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.vpcID = vpcID
-	r.subnetID = subnetID
+	r.network = network
 	r.defaultResourceGroup = defaultResourceGroup
 }
 
@@ -104,7 +119,7 @@ func (r *FileSharePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 	if !hasFinalizer(pool) {
 		addFinalizer(pool)
-		if err := r.k8sClient.UpdateFileSharePool(ctx, pool); err != nil {
+		if err = r.k8sClient.UpdateFileSharePool(ctx, pool); err != nil {
 			klog.ErrorS(err, "Failed to add finalizer", "pool", pool.Name)
 			return reconcile.Result{}, err
 		}
@@ -123,7 +138,7 @@ func (r *FileSharePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	// 3. Initial provisioning
 	if pool.Status.Phase == "" || pool.Status.Phase == "Initializing" {
-		if err := r.initialProvisioning(ctx, pool); err != nil {
+		if err = r.initialProvisioning(ctx, pool); err != nil {
 			klog.ErrorS(err, "Initial provisioning failed, will retry", "pool", pool.Name)
 			pool.Status.Phase = "Initializing"
 			r.setCondition(pool, "SharesReady", metav1.ConditionFalse, "ProvisioningFailed", err.Error())
@@ -138,7 +153,7 @@ func (r *FileSharePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		// would try to create the same share name again and get HTTP 400.
 		pool.Status.Phase = "Expanding"
 		pool.Status.LastReconcileTime = timeNow()
-		if err := r.k8sClient.UpdateFileSharePoolStatus(ctx, pool); err != nil {
+		if err = r.k8sClient.UpdateFileSharePoolStatus(ctx, pool); err != nil {
 			klog.ErrorS(err, "Failed to persist post-provisioning status", "pool", pool.Name)
 			return reconcile.Result{}, err
 		}
@@ -194,6 +209,18 @@ func (r *FileSharePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 // handleDeletion processes a pool that has a DeletionTimestamp set.
 func (r *FileSharePoolReconciler) handleDeletion(ctx context.Context, pool *v1alpha1.FileSharePool) (ctrl.Result, error) {
+	// The pool's golden images are volumes on the pool, so they go first.
+	if r.goldenImages != nil {
+		done, err := r.goldenImages.RemovePoolImages(ctx, pool)
+		if err != nil {
+			klog.ErrorS(err, "Failed to remove golden images during deletion", "pool", pool.Name)
+			return reconcile.Result{}, err
+		}
+		if !done {
+			return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
+		}
+	}
+
 	// Check for active SubVolumes
 	subVolumes, err := r.k8sClient.ListSubVolumes(ctx, pool.Name)
 	if err != nil {
@@ -211,6 +238,22 @@ func (r *FileSharePoolReconciler) handleDeletion(ctx context.Context, pool *v1al
 		return reconcile.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
+	// Snapshot data lives on the pool's shares; deleting a share deletes it.
+	snapshots, err := r.k8sClient.ListSnapshots(ctx, pool.Name)
+	if err != nil {
+		klog.ErrorS(err, "Failed to list snapshots during deletion", "pool", pool.Name)
+		return reconcile.Result{}, err
+	}
+	if len(snapshots) > 0 {
+		klog.V(2).InfoS("Deletion blocked: snapshots exist",
+			"pool", pool.Name, "snapshotCount", len(snapshots))
+		r.setCondition(pool, "DeletionBlocked", metav1.ConditionTrue,
+			"SnapshotsExist", fmt.Sprintf("%d snapshots still exist; delete their VolumeSnapshots first", len(snapshots)))
+		pool.Status.LastReconcileTime = timeNow()
+		_ = r.k8sClient.UpdateFileSharePoolStatus(ctx, pool)
+		return reconcile.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
 	// Delete all VPC shares
 	for _, share := range pool.Status.Shares {
 		if err := r.vpcClient.DeleteFileShare(ctx, share.ShareID); err != nil {
@@ -220,6 +263,8 @@ func (r *FileSharePoolReconciler) handleDeletion(ctx context.Context, pool *v1al
 		}
 		klog.V(2).InfoS("Deleted VPC share", "pool", pool.Name, "shareID", share.ShareID)
 	}
+
+	dropShareMetrics(pool.Name)
 
 	// Remove finalizer
 	removeFinalizer(pool)
@@ -293,6 +338,13 @@ func (r *FileSharePoolReconciler) healthCheck(ctx context.Context, pool *v1alpha
 
 		switch info.LifecycleState {
 		case "stable":
+			// A healthy share that is not on the drain list takes new
+			// volumes again, also after a drain request was removed or the
+			// VPC reported it degraded for a while.
+			if share.State == "draining" && !slices.Contains(pool.Spec.DrainShares, share.ShareID) {
+				share.State = "stable"
+				klog.V(2).InfoS("Share back in service", "pool", pool.Name, "shareID", share.ShareID)
+			}
 			if share.State == "creating" {
 				share.State = "stable"
 				klog.V(2).InfoS("Share transitioned to stable",
@@ -348,19 +400,14 @@ func (r *FileSharePoolReconciler) healthCheck(ctx context.Context, pool *v1alpha
 		}
 
 		// Recovery: if the share is stable but has no mount target IP, the share
-		// may have been created before VPC config was available (no inline mount
-		// target), or the mount target's MountPath never populated. Create a mount
-		// target if none exist on the VPC side.
+		// may have been created without a mount target, or the mount target's
+		// MountPath never populated. Create a mount target if none exist on the
+		// VPC side.
 		if share.State == "stable" && share.MountTargetIP == "" {
-			if len(info.MountTargets) == 0 && r.vpcID != "" {
+			if len(info.MountTargets) == 0 && r.network != nil {
 				klog.InfoS("Stable share has no mount targets — creating one",
 					"pool", pool.Name, "shareID", share.ShareID)
-				mtInput := ibmcloud.CreateMountTargetInput{
-					Name:             share.ShareName + "-mt",
-					VPCId:            r.vpcID,
-					EncryptInTransit: pool.Spec.EncryptionInTransit,
-				}
-				mtInfo, mtErr := r.vpcClient.CreateShareMountTarget(ctx, share.ShareID, mtInput)
+				mtInfo, mtErr := r.createMountTarget(ctx, pool, share)
 				if mtErr != nil {
 					klog.ErrorS(mtErr, "Failed to create mount target for share — will retry next reconcile",
 						"shareID", share.ShareID)
@@ -393,10 +440,25 @@ func (r *FileSharePoolReconciler) healthCheck(ctx context.Context, pool *v1alpha
 	}
 }
 
+// createMountTarget creates a security group mount target for a share that has
+// none, using the same network as a new share.
+func (r *FileSharePoolReconciler) createMountTarget(ctx context.Context, pool *v1alpha1.FileSharePool, share *v1alpha1.PoolShareStatus) (*ibmcloud.MountTargetInfo, error) {
+	subnetID, sgIDs, err := r.network.mountTargetNetwork(ctx, r.vpcClient, pool)
+	if err != nil {
+		return nil, err
+	}
+	return r.vpcClient.CreateShareMountTarget(ctx, share.ShareID, ibmcloud.CreateMountTargetInput{
+		Name:             share.ShareName + "-mt",
+		SubnetID:         subnetID,
+		SecurityGroupIDs: sgIDs,
+		EncryptInTransit: pool.Spec.EncryptionInTransit,
+	})
+}
+
 // ensureAccessorMountTargets populates MountTargets status for accessor zones.
-// VPC access mode uses a single mount target per VPC with a FQDN that the VPC
-// DNS resolves to zone-optimal IPs automatically. We record this FQDN as the
-// IP for each accessible zone so that the CSI driver can emit server.<zone> keys.
+// A share has one mount target, in its home zone, and nodes in other zones
+// mount it across zones. We record its address for each accessible zone so
+// that the CSI driver can emit server.<zone> keys.
 func (r *FileSharePoolReconciler) ensureAccessorMountTargets(_ context.Context, pool *v1alpha1.FileSharePool) {
 	if len(pool.Spec.AccessorZones) == 0 {
 		return
@@ -420,7 +482,7 @@ func (r *FileSharePoolReconciler) ensureAccessorMountTargets(_ context.Context, 
 			}
 		}
 
-		// Add accessor zones using the same VPC-mode FQDN/IP (DNS handles routing)
+		// Add accessor zones using the home-zone mount target address
 		for _, az := range pool.Spec.AccessorZones {
 			exists := false
 			for _, mt := range share.MountTargets {
@@ -440,7 +502,7 @@ func (r *FileSharePoolReconciler) ensureAccessorMountTargets(_ context.Context, 
 				ExportPath:    share.ExportPath,
 			})
 
-			klog.V(2).InfoS("Added accessor zone to mount targets (same VPC FQDN)",
+			klog.V(2).InfoS("Added accessor zone to mount targets (home-zone address)",
 				"pool", pool.Name, "shareID", share.ShareID,
 				"zone", az.Zone, "server", share.MountTargetIP)
 		}
@@ -514,12 +576,20 @@ func (r *FileSharePoolReconciler) processDrainRequests(ctx context.Context, pool
 			continue
 		}
 
-		remaining := int32(len(subVolumes)) //nolint:gosec // len bounded by MaxShares * PVCs-per-share, well within int32
-		drained := remaining == 0
+		snapshots, err := r.k8sClient.ListSnapshotsByShare(ctx, shareID)
+		if err != nil {
+			klog.ErrorS(err, "Failed to list snapshots for draining share", "shareID", shareID)
+			continue
+		}
+
+		remaining := int32(len(subVolumes))         //nolint:gosec // len bounded by MaxShares * PVCs-per-share, well within int32
+		remainingSnapshots := int32(len(snapshots)) //nolint:gosec // bounded like the SubVolumes
+		drained := remaining == 0 && remainingSnapshots == 0
 
 		ds := v1alpha1.ShareDrainStatus{
 			ShareID:             shareID,
 			RemainingSubVolumes: remaining,
+			RemainingSnapshots:  remainingSnapshots,
 			Drained:             drained,
 		}
 
@@ -538,7 +608,7 @@ func (r *FileSharePoolReconciler) processDrainRequests(ctx context.Context, pool
 				"pool", pool.Name, "shareID", shareID)
 		} else {
 			klog.V(4).InfoS("Share drain in progress",
-				"pool", pool.Name, "shareID", shareID, "remaining", remaining)
+				"pool", pool.Name, "shareID", shareID, "remaining", remaining, "remainingSnapshots", remainingSnapshots)
 		}
 	}
 
@@ -547,12 +617,13 @@ func (r *FileSharePoolReconciler) processDrainRequests(ctx context.Context, pool
 	// Set a condition summarizing drain progress
 	totalDraining := len(pool.Spec.DrainShares)
 	drainedCount := 0
-	totalRemaining := int32(0)
+	totalRemaining, totalSnapshots := int32(0), int32(0)
 	for _, ds := range updatedDrainStatus {
 		if ds.Drained {
 			drainedCount++
 		}
 		totalRemaining += ds.RemainingSubVolumes
+		totalSnapshots += ds.RemainingSnapshots
 	}
 
 	if drainedCount == totalDraining {
@@ -560,16 +631,22 @@ func (r *FileSharePoolReconciler) processDrainRequests(ctx context.Context, pool
 			fmt.Sprintf("All %d shares fully drained", totalDraining))
 	} else {
 		r.setCondition(pool, "DrainComplete", metav1.ConditionFalse, "DrainInProgress",
-			fmt.Sprintf("%d/%d shares drained, %d SubVolumes remaining",
-				drainedCount, totalDraining, totalRemaining))
+			fmt.Sprintf("%d/%d shares drained, %d SubVolumes and %d snapshots remaining",
+				drainedCount, totalDraining, totalRemaining, totalSnapshots))
 	}
 }
 
-// reconcileMetrics recalculates per-share and pool totals from SubVolume CRs.
+// reconcileMetrics recalculates per-share and pool totals from SubVolume and
+// Snapshot CRs. A snapshot uses space on its share but is not a PVC.
 func (r *FileSharePoolReconciler) reconcileMetrics(ctx context.Context, pool *v1alpha1.FileSharePool) {
 	subVolumes, err := r.k8sClient.ListSubVolumes(ctx, pool.Name)
 	if err != nil {
 		klog.ErrorS(err, "Failed to list SubVolumes for metrics reconciliation", "pool", pool.Name)
+		return
+	}
+	snapshots, err := r.k8sClient.ListSnapshots(ctx, pool.Name)
+	if err != nil {
+		klog.ErrorS(err, "Failed to list snapshots for metrics reconciliation", "pool", pool.Name)
 		return
 	}
 
@@ -579,6 +656,9 @@ func (r *FileSharePoolReconciler) reconcileMetrics(ctx context.Context, pool *v1
 	for _, sv := range subVolumes {
 		shareAllocated[sv.Spec.ShareID] += sv.Spec.RequestedGB
 		sharePVCCount[sv.Spec.ShareID]++
+	}
+	for i := range snapshots {
+		shareAllocated[snapshots[i].Spec.ShareID] += snapshotChargeGB(&snapshots[i])
 	}
 
 	// Update per-share values
@@ -608,7 +688,26 @@ func (r *FileSharePoolReconciler) reconcileMetrics(ctx context.Context, pool *v1
 	metrics.PoolCapacityGB.WithLabelValues(pool.Name).Set(float64(pool.Status.TotalCapacityGB))
 	metrics.PoolAllocatedGB.WithLabelValues(pool.Name).Set(float64(pool.Status.TotalAllocatedGB))
 	metrics.PoolShareCount.WithLabelValues(pool.Name).Set(float64(pool.Status.ShareCount))
+	metrics.PoolMaxShares.WithLabelValues(pool.Name).Set(float64(pool.Spec.MaxShares))
 	metrics.PoolPVCCount.WithLabelValues(pool.Name).Set(float64(pool.Status.TotalPVCCount))
+	emitShareMetrics(pool)
+}
+
+// dropShareMetrics removes the per-share series of a pool.
+func dropShareMetrics(poolName string) {
+	labels := prometheus.Labels{"pool": poolName}
+	metrics.ShareTotalGB.DeletePartialMatch(labels)
+	metrics.ShareAllocatedGB.DeletePartialMatch(labels)
+}
+
+// emitShareMetrics sets the per-share gauges of a pool. It first drops the
+// pool's old series, so a share that left the pool does not keep a value.
+func emitShareMetrics(pool *v1alpha1.FileSharePool) {
+	dropShareMetrics(pool.Name)
+	for _, s := range pool.Status.Shares {
+		metrics.ShareTotalGB.WithLabelValues(pool.Name, s.ShareName).Set(float64(s.TotalGB))
+		metrics.ShareAllocatedGB.WithLabelValues(pool.Name, s.ShareName).Set(float64(s.AllocatedGB))
+	}
 }
 
 // proactiveExpansion creates a new share if utilization exceeds the threshold.
@@ -617,9 +716,10 @@ func (r *FileSharePoolReconciler) proactiveExpansion(ctx context.Context, pool *
 		return
 	}
 
-	// Skip if any share is still creating
+	// Skip while any share is still creating or has no mount target: a new
+	// share would not add usable capacity sooner than those shares will.
 	for _, s := range pool.Status.Shares {
-		if s.State == "creating" {
+		if s.State == "creating" || (s.State == "stable" && !shareReady(s)) {
 			return
 		}
 	}
@@ -685,39 +785,9 @@ func (r *FileSharePoolReconciler) proactiveExpansion(ctx context.Context, pool *
 // createPoolShare creates a new VPC share and appends it to pool status.
 // tier is the name of the ShareTier; empty for pools without tiers.
 func (r *FileSharePoolReconciler) createPoolShare(ctx context.Context, pool *v1alpha1.FileSharePool, tier string) error {
-	profile, sizeGB, iops, _, _, err := pool.Spec.TierConfig(tier)
+	input, err := newShareInput(ctx, r.vpcClient, r.network, pool, tier, r.defaultResourceGroup)
 	if err != nil {
 		return err
-	}
-
-	resourceGroup := pool.Spec.ResourceGroup
-	if resourceGroup == "" {
-		resourceGroup = r.defaultResourceGroup
-	}
-
-	// Build share name: include tier when present
-	shareName := fmt.Sprintf("%s-share-%d", pool.Name, len(pool.Status.Shares)+1)
-	if tier != "" {
-		tierShareCount := int32(0)
-		for _, s := range pool.Status.Shares {
-			if s.Tier == tier {
-				tierShareCount++
-			}
-		}
-		shareName = fmt.Sprintf("%s-%s-share-%d", pool.Name, tier, tierShareCount+1)
-	}
-
-	input := ibmcloud.CreateShareInput{
-		Name:             shareName,
-		Zone:             pool.Spec.Zone,
-		Profile:          profile,
-		SizeGB:           sizeGB,
-		IOPS:             iops,
-		ResourceGroupID:  resourceGroup,
-		Tags:             pool.Spec.Tags,
-		EncryptInTransit: pool.Spec.EncryptionInTransit,
-		VPCId:            r.vpcID,
-		SubnetID:         r.subnetID,
 	}
 
 	shareInfo, err := r.vpcClient.CreateFileShare(ctx, input)
@@ -725,52 +795,7 @@ func (r *FileSharePoolReconciler) createPoolShare(ctx context.Context, pool *v1a
 		return fmt.Errorf("create VPC share: %w", err)
 	}
 
-	mountTargetIP := ""
-	mountTargetID := ""
-	exportPath := "/"
-	if len(shareInfo.MountTargets) > 0 {
-		mountTargetIP = shareInfo.MountTargets[0].IPAddress
-		mountTargetID = shareInfo.MountTargets[0].ID
-		if shareInfo.MountTargets[0].ExportPath != "" {
-			exportPath = shareInfo.MountTargets[0].ExportPath
-		}
-	}
-
-	state := "creating"
-	if shareInfo.LifecycleState == "stable" {
-		state = "stable"
-	}
-
-	// Build initial MountTargets slice for the home zone.
-	var mountTargets []v1alpha1.ZoneMountTarget
-	if mountTargetIP != "" {
-		mountTargets = []v1alpha1.ZoneMountTarget{
-			{
-				Zone:          shareInfo.Zone,
-				MountTargetID: mountTargetID,
-				MountTargetIP: mountTargetIP,
-				ExportPath:    exportPath,
-			},
-		}
-	}
-
-	now := metav1.Now()
-	newShare := v1alpha1.PoolShareStatus{
-		ShareID:       shareInfo.ID,
-		ShareName:     shareInfo.Name,
-		MountTargetIP: mountTargetIP,
-		MountTargetID: mountTargetID,
-		ExportPath:    exportPath,
-		TotalGB:       shareInfo.SizeGB,
-		AllocatedGB:   0,
-		PVCCount:      0,
-		State:         state,
-		Tier:          tier,
-		Zone:          shareInfo.Zone,
-		MountTargets:  mountTargets,
-		CreatedAt:     &now,
-	}
-
+	newShare := newPoolShareStatus(shareInfo, tier)
 	pool.Status.Shares = append(pool.Status.Shares, newShare)
 	pool.Status.ShareCount = int32(len(pool.Status.Shares)) //nolint:gosec // safe: MaxShares capped at 100
 	pool.Status.TotalCapacityGB += shareInfo.SizeGB
@@ -779,7 +804,7 @@ func (r *FileSharePoolReconciler) createPoolShare(ctx context.Context, pool *v1a
 		"pool", pool.Name,
 		"tier", tier,
 		"shareID", shareInfo.ID,
-		"state", state,
+		"state", newShare.State,
 	)
 
 	return nil
@@ -791,14 +816,15 @@ func determinePhase(pool *v1alpha1.FileSharePool) string {
 		return "Initializing"
 	}
 
-	hasStable := false
+	hasReady := false
 	hasDraining := false
 	hasCreating := false
 
 	for _, s := range pool.Status.Shares {
+		if shareReady(s) {
+			hasReady = true
+		}
 		switch s.State {
-		case "stable":
-			hasStable = true
 		case "draining", "degraded":
 			hasDraining = true
 		case "creating":
@@ -812,15 +838,16 @@ func determinePhase(pool *v1alpha1.FileSharePool) string {
 	if hasCreating {
 		return "Expanding"
 	}
-	if !hasStable {
-		return "Initializing"
+	if !hasReady {
+		// Every share is stable but none has a usable mount target.
+		return "Degraded"
 	}
 
 	// Check if all shares are full at max capacity
 	if int32(len(pool.Status.Shares)) >= pool.Spec.MaxShares { //nolint:gosec // safe: MaxShares capped at 100
 		allFull := true
 		for _, s := range pool.Status.Shares {
-			if s.State == "stable" && s.AllocatedGB < s.TotalGB {
+			if shareReady(s) && s.AllocatedGB < s.TotalGB {
 				allFull = false
 				break
 			}
@@ -865,16 +892,23 @@ func (r *FileSharePoolReconciler) setCondition(pool *v1alpha1.FileSharePool, con
 // updateConditions sets SharesReady and CapacityAvailable conditions.
 func (r *FileSharePoolReconciler) updateConditions(pool *v1alpha1.FileSharePool) {
 	// SharesReady
-	stableCount := 0
+	readyCount := 0
+	var noMountTarget []string
 	for _, s := range pool.Status.Shares {
-		if s.State == "stable" {
-			stableCount++
+		if shareReady(s) {
+			readyCount++
+		} else if s.State == "stable" {
+			noMountTarget = append(noMountTarget, s.ShareID)
 		}
 	}
-	if stableCount > 0 {
+	switch {
+	case readyCount > 0:
 		r.setCondition(pool, "SharesReady", metav1.ConditionTrue, "SharesAvailable",
-			fmt.Sprintf("%d shares ready", stableCount))
-	} else {
+			fmt.Sprintf("%d shares ready", readyCount))
+	case len(noMountTarget) > 0:
+		r.setCondition(pool, "SharesReady", metav1.ConditionFalse, "NoMountTarget",
+			fmt.Sprintf("No share can serve volumes: no mount target on %s", strings.Join(noMountTarget, ", ")))
+	default:
 		r.setCondition(pool, "SharesReady", metav1.ConditionFalse, "NoSharesReady",
 			"No shares in stable state")
 	}
@@ -930,18 +964,15 @@ func (r *FileSharePoolReconciler) ensureStorageProfiles(ctx context.Context, poo
 	}
 }
 
-// storageProfileGVR is the GroupVersionResource for CDI StorageProfiles.
-var storageProfileGVR = schema.GroupVersionResource{
-	Group:    "cdi.kubevirt.io",
-	Version:  "v1beta1",
-	Resource: "storageprofiles",
-}
+// cdiCloneStrategy is the StorageProfile clone strategy for pool StorageClasses.
+const cdiCloneStrategy = "csi-clone"
 
 // patchStorageProfile patches the CDI StorageProfile with the given name,
 // setting spec.claimPropertySets and spec.cloneStrategy if not already set.
 // claimPropertySets enables the Virtualization UI to auto-select access modes.
-// cloneStrategy "copy" forces host-assisted cloning — CDI's snapshot-based
-// cloning does not work with our CSI driver.
+// cloneStrategy "csi-clone" makes CDI ask the driver for a clone. CDI's
+// snapshot clone does not work with this driver, and CDI's host-assisted copy
+// pods run out of memory when they write onto NFS (rovslab, 20 October 2026).
 func (r *FileSharePoolReconciler) patchStorageProfile(ctx context.Context, name string) {
 	if r.directClient == nil {
 		return
@@ -962,8 +993,8 @@ func (r *FileSharePoolReconciler) patchStorageProfile(ctx context.Context, name 
 
 	// Build a merge patch for fields that need setting.
 	needsPatch := false
-	patchMap := map[string]interface{}{"spec": map[string]interface{}{}}
-	specPatch := patchMap["spec"].(map[string]interface{})
+	specPatch := map[string]interface{}{}
+	patchMap := map[string]interface{}{"spec": specPatch}
 
 	// Check if claimPropertySets is already populated.
 	spec, _, _ := unstructured.NestedMap(sp.Object, "spec")
@@ -985,9 +1016,9 @@ func (r *FileSharePoolReconciler) patchStorageProfile(ctx context.Context, name 
 		needsPatch = true
 	}
 
-	// Ensure cloneStrategy is "copy" — CDI's snapshot clone doesn't work with our driver.
-	if spec == nil || spec["cloneStrategy"] != "copy" {
-		specPatch["cloneStrategy"] = "copy"
+	// Ensure the driver makes CDI's clones.
+	if spec == nil || spec["cloneStrategy"] != cdiCloneStrategy {
+		specPatch["cloneStrategy"] = cdiCloneStrategy
 		needsPatch = true
 	}
 
@@ -1007,7 +1038,7 @@ func (r *FileSharePoolReconciler) patchStorageProfile(ctx context.Context, name 
 	klog.V(2).InfoS("Patched StorageProfile",
 		"storageProfile", name,
 		"claimPropertySets", "ReadWriteMany/Filesystem",
-		"cloneStrategy", "copy")
+		"cloneStrategy", cdiCloneStrategy)
 }
 
 // SetupWithManager registers the reconciler with a controller-runtime Manager.
@@ -1015,9 +1046,20 @@ func (r *FileSharePoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.directClient = mgr.GetClient()
 	r.restMapper = mgr.GetRESTMapper()
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&v1alpha1.FileSharePool{}).
+		For(&v1alpha1.FileSharePool{}, builder.WithPredicates(poolEventFilter())).
 		Named("filesharepool").
 		Complete(r)
+}
+
+// poolEventFilter passes spec, label and annotation changes and drops
+// status-only updates. Reconcile writes status on every pass, so without this
+// filter each pass starts the next one at once instead of after ReconcileInterval.
+func poolEventFilter() predicate.Predicate {
+	return predicate.Or(
+		predicate.GenerationChangedPredicate{},
+		predicate.LabelChangedPredicate{},
+		predicate.AnnotationChangedPredicate{},
+	)
 }
 
 // Finalizer helpers

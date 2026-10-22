@@ -35,28 +35,30 @@ import {
   DescriptionListDescription,
 } from '@patternfly/react-core';
 import { FileSharePoolModel } from '../../models';
-import { FileSharePool, FileSharePoolSpec, GoldenImageConfig } from '../../types';
+import { FileSharePool, FileSharePoolSpec } from '../../types';
 import { ROUTES } from '../../constants';
+import { parseSecurityGroupIDs } from '../../utils/pool-helpers';
 import FieldPopover from '../common/FieldPopover';
 import YAMLEditorFallback from '../common/YAMLEditorFallback';
 
 // ── Preset configurations ──
 
-interface Preset {
+export interface Preset {
   id: string;
   label: string;
   description: string;
   values: Partial<FormState>;
 }
 
-const PRESETS: Preset[] = [
+export const PRESETS: Preset[] = [
   {
     id: 'standard',
     label: 'Standard Workloads',
-    description: 'Balanced settings for general Kubernetes workloads. 1 TB shares, spread allocation, auto-expand enabled.',
+    description: 'Balanced settings for general Kubernetes workloads. 1 TB shares with 1,000 IOPS, spread allocation, auto-expand enabled.',
     values: {
       profile: 'dp2',
       shareSizeGB: 1000,
+      iops: 1000,
       maxShares: 10,
       initialShares: 1,
       autoExpand: true,
@@ -66,16 +68,16 @@ const PRESETS: Preset[] = [
       defaultUID: '',
       defaultGID: '',
       encryptionInTransit: false,
-      goldenImagesEnabled: false,
     },
   },
   {
     id: 'kubevirt',
     label: 'KubeVirt VMs',
-    description: 'Optimized for virtual machine disk storage. UID 107 for QEMU, 0777 permissions, golden image syncer ready.',
+    description: 'Optimized for virtual machine disk storage. 2 TB shares with 3,000 IOPS, UID 107 for QEMU, 0777 permissions. Make VMs from the standard catalog and pick this pool as the storage class.',
     values: {
       profile: 'dp2',
       shareSizeGB: 2000,
+      iops: 3000,
       maxShares: 5,
       initialShares: 1,
       autoExpand: true,
@@ -85,20 +87,16 @@ const PRESETS: Preset[] = [
       defaultUID: '107',
       defaultGID: '107',
       encryptionInTransit: false,
-      goldenImagesEnabled: true,
-      refreshInterval: '24h',
-      converterImage: 'quay.io/centos/centos:stream9',
-      pvcSizeGB: 15,
     },
   },
   {
     id: 'highiops',
     label: 'High-IOPS Database',
-    description: 'Maximum performance for database workloads. Custom IOPS profile, binpack allocation to minimize share count.',
+    description: 'Maximum performance for database workloads. 40,000 IOPS per share (the most IBM allows for a 4,000 GB share), binpack allocation to minimize share count.',
     values: {
-      profile: 'custom',
+      profile: 'dp2',
       shareSizeGB: 4000,
-      iops: 48000,
+      iops: 40000,
       maxShares: 5,
       initialShares: 2,
       autoExpand: false,
@@ -108,12 +106,11 @@ const PRESETS: Preset[] = [
       defaultUID: '',
       defaultGID: '',
       encryptionInTransit: true,
-      goldenImagesEnabled: false,
     },
   },
 ];
 
-interface FormState {
+export interface FormState {
   name: string;
   zone: string;
   profile: string;
@@ -129,22 +126,17 @@ interface FormState {
   defaultGID: string;
   encryptionInTransit: boolean;
   resourceGroup: string;
+  securityGroupIDs: string;
   tags: string;
   mountOptions: string;
-  goldenImagesEnabled: boolean;
-  targetNamespaces: string;
-  imageFilter: string;
-  refreshInterval: string;
-  converterImage: string;
-  pvcSizeGB: number;
 }
 
-const initialFormState: FormState = {
+export const initialFormState: FormState = {
   name: '',
   zone: '',
   profile: 'dp2',
   shareSizeGB: 1000,
-  iops: 100,
+  iops: 0,
   maxShares: 10,
   initialShares: 1,
   autoExpand: true,
@@ -155,14 +147,9 @@ const initialFormState: FormState = {
   defaultGID: '',
   encryptionInTransit: false,
   resourceGroup: '',
+  securityGroupIDs: '',
   tags: '',
   mountOptions: '',
-  goldenImagesEnabled: false,
-  targetNamespaces: '',
-  imageFilter: '',
-  refreshInterval: '24h',
-  converterImage: 'quay.io/centos/centos:stream9',
-  pvcSizeGB: 15,
 };
 
 const parseLines = (text: string): string[] =>
@@ -171,7 +158,7 @@ const parseLines = (text: string): string[] =>
     .map((l) => l.trim())
     .filter((l) => l.length > 0);
 
-const buildResource = (form: FormState): FileSharePool => {
+export const buildResource = (form: FormState): FileSharePool => {
   const spec: FileSharePoolSpec = {
     zone: form.zone,
     profile: form.profile,
@@ -185,7 +172,7 @@ const buildResource = (form: FormState): FileSharePool => {
     defaultPermissions: form.defaultPermissions,
   };
 
-  if (form.profile === 'custom' && form.iops >= 100) {
+  if (form.iops > 0) {
     spec.iops = form.iops;
   }
 
@@ -203,26 +190,14 @@ const buildResource = (form: FormState): FileSharePool => {
     spec.resourceGroup = form.resourceGroup.trim();
   }
 
+  const securityGroupIDs = parseSecurityGroupIDs(form.securityGroupIDs);
+  if (securityGroupIDs.length > 0) spec.securityGroupIDs = securityGroupIDs;
+
   const tags = parseLines(form.tags);
   if (tags.length > 0) spec.tags = tags;
 
   const mountOpts = parseLines(form.mountOptions);
   if (mountOpts.length > 0) spec.mountOptions = mountOpts;
-
-  if (form.goldenImagesEnabled) {
-    const goldenImages: GoldenImageConfig = {
-      enabled: true,
-      targetNamespaces: parseLines(form.targetNamespaces),
-    };
-
-    const filters = parseLines(form.imageFilter);
-    if (filters.length > 0) goldenImages.imageFilter = filters;
-    if (form.refreshInterval.trim()) goldenImages.refreshInterval = form.refreshInterval.trim();
-    if (form.converterImage.trim()) goldenImages.converterImage = form.converterImage.trim();
-    if (form.pvcSizeGB >= 5) goldenImages.pvcSizeGB = form.pvcSizeGB;
-
-    spec.goldenImages = goldenImages;
-  }
 
   return {
     apiVersion: 'storage.ibmcloud.io/v1alpha1',
@@ -331,8 +306,8 @@ const FileSharePoolCreatePage: React.FC = () => {
     setForm((prev) => ({ ...prev, [key]: value }));
 
   React.useEffect(() => {
-    if (zonesLoaded && discoveredZones.length > 0 && form.zone === '') {
-      set('zone', discoveredZones[0]);
+    if (zonesLoaded && discoveredZones.length > 0) {
+      setForm((prev) => (prev.zone === '' ? { ...prev, zone: discoveredZones[0] } : prev));
     }
   }, [zonesLoaded, discoveredZones]);
 
@@ -352,7 +327,7 @@ const FileSharePoolCreatePage: React.FC = () => {
     ZONE_PATTERN.test(form.zone) &&
     form.shareSizeGB >= 10 &&
     form.shareSizeGB <= 32000 &&
-    (form.profile !== 'custom' || form.iops >= 100);
+    (form.iops === 0 || form.iops >= 100);
 
   const isPoolSizingValid =
     form.maxShares >= 1 &&
@@ -361,10 +336,6 @@ const FileSharePoolCreatePage: React.FC = () => {
     form.initialShares <= form.maxShares &&
     (!form.autoExpand ||
       (form.expandThresholdPercent >= 50 && form.expandThresholdPercent <= 95));
-
-  const isGoldenImagesValid =
-    !form.goldenImagesEnabled ||
-    (parseLines(form.targetNamespaces).length > 0 && form.pvcSizeGB >= 5);
 
   const handleCreate = async () => {
     setError('');
@@ -494,7 +465,7 @@ const FileSharePoolCreatePage: React.FC = () => {
         <FieldPopover
           fieldId="fsp-profile"
           label="Profile"
-          description="VPC file share performance profile. dp2 provides 100 IOPS/GB with balanced performance for most workloads. Custom lets you specify exact IOPS."
+          description="VPC file share profile. dp2 is the only profile VPC file shares offer. You set the IOPS per share below."
           isRequired
         >
           <FormSelect
@@ -502,8 +473,7 @@ const FileSharePoolCreatePage: React.FC = () => {
             value={form.profile}
             onChange={(_event, value) => set('profile', value)}
           >
-            <FormSelectOption value="dp2" label="dp2 - 100 IOPS/GB, balanced performance" />
-            <FormSelectOption value="custom" label="custom - Specify exact IOPS" />
+            <FormSelectOption value="dp2" label="dp2" />
           </FormSelect>
         </FieldPopover>
       </StackItem>
@@ -530,33 +500,30 @@ const FileSharePoolCreatePage: React.FC = () => {
         </FieldPopover>
       </StackItem>
 
-      {form.profile === 'custom' && (
-        <StackItem>
-          <FieldPopover
-            fieldId="fsp-iops"
-            label="IOPS"
-            description="Maximum IOPS for each share. Higher IOPS increases cost. Minimum 100. For dp2, IOPS is automatically 100 per GB of share size."
-            isRequired
-          >
-            <NumberInput
-              id="fsp-iops"
-              value={form.iops}
-              min={100}
-              onMinus={() => set('iops', Math.max(100, form.iops - 100))}
-              onPlus={() => set('iops', form.iops + 100)}
-              onChange={(event) => {
-                const val = parseInt((event.target as HTMLInputElement).value, 10);
-                if (!isNaN(val)) set('iops', val);
-              }}
-            />
-            <FormHelperText>
-              <HelperText>
-                <HelperTextItem>Minimum 100</HelperTextItem>
-              </HelperText>
-            </FormHelperText>
-          </FieldPopover>
-        </StackItem>
-      )}
+      <StackItem>
+        <FieldPopover
+          fieldId="fsp-iops"
+          label="IOPS"
+          description="IOPS for each share. Higher IOPS costs more. 0 lets the VPC choose, which gives 100 IOPS per share whatever its size. The VPC limits the IOPS by share size and refuses values out of range."
+        >
+          <NumberInput
+            id="fsp-iops"
+            value={form.iops}
+            min={0}
+            onMinus={() => set('iops', form.iops <= 100 ? 0 : form.iops - 100)}
+            onPlus={() => set('iops', form.iops + 100)}
+            onChange={(event) => {
+              const val = parseInt((event.target as HTMLInputElement).value, 10);
+              if (!isNaN(val)) set('iops', val);
+            }}
+          />
+          <FormHelperText>
+            <HelperText>
+              <HelperTextItem>0 for the VPC default (100), or 100 to 96,000</HelperTextItem>
+            </HelperText>
+          </FormHelperText>
+        </FieldPopover>
+      </StackItem>
 
       {/* Capacity calculator */}
       <StackItem>
@@ -870,6 +837,27 @@ const FileSharePoolCreatePage: React.FC = () => {
 
       <StackItem>
         <FieldPopover
+          fieldId="fsp-security-groups"
+          label="Security Groups"
+          description="VPC security group IDs attached to the share mount targets. They must allow NFS (TCP 2049) from the worker nodes. One ID per line, or comma-separated."
+        >
+          <TextArea
+            id="fsp-security-groups"
+            value={form.securityGroupIDs}
+            onChange={(_event, value) => set('securityGroupIDs', value)}
+            rows={3}
+            placeholder={"r010-1111-2222\nr010-3333-4444"}
+          />
+          <FormHelperText>
+            <HelperText>
+              <HelperTextItem>Leave empty to use the cluster security group.</HelperTextItem>
+            </HelperText>
+          </FormHelperText>
+        </FieldPopover>
+      </StackItem>
+
+      <StackItem>
+        <FieldPopover
           fieldId="fsp-tags"
           label="Tags"
           description="Tags applied to VPC file shares for cost tracking and organization. One tag per line, e.g. env:production. Tags are propagated to the VPC API."
@@ -912,133 +900,6 @@ const FileSharePoolCreatePage: React.FC = () => {
     </Stack>
   );
 
-  const goldenImagesStep = (
-    <Stack hasGutter>
-      <StackItem>
-        <FieldPopover
-          fieldId="fsp-golden-enabled"
-          label="Golden Image Syncer"
-          description="Automatically discover DataImportCron resources and provision ready-to-boot VM golden images on pool storage. Converts qcow2 images to raw format for KubeVirt."
-        >
-          <Switch
-            id="fsp-golden-enabled"
-            label="Enable golden image syncer"
-            isChecked={form.goldenImagesEnabled}
-            onChange={(_event, checked) => set('goldenImagesEnabled', checked)}
-          />
-        </FieldPopover>
-      </StackItem>
-
-      {form.goldenImagesEnabled && (
-        <>
-          <StackItem>
-            <FieldPopover
-              fieldId="fsp-golden-namespaces"
-              label="Target Namespaces"
-              description="Namespaces where golden image PVCs will be created. Typically openshift-virtualization-os-images for KubeVirt. One namespace per line."
-              isRequired
-            >
-              <TextArea
-                id="fsp-golden-namespaces"
-                value={form.targetNamespaces}
-                onChange={(_event, value) => set('targetNamespaces', value)}
-                rows={3}
-                placeholder={"openshift-virtualization-os-images\ndefault"}
-              />
-              <FormHelperText>
-                <HelperText>
-                  <HelperTextItem>One namespace per line</HelperTextItem>
-                </HelperText>
-              </FormHelperText>
-            </FieldPopover>
-          </StackItem>
-
-          <StackItem>
-            <FieldPopover
-              fieldId="fsp-golden-filter"
-              label="Image Filter"
-              description="Glob patterns to filter which DataImportCron images to sync. Leave empty to sync all discovered images. Example: fedora-*, centos-stream*."
-            >
-              <TextArea
-                id="fsp-golden-filter"
-                value={form.imageFilter}
-                onChange={(_event, value) => set('imageFilter', value)}
-                rows={3}
-                placeholder={"fedora-*\ncentos-stream*"}
-              />
-              <FormHelperText>
-                <HelperText>
-                  <HelperTextItem>One filter pattern per line (optional)</HelperTextItem>
-                </HelperText>
-              </FormHelperText>
-            </FieldPopover>
-          </StackItem>
-
-          <StackItem>
-            <FieldPopover
-              fieldId="fsp-golden-interval"
-              label="Refresh Interval"
-              description="How often the syncer checks for new or updated golden images. Shorter intervals catch upstream image updates faster but increase API load."
-            >
-              <TextInput
-                id="fsp-golden-interval"
-                value={form.refreshInterval}
-                onChange={(_event, value) => set('refreshInterval', value)}
-                placeholder="24h"
-              />
-              <FormHelperText>
-                <HelperText>
-                  <HelperTextItem>Go duration, e.g. 24h, 6h, 30m</HelperTextItem>
-                </HelperText>
-              </FormHelperText>
-            </FieldPopover>
-          </StackItem>
-
-          <StackItem>
-            <FieldPopover
-              fieldId="fsp-golden-converter"
-              label="Converter Image"
-              description="Container image used for qcow2-to-raw conversion Jobs. Must have qemu-img installed. Default uses CentOS Stream 9 which includes qemu-img in its repos."
-            >
-              <TextInput
-                id="fsp-golden-converter"
-                value={form.converterImage}
-                onChange={(_event, value) => set('converterImage', value)}
-                placeholder="quay.io/centos/centos:stream9"
-              />
-              <FormHelperText>
-                <HelperText>
-                  <HelperTextItem>Container image used for qcow2-to-raw conversion</HelperTextItem>
-                </HelperText>
-              </FormHelperText>
-            </FieldPopover>
-          </StackItem>
-
-          <StackItem>
-            <FieldPopover
-              fieldId="fsp-golden-pvc-size"
-              label="PVC Size (GB)"
-              description="Size of each golden image PVC. Must be large enough to hold the converted raw image. Typical cloud images are 2-10 GB raw. Minimum 5 GB."
-              isRequired
-            >
-              <NumberInput
-                id="fsp-golden-pvc-size"
-                value={form.pvcSizeGB}
-                min={5}
-                onMinus={() => set('pvcSizeGB', Math.max(5, form.pvcSizeGB - 1))}
-                onPlus={() => set('pvcSizeGB', form.pvcSizeGB + 1)}
-                onChange={(event) => {
-                  const val = parseInt((event.target as HTMLInputElement).value, 10);
-                  if (!isNaN(val)) set('pvcSizeGB', val);
-                }}
-              />
-            </FieldPopover>
-          </StackItem>
-        </>
-      )}
-    </Stack>
-  );
-
   const resource = buildResource(form);
   const yamlPreview = toYAML(resource);
 
@@ -1071,7 +932,7 @@ const FileSharePoolCreatePage: React.FC = () => {
                   <DescriptionListGroup>
                     <DescriptionListTerm>Profile</DescriptionListTerm>
                     <DescriptionListDescription>
-                      {form.profile}{form.profile === 'custom' ? ` (${form.iops} IOPS)` : ''}
+                      {form.profile} ({form.iops > 0 ? `${form.iops.toLocaleString()} IOPS` : 'VPC default IOPS'})
                     </DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
@@ -1100,14 +961,6 @@ const FileSharePoolCreatePage: React.FC = () => {
                       <Label>{form.allocationStrategy}</Label>
                     </DescriptionListDescription>
                   </DescriptionListGroup>
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>Golden Images</DescriptionListTerm>
-                    <DescriptionListDescription>
-                      <Label color={form.goldenImagesEnabled ? 'green' : 'grey'}>
-                        {form.goldenImagesEnabled ? 'Enabled' : 'Disabled'}
-                      </Label>
-                    </DescriptionListDescription>
-                  </DescriptionListGroup>
                 </DescriptionList>
               </GridItem>
             </Grid>
@@ -1124,7 +977,7 @@ const FileSharePoolCreatePage: React.FC = () => {
           <Button
             variant="primary"
             onClick={handleCreate}
-            isDisabled={creating || !isBasicValid || !isPoolSizingValid || !isGoldenImagesValid}
+            isDisabled={creating || !isBasicValid || !isPoolSizingValid}
             isLoading={creating}
           >
             Create
@@ -1168,16 +1021,9 @@ const FileSharePoolCreatePage: React.FC = () => {
           {advancedStep}
         </WizardStep>
         <WizardStep
-          name="Golden Images"
-          id="step-golden-images"
-          isDisabled={!isBasicValid || !isPoolSizingValid}
-        >
-          {goldenImagesStep}
-        </WizardStep>
-        <WizardStep
           name="Review"
           id="step-review"
-          isDisabled={!isBasicValid || !isPoolSizingValid || !isGoldenImagesValid}
+          isDisabled={!isBasicValid || !isPoolSizingValid}
           footer={{ isNextDisabled: true }}
         >
           {reviewStep}

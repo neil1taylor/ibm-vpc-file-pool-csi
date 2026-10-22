@@ -27,7 +27,7 @@ If all three commands pass, your environment is ready.
 
 | Tool | Version | Purpose |
 |------|---------|---------|
-| Go | 1.25+ | Build and test |
+| Go | 1.26+ | Build and test |
 | golangci-lint | v2 | Linting (install: `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest`) |
 | controller-gen | v0.18+ | CRD generation (install: `go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest`) |
 | Docker or Podman | Latest | Container image builds |
@@ -189,7 +189,7 @@ Keep the first line under 72 characters. Add a body for non-trivial changes.
 ### Bug Reports
 
 Include:
-- Cluster type and version (IKS/ROKS, Kubernetes version)
+- Cluster type and version (IKS/ROKS/ROVS, Kubernetes version)
 - Driver version (container image tag)
 - Steps to reproduce
 - Expected vs. actual behavior

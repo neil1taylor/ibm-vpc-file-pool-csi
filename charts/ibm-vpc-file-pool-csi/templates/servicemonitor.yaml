@@ -1,4 +1,4 @@
-{{- if .Values.metrics.serviceMonitor.enabled }}
+{{- if and .Values.metrics.serviceMonitor.enabled (not (include "ibm-vpc-file-pool-csi.uwm" .)) (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor") }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
@@ -13,5 +13,5 @@ spec:
       app.kubernetes.io/component: controller
   endpoints:
     - port: metrics
-      interval: {{ .Values.metrics.serviceMonitor.interval }}
+      {{- include "ibm-vpc-file-pool-csi.scrapeTLS" (dict "root" . "svc" (printf "%s-metrics" (include "ibm-vpc-file-pool-csi.fullname" .))) | nindent 6 }}
 {{- end }}

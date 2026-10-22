@@ -10,8 +10,8 @@ Step-by-step procedures for operating the pool CSI driver in production.
 
 ```bash
 # 1. Verify all driver pods are running
-kubectl get pods -n kube-system -l app=vpc-file-pool-csi-controller
-kubectl get pods -n kube-system -l app=vpc-file-pool-csi-node
+kubectl get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller
+kubectl get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node
 
 # 2. Check pool phases — all should be "Ready"
 kubectl get filesharepools
@@ -19,8 +19,12 @@ kubectl get filesharepools
 # 3. Check for pending PVCs using pool StorageClasses
 kubectl get pvc --all-namespaces -o wide | grep -E "Pending.*ibm-vpc-file-pool"
 
-# 4. Check for controller errors in the last 24h
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller \
+# 4. OpenShift: alerts are being evaluated (user workload monitoring is on)
+oc -n openshift-user-workload-monitoring get pods
+oc -n ibm-vpc-file-pool-csi-monitoring get events | grep UserWorkloadMonitoringOff   # no output is good
+
+# 5. Check for controller errors in the last 24h
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller \
   -c csi-controller --since=24h | grep -c -i "error"
 ```
 
@@ -29,7 +33,7 @@ kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller \
 ```bash
 # 1. Pool capacity check — flag pools over 70% utilization
 kubectl get filesharepools -o custom-columns=\
-'NAME:.metadata.name,CAPACITY:.status.totalCapacityGB,ALLOCATED:.status.totalAllocatedGB,SHARES:.status.shareCount,PVCS:.status.pvcCount,PHASE:.status.phase'
+'NAME:.metadata.name,CAPACITY:.status.totalCapacityGB,ALLOCATED:.status.totalAllocatedGB,SHARES:.status.shareCount,PVCS:.status.totalPVCCount,PHASE:.status.phase'
 
 # 2. Check for orphaned SubVolumes (SubVolume exists, PVC doesn't)
 for sv in $(kubectl get subvolumes -o jsonpath='{.items[*].metadata.name}'); do
@@ -82,14 +86,14 @@ When the pool's allocated capacity crosses `expandThresholdPercent` (default 80%
 
 ```bash
 # Option 1: Increase maxShares to allow more shares
-kubectl patch filesharespool <pool-name> --type merge \
+kubectl patch filesharepool <pool-name> --type merge \
   -p '{"spec":{"maxShares":20}}'
 
 # Option 2: Lower the threshold temporarily to trigger expansion sooner
-kubectl patch filesharespool <pool-name> --type merge \
+kubectl patch filesharepool <pool-name> --type merge \
   -p '{"spec":{"expandThresholdPercent":50}}'
 # Reset after expansion completes:
-kubectl patch filesharespool <pool-name> --type merge \
+kubectl patch filesharepool <pool-name> --type merge \
   -p '{"spec":{"expandThresholdPercent":80}}'
 ```
 
@@ -99,7 +103,7 @@ If the pool stays in `Expanding` for more than 10 minutes:
 
 ```bash
 # 1. Check controller logs for VPC API errors
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller \
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller \
   -c csi-controller --tail=200 | grep -i "expand\|create.*share\|error"
 
 # 2. Check VPC share quota
@@ -131,7 +135,7 @@ Common causes:
 
 ```bash
 # 1. Mark the share for draining
-kubectl patch filesharespool <pool-name> --type merge \
+kubectl patch filesharepool <pool-name> --type merge \
   -p '{"spec":{"drainShares":["<share-id>"]}}'
 
 # 2. Monitor drain progress
@@ -145,9 +149,23 @@ kubectl get subvolumes -l storage.ibmcloud.io/share-id=<share-id>
 kubectl get subvolumes -l storage.ibmcloud.io/share-id=<share-id> \
   -o jsonpath='{range .items[*]}{.spec.pvcNamespace}/{.spec.pvcName}{"\n"}{end}'
 
-# 5. Once all SubVolumes are gone, the share is fully drained
+# 5. Once all SubVolumes and snapshots on it are gone, the share is fully drained.
+#    Snapshots keep their data on the share, so delete their VolumeSnapshots too
+#    (status.drainStatus[].remainingSnapshots counts them).
 #    The DrainComplete condition is set on the pool
 kubectl get fsp <pool-name> -o jsonpath='{.status.conditions}' | jq '.[] | select(.type=="DrainComplete")'
+
+# 6. To remove the drained share: keep it on the drain list while you delete it.
+#    If it leaves the list first, it takes new volumes again within about 60 s.
+ibmcloud is share-delete <share-id> -f
+#    Wait until the share is gone from the pool status (no PVCs left, so the
+#    pool drops it), then take it off the list.
+kubectl get fsp <pool-name> -o jsonpath='{.status.shares[*].shareID}'
+kubectl patch filesharepool <pool-name> --type merge -p '{"spec":{"drainShares":[]}}'
+
+# To stop draining instead: take the share off the list. If the VPC reports the
+# share healthy, it takes new volumes again within one reconcile (about 60 s).
+kubectl patch filesharepool <pool-name> --type merge -p '{"spec":{"drainShares":[]}}'
 ```
 
 **Note:** Draining prevents new allocations to the share but does not migrate existing data. Applications must create new PVCs to move off the draining share.
@@ -163,7 +181,7 @@ The reconciler automatically handles shares with missing mount targets:
 1. Detects stable shares with no mount target IP
 2. Attempts to create a VPC mount target
 3. If creation succeeds, the share becomes available for allocations
-4. If creation fails (e.g., security_group access mode), the share is marked as `draining`
+4. If creation fails, the reconciler logs `Failed to create mount target for share` and tries again on the next reconcile. The share is not marked `draining`, and the pool uses its other shares meanwhile
 
 ### Manual Recovery for Degraded Shares
 
@@ -174,13 +192,13 @@ kubectl get fsp <pool-name> -o jsonpath='{range .status.shares[*]}{.shareID}  st
 # 2. Check the VPC share status
 ibmcloud is share <share-id> --output json | jq '{lifecycle_state, health_state, health_reasons}'
 
-# 3. If the share is in security_group mode (incompatible with VPC mount targets):
+# 3. Check the share's access mode:
 ibmcloud is share <share-id> --output json | jq '.access_control_mode'
-# "vpc" = can have VPC mount targets
-# "security_group" = incompatible — must drain
+# "security_group" = the mode the driver uses for new mount targets
+# "vpc" = IBM no longer allows new mount targets for this mode: replace the share
 
-# 4. For shares stuck without mount targets, trigger drain
-kubectl patch filesharespool <pool-name> --type merge \
+# 4. For a share that cannot get a mount target, drain it
+kubectl patch filesharepool <pool-name> --type merge \
   -p '{"spec":{"drainShares":["<share-id>"]}}'
 ```
 
@@ -196,7 +214,7 @@ NODE=$(kubectl get pod <affected-pod> -o jsonpath='{.spec.nodeName}')
 kubectl delete pod <affected-pod>
 
 # 3. If many pods on the same node are affected, restart the node agent
-kubectl delete pod -n kube-system -l app=vpc-file-pool-csi-node \
+kubectl delete pod -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node \
   --field-selector spec.nodeName=${NODE}
 ```
 
@@ -208,7 +226,7 @@ kubectl delete pod -n kube-system -l app=vpc-file-pool-csi-node \
 
 ```bash
 # Check per-share utilization within a pool
-kubectl get fsp <pool-name> -o jsonpath='{range .status.shares[*]}  {.shareID}  capacity={.capacityGB}  allocated={.allocatedGB}  pvcs={.pvcCount}{"\n"}{end}'
+kubectl get fsp <pool-name> -o jsonpath='{range .status.shares[*]}  {.shareID}  capacity={.totalGB}  allocated={.allocatedGB}  pvcs={.pvcCount}{"\n"}{end}'
 ```
 
 With `spread` strategy, shares should have roughly equal utilization. With `binpack`, shares fill sequentially (imbalance is expected).
@@ -225,7 +243,7 @@ There is no automated rebalancing. To manually rebalance:
 For less disruptive rebalancing, switch the pool to `spread` strategy:
 
 ```bash
-kubectl patch filesharespool <pool-name> --type merge \
+kubectl patch filesharepool <pool-name> --type merge \
   -p '{"spec":{"allocationStrategy":"spread"}}'
 ```
 
@@ -262,7 +280,7 @@ ibmcloud is share <share-id> --output json | jq '{lifecycle_state, health_state}
 **Steps:**
 ```bash
 # 1. Check controller pod status
-kubectl get pods -n kube-system -l app=vpc-file-pool-csi-controller
+kubectl get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller
 
 # 2. Check for OOM, CrashLoop, or other failures
 kubectl describe pod -n kube-system <controller-pod>
@@ -274,7 +292,7 @@ kubectl logs -n kube-system <controller-pod> -c csi-controller --previous
 kubectl delete pod -n kube-system <controller-pod>
 
 # 5. If leader election is stuck, delete the lease
-kubectl delete lease -n kube-system vpc-file-pool-csi-leader
+kubectl delete lease -n kube-system ibm-vpc-file-pool-csi-leader
 ```
 
 ### Node Agent Failure
@@ -284,7 +302,7 @@ kubectl delete lease -n kube-system vpc-file-pool-csi-leader
 **Steps:**
 ```bash
 # 1. Identify the affected node
-kubectl get pods -n kube-system -l app=vpc-file-pool-csi-node -o wide
+kubectl get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node -o wide
 
 # 2. Check node agent logs
 kubectl logs -n kube-system <node-agent-pod> -c csi-node --tail=100
@@ -298,7 +316,7 @@ kubectl delete pod -n kube-system <node-agent-pod>
 
 ## API Key Rotation
 
-### Managed Clusters (ROKS/IKS)
+### Managed Clusters (ROKS/ROVS/IKS)
 
 On managed clusters, the `storage-secret-store` secret is maintained by the platform. API key rotation is handled automatically by the managed service.
 
@@ -327,10 +345,10 @@ kubectl create secret generic ibm-cloud-credentials \
   --dry-run=client -o yaml | kubectl apply -f -
 
 # 3. Restart the controller to pick up the new key
-kubectl rollout restart deployment/vpc-file-pool-csi-controller -n kube-system
+kubectl rollout restart deployment/ibm-vpc-file-pool-csi-controller -n kube-system
 
 # 4. Verify the new key works
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller \
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller \
   -c csi-controller --tail=20 | grep -i "auth\|credential"
 
 # 5. Clean up
@@ -365,9 +383,9 @@ kubectl delete subvolume <orphaned-sv-name>
 Subdirectories on NFS shares with no corresponding SubVolume. These consume share capacity but are invisible to pool accounting.
 
 ```bash
-# 1. List subdirectories on a share (from a debug pod on any node)
+# 1. List subdirectories on a share (from a debug pod on any node; the node's file system is under /host)
 kubectl debug node/<node-name> -it --image=busybox -- sh -c \
-  "ls /var/data/kubelet/plugins/vpc-file-pool.csi.ibm.io/staging/<share-id>/pvcs/"
+  "ls /host/var/data/kubelet/plugins/vpc-file-pool.csi.ibm.io/staging/<share-id>/pvcs/"
 
 # 2. Compare with known SubVolumes
 kubectl get subvolumes -l storage.ibmcloud.io/share-id=<share-id> \
@@ -376,82 +394,20 @@ kubectl get subvolumes -l storage.ibmcloud.io/share-id=<share-id> \
 # 3. Delete orphaned directories (from the debug pod)
 # CAUTION: Verify the directory is truly orphaned before deleting
 kubectl debug node/<node-name> -it --image=busybox -- sh -c \
-  "rm -rf /var/data/kubelet/plugins/vpc-file-pool.csi.ibm.io/staging/<share-id>/pvcs/<orphaned-pvc-dir>"
+  "rm -rf /host/var/data/kubelet/plugins/vpc-file-pool.csi.ibm.io/staging/<share-id>/pvcs/<orphaned-pvc-dir>"
 ```
 
 ---
 
 ## Log Collection for Support
 
-Collect diagnostics before opening a support ticket:
+Collect diagnostics before you open a support ticket:
 
 ```bash
-#!/bin/bash
-# Save as collect-diagnostics.sh
-OUTPUT="csi-diagnostics-$(date +%Y%m%d-%H%M%S).txt"
-
-{
-  echo "=== Collection Time ==="
-  date -u
-
-  echo -e "\n=== Driver Version ==="
-  kubectl get deployment -n kube-system vpc-file-pool-csi-controller \
-    -o jsonpath='{.spec.template.spec.containers[0].image}'
-
-  echo -e "\n\n=== Cluster Version ==="
-  kubectl version --short 2>/dev/null || kubectl version
-
-  echo -e "\n=== Node Info ==="
-  kubectl get nodes -o wide
-
-  echo -e "\n=== CSI Driver Registration ==="
-  kubectl get csidriver vpc-file-pool.csi.ibm.io -o yaml
-
-  echo -e "\n=== Pool Status ==="
-  kubectl get filesharepools -o yaml
-
-  echo -e "\n=== SubVolumes ==="
-  kubectl get subvolumes -o wide
-
-  echo -e "\n=== Pending PVCs ==="
-  kubectl get pvc --all-namespaces | grep Pending
-
-  echo -e "\n=== Controller Pods ==="
-  kubectl get pods -n kube-system -l app=vpc-file-pool-csi-controller -o wide
-
-  echo -e "\n=== Node Agent Pods ==="
-  kubectl get pods -n kube-system -l app=vpc-file-pool-csi-node -o wide
-
-  echo -e "\n=== Controller Logs (last 500 lines) ==="
-  kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller \
-    -c csi-controller --tail=500
-
-  echo -e "\n=== Node Agent Logs (last 200 lines per pod) ==="
-  for pod in $(kubectl get pods -n kube-system -l app=vpc-file-pool-csi-node \
-    -o jsonpath='{.items[*].metadata.name}'); do
-    echo "--- Pod: $pod ---"
-    kubectl logs -n kube-system "$pod" -c csi-node --tail=200
-  done
-
-  echo -e "\n=== Events (last 1 hour) ==="
-  kubectl get events --all-namespaces --sort-by='.lastTimestamp' \
-    --field-selector reason!=Pulling,reason!=Pulled | tail -100
-
-  echo -e "\n=== Replication Policies ==="
-  kubectl get replicationpolicies -o yaml 2>/dev/null || echo "No replication policies"
-
-  echo -e "\n=== Leader Lease ==="
-  kubectl get lease -n kube-system vpc-file-pool-csi-leader -o yaml 2>/dev/null || echo "No lease found"
-} > "$OUTPUT"
-
-echo "Diagnostics saved to $OUTPUT"
-echo "IMPORTANT: Review the file and redact any API keys or secrets before sharing."
+bash scripts/collect-diagnostics.sh
 ```
 
-```bash
-chmod +x collect-diagnostics.sh
-./collect-diagnostics.sh
-```
+The script writes `csi-diagnostics-<time>.txt` in the current directory. It holds driver versions, pools, volumes, snapshots, backup and replication policies, controller and node logs, and recent events. It never reads a Secret and it removes values that look like keys or tokens. Read the file before you send it. Set `NS` if the driver is not in `kube-system`.
 
 ---
 

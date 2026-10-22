@@ -35,19 +35,24 @@ import {
   Td,
 } from '@patternfly/react-table';
 import { FileSharePoolModel } from '../../models';
-import { FileSharePool } from '../../types';
+import { FileSharePool, PoolShareStatus } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
+import PoolPhase from '../common/PoolPhase';
+import ShareStatus from '../common/ShareStatus';
 import CapacityBar from '../common/CapacityBar';
 import ConditionsTable from '../common/ConditionsTable';
 import { formatAge } from '../../utils/resource-helpers';
 import { usePoolMetrics } from '../../utils/use-pool-metrics';
 import { ROUTES } from '../../constants';
+import { getIOPS } from './FileSharePoolListPage';
 import DeleteModal from '../common/DeleteModal';
+import ShareDrainModal from './ShareDrainModal';
+import { DrainAction, isDraining } from '../../utils/pool-helpers';
 import YAMLEditorFallback from '../common/YAMLEditorFallback';
 
 /** Format seconds to human-readable ms string. */
 const formatLatencyMs = (seconds: number): string => {
-  if (seconds === 0) return '-';
+  if (!Number.isFinite(seconds) || seconds === 0) return '-';
   const ms = seconds * 1000;
   if (ms < 1) return '<1 ms';
   return `${ms.toFixed(0)} ms`;
@@ -58,6 +63,7 @@ const FileSharePoolDetailsPage: React.FC = () => {
   const history = useHistory();
   const [activeTab, setActiveTab] = useState<string | number>(0);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [drainTarget, setDrainTarget] = useState<{ share: PoolShareStatus; action: DrainAction } | null>(null);
 
   const [pool, loaded, loadError] = useK8sWatchResource<FileSharePool>({
     groupVersionKind: {
@@ -138,7 +144,7 @@ const FileSharePoolDetailsPage: React.FC = () => {
               </DescriptionListGroup>
               <DescriptionListGroup>
                 <DescriptionListTerm>IOPS</DescriptionListTerm>
-                <DescriptionListDescription>{spec.iops ?? '-'}</DescriptionListDescription>
+                <DescriptionListDescription>{getIOPS(pool)}</DescriptionListDescription>
               </DescriptionListGroup>
               <DescriptionListGroup>
                 <DescriptionListTerm>Max Shares</DescriptionListTerm>
@@ -201,6 +207,16 @@ const FileSharePoolDetailsPage: React.FC = () => {
                 </DescriptionListDescription>
               </DescriptionListGroup>
               <DescriptionListGroup>
+                <DescriptionListTerm>Security Groups</DescriptionListTerm>
+                <DescriptionListDescription>
+                  {spec.securityGroupIDs && spec.securityGroupIDs.length > 0
+                    ? spec.securityGroupIDs.map((id) => (
+                        <div key={id}><code>{id}</code></div>
+                      ))
+                    : 'Cluster default'}
+                </DescriptionListDescription>
+              </DescriptionListGroup>
+              <DescriptionListGroup>
                 <DescriptionListTerm>Tags</DescriptionListTerm>
                 <DescriptionListDescription>
                   {spec.tags && spec.tags.length > 0
@@ -232,7 +248,7 @@ const FileSharePoolDetailsPage: React.FC = () => {
               <DescriptionListGroup>
                 <DescriptionListTerm>Phase</DescriptionListTerm>
                 <DescriptionListDescription>
-                  <PhaseStatus phase={status?.phase} />
+                  <PoolPhase pool={pool} />
                 </DescriptionListDescription>
               </DescriptionListGroup>
               <DescriptionListGroup>
@@ -294,6 +310,7 @@ const FileSharePoolDetailsPage: React.FC = () => {
             <Th>Mount Target IP</Th>
             <Th>Export Path</Th>
             <Th>Created</Th>
+            <Th>Drain</Th>
           </Tr>
         </Thead>
         <Tbody>
@@ -305,7 +322,7 @@ const FileSharePoolDetailsPage: React.FC = () => {
               </Td>
               <Td>{share.zone}</Td>
               <Td>
-                <PhaseStatus phase={share.state} />
+                <ShareStatus share={share} />
               </Td>
               <Td>
                 <CapacityBar
@@ -319,6 +336,17 @@ const FileSharePoolDetailsPage: React.FC = () => {
               </Td>
               <Td>{share.exportPath ? <code>{share.exportPath}</code> : '-'}</Td>
               <Td>{formatAge(share.createdAt)}</Td>
+              <Td>
+                <Button
+                  variant="link"
+                  isInline
+                  onClick={() =>
+                    setDrainTarget({ share, action: isDraining(pool, share.shareID) ? 'return' : 'drain' })
+                  }
+                >
+                  {isDraining(pool, share.shareID) ? 'Return to service' : 'Drain'}
+                </Button>
+              </Td>
             </Tr>
           ))}
         </Tbody>
@@ -443,7 +471,7 @@ const FileSharePoolDetailsPage: React.FC = () => {
                         {share.pvcCount} PVCs
                       </SplitItem>
                       <SplitItem>
-                        <PhaseStatus phase={share.state} />
+                        <ShareStatus share={share} />
                       </SplitItem>
                     </Split>
                   </StackItem>
@@ -510,14 +538,6 @@ const FileSharePoolDetailsPage: React.FC = () => {
                   <DescriptionListTerm>Refresh Interval</DescriptionListTerm>
                   <DescriptionListDescription>
                     {config.refreshInterval}
-                  </DescriptionListDescription>
-                </DescriptionListGroup>
-              )}
-              {config.converterImage && (
-                <DescriptionListGroup>
-                  <DescriptionListTerm>Converter Image</DescriptionListTerm>
-                  <DescriptionListDescription>
-                    <code>{config.converterImage}</code>
                   </DescriptionListDescription>
                 </DescriptionListGroup>
               )}
@@ -611,6 +631,7 @@ const FileSharePoolDetailsPage: React.FC = () => {
           <Tr>
             <Th>Share ID</Th>
             <Th>Remaining SubVolumes</Th>
+            <Th>Remaining snapshots</Th>
             <Th>Drained</Th>
             <Th>Drain Started</Th>
           </Tr>
@@ -622,6 +643,7 @@ const FileSharePoolDetailsPage: React.FC = () => {
                 <code>{ds.shareID}</code>
               </Td>
               <Td>{ds.remainingSubVolumes}</Td>
+              <Td>{ds.remainingSnapshots ?? 0}</Td>
               <Td>
                 <Label color={ds.drained ? 'green' : 'orange'}>
                   {ds.drained ? 'Yes' : 'No'}
@@ -719,6 +741,16 @@ const FileSharePoolDetailsPage: React.FC = () => {
         }}
         requireConfirmation
       />
+      {drainTarget && (
+        <ShareDrainModal
+          isOpen
+          pool={pool}
+          share={drainTarget.share}
+          action={drainTarget.action}
+          onClose={() => setDrainTarget(null)}
+          onDone={() => setDrainTarget(null)}
+        />
+      )}
     </>
   );
 };

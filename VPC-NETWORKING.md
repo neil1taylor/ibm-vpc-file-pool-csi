@@ -8,61 +8,43 @@ This document explains how NFS traffic flows between Kubernetes worker nodes and
 IBM Cloud Account
 └── Resource Group (billing + IAM boundary)
     └── VPC
-        ├── File Share (NFS backend, created in home zone)
-        │   └── Mount Target (1 per VPC per share)
-        │       └── FQDN resolves to zone-optimal IP via VPC DNS
+        ├── File Share (NFS backend, created in the pool's home zone)
+        │   └── Mount Target (1 per share, security group access mode)
+        │       └── Virtual network interface: IP in the home-zone worker subnet,
+        │           security group kube-<cluster ID>
         │
         ├── Zone: us-south-1 (home)
-        │   ├── Subnet 0717-aaaa...
-        │   └── Worker Nodes → DNS resolves FQDN → 10.240.1.x
+        │   ├── Subnet 0717-aaaa...   ← mount target IP, for example 10.240.1.20
+        │   └── Worker Nodes          → mount 10.240.1.20:/<share export>
         │
         ├── Zone: us-south-2 (accessor)
         │   ├── Subnet 0717-bbbb...
-        │   └── Worker Nodes → DNS resolves FQDN → 10.241.1.x
+        │   └── Worker Nodes          → mount the same IP across zones
         │
         └── Zone: us-south-3 (accessor)
             ├── Subnet 0717-cccc...
-            └── Worker Nodes → DNS resolves FQDN → 10.242.1.x
+            └── Worker Nodes          → mount the same IP across zones
 ```
 
 Every file share in a pool belongs to the same VPC. Cross-VPC sharing is not supported.
 
 ## Mount Target Access Mode
 
-The driver uses **VPC access mode** for all mount targets. This is the key design choice that simplifies cross-zone connectivity.
+The driver creates every share in **security group access mode**. IBM has deprecated VPC access mode: it reaches End of Support on 6 May 2027, and the API already refuses new VPC-mode mount targets with HTTP 501 `shares_not_implemented` (seen in `eu-de-1` and `eu-de-3`, October 2026).
 
-### VPC Mode vs Security Group Mode
+In security group mode, the mount target has a **virtual network interface (VNI)**. A VNI is a network port with its own IP address in one subnet. Security groups on the VNI control which clients can reach NFS.
 
-| Aspect | VPC Mode (used) | Security Group Mode (not used) |
-|--------|-----------------|-------------------------------|
-| **Addressing** | FQDN in `MountPath` | Direct IP in `PrimaryIP.Address` |
-| **Scope** | One mount target per VPC per share | One mount target per subnet per share |
-| **Cross-zone** | Automatic via VPC DNS | Requires explicit mount targets per zone |
-| **Security** | VPC-level access control | Security group rules per mount target |
-
-### Why VPC Mode
-
-VPC mode mount targets return a Fully Qualified Domain Name (FQDN) instead of a bare IP address. The VPC DNS service resolves this FQDN to **zone-optimal IP addresses** automatically — a node in `us-south-1` gets a different IP than a node in `us-south-2`, both from the same FQDN. This means:
-
-- A single mount target per share serves all zones
-- No per-zone mount target management by the driver
-- Cross-zone traffic is handled transparently by IBM's infrastructure
+| Setting | Where the driver gets it |
+|---------|--------------------------|
+| **Subnet** | The cluster's worker subnet in the pool's zone. The driver reads every ID in `vpc_subnet_ids` from the `kube-system/ibm-cloud-provider-data` ConfigMap (or `--subnet-id`), asks the VPC API for each subnet's zone, and uses the one that matches `spec.zone`. If no subnet is in that zone, the pool reports an error and creates no share. |
+| **Security groups** | The cluster's own group, `kube-<cluster ID>`, with the ID from the `kube-system/cluster-info` ConfigMap. This is the group IBM's own file CSI driver uses. A pool can set `spec.securityGroupIDs` to use other groups. |
+| **NFS address** | The mount target's `mount_path`, for example `10.250.0.18:/83ad9ea6_1be6_...`. The server is an IP address, and the export path is specific to the share. |
 
 ### Mount Target Creation
 
-Mount targets are created **inline** with the file share in a single VPC API call:
+The mount target is created **inline** with the file share, in one VPC API call. A share is never created without one: initial provisioning, proactive expansion and auto-expansion all build the request in one place. If a stable share has no mount target, the reconciler creates one with the same subnet and security groups.
 
-```go
-// VPC access mode: bound to VPC, not a specific subnet
-mountTarget := &vpcv1.ShareMountTargetPrototype{
-    Name:              core.StringPtr(input.Name + "-mt"),
-    VPC:               &vpcv1.VPCIdentityByID{ID: core.StringPtr(input.VPCId)},
-    AccessProtocol:    core.StringPtr("nfs4"),
-    TransitEncryption: core.StringPtr(transitEncryption),
-}
-```
-
-The mount target FQDN/IP may not be available immediately after the share reaches `stable`. The driver polls every 10 seconds for up to 2 minutes until the address is populated.
+The mount path may not be known at once when the share reaches `stable`. The driver polls for up to 2 minutes, and the reconciler's health check fills it in later if needed. A share counts as **ready** only when it is stable and its mount path is known. A pool with no ready share is `Degraded`, with the `SharesReady` condition naming the shares that have no mount target, and it does not add shares until the existing ones are usable.
 
 ## Network Path: End to End
 
@@ -77,23 +59,21 @@ The mount target FQDN/IP may not be available immediately after the share reache
 │  /staging/{share-id}/pvcs/pvc-abc123/           │
 │       ▲                                         │
 │       │ NFS mount (nfsvers=4.1, soft)           │
-│       │ mount -t nfs4 <FQDN>:/ /staging/...    │
+│       │ mount -t nfs4 <IP>:/<export> /staging/..│
 └───────┼─────────────────────────────────────────┘
-        │
-        │ VPC DNS resolves FQDN → zone-local IP
         │
         │ TCP 2049 (NFS)
         │ within VPC private network
         │
 ┌───────▼─────────────────────────────────────────┐
 │ Mount Target                                    │
-│  FQDN: share-xxxx.vpc-file.appdomain.cloud     │
-│  Zone-local IP: 10.240.x.x                     │
+│  VNI IP in the home-zone worker subnet          │
+│  mount_path: 10.240.1.20:/<share export>        │
 └───────┬─────────────────────────────────────────┘
         │
 ┌───────▼─────────────────────────────────────────┐
 │ VPC File Share (NFS export)                     │
-│  /                                              │
+│  /<share export>                                │
 │  └── pvcs/                                      │
 │      ├── pvc-aaa/  (50 GB allocated)            │
 │      ├── pvc-bbb/  (100 GB allocated)           │
@@ -105,7 +85,7 @@ All NFS traffic stays within the VPC private network. No traffic traverses the p
 
 ## VPC Configuration Sources
 
-The driver discovers VPC configuration from secrets and ConfigMaps that already exist on managed ROKS/IKS clusters:
+The driver discovers VPC configuration from secrets and ConfigMaps that already exist on managed ROKS/ROVS/IKS clusters:
 
 | Config | Source | Example |
 |--------|--------|---------|
@@ -126,20 +106,25 @@ The driver prefers **private endpoints** so VPC API traffic stays on the IBM Clo
 | 2nd | `https://{region}.iaas.cloud.ibm.com/v1` | Clusters with public endpoints |
 | 3rd | Constructed from region name | Fallback |
 
-On managed ROKS/IKS clusters with private service endpoints enabled, all VPC API calls stay within the IBM network.
+On managed ROKS/ROVS/IKS clusters with private service endpoints enabled, all VPC API calls stay within the IBM network.
 
 ## Security Group Requirements
 
-Worker node security groups **must allow TCP port 2049 outbound** to the VPC file share mount target. On managed ROKS/IKS clusters, this is typically pre-configured.
+The mount target's VNI is a member of the security groups the driver gives it. With the default group, `kube-<cluster ID>`, no rule change is needed: that group allows all traffic between its members, and every worker is a member.
+
+If a pool sets `spec.securityGroupIDs`, those groups must allow **inbound TCP 2049** from the worker nodes, and the worker security groups must allow the matching outbound traffic.
 
 ```
-Worker Node Security Group
-  ├── Outbound: TCP 2049 → VPC file share mount target  (required)
-  └── (other existing rules)
+Mount target VNI (security groups from the pool, or kube-<cluster ID>)
+  └── Inbound: TCP 2049 from the worker nodes   (required)
+Worker node security groups
+  └── Outbound: TCP 2049 to the mount target IP  (required)
 ```
+
+The controller's IAM identity needs to read subnets and security groups, and to create shares and mount targets with a VNI. `VPC Infrastructure Services` **Editor** on the resource group covers this.
 
 !!! warning "Common troubleshooting issue"
-    If pods hang during mount with `nfs: server not responding` errors, verify that the worker node security group allows outbound TCP 2049 to the subnet where the mount target resides.
+    If pods hang during mount with `nfs: server not responding` errors, check the security groups on the mount target's VNI: `ibmcloud is share-mount-target <share-id> <mount-target-id>`.
 
 ## Cross-Zone Access
 
@@ -160,7 +145,7 @@ Zone 1 (us-south-1)
 │                    │   NFS (TCP 2049)    │   │  └─ pvc-bbb/ ││
 │                    └─────────────────────┼──▶│             ││
 │                        zone-local        └──▶│ Mount Target ││
-│                        ~0.2ms latency        │ FQDN → IP   ││
+│                        ~0.2ms latency        │ VNI IP      ││
 │                                              └─────────────┘│
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -194,7 +179,7 @@ spec:
   # ...
 ```
 
-Because VPC mode uses DNS-based routing, the same FQDN is recorded for all zones in the pool status. VPC DNS automatically resolves it to the zone-optimal NFS server IP for each requesting node.
+One mount target, in the home zone, serves every zone. The driver records its IP address for each accessor zone in the pool status, and nodes in other zones mount it across zones over the VPC network. IBM documents cross-zone mounting for security group mode. This project has not yet tested it on a multi-zone cluster. The `subnetID` of an accessor zone is not used.
 
 ### Cross-Zone Traffic Flow
 
@@ -210,9 +195,9 @@ Zone 1 (us-south-1)                      Zone 2 (us-south-2)
 │  /pvcs/pvc-aaa/  ◄──┐  │  cross-zone  │  /data/ ← bind-mount   │
 │  /pvcs/pvc-bbb/     │  │  VPC backbone │       of pvc-aaa/      │
 │                     │  │              │                         │
-│  Mount Target       │  │              │  DNS resolves share     │
-│  FQDN: share-xxx.. │  │              │  FQDN → zone-2 IP      │
-│                     │  │              │  → routes to zone-1     │
+│  Mount Target       │  │              │  mounts the home-zone   │
+│  IP: 10.240.1.20   │  │              │  mount target IP       │
+│                     │  │              │  across zones           │
 └─────────────────────┘  │              └─────────────────────────┘
                          │
                          │              ┌─────────────────────────┐

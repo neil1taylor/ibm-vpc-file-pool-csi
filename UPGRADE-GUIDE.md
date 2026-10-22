@@ -201,9 +201,10 @@ helm upgrade ibm-vpc-file-pool-csi charts/ibm-vpc-file-pool-csi/ \
 After upgrade, register the plugin with the console:
 
 ```bash
-oc patch console.operator.openshift.io cluster \
-  --patch '{"spec":{"plugins":["ibm-vpc-file-pool-csi"]}}' \
-  --type=merge
+# Adds this plugin to the list and keeps the other plugins enabled.
+# (A merge patch with a "plugins" list would replace the whole list.)
+oc patch console.operator.openshift.io cluster --type=json \
+  -p '[{"op":"add","path":"/spec/plugins/-","value":"ibm-vpc-file-pool-csi"}]'
 ```
 
 **Requires OpenShift 4.14+** with the ConsolePlugin v1 API. Non-OpenShift clusters can skip this — no impact on existing functionality.
@@ -270,7 +271,7 @@ oc patch console.operator.openshift.io cluster \
 2. Upgrade controller — now includes `--kubelet-dir` flag wired through Helm
 3. Upgrade node DaemonSet — gains resource limits, probes, and readiness checks
 
-**ROKS users:** Verify `node.kubeletDir` is set to `/var/data/kubelet` in your Helm values. The controller's staging path now respects this setting.
+**ROKS and ROVS users:** Verify `node.kubeletDir` is set to `/var/data/kubelet` in your Helm values. The controller's staging path now respects this setting.
 
 ---
 
@@ -287,7 +288,7 @@ oc patch console.operator.openshift.io cluster \
 
 **Note:** If you already have manually created StorageClasses, they are not overwritten. To opt out of auto-creation, annotate the pool:
 ```bash
-kubectl annotate filesharespool <pool-name> storage.ibmcloud.io/skip-storageclass="true"
+kubectl annotate filesharepool <pool-name> storage.ibmcloud.io/skip-storageclass="true"
 ```
 
 ---
@@ -297,7 +298,7 @@ kubectl annotate filesharespool <pool-name> storage.ibmcloud.io/skip-storageclas
 **New features:** Validating admission webhooks, lifecycle hooks, incremental rsync.
 
 **Prerequisites:**
-- cert-manager v1.12+ must be installed (for webhook TLS certificates)
+- cert-manager v1.12+ must be installed (for webhook TLS certificates). ROVS has no cert-manager; on ROKS and ROVS you can set `webhook.certProvider=openshift` instead (see [INSTALL.md — Webhook Certificates](INSTALL.md#webhook-certificates))
 
 **CRD changes (additive):**
 - `ReplicationPolicy.spec.preSyncHooks` / `postSyncHooks` — new hook fields
@@ -434,8 +435,8 @@ Run this checklist after every upgrade:
 
 ```bash
 # 1. Verify all pods are running
-kubectl get pods -n kube-system -l app=vpc-file-pool-csi-controller
-kubectl get pods -n kube-system -l app=vpc-file-pool-csi-node
+kubectl get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller
+kubectl get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node
 
 # 2. Verify all pools are Ready
 kubectl get filesharepools
@@ -468,7 +469,7 @@ kill %1
 kubectl delete pvc upgrade-test-pvc
 
 # 7. Check controller logs for errors
-kubectl logs -n kube-system -l app=vpc-file-pool-csi-controller -c csi-controller --tail=50 | grep -i "error\|fail"
+kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller --tail=50 | grep -i "error\|fail"
 ```
 
 ---

@@ -11,8 +11,10 @@ import (
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud/fake"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
+	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	storagev1 "k8s.io/api/storage/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -37,8 +39,8 @@ type fakeNFSOperations struct {
 	WriteFileErr  error
 
 	// Sync tracking for replication tests
-	syncCallCount  int
-	lastSyncOpts   SyncOptions
+	syncCallCount int
+	lastSyncOpts  SyncOptions
 }
 
 func newFakeNFSOperations() *fakeNFSOperations {
@@ -157,25 +159,6 @@ func (f *fakeNFSOperations) ReadFile(path string) ([]byte, error) {
 	return append([]byte(nil), data...), nil
 }
 
-func (f *fakeNFSOperations) getSyncCallCount() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.syncCallCount
-}
-
-func (f *fakeNFSOperations) getLastSyncOpts() SyncOptions {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.lastSyncOpts
-}
-
-func (f *fakeNFSOperations) getFile(path string) ([]byte, bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	data, ok := f.files[path]
-	return data, ok
-}
-
 func (f *fakeNFSOperations) copyCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -216,6 +199,8 @@ type fakeK8sClient struct {
 	GetSnapshotErr      error
 	CreateSnapshotErr   error
 	DeleteSnapshotErr   error
+	// UpdateSnapshotStatusErr makes UpdateSnapshotStatus fail.
+	UpdateSnapshotStatusErr error
 }
 
 var _ = (interface {
@@ -240,7 +225,7 @@ func (f *fakeK8sClient) GetFileSharePool(_ context.Context, name string) (*v1alp
 	}
 	p, ok := f.pools[name]
 	if !ok {
-		return nil, fmt.Errorf("pool %q not found", name)
+		return nil, apierrors.NewNotFound(v1alpha1.GroupVersion.WithResource("filesharepools").GroupResource(), name)
 	}
 	return p.DeepCopy(), nil
 }
@@ -277,7 +262,7 @@ func (f *fakeK8sClient) GetSubVolume(_ context.Context, name string) (*v1alpha1.
 	}
 	sv, ok := f.subVolumes[name]
 	if !ok {
-		return nil, fmt.Errorf("subvolume %q not found", name)
+		return nil, apierrors.NewNotFound(v1alpha1.GroupVersion.WithResource("subvolumes").GroupResource(), name)
 	}
 	return sv.DeepCopy(), nil
 }
@@ -316,6 +301,10 @@ func (f *fakeK8sClient) ListCloneSubVolumes(_ context.Context) ([]v1alpha1.SubVo
 		}
 	}
 	return result, nil
+}
+
+func (f *fakeK8sClient) HasOpenRestore(_ context.Context, _, _ string) (bool, error) {
+	return false, nil
 }
 
 func (f *fakeK8sClient) CreateSubVolume(_ context.Context, sv *v1alpha1.SubVolume) error {
@@ -465,6 +454,9 @@ func (f *fakeK8sClient) UpdateSnapshot(_ context.Context, snap *v1alpha1.Snapsho
 func (f *fakeK8sClient) UpdateSnapshotStatus(_ context.Context, snap *v1alpha1.Snapshot) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.UpdateSnapshotStatusErr != nil {
+		return f.UpdateSnapshotStatusErr
+	}
 	existing, ok := f.snapshots[snap.Name]
 	if !ok {
 		return fmt.Errorf("snapshot %q not found", snap.Name)
@@ -560,6 +552,9 @@ func (f *fakeK8sClient) ListReplicationPolicies(_ context.Context) ([]v1alpha1.R
 	return nil, nil
 }
 func (f *fakeK8sClient) CreateReplicationPolicy(_ context.Context, _ *v1alpha1.ReplicationPolicy) error {
+	return nil
+}
+func (f *fakeK8sClient) UpdateReplicationPolicy(_ context.Context, _ *v1alpha1.ReplicationPolicy) error {
 	return nil
 }
 func (f *fakeK8sClient) UpdateReplicationPolicyStatus(_ context.Context, _ *v1alpha1.ReplicationPolicy) error {
@@ -726,7 +721,13 @@ func newStableShare(id, name string, totalGB, allocatedGB int64, pvcCount int32)
 }
 
 func newManagerForTest(k8s *fakeK8sClient, vpc *fake.FakeVPCClient, nfs *fakeNFSOperations) *Manager {
-	return NewManager(k8s, vpc, nfs, "/mnt/staging")
+	m := NewManager(k8s, vpc, nfs, "/mnt/staging")
+	m.SetShareNetwork(testNetwork(vpc))
+	if nfs == nil {
+		nfs = newFakeNFSOperations()
+	}
+	m.SetShareData(&fakeShareData{nfs: nfs, base: "/mnt/staging"})
+	return m
 }
 
 // PV name that matches the regex /pvcs/pvc-[a-f0-9-]{36}
@@ -1547,15 +1548,6 @@ func TestCreateSubDirectory_InvalidPath(t *testing.T) {
 	nfs := newFakeNFSOperations()
 
 	err := createSubDirectory(nfs, "/mnt/staging", "/../../../etc/passwd", nil, nil, "")
-	if err == nil {
-		t.Fatal("expected error for invalid path")
-	}
-}
-
-func TestRemoveSubDirectory_InvalidPath(t *testing.T) {
-	nfs := newFakeNFSOperations()
-
-	err := removeSubDirectory(nfs, "/mnt/staging", "/../../../etc/passwd")
 	if err == nil {
 		t.Fatal("expected error for invalid path")
 	}
@@ -2870,7 +2862,6 @@ func TestCloneVolume_SyncDisabled_AlwaysAsync(t *testing.T) {
 			PoolName:     "test-pool",
 			RequestedGB:  5,
 		},
-		10, // syncThreshold = 10 GB (ignored — sync always disabled)
 	)
 	if err != nil {
 		t.Fatalf("CloneVolume failed: %v", err)
@@ -2930,7 +2921,6 @@ func TestCloneVolume_AsyncPath(t *testing.T) {
 			PoolName:     "test-pool",
 			RequestedGB:  20,
 		},
-		10, // syncThreshold = 10 GB (source is 20 GB, so async)
 	)
 	if err != nil {
 		t.Fatalf("CloneVolume failed: %v", err)
@@ -2983,7 +2973,6 @@ func TestCloneVolume_SameShare(t *testing.T) {
 			PoolName:     "test-pool",
 			RequestedGB:  5,
 		},
-		10,
 	)
 	if err != nil {
 		t.Fatalf("CloneVolume failed: %v", err)
@@ -3021,7 +3010,6 @@ func TestCloneVolume_CrossShare(t *testing.T) {
 			PoolName:     "test-pool",
 			RequestedGB:  10,
 		},
-		10,
 	)
 	if err != nil {
 		t.Fatalf("CloneVolume failed: %v", err)
@@ -3063,7 +3051,6 @@ func TestCloneVolume_SourceNotFound(t *testing.T) {
 			PoolName:     "test-pool",
 			RequestedGB:  5,
 		},
-		10,
 	)
 
 	if !errors.Is(err, ErrSourceNotFound) {
@@ -3097,7 +3084,6 @@ func TestCloneVolume_InsufficientCapacity(t *testing.T) {
 			PoolName:     "test-pool",
 			RequestedGB:  5,
 		},
-		10,
 	)
 
 	if !errors.Is(err, ErrPoolExhausted) {
@@ -3129,7 +3115,6 @@ func TestCloneVolume_SizeTooSmall(t *testing.T) {
 			PoolName:     "test-pool",
 			RequestedGB:  10, // less than source's 50 GB
 		},
-		10,
 	)
 
 	if err == nil {
@@ -3170,7 +3155,6 @@ func TestCloneVolume_Idempotent(t *testing.T) {
 			PoolName:     "test-pool",
 			RequestedGB:  5,
 		},
-		10,
 	)
 	if err != nil {
 		t.Fatalf("idempotent CloneVolume failed: %v", err)
@@ -3213,7 +3197,6 @@ func TestCloneVolume_SyncDisabled_NoNFSCopyAttempted(t *testing.T) {
 			PoolName:     "test-pool",
 			RequestedGB:  5,
 		},
-		10,
 	)
 
 	if err != nil {
@@ -3262,7 +3245,6 @@ func TestCloneVolume_UpdatesPoolCapacity(t *testing.T) {
 			PoolName:     "test-pool",
 			RequestedGB:  5,
 		},
-		10,
 	)
 	if err != nil {
 		t.Fatalf("CloneVolume failed: %v", err)
@@ -3714,4 +3696,47 @@ func searchString(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// The clone duration metric measures the copy, which the clone worker does.
+// Accepting the clone request must not record a duration of a few milliseconds.
+func TestCloneVolume_DoesNotRecordCloneDuration(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	k.addPool(newTestPool("dur-pool", "spread", 1000, newStableShare("share-1", "s1", 1000, 100, 1)))
+	k.addSubVolume(newTestSubVolume("pvc-aaaa1111-2222-3333-4444-555566667777", "dur-pool", "share-1", 5))
+	metrics.CloneDuration.Reset()
+
+	_, err := newManagerForTest(k, vpc, newFakeNFSOperations()).CloneVolume(context.Background(),
+		"dur-pool/share-1/pvc-aaaa1111-2222-3333-4444-555566667777",
+		AllocationRequest{PVName: testPVName, PVCName: "c", PVCNamespace: "default", PoolName: "dur-pool", RequestedGB: 5},
+	)
+	if err != nil {
+		t.Fatalf("CloneVolume failed: %v", err)
+	}
+	series := make(chan prometheus.Metric, 10)
+	metrics.CloneDuration.Collect(series)
+	close(series)
+	if n := len(series); n != 0 {
+		t.Errorf("clone duration series = %d, want 0 before the copy runs", n)
+	}
+}
+
+func TestAllocate_RestorePendingSetsTheGateLabel(t *testing.T) {
+	k := newFakeK8sClient()
+	k.addPool(newTestPool("test-pool", "spread", 1000, newStableShare("share-1", "s1", 1000, 0, 0)))
+	mgr := newManagerForTest(k, fake.NewFakeVPCClient(), newFakeNFSOperations())
+
+	if _, err := mgr.Allocate(context.Background(), AllocationRequest{
+		PVName: testPVName, PVCName: "my-pvc", PVCNamespace: "default", PoolName: "test-pool", RequestedGB: 10, RestorePending: true,
+	}); err != nil {
+		t.Fatalf("Allocate failed: %v", err)
+	}
+	sv, err := k.GetSubVolume(context.Background(), testPVName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sv.Labels[RestorePendingLabel] != "true" {
+		t.Errorf("labels = %v: a volume made for a restore must be held back from its first moment", sv.Labels)
+	}
 }

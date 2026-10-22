@@ -19,7 +19,7 @@ Before using these examples, ensure:
 | [shared-rwx/](shared-rwx/) | ReadWriteMany PVC shared across deployment replicas |
 | [tiered/](tiered/) | Performance tiers: standard and high-IOPS pools |
 | [custom-permissions/](custom-permissions/) | Restricted UID/GID/permissions via StorageClass |
-| [retain-archive/](retain-archive/) | Retain or archive data on PVC deletion |
+| [retain/](retain/) | Keep data after PVC deletion (`reclaimPolicy: Retain`) |
 
 ## Quick Start
 
