@@ -417,7 +417,7 @@ kubectl apply -f config/deploy/node.yaml
 | `--gateway-listen` | `:8443` | Address to listen on |
 | `--gateway-tls-cert-file`, `--gateway-tls-key-file` | (required) | The serving certificate. It is read again when the files change. The gateway is never served in plain HTTP |
 | `--gateway-browse-namespace` | `ibm-vpc-file-pool-csi-browse` | Where the session Secrets are |
-| `--gateway-session-wait` | `60s` | How long a request to open a session waits for it to be ready |
+| `--gateway-session-wait` | `20s` | How long a request that asks to wait holds for the session to be ready; keep it under the proxy timeout |
 | `--gateway-max-download-bytes` | `53687091200` | Largest single file or tar |
 | `--gateway-auth-cache` | `10s` | How long a token review is kept; `0` checks every call. The right on the namespace is checked on every call regardless |
 

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,6 +35,9 @@ type stubGateway struct {
 	tarBytes []byte
 	fileErr  *gateway.ErrorBody
 	denied   bool
+	// slowStart makes a new session Pending until it has been asked about twice.
+	slowStart bool
+	asks      int
 }
 
 func (s *stubGateway) handler(t *testing.T) http.Handler {
@@ -49,6 +53,10 @@ func (s *stubGateway) handler(t *testing.T) http.Handler {
 	}
 	mux.HandleFunc("POST /v1/sessions", func(w http.ResponseWriter, r *http.Request) {
 		rec(r)
+		if r.URL.Query().Get("wait") != "" {
+			fail(w, 504, gateway.ErrorBody{Code: "timeout", Message: "a proxy cut a long request"})
+			return
+		}
 		if s.denied {
 			fail(w, 403, gateway.ErrorBody{Code: "forbidden", Message: "you may not read the backups of that namespace"})
 			return
@@ -58,11 +66,22 @@ func (s *stubGateway) handler(t *testing.T) http.Handler {
 		s.mu.Lock()
 		s.sessions = append(s.sessions, req)
 		s.mu.Unlock()
-		_ = json.NewEncoder(w).Encode(gateway.Session{Name: "bb-abc", Phase: "Ready"})
+		phase := "Ready"
+		if s.slowStart {
+			phase = "Pending"
+		}
+		_ = json.NewEncoder(w).Encode(gateway.Session{Name: "bb-abc", Phase: phase})
 	})
 	mux.HandleFunc("GET /v1/sessions/{name}", func(w http.ResponseWriter, r *http.Request) {
 		rec(r)
-		_ = json.NewEncoder(w).Encode(gateway.Session{Name: r.PathValue("name"), Phase: "Ready"})
+		s.mu.Lock()
+		s.asks++
+		phase := "Ready"
+		if s.slowStart && s.asks < 2 {
+			phase = "Starting"
+		}
+		s.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(gateway.Session{Name: r.PathValue("name"), Phase: phase})
 	})
 	mux.HandleFunc("DELETE /v1/sessions/{name}", func(w http.ResponseWriter, r *http.Request) {
 		rec(r)
@@ -402,5 +421,20 @@ func TestGatewayInfoFromTheConfigMap(t *testing.T) {
 	empty := fakeclient.NewClientBuilder().WithScheme(newScheme()).WithObjects(&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: gatewayInfoName, Namespace: "kube-system"}}).Build()
 	if _, _, err := gatewayInfo(context.Background(), empty, "kube-system"); err == nil {
 		t.Error("a ConfigMap with no url must be refused")
+	}
+}
+
+func TestLs_ASlowSessionIsPolledNotWaitedFor(t *testing.T) {
+	s, gw := newStub(t)
+	s.slowStart = true
+	s.pages[""] = browse.ListPage{}
+	old := pollEvery
+	pollEvery = 10 * time.Millisecond
+	defer func() { pollEvery = old }()
+	if err := runLs(context.Background(), gw, &bytes.Buffer{}, args()); err != nil {
+		t.Fatal(err)
+	}
+	if s.asks < 2 {
+		t.Errorf("the session was asked about %d times; it must be polled until ready", s.asks)
 	}
 }

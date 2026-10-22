@@ -139,7 +139,7 @@ func main() {
 	flag.StringVar(&gw.listen, "gateway-listen", ":8443", "Address the backup gateway listens on (backup-gateway mode)")
 	flag.StringVar(&gw.certFile, "gateway-tls-cert-file", "", "Serving certificate of the backup gateway (PEM); read again when it changes")
 	flag.StringVar(&gw.keyFile, "gateway-tls-key-file", "", "Serving key of the backup gateway (PEM)")
-	flag.DurationVar(&gw.sessionWait, "gateway-session-wait", 60*time.Second, "How long a request to open a browse session waits for it to be ready")
+	flag.DurationVar(&gw.sessionWait, "gateway-session-wait", 20*time.Second, "How long a request that asks to wait holds for a browse session to be ready (keep it under the proxy timeout)")
 	flag.Int64Var(&gw.maxDownload, "gateway-max-download-bytes", 50<<30, "Largest single file or tar a user may download")
 	flag.StringVar(&gw.browseNamespace, "gateway-browse-namespace", "ibm-vpc-file-pool-csi-browse", "Namespace of the browse sessions: their Secrets and helper pods (backup-gateway mode)")
 	flag.DurationVar(&gw.authCache, "gateway-auth-cache", 10*time.Second, "How long a token review is kept; 0 checks every call")

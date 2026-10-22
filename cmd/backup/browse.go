@@ -160,6 +160,11 @@ func parseTarget(flags map[string]string) (target, error) {
 	return t, nil
 }
 
+// pollEvery is how often to ask whether a new session is ready. The request to
+// open a session does not wait: a proxy in front of the gateway would cut a long
+// request (the OpenShift router does after 30 seconds).
+var pollEvery = 2 * time.Second
+
 // openSession returns the name of a ready session on the backup, opening or
 // reusing one.
 func (g *gwClient) openSession(ctx context.Context, t target, timeout time.Duration) (string, error) {
@@ -168,7 +173,7 @@ func (g *gwClient) openSession(ctx context.Context, t target, timeout time.Durat
 	}
 	var s gateway.Session
 	req := gateway.SessionRequest{Policy: t.policy, Namespace: t.namespace, PVC: t.pvc, Moment: t.moment}
-	if err := g.doJSON(ctx, http.MethodPost, "/v1/sessions?wait=true", req, &s); err != nil {
+	if err := g.doJSON(ctx, http.MethodPost, "/v1/sessions", req, &s); err != nil {
 		return "", err
 	}
 	deadline := time.Now().Add(timeout)
@@ -183,7 +188,7 @@ func (g *gwClient) openSession(ctx context.Context, t target, timeout time.Durat
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
-		case <-time.After(2 * time.Second):
+		case <-time.After(pollEvery):
 		}
 		if err := g.doJSON(ctx, http.MethodGet, "/v1/sessions/"+url.PathEscape(s.Name), nil, &s); err != nil {
 			return "", err

@@ -135,8 +135,10 @@ backupGateway:
     enabled: true
     # Empty lets OpenShift choose the host.
     host: ""
-  # How long a request to open a session waits for the helper pod to be ready.
-  sessionWait: 60s
+  # How long a request that asks to wait (?wait=true) holds for the helper pod to
+  # be ready. Keep it under the proxy timeout (the OpenShift router cuts a request
+  # after 30 seconds). kubectl backup does not ask to wait: it polls.
+  sessionWait: 20s
   # The largest single file or tar a user may download.
   maxDownloadBytes: 53687091200
   resources:
