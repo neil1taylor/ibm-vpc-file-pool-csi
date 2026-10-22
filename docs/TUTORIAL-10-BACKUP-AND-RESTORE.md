@@ -175,7 +175,7 @@ The controller makes a `ReplicationPolicy` named `backup-${POLICY}-...` for each
 kubectl backup list --policy ${POLICY}
 ```
 
-Repeat until the row for `${NS}/files` shows a time under `LAST BACKUP`. This takes a few minutes. The row shows `sync in progress` in the `ERROR` column until the first copy ends.
+Repeat until the row for `${NS}/files` shows a time under `LAST BACKUP`. This takes as long as the first copy. The row shows `sync in progress` in the `ERROR` column until the first copy ends, and shows the time within seconds after that.
 
 **Expected:**
 
