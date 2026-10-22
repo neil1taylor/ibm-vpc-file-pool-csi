@@ -15,7 +15,7 @@ Take a snapshot of a running VM in seconds, whatever the disk size. Delete a sna
 
 - OpenShift Virtualization on your cluster, and `virtctl`.
 - A running VM whose disks are PVCs on a pool StorageClass. Its guest runs the guest agent (`qemu-guest-agent`). This tutorial calls the VM `my-vm` in the namespace `vms`. Change the names to match yours.
-- Each disk file (`disk.img`) is owned by the QEMU user (UID 107). The driver changes the file mode from inside the VM pod, as UID 107. If another user owns the file, the first snapshot fails with `chmod: changing permissions of '.../disk.img': Operation not permitted`. A disk that you made by hand as root on NFS (as in [Part 1](TUTORIAL-01-POOL-CREATION.md)) is owned by `nobody` unless you run `chown 107:107` on it.
+- Each disk file (`disk.img`) is owned by the QEMU user (UID 107). The driver makes the frozen file read-only from inside the VM pod, as UID 107, and only the owner can do that. If another user owns the file, the driver refuses before it changes anything: the VolumeSnapshot or VM snapshot fails with a message that names the owner, and the disk chain stays as it was. A disk that you made by hand as root on NFS (as in [Part 1](TUTORIAL-01-POOL-CREATION.md)) is owned by `nobody` unless you run `chown 107:107` on it. Run the `chown`, then take the snapshot again.
 - A VolumeSnapshotClass for the driver exists. The chart makes `ibm-vpc-file-pool` (see `volumeSnapshotClass` in [HELM-VALUES.md](HELM-VALUES.md)).
 - The driver runs with the admission webhooks on, and `vmSnapshots.method=auto` (the chart default). See [HELM-VALUES.md](HELM-VALUES.md).
 
