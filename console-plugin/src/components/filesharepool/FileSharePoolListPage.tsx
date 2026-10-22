@@ -8,6 +8,7 @@ import {
   useListPageFilter,
   Timestamp,
 } from '@openshift-console/dynamic-plugin-sdk';
+import InstantSnapshotStatus from '../common/InstantSnapshotStatus';
 import { Link } from 'react-router-dom';
 import {
   Table,
@@ -27,6 +28,7 @@ import PoolPhase from '../common/PoolPhase';
 import InlineCapacityBar from '../common/InlineCapacityBar';
 import DeleteModal from '../common/DeleteModal';
 import { ROUTES } from '../../constants';
+import { columnInfo } from '../../utils/column-help';
 
 /** IOPS display: spec.iops if set; otherwise the VPC chooses the IOPS when it creates the share. */
 export function getIOPS(pool: FileSharePool): string {
@@ -154,6 +156,9 @@ const FileSharePoolListPage: React.FC = () => {
       <p style={{ padding: '0 24px', margin: '0 0 8px 0' }}>
         <Link to={ROUTES.MIGRATE}>Migrate volumes into a pool</Link>
       </p>
+      <div style={{ padding: '0 24px', margin: '0 0 16px 0' }}>
+        <InstantSnapshotStatus />
+      </div>
       <ListPageBody>
         <ListPageFilter
           data={data}
@@ -186,7 +191,7 @@ const FileSharePoolListPage: React.FC = () => {
                 <Th sort={getSortParams(4)}>Shares</Th>
                 <Th>Capacity</Th>
                 <Th sort={getSortParams(6)}>PVCs</Th>
-                <Th sort={getSortParams(7)}>Phase</Th>
+                <Th sort={getSortParams(7)} info={columnInfo('poolPhase')}>Phase</Th>
                 <Th sort={getSortParams(8)}>Age</Th>
                 <Th></Th>
               </Tr>

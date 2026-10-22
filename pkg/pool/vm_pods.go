@@ -11,7 +11,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-var vmimListGVK = schema.GroupVersionKind{Group: "kubevirt.io", Version: "v1", Kind: "VirtualMachineInstanceMigrationList"}
+var (
+	vmimListGVK = schema.GroupVersionKind{Group: "kubevirt.io", Version: "v1", Kind: "VirtualMachineInstanceMigrationList"}
+	vmiListGVK  = schema.GroupVersionKind{Group: "kubevirt.io", Version: "v1", Kind: "VirtualMachineInstanceList"}
+)
 
 // Helpers that find the KubeVirt pod of a claim and watch it. Both the
 // replication controller and the snapshot code use them.
@@ -50,6 +53,29 @@ func findVMPodForClaim(ctx context.Context, c client.Client, namespace, claim st
 		}
 	}
 	return found, foundVol, nil
+}
+
+// findVMInstanceForClaim returns the name of a VirtualMachineInstance that uses
+// the claim and has not finished, or "". A VMI exists before its pod does, so
+// it shows a VM that starts.
+func findVMInstanceForClaim(ctx context.Context, c client.Client, namespace, claim string) (string, error) {
+	list := &unstructured.UnstructuredList{}
+	list.SetGroupVersionKind(vmiListGVK)
+	if err := c.List(ctx, list, client.InNamespace(namespace)); err != nil {
+		return "", fmt.Errorf("listing VM instances in %s: %w", namespace, err)
+	}
+	for _, vmi := range list.Items {
+		if phase, _, _ := unstructured.NestedString(vmi.Object, "status", "phase"); phase == "Succeeded" || phase == "Failed" {
+			continue
+		}
+		vols, _, _ := unstructured.NestedSlice(vmi.Object, "spec", "volumes")
+		for _, v := range vols {
+			if vol, _ := v.(map[string]any); claimOfVolume(vol) == claim {
+				return vmi.GetName(), nil
+			}
+		}
+	}
+	return "", nil
 }
 
 // vmInstanceMoving reports whether a live migration of the VMI is requested or running.

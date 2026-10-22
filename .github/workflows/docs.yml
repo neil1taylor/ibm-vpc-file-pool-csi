@@ -8,6 +8,7 @@ on:
       - '*.md'
       - 'examples/**/*.md'
       - 'mkdocs.yml'
+      - 'hack/mkdocs_hooks.py'
       - 'docs/**'
       - '.github/workflows/docs.yml'
 

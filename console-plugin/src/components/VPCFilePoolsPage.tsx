@@ -8,8 +8,12 @@ import {
   TabTitleText,
   Spinner,
   Bullseye,
+  Split,
+  SplitItem,
 } from '@patternfly/react-core';
 import { ROUTES } from '../constants';
+import { helpUrlForPath } from '../utils/help-links';
+import HelpLink from './common/HelpLink';
 
 // Lazy-load all sub-pages for webpack code-splitting
 const DashboardPage = React.lazy(
@@ -51,15 +55,6 @@ const RestoreSnapshotPage = React.lazy(
 const SnapshotCreatePage = React.lazy(
   () => import('./snapshot/SnapshotCreatePage'),
 );
-const VolumeGroupSnapshotListPage = React.lazy(
-  () => import('./volumegroupsnapshot/VolumeGroupSnapshotListPage'),
-);
-const VolumeGroupSnapshotDetailsPage = React.lazy(
-  () => import('./volumegroupsnapshot/VolumeGroupSnapshotDetailsPage'),
-);
-const VolumeGroupSnapshotCreatePage = React.lazy(
-  () => import('./volumegroupsnapshot/VolumeGroupSnapshotCreatePage'),
-);
 const ReplicationPolicyListPage = React.lazy(
   () => import('./replicationpolicy/ReplicationPolicyListPage'),
 );
@@ -68,6 +63,21 @@ const ReplicationPolicyDetailsPage = React.lazy(
 );
 const ReplicationPolicyCreatePage = React.lazy(
   () => import('./replicationpolicy/ReplicationPolicyCreatePage'),
+);
+const BackupListPage = React.lazy(
+  () => import('./backup/BackupListPage'),
+);
+const BackupDetailsPage = React.lazy(
+  () => import('./backup/BackupDetailsPage'),
+);
+const BackupPolicyFormPage = React.lazy(
+  () => import('./backup/BackupPolicyFormPage'),
+);
+const BackupCOSRestorePage = React.lazy(
+  () => import('./backup/BackupCOSRestorePage'),
+);
+const BackupRestorePage = React.lazy(
+  () => import('./backup/BackupRestorePage'),
 );
 const MonitoringPage = React.lazy(
   () => import('./monitoring/MonitoringPage'),
@@ -79,8 +89,8 @@ const TAB_PATHS = [
   ROUTES.POOLS,
   ROUTES.SUBVOLUMES,
   ROUTES.SNAPSHOTS,
-  ROUTES.GROUP_SNAPSHOTS,
   ROUTES.REPLICATION,
+  ROUTES.BACKUPS,
   ROUTES.MONITORING,
 ] as const;
 
@@ -91,8 +101,8 @@ const TAB_LABELS: Record<TabKey, string> = {
   [ROUTES.POOLS]: 'Pools',
   [ROUTES.SUBVOLUMES]: 'SubVolumes',
   [ROUTES.SNAPSHOTS]: 'Snapshots',
-  [ROUTES.GROUP_SNAPSHOTS]: 'Group Snapshots',
   [ROUTES.REPLICATION]: 'Replication',
+  [ROUTES.BACKUPS]: 'Backups',
   [ROUTES.MONITORING]: 'Monitoring',
 };
 
@@ -120,13 +130,16 @@ const VPCFilePoolsPage: React.FC = () => {
   // Detail/create pages render standalone (no tabs)
   if (!isTabPath) {
     return (
+      <>
+      <PageSection style={{ paddingBottom: 0, textAlign: 'right' }}>
+        <HelpLink href={helpUrlForPath(location.pathname)} />
+      </PageSection>
       <Suspense fallback={<Loading />}>
         <Switch>
           {/* Create pages (must come before detail :name routes) */}
           <Route exact path={ROUTES.POOL_CREATE} component={FileSharePoolCreatePage} />
           <Route exact path={ROUTES.SUBVOLUME_CREATE} component={SubVolumeCreatePage} />
           <Route exact path={ROUTES.SNAPSHOT_CREATE} component={SnapshotCreatePage} />
-          <Route exact path={ROUTES.GROUP_SNAPSHOT_CREATE} component={VolumeGroupSnapshotCreatePage} />
           <Route exact path={ROUTES.REPLICATION_CREATE} component={ReplicationPolicyCreatePage} />
           <Route exact path={ROUTES.SNAPSHOT_RESTORE} component={RestoreSnapshotPage} />
           <Route exact path={ROUTES.MIGRATE} component={MigrateVolumesPage} />
@@ -135,10 +148,15 @@ const VPCFilePoolsPage: React.FC = () => {
           <Route exact path={ROUTES.POOL_DETAIL} component={FileSharePoolDetailsPage} />
           <Route exact path={ROUTES.SUBVOLUME_DETAIL} component={SubVolumeDetailsPage} />
           <Route exact path={ROUTES.SNAPSHOT_DETAIL} component={SnapshotDetailsPage} />
-          <Route exact path={ROUTES.GROUP_SNAPSHOT_DETAIL} component={VolumeGroupSnapshotDetailsPage} />
           <Route exact path={ROUTES.REPLICATION_DETAIL} component={ReplicationPolicyDetailsPage} />
+          <Route exact path={ROUTES.BACKUP_COS_RESTORE} component={BackupCOSRestorePage} />
+          <Route exact path={ROUTES.BACKUP_CREATE} component={BackupPolicyFormPage} />
+          <Route exact path={ROUTES.BACKUP_EDIT} component={BackupPolicyFormPage} />
+          <Route exact path={ROUTES.BACKUP_RESTORE} component={BackupRestorePage} />
+          <Route exact path={ROUTES.BACKUP_DETAIL} component={BackupDetailsPage} />
         </Switch>
       </Suspense>
+      </>
     );
   }
 
@@ -146,9 +164,14 @@ const VPCFilePoolsPage: React.FC = () => {
   return (
     <>
       <PageSection style={{ paddingBottom: 0 }}>
-        <Title headingLevel="h1" style={{ marginBottom: 16 }}>
-          IBM VPC File Pools
-        </Title>
+        <Split style={{ marginBottom: 16 }}>
+          <SplitItem isFilled>
+            <Title headingLevel="h1">IBM VPC File Pools</Title>
+          </SplitItem>
+          <SplitItem>
+            <HelpLink href={helpUrlForPath(location.pathname)} />
+          </SplitItem>
+        </Split>
         <Tabs
           activeKey={activeTab}
           onSelect={(_e, key) => history.push(key as string)}
@@ -170,8 +193,8 @@ const VPCFilePoolsPage: React.FC = () => {
           <Route exact path={ROUTES.POOLS} component={FileSharePoolListPage} />
           <Route exact path={ROUTES.SUBVOLUMES} component={SubVolumeListPage} />
           <Route exact path={ROUTES.SNAPSHOTS} component={SnapshotListPage} />
-          <Route exact path={ROUTES.GROUP_SNAPSHOTS} component={VolumeGroupSnapshotListPage} />
           <Route exact path={ROUTES.REPLICATION} component={ReplicationPolicyListPage} />
+          <Route exact path={ROUTES.BACKUPS} component={BackupListPage} />
           <Route exact path={ROUTES.MONITORING} component={MonitoringPage} />
           <Route path={ROUTES.DASHBOARD} component={DashboardPage} />
         </Switch>

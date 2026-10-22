@@ -104,15 +104,6 @@ test.describe('Snapshots Tab', () => {
   });
 });
 
-test.describe('Group Snapshots Tab', () => {
-  test('page loads without error', async ({ page }) => {
-    await navigateTo(page, ROUTES.dashboard);
-    await checkSessionValid(page);
-    await clickTab(page, 'Group Snapshots');
-    await expectTableOrEmptyState(page);
-  });
-});
-
 test.describe('Replication Tab', () => {
   test('page loads without error', async ({ page }) => {
     await navigateTo(page, ROUTES.dashboard);

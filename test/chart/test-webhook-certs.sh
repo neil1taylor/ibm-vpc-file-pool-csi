@@ -44,7 +44,7 @@ expect_absent "cert-manager: no OpenShift service CA annotations" "$out" "servic
 # manual: the CA bundle comes from a chart value and is set on every webhook.
 out=$(render --set webhook.certProvider=manual --set webhook.caBundle=Q0EtQlVORExF)
 count=$(grep -c "caBundle: Q0EtQlVORExF" <<<"$out" || true)
-if [[ "$count" == 5 ]]; then pass "manual: all 5 webhooks get the CA bundle"; else fail "manual: CA bundle on $count of 5 webhooks"; fi
+if [[ "$count" == 8 ]]; then pass "manual: all 8 webhooks get the CA bundle"; else fail "manual: CA bundle on $count of 8 webhooks"; fi
 expect_absent "manual: no cert-manager resources" "$out" "cert-manager.io"
 
 # manual without a CA bundle cannot work, so the render fails.

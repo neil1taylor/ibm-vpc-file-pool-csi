@@ -27,6 +27,7 @@ import PhaseStatus from '../common/PhaseStatus';
 import DeleteModal from '../common/DeleteModal';
 import { ROUTES } from '../../constants';
 import { cloneDisabledReason } from '../../utils/restore-helpers';
+import { columnInfo } from '../../utils/column-help';
 
 const SubVolumeRow: React.FC<{
   sv: SubVolume;
@@ -196,8 +197,8 @@ const SubVolumeListPage: React.FC = () => {
                 <Th sort={getSortParams(1)}>Pool</Th>
                 <Th sort={getSortParams(2)}>PVC</Th>
                 <Th sort={getSortParams(3)}>Size</Th>
-                <Th sort={getSortParams(4)}>Phase</Th>
-                <Th sort={getSortParams(5)}>Clone Status</Th>
+                <Th sort={getSortParams(4)} info={columnInfo('subVolumePhase')}>Phase</Th>
+                <Th sort={getSortParams(5)} info={columnInfo('cloneStatus')}>Clone Status</Th>
                 <Th sort={getSortParams(6)}>Age</Th>
                 <Th></Th>
               </Tr>

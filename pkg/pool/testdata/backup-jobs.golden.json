@@ -1,0 +1,546 @@
+{
+  "cosList": {
+    "job": {
+      "apiVersion": "batch/v1",
+      "kind": "Job",
+      "metadata": {
+        "labels": {
+          "storage.ibmcloud.io/share-data-job": "share-data-coslist-abc"
+        },
+        "name": "share-data-coslist-abc",
+        "namespace": "kube-system"
+      },
+      "spec": {
+        "backoffLimit": 3,
+        "template": {
+          "metadata": {
+            "labels": {
+              "storage.ibmcloud.io/share-data-job": "share-data-coslist-abc"
+            }
+          },
+          "spec": {
+            "automountServiceAccountToken": true,
+            "containers": [
+              {
+                "command": [
+                  "/bin/sh",
+                  "-c",
+                  "set -eu\nstate='/tmp/kopia'\nmkdir -p \"$state\"\nexport HOME=\"$state\"\nexport KOPIA_CONFIG_PATH=\"$state/repository.config\"\nexport KOPIA_CACHE_DIRECTORY=\"$state/cache\"\nexport KOPIA_LOG_DIR=\"$state/logs\"\nexport KOPIA_CHECK_FOR_UPDATES=false\nkeyfile='/run/backup-key/key'\n/usr/local/bin/vpc-file-pool-csi --mode=unwrap-backup-key --kp-region='eu-de' --kp-instance='11111111-2222-3333-4444-555555555555' --kp-root-key='abcd-1234' --wrapped-key-file='/var/run/pool-csi/backup-key-wrapped/wrappedKey' --api-key-file='/var/run/pool-csi/keyprotect-apikey/apikey' --key-out=\"$keyfile\"\nKOPIA_PASSWORD=$(cat \"$keyfile\")\nexport KOPIA_PASSWORD\nrm -f \"$keyfile\"\nident=\"--no-persist-credentials --override-username=driver --override-hostname=pool-csi\"\nkopia repository connect s3 --bucket='backups-bucket' --endpoint='s3.eu-de.cloud-object-storage.appdomain.cloud' --prefix='nightly/' $ident --readonly\nkopia snapshot list --all --json | sed -n 's/^ *{\"id\":\"\\([^\"]*\\)\".*\"path\":\"\\([^\"]*\\)\".*\"tag:moment\":\"\\([^\"]*\\)\",\"tag:volume\":\"\\([^\"]*\\)\".*/\\1 \\2 \\3 \\4/p' | awk -v vol='pvc-11111111-2222-3333-4444-555555555555' -v limit=3500 '$2 ~ /\\/\\.moments\\// { next }\nvol != \"\" \u0026\u0026 $4 != vol { next }\n{\n  if (!($4 in seen)) { seen[$4] = 1; order[++n] = $4 }\n  if (!(($4, $3) in has)) { has[$4, $3] = 1; ms[$4] = ms[$4] \" \" $3 }\n}\nEND {\n  out = \"{\\\"volumes\\\":[\"; trunc = \"false\"; first = 1\n  for (i = 1; i \u003c= n \u0026\u0026 trunc == \"false\"; i++) {\n    v = order[i]; k = split(ms[v], arr, \" \")\n    item = \"{\\\"volume\\\":\\\"\" v \"\\\",\\\"moments\\\":[\"\n    for (j = 1; j \u003c= k; j++) {\n      piece = (j \u003e 1 ? \",\" : \"\") \"\\\"\" arr[j] \"\\\"\"\n      if (length(out) + length(item) + length(piece) + 40 \u003e limit) { trunc = \"true\"; break }\n      item = item piece\n    }\n    out = out (first ? \"\" : \",\") item \"]}\"; first = 0\n  }\n  print out \"],\\\"truncated\\\":\" trunc \"}\"\n}' \u003e '/dev/termination-log'\n"
+                ],
+                "env": [
+                  {
+                    "name": "AWS_ACCESS_KEY_ID",
+                    "valueFrom": {
+                      "secretKeyRef": {
+                        "key": "access_key_id",
+                        "name": "cos-credentials"
+                      }
+                    }
+                  },
+                  {
+                    "name": "AWS_SECRET_ACCESS_KEY",
+                    "valueFrom": {
+                      "secretKeyRef": {
+                        "key": "secret_access_key",
+                        "name": "cos-credentials"
+                      }
+                    }
+                  }
+                ],
+                "image": "icr.io/example/ibm-vpc-file-pool-csi:v1.0.0",
+                "name": "share-data",
+                "resources": {
+                  "limits": {
+                    "cpu": "2",
+                    "memory": "2Gi"
+                  },
+                  "requests": {
+                    "cpu": "200m",
+                    "memory": "512Mi"
+                  }
+                },
+                "volumeMounts": [
+                  {
+                    "mountPath": "/var/run/pool-csi/backup-key-wrapped",
+                    "name": "backup-key-wrapped",
+                    "readOnly": true
+                  },
+                  {
+                    "mountPath": "/var/run/pool-csi/keyprotect-apikey",
+                    "name": "keyprotect-apikey",
+                    "readOnly": true
+                  },
+                  {
+                    "mountPath": "/run/backup-key",
+                    "name": "backup-key-memory"
+                  }
+                ]
+              }
+            ],
+            "restartPolicy": "OnFailure",
+            "securityContext": {
+              "runAsUser": 0
+            },
+            "volumes": [
+              {
+                "name": "backup-key-wrapped",
+                "secret": {
+                  "items": [
+                    {
+                      "key": "wrappedKey",
+                      "path": "wrappedKey"
+                    }
+                  ],
+                  "secretName": "cos-backup-key"
+                }
+              },
+              {
+                "name": "keyprotect-apikey",
+                "secret": {
+                  "items": [
+                    {
+                      "key": "apikey",
+                      "path": "apikey"
+                    }
+                  ],
+                  "secretName": "keyprotect-apikey"
+                }
+              },
+              {
+                "emptyDir": {
+                  "medium": "Memory",
+                  "sizeLimit": "1Mi"
+                },
+                "name": "backup-key-memory"
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "cosListVariant": {
+    "job": {
+      "apiVersion": "batch/v1",
+      "kind": "Job",
+      "metadata": {
+        "labels": {
+          "storage.ibmcloud.io/share-data-job": "share-data-coslist-abc"
+        },
+        "name": "share-data-coslist-abc",
+        "namespace": "kube-system"
+      },
+      "spec": {
+        "backoffLimit": 3,
+        "template": {
+          "metadata": {
+            "labels": {
+              "storage.ibmcloud.io/share-data-job": "share-data-coslist-abc"
+            }
+          },
+          "spec": {
+            "automountServiceAccountToken": true,
+            "containers": [
+              {
+                "command": [
+                  "/bin/sh",
+                  "-c",
+                  "set -eu\nstate='/tmp/kopia'\nmkdir -p \"$state\"\nexport HOME=\"$state\"\nexport KOPIA_CONFIG_PATH=\"$state/repository.config\"\nexport KOPIA_CACHE_DIRECTORY=\"$state/cache\"\nexport KOPIA_LOG_DIR=\"$state/logs\"\nexport KOPIA_CHECK_FOR_UPDATES=false\nkeyfile='/run/backup-key/key'\n/usr/local/bin/vpc-file-pool-csi --mode=unwrap-backup-key --kp-region='eu-de' --kp-instance='11111111-2222-3333-4444-555555555555' --kp-root-key='abcd-1234' --wrapped-key-file='/var/run/pool-csi/backup-key-wrapped/wrappedKey' --api-key-file='/var/run/pool-csi/keyprotect-apikey/apikey' --emergency-key-file='/var/run/pool-csi/backup-key-emergency/backupKey' --key-out=\"$keyfile\"\nKOPIA_PASSWORD=$(cat \"$keyfile\")\nexport KOPIA_PASSWORD\nrm -f \"$keyfile\"\nident=\"--no-persist-credentials --override-username=driver --override-hostname=pool-csi\"\nkopia repository connect s3 --bucket='backups-bucket' --endpoint='cos.example.com:9000' --disable-tls --prefix='team/backups/nightly/' $ident --readonly\nkopia snapshot list --all --json | sed -n 's/^ *{\"id\":\"\\([^\"]*\\)\".*\"path\":\"\\([^\"]*\\)\".*\"tag:moment\":\"\\([^\"]*\\)\",\"tag:volume\":\"\\([^\"]*\\)\".*/\\1 \\2 \\3 \\4/p' | awk -v vol='' -v limit=3500 '$2 ~ /\\/\\.moments\\// { next }\nvol != \"\" \u0026\u0026 $4 != vol { next }\n{\n  if (!($4 in seen)) { seen[$4] = 1; order[++n] = $4 }\n  if (!(($4, $3) in has)) { has[$4, $3] = 1; ms[$4] = ms[$4] \" \" $3 }\n}\nEND {\n  out = \"{\\\"volumes\\\":[\"; trunc = \"false\"; first = 1\n  for (i = 1; i \u003c= n \u0026\u0026 trunc == \"false\"; i++) {\n    v = order[i]; k = split(ms[v], arr, \" \")\n    item = \"{\\\"volume\\\":\\\"\" v \"\\\",\\\"moments\\\":[\"\n    for (j = 1; j \u003c= k; j++) {\n      piece = (j \u003e 1 ? \",\" : \"\") \"\\\"\" arr[j] \"\\\"\"\n      if (length(out) + length(item) + length(piece) + 40 \u003e limit) { trunc = \"true\"; break }\n      item = item piece\n    }\n    out = out (first ? \"\" : \",\") item \"]}\"; first = 0\n  }\n  print out \"],\\\"truncated\\\":\" trunc \"}\"\n}' \u003e '/dev/termination-log'\n"
+                ],
+                "env": [
+                  {
+                    "name": "AWS_ACCESS_KEY_ID",
+                    "valueFrom": {
+                      "secretKeyRef": {
+                        "key": "access_key_id",
+                        "name": "cos-credentials"
+                      }
+                    }
+                  },
+                  {
+                    "name": "AWS_SECRET_ACCESS_KEY",
+                    "valueFrom": {
+                      "secretKeyRef": {
+                        "key": "secret_access_key",
+                        "name": "cos-credentials"
+                      }
+                    }
+                  }
+                ],
+                "image": "icr.io/example/ibm-vpc-file-pool-csi:v1.0.0",
+                "name": "share-data",
+                "resources": {
+                  "limits": {
+                    "cpu": "2",
+                    "memory": "2Gi"
+                  },
+                  "requests": {
+                    "cpu": "200m",
+                    "memory": "512Mi"
+                  }
+                },
+                "volumeMounts": [
+                  {
+                    "mountPath": "/var/run/pool-csi/backup-key-wrapped",
+                    "name": "backup-key-wrapped",
+                    "readOnly": true
+                  },
+                  {
+                    "mountPath": "/var/run/pool-csi/keyprotect-apikey",
+                    "name": "keyprotect-apikey",
+                    "readOnly": true
+                  },
+                  {
+                    "mountPath": "/var/run/pool-csi/backup-key-emergency",
+                    "name": "backup-key-emergency",
+                    "readOnly": true
+                  },
+                  {
+                    "mountPath": "/run/backup-key",
+                    "name": "backup-key-memory"
+                  }
+                ]
+              }
+            ],
+            "restartPolicy": "OnFailure",
+            "securityContext": {
+              "runAsUser": 0
+            },
+            "volumes": [
+              {
+                "name": "backup-key-wrapped",
+                "secret": {
+                  "items": [
+                    {
+                      "key": "wrappedKey",
+                      "path": "wrappedKey"
+                    }
+                  ],
+                  "secretName": "cos-backup-key"
+                }
+              },
+              {
+                "name": "keyprotect-apikey",
+                "secret": {
+                  "items": [
+                    {
+                      "key": "apikey",
+                      "path": "apikey"
+                    }
+                  ],
+                  "secretName": "keyprotect-apikey"
+                }
+              },
+              {
+                "name": "backup-key-emergency",
+                "secret": {
+                  "items": [
+                    {
+                      "key": "backupKey",
+                      "path": "backupKey"
+                    }
+                  ],
+                  "secretName": "cos-emergency-key"
+                }
+              },
+              {
+                "emptyDir": {
+                  "medium": "Memory",
+                  "sizeLimit": "1Mi"
+                },
+                "name": "backup-key-memory"
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "input": {
+    "backupPath": "/backup/nightly/pvcs/pvc-11111111-2222-3333-4444-555555555555",
+    "cosListKey": "coslist-abc",
+    "cosRepo": {
+      "backupKeySecret": "cos-backup-key",
+      "bucket": "backups-bucket",
+      "credentialsSecret": "cos-credentials",
+      "emergencyKeySecret": "",
+      "endpoint": "s3.eu-de.cloud-object-storage.appdomain.cloud",
+      "keyProtect": {
+        "apiKeySecret": "keyprotect-apikey",
+        "instanceID": "11111111-2222-3333-4444-555555555555",
+        "region": "eu-de",
+        "rootKeyID": "abcd-1234"
+      },
+      "prefix": "nightly/"
+    },
+    "cosRepoVariant": {
+      "backupKeySecret": "cos-backup-key",
+      "bucket": "backups-bucket",
+      "credentialsSecret": "cos-credentials",
+      "emergencyKeySecret": "cos-emergency-key",
+      "endpoint": "http://cos.example.com:9000",
+      "keyProtect": {
+        "apiKeySecret": "keyprotect-apikey",
+        "instanceID": "11111111-2222-3333-4444-555555555555",
+        "region": "eu-de",
+        "rootKeyID": "abcd-1234"
+      },
+      "prefix": "team/backups/nightly/"
+    },
+    "cosVolume": "pvc-11111111-2222-3333-4444-555555555555",
+    "deleteKey": "bkdelete-pvc-11111111-2222-3333-4444-555555555555",
+    "driverImage": "icr.io/example/ibm-vpc-file-pool-csi:v1.0.0",
+    "image": "quay.io/centos/centos:stream9",
+    "measureKey": "bkmeasure-pvc-11111111-2222-3333-4444-555555555555",
+    "momentsPath": "/backup/nightly/.moments/pvcs/pvc-11111111-2222-3333-4444-555555555555",
+    "namespace": "kube-system",
+    "share": {
+      "exportPath": "/share_a",
+      "mountTargetIP": "10.240.0.1"
+    }
+  },
+  "measure": {
+    "job": {
+      "apiVersion": "batch/v1",
+      "kind": "Job",
+      "metadata": {
+        "labels": {
+          "storage.ibmcloud.io/share-data-job": "share-data-bkmeasure-pvc-11111111-2222-3333-444-b2d009d3"
+        },
+        "name": "share-data-bkmeasure-pvc-11111111-2222-3333-444-b2d009d3",
+        "namespace": "kube-system"
+      },
+      "spec": {
+        "backoffLimit": 3,
+        "template": {
+          "metadata": {
+            "labels": {
+              "storage.ibmcloud.io/share-data-job": "share-data-bkmeasure-pvc-11111111-2222-3333-444-b2d009d3"
+            }
+          },
+          "spec": {
+            "automountServiceAccountToken": true,
+            "containers": [
+              {
+                "command": [
+                  "/bin/sh",
+                  "-c",
+                  "set -eu\nset --\nfor d in \"/share0/backup/nightly/pvcs/pvc-11111111-2222-3333-4444-555555555555\" \"/share0/backup/nightly/.moments/pvcs/pvc-11111111-2222-3333-4444-555555555555\"; do\n  if [ -d \"$d\" ]; then\n    set -- \"$@\" \"$d\"\n  fi\ndone\ntotal=0\nif [ \"$#\" -gt 0 ]; then\n  for kb in $(du -sk \"$@\" | cut -f1); do\n    total=$((total + kb))\n  done\nfi\necho \"$total\" \u003e /dev/termination-log\n"
+                ],
+                "image": "quay.io/centos/centos:stream9",
+                "name": "share-data",
+                "resources": {
+                  "limits": {
+                    "cpu": "1",
+                    "memory": "512Mi"
+                  },
+                  "requests": {
+                    "cpu": "100m",
+                    "memory": "128Mi"
+                  }
+                },
+                "volumeMounts": [
+                  {
+                    "mountPath": "/share0",
+                    "name": "share0"
+                  }
+                ]
+              }
+            ],
+            "restartPolicy": "OnFailure",
+            "securityContext": {
+              "runAsUser": 0
+            },
+            "volumes": [
+              {
+                "name": "share0",
+                "persistentVolumeClaim": {
+                  "claimName": "share-data-bkmeasure-pvc-11111111-2222-3333-444-b2d009d3-s0"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "pv": {
+      "apiVersion": "v1",
+      "kind": "PersistentVolume",
+      "metadata": {
+        "labels": {
+          "storage.ibmcloud.io/share-data-job": "share-data-bkmeasure-pvc-11111111-2222-3333-444-b2d009d3"
+        },
+        "name": "share-data-bkmeasure-pvc-11111111-2222-3333-444-b2d009d3-s0"
+      },
+      "spec": {
+        "accessModes": [
+          "ReadWriteMany"
+        ],
+        "capacity": {
+          "storage": "1Gi"
+        },
+        "claimRef": {
+          "name": "share-data-bkmeasure-pvc-11111111-2222-3333-444-b2d009d3-s0",
+          "namespace": "kube-system"
+        },
+        "mountOptions": [
+          "nfsvers=4.1",
+          "soft",
+          "timeo=600",
+          "retrans=3",
+          "sec=sys"
+        ],
+        "nfs": {
+          "path": "/share_a",
+          "server": "10.240.0.1"
+        },
+        "persistentVolumeReclaimPolicy": "Retain"
+      }
+    },
+    "pvc": {
+      "apiVersion": "v1",
+      "kind": "PersistentVolumeClaim",
+      "metadata": {
+        "labels": {
+          "storage.ibmcloud.io/share-data-job": "share-data-bkmeasure-pvc-11111111-2222-3333-444-b2d009d3"
+        },
+        "name": "share-data-bkmeasure-pvc-11111111-2222-3333-444-b2d009d3-s0",
+        "namespace": "kube-system"
+      },
+      "spec": {
+        "accessModes": [
+          "ReadWriteMany"
+        ],
+        "resources": {
+          "requests": {
+            "storage": "1Gi"
+          }
+        },
+        "storageClassName": "",
+        "volumeName": "share-data-bkmeasure-pvc-11111111-2222-3333-444-b2d009d3-s0"
+      }
+    }
+  },
+  "remove": {
+    "job": {
+      "apiVersion": "batch/v1",
+      "kind": "Job",
+      "metadata": {
+        "labels": {
+          "storage.ibmcloud.io/share-data-job": "share-data-bkdelete-pvc-11111111-2222-3333-4444-06555fcb"
+        },
+        "name": "share-data-bkdelete-pvc-11111111-2222-3333-4444-06555fcb",
+        "namespace": "kube-system"
+      },
+      "spec": {
+        "backoffLimit": 3,
+        "template": {
+          "metadata": {
+            "labels": {
+              "storage.ibmcloud.io/share-data-job": "share-data-bkdelete-pvc-11111111-2222-3333-4444-06555fcb"
+            }
+          },
+          "spec": {
+            "automountServiceAccountToken": true,
+            "containers": [
+              {
+                "command": [
+                  "/bin/sh",
+                  "-c",
+                  "set -eu\nrm -r -f -- \"/share0/backup/nightly/pvcs/pvc-11111111-2222-3333-4444-555555555555\"\nrm -r -f -- \"/share0/backup/nightly/.moments/pvcs/pvc-11111111-2222-3333-4444-555555555555\"\n"
+                ],
+                "image": "quay.io/centos/centos:stream9",
+                "name": "share-data",
+                "resources": {
+                  "limits": {
+                    "cpu": "1",
+                    "memory": "512Mi"
+                  },
+                  "requests": {
+                    "cpu": "100m",
+                    "memory": "128Mi"
+                  }
+                },
+                "volumeMounts": [
+                  {
+                    "mountPath": "/share0",
+                    "name": "share0"
+                  }
+                ]
+              }
+            ],
+            "restartPolicy": "OnFailure",
+            "securityContext": {
+              "runAsUser": 0
+            },
+            "volumes": [
+              {
+                "name": "share0",
+                "persistentVolumeClaim": {
+                  "claimName": "share-data-bkdelete-pvc-11111111-2222-3333-4444-06555fcb-s0"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "pv": {
+      "apiVersion": "v1",
+      "kind": "PersistentVolume",
+      "metadata": {
+        "labels": {
+          "storage.ibmcloud.io/share-data-job": "share-data-bkdelete-pvc-11111111-2222-3333-4444-06555fcb"
+        },
+        "name": "share-data-bkdelete-pvc-11111111-2222-3333-4444-06555fcb-s0"
+      },
+      "spec": {
+        "accessModes": [
+          "ReadWriteMany"
+        ],
+        "capacity": {
+          "storage": "1Gi"
+        },
+        "claimRef": {
+          "name": "share-data-bkdelete-pvc-11111111-2222-3333-4444-06555fcb-s0",
+          "namespace": "kube-system"
+        },
+        "mountOptions": [
+          "nfsvers=4.1",
+          "soft",
+          "timeo=600",
+          "retrans=3",
+          "sec=sys"
+        ],
+        "nfs": {
+          "path": "/share_a",
+          "server": "10.240.0.1"
+        },
+        "persistentVolumeReclaimPolicy": "Retain"
+      }
+    },
+    "pvc": {
+      "apiVersion": "v1",
+      "kind": "PersistentVolumeClaim",
+      "metadata": {
+        "labels": {
+          "storage.ibmcloud.io/share-data-job": "share-data-bkdelete-pvc-11111111-2222-3333-4444-06555fcb"
+        },
+        "name": "share-data-bkdelete-pvc-11111111-2222-3333-4444-06555fcb-s0",
+        "namespace": "kube-system"
+      },
+      "spec": {
+        "accessModes": [
+          "ReadWriteMany"
+        ],
+        "resources": {
+          "requests": {
+            "storage": "1Gi"
+          }
+        },
+        "storageClassName": "",
+        "volumeName": "share-data-bkdelete-pvc-11111111-2222-3333-4444-06555fcb-s0"
+      }
+    }
+  }
+}

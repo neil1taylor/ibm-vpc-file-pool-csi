@@ -26,12 +26,16 @@ import (
 type fakeVMCopier struct {
 	mu sync.Mutex
 
-	starts      []fakeStart
-	startErr    error
-	freezeErr   string
-	state       vmcopy.State
-	stateMsg    string
-	finishes    []bool // removeStaging of each Finish call
+	starts    []fakeStart
+	startErr  error
+	freezeErr string
+	state     vmcopy.State
+	stateMsg  string
+	finishes  []bool // removeStaging of each Finish call
+	// finishDisks and cancelDisks hold the volumes of the Copy each Finish and
+	// Cancel call got.
+	finishDisks [][]string
+	cancelDisks [][]string
 	cancels     int
 	removeStale int
 	moment      time.Time
@@ -83,10 +87,19 @@ func (f *fakeVMCopier) Progress(_ context.Context, _ vmcopy.VM, _ *vmcopy.Copy) 
 	return f.state, f.stateMsg, nil
 }
 
-func (f *fakeVMCopier) Finish(_ context.Context, _ vmcopy.VM, _ *vmcopy.Copy, removeStaging bool) error {
+func copyVolumes(cp *vmcopy.Copy) []string {
+	var v []string
+	for _, d := range cp.Disks {
+		v = append(v, d.Volume)
+	}
+	return v
+}
+
+func (f *fakeVMCopier) Finish(_ context.Context, _ vmcopy.VM, cp *vmcopy.Copy, removeStaging bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.finishes = append(f.finishes, removeStaging)
+	f.finishDisks = append(f.finishDisks, copyVolumes(cp))
 	return nil
 }
 
@@ -97,10 +110,11 @@ func (f *fakeVMCopier) Commit(_ context.Context, _ vmcopy.VM, cp *vmcopy.Copy) e
 	return nil
 }
 
-func (f *fakeVMCopier) Cancel(_ context.Context, _ vmcopy.VM, _ *vmcopy.Copy) error {
+func (f *fakeVMCopier) Cancel(_ context.Context, _ vmcopy.VM, cp *vmcopy.Copy) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.cancels++
+	f.cancelDisks = append(f.cancelDisks, copyVolumes(cp))
 	return f.cancelErr
 }
 
@@ -851,5 +865,137 @@ func TestVMCopy_WaitsWhileAnotherCopyRunsInTheVM(t *testing.T) {
 	e.tick()
 	if len(e.cop.starts) != 1 {
 		t.Errorf("starts = %d, want 1 once the VM is free", len(e.cop.starts))
+	}
+}
+
+// A plain volume beside a VM gets a new copy on every due tick. The VM always
+// has a copy in flight at a due tick, which must not hold the plain volume's
+// result of the last cycle for ever.
+func TestVMCopy_PlainVolumeIsCopiedAgainWhileTheVMAlwaysCopies(t *testing.T) {
+	e := newVMCopyEnv(t)
+	plain := newTestSubVolume("pvc-plain-0000-0000-0000-000000000003", "prod-pool", "share-1", 5)
+	plain.Spec.PVCName = "plain-pvc"
+	e.k.addSubVolume(plain)
+
+	dueTick := func() {
+		e.clock = e.clock.Add(2 * time.Hour)
+		e.rc.processOnce(e.ctx)
+	}
+	finishJob := func(sv string) {
+		job := e.job(t, sv)
+		if job == nil {
+			t.Fatalf("no Job for %s", sv)
+		}
+		job.Status.Succeeded = 1
+		if err := e.dc.Status().Update(e.ctx, job); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	e.cop.state = vmcopy.Running
+	e.rc.processOnce(e.ctx) // cycle 1: VM copy starts, plain Job created
+	finishJob(plain.Name)
+	e.cop.state = vmcopy.Done
+	e.tick() // VM copy moves to Sending
+	e.succeedJobs(t)
+	e.tick() // VM copy done
+	e.cop.state = vmcopy.Running
+	dueTick() // cycle 2: the plain Job of cycle 1 is recorded; VM copy starts again
+	if e.status(t, plain.Name).LastSyncTime == nil {
+		t.Fatal("expected the plain volume's first copy to be recorded")
+	}
+	e.cop.state = vmcopy.Done
+	e.tick()
+	e.succeedJobs(t)
+	e.tick()
+	e.cop.state = vmcopy.Running
+	dueTick() // cycle 3: the plain volume must get a new Job
+	if e.job(t, plain.Name) == nil {
+		t.Fatal("expected a new Job for the plain volume in the third cycle")
+	}
+}
+
+// The apply Job has a TTL. If the controller was paused for longer, the
+// finished Job is gone before its result is read (#160). The copy must say so,
+// run the Job again, and finish.
+func TestVMCopy_ApplyJobGoneBeforeResultIsRead(t *testing.T) {
+	e := newVMCopyEnv(t)
+	e.tick()
+	e.cop.state = vmcopy.Done
+	e.tick()
+	for _, sv := range []string{vmGuardSV1, vmGuardSV2} {
+		if err := e.dc.Delete(e.ctx, e.job(t, sv)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	e.tick()
+	for _, sv := range []string{vmGuardSV1, vmGuardSV2} {
+		s := e.status(t, sv)
+		if s.VMCopy == nil || s.VMCopy.Phase != "Sending" {
+			t.Fatalf("%s VMCopy = %+v, want still Sending", sv, s.VMCopy)
+		}
+		if !strings.Contains(s.LastError, "apply Job was gone") {
+			t.Errorf("%s LastError = %q, want a message that the apply Job was gone and runs again", sv, s.LastError)
+		}
+		if e.job(t, sv) == nil {
+			t.Errorf("expected the apply Job for %s to be made again", sv)
+		}
+	}
+
+	e.succeedJobs(t)
+	e.tick()
+	for _, sv := range []string{vmGuardSV1, vmGuardSV2} {
+		s := e.status(t, sv)
+		if s.VMCopy != nil || s.LastSyncTime == nil || s.LastError != "" {
+			t.Errorf("%s status = %+v, want the copy finished with no error", sv, s)
+		}
+	}
+}
+
+func (e *vmCopyEnv) tempObjectCount(t *testing.T) int {
+	t.Helper()
+	sel := client.MatchingLabels{replTempLabel: "true"}
+	jobs, pvcs, pvs := &batchv1.JobList{}, &corev1.PersistentVolumeClaimList{}, &corev1.PersistentVolumeList{}
+	for _, l := range []client.ObjectList{jobs, pvcs, pvs} {
+		if err := e.dc.List(e.ctx, l, sel); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return len(jobs.Items) + len(pvcs.Items) + len(pvs.Items)
+}
+
+// Deleting a policy while copies are in flight must not leave the temporary
+// Jobs, PVCs and PVs behind (#160).
+func TestVMCopy_PolicyDeletedCleansTemporaryResources(t *testing.T) {
+	e := newVMCopyEnv(t)
+	e.tick()
+	e.cop.state = vmcopy.Done
+	e.tick()
+	if n := e.tempObjectCount(t); n == 0 {
+		t.Fatal("expected temporary resources while the apply Job is in flight")
+	}
+
+	if err := e.k.DeleteReplicationPolicy(e.ctx, e.policy); err != nil {
+		t.Fatal(err)
+	}
+	e.tick()
+	if n := e.tempObjectCount(t); n != 0 {
+		t.Errorf("%d temporary resources left after the policy was deleted", n)
+	}
+}
+
+func TestVMCopy_CleanupKeepsResourcesOfOtherPolicies(t *testing.T) {
+	e := newVMCopyEnv(t)
+	e.tick()
+	e.cop.state = vmcopy.Done
+	e.tick()
+	before := e.tempObjectCount(t)
+
+	other := newTestReplicationPolicy("other", "prod-pool", "1h")
+	e.k.addPolicy(other)
+	e.tick()
+	if n := e.tempObjectCount(t); n != before {
+		t.Errorf("temporary resources = %d, want %d: a live policy's resources must stay", n, before)
 	}
 }

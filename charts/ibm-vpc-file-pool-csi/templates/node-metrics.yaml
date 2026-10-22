@@ -1,0 +1,49 @@
+{{- if .Values.node.metricsPort }}
+{{- $svc := printf "%s-node-metrics" (include "ibm-vpc-file-pool-csi.fullname" .) }}
+{{- $secret := printf "%s-certs" $svc }}
+# The node agents serve per-share used bytes and NFS latency and IOPS over HTTPS.
+# They have no other Service, so this headless one gives the ServiceMonitor its endpoints.
+# The certificate comes from webhook.certProvider, as for the webhooks: "openshift" asks
+# the service CA, "cert-manager" makes a Certificate (metrics-certs.yaml), "manual" needs a
+# secret of that name (tls.crt, tls.key, ca.crt) made by you. The ServiceMonitor checks it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $svc }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: node
+  {{- if eq .Values.webhook.certProvider "openshift" }}
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: {{ $secret }}
+  {{- end }}
+spec:
+  clusterIP: None
+  ports:
+    - name: metrics
+      port: {{ .Values.node.metricsPort }}
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    {{- include "ibm-vpc-file-pool-csi.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: node
+{{- if and .Values.metrics.serviceMonitor.enabled (not (include "ibm-vpc-file-pool-csi.uwm" .)) (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor") }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-node
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "ibm-vpc-file-pool-csi.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: node
+  endpoints:
+    - port: metrics
+      {{- include "ibm-vpc-file-pool-csi.scrapeTLS" (dict "root" . "svc" $svc) | nindent 6 }}
+{{- end }}
+{{- end }}

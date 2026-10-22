@@ -161,6 +161,12 @@ export function isNotFoundError(err: unknown): boolean {
   return e.code === 404 || e.response?.status === 404 || e.json?.code === 404;
 }
 
+export function isAlreadyExistsError(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false;
+  const e = err as { code?: number; response?: { status?: number }; json?: { code?: number } };
+  return e.code === 409 || e.response?.status === 409 || e.json?.code === 409;
+}
+
 /** DNS-1123 label: lower-case letters, digits and dashes, at most 63 characters. */
 export function isValidK8sName(name: string): boolean {
   return name.length <= 63 && /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(name);

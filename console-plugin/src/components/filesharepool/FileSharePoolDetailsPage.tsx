@@ -35,7 +35,7 @@ import {
   Td,
 } from '@patternfly/react-table';
 import { FileSharePoolModel } from '../../models';
-import { FileSharePool } from '../../types';
+import { FileSharePool, PoolShareStatus } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
 import PoolPhase from '../common/PoolPhase';
 import ShareStatus from '../common/ShareStatus';
@@ -46,11 +46,13 @@ import { usePoolMetrics } from '../../utils/use-pool-metrics';
 import { ROUTES } from '../../constants';
 import { getIOPS } from './FileSharePoolListPage';
 import DeleteModal from '../common/DeleteModal';
+import ShareDrainModal from './ShareDrainModal';
+import { DrainAction, isDraining } from '../../utils/pool-helpers';
 import YAMLEditorFallback from '../common/YAMLEditorFallback';
 
 /** Format seconds to human-readable ms string. */
 const formatLatencyMs = (seconds: number): string => {
-  if (seconds === 0) return '-';
+  if (!Number.isFinite(seconds) || seconds === 0) return '-';
   const ms = seconds * 1000;
   if (ms < 1) return '<1 ms';
   return `${ms.toFixed(0)} ms`;
@@ -61,6 +63,7 @@ const FileSharePoolDetailsPage: React.FC = () => {
   const history = useHistory();
   const [activeTab, setActiveTab] = useState<string | number>(0);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [drainTarget, setDrainTarget] = useState<{ share: PoolShareStatus; action: DrainAction } | null>(null);
 
   const [pool, loaded, loadError] = useK8sWatchResource<FileSharePool>({
     groupVersionKind: {
@@ -307,6 +310,7 @@ const FileSharePoolDetailsPage: React.FC = () => {
             <Th>Mount Target IP</Th>
             <Th>Export Path</Th>
             <Th>Created</Th>
+            <Th>Drain</Th>
           </Tr>
         </Thead>
         <Tbody>
@@ -332,6 +336,17 @@ const FileSharePoolDetailsPage: React.FC = () => {
               </Td>
               <Td>{share.exportPath ? <code>{share.exportPath}</code> : '-'}</Td>
               <Td>{formatAge(share.createdAt)}</Td>
+              <Td>
+                <Button
+                  variant="link"
+                  isInline
+                  onClick={() =>
+                    setDrainTarget({ share, action: isDraining(pool, share.shareID) ? 'return' : 'drain' })
+                  }
+                >
+                  {isDraining(pool, share.shareID) ? 'Return to service' : 'Drain'}
+                </Button>
+              </Td>
             </Tr>
           ))}
         </Tbody>
@@ -616,6 +631,7 @@ const FileSharePoolDetailsPage: React.FC = () => {
           <Tr>
             <Th>Share ID</Th>
             <Th>Remaining SubVolumes</Th>
+            <Th>Remaining snapshots</Th>
             <Th>Drained</Th>
             <Th>Drain Started</Th>
           </Tr>
@@ -627,6 +643,7 @@ const FileSharePoolDetailsPage: React.FC = () => {
                 <code>{ds.shareID}</code>
               </Td>
               <Td>{ds.remainingSubVolumes}</Td>
+              <Td>{ds.remainingSnapshots ?? 0}</Td>
               <Td>
                 <Label color={ds.drained ? 'green' : 'orange'}>
                   {ds.drained ? 'Yes' : 'No'}
@@ -724,6 +741,16 @@ const FileSharePoolDetailsPage: React.FC = () => {
         }}
         requireConfirmation
       />
+      {drainTarget && (
+        <ShareDrainModal
+          isOpen
+          pool={pool}
+          share={drainTarget.share}
+          action={drainTarget.action}
+          onClose={() => setDrainTarget(null)}
+          onDone={() => setDrainTarget(null)}
+        />
+      )}
     </>
   );
 };

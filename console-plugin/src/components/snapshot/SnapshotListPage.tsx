@@ -24,10 +24,13 @@ import { Bullseye, Spinner, Label } from '@patternfly/react-core';
 import { SnapshotModel, VolumeSnapshotContentModel, VolumeSnapshotModel } from '../../models';
 import { Snapshot } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
+import InstantSnapshotStatus from '../common/InstantSnapshotStatus';
+import RunningVMSnapshotNote from '../common/RunningVMSnapshotNote';
 import DeleteModal from '../common/DeleteModal';
 import { ROUTES } from '../../constants';
 import { VolumeSnapshotContent } from '../../utils/k8s-objects';
 import { findVolumeSnapshotRef, restoreDisabledReason } from '../../utils/restore-helpers';
+import { columnInfo } from '../../utils/column-help';
 
 const SnapshotRow: React.FC<{
   snap: Snapshot;
@@ -153,6 +156,10 @@ const SnapshotListPage: React.FC = () => {
       <p style={{ padding: '0 24px', color: 'var(--pf-t--global--color--subtle)', margin: '0 0 8px 0' }}>
         These are records written by the driver. This list is read-only: to take a snapshot, create a VolumeSnapshot.
       </p>
+      <div style={{ padding: '0 24px', margin: '0 0 16px 0' }}>
+        <InstantSnapshotStatus />
+        <RunningVMSnapshotNote />
+      </div>
       <ListPageBody>
         <ListPageFilter
           data={data}
@@ -182,8 +189,8 @@ const SnapshotListPage: React.FC = () => {
                 <Th sort={getSortParams(1)}>Pool</Th>
                 <Th sort={getSortParams(2)}>Source SubVolume</Th>
                 <Th sort={getSortParams(3)}>Size</Th>
-                <Th sort={getSortParams(4)}>Phase</Th>
-                <Th sort={getSortParams(5)}>Ready</Th>
+                <Th sort={getSortParams(4)} info={columnInfo('snapshotPhase')}>Phase</Th>
+                <Th sort={getSortParams(5)} info={columnInfo('snapshotReady')}>Ready</Th>
                 <Th sort={getSortParams(6)}>Age</Th>
                 <Th></Th>
               </Tr>

@@ -62,3 +62,11 @@ describe('ReplicationPolicyCreatePage receiver mode', () => {
     expect(createButton().disabled).toBe(true);
   });
 });
+
+describe('ReplicationPolicyCreatePage Red Hat support note', () => {
+  it('says next to the VM copy settings that copies of running VMs are not supported by Red Hat', () => {
+    render(<ReplicationPolicyCreatePage />);
+    expect(screen.getByText('Not supported by Red Hat')).toBeTruthy();
+    expect(screen.getByText(/the driver works directly with QEMU, which runs the VM, not through OpenShift/)).toBeTruthy();
+  });
+});

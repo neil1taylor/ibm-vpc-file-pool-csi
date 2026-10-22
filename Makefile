@@ -1,6 +1,7 @@
 BINARY_NAME := vpc-file-pool-csi
 IMAGE_NAME := de.icr.io/ibm-vpc-file-pool-csi/driver
 CONSOLE_PLUGIN_IMAGE := de.icr.io/ibm-vpc-file-pool-csi/console-plugin
+BROWSE_IMAGE := de.icr.io/ibm-vpc-file-pool-csi/browse
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 GOLANGCI_LINT_VERSION := v2.1.6
 CONTROLLER_GEN_VERSION := v0.20.1
@@ -8,7 +9,7 @@ GOBIN := $(shell go env GOPATH)/bin
 GOLANGCI_LINT := $(GOBIN)/golangci-lint
 CONTROLLER_GEN := $(GOBIN)/controller-gen
 
-.PHONY: build build-migrate build-failover test test-scripts test-integration test-e2e test-release test-vm test-coverage vet lint generate docker-build \
+.PHONY: build build-migrate build-failover build-pool-snapshots build-backup build-browse test test-scripts test-integration test-e2e test-release test-vm test-coverage vet lint generate docker-build docker-build-browse \
         install-crds deploy helm-install helm-lint helm-template run-local tools clean \
         console-plugin-install console-plugin-build console-plugin-dev console-plugin-lint \
         console-plugin-test console-plugin-docker-build \
@@ -23,6 +24,15 @@ build-migrate:
 build-failover:
 	CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$(VERSION)" -o bin/kubectl-failover ./cmd/failover/
 
+build-pool-snapshots:
+	CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$(VERSION)" -o bin/kubectl-pool_snapshots ./cmd/poolsnapshots/
+
+build-backup:
+	CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$(VERSION)" -o bin/kubectl-backup ./cmd/backup/
+
+build-browse:
+	CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$(VERSION)" -o bin/browse ./cmd/browse/
+
 test:
 	go test ./... -v -race -count=1
 
@@ -30,8 +40,18 @@ test-scripts:
 	bash test/chart/test-webhook-certs.sh
 	bash test/chart/test-servicemonitor.sh
 	bash test/chart/test-receiver.sh
+	bash test/chart/test-alerts.sh
+	bash test/chart/test-diagnostics.sh
+	bash test/chart/test-doc-links.sh
+	bash test/chart/test-vm-snapshots.sh
+	bash test/chart/test-clusterrole.sh
+	bash test/chart/test-hardening.sh
+	bash test/chart/test-node-metrics.sh
+	bash test/chart/test-uwm.sh
+	bash test/chart/test-console-plugin.sh
 	bash test/release/test-runner.sh
 	bash test/e2e/lib/test-detect-zone.sh
+	bash test/e2e/lib/test-backup-cos.sh
 
 test-integration:
 	go test ./test/integration/ -v -race -count=1 -tags=integration
@@ -64,6 +84,9 @@ CONTAINER_ENGINE := $(shell command -v docker 2>/dev/null || command -v podman 2
 
 docker-build:
 	$(CONTAINER_ENGINE) build --platform linux/amd64 --build-arg VERSION=$(VERSION) -t $(IMAGE_NAME):$(VERSION) .
+
+docker-build-browse:
+	$(CONTAINER_ENGINE) build --platform linux/amd64 --build-arg VERSION=$(VERSION) -f Dockerfile.browse -t $(BROWSE_IMAGE):$(VERSION) .
 
 install-crds:
 	kubectl apply -f config/crd/

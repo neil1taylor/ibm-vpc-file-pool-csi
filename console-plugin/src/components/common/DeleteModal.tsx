@@ -24,6 +24,8 @@ interface DeleteModalProps {
   requireConfirmation?: boolean;
   /** An extra step the user may tick. It runs after the delete, and it is off by default. */
   extraOption?: { label: string; run: () => Promise<void> };
+  /** A note under the question, for what the delete does not remove. */
+  note?: React.ReactNode;
 }
 
 const DeleteModal: React.FC<DeleteModalProps> = ({
@@ -35,6 +37,7 @@ const DeleteModal: React.FC<DeleteModalProps> = ({
   onDeleted,
   requireConfirmation = false,
   extraOption,
+  note,
 }) => {
   const [confirmation, setConfirmation] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -79,6 +82,7 @@ const DeleteModal: React.FC<DeleteModalProps> = ({
             Are you sure you want to delete <strong>{resourceName}</strong>? This action cannot be
             undone.
           </StackItem>
+          {note && <StackItem>{note}</StackItem>}
           {requireConfirmation && (
             <StackItem>
               <TextInput

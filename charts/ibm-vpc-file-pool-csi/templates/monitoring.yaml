@@ -1,0 +1,161 @@
+{{- if include "ibm-vpc-file-pool-csi.uwm" . }}
+{{- $name := include "ibm-vpc-file-pool-csi.fullname" . }}
+{{- $ns := .Values.metrics.monitoring.namespace }}
+{{- $ctl := printf "%s-metrics" $name }}
+{{- $node := printf "%s-node-metrics" $name }}
+# Scraping and alerts for OpenShift's user workload monitoring. The driver stays in the
+# release namespace (kube-system); this namespace holds what user workload monitoring
+# reads. It carries no platform monitoring label (Red Hat says not to label other namespaces).
+# The controller keeps the Endpoints of the two Services below (they have no selector).
+# The Services' certificates are issued for the Services in the release namespace, so the
+# ServiceMonitors check those names (serverName).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $ns }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}-metrics-scraper
+  namespace: {{ $ns }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+---
+# A token for the ServiceMonitors: user workload monitoring does not read files.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}-metrics-scraper-token
+  namespace: {{ $ns }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+  annotations:
+    kubernetes.io/service-account.name: {{ $name }}-metrics-scraper
+type: kubernetes.io/service-account-token
+---
+# The service CA, injected by OpenShift, to check the metrics certificates.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-service-ca
+  namespace: {{ $ns }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+  annotations:
+    service.beta.openshift.io/inject-cabundle: "true"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-metrics-reader
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}-metrics-reader
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}-metrics-scraper
+    namespace: {{ $ns }}
+---
+# The controller keeps the Endpoints of the Services below.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-metrics-endpoints
+  namespace: {{ $ns }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    verbs: ["get", "list", "create", "update"]
+  # OpenShift refuses Endpoints that point at pod IPs unless the writer may also create
+  # "endpoints/restricted".
+  - apiGroups: [""]
+    resources: ["endpoints/restricted"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-metrics-endpoints
+  namespace: {{ $ns }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}-metrics-endpoints
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}-controller
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $ctl }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+spec:
+  ports:
+    - name: metrics
+      port: {{ .Values.metrics.port }}
+      protocol: TCP
+{{- if .Values.node.metricsPort }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $node }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: node
+spec:
+  ports:
+    - name: metrics
+      port: {{ .Values.node.metricsPort }}
+      protocol: TCP
+{{- end }}
+{{- if .Values.metrics.serviceMonitor.enabled }}
+{{- range $svc := list $ctl $node }}
+{{- if or (ne $svc $node) $.Values.node.metricsPort }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ $svc }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" $ | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "ibm-vpc-file-pool-csi.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: {{ ternary "node" "controller" (eq $svc $node) }}
+  endpoints:
+    - port: metrics
+      interval: {{ $.Values.metrics.serviceMonitor.interval }}
+      scheme: https
+      authorization:
+        credentials:
+          name: {{ $name }}-metrics-scraper-token
+          key: token
+      tlsConfig:
+        serverName: {{ $svc }}.{{ $.Release.Namespace }}.svc
+        ca:
+          configMap:
+            name: {{ $name }}-service-ca
+            key: service-ca.crt
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

@@ -20,6 +20,7 @@ type fakeLauncher struct {
 	mu sync.Mutex
 
 	disks   map[string]int64           // volume -> virtual size; the VM's disks
+	tops    map[string]string          // volume -> the "file" query-block reports, if not disk.img
 	files   map[string]bool            // files that exist in the volume dirs
 	nodes   map[string]bool            // block nodes added by blockdev-add
 	bitmaps map[string]map[string]bool // dirty bitmaps per disk node
@@ -73,6 +74,15 @@ func (f *fakeLauncher) nodeOf(vol string) string {
 }
 
 func diskPath(vol string) string { return "/var/run/kubevirt-private/vmi-disks/" + vol + "/disk.img" }
+
+// topFile is the file query-block reports for a volume. A disk with a
+// snapshot chain is reported as a json: description of its top file.
+func (f *fakeLauncher) topFile(vol string) string {
+	if t, ok := f.tops[vol]; ok {
+		return t
+	}
+	return diskPath(vol)
+}
 
 func (f *fakeLauncher) Exec(_ context.Context, ns, pod, container string, cmd []string) (string, string, error) {
 	f.mu.Lock()
@@ -199,7 +209,7 @@ func (f *fakeLauncher) qmp(in string) (string, string, error) {
 				"device": "", "qdev": "ua-" + vol,
 				"inserted": map[string]any{
 					"node-name":     node,
-					"file":          diskPath(vol),
+					"file":          f.topFile(vol),
 					"image":         map[string]any{"virtual-size": f.disks[vol]},
 					"dirty-bitmaps": bms,
 				},
@@ -396,6 +406,29 @@ func TestStart_CopiesAllDisksAtOneMoment(t *testing.T) {
 	}
 	if freezeAt < lastPrep {
 		t.Errorf("expected the freeze after all preparation, log:\n%s", strings.Join(f.log, "\n"))
+	}
+}
+
+func TestStart_FindsADiskWithASnapshotChain(t *testing.T) {
+	f := newFakeLauncher()
+	dir := "/var/run/kubevirt-private/vmi-disks/rootdisk/"
+	f.tops = map[string]string{"rootdisk": `json:{"backing": {"driver": "file", "filename": "` + dir + `disk.img"}, "driver": "qcow2", "file": {"driver": "file", "filename": "` + dir + `snap-0a1b2c3d4e5f.qcow2"}}`}
+	c := newTestCopier(f)
+
+	cp, err := c.Start(context.Background(), testVM, []string{"rootdisk"}, StartOptions{ID: "a1"})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if len(cp.Disks) != 1 || cp.Disks[0].Volume != "rootdisk" {
+		t.Fatalf("Disks = %+v", cp.Disks)
+	}
+	for _, a := range f.txnActions {
+		if a["type"] != "blockdev-backup" {
+			continue
+		}
+		if d, _ := a["data"].(map[string]any); d["device"] != f.nodeOf("rootdisk") {
+			t.Errorf("copy reads %v, want the disk's top node %s", d["device"], f.nodeOf("rootdisk"))
+		}
 	}
 }
 
@@ -815,5 +848,23 @@ func TestCleanStaleCopies_OnlyRemovesSnapshotLeftovers(t *testing.T) {
 	}
 	if !f.files[fakeVolDir+"/.repl-staging-snapb2.qcow2"] {
 		t.Error("the staging file of a running copy was removed")
+	}
+}
+
+func TestVolumeOfFile(t *testing.T) {
+	dir := "/var/run/kubevirt-private/vmi-disks/"
+	tests := []struct{ file, want string }{
+		{dir + "rootdisk/disk.img", "rootdisk"},
+		{dir + "data/snap-0a1b2c3d4e5f.qcow2", "data"},
+		{`json:{"backing": {"driver": "file", "filename": "` + dir + `data/disk.img"}, "driver": "qcow2", "file": {"driver": "file", "filename": "` + dir + `data/snap-1.qcow2"}}`, "data"},
+		{"/var/run/kubevirt-ephemeral-disks/cloud-init-data/vms/web/noCloud.iso", ""},
+		{dir + "rootdisk/sub/disk.img", ""},
+		{dir + "rootdisk", ""},
+		{"json:{not json", ""},
+	}
+	for _, tt := range tests {
+		if got := volumeOfFile(tt.file); got != tt.want {
+			t.Errorf("volumeOfFile(%q) = %q, want %q", tt.file, got, tt.want)
+		}
 	}
 }
