@@ -39,6 +39,9 @@ func secretFileVolume(name, secret, key string) corev1.Volume {
 
 // keyVolumes are the Secret volumes and the memory volume of an export Job.
 func keyVolumes(e ExportRepo) []corev1.Volume {
+	if e.EmergencyOnly {
+		return []corev1.Volume{secretFileVolume(emergencyKeyVolume, e.EmergencyKeySecret, ExportEmergencyKeyKey)}
+	}
 	vols := []corev1.Volume{
 		secretFileVolume(wrappedKeyVolume, e.BackupKeySecret, ExportWrappedKeyKey),
 		secretFileVolume(apiKeyVolume, e.KeyProtect.APIKeySecret, ExportAPIKeyKey),
@@ -54,6 +57,9 @@ func keyVolumes(e ExportRepo) []corev1.Volume {
 
 // keyMounts mounts the volumes of keyVolumes into the main container.
 func keyMounts(e ExportRepo) []corev1.VolumeMount {
+	if e.EmergencyOnly {
+		return []corev1.VolumeMount{{Name: emergencyKeyVolume, MountPath: emergencyKeyDir, ReadOnly: true}}
+	}
 	mounts := []corev1.VolumeMount{
 		{Name: wrappedKeyVolume, MountPath: wrappedKeyDir, ReadOnly: true},
 		{Name: apiKeyVolume, MountPath: apiKeyDir, ReadOnly: true},
@@ -92,6 +98,11 @@ func (p exportParams) unwrapCommand() string {
 // where Kopia reads it; the file is removed at once.
 func (p exportParams) unwrapStep(b *strings.Builder) {
 	if !p.useKeyProtect {
+		return
+	}
+	if p.repo.EmergencyOnly {
+		// Key Protect is not asked: the readable key is a mounted Secret file.
+		fmt.Fprintf(b, "KOPIA_PASSWORD=$(cat %s)\nexport KOPIA_PASSWORD\n", util.ShellQuote(emergencyKeyDir+"/"+ExportEmergencyKeyKey))
 		return
 	}
 	fmt.Fprintf(b, "keyfile=%s\n", util.ShellQuote(p.memoryKeyDir()+"/key"))

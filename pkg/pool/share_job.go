@@ -71,6 +71,11 @@ type ShareData interface {
 	// moment at or before moment (the zero time asks for the latest), into the
 	// volume folder dstPath on dst. It reports which moment it wrote.
 	RestoreBackup(ctx context.Context, key string, backup ShareMount, volPath, momentsPath string, dst ShareMount, dstPath string, moment time.Time, owner *Ownership) (bool, RestoreOutcome, error)
+	// FetchFromCOS restores one export of a volume from the Kopia repository in
+	// COS into the scratch folder req.Scratch on dst, and reports its moment.
+	FetchFromCOS(ctx context.Context, key string, dst ShareMount, repo ExportRepo, req COSRestoreRequest) (bool, COSRestoreOutcome, error)
+	// RemoveCOSScratch removes the scratch folder of a restore from COS.
+	RemoveCOSScratch(ctx context.Context, key string, share ShareMount, scratch string) (bool, error)
 	// ShareUsage reads how full the share is, as a whole percent.
 	ShareUsage(ctx context.Context, key string, share ShareMount) (bool, int, error)
 	// ExportToCOS sends the backup folder of one volume and its moments folder

@@ -199,25 +199,28 @@ func (e *BackupExport) Validate() error {
 	return nil
 }
 
-func (k KeyProtectRef) validate() error {
+func (k KeyProtectRef) validate() error { return k.validateAt("spec.export.keyProtect") }
+
+// validateAt checks the block; path names it in messages.
+func (k KeyProtectRef) validateAt(path string) error {
 	for field, v := range map[string]string{
 		"instanceID": k.InstanceID, "region": k.Region, "rootKeyID": k.RootKeyID, "apiKeySecret": k.APIKeySecret,
 	} {
 		if v == "" {
-			return fmt.Errorf("spec.export.keyProtect.%s is required", field)
+			return fmt.Errorf("%s.%s is required", path, field)
 		}
 	}
 	if !keyProtectRegionPattern.MatchString(k.Region) {
-		return fmt.Errorf("spec.export.keyProtect.region %q is not a region name such as eu-de", k.Region)
+		return fmt.Errorf("%s.region %q is not a region name such as eu-de", path, k.Region)
 	}
 	if !keyProtectIDPattern.MatchString(k.InstanceID) {
-		return fmt.Errorf("spec.export.keyProtect.instanceID %q is not valid", k.InstanceID)
+		return fmt.Errorf("%s.instanceID %q is not valid", path, k.InstanceID)
 	}
 	if !keyProtectIDPattern.MatchString(k.RootKeyID) {
-		return fmt.Errorf("spec.export.keyProtect.rootKeyID %q is not valid", k.RootKeyID)
+		return fmt.Errorf("%s.rootKeyID %q is not valid", path, k.RootKeyID)
 	}
 	if !secretNamePattern.MatchString(k.APIKeySecret) {
-		return fmt.Errorf("spec.export.keyProtect.apiKeySecret %q is not a valid Secret name", k.APIKeySecret)
+		return fmt.Errorf("%s.apiKeySecret %q is not a valid Secret name", path, k.APIKeySecret)
 	}
 	return nil
 }

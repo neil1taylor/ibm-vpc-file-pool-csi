@@ -738,6 +738,16 @@ func (s *nfsShareData) ExportToCOS(context.Context, string, pool.ShareMount, poo
 	return true, pool.ExportOutcome{}, nil
 }
 
+// FetchFromCOS is not used: the integration tests make no backups.
+func (s *nfsShareData) FetchFromCOS(context.Context, string, pool.ShareMount, pool.ExportRepo, pool.COSRestoreRequest) (bool, pool.COSRestoreOutcome, error) {
+	return true, pool.COSRestoreOutcome{}, nil
+}
+
+// RemoveCOSScratch is not used: the integration tests make no backups.
+func (s *nfsShareData) RemoveCOSScratch(context.Context, string, pool.ShareMount, string) (bool, error) {
+	return true, nil
+}
+
 // MaintainCOSRepo is not used: the integration tests make no backups.
 func (s *nfsShareData) MaintainCOSRepo(context.Context, string, pool.ExportRepo) (bool, error) {
 	return true, nil
