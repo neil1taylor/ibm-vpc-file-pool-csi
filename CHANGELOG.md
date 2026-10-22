@@ -19,6 +19,8 @@ To make a release:
 
 ## [Unreleased]
 
+- **The replication receiver also bounds the memory used when it writes plain files (issue #225).** Like the VM disk path (#212), it now syncs every 32 MiB and drops the cached pages while it extracts files, so a plain volume larger than the receiver memory limit no longer fills the container with dirty NFS pages.
+
 - **Docs corrected against the code.** One NFS mount per staged volume (not per share per node); a volume request that finds no room can make a share itself when `autoExpand` is on; the COS export and Key Protect unwrap were proved against real IBM Cloud in stage 18; Key Protect is reached with a service ID's API key held in a Secret; receiver-mode replication uploads the whole folder each cycle (only direct NFS mode uses rsync); a clone's claim is Bound at once and only the pod mount waits; there is no failback command.
 
 - **Interactive teaching pages** (`docs/diagrams/index.html`): ten pages with buttons that step through a story, in plain words. This change adds the index and the pages on the two kinds of volume, replication, backup to COS, cloning a VM disk and a pool filling up.
