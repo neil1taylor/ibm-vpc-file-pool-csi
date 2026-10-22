@@ -237,8 +237,8 @@ func modeString(e browse.Entry) string {
 		b[0] = '-'
 	}
 	const rwx = "rwxrwxrwx"
-	for i := 0; i < 9; i++ {
-		if e.Mode&(1<<(8-uint(i))) != 0 {
+	for i := range 9 {
+		if e.Mode&(1<<(8-i)) != 0 {
 			b[i+1] = rwx[i]
 		} else {
 			b[i+1] = '-'
@@ -470,7 +470,7 @@ func extractTar(r io.Reader, dest string, out io.Writer) error {
 				skip("outside the folder or not possible", hdr.Name)
 				continue
 			}
-			f, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, os.FileMode(hdr.Mode&0o777))
+			f, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, os.FileMode(uint32(hdr.Mode&0o777))) //nolint:gosec // G115: masked to the nine permission bits
 			if err != nil {
 				skip("outside the folder, or it exists", hdr.Name)
 				continue
