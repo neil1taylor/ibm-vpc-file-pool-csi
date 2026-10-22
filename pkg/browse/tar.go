@@ -136,7 +136,7 @@ func tarRegular(t Tree, tw *tar.Writer, rep *TarReport, path [][]byte, hdr *tar.
 	defer func() { _ = f.Close() }()
 	hdr.Typeflag = tar.TypeReg
 	hdr.Size = f.Size()
-	if err := tw.WriteHeader(hdr); err != nil {
+	if err = tw.WriteHeader(hdr); err != nil {
 		return err
 	}
 	n, err := io.Copy(tw, io.NewSectionReader(f, 0, hdr.Size))

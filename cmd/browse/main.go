@@ -88,7 +88,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 		_, _ = fmt.Fprintf(stderr, "serve: %v\n", err)
 		return 1
 	}
-	_ = os.WriteFile(*termLog, []byte(reason), 0o644)
+	_ = os.WriteFile(*termLog, []byte(reason), 0o600) //nolint:gosec // the path is an operator flag, not user input
 	klog.InfoS("Browse session ended", "reason", reason)
 	klog.Flush()
 	return 0

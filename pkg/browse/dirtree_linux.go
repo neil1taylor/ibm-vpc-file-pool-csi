@@ -83,7 +83,7 @@ func retryEINTR(fn func() (int, error)) (int, error) {
 
 func (t *DirTree) openAt2(dirfd int, rel string, flags int) (int, error) {
 	how := &unix.OpenHow{
-		Flags: uint64(flags | unix.O_CLOEXEC),
+		Flags: uint64(flags | unix.O_CLOEXEC), //nolint:gosec // flags are small positive constants
 		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS |
 			unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_XDEV,
 	}
@@ -202,7 +202,7 @@ func (t *DirTree) openParent(path [][]byte) (fd int, name string, err error) {
 	if len(path) == 0 {
 		return -1, "", &Error{Code: CodeBadPath, Msg: "the root has no parent"}
 	}
-	if err := ValidatePath(path); err != nil {
+	if err = ValidatePath(path); err != nil {
 		return -1, "", err
 	}
 	fd, err = t.openDir(path[:len(path)-1])

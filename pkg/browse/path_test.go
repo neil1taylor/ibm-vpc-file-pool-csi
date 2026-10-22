@@ -86,8 +86,8 @@ func TestSplitAndJoinPath(t *testing.T) {
 	if got := JoinPath(p); got != "/var/www/html" {
 		t.Errorf("JoinPath = %q", got)
 	}
-	if p, _ := SplitPath("/"); len(p) != 0 {
-		t.Errorf("root should be the empty path, got %q", p)
+	if root, _ := SplitPath("/"); len(root) != 0 {
+		t.Errorf("root should be the empty path, got %q", root)
 	}
 	if got := JoinPath(nil); got != "/" {
 		t.Errorf("JoinPath(root) = %q", got)
@@ -97,7 +97,7 @@ func TestSplitAndJoinPath(t *testing.T) {
 	if len(p) != 1 || string(p[0]) != "a/b" {
 		t.Errorf("escaped slash: %q", p)
 	}
-	if _, err := SplitPath(`/a\xzz`); err == nil {
+	if _, serr := SplitPath(`/a\xzz`); serr == nil {
 		t.Error("bad escape should fail")
 	}
 	// A path survives the trip, including odd names.

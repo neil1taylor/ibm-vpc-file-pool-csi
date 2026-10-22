@@ -243,9 +243,9 @@ func TestOpenReadsRegularFilesOnly(t *testing.T) {
 			t.Errorf("size %d, read %q", f.Size(), buf[:n])
 		}
 		for _, name := range []string{"line\nbreak", "bad\xff\xfeutf8", strings.Repeat("n", 255)} {
-			f2, err := tr.Open(p(name))
-			if err != nil {
-				t.Fatalf("Open(%q): %v", name, err)
+			f2, oerr := tr.Open(p(name))
+			if oerr != nil {
+				t.Fatalf("Open(%q): %v", name, oerr)
 			}
 			_ = f2.Close()
 		}
