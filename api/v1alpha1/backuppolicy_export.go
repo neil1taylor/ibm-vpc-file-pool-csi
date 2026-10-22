@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	"fmt"
+	"regexp"
 	"time"
 )
 
@@ -34,6 +35,34 @@ const (
 	minExportSchedule = time.Minute
 )
 
+var (
+	keyProtectRegionPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+	keyProtectIDPattern     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*$`)
+	secretNamePattern       = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$`)
+)
+
+// KeyProtectRef says which Key Protect root key unlocks the backup key, and
+// which Secret holds the API key that may use it. The Jobs, not the controller,
+// call Key Protect.
+type KeyProtectRef struct {
+	// InstanceID is the GUID of the Key Protect instance.
+	// +kubebuilder:validation:MinLength=1
+	InstanceID string `json:"instanceID"`
+
+	// Region is the region of the Key Protect instance, such as eu-de.
+	// +kubebuilder:validation:MinLength=1
+	Region string `json:"region"`
+
+	// RootKeyID is the ID of the root key that wrapped the backup key.
+	// +kubebuilder:validation:MinLength=1
+	RootKeyID string `json:"rootKeyID"`
+
+	// APIKeySecret names the Secret (key: apikey) with the IBM Cloud API key that
+	// has the Reader role on the root key.
+	// +kubebuilder:validation:MinLength=1
+	APIKeySecret string `json:"apiKeySecret"`
+}
+
 // BackupExport sends the backups of a policy to an IBM Cloud Object Storage
 // bucket, encrypted before they leave the cluster. The Secrets are in the
 // driver's namespace. The controller passes only their names to the Jobs.
@@ -56,10 +85,21 @@ type BackupExport struct {
 	// +kubebuilder:validation:MinLength=1
 	CredentialsSecret string `json:"credentialsSecret"`
 
-	// BackupKeySecret names the Secret with the key that encrypts the backups
-	// (backupKey). The controller never reads it: only the Jobs do.
+	// BackupKeySecret names the Secret with the backup key, wrapped by Key
+	// Protect (wrappedKey). The readable key is never stored. The controller
+	// never reads the Secret: only the Jobs do, and they unwrap the key in memory.
 	// +kubebuilder:validation:MinLength=1
 	BackupKeySecret string `json:"backupKeySecret"`
+
+	// KeyProtect says which root key unwraps the backup key and how to log in.
+	KeyProtect KeyProtectRef `json:"keyProtect"`
+
+	// EmergencyKeySecret names an optional Secret (key: backupKey) with the
+	// readable backup key. The Jobs use it only when Key Protect cannot be
+	// reached. Storing it in the cluster weakens the Key Protect protection; most
+	// users keep the emergency copy outside the cluster and leave this empty.
+	// +optional
+	EmergencyKeySecret string `json:"emergencyKeySecret,omitempty"`
 
 	// KeepFor is how long exported backups are kept: a Go duration, or a number
 	// of days such as "30d". With a Compliance lock it is at least 25 hours.
@@ -127,6 +167,12 @@ func (e *BackupExport) Validate() error {
 			return fmt.Errorf("spec.export.%s is required", field)
 		}
 	}
+	if err := e.KeyProtect.validate(); err != nil {
+		return err
+	}
+	if e.EmergencyKeySecret != "" && !secretNamePattern.MatchString(e.EmergencyKeySecret) {
+		return fmt.Errorf("spec.export.emergencyKeySecret %q is not a valid Secret name", e.EmergencyKeySecret)
+	}
 	lock := e.EffectiveLock()
 	if lock != ExportLockCompliance && lock != ExportLockNone {
 		return fmt.Errorf("spec.export.lock must be %s or %s, got %q", ExportLockCompliance, ExportLockNone, e.Lock)
@@ -149,6 +195,29 @@ func (e *BackupExport) Validate() error {
 		if d < minExportSchedule {
 			return fmt.Errorf("spec.export.schedule must be at least %s, got %s", minExportSchedule, e.Schedule)
 		}
+	}
+	return nil
+}
+
+func (k KeyProtectRef) validate() error {
+	for field, v := range map[string]string{
+		"instanceID": k.InstanceID, "region": k.Region, "rootKeyID": k.RootKeyID, "apiKeySecret": k.APIKeySecret,
+	} {
+		if v == "" {
+			return fmt.Errorf("spec.export.keyProtect.%s is required", field)
+		}
+	}
+	if !keyProtectRegionPattern.MatchString(k.Region) {
+		return fmt.Errorf("spec.export.keyProtect.region %q is not a region name such as eu-de", k.Region)
+	}
+	if !keyProtectIDPattern.MatchString(k.InstanceID) {
+		return fmt.Errorf("spec.export.keyProtect.instanceID %q is not valid", k.InstanceID)
+	}
+	if !keyProtectIDPattern.MatchString(k.RootKeyID) {
+		return fmt.Errorf("spec.export.keyProtect.rootKeyID %q is not valid", k.RootKeyID)
+	}
+	if !secretNamePattern.MatchString(k.APIKeySecret) {
+		return fmt.Errorf("spec.export.keyProtect.apiKeySecret %q is not a valid Secret name", k.APIKeySecret)
 	}
 	return nil
 }

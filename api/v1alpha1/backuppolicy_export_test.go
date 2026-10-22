@@ -12,6 +12,12 @@ func validExport() *BackupExport {
 		Endpoint:          "s3.eu-de.cloud-object-storage.appdomain.cloud",
 		CredentialsSecret: "cos-credentials",
 		BackupKeySecret:   "cos-backup-key",
+		KeyProtect: KeyProtectRef{
+			InstanceID:   "11111111-2222-3333-4444-555555555555",
+			Region:       "eu-de",
+			RootKeyID:    "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+			APIKeySecret: "keyprotect-apikey",
+		},
 	}
 }
 
@@ -79,6 +85,12 @@ func TestBackupExport_Validate(t *testing.T) {
 		{"no endpoint", func(e *BackupExport) { e.Endpoint = "" }, "endpoint"},
 		{"no credentials secret", func(e *BackupExport) { e.CredentialsSecret = "" }, "credentialsSecret"},
 		{"no backup key secret", func(e *BackupExport) { e.BackupKeySecret = "" }, "backupKeySecret"},
+		{"no key protect instance", func(e *BackupExport) { e.KeyProtect.InstanceID = "" }, "keyProtect.instanceID"},
+		{"no key protect region", func(e *BackupExport) { e.KeyProtect.Region = "" }, "keyProtect.region"},
+		{"bad key protect region", func(e *BackupExport) { e.KeyProtect.Region = "eu-de/x" }, "keyProtect.region"},
+		{"no root key", func(e *BackupExport) { e.KeyProtect.RootKeyID = "" }, "keyProtect.rootKeyID"},
+		{"no api key secret", func(e *BackupExport) { e.KeyProtect.APIKeySecret = "" }, "keyProtect.apiKeySecret"},
+		{"bad emergency secret name", func(e *BackupExport) { e.EmergencyKeySecret = "Not A Name" }, "emergencyKeySecret"},
 		{"bad lock", func(e *BackupExport) { e.Lock = "Governance" }, "lock"},
 		{"bad keep", func(e *BackupExport) { e.KeepFor = "soon" }, "keepFor"},
 		{"compliance under 25h", func(e *BackupExport) { e.KeepFor = "24h" }, "25h"},
@@ -121,5 +133,13 @@ func TestBackupExport_Validate_LongKeepNeedsNoExtraCheck(t *testing.T) {
 	e.KeepFor = "3650d" // the typed confirmation lives in the CLI, not here
 	if err := e.Validate(); err != nil {
 		t.Errorf("a long keep time: %v", err)
+	}
+}
+
+func TestBackupExport_Validate_EmergencyKeySecretIsOptional(t *testing.T) {
+	e := validExport()
+	e.EmergencyKeySecret = "cos-emergency-key"
+	if err := e.Validate(); err != nil {
+		t.Errorf("an emergency key Secret: %v", err)
 	}
 }

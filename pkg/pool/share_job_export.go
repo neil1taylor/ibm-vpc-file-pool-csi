@@ -24,7 +24,15 @@ import (
 const (
 	ExportAccessKeyKey = "access_key_id"
 	ExportSecretKeyKey = "secret_access_key"
-	ExportBackupKeyKey = "backupKey"
+	// ExportWrappedKeyKey is the key of the Secret with the backup key wrapped by
+	// Key Protect. The readable key is never in a Secret the driver makes.
+	ExportWrappedKeyKey = "wrappedKey"
+	// ExportAPIKeyKey is the key of the Secret with the IBM Cloud API key that
+	// may use the Key Protect root key.
+	ExportAPIKeyKey = "apikey"
+	// ExportEmergencyKeyKey is the key of the optional Secret with the readable
+	// backup key, for when Key Protect is down.
+	ExportEmergencyKeyKey = "backupKey"
 )
 
 // ExportLockMode is how long COS must keep exported data.
@@ -46,6 +54,8 @@ var (
 	exportEndpointPattern = regexp.MustCompile(`^(https?://)?[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$`)
 	exportBucketPattern   = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`)
 	exportPrefixPattern   = regexp.MustCompile(`^[A-Za-z0-9._/-]*$`)
+	exportRegionPattern   = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+	exportKeyIDPattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*$`)
 	secretNamePattern     = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$`)
 )
 
@@ -61,10 +71,16 @@ type ExportRepo struct {
 	// CredentialsSecret holds the COS HMAC key (ExportAccessKeyKey and
 	// ExportSecretKeyKey) in the driver's namespace.
 	CredentialsSecret string
-	// BackupKeySecret holds the backup key (ExportBackupKeyKey) that encrypts
-	// the repository.
+	// BackupKeySecret holds the backup key that encrypts the repository, wrapped
+	// by Key Protect (ExportWrappedKeyKey). The Job unwraps it in memory.
 	BackupKeySecret string
-	LockMode        ExportLockMode
+	// KeyProtect says which root key unwraps it, and which Secret holds the API
+	// key (ExportAPIKeyKey) that may use the root key.
+	KeyProtect v1alpha1.KeyProtectRef
+	// EmergencyKeySecret is optional. It holds the readable backup key
+	// (ExportEmergencyKeyKey), used only when Key Protect cannot be reached.
+	EmergencyKeySecret string
+	LockMode           ExportLockMode
 	// KeepFor is the lock time of Compliance mode. It is used only when a
 	// repository is created.
 	KeepFor time.Duration
@@ -95,10 +111,20 @@ func (e ExportRepo) validate() error {
 	if !exportPrefixPattern.MatchString(e.Prefix) || strings.Contains(e.Prefix, "..") {
 		return fmt.Errorf("export prefix %q has characters that are not allowed", e.Prefix)
 	}
-	for what, name := range map[string]string{"credentials": e.CredentialsSecret, "backup key": e.BackupKeySecret} {
+	secrets := map[string]string{"credentials": e.CredentialsSecret, "backup key": e.BackupKeySecret, "Key Protect API key": e.KeyProtect.APIKeySecret}
+	if e.EmergencyKeySecret != "" {
+		secrets["emergency key"] = e.EmergencyKeySecret
+	}
+	for what, name := range secrets {
 		if !secretNamePattern.MatchString(name) {
 			return fmt.Errorf("the %s Secret name %q is not a valid name", what, name)
 		}
+	}
+	if !exportRegionPattern.MatchString(e.KeyProtect.Region) {
+		return fmt.Errorf("the Key Protect region %q is not a region name such as eu-de", e.KeyProtect.Region)
+	}
+	if !exportKeyIDPattern.MatchString(e.KeyProtect.InstanceID) || !exportKeyIDPattern.MatchString(e.KeyProtect.RootKeyID) {
+		return errors.New("the Key Protect instance ID and root key ID are required and must be IDs")
 	}
 	if e.MaintenanceInterval < v1alpha1.MinExportMaintenanceInterval {
 		return fmt.Errorf("the maintenance interval %s is shorter than %s", e.MaintenanceInterval, v1alpha1.MinExportMaintenanceInterval)
@@ -133,6 +159,16 @@ type exportParams struct {
 	stateDir string
 	// backend replaces the S3 backend words, for tests.
 	backend string
+
+	// useKeyProtect makes the script unwrap the backup key before it runs
+	// Kopia. The runner always sets it. Tests that run Kopia against a folder
+	// leave it off and give the password in the environment.
+	useKeyProtect bool
+	// unwrapCmd replaces the unwrap command, for tests.
+	unwrapCmd string
+	// keyDir is the memory-backed folder for the readable key (default
+	// /run/backup-key).
+	keyDir string
 }
 
 func (p exportParams) rootDir() string  { return orDefault(p.root, "/share0") }
@@ -176,6 +212,7 @@ export KOPIA_CACHE_DIRECTORY="$state/cache"
 export KOPIA_LOG_DIR="$state/logs"
 export KOPIA_CHECK_FOR_UPDATES=false
 `)
+	p.unwrapStep(b)
 	fmt.Fprintf(b, "ident=\"--no-persist-credentials --override-username=%s --override-hostname=%s\"\n", exportUser, exportHost)
 }
 
@@ -246,7 +283,8 @@ func maintenanceScript(p exportParams) string {
 	return b.String()
 }
 
-// exportEnv gives the Job the keys as references to Secrets.
+// exportEnv gives the Job the COS key as references to a Secret. The backup key
+// is not here: the script unwraps it at run time.
 func exportEnv(e ExportRepo) []corev1.EnvVar {
 	ref := func(name, secret, key string) corev1.EnvVar {
 		return corev1.EnvVar{Name: name, ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
@@ -256,7 +294,6 @@ func exportEnv(e ExportRepo) []corev1.EnvVar {
 	return []corev1.EnvVar{
 		ref("AWS_ACCESS_KEY_ID", e.CredentialsSecret, ExportAccessKeyKey),
 		ref("AWS_SECRET_ACCESS_KEY", e.CredentialsSecret, ExportSecretKeyKey),
-		ref("KOPIA_PASSWORD", e.BackupKeySecret, ExportBackupKeyKey),
 	}
 }
 
@@ -266,6 +303,8 @@ func (r *ShareJobRunner) kopiaShape(repo ExportRepo, script string, readOnly boo
 		image:    r.driverImage,
 		command:  []string{"/bin/sh", "-c", script},
 		env:      exportEnv(repo),
+		volumes:  keyVolumes(repo),
+		mounts:   keyMounts(repo),
 		readOnly: readOnly,
 		resources: &corev1.ResourceRequirements{
 			Requests: corev1.ResourceList{
@@ -295,7 +334,8 @@ func (r *ShareJobRunner) ExportToCOS(ctx context.Context, key string, share Shar
 		return false, ExportOutcome{}, errors.New("no driver image set for COS export Jobs")
 	}
 	script := exportScript(exportParams{
-		repo: repo, backupPath: backupPath, momentsPath: momentsPath,
+		useKeyProtect: true,
+		repo:          repo, backupPath: backupPath, momentsPath: momentsPath,
 		volume: path.Base(backupPath), moment: moment,
 	})
 	done, msg, err := r.runMessage(ctx, key, []ShareMount{share}, r.kopiaShape(repo, script, true))
@@ -314,7 +354,7 @@ func (r *ShareJobRunner) MaintainCOSRepo(ctx context.Context, key string, repo E
 	if r.driverImage == "" {
 		return false, errors.New("no driver image set for COS maintenance Jobs")
 	}
-	return r.run(ctx, key, nil, r.kopiaShape(repo, maintenanceScript(exportParams{repo: repo}), false))
+	return r.run(ctx, key, nil, r.kopiaShape(repo, maintenanceScript(exportParams{repo: repo, useKeyProtect: true}), false))
 }
 
 // parseExportOutcome reads the termination message of an export Job. A message

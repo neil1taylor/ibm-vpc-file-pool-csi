@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -161,6 +162,10 @@ type jobShape struct {
 	// env is added to the main container. Secrets go here as references, so
 	// they are never in the Job's command.
 	env []corev1.EnvVar
+	// volumes and mounts are added to the Job and its main container: Secrets
+	// as files, and memory-backed folders.
+	volumes []corev1.Volume
+	mounts  []corev1.VolumeMount
 	// resources replaces the default limits of the main container.
 	resources *corev1.ResourceRequirements
 }
@@ -385,6 +390,9 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 		}
 	}
 
+	mainMounts := append(slices.Clone(mounts), shape.mounts...)
+	volumes = append(volumes, shape.volumes...)
+
 	resources := corev1.ResourceRequirements{
 		Requests: corev1.ResourceList{
 			corev1.ResourceCPU:    resource.MustParse("100m"),
@@ -429,7 +437,7 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 						Command:      shape.command,
 						Env:          shape.env,
 						Resources:    mainResources,
-						VolumeMounts: mounts,
+						VolumeMounts: mainMounts,
 					}},
 					Volumes: volumes,
 				},

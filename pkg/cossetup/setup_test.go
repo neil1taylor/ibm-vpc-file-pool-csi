@@ -197,7 +197,7 @@ func TestSecretsNeverPrintedAndFilesAreSafe(t *testing.T) {
 	if n := strings.Count(out, e.readableKey()); n != 1 {
 		t.Errorf("the readable backup key must be shown exactly once, was shown %d times", n)
 	}
-	for _, need := range []string{"export:", "bucket: pool-csi-test-bucket", "credentialsSecret: cos-credentials", "backupKeySecret: cos-backup-key", "keepFor: 30d", "lock: Compliance"} {
+	for _, need := range []string{"export:", "bucket: pool-csi-test-bucket", "credentialsSecret: cos-credentials", "backupKeySecret: cos-backup-key", "keepFor: 30d", "lock: Compliance", "keyProtect:", "apiKeySecret: keyprotect-apikey", "region: eu-de"} {
 		if !strings.Contains(out, need) {
 			t.Errorf("output lacks %q:\n%s", need, out)
 		}
