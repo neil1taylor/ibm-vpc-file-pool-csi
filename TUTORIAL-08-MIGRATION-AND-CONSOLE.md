@@ -1,6 +1,6 @@
 # Part 8: Migration and Console Plugin
 
-> **Tutorial Series:** [Index](TUTORIAL.md) | [Part 1: Pool Creation](TUTORIAL-01-POOL-CREATION.md) | [Part 2: Snapshots & Clones](TUTORIAL-02-SNAPSHOTS-AND-CLONES.md) | [Part 3: Group Snapshots & Hooks](TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md) | [Part 4: Pool Configuration](TUTORIAL-04-POOL-CONFIGURATION.md) | [Part 5: Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md) | [Part 6: Replication & Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md) | [Part 7: Monitoring](TUTORIAL-07-MONITORING.md) | **Part 8**
+> **Tutorial Series:** [Index](TUTORIAL.md) | [Part 1: Pool Creation](TUTORIAL-01-POOL-CREATION.md) | [Part 2: Snapshots & Clones](TUTORIAL-02-SNAPSHOTS-AND-CLONES.md) | [Part 3: Group Snapshots & Hooks](TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md) | [Part 4: Pool Configuration](TUTORIAL-04-POOL-CONFIGURATION.md) | [Part 5: Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md) | [Part 6: Replication & Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md) | [Part 7: Monitoring](TUTORIAL-07-MONITORING.md) | **Part 8** | [Part 9: COS Backup Bucket](TUTORIAL-09-COS-BACKUP-BUCKET.md)
 
 Migrate PVCs from the stock IBM VPC File CSI driver to the pool-based driver, then enable and explore the OpenShift Console dynamic plugin for visual pool management.
 
@@ -246,6 +246,15 @@ kubectl migrate execute \
 - Validates the target pool exists and has capacity
 - Shows the migration plan without creating any resources
 
+Expected output:
+
+```
+[dry-run] Would create target PVC pool-tutorial-ops/legacy-app-data-pooled (size: 10Gi, storageClass: ops-pool)
+[dry-run] Would create migration pod pool-tutorial-ops/migrate-legacy-app-data
+[dry-run] Would rsync data from legacy-app-data to legacy-app-data-pooled
+[dry-run] Source PVC would NOT be deleted
+```
+
 ---
 
 ## Step 7: Migration Execute
@@ -262,8 +271,8 @@ kubectl migrate execute \
 
 **What this does:**
 - Creates a new PVC (`legacy-app-data-pooled`) on the pool driver
-- Spawns a temporary migration pod that mounts both the source and target PVCs
-- Uses rsync to copy all data from the source PVC to the target PVC
+- Spawns a temporary migration pod (`migrate-legacy-app-data`) that mounts both the source and target PVCs
+- Uses rsync to copy all data from the source PVC to the target PVC, then compares file counts
 - Reports success when the copy completes
 
 Watch the migration pod progress:
@@ -296,7 +305,7 @@ Expected output on completion:
 POD                              SOURCE PVC       TARGET PVC            PHASE       STARTED
 migrate-legacy-app-data-xxxxx    legacy-app-data  legacy-app-data-pooled  Succeeded   2026-02-25 10:30:15
 
-SUCCESS: PVC legacy-app-data migrated to legacy-app-data-pooled on pool ops-pool
+SUCCESS: Migration completed in 42s. New PVC: pool-tutorial-ops/legacy-app-data-pooled. Update your workloads to use the new PVC, then delete the old PVC when ready.
 ```
 
 ### Verify Data Integrity
@@ -440,7 +449,7 @@ The first tab shows a high-level overview of all pools:
 ### Pools (FileSharePool)
 
 - **List page**: All FileSharePools with capacity bars, share counts, phase status, zone, and profile. Click any pool name to view details.
-- **Create page**: A step-by-step wizard with preset configurations (Standard Workloads, KubeVirt VMs, High Performance). Configure zone, profile, share size, IOPS, max shares, allocation strategy, auto-expand settings, and default permissions. Includes a YAML editor fallback for advanced users.
+- **Create page**: A step-by-step wizard with preset configurations (Standard Workloads, KubeVirt VMs, High-IOPS Database). Configure zone, profile, share size, IOPS, max shares, allocation strategy, auto-expand settings, and default permissions. Includes a YAML editor fallback for advanced users.
 - **Details page**: Full pool specification, status summary, list of shares with IDs and mount target IPs, capacity bar, and associated SubVolumes table.
 
 ### SubVolumes
@@ -454,6 +463,8 @@ The first tab shows a high-level overview of all pools:
 - **List page**: All Snapshot CRs with pool, source SubVolume, creation time, size, and phase.
 - **Create page**: Select a SubVolume to snapshot, provide a name, and create. Validates that the source SubVolume exists and is in a healthy state.
 - **Details page**: Snapshot metadata, source SubVolume reference, creation timestamp, and restore action.
+
+For the disk of a running VM, a snapshot is a QEMU copy or an instant snapshot, not a plain file copy. See [Part 2](TUTORIAL-02-SNAPSHOTS-AND-CLONES.md).
 
 ### Replication Policies
 
@@ -556,7 +567,7 @@ consolePlugin:
 
 ## Series Summary
 
-This concludes the 8-part tutorial series for the IBM VPC File Pool CSI Driver. Here is a summary of what each part covers:
+This concludes the 9-part tutorial series for the IBM VPC File Pool CSI Driver. Here is a summary of what each part covers:
 
 | Part | Tutorial | What You Learned |
 |------|----------|------------------|
@@ -564,10 +575,11 @@ This concludes the 8-part tutorial series for the IBM VPC File Pool CSI Driver. 
 | 2 | [Snapshots and Clones](TUTORIAL-02-SNAPSHOTS-AND-CLONES.md) | Point-in-time snapshots, restore from snapshot, clones |
 | 3 | [Group Snapshots and Hooks](TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md) | Not active: the driver does not act on group snapshots |
 | 4 | [Pool Configuration](TUTORIAL-04-POOL-CONFIGURATION.md) | Multi-tier pools, allocation strategies, auto-expansion, share draining |
-| 5 | [Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md) | Automatic KubeVirt golden image provisioning from CDI and OCI sources |
+| 5 | [Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md) | Hidden, optional feature: golden image provisioning from CDI sources |
 | 6 | [Replication and Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md) | Cross-region DR with direct NFS and driver-to-driver modes, failover |
 | 7 | [Monitoring](TUTORIAL-07-MONITORING.md) | Prometheus metrics, ServiceMonitor, alerting rules, Grafana dashboard |
 | 8 | [Migration and Console Plugin](TUTORIAL-08-MIGRATION-AND-CONSOLE.md) | PVC migration from stock driver, OpenShift console plugin walkthrough |
+| 9 | [A COS bucket for backups](TUTORIAL-09-COS-BACKUP-BUCKET.md) | Manual setup of a locked, versioned COS bucket for backup export |
 
 For production operations, see:
 - [Day 2 Operations](DAY2-OPERATIONS.md) -- Health checks, draining, failover procedures

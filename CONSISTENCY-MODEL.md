@@ -4,7 +4,9 @@ Definitive reference for understanding what this driver can and cannot guarantee
 
 **Audience:** Cluster operators, application developers, SREs evaluating whether their workload is safe with this driver.
 
-**Bottom line:** This driver provides **file-level consistency** only. If your workload requires cross-file transactional consistency, crash consistency, or intra-file point-in-time consistency, this driver's snapshot/clone/replication features are not safe for your data. Read on to understand exactly why.
+**Bottom line:** For plain volumes, this driver provides **file-level consistency** only. If your workload requires cross-file transactional consistency, crash consistency, or intra-file point-in-time consistency, the file-copy features (snapshot, clone, replication and backup of a plain volume) are not safe for your data. Read on to understand exactly why.
+
+**The exception is a running VM.** The driver copies all disks of a running VM with QEMU at one moment. The copy is file-system consistent when the guest could be frozen, and crash consistent when it could not. The status says which. See [CONTEXT.md](CONTEXT.md#how-good-a-copy-is) for the words.
 
 ---
 

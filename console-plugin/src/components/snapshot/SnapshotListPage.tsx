@@ -25,6 +25,7 @@ import { SnapshotModel, VolumeSnapshotContentModel, VolumeSnapshotModel } from '
 import { Snapshot } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
 import InstantSnapshotStatus from '../common/InstantSnapshotStatus';
+import RunningVMSnapshotNote from '../common/RunningVMSnapshotNote';
 import DeleteModal from '../common/DeleteModal';
 import { ROUTES } from '../../constants';
 import { VolumeSnapshotContent } from '../../utils/k8s-objects';
@@ -157,6 +158,7 @@ const SnapshotListPage: React.FC = () => {
       </p>
       <div style={{ padding: '0 24px', margin: '0 0 16px 0' }}>
         <InstantSnapshotStatus />
+        <RunningVMSnapshotNote />
       </div>
       <ListPageBody>
         <ListPageFilter

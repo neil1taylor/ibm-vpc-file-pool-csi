@@ -19,6 +19,10 @@ To make a release:
 
 ## [Unreleased]
 
+- **Console: the VM warnings on the restore and clone pages are correct again.** The restore page no longer says a snapshot of a running VM may not boot; it says the disk was copied at one moment, and what a crash consistent copy means. The clone page points to a VM snapshot for a safe copy.
+
+- **Console says when Red Hat does not support a VM copy.** The replication policy pages (when the policy holds a running VM's disk) and the Snapshots page now say that copies and snapshots of running VMs work directly with QEMU, not through OpenShift, so an OpenShift update could stop them until the driver is updated. The Snapshots page adds that instant snapshots also need a KubeVirt setting Red Hat does not support.
+
 - **Sidecar gate Job has fewer rights (issue #154).** The hook Job that `vmSnapshots.enableSidecarGate` runs may now only get and update the `HyperConverged` object named `kubevirt-hyperconverged` in `openshift-cnv`; before, it could list and update every `HyperConverged`. SECURITY.md now says what the gate opens up.
 
 ### Fixed
