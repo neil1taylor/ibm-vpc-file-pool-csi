@@ -528,6 +528,7 @@ func (c *vmCall) upload() {
 	}
 	sw := bufio.NewWriterSize(staging, 1<<20)
 	mw := bufio.NewWriterSize(manifest, 1<<20)
+	drop := newCacheDropper(staging, c.r.cacheDropEvery, c.r.onCacheDrop)
 	br := bufio.NewReaderSize(c.req.Body, 1<<20)
 	for {
 		rec, rerr := ReadUploadRecord(br, compareChunk)
@@ -561,6 +562,7 @@ func (c *vmCall) upload() {
 				c.fail(http.StatusInternalServerError, "%v", err)
 				return
 			}
+			drop.after(int(rec.Len))
 		}
 		if err = appendSeg(mw, s); err != nil {
 			c.fail(http.StatusInternalServerError, "%v", err)
@@ -736,10 +738,12 @@ func (c *vmCall) commit() {
 		c.fail(http.StatusInternalServerError, "%v", err)
 		return
 	}
+	var stagingR io.ReaderAt
 	if staging != nil {
 		defer func() { _ = staging.Close() }()
+		stagingR = &droppingReaderAt{r: staging, dropper: newCacheDropper(staging, c.r.cacheDropEvery, c.r.onCacheDrop)}
 	}
-	if err = checkDigest(staging, segs, cr.Digest); err != nil {
+	if err = checkDigest(stagingR, segs, cr.Digest); err != nil {
 		// What is stored does not fit the digest, so it must not be kept: the
 		// client would skip the stored records and fail the same way for ever.
 		klog.ErrorS(err, "Discarding an upload that does not match its digest", "disk", c.disk, "copy", c.copyID)
@@ -750,7 +754,7 @@ func (c *vmCall) commit() {
 
 	rc := &receivedCopy{size: cr.Size, segs: segs, byOff: stored}
 	if staging != nil {
-		rc.staging = staging
+		rc.staging = stagingR
 	}
 	if exists {
 		d, derr2 := c.v.openDisk(os.O_RDONLY)
@@ -759,7 +763,7 @@ func (c *vmCall) commit() {
 			return
 		}
 		defer func() { _ = d.Close() }()
-		rc.disk = d
+		rc.disk = &droppingReaderAt{r: d, dropper: newCacheDropper(d, c.r.cacheDropEvery, c.r.onCacheDrop)}
 	}
 
 	opts := ApplyOptions{To: cr.To, Full: cr.Full, Now: time.Now(), Keep: time.Duration(cr.KeepSeconds) * time.Second}

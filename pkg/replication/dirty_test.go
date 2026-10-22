@@ -2,6 +2,7 @@ package replication
 
 import (
 	"bytes"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -106,5 +107,50 @@ func TestApplyCopy_ForcesDataOutWhileWriting(t *testing.T) {
 		if b != 2 {
 			t.Fatalf("byte %d = %d, want 2", i, b)
 		}
+	}
+}
+
+// Clean pages of a file on NFS are not given back fast enough under a small
+// memory limit either: the receiver was killed at 512Mi while it stored
+// records, with 485 MB of cache and 4 MB dirty (#212). The receiver tells the
+// kernel to drop the cached pages of what it stored and what it read.
+
+func TestCacheDropper_DropsAfterEveryLimit(t *testing.T) {
+	drops := 0
+	d := &cacheDropper{every: 100, drop: func() { drops++ }}
+	for i := 0; i < 9; i++ {
+		d.after(30)
+	}
+	if drops != 2 {
+		t.Fatalf("drops = %d, want 2", drops)
+	}
+}
+
+func TestDroppingReaderAt_DropsWhileReading(t *testing.T) {
+	r := bytes.NewReader(bytes.Repeat([]byte{1}, 8*chunk))
+	drops := 0
+	d := &droppingReaderAt{r: r, dropper: &cacheDropper{every: 2 * chunk, drop: func() { drops++ }}}
+	buf := make([]byte, chunk)
+	for i := 0; i < 8; i++ {
+		if _, err := d.ReadAt(buf, int64(i)*chunk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if drops != 4 {
+		t.Fatalf("drops = %d, want 4", drops)
+	}
+}
+
+func TestReceiverVM_UploadDropsCachedPages(t *testing.T) {
+	c := newVMTestClient(t)
+	drops := 0
+	c.rcv.cacheDropEvery = 2 * chunk
+	c.rcv.onCacheDrop = func() { drops++ }
+	_, recs := fullCopy()
+	if code := c.upload("dddddddd-9", recs, "test-token-123"); code != http.StatusOK {
+		t.Fatal("upload failed")
+	}
+	if drops < 2 {
+		t.Fatalf("drops = %d, want at least 2 for 4 records at a limit of 2", drops)
 	}
 }

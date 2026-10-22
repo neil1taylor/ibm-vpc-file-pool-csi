@@ -95,3 +95,43 @@ func (b *boundedWriterAt) WriteAt(p []byte, off int64) (int, error) {
 	}
 	return n, err
 }
+
+// cacheDropper tells the kernel to drop the cached pages of a file after every
+// `every` bytes that were written to it or read from it. Clean pages of a file
+// on NFS are not always given back fast enough under a small memory limit.
+type cacheDropper struct {
+	every, since int64
+	drop         func()
+}
+
+func newCacheDropper(f *os.File, every int64, onDrop func()) *cacheDropper {
+	if every <= 0 {
+		every = maxDirtyBytes / 4
+	}
+	return &cacheDropper{every: every, drop: func() {
+		dropCache(f)
+		if onDrop != nil {
+			onDrop()
+		}
+	}}
+}
+
+func (c *cacheDropper) after(n int) {
+	c.since += int64(n)
+	if c.since >= c.every {
+		c.since = 0
+		c.drop()
+	}
+}
+
+// droppingReaderAt is an io.ReaderAt that drops cached pages as cacheDropper says.
+type droppingReaderAt struct {
+	r       io.ReaderAt
+	dropper *cacheDropper
+}
+
+func (d *droppingReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	n, err := d.r.ReadAt(p, off)
+	d.dropper.after(n)
+	return n, err
+}
