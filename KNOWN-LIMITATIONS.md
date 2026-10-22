@@ -42,7 +42,11 @@ Where the KubeVirt `Sidecar` feature gate is on, a VM disk snapshot is instant i
 
 ## Volume Group Snapshots
 
-**What:** Volume group snapshots (`VolumeGroupSnapshot`) are implemented. The driver supports coordinated multi-PVC snapshots via `CreateVolumeGroupSnapshot` and `DeleteVolumeGroupSnapshot` CSI RPCs.
+**What:** Volume group snapshots (`VolumeGroupSnapshot`) are **not active**. The code and the record type exist, but nothing watches a `VolumeGroupSnapshot`, the hooks never run, and the CSI group snapshot service is not registered, so Kubernetes' group snapshot API cannot reach the driver. There is no plan to turn it on (issue #100). The console does not show them.
+
+**Not needed for VMs:** a snapshot of a running VM with several disks already shows one moment (see the VM snapshot section above). KubeVirt does not use group snapshots.
+
+The notes below describe the design, not a working feature.
 
 **How it works:** Group snapshots iterate through the source PVCs sequentially, creating individual snapshots for each member. The order can be controlled via the `csi.ibm.com/copy-order` parameter (comma-separated PVC names). Two failure policies are supported:
 

@@ -51,15 +51,6 @@ const RestoreSnapshotPage = React.lazy(
 const SnapshotCreatePage = React.lazy(
   () => import('./snapshot/SnapshotCreatePage'),
 );
-const VolumeGroupSnapshotListPage = React.lazy(
-  () => import('./volumegroupsnapshot/VolumeGroupSnapshotListPage'),
-);
-const VolumeGroupSnapshotDetailsPage = React.lazy(
-  () => import('./volumegroupsnapshot/VolumeGroupSnapshotDetailsPage'),
-);
-const VolumeGroupSnapshotCreatePage = React.lazy(
-  () => import('./volumegroupsnapshot/VolumeGroupSnapshotCreatePage'),
-);
 const ReplicationPolicyListPage = React.lazy(
   () => import('./replicationpolicy/ReplicationPolicyListPage'),
 );
@@ -79,7 +70,6 @@ const TAB_PATHS = [
   ROUTES.POOLS,
   ROUTES.SUBVOLUMES,
   ROUTES.SNAPSHOTS,
-  ROUTES.GROUP_SNAPSHOTS,
   ROUTES.REPLICATION,
   ROUTES.MONITORING,
 ] as const;
@@ -91,7 +81,6 @@ const TAB_LABELS: Record<TabKey, string> = {
   [ROUTES.POOLS]: 'Pools',
   [ROUTES.SUBVOLUMES]: 'SubVolumes',
   [ROUTES.SNAPSHOTS]: 'Snapshots',
-  [ROUTES.GROUP_SNAPSHOTS]: 'Group Snapshots',
   [ROUTES.REPLICATION]: 'Replication',
   [ROUTES.MONITORING]: 'Monitoring',
 };
@@ -126,7 +115,6 @@ const VPCFilePoolsPage: React.FC = () => {
           <Route exact path={ROUTES.POOL_CREATE} component={FileSharePoolCreatePage} />
           <Route exact path={ROUTES.SUBVOLUME_CREATE} component={SubVolumeCreatePage} />
           <Route exact path={ROUTES.SNAPSHOT_CREATE} component={SnapshotCreatePage} />
-          <Route exact path={ROUTES.GROUP_SNAPSHOT_CREATE} component={VolumeGroupSnapshotCreatePage} />
           <Route exact path={ROUTES.REPLICATION_CREATE} component={ReplicationPolicyCreatePage} />
           <Route exact path={ROUTES.SNAPSHOT_RESTORE} component={RestoreSnapshotPage} />
           <Route exact path={ROUTES.MIGRATE} component={MigrateVolumesPage} />
@@ -135,7 +123,6 @@ const VPCFilePoolsPage: React.FC = () => {
           <Route exact path={ROUTES.POOL_DETAIL} component={FileSharePoolDetailsPage} />
           <Route exact path={ROUTES.SUBVOLUME_DETAIL} component={SubVolumeDetailsPage} />
           <Route exact path={ROUTES.SNAPSHOT_DETAIL} component={SnapshotDetailsPage} />
-          <Route exact path={ROUTES.GROUP_SNAPSHOT_DETAIL} component={VolumeGroupSnapshotDetailsPage} />
           <Route exact path={ROUTES.REPLICATION_DETAIL} component={ReplicationPolicyDetailsPage} />
         </Switch>
       </Suspense>
@@ -170,7 +157,6 @@ const VPCFilePoolsPage: React.FC = () => {
           <Route exact path={ROUTES.POOLS} component={FileSharePoolListPage} />
           <Route exact path={ROUTES.SUBVOLUMES} component={SubVolumeListPage} />
           <Route exact path={ROUTES.SNAPSHOTS} component={SnapshotListPage} />
-          <Route exact path={ROUTES.GROUP_SNAPSHOTS} component={VolumeGroupSnapshotListPage} />
           <Route exact path={ROUTES.REPLICATION} component={ReplicationPolicyListPage} />
           <Route exact path={ROUTES.MONITORING} component={MonitoringPage} />
           <Route path={ROUTES.DASHBOARD} component={DashboardPage} />

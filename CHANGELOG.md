@@ -33,6 +33,7 @@ To make a release:
 - Release test stage 18 (backup to a snapshot pool): runs `test/e2e/test-backup.sh` and checks each outcome it logs. Not run on a cluster yet. `remote.sh` now also builds `kubectl-backup` and ships all of `test/e2e` (stage 6 needs `test-vm-snapshot.sh` there).
 
 ### Fixed
+- **Group snapshots are no longer shown as a working feature (#100).** Nothing acts on a `VolumeGroupSnapshot` and the hooks never ran, so the docs now say "not active" and the console no longer has the Group Snapshots tab or its pages. The code and the record type stay.
 - **Docs no longer say the VPC API has no share snapshot operation.** It has one. The driver does not use it, because a share holds many volumes (#101).
 - **The console dashboard no longer shows "NaN ms" and a red "High" when there were no allocations.** No data now shows "-" with no label (#113).
 - **Console plugin libraries updated: advisories down from over 60 to 14.** The 14 left are build tools or have no fix; each is listed with its reason in `osv-scanner.toml` and expires on 2026-12-31. Go libraries `mongo-driver` and `x/crypto` updated too. New CI job "Dependency scan" fails on any other known advisory (#90).
