@@ -58,3 +58,20 @@ describe('DeleteModal extra option', () => {
     expect(props.onDeleted).toHaveBeenCalled();
   });
 });
+
+describe('DeleteModal note', () => {
+  it('shows a note about what the delete does not remove', () => {
+    render(
+      <DeleteModal
+        isOpen
+        resourceName="dr"
+        resourceKind="Thing"
+        model={model}
+        onClose={jest.fn()}
+        onDeleted={jest.fn()}
+        note="The data stays."
+      />,
+    );
+    expect(screen.getByText('The data stays.')).toBeTruthy();
+  });
+});

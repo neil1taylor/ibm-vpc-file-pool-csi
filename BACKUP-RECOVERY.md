@@ -402,7 +402,20 @@ The **Backups** tab of the IBM VPC File Pools page shows the same facts as `kube
 - The list has one row for each policy: snapshot pool, schedule, keep time, phase, number of volumes, the age of the stalest backup, and whether the COS export is on.
 - A policy page shows its settings and one row for each volume: the claim, the VM, the newest and oldest backup, the restore points, the size of the newest backup, the consistency, the last error and the export state. A volume the policy no longer backs up is marked with the date its backups are kept until. A crash consistent copy has an orange label.
 - When new backups are stopped because the snapshot pool is more than 85% full, a banner says so on both pages and links to the pool. Nothing is deleted to make room; see [Backups stopped](TROUBLESHOOTING.md#backups-stopped-the-snapshot-pool-is-above-85-full).
-- Restore is in the console too (next section). Changing a policy, deleting backups and the COS tab come in later steps, each with its own section here.
+- Restore is in the console too (next section). Deleting backups and the COS tab come in later steps, each with its own section here.
+
+#### Make and change a policy in the console
+
+On the Backups tab, **Create BackupPolicy** opens a form that makes the same `BackupPolicy` as the YAML above. **Edit** on the list or on a policy page opens it again.
+
+- **Snapshot pool.** Only a pool that holds no workload claims and has a ready share can be chosen; the other pools are listed, switched off, with the reason.
+- **Schedule and keep for.** The page checks the same limits as the admission webhook (a schedule of at least 1 minute, a keep time of at least 1 hour) and shows the webhook's own message if it refuses the policy.
+- **Labels and namespaces.** The page counts, live, the claims the labels match (and says when a VM's other disks join), so a wrong label shows at once. A policy with no labels is refused. Match expressions cannot be edited in the form; an edit keeps them, and keeps the `export` block.
+- **VM copy speed limit.** Explained as on the replication form, with the note that Red Hat does not support copying a running VM.
+- The form explains the 85% stop: when a share of the snapshot pool is more than 85% full, no new backups are made for the volumes on it, and nothing is deleted to make room.
+- **Suspend and Resume** are on the list menu and on the policy page. They set `spec.suspend`; existing backups stay.
+- **Delete** asks first. Deleting a policy stops new backups; the backups already made stay on the snapshot pool. Remove them with `kubectl backup delete` (a console action for this comes in a later step).
+- Without the right to create, update or delete `BackupPolicy` objects, the action is off, the page names the missing right, and (for create and edit) shows the YAML for an administrator.
 
 #### Restore a backup in the console
 
