@@ -40,7 +40,7 @@ func (c *Client) bucketURL(endpoint, bucket string) (string, error) {
 	}
 	base := strings.TrimSuffix(endpoint, "/") + "/" + bucket
 	if !c.allowAnyHost {
-		if err = cossetup.CheckHost(base); err != nil {
+		if err = cossetup.CheckCOSHost(base); err != nil {
 			return "", err
 		}
 	}

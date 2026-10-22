@@ -153,6 +153,8 @@ rm -r -f -- "$scratch"
 	fmt.Fprintf(&b, "mkdir -p %s %s\n", util.ShellQuote(p.rootDir()+scratchBackup), util.ShellQuote(p.rootDir()+scratchMoments))
 	fmt.Fprintf(&b, "kopia snapshot restore \"$back\" %s --skip-owners --write-sparse-files\n", util.ShellQuote(p.rootDir()+scratchBackup))
 	fmt.Fprintf(&b, "if [ \"$moms\" != - ]; then kopia snapshot restore \"$moms\" %s --skip-owners; fi\n", util.ShellQuote(p.rootDir()+scratchMoments))
+	// A tenant can have put symlinks in the backup. None may stay in the copy.
+	b.WriteString("find \"$scratch\" -type l -delete\n")
 	fmt.Fprintf(&b, "trap - EXIT\nprintf '{\"moment\":\"%%s\"}' \"$moment\" > %s\n", util.ShellQuote(p.termFile()))
 	return b.String()
 }
