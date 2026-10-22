@@ -179,6 +179,7 @@ Prometheus metrics and alerting configuration.
 | `metrics.alerts.exportLateSeconds` | int | `43200` | An export to COS, or a moment waiting, this old triggers a warning |
 | `metrics.alerts.snapshotPoolWarning` | int | `75` | Snapshot pool share use (percent) that triggers a warning |
 | `metrics.alerts.snapshotPoolCritical` | int | `85` | Snapshot pool share use (percent) that triggers a critical alert; new backups stop at 85 |
+| `metrics.alerts.shareUtilizationWarning` | int | `90` | Percent of one share's size allocated to PVCs that triggers a warning |
 | `metrics.alerts.utilizationWarning` | int | `80` | Pool utilization percentage that triggers a warning alert |
 | `metrics.alerts.utilizationCritical` | int | `95` | Pool utilization percentage that triggers a critical alert |
 

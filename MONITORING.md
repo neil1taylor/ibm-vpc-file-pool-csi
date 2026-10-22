@@ -8,11 +8,11 @@ Complete metrics reference, alerting rules, and dashboard templates for operatin
 
 The controller exposes Prometheus metrics on `:8080/metrics`. All metrics use the `vpc_file_pool_` or `pool_csi_` prefix and follow the [Prometheus naming conventions](https://prometheus.io/docs/practices/naming/).
 
-The driver emits 29 metrics across eight categories:
+The driver emits 31 metrics across eight categories:
 
 | Category | Metrics | Purpose |
 |----------|---------|---------|
-| Allocation | 7 | PVC provisioning health and capacity |
+| Allocation | 9 | PVC provisioning health and capacity |
 | VPC API | 2 | API call success rate and latency |
 | Snapshots | 2 | Snapshot operation tracking |
 | Clones | 2 | Clone operation tracking |
@@ -29,7 +29,7 @@ The driver emits 29 metrics across eight categories:
 
 The Helm chart creates a `ServiceMonitor` for the controller when the cluster has the Prometheus Operator API (`monitoring.coreos.com/v1`). OpenShift has it. To turn it off, set `metrics.serviceMonitor.enabled=false`.
 
-The console plugin's charts read these metrics. Without the `ServiceMonitor`, they show no data. The console queries 19 of the first 22 metrics on its other pages, and the other three are charted in the Monitoring tab's "Group Snapshot and CDI Activity" section; the VM copy metrics named in the VM-safe replication spec do not exist yet, so they have no panel.
+The console plugin's charts read these metrics. Without the `ServiceMonitor`, they show no data. The console queries 19 of the first 22 metrics on its other pages, and the other three are charted in the Monitoring tab's "Group Snapshot and CDI Activity" section; the two per-share metrics are used by the `VPCFilePoolShareNearlyFull` alert and have no panel; the VM copy metrics named in the VM-safe replication spec do not exist yet, so they have no panel.
 
 ### OpenShift User Workload Monitoring
 
@@ -97,6 +97,8 @@ kill %1
 | `vpc_file_pool_allocated_gb` | Gauge | `pool` | Total allocated (requested) capacity in GB. |
 | `vpc_file_pool_share_count` | Gauge | `pool` | Number of VPC file shares in the pool. |
 | `vpc_file_pool_max_shares` | Gauge | `pool` | Most shares the pool may have (`spec.maxShares`). |
+| `vpc_file_pool_share_total_gb` | Gauge | `pool`, `share` | Provisioned size of one share of the pool in GB. `share` is the VPC share name. |
+| `vpc_file_pool_share_allocated_gb` | Gauge | `pool`, `share` | Capacity allocated to PVCs on one share, in GB. This is what PVCs asked for, not what they wrote. |
 | `vpc_file_pool_pvc_count` | Gauge | `pool` | Number of active PVCs (SubVolumes) in the pool. |
 
 **Normal ranges:**
@@ -240,6 +242,7 @@ The chart ships these alerts as a `PrometheusRule` (on by default; it is made on
 |-------|----------|------------|
 | `VPCFilePoolUtilizationWarning` / `Critical` | warning / critical | Pool use is above 80% / 95% |
 | `VPCFilePoolOverCommitted` | critical | More is allocated than the pool has |
+| `VPCFilePoolShareNearlyFull` | warning | One share has more than 90% of its size allocated for 15 minutes. With the `binpack` strategy shares fill one after another on purpose, so expect this alert there; raise `metrics.alerts.shareUtilizationWarning` or turn it off by setting it to 100. |
 | `VPCFilePoolAtMaxShares` | warning | The pool has its most shares and use is above the warning limit |
 | `VPCFilePoolControllerDown` | critical | No metrics from the controller for 5 minutes |
 | `VPCFilePoolAllocationFailures` | critical | More than 0.1 failed allocations per second |
@@ -250,6 +253,10 @@ The chart ships these alerts as a `PrometheusRule` (on by default; it is made on
 | `VPCFilePoolBackupLate` | warning | A volume has no backup for over 12 h |
 | `VPCFilePoolExportLate` / `ExportMomentWaiting` | warning | The COS copy is over 12 h late |
 | `VPCFilePoolSnapshotPoolNearlyFull` / `Full` | warning / critical | A snapshot pool share is above 75% / 85% |
+
+**Per-share NFS latency and IOPS are not available.** The driver does not measure them: the node agent only mounts shares and keeps no read or write counters, and the controller never touches the NFS data. The two per-share metrics show how much of a share is promised to PVCs, not how much is written or how fast it answers. Use the node exporter's NFS client metrics for latency and IOPS until the node agent reports them.
+
+**Console dashboard.** The dashboard's "Firing Alerts" card asks the cluster Prometheus (`/api/prometheus`) for firing alerts named `VPCFilePool*`. It also asks which alert rules that Prometheus has loaded; if it has none of the driver's, the card says so and does not claim that no alert is firing. OpenShift's platform Prometheus loads rules only from namespaces it watches (`openshift-*`, or `kube-*` with the `openshift.io/cluster-monitoring` label); if the chart is installed in another namespace, the rules need user workload monitoring, which the console queries through a different route that this card does not use.
 
 The examples below are older hand-written rules, kept to show how to write your own. They use different names; if you load them as well as the chart's, you get two alerts for the same problem.
 

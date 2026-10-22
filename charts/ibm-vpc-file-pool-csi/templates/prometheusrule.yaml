@@ -65,6 +65,19 @@ spec:
             description: >-
               Pool {{`{{ $labels.pool }}`}} has reached its share limit and is above
               {{ $a.utilizationWarning }}% utilization. No further auto-expansion is possible.
+        - alert: VPCFilePoolShareNearlyFull
+          expr: |
+            vpc_file_pool_share_allocated_gb / (vpc_file_pool_share_total_gb > 0) * 100
+            > {{ $a.shareUtilizationWarning }}
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "A share of a VPC file pool is nearly full"
+            description: >-
+              Share {{`{{ $labels.share }}`}} of pool {{`{{ $labels.pool }}`}} has
+              {{`{{ printf "%.0f" $value }}`}}% of its size allocated.
+              Volumes placed on it can fail.
     - name: vpc-file-pool-csi.service
       rules:
         - alert: VPCFilePoolControllerDown
