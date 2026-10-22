@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Several Disks, One Moment</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#f4f6f8; --panel:#ffffff; --fg:#161d26; --muted:#5a6675; --line:#d5dce4; --share:#e9eef4;
+  --ok:#0e6b4f; --warn:#8a5300; --bad:#b3261e; --btn:#0f4fd6; --btn-fg:#ffffff;
+  --l0:#2b6f8f; --l1:#d9780f; --l2:#7a4fb0; --l3:#c43d63; --l4:#3a8a2b; --l5:#8d9124;
+  --font:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#10161d; --panel:#18212b; --fg:#e6ebf1; --muted:#9aa7b6; --line:#2b3745; --share:#1d2834;
+  --ok:#5fd0a6; --warn:#e0a24a; --bad:#ff8a80; --btn:#6c9bff; --btn-fg:#0b1220;
+  --l0:#5fb3d6; --l1:#f0a04b; --l2:#b595e6; --l3:#ee7f9b; --l4:#7fcb6a; --l5:#c4c76a; color-scheme:dark;}}
+:root[data-theme="dark"]{
+  --bg:#10161d; --panel:#18212b; --fg:#e6ebf1; --muted:#9aa7b6; --line:#2b3745; --share:#1d2834;
+  --ok:#5fd0a6; --warn:#e0a24a; --bad:#ff8a80; --btn:#6c9bff; --btn-fg:#0b1220;
+  --l0:#5fb3d6; --l1:#f0a04b; --l2:#b595e6; --l3:#ee7f9b; --l4:#7fcb6a; --l5:#c4c76a; color-scheme:dark;}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 var(--font);margin:0;
+  padding-block:24px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+main{max-width:860px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+nav.top{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:.85rem;color:var(--muted)}
+nav.top a{color:var(--btn);text-decoration:none}
+nav.top a:hover{text-decoration:underline}
+nav.top .off{opacity:.5}
+h1{font-size:1.5rem;line-height:1.2;margin:0;font-weight:600;text-wrap:balance}
+h2{font-size:.75rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0;font-weight:600}
+p{margin:0;max-width:65ch}
+.lead{color:var(--muted)}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button{font:inherit;font-weight:500;border:1px solid var(--line);background:var(--panel);color:var(--fg);padding:8px 14px;border-radius:6px;cursor:pointer}
+button.primary{background:var(--btn);color:var(--btn-fg);border-color:var(--btn)}
+button.on{outline:2px solid var(--btn);outline-offset:-2px;font-weight:600}
+button:disabled{opacity:.45;cursor:not-allowed}
+button:focus-visible{outline:2px solid var(--btn);outline-offset:2px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.share{background:var(--share);border:1px solid var(--line);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.mono{font-family:var(--mono);font-size:.85rem}
+.log{border-left:3px solid var(--btn);padding:6px 12px;min-height:3.4em;background:var(--panel)}
+.stats{display:flex;flex-wrap:wrap;gap:16px;color:var(--muted);font-size:.9rem}
+.stats b{color:var(--fg);font-variant-numeric:tabular-nums}
+.hint{font-size:.85rem;color:var(--muted)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:.82rem;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{display:inline-block;width:16px;height:16px;border-radius:4px;border:2px solid var(--c,var(--line));background:color-mix(in srgb,var(--c,transparent) 22%,var(--panel))}
+.sw.dash{border-style:dashed;background:transparent}
+.sw.out{box-shadow:0 0 0 2px var(--fg)}
+.blk{font-family:var(--mono);font-size:.82rem;text-align:center;padding:5px 8px;border-radius:4px;border:2px solid var(--c,var(--line));background:color-mix(in srgb,var(--c,transparent) 22%,var(--panel));min-width:0;white-space:nowrap}
+.blk.dash{border-style:dashed;background:transparent;color:var(--muted)}
+.blk.new{box-shadow:0 0 0 2px var(--fg)}
+.blk.bad{--c:var(--bad)}
+.chip{display:inline-block;font-size:.76rem;font-weight:600;padding:1px 8px;border-radius:10px;border:1px solid var(--line)}
+.chip.ok{color:var(--ok);border-color:var(--ok)}
+.chip.warn{color:var(--warn);border-color:var(--warn)}
+.chip.bad{color:var(--bad);border-color:var(--bad)}
+@media (prefers-reduced-motion:no-preference){.blk{transition:background .25s,border-color .25s}}
+[hidden]{display:none !important}
+.row{display:grid;grid-template-columns:150px minmax(0,1fr);gap:10px;align-items:center}
+.row .who{display:flex;flex-direction:column}
+.row .who b{font-weight:600}
+.row .who span{font-size:.8rem;color:var(--muted)}
+.cells{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:3px}
+.cells i{font-style:normal;font-family:var(--mono);font-size:.75rem;text-align:center;padding:5px 0;border-radius:4px;
+  border:2px solid var(--c,var(--line));background:color-mix(in srgb,var(--c,transparent) 22%,var(--panel));min-width:0}
+.cells i.none{border:2px dashed var(--line);background:transparent;color:transparent}
+.cells i.bad{--c:var(--bad);color:var(--bad);font-weight:600}
+.cells i.new{box-shadow:0 0 0 2px var(--fg)}
+.cells i.cut{box-shadow:0 0 0 2px var(--fg)}
+.group{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line);padding-top:10px}
+.group:first-child{border-top:0;padding-top:0}
+ul.plain{margin:0;padding-left:1.2em;max-width:65ch}
+ul.plain li{margin:2px 0}
+@media (max-width:620px){.row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+<nav class="top" aria-label="Pages"><a href="index.html">All pages</a><a href="09-pool-filling-up.html">&larr; Previous page</a><span class="off">Next page &rarr; (this is the last page)</span></nav>
+  <div>
+    <h1>Several Disks, One Moment</h1>
+    <p class="lead">A VM can have more than one disk. Here the VM has a <b>system disk</b> and a <b>data disk</b>. A program in the VM writes file n on the data disk, then writes a log line about it on the system disk. This page takes a snapshot two ways and restores a new VM from each. The log must never name a file that is missing.</p>
+  </div>
+
+  <div class="bar" role="group" aria-label="Method">
+    <span class="hint">Method:</span>
+    <button id="m-one" class="on">One moment (what the driver does)</button>
+    <button id="m-sep">Two separate snapshots</button>
+  </div>
+  <div class="bar">
+    <button class="primary" id="b-run">1. Let the VM work for 2 ticks</button>
+    <button id="b-snap">2. Take the snapshot</button>
+    <button id="b-rest">3. Restore a new VM from it</button>
+    <button id="b-reset">Start again</button>
+  </div>
+  <p class="hint">A <b>tick</b> is one short step of the VM's work. Let the VM work for a few ticks, take the snapshot with each method (press Start again between them), then restore and compare. A block with a white outline is the last one in that snapshot.</p>
+
+  <section class="card" aria-label="The VM and its snapshots">
+    <h2>What you see</h2>
+    <div id="views"></div>
+    <div class="legend">
+      <span><i class="sw" style="--c:var(--l0)"></i>a file on the data disk</span>
+      <span><i class="sw" style="--c:var(--l1)"></i>a log line on the system disk</span>
+      <span><i class="sw" style="--c:var(--bad)"></i>!n = a log line for a file the data disk does not have</span>
+      <span><i class="sw dash"></i>not written yet</span>
+      <span><i class="sw out"></i>last block in the snapshot</span>
+    </div>
+  </section>
+
+  <div class="stats" aria-live="polite">
+    <span>VM time: <b id="st-tick">tick 0</b></span>
+    <span>Data disk snapshot: <b id="st-d">none</b></span>
+    <span>System disk snapshot: <b id="st-s">none</b></span>
+    <span>Log lines naming a missing file after restore: <b id="st-miss">not restored</b></span>
+  </div>
+  <div class="log" id="log" aria-live="polite"></div>
+
+  <section class="card" aria-label="How the driver does it">
+    <h2>How the driver does this today</h2>
+    <ul class="plain">
+      <li>KubeVirt asks for one snapshot <b>per disk</b>. It does not ask for a group of disks.</li>
+      <li>The driver copies <b>all the pool disks of the VM at one moment</b>, when the first disk's request arrives. The requests for the other disks join that copy.</li>
+      <li>The guest is frozen once, so its pending writes reach the disks first. If the guest cannot freeze, the snapshot is marked crash consistent (as after a power cut) and it says so in its status.</li>
+      <li>With <b>instant snapshots</b> (Experimental, off by default), OpenShift freezes the guest once and the driver starts a new file on every disk inside that freeze.</li>
+      <li>One cost: a snapshot of one disk of a VM with several disks also copies the other disks to temporary files. They are deleted after 10 minutes if no snapshot claims them. Each share needs room for them.</li>
+      <li>A disk that is not on a pool is not part of the moment.</li>
+      <li>A group snapshot record (<span class="mono">VolumeGroupSnapshot</span>) exists, but it is switched off. A VM does not need it.</li>
+    </ul>
+    <p class="hint">Lab result, 21 October 2026, before this was fixed: the two disks were copied 80 seconds apart, and 725 of 1,154 logged files were missing from the data disk of the restored VM. Each disk was sound on its own. They did not fit each other.</p>
+  </section>
+
+</main>
+<script>
+(function(){
+  var N=12, DELAY=4, STEP=2, MAXRUN=8;
+  var mode, tick, snap, restored;
+  function el(i){return document.getElementById(i);}
+  function reset(){
+    tick=0; snap=null; restored=null;
+    say(mode==="sep"? "Method: <b>two separate snapshots</b>. Each disk is copied on its own turn, so each shows a different moment. Let the VM work, then take the snapshot."
+                    : "Method: <b>one moment</b>. Both disks are copied at the same moment. Let the VM work, then take the snapshot.");
+  }
+  function say(h){ el("log").innerHTML=h; render(); }
+  function cells(count,color,opts){
+    opts=opts||{}; var h='<div class="cells">';
+    for(var k=1;k<=N;k++){
+      if(k>count){ h+='<i class="none">'+k+'</i>'; continue; }
+      var bad=opts.missingAbove!==undefined && k>opts.missingAbove;
+      var cut=opts.cut===k;
+      h+= bad ? '<i class="bad'+(cut?' cut':'')+'">!'+k+'</i>' : '<i style="--c:'+color+'"'+(cut?' class="cut"':'')+'>'+k+'</i>';
+    }
+    return h+'</div>';
+  }
+  function row(name,sub,body){ return '<div class="row"><div class="who"><b>'+name+'</b><span>'+sub+'</span></div>'+body+'</div>'; }
+  function render(){
+    var D="var(--l0)", S="var(--l1)";
+    var v='<div class="group">'+
+      row("Data disk, now","file 1 to "+tick+(tick?"":" (none yet)"),cells(tick,D))+
+      row("System disk, now","log line 1 to "+tick+(tick?"":" (none yet)"),cells(tick,S))+'</div>';
+    if(snap){
+      v+='<div class="group">'+
+        row("Snapshot of the data disk","shows moment "+snap.d,cells(snap.d,D,{cut:snap.d}))+
+        row("Snapshot of the system disk","shows moment "+snap.s,cells(snap.s,S,{cut:snap.s}))+'</div>';
+    }
+    if(restored){
+      v+='<div class="group">'+
+        row("Restored VM: data disk","files it has",cells(snap.d,D))+
+        row("Restored VM: system disk","log lines it has",cells(snap.s,S,{missingAbove:snap.d}))+'</div>';
+    }
+    el("views").innerHTML='<div style="display:flex;flex-direction:column;gap:12px">'+v+'</div>';
+    el("st-tick").textContent="tick "+tick;
+    el("st-d").textContent=snap?"moment "+snap.d:"none";
+    el("st-s").textContent=snap?"moment "+snap.s:"none";
+    var miss=restored?Math.max(0,snap.s-snap.d):null;
+    el("st-miss").textContent=restored?String(miss):"not restored";
+    el("m-one").className=mode==="one"?"on":""; el("m-sep").className=mode==="sep"?"on":"";
+    el("b-run").disabled=!!snap||tick>=MAXRUN;
+    el("b-snap").disabled=!!snap||tick<STEP;
+    el("b-rest").disabled=!snap||!!restored;
+  }
+  el("b-run").onclick=function(){
+    tick=Math.min(MAXRUN,tick+STEP);
+    say("The VM worked for "+STEP+" ticks. Each tick wrote a file on the data disk, then a log line about it on the system disk. It is now tick "+tick+".");
+  };
+  el("b-snap").onclick=function(){
+    if(mode==="one"){
+      snap={d:tick,s:tick};
+      say("<b>Snapshot taken at one moment.</b> The guest was frozen once, so its pending writes reached both disks. Then both disks were copied as they were at <b>tick "+tick+"</b>. The VM went on working.");
+    } else {
+      var d=tick; tick=Math.min(N,tick+DELAY); snap={d:d,s:tick};
+      say("<b>Two snapshots, one after the other.</b> The data disk was copied at <b>tick "+d+"</b>. The copy of the data disk took a while, and the VM kept working. The system disk was copied only at <b>tick "+tick+"</b>. The two snapshots show different moments.");
+    }
+  };
+  el("b-rest").onclick=function(){
+    restored=true;
+    var miss=Math.max(0,snap.s-snap.d);
+    if(miss===0) say("<b>Restored.</b> The new VM has files 1 to "+snap.d+" and log lines 1 to "+snap.s+". Every log line names a file that is there. The VM starts from one moment, so the disks fit each other.");
+    else say("<b>Restored, but the disks do not fit.</b> The system disk has log lines up to "+snap.s+", but the data disk has files only up to "+snap.d+". <b>"+miss+" log line"+(miss>1?"s name":" names")+" a file that is missing</b> (red). Each disk is sound alone. Together they are wrong.");
+  };
+  el("m-one").onclick=function(){mode="one"; reset();};
+  el("m-sep").onclick=function(){mode="sep"; reset();};
+  el("b-reset").onclick=reset;
+  mode="one"; reset();
+})();
+
+</script>
+</body>
+</html>
