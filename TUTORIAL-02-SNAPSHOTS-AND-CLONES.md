@@ -17,7 +17,7 @@ Verify the CSI driver is running:
 # Controller pod (6/6 Running)
 oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi -l app.kubernetes.io/component=controller
 
-# Node pods (3/3 Running on each schedulable node)
+# Node pods (2/2 Running on each schedulable node)
 oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi -l app.kubernetes.io/component=node
 
 # CSI Driver registered
@@ -297,7 +297,7 @@ Expected output:
 
 ```
 NAME                    POOL         SOURCE                   SIZE   PHASE   READY
-snap-xxxxxxxx-...       snap-pool    sv-test-data-xxxxxxxx    10     Ready   true
+snap-xxxxxxxx-...       snap-pool    pvc-xxxxxxxx-...         10     Ready   true
 ```
 
 **What the Snapshot CR contains:**

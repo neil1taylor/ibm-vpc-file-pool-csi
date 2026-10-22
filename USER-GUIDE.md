@@ -173,16 +173,16 @@ If `autoExpand` is `false` or you want to proactively add capacity:
 # Option 1: Increase maxShares and let the reconciler add shares as needed
 kubectl patch filesharepool general-purpose --type merge -p '{"spec":{"maxShares":15}}'
 
-# Option 2: Increase individual share size (expands the underlying VPC file share)
-# This is handled by the reconciler when the pool detects shares approaching capacity
-# You can trigger it by lowering expandThresholdPercent temporarily
+# Option 2: Lower expandThresholdPercent so the reconciler adds a share sooner
+# (Changing shareSizeGB only sets the size of shares created afterwards;
+#  existing shares keep their size.)
 ```
 
 ### Draining a Share
 
 If you need to take a share out of rotation (e.g., for maintenance or migration), the pool manager supports a draining state where no new PVCs are allocated to that share but existing PVCs continue to work. This is managed automatically when the VPC API reports a share as degraded.
 
-Manual draining is not yet exposed as a user-facing API — it's tracked as a future feature.
+To drain a share by hand, add its ID to `spec.drainShares` on the pool. See [DAY2-OPERATIONS.md](DAY2-OPERATIONS.md).
 
 ---
 
@@ -243,26 +243,7 @@ metadata:
 provisioner: vpc-file-pool.csi.ibm.io
 parameters:
   pool: general-purpose
-  reclaimAction: retain
 reclaimPolicy: Retain
-volumeBindingMode: Immediate
-allowVolumeExpansion: true
-mountOptions:
-  - nfsvers=4.1
-  - soft
-  - timeo=600
-  - retrans=3
----
-# Archive data on deletion (moved to .archived/ directory on the share)
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: ibm-vpc-file-pool-archive
-provisioner: vpc-file-pool.csi.ibm.io
-parameters:
-  pool: general-purpose
-  reclaimAction: archive
-reclaimPolicy: Delete
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
@@ -280,7 +261,6 @@ mountOptions:
 | `uid` | No | Pool's `defaultUID` | Unix UID owner for the subdirectory |
 | `gid` | No | Pool's `defaultGID` | Unix GID owner for the subdirectory |
 | `permissions` | No | Pool's `defaultPermissions` | Unix permissions (e.g., `"0755"`) |
-| `reclaimAction` | No | `delete` | What happens to the subdirectory on PVC deletion: `delete` (remove it), `retain` (leave it), `archive` (move to `.archived/`) |
 
 ---
 
@@ -378,8 +358,7 @@ kubectl delete pvc my-app-data
 What happens depends on the StorageClass's reclaim policy:
 
 - **Delete** (default): The subdirectory and all its contents are removed from the share. The SubVolume CR is deleted. Capacity is freed in the pool.
-- **Retain**: The subdirectory stays on the share. The SubVolume CR is marked as `Retained`. Data must be manually cleaned up later.
-- **Archive**: The subdirectory is moved to `.archived/<pvc-name>-<timestamp>/` on the share. Useful for accidental deletion recovery.
+- **Retain** (`reclaimPolicy: Retain` on the StorageClass): Kubernetes keeps the PersistentVolume and never asks the driver to delete it. The SubVolume CR and the subdirectory stay too. Clean them up by hand when the data is no longer needed.
 
 ### Viewing SubVolumes
 
@@ -432,7 +411,7 @@ metadata:
   name: my-app-snapshot
   namespace: default
 spec:
-  volumeSnapshotClassName: ibm-vpc-file-pool-snapclass
+  volumeSnapshotClassName: ibm-vpc-file-pool
   source:
     persistentVolumeClaimName: my-app-data
 ```
@@ -597,7 +576,7 @@ The controller exposes metrics on `:8080/metrics`. Scrape this endpoint with Pro
 | `vpc_file_pool_allocated_gb` | Gauge | Total allocated (requested) capacity in a pool |
 | `vpc_file_pool_pvc_count` | Gauge | Number of active PVCs in a pool |
 | `vpc_file_pool_share_count` | Gauge | Number of VPC file shares in a pool |
-| `vpc_file_pool_allocations_total` | Counter | Cumulative PVC allocations (by pool, success/error) |
+| `vpc_file_pool_allocations_total` | Counter | Cumulative PVC allocations (by pool; status `success`, `error`, `deallocate_success` or `deallocate_error`) |
 | `vpc_file_pool_allocation_duration_seconds` | Histogram | Time to allocate a PVC (should be <1s in steady state) |
 | `vpc_file_pool_api_calls_total` | Counter | VPC API calls (by operation, success/error) |
 | `vpc_file_pool_api_call_duration_seconds` | Histogram | VPC API call duration |
@@ -682,7 +661,7 @@ UID/GID mismatch between the pod's `securityContext` and the StorageClass's `uid
 ## Frequently Asked Questions
 
 **Q: Can I use this with OpenShift?**
-Yes. The driver is fully compatible with ROKS and ROVS (Red Hat OpenShift on IBM Cloud). On OpenShift, the node agent requires the `privileged` SCC, which is standard for all CSI node agents. The Helm chart includes the necessary SCC configuration.
+Yes. The driver is fully compatible with ROKS and ROVS (Red Hat OpenShift on IBM Cloud). On OpenShift, the node agent requires the `privileged` SCC, which is standard for all CSI node agents. The chart's ClusterRole lets the node agent use the `privileged` SCC. If your cluster does not grant it, bind the SCC to the node agent's ServiceAccount with `oc adm policy add-scc-to-user privileged -z <node service account> -n kube-system`.
 
 **Q: What happens if a VPC file share goes down?**
 All PVCs on that share will experience I/O errors until the share recovers. IBM VPC File Storage has 99.999% availability with HA-paired nodes, so this is extremely rare. The pool manager will detect the degraded state and stop allocating new PVCs to that share. Existing PVCs recover automatically when the share comes back.

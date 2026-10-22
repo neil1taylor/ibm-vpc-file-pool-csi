@@ -29,7 +29,7 @@ kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.
 ```bash
 # 1. Pool capacity check — flag pools over 70% utilization
 kubectl get filesharepools -o custom-columns=\
-'NAME:.metadata.name,CAPACITY:.status.totalCapacityGB,ALLOCATED:.status.totalAllocatedGB,SHARES:.status.shareCount,PVCS:.status.pvcCount,PHASE:.status.phase'
+'NAME:.metadata.name,CAPACITY:.status.totalCapacityGB,ALLOCATED:.status.totalAllocatedGB,SHARES:.status.shareCount,PVCS:.status.totalPVCCount,PHASE:.status.phase'
 
 # 2. Check for orphaned SubVolumes (SubVolume exists, PVC doesn't)
 for sv in $(kubectl get subvolumes -o jsonpath='{.items[*].metadata.name}'); do
@@ -177,7 +177,7 @@ The reconciler automatically handles shares with missing mount targets:
 1. Detects stable shares with no mount target IP
 2. Attempts to create a VPC mount target
 3. If creation succeeds, the share becomes available for allocations
-4. If creation fails (e.g., security_group access mode), the share is marked as `draining`
+4. If creation fails, the reconciler logs `Failed to create mount target for share` and tries again on the next reconcile. The share is not marked `draining`, and the pool uses its other shares meanwhile
 
 ### Manual Recovery for Degraded Shares
 
@@ -188,12 +188,12 @@ kubectl get fsp <pool-name> -o jsonpath='{range .status.shares[*]}{.shareID}  st
 # 2. Check the VPC share status
 ibmcloud is share <share-id> --output json | jq '{lifecycle_state, health_state, health_reasons}'
 
-# 3. If the share is in security_group mode (incompatible with VPC mount targets):
+# 3. Check the share's access mode:
 ibmcloud is share <share-id> --output json | jq '.access_control_mode'
-# "vpc" = can have VPC mount targets
-# "security_group" = incompatible — must drain
+# "security_group" = the mode the driver uses for new mount targets
+# "vpc" = IBM no longer allows new mount targets for this mode: replace the share
 
-# 4. For shares stuck without mount targets, trigger drain
+# 4. For a share that cannot get a mount target, drain it
 kubectl patch filesharepool <pool-name> --type merge \
   -p '{"spec":{"drainShares":["<share-id>"]}}'
 ```
@@ -222,7 +222,7 @@ kubectl delete pod -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-cs
 
 ```bash
 # Check per-share utilization within a pool
-kubectl get fsp <pool-name> -o jsonpath='{range .status.shares[*]}  {.shareID}  capacity={.capacityGB}  allocated={.allocatedGB}  pvcs={.pvcCount}{"\n"}{end}'
+kubectl get fsp <pool-name> -o jsonpath='{range .status.shares[*]}  {.shareID}  capacity={.totalGB}  allocated={.allocatedGB}  pvcs={.pvcCount}{"\n"}{end}'
 ```
 
 With `spread` strategy, shares should have roughly equal utilization. With `binpack`, shares fill sequentially (imbalance is expected).
@@ -288,7 +288,7 @@ kubectl logs -n kube-system <controller-pod> -c csi-controller --previous
 kubectl delete pod -n kube-system <controller-pod>
 
 # 5. If leader election is stuck, delete the lease
-kubectl delete lease -n kube-system vpc-file-pool-csi-leader
+kubectl delete lease -n kube-system ibm-vpc-file-pool-csi-leader
 ```
 
 ### Node Agent Failure
@@ -341,7 +341,7 @@ kubectl create secret generic ibm-cloud-credentials \
   --dry-run=client -o yaml | kubectl apply -f -
 
 # 3. Restart the controller to pick up the new key
-kubectl rollout restart deployment/vpc-file-pool-csi-controller -n kube-system
+kubectl rollout restart deployment/ibm-vpc-file-pool-csi-controller -n kube-system
 
 # 4. Verify the new key works
 kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller \
@@ -379,9 +379,9 @@ kubectl delete subvolume <orphaned-sv-name>
 Subdirectories on NFS shares with no corresponding SubVolume. These consume share capacity but are invisible to pool accounting.
 
 ```bash
-# 1. List subdirectories on a share (from a debug pod on any node)
+# 1. List subdirectories on a share (from a debug pod on any node; the node's file system is under /host)
 kubectl debug node/<node-name> -it --image=busybox -- sh -c \
-  "ls /var/data/kubelet/plugins/vpc-file-pool.csi.ibm.io/staging/<share-id>/pvcs/"
+  "ls /host/var/data/kubelet/plugins/vpc-file-pool.csi.ibm.io/staging/<share-id>/pvcs/"
 
 # 2. Compare with known SubVolumes
 kubectl get subvolumes -l storage.ibmcloud.io/share-id=<share-id> \
@@ -390,7 +390,7 @@ kubectl get subvolumes -l storage.ibmcloud.io/share-id=<share-id> \
 # 3. Delete orphaned directories (from the debug pod)
 # CAUTION: Verify the directory is truly orphaned before deleting
 kubectl debug node/<node-name> -it --image=busybox -- sh -c \
-  "rm -rf /var/data/kubelet/plugins/vpc-file-pool.csi.ibm.io/staging/<share-id>/pvcs/<orphaned-pvc-dir>"
+  "rm -rf /host/var/data/kubelet/plugins/vpc-file-pool.csi.ibm.io/staging/<share-id>/pvcs/<orphaned-pvc-dir>"
 ```
 
 ---
