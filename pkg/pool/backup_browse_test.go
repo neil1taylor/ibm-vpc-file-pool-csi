@@ -531,3 +531,53 @@ func TestBrowse_AReusedNameNeverGetsTheOldSessionsSecretOrHelper(t *testing.T) {
 		t.Errorf("the old Secret remains: %v", err)
 	}
 }
+
+func TestBrowse_SessionObjectsGoToTheBrowseNamespaceAndPullSecretsAreCopied(t *testing.T) {
+	e := newBrowseEnv(t)
+	e.create(&corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "all-icr-io", Namespace: testDriverNS},
+		Type:       corev1.SecretTypeDockerConfigJson,
+		Data:       map[string][]byte{corev1.DockerConfigJsonKey: []byte(`{"auths":{"v1":{}}}`)},
+	})
+	e.cfg.Namespace, e.cfg.PullSecretNamespace, e.cfg.PullSecrets = "browse-ns", testDriverNS, []string{"all-icr-io", "missing"}
+	e.bc.SetBrowse(e.jobs, e.cfg)
+	e.open("bb1", nil)
+	e.reconcile()
+
+	// The session Secret is in the browse namespace, not in the driver namespace.
+	s := &corev1.Secret{}
+	if err := e.c.Get(e.ctx, types.NamespacedName{Namespace: "browse-ns", Name: "browse-uid-bb1"}, s); err != nil {
+		t.Fatalf("the session Secret is not in the browse namespace: %v", err)
+	}
+	if _, err := e.secret("browse-uid-bb1"); !apierrors.IsNotFound(err) {
+		t.Error("a session Secret was made in the driver namespace")
+	}
+	// The pull secret is copied across, with its type and data.
+	cp := &corev1.Secret{}
+	if err := e.c.Get(e.ctx, types.NamespacedName{Namespace: "browse-ns", Name: "all-icr-io"}, cp); err != nil {
+		t.Fatalf("the pull secret was not copied: %v", err)
+	}
+	if cp.Type != corev1.SecretTypeDockerConfigJson || string(cp.Data[corev1.DockerConfigJsonKey]) != `{"auths":{"v1":{}}}` {
+		t.Errorf("copy = %v %q", cp.Type, cp.Data)
+	}
+	if _, err := e.secret("missing"); !apierrors.IsNotFound(err) {
+		t.Error("a pull secret that does not exist was made up")
+	}
+	// A change in the source is followed.
+	src := &corev1.Secret{}
+	_ = e.c.Get(e.ctx, types.NamespacedName{Namespace: testDriverNS, Name: "all-icr-io"}, src)
+	src.Data[corev1.DockerConfigJsonKey] = []byte(`{"auths":{"v2":{}}}`)
+	_ = e.c.Update(e.ctx, src)
+	e.reconcile()
+	_ = e.c.Get(e.ctx, types.NamespacedName{Namespace: "browse-ns", Name: "all-icr-io"}, cp)
+	if string(cp.Data[corev1.DockerConfigJsonKey]) != `{"auths":{"v2":{}}}` {
+		t.Errorf("the copy was not updated: %q", cp.Data)
+	}
+	// The copy is not taken for the Secret of a vanished session.
+	if e.jobs.stopped["uid-bb1"] != 0 {
+		t.Error("a live session was stopped")
+	}
+	if err := e.c.Get(e.ctx, types.NamespacedName{Namespace: "browse-ns", Name: "all-icr-io"}, cp); err != nil {
+		t.Errorf("the sweep removed the pull secret: %v", err)
+	}
+}

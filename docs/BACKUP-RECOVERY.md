@@ -540,7 +540,42 @@ The goal (issue #92) is to look inside a backup and get back one file or folder 
 
 - **The browse helper** (`cmd/browse`, image `browse`). It reads one backup folder, read-only. It lists a folder in pages of 1000 names, describes a name, reads a byte range of a file, and streams a folder as a tar. It never follows a symbolic link: a link is listed with its text, a download of a link is refused, and a tar keeps it as a link. A path is a list of names, so a name with a newline or bytes that are not text works. Every call needs the session token. The helper ends by itself after 15 minutes without use, or after 2 hours.
 - **Browse sessions (part 2).** A `BackupBrowse` resource per open session; the controller starts the helper pod for it, with a random token and a per-session TLS certificate in a Secret, and removes everything when the session ends. The helper serves only over TLS. Defaults: 15 minutes idle, 2 hours hard limit, 5 open sessions in the cluster and 2 for each namespace; all are Helm values (`backupBrowse.*`).
-- **Not built yet:** the gateway that checks Kubernetes access, `kubectl backup ls/get/browse/restore-files`, the console pages, COS backups and VM disks.
+- **The gateway and `kubectl backup` (part 3).** `kubectl backup ls`, `get` and `browse` list and download files and folders of a plain volume's backup, at the latest copy or at a moment. See "Browse from the command line" below.
+- **Not built yet:** restoring files into a claim (`restore-files`), the console pages, COS backups and VM disks.
+
+### Browse from the command line
+
+```
+kubectl backup ls  --policy nightly --pvc apps/db [--moment 2026-10-21T09:30:00Z] [/var/www]
+kubectl backup ls  --policy nightly --pvc apps/db --moments            # the moments that can be browsed
+kubectl backup get --policy nightly --pvc apps/db /var/www/index.php --out ./restored/
+kubectl backup get --policy nightly --pvc apps/db /var/www --extract ./www-copy
+kubectl backup browse --policy nightly --pvc apps/db                    # prints a session name
+kubectl backup ls --session bb-abc12 /                                  # reuse it
+kubectl backup browse --close bb-abc12
+```
+
+A file is saved under its own name in `--out` (a folder), under the name you give, or on standard output with `--out -`. A file that exists is never replaced. A folder is saved as `NAME.tar`, or unpacked with `--extract`, which writes only folders and regular files below the folder you name and skips links and special files (it says which). A symbolic link in a backup is shown as a link and is not downloaded. A name that is not text is shown as `\xNN`, and you can type it the same way.
+
+Without `--session`, each command reuses an open session of the same user, volume and moment, or opens one, and waits for the helper pod (a few seconds). A session ends after 15 minutes without use.
+
+**Who may browse.** `kubectl backup` sends your own token from your kubeconfig (a token or an exec plugin; a client certificate alone has no token to send). The gateway checks the token with the Kubernetes API, then checks, on every call, that you may `get` the rights-only resource `backupfiles` (group `storage.ibmcloud.io`) in the **namespace of the backed-up claim**. No object of that kind exists: it only lets RBAC say "may read the backups of this namespace".
+
+| Who | May browse the backups of namespace N |
+|-----|----------------------------------------|
+| Admin of N (the built-in `admin` role) | Yes, with no setup: `backup-file-reader` is aggregated into `admin` |
+| A user with only `view` or `edit` in N | No |
+| Anyone with a RoleBinding to `backup-file-reader` (or `backup-file-restorer`) in N | Yes |
+| Cluster administrator | Yes |
+| Admin of another namespace | No |
+
+To let someone read another namespace's backups: `kubectl create rolebinding NAME -n N --clusterrole=backup-file-reader --user=alice`. A deleted claim's backup still belongs to its old namespace. A person without the right gets the same "forbidden" whether the volume exists or not. Removing the binding stops access on the next call; a session of that person cannot be used by anyone else.
+
+**Audit.** Each session start, file download, folder download and close writes a Kubernetes Event on the `BackupBrowse` (in the driver namespace): the user, the namespace, the volume, the moment and the **path**, never contents or tokens. People without rights in the driver namespace cannot read them.
+
+**How the gateway is reached.** Through the reencrypt Route on OpenShift (the router answers with the cluster's ingress certificate and encrypts again to the gateway); elsewhere through the `…-gateway` Service and an ingress of your own. `kubectl backup` finds the address in the ConfigMap `backup-gateway-info` (readable by every signed-in user) or from `--gateway` or `KUBECTL_BACKUP_GATEWAY`. It trusts the system certificate roots; if your ingress certificate is from a private CA, `--gateway-ca-file` names that CA.
+
+**Where it runs.** Helper pods and their Secrets are in their own namespace, `ibm-vpc-file-pool-csi-browse` (`backupBrowse.namespace`), which holds nothing else, so the gateway can read Secrets only there. The namespace allows root pods without capabilities (Pod Security level `baseline`); on OpenShift one SCC allows exactly that.
 
 ### Can the helper read other users' files?
 

@@ -95,6 +95,11 @@ goldenImageSyncer:
 # Dockerfile.browse.
 backupBrowse:
   enabled: true
+  # The namespace of browse sessions: their helper pods and Secrets. The chart
+  # makes it. It holds nothing else, so the gateway's right to read Secrets there
+  # reaches nothing else. It allows root pods without capabilities (the helper
+  # reads backups made by other users); on OpenShift the chart adds one SCC.
+  namespace: ibm-vpc-file-pool-csi-browse
   image:
     repository: de.icr.io/ibm-vpc-file-pool-csi/browse
     # Empty means the same tag as the driver image.
@@ -106,6 +111,43 @@ backupBrowse:
   # Open sessions in the cluster, and for the claims of one namespace. More wait.
   maxSessions: 5
   maxSessionsPerNamespace: 2
+
+# The backup gateway: the one door to browse sessions (issue #92). Users talk
+# to it with their own Kubernetes token; it checks every call with a token review
+# and a SubjectAccessReview on the rights-only name "backupfiles". It needs
+# backupBrowse.enabled.
+backupGateway:
+  enabled: true
+  replicas: 1
+  # The address users reach the gateway at, put in the ConfigMap
+  # backup-gateway-info that "kubectl backup" reads. Empty uses
+  # https://<route.host>, or the host of an existing Route; if neither is known
+  # users pass --gateway.
+  url: ""
+  tls:
+    # Empty: on OpenShift the service CA makes the certificate. Elsewhere you
+    # must name a Secret (tls.crt, tls.key) that holds the gateway's serving
+    # certificate, or the gateway pod cannot start.
+    secretName: ""
+  # A reencrypt Route, made only where the OpenShift Route API exists. The router
+  # answers with its own certificate for the host, then encrypts again to the gateway.
+  route:
+    enabled: true
+    # Empty lets OpenShift choose the host.
+    host: ""
+  # How long a request that asks to wait (?wait=true) holds for the helper pod to
+  # be ready. Keep it under the proxy timeout (the OpenShift router cuts a request
+  # after 30 seconds). kubectl backup does not ask to wait: it polls.
+  sessionWait: 20s
+  # The largest single file or tar a user may download.
+  maxDownloadBytes: 53687091200
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
 
 cdi:
   # The controller keeps the memory limit of CDI's copy pods (OpenShift

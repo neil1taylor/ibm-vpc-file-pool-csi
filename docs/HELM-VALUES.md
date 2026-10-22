@@ -100,6 +100,7 @@ Browse a backup and restore single files (issue #92). Added in phase 1 of `docs/
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `backupBrowse.enabled` | bool | `true` | Turns browse sessions on. When off, the controller gets no `--browse-image` and the chart renders no browse Role or NetworkPolicy |
+| `backupBrowse.namespace` | string | `ibm-vpc-file-pool-csi-browse` | The namespace of browse sessions: their helper pods and one Secret for each. The chart makes it. It holds nothing else, so the gateway's right to read Secrets there reaches nothing else. It is labelled for the Pod Security level `baseline`, because the helper runs as root with every capability dropped (it reads backups made by other users); `restricted` would refuse it. On OpenShift the chart adds one SecurityContextConstraints that allows exactly that for the namespace's default account |
 | `backupBrowse.image.repository` | string | `de.icr.io/ibm-vpc-file-pool-csi/browse` | The browse helper image (`Dockerfile.browse`) |
 | `backupBrowse.image.tag` | string | `""` | Empty means the tag of the driver image |
 | `backupBrowse.idle` | string | `15m` | A session ends after this long without use |
@@ -107,7 +108,25 @@ Browse a backup and restore single files (issue #92). Added in phase 1 of `docs/
 | `backupBrowse.maxSessions` | int | `5` | Open sessions in the cluster. More wait |
 | `backupBrowse.maxSessionsPerNamespace` | int | `2` | Open sessions for the claims of one namespace. More wait |
 
-The chart also makes a Role that lets the controller make and delete the session Secrets in the release namespace only, and a NetworkPolicy that lets only the backup gateway (a later part) reach the helper pods, on port 8443.
+The chart also makes, in the browse namespace, a Role that lets the controller make, change and delete Secrets there (the session Secrets, and copies of the image pull secrets, which the controller copies from the release namespace), and a NetworkPolicy that lets only the backup gateway pods of the release namespace reach the helper pods, on port 8443. **Moving from the earlier part:** sessions that were open in the release namespace are not followed; they end by themselves within 2 hours and their objects are removed with them.
+
+## Backup Gateway
+
+The one door to browse sessions (issue #92). Users talk to it with their own Kubernetes token (`kubectl backup ls/get/browse`). It needs `backupBrowse.enabled`.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `backupGateway.enabled` | bool | `true` | Turns the gateway on |
+| `backupGateway.replicas` | int | `1` | The gateway keeps no state |
+| `backupGateway.url` | string | `""` | The address that goes in the ConfigMap `backup-gateway-info`, which `kubectl backup` reads. Empty uses `https://<route.host>` or the host of the existing Route; if neither is known, users pass `--gateway` |
+| `backupGateway.tls.secretName` | string | `""` | Empty: on OpenShift the service CA makes the serving certificate. Elsewhere you must name a Secret (`tls.crt`, `tls.key`) in the release namespace, or the gateway pod cannot start |
+| `backupGateway.route.enabled` | bool | `true` | A reencrypt Route, made only where the OpenShift Route API exists. The router answers with the cluster's ingress certificate for the host, then encrypts again to the gateway (the service CA certificate, which the router trusts). Traffic is encrypted on both legs |
+| `backupGateway.route.host` | string | `""` | Empty lets OpenShift choose the host |
+| `backupGateway.sessionWait` | string | `20s` | How long a request that asks to wait (`?wait=true`) holds for the helper pod to be ready. Keep it under your proxy's timeout (the OpenShift router cuts a request after 30 seconds). `kubectl backup` does not ask to wait: it polls |
+| `backupGateway.maxDownloadBytes` | int | `53687091200` | The largest single file or tar a user may download (50 GiB) |
+| `backupGateway.resources` | object | small | Requests and limits |
+
+The chart also makes the ClusterRoles `backup-file-reader` and `backup-file-restorer` (see BACKUP-RECOVERY.md), a ServiceAccount for the gateway with only the rights it needs, and the ConfigMap `backup-gateway-info` that every signed-in user may read (that one ConfigMap and no other).
 
 ## Replication Receiver
 

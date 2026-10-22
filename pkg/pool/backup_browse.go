@@ -56,6 +56,11 @@ type BrowseConfig struct {
 	MaxSessions, MaxPerNamespace int
 	// ClosedKeep is how long a closed or failed session stays visible.
 	ClosedKeep time.Duration
+	// PullSecrets are Secrets in PullSecretNamespace (the driver namespace) that
+	// are copied into Namespace, so the helper pods can pull their image. The
+	// browse namespace holds nothing else of the driver's.
+	PullSecretNamespace string
+	PullSecrets         []string
 }
 
 // SetBrowse turns on browse sessions. A field that is zero gets its default.
@@ -118,6 +123,7 @@ func (bc *BackupController) reconcileBrowses(ctx context.Context) {
 			counts.add(items[i].Spec.PVCNamespace)
 		}
 	}
+	bc.copyPullSecrets(ctx)
 	bc.sweepBrowseOrphans(ctx, known)
 	for i := range items {
 		bb := &items[i]
@@ -385,4 +391,55 @@ func (bc *BackupController) ensureBrowseSecret(ctx context.Context, bb *v1alpha1
 		return err
 	}
 	return nil
+}
+
+// copyPullSecrets keeps copies of the image pull Secrets in the browse namespace.
+// A Secret that does not exist is skipped.
+func (bc *BackupController) copyPullSecrets(ctx context.Context) {
+	if bc.browse.PullSecretNamespace == "" || bc.browse.PullSecretNamespace == bc.browse.Namespace {
+		return
+	}
+	for _, name := range bc.browse.PullSecrets {
+		src := &corev1.Secret{}
+		if err := bc.client.Get(ctx, types.NamespacedName{Namespace: bc.browse.PullSecretNamespace, Name: name}, src); err != nil {
+			if !apierrors.IsNotFound(err) {
+				klog.ErrorS(err, "Failed to read a pull secret", "secret", name)
+			}
+			continue
+		}
+		dst := &corev1.Secret{}
+		err := bc.client.Get(ctx, types.NamespacedName{Namespace: bc.browse.Namespace, Name: name}, dst)
+		switch {
+		case apierrors.IsNotFound(err):
+			dst = &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Namespace: bc.browse.Namespace, Name: name, Labels: map[string]string{browsePullSecretLabel: "true"}},
+				Type:       src.Type, Data: src.Data,
+			}
+			if cerr := bc.client.Create(ctx, dst); cerr != nil {
+				klog.ErrorS(cerr, "Failed to copy a pull secret", "secret", name)
+			}
+		case err != nil:
+			klog.ErrorS(err, "Failed to read the copy of a pull secret", "secret", name)
+		case !equalSecretData(dst.Data, src.Data):
+			dst.Data = src.Data
+			if err := bc.client.Update(ctx, dst); err != nil {
+				klog.ErrorS(err, "Failed to update the copy of a pull secret", "secret", name)
+			}
+		}
+	}
+}
+
+// browsePullSecretLabel marks a copy of a pull secret in the browse namespace.
+const browsePullSecretLabel = "storage.ibmcloud.io/browse-pull-secret"
+
+func equalSecretData(a, b map[string][]byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if string(b[k]) != string(v) {
+			return false
+		}
+	}
+	return true
 }

@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -31,6 +32,8 @@ type Options struct {
 	MaxLists int
 	// Info says which moment this session reads.
 	Info Info
+	// Moments lists the moment folders of the volume. Nil means none.
+	Moments func() ([]string, error)
 }
 
 // Info is what a session reports about itself.
@@ -106,6 +109,7 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("/v1/list", s.api("list", s.handleList))
 	mux.HandleFunc("/v1/info", s.api("info", s.handleInfo))
+	mux.HandleFunc("/v1/moments", s.api("moments", s.handleMoments))
 	mux.HandleFunc("/v1/stat", s.api("stat", s.handleStat))
 	mux.HandleFunc("/v1/file", s.api("file", s.handleFile))
 	mux.HandleFunc("/v1/tar", s.api("tar", s.handleTar))
@@ -218,16 +222,27 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	return true
 }
 
-type pathReq struct {
+// PathRequest names one path below the root. It is the body of stat and tar.
+type PathRequest struct {
 	Path [][]byte `json:"path"`
 }
 
+// ListRequest is the body of list.
+type ListRequest struct {
+	PathRequest
+	Cursor []byte `json:"cursor"`
+	Limit  int    `json:"limit"`
+}
+
+// FileRequest is the body of file. A nil or negative Length reads to the end.
+type FileRequest struct {
+	PathRequest
+	Offset int64  `json:"offset"`
+	Length *int64 `json:"length"`
+}
+
 func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		pathReq
-		Cursor []byte `json:"cursor"`
-		Limit  int    `json:"limit"`
-	}
+	var req ListRequest
 	if !decode(w, r, &req) {
 		return
 	}
@@ -264,8 +279,28 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.opts.Info)
 }
 
+func (s *Server) handleMoments(w http.ResponseWriter, r *http.Request) {
+	var req struct{}
+	if !decode(w, r, &req) {
+		return
+	}
+	moments := []string{}
+	if s.opts.Moments != nil {
+		got, err := s.opts.Moments()
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		moments = append(moments, got...)
+	}
+	sort.Strings(moments)
+	writeJSON(w, http.StatusOK, struct {
+		Moments []string `json:"moments"`
+	}{moments})
+}
+
 func (s *Server) handleStat(w http.ResponseWriter, r *http.Request) {
-	var req pathReq
+	var req PathRequest
 	if !decode(w, r, &req) {
 		return
 	}
@@ -293,11 +328,7 @@ func (s *Server) acquire(w http.ResponseWriter) bool {
 }
 
 func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		pathReq
-		Offset int64  `json:"offset"`
-		Length *int64 `json:"length"`
-	}
+	var req FileRequest
 	if !decode(w, r, &req) {
 		return
 	}
@@ -361,7 +392,7 @@ func (f *firstWriteWriter) Write(p []byte) (int, error) {
 }
 
 func (s *Server) handleTar(w http.ResponseWriter, r *http.Request) {
-	var req pathReq
+	var req PathRequest
 	if !decode(w, r, &req) {
 		return
 	}

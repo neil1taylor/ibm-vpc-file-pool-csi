@@ -98,6 +98,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 		return 1
 	}
 	opts.Info = info
+	if *moments != "" {
+		momentsDir := *moments
+		opts.Moments = func() ([]string, error) { return momentNames(momentsDir) }
+	}
 	server, tree, err := newServer(strings.TrimSpace(string(raw)), readRoot, opts)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "%v\n", err)

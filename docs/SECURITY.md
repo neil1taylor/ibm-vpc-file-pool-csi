@@ -110,6 +110,20 @@ Instant VM snapshots need the KubeVirt `Sidecar` feature gate. The Helm value `v
 
 To limit hook sidecars to the driver's own hook, add a validating admission policy that rejects any VM whose `hooks.kubevirt.io/hookSidecars` annotation names a container other than the one the driver sets.
 
+### Browsing backups
+
+Browsing a backup (issue #92) shows files of one namespace to a person who may be in another. The design keeps the trust small:
+
+- **One door.** People never reach helper pods, `BackupBrowse` objects or Secrets. The backup gateway takes their own token, checks it with a token review, and checks `get backupfiles` in the claim's namespace with a SubjectAccessReview on **every** call. A refusal looks the same whether the volume exists or not.
+- **Own namespace.** Helper pods and the per-session Secrets (a token and a TLS key) live in `ibm-vpc-file-pool-csi-browse`, which holds nothing else. The gateway may read Secrets only there; it has no Secret rights in the driver namespace, where the IBM Cloud API key is. The namespace is labelled Pod Security `baseline`; on OpenShift one SCC lets the helper run as root with no capability, no escalation and no host path.
+- **Encrypted, pinned.** The gateway talks to a helper over TLS and trusts exactly the certificate made for that session. Another session's certificate, or any other, is refused. The user's token is never sent to the helper, and the session token is never sent to the user.
+- **Read-only, no links.** The helper mounts only that volume's backup read-only, has no service account token, and never follows a symbolic link (`openat2` with `RESOLVE_BENEATH` and `NO_SYMLINKS`).
+- **Bound to the session.** Everything a session makes is named by the session's UID, so a session deleted and made again with the same name cannot reach the old one's Secret or pod.
+- **Audit.** Starts, downloads and closes are Events with the user and the path; no contents, no tokens.
+- **Limits.** 15 minutes idle, 2 hours at most, 5 open sessions (2 per namespace), 50 GiB for one download.
+
+A cluster administrator can read every backup. Do not give `backup-file-reader` to people who may not read a namespace's data.
+
 ### Image Pinning
 
 Pin container image tags to digests in production Helm values to prevent supply-chain attacks:

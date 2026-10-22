@@ -66,6 +66,13 @@ func main() {
 			os.Exit(1)
 		}
 		return
+	case "ls", "get", "browse":
+		// They talk to the backup gateway with the caller's own token.
+		if err := runBrowseCommand(context.Background(), os.Args[1], os.Stdout, os.Args[2:]); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		return
 	case "list", "restore", "delete", "cos-list":
 	default:
 		_, _ = fmt.Fprintf(os.Stderr, "Unknown subcommand: %s\n\n", os.Args[1])
@@ -107,12 +114,28 @@ func printUsage(w io.Writer) {
 
 Usage:
   kubectl backup list    [--policy NAME]            List the backed-up volumes and their moments
+  kubectl backup ls  [flags] [PATH]                 List a folder inside a backup (your own rights; see below)
+  kubectl backup get [flags] PATH                   Download a file, or a folder as a tar, from a backup
+  kubectl backup browse [flags]                     Open a browse session by hand, or --close NAME
   kubectl backup restore [flags]                    Make a new PVC from a backup
   kubectl backup delete  [flags]                    Remove all backups of one volume, for good
   kubectl backup cos-setup [flags]                  Make the COS bucket, keys and lock for the export (your own IBM Cloud login)
   kubectl backup cos-list [flags]                   List the volumes and moments in the COS bucket of a policy
   kubectl backup restore --from-cos [flags]         Make a new PVC from a backup in COS, in any cluster that runs the driver
   kubectl backup version                            Print version
+
+ls, get and browse flags (they use your own kubeconfig token, and need the right "get backupfiles" in the namespace of the claim):
+  --policy          The BackupPolicy that holds the backup
+  --pvc             The backed-up claim, as NAMESPACE/NAME
+  --moment          A time like 2026-10-21T09:30:00Z: the newest backup at or before it. Default: the latest copy
+  --moments         ls only: list the moments that can be browsed
+  --session         Use an open session by name (from browse) instead of --policy and --pvc
+  --out             get only: a folder or file name, or - for standard output. A file is never replaced
+  --extract         get only: unpack a folder into this folder. Links and special files are skipped
+  --gateway, --gateway-ca-file   The gateway address and its CA, if not found in the cluster
+  --driver-namespace   Where the driver runs (default kube-system)
+  --timeout         How long to wait for a session to be ready (default 5m)
+  A name that is not text is shown as \xNN, and you can type it the same way. Sessions end after 15 minutes without use.
 
 Delete flags:
   --policy          The BackupPolicy that holds the backup (required)
@@ -189,7 +212,7 @@ func parseFlags(args []string) map[string]string {
 			flags[arg[:idx]] = arg[idx+1:]
 			continue
 		}
-		if arg == "wait" || arg == "yes" || arg == "dry-run" || arg == "existing-bucket" || arg == "from-cos" || arg == "skip-marker-cleanup" {
+		if arg == "wait" || arg == "yes" || arg == "dry-run" || arg == "existing-bucket" || arg == "from-cos" || arg == "skip-marker-cleanup" || arg == "moments" {
 			flags[arg] = "true"
 			continue
 		}
@@ -408,4 +431,19 @@ func waitRestore(ctx context.Context, c client.Client, out io.Writer, name strin
 		case <-time.After(poll):
 		}
 	}
+}
+
+// runBrowseCommand runs ls, get or browse through the gateway.
+func runBrowseCommand(ctx context.Context, cmd string, out io.Writer, args []string) error {
+	gw, err := newGatewayClient(ctx, parseBrowseArgs(args))
+	if err != nil {
+		return err
+	}
+	switch cmd {
+	case "ls":
+		return runLs(ctx, gw, out, args)
+	case "get":
+		return runGet(ctx, gw, out, args)
+	}
+	return runBrowse(ctx, gw, out, args)
 }
