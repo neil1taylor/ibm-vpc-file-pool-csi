@@ -419,7 +419,20 @@ export interface BackupRestoreSpec {
   targetNamespace: string;
   targetName: string;
   storageClassName?: string;
-  fromCOS?: Record<string, unknown>;
+  fromCOS?: RestoreFromCOS;
+}
+
+export interface RestoreFromCOS {
+  bucket: string;
+  endpoint: string;
+  prefix?: string;
+  credentialsSecret: string;
+  volume: string;
+  sizeGB: number;
+  backupKeySecret?: string;
+  keyProtect?: { instanceID: string; region: string; rootKeyID: string; apiKeySecret: string };
+  emergencyKeySecret?: string;
+  emergencyKeyOnly?: boolean;
 }
 
 export interface BackupRestoreStatus {
