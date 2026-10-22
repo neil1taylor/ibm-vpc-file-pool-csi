@@ -27,7 +27,7 @@ This reduces VPC API calls, speeds up PVC provisioning (mkdir vs. 30-90s share c
 
 ## Use cases and status
 
-**Included** means it is in the driver today, with its maturity: **GA** (ready for production), **Beta** (tested, may change) or **Experimental** (works in the lab; use only for data you can lose). **In progress** means it is being built. **Proposed** means a spec exists and nothing is built yet. Details are in [FEATURES.md](docs/FEATURES.md).
+**Included** means it is in the driver today, with its maturity: **GA** (ready for production), **Beta** (tested, may change) or **Experimental** (works in the lab; use only for data you can lose). **In progress** means it is being built. **Agreed, not built** means the spec is agreed and building has not started. **Proposed** means a spec is still under review. Details are in [FEATURES.md](docs/FEATURES.md).
 
 | Use case | Status | Notes |
 |---|---|---|
@@ -47,9 +47,9 @@ This reduces VPC API calls, speeds up PVC provisioning (mkdir vs. 30-90s share c
 | Copy volumes to another cluster on a schedule | Included, Beta | Direct NFS or HTTPS receiver. |
 | Copy running VMs to another cluster, rewind and fail over | Included, Experimental | Restore points; `kubectl failover`. Red Hat does not support the method. |
 | Recover from a replication in the console | In progress | Issue #44. |
-| Continuous protection of VMs, recovery point of seconds | Proposed | Like Zerto or Veeam CDP. Spec being written. |
-| Survive the loss of a zone | Proposed | Spec in PR #199. |
-| Snapshot of a whole pool | Proposed | Spec in PR #198. |
+| Continuous protection of VMs, recovery point of seconds | Agreed, not built | Like Zerto or Veeam CDP. Spec: [vm-continuous-data-protection](docs/specs/2026-10-22-vm-continuous-data-protection.md). |
+| Survive the loss of a zone | Agreed, not built | Spec: [zone-loss](docs/specs/2026-10-22-zone-loss.md). |
+| Snapshot of a whole pool | Agreed, not built | Spec: [pool-snapshots](docs/specs/2026-10-22-pool-snapshots.md). |
 | Metrics and alerts | Included, GA | On OpenShift, user workload monitoring must be on ([MONITORING.md](docs/MONITORING.md)). |
 | OpenShift console pages | Included, Beta | Pools, volumes, snapshots, replication, backups, monitoring, with help on each card and column. |
 | Group snapshots (`VolumeGroupSnapshot`) | Not active | The code exists; nothing acts on it. A VM snapshot already gives one moment for all its disks. |
