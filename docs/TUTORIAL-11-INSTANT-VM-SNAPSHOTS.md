@@ -15,6 +15,7 @@ Take a snapshot of a running VM in seconds, whatever the disk size. Delete a sna
 
 - OpenShift Virtualization on your cluster, and `virtctl`.
 - A running VM whose disks are PVCs on a pool StorageClass. Its guest runs the guest agent (`qemu-guest-agent`). This tutorial calls the VM `my-vm` in the namespace `vms`. Change the names to match yours.
+- Each disk file (`disk.img`) is owned by the QEMU user (UID 107). The driver changes the file mode from inside the VM pod, as UID 107. If another user owns the file, the first snapshot fails with `chmod: changing permissions of '.../disk.img': Operation not permitted`. A disk that you made by hand as root on NFS (as in [Part 1](TUTORIAL-01-POOL-CREATION.md)) is owned by `nobody` unless you run `chown 107:107` on it.
 - A VolumeSnapshotClass for the driver exists. The chart makes `ibm-vpc-file-pool` (see `volumeSnapshotClass` in [HELM-VALUES.md](HELM-VALUES.md)).
 - The driver runs with the admission webhooks on, and `vmSnapshots.method=auto` (the chart default). See [HELM-VALUES.md](HELM-VALUES.md).
 
@@ -143,7 +144,7 @@ oc wait -n ${NS} vmsnapshot/${VM}-snap2 --for=jsonpath='{.status.phase}'=Succeed
 oc get subvolume ${PV} -o jsonpath='{.status.diskChain}{"\n"}'
 ```
 
-Change the user name in `virtctl ssh` to the user of your guest image.
+Change the user name in `virtctl ssh` to the user of your guest image. `virtctl ssh` needs an SSH key in the guest. A VM that has only a password (like the one in Part 1) cannot use it: log in on the console and make the file there.
 
 **Expected:** a chain of three files. A disk may have at most 16 snapshots.
 

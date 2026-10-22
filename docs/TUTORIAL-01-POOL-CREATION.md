@@ -15,10 +15,10 @@ Verify the CSI driver is running:
 
 ```bash
 # Controller pod (6/6 Running)
-oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi -l app.kubernetes.io/component=controller
+oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller
 
 # Node pods (2/2 Running on each schedulable node)
-oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi -l app.kubernetes.io/component=node
+oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node
 
 # CSI Driver registered
 oc get csidriver vpc-file-pool.csi.ibm.io
@@ -88,6 +88,8 @@ Use `ibmcloud is shares` to see existing VPC file shares before creating the poo
 ---
 
 ## Step 3: Create a FileSharePool
+
+The examples use the zone `eu-de-1`. Use the zone of your workers instead: `oc get nodes -L topology.kubernetes.io/zone`.
 
 ```bash
 cat <<EOF | oc apply -f -
@@ -198,7 +200,7 @@ oc get filesharepool ${POOL_NAME} -o yaml
 Key things to note in the output:
 - `status.phase: Ready` — pool is operational
 - `status.shares[0].shareID` — the VPC file share ID (e.g., `r010-xxxxxxxx-...`)
-- `status.shares[0].mountTargetIP` — the NFS server hostname
+- `status.shares[0].mountTargetIP` — the NFS server address (an IP address in the cluster's VPC)
 - `status.shares[0].state: stable` — share is healthy
 - `status.totalCapacityGB` / `status.totalAllocatedGB` — capacity tracking
 
@@ -388,6 +390,7 @@ spec:
           qemu-img convert -f qcow2 -O raw /boot/disk.qcow2 /boot/disk.img
           rm /boot/disk.qcow2
           chmod 0666 /boot/disk.img
+          chown 107:107 /boot/disk.img
           ls -lh /boot/disk.img
           qemu-img info /boot/disk.img
           echo "Done!"
@@ -418,14 +421,14 @@ Expected output:
 ```
 Downloading CentOS Stream 9 cloud image...
 Converting qcow2 to raw format...
--rw-rw-rw-. 1 nobody nobody 2.0G ... /boot/disk.img
+-rw-rw-rw-. 1 107 107 10G ... /boot/disk.img
 file format: raw
-virtual size: 2 GiB (2147483648)
+virtual size: 10 GiB (10737418240 bytes)
 disk size: 1.8 GiB
 Done!
 ```
 
-> **Note:** The pod runs as root (needed to install `qemu-img`). Due to NFS `root_squash`, files are created as UID 65534 (nobody). We `chmod 0666` so the QEMU user (UID 107) can read and write the image. KubeVirt's pre-start expansion will resize the raw image to fill the PVC capacity.
+> **Note:** The pod runs as root (needed to install `qemu-img`). Due to NFS `root_squash`, files are created as UID 65534 (nobody). We `chmod 0666` and `chown 107:107` so the QEMU user (UID 107) can read and write the image. Without the `chown`, an instant VM snapshot of this disk fails ([Part 11](TUTORIAL-11-INSTANT-VM-SNAPSHOTS.md)), because the driver changes the file mode from inside the VM pod, as UID 107. KubeVirt's pre-start expansion will resize the raw image to fill the PVC capacity.
 >
 > **Why raw format?** KubeVirt passes filesystem-PVC disk images to QEMU with `"driver":"file"` (no qcow2 format layer). If the image is qcow2, QEMU reads the qcow2 headers as raw data and finds no valid boot sector — resulting in "No bootable device."
 
@@ -552,12 +555,12 @@ Press `Ctrl+]` to exit the console.
 
 ## Step 11: Verify Pool State After Allocations
 
-Both the manually created PVC (Step 7) and the VM's data disk PVC should appear:
+The manually created PVC (Step 7) and the VM's boot and data PVCs should all appear:
 
 ```bash
 # Pool shows total allocated capacity and PVC count
 oc get filesharepools
-# Expected: ALLOCATED=20 (10 from Step 7 + 10 from VM), PVCS=2
+# Expected: ALLOCATED=35 (10 from Step 7, 15 boot disk, 10 data disk), PVCS=3
 
 # Both SubVolumes point to the same underlying VPC file share
 oc get subvolumes -o wide
@@ -567,7 +570,7 @@ ibmcloud is shares
 ibmcloud is share <SHARE_ID>
 ```
 
-This demonstrates the pooling model: **2 PVCs share 1 VPC file share**, saving VPC quota and provisioning time.
+This demonstrates the pooling model: **3 PVCs share 1 VPC file share**, saving VPC quota and provisioning time.
 
 ---
 
@@ -592,10 +595,10 @@ EOF
 # Check it bound
 oc get pvc vm-shared-data-2 -n ${TUTORIAL_NS}
 
-# Pool now shows 40 GB allocated, 3 PVCs — all on the same single VPC share
+# Pool now shows 55 GB allocated, 4 PVCs — all on the same single VPC share
 oc get filesharepools
 
-# Three SubVolumes, all pointing to the same shareID
+# Four SubVolumes, all pointing to the same shareID
 oc get subvolumes -o wide
 ```
 
