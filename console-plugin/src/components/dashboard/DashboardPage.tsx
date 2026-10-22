@@ -32,6 +32,8 @@ import GetHelpCard from '../common/GetHelpCard';
 import HelpLink from '../common/HelpLink';
 import { TROUBLESHOOTING } from '../../utils/help-links';
 import CapacityDonut from './CapacityDonut';
+import FiringAlertsCard from './FiringAlertsCard';
+import { useFiringAlerts } from '../../utils/firing-alerts';
 import { utilizationPercent, formatAge } from '../../utils/resource-helpers';
 import { usePoolMetrics } from '../../utils/use-pool-metrics';
 import { ROUTES } from '../../constants';
@@ -87,6 +89,7 @@ const DashboardPage: React.FC = () => {
   );
 
   const { metrics: poolMetrics, aggregate } = usePoolMetrics(poolNames);
+  const firingAlerts = useFiringAlerts();
 
   const loaded = poolsLoaded && svLoaded;
   const error = poolsError || svError;
@@ -248,6 +251,16 @@ const DashboardPage: React.FC = () => {
               </Card>
             </GridItem>
           </Grid>
+        </StackItem>
+
+        {/* Firing alerts from Prometheus */}
+        <StackItem>
+          <FiringAlertsCard
+            loading={firingAlerts.loading}
+            error={firingAlerts.error}
+            rulesLoaded={firingAlerts.rulesLoaded}
+            firing={firingAlerts.firing}
+          />
         </StackItem>
 
         {/* Row 2: Performance Metrics */}

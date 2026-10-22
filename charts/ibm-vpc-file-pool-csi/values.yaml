@@ -169,6 +169,8 @@ metrics:
     # Pool use, in percent of capacity
     utilizationWarning: 80
     utilizationCritical: 95
+    # One share, in percent of its size allocated to PVCs
+    shareUtilizationWarning: 90
     # Failed volume allocations per second
     allocationFailuresPerSecond: 0.1
     # Slowest 1% of volume allocations, in seconds

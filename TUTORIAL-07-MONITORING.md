@@ -206,9 +206,9 @@ vpc_file_pool_share_count{pool="monitored-pool"} 1
 
 ## Step 4: Key Metrics Walkthrough
 
-The driver exposes 28 metrics across eight categories. This section walks through the first six categories (21 metrics) with PromQL queries and explains what to look for. The backup and CDI metrics are in [MONITORING.md](MONITORING.md).
+The driver exposes 31 metrics across eight categories. This section walks through the first six categories (24 metrics) with PromQL queries and explains what to look for. The backup and CDI metrics are in [MONITORING.md](MONITORING.md).
 
-### Allocation Metrics (6 metrics)
+### Allocation Metrics (9 metrics)
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
@@ -217,6 +217,9 @@ The driver exposes 28 metrics across eight categories. This section walks throug
 | `vpc_file_pool_capacity_gb` | Gauge | `pool` | Total pool capacity in GB |
 | `vpc_file_pool_allocated_gb` | Gauge | `pool` | Total allocated capacity in GB |
 | `vpc_file_pool_share_count` | Gauge | `pool` | Number of VPC shares in the pool |
+| `vpc_file_pool_max_shares` | Gauge | `pool` | Most shares the pool may have (`spec.maxShares`) |
+| `vpc_file_pool_share_total_gb` | Gauge | `pool`, `share` | Provisioned size of one share in GB |
+| `vpc_file_pool_share_allocated_gb` | Gauge | `pool`, `share` | Capacity allocated to PVCs on one share in GB |
 | `vpc_file_pool_pvc_count` | Gauge | `pool` | Number of active PVCs |
 
 **Key PromQL queries:**
