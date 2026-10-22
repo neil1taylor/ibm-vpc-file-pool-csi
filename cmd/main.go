@@ -638,6 +638,10 @@ func runReceiver(basePath, authTokenFile, listenAddr, tlsCertFile, tlsKeyFile st
 		os.Exit(1)
 	}
 
+	if err := replication.ValidateToken(token); err != nil {
+		klog.ErrorS(err, "Receiver auth token is not acceptable", "path", authTokenFile)
+		os.Exit(1)
+	}
 	receiver := replication.NewReceiver(basePath, token, listenAddr)
 	if tlsCertFile != "" && tlsKeyFile != "" {
 		receiver.SetTLS(tlsCertFile, tlsKeyFile)
