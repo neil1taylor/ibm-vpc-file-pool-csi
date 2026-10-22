@@ -266,6 +266,18 @@ func checkHost(raw string) error {
 // COS: only an https address on an IBM Cloud domain passes.
 func CheckHost(raw string) error { return checkHost(raw) }
 
+var cosS3Host = regexp.MustCompile(`^s3\.(direct\.|private\.)?[a-z0-9-]+\.cloud-object-storage\.appdomain\.cloud$`)
+
+// CheckCOSHost is stricter: only an https COS S3 endpoint (no port, no other
+// service on an IBM Cloud domain) may receive the caller's token.
+func CheckCOSHost(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.User != nil || u.Port() != "" || !cosS3Host.MatchString(strings.ToLower(u.Hostname())) {
+		return fmt.Errorf("refusing to send credentials to %s: not a COS S3 endpoint such as s3.eu-de.cloud-object-storage.appdomain.cloud", redactURL(raw))
+	}
+	return nil
+}
+
 func redactURL(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil {

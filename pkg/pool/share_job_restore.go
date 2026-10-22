@@ -57,6 +57,10 @@ src="/share0%s"
 moments="/share0%s"
 dst="%s%s"
 at="%s"
+if [ -L "$src" ] || [ -L "$src/disk.img" ]; then
+  echo "refusing a backup folder or disk that is a symlink" >&2
+  exit 1
+fi
 if [ -f "$src/disk.img" ]; then
   # A retry finds the disk of the first try; the target is a new volume, so
   # this removes only our own earlier output.
@@ -92,6 +96,10 @@ if [ -n "$at" ]; then
   fi
 else
   stamp="$newest"
+fi
+if [ -L "$pick" ]; then
+  echo "refusing a moment folder that is a symlink" >&2
+  exit 1
 fi
 rm -r -f -- "$dst"
 mkdir -p "$dst"

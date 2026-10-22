@@ -8,7 +8,8 @@ import (
 )
 
 var (
-	restoreEndpointPattern = regexp.MustCompile(`^(https?://)?[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$`)
+	// Only a COS S3 host: the caller's IAM token is sent to it.
+	restoreEndpointPattern = regexp.MustCompile(`^(https://)?s3\.(direct\.|private\.)?[a-z0-9-]+\.cloud-object-storage\.appdomain\.cloud$`)
 	restoreBucketPattern   = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`)
 	restorePrefixPattern   = regexp.MustCompile(`^[A-Za-z0-9._/-]*$`)
 	restoreVolumePattern   = regexp.MustCompile(`^pvc-[a-f0-9-]{36}$`)
@@ -87,7 +88,7 @@ func (r *RestoreFromCOS) ValidateSource() error {
 		return fmt.Errorf("spec.fromCOS.bucket %q is not a valid bucket name", r.Bucket)
 	}
 	if r.Endpoint == "" || !restoreEndpointPattern.MatchString(r.Endpoint) {
-		return fmt.Errorf("spec.fromCOS.endpoint %q is not a host name with an optional port", r.Endpoint)
+		return fmt.Errorf("spec.fromCOS.endpoint %q is not a COS S3 host such as s3.eu-de.cloud-object-storage.appdomain.cloud", r.Endpoint)
 	}
 	if !restorePrefixPattern.MatchString(r.Prefix) || strings.Contains(r.Prefix, "..") {
 		return fmt.Errorf("spec.fromCOS.prefix %q has characters that are not allowed", r.Prefix)
