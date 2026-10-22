@@ -2,6 +2,7 @@ import {
   BackupPolicyModel,
   BackupRestoreModel,
   KubeVolumeGroupSnapshotModel,
+  PersistentVolumeModel,
   PersistentVolumeClaimModel,
   StorageClassModel,
   VolumeGroupSnapshotClassModel,
@@ -40,5 +41,11 @@ describe('Backup models', () => {
       plural: 'backuprestores',
       namespaced: false,
     });
+  });
+});
+
+describe('PersistentVolumeModel', () => {
+  it('describes the cluster-wide PV that the backup Jobs use', () => {
+    expect(PersistentVolumeModel).toMatchObject({ apiVersion: 'v1', kind: 'PersistentVolume', plural: 'persistentvolumes', namespaced: false });
   });
 });

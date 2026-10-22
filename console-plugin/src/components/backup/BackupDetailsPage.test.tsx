@@ -5,14 +5,28 @@ import BackupDetailsPage from './BackupDetailsPage';
 import BackupVolumesTable from './BackupVolumesTable';
 import { BackupPolicy } from '../../types';
 
+let mockSearch = '';
+const mockReplace = jest.fn();
+jest.mock('./DeleteBackupsDialog', () => ({
+  __esModule: true,
+  default: ({ volume, onClose }: { volume: { pvcNamespace: string; pvcName: string }; onClose: () => void }) => (
+    <div role="dialog">
+      Delete backups of {volume.pvcNamespace}/{volume.pvcName}
+      <button onClick={onClose}>Close dialog</button>
+    </div>
+  ),
+}));
+
 jest.mock('react-router-dom', () => ({
   useParams: () => ({ name: 'nightly' }),
-  useHistory: () => ({ push: jest.fn() }),
+  useLocation: () => ({ search: mockSearch }),
+  useHistory: () => ({ push: jest.fn(), replace: mockReplace }),
   Link: ({ to, children }: { to: string; children: React.ReactNode }) => <a href={to}>{children}</a>,
 }));
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockSearch = '';
   (useAccessReview as jest.Mock).mockReturnValue([true, false]);
   (k8sPatch as jest.Mock).mockResolvedValue({});
 });
@@ -169,6 +183,39 @@ describe('BackupDetailsPage actions', () => {
     expect((screen.getByRole('button', { name: 'Delete' }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(/You are not allowed to update BackupPolicy objects/)).toBeTruthy();
     expect(screen.getByText(/You are not allowed to delete BackupPolicy objects/)).toBeTruthy();
+  });
+});
+
+describe('Delete backups', () => {
+  it('has a Delete backups action on each volume that opens the dialog for that volume', () => {
+    watch(policy());
+    render(<BackupDetailsPage />);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Kebab toggle' })[2]);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete backups' }));
+    expect(screen.getByRole('dialog').textContent).toContain('Delete backups of apps/old');
+  });
+
+  it('opens the dialog at once when the link has ?claim=', () => {
+    mockSearch = '?claim=apps%2Fold';
+    watch(policy());
+    render(<BackupDetailsPage />);
+    expect(screen.getByRole('dialog').textContent).toContain('Delete backups of apps/old');
+  });
+
+  it('opens no dialog for a claim that is not in the policy', () => {
+    mockSearch = '?claim=apps%2Funknown';
+    watch(policy());
+    render(<BackupDetailsPage />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('closes the dialog, and drops ?claim= from the link', () => {
+    mockSearch = '?claim=apps%2Fold';
+    watch(policy());
+    render(<BackupDetailsPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(mockReplace).toHaveBeenCalledWith('/vpc-file-pools/backups/nightly');
   });
 });
 
