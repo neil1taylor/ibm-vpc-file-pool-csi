@@ -210,16 +210,31 @@ func (p *FailoverPlan) MaterializeVMs() error {
 			}
 			continue
 		}
-		suffix := ".rewind-" + strconv.FormatInt(sv.VMMoment.Unix(), 10)
+		suffix := rewindSuffix(sv.VMMoment)
 		out := sv.LocalDir + suffix
 		if _, err := os.Stat(filepath.Join(out, diskFile)); err != nil {
 			if err = writeRewound(disk, sv.VMMoment, out); err != nil {
 				return fmt.Errorf("rewinding %s to %s: %w", sv.SubVolumeName, sv.VMMoment.UTC().Format(time.RFC3339), err)
 			}
 		}
-		sv.SubPath = path.Join(path.Dir(sv.SubPath), path.Base(sv.SubPath)+suffix)
+		sv.SubPath = rewoundSubPath(sv.SubPath, sv.VMMoment)
 	}
 	return nil
+}
+
+// rewindSuffix is the end of the name of a folder rewound to moment.
+func rewindSuffix(moment time.Time) string {
+	return ".rewind-" + strconv.FormatInt(moment.Unix(), 10)
+}
+
+// rewoundSubPath is the folder a disk rewound to moment is in. A path that
+// already ends so is returned as it is, so it is safe to apply twice.
+func rewoundSubPath(subPath string, moment time.Time) string {
+	suffix := rewindSuffix(moment)
+	if strings.HasSuffix(subPath, suffix) {
+		return subPath
+	}
+	return path.Join(path.Dir(subPath), path.Base(subPath)+suffix)
 }
 
 // writeRewound writes the disk as it was at moment into folder out. It writes
