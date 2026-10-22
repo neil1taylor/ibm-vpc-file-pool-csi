@@ -398,9 +398,10 @@ spec:
   defaultGID: 107
   defaultPermissions: "0777"
   goldenImages:            # Auto-provision golden images for KubeVirt
+    enabled: true
     targetNamespaces:
       - openshift-virtualization-os-images
-    pvcSize: 30Gi
+    pvcSizeGB: 30
 ```
 
 **Budget:** 10 VPC shares max. Capacity: 40 TB for ~40 VMs at 30 GB boot disk + data.

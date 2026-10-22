@@ -162,7 +162,7 @@ Thin wrapper around the VPC file share API with operational guardrails.
 Defense-in-depth controls for a storage driver running with host access.
 
 - **Path traversal validation** — All mkdir/rm operations validate paths against `^/pvcs/pvc-[a-f0-9-]{36}$` and reject traversal attempts.
-- **Validating admission webhooks** — Beta — Five webhook validators cover all CRD types (FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, ReplicationPolicy). A sixth, mutating webhook adds the VM hook to VMs with instant snapshots.
+- **Validating admission webhooks** — Beta — Seven validating webhooks cover the CRD types (FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, ReplicationPolicy, BackupPolicy, BackupRestore). A mutating webhook adds the VM hook to VMs with instant snapshots.
 - **RBAC minimal permissions** — Controller and node service accounts use least-privilege roles.
 - **No secrets in logs** — API keys and tokens are never logged. Share IDs and mount target IPs are safe to log.
 
@@ -170,7 +170,7 @@ Defense-in-depth controls for a storage driver running with host access.
 
 Prometheus metrics and structured logging for operational visibility.
 
-- **Prometheus metrics** — 28 metrics covering allocation (count, duration, capacity), VPC API calls (count, latency), snapshots, clones, group snapshots, replication, and backups.
+- **Prometheus metrics** — 29 metrics covering allocation (count, duration, capacity), VPC API calls (count, latency), snapshots, clones, group snapshots, replication, and backups.
 - **Structured logging** — `klog/v2` with `InfoS`/`ErrorS` and key-value pairs. V(2) for normal operations, V(4) for detailed flow, V(6) for trace-level.
 - **Key metrics:**
   - `vpc_file_pool_allocations_total` — allocation/deallocation counts by pool and status
@@ -207,9 +207,9 @@ CLI tool for migrating PVCs from the stock IBM VPC File CSI driver.
 Visual management of file share pools through the OpenShift Console.
 
 - **Dynamic console plugin** — Registers as an OpenShift ConsolePlugin (v1 API, requires OpenShift 4.14+). On by default where the cluster has the OpenShift console; the chart turns it on in the console. Turn it off with `consolePlugin.enabled=false`.
-- **Single tabbed navigation** — One "IBM VPC File Pools" item under Storage in the console sidebar opens a tabbed interface (Overview, Pools, SubVolumes, Snapshots, Group Snapshots, Replication, Monitoring). Detail and create pages render standalone without tabs.
+- **Single tabbed navigation** — One "IBM VPC File Pools" item under Storage in the console sidebar opens a tabbed interface (Overview, Pools, SubVolumes, Snapshots, Replication, Monitoring). Detail and create pages render standalone without tabs.
 - **Pool dashboard** — Overview tab showing all FileSharePools with status, capacity gauges, share count, SubVolume count, and recent activity table.
-- **CRUD for all 5 CRDs** — List, detail, create, edit, and delete views for FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, and ReplicationPolicy resources. Create buttons route to custom form wizards (not the YAML editor).
+- **CRUD for 4 CRDs** — List, detail, create, edit, and delete views for FileSharePool, SubVolume, Snapshot, and ReplicationPolicy resources. Create buttons route to custom form wizards (not the YAML editor).
 - **FileSharePool creation wizard** — 6-step guided wizard for creating pools: zone/profile selection, capacity configuration, allocation strategy, directory ownership, and review. The form no longer offers golden images.
 - **IOPS column in pool table** — Displays `spec.iops`, or "VPC default" when it is not set.
 - **Restore a snapshot to a new PVC** — A "Restore to new PVC" action on the snapshot details page and in the list row menu opens a form (name, size, storage class, access and volume mode) and creates a claim whose data source is the snapshot's `VolumeSnapshot`. A banner follows the copy. It never replaces an existing volume. See [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md#restore-in-the-console).
@@ -260,7 +260,7 @@ How this driver compares to the two most common alternatives for NFS-based Kuber
 | ExpandVolume | ✅ (pool-level) | ✅ (share-level) | ❌ |
 | Volume snapshots | ✅ (directory copy) | ❌ | ❌ |
 | Volume clones | ✅ (async, Job-based) | ❌ | ❌ |
-| Volume group snapshots | ✅ (beta) | ❌ | ❌ |
+| Volume group snapshots | ❌ (not active) | ❌ | ❌ |
 | Clone status gate | ✅ | — | — |
 | **NFS** | | | |
 | `sec=sys` enforcement | ✅ | ✅ | ❌ |
@@ -291,7 +291,7 @@ How this driver compares to the two most common alternatives for NFS-based Kuber
 | Config auto-discovery | ✅ | ✅ | ❌ |
 | API rate limiting | ✅ | ✅ | — |
 | **Observability** | | | |
-| Prometheus metrics | ✅ (28 metrics) | ✅ | ❌ |
+| Prometheus metrics | ✅ (29 metrics) | ✅ | ❌ |
 | Structured logging (klog) | ✅ | ✅ | ✅ |
 | OpenShift Console plugin | ✅ (beta) | ❌ | ❌ |
 | **Deployment** | | | |

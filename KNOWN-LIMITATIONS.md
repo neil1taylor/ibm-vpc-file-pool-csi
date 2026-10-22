@@ -8,7 +8,7 @@ Explicit list of what the IBM VPC File Pool CSI Driver does not support, why, an
 
 **Why:** VPC file shares expose a single NFS filesystem. NFS does not support per-directory quotas, and the VPC API provides no mechanism for subdirectory-level enforcement. Linux project quotas (`xfs_quota`) are not available on NFS mounts.
 
-**Workaround:** Monitor per-PVC usage via Prometheus metrics (`pool_csi_subvolume_used_bytes`) and configure soft quota alerts at the desired threshold. The `metrics.alerts.utilizationWarning` and `metrics.alerts.utilizationCritical` Helm values control alert thresholds at the pool level.
+**Workaround:** Monitor per-PVC usage with the kubelet volume metrics (`kubelet_volume_stats_*`, which the node agent feeds through `NodeGetVolumeStats`) and alert at the threshold you want. The `metrics.alerts.utilizationWarning` and `metrics.alerts.utilizationCritical` Helm values control alert thresholds at the pool level.
 
 **Roadmap:** No change planned — this is a fundamental NFS/VPC limitation.
 
@@ -63,7 +63,7 @@ The notes below describe the design, not a working feature.
 
 **Not working on ROVS (tested 19 Oct 2026, ROVS 4.21):** nothing calls these RPCs. The chart runs `csi-snapshotter` without group snapshots turned on, and that sidecar only knows the upstream `groupsnapshot.storage.k8s.io` API. OpenShift has its own `groupsnapshot.storage.openshift.io` API, and only on clusters with a non-default feature set. See GitHub issue #14.
 
-**Roadmap:** Phase 4c code is complete; making it reachable on OpenShift is issue #14.
+**Roadmap:** None. The code stays, and there is no plan to turn it on (issue #100).
 
 ## Cross-Region Replication and Disaster Recovery
 
@@ -71,13 +71,13 @@ The notes below describe the design, not a working feature.
 
 **How it works:** The replication controller runs as a background goroutine alongside the CSI controller. For each active `ReplicationPolicy` on schedule:
 1. Lists SubVolumes in the source pool (optionally filtered by label selector)
-2. Copies each matched SubVolume's directory to the destination NFS server
+2. Copies each matched SubVolume's directory to the destination, with rsync (direct NFS) or tar over HTTPS (driver to driver)
 3. Updates per-SubVolume and per-policy replication status
 4. Tracks consecutive failures and pauses the policy after exceeding `maxRetries`
 
 **Limitations:**
 - **File-level consistency only** (without hooks). Each individual file is consistent (NFS close-to-open semantics), but cross-file consistency is NOT guaranteed unless pre/post-sync hooks are configured to quiesce application writes. See `CROSS-REGION-DR.md` for detailed consistency analysis.
-- **Not suitable for VMs, databases, or workloads requiring crash consistency.** Actively written disk images (qcow2, vmdk, raw) and databases with WALs will produce corrupted replicas. Use IBM VPC block storage replication or application-level replication for these workloads.
+- **Plain file replication is not suitable for databases or for running VM disks.** Actively written disk images and databases with WALs will produce corrupted replicas. The controller copies the disks of a running KubeVirt VM with QEMU at one moment instead (Experimental, see [FEATURES.md](FEATURES.md)). Use IBM VPC block storage replication or application-level replication for these workloads.
 - **Requires pre-configured cross-region network connectivity** (Transit Gateway or VPN) and a pre-existing destination FileSharePool.
 - **Failover is manual.** Automated failover is explicitly out of scope due to limited consistency guarantees.
 
@@ -85,7 +85,7 @@ The notes below describe the design, not a working feature.
 
 **Workaround for unsupported workloads:** Use application-level replication (PostgreSQL streaming replication, MySQL Group Replication, etc.) or IBM VPC block storage snapshots for crash-consistent DR.
 
-**Roadmap:** Phase 4d (replication) and Phase 5 (hooks + incremental rsync) — implemented. Future enhancements: bandwidth limiting, parallel rsync.
+**Roadmap:** Phase 4d (replication) and Phase 5 (hooks + incremental rsync) — implemented.
 
 ## statfs Reports Share-Level Stats
 
@@ -93,7 +93,7 @@ The notes below describe the design, not a working feature.
 
 **Why:** This is an NFS protocol limitation. NFS `statfs` returns filesystem-level statistics; there is no per-directory equivalent.
 
-**Workaround:** Use `NodeGetVolumeStats` (exposed via `kubectl describe pvc`) for accurate per-PVC usage based on `du`. Prometheus metrics also report per-SubVolume usage.
+**Workaround:** Use `NodeGetVolumeStats` (exposed via `kubectl describe pvc`) for accurate per-PVC usage based on `du`. The kubelet volume metrics also report per-PVC usage.
 
 **Roadmap:** No change planned — NFS protocol limitation.
 
@@ -271,8 +271,8 @@ Since ROKS and ROVS worker nodes run RHCOS, encryption in transit cannot be enab
 
 **Limitations:**
 - A volume stays on the share it was first backed up to. Backups are not moved when a share is added or fills up, and a share that holds backups must not be removed from the pool.
-- No check that the snapshot pool is full; backups fail when it is (issue #69).
-- No command to remove the backups of a volume (issue #70). Backups of a deleted volume stay on the share, and can be restored, until the keep time has passed since the last backup; after that the files stay on the share until someone removes them.
+- Above 85% full, the policies stop new backups of that share and never delete backups to make room. Free space with `kubectl backup delete` or a shorter `keepFor`.
+- Backups of a deleted volume stay on the share, and can be restored, until the keep time has passed since the last backup. `kubectl backup delete` removes the backups of a volume.
 - A backup of a volume that is not a VM disk is a file copy. It is as consistent as the files are.
-- Backups are in the same VPC as the data, and are not encrypted or locked beyond what the file share does (export to COS is a later step).
+- Backups are in the same VPC as the data, and are not encrypted or locked beyond what the file share does. Export to a COS bucket with a lock (`spec.export`) is built, and has not yet been tested against real IBM Cloud (issue #138).
 - A restore needs the snapshot pool to be ready, and waits while a copy is being written to the backup of that volume.
