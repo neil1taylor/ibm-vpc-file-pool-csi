@@ -22,6 +22,8 @@ To stop: delete the VMs' snapshots (`kubectl pool-snapshots flatten <vm> -n <nam
 
 A VM disk on a pool is one file, `disk.img`, in the volume's folder on a VPC file share. To take a snapshot, the driver tells QEMU (the program that runs the VM) to stop writing to that file and to send all new writes to a new, small file next to it. The old file is now the snapshot. Nothing is copied, so this takes seconds for any disk size. This is the same method VMware uses for its snapshots.
 
+To see it step by step, open [the interactive picture](diagrams/vm-snapshot-chain.html) in a browser.
+
 ## Why the driver does it this way
 
 - **A plain copy cannot be instant.** Today the driver copies the whole disk for each snapshot, at 20 MB/s by default: about 7 hours for 500 GB.
