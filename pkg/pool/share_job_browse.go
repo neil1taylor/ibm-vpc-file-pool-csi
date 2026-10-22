@@ -68,6 +68,10 @@ type BrowseJobs interface {
 // are refused.
 func (r *ShareJobRunner) SetBrowseImage(image string) { r.browseImage = image }
 
+// SetBrowsePullSecrets names the Secrets, in the driver namespace, that the
+// helper pod uses to pull its image from a private registry.
+func (r *ShareJobRunner) SetBrowsePullSecrets(names []string) { r.browsePullSecrets = names }
+
 // Namespace is where the helper pods run.
 func (r *ShareJobRunner) Namespace() string { return r.namespace }
 

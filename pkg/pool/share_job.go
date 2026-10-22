@@ -99,6 +99,8 @@ type ShareJobRunner struct {
 	driverImage   string
 	launcherImage string
 	browseImage   string
+	// browsePullSecrets are the pull Secrets of browse helper pods.
+	browsePullSecrets []string
 }
 
 // SetLauncherImage sets KubeVirt's virt-launcher image, which has qemu-img,

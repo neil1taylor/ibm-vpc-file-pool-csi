@@ -280,3 +280,23 @@ func TestBrowseSessions(t *testing.T) {
 		t.Fatalf("sessions = %v, %v", got, err)
 	}
 }
+
+func TestStartBrowse_UsesThePullSecrets(t *testing.T) {
+	r, c := newBrowseRunner()
+	r.SetBrowsePullSecrets([]string{"all-icr-io", "other"})
+	if err := r.StartBrowse(context.Background(), browseRequest()); err != nil {
+		t.Fatal(err)
+	}
+	got := browseJob(t, c, "bb-1").Spec.Template.Spec.ImagePullSecrets
+	if len(got) != 2 || got[0].Name != "all-icr-io" || got[1].Name != "other" {
+		t.Errorf("imagePullSecrets = %v", got)
+	}
+}
+
+func TestStartBrowse_NoPullSecretsByDefault(t *testing.T) {
+	r, c := newBrowseRunner()
+	_ = r.StartBrowse(context.Background(), browseRequest())
+	if got := browseJob(t, c, "bb-1").Spec.Template.Spec.ImagePullSecrets; len(got) != 0 {
+		t.Errorf("imagePullSecrets = %v", got)
+	}
+}
