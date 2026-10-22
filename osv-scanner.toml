@@ -1,0 +1,85 @@
+# Advisories we have looked at and cannot fix yet. Each entry expires, so it comes back for another look.
+# The CI job "Dependency scan" fails on any other advisory.
+
+# Go: no fixed version exists yet.
+[[IgnoredVulns]]
+id = "GO-2026-5932"
+ignoreUntil = 2026-12-31
+reason = "golang.org/x/crypto: no fixed version yet; indirect dependency"
+
+# Console plugin, build tools only. They are not in the plugin image, which holds the built files and nginx.
+[[IgnoredVulns]]
+id = "GHSA-vfj7-8cjw-p6xm"
+ignoreUntil = 2026-12-31
+reason = "braces: no fixed version; build tool only"
+
+[[IgnoredVulns]]
+id = "GHSA-86w9-cpqp-85rv"
+ignoreUntil = 2026-12-31
+reason = "node-forge: no fixed version; reached only through webpack-dev-server"
+
+[[IgnoredVulns]]
+id = "GHSA-hp3w-g68c-fv3c"
+ignoreUntil = 2026-12-31
+reason = "sprintf-js: no fixed version; build tool only"
+
+[[IgnoredVulns]]
+id = "GHSA-5c6j-r48x-rmvq"
+ignoreUntil = 2026-12-31
+reason = "serialize-javascript: fix needs a new major version; build tool only"
+
+[[IgnoredVulns]]
+id = "GHSA-qj8w-gfj5-8c6v"
+ignoreUntil = 2026-12-31
+reason = "serialize-javascript: fix needs a new major version; build tool only"
+
+[[IgnoredVulns]]
+id = "GHSA-w5hq-g745-h8pq"
+ignoreUntil = 2026-12-31
+reason = "uuid: fix needs a new major version; reached only through webpack-dev-server"
+
+[[IgnoredVulns]]
+id = "GHSA-g84c-rxfj-3j2c"
+ignoreUntil = 2026-12-31
+reason = "webpack-dev-middleware: fix needs a new major version; development server only"
+
+[[IgnoredVulns]]
+id = "GHSA-4v9v-hfq4-rm2v"
+ignoreUntil = 2026-12-31
+reason = "webpack-dev-server: fix needs a new major version; development server only"
+
+[[IgnoredVulns]]
+id = "GHSA-79cf-xcqc-c78w"
+ignoreUntil = 2026-12-31
+reason = "webpack-dev-server: fix needs a new major version; development server only"
+
+[[IgnoredVulns]]
+id = "GHSA-9jgg-88mc-972h"
+ignoreUntil = 2026-12-31
+reason = "webpack-dev-server: fix needs a new major version; development server only"
+
+[[IgnoredVulns]]
+id = "GHSA-f5vj-f2hx-8m93"
+ignoreUntil = 2026-12-31
+reason = "webpack-dev-server: fix needs a new major version; development server only"
+
+[[IgnoredVulns]]
+id = "GHSA-m28w-2pqf-7qgj"
+ignoreUntil = 2026-12-31
+reason = "webpack-dev-server: fix needs a new major version; development server only"
+
+[[IgnoredVulns]]
+id = "GHSA-mx8g-39q3-5c79"
+ignoreUntil = 2026-12-31
+reason = "webpack-dev-server: fix needs a new major version; development server only"
+
+# Console plugin, runs in the browser. The console SDK pins react-router 6; the fix is only in version 7.
+[[IgnoredVulns]]
+id = "GHSA-337j-9hxr-rhxg"
+ignoreUntil = 2026-12-31
+reason = "react-router: fix only in v7; the OpenShift console SDK pins v6"
+
+[[IgnoredVulns]]
+id = "GHSA-wrjc-x8rr-h8h6"
+ignoreUntil = 2026-12-31
+reason = "react-router: fix only in v7; the OpenShift console SDK pins v6"
