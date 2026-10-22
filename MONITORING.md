@@ -8,7 +8,7 @@ Complete metrics reference, alerting rules, and dashboard templates for operatin
 
 The controller exposes Prometheus metrics on `:8080/metrics`. All metrics use the `vpc_file_pool_` or `pool_csi_` prefix and follow the [Prometheus naming conventions](https://prometheus.io/docs/practices/naming/).
 
-The driver emits 31 metrics across eight categories:
+The driver emits 37 metrics across nine categories:
 
 | Category | Metrics | Purpose |
 |----------|---------|---------|
@@ -20,12 +20,17 @@ The driver emits 31 metrics across eight categories:
 | Replication | 5 | Cross-region DR health |
 | CDI | 1 | CDI copy pod memory limit |
 | Backup | 6 | Backup policy health, age of backups, fullness of the snapshot pool and lateness of the export to COS |
+| Share (node agent) | 6 | Bytes written on each share, and NFS operations, latency and bytes of each share, read by the node agents |
 
 ---
 
 ## Scrape Configuration
 
 ### Prometheus Operator (ServiceMonitor)
+
+The node agents serve their own metrics (the "Share Metrics (Node Agent)" section) over HTTPS on port `node.metricsPort` (`9810`). The caller must send a bearer token that the API server accepts, and its user must be allowed to `get` the URL `/metrics`. The chart makes a headless Service and a second `ServiceMonitor` (`<release>-node`) that send the pod's service account token, and it binds a `<release>-metrics-reader` ClusterRole to `metrics.scraper.serviceAccount` (`prometheus-k8s` in `openshift-monitoring`). The node agent serves a certificate that Prometheus checks (the token it sends is its own, so it must not go to a stranger). The certificate comes from `webhook.certProvider`, as for the webhooks: `openshift` asks the service CA (the `ServiceMonitor` trusts the service CA bundle that OpenShift's Prometheus mounts); `cert-manager` makes a `Certificate`; `manual` needs a secret `<release>-ibm-vpc-file-pool-csi-node-metrics-certs` with `tls.crt`, `tls.key` and `ca.crt`, made by you, in the release namespace. With the last two the `ServiceMonitor` trusts `ca.crt` of that secret. The name it checks is `<release>-ibm-vpc-file-pool-csi-node-metrics.<namespace>.svc`. The node agents need to read FileSharePools to name the shares. Set `node.metricsPort=0` to turn the endpoint off.
+
+The controller's own `:8080/metrics` is plain HTTP without a login. That is how it was before; it is not changed here.
 
 The Helm chart creates a `ServiceMonitor` for the controller when the cluster has the Prometheus Operator API (`monitoring.coreos.com/v1`). OpenShift has it. To turn it off, set `metrics.serviceMonitor.enabled=false`.
 
@@ -171,6 +176,26 @@ kill %1
 |--------|------|--------|-------------|
 | `vpc_file_pool_cdi_copy_limit_raised_total` | Counter | none | Times the controller raised the memory limit of CDI's copy pods (`HyperConverged` `spec.resourceRequirements.storageWorkloads`) to `cdi.copyPodMemoryLimit`. The controller also logs a warning each time. The first raise is normal. A later raise means something, such as an update of IBM's add-on, put the old value back. |
 
+### Share Metrics (Node Agent)
+
+Each node agent reads the NFS shares mounted on its node, every `--share-stats-interval` (30 s). It reads the NFS counters in `/proc/self/mountstats` and runs `statfs` on the share mount; it never walks the files. `pool` and `share` are the same names as the controller's per-share metrics. A share mounted on several nodes is reported by each node (the scrape adds an `instance` label), so use `max by (pool, share)` for the space metrics and `sum by (pool, share)` for the traffic counters. A share that is mounted nowhere has no series. A share whose pool cannot be found has `pool="unknown"`.
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `vpc_file_pool_share_used_bytes` | Gauge | `pool`, `share` | Bytes written on the share (size minus free, from `statfs`). Absent when `statfs` fails or takes more than 10 s. |
+| `vpc_file_pool_share_size_bytes` | Gauge | `pool`, `share` | Size of the share as the NFS client sees it. |
+| `vpc_file_pool_share_nfs_operations_total` | Counter | `pool`, `share`, `op` | NFS operations done by this node. `op` is `read`, `write` or `other` (all metadata calls). `rate()` of `read` and `write` is the IOPS. |
+| `vpc_file_pool_share_nfs_rtt_seconds_total` | Counter | `pool`, `share`, `op` | Seconds spent between sending a request and getting the reply (the network and the server). |
+| `vpc_file_pool_share_nfs_execute_seconds_total` | Counter | `pool`, `share`, `op` | Seconds from queueing a request to its end (the round trip plus the wait in the client). Latency per request is `rate(execute) / rate(operations)`. |
+| `vpc_file_pool_share_nfs_bytes_total` | Counter | `pool`, `share`, `direction` | Bytes read from and written to the share. |
+
+Latency per request, per share:
+
+```promql
+sum by (pool, share, op) (rate(vpc_file_pool_share_nfs_execute_seconds_total{op=~"read|write"}[5m]))
+/ (sum by (pool, share, op) (rate(vpc_file_pool_share_nfs_operations_total{op=~"read|write"}[5m])) > 0)
+```
+
 ### Backup Metrics
 
 | Metric | Type | Labels | Description |
@@ -243,6 +268,9 @@ The chart ships these alerts as a `PrometheusRule` (on by default; it is made on
 | `VPCFilePoolUtilizationWarning` / `Critical` | warning / critical | Pool use is above 80% / 95% |
 | `VPCFilePoolOverCommitted` | critical | More is allocated than the pool has |
 | `VPCFilePoolShareNearlyFull` | warning | One share has more than 90% of its size allocated for 15 minutes. With the `binpack` strategy shares fill one after another on purpose, so expect this alert there; raise `metrics.alerts.shareUtilizationWarning` or turn it off by setting it to 100. |
+| `VPCFilePoolShareUsedHigh` / `Critical` | warning / critical | One share has more than 85% / 95% of its size written (real used bytes) for 15 minutes. Max over the nodes that mount it. |
+| `VPCFilePoolShareNFSLatencyHigh` | warning | Reads or writes on one share take more than 0.1 s each on average for 10 minutes. Judged only while the share does at least 1 such request a second, so an idle share gives no alert and no NaN. |
+| `VPCFilePoolShareIOPSHigh` | warning | Reads plus writes on one share, all nodes together, are above `metrics.alerts.shareIOPSWarning` per second. Off by default (value `0`): set it near the IOPS of the share profile. |
 | `VPCFilePoolAtMaxShares` | warning | The pool has its most shares and use is above the warning limit |
 | `VPCFilePoolControllerDown` | critical | No metrics from the controller for 5 minutes |
 | `VPCFilePoolAllocationFailures` | critical | More than 0.1 failed allocations per second |
