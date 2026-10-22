@@ -29,6 +29,17 @@ type Options struct {
 	MaxStreams int
 	// MaxLists is how many folder listings may run at once. Zero means 4.
 	MaxLists int
+	// Info says which moment this session reads.
+	Info Info
+}
+
+// Info is what a session reports about itself.
+type Info struct {
+	// Moment is the moment folder being read, such as 20261022T100000Z. It is
+	// empty if the backup has no moment folders yet.
+	Moment string `json:"moment"`
+	// Latest is true if the moment is the newest.
+	Latest bool `json:"latest"`
 }
 
 // Why a session ended.
@@ -94,6 +105,7 @@ func (s *Server) Handler() http.Handler {
 		_, _ = io.WriteString(w, "ok")
 	})
 	mux.HandleFunc("/v1/list", s.api("list", s.handleList))
+	mux.HandleFunc("/v1/info", s.api("info", s.handleInfo))
 	mux.HandleFunc("/v1/stat", s.api("stat", s.handleStat))
 	mux.HandleFunc("/v1/file", s.api("file", s.handleFile))
 	mux.HandleFunc("/v1/tar", s.api("tar", s.handleTar))
@@ -242,6 +254,14 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 		page.Entries = []Entry{}
 	}
 	writeJSON(w, http.StatusOK, page)
+}
+
+func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
+	var req struct{}
+	if !decode(w, r, &req) {
+		return
+	}
+	writeJSON(w, http.StatusOK, s.opts.Info)
 }
 
 func (s *Server) handleStat(w http.ResponseWriter, r *http.Request) {
