@@ -25,6 +25,8 @@ export const ROUTES = {
   REPLICATION: '/vpc-file-pools/replication',
   REPLICATION_CREATE: '/vpc-file-pools/replication/~new',
   REPLICATION_DETAIL: '/vpc-file-pools/replication/:name',
+  BACKUPS: '/vpc-file-pools/backups',
+  BACKUP_DETAIL: '/vpc-file-pools/backups/:name',
   MONITORING: '/vpc-file-pools/monitoring',
 } as const;
 

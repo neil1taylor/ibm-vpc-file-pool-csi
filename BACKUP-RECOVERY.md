@@ -395,6 +395,15 @@ It refuses, and changes nothing, in these cases:
 
 If the policy is already deleted, its status can no longer say where the backup is. Name the snapshot pool and the volume yourself: `--pool backups --volume pvc-...`. The volume name is the folder under `/backup/<policy>/pvcs/` on the share.
 
+### Backups in the console
+
+The **Backups** tab of the IBM VPC File Pools page shows the same facts as `kubectl backup list`, with no `kubectl`.
+
+- The list has one row for each policy: snapshot pool, schedule, keep time, phase, number of volumes, the age of the stalest backup, and whether the COS export is on.
+- A policy page shows its settings and one row for each volume: the claim, the VM, the newest and oldest backup, the restore points, the size of the newest backup, the consistency, the last error and the export state. A volume the policy no longer backs up is marked with the date its backups are kept until. A crash consistent copy has an orange label.
+- When new backups are stopped because the snapshot pool is more than 85% full, a banner says so on both pages and links to the pool. Nothing is deleted to make room; see [Backups stopped](TROUBLESHOOTING.md#backups-stopped-the-snapshot-pool-is-above-85-full).
+- The console only reads the policy so far. Restore, changing a policy, deleting backups and the COS tab come in later steps, each with its own section here.
+
 ### Export to COS (built; the release test is written and not yet run)
 
 A policy can also send its backups to an IBM Cloud Object Storage bucket, encrypted before they leave the cluster, with a lock that nobody can shorten. The controller does this with the `spec.export` block:
