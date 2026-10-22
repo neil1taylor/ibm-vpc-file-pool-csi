@@ -128,6 +128,14 @@ export const CARD_HELP = {
     title: 'Replication Sync Rate',
     text: 'Sync runs per minute for all replication policies, split by result, over the chosen time range. Failed runs that do not stop need a look at the policy.',
   },
+  backupPolicy: {
+    title: 'Backup Policy',
+    text: 'Which volumes are backed up, how often, for how long, and into which snapshot pool. A VM is picked through its disks: if one disk matches, all its disks are backed up.',
+  },
+  backupVolumes: {
+    title: 'Backed-up Volumes',
+    text: 'Each volume the policy backs up, with the restore points you can go back to. A volume marked "no longer backed up" keeps its backups until the keep time has passed.',
+  },
 } satisfies Record<string, CardHelp>;
 
 export type CardHelpKey = keyof typeof CARD_HELP;
