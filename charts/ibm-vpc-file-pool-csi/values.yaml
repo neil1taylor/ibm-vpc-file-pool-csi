@@ -164,9 +164,27 @@ metrics:
     enabled: true
     interval: 30s
   alerts:
-    enabled: false
+    # Created only when the cluster has the Prometheus Operator API.
+    enabled: true
+    # Pool use, in percent of capacity
     utilizationWarning: 80
     utilizationCritical: 95
+    # Failed volume allocations per second
+    allocationFailuresPerSecond: 0.1
+    # Slowest 1% of volume allocations, in seconds
+    allocationP99Seconds: 5
+    # Failed VPC API calls per second
+    apiErrorsPerSecond: 0.05
+    # Replication: seconds behind, and failures in a row
+    replicationLagSeconds: 7200
+    replicationFailures: 3
+    # Backups: a volume with no backup for this long (twice the schedule is a good value)
+    backupLateSeconds: 43200
+    # Copy in COS: the newest export, or a moment waiting, this old
+    exportLateSeconds: 43200
+    # Snapshot pool share use, in percent. New backups stop at 85.
+    snapshotPoolWarning: 75
+    snapshotPoolCritical: 85
 
 volumeSnapshotClass:
   create: true

@@ -148,7 +148,9 @@ func (o *Options) validate() (time.Duration, error) {
 }
 
 // Run does the setup. It reads first, shows what it would make, asks for a
-// confirmation, and only then makes it. It never deletes anything.
+// confirmation, and only then makes it. It deletes one thing only: the
+// instance-wide policy that IBM Cloud adds to the service ID when the HMAC key
+// is made (see removeImplicitPolicy).
 func (s *Setup) Run(ctx context.Context, o Options) error {
 	o.defaults()
 	if _, err := parseRootKey(o.RootKeyCRN); err != nil {

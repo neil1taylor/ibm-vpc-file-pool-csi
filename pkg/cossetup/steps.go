@@ -130,6 +130,7 @@ type run struct {
 
 	hmacID, hmacSecret string
 	hmacKnown          bool
+	keyWritten         bool // the COS key file was written in this pass
 
 	wrapped   string // the wrapped backup key, as stored
 	keyNeeded bool   // a new backup key will be made
@@ -613,6 +614,7 @@ func (r *run) hmacName() string { return r.o.Bucket + "-hmac" }
 
 func (r *run) hmac(ctx context.Context) error {
 	e := r.s.Endpoints.ResourceController
+	hmacExists := false
 	if r.sidKnown {
 		rep, err := r.call(ctx, http.MethodGet, e+"/v2/resource_keys?"+url.Values{"name": {r.hmacName()}}.Encode(), nil, nil)
 		if _, err = must("looking for the HMAC key", rep, err); err != nil {
@@ -626,17 +628,36 @@ func (r *run) hmac(ctx context.Context) error {
 		}
 		for _, k := range list.Resources {
 			if k.Name == r.hmacName() {
+				hmacExists = true
 				r.setHMAC(k)
 			}
 		}
 	}
+	_, statErr := os.Stat(r.o.KeyFile)
+	switch {
+	case hmacExists && !r.hmacKnown && statErr != nil:
+		return fmt.Errorf("the HMAC key %s exists, but IBM Cloud shows its secret only when the key is made, and it cannot be shown again. This command did not make another. To get a new one, delete the HMAC key (ibmcloud resource service-key-delete %s) and run this command again", r.hmacName(), r.hmacName())
+	case !hmacExists && statErr == nil:
+		return fmt.Errorf("the key file %s exists, but the HMAC key %s does not. A new HMAC key needs a new file, because the secret must be saved the moment it is made and a file is never replaced: move %s away, then run this command again", r.o.KeyFile, r.hmacName(), r.o.KeyFile)
+	}
+	var before map[string]bool
 	body := map[string]any{"name": r.hmacName(), "source": r.instGUID, "role": "Writer",
 		"parameters": map[string]any{"HMAC": true, "serviceid_crn": r.sidCRN}}
-	err := r.step("HMAC key "+r.hmacName()+" (the secret goes to the key file, never to the screen)", r.hmacKnown, pretty(body), func() error {
+	made := false
+	err := r.step("HMAC key "+r.hmacName()+" (the secret goes to the key file the moment the key is made, never to the screen; IBM Cloud also adds an instance-wide policy for the key, and this command removes that one policy)", hmacExists, pretty(body), func() error {
+		pols, err := r.subjectPolicies(ctx)
+		if err != nil {
+			return err
+		}
+		before = map[string]bool{}
+		for _, p := range pols {
+			before[p.ID] = true
+		}
 		rep, err := r.call(ctx, http.MethodPost, e+"/v2/resource_keys", body, nil)
 		if _, err = must("making the HMAC key", rep, err); err != nil {
 			return err
 		}
+		made = true
 		var k keyReply
 		if err = rep.decode(&k); err != nil {
 			return err
@@ -645,12 +666,54 @@ func (r *run) hmac(ctx context.Context) error {
 		if !r.hmacKnown {
 			return fmt.Errorf("the answer holds no HMAC key")
 		}
-		return nil
+		return r.writeKeyFile()
 	})
 	if err != nil || !r.sidKnown {
 		return err
 	}
+	if made {
+		if err = r.removeImplicitPolicy(ctx, before); err != nil {
+			return err
+		}
+	}
 	return r.checkNarrow(ctx)
+}
+
+// removeImplicitPolicy deletes the policy that IBM Cloud adds to the service
+// ID when it makes an HMAC key: the Writer role on the whole COS instance. It
+// deletes only a policy that was not in before, the policies of the service ID
+// before the key was made. This is the one thing the command deletes, and it
+// is a policy the command's own call made.
+func (r *run) removeImplicitPolicy(ctx context.Context, before map[string]bool) error {
+	pols, err := r.subjectPolicies(ctx)
+	if err != nil {
+		return fmt.Errorf("the HMAC key is made and its secret is in %s; checking the policies of the service ID failed: %w", r.o.KeyFile, err)
+	}
+	for _, p := range pols {
+		if before[p.ID] || !r.instanceWide(p) {
+			continue
+		}
+		rep, err := r.call(ctx, http.MethodDelete, r.s.Endpoints.IAM+"/v1/policies/"+url.PathEscape(p.ID), nil, nil)
+		if _, err = must("removing the instance-wide policy "+p.ID+" that IBM Cloud added for the HMAC key", rep, err); err != nil {
+			return fmt.Errorf("the HMAC key is made and its secret is in %s; %w. Remove that policy yourself (ibmcloud iam service-policy-delete), then run this command again", r.o.KeyFile, err)
+		}
+		r.say("  removed       policy %s: IBM Cloud added it for the HMAC key (the Writer role on the whole COS instance); it was not made by you, and it is the only thing this command deletes\n", p.ID)
+	}
+	return nil
+}
+
+// instanceWide says p is a policy for the service ID on this COS instance as a
+// whole: no resource type, no resource.
+func (r *run) instanceWide(p policy) bool {
+	if !p.anySubject(map[string]string{"iam_id": r.sidIAM}) {
+		return false
+	}
+	if len(p.Resources) != 1 {
+		return false
+	}
+	res := p.Resources[0]
+	return res.get("serviceName") == COSServiceName && res.get("serviceInstance") == r.instGUID &&
+		res.get("resourceType") == "" && res.get("resource") == ""
 }
 
 type keyReply struct {
@@ -670,9 +733,9 @@ func (r *run) setHMAC(k keyReply) {
 }
 
 // checkNarrow makes sure the service ID can reach only the one bucket (and
-// read the root key). Making an HMAC key for a service ID might add a policy
-// on the whole instance; this finds it. The command never deletes a policy, so
-// it reports it for the person to remove.
+// read the root key). The policy IBM Cloud adds for the HMAC key has been
+// removed by now. Any other wide policy was not made by this command, so it is
+// reported for the person to remove.
 func (r *run) checkNarrow(ctx context.Context) error {
 	pols, err := r.subjectPolicies(ctx)
 	if err != nil {
@@ -683,22 +746,24 @@ func (r *run) checkNarrow(ctx context.Context) error {
 			bucketOnly := res.get("serviceName") == COSServiceName && res.get("resourceType") == "bucket"
 			rootKeyOnly := res.get("serviceName") == r.kp.service && res.get("resourceType") == "key"
 			if !bucketOnly && !rootKeyOnly {
-				return fmt.Errorf("the service ID %s has policy %s that gives access to the whole %q service, not one bucket. This command never deletes anything: remove that policy yourself (ibmcloud iam service-policy-delete), then run it again", r.sidName(), p.ID, res.get("serviceName"))
+				return fmt.Errorf("the service ID %s has policy %s that gives access to the whole %q service, not one bucket. This command deletes only the policy IBM Cloud adds for the HMAC key, and this one was there before: remove it yourself (ibmcloud iam service-policy-delete), then run it again", r.sidName(), p.ID, res.get("serviceName"))
 			}
 		}
 	}
 	return nil
 }
 
+func (r *run) writeKeyFile() error {
+	r.keyWritten = true
+	return writePrivate(r.o.KeyFile, secretManifest(r.o.CredentialsSecret, r.o.Namespace, map[string]string{
+		"access_key_id": r.hmacID, "secret_access_key": r.hmacSecret}))
+}
+
 func (r *run) keyFile(_ context.Context) error {
 	_, statErr := os.Stat(r.o.KeyFile)
 	desc := fmt.Sprintf("write Secret %s (access_key_id, secret_access_key) to %s, mode 0600", r.o.CredentialsSecret, r.o.KeyFile)
-	return r.step("COS key file "+r.o.KeyFile, statErr == nil, desc, func() error {
-		if !r.hmacKnown {
-			return fmt.Errorf("the HMAC key exists, but its secret could not be read")
-		}
-		return writePrivate(r.o.KeyFile, secretManifest(r.o.CredentialsSecret, r.o.Namespace, map[string]string{
-			"access_key_id": r.hmacID, "secret_access_key": r.hmacSecret}))
+	return r.step("COS key file "+r.o.KeyFile, statErr == nil || r.keyWritten, desc, func() error {
+		return r.writeKeyFile()
 	})
 }
 

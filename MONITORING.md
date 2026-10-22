@@ -96,6 +96,7 @@ kill %1
 | `vpc_file_pool_capacity_gb` | Gauge | `pool` | Total pool capacity in GB across all shares. |
 | `vpc_file_pool_allocated_gb` | Gauge | `pool` | Total allocated (requested) capacity in GB. |
 | `vpc_file_pool_share_count` | Gauge | `pool` | Number of VPC file shares in the pool. |
+| `vpc_file_pool_max_shares` | Gauge | `pool` | Most shares the pool may have (`spec.maxShares`). |
 | `vpc_file_pool_pvc_count` | Gauge | `pool` | Number of active PVCs (SubVolumes) in the pool. |
 
 **Normal ranges:**
@@ -207,7 +208,7 @@ Alert when the copy in COS is late, using twice the export schedule as the limit
     summary: "Backup policy {{ $labels.policy }} has a backup moment that has waited over 12 hours to go to COS"
 ```
 
-An export problem never stops the backups to the snapshot pool. `status.volumes[].exportError` says what failed. The chart does not ship these two rules yet (issue #117).
+An export problem never stops the backups to the snapshot pool. `status.volumes[].exportError` says what failed.
 
 Alert before the snapshot pool reaches the limit, and when it has. At 85% the policies on the pool stop new backups; they never delete backups to make room, so the fix is more space or a shorter `keepFor`:
 
@@ -232,6 +233,25 @@ Alert before the snapshot pool reaches the limit, and when it has. At 85% the po
 ---
 
 ## Alerting Rules
+
+The chart ships these alerts as a `PrometheusRule` (on by default; it is made only when the cluster has the Prometheus Operator API). Set the limits under `metrics.alerts` (see [HELM-VALUES.md](HELM-VALUES.md)). A pool with no capacity, or a driver with no traffic, gives no alert. The rules are tested with `promtool` in `make test-scripts`.
+
+| Alert | Severity | Fires when |
+|-------|----------|------------|
+| `VPCFilePoolUtilizationWarning` / `Critical` | warning / critical | Pool use is above 80% / 95% |
+| `VPCFilePoolOverCommitted` | critical | More is allocated than the pool has |
+| `VPCFilePoolAtMaxShares` | warning | The pool has its most shares and use is above the warning limit |
+| `VPCFilePoolControllerDown` | critical | No metrics from the controller for 5 minutes |
+| `VPCFilePoolAllocationFailures` | critical | More than 0.1 failed allocations per second |
+| `VPCFilePoolAllocationSlow` | warning | P99 allocation time above 5 s |
+| `VPCFilePoolAPIErrors` | warning | More than 0.05 failed VPC API calls per second |
+| `VPCFilePoolSnapshotFailures` | warning | Snapshot operations fail |
+| `VPCFilePoolReplicationLagHigh` / `ReplicationFailing` | warning / critical | Lag over 2 h, or more than 3 failures in a row |
+| `VPCFilePoolBackupLate` | warning | A volume has no backup for over 12 h |
+| `VPCFilePoolExportLate` / `ExportMomentWaiting` | warning | The COS copy is over 12 h late |
+| `VPCFilePoolSnapshotPoolNearlyFull` / `Full` | warning / critical | A snapshot pool share is above 75% / 85% |
+
+The examples below are older hand-written rules, kept to show how to write your own. They use different names; if you load them as well as the chart's, you get two alerts for the same problem.
 
 ### Critical Alerts
 

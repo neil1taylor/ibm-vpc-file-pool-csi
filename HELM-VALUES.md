@@ -169,7 +169,16 @@ Prometheus metrics and alerting configuration.
 | `metrics.port` | int | `8080` | Port for the `/metrics` endpoint |
 | `metrics.serviceMonitor.enabled` | bool | `true` | Create a Prometheus ServiceMonitor. The chart creates it only when the cluster has the `monitoring.coreos.com/v1` API. The console plugin's charts need it |
 | `metrics.serviceMonitor.interval` | string | `30s` | Scrape interval for the ServiceMonitor |
-| `metrics.alerts.enabled` | bool | `false` | Create PrometheusRule alert resources |
+| `metrics.alerts.enabled` | bool | `true` | Create the PrometheusRule (only when the cluster has the Prometheus Operator API) |
+| `metrics.alerts.allocationFailuresPerSecond` | number | `0.1` | Failed volume allocations per second that trigger a critical alert |
+| `metrics.alerts.allocationP99Seconds` | number | `5` | P99 allocation time in seconds that triggers a warning |
+| `metrics.alerts.apiErrorsPerSecond` | number | `0.05` | Failed VPC API calls per second that trigger a warning |
+| `metrics.alerts.replicationLagSeconds` | int | `7200` | Replication lag in seconds that triggers a warning |
+| `metrics.alerts.replicationFailures` | int | `3` | Replication failures in a row that trigger a critical alert |
+| `metrics.alerts.backupLateSeconds` | int | `43200` | A volume with no backup for this long triggers a warning (use twice the schedule) |
+| `metrics.alerts.exportLateSeconds` | int | `43200` | An export to COS, or a moment waiting, this old triggers a warning |
+| `metrics.alerts.snapshotPoolWarning` | int | `75` | Snapshot pool share use (percent) that triggers a warning |
+| `metrics.alerts.snapshotPoolCritical` | int | `85` | Snapshot pool share use (percent) that triggers a critical alert; new backups stop at 85 |
 | `metrics.alerts.utilizationWarning` | int | `80` | Pool utilization percentage that triggers a warning alert |
 | `metrics.alerts.utilizationCritical` | int | `95` | Pool utilization percentage that triggers a critical alert |
 

@@ -52,6 +52,15 @@ var (
 		[]string{"pool"},
 	)
 
+	// PoolMaxShares reports the most shares the pool may have (spec.maxShares).
+	PoolMaxShares = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "vpc_file_pool_max_shares",
+			Help: "Most shares the pool may have (spec.maxShares)",
+		},
+		[]string{"pool"},
+	)
+
 	// PoolPVCCount reports the number of PVCs in the pool.
 	PoolPVCCount = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -280,6 +289,7 @@ func init() {
 		PoolCapacityGB,
 		PoolAllocatedGB,
 		PoolShareCount,
+		PoolMaxShares,
 		PoolPVCCount,
 		VPCAPICallsTotal,
 		VPCAPICallDuration,
