@@ -1,6 +1,6 @@
 # Part 1: Pool Creation, PVCs, and KubeVirt VMs
 
-> **Tutorial Series:** [Index](TUTORIAL.md) | **Part 1** | [Part 2: Snapshots & Clones](TUTORIAL-02-SNAPSHOTS-AND-CLONES.md) | [Part 3: Group Snapshots & Hooks](TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md) | [Part 4: Pool Configuration](TUTORIAL-04-POOL-CONFIGURATION.md) | [Part 5: Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md) | [Part 6: Replication & Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md) | [Part 7: Monitoring](TUTORIAL-07-MONITORING.md) | [Part 8: Migration & Console](TUTORIAL-08-MIGRATION-AND-CONSOLE.md)
+> **Tutorial Series:** [Index](TUTORIAL.md) | **Part 1** | [Part 2: Snapshots & Clones](TUTORIAL-02-SNAPSHOTS-AND-CLONES.md) | [Part 3: Group Snapshots & Hooks](TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md) | [Part 4: Pool Configuration](TUTORIAL-04-POOL-CONFIGURATION.md) | [Part 5: Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md) | [Part 6: Replication & Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md) | [Part 7: Monitoring](TUTORIAL-07-MONITORING.md) | [Part 8: Migration & Console](TUTORIAL-08-MIGRATION-AND-CONSOLE.md) | [Part 9: COS Bucket for Backups](TUTORIAL-09-COS-BACKUP-BUCKET.md)
 
 Step-by-step guide to create a file share pool, inspect it via IBM Cloud CLI, and attach NFS-backed storage to a KubeVirt VM as a shared data disk.
 
@@ -117,6 +117,7 @@ EOF
 - Each share is 100 GB; up to 3 shares allowed
 - 1 share is created immediately
 - Auto-expands when 80% of capacity is allocated
+- Each share's mount target uses the cluster's own security group (`kube-<cluster ID>`), which already lets every worker reach NFS. Set `securityGroupIDs` to use other groups
 - `defaultPermissions: "0777"` — ensures the QEMU user (UID 107) can access subdirectories
 - `defaultUID: 107` / `defaultGID: 107` — PVC subdirectories are chowned to the QEMU user, so KubeVirt's virt-handler skips its own chown (see [KubeVirt NFS Permissions](#kubevirt-nfs-permissions) below)
 
@@ -768,9 +769,10 @@ StorageClass (auto-created)     FileSharePool                VPC File Share
 Now that you have a working pool with PVCs and a VM, explore the rest of the tutorial series:
 
 - **[Part 2: Snapshots & Clones](TUTORIAL-02-SNAPSHOTS-AND-CLONES.md)** — Create point-in-time snapshots, restore from them, and clone volumes (async)
-- **[Part 3: Group Snapshots & Hooks](TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md)** — Coordinate multi-PVC snapshots with lifecycle hooks
+- **[Part 3: Group Snapshots & Hooks](TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md)** — Group snapshots are not active yet; this part explains why and covers hooks
 - **[Part 4: Pool Configuration](TUTORIAL-04-POOL-CONFIGURATION.md)** — Multi-tier pools, allocation strategies, auto-expansion, and share draining
-- **[Part 5: Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md)** — Automatic golden image provisioning for KubeVirt
+- **[Part 5: Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md)** — Optional golden image provisioning for KubeVirt (hidden in the console)
 - **[Part 6: Replication & Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md)** — Cross-region DR with direct NFS and driver-to-driver modes
 - **[Part 7: Monitoring](TUTORIAL-07-MONITORING.md)** — Prometheus metrics, alerts, and Grafana dashboards
 - **[Part 8: Migration & Console](TUTORIAL-08-MIGRATION-AND-CONSOLE.md)** — PVC migration tool and OpenShift console plugin
+- **[Part 9: COS Bucket for Backups](TUTORIAL-09-COS-BACKUP-BUCKET.md)** — Locked COS bucket, a restricted key, and a CBR rule

@@ -41,6 +41,12 @@ node:
   # Must not conflict with other hostNetwork services on the node.
   # Stock IBM VPC file CSI uses 9808; we default to 9809.
   registrarHealthPort: 9809
+  # Port of the node agent's metrics endpoint (per-share used bytes, NFS latency
+  # and IOPS). The node agent uses the host network, so the port must be free on
+  # the node. 0 turns the endpoint off.
+  metricsPort: 9810
+  # How often the node agent reads the NFS statistics of its shares.
+  shareStatsInterval: 30s
   resources:
     requests:
       cpu: 50m
@@ -166,6 +172,25 @@ metrics:
     # (OpenShift has it). The console plugin's charts read these metrics.
     enabled: true
     interval: 30s
+  # Where scraping and alerts live on OpenShift. Platform monitoring reads only
+  # namespaces labelled openshift.io/cluster-monitoring=true, and Red Hat says not to
+  # label other namespaces or to put your own ServiceMonitors in kube-*. So the chart
+  # makes its own namespace for the ServiceMonitors, the PrometheusRule and Services
+  # whose Endpoints the controller keeps. OpenShift's user workload monitoring must be
+  # on (enableUserWorkload: true in openshift-monitoring/cluster-monitoring-config);
+  # the chart never changes that. See MONITORING.md.
+  monitoring:
+    # auto: use it when the cluster has the Prometheus Operator API and the OpenShift
+    # console and webhook.certProvider=openshift. enabled: always (needs certProvider
+    # openshift). disabled: ServiceMonitors and rules stay in the release namespace.
+    mode: auto
+    namespace: ibm-vpc-file-pool-csi-monitoring
+  # The service account that scrapes the node agents' metrics (they need a token
+  # that may "get" /metrics). The defaults are OpenShift's Prometheus. Empty
+  # serviceAccount creates no binding; then bind the chart's metrics-reader role yourself.
+  scraper:
+    serviceAccount: prometheus-k8s
+    namespace: openshift-monitoring
   alerts:
     # Created only when the cluster has the Prometheus Operator API.
     enabled: true
@@ -174,6 +199,16 @@ metrics:
     utilizationCritical: 95
     # One share, in percent of its size allocated to PVCs
     shareUtilizationWarning: 90
+    # One share, in percent of its size written (real used bytes, from the node agents)
+    shareUsedWarning: 85
+    shareUsedCritical: 95
+    # NFS requests on one share (read or write): average seconds per request.
+    # Judged only while the share does at least nfsMinOpsPerSecond requests a second.
+    nfsLatencySeconds: 0.1
+    nfsMinOpsPerSecond: 1
+    # Read and write operations a second on one share, all nodes together.
+    # 0 turns the alert off. Set it near the IOPS of the share profile.
+    shareIOPSWarning: 0
     # Failed volume allocations per second
     allocationFailuresPerSecond: 0.1
     # Slowest 1% of volume allocations, in seconds

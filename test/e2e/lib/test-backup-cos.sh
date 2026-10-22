@@ -143,6 +143,45 @@ out=$(PATH="$WORK/bin:$PATH" STUB_SEEN="$WORK/seen3" cos_make_secrets kube-syste
 eq "a missing API key file fails" "$rc" "1"
 if echo "$out" | grep -qF "kp-apikey.json"; then pass "the error names the file"; else fail "the error names the file"; fi
 
+# --- cos-list wait: one export of a volume is enough (it holds the earlier moments as undo files) ---
+mkdir -p "$WORK/list"
+cat >"$WORK/bin/kubectl-backup" <<'STUB'
+#!/usr/bin/env bash
+vol=""; while [ $# -gt 0 ]; do [ "$1" = "--volume" ] && vol="$2"; shift; done
+[ -f "$STUB_LIST/${vol:-all}.out" ] && cat "$STUB_LIST/${vol:-all}.out"
+rc=0; [ -f "$STUB_LIST/${vol:-all}.rc" ] && rc=$(cat "$STUB_LIST/${vol:-all}.rc")
+exit "$rc"
+STUB
+chmod +x "$WORK/bin/kubectl-backup"
+BACKUP_BIN="$WORK/bin/kubectl-backup" STUB_LIST="$WORK/list" COS_SOURCE_FLAGS=(--policy p) COS_POLL_SECONDS=0
+export STUB_LIST
+COS_PV_ROOT=pvc-root COS_PV_DATA=pvc-data COS_PV_FILES=pvc-files
+printf 'VOLUME  MOMENT\npvc-root  2026-10-22T09:00:00Z\npvc-root  2026-10-22T09:05:00Z\n' >"$WORK/list/pvc-root.out"
+printf 'VOLUME  MOMENT\npvc-data  2026-10-22T09:00:00Z\n' >"$WORK/list/pvc-data.out"
+printf 'VOLUME  MOMENT\npvc-files  2026-10-22T09:18:54Z\n' >"$WORK/list/pvc-files.out"
+ok "one export of the pod volume and two of a disk pass" cos_exports_listed
+printf 'No backups of policy p found in bucket b\n' >"$WORK/list/pvc-files.out"
+no "a volume with no export fails" cos_exports_listed
+printf 'VOLUME  MOMENT\npvc-files  -\n' >"$WORK/list/pvc-files.out"
+no "a volume line with no moment fails" cos_exports_listed
+printf 'VOLUME  MOMENT\npvc-files  2026-10-22T09:18:54Z\n' >"$WORK/list/pvc-files.out"
+echo 1 >"$WORK/list/pvc-data.rc"
+no "a cos-list that exits non-zero fails" cos_exports_listed
+for want in "cos-list --volume pvc-data (exit 1)" "cos-list --volume pvc-root (exit 0)" "pvc-files  2026-10-22T09:18:54Z"; do
+    if echo "$COS_LIST_REPORT" | grep -qF -- "$want"; then pass "the report has: $want"; else fail "the report has: $want"; fi
+done
+rm "$WORK/list/pvc-data.rc"
+ok "the wait returns at once when all are listed" cos_wait_listed 5
+echo 2 >"$WORK/list/pvc-root.rc"
+SECONDS=0
+no "the wait fails when a volume cannot be listed" cos_wait_listed 0
+if echo "$COS_LIST_REPORT" | grep -qF "cos-list --volume pvc-root (exit 2)"; then pass "the report after a failed wait names the exit status"; else fail "the report after a failed wait names the exit status"; fi
+printf 'VOLUME  MOMENT\npvc-root  2026-10-22T09:00:00Z\n' >"$WORK/list/all.out"
+out=$(cos_list_diagnose)
+for want in "kubectl backup cos-list (exit 0)" "pvc-root  2026-10-22T09:00:00Z" "cos-list --volume pvc-root (exit 2)"; do
+    if echo "$out" | grep -qF -- "$want"; then pass "the diagnostics have: $want"; else fail "the diagnostics have: $want"; fi
+done
+
 # --- the locked-objects note ---
 COS_BUCKET=bk
 n=$(cos_locked_note stage18/x-1)

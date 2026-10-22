@@ -64,6 +64,18 @@ const ReplicationPolicyDetailsPage = React.lazy(
 const ReplicationPolicyCreatePage = React.lazy(
   () => import('./replicationpolicy/ReplicationPolicyCreatePage'),
 );
+const BackupListPage = React.lazy(
+  () => import('./backup/BackupListPage'),
+);
+const BackupDetailsPage = React.lazy(
+  () => import('./backup/BackupDetailsPage'),
+);
+const BackupPolicyFormPage = React.lazy(
+  () => import('./backup/BackupPolicyFormPage'),
+);
+const BackupRestorePage = React.lazy(
+  () => import('./backup/BackupRestorePage'),
+);
 const MonitoringPage = React.lazy(
   () => import('./monitoring/MonitoringPage'),
 );
@@ -75,6 +87,7 @@ const TAB_PATHS = [
   ROUTES.SUBVOLUMES,
   ROUTES.SNAPSHOTS,
   ROUTES.REPLICATION,
+  ROUTES.BACKUPS,
   ROUTES.MONITORING,
 ] as const;
 
@@ -86,6 +99,7 @@ const TAB_LABELS: Record<TabKey, string> = {
   [ROUTES.SUBVOLUMES]: 'SubVolumes',
   [ROUTES.SNAPSHOTS]: 'Snapshots',
   [ROUTES.REPLICATION]: 'Replication',
+  [ROUTES.BACKUPS]: 'Backups',
   [ROUTES.MONITORING]: 'Monitoring',
 };
 
@@ -132,6 +146,10 @@ const VPCFilePoolsPage: React.FC = () => {
           <Route exact path={ROUTES.SUBVOLUME_DETAIL} component={SubVolumeDetailsPage} />
           <Route exact path={ROUTES.SNAPSHOT_DETAIL} component={SnapshotDetailsPage} />
           <Route exact path={ROUTES.REPLICATION_DETAIL} component={ReplicationPolicyDetailsPage} />
+          <Route exact path={ROUTES.BACKUP_CREATE} component={BackupPolicyFormPage} />
+          <Route exact path={ROUTES.BACKUP_EDIT} component={BackupPolicyFormPage} />
+          <Route exact path={ROUTES.BACKUP_RESTORE} component={BackupRestorePage} />
+          <Route exact path={ROUTES.BACKUP_DETAIL} component={BackupDetailsPage} />
         </Switch>
       </Suspense>
       </>
@@ -172,6 +190,7 @@ const VPCFilePoolsPage: React.FC = () => {
           <Route exact path={ROUTES.SUBVOLUMES} component={SubVolumeListPage} />
           <Route exact path={ROUTES.SNAPSHOTS} component={SnapshotListPage} />
           <Route exact path={ROUTES.REPLICATION} component={ReplicationPolicyListPage} />
+          <Route exact path={ROUTES.BACKUPS} component={BackupListPage} />
           <Route exact path={ROUTES.MONITORING} component={MonitoringPage} />
           <Route path={ROUTES.DASHBOARD} component={DashboardPage} />
         </Switch>

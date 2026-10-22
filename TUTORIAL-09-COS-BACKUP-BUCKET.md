@@ -1,10 +1,10 @@
 # Part 9: A COS bucket for backups (manual setup)
 
-> **Tutorial Series:** [Index](TUTORIAL.md) | **Part 9**
+> **Tutorial Series:** [Index](TUTORIAL.md) | [Part 1: Pool Creation](TUTORIAL-01-POOL-CREATION.md) | [Part 2: Snapshots & Clones](TUTORIAL-02-SNAPSHOTS-AND-CLONES.md) | [Part 3: Group Snapshots & Hooks](TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md) | [Part 4: Pool Configuration](TUTORIAL-04-POOL-CONFIGURATION.md) | [Part 5: Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md) | [Part 6: Replication & Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md) | [Part 7: Monitoring](TUTORIAL-07-MONITORING.md) | [Part 8: Migration & Console](TUTORIAL-08-MIGRATION-AND-CONSOLE.md) | **Part 9**
 
-Make an IBM Cloud Object Storage (COS) bucket that the backup export can use: a locked, versioned bucket, a key that can only write to it, and a network rule that lets only the cluster and your admin addresses reach it. This is the setup that `kubectl backup cos-setup` will do for you (see `docs/specs/2026-10-21-backup-cos-export.md`). Until that command exists, follow these steps. They are what we ran on the lab on 21 October 2026, and each one was checked.
+Make an IBM Cloud Object Storage (COS) bucket that the backup export can use: a locked, versioned bucket, a key that can only write to it, and a network rule that lets only the cluster and your admin addresses reach it. This is the setup that `kubectl backup cos-setup` does for you (see `docs/specs/2026-10-21-backup-cos-export.md`). Follow these steps by hand if you want to see each one. They are what we ran on the lab on 21 October 2026, and each one was checked.
 
-> **Note:** once part 4 of the COS export is merged, `kubectl backup cos-setup` automates these steps (run it with `--dry-run` first; see [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md#export-to-cos-building-not-usable-end-to-end-yet)). It has not been run against real IBM Cloud yet. This page stays the tested manual procedure and the reference for what the command makes.
+> **Note:** `kubectl backup cos-setup` automates these steps (run it with `--dry-run` first; see [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md#export-to-cos-built-the-release-test-is-written-and-not-yet-run)). It has not been run against real IBM Cloud yet. The command also makes the backup key and wraps it with Key Protect. These manual steps do not. This page stays the tested manual procedure and the reference for what the command makes.
 
 **Account:** the one that holds your cluster. **Region:** the bucket is in the cluster's region (`eu-de` here).
 
@@ -225,4 +225,4 @@ Delete the key file `~/.config/pool-csi/cos-key.json` too.
 
 ## Next
 
-[Part 6: Replication and Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md) covers replication between sites. The backup export itself (the `spec.export` block, `kubectl backup restore --from-cos`) is described in `docs/specs/2026-10-21-backup-cos-export.md` and is built in steps.
+The backup export itself (the `spec.export` block, `kubectl backup cos-setup`, `kubectl backup restore --from-cos`) is described in [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md#export-to-cos-built-the-release-test-is-written-and-not-yet-run) and in `docs/specs/2026-10-21-backup-cos-export.md`. [Part 6: Replication and Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md) covers replication between sites.

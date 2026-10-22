@@ -34,8 +34,15 @@ else
     pass "disabled: no PrometheusRule"
 fi
 
+# The IOPS alert is off unless the user sets a limit.
+if render --api-versions "$PR_API" | grep -qF "VPCFilePoolShareIOPSHigh"; then
+    fail "default: IOPS alert rendered without a limit"
+else
+    pass "default: no IOPS alert without a limit"
+fi
+
 # Keep the "groups:" part of the rule and dedent it, so promtool can read it.
-render --api-versions "$PR_API" \
+render --api-versions "$PR_API" --set metrics.alerts.shareIOPSWarning=150 \
     | awk '/^kind: PrometheusRule/{f=1} f&&/^---/{exit} f' \
     | awk '/^  groups:/{g=1; print "groups:"; next} g{sub(/^  /,""); print}' > "$WORK/rendered-rules.yml"
 cp "$DIR/alerts_test.yml" "$WORK/alerts_test.yml"

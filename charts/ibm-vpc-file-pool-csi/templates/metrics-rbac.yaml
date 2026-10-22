@@ -1,0 +1,27 @@
+# Whoever scrapes the metrics endpoints needs "get" on /metrics.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-metrics-reader
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+rules:
+  - nonResourceURLs: ["/metrics"]
+    verbs: ["get"]
+{{- if and .Values.metrics.scraper.serviceAccount (not (include "ibm-vpc-file-pool-csi.uwm" .)) }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-metrics-reader
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-metrics-reader
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.metrics.scraper.serviceAccount }}
+    namespace: {{ .Values.metrics.scraper.namespace }}
+{{- end }}

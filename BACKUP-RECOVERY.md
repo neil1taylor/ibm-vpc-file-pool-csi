@@ -395,6 +395,53 @@ It refuses, and changes nothing, in these cases:
 
 If the policy is already deleted, its status can no longer say where the backup is. Name the snapshot pool and the volume yourself: `--pool backups --volume pvc-...`. The volume name is the folder under `/backup/<policy>/pvcs/` on the share.
 
+### Backups in the console
+
+The **Backups** tab of the IBM VPC File Pools page shows the same facts as `kubectl backup list`, with no `kubectl`.
+
+- The list has one row for each policy: snapshot pool, schedule, keep time, phase, number of volumes, the age of the stalest backup, and whether the COS export is on.
+- A policy page shows its settings and one row for each volume: the claim, the VM, the newest and oldest backup, the restore points, the size of the newest backup, the consistency, the last error and the export state. A volume the policy no longer backs up is marked with the date its backups are kept until. A crash consistent copy has an orange label.
+- When new backups are stopped because the snapshot pool is more than 85% full, a banner says so on both pages and links to the pool. Nothing is deleted to make room; see [Backups stopped](TROUBLESHOOTING.md#backups-stopped-the-snapshot-pool-is-above-85-full).
+- Restore is in the console too (next section). The COS tab comes in a later step, with its own section here.
+
+#### Make and change a policy in the console
+
+On the Backups tab, **Create BackupPolicy** opens a form that makes the same `BackupPolicy` as the YAML above. **Edit** on the list or on a policy page opens it again.
+
+- **Snapshot pool.** Only a pool that holds no workload claims and has a ready share can be chosen; the other pools are listed, switched off, with the reason.
+- **Schedule and keep for.** The page checks the same limits as the admission webhook (a schedule of at least 1 minute, a keep time of at least 1 hour) and shows the webhook's own message if it refuses the policy.
+- **Labels and namespaces.** The page counts, live, the claims the labels match (and says when a VM's other disks join), so a wrong label shows at once. A policy with no labels is refused. Match expressions cannot be edited in the form; an edit keeps them, and keeps the `export` block.
+- **VM copy speed limit.** Explained as on the replication form, with the note that Red Hat does not support copying a running VM.
+- The form explains the 85% stop: when a share of the snapshot pool is more than 85% full, no new backups are made for the volumes on it, and nothing is deleted to make room.
+- **Suspend and Resume** are on the list menu and on the policy page. They set `spec.suspend`; existing backups stay.
+- **Delete** asks first. Deleting a policy stops new backups; the backups already made stay on the snapshot pool. Remove them with **Delete backups** on the volume (while the policy exists) or with `kubectl backup delete`.
+- Without the right to create, update or delete `BackupPolicy` objects, the action is off, the page names the missing right, and (for create and edit) shows the YAML for an administrator.
+
+#### Restore a backup in the console
+
+Open a policy, and choose **Restore** in the menu of a volume. This does what `kubectl backup restore` does: it makes one `BackupRestore` object, and the driver makes the new claim and copies the backup into it.
+
+- **Volume.** Any volume the policy has backups of, including a volume that is gone (marked "no longer backed up").
+- **Latest backup, or a moment.** For a moment, choose a time in your time zone. The restore uses the newest backup at or before it, and the banner tells you which backup it used. The page shows the oldest and the newest backup, and refuses a time before the oldest. It cannot list the moments one by one, because the policy status holds only the count of restore points.
+- **Namespace and new claim name.** The name must not exist; the page checks the namespace live and refuses a name that is taken, as a restore never writes over a volume.
+- **Storage class.** The default is the class of the backed-up claim. Only classes of this driver are offered.
+- A confirmation says that a new claim is made, that nothing is overwritten, and that the copy takes time.
+- The page then follows the restore: Pending, Provisioning, Restoring, Done (with the restored moment) or Failed (with the message). The new claim cannot be used until it is Done.
+- A crash consistent VM disk shows a warning: the guest may need a file system check when it starts.
+- If your account may not create `BackupRestore` objects, the button is off, the page names the missing right, and it shows the YAML an administrator can apply for you.
+- Other pages can link to the page with `?claim=<namespace>/<name>` and `?moment=<time>`.
+
+#### Delete the backups of a volume in the console
+
+**Delete backups** in the menu of a volume does what `kubectl backup delete` does, as a dialog. It is the only destructive action of the Backups tab.
+
+1. **Refusals.** The dialog refuses, and starts nothing, while the policy still backs up the volume (the label that selects it is still there; remove it, or delete the policy, and wait for one backup cycle so the volume shows as "no longer backed up"), and while a restore of the volume has not ended. It uses the words of the command line.
+2. **Measure.** The console starts the same measure Job as the command, on the snapshot pool's share, and shows how much would go, for example "12.0 GiB, 9 moments". The Job only reads. If the folders are empty or missing, the dialog says so and stops.
+3. **Confirm.** You type the claim as `namespace/name`. Only then does the console start the delete Job. The backups cannot be recovered; the volume itself is not touched.
+4. **Result.** The dialog follows the Job and says "Removed the backups of ... (size)", or the error. The console removes each Job, its claim and its PV when the Job ends.
+
+The Jobs run in the driver namespace (`kube-system`) with your own rights: to make and remove Jobs and claims there, to make and remove PersistentVolumes, and to list pods. Without them the dialog is off, names the missing rights, and shows the YAML of the delete objects for an administrator to apply (applying it removes the backups without the measure step or the typed confirmation, so only apply it knowingly). A link can open the dialog with `?claim=<namespace>/<name>` on the policy page. After a policy is deleted, its status can no longer say where its backups are; use `kubectl backup delete --pool ... --volume ...`.
+
 ### Export to COS (built; the release test is written and not yet run)
 
 A policy can also send its backups to an IBM Cloud Object Storage bucket, encrypted before they leave the cluster, with a lock that nobody can shorten. The controller does this with the `spec.export` block:
