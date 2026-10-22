@@ -4,6 +4,8 @@ This page defines each word once. Other pages link here instead of defining the 
 
 The meanings come from the code (`api/v1alpha1/` and `pkg/`). If a page disagrees with this one, this one is right, and the page is a bug. Please report it.
 
+For pictures you can click through, see the [interactive diagrams](diagrams/index.html).
+
 **Contents**
 
 - [Storage](#storage): pool, share, mount target, SubVolume, volume, plain volume, VM disk, allocation strategy, auto-expand, tier, drain, StorageClass, staging, reclaim policy

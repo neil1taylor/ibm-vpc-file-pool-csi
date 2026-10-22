@@ -19,6 +19,8 @@ To make a release:
 
 ## [Unreleased]
 
+- **Interactive teaching pages** (`docs/diagrams/index.html`): ten pages with buttons that step through a story, in plain words. This change adds the index and the pages on the two kinds of volume, replication, backup to COS, cloning a VM disk and a pool filling up.
+
 - **Tests pin two replication fixes found in the 22 October two-cluster run (issues #214, #215).** Deleting a policy removes the Jobs, PVCs and PVs of its plain-volume copies (direct and receiver mode), and a plain volume's status follows its Job within one pass while a VM disk is also copying. Both were fixed by #161 and #197, which the image used in that run did not yet contain; no driver code changed.
 
 - **Migrating a claim works for a user with only the edit role (issue #196).** The copy pod (`kubectl migrate execute` and the console page "Migrate volumes into a pool") ran `apk add rsync` at start, which fails for the random user id that OpenShift gives a normal user. It now uses the OpenShift `tools` image (`openshift/tools:latest` in the cluster's registry), which already holds rsync, and it follows the restricted rules (no user id set, no extra rights, all capabilities dropped). The copy runs as the namespace's user, so it no longer sets owners or folder times: the new files belong to that user. The release test for the console migrate page no longer grants the `anyuid` right.
