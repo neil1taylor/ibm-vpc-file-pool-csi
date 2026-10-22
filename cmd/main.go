@@ -17,6 +17,7 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
@@ -509,6 +510,11 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metric
 		os.Exit(1)
 	}
 	replController := pool.NewReplicationController(k8sClient, replClient, nfsOps)
+	// The backup controller reports what replication did, so replication wakes
+	// it after each pass. See the Job watch below.
+	backupController := pool.NewBackupController(replClient)
+	backupController.SetShareData(shareRunner)
+	replController.SetOnProcessed(backupController.Kick)
 	hookOrchestrator := hooks.NewOrchestrator(
 		hooks.NewExecHook(clientset, restConfig),
 		hooks.NewHTTPHook(nil),
@@ -520,6 +526,16 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metric
 	vmCopier := vmcopy.NewCopier(hooks.NewPodExecer(clientset, restConfig))
 	replController.SetVMCopier(vmCopier)
 	go replController.Run(signalCtx)
+
+	// Watch the Jobs in the driver's namespace, so a controller that waits for
+	// a Job sees it finish within seconds and not at its next tick.
+	jobInformers := informers.NewSharedInformerFactoryWithOptions(clientset, 0, informers.WithNamespace(driverNamespace))
+	if _, addErr := jobInformers.Batch().V1().Jobs().Informer().AddEventHandler(
+		pool.NewJobFinishHandler(replController.Kick, backupController.Kick)); addErr != nil {
+		klog.ErrorS(addErr, "Failed to watch Jobs")
+		os.Exit(1)
+	}
+	jobInformers.Start(signalCtx.Done())
 
 	// Snapshots of running VM disks are QEMU copies. The same commands run in
 	// the VM pod; a timer on the leader moves each copy forward.
@@ -551,8 +567,6 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metric
 
 	// Backup policies: label the volumes they select and keep one
 	// ReplicationPolicy for each source pool. Runs on the leader only.
-	backupController := pool.NewBackupController(replClient)
-	backupController.SetShareData(shareRunner)
 	if addErr := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
 		backupController.Run(ctx)
 		return nil
