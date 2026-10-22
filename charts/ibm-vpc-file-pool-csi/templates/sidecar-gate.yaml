@@ -1,0 +1,93 @@
+{{- if .Values.vmSnapshots.enableSidecarGate }}
+{{- if ne .Values.vmSnapshots.method "auto" }}
+{{- fail "vmSnapshots.enableSidecarGate needs vmSnapshots.method=auto; with copy the gate is not used" }}
+{{- end }}
+{{- $fullname := include "ibm-vpc-file-pool-csi.fullname" . }}
+# Turns on the KubeVirt Sidecar feature gate that instant VM snapshots need.
+# Nothing in the chart turns it off again: VMs with instant snapshots cannot
+# start without it.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $fullname }}-sidecar-gate
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $fullname }}-sidecar-gate
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["hco.kubevirt.io"]
+    resources: ["hyperconvergeds"]
+    resourceNames: ["kubevirt-hyperconverged"]
+    verbs: ["get", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $fullname }}-sidecar-gate
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $fullname }}-sidecar-gate
+subjects:
+  - kind: ServiceAccount
+    name: {{ $fullname }}-sidecar-gate
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-sidecar-gate
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sidecar-gate
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        {{- include "ibm-vpc-file-pool-csi.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: sidecar-gate
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ $fullname }}-sidecar-gate
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: enable-sidecar-gate
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - "--mode=enable-sidecar-gate"
+            - "--v={{ .Values.logLevel }}"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+{{- end }}

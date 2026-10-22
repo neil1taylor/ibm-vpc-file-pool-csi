@@ -245,7 +245,7 @@ The savings increase as PVC sizes decrease below the 10 GB VPC minimum.
 | Factor | Impact |
 |--------|--------|
 | Share IOPS profile | Higher IOPS = higher cost per GB |
-| Snapshot storage | Snapshots consume share capacity (billed) |
+| Snapshot storage | Snapshots consume share capacity (billed). A snapshot is kept on its volume's share and is charged the volume's size (a copy) or a tenth of it (an instant VM snapshot). A share without that much free space refuses the snapshot (`ResourceExhausted`). Snapshots do not count as PVCs. |
 | Replication storage | DR destination pool is billed separately |
 
 ---
@@ -398,9 +398,10 @@ spec:
   defaultGID: 107
   defaultPermissions: "0777"
   goldenImages:            # Auto-provision golden images for KubeVirt
+    enabled: true
     targetNamespaces:
       - openshift-virtualization-os-images
-    pvcSize: 30Gi
+    pvcSizeGB: 30
 ```
 
 **Budget:** 10 VPC shares max. Capacity: 40 TB for ~40 VMs at 30 GB boot disk + data.

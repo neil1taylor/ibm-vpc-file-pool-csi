@@ -54,7 +54,7 @@ This section documents what the IBM VPC platform does and does not provide. Thes
 | Capability | Status | Impact |
 |------------|--------|--------|
 | **Native cross-region replication** | Not available | No async/sync mirror, no replica shares across regions. All replication must be built at the application layer. |
-| **Share-level snapshots** | Not available | No atomic point-in-time capture of an entire file share. The VPC API has no snapshot operation for file shares. |
+| **Share-level snapshots** | Available, not used | The VPC API can snapshot a whole file share, but not for shares in `vpc` access mode. A pool share holds many volumes, so the driver does not use it: one volume could not be restored without touching the others. |
 | **Directory-level snapshots** | Not available | No way to atomically capture a subdirectory within a share. |
 | **File-level snapshots** | Not available | No copy-on-write or reflink support at the NFS protocol level. |
 | **Change tracking / changelog** | Not available | No journal, delta stream, or inotify-equivalent at the share level. Change detection requires full directory traversal. |
@@ -128,7 +128,7 @@ Result on destination:
 
 ## Unsupported Workload Types
 
-The following workloads MUST NOT use Phase 4d replication. Using this feature for these workloads will produce corrupted or unusable replicas in the DR region.
+The following workloads MUST NOT be copied with rsync. A file copy of them produces corrupted or unusable replicas in the DR region. The controller never copies a running VM's disk with rsync: it uses a QEMU copy instead, as the VM section below describes.
 
 ### VM Boot and Data Disks (qcow2, vmdk, raw)
 
@@ -161,7 +161,7 @@ This is NOT a file-level consistency problem (rsync is reading one file). It is 
 
 **Skipped volumes:** it never copies a volume that a running or starting VM uses with rsync. Before each copy it looks for a KubeVirt pod (`kubevirt.io=virt-launcher` or `kubevirt.io=hotplug-disk`) in the claim's namespace that mounts the claim. If it finds one, it skips the volume and sets the volume's status error to `skipped: in use by running VM <namespace>/<pod>; ...`. The policy's `lastError` counts the skipped volumes. A skipped volume does not count as a failed cycle, so it does not pause the policy for the other volumes. If a VM starts while a copy runs, the controller does not record that copy as a sync. If the controller cannot list the pods, it does not copy the volume. Volumes of stopped VMs are copied as before; rsync leaves out any staging files left by an earlier VM copy.
 
-**What to use instead:** IBM Cloud VPC block storage volume snapshots and replication for VM workloads. Block storage provides crash-consistent snapshots at the storage layer.
+**What to use instead:** the QEMU copy that the controller makes of a running VM (above). Its status says `FileSystemConsistent` or `CrashConsistent`. IBM Cloud VPC block storage snapshots and replication are another option for VM workloads.
 
 ### Databases with Write-Ahead Logs
 
@@ -383,6 +383,7 @@ Notes:
 - The check Job deletes itself after ten minutes.
 - When you delete the policy in the console, the dialog has a box, off by default: "Also delete the Secrets the receiver setup made". It appears only for Secrets named `<policy name>-receiver-token` and `<policy name>-receiver-ca` that the policy uses and no other policy uses. The console deletes a Secret only after it proves the Secret carries the label the setup put on it, so a Secret you made yourself with the same name is left alone and named in a message.
 - A user who may not make Jobs in `kube-system` sees a warning and can still make the policy without the check. A user who may not make Secrets there is told to ask an administrator and use existing Secrets.
+- After the policy exists, the replication controller repeats the same checks (health call, certificate, token) once per schedule and sets the `ReceiverReachable` condition on the policy. The Replication Policies list has a Receiver column and the policy page a Receiver Status line: Reachable, Not reachable with the reason, or Checking... until the first result. `kubectl get replicationpolicy <name> -o jsonpath='{.status.conditions}'` shows the same. A failing check does not stop replication.
 - The same test from a terminal: `curl -H "Authorization: Bearer $TOKEN" https://<receiver>/api/v1/auth-check` (add `--cacert ca.crt` for a self-signed receiver).
 
 ### Replication Data Flow
@@ -870,7 +871,7 @@ Phase 4d is not the right tool for every DR scenario. This section documents whe
 
 ### Use IBM VPC Block Storage Replication When:
 
-- Workloads require crash-consistent snapshots (VMs, databases)
+- Workloads require crash-consistent snapshots (databases)
 - RPO must be near-zero (seconds)
 - The workload uses ReadWriteOnce volumes (block is the natural fit)
 
@@ -1005,7 +1006,7 @@ Future (snapshot + ship):
 | No crash consistency | Storage-layer snapshot is crash-consistent by definition |
 | Full directory scan every cycle | Snapshot delta tracking (changed blocks only) |
 | rsync CPU overhead | Block-level delta eliminates checksum computation |
-| Cannot replicate VM disks safely | Crash-consistent snapshots make VM replication viable |
+| A running VM disk needs a QEMU copy | A storage-layer snapshot would not need QEMU (the QEMU copy is built today) |
 
 ### What Would Change in the CRD
 
@@ -1029,7 +1030,7 @@ The ReplicationPolicy CRD and controller interface would remain the same -- only
 ### Impact on Supported Workloads
 
 With native snapshots, Phase 4d would expand to support:
-- VM boot/data disks (crash-consistent replicas)
+- VM boot/data disks without QEMU (today a running VM is copied with QEMU)
 - Databases (crash-consistent, WAL+data file consistency guaranteed)
 - Any workload requiring cross-file transactional consistency
 

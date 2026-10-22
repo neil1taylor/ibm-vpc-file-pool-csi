@@ -1,4 +1,4 @@
-{{- if .Values.consolePlugin.enabled }}
+{{- if include "ibm-vpc-file-pool-csi.consolePlugin" . }}
 apiVersion: v1
 kind: Service
 metadata:

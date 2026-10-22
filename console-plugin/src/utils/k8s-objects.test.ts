@@ -5,6 +5,7 @@ import {
   buildVolumeSnapshot,
   findClassByDriver,
   errorMessage,
+  isAlreadyExistsError,
   isNotFoundError,
   isValidK8sName,
   parseMatchLabels,
@@ -171,5 +172,19 @@ describe('errorMessage', () => {
 
   it('uses the fallback for anything else', () => {
     expect(errorMessage(undefined, 'fallback')).toBe('fallback');
+  });
+});
+
+describe('isAlreadyExistsError', () => {
+  it('is true for a 409 in any of the shapes the console client gives', () => {
+    expect(isAlreadyExistsError({ code: 409 })).toBe(true);
+    expect(isAlreadyExistsError({ response: { status: 409 } })).toBe(true);
+    expect(isAlreadyExistsError({ json: { code: 409 } })).toBe(true);
+  });
+
+  it('is false for other errors', () => {
+    expect(isAlreadyExistsError({ code: 404 })).toBe(false);
+    expect(isAlreadyExistsError(new Error('boom'))).toBe(false);
+    expect(isAlreadyExistsError(undefined)).toBe(false);
   });
 });

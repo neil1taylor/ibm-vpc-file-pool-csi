@@ -130,6 +130,23 @@ describe('RestoreSnapshotPage', () => {
     expect(screen.queryByText(/taken while a VM was running/i)).toBeNull();
   });
 
+  it('says a running VM is copied at one moment, explains a crash consistent copy, and points to no future step', () => {
+    watch({
+      ...base(),
+      VirtualMachine: [
+        {
+          metadata: { name: 'vm1', namespace: 'apps' },
+          spec: { template: { spec: { volumes: [{ persistentVolumeClaim: { claimName: 'data' } }] } } },
+        },
+      ],
+    });
+    render(<RestoreSnapshotPage />);
+    expect(screen.getByText(/froze the guest and copied the disk at one moment/i)).toBeTruthy();
+    expect(screen.getByText(/crash consistent/i)).toBeTruthy();
+    expect(screen.queryByText(/step 7/i)).toBeNull();
+    expect(screen.queryByText(/may not boot/i)).toBeNull();
+  });
+
   it('shows the pool free space and warns when the size is more than that', () => {
     watch(base());
     render(<RestoreSnapshotPage />);

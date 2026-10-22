@@ -118,6 +118,9 @@ run() {
   destinationAuthSecretRef: receiver-token')"
     check "a replication policy with a blocked rsync option is refused" \
         refused "disallowed flag" "$(replication_yaml '  destinationNFSServer: 10.0.0.1
+  rsyncOptions: ["--rsh=ssh"]')"
+    check "a replication policy with shell characters in an rsync option is refused" \
+        refused "no spaces, quotes or shell characters" "$(replication_yaml '  destinationNFSServer: 10.0.0.1
   rsyncOptions: ["--rsh=sh -c id"]')"
     check "a replication policy with a bad schedule is refused" \
         refused "spec.schedule is not a valid duration" "$(replication_yaml '  destinationNFSServer: 10.0.0.1' often)"

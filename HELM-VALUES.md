@@ -51,6 +51,8 @@ Settings for the CSI node agent DaemonSet (runs on every worker node).
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `node.kubeletDir` | string | `/var/data/kubelet` | Kubelet root directory. ROKS/ROVS/IKS uses `/var/data/kubelet` (the real path). Standard Kubernetes uses `/var/lib/kubelet` |
+| `node.metricsPort` | int | `9810` | Port of the node agent's HTTPS metrics endpoint (per-share used bytes, NFS latency and IOPS). Its certificate follows `webhook.certProvider` (`manual` needs the secret `<release>-ibm-vpc-file-pool-csi-node-metrics-certs`). The node agent uses the host network, so the port must be free on the node. `0` turns the endpoint, its Service and its ServiceMonitor off |
+| `node.shareStatsInterval` | string | `30s` | How often the node agent reads the NFS statistics of its shares |
 | `node.registrarHealthPort` | int | `9809` | Port for the node-driver-registrar health endpoint. Must not conflict with other hostNetwork services. Stock IBM VPC file CSI uses 9808 |
 | `node.resources.requests.cpu` | string | `50m` | Node agent CPU request |
 | `node.resources.requests.memory` | string | `64Mi` | Node agent memory request |
@@ -114,6 +116,16 @@ Controller-side replication Job configuration.
 |-----------|------|---------|-------------|
 | `replication.image` | string | `""` | Override container image for replication Jobs. When empty, the driver image is used for receiver-mode (sync-client) Jobs; CentOS Stream 9 is used for direct-NFS (rsync) Jobs |
 
+## VM Snapshots
+
+See [VM-INSTANT-SNAPSHOTS.md](VM-INSTANT-SNAPSHOTS.md).
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `vmSnapshots.method` | string | `auto` | `auto`: a snapshot of a KubeVirt VM disk is instant (a new overlay file, nothing copied) where the KubeVirt `Sidecar` feature gate is on, and a copy elsewhere. It adds the VM hook webhook. `copy`: every VM disk snapshot is a copy, and there is no VM hook webhook. Red Hat does not support the `Sidecar` feature gate |
+| `vmSnapshots.enableSidecarGate` | bool | `false` | Turn on the KubeVirt `Sidecar` feature gate, which instant snapshots need. A hook Job adds one entry to the `HyperConverged` `kubevirt.kubevirt.io/jsonpatch` annotation after each install and upgrade, and keeps the other entries. Only that Job's service account gets rights on `HyperConverged`: get and update on the object named `kubevirt-hyperconverged`, nothing else. The gate is cluster-wide: once it is on, anyone who can create or edit a VM can add a hook sidecar container to that VM's pod (see SECURITY.md). Setting it back to `false` or uninstalling does **not** turn the gate off, because VMs with instant snapshots cannot start without it. Needs `vmSnapshots.method=auto`. Red Hat does not support settings made through that annotation |
+| `vmSnapshots.launcherImage` | string | `""` | KubeVirt's virt-launcher image, which has `qemu-img`, for the Jobs that change a stopped VM's snapshot files and that restore instant snapshots. Empty reads it from the virt-operator Deployment in the namespace of the `KubeVirt` resource |
+
 ## Webhook
 
 | Parameter | Type | Default | Description |
@@ -159,7 +171,26 @@ Prometheus metrics and alerting configuration.
 | `metrics.port` | int | `8080` | Port for the `/metrics` endpoint |
 | `metrics.serviceMonitor.enabled` | bool | `true` | Create a Prometheus ServiceMonitor. The chart creates it only when the cluster has the `monitoring.coreos.com/v1` API. The console plugin's charts need it |
 | `metrics.serviceMonitor.interval` | string | `30s` | Scrape interval for the ServiceMonitor |
-| `metrics.alerts.enabled` | bool | `false` | Create PrometheusRule alert resources |
+| `metrics.monitoring.mode` | string | `auto` | Where scraping and alerts live on OpenShift. `auto`: in the monitoring namespace when the cluster has the Prometheus Operator API and the OpenShift console and `webhook.certProvider=openshift`; `enabled`: always (needs `certProvider=openshift`, else the render fails); `disabled`: in the release namespace. Needs user workload monitoring on: see [MONITORING.md](MONITORING.md#where-alerts-run-on-openshift) |
+| `metrics.monitoring.namespace` | string | `ibm-vpc-file-pool-csi-monitoring` | Namespace for the `ServiceMonitor` objects, the `PrometheusRule` and the metrics Services. The chart creates it, without a platform monitoring label |
+| `metrics.scraper.serviceAccount` | string | `prometheus-k8s` | Service account bound to the chart's `metrics-reader` ClusterRole (`get` on `/metrics`) so it can scrape the node agents. Empty creates no binding |
+| `metrics.scraper.namespace` | string | `openshift-monitoring` | Namespace of that service account |
+| `metrics.alerts.shareUsedWarning` | int | `85` | Percent of one share's size written (real used bytes) that triggers a warning |
+| `metrics.alerts.shareUsedCritical` | int | `95` | Percent of one share's size written that triggers a critical alert |
+| `metrics.alerts.nfsLatencySeconds` | number | `0.1` | Average seconds per NFS read or write request on one share that triggers a warning |
+| `metrics.alerts.nfsMinOpsPerSecond` | number | `1` | The latency alert is judged only while the share does at least this many read or write requests a second |
+| `metrics.alerts.shareIOPSWarning` | int | `0` | Read plus write operations a second on one share (all nodes) that trigger a warning. `0` turns the alert off |
+| `metrics.alerts.enabled` | bool | `true` | Create the PrometheusRule (only when the cluster has the Prometheus Operator API) |
+| `metrics.alerts.allocationFailuresPerSecond` | number | `0.1` | Failed volume allocations per second that trigger a critical alert |
+| `metrics.alerts.allocationP99Seconds` | number | `5` | P99 allocation time in seconds that triggers a warning |
+| `metrics.alerts.apiErrorsPerSecond` | number | `0.05` | Failed VPC API calls per second that trigger a warning |
+| `metrics.alerts.replicationLagSeconds` | int | `7200` | Replication lag in seconds that triggers a warning |
+| `metrics.alerts.replicationFailures` | int | `3` | Replication failures in a row that trigger a critical alert |
+| `metrics.alerts.backupLateSeconds` | int | `43200` | A volume with no backup for this long triggers a warning (use twice the schedule) |
+| `metrics.alerts.exportLateSeconds` | int | `43200` | An export to COS, or a moment waiting, this old triggers a warning |
+| `metrics.alerts.snapshotPoolWarning` | int | `75` | Snapshot pool share use (percent) that triggers a warning |
+| `metrics.alerts.snapshotPoolCritical` | int | `85` | Snapshot pool share use (percent) that triggers a critical alert; new backups stop at 85 |
+| `metrics.alerts.shareUtilizationWarning` | int | `90` | Percent of one share's size allocated to PVCs that triggers a warning |
 | `metrics.alerts.utilizationWarning` | int | `80` | Pool utilization percentage that triggers a warning alert |
 | `metrics.alerts.utilizationCritical` | int | `95` | Pool utilization percentage that triggers a critical alert |
 
@@ -180,11 +211,11 @@ Configuration for the default StorageClass created by the chart.
 
 ## Console Plugin
 
-OpenShift Console dynamic plugin for visual pool management. Requires OpenShift 4.14+ with the ConsolePlugin v1 API. Disabled by default.
+OpenShift Console dynamic plugin for visual pool management. On by default, and installed only on clusters with the OpenShift console (ConsolePlugin v1 API, OpenShift 4.14+). On other clusters the chart leaves it out.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `consolePlugin.enabled` | bool | `false` | Enable the OpenShift Console dynamic plugin |
+| `consolePlugin.enabled` | bool | `true` | Install the OpenShift Console dynamic plugin and turn it on in the console. Set `false` to leave it out |
 | `consolePlugin.image.repository` | string | `de.icr.io/ibm-vpc-file-pool-csi/console-plugin` | Plugin container image repository |
 | `consolePlugin.image.tag` | string | `latest` | Plugin image tag |
 | `consolePlugin.replicas` | int | `2` | Number of plugin pod replicas |
@@ -193,14 +224,7 @@ OpenShift Console dynamic plugin for visual pool management. Requires OpenShift 
 | `consolePlugin.resources.requests.memory` | string | `50Mi` | Memory request |
 | `consolePlugin.resources.limits.memory` | string | `128Mi` | Memory limit |
 
-After installing with `consolePlugin.enabled=true`, register the plugin with the OpenShift console:
-
-```bash
-# Adds this plugin to the list and keeps the other plugins enabled.
-# (A merge patch with a "plugins" list would replace the whole list.)
-oc patch console.operator.openshift.io cluster --type=json \
-  -p '[{"op":"add","path":"/spec/plugins/-","value":"ibm-vpc-file-pool-csi"}]'
-```
+The chart turns the plugin on in the console for you. A hook Job runs after each install and upgrade and adds `ibm-vpc-file-pool-csi` to the console's plugin list (`console.operator.openshift.io/cluster`, `spec.plugins`). It keeps every other plugin. Before `helm uninstall`, a second hook Job removes only this plugin from the list. If you upgrade with `consolePlugin.enabled=false`, the same Job removes it after the upgrade. The Jobs use the driver image and a service account that can only read and update that one object.
 
 ## Example Overrides
 
@@ -256,24 +280,14 @@ kubectl create secret generic ibm-cloud-credentials \
 
 ### Console Plugin
 
-Enable the OpenShift Console dynamic plugin:
+Pin the OpenShift Console plugin image (the plugin is on by default):
 
 ```yaml
 consolePlugin:
-  enabled: true
   image:
     repository: de.icr.io/ibm-vpc-file-pool-csi/console-plugin
     tag: v0.12.0
   replicas: 2
-```
-
-After install, register the plugin:
-
-```bash
-# Adds this plugin to the list and keeps the other plugins enabled.
-# (A merge patch with a "plugins" list would replace the whole list.)
-oc patch console.operator.openshift.io cluster --type=json \
-  -p '[{"op":"add","path":"/spec/plugins/-","value":"ibm-vpc-file-pool-csi"}]'
 ```
 
 ### Custom Metrics

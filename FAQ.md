@@ -1,6 +1,6 @@
 # Frequently Asked Questions — IBM VPC File Pool CSI Driver
 
-Quick answers with links to authoritative documentation for deeper reading.
+Quick answers with links to authoritative documentation for deeper reading. For the meaning of project words such as pool, share, moment and snapshot pool, see [CONTEXT.md](CONTEXT.md).
 
 ---
 
@@ -44,7 +44,7 @@ No. Kubernetes does not support PVC shrinking (this is a platform-wide constrain
 
 ### What happens to data when I delete a PVC?
 
-It depends on the StorageClass reclaim policy: `Delete` removes the subdirectory and data, `Retain` keeps data for manual recovery, and `Archive` moves data to `.archived/` on the share. See [USER-GUIDE.md — Deleting a PVC](USER-GUIDE.md#deleting-a-pvc).
+It depends on the StorageClass reclaim policy: `Delete` removes the subdirectory and data, and `Retain` keeps the PersistentVolume, the SubVolume and the data for manual clean-up. There is no archive mode. See [USER-GUIDE.md — Deleting a PVC](USER-GUIDE.md#deleting-a-pvc).
 
 ---
 
@@ -96,11 +96,11 @@ NFS traffic is not encrypted in transit on ROKS or ROVS clusters because IBM Clo
 
 ### How fast are snapshots?
 
-Snapshots are full directory copies (`cp -a`), not instantaneous COW snapshots. Speed is proportional to data size: ~1 GB takes 5-15 seconds, ~100 GB takes 5-15 minutes. Snapshots consume share capacity equal to the source data. See [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md) for scheduling and retention strategies.
+A snapshot of a plain volume is a full directory copy (`cp -a`). Speed is proportional to data size: ~1 GB takes 5-15 seconds, ~100 GB takes 5-15 minutes. A snapshot of a VM disk is a QEMU copy, or an instant snapshot (nothing is copied) where the KubeVirt `Sidecar` feature gate is on. A snapshot uses share capacity: a copy uses as much as the source data. A snapshot stays on the same share as its volume, so it does not protect you from losing the share. See [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md) for scheduling and retention strategies.
 
 ### What's the best backup strategy?
 
-It depends on your workload. For application data, use scheduled snapshots + cross-region replication. For databases, use application-level backup (pg_dump, etc.) with pool snapshots as a secondary layer. For VMs, stop the VM before snapshotting. See [BACKUP-RECOVERY.md — Strategy Recommendations](BACKUP-RECOVERY.md#strategy-recommendations-by-workload-type).
+It depends on your workload. For application data, use scheduled snapshots + cross-region replication. For databases, use application-level backup (pg_dump, etc.) with pool snapshots as a secondary layer. For VMs, use a snapshot of the running VM (all its disks show one moment) or a `BackupPolicy`. You do not need to stop the VM. See [BACKUP-RECOVERY.md — Strategy Recommendations](BACKUP-RECOVERY.md#strategy-recommendations-by-workload-type).
 
 ---
 

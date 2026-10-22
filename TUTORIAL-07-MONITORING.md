@@ -1,8 +1,8 @@
 # Part 7: Monitoring
 
-> **Tutorial Series:** [Index](TUTORIAL.md) | [Part 1: Pool Creation](TUTORIAL-01-POOL-CREATION.md) | [Part 2: Snapshots & Clones](TUTORIAL-02-SNAPSHOTS-AND-CLONES.md) | [Part 3: Group Snapshots & Hooks](TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md) | [Part 4: Pool Configuration](TUTORIAL-04-POOL-CONFIGURATION.md) | [Part 5: Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md) | [Part 6: Replication & Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md) | **Part 7** | [Part 8: Migration & Console](TUTORIAL-08-MIGRATION-AND-CONSOLE.md)
+> **Tutorial Series:** [Index](TUTORIAL.md) | [Part 1: Pool Creation](TUTORIAL-01-POOL-CREATION.md) | [Part 2: Snapshots & Clones](TUTORIAL-02-SNAPSHOTS-AND-CLONES.md) | [Part 3: Group Snapshots & Hooks](TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md) | [Part 4: Pool Configuration](TUTORIAL-04-POOL-CONFIGURATION.md) | [Part 5: Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md) | [Part 6: Replication & Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md) | **Part 7** | [Part 8: Migration & Console](TUTORIAL-08-MIGRATION-AND-CONSOLE.md) | [Part 9: COS Backup Bucket](TUTORIAL-09-COS-BACKUP-BUCKET.md)
 
-Set up Prometheus monitoring for the CSI driver: enable metric scraping, explore all 21 metrics, deploy alerting rules, trigger a test alert, and import a Grafana dashboard.
+Set up Prometheus monitoring for the CSI driver: enable metric scraping, explore the main metrics, deploy alerting rules, trigger a test alert, and import a Grafana dashboard.
 
 **Cluster:** ROKS eu-de (OpenShift Virtualization enabled)
 **Zone:** eu-de-1
@@ -123,11 +123,17 @@ oc get filesharepools ${POOL_NAME}
 
 ## Step 3: Enable ServiceMonitor
 
-The controller serves Prometheus metrics on `:8080/metrics`. You need a ServiceMonitor to tell Prometheus where to scrape.
+The controller serves Prometheus metrics on `:8080/metrics`. A ServiceMonitor tells Prometheus where to scrape.
 
 ### Method A: Helm Values (Recommended)
 
-Upgrade the Helm release with monitoring enabled:
+The chart creates the ServiceMonitor by default (`metrics.serviceMonitor.enabled` is `true`). It does so only when the cluster has the Prometheus Operator API, which OpenShift has. Check that it exists:
+
+```bash
+oc get servicemonitors -n kube-system
+```
+
+If you turned it off, enable it again:
 
 ```bash
 helm upgrade ibm-vpc-file-pool-csi charts/ibm-vpc-file-pool-csi \
@@ -143,7 +149,7 @@ helm upgrade ibm-vpc-file-pool-csi charts/ibm-vpc-file-pool-csi \
 
 ### Method B: Manual ServiceMonitor
 
-If you prefer not to use Helm, apply the ServiceMonitor directly:
+If you do not use Helm, apply the ServiceMonitor directly. It selects the metrics Service that the chart creates (`ibm-vpc-file-pool-csi-metrics`). Skip this method if the chart already made the ServiceMonitor.
 
 ```bash
 cat <<EOF | oc apply -f -
@@ -152,12 +158,11 @@ kind: ServiceMonitor
 metadata:
   name: vpc-file-pool-csi
   namespace: kube-system
-  labels:
-    app: vpc-file-pool-csi-controller
 spec:
   selector:
     matchLabels:
-      app: vpc-file-pool-csi-controller
+      app.kubernetes.io/name: ibm-vpc-file-pool-csi
+      app.kubernetes.io/component: controller
   endpoints:
     - port: metrics
       interval: 30s
@@ -206,9 +211,9 @@ vpc_file_pool_share_count{pool="monitored-pool"} 1
 
 ## Step 4: Key Metrics Walkthrough
 
-The driver exposes 21 metrics across six categories. This section walks through each category with PromQL queries and explains what to look for.
+The driver exposes 31 metrics across eight categories. This section walks through the first six categories (24 metrics) with PromQL queries and explains what to look for. The backup and CDI metrics are in [MONITORING.md](MONITORING.md).
 
-### Allocation Metrics (6 metrics)
+### Allocation Metrics (9 metrics)
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
@@ -217,6 +222,9 @@ The driver exposes 21 metrics across six categories. This section walks through 
 | `vpc_file_pool_capacity_gb` | Gauge | `pool` | Total pool capacity in GB |
 | `vpc_file_pool_allocated_gb` | Gauge | `pool` | Total allocated capacity in GB |
 | `vpc_file_pool_share_count` | Gauge | `pool` | Number of VPC shares in the pool |
+| `vpc_file_pool_max_shares` | Gauge | `pool` | Most shares the pool may have (`spec.maxShares`) |
+| `vpc_file_pool_share_total_gb` | Gauge | `pool`, `share` | Provisioned size of one share in GB |
+| `vpc_file_pool_share_allocated_gb` | Gauge | `pool`, `share` | Capacity allocated to PVCs on one share in GB |
 | `vpc_file_pool_pvc_count` | Gauge | `pool` | Number of active PVCs |
 
 **Key PromQL queries:**
@@ -278,6 +286,8 @@ histogram_quantile(0.95, rate(vpc_file_pool_api_call_duration_seconds_bucket[5m]
 
 ### Group Snapshot Metrics (4 metrics)
 
+> **Note:** VolumeGroupSnapshot is not active. Nothing acts on it yet (issue #100), so these four metrics stay empty.
+
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
 | `vpc_file_pool_group_snapshots_total` | Counter | `pool`, `operation`, `status` | operation=create, delete |
@@ -318,7 +328,13 @@ pool_csi_replication_consecutive_failures
 
 ## Step 5: Alerting Rules
 
-Apply PrometheusRule CRs to define alerts for pool health, allocation failures, and replication issues.
+The chart already ships a PrometheusRule named `ibm-vpc-file-pool-csi` (`metrics.alerts.enabled` is `true` by default). Its alerts are named `VPCFilePool...`, for example `VPCFilePoolUtilizationWarning`. See [MONITORING.md](MONITORING.md) for the full list. Check it:
+
+```bash
+oc get prometheusrules -n kube-system
+```
+
+The rules below are examples to show how an alert is written. If the chart rules are active, you do not need them, and applying both sends two alerts for one problem. Apply them only for learning, and delete them in Cleanup.
 
 ### Critical Alerts
 
@@ -355,7 +371,7 @@ spec:
             description: "More than 0.1 allocation failures per second sustained for 5 minutes."
 
         - alert: ControllerDown
-          expr: absent(up{job="vpc-file-pool-csi"} == 1)
+          expr: absent(up{job="ibm-vpc-file-pool-csi-metrics"} == 1)
           for: 5m
           labels:
             severity: critical
@@ -459,7 +475,7 @@ oc get filesharepools ${POOL_NAME}
 # ALLOCATED should show 90, which is 90% of 100 GB
 ```
 
-After the `for: 10m` hold-off period, the `PoolNearCapacity` alert fires. Check in the OpenShift Console under Observe > Alerting, or query Prometheus directly:
+After the `for: 10m` hold-off period, the `PoolNearCapacity` alert fires. The chart's `VPCFilePoolUtilizationWarning` alert (default threshold 80%, hold-off 5 minutes) fires too. Check in the OpenShift Console under Observe > Alerting, or query Prometheus directly:
 
 ```bash
 # Port-forward to Prometheus (OpenShift thanos-querier)
@@ -682,7 +698,7 @@ After importing, the dashboard has five rows:
 
 ## Cleanup
 
-> **Note:** In production, you would keep the ServiceMonitor and PrometheusRules running permanently. This cleanup is for the tutorial environment only.
+> **Note:** In production, keep the ServiceMonitor and PrometheusRules running. This cleanup removes only the examples you applied by hand.
 
 ```bash
 POOL_NAME=monitored-pool
@@ -709,11 +725,11 @@ oc delete filesharepool ${POOL_NAME} --timeout=60s || {
     oc delete filesharepool ${POOL_NAME}
 }
 
-# 5. Delete alerting rules
+# 5. Delete the example alerting rules from Step 5
 oc delete prometheusrule vpc-file-pool-csi-critical -n kube-system --ignore-not-found
 oc delete prometheusrule vpc-file-pool-csi-warning -n kube-system --ignore-not-found
 
-# 6. Delete ServiceMonitor (if created manually)
+# 6. Delete the ServiceMonitor made by Method B (the chart's own stays)
 oc delete servicemonitor vpc-file-pool-csi -n kube-system --ignore-not-found
 
 # 7. Delete namespace
@@ -738,7 +754,7 @@ ibmcloud is shares
 | Replication lag query | `pool_csi_replication_lag_seconds` |
 | P99 allocation latency | `histogram_quantile(0.99, rate(vpc_file_pool_allocation_duration_seconds_bucket[5m]))` |
 | API error rate | `rate(vpc_file_pool_api_calls_total{status="error"}[5m])` |
-| Helm enable monitoring | `helm upgrade ... --set metrics.serviceMonitor.enabled=true --set metrics.alerts.enabled=true` |
+| Helm enable monitoring (on by default) | `helm upgrade ... --set metrics.serviceMonitor.enabled=true --set metrics.alerts.enabled=true` |
 
 ---
 
@@ -750,15 +766,15 @@ The full set of monitoring-related Helm values:
 metrics:
   port: 8080                     # Metrics endpoint port
   serviceMonitor:
-    enabled: false               # Create ServiceMonitor CR
+    enabled: true                # Create ServiceMonitor CR (needs the Prometheus Operator API)
     interval: 30s                # Scrape interval
   alerts:
-    enabled: false               # Create PrometheusRule CRs
+    enabled: true                # Create the PrometheusRule (needs the Prometheus Operator API)
     utilizationWarning: 80       # Warning threshold (%)
     utilizationCritical: 95      # Critical threshold (%)
 ```
 
-Setting `metrics.alerts.enabled: true` in Helm values creates the same PrometheusRule CRs applied manually in Step 5, with thresholds configurable via `utilizationWarning` and `utilizationCritical`.
+The chart's PrometheusRule has more alerts than the examples in Step 5, and more thresholds under `metrics.alerts`. See [HELM-VALUES.md](HELM-VALUES.md) for all of them.
 
 ---
 

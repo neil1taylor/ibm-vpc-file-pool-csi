@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -66,6 +67,24 @@ type ShareData interface {
 	// ApplyVMDisk turns the staged QEMU copy volPath/stagingFile into the raw
 	// disk dstPath/disk.img on the same share, then deletes the staging file.
 	ApplyVMDisk(ctx context.Context, key string, share ShareMount, volPath, stagingFile, dstPath string, moment time.Time) (bool, error)
+	// RestoreBackup writes the backup of one volume, as it was at the newest
+	// moment at or before moment (the zero time asks for the latest), into the
+	// volume folder dstPath on dst. It reports which moment it wrote.
+	RestoreBackup(ctx context.Context, key string, backup ShareMount, volPath, momentsPath string, dst ShareMount, dstPath string, moment time.Time, owner *Ownership) (bool, RestoreOutcome, error)
+	// FetchFromCOS restores one export of a volume from the Kopia repository in
+	// COS into the scratch folder req.Scratch on dst, and reports its moment.
+	FetchFromCOS(ctx context.Context, key string, dst ShareMount, repo ExportRepo, req COSRestoreRequest) (bool, COSRestoreOutcome, error)
+	// RemoveCOSScratch removes the scratch folder of a restore from COS.
+	RemoveCOSScratch(ctx context.Context, key string, share ShareMount, scratch string) (bool, error)
+	// ShareUsage reads how full the share is, as a whole percent.
+	ShareUsage(ctx context.Context, key string, share ShareMount) (bool, int, error)
+	// ExportToCOS sends the backup folder of one volume and its moments folder
+	// to the Kopia repository in COS. It reports the moment it exported and how
+	// many bytes it sent. The controller passes only the names of Secrets.
+	ExportToCOS(ctx context.Context, key string, share ShareMount, repo ExportRepo, backupPath, momentsPath string, moment time.Time) (bool, ExportOutcome, error)
+	// MaintainCOSRepo runs Kopia's maintenance on the repository in COS, and
+	// deletes the snapshots older than repo.ExpireBefore.
+	MaintainCOSRepo(ctx context.Context, key string, repo ExportRepo) (bool, error)
 	// Stop ends any work running for key. It reports done=true once
 	// nothing runs for key any more.
 	Stop(ctx context.Context, key string) (bool, error)
@@ -74,10 +93,54 @@ type ShareData interface {
 // ShareJobRunner implements ShareData with Kubernetes Jobs in the driver's
 // namespace, because the controller pod has no NFS access.
 type ShareJobRunner struct {
-	client      client.Client
-	namespace   string
-	image       string
-	driverImage string
+	client        client.Client
+	namespace     string
+	image         string
+	driverImage   string
+	launcherImage string
+}
+
+// SetLauncherImage sets KubeVirt's virt-launcher image, which has qemu-img,
+// for the Jobs that change a VM disk's snapshot chain. Without it, those Jobs
+// are refused.
+func (r *ShareJobRunner) SetLauncherImage(image string) {
+	r.launcherImage = image
+}
+
+// RunChainScript runs a pkg/vmsnap script as the QEMU user in the
+// virt-launcher image, after initScript (if set) as root. Folder i is mounted
+// at /vol<i>; nothing else of the shares is mounted. It implements ChainJobs.
+func (r *ShareJobRunner) RunChainScript(ctx context.Context, key string, folders []ShareFolder, script, initScript string) (bool, error) {
+	if r.launcherImage == "" {
+		return false, errors.New("no virt-launcher image set for VM disk chain Jobs")
+	}
+	var shares []ShareMount
+	// The root step runs in the runner's own image: the virt-launcher image
+	// only ever runs as the QEMU user.
+	shape := jobShape{
+		image:      r.launcherImage,
+		command:    []string{"/bin/sh", "-c", script},
+		runAsUser:  qemuUID,
+		initScript: initScript,
+		initImage:  r.image,
+	}
+	for i, f := range folders {
+		if err := validateSharePath(f.Path); err != nil {
+			return false, err
+		}
+		idx := -1
+		for j, sh := range shares {
+			if sh == f.Share {
+				idx = j
+			}
+		}
+		if idx < 0 {
+			shares = append(shares, f.Share)
+			idx = len(shares) - 1
+		}
+		shape.folders = append(shape.folders, folderMount{share: idx, subPath: strings.TrimPrefix(f.Path, "/"), at: fmt.Sprintf("/vol%d", i)})
+	}
+	return r.run(ctx, key, shares, shape)
 }
 
 // SetDriverImage sets the image of Jobs that run the driver itself. Without
@@ -94,6 +157,35 @@ type jobShape struct {
 	command    []string
 	runAsUser  int64
 	initScript string
+	// initImage runs initScript; empty means image.
+	initImage string
+	// folders, if set, replace the share mounts: each mounts one folder of
+	// a share.
+	folders []folderMount
+	// readOnly mounts every share read-only, down to the NFS export.
+	readOnly bool
+	// env is added to the main container. Secrets go here as references, so
+	// they are never in the Job's command.
+	env []corev1.EnvVar
+	// volumes and mounts are added to the Job and its main container: Secrets
+	// as files, and memory-backed folders.
+	volumes []corev1.Volume
+	mounts  []corev1.VolumeMount
+	// resources replaces the default limits of the main container.
+	resources *corev1.ResourceRequirements
+}
+
+// folderMount mounts subPath of share number share at at.
+type folderMount struct {
+	share   int
+	subPath string
+	at      string
+}
+
+// ShareFolder is one folder on a share.
+type ShareFolder struct {
+	Share ShareMount
+	Path  string // e.g. /pvcs/pvc-abc
 }
 
 // NewShareJobRunner creates a runner that starts Jobs in namespace with image.
@@ -142,20 +234,26 @@ func (r *ShareJobRunner) CopyDir(ctx context.Context, key string, src ShareMount
 	fmt.Fprintf(&b, "rm -r -f -- \"%s\"\n", to)
 	fmt.Fprintf(&b, "mkdir -p \"%s\"\n", to)
 	fmt.Fprintf(&b, "cp -a \"%s/.\" \"%s/\"\n", from, to)
-	if owner != nil {
-		if owner.UID != nil && owner.GID != nil {
-			recursive := ""
-			if owner.Recursive {
-				recursive = "-R "
-			}
-			fmt.Fprintf(&b, "chown %s%d:%d \"%s\"\n", recursive, *owner.UID, *owner.GID, to)
-		}
-		if owner.Permissions != "" {
-			fmt.Fprintf(&b, "chmod %s \"%s\"\n", owner.Permissions, to)
-		}
-	}
+	writeOwnerScript(&b, to, owner)
 	b.WriteString("trap - EXIT\n")
 	return r.run(ctx, key, shares, r.scriptShape(b.String()))
+}
+
+// writeOwnerScript adds the commands that give the folder to its owner.
+func writeOwnerScript(b *strings.Builder, to string, owner *Ownership) {
+	if owner == nil {
+		return
+	}
+	if owner.UID != nil && owner.GID != nil {
+		recursive := ""
+		if owner.Recursive {
+			recursive = "-R "
+		}
+		fmt.Fprintf(b, "chown %s%d:%d \"%s\"\n", recursive, *owner.UID, *owner.GID, to)
+	}
+	if owner.Permissions != "" {
+		fmt.Fprintf(b, "chmod %s \"%s\"\n", owner.Permissions, to)
+	}
 }
 
 // scriptShape is a Job that runs a shell script as root.
@@ -200,23 +298,62 @@ exec /usr/local/bin/vpc-file-pool-csi --mode=apply-vm-disk --staging-path="%s" -
 
 // run starts the Job for key, or reports on the Job that already exists.
 func (r *ShareJobRunner) run(ctx context.Context, key string, shares []ShareMount, shape jobShape) (bool, error) {
+	done, _, err := r.runMessage(ctx, key, shares, shape)
+	return done, err
+}
+
+// runMessage is run, and it also returns the termination message of the Job's
+// container when the Job has succeeded. It reads the message before the Job
+// and its pods are removed.
+func (r *ShareJobRunner) runMessage(ctx context.Context, key string, shares []ShareMount, shape jobShape) (bool, string, error) {
 	jobName := shareJobName(key)
 	job := &batchv1.Job{}
 	err := r.client.Get(ctx, types.NamespacedName{Namespace: r.namespace, Name: jobName}, job)
 	switch {
 	case apierrors.IsNotFound(err):
-		return false, r.start(ctx, jobName, shares, shape)
+		return false, "", r.start(ctx, jobName, shares, shape)
 	case err != nil:
-		return false, fmt.Errorf("get share Job %s: %w", jobName, err)
+		return false, "", fmt.Errorf("get share Job %s: %w", jobName, err)
 	case job.Status.Succeeded > 0:
+		msg := r.terminationMessage(ctx, jobName)
 		r.cleanup(ctx, jobName, len(shares))
-		return true, nil
-	case job.Status.Failed > shareJobBackoffLimit:
+		return true, msg, nil
+	case job.Status.Failed > shareJobBackoffLimit || jobHasFailed(job):
 		r.cleanup(ctx, jobName, len(shares))
-		return false, fmt.Errorf("%w: %s", ErrShareJobFailed, jobName)
+		return false, "", fmt.Errorf("%w: %s", ErrShareJobFailed, jobName)
 	default:
-		return false, nil
+		return false, "", nil
 	}
+}
+
+// jobHasFailed reports whether the Job has its Failed condition. A pod that
+// restarts in place uses up the retries of a Job without raising the Job's
+// failed count past the limit.
+func jobHasFailed(job *batchv1.Job) bool {
+	for _, c := range job.Status.Conditions {
+		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
+}
+
+// terminationMessage returns what the container of a Job's pod wrote to its
+// termination log, or "".
+func (r *ShareJobRunner) terminationMessage(ctx context.Context, jobName string) string {
+	pods := &corev1.PodList{}
+	if err := r.client.List(ctx, pods, client.InNamespace(r.namespace), client.MatchingLabels{shareJobLabel: jobName}); err != nil {
+		klog.V(4).InfoS("Could not list pods of a share data Job", "job", jobName, "err", err)
+		return ""
+	}
+	for _, p := range pods.Items {
+		for _, cs := range p.Status.ContainerStatuses {
+			if cs.State.Terminated != nil && cs.State.Terminated.Message != "" {
+				return cs.State.Terminated.Message
+			}
+		}
+	}
+	return ""
 }
 
 // podSecurityContext runs a share data Job as uid. Root Jobs set no group, as
@@ -236,7 +373,7 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 
 	for i, share := range shares {
 		name := fmt.Sprintf("%s-s%d", jobName, i)
-		if err := r.ensureSharePV(ctx, name, share, labels); err != nil {
+		if err := r.ensureSharePV(ctx, name, share, labels, shape.readOnly); err != nil {
 			return err
 		}
 		if err := r.ensureShareClaim(ctx, name, labels); err != nil {
@@ -246,11 +383,20 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 		volumes = append(volumes, corev1.Volume{
 			Name: volName,
 			VolumeSource: corev1.VolumeSource{
-				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: name},
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: name, ReadOnly: shape.readOnly},
 			},
 		})
-		mounts = append(mounts, corev1.VolumeMount{Name: volName, MountPath: "/" + volName})
+		mounts = append(mounts, corev1.VolumeMount{Name: volName, MountPath: "/" + volName, ReadOnly: shape.readOnly})
 	}
+	if shape.folders != nil {
+		mounts = nil
+		for _, f := range shape.folders {
+			mounts = append(mounts, corev1.VolumeMount{Name: fmt.Sprintf("share%d", f.share), MountPath: f.at, SubPath: f.subPath, ReadOnly: shape.readOnly})
+		}
+	}
+
+	mainMounts := append(slices.Clone(mounts), shape.mounts...)
+	volumes = append(volumes, shape.volumes...)
 
 	resources := corev1.ResourceRequirements{
 		Requests: corev1.ResourceList{
@@ -262,11 +408,15 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 			corev1.ResourceMemory: resource.MustParse("512Mi"),
 		},
 	}
+	mainResources := resources
+	if shape.resources != nil {
+		mainResources = *shape.resources
+	}
 	var initContainers []corev1.Container
 	if shape.initScript != "" {
 		initContainers = []corev1.Container{{
 			Name:            "prepare",
-			Image:           shape.image,
+			Image:           orDefault(shape.initImage, shape.image),
 			Command:         []string{"/bin/sh", "-c", shape.initScript},
 			SecurityContext: &corev1.SecurityContext{RunAsUser: int64Ptr(0)},
 			Resources:       resources,
@@ -281,15 +431,18 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
-					RestartPolicy:   corev1.RestartPolicyOnFailure,
-					SecurityContext: podSecurityContext(shape.runAsUser),
-					InitContainers:  initContainers,
+					// A Job that opens VM disk files needs no API access.
+					AutomountServiceAccountToken: boolPtr(shape.folders == nil),
+					RestartPolicy:                corev1.RestartPolicyOnFailure,
+					SecurityContext:              podSecurityContext(shape.runAsUser),
+					InitContainers:               initContainers,
 					Containers: []corev1.Container{{
 						Name:         "share-data",
 						Image:        shape.image,
 						Command:      shape.command,
-						Resources:    resources,
-						VolumeMounts: mounts,
+						Env:          shape.env,
+						Resources:    mainResources,
+						VolumeMounts: mainMounts,
 					}},
 					Volumes: volumes,
 				},
@@ -303,7 +456,7 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 	return nil
 }
 
-func (r *ShareJobRunner) ensureSharePV(ctx context.Context, name string, share ShareMount, labels map[string]string) error {
+func (r *ShareJobRunner) ensureSharePV(ctx context.Context, name string, share ShareMount, labels map[string]string, readOnly bool) error {
 	exportPath := share.ExportPath
 	if exportPath == "" {
 		exportPath = "/"
@@ -317,7 +470,7 @@ func (r *ShareJobRunner) ensureSharePV(ctx context.Context, name string, share S
 			PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimRetain,
 			MountOptions:                  []string{"nfsvers=4.1", "soft", "timeo=600", "retrans=3", "sec=sys"},
 			PersistentVolumeSource: corev1.PersistentVolumeSource{
-				NFS: &corev1.NFSVolumeSource{Server: share.MountTargetIP, Path: exportPath},
+				NFS: &corev1.NFSVolumeSource{Server: share.MountTargetIP, Path: exportPath, ReadOnly: readOnly},
 			},
 			ClaimRef: &corev1.ObjectReference{Name: name, Namespace: r.namespace},
 		},
@@ -415,3 +568,5 @@ func (r *ShareJobRunner) Stop(ctx context.Context, key string) (bool, error) {
 	r.cleanup(ctx, jobName, 2)
 	return true, nil
 }
+
+func boolPtr(v bool) *bool { return &v }

@@ -1,6 +1,6 @@
 # Known Limitations
 
-Explicit list of what the IBM VPC File Pool CSI Driver does not support, why, and available workarounds.
+Explicit list of what the IBM VPC File Pool CSI Driver does not support, why, and available workarounds. For the meaning of project words, see [CONTEXT.md](CONTEXT.md).
 
 ## Quota Enforcement
 
@@ -8,7 +8,7 @@ Explicit list of what the IBM VPC File Pool CSI Driver does not support, why, an
 
 **Why:** VPC file shares expose a single NFS filesystem. NFS does not support per-directory quotas, and the VPC API provides no mechanism for subdirectory-level enforcement. Linux project quotas (`xfs_quota`) are not available on NFS mounts.
 
-**Workaround:** Monitor per-PVC usage via Prometheus metrics (`pool_csi_subvolume_used_bytes`) and configure soft quota alerts at the desired threshold. The `metrics.alerts.utilizationWarning` and `metrics.alerts.utilizationCritical` Helm values control alert thresholds at the pool level.
+**Workaround:** Monitor per-PVC usage with the kubelet volume metrics (`kubelet_volume_stats_*`, which the node agent feeds through `NodeGetVolumeStats`) and alert at the threshold you want. The `metrics.alerts.utilizationWarning` and `metrics.alerts.utilizationCritical` Helm values control alert thresholds at the pool level.
 
 **Roadmap:** No change planned — this is a fundamental NFS/VPC limitation.
 
@@ -19,7 +19,7 @@ Explicit list of what the IBM VPC File Pool CSI Driver does not support, why, an
 **Limitations:**
 - Snapshots and clones are not instantaneous — they are full data copies proportional to the source volume size.
 - A snapshot of a volume that is being written is not one point in time: files can change while the copy runs. Stop or freeze the workload before the snapshot if you need a consistent copy. The exception is a disk that a running KubeVirt VM uses: that snapshot is a QEMU copy at one moment, with the guest frozen for a moment (see below).
-- A snapshot of a running VM covers one disk (one claim). The disks of a VM are not matched to each other; group snapshots of VMs are issue #14. The copy runs at 20 MB/s by default, so a 20 GB disk takes about 20 minutes; set `vmCopySpeedLimitMBps` on the VolumeSnapshotClass to change that. Red Hat does not support the QEMU commands this uses.
+- A snapshot of a running VM is made for each disk (each claim) as KubeVirt asks for it, but the driver copies all the pool disks of the VM at one moment, so the snapshots of the disks fit each other. A snapshot of one disk of a multi-disk VM therefore also copies the other disks to temporary files; the files of a disk that no snapshot claims within 10 minutes are deleted, and each share needs room for them. A disk that is not on a pool is not part of the moment. The copy runs at 20 MB/s by default, so a 20 GB disk takes about 20 minutes; set `vmCopySpeedLimitMBps` on the VolumeSnapshotClass to change that. Red Hat does not support the QEMU commands this uses.
 - Cross-share clones require the async path (no same-share optimization).
 - Per-PVC quota enforcement limitations (see above) also apply to cloned volumes.
 - No incremental or COW snapshots — each snapshot is a full copy.
@@ -28,9 +28,25 @@ Explicit list of what the IBM VPC File Pool CSI Driver does not support, why, an
 
 **Roadmap:** Phase 4a (snapshots) and Phase 4b (clones) are complete.
 
+### Instant VM disk snapshots (Experimental)
+
+Where the KubeVirt `Sidecar` feature gate is on, a VM disk snapshot is instant instead of a copy. See [VM-INSTANT-SNAPSHOTS.md](VM-INSTANT-SNAPSHOTS.md). Its limits:
+- **Support:** the `Sidecar` feature gate is not supported by Red Hat, and on OpenShift it is set through a `jsonpatch` annotation on `HyperConverged`, which marks the cluster `TaintedConfiguration`. On ROVS, IBM's add-on manages that resource.
+- **Gate off:** a VM whose disks have instant snapshots does not start while the gate is off; the webhook says so. Turn the gate on, or run `kubectl pool-snapshots flatten <vm>`, which deletes the VM's snapshots.
+- **Restore is a copy.** OpenShift restores a snapshot into new PVCs; the driver writes each with one sparse `qemu-img convert`. Instant restore is not built.
+- **One disk per plain VolumeSnapshot.** All disks of a VM at one moment come from an OpenShift VM snapshot, which freezes the guest first.
+- **Replication and backups** of a VM disk make a full copy after each snapshot, because QEMU's list of changed blocks stays with the frozen file. A stopped VM's disk with snapshots is not copied at all (its status says so): a copy of its folder would give the far site an old `disk.img`. It is copied again while the VM runs, or after `kubectl pool-snapshots flatten`.
+- **No clone** of a disk with instant snapshots: restore one of its snapshots instead. A copy of the folder would not be a clone.
+- At most 16 snapshots per disk. Hot-plugged disks are not supported.
+- A deleted claim's folder stays while any of its instant snapshots exists.
+
 ## Volume Group Snapshots
 
-**What:** Volume group snapshots (`VolumeGroupSnapshot`) are implemented. The driver supports coordinated multi-PVC snapshots via `CreateVolumeGroupSnapshot` and `DeleteVolumeGroupSnapshot` CSI RPCs.
+**What:** Volume group snapshots (`VolumeGroupSnapshot`) are **not active**. The code and the record type exist, but nothing watches a `VolumeGroupSnapshot`, the hooks never run, and the CSI group snapshot service is not registered, so Kubernetes' group snapshot API cannot reach the driver. There is no plan to turn it on (issue #100). The console does not show them.
+
+**Not needed for VMs:** a snapshot of a running VM with several disks already shows one moment (see the VM snapshot section above). KubeVirt does not use group snapshots.
+
+The notes below describe the design, not a working feature.
 
 **How it works:** Group snapshots iterate through the source PVCs sequentially, creating individual snapshots for each member. The order can be controlled via the `csi.ibm.com/copy-order` parameter (comma-separated PVC names). Two failure policies are supported:
 
@@ -47,21 +63,21 @@ Explicit list of what the IBM VPC File Pool CSI Driver does not support, why, an
 
 **Not working on ROVS (tested 19 Oct 2026, ROVS 4.21):** nothing calls these RPCs. The chart runs `csi-snapshotter` without group snapshots turned on, and that sidecar only knows the upstream `groupsnapshot.storage.k8s.io` API. OpenShift has its own `groupsnapshot.storage.openshift.io` API, and only on clusters with a non-default feature set. See GitHub issue #14.
 
-**Roadmap:** Phase 4c code is complete; making it reachable on OpenShift is issue #14.
+**Roadmap:** None. The code stays, and there is no plan to turn it on (issue #100).
 
 ## Cross-Region Replication and Disaster Recovery
 
-**What:** The driver includes a built-in replication controller (Phase 4d) for cross-region disaster recovery. A `ReplicationPolicy` CRD defines which SubVolumes to replicate, the destination NFS server (reachable over Transit Gateway), and a schedule interval. The controller periodically copies SubVolume data from the source pool to the destination using `cp -a` (CopyDir).
+**What:** The driver includes a built-in replication controller (Phase 4d) for cross-region disaster recovery. A `ReplicationPolicy` CRD defines which SubVolumes to replicate, the destination NFS server (reachable over Transit Gateway), and a schedule interval. The controller periodically copies SubVolume data from the source pool to the destination with rsync (direct NFS) or tar over HTTPS (receiver).
 
 **How it works:** The replication controller runs as a background goroutine alongside the CSI controller. For each active `ReplicationPolicy` on schedule:
 1. Lists SubVolumes in the source pool (optionally filtered by label selector)
-2. Copies each matched SubVolume's directory to the destination NFS server
+2. Copies each matched SubVolume's directory to the destination, with rsync (direct NFS) or tar over HTTPS (driver to driver)
 3. Updates per-SubVolume and per-policy replication status
 4. Tracks consecutive failures and pauses the policy after exceeding `maxRetries`
 
 **Limitations:**
 - **File-level consistency only** (without hooks). Each individual file is consistent (NFS close-to-open semantics), but cross-file consistency is NOT guaranteed unless pre/post-sync hooks are configured to quiesce application writes. See `CROSS-REGION-DR.md` for detailed consistency analysis.
-- **Not suitable for VMs, databases, or workloads requiring crash consistency.** Actively written disk images (qcow2, vmdk, raw) and databases with WALs will produce corrupted replicas. Use IBM VPC block storage replication or application-level replication for these workloads.
+- **Plain file replication is not suitable for databases or for running VM disks.** Actively written disk images and databases with WALs will produce corrupted replicas. The controller copies the disks of a running KubeVirt VM with QEMU at one moment instead (Experimental, see [FEATURES.md](FEATURES.md)). Use IBM VPC block storage replication or application-level replication for these workloads.
 - **Requires pre-configured cross-region network connectivity** (Transit Gateway or VPN) and a pre-existing destination FileSharePool.
 - **Failover is manual.** Automated failover is explicitly out of scope due to limited consistency guarantees.
 
@@ -69,7 +85,7 @@ Explicit list of what the IBM VPC File Pool CSI Driver does not support, why, an
 
 **Workaround for unsupported workloads:** Use application-level replication (PostgreSQL streaming replication, MySQL Group Replication, etc.) or IBM VPC block storage snapshots for crash-consistent DR.
 
-**Roadmap:** Phase 4d (replication) and Phase 5 (hooks + incremental rsync) — implemented. Future enhancements: bandwidth limiting, parallel rsync.
+**Roadmap:** Phase 4d (replication) and Phase 5 (hooks + incremental rsync) — implemented.
 
 ## statfs Reports Share-Level Stats
 
@@ -77,7 +93,7 @@ Explicit list of what the IBM VPC File Pool CSI Driver does not support, why, an
 
 **Why:** This is an NFS protocol limitation. NFS `statfs` returns filesystem-level statistics; there is no per-directory equivalent.
 
-**Workaround:** Use `NodeGetVolumeStats` (exposed via `kubectl describe pvc`) for accurate per-PVC usage based on `du`. Prometheus metrics also report per-SubVolume usage.
+**Workaround:** Use `NodeGetVolumeStats` (exposed via `kubectl describe pvc`) for accurate per-PVC usage based on `du`. The kubelet volume metrics also report per-PVC usage.
 
 **Roadmap:** No change planned — NFS protocol limitation.
 
@@ -248,3 +264,19 @@ Since ROKS and ROVS worker nodes run RHCOS, encryption in transit cannot be enab
 **Workaround:** The pool driver significantly reduces share consumption by hosting many PVCs per share. A single pool with 5 shares can serve hundreds of PVCs. Request a quota increase via IBM Cloud support if needed.
 
 **Roadmap:** No change planned — platform quota.
+
+## Alerts Need User Workload Monitoring (OpenShift)
+
+The driver runs in `kube-system`, which OpenShift's platform monitoring does not read, and Red Hat does not support labelling it so that it does. The chart puts the `ServiceMonitor` objects and the alerts in the namespace `ibm-vpc-file-pool-csi-monitoring` for user workload monitoring. **If user workload monitoring is off, there are no alerts at all** (and the controller logs a warning at start). The cluster admin must set `enableUserWorkload: true` in `openshift-monitoring/cluster-monitoring-config`; see [MONITORING.md](MONITORING.md#where-alerts-run-on-openshift). The monitoring namespace needs `webhook.certProvider=openshift`; with another provider the chart keeps the older layout in the release namespace.
+
+## Backups to a Snapshot Pool
+
+**What:** a `BackupPolicy` backs up selected PVCs and VMs into a snapshot pool (see `BACKUP-RECOVERY.md`).
+
+**Limitations:**
+- A volume stays on the share it was first backed up to. Backups are not moved when a share is added or fills up, and a share that holds backups must not be removed from the pool.
+- Above 85% full, the policies stop new backups of that share and never delete backups to make room. Free space with `kubectl backup delete` or a shorter `keepFor`.
+- Backups of a deleted volume stay on the share, and can be restored, until the keep time has passed since the last backup. `kubectl backup delete` removes the backups of a volume.
+- A backup of a volume that is not a VM disk is a file copy. It is as consistent as the files are.
+- Backups are in the same VPC as the data, and are not encrypted or locked beyond what the file share does. Export to a COS bucket with a lock (`spec.export`) is built, and has not yet been tested against real IBM Cloud (issue #138).
+- A restore needs the snapshot pool to be ready, and waits while a copy is being written to the backup of that volume.

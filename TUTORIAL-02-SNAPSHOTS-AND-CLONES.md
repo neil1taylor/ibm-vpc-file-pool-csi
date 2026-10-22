@@ -1,6 +1,6 @@
 # Part 2: Snapshots and Clones
 
-> **Tutorial Series:** [Index](TUTORIAL.md) | [Part 1: Pool Creation](TUTORIAL-01-POOL-CREATION.md) | **Part 2** | [Part 3: Group Snapshots & Hooks](TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md) | [Part 4: Pool Configuration](TUTORIAL-04-POOL-CONFIGURATION.md) | [Part 5: Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md) | [Part 6: Replication & Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md) | [Part 7: Monitoring](TUTORIAL-07-MONITORING.md) | [Part 8: Migration & Console](TUTORIAL-08-MIGRATION-AND-CONSOLE.md)
+> **Tutorial Series:** [Index](TUTORIAL.md) | [Part 1: Pool Creation](TUTORIAL-01-POOL-CREATION.md) | **Part 2** | [Part 3: Group Snapshots & Hooks](TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md) | [Part 4: Pool Configuration](TUTORIAL-04-POOL-CONFIGURATION.md) | [Part 5: Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md) | [Part 6: Replication & Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md) | [Part 7: Monitoring](TUTORIAL-07-MONITORING.md) | [Part 8: Migration & Console](TUTORIAL-08-MIGRATION-AND-CONSOLE.md) | [Part 9: COS Bucket for Backups](TUTORIAL-09-COS-BACKUP-BUCKET.md)
 
 Step-by-step guide to create point-in-time snapshots, restore data from them, and clone volumes. Every clone is asynchronous: a Job copies the data in the background.
 
@@ -17,7 +17,7 @@ Verify the CSI driver is running:
 # Controller pod (6/6 Running)
 oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi -l app.kubernetes.io/component=controller
 
-# Node pods (3/3 Running on each schedulable node)
+# Node pods (2/2 Running on each schedulable node)
 oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi -l app.kubernetes.io/component=node
 
 # CSI Driver registered
@@ -271,8 +271,10 @@ EOF
 **What this does:**
 - Creates a VolumeSnapshot named `test-data-snap` targeting the `test-data` PVC
 - The `ibm-vpc-file-pool` VolumeSnapshotClass tells the CSI external-snapshotter sidecar to call the pool driver's `CreateSnapshot` RPC
-- The driver copies the SubVolume's directory into a snapshot path (e.g., `/pvcs/.snapshots/snap-xxx`) on the same VPC file share
+- A Kubernetes Job in the driver's namespace copies the SubVolume's directory into a snapshot path (e.g., `/pvcs/.snapshots/snap-xxx`) on the same VPC file share. The copy is not instant
 - The driver creates a `Snapshot` CR (kind: Snapshot, apiVersion: storage.ibmcloud.io/v1alpha1) that tracks the snapshot on disk
+
+> **Consistency:** A snapshot of a volume that a pod is writing to is not one point in time, because files can change while the copy runs. Here no pod uses the volume, so the copy is consistent. For a disk of a running VM, the snapshot is a QEMU copy (or an instant snapshot where the KubeVirt `Sidecar` feature gate is on). See [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md#snapshots-and-clones) and [VM-INSTANT-SNAPSHOTS.md](VM-INSTANT-SNAPSHOTS.md).
 
 Watch the VolumeSnapshot become ready:
 
@@ -297,7 +299,7 @@ Expected output:
 
 ```
 NAME                    POOL         SOURCE                   SIZE   PHASE   READY
-snap-xxxxxxxx-...       snap-pool    sv-test-data-xxxxxxxx    10     Ready   true
+snap-xxxxxxxx-...       snap-pool    pvc-xxxxxxxx-...         10     Ready   true
 ```
 
 **What the Snapshot CR contains:**
@@ -351,7 +353,7 @@ Wait for the PVC to bind:
 
 ```bash
 oc get pvc restored-data -n ${TUTORIAL_NS} -w
-# Wait for STATUS=Bound
+# The PVC may stay Pending until the restore copy has finished
 ```
 
 Mount the restored PVC in a reader pod and verify the data:
@@ -988,11 +990,12 @@ Earlier versions had a synchronous path for small volumes; it was removed. A `cl
 
 ## What's Next
 
-Now that you can create snapshots, restore from them, and clone volumes, explore coordinated multi-PVC snapshots:
+Now that you can create snapshots, restore from them, and clone volumes, explore the rest of the series. Group snapshots (Part 3) are not active, so Part 3 explains why and covers hooks:
 
-- **[Part 3: Group Snapshots & Hooks](TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md)** -- Coordinate snapshots across multiple PVCs with pre/post lifecycle hooks
+- **[Part 3: Group Snapshots & Hooks](TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md)** -- Group snapshots are not active yet; this part explains why and covers hooks
 - **[Part 4: Pool Configuration](TUTORIAL-04-POOL-CONFIGURATION.md)** -- Multi-tier pools, allocation strategies, auto-expansion, and share draining
-- **[Part 5: Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md)** -- Automatic golden image provisioning for KubeVirt
+- **[Part 5: Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md)** -- Optional golden image provisioning for KubeVirt (hidden in the console)
 - **[Part 6: Replication & Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md)** -- Cross-region DR with direct NFS and driver-to-driver modes
 - **[Part 7: Monitoring](TUTORIAL-07-MONITORING.md)** -- Prometheus metrics, alerts, and Grafana dashboards
 - **[Part 8: Migration & Console](TUTORIAL-08-MIGRATION-AND-CONSOLE.md)** -- PVC migration tool and OpenShift console plugin
+- **[Part 9: COS Bucket for Backups](TUTORIAL-09-COS-BACKUP-BUCKET.md)** -- Locked COS bucket, a restricted key, and a CBR rule
