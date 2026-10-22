@@ -80,15 +80,21 @@ export async function checkPrometheusConnection(): Promise<{
   }
 }
 
-function resultToNumber(results: PrometheusResult[], pool?: string, label = 'pool'): number {
+/** Prometheus answers NaN or Inf when there is no data (for example a P95 with no samples). That is "no data", so 0. */
+const finiteOrZero = (value: string): number => {
+  const n = parseFloat(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+export function resultToNumber(results: PrometheusResult[], pool?: string, label = 'pool'): number {
   const match = pool
     ? results.find((r) => r.metric[label] === pool)
     : results[0];
-  return match ? parseFloat(match.value[1]) : 0;
+  return match ? finiteOrZero(match.value[1]) : 0;
 }
 
-function resultSum(results: PrometheusResult[]): number {
-  return results.reduce((sum, r) => sum + parseFloat(r.value[1] || '0'), 0);
+export function resultSum(results: PrometheusResult[]): number {
+  return results.reduce((sum, r) => sum + finiteOrZero(r.value[1] || '0'), 0);
 }
 
 function resultsByLabel(results: PrometheusResult[], label: string): Record<string, number> {

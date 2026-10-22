@@ -35,7 +35,7 @@ import { ROUTES } from '../../constants';
 
 /** Format seconds to human-readable ms string. */
 export const formatLatencyMs = (seconds: number): string => {
-  if (seconds === 0) return '-';
+  if (!Number.isFinite(seconds) || seconds === 0) return '-';
   const ms = seconds * 1000;
   if (ms < 1) return '<1 ms';
   return `${ms.toFixed(0)} ms`;
@@ -43,7 +43,7 @@ export const formatLatencyMs = (seconds: number): string => {
 
 /** Color code for latency values. */
 export const latencyColor = (seconds: number): 'green' | 'gold' | 'red' | 'grey' => {
-  if (seconds === 0) return 'grey';
+  if (!Number.isFinite(seconds) || seconds === 0) return 'grey';
   const ms = seconds * 1000;
   if (ms < 100) return 'green';
   if (ms < 500) return 'gold';

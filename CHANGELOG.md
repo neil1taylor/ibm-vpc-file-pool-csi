@@ -32,6 +32,7 @@ To make a release:
 - Release test stage 18 (backup to a snapshot pool): runs `test/e2e/test-backup.sh` and checks each outcome it logs. Not run on a cluster yet. `remote.sh` now also builds `kubectl-backup` and ships all of `test/e2e` (stage 6 needs `test-vm-snapshot.sh` there).
 
 ### Fixed
+- **The console dashboard no longer shows "NaN ms" and a red "High" when there were no allocations.** No data now shows "-" with no label (#113).
 - **Console plugin libraries updated: advisories down from over 60 to 14.** The 14 left are build tools or have no fix; each is listed with its reason in `osv-scanner.toml` and expires on 2026-12-31. Go libraries `mongo-driver` and `x/crypto` updated too. New CI job "Dependency scan" fails on any other known advisory (#90).
 - `kubectl backup` and `kubectl failover` now use the `KUBECONFIG` variable when `--kubeconfig` is not given, as kubectl does. Before, they read only `~/.kube/config`.
 - **A backup policy with a longer name could not copy plain volumes.** The name of the replication policy a backup policy makes (`backup-<policy>-<pool>-<hash>`) is a label value on the temporary volume of a copy, and it went over 63 characters for a policy and pool name of about 25 characters each. The copy failed on every cycle with "must be no more than 63 characters", and the VM disks, which use another path, still worked. The name is now cut to fit; names that already fit stay as they were. Found by release stage 18 on the lab.

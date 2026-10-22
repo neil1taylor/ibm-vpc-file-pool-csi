@@ -52,7 +52,7 @@ import YAMLEditorFallback from '../common/YAMLEditorFallback';
 
 /** Format seconds to human-readable ms string. */
 const formatLatencyMs = (seconds: number): string => {
-  if (seconds === 0) return '-';
+  if (!Number.isFinite(seconds) || seconds === 0) return '-';
   const ms = seconds * 1000;
   if (ms < 1) return '<1 ms';
   return `${ms.toFixed(0)} ms`;
