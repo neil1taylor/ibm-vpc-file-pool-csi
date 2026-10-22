@@ -54,7 +54,7 @@ export const CARD_HELP = {
   },
   consecutiveFailures: {
     title: 'Consecutive Failures',
-    text: 'How many syncs in a row have failed, for each replication policy; normal is 0. The next sync tries again by itself. If the number keeps rising, open the policy and read its last error.',
+    text: 'How many syncs in a row have failed, for each replication policy; normal is 0. When a policy reaches its retry limit (3 by default), it pauses and stops syncing. Open the policy, read its last error, fix the cause, then resume it.',
   },
   snapshots: {
     title: 'Snapshots',

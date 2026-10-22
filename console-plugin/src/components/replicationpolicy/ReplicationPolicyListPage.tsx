@@ -28,6 +28,7 @@ import DeleteModal from '../common/DeleteModal';
 import { formatAge } from '../../utils/resource-helpers';
 import { replicationDestination } from '../../utils/replication-helpers';
 import { ROUTES } from '../../constants';
+import { columnInfo } from '../../utils/column-help';
 
 const ReplicationPolicyRow: React.FC<{
   policy: ReplicationPolicy;
@@ -182,9 +183,9 @@ const ReplicationPolicyListPage: React.FC = () => {
                 <Th sort={getSortParams(1)}>Source Pool</Th>
                 <Th>Destination</Th>
                 <Th sort={getSortParams(2)}>Schedule</Th>
-                <Th sort={getSortParams(3)}>Phase</Th>
-                <Th sort={getSortParams(4)}>Last Sync</Th>
-                <Th sort={getSortParams(5)}>Failures</Th>
+                <Th sort={getSortParams(3)} info={columnInfo('replicationPhase')}>Phase</Th>
+                <Th sort={getSortParams(4)} info={columnInfo('replicationLastSync')}>Last Sync</Th>
+                <Th sort={getSortParams(5)} info={columnInfo('replicationFailures')}>Failures</Th>
                 <Th></Th>
               </Tr>
             </Thead>

@@ -29,6 +29,7 @@ import DeleteModal from '../common/DeleteModal';
 import { ROUTES } from '../../constants';
 import { VolumeSnapshotContent } from '../../utils/k8s-objects';
 import { findVolumeSnapshotRef, restoreDisabledReason } from '../../utils/restore-helpers';
+import { columnInfo } from '../../utils/column-help';
 
 const SnapshotRow: React.FC<{
   snap: Snapshot;
@@ -186,8 +187,8 @@ const SnapshotListPage: React.FC = () => {
                 <Th sort={getSortParams(1)}>Pool</Th>
                 <Th sort={getSortParams(2)}>Source SubVolume</Th>
                 <Th sort={getSortParams(3)}>Size</Th>
-                <Th sort={getSortParams(4)}>Phase</Th>
-                <Th sort={getSortParams(5)}>Ready</Th>
+                <Th sort={getSortParams(4)} info={columnInfo('snapshotPhase')}>Phase</Th>
+                <Th sort={getSortParams(5)} info={columnInfo('snapshotReady')}>Ready</Th>
                 <Th sort={getSortParams(6)}>Age</Th>
                 <Th></Th>
               </Tr>
