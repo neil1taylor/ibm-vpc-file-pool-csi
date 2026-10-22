@@ -121,6 +121,7 @@ See [VM-INSTANT-SNAPSHOTS.md](VM-INSTANT-SNAPSHOTS.md).
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `vmSnapshots.method` | string | `auto` | `auto`: a snapshot of a KubeVirt VM disk is instant (a new overlay file, nothing copied) where the KubeVirt `Sidecar` feature gate is on, and a copy elsewhere. It adds the VM hook webhook. `copy`: every VM disk snapshot is a copy, and there is no VM hook webhook. Red Hat does not support the `Sidecar` feature gate |
+| `vmSnapshots.enableSidecarGate` | bool | `false` | Turn on the KubeVirt `Sidecar` feature gate, which instant snapshots need. A hook Job adds one entry to the `HyperConverged` `kubevirt.kubevirt.io/jsonpatch` annotation after each install and upgrade, and keeps the other entries. Only that Job's service account gets the right to update `HyperConverged`. Setting it back to `false` or uninstalling does **not** turn the gate off, because VMs with instant snapshots cannot start without it. Needs `vmSnapshots.method=auto`. Red Hat does not support settings made through that annotation |
 | `vmSnapshots.launcherImage` | string | `""` | KubeVirt's virt-launcher image, which has `qemu-img`, for the Jobs that change a stopped VM's snapshot files and that restore instant snapshots. Empty reads it from the virt-operator Deployment in the namespace of the `KubeVirt` resource |
 
 ## Webhook
