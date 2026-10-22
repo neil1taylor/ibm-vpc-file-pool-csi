@@ -128,7 +128,7 @@ Result on destination:
 
 ## Unsupported Workload Types
 
-The following workloads MUST NOT use Phase 4d replication. Using this feature for these workloads will produce corrupted or unusable replicas in the DR region.
+The following workloads MUST NOT be copied with rsync. A file copy of them produces corrupted or unusable replicas in the DR region. The controller never copies a running VM's disk with rsync: it uses a QEMU copy instead, as the VM section below describes.
 
 ### VM Boot and Data Disks (qcow2, vmdk, raw)
 
@@ -161,7 +161,7 @@ This is NOT a file-level consistency problem (rsync is reading one file). It is 
 
 **Skipped volumes:** it never copies a volume that a running or starting VM uses with rsync. Before each copy it looks for a KubeVirt pod (`kubevirt.io=virt-launcher` or `kubevirt.io=hotplug-disk`) in the claim's namespace that mounts the claim. If it finds one, it skips the volume and sets the volume's status error to `skipped: in use by running VM <namespace>/<pod>; ...`. The policy's `lastError` counts the skipped volumes. A skipped volume does not count as a failed cycle, so it does not pause the policy for the other volumes. If a VM starts while a copy runs, the controller does not record that copy as a sync. If the controller cannot list the pods, it does not copy the volume. Volumes of stopped VMs are copied as before; rsync leaves out any staging files left by an earlier VM copy.
 
-**What to use instead:** IBM Cloud VPC block storage volume snapshots and replication for VM workloads. Block storage provides crash-consistent snapshots at the storage layer.
+**What to use instead:** the QEMU copy that the controller makes of a running VM (above). Its status says `FileSystemConsistent` or `CrashConsistent`. IBM Cloud VPC block storage snapshots and replication are another option for VM workloads.
 
 ### Databases with Write-Ahead Logs
 
@@ -871,7 +871,7 @@ Phase 4d is not the right tool for every DR scenario. This section documents whe
 
 ### Use IBM VPC Block Storage Replication When:
 
-- Workloads require crash-consistent snapshots (VMs, databases)
+- Workloads require crash-consistent snapshots (databases)
 - RPO must be near-zero (seconds)
 - The workload uses ReadWriteOnce volumes (block is the natural fit)
 
@@ -1006,7 +1006,7 @@ Future (snapshot + ship):
 | No crash consistency | Storage-layer snapshot is crash-consistent by definition |
 | Full directory scan every cycle | Snapshot delta tracking (changed blocks only) |
 | rsync CPU overhead | Block-level delta eliminates checksum computation |
-| Cannot replicate VM disks safely | Crash-consistent snapshots make VM replication viable |
+| A running VM disk needs a QEMU copy | A storage-layer snapshot would not need QEMU (the QEMU copy is built today) |
 
 ### What Would Change in the CRD
 
@@ -1030,7 +1030,7 @@ The ReplicationPolicy CRD and controller interface would remain the same -- only
 ### Impact on Supported Workloads
 
 With native snapshots, Phase 4d would expand to support:
-- VM boot/data disks (crash-consistent replicas)
+- VM boot/data disks without QEMU (today a running VM is copied with QEMU)
 - Databases (crash-consistent, WAL+data file consistency guaranteed)
 - Any workload requiring cross-file transactional consistency
 
