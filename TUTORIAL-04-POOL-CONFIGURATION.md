@@ -1,6 +1,6 @@
 # Part 4: Pool Configuration
 
-> **Tutorial Series:** [Index](TUTORIAL.md) | [Part 1: Pool Creation](TUTORIAL-01-POOL-CREATION.md) | [Part 2: Snapshots & Clones](TUTORIAL-02-SNAPSHOTS-AND-CLONES.md) | [Part 3: Group Snapshots & Hooks](TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md) | **Part 4** | [Part 5: Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md) | [Part 6: Replication & Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md) | [Part 7: Monitoring](TUTORIAL-07-MONITORING.md) | [Part 8: Migration & Console](TUTORIAL-08-MIGRATION-AND-CONSOLE.md)
+> **Tutorial Series:** [Index](TUTORIAL.md) | [Part 1: Pool Creation](TUTORIAL-01-POOL-CREATION.md) | [Part 2: Snapshots & Clones](TUTORIAL-02-SNAPSHOTS-AND-CLONES.md) | [Part 3: Group Snapshots & Hooks](TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md) | **Part 4** | [Part 5: Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md) | [Part 6: Replication & Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md) | [Part 7: Monitoring](TUTORIAL-07-MONITORING.md) | [Part 8: Migration & Console](TUTORIAL-08-MIGRATION-AND-CONSOLE.md) | [Part 9: COS Bucket for Backups](TUTORIAL-09-COS-BACKUP-BUCKET.md)
 
 Step-by-step guide to advanced pool configuration: multi-tier pools, allocation strategies, auto-expansion, and share draining. Each section creates a pool, demonstrates the behavior, and verifies the result.
 
@@ -17,7 +17,7 @@ Verify the CSI driver is running:
 # Controller pod (6/6 Running)
 oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi -l app.kubernetes.io/component=controller
 
-# Node pods (3/3 Running on each schedulable node)
+# Node pods (2/2 Running on each schedulable node)
 oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi -l app.kubernetes.io/component=node
 
 # CSI Driver registered
@@ -334,7 +334,7 @@ done
 Wait for all PVCs to bind:
 
 ```bash
-oc get pvc -n ${TUTORIAL_NS} -l '!pool.storage.ibmcloud.io/golden-image' | grep -E 'spread|binpack'
+oc get pvc -n ${TUTORIAL_NS} | grep -E 'spread|binpack'
 ```
 
 ### Step 2d: Compare Distributions
@@ -583,7 +583,7 @@ Share draining allows you to evacuate a specific VPC file share so it can be dec
 1. Marks the share's state as `draining`
 2. Excludes it from new PVC allocations
 3. Tracks the number of remaining SubVolumes in `status.drainStatus`
-4. Reports `drained: true` when the share has zero SubVolumes
+4. Reports `drained: true` when the share has zero SubVolumes and zero snapshots
 
 ### Step 4a: Identify a Share to Drain
 
@@ -778,7 +778,7 @@ ibmcloud is shares
 |------|---------|
 | List pools | `oc get filesharepools` |
 | Pool YAML (full status) | `oc get filesharepool <name> -o yaml` |
-| List StorageClasses for a pool | `oc get sc -l app.kubernetes.io/managed-by=vpc-file-pool-csi` |
+| List StorageClasses for a pool | `oc get sc -l storage.ibmcloud.io/pool=<name>` |
 | StorageClass parameters | `oc get sc <name> -o yaml \| grep -A5 parameters` |
 | SubVolumes by pool | `oc get subvolumes -l storage.ibmcloud.io/pool=<name> -o wide` |
 | SubVolume share placement | `oc get subvolumes -o custom-columns=NAME:.metadata.name,SHARE:.spec.shareID,PVC:.spec.pvcName` |
@@ -795,9 +795,9 @@ ibmcloud is shares
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `spec.zone` | string | (required) | VPC availability zone (e.g., `eu-de-1`) |
-| `spec.profile` | string | (required) | VPC file storage profile (e.g., `dp2`) |
+| `spec.profile` | string | (required) | VPC file storage profile. `dp2` is the only one VPC offers |
 | `spec.shareSizeGB` | int64 | 1000 | Size in GB per share (10-32000) |
-| `spec.iops` | *int64 | (optional) | IOPS per share (min 100) |
+| `spec.iops` | *int64 | (optional) | IOPS per share (min 100). The webhook rejects a value that IBM does not allow for the share size. For example, a share of 10 to 39 GB allows 100 to 1000 |
 | `spec.maxShares` | int32 | 10 | Maximum shares (1-100) |
 | `spec.initialShares` | int32 | 1 | Shares to pre-create (min 0) |
 | `spec.autoExpand` | bool | true | Auto-create shares when capacity is low |
@@ -809,11 +809,12 @@ ibmcloud is shares
 | `spec.defaultGID` | *int64 | (optional) | Owner GID for subdirectories |
 | `spec.resourceGroup` | string | (optional) | IBM Cloud resource group ID |
 | `spec.tags` | []string | (optional) | IBM Cloud tags for created shares |
+| `spec.securityGroupIDs` | []string | (optional) | VPC security groups for each share's mount target. When empty, the cluster's own group `kube-<cluster ID>` is used |
 | `spec.mountOptions` | []string | (optional) | Additional NFS mount options |
 | `spec.accessorZones` | []AccessorZone | (optional) | Cross-zone mount targets |
 | `spec.tiers` | []ShareTier | (optional) | Multi-tier configuration |
 | `spec.drainShares` | []string | (optional) | VPC share IDs to drain |
-| `spec.goldenImages` | *GoldenImageConfig | (optional) | Golden image syncer config |
+| `spec.goldenImages` | *GoldenImageConfig | (optional) | Golden image syncer config. Hidden in the console and optional. See [Part 5](TUTORIAL-05-GOLDEN-IMAGES.md) |
 
 ### ShareTier Fields
 
@@ -822,7 +823,7 @@ ibmcloud is shares
 | `name` | string | (required) | Tier identifier (lowercase alphanumeric + hyphens) |
 | `profile` | string | (required) | VPC file storage profile |
 | `shareSizeGB` | int64 | (required) | Size in GB per share (10-32000) |
-| `iops` | *int64 | (optional) | IOPS per share |
+| `iops` | *int64 | (optional) | IOPS per share. If unset, the VPC chooses it (100 for dp2) |
 | `maxShares` | int32 | (required) | Maximum shares for this tier (1-100) |
 | `initialShares` | int32 | 1 | Shares to pre-create for this tier |
 
@@ -850,9 +851,10 @@ ibmcloud is shares
 
 ## What's Next
 
-Now that you understand pool configuration, explore golden images for KubeVirt:
+Now that you understand pool configuration, explore the rest of the series. Golden images are optional:
 
-- **[Part 5: Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md)** -- Automatic golden image provisioning for KubeVirt VMs using CDI native mode or the custom syncer
+- **[Part 5: Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md)** -- Optional golden image provisioning for KubeVirt VMs (hidden in the console)
 - **[Part 6: Replication & Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md)** -- Cross-region DR with direct NFS and driver-to-driver modes
 - **[Part 7: Monitoring](TUTORIAL-07-MONITORING.md)** -- Prometheus metrics, alerts, and Grafana dashboards
 - **[Part 8: Migration & Console](TUTORIAL-08-MIGRATION-AND-CONSOLE.md)** -- PVC migration tool and OpenShift console plugin
+- **[Part 9: COS Bucket for Backups](TUTORIAL-09-COS-BACKUP-BUCKET.md)** -- Locked COS bucket, a restricted key, and a CBR rule
