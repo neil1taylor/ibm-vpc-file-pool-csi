@@ -5,6 +5,7 @@ import { SubVolumeReplicationStatus } from '../../types';
 import { describeVolumeStatus } from '../../utils/replication-helpers';
 import { formatAge, humanizeBytes } from '../../utils/resource-helpers';
 import { columnInfo } from '../../utils/column-help';
+import RunningVMCopyNote from '../common/RunningVMCopyNote';
 
 interface Props {
   statuses: SubVolumeReplicationStatus[] | undefined;
@@ -26,10 +27,13 @@ const VolumeStatusTable: React.FC<Props> = ({ statuses }) => {
     );
   }
 
+  const hasVMDisk = statuses.some((s) => describeVolumeStatus(s).isVMDisk);
+
   return (
     <Card style={{ marginTop: 16 }}>
       <CardTitle>Sync Status</CardTitle>
       <CardBody>
+        {hasVMDisk && <RunningVMCopyNote style={{ marginBottom: 16 }} />}
         <Table aria-label="SubVolume sync statuses" variant="compact">
           <Thead>
             <Tr>
