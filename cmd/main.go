@@ -6,7 +6,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -19,11 +18,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	ctrlwebhook "sigs.k8s.io/controller-runtime/pkg/webhook"
 
@@ -681,7 +682,7 @@ func runNode(endpoint, nodeID, mode, metricsAddr string, statsInterval time.Dura
 	k8sClient := k8s.NewClient(ctrlClient)
 
 	if metricsAddr != "" {
-		startShareMetrics(metricsAddr, statsInterval, k8sClient)
+		startShareMetrics(metricsAddr, statsInterval, restConfig, k8sClient)
 	}
 
 	d, err := driver.NewDriver(driver.Config{
@@ -704,12 +705,18 @@ func runNode(endpoint, nodeID, mode, metricsAddr string, statsInterval time.Dura
 }
 
 // startShareMetrics serves the per-share used bytes and NFS statistics of this
-// node on addr, in the background. If it cannot listen it logs and carries on:
-// missing metrics must not stop volumes from mounting.
-func startShareMetrics(addr string, interval time.Duration, k8sClient k8s.Client) {
-	l, err := net.Listen("tcp", addr)
+// node on addr over HTTPS, in the background. Callers need a token that the API
+// server accepts and may "get" /metrics. If it cannot start it logs and carries
+// on: missing metrics must not stop volumes from mounting.
+func startShareMetrics(addr string, interval time.Duration, restConfig *rest.Config, k8sClient k8s.Client) {
+	httpClient, err := rest.HTTPClientFor(restConfig)
 	if err != nil {
-		klog.ErrorS(err, "Cannot serve node metrics; continuing without them", "addr", addr)
+		klog.ErrorS(err, "Cannot serve node metrics; continuing without them")
+		return
+	}
+	srv, err := nodemetrics.NewSecureServer(addr, restConfig, httpClient)
+	if err != nil {
+		klog.ErrorS(err, "Cannot serve node metrics; continuing without them")
 		return
 	}
 	c := nodemetrics.NewCollector(nodemetrics.Config{
@@ -718,14 +725,18 @@ func startShareMetrics(addr string, interval time.Duration, k8sClient k8s.Client
 		Statfs:         nodemetrics.Statfs,
 		Resolve:        nodemetrics.ResolverFromPools(k8sClient.ListFileSharePools),
 	})
+	if err := ctrlmetrics.Registry.Register(c); err != nil {
+		klog.ErrorS(err, "Cannot register node metrics; continuing without them")
+		return
+	}
 	ctx := context.Background()
 	go c.Run(ctx, interval)
 	go func() {
-		if err := nodemetrics.Serve(ctx, l, nodemetrics.Handler(c)); err != nil {
+		if err := srv.Start(ctx); err != nil {
 			klog.ErrorS(err, "Node metrics server stopped")
 		}
 	}()
-	klog.InfoS("Serving node metrics", "addr", addr)
+	klog.InfoS("Serving node metrics over HTTPS", "addr", addr)
 }
 
 // networkConfig is the cluster network that share mount targets join.

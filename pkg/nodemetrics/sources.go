@@ -2,17 +2,10 @@ package nodemetrics
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net"
-	"net/http"
 	"os"
 	"syscall"
 	"time"
-
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/collectors"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 )
@@ -84,28 +77,4 @@ func statfsWith(ctx context.Context, path string, timeout time.Duration, fn func
 	case <-ctx.Done():
 		return 0, 0, ctx.Err()
 	}
-}
-
-// Handler serves the collector's metrics, with the Go and process metrics.
-func Handler(c *Collector) http.Handler {
-	reg := prometheus.NewRegistry()
-	reg.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}), c)
-	return promhttp.HandlerFor(reg, promhttp.HandlerOpts{})
-}
-
-// Serve answers HTTP requests on l with h until ctx ends.
-func Serve(ctx context.Context, l net.Listener, h http.Handler) error {
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", h)
-	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
-	go func() {
-		<-ctx.Done()
-		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = srv.Shutdown(shutCtx)
-	}()
-	if err := srv.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return err
-	}
-	return nil
 }

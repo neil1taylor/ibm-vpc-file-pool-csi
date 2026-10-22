@@ -3,10 +3,6 @@ package nodemetrics
 import (
 	"context"
 	"errors"
-	"net"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -59,42 +55,5 @@ func TestStatfs_GivesUpOnAHungMount(t *testing.T) {
 		func(string) (uint64, uint64, error) { <-block; return 0, 0, nil })
 	if err == nil || time.Since(start) > 2*time.Second {
 		t.Fatalf("want a timeout error quickly, got %v after %v", err, time.Since(start))
-	}
-}
-
-func TestHandler_ServesMetrics(t *testing.T) {
-	c := NewCollector(baseConfig())
-	c.Refresh(context.Background())
-	rec := httptest.NewRecorder()
-	Handler(c).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-	body := rec.Body.String()
-	if rec.Code != 200 || !strings.Contains(body, `vpc_file_pool_share_used_bytes{pool="gp",share="gp-share-1"}`) {
-		t.Fatalf("code %d body:\n%s", rec.Code, body)
-	}
-}
-
-func TestServe_AnswersUntilContextEnds(t *testing.T) {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- Serve(ctx, l, Handler(NewCollector(baseConfig()))) }()
-
-	resp, err := http.Get("http://" + l.Addr().String() + "/metrics")
-	if err != nil || resp.StatusCode != 200 {
-		t.Fatalf("get: %v %v", resp, err)
-	}
-	_ = resp.Body.Close()
-
-	cancel()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Errorf("Serve returned %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("Serve did not stop")
 	}
 }

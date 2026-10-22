@@ -1,0 +1,73 @@
+{{- if .Values.node.metricsPort }}
+# The node agents serve per-share used bytes and NFS latency and IOPS over HTTPS.
+# They have no other Service, so this headless one gives the ServiceMonitor its endpoints.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-node-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: node
+spec:
+  clusterIP: None
+  ports:
+    - name: metrics
+      port: {{ .Values.node.metricsPort }}
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    {{- include "ibm-vpc-file-pool-csi.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: node
+{{- if and .Values.metrics.serviceMonitor.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor") }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-node
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "ibm-vpc-file-pool-csi.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: node
+  endpoints:
+    - port: metrics
+      interval: {{ .Values.metrics.serviceMonitor.interval }}
+      scheme: https
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      # The node agent makes its own certificate; callers are checked by token.
+      tlsConfig:
+        insecureSkipVerify: true
+{{- end }}
+---
+# Whoever scrapes the node agents needs "get" on /metrics.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-metrics-reader
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+rules:
+  - nonResourceURLs: ["/metrics"]
+    verbs: ["get"]
+{{- if .Values.metrics.scraper.serviceAccount }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-metrics-reader
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-metrics-reader
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.metrics.scraper.serviceAccount }}
+    namespace: {{ .Values.metrics.scraper.namespace }}
+{{- end }}
+{{- end }}

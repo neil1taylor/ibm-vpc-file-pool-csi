@@ -41,6 +41,12 @@ node:
   # Must not conflict with other hostNetwork services on the node.
   # Stock IBM VPC file CSI uses 9808; we default to 9809.
   registrarHealthPort: 9809
+  # Port of the node agent's metrics endpoint (per-share used bytes, NFS latency
+  # and IOPS). The node agent uses the host network, so the port must be free on
+  # the node. 0 turns the endpoint off.
+  metricsPort: 9810
+  # How often the node agent reads the NFS statistics of its shares.
+  shareStatsInterval: 30s
   resources:
     requests:
       cpu: 50m
@@ -166,6 +172,12 @@ metrics:
     # (OpenShift has it). The console plugin's charts read these metrics.
     enabled: true
     interval: 30s
+  # The service account that scrapes the node agents' metrics (they need a token
+  # that may "get" /metrics). The defaults are OpenShift's Prometheus. Empty
+  # serviceAccount creates no binding; then bind the chart's metrics-reader role yourself.
+  scraper:
+    serviceAccount: prometheus-k8s
+    namespace: openshift-monitoring
   alerts:
     # Created only when the cluster has the Prometheus Operator API.
     enabled: true
