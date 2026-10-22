@@ -54,7 +54,7 @@ This section documents what the IBM VPC platform does and does not provide. Thes
 | Capability | Status | Impact |
 |------------|--------|--------|
 | **Native cross-region replication** | Not available | No async/sync mirror, no replica shares across regions. All replication must be built at the application layer. |
-| **Share-level snapshots** | Not available | No atomic point-in-time capture of an entire file share. The VPC API has no snapshot operation for file shares. |
+| **Share-level snapshots** | Available, not used | The VPC API can snapshot a whole file share, but not for shares in `vpc` access mode. A pool share holds many volumes, so the driver does not use it: one volume could not be restored without touching the others. |
 | **Directory-level snapshots** | Not available | No way to atomically capture a subdirectory within a share. |
 | **File-level snapshots** | Not available | No copy-on-write or reflink support at the NFS protocol level. |
 | **Change tracking / changelog** | Not available | No journal, delta stream, or inotify-equivalent at the share level. Change detection requires full directory traversal. |
