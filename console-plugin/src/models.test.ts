@@ -1,4 +1,6 @@
 import {
+  BackupPolicyModel,
+  BackupRestoreModel,
   KubeVolumeGroupSnapshotModel,
   PersistentVolumeClaimModel,
   StorageClassModel,
@@ -19,5 +21,24 @@ describe('Kubernetes models', () => {
       namespaced: true,
     });
     expect(VolumeGroupSnapshotClassModel).toMatchObject({ apiGroup: 'groupsnapshot.storage.k8s.io', namespaced: false });
+  });
+});
+
+describe('Backup models', () => {
+  it('describe the cluster-scoped backup resources of the driver', () => {
+    expect(BackupPolicyModel).toMatchObject({
+      apiGroup: 'storage.ibmcloud.io',
+      apiVersion: 'v1alpha1',
+      kind: 'BackupPolicy',
+      plural: 'backuppolicies',
+      namespaced: false,
+    });
+    expect(BackupRestoreModel).toMatchObject({
+      apiGroup: 'storage.ibmcloud.io',
+      apiVersion: 'v1alpha1',
+      kind: 'BackupRestore',
+      plural: 'backuprestores',
+      namespaced: false,
+    });
   });
 });

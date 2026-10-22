@@ -62,6 +62,38 @@ export const COLUMN_HELP = {
     title: 'Status',
     text: 'Copying or Sending while a copy of a running VM disk is in progress, and the last message for the volume. An orange message only says the volume is waiting; a red message is an error to read.',
   },
+  backupPhase: {
+    title: 'Phase',
+    text: 'Active means the policy makes backups on its schedule, and Suspended means someone stopped new backups (existing backups stay). Error means something is wrong, such as a snapshot pool that is more than 85% full: read the message on the page.',
+  },
+  backupStalest: {
+    title: 'Stalest Backup',
+    text: 'How long ago the oldest of the latest backups was made, over the volumes the policy still backs up. Much longer than the schedule means a volume is late: open the policy and read the error of that volume.',
+  },
+  backupListExport: {
+    title: 'Export',
+    text: 'On means the policy also sends its backups to an IBM Cloud Object Storage bucket, so they survive the loss of the snapshot pool. Off means backups stay in the snapshot pool only.',
+  },
+  backupLast: {
+    title: 'Last Backup',
+    text: 'How long ago the newest backup of this volume was made. For a running VM, all disks of the VM show the same moment.',
+  },
+  backupOldest: {
+    title: 'Oldest Backup',
+    text: 'How long ago the oldest backup that is still kept was made. A restore can go back as far as this.',
+  },
+  backupRestorePoints: {
+    title: 'Restore Points',
+    text: 'How many older moments, besides the newest, a restore can go back to. Backups older than the keep time of the policy are removed.',
+  },
+  backupConsistency: {
+    title: 'Consistency',
+    text: 'File-system consistent means the guest file systems were frozen for the copy. Crash consistent means they were not, as after a power loss; most applications recover from that. File copy is a plain volume that no VM uses.',
+  },
+  backupVolumeExport: {
+    title: 'Export',
+    text: 'Whether the newest backup of this volume reached the COS bucket, and how long ago. A failure is tried again by itself and never stops the backups in the snapshot pool.',
+  },
 } satisfies Record<string, ColumnHelp>;
 
 export type ColumnHelpKey = keyof typeof COLUMN_HELP;

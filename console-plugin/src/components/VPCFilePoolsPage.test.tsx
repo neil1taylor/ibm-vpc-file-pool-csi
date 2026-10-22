@@ -29,6 +29,9 @@ jest.mock('./migrate/MigrateVolumesPage', () => ({ __esModule: true, default: ()
 jest.mock('./replicationpolicy/ReplicationPolicyListPage', () => ({ __esModule: true, default: () => null }));
 jest.mock('./replicationpolicy/ReplicationPolicyDetailsPage', () => ({ __esModule: true, default: () => null }));
 jest.mock('./replicationpolicy/ReplicationPolicyCreatePage', () => ({ __esModule: true, default: () => null }));
+jest.mock('./backup/BackupListPage', () => ({ __esModule: true, default: () => null }));
+jest.mock('./backup/BackupRestorePage', () => ({ __esModule: true, default: () => null }));
+jest.mock('./backup/BackupDetailsPage', () => ({ __esModule: true, default: () => null }));
 jest.mock('./monitoring/MonitoringPage', () => ({ __esModule: true, default: () => null }));
 
 const cases: Array<[string, string]> = [
@@ -37,6 +40,9 @@ const cases: Array<[string, string]> = [
   ['/vpc-file-pools/subvolumes', 'USER-GUIDE.md'],
   ['/vpc-file-pools/snapshots', 'TUTORIAL-02-SNAPSHOTS-AND-CLONES.md'],
   ['/vpc-file-pools/replication', 'TUTORIAL-06-REPLICATION-AND-FAILOVER.md'],
+  ['/vpc-file-pools/backups', 'TUTORIAL-10-BACKUP-AND-RESTORE.md'],
+  ['/vpc-file-pools/backups/nightly', 'TUTORIAL-10-BACKUP-AND-RESTORE.md'],
+  ['/vpc-file-pools/backups/nightly/restore', 'TUTORIAL-10-BACKUP-AND-RESTORE.md'],
   ['/vpc-file-pools/monitoring', 'MONITORING.md'],
   ['/vpc-file-pools/pools/~new', 'TUTORIAL-01-POOL-CREATION.md'],
   ['/vpc-file-pools/pools/general-purpose', 'TUTORIAL-01-POOL-CREATION.md'],
@@ -52,5 +58,13 @@ describe('every page has a Help link with the right guide', () => {
     const a = (await screen.findByTestId('help-link')) as HTMLAnchorElement;
     expect(a.getAttribute('href')).toBe(`${GUIDE_BASE}${file}`);
     expect(a.getAttribute('target')).toBe('_blank');
+  });
+});
+
+describe('the Backups tab', () => {
+  it('is one of the tabs under Pools', () => {
+    mockPath = '/vpc-file-pools/backups';
+    render(<VPCFilePoolsPage />);
+    expect(screen.getByRole('tab', { name: 'Backups' })).toBeTruthy();
   });
 });

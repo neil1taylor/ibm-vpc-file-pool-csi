@@ -1,5 +1,7 @@
 # User Guide — IBM VPC File Pool CSI Driver
 
+For the meaning of project words such as pool, share, SubVolume and snapshot, see [CONTEXT.md](CONTEXT.md).
+
 ## How It Works
 
 The IBM VPC File Pool CSI Driver changes the relationship between PVCs and VPC file shares. Instead of one PVC creating one share, many PVCs share a common pool of large file shares. Each PVC gets its own subdirectory on a share.
@@ -423,7 +425,7 @@ kubectl apply -f snapshot.yaml
 kubectl get volumesnapshot my-app-snapshot
 ```
 
-The snapshot creates a directory copy under `/pvcs/.snapshots/` on the same share. Snapshot creation time is proportional to data size.
+For a plain volume, the snapshot is a directory copy under `/pvcs/.snapshots/` on the same share, and its creation time is proportional to data size. For a VM disk, it is a QEMU copy or an instant snapshot (see [CONTEXT.md](CONTEXT.md#snapshot)).
 
 ### Restoring from a Snapshot
 
@@ -667,7 +669,7 @@ Yes. The driver is fully compatible with ROKS and ROVS (Red Hat OpenShift on IBM
 All PVCs on that share will experience I/O errors until the share recovers. IBM VPC File Storage has 99.999% availability with HA-paired nodes, so this is extremely rare. The pool manager will detect the degraded state and stop allocating new PVCs to that share. Existing PVCs recover automatically when the share comes back.
 
 **Q: Can I migrate existing PVCs from the stock IBM CSI driver to this driver?**
-Not in-place — Kubernetes doesn't support changing a PV's CSI driver. You would need to create a new PVC with the pool StorageClass, copy the data (e.g., with `rsync` in a pod that mounts both PVCs), then switch your application to the new PVC. A migration tool is planned for a future release.
+Not in-place — Kubernetes doesn't support changing a PV's CSI driver. You would need to create a new PVC with the pool StorageClass, copy the data (e.g., with `rsync` in a pod that mounts both PVCs), then switch your application to the new PVC. The `kubectl migrate` plugin does this for you. See [TUTORIAL-08-MIGRATION-AND-CONSOLE.md](TUTORIAL-08-MIGRATION-AND-CONSOLE.md).
 
 **Q: Is there per-PVC quota enforcement?**
 Currently, quotas are advisory (soft enforcement). The driver tracks allocated vs. requested capacity in SubVolume CRs, and the metrics/alerts system will warn you when a PVC exceeds its allocation. Hard per-subdirectory quotas depend on NFS server-side project quota support, which IBM VPC File Storage does not currently expose. If hard quotas are critical for your use case, use the stock IBM CSI driver for those specific workloads.

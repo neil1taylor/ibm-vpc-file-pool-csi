@@ -56,6 +56,28 @@ export const ReplicationPolicyModel: K8sModel = {
   namespaced: false,
 };
 
+export const BackupPolicyModel: K8sModel = {
+  apiGroup: API_GROUP,
+  apiVersion: API_VERSION,
+  kind: 'BackupPolicy',
+  plural: 'backuppolicies',
+  abbr: 'BP',
+  label: 'BackupPolicy',
+  labelPlural: 'BackupPolicies',
+  namespaced: false,
+};
+
+export const BackupRestoreModel: K8sModel = {
+  apiGroup: API_GROUP,
+  apiVersion: API_VERSION,
+  kind: 'BackupRestore',
+  plural: 'backuprestores',
+  abbr: 'BR',
+  label: 'BackupRestore',
+  labelPlural: 'BackupRestores',
+  namespaced: false,
+};
+
 // ── Standard Kubernetes kinds used by the create pages ──
 
 export const PersistentVolumeClaimModel: K8sModel = {

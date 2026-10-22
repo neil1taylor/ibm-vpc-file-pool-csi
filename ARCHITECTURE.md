@@ -1,5 +1,7 @@
 # Architecture Reference
 
+For the meaning of project words such as pool, share, SubVolume and moment, see [CONTEXT.md](CONTEXT.md).
+
 ## System Overview
 
 ```

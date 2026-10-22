@@ -53,42 +53,29 @@ IBM VPC Client ──► VPC File Share API
 | Share Selection | `pkg/pool/share.go` | Spread (most free) or binpack (least free) strategy |
 | Clone Worker | `pkg/pool/clone_worker.go` | Async clone operations |
 | Replication Controller | `pkg/pool/replication_controller.go` | Cross-region disaster recovery with incremental rsync |
-| Hook Orchestrator | `pkg/hooks/` | Lifecycle hooks (exec + HTTP) for replication and group snapshots |
+| Hook Orchestrator | `pkg/hooks/` | Lifecycle hooks (exec + HTTP) for replication |
 | Admission Webhooks | `pkg/webhook/` | Validating webhooks for all CRD types |
 | Migration CLI | `pkg/migrate/` | Migrate PVCs from stock IBM CSI driver |
 | IBM VPC Client | `pkg/ibmcloud/client.go` | Thin wrapper around VPC file share API |
-| CRD Types | `api/v1alpha1/` | FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, ReplicationPolicy, Hook |
+| CRD Types | `api/v1alpha1/` | FileSharePool, SubVolume, Snapshot, ReplicationPolicy, BackupPolicy, BackupRestore, VolumeGroupSnapshot (not active), Hook |
 
 ## CRDs
 
 - **FileSharePool** (cluster-scoped) — defines a pool of VPC file shares with allocation strategy, auto-expansion, and capacity limits
 - **SubVolume** (cluster-scoped) — tracks individual PVC allocations: which share, subdirectory path, requested size, and clone/snapshot state
-- **Snapshot** (cluster-scoped) — tracks point-in-time directory copies of SubVolumes
-- **VolumeGroupSnapshot** (cluster-scoped) — coordinates multi-PVC consistent snapshots with pre/post-snapshot lifecycle hooks
-- **ReplicationPolicy** (cluster-scoped) — defines cross-region replication relationships between pools with pre/post-sync lifecycle hooks and incremental rsync
+- **Snapshot** (cluster-scoped) — tracks a snapshot of a SubVolume on the same share
+- **ReplicationPolicy** (cluster-scoped) — defines replication from a pool to a destination, with pre/post-sync lifecycle hooks and incremental rsync
+- **BackupPolicy** (cluster-scoped) — backs up the PVCs and VMs it selects into a snapshot pool, on a schedule
+- **BackupRestore** (cluster-scoped) — one request to restore a backup into a new PVC
+- **VolumeGroupSnapshot** (cluster-scoped) — not active; nothing acts on it
+
+The words used here (pool, share, moment, snapshot pool and others) are defined once in [CONTEXT.md](CONTEXT.md).
 
 ## Glossary
 
 ### Core Concepts
 
-| Term | Definition |
-|------|-----------|
-| **Pool** (FileSharePool) | A group of VPC file shares managed as a unit, defined by a FileSharePool CR |
-| **Share** (VPC File Share) | An NFS-exported block of cloud storage created via the IBM VPC API; each pool contains one or more shares |
-| **SubVolume** | A subdirectory on a share that backs a single PVC, tracked by a SubVolume CR |
-| **Subdirectory** | The physical directory on the NFS share (e.g., `/pvcs/pvc-abc123`), created by the node agent during publish |
-| **Mount Target** | The VPC-managed NFS endpoint (IP address) used to mount a share on worker nodes |
-| **Allocation** | The process of selecting a share, recording a SubVolume CR, and creating a subdirectory for a new PVC |
-| **Staging** | Per-node NFS mount of a share at a staging directory; done once per share per node |
-| **Tier** | A named performance level within a pool (e.g., "standard", "premium"), each with its own VPC profile, share size, and StorageClass |
-| **Spread** | Allocation strategy that places each new PVC on the share with the most free capacity, distributing PVCs evenly across shares |
-| **Binpack** | Allocation strategy that places each new PVC on the share with the least free capacity that still fits, filling shares sequentially |
-| **Draining** | Share state where no new PVCs are allocated but existing PVCs continue to work; used to decommission a share gracefully |
-| **Expanding** | Pool state when a new VPC file share is being created because utilization crossed the `expandThresholdPercent` threshold |
-| **Golden Image** | A pre-configured VM boot disk image (e.g., CentOS, Fedora) provisioned on pool storage for rapid VM creation via cloning |
-| **Clone Worker** | Background goroutine that copies data for volume clones asynchronously with a Kubernetes Job, allowing `CreateVolume` to return immediately |
-| **Hook Orchestrator** | Component that executes lifecycle hooks (exec commands or HTTP webhooks) before/after replication syncs and group snapshots |
-| **Incremental Sync** | rsync-based replication that transfers only changed files between source and destination, instead of full directory copies |
+The project's own words (pool, share, SubVolume, tier, drain, golden image, clone, hook and the rest) are defined once in [CONTEXT.md](CONTEXT.md).
 
 ### IBM Cloud VPC
 
@@ -96,8 +83,8 @@ IBM VPC Client ──► VPC File Share API
 |------|-----------|
 | **dp2** | The only VPC file share profile. IOPS range from 100 to 96,000; if `spec.iops` is not set, each share gets 100 IOPS whatever its size |
 | **IOPS** | I/O Operations Per Second; the performance budget for a share, shared by all PVCs on that share |
-| **VPC Access Mode** | File share access control mode where shares are exported under a shared FQDN and differentiated by their NFS export path |
-| **Security Group Mode** | Alternative file share access control mode using VPC security groups; incompatible with VPC mount targets |
+| **VPC Access Mode** | The older file share access control mode. Shares are exported under a shared FQDN and differ by their NFS export path. Existing shares still work. The driver no longer creates them |
+| **Security Group Mode** | The file share access control mode the driver uses for every new share. A security group on the mount target's virtual network interface decides who can mount. By default it is the cluster's own security group |
 | **root_squash** | NFS server mapping of root (UID 0) to nobody (UID 65534); always enabled on VPC file shares, cannot be disabled |
 | **initial_owner** | VPC API parameter setting the UID/GID ownership of the share's root directory at creation time |
 | **Transit Gateway** | IBM Cloud service connecting VPCs across regions over the private backbone; required for cross-region replication |
