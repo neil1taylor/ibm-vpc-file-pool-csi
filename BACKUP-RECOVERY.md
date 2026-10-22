@@ -10,7 +10,7 @@ Data protection strategy using the driver's snapshot, clone, group snapshot, and
 |--------|-----|-----|-------|----------|
 | [Volume Snapshots](#volume-snapshots) | Point-in-time | Minutes (copy speed) | Single PVC | Regular backups of individual volumes |
 | [Volume Clones](#volume-clones) | Point-in-time | Seconds (sync) to minutes (async) | Single PVC | Dev/test copies, pre-migration backup |
-| [Group Snapshots](#group-snapshots) | Coordinated point-in-time | Minutes | Multiple PVCs | Multi-volume application backups |
+| [Group Snapshots](#group-snapshots) (not active) | Coordinated point-in-time | Minutes | Multiple PVCs | Multi-volume application backups |
 | [Backups to a Snapshot Pool](#backups-to-a-snapshot-pool) | Schedule-based (minutes to hours) | Minutes to hours (copy speed) | Selected PVCs and VMs, all disks of a VM together | Keeping many moments of a volume or VM in the same region, on shares of their own |
 | [Cross-Region Replication](#cross-region-replication) | Schedule-based (minutes to hours) | Manual failover | Full pool or label-selected | Disaster recovery |
 | [Application-Level Backup](#application-level-backup) | Varies | Varies | Application-specific | Databases, VMs, crash-consistent workloads |
@@ -247,6 +247,10 @@ The console can do the same without YAML. Open a snapshot in the IBM VPC File Po
 
 ## Group Snapshots
 
+> **Not active (issue #100).** The driver does not act on `VolumeGroupSnapshot` records. The hooks never run and there is no plan to turn them on. The examples below do nothing. A running VM with several disks does not need group snapshots: its snapshots show one moment already (see [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md)).
+
+> **Not active (issue #100).** The driver does not act on `VolumeGroupSnapshot` records: nothing watches them, the hooks below never run, and the CSI group snapshot service is not registered, so Kubernetes' own group snapshot API cannot reach the driver. There is no plan to turn it on. A running VM with several disks does not need it: its snapshots show one moment already (see [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md)). This page describes the design, not a working feature.
+
 Coordinated multi-PVC snapshots for applications with related volumes. See [USER-GUIDE.md — Volume Group Snapshots](USER-GUIDE.md#volume-group-snapshots) and [VOLUME-GROUP-SNAPSHOTS.md](VOLUME-GROUP-SNAPSHOTS.md) for design details.
 
 ### Application-Consistent Group Snapshot with Hooks
@@ -379,7 +383,7 @@ It refuses, and changes nothing, in these cases:
 
 If the policy is already deleted, its status can no longer say where the backup is. Name the snapshot pool and the volume yourself: `--pool backups --volume pvc-...`. The volume name is the folder under `/backup/<policy>/pvcs/` on the share.
 
-### Export to COS (built; the release test is not yet run)
+### Export to COS (built; the release test is written and not yet run)
 
 A policy can also send its backups to an IBM Cloud Object Storage bucket, encrypted before they leave the cluster, with a lock that nobody can shorten. The controller does this with the `spec.export` block:
 

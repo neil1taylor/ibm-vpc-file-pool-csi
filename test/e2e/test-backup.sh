@@ -14,6 +14,14 @@
 #     restored at the latest it holds the changed content
 #   - the pod volume can be restored after the claim is deleted
 #
+# With COS settings (see lib/backup-cos.sh) the policy also exports to a COS
+# bucket (Compliance lock, 25 hours), and after the local checks it checks the
+# exports, runs `kubectl backup cos-list`, and restores the three volumes from
+# COS into a second namespace: the VM boots with matching checksums, and the pod
+# volume holds the first and the changed content. With COS_DR_KUBECONFIG it
+# repeats the restore in the other cluster of the lab pair. Objects locked by
+# Compliance are left in the bucket, under a prefix that is new for each run.
+#
 # Usage: KUBECONFIG=... SSH_KEY=~/.ssh/key BACKUP_BIN=bin/kubectl-backup test/e2e/test-backup.sh [--keep]
 # SSH_KEY is a private key whose .pub file is put in the VM for virtctl ssh.
 # BACKUP_BIN is the kubectl-backup plugin (make build-backup).
@@ -34,6 +42,10 @@ BACKUP_TIMEOUT=${BACKUP_TIMEOUT:-5400}
 # A small pod volume is copied in the first few cycles; a longer wait means the copy fails.
 FIRST_FILES_TIMEOUT=${FIRST_FILES_TIMEOUT:-1200}
 
+HERE_E2E="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/backup-cos.sh
+source "$HERE_E2E/lib/backup-cos.sh"
+
 log() { echo "[$(date -u +%H:%M:%S)] $*"; }
 # Show why a backup did not happen, before cleanup deletes the evidence.
 diagnose() {
@@ -41,6 +53,7 @@ diagnose() {
     oc get replicationpolicy -o json 2>/dev/null | jq -c --arg p "backup-$POLICY" '.items[] | select(.metadata.name | startswith($p)) | {name: .metadata.name, phase: .status.phase, failures: .status.consecutiveFailures, err: .status.lastError, volumes: [.status.subVolumeStatuses[]? | {sv: .subVolumeName, err: .lastError}]}' || true
     # The controller deletes a failed copy Job at once, so its pods are usually gone; the errors above and the log below are the record.
     oc get jobs,pods -n kube-system -l storage.ibmcloud.io/repl-temp=true -o wide 2>/dev/null || true
+    cos_diagnose
     oc logs -n kube-system deploy/ibm-vpc-file-pool-csi-controller -c csi-controller --since=2h 2>/dev/null | grep -i "$POLICY" | tail -20 || true
 }
 fail() { log "FAIL: $*"; diagnose; exit 1; }
@@ -60,10 +73,12 @@ cleanup() {
     oc get backuprestore -o json | jq -r --arg ns "$NS" '.items[] | select(.spec.targetNamespace == $ns) | .metadata.name' |
         while read -r name; do oc delete backuprestore "$name" --wait=false || true; done
     oc delete backuppolicy "$POLICY" --ignore-not-found --wait=false || true
+    cos_cleanup
     oc delete ns "$NS" --ignore-not-found --wait=true --timeout=15m || true
     oc delete filesharepool "$SRC" "$SNAP" --ignore-not-found --wait=false || true
 }
 trap cleanup EXIT
+cos_init
 
 zone() {
     oc get nodes -o jsonpath='{range .items[*]}{.metadata.labels.topology\.kubernetes\.io/zone}{"\n"}{end}' |
@@ -272,6 +287,9 @@ wait_until 300 "the writer pod running" pod_running files-writer
 wait_until 300 "the pod volume written" oc exec -n "$NS" files-writer -- test -f /data/written
 
 log "making the backup policy $POLICY (schedule $SCHEDULE)"
+if $COS_ON; then
+    cos_make_secrets "$DRIVER_NS" "$PREFIX" || fail "cannot make the COS Secrets in $DRIVER_NS"
+fi
 oc apply -f - <<YAML
 apiVersion: storage.ibmcloud.io/v1alpha1
 kind: BackupPolicy
@@ -283,6 +301,7 @@ spec:
   vmCopySpeedLimitMBps: 50
   namespaces: [$NS]
   selector: {matchLabels: {backup: "yes"}}
+$(if $COS_ON; then cos_policy_export_yaml; fi)
 YAML
 
 # vol_field <claim> <jq expression on the volume entry>
@@ -311,6 +330,11 @@ echo "$status" | jq -c '.status.volumes[] | {pvc: .pvcName, vm: .vmName, last: .
 [ "$(vol_field data .consistency)" = FileSystemConsistent ] || fail "the data disk backup is not FileSystemConsistent"
 [ "$(vol_field files .consistency)" = FileCopy ] || fail "the pod volume backup is not FileCopy"
 log "PASS: three volumes backed up, two moments each"
+# The volume names are how COS keeps backups. Save them before the claim "files" is deleted.
+export COS_PV_ROOT COS_PV_DATA COS_PV_FILES
+COS_PV_ROOT=$(oc get pvc -n "$NS" root -o jsonpath='{.spec.volumeName}')
+COS_PV_DATA=$(oc get pvc -n "$NS" data -o jsonpath='{.spec.volumeName}')
+COS_PV_FILES=$(oc get pvc -n "$NS" files -o jsonpath='{.spec.volumeName}')
 
 first_vm=$(vol_field root .oldestBackupTime)
 first_files=$(vol_field files .oldestBackupTime)
@@ -360,3 +384,7 @@ oc delete pvc -n "$NS" files --wait=true --timeout=10m
 restore files files-gone
 check_files check-gone files-gone manifest-B.sha256 'test -e /data/b'
 log "PASS: a volume that was deleted can be restored from its backup"
+
+if $COS_ON; then
+    cos_phase
+fi

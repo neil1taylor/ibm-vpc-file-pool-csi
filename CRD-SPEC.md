@@ -1051,6 +1051,8 @@ Snapshots reside on the same VPC file share as the source SubVolume and are stor
 
 ## VolumeGroupSnapshot
 
+> **Not active (issue #100).** The type is installed, but nothing acts on a `VolumeGroupSnapshot`. There is no plan to turn it on.
+
 Cluster-scoped resource. Coordinates a group of SubVolume snapshots to achieve application-consistent or crash-consistent point-in-time copies across multiple volumes.
 
 ### Go Type Definition

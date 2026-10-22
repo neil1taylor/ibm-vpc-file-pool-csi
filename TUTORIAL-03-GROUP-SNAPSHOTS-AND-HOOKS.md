@@ -7,6 +7,8 @@ Step-by-step guide to create coordinated multi-PVC snapshots using VolumeGroupSn
 **Cluster:** ROKS eu-de (OpenShift Virtualization enabled)
 **Zone:** eu-de-1
 
+> **Not active (issue #100).** The driver does not act on `VolumeGroupSnapshot` records: nothing watches them, the hooks below never run, and the CSI group snapshot service is not registered, so Kubernetes' own group snapshot API cannot reach the driver. There is no plan to turn it on. A running VM with several disks does not need it: its snapshots show one moment already (see [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md)). This page describes the design, not a working feature.
+
 ---
 
 ## Prerequisites
