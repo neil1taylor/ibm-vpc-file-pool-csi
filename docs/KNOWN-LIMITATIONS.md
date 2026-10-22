@@ -37,6 +37,7 @@ Where the KubeVirt `Sidecar` feature gate is on, a VM disk snapshot is instant i
 - **One disk per plain VolumeSnapshot.** All disks of a VM at one moment come from an OpenShift VM snapshot, which freezes the guest first.
 - **Replication and backups** of a VM disk make a full copy after each snapshot, because QEMU's list of changed blocks stays with the frozen file. A stopped VM's disk with snapshots is not copied at all (its status says so): a copy of its folder would give the far site an old `disk.img`. It is copied again while the VM runs, or after `kubectl pool-snapshots flatten`.
 - **No clone** of a disk with instant snapshots: restore one of its snapshots instead. A copy of the folder would not be a clone.
+- **The disk file must be owned by UID 107** (the QEMU user). Only the owner can make the frozen file read-only. For another owner, the snapshot fails before anything changes, and the message names the owner and the fix (`chown 107:107`).
 - At most 16 snapshots per disk. Hot-plugged disks are not supported.
 - A deleted claim's folder stays while any of its instant snapshots exists.
 
