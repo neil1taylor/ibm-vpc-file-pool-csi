@@ -196,7 +196,7 @@ Sizes: S is a day or less of work, M a few days, L a week or more. Each PR has i
 6. **VM disks in COS (M).** Kopia library range reads and the cache; speed measurements; the fall-back decision if needed.
 7. **Release test stage 19 final and docs (S).** The stage is extended per phase; this PR makes it one run for the lab pair, adds the two-cluster COS run and the cleanup checks, and writes the user tutorial.
 
-Total: about 4 to 6 weeks of agent work, with the lab as the slowest part (stage 19 runs about an hour). Phases 1 to 4 deliver the whole plain-volume goal and can be shown to the pilot customer before phases 5 and 6 are done.
+Total: about 4 to 6 weeks of agent work, with the lab as the slowest part (stage 19 runs about an hour). Phases 1 to 4 deliver the whole plain-volume goal and can be deployed and tested before phases 5 and 6 are done.
 
 ## Cost and risk
 
@@ -231,4 +231,4 @@ Total: about 4 to 6 weeks of agent work, with the lab as the slowest part (stage
 ## Needs from you
 
 - **Nothing blocks phases 1 to 4.** Phase 0 needs the lab (ROVS, with bare-metal workers that have KVM) for one to two hours, and a pull of the libguestfs image from the Red Hat registry (the cluster's pull secret should already allow it).
-- Whether you want phases 5 and 6 (VM disks) before or after the pilot customer sees phases 1 to 4. I assumed after.
+- Whether phases 5 and 6 (VM disks) must be in the first deployment, or can follow it. I assumed they follow.
