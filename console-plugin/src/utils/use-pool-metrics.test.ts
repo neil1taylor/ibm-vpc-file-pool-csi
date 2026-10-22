@@ -173,6 +173,26 @@ describe('usePoolMetrics replication lag', () => {
     expect(urls.some((u) => u.includes('allocation_duration_seconds_bucket'))).toBe(true);
     expect(urls.some((u) => /_seconds\[/.test(u))).toBe(false);
   });
+
+  it('reports the allocation rate per hour, not per second', async () => {
+    mockFetch.mockImplementation(async (url: string) =>
+      decodeURIComponent(url).includes('rate(vpc_file_pool_allocations_total[1h])')
+        ? { status: 'success', data: { resultType: 'vector', result: [{ metric: { pool: 'pool-a' }, value: [0, '0.01'] }] } }
+        : { status: 'success', data: { resultType: 'vector', result: [] } },
+    );
+    const { result } = renderHook(() => usePoolMetrics(['pool-a'], 60000));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.metrics['pool-a'].allocationRate1h).toBeCloseTo(36);
+  });
+
+  it('counts only snapshots taken and clones finished, not deletes or errors', async () => {
+    mockFetch.mockImplementation(async () => ({ status: 'success', data: { resultType: 'vector', result: [] } }));
+    renderHook(() => usePoolMetrics(['pool-a'], 60000));
+    await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+    const urls = mockFetch.mock.calls.map((c) => decodeURIComponent(c[0] as string));
+    expect(urls.some((u) => u.includes('vpc_file_pool_snapshots_total{operation="create",status="success"}'))).toBe(true);
+    expect(urls.some((u) => u.includes('vpc_file_pool_clones_total{status="async_success"}'))).toBe(true);
+  });
 });
 
 const r = (pool: string, value: string) => ({ metric: { pool }, value: [0, value] as [number, string] });

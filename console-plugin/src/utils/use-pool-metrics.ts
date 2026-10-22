@@ -146,8 +146,8 @@ export function usePoolMetrics(poolNames: string[], refreshInterval = 30000): Me
         queryPrometheus(`sum(rate(${METRICS.VPC_API_CALLS_TOTAL}[5m]))`),
         queryPrometheus(`sum(rate(${METRICS.VPC_API_CALLS_TOTAL}{status="error"}[5m]))`),
         queryPrometheus(metricQueries.apiP95),
-        queryPrometheus(METRICS.SNAPSHOTS_TOTAL),
-        queryPrometheus(METRICS.CLONES_TOTAL),
+        queryPrometheus(`${METRICS.SNAPSHOTS_TOTAL}{operation="create",status="success"}`),
+        queryPrometheus(`${METRICS.CLONES_TOTAL}{status="async_success"}`),
         queryPrometheus(metricQueries.cloneMedian),
         queryPrometheus(METRICS.GROUP_SNAPSHOTS_TOTAL),
         queryPrometheus(`sum(rate(${METRICS.REPLICATION_SYNC_TOTAL}[5m]))`),
@@ -161,7 +161,8 @@ export function usePoolMetrics(poolNames: string[], refreshInterval = 30000): Me
           allocatedGB: resultToNumber(allocated, pool),
           shareCount: resultToNumber(shares, pool),
           pvcCount: resultToNumber(pvcs, pool),
-          allocationRate1h: resultToNumber(rate, pool),
+          // rate() is per second; the dashboard shows per hour.
+          allocationRate1h: resultToNumber(rate, pool) * 3600,
           p95LatencySeconds: resultToNumber(latency, pool),
           replicationLagSeconds: resultToNumber(lag, pool, 'source_pool'),
         };
