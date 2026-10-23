@@ -41,3 +41,8 @@ console-plugin/playwright-report/
 .claude/settings.local.json
 /migrate
 test/release/out/
+
+# Local credentials
+.env
+.env.*
+!.env.example
