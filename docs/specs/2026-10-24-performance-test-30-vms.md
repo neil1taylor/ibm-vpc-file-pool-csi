@@ -59,13 +59,13 @@ Two thirds Linux (CentOS Stream 9, 1 vCPU, 2 GB) and one third Windows Server 20
 
 ### The tiers
 
-Three runs, one for each share speed. Each uses a fresh pool with one share, made and deleted for the run:
+Three runs, one for each share speed. Each uses a fresh pool with one share of 3,900 GB, made and deleted for the run. Only the IOPS changes, so the three results compare like with like. IBM allows 200 to 40,000 IOPS at that size (the 2,000 to 3,999 GB row). The disks of 90 VMs need about 3.2 TB: a copy of a catalog disk must be 30 GiB, so each Linux VM needs 32 GiB with its load disk and each Windows VM about 42 GiB. (The first draft gave each tier its own smaller share. That was wrong: 90 VMs do not fit on 200 GB, or on 3,000 GB.)
 
-| Tier | Share size | IOPS set |
-|---|---|---|
-| Low | 200 GB | 3,000 |
-| Middle | 500 GB | 10,000 |
-| High | 1,000 GB | 20,000 |
+| Tier | IOPS set |
+|---|---|
+| Low | 3,000 |
+| Middle | 10,000 |
+| High | 20,000 |
 
 ### The steps in one run
 
@@ -127,18 +127,33 @@ Yes. It finds the knee for each tier by growing the count until users would noti
 ## Cost, effort and risk
 
 - **Effort:** about 3 to 5 days to build the tooling and the smoke run. Each full run is about 8 hours of lab time, so the three tiers are about a day of running, which can go overnight.
-- **Cost:** three shares (200, 500 and 1,000 GB) for a few hours each, deleted after. The VMs use the lab cluster's spare room.
+- **Cost:** three shares of 3,900 GB for a few hours each, deleted after. The VMs use the lab cluster's spare room.
 - **Risk:**
-  - The Windows image: if it cannot be used for a test like this (licence or no `diskspd`), the Windows third of the mix is replaced and the table says so.
+  - The Windows image: if it cannot be used for a test like this (licence or no `diskspd`), the Windows third of the mix is replaced and the table says so. Today no Windows catalog image is ready on `rovslab-dr-eude`, so the Windows part needs an image brought in first. Phase 1 builds the Linux half; the Windows half waits for a decision on the image.
   - A leftover VM or share after a failed run costs money until it is deleted. The sweep and the final VPC check guard against it.
   - Results from a shared cloud backend are noisy. The repeat run and the written knee rule limit this.
+
+## Phase 1 results (smoke runs on rovslab-dr-eude, 2026-10-24)
+
+Five small Linux VMs on a 200 GB, 3,000 IOPS share, 10 minutes of measuring. It took four runs to get a good one. What each run found:
+
+1. The VM definition used a cloud-init field name KubeVirt does not know (`secretRef` is right).
+2. A copy of a catalog disk must be at least as large as the catalog disk, 30 GiB. This changed the share size in this spec (3,900 GB).
+3. `fio` counted every I/O of a job with a block size range as the smallest block size, so the load came out about 8 times too light (35 IOPS for a target of 300). The load is now three jobs with fixed block sizes. After the fix the VMs hit their targets: about 28 steady and 298 burst IOPS against 30 and 300.
+4. The node agents' `/metrics` answered HTTP 500 when a node held the same share more than once, so the share counters read zero. This was a driver bug, fixed in PR #246 and in the `main-55211050` build that DR runs.
+
+The good run: all 5 VMs ready in about 4 minutes (including the disk fill), no stall, no slow VM, no VM short of its rate, and the cleanup left nothing.
+
+**Open, to settle before the first full run.** The share counters showed 982 NFS operations a second at 532 ms average, while the VMs reported about 359 IOPS and a p95 of about 1.3 ms. The two sides do not agree. Possible causes: a host cache between the guest and the share (the disk cache mode), the root disks' own traffic on the same share, or write-behind queueing in the NFS client that the guests never wait for. Every run now records the first VM's disk definition (`vm1-disks.txt`) to answer the first. If a cache is the cause, the guest latency is flattered and the 20 ms rule must be applied to the share-side latency, or the cache must be bypassed.
+
+**Not built yet:** Windows VMs (no Windows catalog image is ready on the DR cluster), repeat runs and a steady-state check, the baseline and event windows, the boot storm and the other planned events. They are items 5, 7, 9 and 12 of the research file `docs/research/2026-10-24-storage-benchmark-tools.md`.
 
 ## Decisions I made for you
 
 - The real VM mix and peaks are not known, so I used the issue's defaults: 20 Linux and 10 Windows, 20 to 50 IOPS average, 300 IOPS bursts, 70/30 read/write. Change them here and the test follows.
 - "Users notice" means p95 read latency above 20 ms, or any stall over 5 seconds, or a boot storm twice as slow as at 15 VMs.
 - The recommended count is 80% of the knee.
-- Three tiers: 3,000, 10,000 and 20,000 IOPS (shares of 200, 500 and 1,000 GB).
+- Three tiers: 3,000, 10,000 and 20,000 IOPS, all on a 3,900 GB share, so only the IOPS differs.
 - The ramp goes 15, 30, 45, 60, 75, 90 and stops at the knee or 90.
 - The test runs on `rovslab-dr-eude`, not on `rovslab-prod-eude`.
 - The Linux VMs are small (1 vCPU, 2 GB) and the Windows VMs are 2 vCPU, 4 GB, so the disk is the thing being tested, not the CPU.

@@ -53,6 +53,7 @@ test-scripts:
 	bash test/release/test-runner.sh
 	bash test/e2e/lib/test-detect-zone.sh
 	bash test/e2e/lib/test-backup-cos.sh
+	bash test/perf/test-perf.sh
 
 test-integration:
 	go test ./test/integration/ -v -race -count=1 -tags=integration
