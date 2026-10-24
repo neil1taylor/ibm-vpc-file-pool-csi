@@ -152,6 +152,18 @@ describe('BackupRestorePage', () => {
     expect(within(dialog).getByText(/takes time/)).toBeTruthy();
   });
 
+  it('does not call its own new claim a name that is taken, after the restore starts', async () => {
+    (k8sCreate as jest.Mock).mockImplementation(async () => {
+      claims = [{ metadata: { name: 'data-restored' } }];
+      return {};
+    });
+    render(<BackupRestorePage />);
+    fireEvent.click(restoreButton());
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Restore' }));
+    expect(await screen.findByText(/the request is starting/)).toBeTruthy();
+    expect(screen.queryByText(/already exists/)).toBeNull();
+  });
+
   it('creates one BackupRestore for the latest backup, and follows it', async () => {
     render(<BackupRestorePage />);
     fireEvent.click(restoreButton());

@@ -21,10 +21,12 @@ To make a release:
 
 ### Added
 
-- **Two new tutorials.** Part 15, "Make a VM from the Catalog on a Pool" (`docs/TUTORIAL-15-VM-FROM-THE-CATALOG.md`), and Part 16, "Backups, Clones and Replication Setup in the Console" (`docs/TUTORIAL-16-CONSOLE-BACKUPS-CLONES-RECEIVER.md`), with three draw.io diagrams. They have not been run on a cluster; the console labels were checked against the plugin source.
+- **Two new tutorials.** Part 15, "Make a VM from the Catalog on a Pool" (`docs/TUTORIAL-15-VM-FROM-THE-CATALOG.md`), and Part 16, "Backups, Clones and Replication Setup in the Console" (`docs/TUTORIAL-16-CONSOLE-BACKUPS-CLONES-RECEIVER.md`), with three draw.io diagrams. Both were run end to end on rovslab on 24 October 2026.
 
 ### Fixed
 
+- **Console: the clone and restore pages no longer call their own new claim a taken name.** After "Clone to new PVC", "Restore to new PVC" or a backup restore started, the form showed "A claim with this name already exists" under the name, because the page counted the claim it had just made.
+- **Tutorials 15 and 16 corrected after a run on rovslab** (driver v0.14.1, OpenShift 4.21). Part 15: the claim is Pending during the CDI copy, the copy pods are in the catalog images' namespace, the VM pod label is `vm.kubevirt.io/name`, the console labels of OpenShift 4.21, and a 3000-IOPS example pool. Part 16: the phase shows Unknown for a few seconds, Size shows `-` for a plain volume (also in BACKUP-RECOVERY.md), and the clone banner now follows the copy.
 - **The node agent metrics endpoint no longer answers HTTP 500 when a node holds the same share twice.** Kubelet gives each volume its own staging path, so a node can have several staging mounts of one share (and stale ones of deleted pools). The collector reported each one, Prometheus refused the repeated series, and the whole endpoint, with every share metric and the alerts built on them, showed nothing. It now reports one set of series for each share, using the larger counter of its mounts. Found on `rovslab-prod-eude` while preparing the performance test.
 - **Console: the clone banner no longer says "ready" while the copy still runs.** A clone's claim is Bound at once, so the banner after "Clone to new PVC" said the volume was ready before the copy had ended. It now follows the SubVolume's copy, shows its progress, and shows a failed copy.
 - **Console: a refused "Delete backups" dialog offers "Close".** The button read "Close (the Job goes on)" although no Job had started.

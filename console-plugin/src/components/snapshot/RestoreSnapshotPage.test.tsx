@@ -183,6 +183,19 @@ describe('RestoreSnapshotPage', () => {
     expect(screen.queryByRole('button', { name: 'Restore' })).toBeNull();
   });
 
+  it('does not call its own new claim a name that is taken, after the restore starts', async () => {
+    const data = base();
+    watch(data);
+    (k8sCreate as jest.Mock).mockImplementation(async () => {
+      data.PersistentVolumeClaim.push({ ...sourcePVC, metadata: { name: 'data-restored', namespace: 'apps' } });
+      return {};
+    });
+    render(<RestoreSnapshotPage />);
+    fireEvent.click(createButton());
+    expect(await screen.findByText(/Restoring/)).toBeTruthy();
+    expect(screen.queryByText(/already exists/)).toBeNull();
+  });
+
   it('creates a claim with the VolumeSnapshot as its data source and then shows the copy banner', async () => {
     watch(base());
     (k8sCreate as jest.Mock).mockResolvedValue({});

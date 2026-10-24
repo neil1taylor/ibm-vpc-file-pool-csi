@@ -400,7 +400,7 @@ If the policy is already deleted, its status can no longer say where the backup 
 The **Backups** tab of the IBM VPC File Pools page shows the same facts as `kubectl backup list`, with no `kubectl`.
 
 - The list has one row for each policy: snapshot pool, schedule, keep time, phase, number of volumes, the age of the stalest backup, and whether the COS export is on.
-- A policy page shows its settings and one row for each volume: the claim, the VM, the newest and oldest backup, the restore points, the size of the newest backup, the consistency, the last error and the export state. A volume the policy no longer backs up is marked with the date its backups are kept until. A crash consistent copy has an orange label.
+- A policy page shows its settings and one row for each volume: the claim, the VM, the newest and oldest backup, the restore points, what the newest backup wrote (VM disks only: a plain volume shows `-`, because its file copy does not count bytes), the consistency, the last error and the export state. A volume the policy no longer backs up is marked with the date its backups are kept until. A crash consistent copy has an orange label.
 - When new backups are stopped because the snapshot pool is more than 85% full, a banner says so on both pages and links to the pool. Nothing is deleted to make room; see [Backups stopped](TROUBLESHOOTING.md#backups-stopped-the-snapshot-pool-is-above-85-full).
 - Restore is in the console too (next section). The COS tab and restore from COS are described below.
 

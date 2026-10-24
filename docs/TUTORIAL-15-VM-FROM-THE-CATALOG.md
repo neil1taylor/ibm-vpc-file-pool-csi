@@ -6,8 +6,8 @@ Make a virtual machine (VM) from the OpenShift Virtualization catalog, with its 
 
 ![CDI copies the catalog image onto the pool as disk.img, and the VM boots from it](images/tutorial-15-vm-from-catalog.drawio.svg)
 
-**Time:** about 20 minutes of work. The image copy runs by itself. On rovslab, a RHEL 9 VM had its guest agent about 103 seconds after it was created ([USER-GUIDE.md](USER-GUIDE.md#create-a-vm-with-its-boot-disk-on-a-pool)).
-**Status:** Beta. See [FEATURES.md](FEATURES.md) (the CDI copy limit feature).
+**Time:** about 30 minutes, most of it waiting for the image copy. On rovslab (24 October 2026, driver v0.14.1, OpenShift 4.21), the copy of the CentOS Stream 9 image onto a 100-IOPS share took about 13 minutes for the first VM and about 7 minutes for a second VM.
+**Status:** Beta. See [FEATURES.md](FEATURES.md) (the CDI copy limit feature). This page was run end to end on rovslab on 24 October 2026, both in the console and with YAML.
 **Scope:** this page makes a VM from a catalog image. It does not use the pool's golden images, which are hidden. See [FEATURES.md](FEATURES.md).
 
 ---
@@ -41,7 +41,7 @@ oc get filesharepool ${POOL_NAME} \
 
 **Expected:** `107 107 0777`.
 
-If you have no pool yet, make one. Use the zone of your workers (`oc get nodes -L topology.kubernetes.io/zone`). The share must hold the VM disk, so the example makes a 100 GB share.
+If you have no pool yet, make one. Use the zone of your workers (`oc get nodes -L topology.kubernetes.io/zone`). The share must hold the VM disk, so the example makes a 100 GB share. More IOPS make the image copy faster.
 
 ```bash
 cat <<EOF | oc apply -f -
@@ -53,7 +53,7 @@ spec:
   zone: eu-de-1
   profile: dp2
   shareSizeGB: 100
-  iops: 100
+  iops: 3000
   maxShares: 3
   initialShares: 1
   autoExpand: true
@@ -124,12 +124,13 @@ export NS=pool-tutorial-vm
 oc create namespace ${NS}
 ```
 
-2. In the OpenShift console, open **Virtualization**, then the **Catalog**.
-3. Choose a catalog image, such as CentOS Stream 9 or RHEL 9, and an instance type.
-4. For the boot disk, choose the pool's StorageClass. It has the name of the pool (`my-pool` in the example).
-5. Make the VM in the project `pool-tutorial-vm`.
+2. In the OpenShift console, open **Virtualization**, then **Catalog**, in the project `pool-tutorial-vm`. The page is called **Create new VirtualMachine**. Stay on the **InstanceTypes** tab.
+3. Under **Select volume to boot from**, choose a catalog image, such as `centos-stream9` or `rhel9`.
+4. Under **Select InstanceType**, keep the default (for example **U series**, `u1.medium`) or choose another.
+5. Under **VirtualMachine details**, set **Name**, and set **Storage class** to the pool's StorageClass. It has the name of the pool (`my-pool` in the example). Keep the **Disk size**, or make it bigger.
+6. Choose **Create VirtualMachine**.
 
-The labels in the Virtualization pages depend on your OpenShift version. The three choices to make are the image, the instance type and the StorageClass of the boot disk. Keep the default size of the boot disk, or make it bigger.
+These labels are from OpenShift 4.21. Other versions can name them differently. The three choices are the same: the image, the instance type and the StorageClass of the boot disk.
 
 Go to [Step 6](#step-6-watch-the-copy) to watch the copy.
 
@@ -230,7 +231,13 @@ Look at the pods and the PVC while it runs:
 oc get pods,pvc -n ${NS}
 ```
 
-**Expected:** a CDI pod is `Running` while the copy runs, and the PVC `catalog-vm-rootdisk` is `Bound` (the PVC and the DataVolume have the same name). If you used the console, the name of the PVC is on the VM's **Storage** tab, or in `oc get pvc -n ${NS}`.
+**Expected:** the PVC `catalog-vm-rootdisk` is `Pending` while the copy runs, and becomes `Bound` when the DataVolume is `Succeeded` (the PVC and the DataVolume have the same name). CDI copies into a temporary claim on the pool, then hands the volume to your PVC. The CDI pods and the temporary claim are in the namespace of the catalog images, not in `${NS}`:
+
+```bash
+oc get pods,pvc -n openshift-virtualization-os-images
+```
+
+If you used the console, the PVC has the name of the VM with `-volume` added (for example `console-vm-volume`). It is also on the VM's **Storage** tab.
 
 If the CDI pod restarts and the progress goes back to zero, go to [If the copy fails](#if-the-copy-fails).
 
@@ -266,11 +273,11 @@ oc get subvolume ${PV} -o jsonpath='{.spec.poolName}{" "}{.spec.shareID}{" "}{.s
 See the file from inside the VM's pod. The VM's `virt-launcher` pod has the disk under `/var/run/kubevirt-private/vmi-disks/<disk name>/`:
 
 ```bash
-LAUNCHER=$(oc get pods -n ${NS} -l kubevirt.io/domain=${VM} -o name | head -1)
+LAUNCHER=$(oc get pods -n ${NS} -l vm.kubevirt.io/name=${VM} -o name | head -1)
 oc exec -n ${NS} ${LAUNCHER} -c compute -- ls -l /var/run/kubevirt-private/vmi-disks/
 ```
 
-**Expected:** one folder for each disk. For the YAML of Step 5 it is `rootdisk`. List that folder to see `disk.img`:
+**Expected:** one folder for each disk. For the YAML of Step 5, and for a VM made in the console, it is `rootdisk`. List that folder to see `disk.img`:
 
 ```bash
 oc exec -n ${NS} ${LAUNCHER} -c compute -- ls -l /var/run/kubevirt-private/vmi-disks/rootdisk/
