@@ -74,6 +74,13 @@ beforeEach(() => jest.clearAllMocks());
 const createButton = () => screen.getByRole('button', { name: 'Restore' }) as HTMLButtonElement;
 
 describe('RestoreSnapshotPage', () => {
+  it('does not offer the storage class of a snapshot pool', () => {
+    watch({ ...base(), StorageClass: [...storageClasses, { metadata: { name: 'backups' }, provisioner: DRIVER, parameters: { pool: 'backups' } }], BackupPolicy: [{ metadata: { name: 'nightly' }, spec: { snapshotPool: 'backups' } }] });
+    render(<RestoreSnapshotPage />);
+    expect(screen.getByRole('option', { name: 'pool-a' })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: 'backups' })).toBeNull();
+  });
+
   it('opens with defaults: name <source>-restored, the snapshot size, the source class, and the namespace fixed', () => {
     watch(base());
     render(<RestoreSnapshotPage />);

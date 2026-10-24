@@ -25,6 +25,8 @@ To make a release:
 
 ### Fixed
 
+- **A volume can no longer be made on a backup policy's snapshot pool.** A policy stops backing up while its snapshot pool holds any volume, and the console offered that pool's storage class for new volumes, clones, restores and migrations. The driver now refuses CreateVolume on such a pool (FailedPrecondition, naming the policy), and the console leaves those pools out of its lists.
+
 - **Console: the clone and restore pages no longer call their own new claim a taken name.** After "Clone to new PVC", "Restore to new PVC" or a backup restore started, the form showed "A claim with this name already exists" under the name, because the page counted the claim it had just made.
 - **Tutorials 15 and 16 corrected after a run on rovslab** (driver v0.14.1, OpenShift 4.21). Part 15: the claim is Pending during the CDI copy, the copy pods are in the catalog images' namespace, the VM pod label is `vm.kubevirt.io/name`, the console labels of OpenShift 4.21, and a 3000-IOPS example pool. Part 16: the phase shows Unknown for a few seconds, Size shows `-` for a plain volume (also in BACKUP-RECOVERY.md), and the clone banner now follows the copy.
 - **The node agent metrics endpoint no longer answers HTTP 500 when a node holds the same share twice.** Kubelet gives each volume its own staging path, so a node can have several staging mounts of one share (and stale ones of deleted pools). The collector reported each one, Prometheus refused the repeated series, and the whole endpoint, with every share metric and the alerts built on them, showed nothing. It now reports one set of series for each share, using the larger counter of its mounts. Found on `rovslab-prod-eude` while preparing the performance test.

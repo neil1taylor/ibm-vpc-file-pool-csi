@@ -141,6 +141,18 @@ describe('BackupCOSRestorePage', () => {
     expect(restoreButton().disabled).toBe(false);
   });
 
+  it('does not offer the storage class of a snapshot pool', () => {
+    classes.push({ metadata: { name: 'snaps' }, provisioner: 'vpc-file-pool.csi.ibm.io', parameters: { pool: 'snaps' } } as never);
+    try {
+      render(<BackupCOSRestorePage />);
+      const select = field(/^Storage class( \*)?$/) as unknown as HTMLSelectElement;
+      expect(within(select).getByRole('option', { name: 'pool-a' })).toBeTruthy();
+      expect(within(select).queryByRole('option', { name: 'snaps' })).toBeNull();
+    } finally {
+      classes.pop();
+    }
+  });
+
   it('offers only storage classes of the driver, and says COS does not keep the class or the size', () => {
     render(<BackupCOSRestorePage />);
     const select = field(/^Storage class( \*)?$/) as unknown as HTMLSelectElement;

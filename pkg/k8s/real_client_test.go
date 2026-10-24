@@ -723,3 +723,30 @@ func TestCreateStorageClass(t *testing.T) {
 		t.Errorf("expected pool param 'test-pool', got %q", got.Parameters["pool"])
 	}
 }
+
+func TestBackupPolicyUsingPool(t *testing.T) {
+	scheme := newTestScheme(t)
+	nightly := &v1alpha1.BackupPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "nightly"},
+		Spec:       v1alpha1.BackupPolicySpec{SnapshotPool: "backups"},
+	}
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(nightly).Build()
+	c := NewClient(fc)
+
+	tests := []struct {
+		pool string
+		want string
+	}{
+		{pool: "backups", want: "nightly"},
+		{pool: "data", want: ""},
+	}
+	for _, tt := range tests {
+		got, err := c.BackupPolicyUsingPool(context.Background(), tt.pool)
+		if err != nil {
+			t.Fatalf("pool %s: unexpected error: %v", tt.pool, err)
+		}
+		if got != tt.want {
+			t.Errorf("pool %s: got %q, want %q", tt.pool, got, tt.want)
+		}
+	}
+}

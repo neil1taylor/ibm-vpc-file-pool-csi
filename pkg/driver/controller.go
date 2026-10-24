@@ -73,6 +73,19 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 		}
 	}
 
+	// A snapshot pool must hold only backups: its policy stops backing up when
+	// the pool holds a volume.
+	if d.k8sClient != nil {
+		policy, err := d.k8sClient.BackupPolicyUsingPool(ctx, poolName)
+		if err != nil {
+			return nil, status.Errorf(codes.Unavailable, "check whether pool %q holds backups: %v", poolName, err)
+		}
+		if policy != "" {
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"pool %q is the snapshot pool of BackupPolicy %q and must hold only backups; a volume here would stop its backups. Use the StorageClass of another pool", poolName, policy)
+		}
+	}
+
 	// Extract topology preference (zone)
 	zone := ""
 	if req.GetAccessibilityRequirements() != nil {

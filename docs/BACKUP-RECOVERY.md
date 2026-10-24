@@ -321,7 +321,7 @@ The inconsistency window (time between first and last member copy) is tracked in
 
 ## Backups to a Snapshot Pool
 
-A `BackupPolicy` backs up the PVCs and VMs you select into a pool that holds only backups. The pool has its own VPC file share, so losing or filling a data share does not take the backups with it. A running VM is backed up at one moment for all its disks, with the guest file systems frozen for a fraction of a second, and only changed blocks are copied after the first backup.
+A `BackupPolicy` backs up the PVCs and VMs you select into a pool that holds only backups. The pool has its own VPC file share, so losing or filling a data share does not take the backups with it. The pool must hold only backups: the policy stops backing up while it holds any volume. So the driver refuses to make a volume (a new claim, a clone or a restore) on a pool that a policy uses as its snapshot pool, and the console leaves that pool's storage class out of its lists. A running VM is backed up at one moment for all its disks, with the guest file systems frozen for a fraction of a second, and only changed blocks are copied after the first backup.
 
 ![A BackupPolicy copies PVCs and VM disks from the data pool into a snapshot pool, and kubectl backup restore reads them back](images/backup-recovery-snapshot-pool.drawio.svg)
 

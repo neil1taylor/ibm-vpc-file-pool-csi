@@ -34,12 +34,13 @@ import {
 } from '../../utils/backup-cos';
 import { localInputToISO, momentToLocalInput } from '../../utils/backup-helpers';
 import { COSRepo, cosAreaPrefix } from '../../utils/backup-jobs';
-import { CSI_DRIVER_NAME, PersistentVolumeClaim, StorageClass, errorMessage } from '../../utils/k8s-objects';
+import { PersistentVolumeClaim, StorageClass, errorMessage } from '../../utils/k8s-objects';
 import { toYAML } from '../../utils/yaml-lite';
 import FieldPopover from '../common/FieldPopover';
 import NoAccessNote from '../common/NoAccessNote';
 import BackupRestoreBanner from './BackupRestoreBanner';
 import COSContents from './COSContents';
+import { volumeClasses } from '../../utils/snapshot-pools';
 
 const gvk = (model: { apiGroup?: string; apiVersion: string; kind: string }) => ({
   group: model.apiGroup,
@@ -134,7 +135,7 @@ const BackupCOSRestorePage: React.FC = () => {
         emergencyKeySecret: form.emergencyKeySecret,
       }
     : undefined;
-  const driverClasses = (storageClasses || []).filter((sc) => sc.provisioner === CSI_DRIVER_NAME);
+  const driverClasses = volumeClasses(storageClasses || [], policies);
   const set = <K extends keyof COSRestoreForm>(key: K, value: COSRestoreForm[K]) => setForm((f) => ({ ...f, [key]: value }));
   const locked = !!created;
   const request = buildCOSRestore(form, Date.now());
