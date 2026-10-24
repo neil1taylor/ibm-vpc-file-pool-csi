@@ -19,6 +19,10 @@ To make a release:
 
 ## [Unreleased]
 
+### Fixed
+
+- **Node agent share metrics are no longer minutes late on a node with dead mounts (issue #251).** A node can keep staging mounts of deleted shares, and `statfs` on each one waits 10 s. The node agent asked the mounts one after the other, so on a rovslab node with about 25 such mounts one read took about 4 minutes, not 30 s. A restarted node agent showed no share series for that long, and a new pool's series came late. The node agent now asks up to 8 mounts at once, and does not ask a mount whose `statfs` failed again for 5 minutes. That mount's NFS counters are still reported.
+
 ## [v0.14.2] — 2026-10-24
 
 A fix release. The node agent metrics endpoint works again on nodes that hold one share twice, the driver refuses volumes on a backup policy's snapshot pool, and the console has three fixes. No CRD or chart value changes.

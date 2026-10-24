@@ -231,11 +231,11 @@ kill %1
 
 ### Share Metrics (Node Agent)
 
-Each node agent reads the NFS shares mounted on its node, every `--share-stats-interval` (30 s). It reads the NFS counters in `/proc/self/mountstats` and runs `statfs` on the share mount; it never walks the files. `pool` and `share` are the same names as the controller's per-share metrics. A share mounted on several nodes is reported by each node (the scrape adds an `instance` label), so use `max by (pool, share)` for the space metrics and `sum by (pool, share)` for the traffic counters. A share that is mounted nowhere has no series. A share whose pool cannot be found has `pool="unknown"`.
+Each node agent reads the NFS shares mounted on its node, every `--share-stats-interval` (30 s). It reads the NFS counters in `/proc/self/mountstats` and runs `statfs` on the share mount, up to 8 mounts at once; it never walks the files. `pool` and `share` are the same names as the controller's per-share metrics. A share mounted on several nodes is reported by each node (the scrape adds an `instance` label), so use `max by (pool, share)` for the space metrics and `sum by (pool, share)` for the traffic counters. A share that is mounted nowhere has no series. A share whose pool cannot be found has `pool="unknown"`.
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `vpc_file_pool_share_used_bytes` | Gauge | `pool`, `share` | Bytes written on the share (size minus free, from `statfs`). Absent when `statfs` fails or takes more than 10 s. |
+| `vpc_file_pool_share_used_bytes` | Gauge | `pool`, `share` | Bytes written on the share (size minus free, from `statfs`). Absent when `statfs` fails or takes more than 10 s; after a failure the node agent does not try that mount again for 5 minutes. |
 | `vpc_file_pool_share_size_bytes` | Gauge | `pool`, `share` | Size of the share as the NFS client sees it. |
 | `vpc_file_pool_share_nfs_operations_total` | Counter | `pool`, `share`, `op` | NFS operations done by this node. `op` is `read`, `write` or `other` (all metadata calls). `rate()` of `read` and `write` is the IOPS. |
 | `vpc_file_pool_share_nfs_rtt_seconds_total` | Counter | `pool`, `share`, `op` | Seconds spent between sending a request and getting the reply (the network and the server). |
