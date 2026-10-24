@@ -229,4 +229,102 @@ fill_at=$(grep -n -- "--name=fill" <<<"$ud" | head -1 | cut -d: -f1)
 ready_at=$(grep -n "echo PERF-READY" <<<"$ud" | head -1 | cut -d: -f1)
 if [ -n "$fill_at" ] && [ -n "$ready_at" ] && [ "$fill_at" -lt "$ready_at" ]; then pass "the fill comes before PERF-READY"; else fail "the fill comes before PERF-READY (fill line '$fill_at', ready line '$ready_at')"; fi
 
+# --- the Windows VMs: the same fio jobs, a load script, and how the run starts it ---
+# A Windows VM runs fio for Windows with the same jobs as a Linux VM. Only the disk and the I/O
+# engine differ, so the two kinds of VM compare like with like and one collector reads both.
+wa=$(perf_windows_fio_args steady 30 555 3G)
+has "the Windows steady phase has the 4k job at the Linux rate (15 total: 10 reads, 5 writes)" "$wa" "--rate_iops=10,5"
+has "the Windows steady phase has a 16k job" "$wa" "--name=steady-16k"
+has "the Windows steady phase has a 64k job" "$wa" "--name=steady-64k"
+has "it works on the load disk, whose number the VM puts in" "$wa" '--filename=\\.\PhysicalDrive#PERFDISK'
+has "it uses the Windows I/O engine" "$wa" "--ioengine=windowsaio"
+has "it bypasses the guest cache" "$wa" "--direct=1"
+has "it keeps 4 I/Os in flight per job" "$wa" "--iodepth=4"
+has "reads are 70 percent" "$wa" "--rwmixread=70"
+has "each fio process uses a different random pattern" "$wa" "--randrepeat=0"
+has "total latency is recorded" "$wa" "--lat_percentiles=1"
+has "it works on the test area" "$wa" "--size=3G"
+has "it runs for the phase length" "$wa" "--runtime=555"
+has "the result is JSON" "$wa" "--output-format=json"
+lacks "no job uses a block size range" "$wa" "--bsrange"
+eq "each argument is on its own line, so the VM passes them one by one" "$(grep -c -- '^--' <<<"$wa")" "$(wc -l <<<"$wa" | tr -d ' ')"
+wb=$(perf_windows_fio_args burst 300 45 3G)
+has "the Windows burst 4k job (150 total: 105 reads, 45 writes)" "$wb" "--rate_iops=105,45"
+has "the Windows burst lasts the burst time" "$wb" "--runtime=45"
+wf=$(perf_windows_fill_args 3G)
+has "the Windows fill writes the test area" "$wf" "--size=3G"
+has "the Windows fill is a sequential write" "$wf" "--rw=write"
+has "the Windows fill bypasses the guest cache" "$wf" "--direct=1"
+
+if command -v pwsh >/dev/null 2>&1; then
+    for ps in load.ps1 perf.ps1; do
+        errs=$(pwsh -NoProfile -Command "\$e = \$null; [void][System.Management.Automation.Language.Parser]::ParseFile('$HERE/windows/$ps', [ref]\$null, [ref]\$e); \$e | ForEach-Object { \$_.ToString() }" 2>&1)
+        eq "$ps has no PowerShell syntax error" "$errs" ""
+    done
+    # fio prints its JSON over many lines, after any warnings; the line is the JSON on one line, as on Linux.
+    pretty=$(printf 'fio: a warning\n%s\n' "$(fio_json 20 9 4000000 9000000 12000000 2000000 3000000 | jq .)")
+    printf '%s' "$pretty" >"$WORK/fio-out.txt"
+    wline=$(pwsh -NoProfile -Command ". '$HERE/windows/perf.ps1'; Format-PerfLine 1700000100 steady (Get-Content -Raw '$WORK/fio-out.txt')" 2>&1)
+    eq "a Windows result line reads like a Linux one" "$(perf_parse_line "$wline")" "1700000100,steady,20,9,4,2,9,12"
+    nojson=$(pwsh -NoProfile -Command ". '$HERE/windows/perf.ps1'; Format-PerfLine 1700000100 steady 'fio: error'" 2>&1)
+    eq "fio output with no JSON gives no row, so the VM counts as slow" "$(perf_parse_line "$nojson")" ""
+else
+    echo "SKIP  the Windows script checks: pwsh is not installed"
+fi
+
+load=$(cat "$HERE/windows/load.ps1")
+has "the Windows load reads its settings from the config disk" "$load" "settings.txt"
+has "it reads the fio arguments of each phase from the config disk" "$load" '.args'
+has "it finds the load disk by its serial number" "$load" "SerialNumber"
+has "it fills the test area once before it says ready" "$load" "perf-filled"
+has "it says PERF-READY on the serial console" "$load" "PERF-READY"
+has "results go to the serial port" "$load" "COM1"
+has "each VM starts at its own offset" "$load" "Get-Random"
+has "it runs fio for Windows" "$load" 'fio.exe'
+has "an error output from fio does not stop the script" "$load" "\$ErrorActionPreference = 'Continue'"
+
+wvm=$(PERF_ID=T1 bash "$HERE/run-tier.sh" --iops 3000 --windows-every 3 --print-vm 3 2>&1)
+has "every third VM is Windows" "$wvm" "name: windows.2k22.virtio"
+has "a Windows VM starts from the prepared Windows image" "$wvm" "name: win2k22-perf"
+has "a Windows VM has 2 vCPUs, as sockets, which the Windows preference requires" "$wvm" "sockets: 2"
+has "a Windows VM has 4 GiB of memory" "$wvm" "guest: 4Gi"
+has "its load disk has a serial number the load script finds it by" "$wvm" "serial: perfload"
+has "it gets the config disk as a CD" "$wvm" "volumeLabel: PERFCFG"
+has "the config disk comes from the run's ConfigMap" "$wvm" "name: perf-windows"
+lacks "a Windows VM has no cloud-init" "$wvm" "cloudInitNoCloud"
+has "its root disk is on the pool under test" "$wvm" "storageClassName: perf-T1"
+has "its serial console is logged" "$wvm" "logSerialConsole: true"
+lvm=$(PERF_ID=T1 bash "$HERE/run-tier.sh" --iops 3000 --windows-every 3 --print-vm 2 2>&1)
+has "the other VMs stay Linux" "$lvm" "name: centos.stream9"
+lvm=$(PERF_ID=T1 bash "$HERE/run-tier.sh" --iops 3000 --windows-every 0 --print-vm 3 2>&1)
+has "--windows-every 0 makes every VM Linux" "$lvm" "name: centos.stream9"
+dvm=$(PERF_ID=T1 bash "$HERE/run-tier.sh" --iops 3000 --print-vm 3 2>&1)
+has "by default a third of the VMs are Windows, as the spec says" "$dvm" "name: windows.2k22.virtio"
+
+cfg=$(PERF_ID=T1 bash "$HERE/run-tier.sh" --iops 3000 --avg 30 --burst 300 --burst-secs 45 --period 600 --print-windows-config 2>&1)
+has "the config has the steady phase at the steady rate" "$cfg" "--rate_iops=10,5"
+has "the config has the burst phase at the burst rate" "$cfg" "--rate_iops=105,45"
+has "the config gives the period" "$cfg" "period=600"
+has "the config names the load disk's serial number" "$cfg" "serial=perfload"
+
+# The run starts the load of a Windows VM through the guest agent, once: a start-up task in Windows
+# stayed "Queued" and never ran. The start finds the config disk by its label and does nothing if a load runs.
+st=$(PERF_ID=T1 bash "$HERE/run-tier.sh" --iops 3000 --print-windows-start 2>&1)
+has "the start finds the config disk by its label" "$st" "PERFCFG"
+has "the start does not start a second load" "$st" "load.ps1"
+has "the start leaves the load running in the background" "$st" "Start-Process"
+# shellcheck disable=SC2016 # the text of the script, not a shell expansion
+has "the guest agent helper is shared with the image preparation" "$(cat "$HERE/run-tier.sh")" 'source "$HERE/guest.sh"'
+
+prep="$HERE/prepare-windows-image.sh"
+if bash -n "$prep"; then pass "prepare-windows-image.sh has no shell syntax error"; else fail "prepare-windows-image.sh has no shell syntax error"; fi
+p=$(cat "$prep")
+has "the image gets fio for Windows" "$p" "fio-3.43-x64.msi"
+has "the fio installer is checked against its checksum" "$p" "8299E6E6FBC024D3B74AA1CE62FB94EF6960B45629FBFA678B720834B6EB34AA"
+has "an old start-up task is removed, so a load never starts twice" "$p" "Unregister-ScheduledTask"
+has "the licence is activated online when it can be" "$p" "slmgr.vbs /ato"
+has "without internet the grace period is reset" "$p" "slmgr.vbs /rearm"
+has "the licence is checked after a restart" "$p" "slmgr.vbs /dli"
+has "the test's DataSource points at the prepared disk" "$p" "kind: DataSource"
+
 exit "$FAILED"

@@ -30,15 +30,24 @@ perf_job_iops() {
     echo "$n"
 }
 
-# perf_fio_jobs PHASE TOTAL_IOPS — the "--name ... --bs ... --rate_iops" part of a fio
-# command: one job for each block size in PERF_BLOCK_MIX, each with its share of TOTAL_IOPS.
-perf_fio_jobs() {
+# perf_fio_job_list PHASE TOTAL_IOPS — the jobs of one phase, one argument to a line:
+# one job for each block size in PERF_BLOCK_MIX, each with its share of TOTAL_IOPS.
+perf_fio_job_list() {
     local phase="$1" total="$2" entry bs weight
     for entry in $PERF_BLOCK_MIX; do
         bs=${entry%%:*}
         weight=${entry##*:}
-        printf ' \\\n    --name=%s-%s --bs=%s --rate_iops=%s' "$phase" "$bs" "$bs" "$(perf_split_iops "$(perf_job_iops "$total" "$weight")")"
+        printf '%s\n' "--name=$phase-$bs" "--bs=$bs" "--rate_iops=$(perf_split_iops "$(perf_job_iops "$total" "$weight")")"
     done
+}
+
+# perf_fio_jobs PHASE TOTAL_IOPS — the "--name ... --bs ... --rate_iops" part of a fio
+# command in a shell script, one job to a line.
+perf_fio_jobs() {
+    local name bs rate
+    while read -r name && read -r bs && read -r rate; do
+        printf ' \\\n    %s %s %s' "$name" "$bs" "$rate"
+    done < <(perf_fio_job_list "$1" "$2")
 }
 
 # perf_ibm_ops_per_io — how many share operations IBM counts, on average, for one I/O of the
@@ -64,6 +73,14 @@ perf_prefill_command() {
     echo "fio --name=fill --filename=$1 --rw=write --bs=1M --size=$2 --direct=1 --ioengine=libaio --iodepth=8"
 }
 
+# perf_fio_common DEVICE SIZE ENGINE — the options every load phase of every VM uses, one to a
+# line: random reads and writes at the read share of the mix, 4 I/Os in flight per job, no guest
+# cache, the total latency, and one JSON result for all the jobs.
+perf_fio_common() {
+    printf '%s\n' "--filename=$1" --direct=1 "--ioengine=$3" --rw=randrw "--rwmixread=$PERF_READ_PCT" --iodepth=4 \
+        "--size=$2" --randrepeat=0 --lat_percentiles=1 --time_based --group_reporting --output-format=json
+}
+
 # perf_linux_load_script AVG_IOPS BURST_IOPS BURST_SECS PERIOD_SECS DEVICE [SIZE] —
 # the shell script a Linux VM runs for ever. A period is the steady phase and
 # then the burst. Each VM waits a different time before its first period, so
@@ -77,7 +94,7 @@ perf_linux_load_script() {
     local avg="$1" burst="$2" burst_secs="$3" period="$4" device="$5" size="${6:-3G}"
     local steady_secs common
     steady_secs=$((period - burst_secs))
-    common="--filename=$device --direct=1 --ioengine=libaio --rw=randrw --rwmixread=$PERF_READ_PCT --iodepth=4 --size=$size --randrepeat=0 --lat_percentiles=1 --time_based --group_reporting --output-format=json"
+    common=$(perf_fio_common "$device" "$size" libaio | paste -sd' ' -)
     cat <<EOF
 #!/bin/sh
 # Load for one VM: a steady rate, then a short burst, over and over.
@@ -91,3 +108,22 @@ while true; do
 done
 EOF
 }
+
+# The load disk of a Windows VM. The VM finds the disk number by the disk's serial
+# number and puts it in place of #PERFDISK.
+PERF_WINDOWS_DISK='\\.\PhysicalDrive#PERFDISK'
+
+# perf_windows_fio_args PHASE TOTAL_IOPS SECS SIZE — the fio arguments of one phase of a
+# Windows VM, one to a line: the same jobs as a Linux VM, with the Windows load disk and
+# the Windows I/O engine, so the two kinds of VM compare like with like.
+perf_windows_fio_args() {
+    perf_fio_common "$PERF_WINDOWS_DISK" "$4" windowsaio
+    printf '%s\n' --thread "--runtime=$3"
+    perf_fio_job_list "$1" "$2"
+}
+
+# perf_windows_fill_args SIZE — the fio arguments that write a Windows VM's test area once.
+perf_windows_fill_args() {
+    printf '%s\n' --name=fill "--filename=$PERF_WINDOWS_DISK" --rw=write --bs=1M "--size=$1" --direct=1 --ioengine=windowsaio --thread --iodepth=8
+}
+
