@@ -368,7 +368,7 @@ start_windows_loads() {
     for ((i = 1; i <= $1; i++)); do
         is_windows "$i" || continue
         vm=$(vm_name "$i")
-        vm_console "$vm" | grep -q PERF-READY && continue
+        vm_console "$vm" | perf_said_ready && continue
         guest_agent_connected "$NS" "$vm" || continue
         guest_ps "$NS" "$vm" "$(windows_start_script)" >/dev/null 2>&1 || true
     done
@@ -381,7 +381,7 @@ ready() { start_windows_loads "$1"; all_ready "$1"; }
 all_ready() {
     local i
     for ((i = 1; i <= $1; i++)); do
-        vm_console "$(vm_name "$i")" | grep -q PERF-READY || return 1
+        vm_console "$(vm_name "$i")" | perf_said_ready || return 1
     done
 }
 
