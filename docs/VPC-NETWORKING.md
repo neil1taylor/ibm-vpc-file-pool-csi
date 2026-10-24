@@ -4,27 +4,7 @@ This document explains how NFS traffic flows between Kubernetes worker nodes and
 
 ## VPC Resource Topology
 
-```
-IBM Cloud Account
-└── Resource Group (billing + IAM boundary)
-    └── VPC
-        ├── File Share (NFS backend, created in the pool's home zone)
-        │   └── Mount Target (1 per share, security group access mode)
-        │       └── Virtual network interface: IP in the home-zone worker subnet,
-        │           security group kube-<cluster ID>
-        │
-        ├── Zone: us-south-1 (home)
-        │   ├── Subnet 0717-aaaa...   ← mount target IP, for example 10.240.1.20
-        │   └── Worker Nodes          → mount 10.240.1.20:/<share export>
-        │
-        ├── Zone: us-south-2 (accessor)
-        │   ├── Subnet 0717-bbbb...
-        │   └── Worker Nodes          → mount the same IP across zones
-        │
-        └── Zone: us-south-3 (accessor)
-            ├── Subnet 0717-cccc...
-            └── Worker Nodes          → mount the same IP across zones
-```
+![A resource group holds the VPC; the file share and its mount target sit in the home zone, and worker nodes in all three zones mount it](images/vpc-networking-topology.drawio.svg)
 
 Every file share in a pool belongs to the same VPC. Cross-VPC sharing is not supported.
 
@@ -48,38 +28,7 @@ The mount path may not be known at once when the share reaches `stable`. The dri
 
 ## Network Path: End to End
 
-```
-┌─────────────────────────────────────────────────┐
-│ Pod                                             │
-│  /data/ ← bind-mount of subdirectory           │
-└──────────────────────┬──────────────────────────┘
-                       │ bind mount
-┌──────────────────────▼──────────────────────────┐
-│ Node Agent (DaemonSet)                          │
-│  /staging/{share-id}/pvcs/pvc-abc123/           │
-│       ▲                                         │
-│       │ NFS mount (nfsvers=4.1, soft)           │
-│       │ mount -t nfs4 <IP>:/<export> /staging/..│
-└───────┼─────────────────────────────────────────┘
-        │
-        │ TCP 2049 (NFS)
-        │ within VPC private network
-        │
-┌───────▼─────────────────────────────────────────┐
-│ Mount Target                                    │
-│  VNI IP in the home-zone worker subnet          │
-│  mount_path: 10.240.1.20:/<share export>        │
-└───────┬─────────────────────────────────────────┘
-        │
-┌───────▼─────────────────────────────────────────┐
-│ VPC File Share (NFS export)                     │
-│  /<share export>                                │
-│  └── pvcs/                                      │
-│      ├── pvc-aaa/  (50 GB allocated)            │
-│      ├── pvc-bbb/  (100 GB allocated)           │
-│      └── pvc-ccc/  (25 GB allocated)            │
-└─────────────────────────────────────────────────┘
-```
+![A pod reaches its subdirectory through a bind mount, the node agent mounts the share over NFS to the mount target, which fronts the file share](images/vpc-networking-path.drawio.svg)
 
 All NFS traffic stays within the VPC private network. No traffic traverses the public internet.
 
@@ -132,23 +81,7 @@ The controller's IAM identity needs to read subnets and security groups, and to 
 
 A pool with only `spec.zone` creates shares and mount targets in one availability zone. All worker nodes and file shares are co-located — NFS traffic never leaves the zone.
 
-```
-Zone 1 (us-south-1)
-┌──────────────────────────────────────────────────────────────┐
-│                                                              │
-│  Worker Node A          Worker Node B          VPC File Share│
-│  ┌──────────────┐      ┌──────────────┐      ┌─────────────┐│
-│  │ Pod          │      │ Pod          │      │ NFS backend  ││
-│  │ /data/ ←─────┼──┐   │ /data/ ←─────┼──┐   │             ││
-│  └──────────────┘  │   └──────────────┘  │   │ /pvcs/      ││
-│                    │                     │   │  ├─ pvc-aaa/ ││
-│                    │   NFS (TCP 2049)    │   │  └─ pvc-bbb/ ││
-│                    └─────────────────────┼──▶│             ││
-│                        zone-local        └──▶│ Mount Target ││
-│                        ~0.2ms latency        │ VNI IP      ││
-│                                              └─────────────┘│
-└──────────────────────────────────────────────────────────────┘
-```
+![In a single zone, pods on two worker nodes mount the file share over NFS inside the zone](images/vpc-networking-single-zone.drawio.svg)
 
 ```yaml
 apiVersion: storage.ibm.io/v1alpha1
@@ -185,28 +118,7 @@ One mount target, in the home zone, serves every zone. The driver records its IP
 
 In a cross-zone pool, the file share lives in the home zone but pods on worker nodes in accessor zones access it over the VPC backbone:
 
-```
-Zone 1 (us-south-1)                      Zone 2 (us-south-2)
-┌─────────────────────────┐              ┌─────────────────────────┐
-│                         │              │                         │
-│  VPC File Share         │              │  Worker Node / VM       │
-│  (NFS backend)          │◄────NFS──────│  running Pod            │
-│                         │   TCP 2049   │                         │
-│  /pvcs/pvc-aaa/  ◄──┐  │  cross-zone  │  /data/ ← bind-mount   │
-│  /pvcs/pvc-bbb/     │  │  VPC backbone │       of pvc-aaa/      │
-│                     │  │              │                         │
-│  Mount Target       │  │              │  mounts the home-zone   │
-│  IP: 10.240.1.20   │  │              │  mount target IP       │
-│                     │  │              │  across zones           │
-└─────────────────────┘  │              └─────────────────────────┘
-                         │
-                         │              ┌─────────────────────────┐
-                         │              │  Zone 3 (us-south-3)    │
-                         └──────NFS─────│  Worker Node / VM       │
-                             TCP 2049   │  running Pod            │
-                             cross-zone │  /data/ ← pvc-bbb/     │
-                                        └─────────────────────────┘
-```
+![Worker nodes in zones 2 and 3 mount the home-zone mount target across zones](images/vpc-networking-cross-zone.drawio.svg)
 
 All NFS traffic stays within the VPC private network — it never traverses the public internet.
 
@@ -227,26 +139,9 @@ All NFS traffic stays within the VPC private network — it never traverses the 
 
 For latency-sensitive workloads, avoid cross-zone NFS entirely by creating a **separate pool in each zone**. Each pool's shares and consumers stay zone-local.
 
-```
-Zone 1 (us-south-1)                      Zone 2 (us-south-2)
-┌───────────────────────────┐            ┌───────────────────────────┐
-│                           │            │                           │
-│  Pool: db-storage-z1      │            │  Pool: db-storage-z2      │
-│                           │            │                           │
-│  Worker Node              │            │  Worker Node              │
-│  ┌─────────────────┐     │            │  ┌─────────────────┐     │
-│  │ DB Pod          │     │            │  │ DB Pod          │     │
-│  │ /data/ ←────────┼──┐  │            │  │ /data/ ←────────┼──┐  │
-│  └─────────────────┘  │  │            │  └─────────────────┘  │  │
-│                       │  │            │                       │  │
-│  VPC File Share    ◄──┘  │            │  VPC File Share    ◄──┘  │
-│  zone-local NFS          │            │  zone-local NFS          │
-│  ~0.2ms latency          │            │  ~0.2ms latency          │
-│                           │            │                           │
-└───────────────────────────┘            └───────────────────────────┘
+![Each zone has its own pool and file share, so NFS traffic stays inside the zone](images/vpc-networking-pool-per-zone.drawio.svg)
 
-              No cross-zone NFS traffic
-```
+No cross-zone NFS traffic.
 
 ```yaml
 # Pool for zone 1
@@ -354,29 +249,9 @@ All shares in a pool belong to the same IBM Cloud resource group, set via `spec.
 
 When `spec.encryptInTransit: true` is set on the pool, the mount target is created with `TransitEncryption: "user_managed"`. This adds Kerberos encryption (`sec=krb5p`) to the NFS mount, encrypting all data on the wire between the worker node and the file share.
 
-```
-Without encryption (default):
+![Without encryption NFS 4.1 runs in plaintext inside the VPC; with encryptInTransit it uses krb5p](images/vpc-networking-encryption.drawio.svg)
 
-  Worker Node                        VPC File Share
-  ┌──────────────┐    NFS v4.1      ┌──────────────┐
-  │ Pod /data/   │─────────────────▶│ /pvcs/...    │
-  └──────────────┘   plaintext       └──────────────┘
-                     TCP 2049
-                     (within VPC)
-
-
-With encryption (encryptInTransit: true):
-
-  Worker Node                        VPC File Share
-  ┌──────────────┐    NFS v4.1      ┌──────────────┐
-  │ Pod /data/   │──── krb5p ──────▶│ /pvcs/...    │
-  └──────────────┘   encrypted       └──────────────┘
-                     TCP 2049
-                     (within VPC)
-
-  Mount options: nfsvers=4.1,soft,timeo=600,retrans=3,sec=krb5p
-  Mount target:  TransitEncryption: "user_managed"
-```
+With encryption, the mount options are `nfsvers=4.1,soft,timeo=600,retrans=3,sec=krb5p` and the mount target has `TransitEncryption: "user_managed"`. Traffic uses TCP 2049 within the VPC in both cases.
 
 ```yaml
 apiVersion: storage.ibm.io/v1alpha1
