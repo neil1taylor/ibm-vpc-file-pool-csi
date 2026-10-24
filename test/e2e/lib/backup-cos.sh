@@ -192,9 +192,22 @@ cos_init() { # sets COS_ON, COS_PREFIX, the Secret names
 
 cos_policy_export_yaml() { cos_export_yaml "$COS_PREFIX" "$COS_CRED_SECRET" "$COS_KEY_SECRET" "$COS_KP_SECRET"; }
 
+# cos_job_diagnose — what the COS fetch jobs and their pods in the driver namespace say, before cleanup
+# deletes them. A fetch job that fails leaves only "share data job failed" in the restore message.
+cos_job_diagnose() {
+    local p
+    oc get jobs,pods -n "$DRIVER_NS" 2>&1 | grep -E "^NAME|cosfetch" || true
+    for p in $(oc get pods -n "$DRIVER_NS" -o name 2>/dev/null | grep cosfetch); do
+        echo "--- $p"
+        oc describe -n "$DRIVER_NS" "$p" 2>&1 | grep -E "^Node:|State:|Reason:|Exit Code|Message:|Warning|Failed|Back-off|Unhealthy" || true
+        oc logs -n "$DRIVER_NS" "$p" --all-containers --tail=40 2>&1 || true
+    done
+}
+
 cos_diagnose() {
     $COS_ON || return 0
     log "COS diagnostics (no secret values are shown)"
+    cos_job_diagnose
     oc get backuppolicy "$POLICY" -o json 2>/dev/null | jq -c '[.status.volumes[]? | {pvc: .pvcName, exportedTime, exportedBytes, exportError}]' || true
     [ -z "${COS_LIST_REPORT:-}" ] || echo "$COS_LIST_REPORT"
     oc get backuprestore -o json 2>/dev/null | jq -c --arg ns "$COS_NS" '.items[] | select(.spec.targetNamespace == $ns) | {name: .metadata.name, phase: .status.phase, fetched: .status.fetched, copied: .status.copied, message: .status.message}' || true
@@ -260,8 +273,10 @@ cos_source_flags() {
 cos_restore() {
     local moment=()
     [ -z "${4:-}" ] || moment=(--moment "$4")
+    # The caller may run under `|| rc=$?`, where set -e is off: stop here, not three steps later.
     "$BACKUP_BIN" restore --from-cos "${COS_SOURCE_FLAGS[@]}" --volume "$1" --to "$2" --size-gb "$3" \
-        --storage-class "$COSR_POOL" --skip-marker-cleanup ${moment[@]+"${moment[@]}"} --wait --timeout 1h
+        --storage-class "$COSR_POOL" --skip-marker-cleanup ${moment[@]+"${moment[@]}"} --wait --timeout 1h ||
+        fail "the COS restore of $1 failed"
 }
 
 # cos_restore_phase LABEL — restore the three volumes from COS in the current cluster

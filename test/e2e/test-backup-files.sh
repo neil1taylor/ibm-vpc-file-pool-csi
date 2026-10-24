@@ -177,7 +177,13 @@ spec:
     - {name: share, mountPath: /data, subPath: $SUB, readOnly: true}
     - {name: token, mountPath: /etc/browse, readOnly: true}
 YAML
-oc wait pod "$PREFIX-browse" -n "$DRIVER_NS" --for=condition=Ready --timeout=300s >/dev/null || fail "the helper pod did not start"
+oc wait pod "$PREFIX-browse" -n "$DRIVER_NS" --for=condition=Ready --timeout=300s >/dev/null || {
+    # Say why, before cleanup deletes the pod.
+    oc get pod "$PREFIX-browse" -n "$DRIVER_NS" -o wide 2>&1 || true
+    oc describe pod "$PREFIX-browse" -n "$DRIVER_NS" 2>&1 | grep -E "^Node:|State:|Reason:|Exit Code|Message:|Warning|Failed|Back-off|Unhealthy" || true
+    oc logs "$PREFIX-browse" -n "$DRIVER_NS" --tail=40 2>&1 || true
+    fail "the helper pod did not start"
+}
 oc port-forward -n "$DRIVER_NS" "pod/$PREFIX-browse" "$PORT:8080" >/dev/null 2>&1 &
 PF_PID=$!
 sleep 3

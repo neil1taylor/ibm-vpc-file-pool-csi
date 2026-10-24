@@ -74,6 +74,21 @@ no "a prefix with .. is refused" cos_prefix stage18 .. 1
 # fail with "already exists" and the lookup with "not found".
 eq "the other cluster's restore pool has its own name" "$(cos_dr_pool rt-1-cosr)" "rt-1-cosr-dr"
 
+# --- a failed restore stops the test ---
+# The restore runs under `|| rc=$?` (cos_with_kubeconfig), where set -e is off, so a failed
+# restore was ignored and the test went on to boot a VM from an empty volume.
+mkdir -p "$WORK/bin"
+cat >"$WORK/bin/kubectl-backup-fail" <<'EOF'
+#!/usr/bin/env bash
+echo "the restore failed" >&2
+exit 1
+EOF
+chmod +x "$WORK/bin/kubectl-backup-fail"
+out=$( BACKUP_BIN="$WORK/bin/kubectl-backup-fail" COS_SOURCE_FLAGS=(--policy p) COSR_POOL=pool-x
+       fail() { echo "STOPPED: $*"; return 1; }
+       cos_restore pvc-1 ns/vol 5 2>&1 )
+if echo "$out" | grep -qF "STOPPED: the COS restore of pvc-1 failed"; then pass "a failed COS restore calls fail"; else fail "a failed COS restore calls fail (got: $out)"; fi
+
 # --- export block ---
 COS_BUCKET=b COS_ENDPOINT=e.example KP_INSTANCE_ID=inst KP_REGION=eu-de KP_ROOT_KEY_ID=root
 y=$(cos_export_yaml stage18/x-1 cred wrapped apik)
