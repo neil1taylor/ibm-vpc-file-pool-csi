@@ -149,6 +149,8 @@ See [VM-INSTANT-SNAPSHOTS.md](VM-INSTANT-SNAPSHOTS.md).
 | `vmSnapshots.enableSidecarGate` | bool | `false` | Turn on the KubeVirt `Sidecar` feature gate, which instant snapshots need. A hook Job adds one entry to the `HyperConverged` `kubevirt.kubevirt.io/jsonpatch` annotation after each install and upgrade, and keeps the other entries. Only that Job's service account gets rights on `HyperConverged`: get and update on the object named `kubevirt-hyperconverged`, nothing else. The gate is cluster-wide: once it is on, anyone who can create or edit a VM can add a hook sidecar container to that VM's pod (see SECURITY.md). Setting it back to `false` or uninstalling does **not** turn the gate off, because VMs with instant snapshots cannot start without it. Needs `vmSnapshots.method=auto`. Red Hat does not support settings made through that annotation |
 | `vmSnapshots.launcherImage` | string | `""` | KubeVirt's virt-launcher image, which has `qemu-img`, for the Jobs that change a stopped VM's snapshot files and that restore instant snapshots. Empty reads it from the virt-operator Deployment in the namespace of the `KubeVirt` resource |
 
+The chart also renders a ConfigMap `ibm-vpc-file-pool-csi-settings` in the release namespace. It holds `vmSnapshotMethod`, the value of `vmSnapshots.method`, and no secret. A Role lets every signed-in user `get` that one ConfigMap by name, and nothing else in the namespace. The console reads it to show whether snapshots are instant or copies.
+
 ## Webhook
 
 | Parameter | Type | Default | Description |

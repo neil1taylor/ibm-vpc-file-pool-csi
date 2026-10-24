@@ -22,11 +22,11 @@ The console needs one more fact, `method`, and it already has the other one, the
 
 | `method` | Gate | Mode shown |
 |---|---|---|
-| `copy` | on or off | **Copy** |
+| `copy` | on, off or cannot be read | **Copy** |
 | `auto` | on | **Instant** |
 | `auto` | off | **Copy** |
-| any | cannot be read | **Unknown** |
-| not published (older chart) | on or off | **Unknown**, with the words "the driver does not report its setting" |
+| `auto` | cannot be read | **Unknown** |
+| not published (older chart) | any | **Unknown**, with the words "the driver does not report its setting" |
 
 **How the console learns `method`.** The Helm chart renders a small ConfigMap, `ibm-vpc-file-pool-csi-settings`, in the release namespace. It holds only non-secret settings the console wants to show. It starts with one key, `vmSnapshotMethod`. It is configuration written by Helm, not driver state, so the rule "all state in CRDs" is not touched.
 
@@ -69,3 +69,4 @@ Yes. The box shows copy or instant, and it cannot say "instant" unless both cond
 - An older chart with no ConfigMap shows "Unknown" with a reason. It never guesses.
 - The list of VMs with instant snapshots appears only in Instant mode.
 - One pull request, chart first, console second.
+- With `method=copy` the box says Copy even when the KubeVirt gate cannot be read, because the setting alone settles the answer. (Changed while building: the first draft said Unknown.)
