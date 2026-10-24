@@ -19,6 +19,8 @@ For pictures you can click through, see the [interactive diagrams](diagrams/inde
 
 ## Storage
 
+![A pool holds shares; a share has a mount target and one folder for each volume; a SubVolume records each volume; the node agent mounts through the mount target](images/context-storage.drawio.svg)
+
 ### Pool
 
 A **pool** is a group of VPC file shares that the driver manages as one unit. You define it with a `FileSharePool` resource. A pool lives in one zone and has one share profile (`dp2`).

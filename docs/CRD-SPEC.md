@@ -25,6 +25,14 @@ var (
 
 ---
 
+## How the resources relate
+
+![The CRDs and the fields that link them: SubVolume, Snapshot, ReplicationPolicy and BackupPolicy all point to a FileSharePool](images/crd-spec-relationships.drawio.svg)
+
+Each arrow is labelled with the field that holds the reference.
+
+---
+
 ## FileSharePool
 
 Cluster-scoped resource. Defines a pool of VPC file shares that back PVC subdirectories.

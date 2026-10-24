@@ -31,24 +31,9 @@ Using qcow2 on NFS means paying for features the storage already provides.
 
 ### Performance: Raw Eliminates a Layer
 
-```
-With qcow2 on NFS (double indirection):
+![With qcow2 the I/O passes an extra cluster-mapping layer before the NFS client; with raw the guest offset is the file offset](images/vm-disk-formats-io-path.drawio.svg)
 
-  VM I/O → QEMU
-           ├─ Resolve qcow2 cluster mapping (L1/L2 tables)
-           ├─ Translate guest offset → host file offset
-           └─ NFS client
-              ├─ Translate file offset → NFS READ/WRITE RPC
-              └─ TCP 2049 → VPC File Share
-
-
-With raw on NFS (single indirection):
-
-  VM I/O → QEMU
-           └─ NFS client (guest offset = file offset, 1:1)
-              ├─ NFS READ/WRITE RPC
-              └─ TCP 2049 → VPC File Share
-```
+With qcow2, QEMU resolves the qcow2 cluster mapping (L1/L2 tables) and translates the guest offset to a host file offset. The NFS client then translates the file offset to an NFS READ/WRITE RPC over TCP 2049 to the VPC file share. With raw, the guest offset is the file offset (1:1), so the step is skipped.
 
 Raw eliminates qcow2's cluster table lookups. Every guest block maps directly to a file offset — no metadata parsing, no L1/L2 table walks, no refcount updates. This reduces:
 
@@ -64,14 +49,7 @@ For a boot disk doing random I/O (OS page cache misses, journaling, swap), this 
 
 The Containerized Data Importer (CDI) converts source images to raw during import:
 
-```
-Source image (any format)          PVC on NFS share
-┌──────────────────────┐          ┌──────────────────────┐
-│ my-vm.qcow2          │          │ /pvcs/pvc-vm-001/    │
-│ my-vm.vmdk           │──CDI────▶│   disk.img (raw)     │
-│ my-vm.iso            │ converts │                      │
-└──────────────────────┘          └──────────────────────┘
-```
+![CDI converts a qcow2, vmdk or iso source image into a raw disk.img on the PVC](images/vm-disk-formats-cdi-import.drawio.svg)
 
 CDI handles:
 

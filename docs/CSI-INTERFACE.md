@@ -803,6 +803,8 @@ func (d *Driver) ControllerModifyVolume(ctx, req) { return Unimplemented }
 
 ## Node Service
 
+![Kubelet stages the volume by mounting the whole share, then publishes it by bind-mounting the subDir into the pod path](images/csi-interface-node-mount.drawio.svg)
+
 ### Capabilities
 
 ```go

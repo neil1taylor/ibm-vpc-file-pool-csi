@@ -9,21 +9,7 @@ The driver runs two things on your cluster:
 1. **Controller** (one instance) — decides *where* each PVC goes
 2. **Node Agent** (one per worker node) — does the actual *mounting*
 
-```
-                    PVC created
-                        │
-                        ▼
-              ┌──────────────────┐
-              │    Controller    │   "Put this PVC on share #2"
-              │  (1 per cluster) │
-              └────────┬─────────┘
-                       │ records a SubVolume CR
-                       ▼
-              ┌──────────────────┐
-              │   Node Agent     │   "Mount share #2, bind-mount
-              │  (1 per node)    │    the subdirectory into the pod"
-              └──────────────────┘
-```
+![A created PVC goes to the controller, which records a SubVolume CR; the node agent then mounts the share and bind-mounts the subdirectory into the pod](images/overview-controller-and-node-agent.drawio.svg)
 
 ## Controller
 

@@ -43,3 +43,30 @@ A tutorial links to the design doc's diagram when it shows the same thing, inste
 ## Docs and their diagrams
 
 Filled in as each batch merges.
+
+### Batch 1, design docs
+
+- `docs/ARCHITECTURE.md`: `architecture-system-overview.drawio.svg`, `architecture-create-volume.drawio.svg`, `architecture-delete-volume.drawio.svg`, `architecture-reconcile.drawio.svg`, `architecture-create-snapshot.drawio.svg`, `architecture-clone-volume.drawio.svg`
+- `docs/CONSISTENCY-MODEL.md`: `consistency-model-copy.drawio.svg`, `consistency-model-file-level.drawio.svg`, `consistency-model-cross-file.drawio.svg`, `consistency-model-crash.drawio.svg`, `consistency-model-quiesce.drawio.svg`, `consistency-model-vm-blocks.drawio.svg`, `consistency-model-vm-smear.drawio.svg`, `consistency-model-vm-rule.drawio.svg`, `consistency-model-building-blocks.drawio.svg`, `consistency-model-workload-safe.drawio.svg`
+- `docs/VOLUME-GROUP-SNAPSHOTS.md`: `volume-group-snapshots-quiesce.drawio.svg`, `volume-group-snapshots-no-quiesce.drawio.svg`, `volume-group-snapshots-components.drawio.svg`, `volume-group-snapshots-create.drawio.svg`, `volume-group-snapshots-delete.drawio.svg`, `volume-group-snapshots-pre-hook.drawio.svg`, `volume-group-snapshots-post-hook.drawio.svg`, `volume-group-snapshots-failure-abort.drawio.svg`, `volume-group-snapshots-failure-continue.drawio.svg`
+- `docs/VOLUME-CLONING.md`: `volume-cloning-same-share.drawio.svg`, `volume-cloning-cross-share.drawio.svg`, `volume-cloning-request.drawio.svg`, `volume-cloning-vm-rule.drawio.svg`, `volume-cloning-worker.drawio.svg`, `volume-cloning-node-gate.drawio.svg`, `architecture-clone-volume.drawio.svg`
+- `docs/CROSS-REGION-DR.md`: `cross-region-dr-overview.drawio.svg`, `cross-region-dr-vm-blocks.drawio.svg`, `cross-region-dr-components.drawio.svg`, `cross-region-dr-data-flow.drawio.svg`, `cross-region-dr-failover.drawio.svg`, `cross-region-dr-native-snapshots.drawio.svg`
+- `docs/VPC-NETWORKING.md`: `vpc-networking-topology.drawio.svg`, `vpc-networking-path.drawio.svg`, `vpc-networking-single-zone.drawio.svg`, `vpc-networking-cross-zone.drawio.svg`, `vpc-networking-pool-per-zone.drawio.svg`, `vpc-networking-encryption.drawio.svg`
+- `docs/VM-DISK-FORMATS.md`: `vm-disk-formats-io-path.drawio.svg`, `vm-disk-formats-cdi-import.drawio.svg`
+- `docs/VM-INSTANT-SNAPSHOTS.md`: `vm-instant-snapshots-chain.drawio.svg`, `vm-instant-snapshots-take.drawio.svg`, `vm-instant-snapshots-hook.drawio.svg`
+- `docs/CSI-INTERFACE.md`: `csi-interface-node-mount.drawio.svg`
+- `docs/CRD-SPEC.md`: `crd-spec-relationships.drawio.svg`
+- `docs/IBM-VPC-API.md`: `ibm-vpc-api-authentication.drawio.svg`, `ibm-vpc-api-share-lifecycle.drawio.svg`
+- `docs/GOLDEN-IMAGE-WORKFLOW.md`: `golden-image-workflow-syncer.drawio.svg`
+- `docs/OVERVIEW.md`: `overview-controller-and-node-agent.drawio.svg`
+- `README.md`: `readme-architecture.drawio.svg`
+- `docs/FEATURES.md`: no diagram: a catalog of features and a comparison table; no structure or flow to draw
+- `docs/KNOWN-LIMITATIONS.md`: no diagram: a list of limits and workarounds; no structure or flow to draw
+- `docs/SECURITY.md`: no diagram: a policy and a hardening checklist; no structure or flow to draw
+- `docs/CONTEXT.md`: `context-storage.drawio.svg`
+- `docs/CAPACITY-PLANNING.md`: `capacity-planning-decisions.drawio.svg`
+- `docs/PERFORMANCE-TUNING.md`: `performance-tuning-spread.drawio.svg`, `performance-tuning-binpack.drawio.svg`
+- `docs/TESTING.md`: `testing-pyramid.drawio.svg`
+- `docs/CODING-GUIDELINES.md`: no diagram: rules and conventions; its only drawing is a folder-role listing, kept as text
+- `SKILL.md`: no diagram: build guidance; its only drawing is a folder tree, kept as text
+- `CONTRIBUTING.md`: no diagram: contributor steps and rules; no structure or flow to draw

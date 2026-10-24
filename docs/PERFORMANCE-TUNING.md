@@ -137,11 +137,7 @@ The pool manager supports two share selection strategies: `spread` and `binpack`
 
 **How it works:** When a new PVC is allocated, the manager selects the share with the most free capacity. PVCs are distributed evenly across all shares.
 
-```
-Share-1: [PVC-1] [PVC-4] [PVC-7]     ← 30% used
-Share-2: [PVC-2] [PVC-5] [PVC-8]     ← 30% used
-Share-3: [PVC-3] [PVC-6] [PVC-9]     ← 30% used
-```
+![Spread: nine PVCs are spread evenly over three shares, each 30% used](images/performance-tuning-spread.drawio.svg)
 
 **Pros:**
 - Lower blast radius — if one share fails, only ~1/N of PVCs are affected
@@ -156,11 +152,7 @@ Share-3: [PVC-3] [PVC-6] [PVC-9]     ← 30% used
 
 **How it works:** When a new PVC is allocated, the manager selects the share with the least free capacity that still fits the request. Shares are filled sequentially.
 
-```
-Share-1: [PVC-1] [PVC-2] [PVC-3] [PVC-4] [PVC-5]  ← 90% used
-Share-2: [PVC-6] [PVC-7]                             ← 25% used
-Share-3: (empty)                                      ← 0% used
-```
+![Binpack: five PVCs fill Share-1 (90% used), two are on Share-2, and Share-3 is empty](images/performance-tuning-binpack.drawio.svg)
 
 **Pros:**
 - Fewer shares in active use — saves VPC quota
