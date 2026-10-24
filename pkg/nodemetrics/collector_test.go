@@ -189,3 +189,60 @@ func TestCollector_ReadErrorKeepsPreviousSnapshot(t *testing.T) {
 		t.Errorf("snapshot lost after read error:\n%s", got)
 	}
 }
+
+// Kubelet gives each volume its own staging path, so one node can have several
+// staging mounts of the same share. Prometheus refuses a scrape that holds the
+// same series twice, so the endpoint answered HTTP 500 and showed nothing.
+func TestCollector_SameShareStagedTwiceIsReportedOnce(t *testing.T) {
+	stage2 := "/var/data/kubelet/plugins/kubernetes.io/csi/vpc-file-pool.csi.ibm.io/h2/globalmount"
+	cfg := baseConfig()
+	cfg.ReadMountStats = func() ([]NFSMount, error) {
+		return []NFSMount{
+			{Server: "10.0.0.5", Export: "/share_abc", MountPoint: stage, Ops: map[string]OpStats{
+				"READ":  {Ops: 100, BytesRecv: 4000, RTTMillis: 300, ExecMillis: 400},
+				"WRITE": {Ops: 50, BytesSent: 2000, RTTMillis: 150, ExecMillis: 250},
+			}},
+			// the same share through a second volume's staging path, read a moment later
+			{Server: "10.0.0.5", Export: "/share_abc", MountPoint: stage2, Ops: map[string]OpStats{
+				"READ":  {Ops: 120, BytesRecv: 4800, RTTMillis: 360, ExecMillis: 480},
+				"WRITE": {Ops: 50, BytesSent: 2000, RTTMillis: 150, ExecMillis: 250},
+			}},
+		}, nil
+	}
+	cfg.Statfs = func(context.Context, string) (uint64, uint64, error) { return 100 << 30, 60 << 30, nil }
+	c := NewCollector(cfg)
+	c.Refresh(context.Background())
+
+	// gather uses a pedantic registry, which fails the test on a repeated series.
+	got := gather(t, c)
+	wantLines(t, got,
+		// the larger counter wins: counters only grow, so it is the newer reading of the same client
+		`vpc_file_pool_share_nfs_operations_total{op="read",pool="gp",share="gp-share-1"} 120`,
+		`vpc_file_pool_share_nfs_operations_total{op="write",pool="gp",share="gp-share-1"} 50`,
+		`vpc_file_pool_share_nfs_bytes_total{direction="read",pool="gp",share="gp-share-1"} 4800`,
+		`vpc_file_pool_share_used_bytes{pool="gp",share="gp-share-1"} 4.294967296e+10`,
+	)
+	if n := strings.Count(got, "vpc_file_pool_share_used_bytes{"); n != 1 {
+		t.Errorf("want one used_bytes series for the share, got %d:\n%s", n, got)
+	}
+}
+
+// A share that is not resolved is labelled "unknown"; two such shares must stay apart.
+func TestCollector_TwoUnresolvedSharesStayApart(t *testing.T) {
+	cfg := baseConfig()
+	cfg.Resolve = func(context.Context) (map[string]ShareRef, error) { return nil, errors.New("api down") }
+	stage2 := "/var/data/kubelet/plugins/kubernetes.io/csi/vpc-file-pool.csi.ibm.io/h2/globalmount"
+	cfg.ReadMountStats = func() ([]NFSMount, error) {
+		return []NFSMount{
+			{Export: "/share_aaa", MountPoint: stage, Ops: map[string]OpStats{"READ": {Ops: 1}}},
+			{Export: "/share_bbb", MountPoint: stage2, Ops: map[string]OpStats{"READ": {Ops: 2}}},
+		}, nil
+	}
+	cfg.Statfs = func(context.Context, string) (uint64, uint64, error) { return 100 << 30, 60 << 30, nil }
+	c := NewCollector(cfg)
+	c.Refresh(context.Background())
+	wantLines(t, gather(t, c),
+		`vpc_file_pool_share_nfs_operations_total{op="read",pool="unknown",share="share_aaa"} 1`,
+		`vpc_file_pool_share_nfs_operations_total{op="read",pool="unknown",share="share_bbb"} 2`,
+	)
+}
