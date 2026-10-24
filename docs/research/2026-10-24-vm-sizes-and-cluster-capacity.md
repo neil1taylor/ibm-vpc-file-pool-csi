@@ -223,7 +223,25 @@ The 10 percent burst share is my estimate. The worst case is the spec's patch wi
 How IBM counts operations (https://cloud.ibm.com/docs/vpc?topic=vpc-file-storage-profiles): "IOPS values are based on a 16 KB block size for all profiles, with a 50-50 random workload. Each 16 KB of data that is read or written counts as one read/write operation. A single write of less than 16 KB counts as a single write operation." (The repo's earlier research quotes the same text.) So:
 
 - IBM operations = sum over I/Os of ceil(size / 16 KB). An I/O of 16 KB or less counts as 1. A 64 KB I/O counts as 4.
-- My IOPS figures above are guest I/Os. The performance test's block mix (50 percent 4k, 30 percent 16k, 20 percent 64k, `test/perf/profile.sh`) counts as 1.6 IBM operations per I/O on average. I use that factor: average N+1 2,310 x 1.6 = 3,696, 3 nodes 4,620 x 1.6 = 7,392; all-burst N+1 19,800 x 1.6 = 31,680, 3 nodes 39,600 x 1.6 = 63,360. The mix is the test's model, not a measurement of real VMs. Larger I/O (backup scans, boot, copy) raises the factor.
+- My IOPS figures above are guest I/Os: what a VM does. The share's limit is in IBM operations. The two are not the same when an I/O is larger than 16 KB.
+
+The 1.6 factor. The performance test's block mix (`test/perf/profile.sh`, `PERF_BLOCK_MIX`) gives each I/O size a share of the I/Os. Each size counts as a number of IBM operations by the rule above:
+
+| I/O size | Share of the I/Os | IBM operations each | Adds |
+|---|---|---|---|
+| 4 KiB | 50 percent | 1 | 0.5 |
+| 16 KiB | 30 percent | 1 | 0.3 |
+| 64 KiB | 20 percent | 4 | 0.8 |
+| **Average** | | | **1.6** |
+
+So one guest I/O of this mix counts as 1.6 IBM operations on average. A VM that does 300 I/Os a second uses 300 x 1.6 = 480 of the share's IOPS. The test computes the same factor (`perf_ibm_ops_per_io`) and reports `ibm_ops_demand` = guest IOPS x 1.6 beside the share's own count.
+
+With the factor:
+- Average: N+1 2,310 x 1.6 = 3,696 IBM operations a second. 3 nodes 4,620 x 1.6 = 7,392.
+- All VMs burst together: N+1 19,800 x 1.6 = 31,680. 3 nodes 39,600 x 1.6 = 63,360.
+- One share with 33 VMs all bursting: 33 x 300 = 9,900 guest I/Os, but 9,900 x 1.6 = 15,840 IBM operations. This is why section 6 proposes 16,000 IOPS per share, not 12,000.
+
+Limit of the factor: the mix is the test's model of an everyday VM, not a measurement of real VMs. Larger I/O (backup scans, boot, file copies) raises the factor. A mix of only 4 KiB and 16 KiB I/O gives 1.0; a 1 MiB I/O counts as 64. Replace 1.6 with the factor of the real workload when it is known.
 
 Throughput:
 - IBM sets the maximum bandwidth as IOPS x 256 KB. The dp2 maximum is 8,192 Mbps (same IBM page).
