@@ -59,13 +59,13 @@ Two thirds Linux (CentOS Stream 9, 1 vCPU, 2 GB) and one third Windows Server 20
 
 ### The tiers
 
-Three runs, one for each share speed. Each uses a fresh pool with one share, made and deleted for the run:
+Three runs, one for each share speed. Each uses a fresh pool with one share of 3,900 GB, made and deleted for the run. Only the IOPS changes, so the three results compare like with like. IBM allows 200 to 40,000 IOPS at that size (the 2,000 to 3,999 GB row). The disks of 90 VMs need about 3.2 TB: a copy of a catalog disk must be 30 GiB, so each Linux VM needs 32 GiB with its load disk and each Windows VM about 42 GiB. (The first draft gave each tier its own smaller share. That was wrong: 90 VMs do not fit on 200 GB, or on 3,000 GB.)
 
-| Tier | Share size | IOPS set |
-|---|---|---|
-| Low | 200 GB | 3,000 |
-| Middle | 500 GB | 10,000 |
-| High | 1,000 GB | 20,000 |
+| Tier | IOPS set |
+|---|---|
+| Low | 3,000 |
+| Middle | 10,000 |
+| High | 20,000 |
 
 ### The steps in one run
 
@@ -127,9 +127,9 @@ Yes. It finds the knee for each tier by growing the count until users would noti
 ## Cost, effort and risk
 
 - **Effort:** about 3 to 5 days to build the tooling and the smoke run. Each full run is about 8 hours of lab time, so the three tiers are about a day of running, which can go overnight.
-- **Cost:** three shares (200, 500 and 1,000 GB) for a few hours each, deleted after. The VMs use the lab cluster's spare room.
+- **Cost:** three shares of 3,900 GB for a few hours each, deleted after. The VMs use the lab cluster's spare room.
 - **Risk:**
-  - The Windows image: if it cannot be used for a test like this (licence or no `diskspd`), the Windows third of the mix is replaced and the table says so.
+  - The Windows image: if it cannot be used for a test like this (licence or no `diskspd`), the Windows third of the mix is replaced and the table says so. Today no Windows catalog image is ready on `rovslab-dr-eude`, so the Windows part needs an image brought in first. Phase 1 builds the Linux half; the Windows half waits for a decision on the image.
   - A leftover VM or share after a failed run costs money until it is deleted. The sweep and the final VPC check guard against it.
   - Results from a shared cloud backend are noisy. The repeat run and the written knee rule limit this.
 
@@ -138,7 +138,7 @@ Yes. It finds the knee for each tier by growing the count until users would noti
 - The real VM mix and peaks are not known, so I used the issue's defaults: 20 Linux and 10 Windows, 20 to 50 IOPS average, 300 IOPS bursts, 70/30 read/write. Change them here and the test follows.
 - "Users notice" means p95 read latency above 20 ms, or any stall over 5 seconds, or a boot storm twice as slow as at 15 VMs.
 - The recommended count is 80% of the knee.
-- Three tiers: 3,000, 10,000 and 20,000 IOPS (shares of 200, 500 and 1,000 GB).
+- Three tiers: 3,000, 10,000 and 20,000 IOPS, all on a 3,900 GB share, so only the IOPS differs.
 - The ramp goes 15, 30, 45, 60, 75, 90 and stops at the knee or 90.
 - The test runs on `rovslab-dr-eude`, not on `rovslab-prod-eude`.
 - The Linux VMs are small (1 vCPU, 2 GB) and the Windows VMs are 2 vCPU, 4 GB, so the disk is the thing being tested, not the CPU.
