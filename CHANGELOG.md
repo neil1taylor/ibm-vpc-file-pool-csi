@@ -19,6 +19,10 @@ To make a release:
 
 ## [Unreleased]
 
+### Added
+
+- **Two new tutorials.** Part 15, "Make a VM from the Catalog on a Pool" (`docs/TUTORIAL-15-VM-FROM-THE-CATALOG.md`), and Part 16, "Backups, Clones and Replication Setup in the Console" (`docs/TUTORIAL-16-CONSOLE-BACKUPS-CLONES-RECEIVER.md`), with three draw.io diagrams. They have not been run on a cluster; the console labels were checked against the plugin source.
+
 ## [v0.14.1] — 2026-10-24
 
 A small release. The driver itself is the same as v0.14.0. The console now shows the driver's real VM snapshot mode, and the chart renders one more ConfigMap for it.
