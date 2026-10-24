@@ -83,15 +83,22 @@ wait_until() { # wait_until SECONDS DESCRIPTION COMMAND...
 # guest_ps SCRIPT — runs a PowerShell script in the VM through the guest agent and
 # prints what it printed. Returns its exit code.
 guest_ps() {
-    local pod dom enc req pid status code
+    local pod dom enc req pid status code lost=0
     pod=$(oc get pods -n "$NS" -l "vm.kubevirt.io/name=$VM" -o name | head -1)
     dom=$(oc exec -n "$NS" "$pod" -c compute -- virsh list --name | head -1)
-    enc=$(printf '%s' "$1" | iconv -t UTF-16LE | base64 | tr -d '\n')
+    # shellcheck disable=SC2016 # a PowerShell variable, not a shell one
+    enc=$(printf '$ProgressPreference = "SilentlyContinue"\n%s' "$1" | iconv -t UTF-16LE | base64 | tr -d '\n')
     req=$(jq -cn --arg e "$enc" '{execute: "guest-exec", arguments: {path: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", arg: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $e], "capture-output": true}}')
     pid=$(oc exec -n "$NS" "$pod" -c compute -- virsh qemu-agent-command "$dom" "$req" | jq -r .return.pid)
     [ -n "$pid" ] && [ "$pid" != null ] || { log "FAIL: the guest agent did not start the command"; return 1; }
     for _ in $(seq 120); do
-        status=$(oc exec -n "$NS" "$pod" -c compute -- virsh qemu-agent-command "$dom" "{\"execute\":\"guest-exec-status\",\"arguments\":{\"pid\":$pid}}")
+        # The agent forgets a command when it restarts, which it does early in a boot.
+        if ! status=$(oc exec -n "$NS" "$pod" -c compute -- virsh qemu-agent-command "$dom" "{\"execute\":\"guest-exec-status\",\"arguments\":{\"pid\":$pid}}" 2>/dev/null); then
+            lost=$((lost + 1))
+            [ "$lost" -lt 3 ] || { log "FAIL: the guest agent lost the command"; return 1; }
+            sleep 5
+            continue
+        fi
         if [ "$(jq -r .return.exited <<<"$status")" = true ]; then
             jq -r '.return["out-data"] // empty' <<<"$status" | base64 -d | tr -d '\r'
             jq -r '.return["err-data"] // empty' <<<"$status" | base64 -d | tr -d '\r' >&2
@@ -106,8 +113,12 @@ guest_ps() {
 
 start_vm() {
     vm_yaml | oc apply -n "$NS" -f - >/dev/null || return 1
-    wait_until 1200 "the guest agent of $VM" agent_connected
+    wait_until 1200 "the guest agent of $VM" agent_connected || return 1
+    wait_until 600 "the guest agent of $VM to run commands" guest_answers
 }
+# guest_answers — the agent runs a command and returns its output. Early in a boot
+# it says it is connected but can still restart and lose a command.
+guest_answers() { [ "$(guest_ps 'Write-Output ok' 2>/dev/null)" = ok ]; }
 
 stop_vm() {
     oc delete vm "$VM" -n "$NS" --wait=true --timeout=10m >/dev/null
