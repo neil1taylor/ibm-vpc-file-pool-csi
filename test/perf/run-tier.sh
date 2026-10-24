@@ -98,6 +98,14 @@ log() { echo "[$(date -u +%H:%M:%S)] $*"; }
 vm_name() { printf 'perf-%03d' "$1"; }
 # is_windows N — VM N is one of the Windows VMs.
 is_windows() { [ "$WINDOWS_EVERY" -gt 0 ] && [ $(($1 % WINDOWS_EVERY)) -eq 0 ]; }
+# windows_mix — which VMs are Windows, in words.
+windows_mix() {
+    case "$WINDOWS_EVERY" in
+        0) echo "all VMs Linux" ;;
+        1) echo "all VMs Windows" ;;
+        *) echo "1 VM in $WINDOWS_EVERY Windows" ;;
+    esac
+}
 
 # user_data — the cloud-init file every VM gets: it writes the load script,
 # installs fio, says PERF-READY on the serial console, and starts the load. It is
@@ -403,7 +411,7 @@ pool_gone() { ! oc get filesharepool "$POOL" >/dev/null 2>&1; }
 
 mkdir -p "$OUT"
 trap cleanup EXIT
-log "run $ID: tier $IOPS IOPS, share $SHARE_GB GB, steps $STEPS, $STEP_MIN min each, 1 VM in ${WINDOWS_EVERY} Windows (0: none); results in $OUT"
+log "run $ID: tier $IOPS IOPS, share $SHARE_GB GB, steps $STEPS, $STEP_MIN min each, $(windows_mix); results in $OUT"
 
 create_pool || { log "FAIL: cannot make the pool"; exit 1; }
 wait_until 1800 "pool $POOL to be Ready" pool_ready || exit 1
@@ -477,7 +485,7 @@ done
 {
     echo "# Performance test, tier $IOPS IOPS (run $ID)"
     echo
-    echo "Share: $SHARE_GB GB at $IOPS IOPS. Load per VM: $AVG IOPS average, bursts of $BURST IOPS for $BURST_SECS s every $PERIOD s, 70/30 read/write, blocks of $PERF_BLOCK_MIX (size:percent), a test area of $AREA written once before measuring, a different random pattern in every fio process. 1 VM in ${WINDOWS_EVERY} is Windows Server 2022 (2 vCPU, 4 GiB) running the same fio jobs with fio for Windows (0: none); the other VMs are Linux."
+    echo "Share: $SHARE_GB GB at $IOPS IOPS. Load per VM: $AVG IOPS average, bursts of $BURST IOPS for $BURST_SECS s every $PERIOD s, 70/30 read/write, blocks of $PERF_BLOCK_MIX (size:percent), a test area of $AREA written once before measuring, a different random pattern in every fio process. VMs: $(windows_mix). Windows VMs are Windows Server 2022 (2 vCPU, 4 GiB) running the same fio jobs with fio for Windows; Linux VMs are CentOS Stream 9."
     echo
     echo "| Tier | Knee at 20 ms (VMs) | Recommended (80% of the knee) | Knee at 10 ms | Knee at 30 ms |"
     echo "|---|---|---|---|---|"
