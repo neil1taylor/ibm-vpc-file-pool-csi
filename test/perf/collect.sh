@@ -140,3 +140,10 @@ perf_share_rate() {
         printf "%.0f %.1f\n", ops / secs, (as - bs) / ops * 1000
     }'
 }
+
+# perf_said_ready — reads a VM's console log on stdin and succeeds if the VM said
+# PERF-READY. It reads the whole log: grep -q would stop at the first match, and the
+# log reader would then fail on the closed pipe, which pipefail turns into "not ready".
+perf_said_ready() {
+    [ "$(grep -c PERF-READY)" -gt 0 ]
+}

@@ -327,4 +327,13 @@ has "without internet the grace period is reset" "$p" "slmgr.vbs /rearm"
 has "the licence is checked after a restart" "$p" "slmgr.vbs /dli"
 has "the test's DataSource points at the prepared disk" "$p" "kind: DataSource"
 
+# --- the ready check on a long console log ---
+# A VM's console log grows with every result line. grep -q stops at the first match, the log
+# reader then fails on the closed pipe, and with pipefail the check failed although the VM was
+# ready: a full run waited at step 30 for VMs that had all said PERF-READY.
+long_log() { echo PERF-READY; head -c 2000000 /dev/zero | tr '\0' 'x'; echo; }
+if long_log | perf_said_ready; then pass "a VM with a long console log still counts as ready"; else fail "a VM with a long console log still counts as ready"; fi
+if printf 'boot\nlogin:\n' | perf_said_ready; then fail "a VM that has not said PERF-READY is not ready"; else pass "a VM that has not said PERF-READY is not ready"; fi
+lacks "the run script never reads a console log with grep -q" "$(cat "$HERE/run-tier.sh")" "grep -q PERF-READY"
+
 exit "$FAILED"
