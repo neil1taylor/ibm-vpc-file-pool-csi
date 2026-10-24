@@ -147,6 +147,8 @@ const DeleteBackupsDialog: React.FC<Props> = ({ policy, volume, onClose }) => {
   };
 
   const moments = momentsCount(volume);
+  // A refused dialog starts no Job, so it has ended as much as a finished one.
+  const ended = blocked || step === 'done' || step === 'empty' || step === 'error';
   const working = step === 'start' || step === 'measuring' || step === 'removing';
   const adminCommand = {
     text: `kubectl backup delete --policy ${policy.metadata?.name} --pvc ${claim}`,
@@ -235,8 +237,8 @@ const DeleteBackupsDialog: React.FC<Props> = ({ policy, volume, onClose }) => {
             Delete backups
           </Button>
         )}
-        <Button variant={step === 'done' || step === 'empty' || step === 'error' ? 'primary' : 'link'} onClick={onClose}>
-          {step === 'done' || step === 'empty' || step === 'error' ? 'Close' : working ? 'Close (the Job goes on)' : 'Cancel'}
+        <Button variant={ended ? 'primary' : 'link'} onClick={onClose}>
+          {ended ? 'Close' : working ? 'Close (the Job goes on)' : 'Cancel'}
         </Button>
       </ModalFooter>
     </Modal>
