@@ -1,0 +1,3420 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A Kubernetes CSI driver that pools multiple PVCs as subdirectories within shared VPC file shares">
+      
+      
+      
+        <link rel="canonical" href="https://neil1taylor.github.io/ibm-vpc-file-pool-csi/FEATURES/">
+      
+      
+        <link rel="prev" href="../DEPLOYMENT-NOTES/">
+      
+      
+        <link rel="next" href="../UPGRADE-GUIDE/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Features - IBM VPC File Pool CSI Driver</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#features" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="IBM VPC File Pool CSI Driver" class="md-header__button md-logo" aria-label="IBM VPC File Pool CSI Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            IBM VPC File Pool CSI Driver
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Features
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/neil1taylor/ibm-vpc-file-pool-csi" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neil1taylor/ibm-vpc-file-pool-csi
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../INSTALL/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../DAY2-OPERATIONS/" class="md-tabs__link">
+          
+  
+  
+  Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../OVERVIEW/" class="md-tabs__link">
+          
+  
+  
+  Architecture
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../VOLUME-CLONING/" class="md-tabs__link">
+          
+  
+  
+  Design (Phase 4)
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../CONTRIBUTING/" class="md-tabs__link">
+          
+  
+  
+  Development
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../examples/" class="md-tabs__link">
+          
+  
+  
+  Examples
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="IBM VPC File Pool CSI Driver" class="md-nav__button md-logo" aria-label="IBM VPC File Pool CSI Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    IBM VPC File Pool CSI Driver
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/neil1taylor/ibm-vpc-file-pool-csi" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neil1taylor/ibm-vpc-file-pool-csi
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../INSTALL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../USER-GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-01-POOL-CREATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 1 - Pool Creation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-02-SNAPSHOTS-AND-CLONES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 2 - Snapshots and Clones
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 3 - Group Snapshots and Hooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-04-POOL-CONFIGURATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 4 - Pool Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-05-GOLDEN-IMAGES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 5 - Golden Images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-06-REPLICATION-AND-FAILOVER/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 6 - Replication and Failover
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-07-MONITORING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 7 - Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-08-MIGRATION-AND-CONSOLE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 8 - Migration and Console
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-09-COS-BACKUP-BUCKET/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 9 - COS Bucket for Backups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-10-BACKUP-AND-RESTORE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 10 - Backup and Restore
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-11-INSTANT-VM-SNAPSHOTS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 11 - Instant VM Snapshots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-12-REPLICATING-RUNNING-VMS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 12 - Replicating Running VMs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-13-FAILOVER-OF-RUNNING-VMS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 13 - Failover of Running VMs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-14-CONSOLE-RESTORE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 14 - Restore a Snapshot in the Console
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DEPLOYMENT-NOTES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment Notes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Overview">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#maturity-legend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Maturity Legend
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#feature-categories" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Feature Categories
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Feature Categories">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#core-pooled-storage-model-ga" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Core: Pooled Storage Model — GA
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#allocation-capacity-ga" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Allocation &amp; Capacity — GA
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#volume-snapshots-beta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Volume Snapshots — Beta
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#volume-cloning-beta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Volume Cloning — Beta
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#backup-to-a-snapshot-pool-experimental" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Backup to a Snapshot Pool — Experimental
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#volume-group-snapshots-not-active" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Volume Group Snapshots — Not active
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cross-region-replication-beta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cross-Region Replication — Beta
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nfs-mount-management-ga" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NFS &amp; Mount Management — GA
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kubevirt-integration-beta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        KubeVirt Integration — Beta
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#multi-tenancy-performance-tiers-beta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multi-Tenancy &amp; Performance Tiers — Beta
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pool-lifecycle-resilience-ga" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pool Lifecycle &amp; Resilience — GA
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ibm-vpc-platform-integration-ga" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        IBM VPC Platform Integration — GA
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#security-ga" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security — GA
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#observability-ga" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Observability — GA
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deployment-ga" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment — GA
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#migration-beta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Migration — Beta
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#openshift-console-integration-beta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OpenShift Console Integration — Beta
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cdi-copy-limit-beta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CDI Copy Limit — Beta
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#golden-image-syncer-hidden" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Golden Image Syncer — Hidden
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#comparison-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Comparison Table
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../UPGRADE-GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrade Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../FAQ/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../HELM-VALUES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Helm Values Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DAY2-OPERATIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 Operations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../MONITORING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CAPACITY-PLANNING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Capacity Planning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../BACKUP-RECOVERY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backup and Recovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../GOLDEN-IMAGE-WORKFLOW/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Golden Image Workflow
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../SECURITY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TROUBLESHOOTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../PERFORMANCE-TUNING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance Tuning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../KNOWN-LIMITATIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Known Limitations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../OVERVIEW/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTEXT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context (the words we use)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONSISTENCY-MODEL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Consistency Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VPC-NETWORKING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VPC Networking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VM-DISK-FORMATS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VM Disk Formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CRD-SPEC/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CRD Specification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CSI-INTERFACE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CSI Interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../IBM-VPC-API/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    IBM VPC API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../API-KEY-SETUP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Key Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design (Phase 4)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Design (Phase 4)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VOLUME-CLONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Volume Cloning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VOLUME-GROUP-SNAPSHOTS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Volume Group Snapshots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CROSS-REGION-DR/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cross-Region DR
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CODING-GUIDELINES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coding Guidelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TESTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Examples
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Overview">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#maturity-legend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Maturity Legend
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#feature-categories" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Feature Categories
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Feature Categories">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#core-pooled-storage-model-ga" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Core: Pooled Storage Model — GA
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#allocation-capacity-ga" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Allocation &amp; Capacity — GA
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#volume-snapshots-beta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Volume Snapshots — Beta
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#volume-cloning-beta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Volume Cloning — Beta
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#backup-to-a-snapshot-pool-experimental" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Backup to a Snapshot Pool — Experimental
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#volume-group-snapshots-not-active" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Volume Group Snapshots — Not active
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cross-region-replication-beta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cross-Region Replication — Beta
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nfs-mount-management-ga" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NFS &amp; Mount Management — GA
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kubevirt-integration-beta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        KubeVirt Integration — Beta
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#multi-tenancy-performance-tiers-beta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multi-Tenancy &amp; Performance Tiers — Beta
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pool-lifecycle-resilience-ga" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pool Lifecycle &amp; Resilience — GA
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ibm-vpc-platform-integration-ga" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        IBM VPC Platform Integration — GA
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#security-ga" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security — GA
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#observability-ga" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Observability — GA
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deployment-ga" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment — GA
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#migration-beta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Migration — Beta
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#openshift-console-integration-beta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OpenShift Console Integration — Beta
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cdi-copy-limit-beta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CDI Copy Limit — Beta
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#golden-image-syncer-hidden" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Golden Image Syncer — Hidden
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#comparison-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Comparison Table
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="features">Features<a class="headerlink" href="#features" title="Permanent link">&para;</a></h1>
+<h2 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">&para;</a></h2>
+<p>The IBM VPC File Pool CSI Driver replaces the traditional one-PVC-per-share model with a pooled architecture: a small number of large VPC file shares are pre-provisioned, and each PVC gets a subdirectory on an existing share. This eliminates the 30-90 second wait for VPC share creation, reduces the number of shares needed (VPC accounts cap at 300), and consolidates billing since each share has a 10 GB minimum.</p>
+<p>For cluster administrators, the driver manages pool lifecycle automatically — expanding capacity when usage crosses a threshold, monitoring share health via the VPC API, and draining degraded shares without manual intervention. State lives entirely in Kubernetes CRDs (FileSharePool, SubVolume, Snapshot), so there is no external database or ConfigMap to manage.</p>
+<p>For workload teams, the driver is invisible: they create standard PVCs and the CSI sidecar routes requests to the pool manager. PVC creation completes in under a second. Volume snapshots, clones, and group snapshots work through the standard CSI interfaces. KubeVirt users get first-class support with correct directory ownership and raw disk image handling.</p>
+<p>The driver is purpose-built for IBM Cloud ROKS and ROVS clusters running on VPC infrastructure. It integrates with the VPC file share API, creates one mount target per share that serves pods in every zone, and authenticates through the same <code>secret-common-lib</code> used by the stock IBM CSI drivers.</p>
+<h3 id="maturity-legend">Maturity Legend<a class="headerlink" href="#maturity-legend" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Badge</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>GA</strong></td>
+<td>Production-ready, fully tested, stable API</td>
+</tr>
+<tr>
+<td><strong>Beta</strong></td>
+<td>Implemented and tested, API may evolve</td>
+</tr>
+<tr>
+<td><strong>Planned</strong></td>
+<td>Code exists but not yet validated in production</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="feature-categories">Feature Categories<a class="headerlink" href="#feature-categories" title="Permanent link">&para;</a></h2>
+<h3 id="core-pooled-storage-model-ga">Core: Pooled Storage Model — GA<a class="headerlink" href="#core-pooled-storage-model-ga" title="Permanent link">&para;</a></h3>
+<p>Subdirectory-based PVC provisioning on shared VPC file shares. Each PVC maps to a directory (<code>/pvcs/pvc-&lt;uuid&gt;</code>) on an existing share, tracked by a SubVolume CR.</p>
+<ul>
+<li><strong>CRD-based state</strong> — FileSharePool and SubVolume CRDs hold all allocation state. No external database or ConfigMaps.</li>
+<li><strong>Background reconciliation</strong> — VPC API calls (share creation, health checks, mount target discovery) happen in a background reconciler. One exception: with <code>autoExpand</code> on, a CreateVolume that finds no share with room calls <code>CreateFileShare</code> itself and returns a retriable error so the provisioner retries.</li>
+<li><strong>Instant PVC creation</strong> — CreateVolume records a SubVolume CR and returns immediately (&lt;1s vs 30-90s for the stock driver).</li>
+<li><strong>Idempotent operations</strong> — All CSI methods are idempotent with crash recovery. Duplicate requests return the same result.</li>
+</ul>
+<h3 id="allocation-capacity-ga">Allocation &amp; Capacity — GA<a class="headerlink" href="#allocation-capacity-ga" title="Permanent link">&para;</a></h3>
+<p>Share selection and capacity management across the pool.</p>
+<ul>
+<li><strong>Spread strategy</strong> — Distributes PVCs evenly across shares for lower blast radius (default).</li>
+<li><strong>Binpack strategy</strong> — Fills shares before using the next one, minimizing active share count.</li>
+<li><strong>Automatic pool expansion</strong> — When allocation exceeds a configurable threshold (default 80%), a new VPC share is created in the background. Proactive expansion adds buffer before the threshold is reached.</li>
+<li><strong>Per-PVC quota tracking</strong> — Each SubVolume records its requested size. Pool capacity accounting prevents overcommit.</li>
+<li><strong>Configurable reclaim policies</strong> — Delete (remove subdirectory on PVC deletion) or Retain (keep data for manual recovery).</li>
+</ul>
+<h3 id="volume-snapshots-beta">Volume Snapshots — Beta<a class="headerlink" href="#volume-snapshots-beta" title="Permanent link">&para;</a></h3>
+<p>Directory-level point-in-time copies via the standard CSI snapshot interface.</p>
+<ul>
+<li><strong>CreateSnapshot</strong> — A Job in the driver's namespace copies the SubVolume directory to a snapshot path on the same share. The Snapshot CR reads <code>readyToUse: false</code> until the copy has finished. If a running VM uses the claim, the snapshot is a QEMU copy of that disk at one moment instead (guest frozen for a moment; <code>status.consistency</code> says if it worked; <code>vmCopySpeedLimitMBps</code> on the VolumeSnapshotClass sets the speed, default 20 MB/s). Experimental, like the VM disk copy for replication.</li>
+<li><strong>Instant VM disk snapshots</strong> — Experimental — Where the KubeVirt <code>Sidecar</code> feature gate is on, a snapshot of a VM disk is a new overlay file and nothing is copied: it is ready in seconds, whatever the disk size, and an OpenShift VM snapshot gives all disks of a VM at the moment OpenShift froze the guest. Deleting a snapshot merges its file back while the VM runs. A webhook gives a VM with snapshots the driver's hook when it starts. Red Hat does not support the <code>Sidecar</code> gate. See <a href="../VM-INSTANT-SNAPSHOTS/">VM-INSTANT-SNAPSHOTS.md</a>.</li>
+<li><strong>DeleteSnapshot</strong> — A Job removes the snapshot directory; then the CR is deleted and the pool capacity is given back.</li>
+<li><strong>ListSnapshots</strong> — Lists snapshots filtered by source volume with pagination support.</li>
+<li><strong>Restore from snapshot</strong> — A Job copies the snapshot directory into the new volume and sets the pool's owner and permissions. The claim stays Pending until the copy has finished.</li>
+<li><strong>Validating webhook</strong> — Ensures Snapshot CRs have required fields (sourceSubVolume, poolName).</li>
+</ul>
+<h3 id="volume-cloning-beta">Volume Cloning — Beta<a class="headerlink" href="#volume-cloning-beta" title="Permanent link">&para;</a></h3>
+<p>Asynchronous, Job-based cloning for every volume size.</p>
+<ul>
+<li><strong>Async copy</strong> — CreateVolume creates a SubVolume CR with <code>CloneStatus=Pending</code> and returns. The clone worker runs a Kubernetes Job that copies the data (the controller pod has no NFS access).</li>
+<li><strong>Same-share preference</strong> — Clones prefer the same share as the source for speed. Falls back to cross-share when capacity requires it.</li>
+<li><strong>Clone status gate</strong> — NodePublishVolume returns <code>Unavailable</code> for SubVolumes with an in-progress clone, preventing pods from mounting incomplete data.</li>
+<li><strong>Crash recovery</strong> — The clone worker recovers incomplete clones on restart by scanning for SubVolumes in Pending/InProgress state.</li>
+<li><strong>Progress tracking</strong> — CloneProgress tracks BytesCopied, TotalBytes, StartedAt, CompletedAt, and Error.</li>
+</ul>
+<h3 id="backup-to-a-snapshot-pool-experimental">Backup to a Snapshot Pool — Experimental<a class="headerlink" href="#backup-to-a-snapshot-pool-experimental" title="Permanent link">&para;</a></h3>
+<p>One <code>BackupPolicy</code> backs up the volumes and VMs it selects into a pool that holds only backups, so a lost data share does not take the backups with it. Built on replication, so a running VM is backed up at one moment, all disks together, and only changed blocks are copied.</p>
+<ul>
+<li><strong>Selection</strong> — By PVC label and namespace. If any disk of a VM matches, all its disks are backed up.</li>
+<li><strong>Moments</strong> — The latest backup of a VM disk is whole; earlier moments are undo files (restore points). Other volumes keep each sync as a folder of hard links, so an unchanged file takes no extra space. Moments older than <code>keepFor</code> (default 7 days) go.</li>
+<li><strong>Restore</strong> — <code>kubectl backup restore --policy P --pvc NS/NAME --to NS/NEW [--moment TIME]</code> makes a new PVC and copies the backup into it; the volume is held back from pods until the copy ends. It never writes over a volume that exists, and works after the source volume is deleted.</li>
+<li><strong>More than one share</strong> — A snapshot pool may have several shares. A new volume goes to the ready share with room that holds the fewest volumes and stays there; a restore reads from it.</li>
+<li><strong>Full share</strong> — Above 85% full, a share of the snapshot pool gets no new backups and the policy reports <code>Error</code>. The other shares go on, and new volumes avoid the full one. Backups are never deleted to make room; they resume when usage falls.</li>
+<li><strong>Delete</strong> — <code>kubectl backup delete --policy P --pvc NS/NAME</code> removes the backup and all earlier moments of one volume, after a typed confirmation (or <code>--yes</code>). It refuses while the policy still backs up the volume or a restore of it runs, and the controller never runs it.</li>
+<li><strong>Export to COS (part 2: controller)</strong> — With <code>spec.export</code> (bucket, endpoint, prefix, credentials and backup-key Secrets, <code>keepFor</code> default 30d, <code>lock</code> Compliance or None, optional <code>schedule</code>), the controller sends each new backup moment of a volume to a Kopia repository in a COS bucket, one Job at a time for each policy, reading the snapshot pool read-only. Status per volume: <code>exportedTime</code>, <code>exportedBytes</code>, <code>exportError</code>. A maintenance Job extends locks and deletes snapshots older than <code>keepFor</code>. An export problem never stops the backups to the snapshot pool. <code>kubectl backup cos-setup</code> (part 4, run against real IBM Cloud in stage 18) makes the instance, the locked bucket, the write-only role, the key limited to one bucket, the CBR rule and the wrapped backup key, and prints the <code>spec.export</code> block. Key handling (part 3): the backup key is stored only wrapped by Key Protect; the Jobs unwrap it in memory, with an optional emergency key if Key Protect is down (proved against a real Key Protect root key in stage 18; the emergency key is not yet proved). Restore from COS (part 5): <code>kubectl backup restore --from-cos</code> and <code>kubectl backup cos-list</code> work in a cluster with no policy and no snapshot pool; if Key Protect is gone, <code>--backup-key-file</code> restores with the readable key. Built, not tested against a real bucket; the release test (part 6) is not built.</li>
+<li><strong>Browse a backup, part 2: sessions (issue #92, in development)</strong> — A <code>BackupBrowse</code> resource (cluster scoped; only the gateway will make it) and the controller part: for each session a Secret with a token and a per-session TLS certificate, and a helper pod that mounts only that volume's backup read-only, with limits (15 minutes idle, 2 hours hard, 5 open in the cluster and 2 for each namespace), clean-up after a restart, and every object tied to the session's UID. See <a href="../BACKUP-RECOVERY/#browse-a-backup-and-restore-files-in-development">BACKUP-RECOVERY.md</a>. Still nothing a user can run: the gateway and <code>kubectl backup</code> come next.</li>
+<li><strong>Browse a backup, part 1 (issue #92, in development)</strong> — The helper that will read one backup folder for the browse feature is built and proven on a real share, but nothing in the driver starts it yet: no command, console page or resource uses it. It runs as root with every capability dropped on a read-only mount, never follows a link (<code>openat2</code> with <code>RESOLVE_BENEATH</code> and <code>NO_SYMLINKS</code>), keeps names as raw bytes, and serves list, stat, file range and tar over HTTP with a session token. It ends by itself when idle (15 minutes) or after 2 hours. On the lab share it read another user's files with mode 0600 and folders with mode 0700. The next parts add the <code>BackupBrowse</code> resource, the gateway with Kubernetes access checks, <code>kubectl backup ls/get/browse</code>, and file restore. See <a href="../BACKUP-RECOVERY/#browse-a-backup-and-restore-files-in-development">BACKUP-RECOVERY.md</a>.</li>
+</ul>
+<h3 id="volume-group-snapshots-not-active">Volume Group Snapshots — Not active<a class="headerlink" href="#volume-group-snapshots-not-active" title="Permanent link">&para;</a></h3>
+<p>The code and the record type exist, but nothing acts on a <code>VolumeGroupSnapshot</code> record, the hooks never run, and the console no longer shows it. There is no plan to turn it on (issue #100). A running VM with several disks does not need it. What the code was built to do:</p>
+<ul>
+<li><strong>Coordinated snapshot creation</strong> — CreateVolumeGroupSnapshot takes a list of PVCs and snapshots them in order, tracking per-member state (Pending, Creating, Ready, Failed).</li>
+<li><strong>Failure policies</strong> — <code>Abort</code> (default) rolls back completed snapshots on first failure. <code>Continue</code> finishes all members and marks the group as PartialFailure.</li>
+<li><strong>Copy order</strong> — Configurable ordering of member snapshots. Defaults to alphabetical PV name sorting.</li>
+<li><strong>Inconsistency window tracking</strong> — Measures the time delta between first and last member copy in milliseconds.</li>
+<li><strong>Pre/post-snapshot hooks</strong> — Exec and HTTP webhook hooks via the hook orchestrator for application quiescing.</li>
+<li><strong>Validating webhook</strong> — Ensures VolumeGroupSnapshot CRs have poolName and sourcePVCs.</li>
+</ul>
+<h3 id="cross-region-replication-beta">Cross-Region Replication — Beta<a class="headerlink" href="#cross-region-replication-beta" title="Permanent link">&para;</a></h3>
+<p>Disaster recovery with configurable sync schedules. Two replication modes are supported.</p>
+<ul>
+<li><strong>Direct NFS mode</strong> — rsync-based replication between source and destination NFS shares mounted over Transit Gateway or VPN. Uses incremental delta transfer for efficiency.</li>
+<li><strong>Driver-to-driver mode</strong> — HTTPS-based replication from sync-client Jobs on the source cluster to a receiver service on the destination cluster. Streams tar archives over HTTPS with bearer token auth. No cross-region NFS connectivity required.</li>
+<li><strong>Schedule-based sync</strong> — ReplicationPolicy CR defines sync interval (e.g., <code>15m</code>, <code>1h</code>, <code>6h</code>) as a duration string.</li>
+<li><strong>Per-SubVolume incremental sync</strong> — Optional label selector filters which SubVolumes replicate. Incremental mode (default) uses rsync for efficient delta transfer (direct NFS mode).</li>
+<li><strong>Bandwidth limiting and parallel syncs</strong> — <code>bandwidthLimitMbps</code> caps rsync throughput (direct NFS mode); <code>maxParallelSyncs</code> controls concurrent SubVolume syncs in both modes.</li>
+<li><strong>Extra rsync options</strong> — <code>rsyncOptions</code> field passes additional rsync flags (e.g., <code>--compress</code>, <code>--checksum</code>). Dangerous flags (<code>--daemon</code>, <code>--server</code>, <code>--rsh</code>, <code>--rsync-path</code>) are blocked by the webhook. Only applies to direct NFS mode.</li>
+<li><strong>Retry with backoff</strong> — Configurable max retries (default 3). Policy pauses on consecutive failures.</li>
+<li><strong>Running VM disks</strong> — Experimental — The controller copies a running VM's disks with QEMU, all at one moment, after a short guest freeze (0.15 s in a lab test). After the first copy, each copy holds only the changed blocks. The destination saves the old contents of every changed block first, so a copy that stops half way is rolled back, and it keeps those as restore points for 24 hours by default (<code>restorePointKeepHours</code>). The copy is file-system consistent, or crash consistent if the guest cannot freeze, and the status says which. A live migration cancels the copy. In receiver mode the receiver at the destination applies each copy, and after a VM move only the blocks that differ are sent. Tested between two clusters with Linux and Windows Server 2022 VMs (freeze, copy, rewind and boot). Red Hat does not support the QEMU commands this uses.</li>
+<li><strong>Pause/resume via annotation</strong> — Annotate a ReplicationPolicy with <code>storage.ibmcloud.io/paused=true</code> to pause; remove the annotation to resume. The controller updates <code>status.phase</code> accordingly.</li>
+<li><strong>Pre/post-sync hooks</strong> — Exec and HTTP hooks for application quiescing before sync and notification after.</li>
+<li><strong>Metadata sidecar</strong> — Writes <code>.subvolume-metadata.json</code> alongside each replicated SubVolume directory, enabling the failover CLI to reconstruct resources without querying the source cluster.</li>
+<li><strong>Failover CLI</strong> — <code>kubectl failover</code> plugin with <code>plan</code> (scan destination NFS, compute RPO), <code>execute</code> (create SubVolume CRs, PVs, PVCs on DR cluster), and <code>status</code> (report PVC binding) subcommands. For running VMs it picks the newest moment all of a VM's disks can show, rolls back a copy that stopped half way, and with <code>--rewind-to</code> goes back to an earlier restore point (<code>--list-moments</code> lists them). Supports <code>--dry-run</code> and is idempotent.</li>
+<li><strong>Status tracking</strong> — Per-policy LastSyncTime and LastSyncDuration. Per-SubVolume sync state with BytesSynced and LastError.</li>
+<li><strong>Destination config</strong> — NFS server IP and base path (direct NFS mode), or HTTPS receiver endpoint with bearer token auth (driver-to-driver mode).</li>
+<li><strong>Prometheus metrics</strong> — Dedicated metrics for sync total, duration, lag, failures, and SubVolume count.</li>
+</ul>
+<h3 id="nfs-mount-management-ga">NFS &amp; Mount Management — GA<a class="headerlink" href="#nfs-mount-management-ga" title="Permanent link">&para;</a></h3>
+<p>Efficient NFS mount handling with security enforcement.</p>
+<ul>
+<li><strong>Mount reuse</strong> — One NFS mount per staged volume. A second pod on the same volume reuses the mount. A different volume on the same share is mounted again.</li>
+<li><strong>Bind-mount publishing</strong> — NodePublishVolume bind-mounts the SubVolume's subdirectory from the staged NFS mount into the pod's volume path.</li>
+<li><strong><code>sec=sys</code> enforcement</strong> — All NFS mounts include <code>sec=sys</code> to ensure proper UID/GID authentication. Without it, VPC shares negotiate <code>sec=null</code> and all files appear as UID 99.</li>
+<li><strong>Soft mount defaults</strong> — Mount options <code>nfsvers=4.1,soft,timeo=600,retrans=3</code> prevent pods from hanging on NFS failures.</li>
+<li><strong>Mount target address</strong> — Each share has one mount target, in the pool's zone. Nodes in every zone mount it.</li>
+<li><strong>Path traversal validation</strong> — All subdirectory paths validated against <code>^/pvcs/pvc-[a-f0-9-]{36}$</code> before any filesystem operation.</li>
+</ul>
+<h3 id="kubevirt-integration-beta">KubeVirt Integration — Beta<a class="headerlink" href="#kubevirt-integration-beta" title="Permanent link">&para;</a></h3>
+<p>First-class support for running virtual machines on pooled storage.</p>
+<ul>
+<li><strong>UID 107 directory ownership</strong> — Pool <code>defaultUID: 107</code> and <code>defaultGID: 107</code> ensure subdirectories are pre-owned for QEMU (virt-handler chowns to 107:107).</li>
+<li><strong>Raw disk image support</strong> — KubeVirt requires raw format for filesystem PVCs. Cloud images (distributed as qcow2) must be converted to raw. CDI does this when it imports an image, and the pool's golden images (a Hidden feature) are made by CDI. Convert with <code>qemu-img convert -f qcow2 -O raw</code> only if you write images to a pool yourself.</li>
+<li><strong>CDI registry import</strong> — CDI imports an image from a registry onto a pool StorageClass. This was measured on rovslab (CentOS Stream 9 in about 40 s, RHEL 9 in about 2.5 min). A copy of a catalog image from other storage (such as Ceph) onto the pool uses CDI's copy pods. Their default memory limit is too small, so the controller raises it (see the CDI copy limit feature below).</li>
+<li><strong><code>sec=sys</code> enables chown</strong> — With <code>sec=sys</code>, virt-handler's chown to UID 107 succeeds. Without it, chown fails for all non-root UIDs.</li>
+</ul>
+<h3 id="multi-tenancy-performance-tiers-beta">Multi-Tenancy &amp; Performance Tiers — Beta<a class="headerlink" href="#multi-tenancy-performance-tiers-beta" title="Permanent link">&para;</a></h3>
+<p>Multiple independent pools with per-tier storage profiles.</p>
+<ul>
+<li><strong>Multiple pools per cluster</strong> — Each FileSharePool CR is independent with its own shares, capacity, and allocation strategy.</li>
+<li><strong>Tiered storage</strong> — Pools can define multiple ShareTiers, each with a distinct IOPS value, share size, and max share count.</li>
+<li><strong>Auto-generated StorageClasses</strong> — Non-tiered pools generate one StorageClass (<code>{pool-name}</code>). Tiered pools generate one per tier (<code>{pool-name}-{tier-name}</code>). Skip with the <code>storage.ibmcloud.io/skip-storageclass</code> annotation.</li>
+<li><strong>Tier-aware allocation</strong> — CreateVolume requests pass the tier name via StorageClass parameters. Share selection filters to the requested tier.</li>
+<li><strong>Resource group &amp; tag support</strong> — Shares can be tagged with VPC resource group and user-defined tags for cost tracking.</li>
+</ul>
+<h3 id="pool-lifecycle-resilience-ga">Pool Lifecycle &amp; Resilience — GA<a class="headerlink" href="#pool-lifecycle-resilience-ga" title="Permanent link">&para;</a></h3>
+<p>Automated pool management with health monitoring and safe shutdown.</p>
+<ul>
+<li><strong>Pool phases</strong> — Initializing (no shares ready) → Ready (stable capacity) → Expanding (creating shares) → Degraded (draining/unhealthy shares) → Full (at max capacity).</li>
+<li><strong>Share health monitoring</strong> — Background reconciler polls VPC API for share lifecycle state. Promotes creating shares to stable when mount targets are available. Detects VPC-reported degradation.</li>
+<li><strong>Share draining</strong> — Marking a share for drain excludes it from new allocations. ShareDrainStatus tracks remaining SubVolumes and drain start time. Share is removed when empty.</li>
+<li><strong>Pool finalizer protection</strong> — Pools cannot be deleted while SubVolumes exist.</li>
+<li><strong>Leader election</strong> — Single-writer safety for the controller. Concurrent controllers would corrupt pool state.</li>
+<li><strong>Crash recovery</strong> — All state in CRDs. Controller restart re-reads CRs and resumes from last known state.</li>
+</ul>
+<h3 id="ibm-vpc-platform-integration-ga">IBM VPC Platform Integration — GA<a class="headerlink" href="#ibm-vpc-platform-integration-ga" title="Permanent link">&para;</a></h3>
+<p>Thin wrapper around the VPC file share API with operational guardrails.</p>
+<ul>
+<li><strong>VPC file share CRUD</strong> — Create, get, list, delete shares with idempotent retry. All operations use context-based timeouts.</li>
+<li><strong>Mount target management</strong> — Creates one mount target per share, in the pool's zone. Tracks its IP address.</li>
+<li><strong>API rate limiting</strong> — 5 requests/second default to stay within VPC API limits.</li>
+<li><strong><code>secret-common-lib</code> authentication</strong> — API key and pod identity auth via the same library used by the stock IBM CSI drivers. Runs as a sidecar with panic recovery.</li>
+<li><strong>Config auto-discovery</strong> — Reads cluster zone, resource group, and VPC ID from standard IBM Cloud ConfigMaps.</li>
+<li><strong>Initial owner handling</strong> — Sets <code>initial_owner: {uid: 65534, gid: 65534}</code> on share creation so root (squashed to 65534 by NFS root_squash) can manage the share root.</li>
+</ul>
+<h3 id="security-ga">Security — GA<a class="headerlink" href="#security-ga" title="Permanent link">&para;</a></h3>
+<p>Defense-in-depth controls for a storage driver running with host access.</p>
+<ul>
+<li><strong>Path traversal validation</strong> — All mkdir/rm operations validate paths against <code>^/pvcs/pvc-[a-f0-9-]{36}$</code> and reject traversal attempts.</li>
+<li><strong>Validating admission webhooks</strong> — Beta — Seven validating webhooks cover the CRD types (FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, ReplicationPolicy, BackupPolicy, BackupRestore). A mutating webhook adds the VM hook to VMs with instant snapshots.</li>
+<li><strong>RBAC minimal permissions</strong> — Controller and node service accounts use least-privilege roles.</li>
+<li><strong>No secrets in logs</strong> — API keys and tokens are never logged. Share IDs and mount target IPs are safe to log.</li>
+</ul>
+<h3 id="observability-ga">Observability — GA<a class="headerlink" href="#observability-ga" title="Permanent link">&para;</a></h3>
+<p>Prometheus metrics and structured logging for operational visibility.</p>
+<ul>
+<li><strong>Prometheus metrics</strong> — 37 metrics covering allocation (count, duration, capacity, size and allocation of each share), VPC API calls (count, latency), snapshots, clones, group snapshots, replication, and backups.</li>
+<li><strong>Structured logging</strong> — <code>klog/v2</code> with <code>InfoS</code>/<code>ErrorS</code> and key-value pairs. V(2) for normal operations, V(4) for detailed flow, V(6) for trace-level.</li>
+<li><strong>Key metrics:</strong></li>
+<li><code>vpc_file_pool_allocations_total</code> — allocation/deallocation counts by pool and status</li>
+<li><code>vpc_file_pool_allocation_duration_seconds</code> — allocation latency histogram</li>
+<li><code>vpc_file_pool_capacity_gb</code> / <code>vpc_file_pool_allocated_gb</code> — pool utilization gauges</li>
+<li><code>vpc_file_pool_api_calls_total</code> / <code>vpc_file_pool_api_call_duration_seconds</code> — VPC API health</li>
+<li><code>vpc_file_pool_snapshots_total</code> / <code>vpc_file_pool_clones_total</code> — data protection operation counts</li>
+<li><code>pool_csi_replication_lag_seconds</code> — replication RPO monitoring</li>
+</ul>
+<h3 id="deployment-ga">Deployment — GA<a class="headerlink" href="#deployment-ga" title="Permanent link">&para;</a></h3>
+<p>Production-ready packaging for ROKS and ROVS clusters.</p>
+<ul>
+<li><strong>Helm chart</strong> — Full customization via <code>values.yaml</code>. Configurable image tags, resource limits, node selectors, tolerations, and all driver parameters.</li>
+<li><strong>ROKS/ROVS kubelet path handling</strong> — ROKS and ROVS use <code>/var/data/kubelet</code> (not <code>/var/lib/kubelet</code>). The chart's <code>node.kubeletDir</code> defaults to the correct path.</li>
+<li><strong>UBI9-based container image</strong> — Built on Red Hat Universal Base Image 9 for enterprise compliance.</li>
+<li><strong>cert-manager webhook TLS</strong> — Admission webhooks use cert-manager for automatic certificate provisioning and rotation. ROVS has no cert-manager; on ROKS and ROVS set <code>webhook.certProvider=openshift</code> (see <a href="../INSTALL/#webhook-certificates">INSTALL.md — Webhook Certificates</a>).</li>
+<li><strong>hostNetwork for NFS persistence</strong> — Node DaemonSet runs with <code>hostNetwork: true</code> so NFS TCP connections survive container restarts.</li>
+</ul>
+<h3 id="migration-beta">Migration — Beta<a class="headerlink" href="#migration-beta" title="Permanent link">&para;</a></h3>
+<p>CLI tool for migrating PVCs from the stock IBM VPC File CSI driver.</p>
+<ul>
+<li><strong><code>kubectl migrate plan</code></strong> — Discovers PVCs in a namespace by StorageClass, calculates total size, detects pod attachments.</li>
+<li><strong><code>kubectl migrate execute</code></strong> — Creates a migration pod that copies data from the source PVC to a new SubVolume in the target pool.</li>
+<li><strong><code>kubectl migrate status</code></strong> — Checks migration pod progress.</li>
+<li><strong>Migrate volumes in the console</strong> — A "Migrate volumes into a pool" link on the Pools tab opens a page that lists the claims of another storage class, refuses a claim a pod uses or a move that does not fit the pool, asks for confirmation, and then makes the same new claim and pod as <code>kubectl migrate execute</code>. It follows the copy and never deletes the old claim. See <a href="../TUTORIAL-08-MIGRATION-AND-CONSOLE/#migrate-in-the-console">TUTORIAL-08-MIGRATION-AND-CONSOLE.md</a>.</li>
+<li><strong>Receiver setup in the console</strong> — The replication form, in Driver-to-Driver mode, makes the token and CA Secrets from what you paste, runs a short check Job in the source cluster (the address answers, the certificate is trusted, the token is accepted), and turns Create on only when it passes. See <a href="../CROSS-REGION-DR/#set-up-the-receiver-in-the-console">CROSS-REGION-DR.md</a>. Afterwards the controller keeps checking the receiver and shows "Reachable" or the reason it is not on the policy list and page.</li>
+<li><strong>Dry-run mode</strong> — Preview migration plan without making changes.</li>
+<li><strong>Idempotent and resumable</strong> — Safe to re-run after interruption.</li>
+</ul>
+<h3 id="openshift-console-integration-beta">OpenShift Console Integration — Beta<a class="headerlink" href="#openshift-console-integration-beta" title="Permanent link">&para;</a></h3>
+<p>Visual management of file share pools through the OpenShift Console.</p>
+<ul>
+<li><strong>Dynamic console plugin</strong> — Registers as an OpenShift ConsolePlugin (v1 API, requires OpenShift 4.14+). On by default where the cluster has the OpenShift console; the chart turns it on in the console. Turn it off with <code>consolePlugin.enabled=false</code>.</li>
+<li><strong>Single tabbed navigation</strong> — One "IBM VPC File Pools" item under Storage in the console sidebar opens a tabbed interface (Overview, Pools, SubVolumes, Snapshots, Replication, Backups, Monitoring). Detail and create pages render standalone without tabs.</li>
+<li><strong>Pool dashboard</strong> — Overview tab showing all FileSharePools with status, capacity gauges, share count, SubVolume count, and recent activity table.</li>
+<li><strong>CRUD for 4 CRDs</strong> — List, detail, create, edit, and delete views for FileSharePool, SubVolume, Snapshot, and ReplicationPolicy resources. Create buttons route to custom form wizards (not the YAML editor).</li>
+<li><strong>FileSharePool creation wizard</strong> — 6-step guided wizard for creating pools: zone/profile selection, capacity configuration, allocation strategy, directory ownership, and review. The form no longer offers golden images.</li>
+<li><strong>IOPS column in pool table</strong> — Displays <code>spec.iops</code>, or "VPC default" when it is not set.</li>
+<li><strong>Restore a snapshot to a new PVC</strong> — A "Restore to new PVC" action on the snapshot details page and in the list row menu opens a form (name, size, storage class, access and volume mode) and creates a claim whose data source is the snapshot's <code>VolumeSnapshot</code>. A banner follows the copy. It never replaces an existing volume. See <a href="../BACKUP-RECOVERY/#restore-in-the-console">BACKUP-RECOVERY.md</a>.</li>
+<li><strong>Clone a volume to a new PVC</strong> — A "Clone to new PVC" action on the SubVolume details page and in the list row menu opens the same kind of form and creates a claim whose data source is the volume's claim. The same banner follows the copy. It never changes the source volume. See <a href="../VOLUME-CLONING/#clone-in-the-console">VOLUME-CLONING.md</a>.</li>
+<li><strong>Backups in the console (issue #46)</strong> — A "Backups" tab lists each backup policy (snapshot pool, schedule, keep time, phase, volumes, stalest backup, export on or off). A policy page shows its settings and one row for each volume: newest and oldest backup, restore points, size, consistency, error and export state. A banner says in plain words when new backups are stopped because the snapshot pool is more than 85% full, and links to the pool. A <strong>Restore</strong> action on each volume opens a page that restores the latest backup, or the newest one at or before a chosen time, to a new claim (it never overwrites a volume), asks for confirmation, and follows the restore to Done or Failed. Create, edit, suspend, resume and delete a policy are in the console too (a form that checks the pool, the schedule, the keep time and the labels, and counts the claims the labels match). A <strong>Delete backups</strong> action on each volume measures the backups with a Job, shows the size and the number of moments, asks you to type the claim, and then removes them with a Job; it refuses while the policy still backs up the volume or a restore of it runs. The Job specs are tied to the Go ones by a golden file. A <strong>COS</strong> tab shows the export settings and the export state of each volume, and lists what is in the bucket with a read-only Job. <strong>Restore from COS</strong> makes a <code>BackupRestore</code> from a bucket, in any cluster that runs the driver. A guide in the COS tab sets up the export as far as a browser can: it shows the <code>cos-setup</code> command with your names filled in (the console cannot run it, because it has no IBM Cloud login), makes the Secrets from the pasted manifests, writes the pasted <code>spec.export</code> into the policy, and shows whether the export works. See <a href="../BACKUP-RECOVERY/#backups-in-the-console">BACKUP-RECOVERY.md</a>.</li>
+<li><strong>Monitoring tab</strong> — Dedicated metrics page with time range selector (1h/6h/24h/7d), stat cards (allocation rate, P95 latency, VPC API health, replication status), and time-series charts (allocation rate, latency, API call rate by status, replication lag), and a collapsed section with the group snapshot inconsistency window, the group snapshot member count, and the times the controller raised CDI's copy limit.</li>
+<li><strong>Prometheus metrics panels</strong> — Stat cards and time-series charts using the driver's Prometheus metrics with <code>usePrometheusRange</code> hook for range queries.</li>
+<li><strong>TLS via service-ca</strong> — Plugin Service uses OpenShift's service-ca operator for automatic TLS certificate provisioning (no cert-manager dependency).</li>
+</ul>
+<h3 id="cdi-copy-limit-beta">CDI Copy Limit — Beta<a class="headerlink" href="#cdi-copy-limit-beta" title="Permanent link">&para;</a></h3>
+<p>Lets VMs from the standard OpenShift Virtualization catalog use a pool for their boot disk.</p>
+<ul>
+<li><strong>Standard catalog</strong> — Pick a catalog image and choose the pool's StorageClass for the boot disk. CDI copies the image onto the pool. See <a href="../USER-GUIDE/#create-a-vm-with-its-boot-disk-on-a-pool">USER-GUIDE.md</a>.</li>
+<li><strong>Copy pod memory limit</strong> — The controller keeps the memory limit of CDI's copy pods at least 8Gi, through <code>HyperConverged</code> <code>spec.resourceRequirements.storageWorkloads</code>. It checks at start-up and every 5 minutes (leader only), and it only raises the limit. Helm value <code>cdi.copyPodMemoryLimit</code>; empty turns the check off.</li>
+<li><strong>Visible resets</strong> — Each raise logs a warning and adds 1 to <code>vpc_file_pool_cdi_copy_limit_raised_total</code>.</li>
+<li><strong>Measured</strong> — On rovslab, a 25 GB copy finished in 134 s with 8Gi and never finished with 2Gi. A RHEL 9 catalog VM had its guest agent after 103 s.</li>
+<li><strong>ROVS</strong> — IBM says the virtualization add-on cannot be modified. See <a href="../KNOWN-LIMITATIONS/#cdi-containerized-data-importer-compatibility">KNOWN-LIMITATIONS.md</a>.</li>
+</ul>
+<h3 id="golden-image-syncer-hidden">Golden Image Syncer — Hidden<a class="headerlink" href="#golden-image-syncer-hidden" title="Permanent link">&para;</a></h3>
+<p><strong>Hidden.</strong> The code is kept for possible later use. The console pool form no longer offers golden images, and the "VM storage" preset no longer turns them on. A pool that sets <code>spec.goldenImages</code> in YAML still works. The standard catalog is the recommended way to make VMs. The features below stay listed for that reason.</p>
+<p>VM image caching for KubeVirt workloads.</p>
+<ul>
+<li><strong>CDI DataImportCron discovery</strong> — Finds golden images defined by CDI DataImportCrons and syncs them to target namespaces.</li>
+<li><strong>CDI import</strong> — Makes a CDI DataVolume <code>golden-&lt;image&gt;</code> in each target namespace, on the pool's StorageClass, from the registry URL of the DataImportCron (<code>pullMethod: node</code>). CDI converts the image to raw. For ImageStream-based crons (RHEL), the syncer uses the external address the ImageStream imports from. The image is ready when the DataVolume phase is Succeeded. Target namespaces need no <code>anyuid</code> grant.</li>
+<li><strong>Configurable refresh interval</strong> — Default 24-hour sync cycle. Per-pool configuration via <code>GoldenImageConfig</code> in the FileSharePool spec.</li>
+<li><strong>CDI DataSource creation</strong> — Creates DataSource CRs in <code>openshift-virtualization-os-images</code>, named <code>&lt;image&gt;-&lt;namespace&gt;-nfs-pool</code> (one per golden claim), for InstanceTypes catalog visibility. Each points to the golden PVC in its target namespace. Creating a VM from the InstanceTypes tab with its boot disk on the pool is being tested.</li>
+<li><strong>Pool deletion clean-up</strong> — Deleting a pool deletes its golden DataVolumes, PVCs, Templates and DataSources first. The syncer skips pools being deleted. The syncer refuses a <code>golden-&lt;image&gt;</code> DataVolume that the pool did not make.</li>
+<li><strong>Per-namespace status</strong> — Tracks sync phase (Pending, Syncing, Ready, Failed) per target namespace.</li>
+</ul>
+<hr />
+<h2 id="comparison-table">Comparison Table<a class="headerlink" href="#comparison-table" title="Permanent link">&para;</a></h2>
+<p>How this driver compares to the two most common alternatives for NFS-based Kubernetes storage on IBM Cloud.</p>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th style="text-align: center;">IBM VPC File Pool CSI</th>
+<th style="text-align: center;">IBM VPC File CSI</th>
+<th style="text-align: center;">K8s NFS CSI</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Architecture</strong></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+</tr>
+<tr>
+<td>Pooled storage model</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>1:1 PVC-to-share mapping</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+</tr>
+<tr>
+<td>State in CRDs</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>PVC creation time</td>
+<td style="text-align: center;">&lt;1s</td>
+<td style="text-align: center;">30-90s</td>
+<td style="text-align: center;">&lt;1s ¹</td>
+</tr>
+<tr>
+<td>Background reconciliation</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td><strong>CSI Operations</strong></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+</tr>
+<tr>
+<td>CreateVolume / DeleteVolume</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+</tr>
+<tr>
+<td>ExpandVolume</td>
+<td style="text-align: center;">✅ (pool-level)</td>
+<td style="text-align: center;">✅ (share-level)</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>Volume snapshots</td>
+<td style="text-align: center;">✅ (directory copy)</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>Volume clones</td>
+<td style="text-align: center;">✅ (async, Job-based)</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>Volume group snapshots</td>
+<td style="text-align: center;">❌ (not active)</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>Clone status gate</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+</tr>
+<tr>
+<td><strong>NFS</strong></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+</tr>
+<tr>
+<td><code>sec=sys</code> enforcement</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>Mount caching (per-share)</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>Soft mount defaults</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">Configurable</td>
+</tr>
+<tr>
+<td>One mount target serves every zone</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">—</td>
+</tr>
+<tr>
+<td>Bind-mount subdirectories</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td><strong>Capacity Management</strong></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+</tr>
+<tr>
+<td>Per-PVC quota tracking</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌ (share-level)</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>Automatic pool expansion</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+</tr>
+<tr>
+<td>Spread / binpack strategies</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+</tr>
+<tr>
+<td>Proactive expansion</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+</tr>
+<tr>
+<td>Share consolidation</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">—</td>
+</tr>
+<tr>
+<td><strong>Resilience</strong></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+</tr>
+<tr>
+<td>Idempotent operations</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+</tr>
+<tr>
+<td>Crash recovery</td>
+<td style="text-align: center;">✅ (CRD state)</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>Share health monitoring</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">—</td>
+</tr>
+<tr>
+<td>Share draining</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+</tr>
+<tr>
+<td>Cross-region replication</td>
+<td style="text-align: center;">✅ (beta)</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>Leader election</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+</tr>
+<tr>
+<td><strong>Platform</strong></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+</tr>
+<tr>
+<td>IBM VPC API integration</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td><code>secret-common-lib</code> auth</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">—</td>
+</tr>
+<tr>
+<td>ROKS/ROVS kubelet path handling</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>KubeVirt UID 107 support</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>Raw disk image conversion</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>Multi-tenancy / tiers</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>Config auto-discovery</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>API rate limiting</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">—</td>
+</tr>
+<tr>
+<td><strong>Observability</strong></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+</tr>
+<tr>
+<td>Prometheus metrics</td>
+<td style="text-align: center;">✅ (37 metrics)</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>Structured logging (klog)</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+</tr>
+<tr>
+<td>OpenShift Console plugin</td>
+<td style="text-align: center;">✅ (beta)</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td><strong>Deployment</strong></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+<td style="text-align: center;"></td>
+</tr>
+<tr>
+<td>Helm chart</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+</tr>
+<tr>
+<td>RBAC minimal permissions</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+</tr>
+<tr>
+<td>Validating webhooks</td>
+<td style="text-align: center;">✅ (beta)</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>UBI9 container image</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>cert-manager TLS</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>Migration from stock driver</td>
+<td style="text-align: center;">✅ (beta)</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+</tr>
+</tbody>
+</table>
+<p>¹ K8s NFS CSI requires a pre-existing NFS server; provisioning time depends on the NFS server setup, not the CSI driver.</p>
+<p><strong>Legend:</strong> ✅ = supported, ❌ = not supported, — = not applicable</p>
+<p><strong>Driver links:</strong>
+- <a href="https://github.com/IBM/ibm-vpc-file-csi-driver">IBM VPC File CSI Driver</a>
+- <a href="https://github.com/kubernetes-csi/csi-driver-nfs">Kubernetes NFS CSI Driver</a></p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "navigation.instant", "search.suggest", "search.highlight", "content.code.copy", "content.tabs.link"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+    
+  </body>
+</html>

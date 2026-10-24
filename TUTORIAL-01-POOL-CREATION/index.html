@@ -1,0 +1,3521 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A Kubernetes CSI driver that pools multiple PVCs as subdirectories within shared VPC file shares">
+      
+      
+      
+        <link rel="canonical" href="https://neil1taylor.github.io/ibm-vpc-file-pool-csi/TUTORIAL-01-POOL-CREATION/">
+      
+      
+        <link rel="prev" href="../TUTORIAL/">
+      
+      
+        <link rel="next" href="../TUTORIAL-02-SNAPSHOTS-AND-CLONES/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Tutorial 1 - Pool Creation - IBM VPC File Pool CSI Driver</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#part-1-pool-creation-pvcs-and-kubevirt-vms" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="IBM VPC File Pool CSI Driver" class="md-header__button md-logo" aria-label="IBM VPC File Pool CSI Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            IBM VPC File Pool CSI Driver
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Tutorial 1 - Pool Creation
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/neil1taylor/ibm-vpc-file-pool-csi" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neil1taylor/ibm-vpc-file-pool-csi
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../INSTALL/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../DAY2-OPERATIONS/" class="md-tabs__link">
+          
+  
+  
+  Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../OVERVIEW/" class="md-tabs__link">
+          
+  
+  
+  Architecture
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../VOLUME-CLONING/" class="md-tabs__link">
+          
+  
+  
+  Design (Phase 4)
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../CONTRIBUTING/" class="md-tabs__link">
+          
+  
+  
+  Development
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../examples/" class="md-tabs__link">
+          
+  
+  
+  Examples
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="IBM VPC File Pool CSI Driver" class="md-nav__button md-logo" aria-label="IBM VPC File Pool CSI Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    IBM VPC File Pool CSI Driver
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/neil1taylor/ibm-vpc-file-pool-csi" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neil1taylor/ibm-vpc-file-pool-csi
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../INSTALL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../USER-GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 1 - Pool Creation
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 1 - Pool Creation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-1-clean-up-any-previous-test-resources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1: Clean Up Any Previous Test Resources
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-2-set-up-variables-and-namespace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2: Set Up Variables and Namespace
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-3-create-a-filesharepool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3: Create a FileSharePool
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4-verify-the-auto-created-storageclass" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 4: Verify the Auto-Created StorageClass
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-5-inspect-the-pool-via-kubernetes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 5: Inspect the Pool via Kubernetes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-6-verify-the-vpc-file-share-via-ibm-cloud-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 6: Verify the VPC File Share via IBM Cloud CLI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-7-test-pvc-provisioning-with-a-simple-pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 7: Test PVC Provisioning with a Simple Pod
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-8-create-a-vm-with-a-pool-backed-data-disk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 8: Create a VM with a Pool-Backed Data Disk
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Step 8: Create a VM with a Pool-Backed Data Disk">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#step-8a-create-the-boot-and-data-pvcs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 8a: Create the Boot and Data PVCs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-8b-download-the-os-image-to-the-boot-pvc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 8b: Download the OS Image to the Boot PVC
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-8c-create-the-vm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 8c: Create the VM
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-9-wait-for-the-vm-to-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 9: Wait for the VM to Start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-10-access-the-vm-and-use-the-data-disk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 10: Access the VM and Use the Data Disk
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-11-verify-pool-state-after-allocations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 11: Verify Pool State After Allocations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-12-create-a-second-manual-pvc-to-see-capacity-grow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 12: Create a Second Manual PVC to See Capacity Grow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cleanup
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Cleanup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#full-cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Full Cleanup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keep-the-pool-delete-only-workloads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keep the Pool, Delete Only Workloads
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stuck-namespace-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stuck Namespace Recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quick-reference-useful-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick Reference: Useful Commands
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#kubevirt-nfs-permissions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        KubeVirt NFS Permissions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-storageclasses-link-to-pools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How StorageClasses Link to Pools
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#whats-next" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What's Next
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-02-SNAPSHOTS-AND-CLONES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 2 - Snapshots and Clones
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 3 - Group Snapshots and Hooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-04-POOL-CONFIGURATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 4 - Pool Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-05-GOLDEN-IMAGES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 5 - Golden Images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-06-REPLICATION-AND-FAILOVER/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 6 - Replication and Failover
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-07-MONITORING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 7 - Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-08-MIGRATION-AND-CONSOLE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 8 - Migration and Console
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-09-COS-BACKUP-BUCKET/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 9 - COS Bucket for Backups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-10-BACKUP-AND-RESTORE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 10 - Backup and Restore
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-11-INSTANT-VM-SNAPSHOTS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 11 - Instant VM Snapshots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-12-REPLICATING-RUNNING-VMS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 12 - Replicating Running VMs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-13-FAILOVER-OF-RUNNING-VMS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 13 - Failover of Running VMs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-14-CONSOLE-RESTORE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 14 - Restore a Snapshot in the Console
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DEPLOYMENT-NOTES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment Notes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../FEATURES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../UPGRADE-GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrade Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../FAQ/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../HELM-VALUES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Helm Values Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DAY2-OPERATIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 Operations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../MONITORING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CAPACITY-PLANNING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Capacity Planning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../BACKUP-RECOVERY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backup and Recovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../GOLDEN-IMAGE-WORKFLOW/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Golden Image Workflow
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../SECURITY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TROUBLESHOOTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../PERFORMANCE-TUNING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance Tuning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../KNOWN-LIMITATIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Known Limitations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../OVERVIEW/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTEXT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context (the words we use)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONSISTENCY-MODEL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Consistency Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VPC-NETWORKING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VPC Networking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VM-DISK-FORMATS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VM Disk Formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CRD-SPEC/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CRD Specification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CSI-INTERFACE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CSI Interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../IBM-VPC-API/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    IBM VPC API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../API-KEY-SETUP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Key Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design (Phase 4)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Design (Phase 4)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VOLUME-CLONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Volume Cloning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VOLUME-GROUP-SNAPSHOTS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Volume Group Snapshots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CROSS-REGION-DR/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cross-Region DR
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CODING-GUIDELINES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coding Guidelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TESTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Examples
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-1-clean-up-any-previous-test-resources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1: Clean Up Any Previous Test Resources
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-2-set-up-variables-and-namespace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2: Set Up Variables and Namespace
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-3-create-a-filesharepool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3: Create a FileSharePool
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4-verify-the-auto-created-storageclass" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 4: Verify the Auto-Created StorageClass
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-5-inspect-the-pool-via-kubernetes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 5: Inspect the Pool via Kubernetes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-6-verify-the-vpc-file-share-via-ibm-cloud-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 6: Verify the VPC File Share via IBM Cloud CLI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-7-test-pvc-provisioning-with-a-simple-pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 7: Test PVC Provisioning with a Simple Pod
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-8-create-a-vm-with-a-pool-backed-data-disk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 8: Create a VM with a Pool-Backed Data Disk
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Step 8: Create a VM with a Pool-Backed Data Disk">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#step-8a-create-the-boot-and-data-pvcs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 8a: Create the Boot and Data PVCs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-8b-download-the-os-image-to-the-boot-pvc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 8b: Download the OS Image to the Boot PVC
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-8c-create-the-vm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 8c: Create the VM
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-9-wait-for-the-vm-to-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 9: Wait for the VM to Start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-10-access-the-vm-and-use-the-data-disk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 10: Access the VM and Use the Data Disk
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-11-verify-pool-state-after-allocations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 11: Verify Pool State After Allocations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-12-create-a-second-manual-pvc-to-see-capacity-grow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 12: Create a Second Manual PVC to See Capacity Grow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cleanup
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Cleanup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#full-cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Full Cleanup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keep-the-pool-delete-only-workloads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keep the Pool, Delete Only Workloads
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stuck-namespace-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stuck Namespace Recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quick-reference-useful-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick Reference: Useful Commands
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#kubevirt-nfs-permissions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        KubeVirt NFS Permissions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-storageclasses-link-to-pools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How StorageClasses Link to Pools
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#whats-next" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What's Next
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="part-1-pool-creation-pvcs-and-kubevirt-vms">Part 1: Pool Creation, PVCs, and KubeVirt VMs<a class="headerlink" href="#part-1-pool-creation-pvcs-and-kubevirt-vms" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p><strong>Tutorial Series:</strong> <a href="../TUTORIAL/">Index</a> | <strong>Part 1</strong> | <a href="../TUTORIAL-02-SNAPSHOTS-AND-CLONES/">Part 2: Snapshots &amp; Clones</a> | <a href="../TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS/">Part 3: Group Snapshots &amp; Hooks</a> | <a href="../TUTORIAL-04-POOL-CONFIGURATION/">Part 4: Pool Configuration</a> | <a href="../TUTORIAL-05-GOLDEN-IMAGES/">Part 5: Golden Images</a> | <a href="../TUTORIAL-06-REPLICATION-AND-FAILOVER/">Part 6: Replication &amp; Failover</a> | <a href="../TUTORIAL-07-MONITORING/">Part 7: Monitoring</a> | <a href="../TUTORIAL-08-MIGRATION-AND-CONSOLE/">Part 8: Migration &amp; Console</a> | <a href="../TUTORIAL-09-COS-BACKUP-BUCKET/">Part 9: COS Bucket for Backups</a></p>
+</blockquote>
+<p>Step-by-step guide to create a file share pool, inspect it via IBM Cloud CLI, and attach NFS-backed storage to a KubeVirt VM as a shared data disk.</p>
+<p><strong>Cluster:</strong> ROKS eu-de (OpenShift Virtualization enabled)
+<strong>Zone:</strong> eu-de-1</p>
+<hr />
+<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
+<p>Verify the CSI driver is running:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Controller pod (6/6 Running)</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>oc<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-l<span class="w"> </span>app.kubernetes.io/name<span class="o">=</span>ibm-vpc-file-pool-csi,app.kubernetes.io/component<span class="o">=</span>controller
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># Node pods (2/2 Running on each schedulable node)</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>oc<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-l<span class="w"> </span>app.kubernetes.io/name<span class="o">=</span>ibm-vpc-file-pool-csi,app.kubernetes.io/component<span class="o">=</span>node
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># CSI Driver registered</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>oc<span class="w"> </span>get<span class="w"> </span>csidriver<span class="w"> </span>vpc-file-pool.csi.ibm.io
+</code></pre></div>
+<hr />
+<h2 id="step-1-clean-up-any-previous-test-resources">Step 1: Clean Up Any Previous Test Resources<a class="headerlink" href="#step-1-clean-up-any-previous-test-resources" title="Permanent link">&para;</a></h2>
+<p>Resources must be deleted in the right order — VMs hold PVC mounts, PVCs cascade to SubVolume deletes, and pools have finalizers that block deletion while SubVolumes exist.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nv">POOL_NAME</span><span class="o">=</span>my-pool
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nv">TUTORIAL_NS</span><span class="o">=</span>pool-tutorial
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># 1. Delete VMs first (releases PVC mounts)</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>oc<span class="w"> </span>delete<span class="w"> </span>vm<span class="w"> </span>--all<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span><span class="w"> </span>--timeout<span class="o">=</span>30s<span class="w"> </span>--ignore-not-found
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># 2. Delete pods, PVCs, and other resources</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>oc<span class="w"> </span>delete<span class="w"> </span>pods<span class="w"> </span>--all<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span><span class="w"> </span>--force<span class="w"> </span>--grace-period<span class="o">=</span><span class="m">0</span><span class="w"> </span>--ignore-not-found
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>oc<span class="w"> </span>delete<span class="w"> </span>pvc<span class="w"> </span>--all<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span><span class="w"> </span>--timeout<span class="o">=</span>60s<span class="w"> </span>--ignore-not-found
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="c1"># 3. Grace period for CSI to cascade SubVolume deletes</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>sleep<span class="w"> </span><span class="m">5</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="c1"># 4. Force-clean orphan SubVolumes (if CSI cascade didn't finish)</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="k">for</span><span class="w"> </span>sv<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="k">$(</span>oc<span class="w"> </span>get<span class="w"> </span>subvolumes.storage.ibmcloud.io<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="w">    </span>-l<span class="w"> </span>storage.ibmcloud.io/pool<span class="o">=</span><span class="si">${</span><span class="nv">POOL_NAME</span><span class="si">}</span><span class="w"> </span>-o<span class="w"> </span>name<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="w">    </span>oc<span class="w"> </span>patch<span class="w"> </span><span class="s2">"</span><span class="nv">$sv</span><span class="s2">"</span><span class="w"> </span>--type<span class="o">=</span>merge<span class="w"> </span>-p<span class="w"> </span><span class="s1">'{"metadata":{"finalizers":null}}'</span>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="k">done</span>
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>oc<span class="w"> </span>delete<span class="w"> </span>subvolumes.storage.ibmcloud.io<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a><span class="w">    </span>-l<span class="w"> </span>storage.ibmcloud.io/pool<span class="o">=</span><span class="si">${</span><span class="nv">POOL_NAME</span><span class="si">}</span><span class="w"> </span>--ignore-not-found
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a><span class="c1"># 5. Delete pool (force-remove finalizer if stuck)</span>
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>oc<span class="w"> </span>delete<span class="w"> </span>filesharepool<span class="w"> </span><span class="si">${</span><span class="nv">POOL_NAME</span><span class="si">}</span><span class="w"> </span>--timeout<span class="o">=</span>60s<span class="w"> </span>--ignore-not-found<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span>
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a><span class="w">    </span>oc<span class="w"> </span>patch<span class="w"> </span>filesharepools.storage.ibmcloud.io<span class="w"> </span><span class="si">${</span><span class="nv">POOL_NAME</span><span class="si">}</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a><span class="w">        </span>--type<span class="o">=</span>merge<span class="w"> </span>-p<span class="w"> </span><span class="s1">'{"metadata":{"finalizers":null}}'</span>
+<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a><span class="w">    </span>oc<span class="w"> </span>delete<span class="w"> </span>filesharepool<span class="w"> </span><span class="si">${</span><span class="nv">POOL_NAME</span><span class="si">}</span><span class="w"> </span>--ignore-not-found
+<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a><span class="o">}</span>
+<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a>
+<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a><span class="c1"># 6. Delete namespace</span>
+<a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a>oc<span class="w"> </span>delete<span class="w"> </span>namespace<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span><span class="w"> </span>--timeout<span class="o">=</span>60s<span class="w"> </span>--ignore-not-found
+<a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a>
+<a id="__codelineno-1-32" name="__codelineno-1-32" href="#__codelineno-1-32"></a><span class="c1"># 7. Verify VPC shares are being deleted</span>
+<a id="__codelineno-1-33" name="__codelineno-1-33" href="#__codelineno-1-33"></a>ibmcloud<span class="w"> </span>is<span class="w"> </span>shares
+</code></pre></div>
+<blockquote>
+<p><strong>Stuck namespace?</strong> If the namespace is stuck in <code>Terminating</code> for more than 60 seconds, clear PVC and SubVolume finalizers — see <a href="#stuck-namespace-recovery">Stuck Namespace Recovery</a> below.</p>
+</blockquote>
+<hr />
+<h2 id="step-2-set-up-variables-and-namespace">Step 2: Set Up Variables and Namespace<a class="headerlink" href="#step-2-set-up-variables-and-namespace" title="Permanent link">&para;</a></h2>
+<p>Choose a name for your pool. The controller automatically creates a StorageClass named after the pool when it reaches <code>Ready</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Set your pool name — used throughout the tutorial</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">POOL_NAME</span><span class="o">=</span>my-pool
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># Create a namespace for tutorial resources</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="nb">export</span><span class="w"> </span><span class="nv">TUTORIAL_NS</span><span class="o">=</span>pool-tutorial
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>oc<span class="w"> </span>create<span class="w"> </span>namespace<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span>
+</code></pre></div>
+<p>Use <code>ibmcloud is shares</code> to see existing VPC file shares before creating the pool.</p>
+<hr />
+<h2 id="step-3-create-a-filesharepool">Step 3: Create a FileSharePool<a class="headerlink" href="#step-3-create-a-filesharepool" title="Permanent link">&para;</a></h2>
+<p>The examples use the zone <code>eu-de-1</code>. Use the zone of your workers instead: <code>oc get nodes -L topology.kubernetes.io/zone</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>cat<span class="w"> </span><span class="s">&lt;&lt;EOF | oc apply -f -</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="s">apiVersion: storage.ibmcloud.io/v1alpha1</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="s">kind: FileSharePool</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="s">metadata:</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="s">  name: ${POOL_NAME}</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="s">spec:</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="s">  zone: eu-de-1</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="s">  profile: dp2</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="s">  shareSizeGB: 100</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="s">  iops: 100</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="s">  maxShares: 3</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="s">  initialShares: 1</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="s">  autoExpand: true</span>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="s">  expandThresholdPercent: 80</span>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="s">  allocationStrategy: spread</span>
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a><span class="s">  defaultPermissions: "0777"</span>
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a><span class="s">  defaultUID: 107</span>
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a><span class="s">  defaultGID: 107</span>
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a><span class="s">EOF</span>
+</code></pre></div>
+<p><strong>What this does:</strong>
+- Creates a pool named <code>${POOL_NAME}</code> in <code>eu-de-1</code>
+- Uses the <code>dp2</code> profile with 100 IOPS
+- Each share is 100 GB; up to 3 shares allowed
+- 1 share is created immediately
+- Auto-expands when 80% of capacity is allocated
+- Each share's mount target uses the cluster's own security group (<code>kube-&lt;cluster ID&gt;</code>), which already lets every worker reach NFS. Set <code>securityGroupIDs</code> to use other groups
+- <code>defaultPermissions: "0777"</code> — ensures the QEMU user (UID 107) can access subdirectories
+- <code>defaultUID: 107</code> / <code>defaultGID: 107</code> — PVC subdirectories are chowned to the QEMU user, so KubeVirt's virt-handler skips its own chown (see <a href="#kubevirt-nfs-permissions">KubeVirt NFS Permissions</a> below)</p>
+<p>Watch the pool initialize (takes 30-90 seconds for VPC share creation):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>oc<span class="w"> </span>get<span class="w"> </span>filesharepools<span class="w"> </span>-w
+</code></pre></div>
+<p>Wait until <code>PHASE</code> shows <code>Ready</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>NAME       ZONE      PROFILE   SHARES   CAPACITY   ALLOCATED   PVCS   PHASE
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>my-pool    eu-de-1   dp2       1        100        0           0      Ready
+</code></pre></div>
+<p>Use <code>ibmcloud is shares</code> to see the new VPC file share that was created.</p>
+<hr />
+<h2 id="step-4-verify-the-auto-created-storageclass">Step 4: Verify the Auto-Created StorageClass<a class="headerlink" href="#step-4-verify-the-auto-created-storageclass" title="Permanent link">&para;</a></h2>
+<p>When a FileSharePool reaches <code>Ready</code>, the controller <strong>automatically creates</strong> a matching StorageClass. You do not need to create one manually.</p>
+<p>The auto-created StorageClass:
+- Is named after the pool (e.g., <code>${POOL_NAME}</code>)
+- Uses <code>vpc-file-pool.csi.ibm.io</code> as the provisioner
+- Sets <code>parameters.pool</code> to the pool name
+- Includes default NFS mount options (<code>nfsvers=4.1,soft,timeo=600,retrans=3</code>)
+- Enables <code>allowVolumeExpansion: true</code> and <code>reclaimPolicy: Delete</code>
+- Has an OwnerReference to the pool (deleted automatically when the pool is deleted)</p>
+<p>For tiered pools, one StorageClass per tier is created (e.g., <code>${POOL_NAME}-standard</code>, <code>${POOL_NAME}-premium</code>), each with the <code>tier</code> parameter set.</p>
+<p>Verify:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>oc<span class="w"> </span>get<span class="w"> </span>sc<span class="w"> </span><span class="si">${</span><span class="nv">POOL_NAME</span><span class="si">}</span>
+</code></pre></div>
+<p><strong>Opt-out:</strong> If you prefer to manage StorageClasses manually, add the annotation <code>storage.ibmcloud.io/skip-storageclass: "true"</code> to the FileSharePool before creating it, then create the StorageClass yourself:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>cat<span class="w"> </span><span class="s">&lt;&lt;EOF | oc apply -f -</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="s">apiVersion: storage.k8s.io/v1</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="s">kind: StorageClass</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="s">metadata:</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="s">  name: ibm-vpc-file-pool</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="s">provisioner: vpc-file-pool.csi.ibm.io</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="s">parameters:</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="s">  pool: ${POOL_NAME}</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="s">reclaimPolicy: Delete</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="s">volumeBindingMode: Immediate</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="s">allowVolumeExpansion: true</span>
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="s">mountOptions:</span>
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="s">  - nfsvers=4.1</span>
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="s">  - soft</span>
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="s">  - timeo=600</span>
+<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="s">  - retrans=3</span>
+<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="s">EOF</span>
+</code></pre></div>
+<hr />
+<h2 id="step-5-inspect-the-pool-via-kubernetes">Step 5: Inspect the Pool via Kubernetes<a class="headerlink" href="#step-5-inspect-the-pool-via-kubernetes" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Summary view</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>oc<span class="w"> </span>get<span class="w"> </span>filesharepools
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1"># Detailed status — shows shares, mount target IPs, capacity</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>oc<span class="w"> </span>describe<span class="w"> </span>filesharepool<span class="w"> </span><span class="si">${</span><span class="nv">POOL_NAME</span><span class="si">}</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="c1"># YAML view — full status with share IDs</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>oc<span class="w"> </span>get<span class="w"> </span>filesharepool<span class="w"> </span><span class="si">${</span><span class="nv">POOL_NAME</span><span class="si">}</span><span class="w"> </span>-o<span class="w"> </span>yaml
+</code></pre></div>
+<p>Key things to note in the output:
+- <code>status.phase: Ready</code> — pool is operational
+- <code>status.shares[0].shareID</code> — the VPC file share ID (e.g., <code>r010-xxxxxxxx-...</code>)
+- <code>status.shares[0].mountTargetIP</code> — the NFS server address (an IP address in the cluster's VPC)
+- <code>status.shares[0].state: stable</code> — share is healthy
+- <code>status.totalCapacityGB</code> / <code>status.totalAllocatedGB</code> — capacity tracking</p>
+<p>Copy the <strong>shareID</strong> from the output — you'll use it in the next step.</p>
+<hr />
+<h2 id="step-6-verify-the-vpc-file-share-via-ibm-cloud-cli">Step 6: Verify the VPC File Share via IBM Cloud CLI<a class="headerlink" href="#step-6-verify-the-vpc-file-share-via-ibm-cloud-cli" title="Permanent link">&para;</a></h2>
+<p>Use the share ID from Step 5 (replace <code>&lt;SHARE_ID&gt;</code> with your actual one):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># List all file shares in the account</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>ibmcloud<span class="w"> </span>is<span class="w"> </span>shares
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="c1"># Get detailed info for the pool's share</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>ibmcloud<span class="w"> </span>is<span class="w"> </span>share<span class="w"> </span>&lt;SHARE_ID&gt;
+</code></pre></div>
+<p>Expected output shows:
+- <strong>Name:</strong> <code>${POOL_NAME}-share-1</code>
+- <strong>Zone:</strong> <code>eu-de-1</code>
+- <strong>Size:</strong> <code>100</code> GB
+- <strong>Profile:</strong> <code>dp2</code>
+- <strong>Lifecycle state:</strong> <code>stable</code></p>
+<p>Now inspect the mount target (the NFS endpoint):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># List mount targets for the share</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>ibmcloud<span class="w"> </span>is<span class="w"> </span>share-mount-targets<span class="w"> </span>&lt;SHARE_ID&gt;
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="c1"># Get mount target details (shows the NFS mount path)</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>ibmcloud<span class="w"> </span>is<span class="w"> </span>share-mount-target<span class="w"> </span>&lt;SHARE_ID&gt;<span class="w"> </span>&lt;MOUNT_TARGET_ID&gt;
+</code></pre></div>
+<p>The <code>mount_path</code> field shows the NFS server and export path, e.g.:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>fsf-fra0251a-byok-fz.adn.networklayer.com:/953e01e5_f4c2_4c0c_b715_99ac35879a58
+</code></pre></div></p>
+<p>This is the NFS server that worker nodes connect to when pods use PVCs from this pool.</p>
+<hr />
+<h2 id="step-7-test-pvc-provisioning-with-a-simple-pod">Step 7: Test PVC Provisioning with a Simple Pod<a class="headerlink" href="#step-7-test-pvc-provisioning-with-a-simple-pod" title="Permanent link">&para;</a></h2>
+<p>Create a PVC and a pod to verify NFS storage works end-to-end:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>cat<span class="w"> </span><span class="s">&lt;&lt;EOF | oc apply -f -</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="s">apiVersion: v1</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="s">kind: PersistentVolumeClaim</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="s">metadata:</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="s">  name: vm-shared-data</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="s">  namespace: ${TUTORIAL_NS}</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="s">spec:</span>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="s">  accessModes:</span>
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="s">    - ReadWriteMany</span>
+<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="s">  storageClassName: ${POOL_NAME}</span>
+<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a><span class="s">  resources:</span>
+<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a><span class="s">    requests:</span>
+<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a><span class="s">      storage: 10Gi</span>
+<a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a><span class="s">---</span>
+<a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a><span class="s">apiVersion: v1</span>
+<a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a><span class="s">kind: Pod</span>
+<a id="__codelineno-12-17" name="__codelineno-12-17" href="#__codelineno-12-17"></a><span class="s">metadata:</span>
+<a id="__codelineno-12-18" name="__codelineno-12-18" href="#__codelineno-12-18"></a><span class="s">  name: pool-test-writer</span>
+<a id="__codelineno-12-19" name="__codelineno-12-19" href="#__codelineno-12-19"></a><span class="s">  namespace: ${TUTORIAL_NS}</span>
+<a id="__codelineno-12-20" name="__codelineno-12-20" href="#__codelineno-12-20"></a><span class="s">spec:</span>
+<a id="__codelineno-12-21" name="__codelineno-12-21" href="#__codelineno-12-21"></a><span class="s">  containers:</span>
+<a id="__codelineno-12-22" name="__codelineno-12-22" href="#__codelineno-12-22"></a><span class="s">    - name: writer</span>
+<a id="__codelineno-12-23" name="__codelineno-12-23" href="#__codelineno-12-23"></a><span class="s">      image: busybox</span>
+<a id="__codelineno-12-24" name="__codelineno-12-24" href="#__codelineno-12-24"></a><span class="s">      command: ["sh", "-c", "echo 'Pool CSI NFS storage is working!' &gt; /data/hello.txt &amp;&amp; ls -la /data/ &amp;&amp; cat /data/hello.txt &amp;&amp; sleep 3600"]</span>
+<a id="__codelineno-12-25" name="__codelineno-12-25" href="#__codelineno-12-25"></a><span class="s">      volumeMounts:</span>
+<a id="__codelineno-12-26" name="__codelineno-12-26" href="#__codelineno-12-26"></a><span class="s">        - name: shared-data</span>
+<a id="__codelineno-12-27" name="__codelineno-12-27" href="#__codelineno-12-27"></a><span class="s">          mountPath: /data</span>
+<a id="__codelineno-12-28" name="__codelineno-12-28" href="#__codelineno-12-28"></a><span class="s">  volumes:</span>
+<a id="__codelineno-12-29" name="__codelineno-12-29" href="#__codelineno-12-29"></a><span class="s">    - name: shared-data</span>
+<a id="__codelineno-12-30" name="__codelineno-12-30" href="#__codelineno-12-30"></a><span class="s">      persistentVolumeClaim:</span>
+<a id="__codelineno-12-31" name="__codelineno-12-31" href="#__codelineno-12-31"></a><span class="s">        claimName: vm-shared-data</span>
+<a id="__codelineno-12-32" name="__codelineno-12-32" href="#__codelineno-12-32"></a><span class="s">EOF</span>
+</code></pre></div>
+<p>Watch the PVC bind and pod start:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>oc<span class="w"> </span>get<span class="w"> </span>pvc<span class="w"> </span>vm-shared-data<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span><span class="w"> </span>-w
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="c1"># Should show STATUS=Bound within seconds</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>oc<span class="w"> </span>get<span class="w"> </span>pod<span class="w"> </span>pool-test-writer<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span><span class="w"> </span>-w
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="c1"># Wait for STATUS=Running, then:</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>oc<span class="w"> </span>logs<span class="w"> </span>pool-test-writer<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span>
+</code></pre></div>
+<p>Expected output:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>Pool CSI NFS storage is working!
+</code></pre></div></p>
+<p>Verify the SubVolume and pool capacity:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>oc<span class="w"> </span>get<span class="w"> </span>subvolumes<span class="w"> </span>-o<span class="w"> </span>wide
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>oc<span class="w"> </span>get<span class="w"> </span>filesharepools
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="c1"># ALLOCATED should show 10, PVCS should show 1</span>
+</code></pre></div>
+<p>Clean up the test pod (keep the PVC for now):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>oc<span class="w"> </span>delete<span class="w"> </span>pod<span class="w"> </span>pool-test-writer<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span>
+</code></pre></div>
+<hr />
+<h2 id="step-8-create-a-vm-with-a-pool-backed-data-disk">Step 8: Create a VM with a Pool-Backed Data Disk<a class="headerlink" href="#step-8-create-a-vm-with-a-pool-backed-data-disk" title="Permanent link">&para;</a></h2>
+<p>KubeVirt VMs work with the pool CSI driver. The driver mounts NFS with <code>sec=sys</code> (matching the stock IBM VPC File CSI driver), which enables proper Unix UID/GID ownership. Configure the pool with <code>defaultUID: 107</code> and <code>defaultGID: 107</code> so subdirectories are owned by the QEMU user.</p>
+<blockquote>
+<p><strong>Note:</strong> This step creates regular PVCs on the pool and downloads the OS image directly. CDI registry import also works on a pool StorageClass; see <a href="../KNOWN-LIMITATIONS/#cdi-containerized-data-importer-compatibility">KNOWN-LIMITATIONS.md</a>.</p>
+</blockquote>
+<p><img alt="The VM mounts a boot PVC and a data PVC, and each PVC is a SubVolume on the pool's file share" src="../images/tutorial-01-vm-disks.drawio.svg" /></p>
+<h3 id="step-8a-create-the-boot-and-data-pvcs">Step 8a: Create the Boot and Data PVCs<a class="headerlink" href="#step-8a-create-the-boot-and-data-pvcs" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>cat<span class="w"> </span><span class="s">&lt;&lt;EOF | oc apply -f -</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="s">apiVersion: v1</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="s">kind: PersistentVolumeClaim</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="s">metadata:</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="s">  name: pool-test-vm-boot</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="s">  namespace: ${TUTORIAL_NS}</span>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="s">spec:</span>
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="s">  accessModes:</span>
+<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a><span class="s">    - ReadWriteMany</span>
+<a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a><span class="s">  storageClassName: ${POOL_NAME}</span>
+<a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a><span class="s">  resources:</span>
+<a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a><span class="s">    requests:</span>
+<a id="__codelineno-17-13" name="__codelineno-17-13" href="#__codelineno-17-13"></a><span class="s">      storage: 15Gi</span>
+<a id="__codelineno-17-14" name="__codelineno-17-14" href="#__codelineno-17-14"></a><span class="s">---</span>
+<a id="__codelineno-17-15" name="__codelineno-17-15" href="#__codelineno-17-15"></a><span class="s">apiVersion: v1</span>
+<a id="__codelineno-17-16" name="__codelineno-17-16" href="#__codelineno-17-16"></a><span class="s">kind: PersistentVolumeClaim</span>
+<a id="__codelineno-17-17" name="__codelineno-17-17" href="#__codelineno-17-17"></a><span class="s">metadata:</span>
+<a id="__codelineno-17-18" name="__codelineno-17-18" href="#__codelineno-17-18"></a><span class="s">  name: pool-test-vm-data</span>
+<a id="__codelineno-17-19" name="__codelineno-17-19" href="#__codelineno-17-19"></a><span class="s">  namespace: ${TUTORIAL_NS}</span>
+<a id="__codelineno-17-20" name="__codelineno-17-20" href="#__codelineno-17-20"></a><span class="s">spec:</span>
+<a id="__codelineno-17-21" name="__codelineno-17-21" href="#__codelineno-17-21"></a><span class="s">  accessModes:</span>
+<a id="__codelineno-17-22" name="__codelineno-17-22" href="#__codelineno-17-22"></a><span class="s">    - ReadWriteMany</span>
+<a id="__codelineno-17-23" name="__codelineno-17-23" href="#__codelineno-17-23"></a><span class="s">  storageClassName: ${POOL_NAME}</span>
+<a id="__codelineno-17-24" name="__codelineno-17-24" href="#__codelineno-17-24"></a><span class="s">  resources:</span>
+<a id="__codelineno-17-25" name="__codelineno-17-25" href="#__codelineno-17-25"></a><span class="s">    requests:</span>
+<a id="__codelineno-17-26" name="__codelineno-17-26" href="#__codelineno-17-26"></a><span class="s">      storage: 10Gi</span>
+<a id="__codelineno-17-27" name="__codelineno-17-27" href="#__codelineno-17-27"></a><span class="s">EOF</span>
+</code></pre></div>
+<p>Both PVCs should bind immediately:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>oc<span class="w"> </span>get<span class="w"> </span>pvc<span class="w"> </span>pool-test-vm-boot<span class="w"> </span>pool-test-vm-data<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="c1"># Both should show STATUS=Bound, STORAGECLASS=${POOL_NAME}</span>
+</code></pre></div>
+<h3 id="step-8b-download-the-os-image-to-the-boot-pvc">Step 8b: Download the OS Image to the Boot PVC<a class="headerlink" href="#step-8b-download-the-os-image-to-the-boot-pvc" title="Permanent link">&para;</a></h3>
+<p>KubeVirt expects a <strong>raw format</strong> disk image named <code>disk.img</code> in a filesystem-mode PVC. Cloud images are distributed as qcow2, so we must convert to raw — CDI does this automatically, but here we do it by hand:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>cat<span class="w"> </span><span class="s">&lt;&lt;EOF | oc apply -f -</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="s">apiVersion: v1</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="s">kind: Pod</span>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="s">metadata:</span>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="s">  name: image-downloader</span>
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="s">  namespace: ${TUTORIAL_NS}</span>
+<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a><span class="s">spec:</span>
+<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a><span class="s">  restartPolicy: Never</span>
+<a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a><span class="s">  containers:</span>
+<a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a><span class="s">    - name: downloader</span>
+<a id="__codelineno-19-11" name="__codelineno-19-11" href="#__codelineno-19-11"></a><span class="s">      image: quay.io/centos/centos:stream9</span>
+<a id="__codelineno-19-12" name="__codelineno-19-12" href="#__codelineno-19-12"></a><span class="s">      command:</span>
+<a id="__codelineno-19-13" name="__codelineno-19-13" href="#__codelineno-19-13"></a><span class="s">        - sh</span>
+<a id="__codelineno-19-14" name="__codelineno-19-14" href="#__codelineno-19-14"></a><span class="s">        - -c</span>
+<a id="__codelineno-19-15" name="__codelineno-19-15" href="#__codelineno-19-15"></a><span class="s">        - |</span>
+<a id="__codelineno-19-16" name="__codelineno-19-16" href="#__codelineno-19-16"></a><span class="s">          dnf install -y qemu-img</span>
+<a id="__codelineno-19-17" name="__codelineno-19-17" href="#__codelineno-19-17"></a><span class="s">          echo "Downloading CentOS Stream 9 cloud image..."</span>
+<a id="__codelineno-19-18" name="__codelineno-19-18" href="#__codelineno-19-18"></a><span class="s">          curl -L -o /boot/disk.qcow2 \</span>
+<a id="__codelineno-19-19" name="__codelineno-19-19" href="#__codelineno-19-19"></a><span class="s">            https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2</span>
+<a id="__codelineno-19-20" name="__codelineno-19-20" href="#__codelineno-19-20"></a><span class="s">          echo "Converting qcow2 to raw format..."</span>
+<a id="__codelineno-19-21" name="__codelineno-19-21" href="#__codelineno-19-21"></a><span class="s">          qemu-img convert -f qcow2 -O raw /boot/disk.qcow2 /boot/disk.img</span>
+<a id="__codelineno-19-22" name="__codelineno-19-22" href="#__codelineno-19-22"></a><span class="s">          rm /boot/disk.qcow2</span>
+<a id="__codelineno-19-23" name="__codelineno-19-23" href="#__codelineno-19-23"></a><span class="s">          chmod 0666 /boot/disk.img</span>
+<a id="__codelineno-19-24" name="__codelineno-19-24" href="#__codelineno-19-24"></a><span class="s">          chown 107:107 /boot/disk.img</span>
+<a id="__codelineno-19-25" name="__codelineno-19-25" href="#__codelineno-19-25"></a><span class="s">          ls -lh /boot/disk.img</span>
+<a id="__codelineno-19-26" name="__codelineno-19-26" href="#__codelineno-19-26"></a><span class="s">          qemu-img info /boot/disk.img</span>
+<a id="__codelineno-19-27" name="__codelineno-19-27" href="#__codelineno-19-27"></a><span class="s">          echo "Done!"</span>
+<a id="__codelineno-19-28" name="__codelineno-19-28" href="#__codelineno-19-28"></a><span class="s">      volumeMounts:</span>
+<a id="__codelineno-19-29" name="__codelineno-19-29" href="#__codelineno-19-29"></a><span class="s">        - name: boot-disk</span>
+<a id="__codelineno-19-30" name="__codelineno-19-30" href="#__codelineno-19-30"></a><span class="s">          mountPath: /boot</span>
+<a id="__codelineno-19-31" name="__codelineno-19-31" href="#__codelineno-19-31"></a><span class="s">  volumes:</span>
+<a id="__codelineno-19-32" name="__codelineno-19-32" href="#__codelineno-19-32"></a><span class="s">    - name: boot-disk</span>
+<a id="__codelineno-19-33" name="__codelineno-19-33" href="#__codelineno-19-33"></a><span class="s">      persistentVolumeClaim:</span>
+<a id="__codelineno-19-34" name="__codelineno-19-34" href="#__codelineno-19-34"></a><span class="s">        claimName: pool-test-vm-boot</span>
+<a id="__codelineno-19-35" name="__codelineno-19-35" href="#__codelineno-19-35"></a><span class="s">EOF</span>
+</code></pre></div>
+<p>Wait for the download and conversion to complete (~1.8 GB download + conversion, takes 2-5 minutes):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="c1"># Watch pod status</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>oc<span class="w"> </span>get<span class="w"> </span>pod<span class="w"> </span>image-downloader<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span><span class="w"> </span>-w
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="c1"># Check progress (while running)</span>
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a>oc<span class="w"> </span>logs<span class="w"> </span>image-downloader<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span><span class="w"> </span>-f
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a>
+<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a><span class="c1"># When STATUS=Completed, verify the image</span>
+<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a>oc<span class="w"> </span>logs<span class="w"> </span>image-downloader<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span>
+</code></pre></div>
+<p>Expected output:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>Downloading CentOS Stream 9 cloud image...
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>Converting qcow2 to raw format...
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>-rw-rw-rw-. 1 107 107 10G ... /boot/disk.img
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a>file format: raw
+<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a>virtual size: 10 GiB (10737418240 bytes)
+<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a>disk size: 1.8 GiB
+<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a>Done!
+</code></pre></div></p>
+<blockquote>
+<p><strong>Note:</strong> The pod runs as root (needed to install <code>qemu-img</code>). Due to NFS <code>root_squash</code>, files are created as UID 65534 (nobody). We <code>chmod 0666</code> and <code>chown 107:107</code> so the QEMU user (UID 107) can read and write the image. Without the <code>chown</code>, an instant VM snapshot of this disk fails (<a href="../TUTORIAL-11-INSTANT-VM-SNAPSHOTS/">Part 11</a>), because the driver changes the file mode from inside the VM pod, as UID 107. KubeVirt's pre-start expansion will resize the raw image to fill the PVC capacity.</p>
+<p><strong>Why raw format?</strong> KubeVirt passes filesystem-PVC disk images to QEMU with <code>"driver":"file"</code> (no qcow2 format layer). If the image is qcow2, QEMU reads the qcow2 headers as raw data and finds no valid boot sector — resulting in "No bootable device."</p>
+</blockquote>
+<p>Clean up the downloader pod:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>oc<span class="w"> </span>delete<span class="w"> </span>pod<span class="w"> </span>image-downloader<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span>
+</code></pre></div>
+<h3 id="step-8c-create-the-vm">Step 8c: Create the VM<a class="headerlink" href="#step-8c-create-the-vm" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>cat<span class="w"> </span><span class="s">&lt;&lt;EOF | oc apply -f -</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="s">apiVersion: kubevirt.io/v1</span>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="s">kind: VirtualMachine</span>
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="s">metadata:</span>
+<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="s">  name: pool-test-vm</span>
+<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="s">  namespace: ${TUTORIAL_NS}</span>
+<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="s">spec:</span>
+<a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a><span class="s">  instancetype:</span>
+<a id="__codelineno-23-9" name="__codelineno-23-9" href="#__codelineno-23-9"></a><span class="s">    kind: virtualmachineclusterinstancetype</span>
+<a id="__codelineno-23-10" name="__codelineno-23-10" href="#__codelineno-23-10"></a><span class="s">    name: u1.medium</span>
+<a id="__codelineno-23-11" name="__codelineno-23-11" href="#__codelineno-23-11"></a><span class="s">  preference:</span>
+<a id="__codelineno-23-12" name="__codelineno-23-12" href="#__codelineno-23-12"></a><span class="s">    kind: virtualmachineclusterpreference</span>
+<a id="__codelineno-23-13" name="__codelineno-23-13" href="#__codelineno-23-13"></a><span class="s">    name: centos.stream9</span>
+<a id="__codelineno-23-14" name="__codelineno-23-14" href="#__codelineno-23-14"></a><span class="s">  runStrategy: Always</span>
+<a id="__codelineno-23-15" name="__codelineno-23-15" href="#__codelineno-23-15"></a><span class="s">  template:</span>
+<a id="__codelineno-23-16" name="__codelineno-23-16" href="#__codelineno-23-16"></a><span class="s">    metadata:</span>
+<a id="__codelineno-23-17" name="__codelineno-23-17" href="#__codelineno-23-17"></a><span class="s">      labels:</span>
+<a id="__codelineno-23-18" name="__codelineno-23-18" href="#__codelineno-23-18"></a><span class="s">        network.kubevirt.io/headlessService: headless</span>
+<a id="__codelineno-23-19" name="__codelineno-23-19" href="#__codelineno-23-19"></a><span class="s">    spec:</span>
+<a id="__codelineno-23-20" name="__codelineno-23-20" href="#__codelineno-23-20"></a><span class="s">      domain:</span>
+<a id="__codelineno-23-21" name="__codelineno-23-21" href="#__codelineno-23-21"></a><span class="s">        devices:</span>
+<a id="__codelineno-23-22" name="__codelineno-23-22" href="#__codelineno-23-22"></a><span class="s">          disks:</span>
+<a id="__codelineno-23-23" name="__codelineno-23-23" href="#__codelineno-23-23"></a><span class="s">            - name: rootdisk</span>
+<a id="__codelineno-23-24" name="__codelineno-23-24" href="#__codelineno-23-24"></a><span class="s">              bootOrder: 1</span>
+<a id="__codelineno-23-25" name="__codelineno-23-25" href="#__codelineno-23-25"></a><span class="s">            - name: datadisk</span>
+<a id="__codelineno-23-26" name="__codelineno-23-26" href="#__codelineno-23-26"></a><span class="s">              serial: DATA0001</span>
+<a id="__codelineno-23-27" name="__codelineno-23-27" href="#__codelineno-23-27"></a><span class="s">          interfaces:</span>
+<a id="__codelineno-23-28" name="__codelineno-23-28" href="#__codelineno-23-28"></a><span class="s">            - masquerade: {}</span>
+<a id="__codelineno-23-29" name="__codelineno-23-29" href="#__codelineno-23-29"></a><span class="s">              name: default</span>
+<a id="__codelineno-23-30" name="__codelineno-23-30" href="#__codelineno-23-30"></a><span class="s">      networks:</span>
+<a id="__codelineno-23-31" name="__codelineno-23-31" href="#__codelineno-23-31"></a><span class="s">        - name: default</span>
+<a id="__codelineno-23-32" name="__codelineno-23-32" href="#__codelineno-23-32"></a><span class="s">          pod: {}</span>
+<a id="__codelineno-23-33" name="__codelineno-23-33" href="#__codelineno-23-33"></a><span class="s">      subdomain: headless</span>
+<a id="__codelineno-23-34" name="__codelineno-23-34" href="#__codelineno-23-34"></a><span class="s">      volumes:</span>
+<a id="__codelineno-23-35" name="__codelineno-23-35" href="#__codelineno-23-35"></a><span class="s">        - persistentVolumeClaim:</span>
+<a id="__codelineno-23-36" name="__codelineno-23-36" href="#__codelineno-23-36"></a><span class="s">            claimName: pool-test-vm-boot</span>
+<a id="__codelineno-23-37" name="__codelineno-23-37" href="#__codelineno-23-37"></a><span class="s">          name: rootdisk</span>
+<a id="__codelineno-23-38" name="__codelineno-23-38" href="#__codelineno-23-38"></a><span class="s">        - persistentVolumeClaim:</span>
+<a id="__codelineno-23-39" name="__codelineno-23-39" href="#__codelineno-23-39"></a><span class="s">            claimName: pool-test-vm-data</span>
+<a id="__codelineno-23-40" name="__codelineno-23-40" href="#__codelineno-23-40"></a><span class="s">          name: datadisk</span>
+<a id="__codelineno-23-41" name="__codelineno-23-41" href="#__codelineno-23-41"></a><span class="s">        - cloudInitNoCloud:</span>
+<a id="__codelineno-23-42" name="__codelineno-23-42" href="#__codelineno-23-42"></a><span class="s">            userData: |</span>
+<a id="__codelineno-23-43" name="__codelineno-23-43" href="#__codelineno-23-43"></a><span class="s">              #cloud-config</span>
+<a id="__codelineno-23-44" name="__codelineno-23-44" href="#__codelineno-23-44"></a><span class="s">              user: centos</span>
+<a id="__codelineno-23-45" name="__codelineno-23-45" href="#__codelineno-23-45"></a><span class="s">              password: pooltest123</span>
+<a id="__codelineno-23-46" name="__codelineno-23-46" href="#__codelineno-23-46"></a><span class="s">              chpasswd:</span>
+<a id="__codelineno-23-47" name="__codelineno-23-47" href="#__codelineno-23-47"></a><span class="s">                expire: false</span>
+<a id="__codelineno-23-48" name="__codelineno-23-48" href="#__codelineno-23-48"></a><span class="s">          name: cloudinitdisk</span>
+<a id="__codelineno-23-49" name="__codelineno-23-49" href="#__codelineno-23-49"></a><span class="s">EOF</span>
+</code></pre></div>
+<p><strong>What this creates:</strong>
+- <strong>Boot disk</strong> (<code>rootdisk</code>): CentOS Stream 9 image on the NFS pool (downloaded in Step 8b)
+- <strong>Data disk</strong> (<code>datadisk</code>): 10 Gi blank disk on the NFS pool
+- <strong>Both disks on NFS</strong> — no ODF/Ceph dependency, no CDI dependency
+- <strong>Instance type</strong>: <code>u1.medium</code> (1 vCPU, 4 Gi RAM)
+- <strong>Login</strong>: user <code>centos</code>, password <code>pooltest123</code></p>
+<hr />
+<h2 id="step-9-wait-for-the-vm-to-start">Step 9: Wait for the VM to Start<a class="headerlink" href="#step-9-wait-for-the-vm-to-start" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="c1"># Watch VM status</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>oc<span class="w"> </span>get<span class="w"> </span>vm<span class="w"> </span>pool-test-vm<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span><span class="w"> </span>-w
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a>
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="c1"># Watch the VMI (VirtualMachineInstance) start</span>
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a>oc<span class="w"> </span>get<span class="w"> </span>vmi<span class="w"> </span>pool-test-vm<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span><span class="w"> </span>-w
+</code></pre></div>
+<p>Both PVCs are already provisioned, so the VM should start quickly (30-60 seconds):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="c1"># Verify both PVCs are Bound on ${POOL_NAME}</span>
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a>oc<span class="w"> </span>get<span class="w"> </span>pvc<span class="w"> </span>pool-test-vm-boot<span class="w"> </span>pool-test-vm-data<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span>
+</code></pre></div>
+<p>Wait until <code>VM STATUS</code> shows <code>Running</code> and <code>VMI PHASE</code> shows <code>Running</code>.</p>
+<hr />
+<h2 id="step-10-access-the-vm-and-use-the-data-disk">Step 10: Access the VM and Use the Data Disk<a class="headerlink" href="#step-10-access-the-vm-and-use-the-data-disk" title="Permanent link">&para;</a></h2>
+<p>Connect to the VM console:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>virtctl<span class="w"> </span>console<span class="w"> </span>pool-test-vm<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span>
+</code></pre></div>
+<p>Login with <code>centos</code> / <code>pooltest123</code>, then:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="c1"># See all disks — the data disk should appear as /dev/vdb or similar</span>
+<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a>lsblk
+<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a>
+<a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a><span class="c1"># Format and mount the data disk</span>
+<a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a>sudo<span class="w"> </span>mkfs.ext4<span class="w"> </span>/dev/vdb
+<a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a>sudo<span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span>/mnt/shared-data
+<a id="__codelineno-27-7" name="__codelineno-27-7" href="#__codelineno-27-7"></a>sudo<span class="w"> </span>mount<span class="w"> </span>/dev/vdb<span class="w"> </span>/mnt/shared-data
+<a id="__codelineno-27-8" name="__codelineno-27-8" href="#__codelineno-27-8"></a>
+<a id="__codelineno-27-9" name="__codelineno-27-9" href="#__codelineno-27-9"></a><span class="c1"># Write test data</span>
+<a id="__codelineno-27-10" name="__codelineno-27-10" href="#__codelineno-27-10"></a><span class="nb">echo</span><span class="w"> </span><span class="s2">"Hello from VM on pool CSI storage!"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>tee<span class="w"> </span>/mnt/shared-data/vm-test.txt
+<a id="__codelineno-27-11" name="__codelineno-27-11" href="#__codelineno-27-11"></a>cat<span class="w"> </span>/mnt/shared-data/vm-test.txt
+<a id="__codelineno-27-12" name="__codelineno-27-12" href="#__codelineno-27-12"></a>
+<a id="__codelineno-27-13" name="__codelineno-27-13" href="#__codelineno-27-13"></a><span class="c1"># Check disk space</span>
+<a id="__codelineno-27-14" name="__codelineno-27-14" href="#__codelineno-27-14"></a>df<span class="w"> </span>-h<span class="w"> </span>/mnt/shared-data
+</code></pre></div>
+<p>Press <code>Ctrl+]</code> to exit the console.</p>
+<hr />
+<h2 id="step-11-verify-pool-state-after-allocations">Step 11: Verify Pool State After Allocations<a class="headerlink" href="#step-11-verify-pool-state-after-allocations" title="Permanent link">&para;</a></h2>
+<p>The manually created PVC (Step 7) and the VM's boot and data PVCs should all appear:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="c1"># Pool shows total allocated capacity and PVC count</span>
+<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a>oc<span class="w"> </span>get<span class="w"> </span>filesharepools
+<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="c1"># Expected: ALLOCATED=35 (10 from Step 7, 15 boot disk, 10 data disk), PVCS=3</span>
+<a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a>
+<a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a><span class="c1"># Both SubVolumes point to the same underlying VPC file share</span>
+<a id="__codelineno-28-6" name="__codelineno-28-6" href="#__codelineno-28-6"></a>oc<span class="w"> </span>get<span class="w"> </span>subvolumes<span class="w"> </span>-o<span class="w"> </span>wide
+<a id="__codelineno-28-7" name="__codelineno-28-7" href="#__codelineno-28-7"></a>
+<a id="__codelineno-28-8" name="__codelineno-28-8" href="#__codelineno-28-8"></a><span class="c1"># VPC share is unchanged (still stable, same size)</span>
+<a id="__codelineno-28-9" name="__codelineno-28-9" href="#__codelineno-28-9"></a>ibmcloud<span class="w"> </span>is<span class="w"> </span>shares
+<a id="__codelineno-28-10" name="__codelineno-28-10" href="#__codelineno-28-10"></a>ibmcloud<span class="w"> </span>is<span class="w"> </span>share<span class="w"> </span>&lt;SHARE_ID&gt;
+</code></pre></div>
+<p>This demonstrates the pooling model: <strong>3 PVCs share 1 VPC file share</strong>, saving VPC quota and provisioning time.</p>
+<hr />
+<h2 id="step-12-create-a-second-manual-pvc-to-see-capacity-grow">Step 12: Create a Second Manual PVC to See Capacity Grow<a class="headerlink" href="#step-12-create-a-second-manual-pvc-to-see-capacity-grow" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a>cat<span class="w"> </span><span class="s">&lt;&lt;EOF | oc apply -f -</span>
+<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="s">apiVersion: v1</span>
+<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a><span class="s">kind: PersistentVolumeClaim</span>
+<a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a><span class="s">metadata:</span>
+<a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a><span class="s">  name: vm-shared-data-2</span>
+<a id="__codelineno-29-6" name="__codelineno-29-6" href="#__codelineno-29-6"></a><span class="s">  namespace: ${TUTORIAL_NS}</span>
+<a id="__codelineno-29-7" name="__codelineno-29-7" href="#__codelineno-29-7"></a><span class="s">spec:</span>
+<a id="__codelineno-29-8" name="__codelineno-29-8" href="#__codelineno-29-8"></a><span class="s">  accessModes:</span>
+<a id="__codelineno-29-9" name="__codelineno-29-9" href="#__codelineno-29-9"></a><span class="s">    - ReadWriteMany</span>
+<a id="__codelineno-29-10" name="__codelineno-29-10" href="#__codelineno-29-10"></a><span class="s">  storageClassName: ${POOL_NAME}</span>
+<a id="__codelineno-29-11" name="__codelineno-29-11" href="#__codelineno-29-11"></a><span class="s">  resources:</span>
+<a id="__codelineno-29-12" name="__codelineno-29-12" href="#__codelineno-29-12"></a><span class="s">    requests:</span>
+<a id="__codelineno-29-13" name="__codelineno-29-13" href="#__codelineno-29-13"></a><span class="s">      storage: 20Gi</span>
+<a id="__codelineno-29-14" name="__codelineno-29-14" href="#__codelineno-29-14"></a><span class="s">EOF</span>
+<a id="__codelineno-29-15" name="__codelineno-29-15" href="#__codelineno-29-15"></a>
+<a id="__codelineno-29-16" name="__codelineno-29-16" href="#__codelineno-29-16"></a><span class="c1"># Check it bound</span>
+<a id="__codelineno-29-17" name="__codelineno-29-17" href="#__codelineno-29-17"></a>oc<span class="w"> </span>get<span class="w"> </span>pvc<span class="w"> </span>vm-shared-data-2<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span>
+<a id="__codelineno-29-18" name="__codelineno-29-18" href="#__codelineno-29-18"></a>
+<a id="__codelineno-29-19" name="__codelineno-29-19" href="#__codelineno-29-19"></a><span class="c1"># Pool now shows 55 GB allocated, 4 PVCs — all on the same single VPC share</span>
+<a id="__codelineno-29-20" name="__codelineno-29-20" href="#__codelineno-29-20"></a>oc<span class="w"> </span>get<span class="w"> </span>filesharepools
+<a id="__codelineno-29-21" name="__codelineno-29-21" href="#__codelineno-29-21"></a>
+<a id="__codelineno-29-22" name="__codelineno-29-22" href="#__codelineno-29-22"></a><span class="c1"># Four SubVolumes, all pointing to the same shareID</span>
+<a id="__codelineno-29-23" name="__codelineno-29-23" href="#__codelineno-29-23"></a>oc<span class="w"> </span>get<span class="w"> </span>subvolumes<span class="w"> </span>-o<span class="w"> </span>wide
+</code></pre></div>
+<hr />
+<h2 id="cleanup">Cleanup<a class="headerlink" href="#cleanup" title="Permanent link">&para;</a></h2>
+<p>Resources must be deleted in dependency order. Deleting the namespace alone can leave orphan SubVolumes and a stuck pool.</p>
+<h3 id="full-cleanup">Full Cleanup<a class="headerlink" href="#full-cleanup" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="c1"># 1. Delete VMs (releases PVC mounts so PVCs can delete)</span>
+<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a>oc<span class="w"> </span>delete<span class="w"> </span>vm<span class="w"> </span>--all<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span><span class="w"> </span>--timeout<span class="o">=</span>30s
+<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a>
+<a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a><span class="c1"># 2. Wait for VMIs to terminate</span>
+<a id="__codelineno-30-5" name="__codelineno-30-5" href="#__codelineno-30-5"></a><span class="k">for</span><span class="w"> </span>i<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="k">$(</span>seq<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="m">15</span><span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<a id="__codelineno-30-6" name="__codelineno-30-6" href="#__codelineno-30-6"></a><span class="w">    </span>oc<span class="w"> </span>get<span class="w"> </span>vmi<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span><span class="w"> </span>-o<span class="w"> </span>name<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-q<span class="w"> </span>.<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="k">break</span>
+<a id="__codelineno-30-7" name="__codelineno-30-7" href="#__codelineno-30-7"></a><span class="w">    </span>sleep<span class="w"> </span><span class="m">2</span>
+<a id="__codelineno-30-8" name="__codelineno-30-8" href="#__codelineno-30-8"></a><span class="k">done</span>
+<a id="__codelineno-30-9" name="__codelineno-30-9" href="#__codelineno-30-9"></a>
+<a id="__codelineno-30-10" name="__codelineno-30-10" href="#__codelineno-30-10"></a><span class="c1"># 3. Delete pods and PVCs</span>
+<a id="__codelineno-30-11" name="__codelineno-30-11" href="#__codelineno-30-11"></a>oc<span class="w"> </span>delete<span class="w"> </span>pods<span class="w"> </span>--all<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span><span class="w"> </span>--force<span class="w"> </span>--grace-period<span class="o">=</span><span class="m">0</span>
+<a id="__codelineno-30-12" name="__codelineno-30-12" href="#__codelineno-30-12"></a>oc<span class="w"> </span>delete<span class="w"> </span>pvc<span class="w"> </span>--all<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span><span class="w"> </span>--timeout<span class="o">=</span>60s
+<a id="__codelineno-30-13" name="__codelineno-30-13" href="#__codelineno-30-13"></a>
+<a id="__codelineno-30-14" name="__codelineno-30-14" href="#__codelineno-30-14"></a><span class="c1"># 4. Grace period for CSI to cascade SubVolume deletes</span>
+<a id="__codelineno-30-15" name="__codelineno-30-15" href="#__codelineno-30-15"></a>sleep<span class="w"> </span><span class="m">5</span>
+<a id="__codelineno-30-16" name="__codelineno-30-16" href="#__codelineno-30-16"></a>
+<a id="__codelineno-30-17" name="__codelineno-30-17" href="#__codelineno-30-17"></a><span class="c1"># 5. Force-clean orphan SubVolumes (clear finalizers if CSI cascade didn't finish)</span>
+<a id="__codelineno-30-18" name="__codelineno-30-18" href="#__codelineno-30-18"></a><span class="k">for</span><span class="w"> </span>sv<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="k">$(</span>oc<span class="w"> </span>get<span class="w"> </span>subvolumes.storage.ibmcloud.io<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-30-19" name="__codelineno-30-19" href="#__codelineno-30-19"></a><span class="w">    </span>-l<span class="w"> </span>storage.ibmcloud.io/pool<span class="o">=</span><span class="si">${</span><span class="nv">POOL_NAME</span><span class="si">}</span><span class="w"> </span>-o<span class="w"> </span>name<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<a id="__codelineno-30-20" name="__codelineno-30-20" href="#__codelineno-30-20"></a><span class="w">    </span>oc<span class="w"> </span>patch<span class="w"> </span><span class="s2">"</span><span class="nv">$sv</span><span class="s2">"</span><span class="w"> </span>--type<span class="o">=</span>merge<span class="w"> </span>-p<span class="w"> </span><span class="s1">'{"metadata":{"finalizers":null}}'</span>
+<a id="__codelineno-30-21" name="__codelineno-30-21" href="#__codelineno-30-21"></a><span class="k">done</span>
+<a id="__codelineno-30-22" name="__codelineno-30-22" href="#__codelineno-30-22"></a>oc<span class="w"> </span>delete<span class="w"> </span>subvolumes.storage.ibmcloud.io<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-30-23" name="__codelineno-30-23" href="#__codelineno-30-23"></a><span class="w">    </span>-l<span class="w"> </span>storage.ibmcloud.io/pool<span class="o">=</span><span class="si">${</span><span class="nv">POOL_NAME</span><span class="si">}</span><span class="w"> </span>--ignore-not-found
+<a id="__codelineno-30-24" name="__codelineno-30-24" href="#__codelineno-30-24"></a>
+<a id="__codelineno-30-25" name="__codelineno-30-25" href="#__codelineno-30-25"></a><span class="c1"># 6. Delete pool-owned PVs</span>
+<a id="__codelineno-30-26" name="__codelineno-30-26" href="#__codelineno-30-26"></a>oc<span class="w"> </span>get<span class="w"> </span>pv<span class="w"> </span>-o<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s2">"</span>
+<a id="__codelineno-30-27" name="__codelineno-30-27" href="#__codelineno-30-27"></a><span class="s2">    .items[]</span>
+<a id="__codelineno-30-28" name="__codelineno-30-28" href="#__codelineno-30-28"></a><span class="s2">    | select(.spec.csi.driver == \"vpc-file-pool.csi.ibm.io\")</span>
+<a id="__codelineno-30-29" name="__codelineno-30-29" href="#__codelineno-30-29"></a><span class="s2">    | select(.spec.csi.volumeAttributes.pool == \"</span><span class="si">${</span><span class="nv">POOL_NAME</span><span class="si">}</span><span class="s2">\")</span>
+<a id="__codelineno-30-30" name="__codelineno-30-30" href="#__codelineno-30-30"></a><span class="s2">    | .metadata.name"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>xargs<span class="w"> </span>-r<span class="w"> </span>oc<span class="w"> </span>delete<span class="w"> </span>pv
+<a id="__codelineno-30-31" name="__codelineno-30-31" href="#__codelineno-30-31"></a>
+<a id="__codelineno-30-32" name="__codelineno-30-32" href="#__codelineno-30-32"></a><span class="c1"># 7. Delete pool (force-remove finalizer if stuck)</span>
+<a id="__codelineno-30-33" name="__codelineno-30-33" href="#__codelineno-30-33"></a>oc<span class="w"> </span>delete<span class="w"> </span>filesharepool<span class="w"> </span><span class="si">${</span><span class="nv">POOL_NAME</span><span class="si">}</span><span class="w"> </span>--timeout<span class="o">=</span>60s<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">{</span>
+<a id="__codelineno-30-34" name="__codelineno-30-34" href="#__codelineno-30-34"></a><span class="w">    </span>oc<span class="w"> </span>patch<span class="w"> </span>filesharepools.storage.ibmcloud.io<span class="w"> </span><span class="si">${</span><span class="nv">POOL_NAME</span><span class="si">}</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-30-35" name="__codelineno-30-35" href="#__codelineno-30-35"></a><span class="w">        </span>--type<span class="o">=</span>merge<span class="w"> </span>-p<span class="w"> </span><span class="s1">'{"metadata":{"finalizers":null}}'</span>
+<a id="__codelineno-30-36" name="__codelineno-30-36" href="#__codelineno-30-36"></a><span class="w">    </span>oc<span class="w"> </span>delete<span class="w"> </span>filesharepool<span class="w"> </span><span class="si">${</span><span class="nv">POOL_NAME</span><span class="si">}</span>
+<a id="__codelineno-30-37" name="__codelineno-30-37" href="#__codelineno-30-37"></a><span class="o">}</span>
+<a id="__codelineno-30-38" name="__codelineno-30-38" href="#__codelineno-30-38"></a>
+<a id="__codelineno-30-39" name="__codelineno-30-39" href="#__codelineno-30-39"></a><span class="c1"># 8. Delete StorageClass (auto-deleted with pool via OwnerReference,</span>
+<a id="__codelineno-30-40" name="__codelineno-30-40" href="#__codelineno-30-40"></a><span class="c1">#    but delete manually if you created one yourself)</span>
+<a id="__codelineno-30-41" name="__codelineno-30-41" href="#__codelineno-30-41"></a><span class="c1"># oc delete sc ${POOL_NAME}</span>
+<a id="__codelineno-30-42" name="__codelineno-30-42" href="#__codelineno-30-42"></a>
+<a id="__codelineno-30-43" name="__codelineno-30-43" href="#__codelineno-30-43"></a><span class="c1"># 9. Delete namespace</span>
+<a id="__codelineno-30-44" name="__codelineno-30-44" href="#__codelineno-30-44"></a>oc<span class="w"> </span>delete<span class="w"> </span>namespace<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span><span class="w"> </span>--timeout<span class="o">=</span>60s
+<a id="__codelineno-30-45" name="__codelineno-30-45" href="#__codelineno-30-45"></a>
+<a id="__codelineno-30-46" name="__codelineno-30-46" href="#__codelineno-30-46"></a><span class="c1"># 10. Verify VPC shares are being deleted</span>
+<a id="__codelineno-30-47" name="__codelineno-30-47" href="#__codelineno-30-47"></a>ibmcloud<span class="w"> </span>is<span class="w"> </span>shares
+</code></pre></div>
+<h3 id="keep-the-pool-delete-only-workloads">Keep the Pool, Delete Only Workloads<a class="headerlink" href="#keep-the-pool-delete-only-workloads" title="Permanent link">&para;</a></h3>
+<p>If you want to keep the pool for another round of testing:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="c1"># Delete VMs and pods</span>
+<a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a>oc<span class="w"> </span>delete<span class="w"> </span>vm<span class="w"> </span>--all<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span><span class="w"> </span>--timeout<span class="o">=</span>30s
+<a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a>oc<span class="w"> </span>delete<span class="w"> </span>pods<span class="w"> </span>--all<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span><span class="w"> </span>--force<span class="w"> </span>--grace-period<span class="o">=</span><span class="m">0</span>
+<a id="__codelineno-31-4" name="__codelineno-31-4" href="#__codelineno-31-4"></a>
+<a id="__codelineno-31-5" name="__codelineno-31-5" href="#__codelineno-31-5"></a><span class="c1"># Delete PVCs (CSI cascades SubVolume deletes)</span>
+<a id="__codelineno-31-6" name="__codelineno-31-6" href="#__codelineno-31-6"></a>oc<span class="w"> </span>delete<span class="w"> </span>pvc<span class="w"> </span>--all<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span><span class="w"> </span>--timeout<span class="o">=</span>60s
+<a id="__codelineno-31-7" name="__codelineno-31-7" href="#__codelineno-31-7"></a>
+<a id="__codelineno-31-8" name="__codelineno-31-8" href="#__codelineno-31-8"></a><span class="c1"># Verify capacity is reclaimed</span>
+<a id="__codelineno-31-9" name="__codelineno-31-9" href="#__codelineno-31-9"></a>oc<span class="w"> </span>get<span class="w"> </span>filesharepools
+<a id="__codelineno-31-10" name="__codelineno-31-10" href="#__codelineno-31-10"></a><span class="c1"># Expected: ALLOCATED=0, PVCS=0</span>
+</code></pre></div>
+<h3 id="stuck-namespace-recovery">Stuck Namespace Recovery<a class="headerlink" href="#stuck-namespace-recovery" title="Permanent link">&para;</a></h3>
+<p>If the namespace is stuck in <code>Terminating</code>, a PVC finalizer is blocking deletion. Clear it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="c1"># Clear PVC finalizers</span>
+<a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a><span class="k">for</span><span class="w"> </span>pvc<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="k">$(</span>oc<span class="w"> </span>get<span class="w"> </span>pvc<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span><span class="w"> </span>-o<span class="w"> </span>name<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a><span class="w">    </span>oc<span class="w"> </span>patch<span class="w"> </span><span class="s2">"</span><span class="nv">$pvc</span><span class="s2">"</span><span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">TUTORIAL_NS</span><span class="si">}</span><span class="w"> </span>--type<span class="o">=</span>merge<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-32-4" name="__codelineno-32-4" href="#__codelineno-32-4"></a><span class="w">        </span>-p<span class="w"> </span><span class="s1">'{"metadata":{"finalizers":null}}'</span>
+<a id="__codelineno-32-5" name="__codelineno-32-5" href="#__codelineno-32-5"></a><span class="k">done</span>
+<a id="__codelineno-32-6" name="__codelineno-32-6" href="#__codelineno-32-6"></a>
+<a id="__codelineno-32-7" name="__codelineno-32-7" href="#__codelineno-32-7"></a><span class="c1"># SubVolumes are cluster-wide: they do not hold a namespace open. Do not clear</span>
+<a id="__codelineno-32-8" name="__codelineno-32-8" href="#__codelineno-32-8"></a><span class="c1"># their finalizers unless you know the volume is already gone.</span>
+</code></pre></div>
+<p>The namespace should delete within a few seconds after clearing finalizers.</p>
+<hr />
+<h2 id="quick-reference-useful-commands">Quick Reference: Useful Commands<a class="headerlink" href="#quick-reference-useful-commands" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>What</th>
+<th>Command</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>List pools</td>
+<td><code>oc get filesharepools</code></td>
+</tr>
+<tr>
+<td>Pool details</td>
+<td><code>oc describe filesharepool &lt;name&gt;</code></td>
+</tr>
+<tr>
+<td>List SubVolumes</td>
+<td><code>oc get subvolumes -o wide</code></td>
+</tr>
+<tr>
+<td>List VPC shares</td>
+<td><code>ibmcloud is shares</code></td>
+</tr>
+<tr>
+<td>Share details</td>
+<td><code>ibmcloud is share &lt;id&gt;</code></td>
+</tr>
+<tr>
+<td>Mount targets</td>
+<td><code>ibmcloud is share-mount-targets &lt;share-id&gt;</code></td>
+</tr>
+<tr>
+<td>CSI driver status</td>
+<td><code>oc get csidriver vpc-file-pool.csi.ibm.io</code></td>
+</tr>
+<tr>
+<td>Controller logs</td>
+<td><code>oc logs -n kube-system -l app.kubernetes.io/component=controller -c csi-controller --tail=50</code></td>
+</tr>
+<tr>
+<td>Node agent logs</td>
+<td><code>oc logs -n kube-system -l app.kubernetes.io/component=node -c csi-node --tail=50</code></td>
+</tr>
+<tr>
+<td>Webhook test</td>
+<td><code>echo '{"apiVersion":"storage.ibmcloud.io/v1alpha1","kind":"FileSharePool","metadata":{"name":"bad"},"spec":{}}' \| oc apply -f -</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="kubevirt-nfs-permissions">KubeVirt NFS Permissions<a class="headerlink" href="#kubevirt-nfs-permissions" title="Permanent link">&para;</a></h2>
+<p>KubeVirt's virt-handler calls <code>chown(mountDir, 107, 107)</code> on every filesystem-mode PVC mount. This requires NFS to be mounted with <code>sec=sys</code> (AUTH_UNIX) so that Unix UID/GID credentials are sent in NFS RPCs and <code>chown</code> succeeds.</p>
+<p>The CSI driver includes <code>sec=sys</code> in its default NFS mount options (matching the stock IBM VPC File CSI driver). VPC file shares also enforce <code>root_squash</code> — root (UID 0) is mapped to nobody (UID 65534) — but non-root UIDs pass through correctly with <code>sec=sys</code>.</p>
+<p><strong>Required pool configuration for KubeVirt:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="w">  </span><span class="nt">defaultPermissions</span><span class="p">:</span><span class="w"> </span><span class="s">"0777"</span>
+<a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a><span class="w">  </span><span class="nt">defaultUID</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">107</span><span class="w">        </span><span class="c1"># QEMU user</span>
+<a id="__codelineno-33-4" name="__codelineno-33-4" href="#__codelineno-33-4"></a><span class="w">  </span><span class="nt">defaultGID</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">107</span><span class="w">        </span><span class="c1"># QEMU group</span>
+</code></pre></div>
+<p>This ensures subdirectories are created with UID 107 ownership, so virt-handler's <code>chown</code> call either succeeds or is a no-op (directory already has the correct owner).</p>
+<p><strong>Important:</strong> If mounting with custom StorageClass <code>mountOptions</code>, always include <code>sec=sys</code>. Omitting it causes NFS to negotiate <code>sec=null</code> (anonymous auth), which breaks <code>chown</code> and prevents VMs from starting.</p>
+<p>See <a href="../KNOWN-LIMITATIONS/#kubevirt-nfs-permissions-root_squash">Known Limitations — KubeVirt NFS Permissions</a> for more details.</p>
+<hr />
+<h2 id="how-storageclasses-link-to-pools">How StorageClasses Link to Pools<a class="headerlink" href="#how-storageclasses-link-to-pools" title="Permanent link">&para;</a></h2>
+<p>When a FileSharePool reaches <code>Ready</code>, the controller <strong>auto-creates</strong> a StorageClass named after the pool. You can also create StorageClasses manually if you opt out of auto-creation.</p>
+<p><img alt="A StorageClass names a pool, the pool manages a VPC file share, and each PVC becomes a SubVolume" src="../images/tutorial-01-storageclass-chain.drawio.svg" /></p>
+<ul>
+<li><strong>One StorageClass</strong> references <strong>one pool</strong> (via <code>parameters.pool</code>) — auto-created by the controller</li>
+<li><strong>One pool</strong> manages <strong>one or more VPC file shares</strong> (auto-expands as needed)</li>
+<li><strong>Each PVC</strong> creates a <strong>SubVolume</strong> (subdirectory on an existing share)</li>
+<li><strong>Multiple PVCs</strong> share the <strong>same VPC file share</strong> — that's the pooling benefit</li>
+</ul>
+<hr />
+<h2 id="whats-next">What's Next<a class="headerlink" href="#whats-next" title="Permanent link">&para;</a></h2>
+<p>Now that you have a working pool with PVCs and a VM, explore the rest of the tutorial series:</p>
+<ul>
+<li><strong><a href="../TUTORIAL-02-SNAPSHOTS-AND-CLONES/">Part 2: Snapshots &amp; Clones</a></strong> — Create point-in-time snapshots, restore from them, and clone volumes (async)</li>
+<li><strong><a href="../TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS/">Part 3: Group Snapshots &amp; Hooks</a></strong> — Group snapshots are not active yet; this part explains why and covers hooks</li>
+<li><strong><a href="../TUTORIAL-04-POOL-CONFIGURATION/">Part 4: Pool Configuration</a></strong> — Multi-tier pools, allocation strategies, auto-expansion, and share draining</li>
+<li><strong><a href="../TUTORIAL-05-GOLDEN-IMAGES/">Part 5: Golden Images</a></strong> — Optional golden image provisioning for KubeVirt (hidden in the console)</li>
+<li><strong><a href="../TUTORIAL-06-REPLICATION-AND-FAILOVER/">Part 6: Replication &amp; Failover</a></strong> — Cross-region DR with direct NFS and driver-to-driver modes</li>
+<li><strong><a href="../TUTORIAL-07-MONITORING/">Part 7: Monitoring</a></strong> — Prometheus metrics, alerts, and Grafana dashboards</li>
+<li><strong><a href="../TUTORIAL-08-MIGRATION-AND-CONSOLE/">Part 8: Migration &amp; Console</a></strong> — PVC migration tool and OpenShift console plugin</li>
+<li><strong><a href="../TUTORIAL-09-COS-BACKUP-BUCKET/">Part 9: COS Bucket for Backups</a></strong> — Locked COS bucket, a restricted key, and a CBR rule</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "navigation.instant", "search.suggest", "search.highlight", "content.code.copy", "content.tabs.link"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+    
+  </body>
+</html>

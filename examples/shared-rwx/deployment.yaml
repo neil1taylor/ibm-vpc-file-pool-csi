@@ -1,0 +1,39 @@
+# Multi-replica deployment sharing a single RWX PVC.
+# All replicas read/write to the same subdirectory on the NFS share.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shared-app
+  namespace: default
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: shared-app
+  template:
+    metadata:
+      labels:
+        app: shared-app
+    spec:
+      containers:
+        - name: app
+          image: busybox:latest
+          command:
+            - sh
+            - -c
+            - |
+              echo "$(hostname) started at $(date)" >> /shared/log.txt
+              while true; do
+                echo "$(hostname): $(date)" >> /shared/log.txt
+                sleep 30
+              done
+          volumeMounts:
+            - name: shared
+              mountPath: /shared
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+      volumes:
+        - name: shared
+          persistentVolumeClaim:
+            claimName: shared-data

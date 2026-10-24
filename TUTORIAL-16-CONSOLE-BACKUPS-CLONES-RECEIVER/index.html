@@ -1,0 +1,2750 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A Kubernetes CSI driver that pools multiple PVCs as subdirectories within shared VPC file shares">
+      
+      
+      
+        <link rel="canonical" href="https://neil1taylor.github.io/ibm-vpc-file-pool-csi/TUTORIAL-16-CONSOLE-BACKUPS-CLONES-RECEIVER/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Part 16: Backups, Clones and Replication Setup in the Console - IBM VPC File Pool CSI Driver</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#part-16-backups-clones-and-replication-setup-in-the-console" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="IBM VPC File Pool CSI Driver" class="md-header__button md-logo" aria-label="IBM VPC File Pool CSI Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            IBM VPC File Pool CSI Driver
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Part 16: Backups, Clones and Replication Setup in the Console
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/neil1taylor/ibm-vpc-file-pool-csi" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neil1taylor/ibm-vpc-file-pool-csi
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../INSTALL/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../DAY2-OPERATIONS/" class="md-tabs__link">
+          
+  
+  
+  Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../OVERVIEW/" class="md-tabs__link">
+          
+  
+  
+  Architecture
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../VOLUME-CLONING/" class="md-tabs__link">
+          
+  
+  
+  Design (Phase 4)
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../CONTRIBUTING/" class="md-tabs__link">
+          
+  
+  
+  Development
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../examples/" class="md-tabs__link">
+          
+  
+  
+  Examples
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="IBM VPC File Pool CSI Driver" class="md-nav__button md-logo" aria-label="IBM VPC File Pool CSI Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    IBM VPC File Pool CSI Driver
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/neil1taylor/ibm-vpc-file-pool-csi" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neil1taylor/ibm-vpc-file-pool-csi
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../INSTALL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../USER-GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-01-POOL-CREATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 1 - Pool Creation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-02-SNAPSHOTS-AND-CLONES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 2 - Snapshots and Clones
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 3 - Group Snapshots and Hooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-04-POOL-CONFIGURATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 4 - Pool Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-05-GOLDEN-IMAGES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 5 - Golden Images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-06-REPLICATION-AND-FAILOVER/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 6 - Replication and Failover
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-07-MONITORING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 7 - Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-08-MIGRATION-AND-CONSOLE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 8 - Migration and Console
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-09-COS-BACKUP-BUCKET/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 9 - COS Bucket for Backups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-10-BACKUP-AND-RESTORE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 10 - Backup and Restore
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-11-INSTANT-VM-SNAPSHOTS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 11 - Instant VM Snapshots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-12-REPLICATING-RUNNING-VMS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 12 - Replicating Running VMs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-13-FAILOVER-OF-RUNNING-VMS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 13 - Failover of Running VMs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-14-CONSOLE-RESTORE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 14 - Restore a Snapshot in the Console
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DEPLOYMENT-NOTES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment Notes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../FEATURES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../UPGRADE-GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrade Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../FAQ/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../HELM-VALUES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Helm Values Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DAY2-OPERATIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 Operations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../MONITORING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CAPACITY-PLANNING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Capacity Planning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../BACKUP-RECOVERY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backup and Recovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../GOLDEN-IMAGE-WORKFLOW/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Golden Image Workflow
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../SECURITY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TROUBLESHOOTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../PERFORMANCE-TUNING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance Tuning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../KNOWN-LIMITATIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Known Limitations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../OVERVIEW/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTEXT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context (the words we use)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONSISTENCY-MODEL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Consistency Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VPC-NETWORKING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VPC Networking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VM-DISK-FORMATS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VM Disk Formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CRD-SPEC/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CRD Specification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CSI-INTERFACE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CSI Interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../IBM-VPC-API/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    IBM VPC API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../API-KEY-SETUP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Key Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design (Phase 4)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Design (Phase 4)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VOLUME-CLONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Volume Cloning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VOLUME-GROUP-SNAPSHOTS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Volume Group Snapshots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CROSS-REGION-DR/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cross-Region DR
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CODING-GUIDELINES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coding Guidelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TESTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Examples
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="part-16-backups-clones-and-replication-setup-in-the-console">Part 16: Backups, Clones and Replication Setup in the Console<a class="headerlink" href="#part-16-backups-clones-and-replication-setup-in-the-console" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p><strong>Tutorial Series:</strong> <a href="../TUTORIAL/">Index</a> | <a href="../TUTORIAL-06-REPLICATION-AND-FAILOVER/">Part 6: Replication &amp; Failover</a> | <a href="../TUTORIAL-10-BACKUP-AND-RESTORE/">Part 10: Backup and Restore</a> | <a href="../TUTORIAL-14-CONSOLE-RESTORE/">Part 14: Restore a Snapshot in the Console</a> | <strong>Part 16</strong></p>
+</blockquote>
+<p>Do three jobs in the OpenShift console, with no YAML. First, back up a volume on a schedule, restore it, and delete its backups. Second, clone a volume to a new PVC. Third, set up a replication receiver: paste its token and certificate, let the console make the Secrets, and check the connection. The words backup, moment, restore point and snapshot pool are defined in <a href="../CONTEXT/">CONTEXT.md</a>.</p>
+<p><img alt="A backup policy selects a volume, copies it into the snapshot pool, and a restore makes a new volume" src="../images/tutorial-16-backup-and-restore.drawio.svg" /></p>
+<p><strong>Time:</strong> about 45 minutes for parts A and B, most of it waiting for backups. Part C needs a second cluster.
+<strong>Status:</strong> backups are Experimental (<a href="../BACKUP-RECOVERY/">BACKUP-RECOVERY.md</a>). This page was run end to end on rovslab on 24 October 2026 (driver v0.14.1, OpenShift 4.21), with a second cluster for part C.
+<strong>Scope:</strong> the console does not run <code>kubectl backup cos-setup</code>. Part A shows what the COS tab does and links to the commands.</p>
+<hr />
+<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
+<ul>
+<li>The console plugin is on. In the console, the menu <strong>Storage</strong> shows <strong>IBM VPC File Pools</strong> (<a href="../TUTORIAL-08-MIGRATION-AND-CONSOLE/">Part 8</a>).</li>
+<li>The data pool, the snapshot pool and the labelled volume of <a href="../TUTORIAL-10-BACKUP-AND-RESTORE/">Part 10</a>, Steps 1 to 3. They give you the namespace <code>pool-tutorial-backup</code>, the pools <code>tut-data</code> and <code>tut-backups</code>, and the PVC <code>files</code> with the label <code>backup=yes</code>. The steps below use those names.</li>
+<li><code>oc</code>, to check the results. You can use the console terminal instead.</li>
+<li>Your login may create <code>BackupPolicy</code> and <code>BackupRestore</code> objects. Without the right, the console switches the button off, names the missing right and shows YAML for an administrator.</li>
+<li>For part C only: a second cluster with a running replication receiver (<a href="../TUTORIAL-06-REPLICATION-AND-FAILOVER/">Part 6</a>, Step 6a to 6c).</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">NS</span><span class="o">=</span>pool-tutorial-backup
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">POLICY</span><span class="o">=</span>tut-console
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>oc<span class="w"> </span>get<span class="w"> </span>pvc<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">NS</span><span class="si">}</span><span class="w"> </span>files<span class="w"> </span>--show-labels
+</code></pre></div>
+<p><strong>Expected:</strong> <code>files</code> is <code>Bound</code> and has the label <code>backup=yes</code>.</p>
+<hr />
+<h1 id="part-a-backups">Part A: Backups<a class="headerlink" href="#part-a-backups" title="Permanent link">&para;</a></h1>
+<h2 id="step-1-open-the-backups-tab">Step 1: Open the Backups tab<a class="headerlink" href="#step-1-open-the-backups-tab" title="Permanent link">&para;</a></h2>
+<p>Open <strong>Storage</strong>, then <strong>IBM VPC File Pools</strong>, then the <strong>Backups</strong> tab. The list is empty, and says "No BackupPolicies found".</p>
+<hr />
+<h2 id="step-2-make-a-policy-with-the-form">Step 2: Make a policy with the form<a class="headerlink" href="#step-2-make-a-policy-with-the-form" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Choose <strong>Create BackupPolicy</strong>.</li>
+<li>Fill in the form:</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>What to enter</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Name</strong></td>
+<td><code>tut-console</code>. The name is also a label value on the volumes the policy backs up, so you cannot change it later.</td>
+</tr>
+<tr>
+<td><strong>Snapshot pool</strong></td>
+<td><code>tut-backups</code>. Only a pool that holds no workload claims and has a ready share can be chosen. The other pools are listed but switched off, with the reason.</td>
+</tr>
+<tr>
+<td><strong>Schedule</strong></td>
+<td>Choose <strong>Custom</strong> and type <code>5m</code>. The presets are <code>1h</code>, <code>6h</code>, <code>12h</code> and <code>24h</code>. The least is 1 minute.</td>
+</tr>
+<tr>
+<td><strong>Keep for</strong></td>
+<td><code>48h</code>. The links under the box (<strong>1 day</strong>, <strong>7 days</strong>, <strong>30 days</strong>) fill it in. The least is 1 hour.</td>
+</tr>
+<tr>
+<td><strong>Labels</strong></td>
+<td>Key <code>backup</code>, value <code>yes</code>, then <strong>Add label</strong>. A policy with no labels is refused.</td>
+</tr>
+<tr>
+<td><strong>Namespaces</strong></td>
+<td><code>pool-tutorial-backup</code>. Empty means all namespaces.</td>
+</tr>
+<tr>
+<td><strong>VM copy speed limit (MB/s per disk)</strong></td>
+<td>Leave it. It matters only for VM disks.</td>
+</tr>
+</tbody>
+</table>
+<ol>
+<li>Look under <strong>Labels</strong>. A line counts the claims that match. It says <code>1 claim matches.</code> If it says <code>No claim matches yet. Check the labels.</code>, the label is wrong.</li>
+<li>The blue box at the top of the form says that backups stop when the snapshot pool is more than 85% full. Nothing is deleted to make room, and backups start again when the use falls to 85% or less.</li>
+<li>Choose <strong>Create</strong>.</li>
+</ol>
+<p>The form checks the same limits as the admission webhook. If the webhook still refuses the policy, the page shows its message under <strong>Creation failed</strong>.</p>
+<p><strong>Expected:</strong> the page of the policy opens. Its <strong>Phase</strong> shows <code>Unknown</code> for a few seconds, then <code>Active</code>. Check from a terminal:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>oc<span class="w"> </span>get<span class="w"> </span>backuppolicy<span class="w"> </span><span class="si">${</span><span class="nv">POLICY</span><span class="si">}</span>
+</code></pre></div>
+<p><strong>Expected:</strong> <code>PHASE</code> is <code>Active</code>. If it is <code>Error</code>, the page shows a red banner with the reason. The usual cause is a snapshot pool that is not <code>Ready</code> yet.</p>
+<hr />
+<h2 id="step-3-read-the-list-and-the-policy-page">Step 3: Read the list and the policy page<a class="headerlink" href="#step-3-read-the-list-and-the-policy-page" title="Permanent link">&para;</a></h2>
+<p>Go back to the <strong>Backups</strong> tab. The list has one row for each policy, with these columns:</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Name</strong></td>
+<td>A link to the policy page.</td>
+</tr>
+<tr>
+<td><strong>Snapshot Pool</strong>, <strong>Schedule</strong>, <strong>Keep</strong></td>
+<td>The settings of the policy.</td>
+</tr>
+<tr>
+<td><strong>Phase</strong></td>
+<td><code>Active</code>, <code>Suspended</code> or <code>Error</code>.</td>
+</tr>
+<tr>
+<td><strong>Volumes</strong></td>
+<td>How many volumes the policy backs up.</td>
+</tr>
+<tr>
+<td><strong>Stalest Backup</strong></td>
+<td>How old the oldest "last backup" is. It says <code>No backup yet</code> until the first backup ends.</td>
+</tr>
+<tr>
+<td><strong>Export</strong></td>
+<td><code>On</code> or <code>Off</code>: whether the policy also sends backups to COS.</td>
+</tr>
+</tbody>
+</table>
+<p>When a policy is in the <code>Error</code> phase because its snapshot pool is more than 85% full, a red banner above the table says so and links to the pool.</p>
+<p>Open the policy. The <strong>Overview</strong> tab shows the settings (<strong>Snapshot Pool</strong>, <strong>Schedule</strong>, <strong>Keep</strong>, <strong>Volumes picked by label</strong>, <strong>Namespaces</strong>, <strong>VM Copy Speed Limit</strong>, <strong>Export to COS</strong>). Below them is a table with one row for each volume:</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Claim</strong></td>
+<td><code>namespace/name</code> of the PVC. A volume that the policy no longer backs up says <code>No longer backed up, kept until &lt;date&gt;</code>.</td>
+</tr>
+<tr>
+<td><strong>VM</strong></td>
+<td>The VM that uses the disk, or <code>-</code>.</td>
+</tr>
+<tr>
+<td><strong>Last Backup</strong>, <strong>Oldest Backup</strong></td>
+<td>How long ago. A restore can go back as far as the oldest.</td>
+</tr>
+<tr>
+<td><strong>Restore Points</strong></td>
+<td>How many older moments, besides the newest, a restore can go back to.</td>
+</tr>
+<tr>
+<td><strong>Size</strong></td>
+<td>What the newest backup wrote, for a VM disk. A plain volume shows <code>-</code>: its file copy does not count bytes.</td>
+</tr>
+<tr>
+<td><strong>Consistency</strong></td>
+<td><code>File copy</code> for a plain volume. <code>File-system consistent</code> or <code>Crash consistent</code> for a VM disk. A crash consistent copy has an orange label.</td>
+</tr>
+<tr>
+<td><strong>Error</strong></td>
+<td>The last error, or <code>-</code>.</td>
+</tr>
+<tr>
+<td><strong>Export</strong></td>
+<td>The COS state of the volume.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Expected:</strong> the table has one row, <code>pool-tutorial-backup/files</code>. Its <strong>Consistency</strong> is <code>File copy</code> once the first backup ends. The first backup takes as long as the first copy. A new backup is made every 5 minutes.</p>
+<p>Wait until <strong>Last Backup</strong> shows a time. Then wait for <strong>Restore Points</strong> to reach <code>1</code>, which takes one more cycle.</p>
+<hr />
+<h2 id="step-4-suspend-and-resume-the-policy">Step 4: Suspend and resume the policy<a class="headerlink" href="#step-4-suspend-and-resume-the-policy" title="Permanent link">&para;</a></h2>
+<p>Suspend stops new backups. The backups that exist stay.</p>
+<ol>
+<li>On the policy page, choose <strong>Suspend</strong>. Or open the menu (the three dots) of the policy on the <strong>Backups</strong> list and choose <strong>Suspend</strong>.</li>
+</ol>
+<p><strong>Expected:</strong> <strong>Phase</strong> is <code>Suspended</code>, and the page shows an information box <strong>Backups are suspended</strong>. The button now reads <strong>Resume</strong>. The phase can take up to 20 seconds to change on the page.</p>
+<ol>
+<li>Choose <strong>Resume</strong>.</li>
+</ol>
+<p><strong>Expected:</strong> <strong>Phase</strong> is <code>Active</code> again.</p>
+<p>The same menu has <strong>View Details</strong>, <strong>Edit</strong> and <strong>Delete</strong>. <strong>Edit</strong> opens the same form, with the name switched off.</p>
+<hr />
+<h2 id="step-5-restore-a-volume-with-the-restore-form">Step 5: Restore a volume with the Restore form<a class="headerlink" href="#step-5-restore-a-volume-with-the-restore-form" title="Permanent link">&para;</a></h2>
+<p>A restore makes a new PVC. It never writes over a volume that exists.</p>
+<ol>
+<li>On the policy page, open the menu (the three dots) of the row <code>pool-tutorial-backup/files</code> and choose <strong>Restore</strong>.</li>
+</ol>
+<p>The page is called <strong>Restore from a backup</strong>. The fields:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Default and notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Volume</strong></td>
+<td>The volume you chose. A volume that is gone is listed too, with <code>(no longer backed up)</code>, until its backups pass the keep time. A line below shows the oldest and the newest backup.</td>
+</tr>
+<tr>
+<td><strong>Latest backup</strong> / <strong>At a moment</strong></td>
+<td><strong>Latest backup</strong> is on. With <strong>At a moment</strong>, a <strong>Moment</strong> field appears. Choose a time in your time zone. The restore uses the newest backup at or before it. The page refuses a time before the oldest backup.</td>
+</tr>
+<tr>
+<td><strong>Namespace</strong></td>
+<td>The namespace of the backed-up claim.</td>
+</tr>
+<tr>
+<td><strong>New claim name</strong></td>
+<td><code>files-restored</code>. The page refuses a name that exists.</td>
+</tr>
+<tr>
+<td><strong>Storage class</strong></td>
+<td><strong>Same as the backed-up claim</strong>, with the class name. Only classes of this driver are offered.</td>
+</tr>
+</tbody>
+</table>
+<ol>
+<li>Leave the defaults and choose <strong>Restore</strong>.</li>
+<li>A box asks <strong>Restore from this backup?</strong> It says that a new claim is made, that nothing is overwritten, and that the copy takes time. Choose <strong>Restore</strong>.</li>
+</ol>
+<p><strong>Expected:</strong> a banner follows the restore through these titles:</p>
+<ol>
+<li><code>Restoring: the request is starting</code></li>
+<li><code>Restoring: making the new volume</code></li>
+<li><code>Restoring: copying the backup into the new volume</code></li>
+<li><code>The restored volume is ready</code>, with the line <code>Restored the latest backup, from &lt;time&gt;.</code></li>
+</ol>
+<p>If the restore fails, the banner is red and says <code>The restore failed</code> with the message. Nothing was written over an existing volume. The banner links to the new claim. Choose <strong>Back to the policy</strong> to leave the page.</p>
+<p>Check from a terminal:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>oc<span class="w"> </span>get<span class="w"> </span>backuprestore
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>oc<span class="w"> </span>get<span class="w"> </span>pvc<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">NS</span><span class="si">}</span>
+</code></pre></div>
+<p><strong>Expected:</strong> one <code>BackupRestore</code> with <code>PHASE</code> <code>Done</code>, and the PVC <code>files-restored</code>.</p>
+<hr />
+<h2 id="step-6-check-the-restored-data">Step 6: Check the restored data<a class="headerlink" href="#step-6-check-the-restored-data" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>cat<span class="w"> </span><span class="s">&lt;&lt;EOF | oc apply -n ${NS} -f -</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="s">apiVersion: v1</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="s">kind: Pod</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="s">metadata:</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="s">  name: files-check</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="s">spec:</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="s">  restartPolicy: Never</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="s">  containers:</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="s">    - name: check</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="s">      image: registry.access.redhat.com/ubi9/ubi-minimal:latest</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="s">      command: ["/bin/bash", "-c"]</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="s">      args: ["cat /data/a/1; ls /data"]</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="s">      volumeMounts:</span>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="s">        - name: data</span>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="s">          mountPath: /data</span>
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a><span class="s">  volumes:</span>
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a><span class="s">    - name: data</span>
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a><span class="s">      persistentVolumeClaim:</span>
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a><span class="s">        claimName: files-restored</span>
+<a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a><span class="s">EOF</span>
+<a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>
+<a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a>oc<span class="w"> </span><span class="nb">wait</span><span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">NS</span><span class="si">}</span><span class="w"> </span>--for<span class="o">=</span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'{.status.phase}'</span><span class="o">=</span>Succeeded<span class="w"> </span>pod/files-check<span class="w"> </span>--timeout<span class="o">=</span>300s
+<a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a>oc<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">NS</span><span class="si">}</span><span class="w"> </span>files-check
+</code></pre></div>
+<p><strong>Expected:</strong> the output is <code>first</code>, then a listing with <code>a</code>, <code>keep</code> and <code>written</code>. A pod that mounts the new claim does not start until the restore ends.</p>
+<p>To restore an earlier moment, repeat Step 5 and choose <strong>At a moment</strong>. The line under <strong>Volume</strong> shows the oldest and the newest backup. Enter a time in your own time zone.</p>
+<hr />
+<h2 id="step-7-delete-the-backups-of-a-volume">Step 7: Delete the backups of a volume<a class="headerlink" href="#step-7-delete-the-backups-of-a-volume" title="Permanent link">&para;</a></h2>
+<p><strong>Delete backups</strong> is the only destructive action of the Backups tab. It removes all backups of one volume, for good. The volume itself is not touched.</p>
+<p>First see the refusal. The policy still backs up <code>files</code>, so:</p>
+<ol>
+<li>On the policy page, open the menu of the row <code>pool-tutorial-backup/files</code> and choose <strong>Delete backups</strong>.</li>
+</ol>
+<p><strong>Expected:</strong> the box is called <strong>Delete backups of pool-tutorial-backup/files</strong>. It shows a warning, <strong>The backups of this volume cannot be removed now</strong>, and the text <code>Policy tut-console still backs up pool-tutorial-backup/files: remove the label that selects it, or delete the policy, wait for the next backup cycle, then try again.</code> Nothing starts. Close the box.</p>
+<p>The box also refuses while a restore of the volume has not ended. The text is <code>Restore &lt;name&gt; of &lt;claim&gt; has not ended; wait for it, then try again.</code></p>
+<p>Now stop the policy from backing up the volume. Remove the label, and wait for one backup cycle (5 minutes):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>oc<span class="w"> </span>label<span class="w"> </span>pvc<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">NS</span><span class="si">}</span><span class="w"> </span>files<span class="w"> </span>backup-
+</code></pre></div>
+<p><strong>Expected:</strong> after one cycle, the row of the volume says <code>No longer backed up, kept until &lt;date&gt;</code>.</p>
+<ol>
+<li>Open <strong>Delete backups</strong> on the row again. The console starts a short Job in <code>kube-system</code> that only measures the backups. The box says <code>Measuring the backups on the snapshot pool...</code>.</li>
+<li>When the measure ends, a red box says <code>This removes all backups of pool-tutorial-backup/files from policy tut-console, for good</code>. It shows the two folders, the size and the number of moments.</li>
+<li>Type <code>pool-tutorial-backup/files</code> in the box. The button <strong>Delete backups</strong> turns on only when the text matches exactly.</li>
+<li>Choose <strong>Delete backups</strong>.</li>
+</ol>
+<p><strong>Expected:</strong> the box says <code>Removing the backups on the snapshot pool...</code>, then <strong>The backups are removed</strong>, with <code>Removed the backups of pool-tutorial-backup/files (&lt;size&gt;).</code> The console removes its Jobs when they end. If the folders are empty, the box says <strong>No backup data found</strong> and stops. If the delete fails, it says <strong>The delete stopped</strong>. You can try again.</p>
+<p>The Jobs run in <code>kube-system</code> with your own rights. Without them, the box names the missing rights and shows the command <code>kubectl backup delete --policy tut-console --pvc pool-tutorial-backup/files</code> for an administrator. After a policy is deleted, its status no longer says where its backups are. Then use <code>kubectl backup delete --pool ... --volume ...</code> (<a href="../TUTORIAL-10-BACKUP-AND-RESTORE/">Part 10</a>).</p>
+<hr />
+<h2 id="step-8-look-at-the-cos-tab">Step 8: Look at the COS tab<a class="headerlink" href="#step-8-look-at-the-cos-tab" title="Permanent link">&para;</a></h2>
+<p>A policy can also send its backups, encrypted, to an IBM Cloud Object Storage (COS) bucket. Open the policy and choose the <strong>COS</strong> tab.</p>
+<p>For a policy with no export, the tab says <strong>This policy does not export to COS</strong>. The tab shows:</p>
+<ul>
+<li><strong>Set up the export.</strong> A guide with four steps. It shows the <code>kubectl backup cos-setup</code> command with your names filled in (<strong>Region</strong>, <strong>Resource group</strong>, <strong>Bucket</strong>, <strong>Key Protect root key CRN</strong>, <strong>VPC CRN</strong>, <strong>Admin addresses</strong>, <strong>Folder in the bucket (optional)</strong>). The console does not run it, because it needs your own IBM Cloud login and the console must not hold an IBM Cloud API key. After you run it on your machine, you paste what it wrote:</li>
+<li><strong>Step 2. Make the Secrets.</strong> Paste the two Secret files and the Key Protect API key, then choose <strong>Make the Secrets</strong>. The console makes the Secrets in <code>kube-system</code>. It sends each once, never reads a Secret back, and leaves a Secret that exists already as it is.</li>
+<li><strong>Step 3. Save the export to the policy.</strong> Paste the <code>spec.export</code> block that the command printed, then choose <strong>Save the export to the policy</strong>.</li>
+<li><strong>Step 4. Check that it works.</strong> A line says whether volumes have reached COS.</li>
+<li><strong>What is in the bucket.</strong> The button <strong>List COS contents</strong> runs a read-only Job and shows the volumes and their moments. It is off while the policy has no export.</li>
+<li><strong>Restore from COS.</strong> A link, also on the <strong>Backups</strong> list. It makes a restore from the bucket, and works in a cluster that has no policy.</li>
+</ul>
+<p>For a policy with an export, the tab also shows <strong>Export settings</strong> and <strong>Export state of each volume</strong>.</p>
+<p>Make the bucket by hand with <a href="../TUTORIAL-09-COS-BACKUP-BUCKET/">Part 9</a>. The commands and the full export are in <a href="../BACKUP-RECOVERY/#export-to-cos-built-proved-in-stage-18-except-the-emergency-key-and-dr-cluster-restores">BACKUP-RECOVERY.md</a>.</p>
+<hr />
+<h1 id="part-b-clone-a-volume">Part B: Clone a volume<a class="headerlink" href="#part-b-clone-a-volume" title="Permanent link">&para;</a></h1>
+<p>A clone is a new PVC with a copy of the data of another PVC. A Job copies the data in the background.</p>
+<h2 id="step-9-clone-with-clone-to-new-pvc">Step 9: Clone with "Clone to new PVC"<a class="headerlink" href="#step-9-clone-with-clone-to-new-pvc" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Open the <strong>SubVolumes</strong> tab. Find the row whose <strong>PVC</strong> is <code>pool-tutorial-backup/files</code>.</li>
+<li>Open the menu of the row and choose <strong>Clone to new PVC</strong>. Or open the SubVolume page and choose the button <strong>Clone to new PVC</strong>.</li>
+</ol>
+<p>The action is off, with a reason, in these cases: the volume is not <code>Bound</code> yet, or a copy into the volume is still running.</p>
+<p>The page is called <strong>Clone to new PVC</strong>. The fields:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Default and notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Name</strong></td>
+<td><code>files-clone</code>.</td>
+</tr>
+<tr>
+<td><strong>Namespace</strong></td>
+<td>The namespace of the source claim. You cannot change it. This is a Kubernetes rule.</td>
+</tr>
+<tr>
+<td><strong>Size (GiB)</strong></td>
+<td>The size of the source volume. You can make it bigger, not smaller. The page shows the free space of the pool.</td>
+</tr>
+<tr>
+<td><strong>Storage class</strong></td>
+<td>The class of the source claim. Only classes of this driver are offered.</td>
+</tr>
+<tr>
+<td><strong>Access mode</strong>, <strong>Volume mode</strong></td>
+<td>Copied from the source claim.</td>
+</tr>
+</tbody>
+</table>
+<ol>
+<li>Leave the defaults and choose <strong>Clone</strong>.</li>
+</ol>
+<p>If a VM uses the source claim, the page warns <strong>A VM uses this claim</strong>: the clone is a plain file copy made while the VM runs, so the cloned disk may not boot. Here no VM uses <code>files</code>.</p>
+<hr />
+<h2 id="step-10-follow-the-clone">Step 10: Follow the clone<a class="headerlink" href="#step-10-follow-the-clone" title="Permanent link">&para;</a></h2>
+<p><strong>Expected:</strong> a banner follows the clone:</p>
+<ol>
+<li><code>Cloning: the copy is starting</code></li>
+<li><code>Cloning: copying &lt;size&gt; from the volume</code>, with a bar that shows <code>Copied &lt;size&gt; of &lt;size&gt;</code></li>
+<li><code>The cloned volume is ready</code>, with <code>The claim files-clone is Bound.</code></li>
+</ol>
+<p>If the copy fails, the banner is red: <code>Cloning failed</code>, with the error. The claim is not deleted. Choose <strong>Back to volumes</strong> to leave the page.</p>
+<p>The claim is <code>Bound</code> at once: the driver makes the claim and copies the data behind it. A pod that mounts the claim waits until the copy ends. The banner follows the copy, not the claim. In driver v0.14.1 and earlier, the banner showed the last title as soon as the claim was <code>Bound</code>, before the copy ended. To see the copy itself, open the SubVolume of the clone (it has the same name as the PV of the claim). The <strong>Clone Progress</strong> card shows the bar, <strong>Started At</strong>, <strong>Completed At</strong> and any <strong>Clone error</strong>. The <strong>Clone Status</strong> column of the SubVolumes list shows the same.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>oc<span class="w"> </span>get<span class="w"> </span>pvc<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">NS</span><span class="si">}</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>oc<span class="w"> </span>get<span class="w"> </span>subvolumes<span class="w"> </span>-o<span class="w"> </span>wide
+</code></pre></div>
+<p><strong>Expected:</strong> the PVCs <code>files</code>, <code>files-restored</code> and <code>files-clone</code> are <code>Bound</code>.</p>
+<hr />
+<h1 id="part-c-set-up-a-replication-receiver">Part C: Set up a replication receiver<a class="headerlink" href="#part-c-set-up-a-replication-receiver" title="Permanent link">&para;</a></h1>
+<p><img alt="The form makes two Secrets, a Check Job reads them and checks the receiver" src="../images/tutorial-16-receiver-setup.drawio.svg" /></p>
+<p>A receiver is a pod on the destination cluster. It takes the data of a replication policy over HTTPS. The form needs the receiver's address, its token, and its certificate. This part uses two clusters. The <strong>destination</strong> cluster runs the receiver. The <strong>source</strong> cluster runs the console you use.</p>
+<h2 id="step-11-get-the-token-and-the-certificate-from-the-destination">Step 11: Get the token and the certificate from the destination<a class="headerlink" href="#step-11-get-the-token-and-the-certificate-from-the-destination" title="Permanent link">&para;</a></h2>
+<p>On the destination cluster, read the token that you put in the receiver's Secret. <a href="../TUTORIAL-06-REPLICATION-AND-FAILOVER/">Part 6</a> names it <code>repl-receiver-token</code>, with the key <code>token</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>oc<span class="w"> </span>get<span class="w"> </span>secret<span class="w"> </span>repl-receiver-token<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'{.data.token}'</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>base64<span class="w"> </span>-d<span class="p">;</span><span class="w"> </span><span class="nb">echo</span>
+</code></pre></div>
+<p>Get the address of the receiver:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>oc<span class="w"> </span>get<span class="w"> </span>route<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-l<span class="w"> </span>app.kubernetes.io/component<span class="o">=</span>replication-receiver<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'https://{.items[0].spec.host}{"\n"}'</span>
+</code></pre></div>
+<p>If the receiver has its own certificate (Part 6, Option A), copy the CA certificate as well. If the Route provides the TLS with a public authority (Option B), you need no certificate.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>oc<span class="w"> </span>get<span class="w"> </span>secret<span class="w"> </span>ibm-vpc-file-pool-csi-receiver-certs<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'{.data.ca\.crt}'</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>base64<span class="w"> </span>-d
+</code></pre></div>
+<p><strong>Expected:</strong> a long token, an <code>https://</code> address, and for Option A a block that starts with <code>-----BEGIN CERTIFICATE-----</code>.</p>
+<hr />
+<h2 id="step-12-fill-in-the-replication-form">Step 12: Fill in the replication form<a class="headerlink" href="#step-12-fill-in-the-replication-form" title="Permanent link">&para;</a></h2>
+<p>On the source cluster, open <strong>Storage</strong>, <strong>IBM VPC File Pools</strong>, the <strong>Replication</strong> tab, and choose <strong>Create ReplicationPolicy</strong>.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>What to enter</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Name</strong></td>
+<td><code>dr-console</code>. The console names the Secrets and the check Job after it. Enter the name first.</td>
+</tr>
+<tr>
+<td><strong>Source Pool Name</strong></td>
+<td><code>tut-data</code>.</td>
+</tr>
+<tr>
+<td><strong>Replication Mode</strong></td>
+<td><strong>Driver-to-Driver (cross-region)</strong>.</td>
+</tr>
+<tr>
+<td><strong>Receiver Endpoint</strong></td>
+<td>The <code>https://</code> address. The form refuses <code>http://</code>.</td>
+</tr>
+<tr>
+<td><strong>Token and certificate</strong></td>
+<td><strong>Make new Secrets from what I paste</strong>. The other choice, <strong>Use Secrets that already exist</strong>, asks for the names of Secrets in <code>kube-system</code> (<strong>Auth Secret Name</strong> with the key <code>token</code>, <strong>CA Cert Secret Name (optional)</strong> with the key <code>ca.crt</code>).</td>
+</tr>
+<tr>
+<td><strong>Token</strong></td>
+<td>Paste the token.</td>
+</tr>
+<tr>
+<td><strong>CA certificate (optional)</strong></td>
+<td>Paste the certificate in PEM form. Leave it empty when a public authority signed the receiver's certificate.</td>
+</tr>
+<tr>
+<td><strong>SubVolume Selector</strong></td>
+<td>Add the label <code>tutorial</code> = <code>receiver-setup</code>, with <strong>Add</strong>. See the note below.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Note:</strong> <strong>Create</strong> makes a real policy. Without labels in the <strong>SubVolume Selector</strong>, every SubVolume in the pool is replicated. A label that no volume has replicates none. Use this to test the receiver without copying data.</p>
+<hr />
+<h2 id="step-13-check-the-connection">Step 13: Check the connection<a class="headerlink" href="#step-13-check-the-connection" title="Permanent link">&para;</a></h2>
+<p>Choose <strong>Check connection</strong>. The console does three things:</p>
+<ol>
+<li>It makes the Secrets <code>dr-console-receiver-token</code> and <code>dr-console-receiver-ca</code> in <code>kube-system</code>. The token goes once from the browser to this cluster's API server. The console keeps no copy and never reads a Secret back. If a Secret with that name exists and the console did not make it, the form stops and says so.</li>
+<li>It starts a short Job in <code>kube-system</code>, with the driver image. The Job tests, in order, that the receiver answers, that its certificate is trusted, and that it accepts the token.</li>
+<li>It shows the result.</li>
+</ol>
+<p><strong>Expected:</strong> an information box, <strong>Checking the receiver</strong>, then a green box, <strong>The receiver is ready</strong>: <code>The receiver answered, its certificate is trusted, and the token is accepted.</code></p>
+<p>If the check fails, a red box, <strong>The check failed</strong>, gives one reason: <code>cannot connect</code>, <code>certificate not trusted</code>, <code>token refused</code>, <code>receiver storage not reachable</code>, or <code>receiver has no auth-check call; update it</code>. Fix the cause and choose <strong>Check connection</strong> again. Changing any field turns the check off, and you must run it again.</p>
+<p><strong>Create</strong> turns on only after the check passes. If your account may not make Jobs in <code>kube-system</code>, the form says <strong>You cannot run the check</strong>, and you can make the policy without it. A wrong address, token or certificate then shows up only when the first copy runs. If your account may not make Secrets there, the form says <strong>You cannot make Secrets in kube-system</strong>. Ask an administrator to make them, then choose <strong>Use Secrets that already exist</strong>.</p>
+<p>Check the Secrets from a terminal. The check Job removes itself after ten minutes.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>oc<span class="w"> </span>get<span class="w"> </span>secret<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>dr-console-receiver-token<span class="w"> </span>dr-console-receiver-ca
+</code></pre></div>
+<p><strong>Expected:</strong> both Secrets exist. With no certificate pasted, only the token Secret exists.</p>
+<hr />
+<h2 id="step-14-make-the-policy-and-read-the-receiver-status">Step 14: Make the policy and read the Receiver status<a class="headerlink" href="#step-14-make-the-policy-and-read-the-receiver-status" title="Permanent link">&para;</a></h2>
+<p>Leave <strong>Destination Base Path</strong> and <strong>Schedule</strong> as they are (<code>/pvcs</code> and <code>15m</code>), and choose <strong>Create</strong>.</p>
+<p><strong>Expected:</strong> the policy page opens. It shows the label <strong>Driver-to-Driver</strong>, the <strong>Receiver Endpoint</strong>, and a line <strong>Receiver Status</strong>. The status is <code>Checking...</code> until the controller's first result, then <code>Reachable</code>. If it says <code>Not reachable</code>, the reason follows. The controller repeats the same checks once for each schedule. A failing check does not stop replication.</p>
+<p>Open the <strong>Replication</strong> tab. The list has a <strong>Receiver</strong> column with the same state.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>oc<span class="w"> </span>get<span class="w"> </span>replicationpolicy<span class="w"> </span>dr-console<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'{.status.conditions}{"\n"}'</span>
+</code></pre></div>
+<p><strong>Expected:</strong> a condition of type <code>ReceiverReachable</code> with status <code>True</code>.</p>
+<hr />
+<h2 id="step-15-delete-the-policy-and-the-secrets-it-made">Step 15: Delete the policy and the Secrets it made<a class="headerlink" href="#step-15-delete-the-policy-and-the-secrets-it-made" title="Permanent link">&para;</a></h2>
+<ol>
+<li>On the policy page, choose <strong>Delete</strong>.</li>
+<li>The box asks <strong>Delete ReplicationPolicy?</strong> It has a tick box that is off: <strong>Also delete the Secrets the receiver setup made (dr-console-receiver-token, dr-console-receiver-ca)</strong>. The box appears only for Secrets named <code>&lt;policy name&gt;-receiver-token</code> and <code>&lt;policy name&gt;-receiver-ca</code> that this policy uses and no other policy uses.</li>
+<li>Tick the box and choose <strong>Delete</strong>.</li>
+</ol>
+<p>The console deletes a Secret only after it proves that the Secret carries the label that the setup put on it. A Secret that you made yourself with the same name is left alone, and a message names it.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>oc<span class="w"> </span>get<span class="w"> </span>secret<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>dr-console-receiver-token<span class="w"> </span>dr-console-receiver-ca
+</code></pre></div>
+<p><strong>Expected:</strong> both Secrets are not found.</p>
+<hr />
+<h2 id="clean-up">Clean up<a class="headerlink" href="#clean-up" title="Permanent link">&para;</a></h2>
+<p>Delete the backup policy in the console (<strong>Backups</strong> tab, row menu, <strong>Delete</strong>). The box says that new backups stop, and that the backups already made stay on the snapshot pool. If any remain, use <strong>Delete backups</strong> first (Step 7).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>oc<span class="w"> </span>delete<span class="w"> </span>pod<span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">NS</span><span class="si">}</span><span class="w"> </span>files-check<span class="w"> </span>--ignore-not-found
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>oc<span class="w"> </span>delete<span class="w"> </span>namespace<span class="w"> </span><span class="si">${</span><span class="nv">NS</span><span class="si">}</span><span class="w"> </span>--timeout<span class="o">=</span>120s
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>oc<span class="w"> </span>get<span class="w"> </span>backuprestore<span class="w">   </span><span class="c1"># delete the ones you made with: oc delete backuprestore &lt;name&gt;</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>oc<span class="w"> </span>delete<span class="w"> </span>filesharepool<span class="w"> </span>tut-data<span class="w"> </span>tut-backups
+</code></pre></div>
+<p>Deleting a pool deletes its VPC shares and everything on them, including backups. The driver blocks the delete while volumes remain, so wait for the namespace to go first. The destination cluster keeps the receiver and anything replicated to it.</p>
+<hr />
+<h2 id="what-you-learned">What you learned<a class="headerlink" href="#what-you-learned" title="Permanent link">&para;</a></h2>
+<ul>
+<li>The <strong>Backups</strong> tab makes and changes a policy with a form, suspends and resumes it, restores a volume to a new claim, and deletes the backups of a volume after a typed confirmation.</li>
+<li><strong>Delete backups</strong> refuses while the policy still backs up the volume or a restore runs, and it asks you to type the claim.</li>
+<li><strong>Clone to new PVC</strong> copies a volume to a new claim in the same namespace.</li>
+<li>The replication form makes the receiver Secrets, checks the connection, and shows the receiver's state on the list and the policy page. The delete box removes the Secrets that the setup made.</li>
+</ul>
+<h2 id="next">Next<a class="headerlink" href="#next" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../TUTORIAL-10-BACKUP-AND-RESTORE/">Part 10: Backup and restore</a> does the same with <code>kubectl backup</code>.</li>
+<li><a href="../TUTORIAL-09-COS-BACKUP-BUCKET/">Part 9: A COS bucket for backups</a></li>
+<li><a href="../TUTORIAL-06-REPLICATION-AND-FAILOVER/">Part 6: Replication and failover</a> sets up the receiver and runs a failover.</li>
+<li><a href="../TUTORIAL-14-CONSOLE-RESTORE/">Part 14: Restore a snapshot in the console</a></li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "navigation.instant", "search.suggest", "search.highlight", "content.code.copy", "content.tabs.link"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+    
+  </body>
+</html>

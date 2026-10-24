@@ -1,0 +1,2539 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A Kubernetes CSI driver that pools multiple PVCs as subdirectories within shared VPC file shares">
+      
+      
+      
+        <link rel="canonical" href="https://neil1taylor.github.io/ibm-vpc-file-pool-csi/specs/2026-10-21-backup-cos-export/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Spec: export backups to IBM Cloud Object Storage (COS) - IBM VPC File Pool CSI Driver</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#spec-export-backups-to-ibm-cloud-object-storage-cos" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="IBM VPC File Pool CSI Driver" class="md-header__button md-logo" aria-label="IBM VPC File Pool CSI Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            IBM VPC File Pool CSI Driver
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Spec: export backups to IBM Cloud Object Storage (COS)
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/neil1taylor/ibm-vpc-file-pool-csi" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neil1taylor/ibm-vpc-file-pool-csi
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../INSTALL/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../DAY2-OPERATIONS/" class="md-tabs__link">
+          
+  
+  
+  Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../OVERVIEW/" class="md-tabs__link">
+          
+  
+  
+  Architecture
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../VOLUME-CLONING/" class="md-tabs__link">
+          
+  
+  
+  Design (Phase 4)
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../CONTRIBUTING/" class="md-tabs__link">
+          
+  
+  
+  Development
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../examples/" class="md-tabs__link">
+          
+  
+  
+  Examples
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="IBM VPC File Pool CSI Driver" class="md-nav__button md-logo" aria-label="IBM VPC File Pool CSI Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    IBM VPC File Pool CSI Driver
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/neil1taylor/ibm-vpc-file-pool-csi" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neil1taylor/ibm-vpc-file-pool-csi
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../INSTALL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../USER-GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-01-POOL-CREATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 1 - Pool Creation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-02-SNAPSHOTS-AND-CLONES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 2 - Snapshots and Clones
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 3 - Group Snapshots and Hooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-04-POOL-CONFIGURATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 4 - Pool Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-05-GOLDEN-IMAGES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 5 - Golden Images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-06-REPLICATION-AND-FAILOVER/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 6 - Replication and Failover
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-07-MONITORING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 7 - Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-08-MIGRATION-AND-CONSOLE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 8 - Migration and Console
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-09-COS-BACKUP-BUCKET/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 9 - COS Bucket for Backups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-10-BACKUP-AND-RESTORE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 10 - Backup and Restore
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-11-INSTANT-VM-SNAPSHOTS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 11 - Instant VM Snapshots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-12-REPLICATING-RUNNING-VMS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 12 - Replicating Running VMs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-13-FAILOVER-OF-RUNNING-VMS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 13 - Failover of Running VMs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-14-CONSOLE-RESTORE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 14 - Restore a Snapshot in the Console
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../DEPLOYMENT-NOTES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment Notes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../FEATURES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../UPGRADE-GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrade Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../FAQ/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../HELM-VALUES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Helm Values Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../DAY2-OPERATIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 Operations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../MONITORING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CAPACITY-PLANNING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Capacity Planning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../BACKUP-RECOVERY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backup and Recovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../GOLDEN-IMAGE-WORKFLOW/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Golden Image Workflow
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../SECURITY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TROUBLESHOOTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PERFORMANCE-TUNING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance Tuning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../KNOWN-LIMITATIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Known Limitations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../OVERVIEW/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTEXT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context (the words we use)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONSISTENCY-MODEL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Consistency Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VPC-NETWORKING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VPC Networking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VM-DISK-FORMATS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VM Disk Formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CRD-SPEC/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CRD Specification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CSI-INTERFACE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CSI Interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../IBM-VPC-API/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    IBM VPC API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../API-KEY-SETUP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Key Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design (Phase 4)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Design (Phase 4)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VOLUME-CLONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Volume Cloning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VOLUME-GROUP-SNAPSHOTS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Volume Group Snapshots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CROSS-REGION-DR/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cross-Region DR
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CODING-GUIDELINES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coding Guidelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TESTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Examples
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#goal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Goal
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-you-see" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What you see
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it works
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setup-command" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup command
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#restore-from-cos" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Restore from COS
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-shortest-lock" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The shortest lock
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#not-in-this-step" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Not in this step
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build order
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tests
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cost-and-risk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cost and risk
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decisions-i-made-for-you" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decisions I made for you
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#needs-from-you" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Needs from you
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="spec-export-backups-to-ibm-cloud-object-storage-cos">Spec: export backups to IBM Cloud Object Storage (COS)<a class="headerlink" href="#spec-export-backups-to-ibm-cloud-object-storage-cos" title="Permanent link">&para;</a></h1>
+<p>Date: 2026-10-21. Status: draft for review. This is step 9 of <code>2026-10-20-vm-safe-replication.md</code>. It builds on <code>2026-10-21-backup-to-snapshot-pool.md</code> (step 8, built and merged). Read both first. The main spec already sets the design (Kopia, Key Protect, Compliance lock). This spec turns it into things we can build and test.</p>
+<h2 id="goal">Goal<a class="headerlink" href="#goal" title="Permanent link">&para;</a></h2>
+<p>When this step is done:
+- A <code>BackupPolicy</code> can send its backups to a COS bucket, as well as keep them in the snapshot pool.
+- The copy in COS is encrypted before it leaves the cluster, and nobody can delete or change it before its keep time ends. That includes a person who has taken over the cluster.
+- If the VPC, the cluster and both regions lose their pools, you can restore a volume from COS into a new cluster that runs the driver.
+- Sending to COS never slows a running VM. It reads from the snapshot pool, not from the VM.</p>
+<h2 id="what-you-see">What you see<a class="headerlink" href="#what-you-see" title="Permanent link">&para;</a></h2>
+<p><strong>On the policy.</strong> A new optional block <code>spec.export</code>:</p>
+<ul>
+<li><code>bucket</code>, <code>endpoint</code> and <code>prefix</code> (the bucket and where it is)</li>
+<li><code>credentialsSecret</code> (the driver's COS key, made by the setup command)</li>
+<li><code>keepFor</code> (how long COS backups are kept, default <code>30d</code>) and <code>lock</code> (<code>Compliance</code> or <code>None</code>, default <code>Compliance</code>). Both are set on each policy, so a test policy can use a short lock and a real policy a long one. The webhook refuses a keep time below the minimum (see "The shortest lock")</li>
+<li><code>schedule</code> (how often to send, default after each local backup moment)</li>
+</ul>
+<p>Without <code>export</code>, nothing changes from step 8.</p>
+<p><strong>Commands.</strong> Three, all in <code>kubectl backup</code>:</p>
+<ul>
+<li><code>kubectl backup cos-setup</code> — run once, with your own IBM Cloud login. Makes the COS instance (or uses yours), the bucket with object lock, the driver's key, and the backup key. Shows the readable backup key once.</li>
+<li><code>kubectl backup restore --from-cos ...</code> — makes a new PVC from a COS backup, in any cluster. Same flags as the local restore, plus the bucket.</li>
+<li><code>kubectl backup cos-list</code> — lists what is in the bucket for a policy: volumes and moments.</li>
+</ul>
+<p><strong>Status.</strong> Each volume in the policy status gets <code>exportedTime</code> (the moment of the newest copy in COS), <code>exportedBytes</code> and <code>exportError</code>. The console shows them next to the local backup.</p>
+<p><strong>Metrics and alerts.</strong> A gauge for the age of the oldest unexported moment, and one for the age of the newest export. An alert for "export late", using twice the schedule, as for local backups.</p>
+<h2 id="how-it-works">How it works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
+<ol>
+<li>A local backup of a volume finishes (step 8). It has a moment.</li>
+<li>If the policy has <code>export</code>, the controller starts an <strong>export Job</strong> in the driver namespace for that volume. The Job mounts the snapshot pool's share <strong>read-only</strong>, at the volume's backup folder and its <code>.moments</code> folder.</li>
+<li>The Job unlocks the backup key (below), opens the Kopia repository in the bucket (the area of this policy only), and makes a Kopia snapshot of the two folders. It is tagged with the moment and the volume name. Kopia sends only chunks that COS does not have yet.</li>
+<li>The Job writes its result (bytes sent, moment) in its termination message. The controller puts it in the status, as it does for other Jobs.</li>
+<li>Kopia's maintenance run (a second Job, once a day) extends the locks of chunks still in use and removes snapshots past their keep time. The keep time of the lock is at least the maintenance interval plus 24 hours (Kopia's rule, tested on 20 Oct).</li>
+</ol>
+<p>One export Job runs at a time for each policy, so a slow upload does not pile up. A moment that is not yet exported when the next one is made is exported as part of the next snapshot (Kopia sees both folders), so nothing is skipped; the older moment is still tagged and restorable.</p>
+<p><strong>What goes to COS:</strong> the whole backup folder (the latest whole copy) and the earlier moments (undo files) of every volume. A restore from COS therefore gives the same choice of moments as a local restore.</p>
+<p><strong>Where Kopia comes from.</strong> We add the Kopia command-line program to the driver image, at a pinned version and checked by its SHA-256. The Job runs it as a child process. We do not link Kopia into the driver as a Go library, because that would add a large number of Go dependencies to the controller, which must stay small and easy to review. Kopia is only used by the Job.</p>
+<p><strong>Credentials.</strong> Three secrets, all in the driver namespace:</p>
+<ul>
+<li>the COS key of the driver (an HMAC key for the S3 interface, limited to the one bucket by the custom role)</li>
+<li>the driver's IBM Cloud API key with the Reader role on the Key Protect root key</li>
+<li>the backup key, encrypted by Key Protect (the readable key is never stored)</li>
+</ul>
+<p>The Job, not the controller, asks Key Protect to unlock the backup key. The key stays in the Job's memory. The controller never sees it.</p>
+<h2 id="setup-command">Setup command<a class="headerlink" href="#setup-command" title="Permanent link">&para;</a></h2>
+<p>As in the main spec: the user runs it with their own login. It uses the IBM Cloud APIs for COS, Key Protect and IAM. In order:</p>
+<ol>
+<li>Check the account: Key Protect instance exists, and the account is in good standing (locks need that).</li>
+<li>Make or reuse the COS instance. Make the bucket: object lock on, no default keep time, encrypted with the user's Key Protect root key. The bucket's region is the user's choice; we show the cost note below.</li>
+<li>Make the custom role (read, write, extend locks; no delete of versions, no skip of locks, no change of bucket settings) and a service ID with that role on the one bucket. Make an HMAC key for it.</li>
+<li>Give the service ID the Reader role on the root key.</li>
+<li>Make the backup key, have Key Protect wrap it, store the wrapped copy in a Secret and in the bucket. Show the readable key once. Ask the user to confirm they saved it.</li>
+<li>Print the <code>spec.export</code> block to paste into the policy.</li>
+</ol>
+<p>The setup command never runs in the cluster, and the driver never creates or deletes a bucket or an instance.</p>
+<h2 id="restore-from-cos">Restore from COS<a class="headerlink" href="#restore-from-cos" title="Permanent link">&para;</a></h2>
+<ol>
+<li>The command reads the wrapped key from the bucket (or from the Secret in this cluster) and unlocks it with Key Protect, or with the emergency copy if the user passes it with <code>--backup-key-file</code>.</li>
+<li>With the user's own login, it removes any delete markers in the bucket area (the driver's key cannot; a delete by that key only hides data).</li>
+<li>It starts a Job that opens the repository read-only, restores the chosen snapshot into a scratch folder on a share, then the existing restore Job (step 8) copies the volume or applies the undo files, as for a local restore. This reuses the tested path.</li>
+<li>The new PVC is held back from pods until the copy ends, as for a local restore. It never writes over an existing volume.</li>
+</ol>
+<p>In a new cluster the policy and the snapshot pool need not exist. The command needs only the bucket, the endpoint, the keys, and a pool to restore into.</p>
+<h2 id="the-shortest-lock">The shortest lock<a class="headerlink" href="#the-shortest-lock" title="Permanent link">&para;</a></h2>
+<p>Each policy sets its own lock mode and keep time, so tests use a short lock. <strong>The shortest possible lock is a little over 1 day, not 1 day.</strong> Kopia needs the keep time to be at least its maintenance interval plus 24 hours, because it extends the locks of chunks still in use at each maintenance run (tested 20 Oct). The driver sets the maintenance interval from the keep time, with 1 hour as the shortest. So:</p>
+<ul>
+<li>the webhook refuses a keep time below 25 hours</li>
+<li>release tests and lab runs use <code>keepFor: 25h</code> with <code>lock: Compliance</code>, and the hourly maintenance run. Their data is then billed for 25 hours and can be deleted after that</li>
+<li>a real policy defaults to 30 days</li>
+</ul>
+<h2 id="not-in-this-step">Not in this step<a class="headerlink" href="#not-in-this-step" title="Permanent link">&para;</a></h2>
+<ul>
+<li>No Governance lock (the main spec explains why).</li>
+<li>No export of volumes that are not in a <code>BackupPolicy</code>.</li>
+<li>No console screen for the setup or the restore from COS (the status is shown; the screens come later).</li>
+<li>No other object stores. IBM COS only. The Kopia S3 interface would allow others later.</li>
+<li>No restore of a VM definition. Only disks and volumes, as in step 8.</li>
+</ul>
+<h2 id="build-order">Build order<a class="headerlink" href="#build-order" title="Permanent link">&para;</a></h2>
+<p>Status: part 1 built and merged (tested against a local Kopia repository, not yet against MinIO or a real bucket, and the image was not built). Part 2 built (PR open): <code>spec.export</code>, the status fields, the webhook rules, the export and maintenance Jobs driven by the controller, Kopia retention, the two metrics and the alert examples; tested with fakes and a local Kopia repository, not on a cluster and not against a bucket. Part 4 built (PR open): <code>kubectl backup cos-setup</code> and package <code>pkg/cossetup</code>, tested with httptest fakes of the IBM Cloud APIs, not run against real IBM Cloud; it keeps its own small Key Protect wrap client until <code>pkg/keyprotect</code> is joined. Part 4 decisions: it does not make the service ID's API key for the Key Protect unlock (it gives the service ID Reader on the root key; the API key and its Secret belong to part 3); the bucket is recognised as made by the command by a marker object; the wrapped key sits in the bucket at <code>_pool-csi-setup/backup-key.wrapped.json</code>; after making an HMAC key it removes the instance-wide Writer policy that IBM Cloud adds for the key by itself (found by comparing the service ID's policies before and after the key is made; first live run, issue #138), then checks that the service ID has no policy wider than the one bucket and stops with a message if it has (a policy that was there before is never removed). Part 3 built (PR open): the Jobs unwrap the backup key with Key Protect in memory (the driver mode <code>unwrap-backup-key</code>, package <code>pkg/keyprotect</code>); <code>spec.export</code> has a required <code>keyProtect</code> block (instanceID, region, rootKeyID, apiKeySecret) and an optional <code>emergencyKeySecret</code>; tested with a fake Key Protect HTTP server, not against a real instance (none exists yet). Part 5 built (PR open): <code>kubectl backup restore --from-cos</code>, <code>kubectl backup cos-list</code>, <code>spec.fromCOS</code> on <code>BackupRestore</code>, delete marker clean-up; tested with fakes, httptest and a local Kopia repository, not against a real bucket. Part 6 built (PR open): the COS part of release test stage 18, in <code>test/e2e/test-backup.sh</code> with helpers in <code>test/e2e/lib/backup-cos.sh</code>; tested with stub scripts only, not run on a cluster, a bucket or Key Protect. Part 6 decisions: see the end of "Decisions I made for you". Part 6 fix after the first real run (rovslab, 2026-10-22): the check counted two <code>cos-list</code> lines per volume, but the pod volume was exported once, so it could never pass; it now needs one export per volume, waits at most 30 minutes, prints the <code>cos-list</code> output and exit status when it fails, and lets the restore checks run before the script ends with a failure. Part 5 decisions: the claim name, class and size are not in COS, so the command takes <code>--volume pvc-...</code>, <code>--storage-class</code> and <code>--size-gb</code>; a restore picks the oldest export made at or after the moment (it holds the earlier moments as undo files), or the newest; <code>cos-list</code> runs a read-only Job in the cluster (no Kopia needed on the laptop) and lists export moments, cut at about 3.5 KB; with <code>--backup-key-file</code> the readable key goes into a temporary Secret that the command removes when the restore ends, and Key Protect is never called; the delete marker clean-up removes markers only, by version, in the policy's area; a scratch folder that cannot be removed is logged and does not fail the restore. Part 3 decisions: the emergency key is used only when Key Protect is unreachable (no connection, a 5xx or a 429), never after a refusal, so a wrong root key or API key is not hidden; the Secrets reach the Job as read-only files, not environment variables, so the Kopia child never holds the API key; the readable key file is removed once Kopia has its password; the API key Secret has the key <code>apikey</code>, and <code>cos-setup</code> prints the command to make it but does not make the API key itself; an emergency key Secret in the cluster is optional and weaker than an emergency copy kept outside IBM Cloud. Part 2 decisions: the maintenance Job runs every maintenance interval (a day, or an hour for a 25-hour keep time) rather than a fixed once a day, so the lock extension keeps pace with a short lock; snapshots past the keep time are deleted by age in the maintenance Job, because Kopia can expire only by count; a failed export is retried after 5 minutes; the controller keeps exporting while a policy is suspended.</p>
+<p>Each part is a PR with its tests, and updates the docs and the release test run in the same PR.</p>
+<ol>
+<li><strong>Kopia in the image and the export Job.</strong> Image change (pinned, checked). A new mode of the Job runner: <code>export</code>, run against a local test repository (a folder), then against MinIO in CI for the S3 path. Status fields.</li>
+<li><strong>The controller, status, metrics, alerts.</strong> <code>spec.export</code>, the webhook rules (lock mode, keep time at least the maintenance interval plus 24 hours), the export Jobs and the maintenance Job.</li>
+<li><strong>Key handling.</strong> Wrapped key, Key Protect unlock in the Job, emergency key. Tested against a Key Protect instance in the lab.</li>
+<li><strong><code>cos-setup</code>.</strong> Built against the real IBM Cloud APIs with a throw-away account section; the custom role and the permissions are verified by a test that tries to do what the role must refuse.</li>
+<li><strong>Restore from COS and <code>cos-list</code>.</strong> Includes the delete marker clean-up.</li>
+<li><strong>Release test: stage 18, second part.</strong> Export the three volumes (an export holds the newest copy and the earlier moments as undo files, so two moments need only one export; <code>cos-list</code> prints one line per export, and a pod volume that does not change is exported once), then restore from COS into a second namespace, boot the VM, check the checksums. A second run restores into the other cluster of the lab pair.</li>
+</ol>
+<h2 id="tests">Tests<a class="headerlink" href="#tests" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Unit tests with fakes for the controller, the status, the webhook and the Job script.</li>
+<li>A local Kopia repository test in CI (folder), and an S3 test against MinIO in CI.</li>
+<li>On the lab and a real bucket: export, a second export that sends only changed chunks (check the bytes), a delete with the driver's key (check only a marker is made and the restore command repairs it), an attempt to shorten a lock with every key we hold (must fail), and a restore into another cluster.</li>
+<li>A test that the logs and the status never contain a key or secret.</li>
+</ul>
+<h2 id="cost-and-risk">Cost and risk<a class="headerlink" href="#cost-and-risk" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>COS storage.</strong> Paid for each GB stored. The first upload is the size of the data; later ones add only changed chunks and the undo files. <strong>Locked data is billed until its lock ends,</strong> so a 30 day Compliance lock on a policy means 30 days of billing even after you delete the policy. A cost table for the lab (size, keep time, price per month) goes in this spec after you choose keep times; the formula is: stored GB × price per GB per month × (keep days ÷ 30), plus the changed data per day × keep days.</li>
+<li><strong>Compliance lock cannot be undone.</strong> A wrong keep time (for example 10 years by mistake) costs money for that time and cannot be shortened, even by IBM. The setup command and the webhook ask for a clear confirmation of the keep time above 90 days.</li>
+<li><strong>Key loss.</strong> Without Key Protect and without the emergency copy, nobody can read the backups. The setup command makes the user confirm the copy.</li>
+<li><strong>New dependency.</strong> Kopia (a program in the image, used only by the export and restore Jobs). It is open source, used by other backup products, and tested in step 1.</li>
+<li><strong>Same account.</strong> COS in the same IBM Cloud account as the cluster is better than nothing, but an account takeover reaches both. The lock protects against deletes by a stolen driver key, not against a stolen account owner. A bucket in a second account is possible (the user gives the endpoint and key); we do not set it up.</li>
+</ul>
+<h2 id="decisions-i-made-for-you">Decisions I made for you<a class="headerlink" href="#decisions-i-made-for-you" title="Permanent link">&para;</a></h2>
+<ul>
+<li>
+<p><code>cos-setup</code> writes the COS key file the moment the HMAC key is made, before any check, because IBM Cloud shows the secret once. The "never deletes anything" rule has one exception: the instance-wide Writer policy that IBM Cloud adds to the service ID when the HMAC key is made. The command deletes only a policy that matches (this service ID, the COS service, this instance, no resource type, no resource) and that was not there before the key was made, and says so in the printed steps. Any other wide policy still stops the command. If the HMAC key exists already, the command makes no second one and says its secret cannot be shown again; delete the key to get a new one. A key file that exists without its HMAC key stops the command before it makes a key (issue #138).</p>
+</li>
+<li>
+<p>Export is a block on the existing <code>BackupPolicy</code>, not a new resource. One policy, one schedule, one place to look.</p>
+</li>
+<li>The export reads from the snapshot pool, mounted read-only, never from a running VM.</li>
+<li>We run the Kopia program as a child of the Job. We do not link it into the driver.</li>
+<li>The Job unlocks the backup key. The controller never holds it.</li>
+<li>Export is off unless the policy has <code>spec.export</code>.</li>
+<li>A new export block defaults to Compliance lock and 30 days. Lock mode and keep time are set on each policy. Tests use Compliance for 25 hours, the shortest Kopia allows (the owner asked for 1 day; 1 day is 1 hour short of Kopia's rule).</li>
+<li>A keep time above 90 days needs a typed confirmation, because it cannot be undone.</li>
+<li>One export Job runs at a time for each policy. A missed moment goes out with the next one.</li>
+<li>Restore from COS reuses the step 8 restore Job, so there is one restore path to test.</li>
+<li>COS restore into a new cluster needs no policy and no snapshot pool in that cluster.</li>
+<li>Only IBM COS for now.</li>
+<li>The bucket is locked to the cluster with a context-based restriction (CBR) rule: the cluster VPC and the admin addresses only. A virtual private endpoint (VPE) for COS in the cluster's VPC is recommended for real backups and not needed for lab tests. The setup command offers both, and <code>docs</code> tutorial 9 shows the manual steps. The admin addresses must be in the zone, or <code>cos-setup</code>, <code>cos-list</code> and <code>restore --from-cos</code> fail from a laptop.</li>
+<li>The setup command is built last of the key parts, after the export works against MinIO and a real bucket by hand.</li>
+<li>Maintenance runs every maintenance interval, not on a fixed daily timer: a day for a normal keep time, an hour for the 25-hour test lock. This keeps lock extension ahead of a short lock.</li>
+<li>Snapshots past the keep time are deleted by age in the maintenance Job. Kopia can only expire by count, so the export tells Kopia to keep every snapshot and the Job does the expiry.</li>
+<li>A failed export is tried again after 5 minutes, and a volume that keeps failing does not hold up the others.</li>
+<li>The controller keeps exporting while a policy is suspended: suspend stops new local backups, not the copy of moments that already exist.</li>
+<li>A failed maintenance run is written to the controller log and tried again; it is not in the status yet.</li>
+<li>Release test (part 6): the COS checks run inside the existing stage 18 script, on the same policy and the same three volumes, so the VM is built once. They are on when <code>COS_BUCKET</code> is set (in the environment or in <code>~/.config/pool-csi/cos-stage.env</code>) and reported as "not checked" otherwise. A partly filled configuration fails the stage at the start, before the 60 to 90 minutes of setup.</li>
+<li>The test needs an existing bucket (made by <code>cos-setup</code>), the HMAC key file <code>cos-key.json</code>, the Key Protect API key file <code>kp-apikey.json</code> and the <code>backup-key-secret.yaml</code> that <code>cos-setup --secret-file</code> wrote, all in <code>~/.config/pool-csi</code>. It makes its own copies of the three Secrets, named after the run, and deletes them. Values go from file to file to Secret and are never on a command line or in the log.</li>
+<li>Each run uses a new prefix, <code>stage18/&lt;run name&gt;-&lt;date and time&gt;</code>, with <code>lock: Compliance</code> and <code>keepFor: 25h</code>. The objects stay in the bucket and are billed for 25 hours; the test says so in its output and in the report.</li>
+<li>The restore in the other cluster is part of the same run, switched on by <code>COS_DR_KUBECONFIG</code> (with <code>remote.sh</code>, <code>COS_DR_CLUSTER=rovslab-dr-eude</code>). It needs the driver and a free zone there; it makes its own pool, namespace and Secrets and removes them. A separate second run is not needed: the prefix is new for each run, so a separate run could not find the first one's exports.</li>
+<li>The restore from COS skips the delete marker clean-up (<code>--skip-marker-cleanup</code>): the test deletes nothing in the bucket, and the lab run has no IBM Cloud login on the build server.</li>
+<li>The test restores the two VM disks and the pod volume at the oldest and the newest moments, as the local part does, into a pool made for the purpose, so the restore has room (the scratch copy needs space for a full volume).</li>
+</ul>
+<h2 id="needs-from-you">Needs from you<a class="headerlink" href="#needs-from-you" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>A COS bucket for the release test, and a Key Protect root key in the lab account.</strong> Needed from build part 3 on. I will build parts 1 and 2 without them (local repository and MinIO). Say if you want me to make them with the setup command once it exists instead.</li>
+<li><strong>Keep times</strong> (local and COS) that a customer would choose, to fill in the cost table.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "navigation.instant", "search.suggest", "search.highlight", "content.code.copy", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+    
+  </body>
+</html>

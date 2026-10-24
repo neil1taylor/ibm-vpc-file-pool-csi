@@ -1,0 +1,3651 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A Kubernetes CSI driver that pools multiple PVCs as subdirectories within shared VPC file shares">
+      
+      
+      
+        <link rel="canonical" href="https://neil1taylor.github.io/ibm-vpc-file-pool-csi/UPGRADE-GUIDE/">
+      
+      
+        <link rel="prev" href="../FEATURES/">
+      
+      
+        <link rel="next" href="../FAQ/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Upgrade Guide - IBM VPC File Pool CSI Driver</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#upgrade-guide-ibm-vpc-file-pool-csi-driver" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="IBM VPC File Pool CSI Driver" class="md-header__button md-logo" aria-label="IBM VPC File Pool CSI Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            IBM VPC File Pool CSI Driver
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Upgrade Guide
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/neil1taylor/ibm-vpc-file-pool-csi" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neil1taylor/ibm-vpc-file-pool-csi
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../INSTALL/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../DAY2-OPERATIONS/" class="md-tabs__link">
+          
+  
+  
+  Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../OVERVIEW/" class="md-tabs__link">
+          
+  
+  
+  Architecture
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../VOLUME-CLONING/" class="md-tabs__link">
+          
+  
+  
+  Design (Phase 4)
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../CONTRIBUTING/" class="md-tabs__link">
+          
+  
+  
+  Development
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../examples/" class="md-tabs__link">
+          
+  
+  
+  Examples
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="IBM VPC File Pool CSI Driver" class="md-nav__button md-logo" aria-label="IBM VPC File Pool CSI Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    IBM VPC File Pool CSI Driver
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/neil1taylor/ibm-vpc-file-pool-csi" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neil1taylor/ibm-vpc-file-pool-csi
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../INSTALL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../USER-GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-01-POOL-CREATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 1 - Pool Creation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-02-SNAPSHOTS-AND-CLONES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 2 - Snapshots and Clones
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 3 - Group Snapshots and Hooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-04-POOL-CONFIGURATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 4 - Pool Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-05-GOLDEN-IMAGES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 5 - Golden Images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-06-REPLICATION-AND-FAILOVER/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 6 - Replication and Failover
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-07-MONITORING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 7 - Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-08-MIGRATION-AND-CONSOLE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 8 - Migration and Console
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-09-COS-BACKUP-BUCKET/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 9 - COS Bucket for Backups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-10-BACKUP-AND-RESTORE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 10 - Backup and Restore
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-11-INSTANT-VM-SNAPSHOTS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 11 - Instant VM Snapshots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-12-REPLICATING-RUNNING-VMS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 12 - Replicating Running VMs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-13-FAILOVER-OF-RUNNING-VMS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 13 - Failover of Running VMs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TUTORIAL-14-CONSOLE-RESTORE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 14 - Restore a Snapshot in the Console
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DEPLOYMENT-NOTES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment Notes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../FEATURES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrade Guide
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrade Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#pre-flight-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pre-Flight Checklist
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compatibility-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compatibility Matrix
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#upgrade-methods" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrade Methods
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Upgrade Methods">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#helm-upgrade-recommended" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Helm Upgrade (Recommended)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#raw-manifest-upgrade" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Raw Manifest Upgrade
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#crd-upgrade-procedures" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CRD Upgrade Procedures
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="CRD Upgrade Procedures">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#additive-schema-changes-safe" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Additive Schema Changes (Safe)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#breaking-schema-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Breaking Schema Changes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#verifying-crd-updates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verifying CRD Updates
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#version-specific-upgrade-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Version-Specific Upgrade Notes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Version-Specific Upgrade Notes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v0143-from-v0142" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.14.3 (from v0.14.2)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v0142-from-v0141" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.14.2 (from v0.14.1)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v0141-from-v0140" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.14.1 (from v0.14.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v0140-from-v0132" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.14.0 (from v0.13.2)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v0132-from-v0131" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.13.2 (from v0.13.1)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v0131-from-v0130" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.13.1 (from v0.13.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v0130-from-v0120" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.13.0 (from v0.12.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v0120-from-v0110" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.12.0 (from v0.11.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v0110-from-v0100" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.11.0 (from v0.10.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v0100-from-v090" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.10.0 (from v0.9.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v090-from-v080" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.9.0 (from v0.8.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v080-from-v070" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.8.0 (from v0.7.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v070-from-v060" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.7.0 (from v0.6.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v060-from-v050" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.6.0 (from v0.5.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v050-from-v040" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.5.0 (from v0.4.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v040-from-v030" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.4.0 (from v0.3.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v030-from-v020" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.3.0 (from v0.2.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v020-from-v010" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.2.0 (from v0.1.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fresh-install-v010" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fresh Install: v0.1.0
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rollback-procedures" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rollback Procedures
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Rollback Procedures">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#helm-rollback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Helm Rollback
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#manual-rollback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual Rollback
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#crd-rollback-caveats" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CRD Rollback Caveats
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#post-upgrade-verification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Post-Upgrade Verification
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#downtime-expectations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Downtime Expectations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See Also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../FAQ/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../HELM-VALUES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Helm Values Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DAY2-OPERATIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 Operations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../MONITORING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CAPACITY-PLANNING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Capacity Planning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../BACKUP-RECOVERY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backup and Recovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../GOLDEN-IMAGE-WORKFLOW/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Golden Image Workflow
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../SECURITY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TROUBLESHOOTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../PERFORMANCE-TUNING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance Tuning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../KNOWN-LIMITATIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Known Limitations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../OVERVIEW/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTEXT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context (the words we use)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONSISTENCY-MODEL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Consistency Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VPC-NETWORKING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VPC Networking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VM-DISK-FORMATS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VM Disk Formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CRD-SPEC/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CRD Specification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CSI-INTERFACE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CSI Interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../IBM-VPC-API/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    IBM VPC API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../API-KEY-SETUP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Key Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design (Phase 4)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Design (Phase 4)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VOLUME-CLONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Volume Cloning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VOLUME-GROUP-SNAPSHOTS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Volume Group Snapshots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CROSS-REGION-DR/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cross-Region DR
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CODING-GUIDELINES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coding Guidelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TESTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Examples
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#pre-flight-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pre-Flight Checklist
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compatibility-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compatibility Matrix
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#upgrade-methods" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrade Methods
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Upgrade Methods">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#helm-upgrade-recommended" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Helm Upgrade (Recommended)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#raw-manifest-upgrade" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Raw Manifest Upgrade
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#crd-upgrade-procedures" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CRD Upgrade Procedures
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="CRD Upgrade Procedures">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#additive-schema-changes-safe" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Additive Schema Changes (Safe)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#breaking-schema-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Breaking Schema Changes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#verifying-crd-updates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verifying CRD Updates
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#version-specific-upgrade-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Version-Specific Upgrade Notes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Version-Specific Upgrade Notes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v0143-from-v0142" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.14.3 (from v0.14.2)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v0142-from-v0141" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.14.2 (from v0.14.1)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v0141-from-v0140" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.14.1 (from v0.14.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v0140-from-v0132" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.14.0 (from v0.13.2)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v0132-from-v0131" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.13.2 (from v0.13.1)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v0131-from-v0130" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.13.1 (from v0.13.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v0130-from-v0120" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.13.0 (from v0.12.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v0120-from-v0110" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.12.0 (from v0.11.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v0110-from-v0100" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.11.0 (from v0.10.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v0100-from-v090" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.10.0 (from v0.9.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v090-from-v080" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.9.0 (from v0.8.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v080-from-v070" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.8.0 (from v0.7.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v070-from-v060" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.7.0 (from v0.6.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v060-from-v050" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.6.0 (from v0.5.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v050-from-v040" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.5.0 (from v0.4.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v040-from-v030" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.4.0 (from v0.3.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v030-from-v020" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.3.0 (from v0.2.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-to-v020-from-v010" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading to v0.2.0 (from v0.1.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fresh-install-v010" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fresh Install: v0.1.0
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rollback-procedures" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rollback Procedures
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Rollback Procedures">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#helm-rollback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Helm Rollback
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#manual-rollback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual Rollback
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#crd-rollback-caveats" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CRD Rollback Caveats
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#post-upgrade-verification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Post-Upgrade Verification
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#downtime-expectations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Downtime Expectations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See Also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="upgrade-guide-ibm-vpc-file-pool-csi-driver">Upgrade Guide — IBM VPC File Pool CSI Driver<a class="headerlink" href="#upgrade-guide-ibm-vpc-file-pool-csi-driver" title="Permanent link">&para;</a></h1>
+<p>This guide covers upgrading the driver between versions without data loss or downtime.</p>
+<p><img alt="The upgrade path: pre-flight checks, new CRDs, helm upgrade, rollout watch, post-upgrade checks" src="../images/upgrade-guide-steps.drawio.svg" /></p>
+<hr />
+<h2 id="pre-flight-checklist">Pre-Flight Checklist<a class="headerlink" href="#pre-flight-checklist" title="Permanent link">&para;</a></h2>
+<p>Before upgrading, complete every item:</p>
+<ul>
+<li>[ ] <strong>Read the <a href="../CHANGELOG/">CHANGELOG.md</a></strong> entry for the target version — note breaking changes, new CRD fields, and required actions</li>
+<li>[ ] <strong>Verify pool health</strong> — all pools should be in <code>Ready</code> phase:
+  <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kubectl<span class="w"> </span>get<span class="w"> </span>filesharepools
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c1"># All pools should show Phase: Ready</span>
+</code></pre></div></li>
+<li>[ ] <strong>Back up CRD resources</strong> (pools and subvolumes are the source of truth for all state):
+  <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>kubectl<span class="w"> </span>get<span class="w"> </span>filesharepools<span class="w"> </span>-o<span class="w"> </span>yaml<span class="w"> </span>&gt;<span class="w"> </span>backup-pools.yaml
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>subvolumes<span class="w"> </span>-o<span class="w"> </span>yaml<span class="w"> </span>&gt;<span class="w"> </span>backup-subvolumes.yaml
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>kubectl<span class="w"> </span>get<span class="w"> </span>snapshots.storage.ibmcloud.io<span class="w"> </span>-o<span class="w"> </span>yaml<span class="w"> </span>&gt;<span class="w"> </span>backup-snapshots.yaml<span class="w"> </span><span class="m">2</span>&gt;/dev/null
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>kubectl<span class="w"> </span>get<span class="w"> </span>replicationpolicies<span class="w"> </span>-o<span class="w"> </span>yaml<span class="w"> </span>&gt;<span class="w"> </span>backup-replication.yaml<span class="w"> </span><span class="m">2</span>&gt;/dev/null
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>kubectl<span class="w"> </span>get<span class="w"> </span>volumegroupsnapshots<span class="w"> </span>-o<span class="w"> </span>yaml<span class="w"> </span>&gt;<span class="w"> </span>backup-groupsnapshots.yaml<span class="w"> </span><span class="m">2</span>&gt;/dev/null
+</code></pre></div></li>
+<li>[ ] <strong>Check for in-flight operations</strong> — no PVCs should be in <code>Pending</code> state and no clones should be in progress:
+  <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>kubectl<span class="w"> </span>get<span class="w"> </span>pvc<span class="w"> </span>--all-namespaces<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>Pending
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>subvolumes<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'{range .items[?(@.spec.cloneStatus=="InProgress")]}{.metadata.name}{"\n"}{end}'</span>
+</code></pre></div></li>
+<li>[ ] <strong>Verify you have the correct target version</strong> of the Helm chart or manifests</li>
+<li>[ ] <strong>Confirm cluster meets the compatibility requirements</strong> for the target version (see below)</li>
+</ul>
+<hr />
+<h2 id="compatibility-matrix">Compatibility Matrix<a class="headerlink" href="#compatibility-matrix" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Driver Version</th>
+<th>Kubernetes</th>
+<th>OpenShift (ROKS)</th>
+<th>Helm</th>
+<th>Go</th>
+<th>Key Dependencies</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>v0.1.0–v0.3.0</td>
+<td>1.28+</td>
+<td>4.14+</td>
+<td>v3.10+</td>
+<td>1.25+</td>
+<td>controller-runtime v0.18+</td>
+</tr>
+<tr>
+<td>v0.4.0–v0.5.0</td>
+<td>1.28+</td>
+<td>4.14+</td>
+<td>v3.10+</td>
+<td>1.25+</td>
+<td>controller-runtime v0.18+, VolumeSnapshot CRDs</td>
+</tr>
+<tr>
+<td>v0.6.0–v0.8.0</td>
+<td>1.28+</td>
+<td>4.14+</td>
+<td>v3.10+</td>
+<td>1.25+</td>
+<td>controller-runtime v0.23+, cert-manager v1.12+</td>
+</tr>
+<tr>
+<td>v0.9.0–v0.10.0</td>
+<td>1.28+</td>
+<td>4.14+</td>
+<td>v3.10+</td>
+<td>1.25+</td>
+<td>controller-runtime v0.23+, cert-manager v1.12+</td>
+</tr>
+<tr>
+<td>v0.11.0</td>
+<td>1.28+</td>
+<td>4.14+</td>
+<td>v3.10+</td>
+<td>1.25+</td>
+<td>controller-runtime v0.23+, cert-manager v1.12+, CDI (optional)</td>
+</tr>
+<tr>
+<td>v0.12.0</td>
+<td>1.28+</td>
+<td>4.14+</td>
+<td>v3.10+</td>
+<td>1.25+</td>
+<td>controller-runtime v0.23+, cert-manager v1.12+, CDI (optional)</td>
+</tr>
+<tr>
+<td>v0.13.0–v0.13.2</td>
+<td>1.28+</td>
+<td>4.14+</td>
+<td>v3.10+</td>
+<td>1.25+</td>
+<td>controller-runtime v0.23+, cert-manager v1.12+, CDI (optional)</td>
+</tr>
+<tr>
+<td>v0.14.0–v0.14.3</td>
+<td>1.28+</td>
+<td>4.14+</td>
+<td>v3.10+</td>
+<td>1.25+</td>
+<td>controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="upgrade-methods">Upgrade Methods<a class="headerlink" href="#upgrade-methods" title="Permanent link">&para;</a></h2>
+<h3 id="helm-upgrade-recommended">Helm Upgrade (Recommended)<a class="headerlink" href="#helm-upgrade-recommended" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># 1. Update the chart repository (if using a remote repo)</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>helm<span class="w"> </span>repo<span class="w"> </span>update
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># 2. Preview changes</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>helm<span class="w"> </span>diff<span class="w"> </span>upgrade<span class="w"> </span>ibm-vpc-file-pool-csi<span class="w"> </span>charts/ibm-vpc-file-pool-csi/<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">  </span>--namespace<span class="w"> </span>kube-system<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">  </span>--values<span class="w"> </span>my-values.yaml
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="c1"># 3. Apply the upgrade</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>helm<span class="w"> </span>upgrade<span class="w"> </span>ibm-vpc-file-pool-csi<span class="w"> </span>charts/ibm-vpc-file-pool-csi/<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="w">  </span>--namespace<span class="w"> </span>kube-system<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="w">  </span>--values<span class="w"> </span>my-values.yaml<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="w">  </span>--timeout<span class="w"> </span>5m
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="c1"># 4. Watch rollout</span>
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>kubectl<span class="w"> </span>rollout<span class="w"> </span>status<span class="w"> </span>deployment/ibm-vpc-file-pool-csi-controller<span class="w"> </span>-n<span class="w"> </span>kube-system
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>kubectl<span class="w"> </span>rollout<span class="w"> </span>status<span class="w"> </span>daemonset/ibm-vpc-file-pool-csi-node<span class="w"> </span>-n<span class="w"> </span>kube-system
+</code></pre></div>
+<h3 id="raw-manifest-upgrade">Raw Manifest Upgrade<a class="headerlink" href="#raw-manifest-upgrade" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># 1. Apply updated CRDs first (CRDs are not managed by kubectl apply on deployments)</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>config/crd/
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># 2. Apply updated RBAC</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>config/rbac/
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="c1"># 3. Apply updated deployments and daemonsets</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>config/controller/
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>config/node/
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="c1"># 4. Watch rollout</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>kubectl<span class="w"> </span>rollout<span class="w"> </span>status<span class="w"> </span>deployment/ibm-vpc-file-pool-csi-controller<span class="w"> </span>-n<span class="w"> </span>kube-system
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>kubectl<span class="w"> </span>rollout<span class="w"> </span>status<span class="w"> </span>daemonset/ibm-vpc-file-pool-csi-node<span class="w"> </span>-n<span class="w"> </span>kube-system
+</code></pre></div>
+<hr />
+<h2 id="crd-upgrade-procedures">CRD Upgrade Procedures<a class="headerlink" href="#crd-upgrade-procedures" title="Permanent link">&para;</a></h2>
+<p>CRDs require special handling because Helm does not upgrade CRDs on <code>helm upgrade</code> (by design).</p>
+<h3 id="additive-schema-changes-safe">Additive Schema Changes (Safe)<a class="headerlink" href="#additive-schema-changes-safe" title="Permanent link">&para;</a></h3>
+<p>Most upgrades add new optional fields to existing CRDs. These are backward-compatible — existing CRs continue to work without modification. Apply the new CRDs before upgrading the controller:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>config/crd/
+</code></pre></div>
+<h3 id="breaking-schema-changes">Breaking Schema Changes<a class="headerlink" href="#breaking-schema-changes" title="Permanent link">&para;</a></h3>
+<p>No versions to date have introduced breaking CRD schema changes. All field additions have been optional with backward-compatible defaults. If a future version requires a breaking change, it will be called out explicitly in the CHANGELOG and this guide will be updated with migration steps.</p>
+<h3 id="verifying-crd-updates">Verifying CRD Updates<a class="headerlink" href="#verifying-crd-updates" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># Check CRD versions</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>crd<span class="w"> </span>filesharepools.storage.ibmcloud.io<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'{.spec.versions[*].name}'</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>kubectl<span class="w"> </span>get<span class="w"> </span>crd<span class="w"> </span>subvolumes.storage.ibmcloud.io<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'{.spec.versions[*].name}'</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="c1"># Verify new fields are present (example: check for ExportPath added in v0.9.0)</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>kubectl<span class="w"> </span>get<span class="w"> </span>crd<span class="w"> </span>filesharepools.storage.ibmcloud.io<span class="w"> </span>-o<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="w">  </span>python3<span class="w"> </span>-c<span class="w"> </span><span class="s2">"import sys,json; schema=json.load(sys.stdin); print('exportPath' in str(schema))"</span>
+</code></pre></div>
+<hr />
+<h2 id="version-specific-upgrade-notes">Version-Specific Upgrade Notes<a class="headerlink" href="#version-specific-upgrade-notes" title="Permanent link">&para;</a></h2>
+<h3 id="upgrading-to-v0143-from-v0142">Upgrading to v0.14.3 (from v0.14.2)<a class="headerlink" href="#upgrading-to-v0143-from-v0142" title="Permanent link">&para;</a></h3>
+<p><strong>Changes:</strong> the node agent finishes the unmount of a volume whose share was already deleted. Before, such a volume stayed on the node, and kubelet repeated a failing unmount forever. Share metrics are no longer minutes late on a node with dead mounts. See <code>CHANGELOG.md</code>.</p>
+<p><strong>CRD changes:</strong> none.</p>
+<p><strong>Action required:</strong>
+1. Upgrade with Helm. No CRD step, and no chart value changes. Set both <code>image.tag</code> and <code>consolePlugin.image.tag</code> if you pin image tags.
+2. Nothing to clean by hand. After the upgrade, kubelet's next retries remove the leftover volumes of deleted shares from each node. Each one takes up to about 4 minutes. To check a node, count the folders under <code>&lt;kubelet dir&gt;/plugins/kubernetes.io/csi/vpc-file-pool.csi.ibm.io/</code>: only volumes in use stay.</p>
+<h3 id="upgrading-to-v0142-from-v0141">Upgrading to v0.14.2 (from v0.14.1)<a class="headerlink" href="#upgrading-to-v0142-from-v0141" title="Permanent link">&para;</a></h3>
+<p><strong>Changes:</strong> the node agent <code>/metrics</code> endpoint no longer answers HTTP 500 when a node holds the same share twice, so share metrics and the alerts built on them work again on those nodes. The driver refuses CreateVolume on a backup policy's snapshot pool (FailedPrecondition, naming the policy), and the console leaves those pools out of its lists. The console clone banner follows the copy, a refused "Delete backups" dialog says "Close", and the clone and restore pages no longer call their own new claim a taken name. See <code>CHANGELOG.md</code>.</p>
+<p><strong>CRD changes:</strong> none.</p>
+<p><strong>Action required:</strong>
+1. Upgrade with Helm. No CRD step, and no chart value changes.
+2. Upgrade the driver and the console plugin image to v0.14.2 together. If you pin image tags, set both <code>image.tag</code> and <code>consolePlugin.image.tag</code>.
+3. If a volume already sits on a backup policy's snapshot pool, it stays. Only new volumes on that pool are refused. Move the volume off the pool so the policy backs up again.</p>
+<h3 id="upgrading-to-v0141-from-v0140">Upgrading to v0.14.1 (from v0.14.0)<a class="headerlink" href="#upgrading-to-v0141-from-v0140" title="Permanent link">&para;</a></h3>
+<p><strong>Changes:</strong> the console box on the Snapshots and Pools pages now shows how the driver takes VM disk snapshots: instant, copy, or unknown. Before, it read only the KubeVirt <code>Sidecar</code> gate and said "on" even when the driver was set to <code>vmSnapshots.method=copy</code>. The driver code is the same as v0.14.0.</p>
+<p><strong>CRD changes:</strong> none.</p>
+<p><strong>Action required:</strong>
+1. Upgrade with Helm. No CRD step.
+2. The chart now renders a ConfigMap <code>ibm-vpc-file-pool-csi-settings</code> (key <code>vmSnapshotMethod</code>, no secret) in the release namespace, and a Role and RoleBinding that let every signed-in user <code>get</code> that one ConfigMap by name. Nothing else in the namespace becomes readable. The console reads it.
+3. Upgrade the console plugin image to v0.14.1 with the chart. A console plugin that is newer than the driver shows "unknown" until the driver is upgraded too.</p>
+<h3 id="upgrading-to-v0140-from-v0132">Upgrading to v0.14.0 (from v0.13.2)<a class="headerlink" href="#upgrading-to-v0140-from-v0132" title="Permanent link">&para;</a></h3>
+<p><strong>Changes:</strong> shares use security group access mode; VM snapshots and replication use a QEMU copy of running VMs; golden images are imported by CDI; new console pages. See <code>CHANGELOG.md</code> for the full list.</p>
+<p><strong>CRD changes (additive):</strong> <code>FileSharePool.spec.securityGroupIDs</code>, new status fields on <code>Snapshot</code> (<code>consistency</code>, <code>copyMoment</code>) and <code>ReplicationPolicy</code> (restore points, copy moments), and <code>ReplicationPolicy.spec.vmCopySpeedLimitMBps</code>.</p>
+<p><strong>Action required:</strong>
+1. Apply updated CRDs: <code>kubectl apply -f config/crd/</code>
+2. Upgrade with Helm. The controller ClusterRole gains permissions (DataVolumes, DataSources, KubeVirt migrations, the <code>kubevirt-controller</code> SCC, <code>hyperconvergeds</code>) and loses ImageStreams and RoleBindings.
+3. Shares you made before this version in VPC access mode keep working until IBM ends support on 6 May 2027. New shares use security group access mode. The driver does not change an existing share.
+4. If the Prometheus Operator API is present, the chart now creates a ServiceMonitor by default (<code>metrics.serviceMonitor.enabled</code>).
+5. <strong>BREAKING: the controller metrics endpoint (<code>:8080/metrics</code>) is now HTTPS with a token login (PR #174).</strong> Anything that scraped it over plain HTTP must change to HTTPS with a bearer token. The node agent also serves metrics on port 9810 over HTTPS.
+6. <strong>On OpenShift, alerts need user workload monitoring turned on</strong> (<code>enableUserWorkload: true</code>); without it no alert fires. The chart does not change that setting. The command is in <code>docs/INSTALL.md</code>.
+7. The guides moved into <code>docs/</code> (PR #184). README, CHANGELOG, CONTRIBUTING, CLAUDE.md and SKILL.md stay in the root. Update bookmarks; the console help links already point to <code>docs/</code>. A branch that edits a guide at its old place: run <code>hack/follow-docs-move.sh</code> after <code>git merge origin/main</code>.
+8. Hardening (PRs #156, #105, #203): the image runs as user 65532 (the node agent stays root), the replication receiver has its own ServiceAccount, and receiver TLS stays off by default (turning it on needs cert-manager and a trusted CA on the source cluster).
+9. The default image tag is <code>v</code> plus the chart <code>appVersion</code>, not <code>latest</code>.
+10. <strong>The replication receiver memory limit is raised from <code>512Mi</code> to <code>1Gi</code></strong> (<code>replicationReceiver.resources.limits.memory</code>). If you set your own value, check that it is at least <code>512Mi</code>. The receiver now forces data out every 32 MiB for VM disks and plain files (PRs #219, #226).
+11. <strong>Failover:</strong> apply the new SubVolume CRD (<code>config/crd</code>) before <code>kubectl failover execute --rewind-to</code>. The dry run now needs <code>--kubeconfig</code> because it reads the pool for the mount options. PVs it makes now carry <code>sec=sys</code>, and its PVCs bind only to the PV it made (PR #218).
+12. <strong>Migrating a claim</strong> (<code>kubectl migrate</code>, console page) now runs as the namespace's user with the cluster's <code>openshift/tools</code> image. Owners are not kept and files unreadable to that user are not copied (PR #207; <code>KNOWN-LIMITATIONS.md</code>).
+13. Snapshot records of failed snapshots (not ready, older than 2 minutes, no VolumeSnapshotContent) are removed by the controller, including old leftovers (PR #204).</p>
+<p><strong>Fixes in this release:</strong> instant VM snapshot of a disk not owned by user 107 is refused and leaves the chain clean (#191, PR #194); replication and backup status follow the Jobs within seconds (#192, PR #197); the restore page no longer spins without the right to read VolumeSnapshotContents (#186, PR #188); a VM disk copy no longer sticks when its apply Job expires (#160, PR #161); <code>kubectl backup cos-list</code> works (PR #183).</p>
+<p><strong>Also fixed:</strong> receiver damaged upload record and Failed Jobs with in-place restarts (#213, PR #219); failover rewind path rule, mount options and StorageClass (#209 to #211, PR #218); plain-file receiver memory (#225, PR #226); #214 and #215 verified fixed by #161 and #197 (tests in PR #217).</p>
+<p><strong>Not in this release:</strong> auto-expand making a share inside the volume request (#222), the console restore banner (#224), failback (no command, untested), and file-level restore from a backup (issue #92). Parts 1 and 2 (the browse helper and the <code>BackupBrowse</code> resource with its session controller) are in the code, but nothing creates a <code>BackupBrowse</code>, so users see no change.</p>
+<h3 id="upgrading-to-v0132-from-v0131">Upgrading to v0.13.2 (from v0.13.1)<a class="headerlink" href="#upgrading-to-v0132-from-v0131" title="Permanent link">&para;</a></h3>
+<p><strong>Fixes:</strong> Receiver Helm template ServiceAccount, ReplicationPolicy CRD validation, sync-client Job image selection, receiver path-doubling bug, scheduling fairness for parallel syncs.</p>
+<p><strong>CRD changes (additive):</strong>
+- <code>ReplicationPolicy.spec.destinationNFSServer</code> is now optional at the OpenAPI level (was incorrectly required, blocking driver-to-driver mode)
+- New field: <code>ReplicationPolicy.spec.destinationCACertSecretRef</code> — references a Secret containing a <code>ca.crt</code> key for verifying the receiver's TLS certificate (required for self-signed certs)</p>
+<p><strong>Action required:</strong>
+1. Apply updated CRDs: <code>kubectl apply -f config/crd/</code>
+2. Upgrade controller — now passes <code>--driver-image</code> to receiver-mode sync-client Jobs automatically
+3. If using driver-to-driver mode with TLS: create a Secret with the receiver's CA cert and set <code>destinationCACertSecretRef</code> on the ReplicationPolicy</p>
+<p><strong>New features:</strong>
+- <strong>Receiver TLS support</strong> — native HTTPS on the replication receiver via cert-manager. Enable with <code>replicationReceiver.tls.enabled=true</code> in Helm values. Creates a self-signed Issuer and Certificate automatically. OpenShift Route switches to passthrough TLS termination
+- <code>--driver-image</code> CLI flag and Helm wiring for receiver-mode sync-client Jobs
+- New CLI flags: <code>--receiver-tls-cert-file</code>, <code>--receiver-tls-key-file</code> (receiver), <code>--ca-cert-file</code> (sync-client)
+- Annotation-based pause/resume: <code>storage.ibmcloud.io/paused=true</code> on a ReplicationPolicy pauses replication; removing it resumes
+- Scheduling fairness: SubVolumes sorted by last-sync-time (oldest first) to prevent starvation under <code>maxParallelSyncs</code> limits
+- BytesWritten tracking: sync-client Jobs report bytes transferred via termination log; recorded in <code>SubVolumeReplicationStatus.bytesSynced</code></p>
+<p><strong>Bug fixes:</strong>
+- Receiver path-doubling: when <code>subPath</code> already included the <code>basePath</code> prefix (e.g., <code>/pvcs/pvc-xxx</code>), the receiver would double it (e.g., <code>/data/pvcs/pvcs/pvc-xxx</code>). Now strips the prefix automatically
+- Sync-client Jobs now mount the CA cert Secret when <code>destinationCACertSecretRef</code> is set, enabling TLS verification for self-signed receiver certificates</p>
+<hr />
+<h3 id="upgrading-to-v0131-from-v0130">Upgrading to v0.13.1 (from v0.13.0)<a class="headerlink" href="#upgrading-to-v0131-from-v0130" title="Permanent link">&para;</a></h3>
+<p><strong>Fixes:</strong> Console plugin table rows not rendering in tabbed layout.</p>
+<p><strong>No CRD changes.</strong> No RBAC changes. No data migration required.</p>
+<p><strong>Action required:</strong>
+1. Upgrade controller — metrics now register with controller-runtime registry (fixes scraping when using Prometheus Operator)
+2. Update image references from <code>icr.io</code> to <code>de.icr.io</code> (Frankfurt regional registry) if using explicit image tags</p>
+<p><strong>Console plugin changes:</strong>
+- Replaced VirtualizedTable with PatternFly composable Table in all 5 list pages
+- Added client-side column sorting on all list pages</p>
+<hr />
+<h3 id="upgrading-to-v0130-from-v0120">Upgrading to v0.13.0 (from v0.12.0)<a class="headerlink" href="#upgrading-to-v0130-from-v0120" title="Permanent link">&para;</a></h3>
+<p><strong>New features:</strong> Console plugin tabbed navigation, CDI DataSource creation for InstanceTypes catalog, monitoring tab with Prometheus charts.</p>
+<p><strong>No CRD changes.</strong> No RBAC changes. No data migration required.</p>
+<p><strong>Action required:</strong>
+1. Upgrade controller — golden image syncer now creates DataSource CRs in <code>openshift-virtualization-os-images</code> for InstanceTypes catalog visibility
+2. If using the console plugin, the UI now uses a single tabbed interface instead of 7 sidebar items</p>
+<p><strong>Console plugin changes (if enabled):</strong>
+- Single "IBM VPC File Pools" sidebar entry with tabbed interface (Overview, Pools, SubVolumes, Snapshots, Group Snapshots, Replication, Monitoring)
+- New Monitoring tab with time-series charts and stat cards
+- IOPS column in pool table
+- Create buttons now route to custom form wizards instead of YAML editor</p>
+<hr />
+<h3 id="upgrading-to-v0120-from-v0110">Upgrading to v0.12.0 (from v0.11.0)<a class="headerlink" href="#upgrading-to-v0120-from-v0110" title="Permanent link">&para;</a></h3>
+<p><strong>New feature:</strong> OpenShift Console dynamic plugin for visual pool management.</p>
+<p><strong>No CRD changes.</strong> No RBAC changes. No data migration required.</p>
+<p><strong>Console plugin is opt-in.</strong> The plugin is disabled by default (<code>consolePlugin.enabled: false</code>). To enable:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>helm<span class="w"> </span>upgrade<span class="w"> </span>ibm-vpc-file-pool-csi<span class="w"> </span>charts/ibm-vpc-file-pool-csi/<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span>--namespace<span class="w"> </span>kube-system<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span>--set<span class="w"> </span>consolePlugin.enabled<span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">  </span>--reuse-values
+</code></pre></div>
+<p>After upgrade, register the plugin with the console:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Adds this plugin to the list and keeps the other plugins enabled.</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="c1"># (A merge patch with a "plugins" list would replace the whole list.)</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>oc<span class="w"> </span>patch<span class="w"> </span>console.operator.openshift.io<span class="w"> </span>cluster<span class="w"> </span>--type<span class="o">=</span>json<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">  </span>-p<span class="w"> </span><span class="s1">'[{"op":"add","path":"/spec/plugins/-","value":"ibm-vpc-file-pool-csi"}]'</span>
+</code></pre></div>
+<p><strong>Requires OpenShift 4.14+</strong> with the ConsolePlugin v1 API. Non-OpenShift clusters can skip this — no impact on existing functionality.</p>
+<hr />
+<h3 id="upgrading-to-v0110-from-v0100">Upgrading to v0.11.0 (from v0.10.0)<a class="headerlink" href="#upgrading-to-v0110-from-v0100" title="Permanent link">&para;</a></h3>
+<p><strong>New features:</strong> Golden image syncer, mount target recovery, <code>selectShare</code> IP guard.</p>
+<p><strong>CRD changes (additive):</strong>
+- <code>FileSharePool.spec.goldenImages</code> — new optional field for golden image syncer config
+- <code>FileSharePool.status.goldenImages</code> — new status field for per-image sync state</p>
+<p><strong>RBAC changes:</strong> ClusterRole extended with <code>cdi.kubevirt.io</code> (dataimportcrons, datasources), <code>batch/jobs</code>, and <code>template.openshift.io/templates</code>. Apply updated RBAC before upgrading.</p>
+<p><strong>Action required:</strong>
+1. Apply updated CRDs: <code>kubectl apply -f config/crd/</code>
+2. Apply updated RBAC: <code>kubectl apply -f config/rbac/</code>
+3. Upgrade controller — the new mount target recovery and IP guard activate automatically
+4. (Optional) Configure <code>spec.goldenImages</code> on FileSharePool CRs if using KubeVirt</p>
+<p><strong>No data migration required.</strong> Shares with missing mount targets are automatically recovered or drained.</p>
+<hr />
+<h3 id="upgrading-to-v0100-from-v090">Upgrading to v0.10.0 (from v0.9.0)<a class="headerlink" href="#upgrading-to-v0100-from-v090" title="Permanent link">&para;</a></h3>
+<p><strong>New features:</strong> NFS <code>sec=sys</code> default mount option, CDI StorageProfile auto-patching.</p>
+<p><strong>Action required:</strong>
+1. Upgrade controller and node DaemonSet
+2. Existing NFS mounts continue with their current <code>sec=</code> negotiation. New mounts get <code>sec=sys</code> automatically.
+3. To apply <code>sec=sys</code> to existing mounts, restart the node DaemonSet pods (rolling restart happens automatically during upgrade)</p>
+<p><strong>KubeVirt users:</strong> This upgrade fixes the "chown operation not permitted" issue. After upgrade, restart affected VMs.</p>
+<hr />
+<h3 id="upgrading-to-v090-from-v080">Upgrading to v0.9.0 (from v0.8.0)<a class="headerlink" href="#upgrading-to-v090-from-v080" title="Permanent link">&para;</a></h3>
+<p><strong>Critical fix:</strong> NFS mount used server root instead of share export path.</p>
+<p><strong>CRD changes (additive):</strong>
+- <code>PoolShareStatus.ExportPath</code> — new field for NFS export path
+- <code>ZoneMountTarget.ExportPath</code> — new field
+- <code>SubVolumeSpec.ShareExportPath</code> — new field</p>
+<p><strong>Action required:</strong>
+1. Apply updated CRDs: <code>kubectl apply -f config/crd/</code>
+2. Upgrade controller — existing shares without export paths are <strong>automatically backfilled</strong> during the reconciler's health check
+3. Upgrade node DaemonSet — new mounts use the correct export path</p>
+<p><strong>No manual data migration required.</strong> The health check backfill handles existing shares.</p>
+<hr />
+<h3 id="upgrading-to-v080-from-v070">Upgrading to v0.8.0 (from v0.7.0)<a class="headerlink" href="#upgrading-to-v080-from-v070" title="Permanent link">&para;</a></h3>
+<p><strong>Fixes:</strong> Hardcoded staging path, mount flags override, resource requests/limits, probes, webhook cert permissions.</p>
+<p><strong>Action required:</strong>
+1. Apply updated CRDs
+2. Upgrade controller — now includes <code>--kubelet-dir</code> flag wired through Helm
+3. Upgrade node DaemonSet — gains resource limits, probes, and readiness checks</p>
+<p><strong>ROKS and ROVS users:</strong> Verify <code>node.kubeletDir</code> is set to <code>/var/data/kubelet</code> in your Helm values. The controller's staging path now respects this setting.</p>
+<hr />
+<h3 id="upgrading-to-v070-from-v060">Upgrading to v0.7.0 (from v0.6.0)<a class="headerlink" href="#upgrading-to-v070-from-v060" title="Permanent link">&para;</a></h3>
+<p><strong>New feature:</strong> Automatic StorageClass creation.</p>
+<p><strong>RBAC changes:</strong> Controller ClusterRole needs <code>create</code> verb for <code>storageclasses</code>.</p>
+<p><strong>Action required:</strong>
+1. Apply updated RBAC: <code>kubectl apply -f config/rbac/</code>
+2. Apply updated CRDs
+3. Upgrade controller — auto-creates StorageClasses for existing pools</p>
+<p><strong>Note:</strong> If you already have manually created StorageClasses, they are not overwritten. To opt out of auto-creation, annotate the pool:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>kubectl<span class="w"> </span>annotate<span class="w"> </span>filesharepool<span class="w"> </span>&lt;pool-name&gt;<span class="w"> </span>storage.ibmcloud.io/skip-storageclass<span class="o">=</span><span class="s2">"true"</span>
+</code></pre></div></p>
+<hr />
+<h3 id="upgrading-to-v060-from-v050">Upgrading to v0.6.0 (from v0.5.0)<a class="headerlink" href="#upgrading-to-v060-from-v050" title="Permanent link">&para;</a></h3>
+<p><strong>New features:</strong> Validating admission webhooks, lifecycle hooks, incremental rsync.</p>
+<p><strong>Prerequisites:</strong>
+- cert-manager v1.12+ must be installed (for webhook TLS certificates). ROVS has no cert-manager; on ROKS and ROVS you can set <code>webhook.certProvider=openshift</code> instead (see <a href="../INSTALL/#webhook-certificates">INSTALL.md — Webhook Certificates</a>)</p>
+<p><strong>CRD changes (additive):</strong>
+- <code>ReplicationPolicy.spec.preSyncHooks</code> / <code>postSyncHooks</code> — new hook fields
+- <code>ReplicationPolicy.spec.incrementalSync</code> — new field (default <code>true</code>)
+- <code>VolumeGroupSnapshot.spec.preSnapshotHooks</code> / <code>postSnapshotHooks</code> — new hook fields
+- New CRD types: <code>Hook</code>, <code>ExecHookSpec</code>, <code>HTTPHookSpec</code>, <code>HookResult</code></p>
+<p><strong>Action required:</strong>
+1. Install cert-manager if not already present: <code>kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml</code>
+2. Apply updated CRDs: <code>kubectl apply -f config/crd/</code>
+3. Apply webhook configurations: <code>kubectl apply -f config/webhook/</code>
+4. Upgrade controller</p>
+<p><strong>Known issue fixed:</strong> VPC auto-discovery silent failure — if you experienced pools without mount targets, this version fixes it by using <code>kubernetes.Clientset</code> for pre-start ConfigMap reads.</p>
+<hr />
+<h3 id="upgrading-to-v050-from-v040">Upgrading to v0.5.0 (from v0.4.0)<a class="headerlink" href="#upgrading-to-v050-from-v040" title="Permanent link">&para;</a></h3>
+<p><strong>New feature:</strong> Cross-region disaster recovery (ReplicationPolicy CRD).</p>
+<p><strong>CRD changes (additive):</strong>
+- New CRD: <code>ReplicationPolicy</code></p>
+<p><strong>Action required:</strong>
+1. Apply new CRD: <code>kubectl apply -f config/crd/</code>
+2. Upgrade controller
+3. (Optional) Create <code>ReplicationPolicy</code> CRs for DR — see <a href="../CROSS-REGION-DR/">CROSS-REGION-DR.md</a></p>
+<hr />
+<h3 id="upgrading-to-v040-from-v030">Upgrading to v0.4.0 (from v0.3.0)<a class="headerlink" href="#upgrading-to-v040-from-v030" title="Permanent link">&para;</a></h3>
+<p><strong>New features:</strong> Volume snapshots, volume cloning, volume group snapshots, share draining, migration CLI.</p>
+<p><strong>CRD changes (additive):</strong>
+- New CRD: <code>Snapshot</code>
+- New CRD: <code>VolumeGroupSnapshot</code>
+- <code>SubVolume</code> gains clone fields: <code>sourceVolume</code>, <code>sourceShareID</code>, <code>cloneStatus</code>, <code>cloneProgress</code>
+- <code>FileSharePool.spec.drainShares</code> — new field for graceful share draining</p>
+<p><strong>Prerequisites:</strong>
+- VolumeSnapshot CRDs must be installed (external-snapshotter):
+  <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/master/client/config/crd/
+</code></pre></div></p>
+<p><strong>Action required:</strong>
+1. Install VolumeSnapshot CRDs (if not already present)
+2. Apply updated CRDs: <code>kubectl apply -f config/crd/</code>
+3. Upgrade controller and node DaemonSet
+4. (Optional) Create <code>VolumeSnapshotClass</code> for the pool driver</p>
+<hr />
+<h3 id="upgrading-to-v030-from-v020">Upgrading to v0.3.0 (from v0.2.0)<a class="headerlink" href="#upgrading-to-v030-from-v020" title="Permanent link">&para;</a></h3>
+<p><strong>New features:</strong> Cross-zone accessor binding, idempotent CreateFileShare, nsenter mount wrapper.</p>
+<p><strong>CRD changes (additive):</strong>
+- <code>FileSharePool.spec.accessorZones</code> — new field for multi-zone mount targets
+- <code>PoolShareStatus.mountTargets</code> — new status field (ZoneMountTarget array)</p>
+<p><strong>Action required:</strong>
+1. Apply updated CRDs: <code>kubectl apply -f config/crd/</code>
+2. Upgrade controller and node DaemonSet
+3. <strong>Node DaemonSet now requires <code>hostPID: true</code></strong> for the nsenter mount wrapper — verify your DaemonSet spec includes this</p>
+<hr />
+<h3 id="upgrading-to-v020-from-v010">Upgrading to v0.2.0 (from v0.1.0)<a class="headerlink" href="#upgrading-to-v020-from-v010" title="Permanent link">&para;</a></h3>
+<p><strong>New features:</strong> Share tiering, per-PVC usage reporting, Prometheus metrics, auto-discovery.</p>
+<p><strong>CRD changes (additive):</strong>
+- <code>FileSharePool.spec.tiers</code> — new optional field for tiered storage
+- Various status fields for metrics</p>
+<p><strong>Action required:</strong>
+1. Apply updated CRDs: <code>kubectl apply -f config/crd/</code>
+2. Upgrade controller — metrics endpoint becomes available on <code>:8080/metrics</code>
+3. (Optional) Configure Prometheus scraping — see <a href="../MONITORING/">MONITORING.md</a>
+4. (Optional) Configure tiered storage if needed</p>
+<hr />
+<h3 id="fresh-install-v010">Fresh Install: v0.1.0<a class="headerlink" href="#fresh-install-v010" title="Permanent link">&para;</a></h3>
+<p>Initial release. See <a href="../INSTALL/">INSTALL.md</a> for first-time installation.</p>
+<hr />
+<h2 id="rollback-procedures">Rollback Procedures<a class="headerlink" href="#rollback-procedures" title="Permanent link">&para;</a></h2>
+<h3 id="helm-rollback">Helm Rollback<a class="headerlink" href="#helm-rollback" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># List revision history</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>helm<span class="w"> </span><span class="nb">history</span><span class="w"> </span>ibm-vpc-file-pool-csi<span class="w"> </span>-n<span class="w"> </span>kube-system
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="c1"># Rollback to previous revision</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>helm<span class="w"> </span>rollback<span class="w"> </span>ibm-vpc-file-pool-csi<span class="w"> </span>&lt;revision-number&gt;<span class="w"> </span>-n<span class="w"> </span>kube-system
+</code></pre></div>
+<h3 id="manual-rollback">Manual Rollback<a class="headerlink" href="#manual-rollback" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># Reapply the previous version's manifests</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>config/controller/<span class="w">  </span><span class="c1"># previous version</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>config/node/<span class="w">        </span><span class="c1"># previous version</span>
+</code></pre></div>
+<h3 id="crd-rollback-caveats">CRD Rollback Caveats<a class="headerlink" href="#crd-rollback-caveats" title="Permanent link">&para;</a></h3>
+<p><strong>Helm does not roll back CRDs.</strong> If the upgrade added new CRD fields, those fields remain in the CRD schema after rollback. This is generally safe because:</p>
+<ul>
+<li>New fields are optional with defaults</li>
+<li>The older controller version ignores unknown fields</li>
+<li>Existing CR data is preserved</li>
+</ul>
+<p>If you need to roll back a CRD, apply the previous version's CRD manifests manually:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>config/crd/<span class="w">  </span><span class="c1"># from the previous version's checkout</span>
+</code></pre></div>
+<p><strong>Warning:</strong> Rolling back CRDs that removed fields can cause data loss in those fields. Always back up CRs before rollback (see pre-flight checklist).</p>
+<hr />
+<h2 id="post-upgrade-verification">Post-Upgrade Verification<a class="headerlink" href="#post-upgrade-verification" title="Permanent link">&para;</a></h2>
+<p>Run this checklist after every upgrade:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1"># 1. Verify all pods are running</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-l<span class="w"> </span>app.kubernetes.io/name<span class="o">=</span>ibm-vpc-file-pool-csi,app.kubernetes.io/component<span class="o">=</span>controller
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>kubectl<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-l<span class="w"> </span>app.kubernetes.io/name<span class="o">=</span>ibm-vpc-file-pool-csi,app.kubernetes.io/component<span class="o">=</span>node
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="c1"># 2. Verify all pools are Ready</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>kubectl<span class="w"> </span>get<span class="w"> </span>filesharepools
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="c1"># 3. Verify CSI driver is registered</span>
+<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a>kubectl<span class="w"> </span>get<span class="w"> </span>csidriver<span class="w"> </span>vpc-file-pool.csi.ibm.io
+<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a>
+<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a><span class="c1"># 4. Test PVC creation (create a test PVC and verify it binds)</span>
+<a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;'EOF'</span>
+<a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a><span class="s">apiVersion: v1</span>
+<a id="__codelineno-14-14" name="__codelineno-14-14" href="#__codelineno-14-14"></a><span class="s">kind: PersistentVolumeClaim</span>
+<a id="__codelineno-14-15" name="__codelineno-14-15" href="#__codelineno-14-15"></a><span class="s">metadata:</span>
+<a id="__codelineno-14-16" name="__codelineno-14-16" href="#__codelineno-14-16"></a><span class="s">  name: upgrade-test-pvc</span>
+<a id="__codelineno-14-17" name="__codelineno-14-17" href="#__codelineno-14-17"></a><span class="s">  namespace: default</span>
+<a id="__codelineno-14-18" name="__codelineno-14-18" href="#__codelineno-14-18"></a><span class="s">spec:</span>
+<a id="__codelineno-14-19" name="__codelineno-14-19" href="#__codelineno-14-19"></a><span class="s">  accessModes: [ReadWriteMany]</span>
+<a id="__codelineno-14-20" name="__codelineno-14-20" href="#__codelineno-14-20"></a><span class="s">  storageClassName: ibm-vpc-file-pool</span>
+<a id="__codelineno-14-21" name="__codelineno-14-21" href="#__codelineno-14-21"></a><span class="s">  resources:</span>
+<a id="__codelineno-14-22" name="__codelineno-14-22" href="#__codelineno-14-22"></a><span class="s">    requests:</span>
+<a id="__codelineno-14-23" name="__codelineno-14-23" href="#__codelineno-14-23"></a><span class="s">      storage: 1Gi</span>
+<a id="__codelineno-14-24" name="__codelineno-14-24" href="#__codelineno-14-24"></a><span class="s">EOF</span>
+<a id="__codelineno-14-25" name="__codelineno-14-25" href="#__codelineno-14-25"></a>kubectl<span class="w"> </span>get<span class="w"> </span>pvc<span class="w"> </span>upgrade-test-pvc<span class="w"> </span>-w<span class="w">  </span><span class="c1"># Should bind within seconds</span>
+<a id="__codelineno-14-26" name="__codelineno-14-26" href="#__codelineno-14-26"></a>
+<a id="__codelineno-14-27" name="__codelineno-14-27" href="#__codelineno-14-27"></a><span class="c1"># 5. Verify metrics endpoint (if applicable)</span>
+<a id="__codelineno-14-28" name="__codelineno-14-28" href="#__codelineno-14-28"></a>kubectl<span class="w"> </span>port-forward<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>svc/ibm-vpc-file-pool-csi-metrics<span class="w"> </span><span class="m">8080</span>:8080<span class="w"> </span><span class="p">&amp;</span>
+<a id="__codelineno-14-29" name="__codelineno-14-29" href="#__codelineno-14-29"></a>curl<span class="w"> </span>-s<span class="w"> </span>http://localhost:8080/metrics<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>vpc_file_pool<span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-5
+<a id="__codelineno-14-30" name="__codelineno-14-30" href="#__codelineno-14-30"></a><span class="nb">kill</span><span class="w"> </span>%1
+<a id="__codelineno-14-31" name="__codelineno-14-31" href="#__codelineno-14-31"></a>
+<a id="__codelineno-14-32" name="__codelineno-14-32" href="#__codelineno-14-32"></a><span class="c1"># 6. Clean up test PVC</span>
+<a id="__codelineno-14-33" name="__codelineno-14-33" href="#__codelineno-14-33"></a>kubectl<span class="w"> </span>delete<span class="w"> </span>pvc<span class="w"> </span>upgrade-test-pvc
+<a id="__codelineno-14-34" name="__codelineno-14-34" href="#__codelineno-14-34"></a>
+<a id="__codelineno-14-35" name="__codelineno-14-35" href="#__codelineno-14-35"></a><span class="c1"># 7. Check controller logs for errors</span>
+<a id="__codelineno-14-36" name="__codelineno-14-36" href="#__codelineno-14-36"></a>kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-l<span class="w"> </span>app.kubernetes.io/name<span class="o">=</span>ibm-vpc-file-pool-csi,app.kubernetes.io/component<span class="o">=</span>controller<span class="w"> </span>-c<span class="w"> </span>csi-controller<span class="w"> </span>--tail<span class="o">=</span><span class="m">50</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-i<span class="w"> </span><span class="s2">"error\|fail"</span>
+</code></pre></div>
+<hr />
+<h2 id="downtime-expectations">Downtime Expectations<a class="headerlink" href="#downtime-expectations" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Downtime</th>
+<th>Impact</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Controller</strong></td>
+<td>~30 seconds</td>
+<td>Leader election gap. New PVC creation pauses during the gap. Existing mounted PVCs are unaffected.</td>
+</tr>
+<tr>
+<td><strong>Node DaemonSet</strong></td>
+<td>Rolling update, ~60s per node</td>
+<td>No mount disruption for existing pods. New <code>NodePublishVolume</code> calls queue until the new pod is ready.</td>
+</tr>
+<tr>
+<td><strong>CRD apply</strong></td>
+<td>None</td>
+<td>CRD updates are live. Existing CRs continue to work.</td>
+</tr>
+<tr>
+<td><strong>Webhook update</strong></td>
+<td>~10 seconds</td>
+<td>CRD creation/update requests may briefly fail validation. Retry resolves this.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Zero-downtime for existing workloads.</strong> Pods with mounted PVCs are not affected by controller or node agent upgrades — NFS mounts are kernel-level and persist independently of the CSI driver pods.</p>
+<hr />
+<h2 id="see-also">See Also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../CHANGELOG/">CHANGELOG.md</a> — Full version history</li>
+<li><a href="../INSTALL/">INSTALL.md</a> — First-time installation</li>
+<li><a href="../HELM-VALUES/">HELM-VALUES.md</a> — Helm chart configuration reference</li>
+<li><a href="../CRD-SPEC/">CRD-SPEC.md</a> — CRD field definitions</li>
+<li><a href="../DAY2-OPERATIONS/">DAY2-OPERATIONS.md</a> — Post-upgrade operational procedures</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "navigation.instant", "search.suggest", "search.highlight", "content.code.copy", "content.tabs.link"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+    
+  </body>
+</html>
