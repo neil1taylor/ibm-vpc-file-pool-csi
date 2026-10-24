@@ -18,6 +18,20 @@ The console's Pools and Snapshots pages show whether instant snapshots are on, a
 
 To stop: delete the VMs' snapshots (`kubectl pool-snapshots flatten <vm> -n <namespace>` for each VM), then remove the operation from the annotation. A VM with snapshots does not start while the gate is off. The chart never removes the gate, not when you uninstall and not when you set `vmSnapshots.enableSidecarGate=false`, so turning it off is always a step you take on purpose.
 
+## Choosing a setting
+
+Three combinations of the two Helm values are possible. Pick one for each cluster.
+
+| Setting | What happens | Benefit | Consequence |
+|---|---|---|---|
+| `vmSnapshots.method=copy` | Every VM disk snapshot is a full copy of the disk file. There is no VM hook webhook. | Touches nothing else on the cluster. No webhook, no feature gate. | Slow on big disks: a copy of a 30 GB disk with 2 GB used took 165 s (restore test below). Uses as much storage as the disk holds. |
+| `vmSnapshots.method=auto`, gate off (`enableSidecarGate=false`, the default) | Snapshots are copies, as with `copy`. The driver also adds the VM hook webhook. | None over `copy`. | One more moving part and no gain. |
+| `vmSnapshots.method=auto`, gate on (`enableSidecarGate=true`) | Snapshots are instant: a new overlay file, nothing copied. 2 s for a running Linux VM with the guest frozen (test below). | Fast, and almost no extra storage. | Red Hat does not support the gate, and `HyperConverged` reports `TaintedConfiguration=True`. The gate is cluster-wide: anyone who can create or edit a VM can add a hook sidecar container to that VM's pod (see [SECURITY.md](SECURITY.md#kubevirt-sidecar-feature-gate)). The chart never turns the gate off, not even on uninstall, because VMs with instant snapshots cannot start without it. |
+
+**Existing VMs.** Turning the gate on does not change a VM by itself. The driver adds its hook only to a VM whose disks have a snapshot chain, and only while the gate is on. A VM that was never snapshotted by the driver is left alone. This guide has not checked whether KubeVirt restarts its own components when the feature gate list changes.
+
+**Shared clusters.** On a cluster that also runs other teams' VMs, use `copy` unless those teams agree to the gate. The gate is the only setting in this table that changes the cluster, not just the driver.
+
 ## In one paragraph
 
 A VM disk on a pool is one file, `disk.img`, in the volume's folder on a VPC file share. To take a snapshot, the driver tells QEMU (the program that runs the VM) to stop writing to that file and to send all new writes to a new, small file next to it. The old file is now the snapshot. Nothing is copied, so this takes seconds for any disk size. This is the same method VMware uses for its snapshots.
