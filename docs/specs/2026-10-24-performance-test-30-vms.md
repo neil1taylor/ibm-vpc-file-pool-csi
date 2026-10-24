@@ -133,6 +133,21 @@ Yes. It finds the knee for each tier by growing the count until users would noti
   - A leftover VM or share after a failed run costs money until it is deleted. The sweep and the final VPC check guard against it.
   - Results from a shared cloud backend are noisy. The repeat run and the written knee rule limit this.
 
+## Phase 1 results (smoke runs on rovslab-dr-eude, 2026-10-24)
+
+Five small Linux VMs on a 200 GB, 3,000 IOPS share, 10 minutes of measuring. It took four runs to get a good one. What each run found:
+
+1. The VM definition used a cloud-init field name KubeVirt does not know (`secretRef` is right).
+2. A copy of a catalog disk must be at least as large as the catalog disk, 30 GiB. This changed the share size in this spec (3,900 GB).
+3. `fio` counted every I/O of a job with a block size range as the smallest block size, so the load came out about 8 times too light (35 IOPS for a target of 300). The load is now three jobs with fixed block sizes. After the fix the VMs hit their targets: about 28 steady and 298 burst IOPS against 30 and 300.
+4. The node agents' `/metrics` answered HTTP 500 when a node held the same share more than once, so the share counters read zero. This was a driver bug, fixed in PR #246 and in the `main-55211050` build that DR runs.
+
+The good run: all 5 VMs ready in about 4 minutes (including the disk fill), no stall, no slow VM, no VM short of its rate, and the cleanup left nothing.
+
+**Open, to settle before the first full run.** The share counters showed 982 NFS operations a second at 532 ms average, while the VMs reported about 359 IOPS and a p95 of about 1.3 ms. The two sides do not agree. Possible causes: a host cache between the guest and the share (the disk cache mode), the root disks' own traffic on the same share, or write-behind queueing in the NFS client that the guests never wait for. Every run now records the first VM's disk definition (`vm1-disks.txt`) to answer the first. If a cache is the cause, the guest latency is flattered and the 20 ms rule must be applied to the share-side latency, or the cache must be bypassed.
+
+**Not built yet:** Windows VMs (no Windows catalog image is ready on the DR cluster), repeat runs and a steady-state check, the baseline and event windows, the boot storm and the other planned events. They are items 5, 7, 9 and 12 of the research file `docs/research/2026-10-24-storage-benchmark-tools.md`.
+
 ## Decisions I made for you
 
 - The real VM mix and peaks are not known, so I used the issue's defaults: 20 Linux and 10 Windows, 20 to 50 IOPS average, 300 IOPS bursts, 70/30 read/write. Change them here and the test follows.

@@ -275,6 +275,13 @@ for n in "${STEP_LIST[@]}"; do
         vm_yaml "$i" | oc apply -n "$NS" -f - >/dev/null || log "WARNING: could not make VM $i"
     done
     wait_until 3600 "$n VMs to say PERF-READY" all_ready "$n" || exit 1
+    if [ "$prev" -eq 0 ]; then
+        # How the disks are opened (the cache mode) decides whether a host cache flatters the guests' latency.
+        # The research for this test could not confirm it, so every run records it for the first VM.
+        pod=$(oc get pods -n "$NS" -l "vm.kubevirt.io/name=$(vm_name 1)" -o name 2>/dev/null | head -1)
+        [ -z "$pod" ] || oc exec -n "$NS" "$pod" -c compute -- sh -c 'virsh dumpxml "$(virsh list --name | head -1)"' 2>/dev/null |
+            grep -E '<driver |<source (file|dev)|<target dev' >"$OUT/vm1-disks.txt" || true
+    fi
     log "step $n: all ready; settling for $SETTLE_MIN min"
     sleep $((SETTLE_MIN * 60))
 
