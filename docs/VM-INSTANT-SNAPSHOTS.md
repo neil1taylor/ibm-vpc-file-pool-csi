@@ -14,7 +14,7 @@ Status: **built, Experimental.** Tested by hand on rovslab on 21 October 2026 (r
    **Red Hat does not support this setting**, and `HyperConverged` then reports `TaintedConfiguration=True`.
 3. Take a snapshot from the console's VM Snapshots tab, or with a `VirtualMachineSnapshot`. The VolumeSnapshots are ready at once.
 
-The console's Pools and Snapshots pages show whether instant snapshots are on, and which VMs have them.
+The console's Pools and Snapshots pages show how the driver takes VM disk snapshots: instant, copy, or unknown. The box says instant only when the driver is set to `auto` and the gate is on, and it lists the VMs that have instant snapshots. It reads the driver's setting from the ConfigMap `ibm-vpc-file-pool-csi-settings`, which the chart renders; a driver that does not publish it shows "unknown".
 
 To stop: delete the VMs' snapshots (`kubectl pool-snapshots flatten <vm> -n <namespace>` for each VM), then remove the operation from the annotation. A VM with snapshots does not start while the gate is off. The chart never removes the gate, not when you uninstall and not when you set `vmSnapshots.enableSidecarGate=false`, so turning it off is always a step you take on purpose.
 

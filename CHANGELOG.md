@@ -21,6 +21,7 @@ To make a release:
 
 ### Added
 
+- **The console shows the driver's real VM snapshot mode, "copy" or "instant"** (spec `docs/specs/2026-10-24-console-snapshot-mode.md`). The box on the Snapshots and Pools pages used to read only the KubeVirt `Sidecar` gate, so it said "on" while the driver was set to `vmSnapshots.method=copy`. The chart now renders a ConfigMap `ibm-vpc-file-pool-csi-settings` (key `vmSnapshotMethod`) and a Role that lets signed-in users `get` that one ConfigMap by name. The box says instant only when the driver is set to `auto` and the gate is on. A driver that does not publish its setting shows "unknown".
 - **Teaching page on instant VM snapshots** (`docs/diagrams/vm-snapshot-chain.html`, now page 12): adds switches for `vmSnapshots.method` and the KubeVirt `Sidecar` gate, stop, start and move of the VM with the hook, the guest freeze, the fail-safe start, and flatten.
 - **Interactive teaching page 11, "What QEMU does"** (`docs/diagrams/11-what-qemu-does.html`): how QEMU copies a running VM disk at one moment, keeps a change list, and why a VM move makes the next copy a full copy.
 
