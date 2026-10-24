@@ -82,6 +82,13 @@ describe('DeleteBackupsDialog refusals', () => {
     expect(k8sCreate).not.toHaveBeenCalled();
   });
 
+  it('offers a plain Close, not a Job that goes on, when it refuses', async () => {
+    show(volume({ retained: false }));
+    expect(await screen.findByText(/still backs up apps\/old/)).toBeTruthy();
+    expect(screen.getByText('Close', { selector: 'button, button *' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /the Job goes on/ })).toBeNull();
+  });
+
   it('refuses while a restore of the volume is running, and starts no Job', async () => {
     restores = [
       {

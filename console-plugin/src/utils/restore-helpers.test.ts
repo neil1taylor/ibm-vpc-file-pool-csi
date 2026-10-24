@@ -203,6 +203,25 @@ describe('restoreProgress', () => {
   it('is waiting while the claim is Pending and no SubVolume exists yet', () => {
     expect(restoreProgress(pvc('Pending'), undefined)).toEqual({ state: 'waiting' });
   });
+
+  it('shows the copy, not ready, while a clone claim is Bound and the copy runs', () => {
+    const p = restoreProgress(pvc('Bound', 'pvc-x'), sub({ cloneStatus: 'InProgress', cloneProgress: { bytesCopied: 10, totalBytes: 20 } }));
+    expect(p).toEqual({ state: 'copying', percent: 50, copiedBytes: 10, totalBytes: 20 });
+  });
+
+  it('shows the copy, not ready, while a clone claim is Bound and the copy has not started', () => {
+    expect(restoreProgress(pvc('Bound', 'pvc-x'), sub({ cloneStatus: 'Pending' }))).toEqual({
+      state: 'copying',
+      percent: 0,
+      copiedBytes: 0,
+      totalBytes: 0,
+    });
+  });
+
+  it('shows the clone error when a Bound clone claim failed its copy', () => {
+    const p = restoreProgress(pvc('Bound', 'pvc-x'), sub({ cloneStatus: 'Failed', cloneProgress: { bytesCopied: 0, totalBytes: 20, error: 'cp failed' } }));
+    expect(p).toEqual({ state: 'failed', error: 'cp failed' });
+  });
 });
 
 describe('clone helpers', () => {
