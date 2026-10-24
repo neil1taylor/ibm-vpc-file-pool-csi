@@ -2,18 +2,7 @@
 
 ## Testing Pyramid
 
-```
-                    ┌─────────┐
-                    │  E2E    │  Real ROKS or ROVS cluster + real VPC shares
-                    │  Tests  │  `make test-e2e` (requires live cluster)
-                   ─┼─────────┼─
-                  / │ Integr. │ \  Fake-based: fakeK8sClient, fake VPC,
-                 /  │  Tests  │  \ fakeNFSOperations — no Docker, no NFS
-               ─┼───┼─────────┼───┼─
-              / │   │  Unit   │   │ \  Pure Go, no external deps
-             /  │   │  Tests  │   │  \ Run in CI, run in Claude Code
-            ────┴───┴─────────┴───┴────
-```
+![The testing pyramid: unit tests at the base, integration tests in the middle, E2E tests on a live cluster at the top](images/testing-pyramid.drawio.svg)
 
 **Claude Code operates in the bottom two layers.** Every piece of code must have unit tests that run with `go test ./...` — no cluster, no NFS server, no IBM Cloud credentials. Integration tests are also fully runnable locally via `make test-integration` — they use in-memory fakes, not Docker or real NFS.
 

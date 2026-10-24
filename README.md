@@ -57,21 +57,7 @@ This reduces VPC API calls, speeds up PVC provisioning (mkdir vs. 30-90s share c
 
 ## Architecture
 
-```
-Workload Pod
-    │ bind-mount /data
-    ▼
-CSI Node Agent (DaemonSet)
-    │ NFS mount per staged volume, bind-mount per pod
-    │
-CSI Controller (Deployment)
-    │ CreateVolume / DeleteVolume
-    ▼
-Pool Manager
-    │ share selection (spread/binpack), mkdir, capacity tracking
-    ▼
-IBM VPC Client ──► VPC File Share API
-```
+![The workload pod gets its mount from the CSI Node Agent; the CSI Controller calls the Pool Manager, which calls the IBM VPC Client and the VPC File Share API](docs/images/readme-architecture.drawio.svg)
 
 **Key components:**
 

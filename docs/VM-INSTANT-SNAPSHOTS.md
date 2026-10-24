@@ -62,6 +62,8 @@ After two snapshots:
 
 This set of files is a **chain**. Each file holds only the parts of the disk that changed after the file before it.
 
+![The VM reads and writes the newest file, which points back through snap-1.qcow2 to disk.img](images/vm-instant-snapshots-chain.drawio.svg)
+
 ### Writes and reads
 
 - **Writes** always go to the newest file.
@@ -74,6 +76,8 @@ This set of files is a **chain**. Each file holds only the parts of the disk tha
 2. The driver runs one command in the VM's pod: `virsh snapshot-create-as ... --disk-only`. QEMU starts the new file and switches to it.
 3. The guest is thawed. The VM never stops.
 4. The driver makes the frozen file read-only and records the chain.
+
+![Steps 1 to 4: freeze the guest, create the new file with virsh, thaw the guest, then make the frozen file read-only](images/vm-instant-snapshots-take.drawio.svg)
 
 ### Deleting a snapshot (merge)
 

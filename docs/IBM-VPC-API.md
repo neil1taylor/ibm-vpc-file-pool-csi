@@ -29,6 +29,8 @@ IBM's `secret-common-lib` reads credentials from Kubernetes secrets that already
 
 The library handles IAM token exchange, caching, and renewal automatically.
 
+![The controller asks secret-common-lib for a client; the library reads the credentials secret, then the legacy secret, and gets an IAM token for VPC API calls](images/ibm-vpc-api-authentication.drawio.svg)
+
 ### Secret Lookup Order
 
 The library checks credentials in this order:
@@ -305,6 +307,8 @@ func (c *Client) getShareByName(ctx context.Context, name string) (*ShareInfo, e
 ### Wait for Share Stable
 
 VPC file shares go through lifecycle states: `pending` → `stable` → (or `failed`).
+
+![A pending share becomes stable or failed; if neither happens before the deadline the wait returns a timeout error](images/ibm-vpc-api-share-lifecycle.drawio.svg)
 
 ```go
 func (c *Client) waitForShareStable(ctx context.Context, shareID string, timeout time.Duration) (*ShareInfo, error) {

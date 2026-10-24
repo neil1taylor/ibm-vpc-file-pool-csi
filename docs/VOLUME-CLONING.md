@@ -15,20 +15,13 @@ Key characteristics:
 - **No crash consistency guarantee** if the source is being actively written to.
 - **Same-share or cross-share** -- The clone can land on the same VPC file share as the source or a different share in the pool.
 
-```
-VPC File Share (pool-1-a)
-  /pvcs/
-    /pvc-aaaa (source, 50 GB)  ──cp -a──>  /pvc-bbbb (clone, 50 GB)
-    /pvc-cccc
-    /pvc-dddd
+Clone on the same share:
 
-  OR cross-share:
+![Same-share clone: the clone folder is made on the same file share as the source with cp -a](images/volume-cloning-same-share.drawio.svg)
 
-VPC File Share (pool-1-a)               VPC File Share (pool-1-b)
-  /pvcs/                                  /pvcs/
-    /pvc-aaaa (source) ──cp via NFS──>      /pvc-bbbb (clone)
-    /pvc-cccc                               /pvc-eeee
-```
+Or across shares:
+
+![Cross-share clone: the clone folder is made on a different file share than the source](images/volume-cloning-cross-share.drawio.svg)
 
 ---
 
@@ -38,33 +31,23 @@ The CSI specification defines volume cloning through `CreateVolume` with a `volu
 
 ### Request Flow
 
-```
-1. User creates PVC with dataSource referencing an existing PVC
-       │
-       ▼
-2. csi-provisioner detects dataSource, sets volume_content_source
-       │
-       ▼
-3. CSI Controller receives CreateVolume with:
-       - req.Name = new PV name (pvc-bbbb)
-       - req.VolumeContentSource.Type = VOLUME
-       - req.VolumeContentSource.Volume.VolumeId = "pool/share-id/pvc-aaaa"
-       - req.CapacityRange.RequiredBytes >= source size
-       │
-       ▼
-4. CSI Controller delegates to PoolManager.CloneVolume()
-       │
-       ▼
-5. PoolManager:
-       - Validates source SubVolume exists
-       - Selects target share (prefer same share)
-       - Creates target SubVolume CR with clone tracking fields
-       - Records the clone intent (cloneStatus=Pending); the clone worker copies the data later in a Job
-       - Returns AllocationResult
-       │
-       ▼
-6. CSI Controller returns CreateVolumeResponse with content_source set
-```
+![The provisioner passes the clone request to the CSI Controller and Pool Manager, which record a SubVolume CR with cloneStatus Pending](images/volume-cloning-request.drawio.svg)
+
+1. The user creates a PVC with a `dataSource` that references an existing PVC.
+2. `csi-provisioner` detects the `dataSource` and sets `volume_content_source`.
+3. The CSI Controller receives `CreateVolume` with:
+   - `req.Name` = the new PV name (`pvc-bbbb`)
+   - `req.VolumeContentSource.Type` = `VOLUME`
+   - `req.VolumeContentSource.Volume.VolumeId` = `"pool/share-id/pvc-aaaa"`
+   - `req.CapacityRange.RequiredBytes` >= the source size
+4. The CSI Controller delegates to `PoolManager.CloneVolume()`.
+5. The Pool Manager:
+   - Validates that the source SubVolume exists.
+   - Selects the target share (prefers the same share).
+   - Creates the target SubVolume CR with clone tracking fields.
+   - Records the clone intent (`cloneStatus=Pending`); the clone worker copies the data later in a Job.
+   - Returns an `AllocationResult`.
+6. The CSI Controller returns `CreateVolumeResponse` with `content_source` set.
 
 ### PVC Definition (User-Facing)
 
@@ -169,13 +152,9 @@ This is the same consistency level as `rsync` against a live NFS mount.
 
 **NOT safe to clone while the VM is running.** VM disk images (QCOW2, VMDK, raw) are single large files with internal structure. `cp` of a file being actively written to can produce an internally inconsistent disk image -- partial block writes, torn metadata, corrupted filesystem structures.
 
-```
-  WARNING: Cloning a SubVolume containing a running VM's disk image
-  will almost certainly produce an unusable clone. Stop the VM first.
+![Safe: stop the VM, clone, start the VM on the clone. Unsafe: clone while the VM runs, which gives a corrupted disk image](images/volume-cloning-vm-rule.drawio.svg)
 
-  Safe:    Stop VM  -->  Clone  -->  Start VM on clone
-  Unsafe:  Clone while VM running  -->  Corrupted disk image
-```
+Cloning a SubVolume that holds a running VM's disk image will almost certainly produce an unusable clone. Stop the VM first.
 
 ### Consistency Matrix
 
@@ -196,44 +175,39 @@ The core challenge is that `cp -a` of a large SubVolume can take minutes, but th
 
 All clone operations use the same asynchronous Job-based workflow, regardless of volume size:
 
-```
-CreateVolume with VolumeContentSource (clone)
-       │
-       ├── 1. Validate source SubVolume exists
-       ├── 2. Select target share (prefer source share)
-       ├── 3. Create SubVolume CR (phase=Cloning, cloneStatus=Pending)
-       ├── 4. Update pool capacity tracking
-       └── 5. Return CreateVolumeResponse immediately
-              │
-              │  (CloneWorker background loop, every 10s)
-              │
-              ├── 6. Detect SubVolume with cloneStatus=Pending
-              ├── 7. Transition to cloneStatus=InProgress
-              ├── 8. Create temp NFS PV (mounts target share root)
-              ├── 9. Create temp PVC (bound to temp PV)
-              ├── 10. Create clone Job:
-              │       - Mounts source PVC read-only at /source
-              │       - Mounts temp PVC (share root) at /target-share
-              │       - Runs: cp -a /source/. /target-share/<subPath>/
-              │       - chown + chmod to match SubVolume UID/GID/perms
-              ├── 11. Poll Job status until succeeded or failed
-              ├── 12. On success: cloneStatus=Complete, phase=Bound
-              ├── 13. On failure: cloneStatus=Failed, phase=Failed
-              └── 14. Cleanup temp PV, PVC, and Job
+![CreateVolume records a Pending SubVolume CR; the Clone Worker sets InProgress, makes temp PV and PVC, runs the copy Job and sets Complete or Failed](images/volume-cloning-worker.drawio.svg)
 
-  Later, when pod is scheduled:
+`CreateVolume` with a `VolumeContentSource` (clone):
 
-NodeStageVolume (standard NFS mount)
-  │
-NodePublishVolume
-  │
-  ├── 1. Read SubVolume CR cloneStatus
-  ├── 2. If cloneStatus != Complete:
-  │      Return codes.Unavailable ("clone in progress, retry")
-  │      (kubelet retries with backoff)
-  └── 3. If cloneStatus == Complete:
-         Bind-mount subdirectory into pod (normal path)
-```
+1. Validate that the source SubVolume exists.
+2. Select the target share (prefer the source share).
+3. Create the SubVolume CR (`phase=Cloning`, `cloneStatus=Pending`).
+4. Update the pool capacity tracking.
+5. Return `CreateVolumeResponse` immediately.
+
+The CloneWorker background loop (every 10 s):
+
+6. Detect a SubVolume with `cloneStatus=Pending`.
+7. Move it to `cloneStatus=InProgress`.
+8. Create a temp NFS PV (mounts the target share root).
+9. Create a temp PVC (bound to the temp PV).
+10. Create the clone Job:
+    - Mounts the source PVC read-only at `/source`.
+    - Mounts the temp PVC (share root) at `/target-share`.
+    - Runs `cp -a /source/. /target-share/<subPath>/`.
+    - Runs `chown` and `chmod` to match the SubVolume UID/GID/permissions.
+11. Poll the Job status until it succeeds or fails.
+12. On success: `cloneStatus=Complete`, `phase=Bound`.
+13. On failure: `cloneStatus=Failed`, `phase=Failed`.
+14. Clean up the temp PV, PVC and Job.
+
+Later, when the pod is scheduled, the node agent runs `NodeStageVolume` (a standard NFS mount), then `NodePublishVolume`:
+
+![NodePublishVolume reads cloneStatus: Complete bind-mounts into the pod, otherwise it returns Unavailable and kubelet retries](images/volume-cloning-node-gate.drawio.svg)
+
+1. Read the SubVolume CR `cloneStatus`.
+2. If `cloneStatus != Complete`: return `codes.Unavailable` ("clone in progress, retry"). Kubelet retries with backoff.
+3. If `cloneStatus == Complete`: bind-mount the subdirectory into the pod (the normal path).
 
 The node agent gates pod access on clone completion. Kubelet retries `NodePublishVolume` with exponential backoff, so the pod simply waits until the clone finishes. This is the same pattern used by CSI drivers that support asynchronous volume provisioning.
 
@@ -261,51 +235,11 @@ Long names are shortened with a hash. All of them are removed after the clone co
 
 ### Architecture Diagram
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                          CSI Controller                               │
-│                                                                       │
-│   CreateVolume(VolumeContentSource=VOLUME)                           │
-│       │                                                               │
-│       ├── Parse source volume ID                                     │
-│       ├── Fetch source SubVolume CR                                  │
-│       ├── Select target share                                        │
-│       ├── Create SubVolume CR (cloneStatus=Pending)                  │
-│       └── Return CreateVolumeResponse immediately                    │
-│                                                                       │
-└───────────────────────────────────────────────────────────────────────┘
+![The CSI Controller records the clone, the Clone Worker copies it in a Job and updates the SubVolume CR, and the node agent checks cloneStatus before mounting](images/architecture-clone-volume.drawio.svg)
 
-┌──────────────────────────────────────────────────────────────────────┐
-│                       Clone Worker (background)                       │
-│                                                                       │
-│   Polls every 10s for SubVolumes with cloneStatus=Pending/InProgress │
-│       │                                                               │
-│       ├── Create temp NFS PVs + PVCs for the share roots (kube-system)│
-│       ├── Create share data Job (cp -a + chown)                      │
-│       ├── Poll Job until succeeded/failed                            │
-│       ├── Update SubVolume: Complete or Failed                       │
-│       └── Cleanup temp resources                                     │
-│                                                                       │
-└───────────────────────────────────────────────────────────────────────┘
-
-┌──────────────────────────────────────────────────────────────────────┐
-│                          CSI Node Agent                               │
-│                                                                       │
-│   NodePublishVolume                                                  │
-│       │                                                               │
-│       ├── Fetch SubVolume CR                                         │
-│       ├── cloneStatus == Complete?                                   │
-│       │       │                                                       │
-│       │   ┌───┴───┐                                                  │
-│       │   │ YES   │  Normal bind-mount path                         │
-│       │   └───────┘                                                  │
-│       │       │                                                       │
-│       │   ┌───┴───┐                                                  │
-│       │   │  NO   │  Return codes.Unavailable (kubelet retries)     │
-│       │   └───────┘                                                  │
-│       │                                                               │
-└───────────────────────────────────────────────────────────────────────┘
-```
+- **CSI Controller:** `CreateVolume(VolumeContentSource=VOLUME)` parses the source volume ID, fetches the source SubVolume CR, selects the target share, creates the SubVolume CR (`cloneStatus=Pending`) and returns `CreateVolumeResponse` immediately.
+- **Clone Worker (background):** polls every 10 s for SubVolumes with `cloneStatus=Pending` or `InProgress`. It creates temp NFS PVs and PVCs for the share roots (in `kube-system`), creates the share data Job (`cp -a` + `chown`), polls the Job until it succeeds or fails, updates the SubVolume to `Complete` or `Failed`, and cleans up the temp resources.
+- **CSI Node Agent:** `NodePublishVolume` fetches the SubVolume CR. If `cloneStatus` is `Complete`, it takes the normal bind-mount path. If not, it returns `codes.Unavailable` and kubelet retries.
 
 ---
 
@@ -448,11 +382,7 @@ A clone can be placed on the same VPC file share as the source or on a different
 
 ### Same-Share Clone
 
-```
-VPC File Share (pool-1-a)
-  /pvcs/
-    /pvc-aaaa (source)  ──cp -a──>  /pvc-bbbb (clone)
-```
+![Same-share clone: the clone folder is made on the same file share as the source with cp -a](images/volume-cloning-same-share.drawio.svg)
 
 **Advantages:**
 - Faster copy. Data stays on the same NFS server; no network transfer between shares.
@@ -466,11 +396,7 @@ VPC File Share (pool-1-a)
 
 ### Cross-Share Clone
 
-```
-VPC File Share (pool-1-a)               VPC File Share (pool-1-b)
-  /pvcs/                                  /pvcs/
-    /pvc-aaaa (source)  ──cp via NFS──>     /pvc-bbbb (clone)
-```
+![Cross-share clone: the clone folder is made on a different file share than the source](images/volume-cloning-cross-share.drawio.svg)
 
 **Advantages:**
 - Better capacity distribution. The clone uses free space on a different share.

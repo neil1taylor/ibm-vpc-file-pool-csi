@@ -8,28 +8,7 @@ Decision framework for sizing pools, selecting profiles, and planning growth. Th
 
 Use this to determine your pool configuration:
 
-```
-1. What workload type?
-   ├── General (configs, logs, small apps) ──→ Profile: dp2, Share: 1-2 TB, Strategy: spread
-   ├── Database / analytics ──→ Profile: dp2 (set spec.iops), Share: 2-4 TB, Strategy: spread
-   ├── CI/CD ephemeral ──→ Profile: dp2, Share: 500 GB-1 TB, Strategy: binpack
-   ├── ML/AI training ──→ Profile: dp2, Share: 4-16 TB, Strategy: spread
-   └── KubeVirt VMs ──→ Profile: dp2, Share: 2-4 TB, Strategy: spread, UID: 107
-
-2. How many trust boundaries?
-   ├── Single team / single tenant ──→ 1 pool
-   ├── Multiple teams, same trust level ──→ 1 pool with tiers
-   └── Multiple teams, different trust levels ──→ Separate pools per trust boundary
-
-3. How many zones?
-   ├── Pods in one zone ──→ 1 pool in that zone
-   ├── Pods in many zones, shared data ──→ 1 pool (its one mount target serves every zone)
-   └── Zone-isolated data ──→ 1 pool per zone
-
-4. Need DR?
-   ├── No ──→ Done
-   └── Yes ──→ Add ReplicationPolicy + destination pool in DR region
-```
+![Four questions (workload type, trust boundaries, zones, DR) and the pool setting each answer gives](images/capacity-planning-decisions.drawio.svg)
 
 ---
 
