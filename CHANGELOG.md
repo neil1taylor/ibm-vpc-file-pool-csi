@@ -19,6 +19,10 @@ To make a release:
 
 ## [Unreleased]
 
+## [v0.14.1] — 2026-10-24
+
+A small release. The driver itself is the same as v0.14.0. The console now shows the driver's real VM snapshot mode, and the chart renders one more ConfigMap for it.
+
 ### Added
 
 - **The console shows the driver's real VM snapshot mode, "copy" or "instant"** (spec `docs/specs/2026-10-24-console-snapshot-mode.md`). The box on the Snapshots and Pools pages used to read only the KubeVirt `Sidecar` gate, so it said "on" while the driver was set to `vmSnapshots.method=copy`. The chart now renders a ConfigMap `ibm-vpc-file-pool-csi-settings` (key `vmSnapshotMethod`) and a Role that lets signed-in users `get` that one ConfigMap by name. The box says instant only when the driver is set to `auto` and the gate is on. A driver that does not publish its setting shows "unknown".
