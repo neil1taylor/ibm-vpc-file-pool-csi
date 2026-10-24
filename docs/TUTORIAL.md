@@ -29,22 +29,7 @@ Hands-on tutorials covering every major capability of the pool CSI driver. Each 
 
 ## Reading Order
 
-```
-Part 1 (foundation — do this first)
-├── Part 2 (snapshots/clones)
-│   └── Part 3 (group snapshots/hooks)
-├── Part 4 (pool configuration)
-│   └── Part 5 (golden images)
-├── Part 6 (replication/failover)
-├── Part 7 (monitoring)
-├── Part 8 (migration/console)
-├── Part 9 (COS bucket for backups)
-├── Part 10 (backup and restore)
-├── Part 11 (instant VM snapshots)
-├── Part 12 (replicating running VMs)
-│   └── Part 13 (failover of running VMs)
-└── Part 14 (restore a snapshot in the console)
-```
+![Part 1 comes first; Parts 2 to 14 follow from it, with Part 3 after Part 2, Part 5 after Part 4 and Part 13 after Part 12](images/tutorial-reading-order.drawio.svg)
 
 Parts 2-14 are independent of each other, except that Part 13 follows Part 12. Pick whichever is relevant to your use case.
 

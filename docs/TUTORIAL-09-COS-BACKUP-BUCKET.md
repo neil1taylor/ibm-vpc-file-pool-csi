@@ -8,6 +8,8 @@ Make an IBM Cloud Object Storage (COS) bucket that the backup export can use: a 
 
 **Account:** the one that holds your cluster. **Region:** the bucket is in the cluster's region (`eu-de` here).
 
+![A CBR rule lets only the cluster VPC and the admin addresses reach the bucket; the export Job uses a writer-role key](images/tutorial-09-cos-bucket.drawio.svg)
+
 ---
 
 ## Prerequisites

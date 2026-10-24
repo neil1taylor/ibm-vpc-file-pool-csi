@@ -323,6 +323,8 @@ KubeVirt VMs work with the pool CSI driver. The driver mounts NFS with `sec=sys`
 
 > **Note:** This step creates regular PVCs on the pool and downloads the OS image directly. CDI registry import also works on a pool StorageClass; see [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md#cdi-containerized-data-importer-compatibility).
 
+![The VM mounts a boot PVC and a data PVC, and each PVC is a SubVolume on the pool's file share](images/tutorial-01-vm-disks.drawio.svg)
+
 ### Step 8a: Create the Boot and Data PVCs
 
 ```bash
@@ -740,25 +742,7 @@ See [Known Limitations — KubeVirt NFS Permissions](KNOWN-LIMITATIONS.md#kubevi
 
 When a FileSharePool reaches `Ready`, the controller **auto-creates** a StorageClass named after the pool. You can also create StorageClasses manually if you opt out of auto-creation.
 
-```
-StorageClass (auto-created)     FileSharePool                VPC File Share
-┌─────────────────────┐        ┌──────────────────┐        ┌──────────────────┐
-│ my-pool             │        │ my-pool          │        │ my-pool-share-1  │
-│                     │        │                  │        │                  │
-│ parameters:         │───────>│ zone: eu-de-1    │───────>│ 100 GB, dp2      │
-│   pool: my-pool     │        │ profile: dp2     │        │ NFS mount target │
-│                     │        │ shareSizeGB: 100 │        │                  │
-└─────────────────────┘        └──────────────────┘        └──────────────────┘
-         │                              │
-         │ PVC requests                 │ Allocates subdirectories
-         ▼                              ▼
-┌─────────────────────┐        ┌──────────────────┐
-│ PVC: my-app-data    │        │ SubVolume CR     │
-│ 10Gi RWX            │───────>│ shareID: r010-.. │
-│                     │        │ subPath: /pvcs/  │
-└─────────────────────┘        │   pvc-xxxx       │
-                               └──────────────────┘
-```
+![A StorageClass names a pool, the pool manages a VPC file share, and each PVC becomes a SubVolume](images/tutorial-01-storageclass-chain.drawio.svg)
 
 - **One StorageClass** references **one pool** (via `parameters.pool`) — auto-created by the controller
 - **One pool** manages **one or more VPC file shares** (auto-expands as needed)

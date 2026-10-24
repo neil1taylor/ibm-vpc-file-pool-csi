@@ -7,6 +7,8 @@ Make a snapshot of a volume in the OpenShift console, change the volume, and res
 **Time:** about 15 minutes.
 **Scope:** this page restores a **snapshot**, which stays on the same share as its volume. The console has no screens for backups yet. To restore a backup, use `kubectl backup restore` ([Part 10](TUTORIAL-10-BACKUP-AND-RESTORE.md)).
 
+![A snapshot of a volume stays on the same share, and a restore makes a new PVC from it](images/tutorial-14-console-restore.drawio.svg)
+
 ---
 
 ## Prerequisites
