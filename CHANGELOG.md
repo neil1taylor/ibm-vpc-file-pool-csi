@@ -19,6 +19,10 @@ To make a release:
 
 ## [Unreleased]
 
+### Added
+
+- **Interactive teaching page 11, "What QEMU does"** (`docs/diagrams/11-what-qemu-does.html`): how QEMU copies a running VM disk at one moment, keeps a change list, and why a VM move makes the next copy a full copy.
+
 ## [v0.14.0] — 2026-10-22
 
 This release adds backup to a snapshot pool and to IBM Cloud Object Storage (COS), instant VM snapshots, replication of running VMs, 21 alerts with real share usage and latency, image and controller hardening, and many fixes.
