@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VM Disk Snapshot Chain</title>
+<title>Instant VM Snapshots</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
-/* Layout: steps on top, the VM's disk now and each snapshot as rows of labelled blocks, then the files on the share. Every block shows its content and takes the colour of the file that holds it. */
+/* Layout: settings and steps on top, the VM's disk now and each snapshot as rows of labelled blocks, then the files on the share. Every block shows its content and takes the colour of the file that holds it. */
 :root{
   --bg:#f4f6f8; --panel:#ffffff; --fg:#161d26; --muted:#5a6675; --line:#d5dce4; --share:#e9eef4;
-  --ok:#0e6b4f; --warn:#8a5300; --btn:#0f4fd6; --btn-fg:#ffffff;
+  --ok:#0e6b4f; --warn:#8a5300; --bad:#b3261e; --btn:#0f4fd6; --btn-fg:#ffffff;
   --l0:#2b6f8f; --l1:#d9780f; --l2:#7a4fb0; --l3:#c43d63; --l4:#3a8a2b; --l5:#8d9124;
   --font:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
   --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
@@ -18,11 +18,11 @@
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --bg:#10161d; --panel:#18212b; --fg:#e6ebf1; --muted:#9aa7b6; --line:#2b3745; --share:#1d2834;
-  --ok:#5fd0a6; --warn:#e0a24a; --btn:#6c9bff; --btn-fg:#0b1220;
+  --ok:#5fd0a6; --warn:#e0a24a; --bad:#ff8a80; --btn:#6c9bff; --btn-fg:#0b1220;
   --l0:#5fb3d6; --l1:#f0a04b; --l2:#b595e6; --l3:#ee7f9b; --l4:#7fcb6a; --l5:#c4c76a; color-scheme:dark;}}
 :root[data-theme="dark"]{
   --bg:#10161d; --panel:#18212b; --fg:#e6ebf1; --muted:#9aa7b6; --line:#2b3745; --share:#1d2834;
-  --ok:#5fd0a6; --warn:#e0a24a; --btn:#6c9bff; --btn-fg:#0b1220;
+  --ok:#5fd0a6; --warn:#e0a24a; --bad:#ff8a80; --btn:#6c9bff; --btn-fg:#0b1220;
   --l0:#5fb3d6; --l1:#f0a04b; --l2:#b595e6; --l3:#ee7f9b; --l4:#7fcb6a; --l5:#c4c76a; color-scheme:dark;}
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--fg);font:15px/1.5 var(--font);
@@ -62,22 +62,56 @@ button:focus-visible{outline:2px solid var(--btn);outline-offset:2px}
 .hint{font-size:.85rem;color:var(--muted)}
 @media (max-width:620px){.row,.file{grid-template-columns:1fr}.file .bar{justify-self:start}}
 @media (prefers-reduced-motion:no-preference){.cells i{transition:background .25s,border-color .25s}}
+nav.top{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:.85rem;color:var(--muted)}
+nav.top a{color:var(--btn);text-decoration:none}
+nav.top a:hover{text-decoration:underline}
+nav.top .off{opacity:.5}
+button.on{outline:2px solid var(--btn);outline-offset:-2px;font-weight:600}
+.set{display:grid;grid-template-columns:230px minmax(0,1fr);gap:8px 12px;align-items:center}
+.set .bar{gap:6px}
+.chip{display:inline-block;font-size:.76rem;font-weight:600;padding:1px 8px;border-radius:10px;border:1px solid var(--line)}
+.chip.ok{color:var(--ok);border-color:var(--ok)}
+.chip.warn{color:var(--warn);border-color:var(--warn)}
+.chip.bad{color:var(--bad);border-color:var(--bad)}
+ul.plain{margin:0;padding-left:1.2em;max-width:65ch}
+ul.plain li{margin:2px 0}
+@media (max-width:620px){.set{grid-template-columns:1fr}}
 </style>
 
 </head>
 <body>
 <main>
+<nav class="top" aria-label="Pages"><a href="index.html">All pages</a><a href="11-what-qemu-does.html">&larr; Previous page</a><span class="off">Next page &rarr; (this is the last page)</span></nav>
   <div>
-    <h1>VM Disk Snapshot Chain</h1>
-    <p class="lead">A VM's disk is one file on a shared file share. This page shows what happens to that file when you take a snapshot. Each block below is one piece of the disk. The letter is what is stored in it.</p>
+    <h1>Instant VM Snapshots</h1>
+    <p class="lead">A VM's disk is one file, <span class="mono">disk.img</span>, on a shared file share. An instant snapshot copies nothing. QEMU, the program that runs the VM, stops writing to the disk's file and writes to a new, small file next to it. This set of files is a <b>chain</b>. Each block below is one piece of the disk. The letter is what is stored in it.</p>
   </div>
+
+  <section class="card" aria-label="Settings">
+    <h2>Settings</h2>
+    <div class="set">
+      <span>Driver setting <span class="mono">vmSnapshots.method</span></span>
+      <div class="bar"><button id="m-auto">auto (default)</button><button id="m-copy">copy</button></div>
+      <span>KubeVirt <span class="mono">Sidecar</span> feature gate</span>
+      <div class="bar"><button id="g-on">on</button><button id="g-off">off</button></div>
+      <span>Snapshots of VM disks are</span>
+      <div id="mode"></div>
+    </div>
+    <p class="hint">The <span class="mono">Sidecar</span> feature gate is a switch in KubeVirt. It is off by default. It lets a VM's pod have an extra container. The driver setting <span class="mono">vmSnapshots.enableSidecarGate=true</span> turns the gate on after each install and upgrade. It needs <span class="mono">method=auto</span>. You can also turn the gate on by hand. Nothing in the driver ever turns the gate off: you do that by hand.</p>
+  </section>
 
   <div class="bar">
     <button class="primary" id="btn-write">1. VM changes some data</button>
     <button id="btn-snap">2. Take a snapshot</button>
+    <button id="btn-flat">Delete all snapshots (flatten)</button>
     <button id="btn-reset">Start again</button>
   </div>
-  <p class="hint">Try: take a snapshot, then change data. The snapshot keeps the old letters. The VM sees the new ones. A block with a white outline was just changed.</p>
+  <div class="bar">
+    <button id="vm-stop">Stop the VM</button>
+    <button id="vm-start">Start the VM</button>
+    <button id="vm-move">Move the VM to another node</button>
+  </div>
+  <p class="hint">Try: take a snapshot, then change data. The snapshot keeps the old letters. The VM sees the new ones. Then stop and start the VM. Then turn the gate off and start the VM again. A block with a white outline was just changed.</p>
 
   <section class="card" aria-label="What the VM and its snapshots see">
     <h2>What you see</h2>
@@ -93,25 +127,47 @@ button:focus-visible{outline:2px solid var(--btn);outline-offset:2px}
   </section>
 
   <div class="stats" aria-live="polite">
+    <span>VM: <b id="st-vm">running</b></span>
+    <span>Hook: <b id="st-hook">not needed</b></span>
     <span>Blocks copied by the last action: <b id="copied">0</b></span>
     <span>Files in the chain: <b id="count">1</b> of 6</span>
   </div>
   <div class="log" id="log" aria-live="polite"></div>
+
+  <section class="card" aria-label="What to know">
+    <h2>What to know</h2>
+    <ul class="plain">
+      <li><b>Reads:</b> QEMU looks in the newest file first. If that piece is not there, it looks in the file before, down to <span class="mono">disk.img</span>. Each file has a small map of the pieces it holds, so this is fast.</li>
+      <li><b>Taking a snapshot of a running VM:</b> the guest is frozen for a moment, so it writes its pending data to disk. OpenShift does this when you take a VM snapshot in the console. Otherwise the driver asks the guest agent. QEMU then starts the new file, and the guest thaws. The VM never stops.</li>
+      <li><b>Frozen files are read-only.</b> A write to a frozen file would damage every snapshot built on it.</li>
+      <li><b>The hook:</b> KubeVirt always opens <span class="mono">disk.img</span> when a VM starts. It does not know about the chain. So when a VM with snapshots starts, the driver adds a hook: a small extra container in the VM's pod. The hook tells QEMU to open the newest file. The hook needs the <span class="mono">Sidecar</span> gate. A running VM does not need the hook to take a snapshot or to move.</li>
+      <li><b>Fail safe:</b> if a VM with snapshots starts without the hook, QEMU cannot write to the read-only <span class="mono">disk.img</span>, so the VM does not start. It never starts on old data.</li>
+      <li><b>To turn instant snapshots off:</b> delete each VM's snapshots first (<span class="mono">kubectl pool-snapshots flatten &lt;vm&gt; -n &lt;namespace&gt;</span>), then turn the gate off.</li>
+      <li><b>A stopped VM:</b> QEMU does not run, so a Job makes the new file or does the merge. While the Job runs, the VM cannot start.</li>
+      <li><b>Deleting a snapshot</b> merges the next file into it. Only the changed pieces move. <b>Restoring</b> makes a new disk with a full copy, so it is not instant.</li>
+      <li><b>Limits:</b> the driver allows at most 16 snapshot files per disk, because each file makes reads a little slower. This page allows 5.</li>
+      <li><b>Support:</b> Red Hat does not support the <span class="mono">Sidecar</span> gate. With it on, <span class="mono">HyperConverged</span> reports <span class="mono">TaintedConfiguration=True</span>. The gate is for the whole cluster: anyone who can create or edit a VM can then add an extra container to that VM's pod.</li>
+    </ul>
+    <p class="hint">The full design and the lab results are in <a href="../VM-INSTANT-SNAPSHOTS.md">VM-INSTANT-SNAPSHOTS.md</a>. If this page and that document disagree, the document is right.</p>
+  </section>
 </main>
 
 <script>
 (function(){
   var N=8, MAX=6, LETTERS="ABCDEFGH";
-  var state, nextColor, nextSnap, restored, version, lastChanged;
+  var state, nextColor, nextSnap, restored, version, lastChanged, method, gate, vm, node, hook;
+  function el(i){return document.getElementById(i);}
+  function instantOn(){ return method==="auto" && gate; }
+  function hasChain(){ return state.length>1; }
 
   function reset(){
     var m=new Map(); for(var i=0;i<N;i++) m.set(i,LETTERS[i]+"1");
     state=[{name:"disk.img",blocks:m,snap:null,color:0}];
     nextColor=1; nextSnap=1; restored=null; version=1; lastChanged=[];
-    show("This is a disk with 8 blocks, all stored in <b>disk.img</b>. Take a snapshot, then change some data.",0);
+    method="auto"; gate=true; vm="running"; node="A"; hook=false;
+    show("This is a disk with 8 blocks, all stored in <b>disk.img</b>. The VM runs on node A. Take a snapshot, then change some data.",0);
   }
-  var copiedEl=document.getElementById("copied"), logEl=document.getElementById("log");
-  function show(html,copied){ logEl.innerHTML=html; copiedEl.textContent=copied; render(); }
+  function show(html,copied){ el("log").innerHTML=html; el("copied").textContent=copied; render(); }
 
   function owner(files,b){ for(var i=files.length-1;i>=0;i--) if(files[i].blocks.has(b)) return files[i]; return null; }
   function cells(files,mark){
@@ -130,7 +186,7 @@ button:focus-visible{outline:2px solid var(--btn);outline-offset:2px}
     for(var i=0;i<state.length-1;i++){
       v+='<div class="row"><div class="who"><b>Snapshot '+state[i].snap+'</b><span>the disk as it was</span></div>'+cells(state.slice(0,i+1),false)+'</div>';
     }
-    document.getElementById("views").innerHTML='<div style="display:flex;flex-direction:column;gap:10px">'+v+'</div>';
+    el("views").innerHTML='<div style="display:flex;flex-direction:column;gap:10px">'+v+'</div>';
 
     var h='';
     for(var j=state.length-1;j>=0;j--){
@@ -141,16 +197,30 @@ button:focus-visible{outline:2px solid var(--btn);outline-offset:2px}
          own(f)+
          '<div class="bar bar2">'+(top?'':'<button data-del="'+j+'">Delete snapshot '+f.snap+'</button><button data-res="'+j+'">Restore</button>')+'</div></div>';
     }
-    document.getElementById("folder-main").innerHTML=h;
-    document.getElementById("folder-restore").innerHTML = restored ?
+    el("folder-main").innerHTML=h;
+    el("folder-restore").innerHTML = restored ?
       '<div class="file" style="--c:var(--muted)"><div class="name"><span class="mono">/pvcs/pvc-ccc/disk.img</span><span class="tag">new disk: a full copy of Snapshot '+restored.snap+'</span></div>'+
       '<div class="cells">'+restored.vals.map(function(x){return '<i style="--c:var(--muted)">'+x+'</i>';}).join('')+'</div><span></span></div>' : "";
-    document.getElementById("count").textContent=state.length;
-    document.getElementById("btn-snap").disabled = state.length>=MAX;
-    document.getElementById("share-note").textContent = state.length>1 ? state.length+" files in the chain" : "1 file";
-  }
+    el("count").textContent=state.length;
+    el("share-note").textContent = state.length>1 ? state.length+" files in the chain" : "1 file";
 
-  document.getElementById("btn-write").onclick=function(){
+    el("m-auto").className=method==="auto"?"on":""; el("m-copy").className=method==="copy"?"on":"";
+    el("g-on").className=gate?"on":""; el("g-off").className=gate?"":"on";
+    el("mode").innerHTML = instantOn() ? '<span class="chip ok">instant</span>'
+      : '<span class="chip warn">full copies</span> <span class="hint">'+(method==="copy"?"because the method is copy":"because the gate is off")+'</span>';
+    el("st-vm").textContent = vm==="running" ? "running on node "+node : vm==="failed" ? "did not start" : "stopped";
+    el("st-hook").textContent = vm!=="running" ? (vm==="failed"?"missing":"-") : hook ? "added at start" : "not needed";
+
+    el("btn-write").disabled = vm!=="running";
+    el("btn-snap").disabled = state.length>=MAX;
+    el("btn-flat").disabled = !hasChain();
+    el("vm-stop").disabled = vm!=="running";
+    el("vm-start").disabled = vm==="running";
+    el("vm-move").disabled = vm!=="running";
+  }
+  function by(){ return vm==="running" ? "QEMU did this while the VM kept running." : "The VM is stopped, so a Job did this with qemu-img."; }
+
+  el("btn-write").onclick=function(){
     var top=state[state.length-1], picked=[];
     while(picked.length<3){ var b=Math.floor(Math.random()*N); if(picked.indexOf(b)<0) picked.push(b); }
     version++; lastChanged=picked;
@@ -158,21 +228,67 @@ button:focus-visible{outline:2px solid var(--btn);outline-offset:2px}
     var snaps=state.length>1;
     show("The VM changed 3 blocks (white outline). The new letters were written to <b>"+top.name+"</b>."+(snaps?" The snapshots above still show the old letters, because the older files did not change.":" There is no snapshot yet, so the change went straight into the one file."),0);
   };
-  document.getElementById("btn-snap").onclick=function(){
+  el("btn-snap").onclick=function(){
+    if(!instantOn()){
+      lastChanged=[];
+      show("<b>Instant snapshots are off</b> ("+(method==="copy"?"the method is copy":"the gate is off")+"). The driver makes a full copy of the disk instead, and the chain does not change. <a href=\"11-what-qemu-does.html\">Page 11</a> shows that copy. Turn instant snapshots on above to follow this page.",0);
+      return;
+    }
     var top=state[state.length-1]; top.snap=nextSnap++; lastChanged=[];
     var nf={name:"snap-"+state.length+".qcow2",blocks:new Map(),snap:null,color:nextColor++%6};
     state.push(nf);
-    show("<b>Snapshot "+top.snap+" taken.</b> <span class='mono'>"+top.name+"</span> is frozen, so it keeps these letters for good. A new empty file <span class='mono'>"+nf.name+"</span> takes all new writes. <b>Nothing was copied</b>, so it takes seconds for any disk size.",0);
+    if(vm==="failed") vm="stopped";
+    var how = vm==="running"
+      ? "The guest was frozen for a moment, so it wrote its pending data to disk. QEMU started a new empty file, <span class='mono'>"+nf.name+"</span>, and switched to it. Then the guest thawed."
+      : "The VM is stopped, so a Job made the new empty file <span class='mono'>"+nf.name+"</span>. While the Job ran, the VM could not start.";
+    show("<b>Snapshot "+top.snap+" taken.</b> "+how+" The driver made <span class='mono'>"+top.name+"</span> read-only, so it keeps these letters for good. <b>Nothing was copied</b>, so it takes seconds for any disk size.",0);
   };
-  document.getElementById("btn-reset").onclick=reset;
+  el("btn-flat").onclick=function(){
+    var base=state[0], moved=0;
+    for(var i=1;i<state.length;i++) state[i].blocks.forEach(function(val,b){ base.blocks.set(b,val); moved++; });
+    state=[base]; base.snap=null; lastChanged=[];
+    show("<b>All snapshots deleted.</b> This is what <span class='mono'>kubectl pool-snapshots flatten</span> does. Every change was merged back into <span class='mono'>disk.img</span>, which is the live file again and is writable. "+by()+" The VM no longer needs the hook, so you can now turn the gate off safely.",moved);
+  };
+  el("btn-reset").onclick=reset;
 
-  document.getElementById("folder-main").addEventListener("click",function(e){
+  el("vm-stop").onclick=function(){
+    vm="stopped"; hook=false; lastChanged=[];
+    show("The VM is stopped. QEMU no longer runs. The chain stays on the share as it is.",0);
+  };
+  el("vm-start").onclick=function(){
+    lastChanged=[];
+    if(!hasChain()){
+      vm="running"; hook=false;
+      show("The VM started. It has no snapshots, so the driver did not change it. KubeVirt opened <span class='mono'>disk.img</span> as usual.",0);
+    } else if(instantOn()){
+      vm="running"; hook=true;
+      show("The VM started. It has snapshots, so <b>the driver added the hook</b> to the VM's pod. The hook told QEMU to open the newest file, <span class='mono'>"+state[state.length-1].name+"</span>. QEMU follows the chain down to <span class='mono'>disk.img</span>, so the VM sees its latest data.",0);
+    } else {
+      vm="failed"; hook=false;
+      show("<b>The VM did not start.</b> "+(method==="copy"?"With the method copy, the driver adds no hook.":"With the gate off, the driver cannot add the hook.")+" So KubeVirt tried to open <span class='mono'>disk.img</span> for writing. <span class='mono'>disk.img</span> is read-only, so QEMU stopped with \"Permission denied\". This is on purpose: otherwise the VM would start on old data and lose every change since Snapshot 1. To fix it, turn instant snapshots back on, or flatten the VM first.",0);
+    }
+  };
+  el("vm-move").onclick=function(){
+    node=node==="A"?"B":"A"; lastChanged=[];
+    show("The VM moved to node "+node+" while it ran (a live migration). The chain did not move: it stays on the share. The new QEMU writes to the same newest file. A move does not need the hook.",0);
+  };
+
+  el("m-auto").onclick=function(){ method="auto"; lastChanged=[];
+    show("Method <span class='mono'>auto</span>: snapshots are instant where the gate is on, and full copies where it is off. The driver adds the hook to each VM with snapshots when it starts.",0); };
+  el("m-copy").onclick=function(){ method="copy"; lastChanged=[];
+    show("Method <span class='mono'>copy</span>: every VM snapshot is a full copy, and the driver adds no hook."+(hasChain()?" <b>This VM still has snapshots.</b> It keeps running, but it will not start again until you go back to <span class='mono'>auto</span> or flatten it.":""),0); };
+  el("g-on").onclick=function(){ gate=true; lastChanged=[];
+    show("The gate is on. <span class='mono'>HyperConverged</span> now reports <span class='mono'>TaintedConfiguration=True</span>. Red Hat does not support this setting.",0); };
+  el("g-off").onclick=function(){ gate=false; lastChanged=[];
+    show("You turned the gate off by hand. The driver never does this."+(hasChain()?" <b>This VM still has snapshots.</b> It keeps running, but it will not start again until the gate is on or you flatten it. Flatten first, then turn the gate off.":" The VM has no snapshots, so this is safe."),0); };
+
+  el("folder-main").addEventListener("click",function(e){
     var t=e.target.closest("button"); if(!t) return;
     if(t.dataset.del!==undefined){
       var i=+t.dataset.del, lo=state[i], up=state[i+1], moved=0, gone=lo.snap;
       up.blocks.forEach(function(val,b){ lo.blocks.set(b,val); moved++; });
       lo.snap=up.snap; state.splice(i+1,1); lastChanged=[];
-      show("<b>Snapshot "+gone+" deleted.</b> The changes from the next file were merged into <span class='mono'>"+lo.name+"</span> while the VM kept running, and the next file was removed. Only changed blocks move: "+moved+" here.",moved);
+      show("<b>Snapshot "+gone+" deleted.</b> The changes from the next file were merged into <span class='mono'>"+lo.name+"</span>, and the next file was removed. "+by()+" Only changed blocks move: "+moved+" here.",moved);
     } else if(t.dataset.res!==undefined){
       var j=+t.dataset.res, vals=[], files=state.slice(0,j+1);
       for(var b=0;b<N;b++) vals.push(owner(files,b).blocks.get(b));

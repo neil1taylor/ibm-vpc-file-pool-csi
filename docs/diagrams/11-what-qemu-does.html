@@ -84,7 +84,7 @@ ul.plain li{margin:2px 0}
 </head>
 <body>
 <main>
-<nav class="top" aria-label="Pages"><a href="index.html">All pages</a><a href="10-several-disks-one-moment.html">&larr; Previous page</a><span class="off">Next page &rarr; (this is the last page)</span></nav>
+<nav class="top" aria-label="Pages"><a href="index.html">All pages</a><a href="10-several-disks-one-moment.html">&larr; Previous page</a><a href="vm-snapshot-chain.html">Next page &rarr;</a></nav>
   <div>
     <h1>What QEMU Does</h1>
     <p class="lead"><b>QEMU</b> is the program that runs each VM. It runs in the VM's pod, in the container called <span class="mono">compute</span>. It reads and writes the VM's disk file, <span class="mono">disk.img</span>, on the share. The driver does not run VMs. It sends commands to QEMU when it needs a copy of a running VM's disk. This page shows one disk of 12 blocks. The number in a block is its version. The version goes up each time the guest writes to that block.</p>
