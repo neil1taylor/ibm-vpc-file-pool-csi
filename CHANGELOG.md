@@ -19,6 +19,10 @@ To make a release:
 
 ## [Unreleased]
 
+## [v0.14.3] — 2026-10-24
+
+A fix release for the node agent. Volumes of a deleted share no longer stay mounted on nodes, and share metrics are no longer minutes late on a node with dead mounts. No CRD or chart value changes.
+
 ### Fixed
 
 - **Volumes of a deleted share no longer stay mounted on nodes for good.** When a pool was deleted soon after its volumes (as the performance test cleanup does), the share was gone before kubelet unmounted the volumes from the node. `umount` then waited on an NFS server that never answers, kubelet gave up, the late unmount removed the folder, and every repeat failed with "no mount point specified", so kubelet repeated it forever. The node agent now treats a volume that is already unmounted as done, and detaches a mount whose `umount` has no answer in 30 s. Found on rovslab-dr-eude, where one node held about 25 such mounts; the fix cleaned all of them.
