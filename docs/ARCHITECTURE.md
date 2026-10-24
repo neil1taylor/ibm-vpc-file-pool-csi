@@ -4,59 +4,7 @@ For the meaning of project words such as pool, share, SubVolume and moment, see 
 
 ## System Overview
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                        Kubernetes Cluster                            │
-│                                                                      │
-│  ┌─────────────┐    PVC     ┌──────────────────────────────────┐    │
-│  │  Workload   │──created──▶│       CSI Controller Pod          │    │
-│  │   Pod       │            │                                    │    │
-│  │             │            │  ┌────────────────┐                │    │
-│  │  /data ◄───bind-mount───│──│  CSI Controller │                │    │
-│  │             │            │  │  (gRPC server)  │                │    │
-│  └─────────────┘            │  └───────┬────────┘                │    │
-│        ▲                    │          │ Allocate()              │    │
-│        │                    │  ┌───────▼────────┐                │    │
-│        │                    │  │  Pool Manager   │                │    │
-│  ┌─────┴───────┐            │  │                 │                │    │
-│  │  CSI Node   │            │  │  - Pick share   │                │    │
-│  │  Agent      │            │  │  - Record CR    │                │    │
-│  │  (DaemonSet)│            │  │  - Track alloc  │                │    │
-│  │             │            │  │  - Auto-expand  │                │    │
-│  │  NFS mount  │            │  └───────┬────────┘                │    │
-│  │  + bind     │            │          │                          │    │
-│  └─────────────┘            │  ┌───────▼────────┐                │    │
-│                             │  │  IBM VPC Client │                │    │
-│                             │  │  (share CRUD)   │                │    │
-│                             │  └───────┬────────┘                │    │
-│                             └──────────┼────────────────────────┘    │
-│                                        │                              │
-└────────────────────────────────────────┼──────────────────────────────┘
-                                         │ HTTPS (VPC API)
-                                         ▼
-                              ┌─────────────────────┐
-                              │  IBM Cloud VPC API   │
-                              │  File Share Service  │
-                              └──────────┬──────────┘
-                                         │
-                                         ▼
-                              ┌─────────────────────┐
-                              │  VPC File Shares     │
-                              │  (NFS exports)       │
-                              │                      │
-                              │  ┌────────────────┐  │
-                              │  │ Share pool-1-a │  │
-                              │  │ /pvcs/pvc-aaa  │  │
-                              │  │ /pvcs/pvc-bbb  │  │
-                              │  │ /pvcs/pvc-ccc  │  │
-                              │  └────────────────┘  │
-                              │  ┌────────────────┐  │
-                              │  │ Share pool-1-b │  │
-                              │  │ /pvcs/pvc-ddd  │  │
-                              │  │ /pvcs/pvc-eee  │  │
-                              │  └────────────────┘  │
-                              └─────────────────────┘
-```
+![The workload pod, the CSI Node Agent, the CSI Controller with its Pool Manager and IBM VPC Client, the VPC API and the VPC file shares](images/architecture-system-overview.drawio.svg)
 
 ## Components
 
@@ -291,162 +239,102 @@ See `CRD-SPEC.md` for full type definitions.
 
 ## Data Flow: CreateVolume
 
-```
-1. User creates PVC with the pool's StorageClass (auto-created, named after pool)
-       │
-2. csi-provisioner sidecar calls CreateVolume gRPC
-       │
-3. CSI Controller receives CreateVolume
-       │
-       ├─ Extract pool name from StorageClass parameters
-       ├─ Extract requested size from PVC spec
-       │
-4. Call PoolManager.Allocate(ctx, request)
-       │
-       ├─ 4a. Read FileSharePool CR for the named pool
-       ├─ 4b. Read all SubVolume CRs for that pool (or use cached state)
-       ├─ 4c. Calculate per-share allocated capacity
-       ├─ 4d. Pick a share with enough remaining capacity
-       │       (strategy: spread or bin-pack, per pool config)
-       │
-       │   If no share has room:
-       │       ├─ If pool.spec.autoExpand and shares < maxShares:
-       │       │   Create new VPC file share via IBM VPC Client (SLOW: 30-90s)
-       │       │   Wait for share to become "stable"
-       │       │   Add to FileSharePool.Status.Shares
-       │       │   Use this new share
-       │       └─ Else: return codes.ResourceExhausted error (retriable)
-       │
-       ├─ 4e. Create SubVolume CR recording the allocation
-       │
-       └─ 4f. Return AllocationResult (share IP, subpath, uid, gid, permissions)
-       │
-       │   NOTE: Subdirectory creation is deferred to NodePublishVolume on the node agent.
-       │   The controller does NOT create directories on the NFS share (nfsOps is nil).
-       │
-5. CSI Controller returns CreateVolumeResponse with:
-       - volume_id: "{pool}/{share-id}/{subdir-name}"
-       - volume_context:
-           server: "10.240.1.5"                  # Primary (home zone) IP
-           server.us-south-1: "10.240.1.5"       # Zone-keyed IPs (when accessorZones configured)
-           server.us-south-2: "10.240.2.10"      # Accessor zone IP
-           share: "/"
-           subDir: "/pvcs/pvc-abc123"
-           pool: "general-purpose"
-           shareID: "r006-a1b2c3d4-..."
-           permissions: "0755"   # optional
-           uid: "1000"           # optional
-           gid: "1000"           # optional
-       - accessible_topology: [zone]
-       │
-6. Kubernetes creates PV, binds it to the PVC
-       │
-7. Pod scheduled → kubelet calls NodeStageVolume + NodePublishVolume
-       │
-8. Node agent mounts share (if not cached), creates subdirectory if it
-       does not exist (with uid/gid/permissions from VolumeContext), then
-       bind-mounts subdir into pod
-```
+![A new PVC goes through the provisioner, the CSI Controller and the Pool Manager, which records a SubVolume CR; the node agent then mounts it](images/architecture-create-volume.drawio.svg)
+
+1. The user creates a PVC with the pool's StorageClass (auto-created, named after the pool).
+2. The `csi-provisioner` sidecar calls the `CreateVolume` gRPC.
+3. The CSI Controller receives `CreateVolume`. It takes the pool name from the StorageClass parameters and the requested size from the PVC spec.
+4. It calls `PoolManager.Allocate(ctx, request)`:
+   - 4a. Read the FileSharePool CR for the named pool.
+   - 4b. Read all SubVolume CRs for that pool (or use cached state).
+   - 4c. Calculate the allocated capacity of each share.
+   - 4d. Pick a share with enough remaining capacity (strategy: spread or bin-pack, per pool config).
+     - If no share has room and `pool.spec.autoExpand` is on and shares < `maxShares`: create a new VPC file share through the IBM VPC Client (slow: 30-90 s), wait for it to become "stable", add it to `FileSharePool.Status.Shares`, and use it.
+     - Otherwise: return a retriable `codes.ResourceExhausted` error.
+   - 4e. Create the SubVolume CR that records the allocation.
+   - 4f. Return an `AllocationResult` (share IP, subpath, uid, gid, permissions).
+
+   The subdirectory is not created here. It is created in `NodePublishVolume` on the node agent. The controller does not create directories on the NFS share (`nfsOps` is nil).
+5. The CSI Controller returns `CreateVolumeResponse` with:
+   - `volume_id`: `"{pool}/{share-id}/{subdir-name}"`
+   - `volume_context`:
+     ```
+     server: "10.240.1.5"                  # Primary (home zone) IP
+     server.us-south-1: "10.240.1.5"       # Zone-keyed IPs (when accessorZones configured)
+     server.us-south-2: "10.240.2.10"      # Accessor zone IP
+     share: "/"
+     subDir: "/pvcs/pvc-abc123"
+     pool: "general-purpose"
+     shareID: "r006-a1b2c3d4-..."
+     permissions: "0755"   # optional
+     uid: "1000"           # optional
+     gid: "1000"           # optional
+     ```
+   - `accessible_topology`: `[zone]`
+6. Kubernetes creates the PV and binds it to the PVC.
+7. The pod is scheduled, and kubelet calls `NodeStageVolume` and `NodePublishVolume`.
+8. The node agent mounts the share (if not cached), creates the subdirectory if it does not exist (with uid/gid/permissions from VolumeContext), then bind-mounts the subdirectory into the pod.
 
 ## Data Flow: DeleteVolume
 
-```
-1. PVC deleted (reclaimPolicy: Delete)
-       │
-2. csi-provisioner calls DeleteVolume gRPC
-       │
-3. CSI Controller receives DeleteVolume
-       │
-       ├─ Parse volume_id to extract pool, share ID, subdir name
-       │
-4. Call PoolManager.Deallocate(ctx, subVolumeName)
-       │
-       ├─ 4a. Read SubVolume CR to get share details
-       ├─ 4b. Update FileSharePool.Status (decrement allocated capacity)
-       ├─ 4c. Delete SubVolume CR
-       │
-       │   NOTE: The controller does NOT remove subdirectories on the NFS share
-       │   (nfsOps is nil in controller mode). Subdirectory cleanup is a future
-       │   enhancement or handled by an external garbage collection process.
-       │
-5. CSI Controller returns success
-```
+![A deleted PVC reaches the Pool Manager, which lowers the pool status and deletes the SubVolume CR](images/architecture-delete-volume.drawio.svg)
+
+1. The PVC is deleted (`reclaimPolicy: Delete`).
+2. The `csi-provisioner` calls the `DeleteVolume` gRPC.
+3. The CSI Controller receives `DeleteVolume` and parses the `volume_id` to get the pool, share ID and subdir name.
+4. It calls `PoolManager.Deallocate(ctx, subVolumeName)`:
+   - 4a. Read the SubVolume CR to get the share details.
+   - 4b. Update `FileSharePool.Status` (decrement allocated capacity).
+   - 4c. Delete the SubVolume CR.
+
+   The controller does not remove subdirectories on the NFS share (`nfsOps` is nil in controller mode). Subdirectory cleanup is a future enhancement or handled by an external garbage collection process.
+5. The CSI Controller returns success.
 
 ## Data Flow: Pool Reconciliation (Background)
 
-```
-Every 60 seconds (or on FileSharePool CR change):
+![The reconciler checks share health, sums allocations, adds a share over the threshold, and updates status and metrics](images/architecture-reconcile.drawio.svg)
 
-1. Reconciler reads FileSharePool CR
-       │
-2. For each share in Status.Shares:
-       ├─ Call IBM VPC API to verify share health
-       ├─ If share is "degraded" or "failed":
-       │   Mark share as draining in Status
-       │
-3. Calculate total pool utilization:
-       ├─ Sum all SubVolume allocations
-       ├─ Compare to total pool capacity
-       │
-4. If utilization > expandThreshold:
-       ├─ If shares.count < maxShares:
-       │   Create new VPC file share (IBM VPC Client)
-       │   Add to Status.Shares when share becomes "stable"
-       └─ Else: emit Warning event ("pool at capacity")
-       │
-5. Update FileSharePool.Status with current metrics
-       │
-6. Emit Prometheus metrics:
-       - pool_total_capacity_gb
-       - pool_allocated_capacity_gb
-       - pool_pvc_count
-       - pool_share_count
-       - share_allocated_capacity_gb (per share)
-       - share_pvc_count (per share)
-```
+Every 60 seconds, or on a FileSharePool CR change:
+
+1. The reconciler reads the FileSharePool CR.
+2. For each share in `Status.Shares`, it calls the IBM VPC API to verify share health. If a share is "degraded" or "failed", it marks the share as draining in `Status`.
+3. It calculates the total pool utilization: the sum of all SubVolume allocations, compared with the total pool capacity.
+4. If utilization is above `expandThreshold`:
+   - If `shares.count < maxShares`: create a new VPC file share (IBM VPC Client) and add it to `Status.Shares` when it becomes "stable".
+   - Otherwise: emit a Warning event ("pool at capacity").
+5. It updates `FileSharePool.Status` with the current metrics.
+6. It emits Prometheus metrics:
+   - `pool_total_capacity_gb`
+   - `pool_allocated_capacity_gb`
+   - `pool_pvc_count`
+   - `pool_share_count`
+   - `share_allocated_capacity_gb` (per share)
+   - `share_pvc_count` (per share)
 
 ## Data Flow: CreateSnapshot
 
-```
-1. User creates VolumeSnapshot referencing a PVC
-       │
-2. csi-snapshotter sidecar calls CreateSnapshot gRPC
-       │
-3. CSI Controller receives CreateSnapshot
-       │
-       ├─ Parse source volume ID to extract pool, share ID, subdir name
-       │
-4. Call PoolManager.CreateSnapshot(ctx, snapshotName, sourceVolumeID, params)
-       │
-       ├─ 4a. Read source SubVolume CR
-       ├─ 4b. Create snapshot directory: /pvcs/.snapshots/{snap-name}/
-       ├─ 4c. cp -a from source subdir to snapshot directory
-       ├─ 4d. Create Snapshot CR recording the snapshot metadata
-       │
-5. CSI Controller returns CreateSnapshotResponse
-```
+![A VolumeSnapshot reaches the Pool Manager, which reads the source SubVolume CR, copies its folder and records a Snapshot CR](images/architecture-create-snapshot.drawio.svg)
+
+1. The user creates a VolumeSnapshot that references a PVC.
+2. The `csi-snapshotter` sidecar calls the `CreateSnapshot` gRPC.
+3. The CSI Controller receives `CreateSnapshot` and parses the source volume ID to get the pool, share ID and subdir name.
+4. It calls `PoolManager.CreateSnapshot(ctx, snapshotName, sourceVolumeID, params)`:
+   - 4a. Read the source SubVolume CR.
+   - 4b. Create the snapshot directory `/pvcs/.snapshots/{snap-name}/`.
+   - 4c. Run `cp -a` from the source subdirectory to the snapshot directory.
+   - 4d. Create the Snapshot CR that records the snapshot metadata.
+5. The CSI Controller returns `CreateSnapshotResponse`.
 
 ## Data Flow: CloneVolume
 
-```
-1. User creates PVC with dataSource referencing an existing PVC
-       │
-2. csi-provisioner detects dataSource, sets VolumeContentSource
-       │
-3. CSI Controller receives CreateVolume with VolumeContentSource.Volume
-       │
-4. Call PoolManager.CloneVolume(ctx, sourceVolumeID, req)
-       ├─ Create SubVolume CR with cloneStatus=Pending
-       └─ Return immediately (pod will wait)
-       │
-       │  (background Clone Worker)
-       ├─ Update CR: cloneStatus=InProgress
-       ├─ Create a Job that runs cp -a from source to target
-       └─ Update CR: cloneStatus=Complete or Failed
-       │
-5. NodePublishVolume gates pod access on cloneStatus=Complete
-       (kubelet retries with backoff until clone finishes)
-```
+![A clone request makes a SubVolume CR in Pending state; the Clone Worker runs a copy Job and updates the status, and the node agent waits for it](images/architecture-clone-volume.drawio.svg)
+
+1. The user creates a PVC with a `dataSource` that references an existing PVC.
+2. The `csi-provisioner` detects the `dataSource` and sets `VolumeContentSource`.
+3. The CSI Controller receives `CreateVolume` with `VolumeContentSource.Volume`.
+4. It calls `PoolManager.CloneVolume(ctx, sourceVolumeID, req)`. This creates a SubVolume CR with `cloneStatus=Pending` and returns at once (the pod waits).
+   - The background Clone Worker updates the CR to `cloneStatus=InProgress`, creates a Job that runs `cp -a` from the source to the target, then updates the CR to `cloneStatus=Complete` or `Failed`.
+5. `NodePublishVolume` gates pod access on `cloneStatus=Complete`. Kubelet retries with backoff until the clone finishes.
 
 ## Volume ID Format
 

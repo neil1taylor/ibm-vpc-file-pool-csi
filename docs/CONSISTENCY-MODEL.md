@@ -42,15 +42,7 @@ The VPC API provides `CreateShare`, `DeleteShare`, `UpdateShare`, `ListShares`, 
 
 Given these constraints, the only way to capture the state of a subdirectory is to read every file in it and write those files somewhere else:
 
-```
-Source: /pvcs/pvc-aaaa/
-  ├── file1.dat      ──cp──>  Destination: /pvcs/.snapshots/snap-001/pvc-aaaa/
-  ├── file2.dat      ──cp──>    ├── file1.dat
-  ├── subdir/        ──cp──>    ├── file2.dat
-  │   └── file3.dat  ──cp──>    ├── subdir/
-  └── file4.dat      ──cp──>    │   └── file3.dat
-                                └── file4.dat
-```
+![Each file of the source folder is copied with cp into the snapshot folder](images/consistency-model-copy.drawio.svg)
 
 ### Consequences
 
@@ -76,14 +68,7 @@ Each individual file is internally consistent at the moment it was read. If a 50
 
 **Caveat:** If a file is still open for writing by another process on the same node when `cp` reads it, close-to-open does not apply (the file has not been closed). In practice, NFS attribute caching and `cp`'s sequential read pattern mean the copy typically gets a coherent state, but this is not guaranteed by the protocol for files with concurrent open writers.
 
-```
-File-level consistency:
-
-  Writer:     OPEN ── write(A) ── write(B) ── write(C) ── CLOSE
-                                                             │
-  cp reads:                                           OPEN ──┘── READ ── CLOSE
-                                                      Sees: A + B + C (complete)
-```
+![The writer closes the file, then cp opens and reads it and sees A, B and C](images/consistency-model-file-level.drawio.svg)
 
 This is our baseline for **all** operations: snapshots, clones, group snapshots, and DR replication.
 
@@ -93,19 +78,7 @@ If an application writes file A then file B as part of a logical operation, the 
 
 **Why:** `cp -a` processes files in directory-listing order. The application writes in its own order. These two orders are unrelated. By the time `cp` gets to a file, it may have already been updated (capturing the new version) or may not yet have been updated (capturing the old version).
 
-```
-Cross-file inconsistency:
-
-  Application:  write(A_new) ─────── write(B_new)
-                    │                     │
-  cp -a:       read(B_old) ── read(A_new) ── read(C_old) ── ...
-                   │              │
-                   │              └─ captured new A
-                   └─ captured old B
-
-  Result: snapshot has A_new + B_old
-          (B was written AFTER A, but cp read B BEFORE A was updated)
-```
+![cp reads B before the application updates it and A after, so the snapshot has A_new and B_old](images/consistency-model-cross-file.drawio.svg)
 
 ### Crash Consistency (NOT Guaranteed)
 
@@ -113,27 +86,7 @@ The copy does **not** represent a single point in time. A crash-consistent snaps
 
 **Why it matters:** Many systems (databases, filesystems, VMs) are designed to recover from a crash because a crash is a single point in time. Journal replay, WAL replay, and fsck all assume that the state is a consistent slice of a timeline. Our copies are not a slice -- they are a smear across a timeline.
 
-```
-Crash-consistent (what we DO NOT provide):
-
-  Time ──────────────────────────────────────────────►
-  App state:  S1 ── S2 ── S3 ── S4 ── S5 ── S6
-                              │
-                              └── crash here: all files at S3
-                                  (single point in time)
-
-
-What cp -a produces:
-
-  Time ──────────────────────────────────────────────►
-  App state:  S1 ── S2 ── S3 ── S4 ── S5 ── S6
-                │         │              │
-                file1     file2          file3
-                (S1)      (S3)           (S5)
-
-  Result: file1 from S1, file2 from S3, file3 from S5
-          NOT a single point in time
-```
+![A crash-consistent copy has every file at one state, but cp -a gets files from different states](images/consistency-model-crash.drawio.svg)
 
 ### Application Consistency (Only With Quiesce Hooks)
 
@@ -151,19 +104,7 @@ If the application freezes writes before the copy and thaws after, all data is c
 
 **Cost:** Application downtime (I/O pause) equal to the copy duration.
 
-```
-Application-consistent (with quiesce hooks):
-
-  Time ──────────────────────────────────────────────►
-
-  App:   writes ──► FREEZE ──────────────── THAW ──► writes
-                       │                      │
-  cp -a:               ├── read file1         │
-                       ├── read file2         │
-                       └── read file3         │
-                                              │
-                    All files from same state ─┘
-```
+![With quiesce hooks the application freezes, cp reads all files, then the application thaws](images/consistency-model-quiesce.drawio.svg)
 
 ---
 
@@ -237,41 +178,7 @@ A VM disk image is a single large file (e.g., `disk.img`, 40 GB raw). But **inte
 
 ### Block-Level Interleaving
 
-```
-Source disk.img (40 GB raw, VM actively writing):
-
-  Offset in file:
-  0 GB       10 GB      20 GB      30 GB      40 GB
-  ├──────────┼──────────┼──────────┼──────────┤
-  │          │          │          │          │
-  │  cp reads│          │          │          │
-  │  here at │  VM writes          │          │
-  │  T=0s    │  here at │          │          │
-  │          │  T=1s    │ cp reads │          │
-  │          │          │ here at  │ VM writes│
-  │          │          │ T=5s     │ here at  │
-  │          │          │          │ T=6s     │
-  └──────────┴──────────┴──────────┴──────────┘
-
-  cp progress =======================================►  (sequential)
-  VM writes   *    *       *  *      *     *    *  *    (random)
-
-
-Destination disk.img after copy:
-
-  0 GB       10 GB      20 GB      30 GB      40 GB
-  ├──────────┼──────────┼──────────┼──────────┤
-  │ blocks   │ blocks   │ blocks   │ blocks   │
-  │ from T=0 │ from T=1 │ from T=5 │ from T=6 │
-  │          │ (some    │ (some    │ (some    │
-  │          │  updated │  updated │  NOT yet │
-  │          │  by VM)  │  by VM)  │  updated)│
-  └──────────┴──────────┴──────────┴──────────┘
-
-  Result: filesystem journal references blocks that have different
-  timestamps. Superblock, block group descriptors, inode tables,
-  and data blocks are from different points in time.
-```
+![cp reads a 40 GB disk image from start to end while the VM writes at random, so the copy mixes blocks from different times](images/consistency-model-vm-blocks.drawio.svg)
 
 ### Why This Is Worse Than a Crash
 
@@ -279,26 +186,7 @@ A crash captures the state at a **single** point in time. The filesystem journal
 
 Our copy has **no single point in time**. The journal entries at the start of the file were written at T=0, but the data blocks they reference at offset 30 GB were captured at T=6. The journal says "I wrote block X with data Y at time T=2" but block X in the copy contains data from T=0 (before the write) or T=6 (after a different write). Journal replay produces nonsense.
 
-```
-Crash (single point in time):
-
-  Time ──► T ──► crash
-           │
-           All blocks from time T.
-           Journal can replay from T.
-           fsck works.
-
-
-cp -a copy (smeared across time):
-
-  Time ──► T0 ────── T1 ────── T2 ────── T3
-           │          │          │          │
-           block A    block B    block C    block D
-
-  Blocks from different times. Journal references are broken.
-  fsck may detect corruption. VM may not boot.
-  Data loss is likely.
-```
+![A crash leaves all blocks at time T, but a cp -a copy has blocks from T0, T1, T2 and T3](images/consistency-model-vm-smear.drawio.svg)
 
 ### What Happens in Practice
 
@@ -308,12 +196,7 @@ cp -a copy (smeared across time):
 
 ### The Rule
 
-```
-If a VM is running: DO NOT snapshot, clone, or replicate its disk image.
-
-  Safe:    Stop VM --> Snapshot/Clone/Replicate --> Start VM
-  Unsafe:  Snapshot/Clone/Replicate while VM is running
-```
+![Safe: stop the VM, then snapshot, clone or replicate, then start it. Unsafe: do it while the VM runs](images/consistency-model-vm-rule.drawio.svg)
 
 This applies regardless of disk format (raw, qcow2, vmdk) and regardless of which driver feature is used (snapshot, clone, group snapshot, DR replication).
 
@@ -364,52 +247,12 @@ fsfreeze: /mnt/nfs-share: freeze failed: Inappropriate ioctl for device
 
 Each phase builds on the previous, using the same fundamental `cp -a` mechanism but applying it to progressively more complex scenarios.
 
-```
-Phase 4a: Snapshot
-  Single SubVolume --> cp -a --> immutable copy under .snapshots/
-  Base primitive. Everything else builds on this.
+- **Phase 4a, Snapshot:** one SubVolume is copied with `cp -a` into an immutable copy under `.snapshots/`. This is the base primitive. Everything else builds on it.
+- **Phase 4b, Clone:** the snapshot idea, with a copy to a new writable location. `cp -a` runs in a Kubernetes Job (async), and the node agent gates the mount.
+- **Phase 4c, Group Snapshot:** coordinated, sequential snapshots of N SubVolumes. Optional quiesce hooks bracket the copy window. The inconsistency window is tracked in status. It is unbounded without hooks, and zero with successful hooks.
+- **Phase 4d, DR Replication:** the snapshot idea, with a transfer to a remote region. A periodic rsync copies from the source pool to the destination pool. The snapshot gives a stable copy source for the transfer.
 
-      /pvcs/pvc-aaa/  ──cp -a──>  /pvcs/.snapshots/snap-001/pvc-aaa/
-      (source)                     (snapshot, read-only)
-
-
-Phase 4b: Clone
-  Snapshot concept + copy to new writable location.
-  cp -a runs in a Kubernetes Job (async), node agent gates mount.
-
-      /pvcs/pvc-aaa/  ──cp -a──>  /pvcs/pvc-bbb/
-      (source)                     (clone, fully independent)
-
-
-Phase 4c: Group Snapshot
-  Coordinated sequential snapshots of N SubVolumes.
-  Optional quiesce hooks bracket the copy window.
-  Inconsistency window tracked in status.
-
-      ┌─ Hook: FREEZE ─────────────────────────── Hook: THAW ─┐
-      │                                                         │
-      │  /pvcs/pvc-aaa/  ──cp -a──>  .snapshots/snap-g1/aaa/  │
-      │  /pvcs/pvc-bbb/  ──cp -a──>  .snapshots/snap-g1/bbb/  │
-      │  /pvcs/pvc-ccc/  ──cp -a──>  .snapshots/snap-g1/ccc/  │
-      │                                                         │
-      └── t0 ─────────── t1 ────── t2 ─────────────────────────┘
-               inconsistency window (without hooks)
-               zero (with successful hooks)
-
-
-Phase 4d: DR Replication
-  Snapshot concept + transfer to remote region.
-  Periodic rsync from source pool to destination pool.
-  Snapshot provides stable copy source for the transfer.
-
-      Source Region                    Destination Region
-      ┌────────────────────┐          ┌────────────────────┐
-      │ /pvcs/pvc-aaa/     │──rsync──▶│ /pvcs/pvc-aaa/     │
-      │ /pvcs/pvc-bbb/     │──rsync──▶│ /pvcs/pvc-bbb/     │
-      └────────────────────┘          └────────────────────┘
-              │                                │
-              └── Transit Gateway ─────────────┘
-```
+![The four phases: snapshot, clone, group snapshot with freeze and thaw hooks, and rsync to a destination region](images/consistency-model-building-blocks.drawio.svg)
 
 ### How Consistency Propagates
 
@@ -440,30 +283,7 @@ No phase can exceed file-level consistency without application cooperation (hook
 
 ## Quick Reference: Is My Workload Safe?
 
-```
-Is the data written once and read many times?
-  YES --> SAFE. Use any feature.
-  NO  |
-      v
-Is the workload a running VM (qcow2/vmdk/raw disk image)?
-  YES --> UNSAFE. Stop the VM before snapshot/clone/replicate.
-  NO  |
-      v
-Is the workload a database (PostgreSQL, MySQL, etcd, etc.)?
-  YES --> UNSAFE without quiesce. Use database-native replication
-          or quiesce writes before snapshot/clone.
-  NO  |
-      v
-Does the workload require cross-file transactional consistency?
-  YES --> UNSAFE without quiesce. Use group snapshots with hooks,
-          or redesign for single-file transactions.
-  NO  |
-      v
-Can the workload tolerate file-level consistency (each file
-  consistent, but cross-file ordering not guaranteed)?
-  YES --> SAFE. File-level consistency is our guarantee.
-  NO  --> UNSAFE. Consider application-level backup tools.
-```
+![A decision tree that ends in SAFE or UNSAFE for a workload](images/consistency-model-workload-safe.drawio.svg)
 
 ---
 
