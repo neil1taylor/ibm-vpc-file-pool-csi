@@ -30,6 +30,9 @@ type Client interface {
 	// HasOpenRestore reports whether a BackupRestore that has not ended is
 	// making the PVC with this namespace and name.
 	HasOpenRestore(ctx context.Context, pvcNamespace, pvcName string) (bool, error)
+	// BackupPolicyUsingPool returns the name of a BackupPolicy whose snapshot
+	// pool is poolName, or "" when no policy uses it.
+	BackupPolicyUsingPool(ctx context.Context, poolName string) (string, error)
 	CreateSubVolume(ctx context.Context, sv *v1alpha1.SubVolume) error
 	UpdateSubVolume(ctx context.Context, sv *v1alpha1.SubVolume) error
 	UpdateSubVolumeStatus(ctx context.Context, sv *v1alpha1.SubVolume) error

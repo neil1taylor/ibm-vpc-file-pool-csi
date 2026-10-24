@@ -39,7 +39,7 @@ oc create namespace ${NS}
 
 ## Step 2: Make a data pool and a snapshot pool
 
-The data pool holds your volume. The snapshot pool holds only backups, so a lost or full data share does not take the backups with it. The driver refuses a snapshot pool that holds any volume.
+The data pool holds your volume. The snapshot pool holds only backups, so a lost or full data share does not take the backups with it. The driver refuses a snapshot pool that holds any volume, and it refuses to make a volume on a pool that a policy uses as its snapshot pool.
 
 Pick the zone of your cluster's workers:
 

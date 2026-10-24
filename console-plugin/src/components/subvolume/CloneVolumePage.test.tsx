@@ -78,6 +78,13 @@ describe('CloneVolumePage', () => {
     expect(screen.queryByRole('option', { name: 'gp' })).toBeNull();
   });
 
+  it('does not offer the storage class of a snapshot pool', () => {
+    watch({ ...base(), StorageClass: [...storageClasses, { metadata: { name: 'backups' }, provisioner: DRIVER, parameters: { pool: 'backups' } }], BackupPolicy: [{ metadata: { name: 'nightly' }, spec: { snapshotPool: 'backups' } }] });
+    render(<CloneVolumePage />);
+    expect(screen.getByRole('option', { name: 'pool-a' })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: 'backups' })).toBeNull();
+  });
+
   it('refuses a size under the volume size', () => {
     watch(base());
     render(<CloneVolumePage />);

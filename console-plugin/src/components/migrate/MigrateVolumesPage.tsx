@@ -32,6 +32,8 @@ import {
 } from '../../utils/migrate-helpers';
 import { buildMigrationPod, buildTargetPVC, migrationNames } from '../../utils/migrate-objects';
 import { ROUTES } from '../../constants';
+import { useBackupPolicies } from '../../utils/use-backup-policies';
+import { isSnapshotPool } from '../../utils/snapshot-pools';
 
 const gvk = (model: { apiGroup?: string; apiVersion: string; kind: string }) => ({
   group: model.apiGroup,
@@ -46,6 +48,7 @@ const MigrateVolumesPage: React.FC = () => {
     isList: true,
   });
   const [pods, podsLoaded] = useK8sWatchResource<MigrationPodLike[]>({ groupVersionKind: gvk(PodModel), isList: true });
+  const policies = useBackupPolicies();
   const [storageClasses, classesLoaded] = useK8sWatchResource<StorageClass[]>({
     groupVersionKind: gvk(StorageClassModel),
     isList: true,
@@ -84,7 +87,10 @@ const MigrateVolumesPage: React.FC = () => {
   const namespace = namespaces.includes(namespaceChoice) ? namespaceChoice : namespaces[0] || '';
 
   const rows = migrationRows({ pvcs: allPVCs, pods: allPods, namespace, sourceClass });
-  const targets = migrationTargets(pools || [], storageClasses || []);
+  const targets = migrationTargets(
+    (pools || []).filter((p) => !isSnapshotPool(p.metadata?.name || '', policies)),
+    storageClasses || [],
+  );
   const target = targets.find((t) => t.storageClass === targetChoice) || targets[0];
   const doesNotFit = !!moving && !!target && target.freeGB !== undefined && moving.sizeGiB > target.freeGB;
 
