@@ -45,7 +45,7 @@ Before upgrading, complete every item:
 | v0.11.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.12.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.13.0–v0.13.2 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
-| v0.14.0–v0.14.2 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
+| v0.14.0–v0.14.3 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
 
 ---
 
@@ -124,6 +124,16 @@ kubectl get crd filesharepools.storage.ibmcloud.io -o json | \
 ---
 
 ## Version-Specific Upgrade Notes
+
+### Upgrading to v0.14.3 (from v0.14.2)
+
+**Changes:** the node agent finishes the unmount of a volume whose share was already deleted. Before, such a volume stayed on the node, and kubelet repeated a failing unmount forever. Share metrics are no longer minutes late on a node with dead mounts. See `CHANGELOG.md`.
+
+**CRD changes:** none.
+
+**Action required:**
+1. Upgrade with Helm. No CRD step, and no chart value changes. Set both `image.tag` and `consolePlugin.image.tag` if you pin image tags.
+2. Nothing to clean by hand. After the upgrade, kubelet's next retries remove the leftover volumes of deleted shares from each node. Each one takes up to about 4 minutes. To check a node, count the folders under `<kubelet dir>/plugins/kubernetes.io/csi/vpc-file-pool.csi.ibm.io/`: only volumes in use stay.
 
 ### Upgrading to v0.14.2 (from v0.14.1)
 
