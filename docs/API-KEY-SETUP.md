@@ -216,7 +216,7 @@ kubectl create secret generic ibm-cloud-credentials \
 rm /tmp/ibm-credentials.env
 
 # 4. Restart the controller (unmanaged provider doesn't auto-detect changes)
-kubectl rollout restart deployment -n kube-system vpc-file-pool-csi-controller
+kubectl rollout restart deployment -n kube-system ibm-vpc-file-pool-csi-controller
 
 # 5. Verify and delete the old key
 kubectl logs -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller -c csi-controller --tail=20
@@ -311,7 +311,7 @@ metadata:
   namespace: kube-system
 subjects:
   - kind: ServiceAccount
-    name: vpc-file-pool-csi-controller
+    name: ibm-vpc-file-pool-csi-controller
     namespace: kube-system
 roleRef:
   kind: Role

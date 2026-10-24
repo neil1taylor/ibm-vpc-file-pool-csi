@@ -25,7 +25,7 @@ The gRPC server that implements CSI Controller RPCs. Runs as a Deployment with 1
 **Does NOT:**
 - Mount anything.
 - Call IBM VPC API directly (goes through Pool Manager → IBM VPC Client).
-- Create VPC file shares on purpose in the CreateVolume path. The one exception is auto-expand: when no share fits and `autoExpand` is on, `Allocate` calls `CreateFileShare` once (see [Pool Manager](#3-pool-manager)) and CreateVolume returns a retriable error so the provisioner retries after the share is ready.
+- Create VPC file shares on purpose in the CreateVolume path. The one exception is auto-expand: when no share fits and `autoExpand` is on, `Allocate` calls `CreateFileShare` once (see [Pool Manager](#3-pool-manager)). The call waits for the new share to become stable. If the share is ready and has a mount target when the call returns, CreateVolume uses it. If not, CreateVolume returns a retriable error (`Unavailable`) and the provisioner retries.
 
 ### 2. CSI Node Agent (DaemonSet)
 
@@ -249,8 +249,8 @@ See `CRD-SPEC.md` for full type definitions.
    - 4b. Read all SubVolume CRs for that pool (or use cached state).
    - 4c. Calculate the allocated capacity of each share.
    - 4d. Pick a share with enough remaining capacity (strategy: spread or bin-pack, per pool config).
-     - If no share has room and `pool.spec.autoExpand` is on and shares < `maxShares`: create a new VPC file share through the IBM VPC Client (slow: 30-90 s), wait for it to become "stable", add it to `FileSharePool.Status.Shares`, and use it.
-     - Otherwise: return a retriable `codes.ResourceExhausted` error.
+     - If no share has room and `pool.spec.autoExpand` is on and shares < `maxShares`: create a new VPC file share through the IBM VPC Client (slow: 30-90 s), wait for it to become "stable", and add it to `FileSharePool.Status.Shares`. If the new share is ready (stable, with a mount target), use it. If not, return a retriable `codes.Unavailable` error ("pool is expanding") and the provisioner retries.
+     - Otherwise (`autoExpand` is off, or the tier is at `maxShares`): return a retriable `codes.ResourceExhausted` error.
    - 4e. Create the SubVolume CR that records the allocation.
    - 4f. Return an `AllocationResult` (share IP, subpath, uid, gid, permissions).
 
@@ -320,10 +320,10 @@ Every 60 seconds, or on a FileSharePool CR change:
 3. The CSI Controller receives `CreateSnapshot` and parses the source volume ID to get the pool, share ID and subdir name.
 4. It calls `PoolManager.CreateSnapshot(ctx, snapshotName, sourceVolumeID, params)`:
    - 4a. Read the source SubVolume CR.
-   - 4b. Create the snapshot directory `/pvcs/.snapshots/{snap-name}/`.
-   - 4c. Run `cp -a` from the source subdirectory to the snapshot directory.
-   - 4d. Create the Snapshot CR that records the snapshot metadata.
-5. The CSI Controller returns `CreateSnapshotResponse`.
+   - 4b. Create the Snapshot CR. It is not ready yet. Its folder is `/pvcs/.snapshots/snap-{name}/`.
+   - 4c. Start a share data Job. The Job copies the source subdirectory to the snapshot folder with `cp -a`. The controller pod has no NFS access, so it never copies data itself. A disk that a running VM writes to is copied with QEMU instead (see [VM-INSTANT-SNAPSHOTS.md](VM-INSTANT-SNAPSHOTS.md)).
+   - 4d. When the Job succeeds, mark the Snapshot CR ready.
+5. The CSI Controller returns `CreateSnapshotResponse`. The snapshot is ready to use after the copy ends.
 
 ## Data Flow: CloneVolume
 

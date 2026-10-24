@@ -858,9 +858,9 @@ Is RPO tolerance > 15 minutes?
 
 ## Failover Procedure
 
-Failover is a manual process. Automated failover is explicitly out of scope for Phase 4d because the replication is async and the consistency guarantees are limited. An automated failover that activates a potentially inconsistent replica without human review would be dangerous.
+Failover is a manual decision. Automated failover is explicitly out of scope for Phase 4d because the replication is async and the consistency guarantees are limited. An automated failover that activates a potentially inconsistent replica without human review would be dangerous. A person starts each failover. The `kubectl failover` plugin ([Failover CLI](#failover-cli)) then does the repetitive work of steps 3 and 4 below.
 
-### Manual Failover Steps
+### Failover Steps
 
 ![Manual failover: stop the source, check the last sync time against the RPO, then create SubVolume CRs, PVs and PVCs on the DR cluster and deploy](images/cross-region-dr-failover.drawio.svg)
 
@@ -873,12 +873,14 @@ Failover is a manual process. Automated failover is explicitly out of scope for 
    - If the RPO is too large, consider the data loss implications before proceeding.
 3. On the DR cluster, create SubVolume CRs matching the source. The replication controller copies DATA but not CRs. SubVolume CRs must be created on the DR cluster to register the replicated subdirectories with the DR pool manager.
 4. Create PVs and PVCs on the DR cluster that reference the DR pool. Use the same PVC names and namespaces as the source for application compatibility.
+
+   Run `kubectl failover plan` to see what will be made, then `kubectl failover execute` to make the SubVolume CRs, PVs and PVCs for you (see [Failover CLI](#failover-cli)). You can also make them by hand.
 5. Deploy the workloads on the DR cluster.
 6. Verify application health.
 
 ### Failback
 
-There is no failback command. `kubectl failover` works in one direction only: it turns replicated data on a destination into live PVCs. To go back, you do the steps by hand: create a ReplicationPolicy on the DR cluster that points back to the original region, wait for the data to arrive, stop the workload on the DR cluster, run `kubectl failover` on the original cluster, and start the workload there. A `Failover` resource that would automate this is only a proposal (a draft pull request) and does not exist.
+There is no failback command. `kubectl failover` works in one direction only: it turns replicated data on a destination into live PVCs. To go back, you use the same steps in the other direction: create a ReplicationPolicy on the DR cluster that points back to the original region, wait for the data to arrive, stop the workload on the DR cluster, run `kubectl failover` on the original cluster, and start the workload there. A `Failover` resource that would automate this is only a proposal (a draft pull request) and does not exist.
 
 ---
 

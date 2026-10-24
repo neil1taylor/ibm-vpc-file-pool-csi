@@ -24,7 +24,7 @@ qcow2 was designed for local block storage where the filesystem doesn't provide 
 | Feature | qcow2 | NFS Filesystem |
 |---------|-------|---------------|
 | **Thin provisioning** | Copy-on-write cluster allocation | Sparse files — unwritten regions consume no space |
-| **Snapshots** | Internal snapshot chains | Storage-level snapshots (VPC file share snapshots) |
+| **Snapshots** | Internal snapshot chains | The driver's snapshots: a folder copy, or a QEMU copy or instant snapshot for a running VM disk (see [VM-INSTANT-SNAPSHOTS.md](VM-INSTANT-SNAPSHOTS.md)). The driver does not use VPC file share snapshots |
 | **Space reclamation** | QEMU manages free clusters | `fallocate` / `DEALLOCATE` on the NFS client |
 
 Using qcow2 on NFS means paying for features the storage already provides.

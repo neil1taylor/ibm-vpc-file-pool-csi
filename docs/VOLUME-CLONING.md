@@ -189,13 +189,13 @@ The CloneWorker background loop (every 10 s):
 
 6. Detect a SubVolume with `cloneStatus=Pending`.
 7. Move it to `cloneStatus=InProgress`.
-8. Create a temp NFS PV (mounts the target share root).
-9. Create a temp PVC (bound to the temp PV).
+8. Create a temp NFS PV for each share root the Job needs (the source share, and the target share when it is a different one).
+9. Create a temp PVC for each temp PV.
 10. Create the clone Job:
-    - Mounts the source PVC read-only at `/source`.
-    - Mounts the temp PVC (share root) at `/target-share`.
-    - Runs `cp -a /source/. /target-share/<subPath>/`.
-    - Runs `chown` and `chmod` to match the SubVolume UID/GID/permissions.
+    - Mounts the share root of the source share at `/share0` through a temp PV and PVC. When the clone is on a different share, it also mounts that share's root at `/share1`.
+    - Removes any old copy of the clone folder, then runs `cp -a` from the source folder to the clone folder (both under `/share0`, or the clone under `/share1`).
+    - Runs `chown -R` and `chmod` to match the SubVolume UID/GID/permissions.
+    - If a step fails, removes the partial copy.
 11. Poll the Job status until it succeeds or fails.
 12. On success: `cloneStatus=Complete`, `phase=Bound`.
 13. On failure: `cloneStatus=Failed`, `phase=Failed`.
@@ -405,8 +405,7 @@ A clone can be placed on the same VPC file share as the source or on a different
 
 **Disadvantages:**
 - Slower copy. Data must traverse the NFS client, flow through the node's network stack, and write to a different NFS server.
-- Requires both shares to be mounted on the controller node (or whichever node performs the copy).
-- More complex implementation. The controller must handle mounting two shares and copying between them.
+- The copy Job must mount both share roots, so it needs two temp PVs and PVCs.
 
 ### Design Decision
 
@@ -442,27 +441,14 @@ selectShareForClone(strategy, shares, requestedGB, tier, sourceShareID):
 
 ### Cross-Share Copy Mechanics
 
-When the clone lands on a different share than the source, the controller must mount both shares to perform the copy. The controller node agent approach:
+When the clone lands on a different share than the source, one copy still does the work. The controller pod has no NFS access, so it never copies data itself. The Clone Worker (in the controller) does this:
 
-```
-Controller (has NFS access via nfsOps):
-  │
-  ├── Source share already mounted at:
-  │     /staging/{source-share-id}/pvcs/pvc-aaaa
-  │
-  ├── Target share mounted at:
-  │     /staging/{target-share-id}/pvcs/pvc-bbbb
-  │
-  └── cp -a /staging/{source-share-id}/pvcs/pvc-aaaa  \
-            /staging/{target-share-id}/pvcs/pvc-bbbb
-```
+1. The controller creates the SubVolume CR with `cloneStatus=Pending`, and both `sourceShareID` and `shareID` set.
+2. The Clone Worker finds the pending clone and makes temporary NFS volumes (PV and PVC) for the share root of the source share and the share root of the target share.
+3. It starts one share data Job. The Job mounts both share roots, runs `cp -a` from the source folder to the clone folder, and then sets the owner and permissions.
+4. The Clone Worker polls the Job, updates the CR to `Complete` or `Failed`, and removes the temporary volumes.
 
-If the controller does not have both shares mounted (controller mode runs without `nfsOps`), the cross-share copy must be deferred to a node agent that can mount both. This is handled by:
-
-1. The controller creates the SubVolume CR with `cloneStatus=Pending` and both `sourceShareID` and `shareID` set.
-2. A clone worker (running as part of the pool reconciler or a dedicated DaemonSet pod) picks up the pending clone, mounts both shares, performs the copy, and updates the CR.
-
-For the initial implementation, cross-share cloning uses the same async path as large-volume cloning: the controller creates the CR, and the reconciler background loop performs the copy on the next reconcile cycle.
+The same path serves same-share clones. Only the number of share roots that the Job mounts differs.
 
 ---
 
@@ -663,57 +649,16 @@ When `NodePublishVolume` returns `codes.Unavailable`, the kubelet retries with e
 
 ## Background Clone Worker
 
-The clone worker runs as part of the pool reconciler and processes SubVolumes with `cloneStatus=Pending` or `cloneStatus=InProgress` (for crash recovery):
+The Clone Worker is a goroutine in the controller (`pkg/pool/clone_worker.go`). Every 10 s it lists the SubVolumes with `cloneStatus=Pending` or `InProgress` and handles each one in its own goroutine:
 
-```go
-func (m *Manager) reconcileClones(ctx context.Context) error {
-    // List SubVolumes with pending or in-progress clones
-    svList, err := m.k8sClient.ListSubVolumesByCloneStatus(ctx, "Pending", "InProgress")
-    if err != nil {
-        return err
-    }
+1. If the status is `Pending`, set it to `InProgress` (`phase=Cloning`) and record the start time.
+2. Read the source SubVolume. If it is gone, set `cloneStatus=Failed`.
+3. Call the share data runner's `CopyDir` with the source folder and the clone folder. The call is idempotent: it starts the Job if none exists, and reports whether the Job has finished. The controller never touches the share itself.
+4. If the Job failed after its retries, set `cloneStatus=Failed`, `phase=Failed`, and `cloneProgress.error`.
+5. If the Job succeeded, set `cloneStatus=Complete`, `phase=Bound`, and `bytesCopied = totalBytes`. The runner removes the Job and the temp PVs and PVCs.
+6. If the Job is still running, do nothing. The next tick checks again.
 
-    for _, sv := range svList {
-        if sv.Status.CloneStatus == "Pending" || sv.Status.CloneStatus == "InProgress" {
-            go m.performClone(ctx, &sv)
-        }
-    }
-    return nil
-}
-
-func (m *Manager) performClone(ctx context.Context, sv *v1alpha1.SubVolume) {
-    // 1. Update status to InProgress
-    sv.Status.CloneStatus = "InProgress"
-    now := metav1.Now()
-    sv.Status.CloneProgress = &v1alpha1.CloneProgress{
-        TotalBytes: sv.Spec.RequestedGB * (1 << 30),
-        StartedAt:  &now,
-    }
-    m.k8sClient.UpdateSubVolumeStatus(ctx, sv)
-
-    // 2. Mount source and target shares if needed
-
-    // 3. Perform copy
-    srcPath := m.resolvePath(sv.Spec.SourceShareID, sv.Spec.SourceVolume)
-    dstPath := m.resolvePath(sv.Spec.ShareID, sv.Spec.SubPath)
-    err := m.nfsOps.CopyDir(srcPath, dstPath)
-
-    // 4. Update status
-    completedAt := metav1.Now()
-    if err != nil {
-        sv.Status.CloneStatus = "Failed"
-        sv.Status.Phase = "Failed"
-        sv.Status.CloneProgress.Error = err.Error()
-        sv.Status.CloneProgress.CompletedAt = &completedAt
-    } else {
-        sv.Status.CloneStatus = "Complete"
-        sv.Status.Phase = "Bound"
-        sv.Status.CloneProgress.BytesCopied = sv.Status.CloneProgress.TotalBytes
-        sv.Status.CloneProgress.CompletedAt = &completedAt
-    }
-    m.k8sClient.UpdateSubVolumeStatus(ctx, sv)
-}
-```
+`NodePublishVolume` returns `codes.Internal` with the error when `cloneStatus=Failed`, and `codes.Unavailable` while it is `Pending` or `InProgress`.
 
 ### Clone Progress Tracking
 
@@ -721,16 +666,16 @@ For fine-grained progress tracking (optional enhancement), the clone worker can 
 
 ### Crash Recovery
 
-If the controller crashes during an async clone:
+If the controller restarts during a clone, the Job keeps running, because Kubernetes owns it:
 
-1. On restart, the reconciler lists SubVolumes with `cloneStatus=InProgress`.
-2. It checks whether the target directory exists and has data.
-3. If the target directory exists but the copy is incomplete, it removes the partial directory and restarts the copy from scratch. `cp -a` is not resumable, so starting over is the only safe option.
-4. If the target directory does not exist, it restarts from `Pending`.
+1. The Clone Worker lists the SubVolumes with `cloneStatus=Pending` or `InProgress` on every tick, including the first one after the restart.
+2. For each one it calls `CopyDir` again. The Job has a fixed name per clone, so the call finds the running Job and waits for it. If the Job already succeeded, the call reports it done and the worker marks the clone `Complete`.
+3. If no Job exists, the call starts a new one. The Job's script first removes the clone folder, then copies from the start. `cp -a` is not resumable, so starting over is the only safe option.
+4. If the Job used up its retries, the clone is marked `Failed`. The user deletes the PVC and creates it again.
 
 This is safe because:
-- The SubVolume CR records the intent; the data copy is idempotent (remove and redo).
-- The node agent will not mount the SubVolume until `cloneStatus=Complete`, so no pod sees partial data.
+- The SubVolume CR records the intent. The copy is idempotent (remove and redo).
+- The node agent does not mount the SubVolume until `cloneStatus=Complete`, so no pod sees partial data.
 
 ---
 
@@ -770,7 +715,7 @@ Recovery:  Increase pool maxShares, or delete unused volumes to free space.
 Condition: cp -a fails partway through (NFS error, disk full on share, etc.)
 Response:  SubVolume CR updated: cloneStatus=Failed, cloneProgress.error set.
            NodePublishVolume returns codes.Internal with error message.
-Cleanup:   Background worker removes the partial target directory.
+Cleanup:   The Job's script removes the partial target directory when a step fails.
            Pool capacity tracking is NOT decremented until the SubVolume CR
            is explicitly deleted (to prevent double-allocation of that space).
 Recovery:  User deletes the failed clone PVC. DeleteVolume cleans up the CR
@@ -882,10 +827,10 @@ Volume cloning is **independent of Phase 4a (snapshots)**. Cloning does not requ
 
 | Component | Snapshots (4a) | Cloning (4b) | Shared? |
 |-----------|---------------|--------------|---------|
-| `NFSOperations.CopyDir` | Yes | Yes | Yes -- same `cp -a` mechanism |
+| Share data Job (`CopyDir`) | Yes | Yes | Yes -- same `cp -a` mechanism, run in a Job |
 | `SubVolume.Status.CloneStatus` | No | Yes | No -- new field |
 | `Snapshot` CRD | Yes | No | No |
-| Background worker | No (snapshots are sync) | Yes | No |
+| Background worker | No (the snapshot copy is a Job that the snapshot code polls) | Yes | No |
 | `CLONE_VOLUME` capability | No | Yes | No |
 | Node publish gate | No | Yes | No |
 | Share selection preference | No | Yes (prefer source share) | No |
