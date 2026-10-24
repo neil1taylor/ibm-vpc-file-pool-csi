@@ -21,6 +21,7 @@ To make a release:
 
 ### Added
 
+- **Teaching page on instant VM snapshots** (`docs/diagrams/vm-snapshot-chain.html`, now page 12): adds switches for `vmSnapshots.method` and the KubeVirt `Sidecar` gate, stop, start and move of the VM with the hook, the guest freeze, the fail-safe start, and flatten.
 - **Interactive teaching page 11, "What QEMU does"** (`docs/diagrams/11-what-qemu-does.html`): how QEMU copies a running VM disk at one moment, keeps a change list, and why a VM move makes the next copy a full copy.
 
 ## [v0.14.0] — 2026-10-22
