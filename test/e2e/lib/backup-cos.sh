@@ -76,6 +76,10 @@ cos_prefix() {
     echo "$p"
 }
 
+# cos_dr_pool NAME — the restore pool in the other cluster. Share names are unique across
+# the account, so the same pool name in both clusters makes the second share collide with the first.
+cos_dr_pool() { echo "$1-dr"; }
+
 # cos_export_yaml — the spec.export block (two-space indent, under spec:). Names only, no secret values.
 cos_export_yaml() { # prefix credentials-secret wrapped-key-secret apikey-secret
     cat <<YAML
@@ -327,7 +331,7 @@ cos_phase() {
     if [ -n "${COS_DR_KUBECONFIG:-}" ]; then
         log "repeating the restore in the other cluster (kubeconfig $COS_DR_KUBECONFIG)"
         # Not in a subshell: set -e must stay on, and fail must end the script.
-        cos_with_kubeconfig "$COS_DR_KUBECONFIG" cos_restore_phase "other cluster"
+        COSR_POOL=$(cos_dr_pool "$COSR_POOL") cos_with_kubeconfig "$COS_DR_KUBECONFIG" cos_restore_phase "other cluster"
     fi
     cos_locked_note "$COS_PREFIX"
     ! $soft_failed || fail "a COS check failed (see the FAIL line above); the restore checks ran for what was in the bucket"
@@ -362,7 +366,7 @@ cos_cleanup() {
     cos_restore_home_kubeconfig
     cos_cleanup_cluster
     if [ -n "${COS_DR_KUBECONFIG:-}" ] && [ -r "$COS_DR_KUBECONFIG" ]; then
-        cos_with_kubeconfig "$COS_DR_KUBECONFIG" cos_cleanup_cluster || true
+        COSR_POOL=$(cos_dr_pool "$COSR_POOL") cos_with_kubeconfig "$COS_DR_KUBECONFIG" cos_cleanup_cluster || true
     fi
     cos_locked_note "$COS_PREFIX"
 }
