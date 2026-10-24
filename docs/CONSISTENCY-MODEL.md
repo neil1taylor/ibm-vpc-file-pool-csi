@@ -74,11 +74,11 @@ This is our baseline for **all** operations: snapshots, clones, group snapshots,
 
 ### Cross-File Consistency (NOT Guaranteed)
 
-If an application writes file A then file B as part of a logical operation, the copy might capture the new version of B but the old version of A (or vice versa). There is no ordering guarantee across files.
+If an application writes file A then file B as part of a logical operation, the copy might capture the old version of A but the new version of B (or the reverse, if `cp` reaches B first). In the first case the copy holds a mix that never existed on the volume. There is no ordering guarantee across files.
 
 **Why:** `cp -a` processes files in directory-listing order. The application writes in its own order. These two orders are unrelated. By the time `cp` gets to a file, it may have already been updated (capturing the new version) or may not yet have been updated (capturing the old version).
 
-![cp reads B before the application updates it and A after, so the snapshot has A_new and B_old](images/consistency-model-cross-file.drawio.svg)
+![cp reads A before the application updates it and B after, so the snapshot has A_old and B_new](images/consistency-model-cross-file.drawio.svg)
 
 ### Crash Consistency (NOT Guaranteed)
 

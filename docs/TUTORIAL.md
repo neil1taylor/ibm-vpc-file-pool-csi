@@ -24,14 +24,16 @@ Hands-on tutorials covering every major capability of the pool CSI driver. Each 
 | 12 | [Replicating Running VMs](TUTORIAL-12-REPLICATING-RUNNING-VMS.md) | Copy a running VM with all disks at one moment to a second cluster through a receiver |
 | 13 | [Failover of Running VMs](TUTORIAL-13-FAILOVER-OF-RUNNING-VMS.md) | Plan, rewind and fail over replicated VMs with `kubectl failover` |
 | 14 | [Restore a Snapshot in the Console](TUTORIAL-14-CONSOLE-RESTORE.md) | Make a snapshot and restore it to a new PVC in the OpenShift console |
+| 15 | [Make a VM from the Catalog on a Pool](TUTORIAL-15-VM-FROM-THE-CATALOG.md) | Pick a catalog image and an instance type, choose the pool's StorageClass for the boot disk, and let CDI copy the image |
+| 16 | [Backups, Clones and Replication Setup in the Console](TUTORIAL-16-CONSOLE-BACKUPS-CLONES-RECEIVER.md) | Schedule and restore backups, clone a volume, and set up a replication receiver in the console |
 
 ---
 
 ## Reading Order
 
-![Part 1 comes first; Parts 2 to 14 follow from it, with Part 3 after Part 2, Part 5 after Part 4 and Part 13 after Part 12](images/tutorial-reading-order.drawio.svg)
+![Part 1 comes first; Parts 2 to 16 follow from it, with Part 3 after Part 2, Part 5 after Part 4 and Part 13 after Part 12](images/tutorial-reading-order.drawio.svg)
 
-Parts 2-14 are independent of each other, except that Part 13 follows Part 12. Pick whichever is relevant to your use case.
+Parts 2-16 are independent of each other, except that Part 13 follows Part 12. Pick whichever is relevant to your use case.
 
 ---
 

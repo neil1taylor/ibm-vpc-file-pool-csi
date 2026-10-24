@@ -69,7 +69,7 @@ helm upgrade ibm-vpc-file-pool-csi charts/ibm-vpc-file-pool-csi/ \
   --timeout 5m
 
 # 4. Watch rollout
-kubectl rollout status deployment/vpc-file-pool-csi-controller -n kube-system
+kubectl rollout status deployment/ibm-vpc-file-pool-csi-controller -n kube-system
 kubectl rollout status daemonset/ibm-vpc-file-pool-csi-node -n kube-system
 ```
 
@@ -87,7 +87,7 @@ kubectl apply -f config/controller/
 kubectl apply -f config/node/
 
 # 4. Watch rollout
-kubectl rollout status deployment/vpc-file-pool-csi-controller -n kube-system
+kubectl rollout status deployment/ibm-vpc-file-pool-csi-controller -n kube-system
 kubectl rollout status daemonset/ibm-vpc-file-pool-csi-node -n kube-system
 ```
 
@@ -502,7 +502,7 @@ EOF
 kubectl get pvc upgrade-test-pvc -w  # Should bind within seconds
 
 # 5. Verify metrics endpoint (if applicable)
-kubectl port-forward -n kube-system svc/vpc-file-pool-csi-controller 8080:8080 &
+kubectl port-forward -n kube-system svc/ibm-vpc-file-pool-csi-metrics 8080:8080 &
 curl -s http://localhost:8080/metrics | grep vpc_file_pool | head -5
 kill %1
 

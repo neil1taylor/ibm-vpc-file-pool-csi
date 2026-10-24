@@ -442,27 +442,14 @@ selectShareForClone(strategy, shares, requestedGB, tier, sourceShareID):
 
 ### Cross-Share Copy Mechanics
 
-When the clone lands on a different share than the source, the controller must mount both shares to perform the copy. The controller node agent approach:
+When the clone lands on a different share than the source, one copy still does the work. The controller pod has no NFS access, so it never copies data itself. The Clone Worker (in the controller) does this:
 
-```
-Controller (has NFS access via nfsOps):
-  │
-  ├── Source share already mounted at:
-  │     /staging/{source-share-id}/pvcs/pvc-aaaa
-  │
-  ├── Target share mounted at:
-  │     /staging/{target-share-id}/pvcs/pvc-bbbb
-  │
-  └── cp -a /staging/{source-share-id}/pvcs/pvc-aaaa  \
-            /staging/{target-share-id}/pvcs/pvc-bbbb
-```
+1. The controller creates the SubVolume CR with `cloneStatus=Pending`, and both `sourceShareID` and `shareID` set.
+2. The Clone Worker finds the pending clone and makes temporary NFS volumes (PV and PVC) for the share root of the source share and the share root of the target share.
+3. It starts one share data Job. The Job mounts both share roots, runs `cp -a` from the source folder to the clone folder, and then sets the owner and permissions.
+4. The Clone Worker polls the Job, updates the CR to `Complete` or `Failed`, and removes the temporary volumes.
 
-If the controller does not have both shares mounted (controller mode runs without `nfsOps`), the cross-share copy must be deferred to a node agent that can mount both. This is handled by:
-
-1. The controller creates the SubVolume CR with `cloneStatus=Pending` and both `sourceShareID` and `shareID` set.
-2. A clone worker (running as part of the pool reconciler or a dedicated DaemonSet pod) picks up the pending clone, mounts both shares, performs the copy, and updates the CR.
-
-For the initial implementation, cross-share cloning uses the same async path as large-volume cloning: the controller creates the CR, and the reconciler background loop performs the copy on the next reconcile cycle.
+The same path serves same-share clones. Only the number of share roots that the Job mounts differs.
 
 ---
 
@@ -882,10 +869,10 @@ Volume cloning is **independent of Phase 4a (snapshots)**. Cloning does not requ
 
 | Component | Snapshots (4a) | Cloning (4b) | Shared? |
 |-----------|---------------|--------------|---------|
-| `NFSOperations.CopyDir` | Yes | Yes | Yes -- same `cp -a` mechanism |
+| Share data Job (`CopyDir`) | Yes | Yes | Yes -- same `cp -a` mechanism, run in a Job |
 | `SubVolume.Status.CloneStatus` | No | Yes | No -- new field |
 | `Snapshot` CRD | Yes | No | No |
-| Background worker | No (snapshots are sync) | Yes | No |
+| Background worker | No (the snapshot copy is a Job that the snapshot code polls) | Yes | No |
 | `CLONE_VOLUME` capability | No | Yes | No |
 | Node publish gate | No | Yes | No |
 | Share selection preference | No | Yes (prefer source share) | No |

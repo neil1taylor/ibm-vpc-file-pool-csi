@@ -379,7 +379,7 @@ Use the standard OpenShift Virtualization catalog. The driver needs no special i
 3. For the boot disk, choose the pool's StorageClass.
 4. Create the VM.
 
-CDI copies the catalog image onto the pool, then the VM starts. On rovslab, a RHEL 9 VM had its guest agent about 103 seconds after it was created.
+CDI copies the catalog image onto the pool, then the VM starts. [Part 15 of the tutorial series](TUTORIAL-15-VM-FROM-THE-CATALOG.md) walks through it. On rovslab, a RHEL 9 VM had its guest agent about 103 seconds after it was created.
 
 The controller keeps the memory limit of CDI's copy pods at least 8Gi. Without it, the copy pod is killed for lack of memory. On ROVS, IBM manages the virtualization settings; see [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md#cdi-containerized-data-importer-compatibility). If a copy fails, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md#cdi-copy-pod-oomkilled-when-a-vm-disk-is-copied-onto-a-pool).
 

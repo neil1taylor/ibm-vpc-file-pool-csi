@@ -5,7 +5,7 @@
 Make a snapshot of a volume in the OpenShift console, change the volume, and restore the snapshot to a new PVC without writing any YAML. Then check the data in the new PVC. The words snapshot and restore are defined in [CONTEXT.md](CONTEXT.md).
 
 **Time:** about 15 minutes.
-**Scope:** this page restores a **snapshot**, which stays on the same share as its volume. The console has no screens for backups yet. To restore a backup, use `kubectl backup restore` ([Part 10](TUTORIAL-10-BACKUP-AND-RESTORE.md)).
+**Scope:** this page restores a **snapshot**, which stays on the same share as its volume. The console has a Backups tab for backups. To back up, restore and delete backups in the console, see [Part 16](TUTORIAL-16-CONSOLE-BACKUPS-CLONES-RECEIVER.md). To do the same with `kubectl backup`, see [Part 10](TUTORIAL-10-BACKUP-AND-RESTORE.md).
 
 ![A snapshot of a volume stays on the same share, and a restore makes a new PVC from it](images/tutorial-14-console-restore.drawio.svg)
 
@@ -169,9 +169,10 @@ This deletes the PVCs. Delete the snapshot in the console first (**Snapshots** t
 
 - You can make and restore a snapshot from the console.
 - A restore always makes a new claim, and the claim waits until the copy ends.
-- The console restores snapshots only. Backups restore with `kubectl backup restore`.
+- This page restores snapshots. Backups restore in the console on the Backups tab ([Part 16](TUTORIAL-16-CONSOLE-BACKUPS-CLONES-RECEIVER.md)) or with `kubectl backup restore`.
 
 ## Next
 
+- [Part 16: Backups, clones and replication setup in the console](TUTORIAL-16-CONSOLE-BACKUPS-CLONES-RECEIVER.md)
 - [Part 10: Backup and restore](TUTORIAL-10-BACKUP-AND-RESTORE.md)
 - [Part 2: Snapshots and clones](TUTORIAL-02-SNAPSHOTS-AND-CLONES.md) does the same with YAML.

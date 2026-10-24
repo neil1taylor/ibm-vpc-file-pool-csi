@@ -241,7 +241,7 @@ The console can do the same without YAML. Open a snapshot in the IBM VPC File Po
 - The form has defaults: the name is `<source claim>-restored`, the size is the snapshot's size (you can make it bigger, not smaller), and the storage class, access mode and volume mode come from the source claim when it still exists.
 - The namespace is fixed to the namespace of the snapshot. This is a Kubernetes rule.
 - The action only creates a new claim. It never replaces an existing volume.
-- The claim is created and `Bound` at once. The copy runs behind it, and a pod cannot mount the volume until the copy is done (the clone gate). Follow the copy in the `cloneStatus` and `cloneProgress` of the volume's SubVolume. If the copy fails, the SubVolume shows the error, and the claim is not deleted.
+- The claim stays `Pending` until the copy ends, and becomes `Bound` only then. A Job runs the copy. If the copy fails, the driver keeps the new volume's record and starts a new copy at the next retry. The claim is not deleted.
 - The action is off, with a reason, when the snapshot is not ready or when no `VolumeSnapshot` points to it. A snapshot made directly as a `Snapshot` object has no `VolumeSnapshot`: create one first.
 - **The form warns when a VM uses the source claim.** The warning text says a snapshot of a running VM is a plain file copy that may not boot. That text is older than the driver: a snapshot of a running VM's disk is now a QEMU copy or an instant snapshot (see the [KubeVirt VMs](#kubevirt-vms) section). Check `status.consistency` on the `Snapshot` before you restore.
 
