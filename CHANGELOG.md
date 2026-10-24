@@ -19,6 +19,10 @@ To make a release:
 
 ## [Unreleased]
 
+## [v0.14.2] — 2026-10-24
+
+A fix release. The node agent metrics endpoint works again on nodes that hold one share twice, the driver refuses volumes on a backup policy's snapshot pool, and the console has three fixes. No CRD or chart value changes.
+
 ### Added
 
 - **Two new tutorials.** Part 15, "Make a VM from the Catalog on a Pool" (`docs/TUTORIAL-15-VM-FROM-THE-CATALOG.md`), and Part 16, "Backups, Clones and Replication Setup in the Console" (`docs/TUTORIAL-16-CONSOLE-BACKUPS-CLONES-RECEIVER.md`), with three draw.io diagrams. Both were run end to end on rovslab on 24 October 2026.
