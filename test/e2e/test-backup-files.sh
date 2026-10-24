@@ -21,6 +21,7 @@ DRIVER_NS=${DRIVER_NS:-kube-system}
 TOKEN=0123456789abcdef0123456789abcdef0123
 PORT=${PORT:-18081}
 PF_PID=""
+CERT_DIR=""
 
 log() { echo "[$(date -u +%H:%M:%S)] $*"; }
 pass() { log "PASS: $*"; }
@@ -28,12 +29,13 @@ fail() { log "FAIL: $*"; exit 1; }
 
 cleanup() {
     [ -n "$PF_PID" ] && kill "$PF_PID" 2>/dev/null || true
+    [ -z "$CERT_DIR" ] || { find "$CERT_DIR" -type f -delete; rmdir "$CERT_DIR"; } 2>/dev/null || true
     if $KEEP; then log "keeping test resources (--keep)"; return; fi
     log "cleaning up"
     oc delete pod "$PREFIX-browse" -n "$DRIVER_NS" --ignore-not-found --wait=true || true
     oc delete pvc "$PREFIX-share" -n "$DRIVER_NS" --ignore-not-found || true
     oc delete pv "$PREFIX-share" --ignore-not-found || true
-    oc delete secret "$PREFIX-token" -n "$DRIVER_NS" --ignore-not-found || true
+    oc delete secret "$PREFIX-token" "$PREFIX-tls" -n "$DRIVER_NS" --ignore-not-found || true
     oc delete ns "$NS" --ignore-not-found --wait=true --timeout=15m || true
     oc delete filesharepool "$POOL" --ignore-not-found --wait=false || true
     oc wait --for=delete "filesharepool/$POOL" --timeout=900s || log "the pool $POOL is not gone yet"
@@ -136,6 +138,11 @@ EXPORT=$(jq -r '.status.shares[0].exportPath' <<<"$SHARE")
 PV=$(oc get pvc data -n "$NS" -o jsonpath='{.spec.volumeName}')
 SUB=$(oc get subvolume "$PV" -o jsonpath='{.spec.subPath}' | sed 's#^/##')
 oc create secret generic "$PREFIX-token" -n "$DRIVER_NS" --from-literal=token="$TOKEN" >/dev/null
+# The helper never serves plain HTTP: give it a certificate for localhost, which the port-forward reaches.
+CERT_DIR=$(mktemp -d)
+openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost" \
+    -keyout "$CERT_DIR/tls.key" -out "$CERT_DIR/tls.crt" 2>/dev/null
+oc create secret generic "$PREFIX-tls" -n "$DRIVER_NS" --from-file=tls.crt="$CERT_DIR/tls.crt" --from-file=tls.key="$CERT_DIR/tls.key" >/dev/null
 oc apply -f - <<YAML
 apiVersion: v1
 kind: PersistentVolume
@@ -168,14 +175,16 @@ spec:
   volumes:
   - {name: share, persistentVolumeClaim: {claimName: $PREFIX-share, readOnly: true}}
   - {name: token, secret: {secretName: $PREFIX-token}}
+  - {name: tls, secret: {secretName: $PREFIX-tls}}
   containers:
   - name: browse
     image: $IMG
-    args: ["--mode=browse-server","--root=/data","--listen=:8080","--token-file=/etc/browse/token"]
+    args: ["--mode=browse-server","--root=/data","--listen=:8080","--token-file=/etc/browse/token","--tls-cert-file=/etc/browse-tls/tls.crt","--tls-key-file=/etc/browse-tls/tls.key"]
     securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
     volumeMounts:
     - {name: share, mountPath: /data, subPath: $SUB, readOnly: true}
     - {name: token, mountPath: /etc/browse, readOnly: true}
+    - {name: tls, mountPath: /etc/browse-tls, readOnly: true}
 YAML
 oc wait pod "$PREFIX-browse" -n "$DRIVER_NS" --for=condition=Ready --timeout=300s >/dev/null || {
     # Say why, before cleanup deletes the pod.
@@ -189,7 +198,7 @@ PF_PID=$!
 sleep 3
 
 b64() { printf '%s' "$1" | base64; }
-api() { curl -s -H "Authorization: Bearer $TOKEN" -X POST "localhost:$PORT$1" -d "$2"; }
+api() { curl -s --cacert "$CERT_DIR/tls.crt" -H "Authorization: Bearer $TOKEN" -X POST "https://localhost:$PORT$1" -d "$2"; }
 file() { api /v1/file "{\"path\":[$(for p in "$@"; do printf '"%s",' "$(b64 "$p")"; done | sed 's/,$//')],\"length\":-1}"; }
 
 [ "$(file u2000 secret0600)" = secret ] && pass "the helper reads another user's file with mode 0600" || fail "cannot read u2000/secret0600"
@@ -197,7 +206,7 @@ file() { api /v1/file "{\"path\":[$(for p in "$@"; do printf '"%s",' "$(b64 "$p"
 [ "$(file u0 secret0600)" = secret ] && pass "the helper reads a file made by root" || fail "cannot read u0/secret0600"
 api /v1/file "{\"path\":[\"$(b64 u1000)\",\"$(b64 to-etc)\",\"$(b64 passwd)\"],\"length\":-1}" | jq -e '.code == "link_refused"' >/dev/null && pass "a path through a link to /etc is refused" || fail "a link was followed"
 api /v1/list "{\"path\":[\"$(b64 u1000)\"]}" | jq -e '([.entries[] | select(.readable | not)] | length) == 0 and ([.entries[] | select(.type == "symlink" and (.link | @base64d) == "/etc")] | length) == 1' >/dev/null && pass "the list shows a link as a link and every entry as readable" || fail "the list is wrong"
-n=$(curl -s -H "Authorization: Bearer $TOKEN" -X POST "localhost:$PORT/v1/tar" -d '{"path":[]}' | tar tf - | wc -l | tr -d ' ')
+n=$(curl -s --cacert "$CERT_DIR/tls.crt" -H "Authorization: Bearer $TOKEN" -X POST "https://localhost:$PORT/v1/tar" -d '{"path":[]}' | tar tf - | wc -l | tr -d ' ')
 [ "$n" -ge 21 ] && pass "a tar of the volume holds all $n entries" || fail "the tar holds only $n entries"
 out=$(oc exec -n "$DRIVER_NS" "$PREFIX-browse" -- sh -c 'touch /data/x' 2>&1 || true)
 [[ "$out" == *"Read-only"* ]] && pass "the helper cannot write to the backup" || fail "the helper could write"
