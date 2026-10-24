@@ -91,3 +91,62 @@ while true; do
 done
 EOF
 }
+
+# perf_bytes SIZE — a block size like 4k, 16k or 1M in bytes.
+perf_bytes() {
+    case "$1" in
+        *[kK]) echo $((${1%[kK]} * 1024)) ;;
+        *[mM]) echo $((${1%[mM]} * 1024 * 1024)) ;;
+        *[gG]) echo $((${1%[gG]} * 1024 * 1024 * 1024)) ;;
+        *) echo "$1" ;;
+    esac
+}
+
+# perf_diskspd_profile TOTAL_IOPS SECS AREA_BYTES — the DiskSpd job file (XML) a Windows VM runs
+# for one phase: the same load as the Linux fio jobs. One target for each block size of
+# PERF_BLOCK_MIX with its share of TOTAL_IOPS, random I/O aligned to the block size, the same
+# write share, 4 I/Os in flight per target, no guest cache. DiskSpd splits reads and writes
+# itself (WriteRatio), so a target takes one rate. All targets are the load disk; the VM puts
+# its disk number in place of #PERFDISK. Latency of all targets is measured together.
+perf_diskspd_profile() {
+    local total="$1" secs="$2" area="$3" entry bs bytes weight
+    echo '<Profile>'
+    echo '  <Progress>0</Progress>'
+    echo '  <ResultFormat>xml</ResultFormat>'
+    echo '  <Verbose>false</Verbose>'
+    echo '  <TimeSpans>'
+    echo '    <TimeSpan>'
+    echo "      <Duration>$secs</Duration>"
+    echo '      <Warmup>0</Warmup>'
+    echo '      <Cooldown>0</Cooldown>'
+    echo '      <RandSeed>0</RandSeed>'
+    echo '      <MeasureLatency>true</MeasureLatency>'
+    echo '      <DisableAffinity>true</DisableAffinity>'
+    echo '      <Targets>'
+    for entry in $PERF_BLOCK_MIX; do
+        bs=${entry%%:*}
+        weight=${entry##*:}
+        bytes=$(perf_bytes "$bs")
+        cat <<XML
+        <Target>
+          <Path>#PERFDISK</Path>
+          <BlockSize>$bytes</BlockSize>
+          <Random>$bytes</Random>
+          <MaxFileSize>$area</MaxFileSize>
+          <RequestCount>4</RequestCount>
+          <ThreadsPerFile>1</ThreadsPerFile>
+          <WriteRatio>$((100 - PERF_READ_PCT))</WriteRatio>
+          <Throughput unit="IOPS">$(perf_job_iops "$total" "$weight")</Throughput>
+          <DisableOSCache>true</DisableOSCache>
+          <WriteThrough>true</WriteThrough>
+          <WriteBufferContent>
+            <Pattern>random</Pattern>
+          </WriteBufferContent>
+        </Target>
+XML
+    done
+    echo '      </Targets>'
+    echo '    </TimeSpan>'
+    echo '  </TimeSpans>'
+    echo '</Profile>'
+}

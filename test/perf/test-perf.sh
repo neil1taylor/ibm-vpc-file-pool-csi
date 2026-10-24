@@ -229,4 +229,102 @@ fill_at=$(grep -n -- "--name=fill" <<<"$ud" | head -1 | cut -d: -f1)
 ready_at=$(grep -n "echo PERF-READY" <<<"$ud" | head -1 | cut -d: -f1)
 if [ -n "$fill_at" ] && [ -n "$ready_at" ] && [ "$fill_at" -lt "$ready_at" ]; then pass "the fill comes before PERF-READY"; else fail "the fill comes before PERF-READY (fill line '$fill_at', ready line '$ready_at')"; fi
 
+# --- the Windows VMs: DiskSpd job files, the result converter and the load script ---
+# DiskSpd takes one job file for each phase: one target for each block size of the mix, all on the
+# load disk, each with its own IOPS (DiskSpd applies the write ratio itself, so no read/write split).
+xml=$(perf_diskspd_profile 30 555 3221225472)
+has "the steady job file has a 4k target" "$xml" "<BlockSize>4096</BlockSize>"
+has "the steady job file has a 16k target" "$xml" "<BlockSize>16384</BlockSize>"
+has "the steady job file has a 64k target" "$xml" "<BlockSize>65536</BlockSize>"
+has "the 4k target takes half the steady IOPS" "$xml" '<Throughput unit="IOPS">15</Throughput>'
+has "the 16k target takes 30 percent" "$xml" '<Throughput unit="IOPS">9</Throughput>'
+has "the 64k target takes 20 percent" "$xml" '<Throughput unit="IOPS">6</Throughput>'
+has "writes are 30 percent" "$xml" "<WriteRatio>30</WriteRatio>"
+has "the I/O is random, aligned to the block size" "$xml" "<Random>4096</Random>"
+has "it bypasses the guest cache, like fio --direct=1" "$xml" "<DisableOSCache>true</DisableOSCache>"
+has "writes go through to the disk" "$xml" "<WriteThrough>true</WriteThrough>"
+has "it keeps 4 I/Os in flight per target, like fio --iodepth=4" "$xml" "<RequestCount>4</RequestCount>"
+has "it works on the test area only" "$xml" "<MaxFileSize>3221225472</MaxFileSize>"
+has "it runs for the phase length" "$xml" "<Duration>555</Duration>"
+has "it measures latency" "$xml" "<MeasureLatency>true</MeasureLatency>"
+has "it reports in XML" "$xml" "<ResultFormat>xml</ResultFormat>"
+has "the load disk is a placeholder the VM replaces with its disk number" "$xml" "<Path>#PERFDISK</Path>"
+burst_xml=$(perf_diskspd_profile 300 45 3221225472)
+has "the burst 4k target (150 IOPS)" "$burst_xml" '<Throughput unit="IOPS">150</Throughput>'
+has "the burst lasts the burst time" "$burst_xml" "<Duration>45</Duration>"
+if command -v xmllint >/dev/null 2>&1; then
+    printf '%s\n' "${xml//#PERFDISK/#1}" >"$WORK/steady.xml"
+    if xmllint --noout --schema "$HERE/windows/diskspd.xsd" "$WORK/steady.xml" 2>"$WORK/xmllint.err"; then
+        pass "the steady job file is valid DiskSpd XML"
+    else
+        fail "the steady job file is valid DiskSpd XML: $(cat "$WORK/xmllint.err")"
+    fi
+else
+    echo "SKIP  the job file schema check: xmllint is not installed"
+fi
+
+# The Windows script turns a DiskSpd result into the same line a Linux VM prints, so one collector reads both.
+if command -v pwsh >/dev/null 2>&1; then
+    json=$(pwsh -NoProfile -Command ". '$HERE/windows/result.ps1'; ConvertTo-PerfJson (Get-Content -Raw '$HERE/windows/testdata/diskspd-result.xml')" 2>&1)
+    eq "a DiskSpd result reads like a fio result: IOPS summed over the targets, p95, p99 and max latency" \
+        "$(perf_parse_line "PERF 1700000100 steady $json")" "1700000100,steady,20,9,4,2,9,12"
+    line=$(pwsh -NoProfile -Command ". '$HERE/windows/result.ps1'; Format-PerfLine 1700000100 burst '{}'" 2>&1)
+    eq "a Windows result line has the same form as a Linux one" "$line" "PERF 1700000100 burst {}"
+    empty=$(pwsh -NoProfile -Command ". '$HERE/windows/result.ps1'; ConvertTo-PerfJson '<Results><TimeSpan><TestTimeSeconds>10.00</TestTimeSeconds></TimeSpan></Results>'" 2>&1)
+    for ps in load.ps1 bootstrap.ps1 result.ps1; do
+        errs=$(pwsh -NoProfile -Command "\$e = \$null; [void][System.Management.Automation.Language.Parser]::ParseFile('$HERE/windows/$ps', [ref]\$null, [ref]\$e); \$e | ForEach-Object { \$_.ToString() }" 2>&1)
+        eq "$ps has no PowerShell syntax error" "$errs" ""
+    done
+    eq "a phase with no I/O gives no row, so the VM counts as slow" "$(perf_parse_line "PERF 1700000100 steady $empty")" ""
+else
+    echo "SKIP  the Windows result converter checks: pwsh is not installed"
+fi
+
+load=$(cat "$HERE/windows/load.ps1")
+has "the Windows load reads its settings from the config disk" "$load" "settings.txt"
+has "it finds the load disk by its serial number" "$load" "SerialNumber"
+has "it fills the test area once before it says ready" "$load" "perf-filled"
+has "it says PERF-READY on the serial console" "$load" "PERF-READY"
+has "results go to the serial port" "$load" "COM1"
+has "each VM starts at its own offset" "$load" "Get-Random"
+has "it runs DiskSpd from a job file" "$load" "-X"
+has "every run uses a different random pattern" "$load" "RandSeed"
+boot=$(cat "$HERE/windows/bootstrap.ps1")
+has "the start-up task looks for the config disk" "$boot" "PERFCFG"
+has "the start-up task runs the load script from the config disk" "$boot" "load.ps1"
+
+wvm=$(PERF_ID=T1 bash "$HERE/run-tier.sh" --iops 3000 --windows-every 3 --print-vm 3 2>&1)
+has "every third VM is Windows" "$wvm" "name: windows.2k22.virtio"
+has "a Windows VM starts from the prepared Windows image" "$wvm" "name: win2k22-perf"
+has "a Windows VM has 2 vCPUs, as sockets, which the Windows preference requires" "$wvm" "sockets: 2"
+has "a Windows VM has 4 GiB of memory" "$wvm" "guest: 4Gi"
+has "its load disk has a serial number the load script finds it by" "$wvm" "serial: perfload"
+has "it gets the config disk as a CD" "$wvm" "volumeLabel: PERFCFG"
+has "the config disk comes from the run's ConfigMap" "$wvm" "name: perf-windows"
+lacks "a Windows VM has no cloud-init" "$wvm" "cloudInitNoCloud"
+has "its root disk is on the pool under test" "$wvm" "storageClassName: perf-T1"
+has "its serial console is logged" "$wvm" "logSerialConsole: true"
+lvm=$(PERF_ID=T1 bash "$HERE/run-tier.sh" --iops 3000 --windows-every 3 --print-vm 2 2>&1)
+has "the other VMs stay Linux" "$lvm" "name: centos.stream9"
+lvm=$(PERF_ID=T1 bash "$HERE/run-tier.sh" --iops 3000 --windows-every 0 --print-vm 3 2>&1)
+has "--windows-every 0 makes every VM Linux" "$lvm" "name: centos.stream9"
+dvm=$(PERF_ID=T1 bash "$HERE/run-tier.sh" --iops 3000 --print-vm 3 2>&1)
+has "by default a third of the VMs are Windows, as the spec says" "$dvm" "name: windows.2k22.virtio"
+
+cfg=$(PERF_ID=T1 bash "$HERE/run-tier.sh" --iops 3000 --avg 30 --burst 300 --burst-secs 45 --period 600 --print-windows-config 2>&1)
+has "the config has the steady job file at the steady rate" "$cfg" '<Throughput unit="IOPS">15</Throughput>'
+has "the config has the burst job file at the burst rate" "$cfg" '<Throughput unit="IOPS">150</Throughput>'
+has "the config gives the period" "$cfg" "period=600"
+has "the config gives the test area in bytes" "$cfg" "area=3221225472"
+
+prep="$HERE/prepare-windows-image.sh"
+if bash -n "$prep"; then pass "prepare-windows-image.sh has no shell syntax error"; else fail "prepare-windows-image.sh has no shell syntax error"; fi
+p=$(cat "$prep")
+has "the image gets the start-up task that runs the load" "$p" "New-ScheduledTaskTrigger -AtStartup"
+has "the start-up task is bootstrap.ps1" "$p" "windows/bootstrap.ps1"
+has "the licence is activated online when it can be" "$p" "slmgr.vbs /ato"
+has "without internet the grace period is reset" "$p" "slmgr.vbs /rearm"
+has "the licence is checked after a restart" "$p" "slmgr.vbs /dli"
+has "the test's DataSource points at the prepared disk" "$p" "kind: DataSource"
+
 exit "$FAILED"

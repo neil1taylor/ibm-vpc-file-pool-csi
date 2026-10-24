@@ -1,20 +1,27 @@
 #!/usr/bin/env bash
 # run-tier.sh — One tier of the performance test: one pool with one share at a
-# given IOPS, a growing number of Linux VMs each running a general-purpose load,
-# and a report. See docs/specs/2026-10-24-performance-test-30-vms.md.
+# given IOPS, a growing number of VMs (Linux and Windows) each running a
+# general-purpose load, and a report. See docs/specs/2026-10-24-performance-test-30-vms.md.
 #
 # Usage (KUBECONFIG points at the cluster, normally rovslab-dr-eude):
 #   bash test/perf/run-tier.sh --iops 3000 [--share-gb 3900] [--steps 15,30,45]
 #        [--step-minutes 45] [--settle-minutes 5] [--avg 30] [--burst 300]
-#        [--burst-secs 45] [--period 600] [--out DIR] [--keep]
+#        [--burst-secs 45] [--period 600] [--windows-every 3] [--out DIR] [--keep]
 #   bash test/perf/run-tier.sh --iops 3000 --print-vm 7     print the YAML of VM 7 and stop
-#   bash test/perf/run-tier.sh --iops 3000 --print-user-data print the cloud-init file of the VMs and stop
+#   bash test/perf/run-tier.sh --iops 3000 --print-user-data print the cloud-init file of the Linux VMs and stop
+#   bash test/perf/run-tier.sh --iops 3000 --print-windows-config print the settings and job files of the Windows VMs and stop
 #
 # Small smoke run: --iops 3000 --share-gb 200 --steps 5 --step-minutes 10 --settle-minutes 2 --period 120 --burst-secs 20
+# One Windows VM only: the same with --steps 1 --windows-every 1
+#
+# Every Nth VM (--windows-every, 3 by default, so a third) is Windows: it starts
+# from the prepared image (prepare-windows-image.sh) and runs the same load with
+# DiskSpd, from a config disk the run makes (ConfigMap perf-windows). 0 makes every
+# VM Linux. The run downloads DiskSpd from Microsoft's GitHub release and checks it.
 #
 # Everything the run makes carries the label perf-test-run=<ID>. At the end, or
 # when the script stops, it deletes the VMs, the namespace and the pool, unless
-# --keep is given. The Windows part of the mix is not built yet (see the spec).
+# --keep is given.
 
 set -uo pipefail
 
@@ -39,10 +46,17 @@ OUT=""
 KEEP=false
 PRINT_VM=""
 PRINT_USER_DATA=false
+PRINT_WINDOWS_CONFIG=false
+WINDOWS_EVERY=3
 
 CATALOG_IMAGE="${PERF_CATALOG_IMAGE:-centos-stream9}"
 CATALOG_PREFERENCE="${PERF_CATALOG_PREFERENCE:-centos.stream9}"
 INSTANCETYPE="${PERF_INSTANCETYPE:-u1.small}"
+WINDOWS_IMAGE="${PERF_WINDOWS_IMAGE:-win2k22-perf}"
+WINDOWS_PREFERENCE="${PERF_WINDOWS_PREFERENCE:-windows.2k22.virtio}"
+# DiskSpd, the Windows load tool: Microsoft's release and the checksum of its zip file.
+DISKSPD_URL=https://github.com/microsoft/diskspd/releases/download/v2.3/DiskSpd.ZIP
+DISKSPD_SHA256=18609981e8b04b4f645f1fd182ad0541615fe71722de36a9a933c54f747218a3
 IMAGES_NS=openshift-virtualization-os-images
 # The copy of a catalog disk must be at least as large as the catalog disk (30 GiB).
 ROOT_GB=30
@@ -66,6 +80,8 @@ while [ $# -gt 0 ]; do
         --keep) KEEP=true; shift ;;
         --print-vm) PRINT_VM="$2"; shift 2 ;;
         --print-user-data) PRINT_USER_DATA=true; shift ;;
+        --print-windows-config) PRINT_WINDOWS_CONFIG=true; shift ;;
+        --windows-every) WINDOWS_EVERY="$2"; shift 2 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
@@ -79,6 +95,8 @@ OUT="${OUT:-$HERE/out/$ID}"
 
 log() { echo "[$(date -u +%H:%M:%S)] $*"; }
 vm_name() { printf 'perf-%03d' "$1"; }
+# is_windows N — VM N is one of the Windows VMs.
+is_windows() { [ "$WINDOWS_EVERY" -gt 0 ] && [ $(($1 % WINDOWS_EVERY)) -eq 0 ]; }
 
 # user_data — the cloud-init file every VM gets: it writes the load script,
 # installs fio, says PERF-READY on the serial console, and starts the load. It is
@@ -89,16 +107,40 @@ user_data() {
     printf 'runcmd:\n  - |\n    set -e\n    dnf install -y -q fio\n    %s > /dev/null\n    echo PERF-READY > /dev/ttyS0\n  - "nohup sh /root/load.sh > /dev/null 2>&1 &"\n' "$(perf_prefill_command /dev/vdb "$AREA")"
 }
 
-# vm_yaml N — the VM and its two disks. The root disk is copied from the catalog
-# image and the second disk (/dev/vdb) is the one the load runs on. Both are on the pool.
+# windows_settings — the settings file of the Windows load (load.ps1).
+windows_settings() {
+    printf 'period=%s\narea=%s\nserial=perfload\n' "$PERIOD" "$(perf_bytes "$AREA")"
+}
+
+# windows_config DIR — the files of the Windows VMs' config disk: the settings, the
+# DiskSpd job files of the two phases, the load scripts and DiskSpd itself.
+windows_config() {
+    local dir="$1" zip
+    windows_settings >"$dir/settings.txt"
+    perf_diskspd_profile "$AVG" $((PERIOD - BURST_SECS)) "$(perf_bytes "$AREA")" >"$dir/steady.xml"
+    perf_diskspd_profile "$BURST" "$BURST_SECS" "$(perf_bytes "$AREA")" >"$dir/burst.xml"
+    cp "$HERE/windows/load.ps1" "$HERE/windows/result.ps1" "$dir/"
+    zip="$dir/diskspd.zip"
+    curl -fsSL -o "$zip" "$DISKSPD_URL" || { log "FAIL: cannot download DiskSpd"; return 1; }
+    if [ "$( (sha256sum "$zip" 2>/dev/null || shasum -a 256 "$zip") | cut -d' ' -f1)" != "$DISKSPD_SHA256" ]; then
+        log "FAIL: the DiskSpd download does not match its checksum"
+        return 1
+    fi
+    unzip -o -j -q "$zip" amd64/diskspd.exe -d "$dir" && find "$zip" -type f -delete
+}
+
+# vm_yaml N — VM N: Linux or Windows.
 vm_yaml() {
-    local vm
-    vm=$(vm_name "$1")
+    if is_windows "$1"; then windows_vm_yaml "$1"; else linux_vm_yaml "$1"; fi
+}
+
+# data_pvc_yaml VM — the load disk of a VM, on the pool.
+data_pvc_yaml() {
     cat <<YAML
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: $vm-data
+  name: $1-data
   labels:
     $LABEL: "$ID"
 spec:
@@ -107,6 +149,36 @@ spec:
   resources:
     requests:
       storage: ${DATA_GB}Gi
+YAML
+}
+
+# root_dv_yaml VM DATASOURCE — the root disk of a VM, copied from an image onto the pool.
+root_dv_yaml() {
+    cat <<YAML
+    - metadata:
+        name: $1-root
+        labels:
+          $LABEL: "$ID"
+      spec:
+        sourceRef:
+          kind: DataSource
+          name: $2
+          namespace: $IMAGES_NS
+        storage:
+          storageClassName: $POOL
+          resources:
+            requests:
+              storage: ${ROOT_GB}Gi
+YAML
+}
+
+# linux_vm_yaml N — a Linux VM and its two disks. The root disk is copied from the catalog
+# image and the second disk (/dev/vdb) is the one the load runs on. Both are on the pool.
+linux_vm_yaml() {
+    local vm
+    vm=$(vm_name "$1")
+    data_pvc_yaml "$vm"
+    cat <<YAML
 ---
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
@@ -123,20 +195,7 @@ spec:
     kind: VirtualMachineClusterPreference
     name: $CATALOG_PREFERENCE
   dataVolumeTemplates:
-    - metadata:
-        name: $vm-root
-        labels:
-          $LABEL: "$ID"
-      spec:
-        sourceRef:
-          kind: DataSource
-          name: $CATALOG_IMAGE
-          namespace: $IMAGES_NS
-        storage:
-          storageClassName: $POOL
-          resources:
-            requests:
-              storage: ${ROOT_GB}Gi
+$(root_dv_yaml "$vm" "$CATALOG_IMAGE")
   template:
     metadata:
       labels:
@@ -159,12 +218,77 @@ spec:
 YAML
 }
 
+# windows_vm_yaml N — a Windows VM: its root disk copied from the prepared image, a
+# load disk the load script finds by its serial number, and the run's config disk as a CD.
+windows_vm_yaml() {
+    local vm
+    vm=$(vm_name "$1")
+    data_pvc_yaml "$vm"
+    cat <<YAML
+---
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: $vm
+  labels:
+    $LABEL: "$ID"
+spec:
+  runStrategy: Always
+  preference:
+    kind: VirtualMachineClusterPreference
+    name: $WINDOWS_PREFERENCE
+  dataVolumeTemplates:
+$(root_dv_yaml "$vm" "$WINDOWS_IMAGE")
+  template:
+    metadata:
+      labels:
+        $LABEL: "$ID"
+    spec:
+      domain:
+        cpu:
+          sockets: 2
+        memory:
+          guest: 4Gi
+        devices:
+          logSerialConsole: true
+          disks:
+            - name: rootdisk
+              bootOrder: 1
+              disk:
+                bus: virtio
+            - name: loaddisk
+              serial: perfload
+              disk:
+                bus: virtio
+            - name: perfcfg
+              cdrom:
+                bus: sata
+      volumes:
+        - name: rootdisk
+          dataVolume:
+            name: $vm-root
+        - name: loaddisk
+          persistentVolumeClaim:
+            claimName: $vm-data
+        - name: perfcfg
+          configMap:
+            name: perf-windows
+            volumeLabel: PERFCFG
+YAML
+}
+
 if [ -n "$PRINT_VM" ]; then
     vm_yaml "$PRINT_VM"
     exit 0
 fi
 if $PRINT_USER_DATA; then
     user_data
+    exit 0
+fi
+if $PRINT_WINDOWS_CONFIG; then
+    windows_settings
+    perf_diskspd_profile "$AVG" $((PERIOD - BURST_SECS)) "$(perf_bytes "$AREA")"
+    perf_diskspd_profile "$BURST" "$BURST_SECS" "$(perf_bytes "$AREA")"
     exit 0
 fi
 
@@ -248,7 +372,7 @@ pool_gone() { ! oc get filesharepool "$POOL" >/dev/null 2>&1; }
 
 mkdir -p "$OUT"
 trap cleanup EXIT
-log "run $ID: tier $IOPS IOPS, share $SHARE_GB GB, steps $STEPS, $STEP_MIN min each; results in $OUT"
+log "run $ID: tier $IOPS IOPS, share $SHARE_GB GB, steps $STEPS, $STEP_MIN min each, every ${WINDOWS_EVERY}th VM Windows (0: none); results in $OUT"
 
 create_pool || { log "FAIL: cannot make the pool"; exit 1; }
 wait_until 1800 "pool $POOL to be Ready" pool_ready || exit 1
@@ -257,6 +381,14 @@ ud=$(mktemp)
 user_data >"$ud"
 oc create secret generic perf-userdata -n "$NS" --from-file=userdata="$ud" >/dev/null
 find "$ud" -type f -delete
+max_vms=${STEPS##*,}
+windows_vms=0
+[ "$WINDOWS_EVERY" -gt 0 ] && windows_vms=$((max_vms / WINDOWS_EVERY))
+if [ "$windows_vms" -gt 0 ]; then
+    mkdir -p "$OUT/windows-config"
+    windows_config "$OUT/windows-config" || exit 1
+    oc create configmap perf-windows -n "$NS" --from-file="$OUT/windows-config" >/dev/null || { log "FAIL: cannot make the Windows config"; exit 1; }
+fi
 
 printf 'vms,slow10_pct,slow20_pct,slow30_pct,burst_slow_pct,stalls,boot_storm_secs,share_at_limit,short_pct\n' >"$OUT/steps.csv"
 printf 'vms,share_nfs_iops,share_avg_latency_ms,guest_iops,ibm_ops_demand\n' >"$OUT/share.csv"
@@ -314,7 +446,7 @@ done
 {
     echo "# Performance test, tier $IOPS IOPS (run $ID)"
     echo
-    echo "Share: $SHARE_GB GB at $IOPS IOPS. Load per VM: $AVG IOPS average, bursts of $BURST IOPS for $BURST_SECS s every $PERIOD s, 70/30 read/write, blocks of $PERF_BLOCK_MIX (size:percent), a test area of $AREA written once before measuring, a different random pattern in every fio process."
+    echo "Share: $SHARE_GB GB at $IOPS IOPS. Load per VM: $AVG IOPS average, bursts of $BURST IOPS for $BURST_SECS s every $PERIOD s, 70/30 read/write, blocks of $PERF_BLOCK_MIX (size:percent), a test area of $AREA written once before measuring, a different random pattern in every fio process. Every ${WINDOWS_EVERY}th VM is Windows Server 2022 (2 vCPU, 4 GiB) running the same load with DiskSpd (0: none); the other VMs are Linux (fio)."
     echo
     echo "| Tier | Knee at 20 ms (VMs) | Recommended (80% of the knee) | Knee at 10 ms | Knee at 30 ms |"
     echo "|---|---|---|---|---|"
