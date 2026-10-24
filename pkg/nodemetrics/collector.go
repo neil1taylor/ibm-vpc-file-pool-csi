@@ -147,8 +147,42 @@ func (c *Collector) Refresh(ctx context.Context) {
 	}
 
 	c.mu.Lock()
-	c.samples = samples
+	c.samples = mergeByShare(samples)
 	c.mu.Unlock()
+}
+
+// mergeByShare keeps one sample for each share. Kubelet gives each volume its
+// own staging path, so a node can hold several staging mounts of the same
+// share, and some of them can be stale mounts of a deleted pool. Prometheus
+// refuses a scrape that holds the same series twice, which made the whole
+// endpoint answer HTTP 500. The mounts of one share on one node go to the same
+// NFS server, and every counter only grows, so the larger value is the newer
+// reading and is never counted twice.
+func mergeByShare(samples []shareSample) []shareSample {
+	var merged []shareSample
+	index := map[ShareRef]int{}
+	for _, s := range samples {
+		i, seen := index[s.ref]
+		if !seen {
+			index[s.ref] = len(merged)
+			merged = append(merged, s)
+			continue
+		}
+		m := &merged[i]
+		if !m.hasSpace && s.hasSpace {
+			m.hasSpace, m.total, m.used = true, s.total, s.used
+		}
+		for k, st := range s.ops {
+			cur := m.ops[k]
+			cur.Ops = max(cur.Ops, st.Ops)
+			cur.RTTMillis = max(cur.RTTMillis, st.RTTMillis)
+			cur.ExecMillis = max(cur.ExecMillis, st.ExecMillis)
+			m.ops[k] = cur
+		}
+		m.bytesRead = max(m.bytesRead, s.bytesRead)
+		m.bytesWrit = max(m.bytesWrit, s.bytesWrit)
+	}
+	return merged
 }
 
 // Run refreshes now and then every interval, until ctx ends.
