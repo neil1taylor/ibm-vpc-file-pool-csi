@@ -43,7 +43,7 @@ Before upgrading, complete every item:
 | v0.11.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.12.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.13.0–v0.13.2 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
-| v0.14.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
+| v0.14.0–v0.14.1 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
 
 ---
 
@@ -122,6 +122,17 @@ kubectl get crd filesharepools.storage.ibmcloud.io -o json | \
 ---
 
 ## Version-Specific Upgrade Notes
+
+### Upgrading to v0.14.1 (from v0.14.0)
+
+**Changes:** the console box on the Snapshots and Pools pages now shows how the driver takes VM disk snapshots: instant, copy, or unknown. Before, it read only the KubeVirt `Sidecar` gate and said "on" even when the driver was set to `vmSnapshots.method=copy`. The driver code is the same as v0.14.0.
+
+**CRD changes:** none.
+
+**Action required:**
+1. Upgrade with Helm. No CRD step.
+2. The chart now renders a ConfigMap `ibm-vpc-file-pool-csi-settings` (key `vmSnapshotMethod`, no secret) in the release namespace, and a Role and RoleBinding that let every signed-in user `get` that one ConfigMap by name. Nothing else in the namespace becomes readable. The console reads it.
+3. Upgrade the console plugin image to v0.14.1 with the chart. A console plugin that is newer than the driver shows "unknown" until the driver is upgraded too.
 
 ### Upgrading to v0.14.0 (from v0.13.2)
 
