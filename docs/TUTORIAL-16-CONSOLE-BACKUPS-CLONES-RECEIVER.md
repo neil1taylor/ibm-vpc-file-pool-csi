@@ -7,7 +7,7 @@ Do three jobs in the OpenShift console, with no YAML. First, back up a volume on
 ![A backup policy selects a volume, copies it into the snapshot pool, and a restore makes a new volume](images/tutorial-16-backup-and-restore.drawio.svg)
 
 **Time:** about 45 minutes for parts A and B, most of it waiting for backups. Part C needs a second cluster.
-**Status:** backups are Experimental ([BACKUP-RECOVERY.md](BACKUP-RECOVERY.md)). This page has not been run end to end on a cluster. Every button and message below is taken from the console source code.
+**Status:** backups are Experimental ([BACKUP-RECOVERY.md](BACKUP-RECOVERY.md)). This page was run end to end on rovslab on 24 October 2026 (driver v0.14.1, OpenShift 4.21), with a second cluster for part C.
 **Scope:** the console does not run `kubectl backup cos-setup`. Part A shows what the COS tab does and links to the commands.
 
 ---
@@ -59,7 +59,7 @@ Open **Storage**, then **IBM VPC File Pools**, then the **Backups** tab. The lis
 
 The form checks the same limits as the admission webhook. If the webhook still refuses the policy, the page shows its message under **Creation failed**.
 
-**Expected:** the page of the policy opens. Its **Phase** is `Active`. Check from a terminal:
+**Expected:** the page of the policy opens. Its **Phase** shows `Unknown` for a few seconds, then `Active`. Check from a terminal:
 
 ```bash
 oc get backuppolicy ${POLICY}
@@ -92,7 +92,7 @@ Open the policy. The **Overview** tab shows the settings (**Snapshot Pool**, **S
 | **VM** | The VM that uses the disk, or `-`. |
 | **Last Backup**, **Oldest Backup** | How long ago. A restore can go back as far as the oldest. |
 | **Restore Points** | How many older moments, besides the newest, a restore can go back to. |
-| **Size** | The size of the newest backup. |
+| **Size** | What the newest backup wrote, for a VM disk. A plain volume shows `-`: its file copy does not count bytes. |
 | **Consistency** | `File copy` for a plain volume. `File-system consistent` or `Crash consistent` for a VM disk. A crash consistent copy has an orange label. |
 | **Error** | The last error, or `-`. |
 | **Export** | The COS state of the volume. |
@@ -109,7 +109,7 @@ Suspend stops new backups. The backups that exist stay.
 
 1. On the policy page, choose **Suspend**. Or open the menu (the three dots) of the policy on the **Backups** list and choose **Suspend**.
 
-**Expected:** **Phase** is `Suspended`, and the page shows an information box **Backups are suspended**. The button now reads **Resume**.
+**Expected:** **Phase** is `Suspended`, and the page shows an information box **Backups are suspended**. The button now reads **Resume**. The phase can take up to 20 seconds to change on the page.
 
 2. Choose **Resume**.
 
@@ -279,7 +279,7 @@ If a VM uses the source claim, the page warns **A VM uses this claim**: the clon
 
 If the copy fails, the banner is red: `Cloning failed`, with the error. The claim is not deleted. Choose **Back to volumes** to leave the page.
 
-The banner can show the last title as soon as the claim is `Bound`, which can be before the copy ends. The driver makes the claim and copies the data behind it. A pod that mounts the claim waits until the copy ends. To see the copy itself, open the SubVolume of the clone (it has the same name as the PV of the claim). The **Clone Progress** card shows the bar, **Started At**, **Completed At** and any **Clone error**. The **Clone Status** column of the SubVolumes list shows the same.
+The claim is `Bound` at once: the driver makes the claim and copies the data behind it. A pod that mounts the claim waits until the copy ends. The banner follows the copy, not the claim. In driver v0.14.1 and earlier, the banner showed the last title as soon as the claim was `Bound`, before the copy ended. To see the copy itself, open the SubVolume of the clone (it has the same name as the PV of the claim). The **Clone Progress** card shows the bar, **Started At**, **Completed At** and any **Clone error**. The **Clone Status** column of the SubVolumes list shows the same.
 
 ```bash
 oc get pvc -n ${NS}

@@ -170,7 +170,8 @@ const RestoreSnapshotPage: React.FC = () => {
 
   const minGiB = restoreDefaults({ snapshot, sourcePVC, sourcePVCName, storageClasses: storageClasses || [] }).sizeGiB;
   const errors = validateRestore(form, {
-    existingNames: (pvcs || []).map((p) => p.metadata?.name || ''),
+    // The claim this page made is not a name taken by someone else.
+    existingNames: (pvcs || []).map((p) => p.metadata?.name || '').filter((n) => n !== createdName),
     minGiB,
   });
   const valid = !errors.name && !errors.size && !!form.storageClass;

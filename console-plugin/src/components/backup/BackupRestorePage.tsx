@@ -144,7 +144,11 @@ const BackupRestorePage: React.FC = () => {
   const moment = useMoment ? localInputToISO(momentText) : '';
   const errors = validateBackupRestore(
     { targetNamespace, targetName, moment: useMoment ? moment || 'invalid' : '' },
-    { existingNames: (claims || []).map((c) => c.metadata?.name || ''), oldestBackupTime: volume?.oldestBackupTime },
+    {
+      // The claim this page made is not a name taken by someone else.
+      existingNames: (claims || []).map((c) => c.metadata?.name || '').filter((n) => n !== created?.target),
+      oldestBackupTime: volume?.oldestBackupTime,
+    },
   );
   if (useMoment && !momentText) errors.moment = 'Choose a time, or restore the latest backup.';
   const valid = !!volume && !errors.targetNamespace && !errors.targetName && !errors.moment;

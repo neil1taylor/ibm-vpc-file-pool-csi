@@ -86,6 +86,19 @@ describe('CloneVolumePage', () => {
     expect(cloneButton().disabled).toBe(true);
   });
 
+  it('does not call its own new claim a name that is taken, after the clone starts', async () => {
+    const data = base();
+    watch(data);
+    (k8sCreate as jest.Mock).mockImplementation(async () => {
+      data.PersistentVolumeClaim.push({ ...sourcePVC, metadata: { name: 'data-clone', namespace: 'apps' } });
+      return {};
+    });
+    render(<CloneVolumePage />);
+    fireEvent.click(cloneButton());
+    expect(await screen.findByText(/Cloning/)).toBeTruthy();
+    expect(screen.queryByText(/already exists/)).toBeNull();
+  });
+
   it('refuses a name that a claim already has', () => {
     watch({
       ...base(),

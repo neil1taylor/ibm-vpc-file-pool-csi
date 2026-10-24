@@ -149,7 +149,8 @@ const CloneVolumePage: React.FC = () => {
 
   const minGiB = cloneDefaults({ subvolume, sourcePVC, storageClasses: storageClasses || [] }).sizeGiB;
   const errors = validateRestore(form, {
-    existingNames: (pvcs || []).map((p) => p.metadata?.name || ''),
+    // The claim this page made is not a name taken by someone else.
+    existingNames: (pvcs || []).map((p) => p.metadata?.name || '').filter((n) => n !== createdName),
     minGiB,
     minLabel: "the volume's",
   });
