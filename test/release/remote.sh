@@ -7,7 +7,8 @@
 #     (set RT_STAGES=01,08 to run only some stages)
 #     Stage 18 also exports to COS when ~/.config/pool-csi/cos-stage.env exists (see
 #     test/e2e/lib/backup-cos.sh): its files are copied for this run only and deleted
-#     when it ends. Set COS_DR_CLUSTER=NAME to repeat the restore in that cluster.
+#     when it ends. Set COS_DR_CLUSTER=NAME to repeat the restore in that cluster; if it is in
+#     another resource group, also set COS_DR_RESOURCE_GROUP=NAME.
 #     COS_QUICK=1 RT_STAGES=18 gives the fast COS run (about 25 minutes; see stage 18).
 #   bash test/release/remote.sh report RUN_ID             copy the report folder back and print it
 #
@@ -66,7 +67,12 @@ start() {
         cos_env="$cos_env COS_CONFIG_DIR=\$HOME/release-test/cos-$id"
         if [ -n "${COS_DR_CLUSTER:-}" ]; then
             kubeconfig=$(mktemp -d)
+            if [ -n "${COS_DR_RESOURCE_GROUP:-}" ]; then
+                home_group="$(ibmcloud target --output json | jq -r '.resource_group.name')"
+                ibmcloud target -g "$COS_DR_RESOURCE_GROUP" >/dev/null
+            fi
             ibmcloud ks cluster config --cluster "$COS_DR_CLUSTER" --admin --output yaml >"$kubeconfig/config"
+            [ -z "${COS_DR_RESOURCE_GROUP:-}" ] || ibmcloud target -g "$home_group" >/dev/null
             build "umask 077 && cat > ~/release-test/kubeconfig-dr-$id" <"$kubeconfig/config"
             find "$kubeconfig" -type f -delete; rmdir "$kubeconfig"
             cos_env="$cos_env COS_DR_KUBECONFIG=\$HOME/release-test/kubeconfig-dr-$id"

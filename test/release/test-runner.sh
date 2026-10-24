@@ -164,6 +164,7 @@ expect_contains "stage 18 reports the COS part as not checked without settings" 
 expect_contains "COS_QUICK=1 without COS settings fails with a clear check" "$SKIPDIR/out/results.tsv" "COS_QUICK=1 needs the COS settings"
 expect_contains "stage 18 documents COS_QUICK" "$HERE/stages/18-backup.sh" "COS_QUICK=1 RT_STAGES=18 bash test/release/remote.sh start"
 expect_contains "remote.sh passes COS_QUICK to the run" "$HERE/remote.sh" 'cos_env="COS_QUICK=1"'
+expect_contains "remote.sh can fetch the DR cluster from its own resource group" "$HERE/remote.sh" 'COS_DR_RESOURCE_GROUP'
 expect_contains "the e2e script has the quick mode" "$HERE/../e2e/test-backup.sh" 'COS_QUICK:-0'
 
 exit "$FAILED"
