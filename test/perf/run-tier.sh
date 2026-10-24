@@ -9,15 +9,17 @@
 #        [--burst-secs 45] [--period 600] [--windows-every 3] [--out DIR] [--keep]
 #   bash test/perf/run-tier.sh --iops 3000 --print-vm 7     print the YAML of VM 7 and stop
 #   bash test/perf/run-tier.sh --iops 3000 --print-user-data print the cloud-init file of the Linux VMs and stop
-#   bash test/perf/run-tier.sh --iops 3000 --print-windows-config print the settings and job files of the Windows VMs and stop
+#   bash test/perf/run-tier.sh --iops 3000 --print-windows-config print the settings and fio arguments of the Windows VMs and stop
+#   bash test/perf/run-tier.sh --iops 3000 --print-windows-start  print the PowerShell that starts a Windows VM's load and stop
 #
 # Small smoke run: --iops 3000 --share-gb 200 --steps 5 --step-minutes 10 --settle-minutes 2 --period 120 --burst-secs 20
 # One Windows VM only: the same with --steps 1 --windows-every 1
 #
 # Every Nth VM (--windows-every, 3 by default, so a third) is Windows: it starts
-# from the prepared image (prepare-windows-image.sh) and runs the same load with
-# DiskSpd, from a config disk the run makes (ConfigMap perf-windows). 0 makes every
-# VM Linux. The run downloads DiskSpd from Microsoft's GitHub release and checks it.
+# from the prepared image (prepare-windows-image.sh), which has fio for Windows, and
+# runs the same fio jobs as a Linux VM from a config disk the run makes (ConfigMap
+# perf-windows). The run starts each Windows VM's load through the guest agent.
+# 0 makes every VM Linux.
 #
 # Everything the run makes carries the label perf-test-run=<ID>. At the end, or
 # when the script stops, it deletes the VMs, the namespace and the pool, unless
@@ -47,6 +49,7 @@ KEEP=false
 PRINT_VM=""
 PRINT_USER_DATA=false
 PRINT_WINDOWS_CONFIG=false
+PRINT_WINDOWS_START=false
 WINDOWS_EVERY=3
 
 CATALOG_IMAGE="${PERF_CATALOG_IMAGE:-centos-stream9}"
@@ -54,9 +57,6 @@ CATALOG_PREFERENCE="${PERF_CATALOG_PREFERENCE:-centos.stream9}"
 INSTANCETYPE="${PERF_INSTANCETYPE:-u1.small}"
 WINDOWS_IMAGE="${PERF_WINDOWS_IMAGE:-win2k22-perf}"
 WINDOWS_PREFERENCE="${PERF_WINDOWS_PREFERENCE:-windows.2k22.virtio}"
-# DiskSpd, the Windows load tool: Microsoft's release and the checksum of its zip file.
-DISKSPD_URL=https://github.com/microsoft/diskspd/releases/download/v2.3/DiskSpd.ZIP
-DISKSPD_SHA256=18609981e8b04b4f645f1fd182ad0541615fe71722de36a9a933c54f747218a3
 IMAGES_NS=openshift-virtualization-os-images
 # The copy of a catalog disk must be at least as large as the catalog disk (30 GiB).
 ROOT_GB=30
@@ -81,6 +81,7 @@ while [ $# -gt 0 ]; do
         --print-vm) PRINT_VM="$2"; shift 2 ;;
         --print-user-data) PRINT_USER_DATA=true; shift ;;
         --print-windows-config) PRINT_WINDOWS_CONFIG=true; shift ;;
+        --print-windows-start) PRINT_WINDOWS_START=true; shift ;;
         --windows-every) WINDOWS_EVERY="$2"; shift 2 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
@@ -109,24 +110,31 @@ user_data() {
 
 # windows_settings — the settings file of the Windows load (load.ps1).
 windows_settings() {
-    printf 'period=%s\narea=%s\nserial=perfload\n' "$PERIOD" "$(perf_bytes "$AREA")"
+    printf 'period=%s\nserial=perfload\n' "$PERIOD"
 }
 
-# windows_config DIR — the files of the Windows VMs' config disk: the settings, the
-# DiskSpd job files of the two phases, the load scripts and DiskSpd itself.
+# windows_config DIR — the files of the Windows VMs' config disk: the settings, the fio
+# arguments of the fill and of the two phases, and the load scripts.
 windows_config() {
-    local dir="$1" zip
+    local dir="$1"
     windows_settings >"$dir/settings.txt"
-    perf_diskspd_profile "$AVG" $((PERIOD - BURST_SECS)) "$(perf_bytes "$AREA")" >"$dir/steady.xml"
-    perf_diskspd_profile "$BURST" "$BURST_SECS" "$(perf_bytes "$AREA")" >"$dir/burst.xml"
-    cp "$HERE/windows/load.ps1" "$HERE/windows/result.ps1" "$dir/"
-    zip="$dir/diskspd.zip"
-    curl -fsSL -o "$zip" "$DISKSPD_URL" || { log "FAIL: cannot download DiskSpd"; return 1; }
-    if [ "$( (sha256sum "$zip" 2>/dev/null || shasum -a 256 "$zip") | cut -d' ' -f1)" != "$DISKSPD_SHA256" ]; then
-        log "FAIL: the DiskSpd download does not match its checksum"
-        return 1
-    fi
-    unzip -o -j -q "$zip" amd64/diskspd.exe -d "$dir" && find "$zip" -type f -delete
+    perf_windows_fill_args "$AREA" >"$dir/fill.args"
+    perf_windows_fio_args steady "$AVG" $((PERIOD - BURST_SECS)) "$AREA" >"$dir/steady.args"
+    perf_windows_fio_args burst "$BURST" "$BURST_SECS" "$AREA" >"$dir/burst.args"
+    cp "$HERE/windows/load.ps1" "$HERE/windows/perf.ps1" "$dir/"
+}
+
+# windows_start_script — the PowerShell the run sends through the guest agent to start a
+# Windows VM's load. It does nothing if the load runs, and fails until the config disk is
+# there. (A start-up task in Windows would have been simpler, but it stayed "Queued" and never ran.)
+windows_start_script() {
+    cat <<'PS'
+if (Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object CommandLine -like '*load.ps1*') { 'running'; exit 0 }
+$volume = Get-Volume | Where-Object FileSystemLabel -eq 'PERFCFG' | Select-Object -First 1
+if (-not ($volume -and $volume.DriveLetter)) { 'no config disk yet'; exit 1 }
+Start-Process powershell.exe -WindowStyle Hidden -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File $($volume.DriveLetter):\load.ps1"
+'started'
+PS
 }
 
 # vm_yaml N — VM N: Linux or Windows.
@@ -287,13 +295,20 @@ if $PRINT_USER_DATA; then
 fi
 if $PRINT_WINDOWS_CONFIG; then
     windows_settings
-    perf_diskspd_profile "$AVG" $((PERIOD - BURST_SECS)) "$(perf_bytes "$AREA")"
-    perf_diskspd_profile "$BURST" "$BURST_SECS" "$(perf_bytes "$AREA")"
+    perf_windows_fill_args "$AREA"
+    perf_windows_fio_args steady "$AVG" $((PERIOD - BURST_SECS)) "$AREA"
+    perf_windows_fio_args burst "$BURST" "$BURST_SECS" "$AREA"
+    exit 0
+fi
+if $PRINT_WINDOWS_START; then
+    windows_start_script
     exit 0
 fi
 
 # shellcheck source=../e2e/lib/zone.sh
 source "$HERE/../e2e/lib/zone.sh"
+# shellcheck source=guest.sh
+source "$HERE/guest.sh"
 
 create_pool() {
     oc apply -f - >/dev/null <<YAML
@@ -338,6 +353,22 @@ vm_console() {
     oc logs -n "$NS" "$pod" -c guest-console-log 2>/dev/null
 }
 
+# start_windows_loads N — starts the load of each of the first N VMs that is Windows, has
+# not said PERF-READY yet, and has a guest agent. Starting twice does nothing.
+start_windows_loads() {
+    local i vm
+    for ((i = 1; i <= $1; i++)); do
+        is_windows "$i" || continue
+        vm=$(vm_name "$i")
+        vm_console "$vm" | grep -q PERF-READY && continue
+        guest_agent_connected "$NS" "$vm" || continue
+        guest_ps "$NS" "$vm" "$(windows_start_script)" >/dev/null 2>&1 || true
+    done
+}
+
+# ready N — starts the Windows loads, then checks every one of the first N VMs is ready.
+ready() { start_windows_loads "$1"; all_ready "$1"; }
+
 # all_ready N — every one of the first N VMs has said PERF-READY.
 all_ready() {
     local i
@@ -372,7 +403,7 @@ pool_gone() { ! oc get filesharepool "$POOL" >/dev/null 2>&1; }
 
 mkdir -p "$OUT"
 trap cleanup EXIT
-log "run $ID: tier $IOPS IOPS, share $SHARE_GB GB, steps $STEPS, $STEP_MIN min each, every ${WINDOWS_EVERY}th VM Windows (0: none); results in $OUT"
+log "run $ID: tier $IOPS IOPS, share $SHARE_GB GB, steps $STEPS, $STEP_MIN min each, 1 VM in ${WINDOWS_EVERY} Windows (0: none); results in $OUT"
 
 create_pool || { log "FAIL: cannot make the pool"; exit 1; }
 wait_until 1800 "pool $POOL to be Ready" pool_ready || exit 1
@@ -386,7 +417,7 @@ windows_vms=0
 [ "$WINDOWS_EVERY" -gt 0 ] && windows_vms=$((max_vms / WINDOWS_EVERY))
 if [ "$windows_vms" -gt 0 ]; then
     mkdir -p "$OUT/windows-config"
-    windows_config "$OUT/windows-config" || exit 1
+    windows_config "$OUT/windows-config"
     oc create configmap perf-windows -n "$NS" --from-file="$OUT/windows-config" >/dev/null || { log "FAIL: cannot make the Windows config"; exit 1; }
 fi
 
@@ -406,7 +437,7 @@ for n in "${STEP_LIST[@]}"; do
     for ((i = prev + 1; i <= n; i++)); do
         vm_yaml "$i" | oc apply -n "$NS" -f - >/dev/null || log "WARNING: could not make VM $i"
     done
-    wait_until 3600 "$n VMs to say PERF-READY" all_ready "$n" || exit 1
+    wait_until 3600 "$n VMs to say PERF-READY" ready "$n" || exit 1
     if [ "$prev" -eq 0 ]; then
         # How the disks are opened (the cache mode) decides whether a host cache flatters the guests' latency.
         # The research for this test could not confirm it, so every run records it for the first VM.
@@ -446,7 +477,7 @@ done
 {
     echo "# Performance test, tier $IOPS IOPS (run $ID)"
     echo
-    echo "Share: $SHARE_GB GB at $IOPS IOPS. Load per VM: $AVG IOPS average, bursts of $BURST IOPS for $BURST_SECS s every $PERIOD s, 70/30 read/write, blocks of $PERF_BLOCK_MIX (size:percent), a test area of $AREA written once before measuring, a different random pattern in every fio process. Every ${WINDOWS_EVERY}th VM is Windows Server 2022 (2 vCPU, 4 GiB) running the same load with DiskSpd (0: none); the other VMs are Linux (fio)."
+    echo "Share: $SHARE_GB GB at $IOPS IOPS. Load per VM: $AVG IOPS average, bursts of $BURST IOPS for $BURST_SECS s every $PERIOD s, 70/30 read/write, blocks of $PERF_BLOCK_MIX (size:percent), a test area of $AREA written once before measuring, a different random pattern in every fio process. 1 VM in ${WINDOWS_EVERY} is Windows Server 2022 (2 vCPU, 4 GiB) running the same fio jobs with fio for Windows (0: none); the other VMs are Linux."
     echo
     echo "| Tier | Knee at 20 ms (VMs) | Recommended (80% of the knee) | Knee at 10 ms | Knee at 30 ms |"
     echo "|---|---|---|---|---|"
