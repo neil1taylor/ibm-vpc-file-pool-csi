@@ -1655,12 +1655,12 @@ func TestNodePublishVolume_RestoreFromBackupInProgress(t *testing.T) {
 	}
 }
 
-// strictMounter fails to unmount a path that is not mounted, as umount does,
-// and records the paths given to UnmountWithForce.
+// strictMounter fails to unmount a path that is not mounted, as umount does.
+// If hang is set, Unmount waits until the test ends, as umount does when the
+// NFS server of the share is gone.
 type strictMounter struct {
 	*mount.FakeMounter
-	forced   []string
-	timeouts []time.Duration
+	hang chan struct{}
 }
 
 func newStrictMounter(mps ...mount.MountPoint) *strictMounter {
@@ -1668,6 +1668,10 @@ func newStrictMounter(mps ...mount.MountPoint) *strictMounter {
 }
 
 func (m *strictMounter) Unmount(target string) error {
+	if m.hang != nil {
+		<-m.hang
+		return fmt.Errorf("umount: %s: no mount point specified", target)
+	}
 	mps, _ := m.List()
 	if !slices.ContainsFunc(mps, func(mp mount.MountPoint) bool { return mp.Path == target }) {
 		return fmt.Errorf("umount: %s: no mount point specified", target)
@@ -1675,10 +1679,22 @@ func (m *strictMounter) Unmount(target string) error {
 	return m.FakeMounter.Unmount(target)
 }
 
-func (m *strictMounter) UnmountWithForce(target string, timeout time.Duration) error {
-	m.forced = append(m.forced, target)
-	m.timeouts = append(m.timeouts, timeout)
-	return m.Unmount(target)
+// hangingDriver returns a driver whose unmount of path never answers, and the
+// list of paths it detached.
+func hangingDriver(t *testing.T, path string) (*Driver, *[]string) {
+	t.Helper()
+	m := newStrictMounter(mount.MountPoint{Device: "10.240.0.1:/share", Path: path, Type: "nfs4"})
+	m.hang = make(chan struct{})
+	t.Cleanup(func() { close(m.hang) })
+	d := newNodeTestDriver(m, nil, nil)
+	d.unmountTimeout = 10 * time.Millisecond
+	var detached []string
+	d.detach = func(p string) error {
+		detached = append(detached, p)
+		m.MountPoints = nil
+		return nil
+	}
+	return d, &detached
 }
 
 // A NodeUnstageVolume call can end after kubelet has given up on it: the
@@ -1712,30 +1728,48 @@ func TestNodeUnstageVolume_UnmountedDirIsRemoved(t *testing.T) {
 	}
 }
 
-// The NFS server of a deleted share never answers, so a plain umount waits.
-// Unstage must force the unmount after a timeout that ends well inside
-// kubelet's two-minute limit.
-func TestNodeUnstageVolume_ForcesUnmountAfterTimeout(t *testing.T) {
+// The NFS server of a deleted share never answers, and umount waits for it
+// inside the kernel, where a timeout cannot stop it. Unstage must detach the
+// mount instead, which does not wait for the server.
+func TestNodeUnstageVolume_DetachesHungUnmount(t *testing.T) {
 	stagingPath := filepath.Join(resolvedTempDir(t), "globalmount")
 	if err := os.MkdirAll(stagingPath, 0750); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	m := newStrictMounter(mount.MountPoint{Device: "10.240.0.1:/share", Path: stagingPath, Type: "nfs4"})
-	d := newNodeTestDriver(m, nil, nil)
+	d, detached := hangingDriver(t, stagingPath)
 
 	if _, err := d.NodeUnstageVolume(context.Background(), &csi.NodeUnstageVolumeRequest{
 		VolumeId: "pool/share/pvc", StagingTargetPath: stagingPath,
 	}); err != nil {
 		t.Fatalf("NodeUnstageVolume: %v", err)
 	}
-	if !slices.Equal(m.forced, []string{stagingPath}) {
-		t.Errorf("want UnmountWithForce on %s, got %v", stagingPath, m.forced)
-	}
-	if m.timeouts[0] <= 0 || m.timeouts[0] > time.Minute {
-		t.Errorf("unmount timeout %s, want more than 0 and at most 1m", m.timeouts[0])
+	if !slices.Equal(*detached, []string{stagingPath}) {
+		t.Errorf("want a detach of %s, got %v", stagingPath, *detached)
 	}
 	if _, err := os.Stat(stagingPath); !os.IsNotExist(err) {
 		t.Error("staging dir should be removed")
+	}
+}
+
+func TestNodeUnstageVolume_AnsweringShareIsNotDetached(t *testing.T) {
+	stagingPath := filepath.Join(resolvedTempDir(t), "globalmount")
+	if err := os.MkdirAll(stagingPath, 0750); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	m := newStrictMounter(mount.MountPoint{Device: "10.240.0.1:/share", Path: stagingPath, Type: "nfs4"})
+	d := newNodeTestDriver(m, nil, nil)
+	d.detach = func(p string) error {
+		t.Errorf("detach of %s: the share answered, so a plain unmount is enough", p)
+		return nil
+	}
+
+	if _, err := d.NodeUnstageVolume(context.Background(), &csi.NodeUnstageVolumeRequest{
+		VolumeId: "pool/share/pvc", StagingTargetPath: stagingPath,
+	}); err != nil {
+		t.Fatalf("NodeUnstageVolume: %v", err)
+	}
+	if len(m.MountPoints) != 0 {
+		t.Errorf("still mounted: %v", m.MountPoints)
 	}
 }
 
@@ -1756,20 +1790,19 @@ func TestNodeUnpublishVolume_UnmountedDirIsRemoved(t *testing.T) {
 	}
 }
 
-func TestNodeUnpublishVolume_ForcesUnmountAfterTimeout(t *testing.T) {
+func TestNodeUnpublishVolume_DetachesHungUnmount(t *testing.T) {
 	targetPath := filepath.Join(resolvedTempDir(t), "mount")
 	if err := os.MkdirAll(targetPath, 0750); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	m := newStrictMounter(mount.MountPoint{Device: "/share" + testSubDir, Path: targetPath, Type: "none"})
-	d := newNodeTestDriver(m, nil, nil)
+	d, detached := hangingDriver(t, targetPath)
 
 	if _, err := d.NodeUnpublishVolume(context.Background(), &csi.NodeUnpublishVolumeRequest{
 		VolumeId: "pool/share/pvc", TargetPath: targetPath,
 	}); err != nil {
 		t.Fatalf("NodeUnpublishVolume: %v", err)
 	}
-	if !slices.Equal(m.forced, []string{targetPath}) {
-		t.Errorf("want UnmountWithForce on %s, got %v", targetPath, m.forced)
+	if !slices.Equal(*detached, []string{targetPath}) {
+		t.Errorf("want a detach of %s, got %v", targetPath, *detached)
 	}
 }

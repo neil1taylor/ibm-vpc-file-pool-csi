@@ -217,10 +217,10 @@ func (d *Driver) NodeUnstageVolume(_ context.Context, req *csi.NodeUnstageVolume
 	return &csi.NodeUnstageVolumeResponse{}, nil
 }
 
-// unmountTimeout is how long a plain umount may wait before it is forced. The
-// NFS server of a deleted share never answers, and kubelet gives a node call
-// two minutes.
-const unmountTimeout = 30 * time.Second
+// defaultUnmountTimeout is how long a plain umount may wait before the mount
+// is detached. The NFS server of a deleted share never answers, and kubelet
+// gives a node call two minutes.
+const defaultUnmountTimeout = 30 * time.Second
 
 // unmountAndRemove unmounts path if it is mounted, then removes the directory.
 // It reads the kernel's mount list instead of calling stat on path, because
@@ -233,17 +233,39 @@ func (d *Driver) unmountAndRemove(path string) error {
 		return fmt.Errorf("list mounts: %w", err)
 	}
 	if slices.ContainsFunc(mps, func(mp mount.MountPoint) bool { return mp.Path == path }) {
-		if f, ok := d.mounter.(mount.MounterForceUnmounter); ok {
-			err = f.UnmountWithForce(path, unmountTimeout)
-		} else {
-			err = d.mounter.Unmount(path)
-		}
-		if err != nil {
+		if err := d.unmountOrDetach(path); err != nil {
 			return err
 		}
 	}
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove %s: %w", path, err)
+	}
+	return nil
+}
+
+// unmountOrDetach unmounts path. If umount has no answer in time, the NFS
+// server is gone: umount then waits inside the kernel, where killing it does not
+// help, so the mount is detached instead, which does not wait for the server.
+func (d *Driver) unmountOrDetach(path string) error {
+	timeout := d.unmountTimeout
+	if timeout == 0 {
+		timeout = defaultUnmountTimeout
+	}
+	done := make(chan error, 1) // buffered: the late answer of a hung umount is dropped
+	go func() { done <- d.mounter.Unmount(path) }()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(timeout):
+	}
+
+	detach := d.detach
+	if detach == nil {
+		detach = detachMount
+	}
+	klog.InfoS("Unmount had no answer; detaching the mount", "path", path, "after", timeout)
+	if err := detach(path); err != nil {
+		return fmt.Errorf("detach %s: %w", path, err)
 	}
 	return nil
 }
