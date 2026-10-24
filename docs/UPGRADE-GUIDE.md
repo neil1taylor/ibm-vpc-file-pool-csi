@@ -43,6 +43,7 @@ Before upgrading, complete every item:
 | v0.11.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.12.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.13.0–v0.13.2 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
+| v0.14.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
 
 ---
 
@@ -121,6 +122,33 @@ kubectl get crd filesharepools.storage.ibmcloud.io -o json | \
 ---
 
 ## Version-Specific Upgrade Notes
+
+### Upgrading to v0.14.0 (from v0.13.2)
+
+**Changes:** shares use security group access mode; VM snapshots and replication use a QEMU copy of running VMs; golden images are imported by CDI; new console pages. See `CHANGELOG.md` for the full list.
+
+**CRD changes (additive):** `FileSharePool.spec.securityGroupIDs`, new status fields on `Snapshot` (`consistency`, `copyMoment`) and `ReplicationPolicy` (restore points, copy moments), and `ReplicationPolicy.spec.vmCopySpeedLimitMBps`.
+
+**Action required:**
+1. Apply updated CRDs: `kubectl apply -f config/crd/`
+2. Upgrade with Helm. The controller ClusterRole gains permissions (DataVolumes, DataSources, KubeVirt migrations, the `kubevirt-controller` SCC, `hyperconvergeds`) and loses ImageStreams and RoleBindings.
+3. Shares you made before this version in VPC access mode keep working until IBM ends support on 6 May 2027. New shares use security group access mode. The driver does not change an existing share.
+4. If the Prometheus Operator API is present, the chart now creates a ServiceMonitor by default (`metrics.serviceMonitor.enabled`).
+5. **BREAKING: the controller metrics endpoint (`:8080/metrics`) is now HTTPS with a token login (PR #174).** Anything that scraped it over plain HTTP must change to HTTPS with a bearer token. The node agent also serves metrics on port 9810 over HTTPS.
+6. **On OpenShift, alerts need user workload monitoring turned on** (`enableUserWorkload: true`); without it no alert fires. The chart does not change that setting. The command is in `docs/INSTALL.md`.
+7. The guides moved into `docs/` (PR #184). README, CHANGELOG, CONTRIBUTING, CLAUDE.md and SKILL.md stay in the root. Update bookmarks; the console help links already point to `docs/`. A branch that edits a guide at its old place: run `hack/follow-docs-move.sh` after `git merge origin/main`.
+8. Hardening (PRs #156, #105, #203): the image runs as user 65532 (the node agent stays root), the replication receiver has its own ServiceAccount, and receiver TLS stays off by default (turning it on needs cert-manager and a trusted CA on the source cluster).
+9. The default image tag is `v` plus the chart `appVersion`, not `latest`.
+10. **The replication receiver memory limit is raised from `512Mi` to `1Gi`** (`replicationReceiver.resources.limits.memory`). If you set your own value, check that it is at least `512Mi`. The receiver now forces data out every 32 MiB for VM disks and plain files (PRs #219, #226).
+11. **Failover:** apply the new SubVolume CRD (`config/crd`) before `kubectl failover execute --rewind-to`. The dry run now needs `--kubeconfig` because it reads the pool for the mount options. PVs it makes now carry `sec=sys`, and its PVCs bind only to the PV it made (PR #218).
+12. **Migrating a claim** (`kubectl migrate`, console page) now runs as the namespace's user with the cluster's `openshift/tools` image. Owners are not kept and files unreadable to that user are not copied (PR #207; `KNOWN-LIMITATIONS.md`).
+13. Snapshot records of failed snapshots (not ready, older than 2 minutes, no VolumeSnapshotContent) are removed by the controller, including old leftovers (PR #204).
+
+**Fixes in this release:** instant VM snapshot of a disk not owned by user 107 is refused and leaves the chain clean (#191, PR #194); replication and backup status follow the Jobs within seconds (#192, PR #197); the restore page no longer spins without the right to read VolumeSnapshotContents (#186, PR #188); a VM disk copy no longer sticks when its apply Job expires (#160, PR #161); `kubectl backup cos-list` works (PR #183).
+
+**Also fixed:** receiver damaged upload record and Failed Jobs with in-place restarts (#213, PR #219); failover rewind path rule, mount options and StorageClass (#209 to #211, PR #218); plain-file receiver memory (#225, PR #226); #214 and #215 verified fixed by #161 and #197 (tests in PR #217).
+
+**Not in this release:** auto-expand making a share inside the volume request (#222), the console restore banner (#224), failback (no command, untested), and file-level restore from a backup (issue #92). Parts 1 and 2 (the browse helper and the `BackupBrowse` resource with its session controller) are in the code, but nothing creates a `BackupBrowse`, so users see no change.
 
 ### Upgrading to v0.13.2 (from v0.13.1)
 

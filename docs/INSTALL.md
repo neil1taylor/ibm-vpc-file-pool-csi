@@ -410,11 +410,24 @@ kubectl apply -f config/deploy/node.yaml
 | `--vm-group` | `""` | `namespace/name` of the VM that owns the disk (send-vm-disk mode). Set by the replication controller |
 | `--copy-id` | `""` | Name of this copy attempt; a repeat with the same name resumes it (send-vm-disk mode). Set by the replication controller |
 
+**Key unwrap flags** (`--mode=unwrap-backup-key`, run by the COS export and restore Jobs):
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--kp-region` | `""` | Key Protect region |
+| `--kp-instance` | `""` | Key Protect instance ID |
+| `--kp-root-key` | `""` | Key Protect root key ID |
+| `--wrapped-key-file` | `""` | File with the backup key wrapped by Key Protect |
+| `--api-key-file` | `""` | File with the IBM Cloud API key for Key Protect |
+| `--emergency-key-file` | `""` | Optional file with the readable backup key, used only when Key Protect is down |
+| `--key-out` | `""` | File to write the readable key to, mode 0400; it must not exist |
+
 **Browse session flags of the controller** (set by the `backupBrowse.*` chart values):
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--browse-image` | `""` | Image of the browse helper. Empty turns browse sessions off |
+| `--browse-image-pull-secrets` | `""` | Comma-separated names of the Secrets, in the driver namespace, that pull the browse image from a private registry. The chart sets it from `imagePullSecrets` |
 | `--browse-idle` | `15m` | End a session after this long without use |
 | `--browse-max-life` | `2h` | End a session after this long, even if in use |
 | `--browse-max-sessions` | `5` | Open sessions in the cluster. More wait |
