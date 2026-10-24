@@ -40,6 +40,8 @@ What the chart does instead (`metrics.monitoring.mode: auto`, which applies when
 - The `ServiceMonitor` objects send the token of a service account in that namespace (kept in a Secret, because user workload monitoring does not read files) and trust the OpenShift service CA from a ConfigMap in that namespace. They check the certificate against the names of the Services in `kube-system`, which is what the service CA issued it for.
 - The chart never changes `cluster-monitoring-config`.
 
+![The monitoring namespace holds Services, ServiceMonitors and the PrometheusRule; user workload monitoring reads them and scrapes the controller and node agents](images/monitoring-user-workload.drawio.svg)
+
 **The admin step.** Turn user workload monitoring on once per cluster. The chart does not do this, because it is a cluster-wide setting that belongs to the cluster admin:
 
 ```bash

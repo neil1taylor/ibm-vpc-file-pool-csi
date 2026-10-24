@@ -325,6 +325,8 @@ The inconsistency window (time between first and last member copy) is tracked in
 
 A `BackupPolicy` backs up the PVCs and VMs you select into a pool that holds only backups. The pool has its own VPC file share, so losing or filling a data share does not take the backups with it. A running VM is backed up at one moment for all its disks, with the guest file systems frozen for a fraction of a second, and only changed blocks are copied after the first backup.
 
+![A BackupPolicy copies PVCs and VM disks from the data pool into a snapshot pool, and kubectl backup restore reads them back](images/backup-recovery-snapshot-pool.drawio.svg)
+
 ### What a backup looks like
 
 A backup is a set of files on a share of the snapshot pool. You cannot browse backups from the cluster or the console yet (issue #92). `kubectl backup list` shows what exists. The folders are below `/backup/<policy>/` on the share. Each volume has a folder named after its PersistentVolume (`pvc-<uuid>`), not after its claim.
@@ -484,6 +486,8 @@ spec:
 ```
 
 After each local backup of a volume, an export Job reads the snapshot pool's share (read-only, so a running VM is never slowed) and sends the changes to the bucket. `kubectl get backuppolicy NAME -o yaml` shows `exportedTime`, `exportedBytes` and `exportError` for each volume. A failed export is tried again after 5 minutes and never stops the backups to the snapshot pool. A maintenance Job runs once a day (hourly for the shortest keep time of 25 hours) and deletes snapshots older than `keepFor`. Alert rules for a late export are in [MONITORING.md](MONITORING.md#backup-metrics).
+
+![An export Job reads the snapshot pool share read-only, asks Key Protect to unwrap the backup key, and sends encrypted changes to the COS bucket](images/backup-recovery-cos-export.drawio.svg)
 
 **`kubectl backup cos-setup`** makes the IBM Cloud side with your own login (`IBMCLOUD_API_KEY`, `IBMCLOUD_IAM_TOKEN` or your `ibmcloud` login; it needs no cluster; it deletes only the instance-wide policy that IBM Cloud adds for the new HMAC key). Run it with `--dry-run` first: it prints every step and the exact objects.
 

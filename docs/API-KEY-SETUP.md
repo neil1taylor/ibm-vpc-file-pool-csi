@@ -69,6 +69,8 @@ Copy the `--link-crn` value from the existing `ibm-vpc-file-controller-sa` link.
 3. The library runs a sidecar that watches the secret, exchanges the API key for IAM tokens, caches them, and auto-refreshes before expiry.
 4. The driver calls `GetDefaultIAMToken()` before each VPC API operation to get a valid bearer token.
 
+![On a managed cluster the add-on makes the secret, the sidecar exchanges its API key for IAM tokens, and the driver sends a token with each VPC API call](images/api-key-setup-managed-credentials.drawio.svg)
+
 The managed provider also supports automatic token refresh without pod restarts when the API key changes.
 
 ---

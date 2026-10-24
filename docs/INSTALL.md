@@ -20,6 +20,8 @@ The end-to-end process from source code to a working driver on your cluster:
 
 Each step is covered in detail below.
 
+![The install path: build, image build, image push, helm install, end-to-end tests](images/install-steps.drawio.svg)
+
 ---
 
 ## Prerequisites

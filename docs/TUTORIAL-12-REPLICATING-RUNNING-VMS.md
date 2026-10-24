@@ -15,6 +15,8 @@ How it works, in short:
 4. QEMU keeps a change list. The next copy holds only the blocks that changed.
 5. Before the receiver changes a block, it saves the old contents in an undo file. The undo files are restore points.
 
+![QEMU writes a staging file, a Job sends it over HTTPS to the receiver, and the receiver applies it to the disk and keeps undo files](images/tutorial-12-vm-copy.drawio.svg)
+
 ---
 
 ## Prerequisites
