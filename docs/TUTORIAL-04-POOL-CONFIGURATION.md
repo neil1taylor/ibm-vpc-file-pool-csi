@@ -592,6 +592,8 @@ Share draining allows you to evacuate a specific VPC file share so it can be dec
 3. Tracks the number of remaining SubVolumes in `status.drainStatus`
 4. Reports `drained: true` when the share has zero SubVolumes and zero snapshots
 
+![A share added to drainShares becomes draining, takes no new PVCs, and is drained when it holds no SubVolumes or snapshots](images/tutorial-04-share-draining.drawio.svg)
+
 ### Step 4a: Identify a Share to Drain
 
 Use the `expand-pool` from the previous section. Find the share ID of the first share (the one with more PVCs):

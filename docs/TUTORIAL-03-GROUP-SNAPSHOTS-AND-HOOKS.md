@@ -66,6 +66,8 @@ spec:
 
 The hook runs in the first pod that matches `podSelector`.
 
+![The pre-sync hook freezes the application pod, the sync runs, and the post-sync hook thaws the pod](images/tutorial-03-sync-hooks.drawio.svg)
+
 ### Hook error handling
 
 | `onError` | Behavior |

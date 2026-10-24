@@ -970,6 +970,8 @@ ibmcloud is shares
 
 ## Key Concepts
 
+![A snapshot is made from a PVC and restored to a new PVC; a clone is a new PVC that a Clone Worker Job fills with a copy](images/tutorial-02-snapshot-restore-clone.drawio.svg)
+
 ### Snapshots vs Clones
 
 | | Snapshot | Clone |

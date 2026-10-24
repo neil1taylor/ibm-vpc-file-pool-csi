@@ -13,6 +13,8 @@ What the failover tool does and does not do:
 - For a running VM, it picks the newest moment that all disks of the VM can show, so the disks fit each other. It rolls back a copy that stopped half way.
 - It does **not** make the VM, start the workload or change DNS. You apply the VM definition yourself.
 
+![The failover tool reads the replicated folders on the destination share and makes a SubVolume, PV and PVC for each volume; you apply the VM](images/tutorial-13-failover.drawio.svg)
+
 > **Rewind before you start the VM.** A VM that runs on the latest disk writes to it. After that, the disk no longer matches its restore points, and the tool refuses to rewind it. If you may want an earlier moment, rewind first.
 
 ---

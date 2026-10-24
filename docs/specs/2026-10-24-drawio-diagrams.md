@@ -43,3 +43,32 @@ A tutorial links to the design doc's diagram when it shows the same thing, inste
 ## Docs and their diagrams
 
 Filled in as each batch merges.
+
+### Batch 2, operations and tutorials
+
+- TUTORIAL.md: `tutorial-reading-order`
+- TUTORIAL-01-POOL-CREATION.md: `tutorial-01-storageclass-chain`, `tutorial-01-vm-disks`
+- TUTORIAL-02-SNAPSHOTS-AND-CLONES.md: `tutorial-02-snapshot-restore-clone`
+- TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md: `tutorial-03-sync-hooks`
+- TUTORIAL-04-POOL-CONFIGURATION.md: `tutorial-04-share-draining`
+- TUTORIAL-05-GOLDEN-IMAGES.md: `tutorial-05-golden-image-syncer`
+- TUTORIAL-06-REPLICATION-AND-FAILOVER.md: `tutorial-06-direct-nfs`, `tutorial-06-driver-to-driver`
+- TUTORIAL-07-MONITORING.md: no diagram: commands and queries; the scrape path is drawn in `monitoring-user-workload` (MONITORING.md)
+- TUTORIAL-08-MIGRATION-AND-CONSOLE.md: no diagram: command steps and console screens
+- TUTORIAL-09-COS-BACKUP-BUCKET.md: `tutorial-09-cos-bucket`
+- TUTORIAL-10-BACKUP-AND-RESTORE.md: `tutorial-10-backup-restore`
+- TUTORIAL-11-INSTANT-VM-SNAPSHOTS.md: `tutorial-11-snapshot-chain`
+- TUTORIAL-12-REPLICATING-RUNNING-VMS.md: `tutorial-12-vm-copy`
+- TUTORIAL-13-FAILOVER-OF-RUNNING-VMS.md: `tutorial-13-failover`
+- TUTORIAL-14-CONSOLE-RESTORE.md: `tutorial-14-console-restore`
+- INSTALL.md: `install-steps`
+- UPGRADE-GUIDE.md: `upgrade-guide-steps`
+- HELM-VALUES.md: no diagram: a reference table of values
+- API-KEY-SETUP.md: `api-key-setup-managed-credentials`
+- MONITORING.md: `monitoring-user-workload`
+- DAY2-OPERATIONS.md: `day2-operations-expansion`
+- BACKUP-RECOVERY.md: `backup-recovery-snapshot-pool`, `backup-recovery-cos-export`
+- TROUBLESHOOTING.md: no diagram: a list of symptoms with commands and fixes
+- USER-GUIDE.md: `user-guide-pooling`
+- DEPLOYMENT-NOTES.md: no diagram: short status notes
+- SUPPORT.md: no diagram: short list of where to get help

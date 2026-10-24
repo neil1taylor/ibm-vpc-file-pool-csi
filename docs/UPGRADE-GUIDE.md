@@ -2,6 +2,8 @@
 
 This guide covers upgrading the driver between versions without data loss or downtime.
 
+![The upgrade path: pre-flight checks, new CRDs, helm upgrade, rollout watch, post-upgrade checks](images/upgrade-guide-steps.drawio.svg)
+
 ---
 
 ## Pre-Flight Checklist
