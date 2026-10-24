@@ -89,6 +89,8 @@ KubeVirt, which starts the VM, always opens `disk.img` as a plain file. On its o
 
 So the driver adds a **hook** to each VM with a pool disk. A hook is a small extra container in the VM's pod. KubeVirt calls it just before the VM starts, and it changes how the VM opens its disks: "open the newest file in the chain, as a qcow2 file". QEMU then follows the chain down to `disk.img`.
 
+![The webhook adds the hook sidecar to the VM's pod, and the hook makes QEMU open the newest file of the chain](images/vm-instant-snapshots-hook.drawio.svg)
+
 - The driver adds the hook by itself when a VM that has snapshots starts. A VM without snapshots is not changed. You make VMs the normal way, from the standard catalog, with the pool's StorageClass.
 - A running VM does not need the hook to take a snapshot or to live-migrate. The hook is only needed at the next start.
 - The hook needs the KubeVirt **`Sidecar` feature gate**. It is off by default. On OpenShift you turn it on with an annotation on the `HyperConverged` resource. **Red Hat does not support this setting**, and the cluster then reports `TaintedConfiguration`. On ROVS, IBM's add-on manages that resource.
