@@ -68,6 +68,12 @@ if [ "$(cos_prefix stage18 a 1)" != "$(cos_prefix stage18 a 2)" ]; then pass "tw
 no "a prefix with a space is refused" cos_prefix "stage 18" a 1
 no "a prefix with .. is refused" cos_prefix stage18 .. 1
 
+# --- the restore pool in the other cluster ---
+# Share names are unique across the account, and the other cluster's login cannot see
+# the home cluster's share. The same pool name in both clusters makes the second create
+# fail with "already exists" and the lookup with "not found".
+eq "the other cluster's restore pool has its own name" "$(cos_dr_pool rt-1-cosr)" "rt-1-cosr-dr"
+
 # --- export block ---
 COS_BUCKET=b COS_ENDPOINT=e.example KP_INSTANCE_ID=inst KP_REGION=eu-de KP_ROOT_KEY_ID=root
 y=$(cos_export_yaml stage18/x-1 cred wrapped apik)
