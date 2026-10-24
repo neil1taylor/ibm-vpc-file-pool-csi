@@ -249,8 +249,6 @@ The console can do the same without YAML. Open a snapshot in the IBM VPC File Po
 
 ## Group Snapshots
 
-> **Not active (issue #100).** The driver does not act on `VolumeGroupSnapshot` records. The hooks never run and there is no plan to turn them on. The examples below do nothing. A running VM with several disks does not need group snapshots: its snapshots show one moment already (see [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md)).
-
 > **Not active (issue #100).** The driver does not act on `VolumeGroupSnapshot` records: nothing watches them, the hooks below never run, and the CSI group snapshot service is not registered, so Kubernetes' own group snapshot API cannot reach the driver. There is no plan to turn it on. A running VM with several disks does not need it: its snapshots show one moment already (see [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md)). This page describes the design, not a working feature.
 
 Coordinated multi-PVC snapshots for applications with related volumes. See [USER-GUIDE.md — Volume Group Snapshots](USER-GUIDE.md#volume-group-snapshots) and [VOLUME-GROUP-SNAPSHOTS.md](VOLUME-GROUP-SNAPSHOTS.md) for design details.
