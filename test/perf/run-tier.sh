@@ -5,7 +5,7 @@
 #
 # Usage (KUBECONFIG points at the cluster, normally rovslab-dr-eude):
 #   bash test/perf/run-tier.sh --iops 3000 [--share-gb 3900] [--steps 15,30,45]
-#        [--step-minutes 45] [--settle-minutes 5] [--avg 30] [--burst 300]
+#        [--step-minutes 45] [--settle-minutes 15] [--avg 30] [--burst 300]
 #        [--burst-secs 45] [--period 600] [--windows-every 3] [--out DIR] [--keep]
 #   bash test/perf/run-tier.sh --iops 3000 --print-vm 7     print the YAML of VM 7 and stop
 #   bash test/perf/run-tier.sh --iops 3000 --print-user-data print the cloud-init file of the Linux VMs and stop
@@ -39,7 +39,7 @@ IOPS=""
 SHARE_GB=3900
 STEPS="15,30,45"
 STEP_MIN=45
-SETTLE_MIN=5
+SETTLE_MIN=15
 AVG=30
 BURST=300
 BURST_SECS=45
@@ -377,6 +377,11 @@ start_windows_loads() {
 # ready N — starts the Windows loads, then checks every one of the first N VMs is ready.
 ready() { start_windows_loads "$1"; all_ready "$1"; }
 
+# copies_done — no DataVolume of the run is still copying.
+copies_done() {
+    [ -z "$(oc get dv -n "$NS" -o jsonpath='{range .items[?(@.status.phase!="Succeeded")]}{.metadata.name}{"\n"}{end}' 2>/dev/null)" ]
+}
+
 # all_ready N — every one of the first N VMs has said PERF-READY.
 all_ready() {
     local i
@@ -453,6 +458,8 @@ for n in "${STEP_LIST[@]}"; do
         [ -z "$pod" ] || oc exec -n "$NS" "$pod" -c compute -- sh -c 'virsh dumpxml "$(virsh list --name | head -1)"' 2>/dev/null |
             grep -E '<driver |<source (file|dev)|<target dev' >"$OUT/vm1-disks.txt" || true
     fi
+    # Copying the new VMs' disks loads the share for minutes after the VMs are ready.
+    wait_until 3600 "the disk copies of step $n to end" copies_done || exit 1
     log "step $n: all ready; settling for $SETTLE_MIN min"
     sleep $((SETTLE_MIN * 60))
 

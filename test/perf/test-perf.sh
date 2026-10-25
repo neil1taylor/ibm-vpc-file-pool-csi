@@ -104,6 +104,19 @@ eq "a steady phase well under the target rate is short" "$(PERF_TARGET_IOPS=100 
 eq "with no target set nothing is short" "$(PERF_TARGET_IOPS='' perf_vm_stats "$log" 1700000000 1700002000)" "8 50 0 0"
 eq "a steady phase at 90 percent of the target is not short" "$(PERF_TARGET_IOPS=32 perf_vm_stats "$log" 1700000000 1700002000)" "8 50 0 0"
 
+# A line is printed when its phase ends. A phase that ends inside the window but started before
+# it ran partly outside the window: during the 3000 IOPS run it carried the slow-down of the
+# previous step's disk copies into the measurement. Only phases that start inside the window count.
+log3="$WORK/vm-c.log"
+{
+    printf 'PERF 1700000100 steady %s\n' "$(fio_json 200 100 40000000 50000000 60000000 40000000 60000000)"
+    printf 'PERF 1700000700 steady %s\n' "$(fio_json 20 9 3000000 4000000 5000000 2000000 3000000)"
+} >"$log3"
+eq "a phase that started before the window does not count" "$(PERF_STEADY_SECS=555 PERF_TARGET_IOPS=30 perf_vm_stats "$log3" 1700000000 1700002000)" "3 -1 0 0"
+eq "with no phase length every line ending in the window counts" "$(PERF_STEADY_SECS='' PERF_TARGET_IOPS=30 perf_vm_stats "$log3" 1700000000 1700002000)" "40 -1 0 0"
+dir3="$WORK/logs3"; mkdir -p "$dir3"; cp "$log3" "$dir3/vm-1.log"
+eq "guest IOPS count only the phases that started in the window" "$(PERF_STEADY_SECS=555 PERF_BURST_SECS=45 perf_guest_iops "$dir3" 1700000000 1700002000)" "29"
+
 log2="$WORK/vm-b.log"
 printf 'PERF 1700000100 steady %s\n' "$(fio_json 20 9 4000000 9000000 5001000000 2000000 3000000)" >"$log2"
 eq "an I/O over 5 seconds counts as a stall" "$(PERF_TARGET_IOPS=30 perf_vm_stats "$log2" 1700000000 1700002000)" "4 -1 1 0"
@@ -335,5 +348,10 @@ long_log() { echo PERF-READY; head -c 2000000 /dev/zero | tr '\0' 'x'; echo; }
 if long_log | perf_said_ready; then pass "a VM with a long console log still counts as ready"; else fail "a VM with a long console log still counts as ready"; fi
 if printf 'boot\nlogin:\n' | perf_said_ready; then fail "a VM that has not said PERF-READY is not ready"; else pass "a VM that has not said PERF-READY is not ready"; fi
 lacks "the run script never reads a console log with grep -q" "$(cat "$HERE/run-tier.sh")" "grep -q PERF-READY"
+
+# --- waiting before the measuring ---
+rt=$(cat "$HERE/run-tier.sh")
+has "the run waits for every disk copy of the step to end before it settles" "$rt" "copies_done"
+has "the settle time is 15 minutes by default: the slow-down of a step's disk copies took about 10 minutes to fade" "$rt" "SETTLE_MIN=15"
 
 exit "$FAILED"
