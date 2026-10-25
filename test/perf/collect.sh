@@ -42,6 +42,19 @@ perf_parse_line() {
         | @csv' 2>/dev/null | tr -d '"'
 }
 
+# perf_in_window EPOCH PHASE START END — the phase that ended at EPOCH ran wholly between START
+# and END. A line is printed when its phase ends, so the phase started PERF_STEADY_SECS or
+# PERF_BURST_SECS earlier (0 when unset). A phase that started before the window would carry
+# what happened before it, such as the disk copies of the step, into the measurement.
+perf_in_window() {
+    local len=0
+    case "$2" in
+        steady) len=${PERF_STEADY_SECS:-0} ;;
+        burst) len=${PERF_BURST_SECS:-0} ;;
+    esac
+    [ $(($1 - len)) -ge "$3" ] && [ "$1" -le "$4" ]
+}
+
 # perf_vm_stats LOG START END — "<steady worst p95> <burst worst p95> <stalls> <short>" for
 # the PERF lines of one VM between two epoch times.
 # - worst p95 is the larger of the read and write p95 of any one phase, in ms, over the
@@ -56,7 +69,7 @@ perf_vm_stats() {
         row=$(perf_parse_line "$line") || true
         [ -n "$row" ] || continue
         IFS=, read -r epoch phase riops wiops rp95 wp95 _ mx <<<"$row"
-        { [ "$epoch" -ge "$start" ] && [ "$epoch" -le "$end" ]; } || continue
+        perf_in_window "$epoch" "$phase" "$start" "$end" || continue
         if awk -v m="$mx" -v t="$PERF_STALL_MS" 'BEGIN { exit !(m > t) }'; then stalls=$((stalls + 1)); fi
         worst=$(awk -v a="$rp95" -v b="$wp95" 'BEGIN { print (a > b) ? a : b }')
         if [ "$phase" = steady ]; then
@@ -109,7 +122,7 @@ perf_guest_iops() {
             row=$(perf_parse_line "$line") || true
             [ -n "$row" ] || continue
             IFS=, read -r epoch phase riops wiops _ <<<"$row"
-            { [ "$epoch" -ge "$start" ] && [ "$epoch" -le "$end" ]; } || continue
+            perf_in_window "$epoch" "$phase" "$start" "$end" || continue
             echo "$f $phase $((riops + wiops))"
         done <"$f"
     done | awk -v sw="${PERF_STEADY_SECS:-1}" -v bw="${PERF_BURST_SECS:-1}" '
