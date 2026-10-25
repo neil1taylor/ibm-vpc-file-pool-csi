@@ -1,0 +1,535 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: poolbenches.storage.ibmcloud.io
+spec:
+  group: storage.ibmcloud.io
+  names:
+    kind: PoolBench
+    listKind: PoolBenchList
+    plural: poolbenches
+    shortNames:
+    - pb
+    singular: poolbench
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.shareSizeGB
+      name: Size GB
+      type: integer
+    - jsonPath: .spec.iops
+      name: IOPS
+      type: integer
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.vms
+      name: VMs
+      type: integer
+    - jsonPath: .status.kneeVMs
+      name: Knee
+      type: integer
+    - jsonPath: .status.recommendedVMs
+      name: Recommended
+      type: integer
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          PoolBench is one performance test run: a new pool with one share, and VMs
+          added in steps until users would notice the share is slow. The PoolBench
+          service makes and deletes everything the run needs. See
+          docs/specs/2026-10-25-poolbench.md.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              PoolBenchSpec holds every setting of a run. Once the run has started, only
+              Control and Events may change.
+            properties:
+              control:
+                description: 'Control changes a running run: pause, hold, measure
+                  longer, skip, stop.'
+                properties:
+                  extendMinutes:
+                    format: int32
+                    type: integer
+                  extendStep:
+                    description: ExtendStep and ExtendMinutes add minutes to the measuring
+                      of one step.
+                    format: int32
+                    type: integer
+                  hold:
+                    description: Hold keeps measuring the current step until it is
+                      false.
+                    type: boolean
+                  paused:
+                    description: Paused stops the VMs' load and the clock of the step
+                      until it is false.
+                    type: boolean
+                  skipStep:
+                    description: |-
+                      SkipStep ends the measuring of this step (by number, from 1) now. Its
+                      result is marked as cut short.
+                    format: int32
+                    type: integer
+                  stop:
+                    description: Stop ends the run and cleans up, also when KeepAfterEnd
+                      is set.
+                    type: boolean
+                type: object
+              events:
+                description: |-
+                  Events are extra tests run at a given VM count: a boot storm, a patch
+                  window, a live migration, a snapshot or a backup. The console adds one
+                  here to run an event now.
+                items:
+                  description: PoolBenchEvent is an extra test at a given VM count.
+                  properties:
+                    atVMs:
+                      description: |-
+                        AtVMs is the step, by VM count, at which the event runs. It must be a
+                        step of the run.
+                      format: int32
+                      type: integer
+                    type:
+                      description: Type is the event.
+                      enum:
+                      - BootStorm
+                      - PatchWindow
+                      - Migration
+                      - Snapshot
+                      - Backup
+                      type: string
+                  required:
+                  - atVMs
+                  - type
+                  type: object
+                type: array
+              iops:
+                description: |-
+                  IOPS is the share's IOPS limit. IBM's dp2 table decides which values a
+                  share of this size may have.
+                format: int64
+                type: integer
+              keepAfterEnd:
+                description: |-
+                  KeepAfterEnd keeps the VMs, pool and namespace after the run ends, for a
+                  look. They cost money until the PoolBench is deleted or Control.Stop is set.
+                type: boolean
+              knee:
+                description: Knee says when users would notice the share is slow.
+                properties:
+                  latencyLimitMs:
+                    default: 20
+                    description: LatencyLimitMs is the p95 latency over which a VM
+                      counts as slow.
+                    format: int32
+                    type: integer
+                  slowVMPercent:
+                    default: 25
+                    description: SlowVMPercent is the share of slow VMs at which a
+                      step fails.
+                    format: int32
+                    type: integer
+                  stallSeconds:
+                    default: 5
+                    description: StallSeconds is the I/O time that counts as a stall.
+                      Any stall fails the step.
+                    format: int32
+                    type: integer
+                  stopAtKnee:
+                    description: StopAtKnee ends the run at the first failed step.
+                      Unset means true.
+                    type: boolean
+                type: object
+              linux:
+                description: Linux is the size and image of the Linux VMs.
+                properties:
+                  cpu:
+                    description: CPU is the number of vCPUs.
+                    format: int32
+                    type: integer
+                  image:
+                    description: Image is the name of the DataSource the root disk
+                      is copied from.
+                    type: string
+                  imageNamespace:
+                    description: ImageNamespace is the namespace of the DataSource.
+                    type: string
+                  memoryGiB:
+                    description: MemoryGiB is the memory of the VM.
+                    format: int32
+                    type: integer
+                  preference:
+                    description: Preference is the VirtualMachineClusterPreference
+                      of the VM.
+                    type: string
+                  rootDiskGiB:
+                    description: |-
+                      RootDiskGiB is the size of the root disk. It must be at least the size
+                      of the image.
+                    format: int32
+                    type: integer
+                type: object
+              load:
+                description: Load is the disk load each VM makes.
+                properties:
+                  areaGiB:
+                    default: 3
+                    description: AreaGiB is the size of the test area on each VM's
+                      load disk.
+                    format: int32
+                    type: integer
+                  blockMix:
+                    default: 4k:50 16k:30 64k:20
+                    description: |-
+                      BlockMix is the block sizes and the share of the I/O each one takes, in
+                      percent, for example "4k:50 16k:30 64k:20". The shares add up to 100.
+                    type: string
+                  burstIOPS:
+                    default: 300
+                    description: BurstIOPS is the rate of a burst.
+                    format: int32
+                    type: integer
+                  burstSeconds:
+                    default: 45
+                    description: BurstSeconds is the length of a burst.
+                    format: int32
+                    type: integer
+                  periodSeconds:
+                    default: 600
+                    description: PeriodSeconds is the time from the start of one burst
+                      to the next.
+                    format: int32
+                    type: integer
+                  readPercent:
+                    default: 70
+                    description: ReadPercent is the share of reads.
+                    format: int32
+                    type: integer
+                  steadyIOPS:
+                    default: 30
+                    description: SteadyIOPS is the rate between bursts.
+                    format: int32
+                    type: integer
+                type: object
+              maxVMs:
+                default: 90
+                description: MaxVMs is the largest number of VMs. The run stops there,
+                  or at the knee.
+                format: int32
+                type: integer
+              measureMinutes:
+                default: 45
+                description: MeasureMinutes is how long each step is measured.
+                format: int32
+                type: integer
+              profile:
+                default: dp2
+                description: Profile of the test share. Only dp2 is supported.
+                type: string
+              settleMinutes:
+                default: 15
+                description: |-
+                  SettleMinutes is the wait after the new VMs of a step are ready, before
+                  the measuring starts. Making and filling new VMs slows the others.
+                format: int32
+                type: integer
+              shareSizeGB:
+                description: ShareSizeGB is the size of the one share of the test
+                  pool, in GB.
+                format: int64
+                type: integer
+              stepVMs:
+                default: 15
+                description: StepVMs is the number of VMs added at each step.
+                format: int32
+                type: integer
+              windows:
+                description: Windows is the size and image of the Windows VMs.
+                properties:
+                  cpu:
+                    description: CPU is the number of vCPUs.
+                    format: int32
+                    type: integer
+                  image:
+                    description: Image is the name of the DataSource the root disk
+                      is copied from.
+                    type: string
+                  imageNamespace:
+                    description: ImageNamespace is the namespace of the DataSource.
+                    type: string
+                  memoryGiB:
+                    description: MemoryGiB is the memory of the VM.
+                    format: int32
+                    type: integer
+                  preference:
+                    description: Preference is the VirtualMachineClusterPreference
+                      of the VM.
+                    type: string
+                  rootDiskGiB:
+                    description: |-
+                      RootDiskGiB is the size of the root disk. It must be at least the size
+                      of the image.
+                    format: int32
+                    type: integer
+                type: object
+              windowsEvery:
+                default: 3
+                description: WindowsEvery makes every Nth VM a Windows VM. 0 means
+                  Linux only.
+                format: int32
+                type: integer
+              zone:
+                description: Zone of the test pool. Unset means the zone with the
+                  most worker nodes.
+                type: string
+            required:
+            - iops
+            - shareSizeGB
+            type: object
+          status:
+            description: PoolBenchStatus is the live state and the results of a run.
+            properties:
+              cleanedUp:
+                description: |-
+                  CleanedUp is true once the run's VMs, pool and namespace are gone and the
+                  VPC no longer lists the share.
+                type: boolean
+              endTime:
+                format: date-time
+                type: string
+              events:
+                description: Events holds the result of each event that has run.
+                items:
+                  description: PoolBenchEventResult is the result of one event.
+                  properties:
+                    atVMs:
+                      format: int32
+                      type: integer
+                    ended:
+                      format: date-time
+                      type: string
+                    message:
+                      type: string
+                    seconds:
+                      description: |-
+                        Seconds is the event's main measure: for a boot storm, the time until
+                        the last VM sends results again.
+                      format: int64
+                      type: integer
+                    started:
+                      format: date-time
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - atVMs
+                  - type
+                  type: object
+                type: array
+              kneeVMs:
+                description: |-
+                  KneeVMs is the VM count of the first failed step; 0 means no knee was
+                  reached. RecommendedVMs is 80% of the knee, rounded down to a step, or
+                  the largest passed step when there is no knee.
+                format: int32
+                type: integer
+              log:
+                description: |-
+                  Log holds the newest entries of the run's log: stage changes, control
+                  actions, warnings and errors.
+                items:
+                  description: PoolBenchLogEntry is one line of a run's log.
+                  properties:
+                    kind:
+                      description: Kind is Info, Warning, Error or Control.
+                      enum:
+                      - Info
+                      - Warning
+                      - Error
+                      - Control
+                      type: string
+                    message:
+                      type: string
+                    time:
+                      format: date-time
+                      type: string
+                  required:
+                  - kind
+                  - message
+                  - time
+                  type: object
+                type: array
+              message:
+                description: Message says in plain words what the run does, or why
+                  it failed.
+                type: string
+              namespace:
+                description: Namespace and PoolName name the run's own namespace and
+                  pool.
+                type: string
+              phase:
+                description: Phase is the state of the run.
+                enum:
+                - Pending
+                - Checking
+                - Running
+                - Paused
+                - CleaningUp
+                - Complete
+                - Stopped
+                - Failed
+                type: string
+              poolName:
+                type: string
+              readyVMs:
+                format: int32
+                type: integer
+              recommendedVMs:
+                format: int32
+                type: integer
+              stage:
+                description: |-
+                  Stage is what the current step does: Creating (new VMs), Settling,
+                  Measuring or Event.
+                type: string
+              stageEnds:
+                format: date-time
+                type: string
+              stageStarted:
+                description: |-
+                  StageStarted is the start of the current stage. StageEnds is its
+                  planned end, when it has one.
+                format: date-time
+                type: string
+              startTime:
+                description: StartTime and EndTime are the start and end of the run.
+                format: date-time
+                type: string
+              step:
+                description: |-
+                  Step is the current step, from 1. TotalSteps is the number of steps if
+                  the run reaches MaxVMs.
+                format: int32
+                type: integer
+              steps:
+                description: Steps holds one result for each step measured.
+                items:
+                  description: |-
+                    PoolBenchStepResult is the result of one step, as in HCIBench: what the
+                    share did and what the VMs felt.
+                  properties:
+                    cutShort:
+                      description: CutShort is true when the step was skipped before
+                        its measuring ended.
+                      type: boolean
+                    ended:
+                      format: date-time
+                      type: string
+                    guestIOPS:
+                      format: int64
+                      type: integer
+                    ibmOps:
+                      format: int64
+                      type: integer
+                    p50Micros:
+                      description: |-
+                        P50Micros, P95Micros and P99Micros are the VMs' latency percentiles,
+                        the median over all VMs' steady phases.
+                      format: int64
+                      type: integer
+                    p95Micros:
+                      format: int64
+                      type: integer
+                    p99Micros:
+                      format: int64
+                      type: integer
+                    pass:
+                      description: Pass is true when the step meets the knee rule.
+                      type: boolean
+                    readySeconds:
+                      description: |-
+                        ReadySeconds is the time from making the step's new VMs until all of
+                        them send results.
+                      format: int64
+                      type: integer
+                    shareIOPS:
+                      description: |-
+                        ShareIOPS is the NFS operations a second the share served, GuestIOPS
+                        the I/Os a second the VMs made, and IBMOps the operations IBM counts
+                        against the share's limit (one for every 16 KiB of an I/O).
+                      format: int64
+                      type: integer
+                    shareLatencyMicros:
+                      description: ShareLatencyMicros is the share's average time
+                        per request.
+                      format: int64
+                      type: integer
+                    slowPercent:
+                      description: |-
+                        SlowPercent is the share of VMs over the latency limit, and Stalls the
+                        number of I/Os over the stall time.
+                      format: int32
+                      type: integer
+                    stalls:
+                      format: int32
+                      type: integer
+                    started:
+                      description: Started and Ended bound the measuring.
+                      format: date-time
+                      type: string
+                    throughputKBps:
+                      description: ThroughputKBps is the VMs' read plus write throughput.
+                      format: int64
+                      type: integer
+                    vms:
+                      description: VMs and WindowsVMs are the VM counts of the step.
+                      format: int32
+                      type: integer
+                    windowsVMs:
+                      format: int32
+                      type: integer
+                  required:
+                  - pass
+                  - vms
+                  type: object
+                type: array
+              totalSteps:
+                format: int32
+                type: integer
+              vms:
+                description: |-
+                  VMs is the number of test VMs that exist, WindowsVMs how many of them
+                  run Windows, and ReadyVMs how many send results.
+                format: int32
+                type: integer
+              windowsVMs:
+                format: int32
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

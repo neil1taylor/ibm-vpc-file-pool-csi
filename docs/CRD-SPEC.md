@@ -1499,6 +1499,51 @@ A session ends when the helper stops by itself (idle, default 15 minutes), when 
 
 ---
 
+## PoolBench
+
+Cluster-scoped. One performance test run: a new pool with one share, and test VMs added in steps until users would notice the share is slow. The PoolBench service (off by default) makes and deletes everything the run needs, in the run's own namespace `poolbench-<name>`. Short name `pb`. See `docs/specs/2026-10-25-poolbench.md`.
+
+```go
+type PoolBenchSpec struct {
+    Zone           string            `json:"zone,omitempty"`           // default: the zone with the most workers
+    Profile        string            `json:"profile,omitempty"`        // dp2 only
+    ShareSizeGB    int64             `json:"shareSizeGB"`
+    IOPS           int64             `json:"iops"`                     // must fit IBM's dp2 table for the size
+    StepVMs        int32             `json:"stepVMs,omitempty"`        // default 15
+    MaxVMs         int32             `json:"maxVMs,omitempty"`         // default 90; a whole number of steps, at most 500
+    WindowsEvery   *int32            `json:"windowsEvery,omitempty"`   // default 3; 0: Linux only
+    Linux          PoolBenchVM       `json:"linux,omitempty"`          // cpu, memoryGiB, image, imageNamespace, preference, rootDiskGiB
+    Windows        PoolBenchVM       `json:"windows,omitempty"`
+    Load           PoolBenchLoad     `json:"load,omitempty"`           // steadyIOPS 30, burstIOPS 300, burstSeconds 45, periodSeconds 600, readPercent 70, blockMix "4k:50 16k:30 64k:20", areaGiB 3
+    SettleMinutes  *int32            `json:"settleMinutes,omitempty"`  // default 15
+    MeasureMinutes int32             `json:"measureMinutes,omitempty"` // default 45; at least one load period
+    Knee           PoolBenchKnee     `json:"knee,omitempty"`           // latencyLimitMs 20, slowVMPercent 25, stallSeconds 5, stopAtKnee (default true)
+    Events         []PoolBenchEvent  `json:"events,omitempty"`         // type BootStorm, PatchWindow, Migration, Snapshot or Backup; atVMs: a step of the run
+    KeepAfterEnd   bool              `json:"keepAfterEnd,omitempty"`   // keep the VMs and pool after the end
+    Control        PoolBenchControl  `json:"control,omitempty"`        // paused, hold, stop, skipStep, extendStep, extendMinutes
+}
+
+type PoolBenchStatus struct {
+    Phase          string                 `json:"phase,omitempty"`  // Pending, Checking, Running, Paused, CleaningUp, Complete, Stopped, Failed
+    Stage          string                 `json:"stage,omitempty"`  // Creating, Settling, Measuring, Event
+    Step, TotalSteps                      int32
+    VMs, WindowsVMs, ReadyVMs             int32
+    Namespace, PoolName                   string
+    StartTime, EndTime, StageStarted, StageEnds *metav1.Time
+    Message        string
+    Steps          []PoolBenchStepResult  // one per step: vms, share, guest and IBM IOPS, share latency, p50/p95/p99, throughput, slow %, stalls, time to ready, pass, cutShort
+    KneeVMs        int32                  // the first failed step; 0: no knee
+    RecommendedVMs int32                  // 80% of the knee, down to a step; or the largest passed step
+    Events         []PoolBenchEventResult
+    Log            []PoolBenchLogEntry    // the newest entries: Info, Warning, Error, Control
+    CleanedUp      bool                   // the VMs, pool and namespace are gone and the VPC no longer lists the share
+}
+```
+
+The webhook refuses a share size or IOPS outside IBM's `dp2` table, a share too small for the disks of the largest step (each VM has its root disk and a load disk one GiB larger than its test area), a load that is not a steady rate and a longer, faster burst, a block mix whose shares do not add up to 100, and an event that is not at a step of the run. The name may be at most 40 characters, so the run's namespace fits a label value. Once the run has started, only `spec.control` may change, and events may only be added (the console adds one to run an event now).
+
+---
+
 ## ReplicationPolicy
 
 Cluster-scoped resource. Defines a replication relationship between a source FileSharePool on the local cluster and a destination NFS server for cross-region disaster recovery. In direct NFS mode it uses rsync (incremental) over Transit Gateway or VPN. In receiver mode (`destinationEndpoint`) it uploads the whole folder as a tar stream each cycle.

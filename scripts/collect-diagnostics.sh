@@ -49,6 +49,7 @@ collect() {
     run "Snapshots" "$KUBECTL" get "snapshots.$API" -o yaml
     run "Backup policies" "$KUBECTL" get "backuppolicies.$API" -o yaml
     run "Backup restores" "$KUBECTL" get "backuprestores.$API" -o yaml
+    run "Performance test runs" "$KUBECTL" get "poolbenches.$API" -o yaml
     run "Replication policies" "$KUBECTL" get "replicationpolicies.$API" -o yaml
 
     section "Pending PVCs"
