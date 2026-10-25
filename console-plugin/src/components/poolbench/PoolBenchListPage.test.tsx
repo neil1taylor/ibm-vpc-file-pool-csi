@@ -54,6 +54,11 @@ describe('PoolBenchListPage', () => {
     expect(row.textContent).toContain('60');
   });
 
+  it('has a button for a new run', () => {
+    render(<PoolBenchListPage />);
+    expect(screen.getByText('New run')).toBeTruthy();
+  });
+
   it('says in plain words why a run failed', () => {
     render(<PoolBenchListPage />);
     const row = screen.getByRole('link', { name: 'bad' }).closest('tr')!;

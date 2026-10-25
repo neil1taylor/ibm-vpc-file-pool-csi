@@ -101,6 +101,28 @@ export const VirtualMachineInstanceModel: K8sModel = {
   namespaced: true,
 };
 
+/** CDI's image source, for the images of the PoolBench test VMs. */
+export const DataSourceModel: K8sModel = {
+  apiGroup: 'cdi.kubevirt.io',
+  apiVersion: 'v1beta1',
+  kind: 'DataSource',
+  plural: 'datasources',
+  abbr: 'DS',
+  label: 'DataSource',
+  labelPlural: 'DataSources',
+  namespaced: true,
+};
+
+export const NodeModel: K8sModel = {
+  apiVersion: 'v1',
+  kind: 'Node',
+  plural: 'nodes',
+  abbr: 'N',
+  label: 'Node',
+  labelPlural: 'Nodes',
+  namespaced: false,
+};
+
 // ── Standard Kubernetes kinds used by the create pages ──
 
 export const PersistentVolumeClaimModel: K8sModel = {

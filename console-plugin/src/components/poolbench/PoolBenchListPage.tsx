@@ -3,6 +3,7 @@ import {
   useK8sWatchResource,
   ListPageHeader,
   ListPageBody,
+  ListPageCreateLink,
 } from '@openshift-console/dynamic-plugin-sdk';
 import { Link } from 'react-router-dom';
 import { Table, Thead, Tr, Th, Td, Tbody } from '@patternfly/react-table';
@@ -39,7 +40,14 @@ const PoolBenchListPage: React.FC = () => {
 
   return (
     <>
-      <ListPageHeader title="PoolBench" />
+      <ListPageHeader title="PoolBench">
+        <ListPageCreateLink
+          to={ROUTES.POOLBENCH_CREATE}
+          createAccessReview={{ groupVersionKind: { group: PoolBenchModel.apiGroup!, version: PoolBenchModel.apiVersion, kind: PoolBenchModel.kind } }}
+        >
+          New run
+        </ListPageCreateLink>
+      </ListPageHeader>
       <p style={{ padding: '0 24px', color: 'var(--pf-t--global--color--subtle)', margin: '0 0 8px 0' }}>{POOLBENCH_INTRO}</p>
       <ListPageBody>
         {!loaded && (
