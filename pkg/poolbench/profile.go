@@ -133,6 +133,7 @@ func (p *Profile) linuxLoadScript() string {
 	b.WriteString("sleep \"$OFFSET\"\nwhile true; do\n")
 	for _, phase := range []string{"steady", "burst"} {
 		iops, secs := p.phase(phase)
+		b.WriteString("  while [ \"$(sh /root/state.sh)\" = paused ]; do sleep 30; done\n")
 		fmt.Fprintf(&b, "  out=$(fio %s --runtime=%d", common, secs)
 		jobs := p.JobList(phase, iops)
 		for i := 0; i+2 < len(jobs); i += 3 {
@@ -152,6 +153,19 @@ func sendScript(url, token string) string {
 		"curl -s -m 10 -H 'Authorization: Bearer %s' --data-binary \"$1\" '%s' > /dev/null 2>&1 || true\n", token, url)
 }
 
+// stateURL is where a VM asks whether the run is paused: the results URL
+// with /state in place of /results.
+func stateURL(resultsURL string) string {
+	return strings.TrimSuffix(resultsURL, "/results") + "/state"
+}
+
+// stateScript prints "paused" while the run is paused. If the collector
+// cannot be reached it prints nothing, so the load goes on.
+func stateScript(url, token string) string {
+	return fmt.Sprintf("#!/bin/sh\n# Prints the run's state from the PoolBench collector: run or paused.\n"+
+		"curl -s -m 10 -H 'Authorization: Bearer %s' '%s' 2>/dev/null\n", token, stateURL(url))
+}
+
 func indent(s, prefix string) string {
 	lines := strings.Split(strings.TrimSuffix(s, "\n"), "\n")
 	return prefix + strings.Join(lines, "\n"+prefix) + "\n"
@@ -165,6 +179,8 @@ func (p *Profile) LinuxUserData(url, token string) string {
 	b.WriteString("#cloud-config\nwrite_files:\n")
 	b.WriteString("  - path: /root/send.sh\n    permissions: \"0700\"\n    content: |\n")
 	b.WriteString(indent(sendScript(url, token), "      "))
+	b.WriteString("  - path: /root/state.sh\n    permissions: \"0700\"\n    content: |\n")
+	b.WriteString(indent(stateScript(url, token), "      "))
 	b.WriteString("  - path: /root/load.sh\n    permissions: \"0755\"\n    content: |\n")
 	b.WriteString(indent(p.linuxLoadScript(), "      "))
 	fmt.Fprintf(&b, "runcmd:\n  - |\n    set -e\n    dnf install -y -q fio\n    %s > /dev/null\n    sh /root/send.sh PERF-READY\n", p.LinuxFill())
@@ -179,10 +195,11 @@ func lines(args []string) string { return strings.Join(args, "\n") + "\n" }
 // scripts. It holds the run's token, so it is kept in a Secret.
 func (p *Profile) WindowsFiles(url, token string) map[string]string {
 	files := map[string]string{
-		"settings.txt": fmt.Sprintf("period=%d\nserial=%s\ncollector=%s\ntoken=%s\n", p.load.PeriodSeconds, WindowsDiskSerial, url, token),
-		"fill.args":    lines(p.WindowsFillArgs()),
-		"steady.args":  lines(p.WindowsPhaseArgs("steady")),
-		"burst.args":   lines(p.WindowsPhaseArgs("burst")),
+		"settings.txt": fmt.Sprintf("period=%d\nserial=%s\ncollector=%s\nstate=%s\ntoken=%s\n",
+			p.load.PeriodSeconds, WindowsDiskSerial, url, stateURL(url), token),
+		"fill.args":   lines(p.WindowsFillArgs()),
+		"steady.args": lines(p.WindowsPhaseArgs("steady")),
+		"burst.args":  lines(p.WindowsPhaseArgs("burst")),
 	}
 	for _, name := range []string{"load.ps1", "perf.ps1"} {
 		data, err := windowsScripts.ReadFile("guest/windows/" + name)

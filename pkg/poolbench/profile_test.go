@@ -82,6 +82,10 @@ func TestUserData(t *testing.T) {
 		`Authorization: Bearer TOKEN123`,
 		"http://collector.example:8080/v1/runs/t10k/results",
 		"sh /root/send.sh PERF-READY",
+		// Before each phase the VM waits while the run is paused.
+		"/root/state.sh",
+		"= paused ]",
+		"http://collector.example:8080/v1/runs/t10k/state",
 		"nohup sh /root/load.sh",
 	} {
 		if !strings.Contains(ud, want) {
@@ -104,7 +108,8 @@ func TestWindowsFiles(t *testing.T) {
 			t.Errorf("missing %s", name)
 		}
 	}
-	for _, want := range []string{"period=600", "serial=perfload", "collector=http://collector.example:8080/v1/runs/t10k/results", "token=TOKEN123"} {
+	for _, want := range []string{"period=600", "serial=perfload", "collector=http://collector.example:8080/v1/runs/t10k/results",
+		"state=http://collector.example:8080/v1/runs/t10k/state", "token=TOKEN123"} {
 		if !strings.Contains(files["settings.txt"], want) {
 			t.Errorf("settings.txt lacks %q", want)
 		}
@@ -114,5 +119,8 @@ func TestWindowsFiles(t *testing.T) {
 	}
 	if !strings.Contains(files["load.ps1"], "Invoke-WebRequest") {
 		t.Error("load.ps1 does not send results to the collector")
+	}
+	if !strings.Contains(files["load.ps1"], "Wait-WhilePaused") {
+		t.Error("load.ps1 does not wait while the run is paused")
 	}
 }

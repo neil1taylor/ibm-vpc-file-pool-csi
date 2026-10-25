@@ -16,9 +16,12 @@ import (
 )
 
 type fakeRuns struct {
-	token string
-	vms   map[string]VM // by IP
+	token  string
+	vms    map[string]VM // by IP
+	paused bool
 }
+
+func (f fakeRuns) Paused(_ context.Context, run string) bool { return f.paused && run == "t10k" }
 
 func (f fakeRuns) Token(_ context.Context, run string) (string, error) {
 	if run != "t10k" {
@@ -207,5 +210,31 @@ func TestStore_CapsPerVM(t *testing.T) {
 	raw, _ := os.ReadFile(filepath.Join(dir, "t10k", "pb-001.log"))
 	if n := strings.Count(string(raw), "\n"); n != maxResultsPerVM+maxErrorsPerVM {
 		t.Fatalf("file lines: got %d, want %d", n, maxResultsPerVM+maxErrorsPerVM)
+	}
+}
+
+func TestCollector_State(t *testing.T) {
+	c, _ := newTestCollector(t)
+	get := func(token string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/v1/runs/t10k/state", nil)
+		req.RemoteAddr = "10.128.0.5:40000"
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		rec := httptest.NewRecorder()
+		c.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := get("secret-token"); rec.Code != http.StatusOK || rec.Body.String() != "run\n" {
+		t.Fatalf("got %d %q", rec.Code, rec.Body)
+	}
+	runs := c.Runs.(fakeRuns)
+	runs.paused = true
+	c.Runs = runs
+	if rec := get("secret-token"); rec.Code != http.StatusOK || rec.Body.String() != "paused\n" {
+		t.Fatalf("got %d %q", rec.Code, rec.Body)
+	}
+	if rec := get(""); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("no token: got %d", rec.Code)
 	}
 }
