@@ -4,6 +4,11 @@ import { Link, useParams } from 'react-router-dom';
 import {
   Alert,
   Bullseye,
+  Button,
+  Modal,
+  ModalBody,
+  ModalHeader,
+  ModalVariant,
   Card,
   CardBody,
   CardTitle,
@@ -37,6 +42,7 @@ import { POOLBENCH_KEPT, POOLBENCH_SHARED_NODES } from './poolbench-texts';
 import RunCharts from './RunCharts';
 import RunControls from './RunControls';
 import { useVMNumbers } from '../../utils/use-run-metrics';
+import { RAW_UNAVAILABLE, fetchVMLines } from '../../utils/poolbench-raw';
 
 const OS_LABEL = 'storage.ibmcloud.io/poolbench-os';
 const RUN_LABEL = 'storage.ibmcloud.io/poolbench';
@@ -164,7 +170,29 @@ const StepTable: React.FC<{ pb: PoolBench }> = ({ pb }) => {
   );
 };
 
+/** One VM's raw result lines, read when the dialog opens. */
+const VMLines: React.FC<{ run: string; vm: string; onClose: () => void }> = ({ run, vm, onClose }) => {
+  const [text, setText] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    fetchVMLines(run, vm)
+      .then(setText)
+      .catch((err) => setError(`${RAW_UNAVAILABLE} ${err instanceof Error ? err.message : ''}`));
+  }, [run, vm]);
+  return (
+    <Modal variant={ModalVariant.large} isOpen onClose={onClose}>
+      <ModalHeader title={`Result lines of ${vm}`} />
+      <ModalBody>
+        {error && <Alert variant="warning" isInline title={error} />}
+        {!error && text === null && <Spinner size="lg" />}
+        {text !== null && <pre style={{ maxHeight: 480, overflow: 'auto', fontSize: 12 }}>{text}</pre>}
+      </ModalBody>
+    </Modal>
+  );
+};
+
 const VMTable: React.FC<{ pb: PoolBench }> = ({ pb }) => {
+  const [open, setOpen] = useState<string | null>(null);
   const ns = pb.status?.namespace;
   const [vmis] = useK8sWatchResource<VMI[]>(
     ns && isActive(pb)
@@ -184,6 +212,7 @@ const VMTable: React.FC<{ pb: PoolBench }> = ({ pb }) => {
   const list = [...(vmis || [])].sort((a, b) => (a.metadata?.name || '').localeCompare(b.metadata?.name || ''));
   if (list.length === 0) return <p>No test VM is running.</p>;
   return (
+    <>
     <Table aria-label="Test VMs" variant="compact" role="grid">
       <Thead>
         <Tr>
@@ -193,6 +222,7 @@ const VMTable: React.FC<{ pb: PoolBench }> = ({ pb }) => {
           <Th>State</Th>
           <Th>Last IOPS</Th>
           <Th>Last p95</Th>
+          <Th screenReaderText="Result lines" />
         </Tr>
       </Thead>
       <Tbody>
@@ -206,11 +236,18 @@ const VMTable: React.FC<{ pb: PoolBench }> = ({ pb }) => {
               <Td dataLabel="State">{v.status?.phase || '-'}</Td>
               <Td dataLabel="Last IOPS">{n && Number.isFinite(n.iops) ? n.iops : '-'}</Td>
               <Td dataLabel="Last p95">{n && Number.isFinite(n.p95Ms) ? `${n.p95Ms} ms` : '-'}</Td>
+              <Td>
+                <Button variant="link" isInline aria-label={`Lines of ${v.metadata?.name}`} onClick={() => setOpen(v.metadata?.name || null)}>
+                  Lines
+                </Button>
+              </Td>
             </Tr>
           );
         })}
       </Tbody>
     </Table>
+    {open && <VMLines run={pb.metadata?.name || ''} vm={open} onClose={() => setOpen(null)} />}
+    </>
   );
 };
 

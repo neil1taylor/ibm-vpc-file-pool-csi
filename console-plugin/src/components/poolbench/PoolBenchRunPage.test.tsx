@@ -1,6 +1,6 @@
 import React from 'react';
-import { render, screen, within } from '@testing-library/react';
-import { useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { consoleFetchText, useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk';
 import PoolBenchRunPage from './PoolBenchRunPage';
 import { PoolBench } from '../../types';
 
@@ -114,6 +114,16 @@ describe('PoolBenchRunPage', () => {
     expect(table.textContent).toContain('w1');
     expect(table.textContent).toContain('Windows');
     expect(table.textContent).toContain('Scheduling');
+  });
+
+  it("opens a VM's own result lines", async () => {
+    (consoleFetchText as jest.Mock).mockResolvedValue('PERF-READY\nPERF 1700000600 steady {}\n');
+    render(<PoolBenchRunPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Lines of vm-001' }));
+    await waitFor(() => expect(screen.getByText(/PERF 1700000600 steady/)).toBeTruthy());
+    expect((consoleFetchText as jest.Mock).mock.calls[0][0]).toBe(
+      '/api/proxy/plugin/ibm-vpc-file-pool-csi/poolbench/v1/runs/t3000/vms/vm-001/log',
+    );
   });
 
   it('shows the run log, newest first', () => {
