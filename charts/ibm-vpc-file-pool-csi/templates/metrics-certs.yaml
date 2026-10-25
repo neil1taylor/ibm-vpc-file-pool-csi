@@ -17,7 +17,9 @@ spec:
   selfSigned: {}
 ---
 {{- end }}
-{{- range $svc := list (printf "%s-metrics" $name) (printf "%s-node-metrics" $name) }}
+{{- $svcs := list (printf "%s-metrics" $name) (printf "%s-node-metrics" $name) }}
+{{- if .Values.poolBench.enabled }}{{- $svcs = append $svcs (printf "%s-poolbench" $name) }}{{- end }}
+{{- range $svc := $svcs }}
 {{- if or (ne $svc (printf "%s-node-metrics" $name)) $.Values.node.metricsPort }}
 apiVersion: cert-manager.io/v1
 kind: Certificate

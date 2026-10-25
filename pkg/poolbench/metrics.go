@@ -12,6 +12,9 @@ type Metrics struct {
 	stalls     *prometheus.CounterVec
 	results    *prometheus.CounterVec
 	lastResult *prometheus.GaugeVec
+	runVMs     *prometheus.GaugeVec
+	runReady   *prometheus.GaugeVec
+	runStep    *prometheus.GaugeVec
 }
 
 // NewMetrics makes the metrics and registers them.
@@ -43,9 +46,29 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "poolbench_vm_last_result_timestamp_seconds",
 			Help: "Time of the last result line from a test VM.",
 		}, vm),
+		runVMs: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "poolbench_run_vms",
+			Help: "Test VMs of a run, by OS.",
+		}, []string{"run", "os"}),
+		runReady: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "poolbench_run_ready_vms",
+			Help: "Test VMs of a run that have said they are ready.",
+		}, []string{"run"}),
+		runStep: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "poolbench_run_step",
+			Help: "Current step of a run, from 1; 0 before the first step.",
+		}, []string{"run"}),
 	}
-	reg.MustRegister(m.iops, m.latency, m.throughput, m.stalls, m.results, m.lastResult)
+	reg.MustRegister(m.iops, m.latency, m.throughput, m.stalls, m.results, m.lastResult, m.runVMs, m.runReady, m.runStep)
 	return m
+}
+
+// setRun publishes the VM counts and the step of a run.
+func (m *Metrics) setRun(run string, linux, windows, ready, step int32) {
+	m.runVMs.WithLabelValues(run, "linux").Set(float64(linux))
+	m.runVMs.WithLabelValues(run, "windows").Set(float64(windows))
+	m.runReady.WithLabelValues(run).Set(float64(ready))
+	m.runStep.WithLabelValues(run).Set(float64(step))
 }
 
 // stallMs is the I/O time the stall metric counts. The step's own stall time
@@ -79,4 +102,7 @@ func (m *Metrics) forget(run string) {
 	m.stalls.DeletePartialMatch(l)
 	m.results.DeletePartialMatch(l)
 	m.lastResult.DeletePartialMatch(l)
+	m.runVMs.DeletePartialMatch(l)
+	m.runReady.DeletePartialMatch(l)
+	m.runStep.DeletePartialMatch(l)
 }

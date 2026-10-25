@@ -88,6 +88,10 @@ spec:
             - "--monitoring-controller-port={{ .Values.metrics.port }}"
             - "--monitoring-node-service={{ include "ibm-vpc-file-pool-csi.fullname" . }}-node-metrics"
             - "--monitoring-node-port={{ .Values.node.metricsPort }}"
+            {{- if .Values.poolBench.enabled }}
+            - "--monitoring-poolbench-service={{ include "ibm-vpc-file-pool-csi.fullname" . }}-poolbench"
+            - "--monitoring-poolbench-port=8443"
+            {{- end }}
             - "--monitoring-selector=app.kubernetes.io/name={{ include "ibm-vpc-file-pool-csi.name" . }},app.kubernetes.io/instance={{ .Release.Name }}"
             {{- end }}
             {{- if .Values.webhook.enabled }}
