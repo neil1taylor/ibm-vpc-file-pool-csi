@@ -99,9 +99,12 @@ func validatePoolBenchSpec(spec *v1alpha1.PoolBenchSpec) error {
 	if err := validatePoolBenchLoad(&spec.Load); err != nil {
 		return err
 	}
-	if int64(spec.MeasureMinutes)*60 < int64(spec.Load.PeriodSeconds) {
-		return fmt.Errorf("spec.measureMinutes must cover at least one load period of %d seconds, got %d minutes",
-			spec.Load.PeriodSeconds, spec.MeasureMinutes)
+	// Each VM starts its phases at its own offset. Only a steady phase that starts
+	// and ends inside the window counts, so the window must hold a whole period
+	// and a whole steady phase after it.
+	if need := 2*int64(spec.Load.PeriodSeconds) - int64(spec.Load.BurstSeconds); int64(spec.MeasureMinutes)*60 < need {
+		return fmt.Errorf("spec.measureMinutes must cover a period and a steady phase, %d seconds with this load, got %d minutes",
+			need, spec.MeasureMinutes)
 	}
 	if err := validatePoolBenchKnee(&spec.Knee); err != nil {
 		return err

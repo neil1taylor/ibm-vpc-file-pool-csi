@@ -75,6 +75,12 @@ func NewStore(dir string, metrics *Metrics) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read the results folder: %w", err)
 	}
+	probe, err := os.CreateTemp(dir, ".write-check-")
+	if err != nil {
+		return nil, fmt.Errorf("the results folder is not writable: %w", err)
+	}
+	_ = probe.Close()
+	_ = os.Remove(probe.Name())
 	for _, run := range runs {
 		if !run.IsDir() || !validName.MatchString(run.Name()) {
 			continue

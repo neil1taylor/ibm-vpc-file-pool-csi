@@ -91,6 +91,12 @@ rules:
   - apiGroups: [""]
     resources: ["pods/exec"]
     verbs: ["create"]
+  # OpenShift refuses an exec into a pod unless the user may use the SCC the
+  # pod runs under. KubeVirt's launcher pods run under this one.
+  - apiGroups: ["security.openshift.io"]
+    resources: ["securitycontextconstraints"]
+    resourceNames: ["kubevirt-controller"]
+    verbs: ["use"]
   - apiGroups: ["kubevirt.io"]
     resources: ["virtualmachines"]
     verbs: ["get", "create"]
@@ -225,8 +231,13 @@ spec:
         app.kubernetes.io/component: poolbench
     spec:
       serviceAccountName: {{ $name }}
+      {{- $podSC := deepCopy (.Values.poolBench.podSecurityContext | default dict) }}
+      {{- $fixedIDs := or (not (.Capabilities.APIVersions.Has "security.openshift.io/v1")) (eq .Release.Namespace "kube-system") }}
+      {{- if and $fixedIDs (not (hasKey $podSC "fsGroup")) }}
+      {{- $_ := set $podSC "fsGroup" 65532 }}
+      {{- end }}
       securityContext:
-        {{- toYaml .Values.poolBench.podSecurityContext | nindent 8 }}
+        {{- toYaml $podSC | nindent 8 }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -240,7 +251,7 @@ spec:
           args:
             - "--mode=poolbench"
             - "--v={{ .Values.logLevel }}"
-            - "--poolbench-collector-url=http://{{ $name }}.{{ .Release.Namespace }}.svc:8080"
+            - "--poolbench-collector-url=http://{{ $name }}.{{ .Release.Namespace }}.svc.cluster.local:8080"
             - "--poolbench-results-dir=/results"
             - "--poolbench-interval={{ .Values.poolBench.interval }}"
             - "--poolbench-run-role={{ $name }}-run"

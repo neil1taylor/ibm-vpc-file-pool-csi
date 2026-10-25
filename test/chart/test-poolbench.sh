@@ -39,7 +39,7 @@ check "the driver image" "$(doc "$OUT" Deployment "$D" '.spec.template.spec.cont
 check "its own service account" "$(doc "$OUT" Deployment "$D" '.spec.template.spec.serviceAccountName')" "$D"
 ARGS=$(doc "$OUT" Deployment "$D" '.spec.template.spec.containers[0].args[]')
 for want in "--mode=poolbench" \
-    "--poolbench-collector-url=http://$D.kube-system.svc:8080" \
+    "--poolbench-collector-url=http://$D.kube-system.svc.cluster.local:8080" \
     "--poolbench-run-role=$D-run" \
     "--poolbench-service-account=$D" \
     "--node-metrics-service=test-ibm-vpc-file-pool-csi-node-metrics" \
@@ -53,6 +53,7 @@ check "runs as non-root" "$(doc "$OUT" Deployment "$D" "$SC.runAsNonRoot")" "tru
 check "drops ALL capabilities" "$(doc "$OUT" Deployment "$D" "$SC.capabilities.drop[0]")" "ALL"
 check "read-only root file system" "$(doc "$OUT" Deployment "$D" "$SC.readOnlyRootFilesystem")" "true"
 check "seccomp RuntimeDefault" "$(doc "$OUT" Deployment "$D" '.spec.template.spec.securityContext.seccompProfile.type')" "RuntimeDefault"
+check "the service may write the results volume" "$(doc "$OUT" Deployment "$D" '.spec.template.spec.securityContext.fsGroup')" "65532"
 check "results volume mounted" "$(doc "$OUT" Deployment "$D" '.spec.template.spec.containers[0].volumeMounts[] | select(.name == "results") | .mountPath')" "/results"
 check "results claim" "$(doc "$OUT" PersistentVolumeClaim "$D-results" '.spec.resources.requests.storage')" "5Gi"
 check "collector Service port" "$(doc "$OUT" Service "$D" '.spec.ports[] | select(.name == "collector") | .port')" "8080"
@@ -70,6 +71,9 @@ RR=$(doc "$OUT" ClusterRole "$D-run" '.rules[].resources[]')
 for want in pods/exec virtualmachines virtualmachineinstances secrets persistentvolumeclaims datavolumes; do
     if grep -qxF -- "$want" <<<"$RR"; then pass "run role has $want"; else fail "run role lacks $want"; fi
 done
+# Exec into a VM pod is allowed only for pods that run under the KubeVirt SCC.
+check "the run role may use only the KubeVirt SCC" \
+    "$(doc "$OUT" ClusterRole "$D-run" '.rules[] | select(.resources[] == "securitycontextconstraints") | .resourceNames[0] + ":" + .verbs[0]')" "kubevirt-controller:use"
 if doc "$OUT" ClusterRoleBinding "$D-run" '.metadata.name' | grep -q .; then fail "the run role is never bound cluster-wide"; else pass "the run role is never bound cluster-wide"; fi
 
 # The metrics of the service are scraped, so the console can draw the live graphs.

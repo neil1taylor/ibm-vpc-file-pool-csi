@@ -178,4 +178,7 @@ func TestPool(t *testing.T) {
 	if *p.Spec.DefaultUID != 107 || p.Labels[RunLabel] != "t10k" {
 		t.Errorf("uid or label: %+v", p)
 	}
+	if p.Spec.ExpandThresholdPercent < 50 || p.Spec.ExpandThresholdPercent > 95 {
+		t.Errorf("the pool CRD accepts 50 to 95, got %d", p.Spec.ExpandThresholdPercent)
+	}
 }

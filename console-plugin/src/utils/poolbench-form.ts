@@ -103,7 +103,7 @@ export const PRESETS: Preset[] = [
     id: 'quick',
     label: 'Quick check',
     description: '5 VMs on a small share for 10 minutes, to prove the images, the network and the cleanup. About 20 minutes.',
-    apply: (f) => ({ ...f, shareSizeGB: 200, iops: 3000, tiers: [], stepVMs: 5, maxVMs: 5, settleMinutes: 2, measureMinutes: 10 }),
+    apply: (f) => ({ ...f, shareSizeGB: 200, iops: 3000, tiers: [], stepVMs: 5, maxVMs: 5, settleMinutes: 2, measureMinutes: 5, periodSeconds: 120, burstSeconds: 20 }),
   },
   {
     id: 'tier',
@@ -210,7 +210,8 @@ export const validateForm = (f: PoolBenchForm): Partial<Record<keyof PoolBenchFo
   if (mix) e.blockMix = mix;
   if (f.areaGiB < 1) e.areaGiB = 'At least 1';
   if (f.settleMinutes < 0) e.settleMinutes = '0 or more';
-  if (f.measureMinutes * 60 < f.periodSeconds) e.measureMinutes = `At least one load period (${f.periodSeconds / 60} min)`;
+  const needSeconds = 2 * f.periodSeconds - f.burstSeconds;
+  if (f.measureMinutes * 60 < needSeconds) e.measureMinutes = `At least ${Math.ceil(needSeconds / 60)} min: a period and a steady phase`;
   if (f.latencyLimitMs < 1) e.latencyLimitMs = 'At least 1';
   if (f.slowVMPercent < 1 || f.slowVMPercent > 100) e.slowVMPercent = '1 to 100';
   if (f.stallSeconds < 1) e.stallSeconds = 'At least 1';

@@ -274,7 +274,7 @@ const PoolBenchCreatePage: React.FC = () => {
             <CardBody>
               <Grid hasGutter md={3}>
                 <GridItem><NumberField id="pb-settle" label="Settle (min)" help="The wait after the new VMs are ready. Making and filling new VMs slows the others for about 20 minutes." value={form.settleMinutes} error={errors.settleMinutes} onChange={(v) => set('settleMinutes', v)} /></GridItem>
-                <GridItem><NumberField id="pb-measure" label="Measure (min)" help="How long each step is measured. At least one load period." value={form.measureMinutes} error={errors.measureMinutes} onChange={(v) => set('measureMinutes', v)} /></GridItem>
+                <GridItem><NumberField id="pb-measure" label="Measure (min)" help="How long each step is measured. At least a period and a steady phase (2 x period - burst)." value={form.measureMinutes} error={errors.measureMinutes} onChange={(v) => set('measureMinutes', v)} /></GridItem>
                 <GridItem><NumberField id="pb-limit" label="Latency limit (ms)" help="A VM whose p95 latency is over this is slow." value={form.latencyLimitMs} error={errors.latencyLimitMs} onChange={(v) => set('latencyLimitMs', v)} /></GridItem>
                 <GridItem><NumberField id="pb-slow" label="Slow VMs at the knee (%)" help="The step fails when more than this share of the VMs is slow." value={form.slowVMPercent} error={errors.slowVMPercent} onChange={(v) => set('slowVMPercent', v)} /></GridItem>
                 <GridItem><NumberField id="pb-stall" label="Stall (s)" help="One I/O that takes longer than this is a stall, and any stall fails the step." value={form.stallSeconds} error={errors.stallSeconds} onChange={(v) => set('stallSeconds', v)} /></GridItem>
