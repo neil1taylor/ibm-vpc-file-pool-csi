@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
-import RunCharts from './RunCharts';
+import RunCharts, { clock } from './RunCharts';
 import { useRunMetrics } from '../../utils/use-run-metrics';
 import { PoolBench } from '../../types';
 
@@ -88,5 +88,17 @@ describe('RunCharts', () => {
   it('draws nothing before the run starts', () => {
     render(<RunCharts pb={{ ...pb, status: {} }} />);
     expect(screen.getByText(/The graphs start when the run starts/)).toBeTruthy();
+  });
+});
+
+describe('clock', () => {
+  const at = new Date(2026, 9, 25, 9, 5);
+
+  it('writes the time of a Date', () => {
+    expect(clock(at)).toBe('09:05');
+  });
+
+  it('writes the time of a number of milliseconds, which is what the axis hands over', () => {
+    expect(clock(at.getTime())).toBe('09:05');
   });
 });
