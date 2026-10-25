@@ -1,6 +1,6 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { consoleFetchText, k8sPatch, useAccessReview } from '@openshift-console/dynamic-plugin-sdk';
+import { consoleFetch, k8sPatch, useAccessReview } from '@openshift-console/dynamic-plugin-sdk';
 import RunControls from './RunControls';
 import { PoolBench } from '../../types';
 
@@ -95,17 +95,17 @@ describe('raw results', () => {
   it('downloads the raw results through the console proxy', async () => {
     const create = jest.fn(() => 'blob:x');
     Object.assign(URL, { createObjectURL: create, revokeObjectURL: jest.fn() });
-    (consoleFetchText as jest.Mock).mockResolvedValue('vm,os\nvm-001,linux\n');
+    (consoleFetch as jest.Mock).mockResolvedValue({ text: () => Promise.resolve('vm,os\nvm-001,linux\n') });
     render(<RunControls pb={measuring()} />);
     fireEvent.click(screen.getByRole('button', { name: 'Raw results (CSV)' }));
     await waitFor(() => expect(create).toHaveBeenCalled());
-    expect((consoleFetchText as jest.Mock).mock.calls[0][0]).toBe(
+    expect((consoleFetch as jest.Mock).mock.calls[0][0]).toBe(
       '/api/proxy/plugin/ibm-vpc-file-pool-csi/poolbench/v1/runs/t3000/raw.csv',
     );
   });
 
   it('says why the raw results cannot be read', async () => {
-    (consoleFetchText as jest.Mock).mockRejectedValue(new Error('404 Not Found'));
+    (consoleFetch as jest.Mock).mockRejectedValue(new Error('404 Not Found'));
     render(<RunControls pb={measuring()} />);
     fireEvent.click(screen.getByRole('button', { name: 'Raw results (CSV)' }));
     await waitFor(() => expect(screen.getByText(/The raw results need the PoolBench service/)).toBeTruthy());
