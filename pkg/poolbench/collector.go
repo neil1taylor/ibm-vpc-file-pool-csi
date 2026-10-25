@@ -44,6 +44,8 @@ type Runs interface {
 	Token(ctx context.Context, run string) (string, error)
 	// VMByIP finds the VM of the run whose pod has this IP address.
 	VMByIP(ctx context.Context, run, ip string) (VM, bool)
+	// Paused is true while the run is paused; the VMs then hold their load.
+	Paused(ctx context.Context, run string) bool
 }
 
 // validName is a Kubernetes object name; it keeps file paths inside the store.
@@ -228,22 +230,28 @@ func (s *Store) Forget(run string) error {
 //	<one or more lines>
 //
 // The VM is found from the address the post comes from, so a VM cannot post
-// as another one.
+// as another one. Before each load phase a VM asks whether the run is paused:
+//
+//	GET /v1/runs/<run>/state   ->   "run" or "paused"
 type Collector struct {
 	Store *Store
 	Runs  Runs
 }
 
 func (c *Collector) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	run, ok := strings.CutPrefix(r.URL.Path, "/v1/runs/")
-	run, ok2 := strings.CutSuffix(run, "/results")
-	if !ok || !ok2 || !validName.MatchString(run) {
+	rest, ok := strings.CutPrefix(r.URL.Path, "/v1/runs/")
+	run, what, ok2 := strings.Cut(rest, "/")
+	if !ok || !ok2 || !validName.MatchString(run) || (what != "results" && what != "state") {
 		http.NotFound(w, r)
 		return
 	}
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		http.Error(w, "use POST", http.StatusMethodNotAllowed)
+	method := http.MethodPost
+	if what == "state" {
+		method = http.MethodGet
+	}
+	if r.Method != method {
+		w.Header().Set("Allow", method)
+		http.Error(w, "use "+method, http.StatusMethodNotAllowed)
 		return
 	}
 	token, err := c.Runs.Token(r.Context(), run)
@@ -254,6 +262,14 @@ func (c *Collector) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	got, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if got == "" || subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
 		http.Error(w, "bad token", http.StatusUnauthorized)
+		return
+	}
+	if what == "state" {
+		state := "run"
+		if c.Runs.Paused(r.Context(), run) {
+			state = "paused"
+		}
+		_, _ = fmt.Fprintln(w, state)
 		return
 	}
 	ip, _, err := net.SplitHostPort(r.RemoteAddr)

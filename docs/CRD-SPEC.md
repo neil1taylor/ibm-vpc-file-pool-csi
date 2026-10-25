@@ -1525,13 +1525,14 @@ type PoolBenchSpec struct {
 
 type PoolBenchStatus struct {
     Phase          string                 `json:"phase,omitempty"`  // Pending, Checking, Running, Paused, CleaningUp, Complete, Stopped, Failed
-    Stage          string                 `json:"stage,omitempty"`  // Creating, Settling, Measuring, Event
+    Stage          string                 `json:"stage,omitempty"`  // Preparing, Creating, Settling, Measuring, Event
     Step, TotalSteps                      int32
     VMs, WindowsVMs, ReadyVMs             int32
     Namespace, PoolName                   string
-    StartTime, EndTime, StageStarted, StageEnds *metav1.Time
+    StartTime, EndTime, StageStarted, StageEnds, PausedAt *metav1.Time
+    ShareAtStart, ShareAtEnd *PoolBenchCounters // the share's NFS counters (ops, micros, at) at the start and end of the measuring
     Message        string
-    Steps          []PoolBenchStepResult  // one per step: vms, share, guest and IBM IOPS, share latency, p50/p95/p99, throughput, slow %, stalls, time to ready, pass, cutShort
+    Steps          []PoolBenchStepResult  // one per step: vms, share, guest and IBM IOPS, share latency, p50/p95/p99, throughput, slow %, burst slow %, stalls, at limit, time to ready, pass, cutShort
     KneeVMs        int32                  // the first failed step; 0: no knee
     RecommendedVMs int32                  // 80% of the knee, down to a step; or the largest passed step
     Events         []PoolBenchEventResult
@@ -1541,6 +1542,8 @@ type PoolBenchStatus struct {
 ```
 
 The webhook refuses a share size or IOPS outside IBM's `dp2` table, a share too small for the disks of the largest step (each VM has its root disk and a load disk one GiB larger than its test area), a load that is not a steady rate and a longer, faster burst, a block mix whose shares do not add up to 100, and an event that is not at a step of the run. The name may be at most 40 characters, so the run's namespace fits a label value. Once the run has started, only `spec.control` may change, and events may only be added (the console adds one to run an event now).
+
+**How a run goes.** `Checking`: the images must exist and the largest step must fit the workers' free memory with one node down; if not, the run fails and makes nothing. Then the service makes the namespace `poolbench-<name>` (with the run's token, the Linux cloud-init and the Windows config disk as Secrets) and the pool `poolbench-<name>` (one share of the size and IOPS under test, never grown). For each step: `Creating` makes the new VMs and waits, up to 60 minutes, until every VM has sent PERF-READY and every disk copy has ended; `Settling` waits `settleMinutes`; `Measuring` reads the share's counters, waits `measureMinutes`, reads them again, waits 90 seconds for the last results, and writes the step's row. The knee rule is that of the command-line test: more than `slowVMPercent` of the VMs slow or with a slow burst, any stall, or the share at 95% of its IOPS limit. At the knee (unless `stopAtKnee` is false) or after the last step the run cleans up: it deletes the namespace, then the pool, and ends `Complete` (or `Stopped` after `control.stop`). A failed run also cleans up and stays `Failed`. `control.paused` stops the clock, and each VM asks the service before each load phase and waits while the run is paused. Deleting a `PoolBench` cleans up first (finalizer `storage.ibmcloud.io/poolbench`) and then forgets its results.
 
 ---
 

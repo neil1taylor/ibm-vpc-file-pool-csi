@@ -64,8 +64,23 @@ if (-not (Test-Path $filled)) {
 Send 'PERF-READY'
 Start-Sleep -Seconds (Get-Random -Maximum ([int] $settings.period))
 
+# Wait-WhilePaused holds the load while the PoolBench run is paused. If the
+# collector cannot be reached, the load goes on.
+function Wait-WhilePaused {
+    if (-not $settings.state) { return }
+    while ($true) {
+        try {
+            $state = (Invoke-WebRequest -UseBasicParsing -Uri $settings.state -TimeoutSec 10 `
+                -Headers @{ Authorization = "Bearer $($settings.token)" }).Content.Trim()
+        } catch { return }
+        if ($state -ne 'paused') { return }
+        Start-Sleep -Seconds 30
+    }
+}
+
 while ($true) {
     foreach ($phase in 'steady', 'burst') {
+        Wait-WhilePaused
         $out = & $fio (Get-FioArgs $phase) 2>$null | Out-String
         Send (Format-PerfLine ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) $phase $out)
     }

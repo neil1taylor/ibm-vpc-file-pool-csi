@@ -389,6 +389,11 @@ spec:
                 description: Namespace and PoolName name the run's own namespace and
                   pool.
                 type: string
+              pausedAt:
+                description: PausedAt is when the run was paused; unset while it is
+                  not paused.
+                format: date-time
+                type: string
               phase:
                 description: Phase is the state of the run.
                 enum:
@@ -409,10 +414,49 @@ spec:
               recommendedVMs:
                 format: int32
                 type: integer
+              shareAtEnd:
+                description: |-
+                  PoolBenchCounters is a reading of the share's NFS counters, added up over
+                  every node: the reads and writes done, and the microseconds they took.
+                properties:
+                  at:
+                    format: date-time
+                    type: string
+                  micros:
+                    format: int64
+                    type: integer
+                  ops:
+                    format: int64
+                    type: integer
+                required:
+                - at
+                - micros
+                - ops
+                type: object
+              shareAtStart:
+                description: |-
+                  ShareAtStart and ShareAtEnd are the share's NFS counters at the start
+                  and the end of the current measuring, so a restart of the service does
+                  not lose them.
+                properties:
+                  at:
+                    format: date-time
+                    type: string
+                  micros:
+                    format: int64
+                    type: integer
+                  ops:
+                    format: int64
+                    type: integer
+                required:
+                - at
+                - micros
+                - ops
+                type: object
               stage:
                 description: |-
-                  Stage is what the current step does: Creating (new VMs), Settling,
-                  Measuring or Event.
+                  Stage is what the run does now: Preparing (the namespace and pool),
+                  Creating (new VMs), Settling, Measuring or Event.
                 type: string
               stageEnds:
                 format: date-time
@@ -440,6 +484,15 @@ spec:
                     PoolBenchStepResult is the result of one step, as in HCIBench: what the
                     share did and what the VMs felt.
                   properties:
+                    atLimit:
+                      description: AtLimit is true when the share ran at 95% of its
+                        IOPS limit or more.
+                      type: boolean
+                    burstSlowPercent:
+                      description: BurstSlowPercent is the share of VMs whose burst
+                        p95 was over 50 ms.
+                      format: int32
+                      type: integer
                     cutShort:
                       description: CutShort is true when the step was skipped before
                         its measuring ended.

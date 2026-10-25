@@ -249,8 +249,8 @@ type PoolBenchStatus struct {
 	// +optional
 	Phase string `json:"phase,omitempty"`
 
-	// Stage is what the current step does: Creating (new VMs), Settling,
-	// Measuring or Event.
+	// Stage is what the run does now: Preparing (the namespace and pool),
+	// Creating (new VMs), Settling, Measuring or Event.
 	// +optional
 	Stage string `json:"stage,omitempty"`
 
@@ -288,6 +288,18 @@ type PoolBenchStatus struct {
 	StageStarted *metav1.Time `json:"stageStarted,omitempty"`
 	// +optional
 	StageEnds *metav1.Time `json:"stageEnds,omitempty"`
+
+	// PausedAt is when the run was paused; unset while it is not paused.
+	// +optional
+	PausedAt *metav1.Time `json:"pausedAt,omitempty"`
+
+	// ShareAtStart and ShareAtEnd are the share's NFS counters at the start
+	// and the end of the current measuring, so a restart of the service does
+	// not lose them.
+	// +optional
+	ShareAtStart *PoolBenchCounters `json:"shareAtStart,omitempty"`
+	// +optional
+	ShareAtEnd *PoolBenchCounters `json:"shareAtEnd,omitempty"`
 
 	// Message says in plain words what the run does, or why it failed.
 	// +optional
@@ -374,6 +386,14 @@ type PoolBenchStepResult struct {
 	// +optional
 	Stalls int32 `json:"stalls,omitempty"`
 
+	// BurstSlowPercent is the share of VMs whose burst p95 was over 50 ms.
+	// +optional
+	BurstSlowPercent int32 `json:"burstSlowPercent,omitempty"`
+
+	// AtLimit is true when the share ran at 95% of its IOPS limit or more.
+	// +optional
+	AtLimit bool `json:"atLimit,omitempty"`
+
 	// ReadySeconds is the time from making the step's new VMs until all of
 	// them send results.
 	// +optional
@@ -392,6 +412,23 @@ type PoolBenchStepResult struct {
 	// +optional
 	Ended *metav1.Time `json:"ended,omitempty"`
 }
+
+// PoolBenchCounters is a reading of the share's NFS counters, added up over
+// every node: the reads and writes done, and the microseconds they took.
+type PoolBenchCounters struct {
+	Ops    int64       `json:"ops"`
+	Micros int64       `json:"micros"`
+	At     metav1.Time `json:"at"`
+}
+
+// The stages of a running run.
+const (
+	PoolBenchStagePreparing = "Preparing"
+	PoolBenchStageCreating  = "Creating"
+	PoolBenchStageSettling  = "Settling"
+	PoolBenchStageMeasuring = "Measuring"
+	PoolBenchStageEvent     = "Event"
+)
 
 // PoolBenchEventResult is the result of one event.
 type PoolBenchEventResult struct {
