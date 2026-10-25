@@ -4,6 +4,11 @@ import { useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk';
 import PoolBenchRunPage from './PoolBenchRunPage';
 import { PoolBench } from '../../types';
 
+jest.mock('./RunCharts', () => ({ __esModule: true, default: () => <div data-testid="run-charts" /> }));
+jest.mock('../../utils/use-run-metrics', () => ({
+  useVMNumbers: () => ({ 'vm-001': { iops: 29, p95Ms: 4.2 } }),
+}));
+
 jest.mock('react-router-dom', () => ({
   Link: ({ to, children }: { to: string; children: React.ReactNode }) => <a href={to}>{children}</a>,
   useParams: () => ({ name: 't3000' }),
@@ -86,9 +91,17 @@ describe('PoolBenchRunPage', () => {
     expect(rows[3].textContent).toContain('In progress');
   });
 
-  it('lists the test VMs with their OS, node and state', () => {
+  it('shows the live graphs', () => {
+    render(<PoolBenchRunPage />);
+    expect(screen.getByTestId('run-charts')).toBeTruthy();
+  });
+
+  it('lists the test VMs with their OS, node, state, last IOPS and p95', () => {
     render(<PoolBenchRunPage />);
     const table = screen.getByRole('grid', { name: 'Test VMs' });
+    const row = within(table).getByText('vm-001').closest('tr')!;
+    expect(row.textContent).toContain('29');
+    expect(row.textContent).toContain('4.2 ms');
     expect(table.textContent).toContain('vm-001');
     expect(table.textContent).toContain('Linux');
     expect(table.textContent).toContain('w1');
