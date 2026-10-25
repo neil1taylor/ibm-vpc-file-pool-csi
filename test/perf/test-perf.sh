@@ -8,6 +8,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
+WINDOWS_DIR="$HERE/../../pkg/poolbench/guest/windows"
 # shellcheck source=profile.sh
 source "$HERE/profile.sh"
 # shellcheck source=report.sh
@@ -271,21 +272,21 @@ has "the Windows fill bypasses the guest cache" "$wf" "--direct=1"
 
 if command -v pwsh >/dev/null 2>&1; then
     for ps in load.ps1 perf.ps1; do
-        errs=$(pwsh -NoProfile -Command "\$e = \$null; [void][System.Management.Automation.Language.Parser]::ParseFile('$HERE/windows/$ps', [ref]\$null, [ref]\$e); \$e | ForEach-Object { \$_.ToString() }" 2>&1)
+        errs=$(pwsh -NoProfile -Command "\$e = \$null; [void][System.Management.Automation.Language.Parser]::ParseFile('$WINDOWS_DIR/$ps', [ref]\$null, [ref]\$e); \$e | ForEach-Object { \$_.ToString() }" 2>&1)
         eq "$ps has no PowerShell syntax error" "$errs" ""
     done
     # fio prints its JSON over many lines, after any warnings; the line is the JSON on one line, as on Linux.
     pretty=$(printf 'fio: a warning\n%s\n' "$(fio_json 20 9 4000000 9000000 12000000 2000000 3000000 | jq .)")
     printf '%s' "$pretty" >"$WORK/fio-out.txt"
-    wline=$(pwsh -NoProfile -Command ". '$HERE/windows/perf.ps1'; Format-PerfLine 1700000100 steady (Get-Content -Raw '$WORK/fio-out.txt')" 2>&1)
+    wline=$(pwsh -NoProfile -Command ". '$WINDOWS_DIR/perf.ps1'; Format-PerfLine 1700000100 steady (Get-Content -Raw '$WORK/fio-out.txt')" 2>&1)
     eq "a Windows result line reads like a Linux one" "$(perf_parse_line "$wline")" "1700000100,steady,20,9,4,2,9,12"
-    nojson=$(pwsh -NoProfile -Command ". '$HERE/windows/perf.ps1'; Format-PerfLine 1700000100 steady 'fio: error'" 2>&1)
+    nojson=$(pwsh -NoProfile -Command ". '$WINDOWS_DIR/perf.ps1'; Format-PerfLine 1700000100 steady 'fio: error'" 2>&1)
     eq "fio output with no JSON gives no row, so the VM counts as slow" "$(perf_parse_line "$nojson")" ""
 else
     echo "SKIP  the Windows script checks: pwsh is not installed"
 fi
 
-load=$(cat "$HERE/windows/load.ps1")
+load=$(cat "$WINDOWS_DIR/load.ps1")
 has "the Windows load reads its settings from the config disk" "$load" "settings.txt"
 has "it reads the fio arguments of each phase from the config disk" "$load" '.args'
 has "it finds the load disk by its serial number" "$load" "SerialNumber"
@@ -353,5 +354,13 @@ lacks "the run script never reads a console log with grep -q" "$(cat "$HERE/run-
 rt=$(cat "$HERE/run-tier.sh")
 has "the run waits for every disk copy of the step to end before it settles" "$rt" "copies_done"
 has "the settle time is 15 minutes by default: the slow-down of a step's disk copies took about 10 minutes to fade" "$rt" "SETTLE_MIN=15"
+
+# --- the PoolBench service makes the same load and reads results the same way ---
+# Its Go tests compare with these files; when the Bash tooling changes, update them with
+# bash test/perf/print-golden.sh profile|step > pkg/poolbench/testdata/<name>.golden
+for g in profile step; do
+    eq "pkg/poolbench/testdata/$g.golden is what the Bash tooling makes" \
+        "$(bash "$HERE/print-golden.sh" "$g")" "$(cat "$HERE/../../pkg/poolbench/testdata/$g.golden")"
+done
 
 exit "$FAILED"
