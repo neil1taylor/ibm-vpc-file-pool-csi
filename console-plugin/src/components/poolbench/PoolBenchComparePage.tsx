@@ -2,6 +2,7 @@ import React from 'react';
 import { useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk';
 import { Link, useLocation } from 'react-router-dom';
 import { Chart, ChartAxis, ChartGroup, ChartLine, ChartThemeColor, ChartVoronoiContainer } from '@patternfly/react-charts';
+import { AXIS_STYLE } from './RunCharts';
 import CardHelpTitle from '../common/CardHelpTitle';
 import { columnInfo } from '../../utils/column-help';
 import { Bullseye, Card, CardBody, Label, PageSection, Spinner, Title } from '@patternfly/react-core';
@@ -58,15 +59,15 @@ const PoolBenchComparePage: React.FC = () => {
             <Chart
               ariaTitle="p95 latency against VMs"
               height={260}
-              padding={{ top: 10, right: 20, bottom: 50, left: 60 }}
+              padding={{ top: 10, right: 20, bottom: 50, left: 85 }}
               domain={{ y: [0, top] }}
               themeColor={ChartThemeColor.multiOrdered}
               containerComponent={
                 <ChartVoronoiContainer labels={({ datum }: { datum: { name?: string; x?: number; y?: number } }) => `${datum.name}: ${datum.y} ms at ${datum.x} VMs`} />
               }
             >
-              <ChartAxis label="VMs" />
-              <ChartAxis dependentAxis label="ms" />
+              <ChartAxis label="VMs" style={AXIS_STYLE} />
+              <ChartAxis dependentAxis label="ms" style={AXIS_STYLE} />
               <ChartGroup>
                 {series.map((s) => (
                   <ChartLine key={s.label} name={s.label} data={s.points.map((p) => ({ ...p, name: s.label }))} />

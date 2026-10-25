@@ -10,7 +10,9 @@ jest.mock('react-router-dom', () => ({
 
 jest.mock('@patternfly/react-charts', () => ({
   Chart: ({ children }: { children: React.ReactNode }) => <div data-testid="chart">{children}</div>,
-  ChartAxis: () => null,
+  ChartAxis: ({ style }: { style?: { tickLabels?: { fill?: string } } }) => (
+    <div data-testid="axis" data-tick={style?.tickLabels?.fill} />
+  ),
   ChartGroup: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   ChartLegend: () => null,
   ChartLine: ({ name, data }: { name: string; data: unknown[] }) => (
@@ -81,5 +83,14 @@ describe('PoolBenchComparePage help', () => {
     expect(screen.getByLabelText('About Median VM p95 latency against the VM count')).toBeTruthy();
     expect(screen.getByLabelText('About Step results')).toBeTruthy();
     expect(screen.getByLabelText('About the VMs column')).toBeTruthy();
+  });
+});
+
+describe('PoolBenchComparePage axes', () => {
+  it('draws the numbers of the axes in the text colour of the theme', () => {
+    render(<PoolBenchComparePage />);
+    const axes = screen.getAllByTestId('axis');
+    expect(axes.length).toBe(2);
+    for (const a of axes) expect(a.getAttribute('data-tick')).toBe('var(--pf-t--global--text--color--regular)');
   });
 });

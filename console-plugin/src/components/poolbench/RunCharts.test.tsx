@@ -13,7 +13,9 @@ jest.mock('@patternfly/react-charts', () => ({
       {children}
     </div>
   ),
-  ChartAxis: () => null,
+  ChartAxis: ({ style, label }: { style?: { tickLabels?: { fill?: string }; axisLabel?: { fill?: string } }; label?: string }) => (
+    <div data-testid="axis" data-name={label} data-tick={style?.tickLabels?.fill} data-label={style?.axisLabel?.fill} />
+  ),
   ChartGroup: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   ChartLegend: () => null,
   ChartLine: ({ name, data }: { name: string; data: unknown[] }) => (
@@ -108,6 +110,30 @@ describe('RunCharts help', () => {
     render(<RunCharts pb={pb} />);
     for (const t of ['VMs running', 'IOPS', 'Latency', 'Throughput', 'Slow VMs']) {
       expect(screen.getByLabelText(`About ${t}`)).toBeTruthy();
+    }
+  });
+});
+
+describe('RunCharts captions and axes', () => {
+  it('says under each title what the graph shows', () => {
+    render(<RunCharts pb={pb} />);
+    expect(screen.getByText(/Not ready are VMs that are made but have not sent a result/)).toBeTruthy();
+    expect(screen.getByText(/Share is what the share served/)).toBeTruthy();
+    expect(screen.getByText(/Median VM p95 is the typical VM/)).toBeTruthy();
+    expect(screen.getByText(/all VMs read and write, added up/)).toBeTruthy();
+    expect(screen.getByText(/share of VMs whose p95 latency is over the limit/)).toBeTruthy();
+  });
+
+  it('draws the numbers and names of the axes in the text colour of the theme', () => {
+    render(<RunCharts pb={pb} />);
+    const axes = screen.getAllByTestId('axis');
+    expect(axes.length).toBeGreaterThan(0);
+    for (const a of axes) {
+      expect(a.getAttribute('data-tick')).toBe('var(--pf-t--global--text--color--regular)');
+    }
+    const named = axes.filter((a) => a.getAttribute('data-name'));
+    for (const a of named) {
+      expect(a.getAttribute('data-label')).toBe('var(--pf-t--global--text--color--regular)');
     }
   });
 });
