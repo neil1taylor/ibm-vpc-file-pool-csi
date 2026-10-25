@@ -88,6 +88,9 @@ const PoolBenchListPage = React.lazy(
 const PoolBenchRunPage = React.lazy(
   () => import('./poolbench/PoolBenchRunPage'),
 );
+const PoolBenchCreatePage = React.lazy(
+  () => import('./poolbench/PoolBenchCreatePage'),
+);
 
 /** Paths that render inside the tabbed layout. */
 const TAB_PATHS = [
@@ -162,6 +165,7 @@ const VPCFilePoolsPage: React.FC = () => {
           <Route exact path={ROUTES.BACKUP_EDIT} component={BackupPolicyFormPage} />
           <Route exact path={ROUTES.BACKUP_RESTORE} component={BackupRestorePage} />
           <Route exact path={ROUTES.BACKUP_DETAIL} component={BackupDetailsPage} />
+          <Route exact path={ROUTES.POOLBENCH_CREATE} component={PoolBenchCreatePage} />
           <Route exact path={ROUTES.POOLBENCH_DETAIL} component={PoolBenchRunPage} />
         </Switch>
       </Suspense>

@@ -491,6 +491,8 @@ export interface PoolBenchSpec {
     stopAtKnee?: boolean;
   };
   events?: { type: string; atVMs: number }[];
+  /** This run waits until the named run has ended. */
+  startAfter?: string;
   keepAfterEnd?: boolean;
   control?: {
     paused?: boolean;
