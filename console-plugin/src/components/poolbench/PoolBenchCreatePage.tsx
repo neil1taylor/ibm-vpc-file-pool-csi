@@ -7,7 +7,6 @@ import {
   Button,
   Card,
   CardBody,
-  CardTitle,
   Checkbox,
   FormHelperText,
   Grid,
@@ -26,6 +25,10 @@ import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import { DataSourceModel, NodeModel, PoolBenchModel } from '../../models';
 import { API_GROUP, ROUTES } from '../../constants';
 import FieldPopover from '../common/FieldPopover';
+import CardHelpTitle from '../common/CardHelpTitle';
+import InfoPopover from '../common/InfoPopover';
+import { CARD_HELP } from '../../utils/card-help';
+import { columnInfo } from '../../utils/column-help';
 import {
   NodeLike,
   PRESETS,
@@ -179,7 +182,7 @@ const PoolBenchCreatePage: React.FC = () => {
 
         <StackItem>
           <Card>
-            <CardTitle>What to run</CardTitle>
+            <CardHelpTitle helpKey="pbWhatToRun" />
             <CardBody>
               {PRESETS.map((p) => (
                 <Radio
@@ -207,7 +210,7 @@ const PoolBenchCreatePage: React.FC = () => {
 
         <StackItem>
           <Card>
-            <CardTitle>Share</CardTitle>
+            <CardHelpTitle helpKey="pbShare" />
             <CardBody>
               <Grid hasGutter md={4}>
                 <GridItem>
@@ -230,7 +233,7 @@ const PoolBenchCreatePage: React.FC = () => {
 
         <StackItem>
           <Card>
-            <CardTitle>VMs</CardTitle>
+            <CardHelpTitle helpKey="pbVMs" />
             <CardBody>
               <Grid hasGutter md={3}>
                 <GridItem><NumberField id="pb-step" label="VMs per step" help="How many VMs are added at each step." value={form.stepVMs} error={errors.stepVMs} onChange={(v) => set('stepVMs', v)} /></GridItem>
@@ -248,7 +251,7 @@ const PoolBenchCreatePage: React.FC = () => {
 
         <StackItem>
           <Card>
-            <CardTitle>Load of each VM</CardTitle>
+            <CardHelpTitle helpKey="pbLoad" />
             <CardBody>
               <Grid hasGutter md={3}>
                 <GridItem><NumberField id="pb-steady" label="Steady IOPS" help="The rate between bursts." value={form.steadyIOPS} error={errors.steadyIOPS} onChange={(v) => set('steadyIOPS', v)} /></GridItem>
@@ -270,7 +273,7 @@ const PoolBenchCreatePage: React.FC = () => {
 
         <StackItem>
           <Card>
-            <CardTitle>Each step, and the knee</CardTitle>
+            <CardHelpTitle helpKey="pbStep" />
             <CardBody>
               <Grid hasGutter md={3}>
                 <GridItem><NumberField id="pb-settle" label="Settle (min)" help="The wait after the new VMs are ready. Making and filling new VMs slows the others for about 20 minutes." value={form.settleMinutes} error={errors.settleMinutes} onChange={(v) => set('settleMinutes', v)} /></GridItem>
@@ -279,7 +282,7 @@ const PoolBenchCreatePage: React.FC = () => {
                 <GridItem><NumberField id="pb-slow" label="Slow VMs at the knee (%)" help="The step fails when more than this share of the VMs is slow." value={form.slowVMPercent} error={errors.slowVMPercent} onChange={(v) => set('slowVMPercent', v)} /></GridItem>
                 <GridItem><NumberField id="pb-stall" label="Stall (s)" help="One I/O that takes longer than this is a stall, and any stall fails the step." value={form.stallSeconds} error={errors.stallSeconds} onChange={(v) => set('stallSeconds', v)} /></GridItem>
               </Grid>
-              <Checkbox id="pb-stop" label="Stop at the knee" description="Without it, the run goes on to the largest VM count." isChecked={form.stopAtKnee} onChange={(_e, v) => set('stopAtKnee', v)} style={{ marginTop: 16 }} />
+              <Checkbox id="pb-stop" label={<>Stop at the knee <InfoPopover title="Knee" text={CARD_HELP.pbStep.text} ariaLabel="About Stop at the knee" /></>} description="Without it, the run goes on to the largest VM count." isChecked={form.stopAtKnee} onChange={(_e, v) => set('stopAtKnee', v)} style={{ marginTop: 16 }} />
               <Checkbox id="pb-keep" label="Keep the VMs and the pool after the end" description="For a look after the run. They cost money until you clean up." isChecked={form.keepAfterEnd} onChange={(_e, v) => set('keepAfterEnd', v)} />
             </CardBody>
           </Card>
@@ -287,7 +290,7 @@ const PoolBenchCreatePage: React.FC = () => {
 
         <StackItem>
           <Card>
-            <CardTitle>What the run will do</CardTitle>
+            <CardHelpTitle helpKey="pbPlan" />
             <CardBody>
               <p style={{ marginBottom: 8 }}>
                 {runs === 1 ? 'One run' : `${runs} runs, one after another`}, each {hours(runMinutes(form))} if it reaches its last
@@ -296,12 +299,12 @@ const PoolBenchCreatePage: React.FC = () => {
               <Table aria-label="Load per step" variant="compact" role="grid">
                 <Thead>
                   <Tr>
-                    <Th>VMs</Th>
-                    <Th>Windows</Th>
-                    <Th>Steady guest IOPS</Th>
-                    <Th>IBM operations</Th>
-                    <Th>Of the limit</Th>
-                    <Th>If all burst at once</Th>
+                    <Th info={columnInfo('poolbenchStepVMs')}>VMs</Th>
+                    <Th info={columnInfo('poolbenchWindowsCount')}>Windows</Th>
+                    <Th info={columnInfo('poolbenchSteadyGuest')}>Steady guest IOPS</Th>
+                    <Th info={columnInfo('poolbenchIBMOps')}>IBM operations</Th>
+                    <Th info={columnInfo('poolbenchOfLimit')}>Of the limit</Th>
+                    <Th info={columnInfo('poolbenchAllBurst')}>If all burst at once</Th>
                   </Tr>
                 </Thead>
                 <Tbody>
@@ -323,7 +326,7 @@ const PoolBenchCreatePage: React.FC = () => {
 
         <StackItem>
           <Card data-testid="poolbench-checks">
-            <CardTitle>Checks before the run</CardTitle>
+            <CardHelpTitle helpKey="pbChecks" />
             <CardBody>
               {checks.map((c) => (
                 <div key={c.label} style={{ marginBottom: 4 }}>

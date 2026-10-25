@@ -27,6 +27,9 @@ import { Table, Thead, Tr, Th, Td, Tbody } from '@patternfly/react-table';
 import { PoolBenchModel, VirtualMachineInstanceModel } from '../../models';
 import { PoolBench } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
+import CardHelpTitle from '../common/CardHelpTitle';
+import InfoPopover from '../common/InfoPopover';
+import { COLUMN_HELP, columnInfo } from '../../utils/column-help';
 import { ROUTES } from '../../constants';
 import {
   bannerText,
@@ -38,7 +41,12 @@ import {
   stepMarks,
   verdictText,
 } from '../../utils/poolbench';
-import { POOLBENCH_KEPT, POOLBENCH_SHARED_NODES } from './poolbench-texts';
+import {
+  POOLBENCH_KEPT,
+  POOLBENCH_PHASE_HELP_TITLE,
+  POOLBENCH_SHARED_NODES,
+  POOLBENCH_TERM_HELP,
+} from './poolbench-texts';
 import RunCharts from './RunCharts';
 import RunControls from './RunControls';
 import { useVMNumbers } from '../../utils/use-run-metrics';
@@ -54,7 +62,10 @@ interface VMI {
 
 const Term: React.FC<{ term: string; children: React.ReactNode }> = ({ term, children }) => (
   <DescriptionListGroup>
-    <DescriptionListTerm>{term}</DescriptionListTerm>
+    <DescriptionListTerm>
+      {term}{' '}
+      {POOLBENCH_TERM_HELP[term] && <InfoPopover title={term} text={POOLBENCH_TERM_HELP[term]} />}
+    </DescriptionListTerm>
     <DescriptionListDescription>{children}</DescriptionListDescription>
   </DescriptionListGroup>
 );
@@ -81,7 +92,7 @@ const SettingsCard: React.FC<{ pb: PoolBench }> = ({ pb }) => {
   const k = s.knee || {};
   return (
     <Card data-testid="poolbench-settings">
-      <CardTitle>Settings</CardTitle>
+      <CardHelpTitle helpKey="pbSettings" />
       <CardBody>
         <DescriptionList isCompact isHorizontal>
           <Term term="Share">
@@ -116,18 +127,18 @@ const StepTable: React.FC<{ pb: PoolBench }> = ({ pb }) => {
     <Table aria-label="Step results" variant="compact" role="grid">
       <Thead>
         <Tr>
-          <Th>VMs</Th>
-          <Th>Share IOPS</Th>
-          <Th>Guest IOPS</Th>
-          <Th>IBM operations (of limit)</Th>
-          <Th>Share latency</Th>
-          <Th>p50</Th>
-          <Th>p95</Th>
-          <Th>p99</Th>
-          <Th>Slow VMs</Th>
-          <Th>Stalls</Th>
-          <Th>Ready after</Th>
-          <Th>Result</Th>
+          <Th info={columnInfo('poolbenchStepVMs')}>VMs</Th>
+          <Th info={columnInfo('poolbenchShareIOPS')}>Share IOPS</Th>
+          <Th info={columnInfo('poolbenchGuestIOPS')}>Guest IOPS</Th>
+          <Th info={columnInfo('poolbenchIBMOps')}>IBM operations (of limit)</Th>
+          <Th info={columnInfo('poolbenchShareLatency')}>Share latency</Th>
+          <Th info={columnInfo('poolbenchP50')}>p50</Th>
+          <Th info={columnInfo('poolbenchP95')}>p95</Th>
+          <Th info={columnInfo('poolbenchP99')}>p99</Th>
+          <Th info={columnInfo('poolbenchSlowVMs')}>Slow VMs</Th>
+          <Th info={columnInfo('poolbenchStalls')}>Stalls</Th>
+          <Th info={columnInfo('poolbenchReadyAfter')}>Ready after</Th>
+          <Th info={columnInfo('poolbenchResult')}>Result</Th>
         </Tr>
       </Thead>
       <Tbody>
@@ -183,6 +194,10 @@ const VMLines: React.FC<{ run: string; vm: string; onClose: () => void }> = ({ r
     <Modal variant={ModalVariant.large} isOpen onClose={onClose}>
       <ModalHeader title={`Result lines of ${vm}`} />
       <ModalBody>
+        <p style={{ marginBottom: 8 }}>
+          The lines this VM sent to the run, oldest first. PERF-READY means the VM is up and has copied its disk; the other
+          lines are its measured results.
+        </p>
         {error && <Alert variant="warning" isInline title={error} />}
         {!error && text === null && <Spinner size="lg" />}
         {text !== null && <pre style={{ maxHeight: 480, overflow: 'auto', fontSize: 12 }}>{text}</pre>}
@@ -217,11 +232,11 @@ const VMTable: React.FC<{ pb: PoolBench }> = ({ pb }) => {
       <Thead>
         <Tr>
           <Th>Name</Th>
-          <Th>OS</Th>
-          <Th>Node</Th>
-          <Th>State</Th>
-          <Th>Last IOPS</Th>
-          <Th>Last p95</Th>
+          <Th info={columnInfo('poolbenchVMOS')}>OS</Th>
+          <Th info={columnInfo('poolbenchVMNode')}>Node</Th>
+          <Th info={columnInfo('poolbenchVMState')}>State</Th>
+          <Th info={columnInfo('poolbenchLastIOPS')}>Last IOPS</Th>
+          <Th info={columnInfo('poolbenchLastP95')}>Last p95</Th>
           <Th screenReaderText="Result lines" />
         </Tr>
       </Thead>
@@ -314,7 +329,12 @@ const PoolBenchRunPage: React.FC = () => {
           </Title>
         </SplitItem>
         <SplitItem>
-          <PhaseStatus phase={st.phase || 'Pending'} />
+          <PhaseStatus phase={st.phase || 'Pending'} />{' '}
+          <InfoPopover
+            title={POOLBENCH_PHASE_HELP_TITLE}
+            text={COLUMN_HELP.poolbenchPhase.text}
+            ariaLabel="About the State of a run"
+          />
         </SplitItem>
       </Split>
 
@@ -341,7 +361,7 @@ const PoolBenchRunPage: React.FC = () => {
       </div>
 
       <Card style={{ marginBottom: 16 }}>
-        <CardTitle>Step results</CardTitle>
+        <CardHelpTitle helpKey="pbStepResults" />
         <CardBody>
           <StepTable pb={pb} />
         </CardBody>
@@ -352,14 +372,14 @@ const PoolBenchRunPage: React.FC = () => {
       </div>
 
       <Card style={{ marginBottom: 16 }}>
-        <CardTitle>Test VMs</CardTitle>
+        <CardHelpTitle helpKey="pbTestVMs" />
         <CardBody>
           <VMTable pb={pb} />
         </CardBody>
       </Card>
 
       <Card>
-        <CardTitle>Run log</CardTitle>
+        <CardHelpTitle helpKey="pbRunLog" />
         <CardBody>
           <RunLog pb={pb} />
         </CardBody>

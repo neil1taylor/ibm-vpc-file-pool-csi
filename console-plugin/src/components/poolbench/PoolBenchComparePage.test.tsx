@@ -74,3 +74,12 @@ describe('PoolBenchComparePage', () => {
     expect(lines).toContain('t10k (3900 GB, 10000 IOPS):4');
   });
 });
+
+describe('PoolBenchComparePage help', () => {
+  it('explains the graph and the table', () => {
+    render(<PoolBenchComparePage />);
+    expect(screen.getByLabelText('About Median VM p95 latency against the VM count')).toBeTruthy();
+    expect(screen.getByLabelText('About Step results')).toBeTruthy();
+    expect(screen.getByLabelText('About the VMs column')).toBeTruthy();
+  });
+});

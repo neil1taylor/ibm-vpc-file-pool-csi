@@ -82,13 +82,13 @@ const PoolBenchListPage: React.FC = () => {
               <Tr>
                 <Th screenReaderText="Choose to compare" />
                 <Th>Name</Th>
-                <Th>Share</Th>
+                <Th info={columnInfo('poolbenchShare')}>Share</Th>
                 <Th info={columnInfo('poolbenchPhase')}>State</Th>
-                <Th>VMs now</Th>
+                <Th info={columnInfo('poolbenchVMsNow')}>VMs now</Th>
                 <Th info={columnInfo('poolbenchKnee')}>Knee</Th>
                 <Th info={columnInfo('poolbenchRecommended')}>Recommended</Th>
-                <Th>Started</Th>
-                <Th>Run time</Th>
+                <Th info={columnInfo('poolbenchStarted')}>Started</Th>
+                <Th info={columnInfo('poolbenchRunTime')}>Run time</Th>
               </Tr>
             </Thead>
             <Tbody>

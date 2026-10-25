@@ -102,3 +102,12 @@ describe('clock', () => {
     expect(clock(at.getTime())).toBe('09:05');
   });
 });
+
+describe('RunCharts help', () => {
+  it('explains each graph', () => {
+    render(<RunCharts pb={pb} />);
+    for (const t of ['VMs running', 'IOPS', 'Latency', 'Throughput', 'Slow VMs']) {
+      expect(screen.getByLabelText(`About ${t}`)).toBeTruthy();
+    }
+  });
+});

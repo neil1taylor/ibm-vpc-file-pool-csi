@@ -154,3 +154,26 @@ describe('PoolBenchRunPage', () => {
     expect(screen.getByText(/kept after the end, and they cost money/)).toBeTruthy();
   });
 });
+
+describe('PoolBenchRunPage help', () => {
+  it('explains every card, column and setting for a new user', () => {
+    render(<PoolBenchRunPage />);
+    for (const t of ['Step results', 'Settings', 'Test VMs', 'Run log']) {
+      expect(screen.getByLabelText(`About ${t}`)).toBeTruthy();
+    }
+    for (const c of ['VMs', 'Share IOPS', 'Guest IOPS', 'IBM operations', 'Share latency', 'p50', 'p95', 'p99', 'Slow VMs', 'Stalls', 'Ready after', 'Result']) {
+      expect(screen.getAllByLabelText(`About the ${c} column`).length).toBeGreaterThan(0);
+    }
+    for (const c of ['OS', 'Node', 'State', 'Last IOPS', 'Last p95']) {
+      expect(screen.getAllByLabelText(`About the ${c} column`).length).toBeGreaterThan(0);
+    }
+    for (const t of ['Share', 'VMs', 'Load per VM', 'Each step', 'Knee rule']) {
+      expect(within(screen.getByTestId('poolbench-settings')).getByLabelText(`About ${t}`)).toBeTruthy();
+    }
+  });
+
+  it('explains the state of the run next to its name', () => {
+    render(<PoolBenchRunPage />);
+    expect(screen.getByLabelText('About the State of a run')).toBeTruthy();
+  });
+});

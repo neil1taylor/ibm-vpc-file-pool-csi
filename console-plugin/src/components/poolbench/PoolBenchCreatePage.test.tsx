@@ -108,3 +108,16 @@ describe('PoolBenchCreatePage', () => {
     expect(screen.getByText(/needs the right to create PoolBench objects/)).toBeTruthy();
   });
 });
+
+describe('PoolBenchCreatePage help', () => {
+  it('explains every card, the table of steps and the checks', () => {
+    render(<PoolBenchCreatePage />);
+    for (const t of ['What to run', 'Share', 'VMs', 'Load of each VM', 'Each step, and the knee', 'What the run will do', 'Checks before the run']) {
+      expect(screen.getByLabelText(`About ${t}`)).toBeTruthy();
+    }
+    for (const c of ['Windows', 'Steady guest IOPS', 'IBM operations', 'Of the limit', 'If all burst at once']) {
+      expect(screen.getByLabelText(`About the ${c} column`)).toBeTruthy();
+    }
+    expect(screen.getByLabelText('About Stop at the knee')).toBeTruthy();
+  });
+});

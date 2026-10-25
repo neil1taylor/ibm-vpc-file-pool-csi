@@ -88,3 +88,13 @@ describe('PoolBenchListPage', () => {
     expect(screen.getByText(/PoolBench is not installed/)).toBeTruthy();
   });
 });
+
+describe('PoolBenchListPage help', () => {
+  it('explains every column', () => {
+    (useK8sWatchResource as jest.Mock).mockReturnValue([runs, true, undefined]);
+    render(<PoolBenchListPage />);
+    for (const c of ['Share', 'State', 'VMs now', 'Knee', 'Recommended', 'Started', 'Run time']) {
+      expect(screen.getByLabelText(`About the ${c} column`)).toBeTruthy();
+    }
+  });
+});
