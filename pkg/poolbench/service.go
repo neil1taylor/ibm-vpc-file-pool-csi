@@ -44,7 +44,7 @@ type Options struct {
 	// ResultsAddr serves the raw results to the console's plugin proxy over
 	// HTTPS, with the certificate in MetricsCertDir.
 	ResultsAddr string
-	HealthAddr     string
+	HealthAddr  string
 	// ResultsDir holds the raw results (a persistent volume).
 	ResultsDir string
 	// Interval is the time between two passes of the runner.
