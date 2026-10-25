@@ -367,7 +367,7 @@ kubectl apply -f config/deploy/node.yaml
 |------|---------|-------------|
 | `--endpoint` | `unix:///csi/csi.sock` | CSI gRPC endpoint |
 | `--node-id` | (required) | Kubernetes node name |
-| `--mode` | `controller` | `controller`, `node`, `receiver`, `sync-client`, `check-receiver`, `apply-vm-disk`, `send-vm-disk`, or `restore-vm-disk`, `unwrap-backup-key`, `register-console-plugin`, or `unregister-console-plugin`, or `enable-sidecar-gate` (all but the first three are run as Jobs; `check-receiver` is run by the console's receiver setup; `register-console-plugin`, `unregister-console-plugin` and `enable-sidecar-gate` are the chart's hook Jobs) |
+| `--mode` | `controller` | `controller`, `node`, `receiver`, `sync-client`, `check-receiver`, `apply-vm-disk`, `send-vm-disk`, or `restore-vm-disk`, `unwrap-backup-key`, `register-console-plugin`, or `unregister-console-plugin`, or `enable-sidecar-gate`, or `poolbench` (the PoolBench service, a Deployment when `poolBench.enabled`; all but the first three and `poolbench` are run as Jobs; `check-receiver` is run by the console's receiver setup; `register-console-plugin`, `unregister-console-plugin` and `enable-sidecar-gate` are the chart's hook Jobs) |
 | `--region` | Auto-discovered | IBM Cloud region |
 | `--vpc-id` | Auto-discovered | VPC ID for mount targets |
 | `--subnet-id` | Auto-discovered | Worker subnet IDs for mount targets, comma-separated; the controller uses the one in each pool's zone |
@@ -411,6 +411,14 @@ kubectl apply -f config/deploy/node.yaml
 | `--restore-moment` | `""` | Moment to restore, RFC 3339; empty for the latest (restore-vm-disk mode). Set by the backup restore Job |
 | `--vm-group` | `""` | `namespace/name` of the VM that owns the disk (send-vm-disk mode). Set by the replication controller |
 | `--copy-id` | `""` | Name of this copy attempt; a repeat with the same name resumes it (send-vm-disk mode). Set by the replication controller |
+| `--poolbench-collector-addr` | `:8080` | Where the collector listens for the test VMs (poolbench mode) |
+| `--poolbench-collector-url` | `""` | How the test VMs reach the collector, `http://<service>.<namespace>.svc:8080` (poolbench mode). Set by the chart |
+| `--poolbench-metrics-addr`, `--poolbench-metrics-cert-dir` | `:8443`, `""` | Metrics endpoint over HTTPS with token login; an empty folder makes a self-signed certificate (poolbench mode) |
+| `--poolbench-health-addr` | `:8081` | Health probe endpoint (poolbench mode) |
+| `--poolbench-results-dir` | `/results` | Folder for the raw results of the test VMs (poolbench mode) |
+| `--poolbench-interval` | `15s` | Time between two passes of the runner (poolbench mode) |
+| `--poolbench-run-role`, `--poolbench-service-account` | `""` | The ClusterRole the service binds to its own service account in each run's namespace (poolbench mode). Set by the chart |
+| `--node-metrics-service`, `--node-metrics-ca` | `""` | The node agents' metrics Service and the file with the CA of their certificate, for the share's counters (poolbench mode). Set by the chart |
 
 **Key unwrap flags** (`--mode=unwrap-backup-key`, run by the COS export and restore Jobs):
 

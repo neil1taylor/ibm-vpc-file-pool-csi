@@ -14,6 +14,7 @@ import (
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -71,7 +72,14 @@ type Runner struct {
 	CollectorURL string
 	Shares       ShareCounter
 	Starter      GuestStarter
-	Now          func() time.Time
+	// RunRole is the ClusterRole that gives the service its rights inside a
+	// run's namespace. The runner binds it there to its own service account
+	// (ServiceAccount in ServiceNamespace), so the service has no right to
+	// VMs, disks or pod exec in any other namespace. Empty binds nothing.
+	RunRole          string
+	ServiceAccount   string
+	ServiceNamespace string
+	Now              func() time.Time
 }
 
 // Pass advances every run once.
@@ -315,6 +323,16 @@ func (r *Runner) prepare(ctx context.Context, pb *v1alpha1.PoolBench) error {
 	if err := r.createIfMissing(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, Labels: runLabels(pb)}}); err != nil {
 		return err
 	}
+	if r.RunRole != "" {
+		rb := &rbacv1.RoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "poolbench", Namespace: ns, Labels: runLabels(pb)},
+			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: r.RunRole},
+			Subjects:   []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Name: r.ServiceAccount, Namespace: r.ServiceNamespace}},
+		}
+		if err := r.createIfMissing(ctx, rb); err != nil {
+			return err
+		}
+	}
 	token, err := r.ensureToken(ctx, pb)
 	if err != nil {
 		return err
@@ -550,6 +568,7 @@ func (r *Runner) copying(ctx context.Context, pb *v1alpha1.PoolBench) (int, erro
 
 func (r *Runner) readShare(ctx context.Context, pb *v1alpha1.PoolBench, now time.Time) *v1alpha1.PoolBenchCounters {
 	if r.Shares == nil {
+		r.log(pb, now, "Warning", "The node agents' metrics are off, so the share's own numbers are missing")
 		return nil
 	}
 	ops, secs, err := r.Shares.Totals(ctx, runName(pb))

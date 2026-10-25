@@ -107,6 +107,35 @@ backupBrowse:
   maxSessions: 5
   maxSessionsPerNamespace: 2
 
+poolBench:
+  # PoolBench runs storage performance tests with test VMs, started from the
+  # console (docs/specs/2026-10-25-poolbench.md). Each run makes its own
+  # namespace and pool and deletes them at the end. Off by default: when on,
+  # the service may make namespaces, pools and VMs.
+  enabled: false
+  # Time between two passes of the runner.
+  interval: 15s
+  # The raw results of the test VMs, kept until a run is deleted.
+  results:
+    size: 5Gi
+    # Empty uses the cluster's default storage class.
+    storageClass: ""
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    runAsNonRoot: true
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
 cdi:
   # The controller keeps the memory limit of CDI's copy pods (OpenShift
   # Virtualization HyperConverged spec.resourceRequirements.storageWorkloads)

@@ -1,0 +1,291 @@
+{{- if .Values.poolBench.enabled }}
+{{- $name := printf "%s-poolbench" (include "ibm-vpc-file-pool-csi.fullname" .) }}
+{{- $nodeMetrics := printf "%s-node-metrics" (include "ibm-vpc-file-pool-csi.fullname" .) }}
+{{- $openshift := eq .Values.webhook.certProvider "openshift" }}
+# The PoolBench service (docs/specs/2026-10-25-poolbench.md). It runs with its
+# own service account. Cluster-wide it may only make and delete namespaces and
+# pools, read nodes, pods and images, and bind the run role. It gets its rights
+# to VMs, disks, secrets and pod exec only inside each run's own namespace,
+# where it binds the run role to itself.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["poolbenches"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["poolbenches/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["filesharepools"]
+    verbs: ["get", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["nodes", "pods"]
+    verbs: ["list"]
+  - apiGroups: ["cdi.kubevirt.io"]
+    resources: ["datasources"]
+    verbs: ["get"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "create"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    verbs: ["bind"]
+    resourceNames: ["{{ $name }}-run"]
+  # The node agents check the token of whoever reads their metrics.
+  - nonResourceURLs: ["/metrics"]
+    verbs: ["get"]
+  # Its own metrics endpoint checks the token of whoever reads it.
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["subjectaccessreviews"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+# The rights in a run's namespace. The service binds this role there with a
+# RoleBinding; it is never bound cluster-wide.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}-run
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets", "persistentvolumeclaims"]
+    verbs: ["get", "create"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: ["kubevirt.io"]
+    resources: ["virtualmachines"]
+    verbs: ["get", "create"]
+  - apiGroups: ["kubevirt.io"]
+    resources: ["virtualmachineinstances"]
+    verbs: ["get", "list"]
+  # KubeVirt checks that whoever makes a VM with disk templates may make
+  # those disks (DataVolumes) itself.
+  - apiGroups: ["cdi.kubevirt.io"]
+    resources: ["datavolumes"]
+    verbs: ["list", "create"]
+---
+# In its own namespace: leader election, and the node agents' addresses.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "create", "update"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}-results
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.poolBench.results.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.poolBench.results.size }}
+---
+# The test VMs post their results to the collector port.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: poolbench
+spec:
+  selector:
+    {{- include "ibm-vpc-file-pool-csi.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: poolbench
+  ports:
+    - name: collector
+      port: 8080
+      targetPort: collector
+      protocol: TCP
+    - name: metrics
+      port: 8443
+      targetPort: metrics
+      protocol: TCP
+{{- if and $openshift .Values.node.metricsPort }}
+---
+# The CA of the node agents' certificate, from the OpenShift service CA.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-service-ca
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+  annotations:
+    service.beta.openshift.io/inject-cabundle: "true"
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: poolbench
+spec:
+  replicas: 1
+  # The results volume is ReadWriteOnce: the old pod must stop first.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "ibm-vpc-file-pool-csi.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: poolbench
+  template:
+    metadata:
+      labels:
+        {{- include "ibm-vpc-file-pool-csi.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: poolbench
+    spec:
+      serviceAccountName: {{ $name }}
+      securityContext:
+        {{- toYaml .Values.poolBench.podSecurityContext | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: poolbench
+          image: "{{ include "ibm-vpc-file-pool-csi.driverImage" . }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.poolBench.securityContext | nindent 12 }}
+          args:
+            - "--mode=poolbench"
+            - "--v={{ .Values.logLevel }}"
+            - "--poolbench-collector-url=http://{{ $name }}.{{ .Release.Namespace }}.svc:8080"
+            - "--poolbench-results-dir=/results"
+            - "--poolbench-interval={{ .Values.poolBench.interval }}"
+            - "--poolbench-run-role={{ $name }}-run"
+            - "--poolbench-service-account={{ $name }}"
+            {{- if .Values.node.metricsPort }}
+            - "--node-metrics-service={{ $nodeMetrics }}"
+            - "--node-metrics-ca=/etc/poolbench/node-ca/{{ ternary "service-ca.crt" "ca.crt" $openshift }}"
+            {{- end }}
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          ports:
+            - name: collector
+              containerPort: 8080
+            - name: metrics
+              containerPort: 8443
+            - name: health
+              containerPort: 8081
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.poolBench.resources | nindent 12 }}
+          volumeMounts:
+            - name: results
+              mountPath: /results
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.node.metricsPort }}
+            - name: node-ca
+              mountPath: /etc/poolbench/node-ca
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: results
+          persistentVolumeClaim:
+            claimName: {{ $name }}-results
+        # The self-signed certificate of the metrics endpoint is written here.
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.node.metricsPort }}
+        - name: node-ca
+          {{- if $openshift }}
+          configMap:
+            name: {{ $name }}-service-ca
+          {{- else }}
+          secret:
+            secretName: {{ $nodeMetrics }}-certs
+            items:
+              - key: ca.crt
+                path: ca.crt
+          {{- end }}
+        {{- end }}
+{{- end }}

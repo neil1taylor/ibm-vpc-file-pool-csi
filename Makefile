@@ -50,6 +50,7 @@ test-scripts:
 	bash test/chart/test-node-metrics.sh
 	bash test/chart/test-uwm.sh
 	bash test/chart/test-console-plugin.sh
+	bash test/chart/test-poolbench.sh
 	bash test/release/test-runner.sh
 	bash test/e2e/lib/test-detect-zone.sh
 	bash test/e2e/lib/test-backup-cos.sh

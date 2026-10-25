@@ -271,7 +271,7 @@ has "the Windows fill is a sequential write" "$wf" "--rw=write"
 has "the Windows fill bypasses the guest cache" "$wf" "--direct=1"
 
 if command -v pwsh >/dev/null 2>&1; then
-    for ps in load.ps1 perf.ps1; do
+    for ps in load.ps1 perf.ps1 start.ps1; do
         errs=$(pwsh -NoProfile -Command "\$e = \$null; [void][System.Management.Automation.Language.Parser]::ParseFile('$WINDOWS_DIR/$ps', [ref]\$null, [ref]\$e); \$e | ForEach-Object { \$_.ToString() }" 2>&1)
         eq "$ps has no PowerShell syntax error" "$errs" ""
     done

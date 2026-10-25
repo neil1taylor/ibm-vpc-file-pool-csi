@@ -137,14 +137,9 @@ windows_config() {
 # windows_start_script — the PowerShell the run sends through the guest agent to start a
 # Windows VM's load. It does nothing if the load runs, and fails until the config disk is
 # there. (A start-up task in Windows would have been simpler, but it stayed "Queued" and never ran.)
+# The PoolBench service sends the same file.
 windows_start_script() {
-    cat <<'PS'
-if (Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object CommandLine -like '*load.ps1*') { 'running'; exit 0 }
-$volume = Get-Volume | Where-Object FileSystemLabel -eq 'PERFCFG' | Select-Object -First 1
-if (-not ($volume -and $volume.DriveLetter)) { 'no config disk yet'; exit 1 }
-Start-Process powershell.exe -WindowStyle Hidden -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File $($volume.DriveLetter):\load.ps1"
-'started'
-PS
+    cat "$WINDOWS_DIR/start.ps1"
 }
 
 # vm_yaml N — VM N: Linux or Windows.

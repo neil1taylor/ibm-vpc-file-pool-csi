@@ -38,6 +38,7 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/monitoring"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/nodemetrics"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/pool"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/poolbench"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/replication"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/vmcopy"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/vmsnap"
@@ -99,6 +100,9 @@ func main() {
 		stagingPath string
 		diskPath    string
 		vmCopy      vmCopyFlags
+
+		// PoolBench mode flags.
+		poolBench poolbench.Options
 
 		// Send-vm-disk mode flags (it also uses the sync-client flags).
 		vmGroup string
@@ -190,6 +194,18 @@ func main() {
 	flag.StringVar(&unwrap.emergencyKeyFile, "emergency-key-file", "", "Optional file with the readable backup key, used only when Key Protect is down (unwrap-backup-key mode)")
 	flag.StringVar(&unwrap.keyOut, "key-out", "", "File to write the readable key to, mode 0400; it must not exist (unwrap-backup-key mode)")
 
+	flag.StringVar(&poolBench.CollectorAddr, "poolbench-collector-addr", ":8080", "Where the collector listens for the test VMs (poolbench mode)")
+	flag.StringVar(&poolBench.CollectorURL, "poolbench-collector-url", "", "How the test VMs reach the collector, for example http://<service>.<namespace>.svc:8080 (poolbench mode)")
+	flag.StringVar(&poolBench.MetricsAddr, "poolbench-metrics-addr", ":8443", "Metrics endpoint, HTTPS with token login (poolbench mode)")
+	flag.StringVar(&poolBench.MetricsCertDir, "poolbench-metrics-cert-dir", "", "Directory with tls.crt and tls.key for the metrics endpoint; empty makes a self-signed certificate (poolbench mode)")
+	flag.StringVar(&poolBench.HealthAddr, "poolbench-health-addr", ":8081", "Health probe endpoint (poolbench mode)")
+	flag.StringVar(&poolBench.ResultsDir, "poolbench-results-dir", "/results", "Folder for the raw results of the test VMs (poolbench mode)")
+	flag.DurationVar(&poolBench.Interval, "poolbench-interval", 15*time.Second, "Time between two passes of the runner (poolbench mode)")
+	flag.StringVar(&poolBench.RunRole, "poolbench-run-role", "", "ClusterRole the service binds to itself in each run's namespace (poolbench mode)")
+	flag.StringVar(&poolBench.ServiceAccount, "poolbench-service-account", "", "The service's own service account, for that binding (poolbench mode)")
+	flag.StringVar(&poolBench.NodeMetricsService, "node-metrics-service", "", "The node agents' metrics Service, read for the share counters (poolbench mode)")
+	flag.StringVar(&poolBench.NodeMetricsCA, "node-metrics-ca", "", "File with the CA of the node agents' metrics certificate (poolbench mode)")
+
 	flag.StringVar(&vmGroup, "vm-group", "", "namespace/name of the VM that owns the disk (send-vm-disk mode)")
 	flag.StringVar(&copyID, "copy-id", "", "Name of this copy attempt; a repeat with the same name resumes (send-vm-disk mode)")
 
@@ -223,6 +239,15 @@ func main() {
 		runConsolePlugin(mode, consolePluginName)
 	case "enable-sidecar-gate":
 		runEnableSidecarGate()
+	case "poolbench":
+		poolBench.Namespace = os.Getenv("POD_NAMESPACE")
+		if poolBench.Namespace == "" {
+			poolBench.Namespace = driverNamespace
+		}
+		if err := poolbench.Run(ctrl.SetupSignalHandler(), ctrl.GetConfigOrDie(), poolBench); err != nil {
+			klog.ErrorS(err, "PoolBench service stopped")
+			os.Exit(1)
+		}
 	default:
 		runNode(endpoint, nodeID, mode, nodeMetricsAddr, nodeMetricsCertDir, shareStatsInterval)
 	}
