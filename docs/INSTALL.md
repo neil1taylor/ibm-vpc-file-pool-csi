@@ -415,6 +415,7 @@ kubectl apply -f config/deploy/node.yaml
 | `--poolbench-collector-addr` | `:8080` | Where the collector listens for the test VMs (poolbench mode) |
 | `--poolbench-collector-url` | `""` | How the test VMs reach the collector, `http://<service>.<namespace>.svc:8080` (poolbench mode). Set by the chart |
 | `--poolbench-metrics-addr`, `--poolbench-metrics-cert-dir` | `:8443`, `""` | Metrics endpoint over HTTPS with token login; an empty folder makes a self-signed certificate (poolbench mode) |
+| `--poolbench-results-addr` | `:8444` | Where the raw results are served to the console's plugin proxy, over HTTPS with the metrics certificate; each request carries the person's token, and the service checks that they may get the run (poolbench mode) |
 | `--poolbench-health-addr` | `:8081` | Health probe endpoint (poolbench mode) |
 | `--poolbench-results-dir` | `/results` | Folder for the raw results of the test VMs (poolbench mode) |
 | `--poolbench-interval` | `15s` | Time between two passes of the runner (poolbench mode) |
