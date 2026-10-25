@@ -2,6 +2,7 @@ package poolbench
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -21,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 func testScheme() *runtime.Scheme {
@@ -674,5 +676,37 @@ func TestRunner_StartAfterAGoneRun(t *testing.T) {
 	h.pass()
 	if got := h.bench(); got.Status.Phase != v1alpha1.PoolBenchChecking {
 		t.Fatalf("a run that is gone does not hold this one: got %s", got.Status.Phase)
+	}
+}
+
+func TestRunner_StepErrorShowsInStatus(t *testing.T) {
+	h := newHarness(t, testBench())
+	watch, ok := h.c.(client.WithWatch)
+	if !ok {
+		t.Fatal("the fake client can watch")
+	}
+	h.r.Client = interceptor.NewClient(watch, interceptor.Funcs{
+		Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+			if _, ok := obj.(*v1alpha1.FileSharePool); ok {
+				return errors.New("pool refused")
+			}
+			return c.Create(ctx, obj, opts...)
+		},
+	})
+	h.pass()
+	h.pass()
+	h.pass()
+	pb := h.bench()
+	if !strings.Contains(pb.Status.Message, "pool refused") {
+		t.Fatalf("the owner must see why the run waits: %q", pb.Status.Message)
+	}
+	n := 0
+	for _, e := range pb.Status.Log {
+		if strings.Contains(e.Message, "pool refused") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("the same error is logged once, got %d", n)
 	}
 }

@@ -113,6 +113,10 @@ func (r *Runner) advance(ctx context.Context, pb *v1alpha1.PoolBench) error {
 	r.Store.metrics.setRun(pb.Name, st.VMs-st.WindowsVMs, st.WindowsVMs, st.ReadyVMs, st.Step)
 	if err != nil {
 		klog.ErrorS(err, "PoolBench: step failed", "run", pb.Name, "phase", pb.Status.Phase, "stage", pb.Status.Stage)
+		if msg := "A step failed and will be tried again: " + err.Error(); st.Message != msg {
+			st.Message = msg
+			r.log(pb, now, "Warning", msg)
+		}
 	}
 	if !reflect.DeepEqual(*before, pb.Status) {
 		if uerr := r.Client.Status().Update(ctx, pb); uerr != nil {

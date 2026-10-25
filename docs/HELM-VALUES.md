@@ -121,7 +121,7 @@ The storage performance test service (`docs/specs/2026-10-25-poolbench.md`). Off
 | `poolBench.interval` | string | `15s` | Time between two passes of the runner |
 | `poolBench.results.size` | string | `5Gi` | Size of the volume that keeps the test VMs' raw results until a run is deleted |
 | `poolBench.results.storageClass` | string | `""` | Class of the results volume; empty uses the cluster's default class |
-| `poolBench.podSecurityContext` | object | seccomp `RuntimeDefault` | Pod security context |
+| `poolBench.podSecurityContext` | object | seccomp `RuntimeDefault` | Pod security context. Where the user ID is fixed (off OpenShift, or in `kube-system`) the chart adds `fsGroup: 65532` unless you set one, so the service can write the results volume |
 | `poolBench.securityContext` | object | non-root, read-only root, no privilege escalation, all capabilities dropped | Container security context |
 | `poolBench.resources` | object | 50m CPU, 64Mi memory requested, 256Mi limit | Container resources |
 
