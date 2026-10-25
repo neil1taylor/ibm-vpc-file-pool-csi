@@ -95,6 +95,12 @@ type PoolBenchSpec struct {
 	// +optional
 	Events []PoolBenchEvent `json:"events,omitempty"`
 
+	// StartAfter names another run. This run waits until that one has ended, so
+	// the runs of a series (one per share speed) do not load the cluster at the
+	// same time. A run that does not exist holds nothing.
+	// +optional
+	StartAfter string `json:"startAfter,omitempty"`
+
 	// KeepAfterEnd keeps the VMs, pool and namespace after the run ends, for a
 	// look. They cost money until the PoolBench is deleted or Control.Stop is set.
 	// +optional

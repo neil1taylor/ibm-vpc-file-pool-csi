@@ -80,6 +80,8 @@ func TestPoolBenchValidator_RefusesCreate(t *testing.T) {
 		{"event of no known type", func(p *v1alpha1.PoolBench) { p.Spec.Events[0].Type = "Reboot" }, "events"},
 		{"disks do not fit the share", func(p *v1alpha1.PoolBench) { p.Spec.ShareSizeGB = 1000; p.Spec.IOPS = 10000 }, "do not fit"},
 		{"negative extend", func(p *v1alpha1.PoolBench) { p.Spec.Control.ExtendMinutes = -5 }, "extendMinutes"},
+		{"waits for itself", func(p *v1alpha1.PoolBench) { p.Spec.StartAfter = "t10k" }, "startAfter"},
+		{"waits for a bad name", func(p *v1alpha1.PoolBench) { p.Spec.StartAfter = "Not_A_Name" }, "startAfter"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

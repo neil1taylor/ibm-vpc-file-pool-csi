@@ -637,3 +637,42 @@ func TestRunner_PublishesTheVMCount(t *testing.T) {
 		t.Fatalf("step: got %v, want 1", got)
 	}
 }
+
+// TestRunner_StartAfter checks that a run waits for the run it names to end,
+// so the three tiers of a series do not load the cluster at the same time.
+func TestRunner_StartAfter(t *testing.T) {
+	first := testBench()
+	first.Name = "t3000"
+	first.Status.Phase = v1alpha1.PoolBenchRunning
+	second := testBench()
+	second.Spec.StartAfter = "t3000"
+	h := newHarness(t, second, first)
+	h.pass()
+	got := h.bench()
+	if got.Status.Phase != v1alpha1.PoolBenchPending || !strings.Contains(got.Status.Message, "t3000") {
+		t.Fatalf("want Pending, waiting for t3000; got %s: %s", got.Status.Phase, got.Status.Message)
+	}
+	f := &v1alpha1.PoolBench{}
+	if err := h.c.Get(context.Background(), client.ObjectKey{Name: "t3000"}, f); err != nil {
+		t.Fatal(err)
+	}
+	f.Status.Phase = v1alpha1.PoolBenchComplete
+	f.Status.CleanedUp = true
+	if err := h.c.Status().Update(context.Background(), f); err != nil {
+		t.Fatal(err)
+	}
+	h.pass()
+	if got := h.bench(); got.Status.Phase != v1alpha1.PoolBenchChecking {
+		t.Fatalf("want Checking after t3000 ended, got %s", got.Status.Phase)
+	}
+}
+
+func TestRunner_StartAfterAGoneRun(t *testing.T) {
+	pb := testBench()
+	pb.Spec.StartAfter = "deleted-run"
+	h := newHarness(t, pb)
+	h.pass()
+	if got := h.bench(); got.Status.Phase != v1alpha1.PoolBenchChecking {
+		t.Fatalf("a run that is gone does not hold this one: got %s", got.Status.Phase)
+	}
+}
