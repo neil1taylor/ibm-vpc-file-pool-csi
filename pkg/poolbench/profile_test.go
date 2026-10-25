@@ -124,3 +124,23 @@ func TestWindowsFiles(t *testing.T) {
 		t.Error("load.ps1 does not wait while the run is paused")
 	}
 }
+
+// TestWindowsLoadRunsOnce: the service sends the start script on each pass until the VM says it is
+// ready, and on DR the check in the start script let two to seven loads run in one VM. The load itself
+// must refuse to run twice, before it does anything else.
+func TestWindowsLoadRunsOnce(t *testing.T) {
+	p, _ := NewProfile(defaultLoad())
+	load := p.WindowsFiles("http://collector.example:8080/v1/runs/t10k/results", "TOKEN123")["load.ps1"]
+	lock := strings.Index(load, `[System.Threading.Mutex]::new($false, 'Global\PoolBenchLoad')`)
+	if lock < 0 {
+		t.Fatal("load.ps1 takes no lock that stops a second copy of the load")
+	}
+	if !strings.Contains(load[lock:], "WaitOne(0)") {
+		t.Error("load.ps1 waits for the lock instead of leaving when a load already runs")
+	}
+	for _, later := range []string{"perf.ps1", "settings.txt", "Send "} {
+		if i := strings.Index(load, later); i >= 0 && i < lock {
+			t.Errorf("load.ps1 uses %q before it takes the lock", later)
+		}
+	}
+}

@@ -9,6 +9,14 @@
 
 # fio and the disk cmdlets write to the error stream; that must not stop the load.
 $ErrorActionPreference = 'Continue'
+
+# One load at a time. The service sends start.ps1 on each pass until the VM says PERF-READY, and
+# the check in start.ps1 let several loads start, each one adding its own I/O. A copy that finds the
+# lock taken leaves at once. The lock goes with the process, so a load that dies frees it.
+$lock = [System.Threading.Mutex]::new($false, 'Global\PoolBenchLoad')
+try { $mine = $lock.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $mine = $true }
+if (-not $mine) { exit 0 }
+
 . (Join-Path $PSScriptRoot 'perf.ps1')
 
 $settings = @{}
