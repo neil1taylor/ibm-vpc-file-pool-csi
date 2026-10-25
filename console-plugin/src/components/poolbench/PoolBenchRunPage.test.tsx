@@ -12,6 +12,7 @@ jest.mock('../../utils/use-run-metrics', () => ({
 jest.mock('react-router-dom', () => ({
   Link: ({ to, children }: { to: string; children: React.ReactNode }) => <a href={to}>{children}</a>,
   useParams: () => ({ name: 't3000' }),
+  useHistory: () => ({ push: jest.fn() }),
 }));
 
 const run = (): PoolBench => ({
@@ -89,6 +90,12 @@ describe('PoolBenchRunPage', () => {
     expect(rows[1].textContent).toContain('Pass');
     expect(rows[2].textContent).toContain('Recommended');
     expect(rows[3].textContent).toContain('In progress');
+  });
+
+  it('shows the controls of a running run', () => {
+    render(<PoolBenchRunPage />);
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Stop and clean up' })).toBeTruthy();
   });
 
   it('shows the live graphs', () => {
