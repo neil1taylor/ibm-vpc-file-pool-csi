@@ -35,6 +35,7 @@ import {
 } from '../../utils/poolbench';
 import { POOLBENCH_KEPT, POOLBENCH_SHARED_NODES } from './poolbench-texts';
 import RunCharts from './RunCharts';
+import RunControls from './RunControls';
 import { useVMNumbers } from '../../utils/use-run-metrics';
 
 const OS_LABEL = 'storage.ibmcloud.io/poolbench-os';
@@ -290,6 +291,7 @@ const PoolBenchRunPage: React.FC = () => {
         {end && <>Expected end about {end.toLocaleTimeString()} if the run goes to its last step. </>}
         {isActive(pb) && POOLBENCH_SHARED_NODES}
       </Alert>
+      <RunControls pb={pb} />
       {kept && (
         <Alert variant="warning" isInline title={POOLBENCH_KEPT} style={{ marginBottom: 16 }} />
       )}

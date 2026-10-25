@@ -23,6 +23,7 @@ To make a release:
 
 - `PoolBench` `spec.startAfter`: a run waits until the named run has ended, so a series of tiers runs one after another. The dp2 size and IOPS table is also written to `pkg/ibmcloud/testdata/dp2-ranges.golden.json` for the console's new-run form.
 - PoolBench metrics are scraped (a ServiceMonitor, or the user workload monitoring Service whose Endpoints the controller keeps, `--monitoring-poolbench-service` and `--monitoring-poolbench-port`), with a certificate for the service's name. New run gauges `poolbench_run_vms`, `poolbench_run_ready_vms` and `poolbench_run_step`.
+- Console: PoolBench run controls (pause, resume, hold, measure longer, skip, stop, clean up; the irreversible ones ask first), downloads (step table CSV, Markdown report, print to PDF) and delete run.
 - Console: a PoolBench **New run** form with presets, live numbers per step, and checks before Run (images, memory with one node down, disks on the share); three tiers make three runs, each starting after the one before.
 - Console: the PoolBench run page has five live graphs (VMs running, IOPS against the share limit, latency against the limit, throughput, slow VMs against the knee threshold) with a mark at each step, and the VM table shows each VM's last IOPS and p95.
 - Console: a PoolBench tab with the list of runs and a run page (live status line, expected end, result sentence, step results table, settings, test VMs, run log).
