@@ -23,6 +23,8 @@ describe('helpUrlForPath', () => {
     ['/vpc-file-pools/backups/nightly', 'TUTORIAL-10-BACKUP-AND-RESTORE.md'],
     [ROUTES.MONITORING, 'MONITORING.md'],
     [ROUTES.MIGRATE, 'TUTORIAL-08-MIGRATION-AND-CONSOLE.md'],
+    [ROUTES.POOLBENCH, 'PERFORMANCE-TUNING.md'],
+    ['/vpc-file-pools/poolbench/t10k', 'PERFORMANCE-TUNING.md'],
   ];
 
   it.each(cases)('%s opens %s', (path, file) => {

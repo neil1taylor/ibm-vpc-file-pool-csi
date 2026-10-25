@@ -82,6 +82,12 @@ const BackupRestorePage = React.lazy(
 const MonitoringPage = React.lazy(
   () => import('./monitoring/MonitoringPage'),
 );
+const PoolBenchListPage = React.lazy(
+  () => import('./poolbench/PoolBenchListPage'),
+);
+const PoolBenchRunPage = React.lazy(
+  () => import('./poolbench/PoolBenchRunPage'),
+);
 
 /** Paths that render inside the tabbed layout. */
 const TAB_PATHS = [
@@ -92,6 +98,7 @@ const TAB_PATHS = [
   ROUTES.REPLICATION,
   ROUTES.BACKUPS,
   ROUTES.MONITORING,
+  ROUTES.POOLBENCH,
 ] as const;
 
 type TabKey = (typeof TAB_PATHS)[number];
@@ -104,6 +111,7 @@ const TAB_LABELS: Record<TabKey, string> = {
   [ROUTES.REPLICATION]: 'Replication',
   [ROUTES.BACKUPS]: 'Backups',
   [ROUTES.MONITORING]: 'Monitoring',
+  [ROUTES.POOLBENCH]: 'PoolBench',
 };
 
 const Loading: React.FC = () => (
@@ -154,6 +162,7 @@ const VPCFilePoolsPage: React.FC = () => {
           <Route exact path={ROUTES.BACKUP_EDIT} component={BackupPolicyFormPage} />
           <Route exact path={ROUTES.BACKUP_RESTORE} component={BackupRestorePage} />
           <Route exact path={ROUTES.BACKUP_DETAIL} component={BackupDetailsPage} />
+          <Route exact path={ROUTES.POOLBENCH_DETAIL} component={PoolBenchRunPage} />
         </Switch>
       </Suspense>
       </>
@@ -196,6 +205,7 @@ const VPCFilePoolsPage: React.FC = () => {
           <Route exact path={ROUTES.REPLICATION} component={ReplicationPolicyListPage} />
           <Route exact path={ROUTES.BACKUPS} component={BackupListPage} />
           <Route exact path={ROUTES.MONITORING} component={MonitoringPage} />
+          <Route exact path={ROUTES.POOLBENCH} component={PoolBenchListPage} />
           <Route path={ROUTES.DASHBOARD} component={DashboardPage} />
         </Switch>
       </Suspense>

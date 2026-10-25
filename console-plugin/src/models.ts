@@ -78,6 +78,29 @@ export const BackupRestoreModel: K8sModel = {
   namespaced: false,
 };
 
+export const PoolBenchModel: K8sModel = {
+  apiGroup: API_GROUP,
+  apiVersion: API_VERSION,
+  kind: 'PoolBench',
+  plural: 'poolbenches',
+  abbr: 'PB',
+  label: 'PoolBench',
+  labelPlural: 'PoolBenches',
+  namespaced: false,
+};
+
+/** KubeVirt's running VM, for the VMs of a PoolBench run. */
+export const VirtualMachineInstanceModel: K8sModel = {
+  apiGroup: 'kubevirt.io',
+  apiVersion: 'v1',
+  kind: 'VirtualMachineInstance',
+  plural: 'virtualmachineinstances',
+  abbr: 'VMI',
+  label: 'VirtualMachineInstance',
+  labelPlural: 'VirtualMachineInstances',
+  namespaced: true,
+};
+
 // ── Standard Kubernetes kinds used by the create pages ──
 
 export const PersistentVolumeClaimModel: K8sModel = {

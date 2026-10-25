@@ -66,6 +66,18 @@ export const COLUMN_HELP = {
     title: 'Status',
     text: 'Copying or Sending while a copy of a running VM disk is in progress, and the last message for the volume. An orange message only says the volume is waiting; a red message is an error to read.',
   },
+  poolbenchPhase: {
+    title: 'State',
+    text: 'Checking and Running mean the run goes on; Paused means someone paused it. CleaningUp deletes the test VMs and the pool. Complete and Stopped have a result; Failed says why on its row and on its page.',
+  },
+  poolbenchKnee: {
+    title: 'Knee',
+    text: 'The VM count of the first step where users would notice: too many VMs slow, any stall, or the share at its IOPS limit. A dash means no knee was found up to the last step measured.',
+  },
+  poolbenchRecommended: {
+    title: 'Recommended',
+    text: 'The largest step at or below 80% of the knee: how many VMs to put on a share like this one. With no knee it is the largest step measured, so the real limit is higher.',
+  },
   backupPhase: {
     title: 'Phase',
     text: 'Active means the policy makes backups on its schedule, and Suspended means someone stopped new backups (existing backups stay). Error means something is wrong, such as a snapshot pool that is more than 85% full: read the message on the page.',
