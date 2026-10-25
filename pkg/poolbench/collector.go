@@ -23,6 +23,14 @@ import (
 // about 10 KiB.
 const maxPostBytes = 1 << 20
 
+// maxResultsPerVM and maxErrorsPerVM bound what one VM can store. A VM sends
+// about 12 results an hour, so the cap is far above any run; it stops a VM
+// that sends too much from filling the results volume.
+const (
+	maxResultsPerVM = 500
+	maxErrorsPerVM  = 20
+)
+
 // VM is a test VM as the collector knows it.
 type VM struct {
 	Name string
@@ -81,7 +89,7 @@ func NewStore(dir string, metrics *Metrics) (*Store, error) {
 }
 
 func (s *Store) load(run, vm, path string) error {
-	fh, err := os.Open(path)
+	fh, err := os.Open(path) //nolint:gosec // the path is built from names checked against validName
 	if err != nil {
 		return fmt.Errorf("read %s: %w", path, err)
 	}
@@ -111,7 +119,8 @@ func (s *Store) record(run string, vm VM) *vmRecord {
 	return rec
 }
 
-// apply records one line. It is false for a line that is not ours.
+// apply records one line. It is false for a line that is not ours, or one
+// past the VM's cap.
 func (s *Store) apply(rec *vmRecord, line string, now time.Time) bool {
 	switch {
 	case line == "PERF-READY":
@@ -119,14 +128,16 @@ func (s *Store) apply(rec *vmRecord, line string, now time.Time) bool {
 			rec.ready = now
 		}
 	case strings.HasPrefix(line, "PERF-ERROR "):
+		if len(rec.errors) >= maxErrorsPerVM {
+			return false
+		}
 		rec.errors = append(rec.errors, strings.TrimPrefix(line, "PERF-ERROR "))
 	default:
 		r, ok := ParseLine(line)
-		if !ok {
+		if !ok || len(rec.results) >= maxResultsPerVM {
 			return false
 		}
 		rec.results = append(rec.results, r)
-		return true
 	}
 	return true
 }
@@ -150,7 +161,7 @@ func (s *Store) Add(run string, vm VM, line string, now time.Time) error {
 	if err := os.MkdirAll(filepath.Join(s.dir, run), 0o750); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(filepath.Join(s.dir, run, vm.Name+".log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640)
+	f, err := os.OpenFile(filepath.Join(s.dir, run, vm.Name+".log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}

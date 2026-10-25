@@ -132,7 +132,7 @@ func (r Rules) Step(results map[string][]Result, start, end int64) StepStats {
 	for _, vmResults := range results {
 		out.VMs++
 		s := r.vm(vmResults, start, end)
-		out.Stalls += int32(s.stalls)
+		out.Stalls += int32(min(s.stalls, maxResultsPerVM)) // #nosec G115 -- capped at maxResultsPerVM
 		if s.steadyP95 < 0 || s.steadyP95 > r.LatencyLimitMs {
 			slow++
 		}

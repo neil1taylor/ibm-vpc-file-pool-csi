@@ -65,11 +65,12 @@ func ms(ns float64) float64 {
 	return math.Floor(ns/1e6*10+0.5) / 10
 }
 
-// ParseLine reads one PERF line. ok is false for any other line, or a line
-// whose JSON is broken.
+// ParseLine reads one PERF line. ok is false for any other line, a phase
+// that is not steady or burst, or a line whose JSON is broken.
 func ParseLine(line string) (Result, bool) {
 	fields := strings.SplitN(line, " ", 4)
-	if len(fields) != 4 || fields[0] != "PERF" {
+	// The phase becomes a metric label, so only the two phases are taken.
+	if len(fields) != 4 || fields[0] != "PERF" || (fields[2] != "steady" && fields[2] != "burst") {
 		return Result{}, false
 	}
 	epoch, err := strconv.ParseInt(fields[1], 10, 64)

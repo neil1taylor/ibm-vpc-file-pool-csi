@@ -141,9 +141,9 @@ func TestStore_KeepsLinesAndReloads(t *testing.T) {
 	if !strings.Contains(string(raw), "PERF-READY\n") || !strings.Contains(string(raw), "PERF-ERROR no disk\n") || strings.Contains(string(raw), "noise") {
 		t.Fatalf("raw log:\n%s", raw)
 	}
-	s2, err := NewStore(dir, NewMetrics(prometheus.NewRegistry()))
-	if err != nil {
-		t.Fatal(err)
+	s2, err2 := NewStore(dir, NewMetrics(prometheus.NewRegistry()))
+	if err2 != nil {
+		t.Fatal(err2)
 	}
 	if len(s2.Results("t10k")["pb-001"]) != 1 {
 		t.Fatalf("after reload: %+v", s2.Results("t10k"))
@@ -181,5 +181,31 @@ func TestStore_RefusesBadNames(t *testing.T) {
 		if err := s.Add(bad.run, VM{Name: bad.vm, OS: "linux"}, "PERF-READY", time.Now()); err == nil {
 			t.Errorf("%+v: want an error", bad)
 		}
+	}
+}
+
+// TestStore_CapsPerVM checks that a VM cannot fill the store: results and
+// errors past the cap are dropped, and not written to the file either.
+func TestStore_CapsPerVM(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := NewStore(dir, NewMetrics(prometheus.NewRegistry()))
+	vm := VM{Name: "pb-001", OS: "linux"}
+	for i := 0; i < maxResultsPerVM+5; i++ {
+		if err := s.Add("t10k", vm, steadyLine(1700000000+int64(i)), time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < maxErrorsPerVM+5; i++ {
+		_ = s.Add("t10k", vm, "PERF-ERROR again", time.Now())
+	}
+	if n := len(s.Results("t10k")["pb-001"]); n != maxResultsPerVM {
+		t.Fatalf("results: got %d, want %d", n, maxResultsPerVM)
+	}
+	if n := len(s.Errors("t10k")["pb-001"]); n != maxErrorsPerVM {
+		t.Fatalf("errors: got %d, want %d", n, maxErrorsPerVM)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "t10k", "pb-001.log"))
+	if n := strings.Count(string(raw), "\n"); n != maxResultsPerVM+maxErrorsPerVM {
+		t.Fatalf("file lines: got %d, want %d", n, maxResultsPerVM+maxErrorsPerVM)
 	}
 }

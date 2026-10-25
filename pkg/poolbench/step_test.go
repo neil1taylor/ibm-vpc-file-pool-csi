@@ -109,10 +109,10 @@ func TestStep_NoVMs(t *testing.T) {
 func TestKnee(t *testing.T) {
 	row := func(vms, slow int32) StepRow { return StepRow{VMs: vms, SlowPercent: slow} }
 	cases := []struct {
-		name     string
-		rows     []StepRow
-		knee     int32
-		recommed int32
+		name      string
+		rows      []StepRow
+		knee      int32
+		recommend int32
 	}{
 		{"first step over a quarter slow", []StepRow{row(15, 0), row(30, 10), row(45, 30), row(60, 60)}, 45, 30},
 		{"exactly a quarter is not a knee", []StepRow{row(15, 25), row(30, 26)}, 30, 15},
@@ -130,8 +130,8 @@ func TestKnee(t *testing.T) {
 			if knee != tc.knee {
 				t.Fatalf("knee: got %d, want %d", knee, tc.knee)
 			}
-			if got := Recommended(tc.rows, knee); got != tc.recommed {
-				t.Fatalf("recommended: got %d, want %d", got, tc.recommed)
+			if got := Recommended(tc.rows, knee); got != tc.recommend {
+				t.Fatalf("recommended: got %d, want %d", got, tc.recommend)
 			}
 		})
 	}

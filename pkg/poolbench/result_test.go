@@ -61,6 +61,8 @@ func TestParseLine_Refuses(t *testing.T) {
 		"PERF 1700000100 steady",
 		"PERF soon steady {}",
 		`PERF 1700000100 steady {"jobs":[]}`,
+		// The phase becomes a metric label, so only the two phases are taken.
+		"PERF 1700000100 other " + fioJSON("lat_ns", 20, 9, 1000000, 4000000, 9000000, 12000000, 2000000, 3000000),
 	} {
 		if r, ok := ParseLine(line); ok {
 			t.Errorf("%q: want no result, got %+v", line, r)
