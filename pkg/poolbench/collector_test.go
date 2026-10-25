@@ -130,8 +130,8 @@ func TestStore_KeepsLinesAndReloads(t *testing.T) {
 	}
 	now := time.Unix(1700000000, 0)
 	for _, l := range []string{"PERF-READY", steadyLine(1700000600), "PERF-ERROR no disk", "noise"} {
-		if err := s.Add("t10k", VM{Name: "pb-001", OS: "linux"}, l, now); err != nil {
-			t.Fatal(err)
+		if addErr := s.Add("t10k", VM{Name: "pb-001", OS: "linux"}, l, now); addErr != nil {
+			t.Fatal(addErr)
 		}
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, "t10k", "pb-001.log"))

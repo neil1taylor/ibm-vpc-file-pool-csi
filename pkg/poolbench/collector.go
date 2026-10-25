@@ -161,7 +161,7 @@ func (s *Store) Add(run string, vm VM, line string, now time.Time) error {
 	if err := os.MkdirAll(filepath.Join(s.dir, run), 0o750); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(filepath.Join(s.dir, run, vm.Name+".log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(filepath.Join(s.dir, run, vm.Name+".log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // run and VM names are checked against validName above
 	if err != nil {
 		return err
 	}
