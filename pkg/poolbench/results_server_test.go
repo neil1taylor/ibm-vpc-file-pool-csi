@@ -101,13 +101,22 @@ func TestKubeAuth(t *testing.T) {
 	cs := kubefake.NewClientset()
 	var sar *authorizationv1.SubjectAccessReview
 	cs.PrependReactor("create", "tokenreviews", func(a k8stesting.Action) (bool, runtime.Object, error) {
-		tr := a.(k8stesting.CreateAction).GetObject().(*authenticationv1.TokenReview)
+		ca, _ := a.(k8stesting.CreateAction)
+		tr, ok := ca.GetObject().(*authenticationv1.TokenReview)
+		if !ok {
+			return true, nil, errors.New("not a TokenReview")
+		}
 		tr.Status = authenticationv1.TokenReviewStatus{Authenticated: tr.Spec.Token == "good",
 			User: authenticationv1.UserInfo{Username: "alice", Groups: []string{"admins"}}}
 		return true, tr, nil
 	})
 	cs.PrependReactor("create", "subjectaccessreviews", func(a k8stesting.Action) (bool, runtime.Object, error) {
-		sar = a.(k8stesting.CreateAction).GetObject().(*authorizationv1.SubjectAccessReview)
+		ca, _ := a.(k8stesting.CreateAction)
+		got, ok := ca.GetObject().(*authorizationv1.SubjectAccessReview)
+		if !ok {
+			return true, nil, errors.New("not a SubjectAccessReview")
+		}
+		sar = got
 		sar.Status.Allowed = sar.Spec.ResourceAttributes.Name == "t10k"
 		return true, sar, nil
 	})
