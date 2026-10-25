@@ -14,6 +14,7 @@ export const k8sUpdate = jest.fn();
 
 // Console fetch mock
 export const consoleFetchJSON = jest.fn();
+export const consoleFetch = jest.fn();
 export const consoleFetchText = jest.fn();
 
 // List page components — render children or placeholder
