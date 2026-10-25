@@ -112,8 +112,8 @@ func Run(ctx context.Context, cfg *rest.Config, opts Options) error {
 	if err != nil {
 		return fmt.Errorf("create manager: %w", err)
 	}
-	if err := mgr.AddHealthzCheck("ping", healthz.Ping); err != nil {
-		return err
+	if herr := mgr.AddHealthzCheck("ping", healthz.Ping); herr != nil {
+		return herr
 	}
 	// The runner reads few objects at long intervals, and some (pods in every
 	// namespace) would be costly to cache, so it reads the API directly.
@@ -129,8 +129,8 @@ func Run(ctx context.Context, cfg *rest.Config, opts Options) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(opts.ResultsDir, 0o750); err != nil {
-		return fmt.Errorf("make the results folder: %w", err)
+	if merr := os.MkdirAll(opts.ResultsDir, 0o750); merr != nil {
+		return fmt.Errorf("make the results folder: %w", merr)
 	}
 	store, err := NewStore(opts.ResultsDir, NewMetrics(ctrlmetrics.Registry))
 	if err != nil {
@@ -148,7 +148,7 @@ func Run(ctx context.Context, cfg *rest.Config, opts Options) error {
 		runner.Shares = &NodeAgentShares{Client: c, Namespace: opts.Namespace, Service: opts.NodeMetricsService,
 			HTTP: httpClient, TokenFile: serviceAccountTokenFile}
 	}
-	if err := mgr.Add(leaderRunnable(func(ctx context.Context) error {
+	if aerr := mgr.Add(leaderRunnable(func(ctx context.Context) error {
 		t := time.NewTicker(opts.Interval)
 		defer t.Stop()
 		for {
@@ -159,11 +159,11 @@ func Run(ctx context.Context, cfg *rest.Config, opts Options) error {
 			case <-t.C:
 			}
 		}
-	})); err != nil {
-		return err
+	})); aerr != nil {
+		return aerr
 	}
 	srv := &http.Server{Addr: opts.CollectorAddr, Handler: &Collector{Store: store, Runs: runner}, ReadHeaderTimeout: 10 * time.Second}
-	if err := mgr.Add(leaderRunnable(func(ctx context.Context) error {
+	if aerr := mgr.Add(leaderRunnable(func(ctx context.Context) error {
 		go func() {
 			<-ctx.Done()
 			sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -171,12 +171,12 @@ func Run(ctx context.Context, cfg *rest.Config, opts Options) error {
 			_ = srv.Shutdown(sctx)
 		}()
 		klog.InfoS("PoolBench collector listening", "addr", opts.CollectorAddr)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return err
+		if serr := srv.ListenAndServe(); serr != nil && !errors.Is(serr, http.ErrServerClosed) {
+			return serr
 		}
 		return nil
-	})); err != nil {
-		return err
+	})); aerr != nil {
+		return aerr
 	}
 	return mgr.Start(ctx)
 }
