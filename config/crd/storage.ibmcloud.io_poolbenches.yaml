@@ -67,6 +67,7 @@ spec:
               Control and Events may change.
             properties:
               control:
+                default: {}
                 description: 'Control changes a running run: pause, hold, measure
                   longer, skip, stop.'
                 properties:
@@ -137,6 +138,7 @@ spec:
                   look. They cost money until the PoolBench is deleted or Control.Stop is set.
                 type: boolean
               knee:
+                default: {}
                 description: Knee says when users would notice the share is slow.
                 properties:
                   latencyLimitMs:
@@ -163,6 +165,7 @@ spec:
                     type: boolean
                 type: object
               linux:
+                default: {}
                 description: Linux is the size and image of the Linux VMs.
                 properties:
                   cpu:
@@ -192,6 +195,7 @@ spec:
                     type: integer
                 type: object
               load:
+                default: {}
                 description: Load is the disk load each VM makes.
                 properties:
                   areaGiB:
@@ -272,6 +276,7 @@ spec:
                 format: int32
                 type: integer
               windows:
+                default: {}
                 description: Windows is the size and image of the Windows VMs.
                 properties:
                   cpu:

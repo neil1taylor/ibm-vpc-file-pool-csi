@@ -243,6 +243,7 @@ func main() {
 	case "enable-sidecar-gate":
 		runEnableSidecarGate()
 	case "poolbench":
+		ctrl.SetLogger(klog.NewKlogr())
 		poolBench.Namespace = os.Getenv("POD_NAMESPACE")
 		if poolBench.Namespace == "" {
 			poolBench.Namespace = driverNamespace

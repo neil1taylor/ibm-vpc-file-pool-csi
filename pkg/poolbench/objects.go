@@ -89,7 +89,7 @@ func buildPool(pb *v1alpha1.PoolBench, zone string) *v1alpha1.FileSharePool {
 		ObjectMeta: metav1.ObjectMeta{Name: runName(pb), Labels: runLabels(pb)},
 		Spec: v1alpha1.FileSharePoolSpec{
 			Zone: zone, Profile: "dp2", ShareSizeGB: pb.Spec.ShareSizeGB, IOPS: &iops,
-			MaxShares: 1, InitialShares: 1, AutoExpand: false, AllocationStrategy: "spread",
+			MaxShares: 1, InitialShares: 1, AutoExpand: false, ExpandThresholdPercent: 80, AllocationStrategy: "spread",
 			DefaultUID: &uid, DefaultGID: &uid, DefaultPermissions: "0777",
 		},
 	}

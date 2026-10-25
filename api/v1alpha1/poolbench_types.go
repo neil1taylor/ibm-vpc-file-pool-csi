@@ -63,14 +63,17 @@ type PoolBenchSpec struct {
 	WindowsEvery *int32 `json:"windowsEvery,omitempty"`
 
 	// Linux is the size and image of the Linux VMs.
+	// +kubebuilder:default={}
 	// +optional
 	Linux PoolBenchVM `json:"linux,omitempty"`
 
 	// Windows is the size and image of the Windows VMs.
+	// +kubebuilder:default={}
 	// +optional
 	Windows PoolBenchVM `json:"windows,omitempty"`
 
 	// Load is the disk load each VM makes.
+	// +kubebuilder:default={}
 	// +optional
 	Load PoolBenchLoad `json:"load,omitempty"`
 
@@ -86,6 +89,7 @@ type PoolBenchSpec struct {
 	MeasureMinutes int32 `json:"measureMinutes,omitempty"`
 
 	// Knee says when users would notice the share is slow.
+	// +kubebuilder:default={}
 	// +optional
 	Knee PoolBenchKnee `json:"knee,omitempty"`
 
@@ -107,6 +111,7 @@ type PoolBenchSpec struct {
 	KeepAfterEnd bool `json:"keepAfterEnd,omitempty"`
 
 	// Control changes a running run: pause, hold, measure longer, skip, stop.
+	// +kubebuilder:default={}
 	// +optional
 	Control PoolBenchControl `json:"control,omitempty"`
 }
