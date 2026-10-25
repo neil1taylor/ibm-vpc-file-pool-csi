@@ -34,6 +34,8 @@ import {
   verdictText,
 } from '../../utils/poolbench';
 import { POOLBENCH_KEPT, POOLBENCH_SHARED_NODES } from './poolbench-texts';
+import RunCharts from './RunCharts';
+import { useVMNumbers } from '../../utils/use-run-metrics';
 
 const OS_LABEL = 'storage.ibmcloud.io/poolbench-os';
 const RUN_LABEL = 'storage.ibmcloud.io/poolbench';
@@ -177,6 +179,7 @@ const VMTable: React.FC<{ pb: PoolBench }> = ({ pb }) => {
         }
       : null,
   );
+  const numbers = useVMNumbers(pb.metadata?.name || '', !!ns && isActive(pb));
   const list = [...(vmis || [])].sort((a, b) => (a.metadata?.name || '').localeCompare(b.metadata?.name || ''));
   if (list.length === 0) return <p>No test VM is running.</p>;
   return (
@@ -187,17 +190,24 @@ const VMTable: React.FC<{ pb: PoolBench }> = ({ pb }) => {
           <Th>OS</Th>
           <Th>Node</Th>
           <Th>State</Th>
+          <Th>Last IOPS</Th>
+          <Th>Last p95</Th>
         </Tr>
       </Thead>
       <Tbody>
-        {list.map((v) => (
-          <Tr key={v.metadata?.name}>
-            <Td dataLabel="Name">{v.metadata?.name}</Td>
-            <Td dataLabel="OS">{v.metadata?.labels?.[OS_LABEL] === 'windows' ? 'Windows' : 'Linux'}</Td>
-            <Td dataLabel="Node">{v.status?.nodeName || '-'}</Td>
-            <Td dataLabel="State">{v.status?.phase || '-'}</Td>
-          </Tr>
-        ))}
+        {list.map((v) => {
+          const n = numbers[v.metadata?.name || ''];
+          return (
+            <Tr key={v.metadata?.name}>
+              <Td dataLabel="Name">{v.metadata?.name}</Td>
+              <Td dataLabel="OS">{v.metadata?.labels?.[OS_LABEL] === 'windows' ? 'Windows' : 'Linux'}</Td>
+              <Td dataLabel="Node">{v.status?.nodeName || '-'}</Td>
+              <Td dataLabel="State">{v.status?.phase || '-'}</Td>
+              <Td dataLabel="Last IOPS">{n && Number.isFinite(n.iops) ? n.iops : '-'}</Td>
+              <Td dataLabel="Last p95">{n && Number.isFinite(n.p95Ms) ? `${n.p95Ms} ms` : '-'}</Td>
+            </Tr>
+          );
+        })}
       </Tbody>
     </Table>
   );
@@ -286,6 +296,10 @@ const PoolBenchRunPage: React.FC = () => {
       {verdict && (
         <Alert variant={st.kneeVMs ? 'warning' : 'success'} isInline title={verdict} style={{ marginBottom: 16 }} />
       )}
+
+      <div style={{ marginBottom: 16 }}>
+        <RunCharts pb={pb} />
+      </div>
 
       <Card style={{ marginBottom: 16 }}>
         <CardTitle>Step results</CardTitle>
