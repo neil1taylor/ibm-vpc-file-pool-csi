@@ -19,6 +19,7 @@ import { API_GROUP, ROUTES } from '../../constants';
 import { ControlAction, availableActions, controlPatch, downloadText, reportMarkdown, stepsCSV } from '../../utils/poolbench-control';
 import { isActive } from '../../utils/poolbench';
 import { errorMessage } from '../../utils/k8s-objects';
+import { RAW_UNAVAILABLE, fetchRawCSV } from '../../utils/poolbench-raw';
 import DeleteModal from '../common/DeleteModal';
 
 const EXTEND_MINUTES = 15;
@@ -77,11 +78,20 @@ const RunControls: React.FC<{ pb: PoolBench }> = ({ pb }) => {
     }
   };
 
+  const downloadRaw = async () => {
+    setError('');
+    try {
+      downloadText(`${name}-raw.csv`, 'text/csv', await fetchRawCSV(name));
+    } catch (err) {
+      setError(`${RAW_UNAVAILABLE} ${errorMessage(err, '')}`);
+    }
+  };
+
   const ask = confirm ? CONFIRM[confirm] : undefined;
   return (
     <>
       {error && (
-        <Alert variant="danger" isInline title="The change failed" style={{ marginBottom: 8 }}>
+        <Alert variant="danger" isInline title="That did not work" style={{ marginBottom: 8 }}>
           {error}
         </Alert>
       )}
@@ -108,6 +118,9 @@ const RunControls: React.FC<{ pb: PoolBench }> = ({ pb }) => {
           </Button>
           <Button variant="link" onClick={() => downloadText(`${name}-report.md`, 'text/markdown', reportMarkdown(pb))}>
             Report (Markdown)
+          </Button>
+          <Button variant="link" onClick={downloadRaw}>
+            Raw results (CSV)
           </Button>
           <Button variant="link" onClick={() => window.print()}>
             Print or save as PDF
