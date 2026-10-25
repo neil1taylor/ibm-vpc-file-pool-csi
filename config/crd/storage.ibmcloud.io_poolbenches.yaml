@@ -245,7 +245,10 @@ spec:
                 type: integer
               measureMinutes:
                 default: 45
-                description: MeasureMinutes is how long each step is measured.
+                description: |-
+                  MeasureMinutes is how long each step is measured. It must cover a whole
+                  period and a whole steady phase (2 x period - burst seconds), because
+                  only a phase that starts and ends in the window counts.
                 format: int32
                 type: integer
               profile:

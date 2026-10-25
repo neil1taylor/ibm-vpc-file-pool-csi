@@ -49,7 +49,7 @@ Sending results to the collector replaces reading the serial console. Results th
 
 ### What the person can set (the new-run form)
 
-Every setting has help text and a sensible default. **Presets** fill the form: "Quick check" (5 VMs, 10 minutes), "One tier" (the spec's full ramp), "Three tiers" (3,000, 10,000 and 20,000 IOPS one after another).
+Every setting has help text and a sensible default. **Presets** fill the form: "Quick check" (5 VMs, a shorter 120-second load period, about 25 minutes), "One tier" (the spec's full ramp), "Three tiers" (3,000, 10,000 and 20,000 IOPS one after another).
 
 - **Share:** size in GB and IOPS, with the allowed IOPS range for that size shown live from the `dp2` table. The form works out the size the VMs need and warns if the share is too small.
 - **VM mix:** VMs per step (15), number of steps or the largest VM count (90), the Windows share of the mix (1 in 3, or none), and the Linux and Windows sizes (vCPU, memory). Windows needs the prepared image; the form shows whether it exists and when its evaluation licence ends.

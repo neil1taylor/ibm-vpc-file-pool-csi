@@ -63,6 +63,7 @@ func TestPoolBenchValidator_RefusesCreate(t *testing.T) {
 		{"negative windows", func(p *v1alpha1.PoolBench) { p.Spec.WindowsEvery = int32p(-1) }, "windowsEvery"},
 		{"negative settle", func(p *v1alpha1.PoolBench) { p.Spec.SettleMinutes = int32p(-1) }, "settleMinutes"},
 		{"measure shorter than one period", func(p *v1alpha1.PoolBench) { p.Spec.MeasureMinutes = 5 }, "measureMinutes"},
+		{"measure cannot hold a whole steady phase", func(p *v1alpha1.PoolBench) { p.Spec.MeasureMinutes = 19 }, "measureMinutes"},
 		{"no steady rate", func(p *v1alpha1.PoolBench) { p.Spec.Load.SteadyIOPS = 0 }, "steadyIOPS"},
 		{"burst below steady", func(p *v1alpha1.PoolBench) { p.Spec.Load.BurstIOPS = 10 }, "burstIOPS"},
 		{"burst as long as the period", func(p *v1alpha1.PoolBench) { p.Spec.Load.BurstSeconds = 600 }, "burstSeconds"},

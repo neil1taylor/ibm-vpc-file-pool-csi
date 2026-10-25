@@ -1516,7 +1516,7 @@ type PoolBenchSpec struct {
     Windows        PoolBenchVM       `json:"windows,omitempty"`
     Load           PoolBenchLoad     `json:"load,omitempty"`           // steadyIOPS 30, burstIOPS 300, burstSeconds 45, periodSeconds 600, readPercent 70, blockMix "4k:50 16k:30 64k:20", areaGiB 3
     SettleMinutes  *int32            `json:"settleMinutes,omitempty"`  // default 15
-    MeasureMinutes int32             `json:"measureMinutes,omitempty"` // default 45; at least one load period
+    MeasureMinutes int32             `json:"measureMinutes,omitempty"` // default 45; at least 2 x period - burst seconds
     Knee           PoolBenchKnee     `json:"knee,omitempty"`           // latencyLimitMs 20, slowVMPercent 25, stallSeconds 5, stopAtKnee (default true)
     Events         []PoolBenchEvent  `json:"events,omitempty"`         // type BootStorm, PatchWindow, Migration, Snapshot or Backup; atVMs: a step of the run
     StartAfter     string            `json:"startAfter,omitempty"`     // wait until this other run has ended (a series of tiers)

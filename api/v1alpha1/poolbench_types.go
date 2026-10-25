@@ -83,7 +83,9 @@ type PoolBenchSpec struct {
 	// +optional
 	SettleMinutes *int32 `json:"settleMinutes,omitempty"`
 
-	// MeasureMinutes is how long each step is measured.
+	// MeasureMinutes is how long each step is measured. It must cover a whole
+	// period and a whole steady phase (2 x period - burst seconds), because
+	// only a phase that starts and ends in the window counts.
 	// +kubebuilder:default=45
 	// +optional
 	MeasureMinutes int32 `json:"measureMinutes,omitempty"`

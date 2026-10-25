@@ -77,6 +77,12 @@ describe('validateForm', () => {
   it('refuses a measuring shorter than one load period', () => {
     expect(validateForm({ ...defaultForm(), measureMinutes: 5 }).measureMinutes).toBeDefined();
   });
+
+  it('refuses a measuring that cannot hold a whole steady phase', () => {
+    // 600 s period, 45 s burst: the window must cover 2 x 600 - 45 = 1155 s, so 20 minutes.
+    expect(validateForm({ ...defaultForm(), measureMinutes: 19 }).measureMinutes).toBeDefined();
+    expect(validateForm({ ...defaultForm(), measureMinutes: 20 }).measureMinutes).toBeUndefined();
+  });
 });
 
 describe('presets', () => {
@@ -85,6 +91,7 @@ describe('presets', () => {
     const quick = PRESETS[0].apply(defaultForm());
     expect(validateForm(quick)).toEqual({});
     expect(runMinutes(quick)).toBeLessThanOrEqual(20);
+    expect(quick.periodSeconds).toBe(120);
     expect(PRESETS[2].apply(defaultForm()).tiers).toEqual([3000, 10000, 20000]);
   });
 });
