@@ -21,6 +21,7 @@ To make a release:
 
 ### Added
 
+- Console: a PoolBench tab with the list of runs and a run page (live status line, expected end, result sentence, step results table, settings, test VMs, run log).
 - The PoolBench service (`--mode=poolbench`, Helm `poolBench.enabled`, off by default): the runner and the collector in one Deployment with leader election, its own service account, cluster rights limited to namespaces, pools and reading nodes, pods and images, and a run role it binds only in each run's namespace. It starts Windows loads through the guest agent and reads the share's counters from the node agents. The Windows start script moved to `pkg/poolbench/guest/windows/start.ps1`, which the Bash test reads too.
 - The PoolBench runner: it takes a `PoolBench` through its checks, makes the run's namespace, secrets, pool and VMs step by step, measures each step, finds the knee, and cleans up; pause, hold, measure longer, skip and stop work; a restart of the service goes on from the status. Each test VM waits before a load phase while the run is paused.
 - The PoolBench collector: test VMs send each result to it, and it keeps the results and publishes them as `poolbench_vm_*` metrics. The Windows load also sends its results to it. The Go code makes the same load and reads results the same way as the Bash test tooling; golden files in `pkg/poolbench/testdata` tie the two together.

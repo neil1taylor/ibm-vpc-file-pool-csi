@@ -57,10 +57,10 @@ type PhaseColorMapping = {
 
 const PHASE_COLORS: PhaseColorMapping = {
   green: ['Ready', 'Bound', 'Complete', 'Active', 'stable'],
-  blue: ['Initializing', 'Creating', 'Cloning', 'Expanding', 'InProgress', 'Pending', 'Syncing', 'creating'],
+  blue: ['Initializing', 'Creating', 'Cloning', 'Expanding', 'InProgress', 'Pending', 'Syncing', 'creating', 'Checking', 'Running', 'CleaningUp'],
   orange: ['Degraded', 'PartialFailure', 'Paused', 'Retained', 'Archived', 'draining', 'degraded'],
   red: ['Failed', 'Full', 'deleting'],
-  grey: ['Deleting'],
+  grey: ['Deleting', 'Stopped'],
 };
 
 export type BadgeColor = 'green' | 'blue' | 'orange' | 'red' | 'grey';

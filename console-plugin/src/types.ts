@@ -445,3 +445,115 @@ export interface BackupRestoreStatus {
   fetched?: boolean;
   copied?: boolean;
 }
+
+// ── PoolBench ──
+
+export interface PoolBench extends K8sResourceCommon {
+  spec: PoolBenchSpec;
+  status?: PoolBenchStatus;
+}
+
+export interface PoolBenchVM {
+  cpu?: number;
+  memoryGiB?: number;
+  image?: string;
+  imageNamespace?: string;
+  preference?: string;
+  rootDiskGiB?: number;
+}
+
+export interface PoolBenchSpec {
+  zone?: string;
+  profile?: string;
+  shareSizeGB: number;
+  iops: number;
+  stepVMs?: number;
+  maxVMs?: number;
+  /** Every Nth VM runs Windows; 0 is Linux only. */
+  windowsEvery?: number;
+  linux?: PoolBenchVM;
+  windows?: PoolBenchVM;
+  load?: {
+    steadyIOPS?: number;
+    burstIOPS?: number;
+    burstSeconds?: number;
+    periodSeconds?: number;
+    readPercent?: number;
+    blockMix?: string;
+    areaGiB?: number;
+  };
+  settleMinutes?: number;
+  measureMinutes?: number;
+  knee?: {
+    latencyLimitMs?: number;
+    slowVMPercent?: number;
+    stallSeconds?: number;
+    stopAtKnee?: boolean;
+  };
+  events?: { type: string; atVMs: number }[];
+  keepAfterEnd?: boolean;
+  control?: {
+    paused?: boolean;
+    hold?: boolean;
+    stop?: boolean;
+    skipStep?: number;
+    extendStep?: number;
+    extendMinutes?: number;
+  };
+}
+
+export type PoolBenchPhase =
+  | 'Pending'
+  | 'Checking'
+  | 'Running'
+  | 'Paused'
+  | 'CleaningUp'
+  | 'Complete'
+  | 'Stopped'
+  | 'Failed';
+
+export interface PoolBenchStepResult {
+  vms: number;
+  windowsVMs?: number;
+  shareIOPS?: number;
+  guestIOPS?: number;
+  ibmOps?: number;
+  shareLatencyMicros?: number;
+  p50Micros?: number;
+  p95Micros?: number;
+  p99Micros?: number;
+  throughputKBps?: number;
+  slowPercent?: number;
+  burstSlowPercent?: number;
+  stalls?: number;
+  atLimit?: boolean;
+  readySeconds?: number;
+  pass: boolean;
+  cutShort?: boolean;
+  started?: string;
+  ended?: string;
+}
+
+export interface PoolBenchStatus {
+  phase?: PoolBenchPhase;
+  stage?: 'Preparing' | 'Creating' | 'Settling' | 'Measuring' | 'Event';
+  step?: number;
+  totalSteps?: number;
+  vms?: number;
+  windowsVMs?: number;
+  readyVMs?: number;
+  namespace?: string;
+  poolName?: string;
+  startTime?: string;
+  endTime?: string;
+  stageStarted?: string;
+  stageEnds?: string;
+  pausedAt?: string;
+  message?: string;
+  steps?: PoolBenchStepResult[];
+  kneeVMs?: number;
+  recommendedVMs?: number;
+  events?: { type: string; atVMs: number; started?: string; ended?: string; seconds?: number; message?: string }[];
+  log?: { time: string; kind: 'Info' | 'Warning' | 'Error' | 'Control'; message: string }[];
+  cleanedUp?: boolean;
+}

@@ -28,6 +28,7 @@ const AREA_GUIDES: Array<[string, string]> = [
   [ROUTES.BACKUPS, `${GUIDE_BASE}TUTORIAL-10-BACKUP-AND-RESTORE.md`],
   [ROUTES.MONITORING, `${GUIDE_BASE}MONITORING.md`],
   [ROUTES.MIGRATE, `${GUIDE_BASE}TUTORIAL-08-MIGRATION-AND-CONSOLE.md`],
+  [ROUTES.POOLBENCH, `${GUIDE_BASE}PERFORMANCE-TUNING.md`],
 ];
 
 /** The guide that matches a console path. An unknown path gets the support guide. */
