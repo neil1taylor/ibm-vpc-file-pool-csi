@@ -111,6 +111,22 @@ Browse a backup and restore single files (issue #92). Added in phase 1 of `docs/
 
 The chart also makes a Role that lets the controller make and delete the session Secrets in the release namespace only, and a NetworkPolicy that lets only the backup gateway (a later part) reach the helper pods, on port 8443.
 
+## PoolBench
+
+The storage performance test service (`docs/specs/2026-10-25-poolbench.md`). Off by default. When on, the chart renders one Deployment (`--mode=poolbench`, the driver image), its own service account, a cluster role, a run role, the collector Service, and the results volume.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `poolBench.enabled` | bool | `false` | Turns the PoolBench service on |
+| `poolBench.interval` | string | `15s` | Time between two passes of the runner |
+| `poolBench.results.size` | string | `5Gi` | Size of the volume that keeps the test VMs' raw results until a run is deleted |
+| `poolBench.results.storageClass` | string | `""` | Class of the results volume; empty uses the cluster's default class |
+| `poolBench.podSecurityContext` | object | seccomp `RuntimeDefault` | Pod security context |
+| `poolBench.securityContext` | object | non-root, read-only root, no privilege escalation, all capabilities dropped | Container security context |
+| `poolBench.resources` | object | 50m CPU, 64Mi memory requested, 256Mi limit | Container resources |
+
+Rights: cluster-wide the service may make and delete namespaces and pools, list nodes and pods (for the room check), read images, read and update `PoolBench` objects, and bind one role, `<release>-poolbench-run`. It binds that role to itself in each run's own namespace; the role gives it secrets, claims, VMs, disks, pods and pod exec there and nowhere else. It reads the node agents' metrics for the share's counters, trusting their certificate as the ServiceMonitors do (the service CA, or the `ca.crt` of `<release>-node-metrics-certs`).
+
 ## Replication Receiver
 
 Configuration for the driver-to-driver cross-region replication receiver. Deploy this on the **destination** cluster. Source cluster sync-client Jobs upload data via HTTPS.

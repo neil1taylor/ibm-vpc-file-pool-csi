@@ -11,6 +11,8 @@ import (
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/prometheus/client_golang/prometheus"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -23,6 +25,8 @@ import (
 func testScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
 	_ = corev1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+	_ = discoveryv1.AddToScheme(s)
 	_ = v1alpha1.AddToScheme(s)
 	for _, gvk := range []schema.GroupVersionKind{vmGVK, vmiGVK, dataSourceGVK, dataVolumeGVK} {
 		s.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
@@ -104,6 +108,7 @@ func newHarness(t *testing.T, pb *v1alpha1.PoolBench, extra ...client.Object) *h
 	}
 	h := &harness{t: t, c: c, now: time.Date(2026, 10, 25, 10, 0, 0, 0, time.UTC), shares: &fakeShares{}, starter: &fakeStarter{}}
 	h.r = &Runner{Client: c, Store: store, CollectorURL: "http://pb.example:8080", Shares: h.shares, Starter: h.starter,
+		RunRole: "pb-run", ServiceAccount: "pb-sa", ServiceNamespace: "kube-system",
 		Now: func() time.Time { return h.now }}
 	return h
 }
@@ -320,6 +325,14 @@ func TestRunner_MadeObjects(t *testing.T) {
 	pool := &v1alpha1.FileSharePool{}
 	if err := h.c.Get(ctx, client.ObjectKey{Name: "poolbench-t10k"}, pool); err != nil || pool.Spec.Zone != "eu-de-2" {
 		t.Fatalf("pool: %v %+v", err, pool.Spec)
+	}
+	rb := &rbacv1.RoleBinding{}
+	if err := h.c.Get(ctx, client.ObjectKey{Namespace: "poolbench-t10k", Name: "poolbench"}, rb); err != nil {
+		t.Fatalf("the service's rights in the run namespace: %v", err)
+	}
+	if rb.RoleRef.Kind != "ClusterRole" || rb.RoleRef.Name != "pb-run" || len(rb.Subjects) != 1 ||
+		rb.Subjects[0].Name != "pb-sa" || rb.Subjects[0].Namespace != "kube-system" {
+		t.Fatalf("role binding: %+v", rb)
 	}
 	// The collector can now check the run's token and find its VMs.
 	got, err := h.r.Token(ctx, "t10k")
