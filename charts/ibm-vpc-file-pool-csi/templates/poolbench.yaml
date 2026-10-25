@@ -367,9 +367,17 @@ spec:
         (has(oldObject.metadata.labels) && 'storage.ibmcloud.io/poolbench' in oldObject.metadata.labels)
       message: "PoolBench may only delete a namespace that one of its runs made"
     - expression: >-
+        !(request.resource.resource == 'namespaces' && request.operation == 'CREATE') ||
+        (has(object.metadata.labels) && 'storage.ibmcloud.io/poolbench' in object.metadata.labels)
+      message: "PoolBench may only make a namespace that carries the run label"
+    - expression: >-
         request.resource.resource != 'rolebindings' ||
-        (request.namespace.startsWith('poolbench-') && object.roleRef.kind == 'ClusterRole' && object.roleRef.name == '{{ $name }}-run')
-      message: "PoolBench may only bind its run role, in a poolbench-* namespace"
+        (request.namespace.startsWith('poolbench-') &&
+         has(namespaceObject.metadata.labels) && 'storage.ibmcloud.io/poolbench' in namespaceObject.metadata.labels &&
+         object.roleRef.kind == 'ClusterRole' && object.roleRef.name == '{{ $name }}-run' &&
+         object.subjects.size() == 1 && object.subjects[0].kind == 'ServiceAccount' &&
+         object.subjects[0].name == '{{ $name }}' && object.subjects[0].namespace == '{{ .Release.Namespace }}')
+      message: "PoolBench may only bind its run role to itself, in a namespace one of its runs made"
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

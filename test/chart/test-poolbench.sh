@@ -123,7 +123,10 @@ for want in namespaces rolebindings filesharepools; do
     if grep -qxF "$want" <<<"$RULES"; then pass "the policy covers $want"; else fail "the policy does not cover $want"; fi
 done
 check "the policy binding denies" "$(doc "$VAP" ValidatingAdmissionPolicyBinding "$D" '.spec.validationActions[0]')" "Deny"
-if grep -q "poolbench-" <<<"$(doc "$VAP" ValidatingAdmissionPolicy "$D" '.spec.validations[].expression')"; then
+VX=$(doc "$VAP" ValidatingAdmissionPolicy "$D" '.spec.validations[].expression')
+if grep -q "object.subjects\[0\].name == '$D'" <<<"$VX"; then pass "a binding may name only the service"; else fail "a binding may name others"; fi
+if grep -q "namespaceObject.metadata.labels" <<<"$VX"; then pass "a binding needs a labelled namespace"; else fail "a binding trusts the name only"; fi
+if grep -q "poolbench-" <<<"$VX"; then
     pass "only names that start with poolbench-"; else fail "the names are not limited"; fi
 
 exit "$FAILED"
