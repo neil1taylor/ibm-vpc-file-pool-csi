@@ -2,7 +2,9 @@ import React from 'react';
 import { useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk';
 import { Link, useLocation } from 'react-router-dom';
 import { Chart, ChartAxis, ChartGroup, ChartLine, ChartThemeColor, ChartVoronoiContainer } from '@patternfly/react-charts';
-import { Bullseye, Card, CardBody, CardTitle, Label, PageSection, Spinner, Title } from '@patternfly/react-core';
+import CardHelpTitle from '../common/CardHelpTitle';
+import { columnInfo } from '../../utils/column-help';
+import { Bullseye, Card, CardBody, Label, PageSection, Spinner, Title } from '@patternfly/react-core';
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import { PoolBenchModel } from '../../models';
 import { PoolBench } from '../../types';
@@ -51,7 +53,7 @@ const PoolBenchComparePage: React.FC = () => {
 
       {series.length > 0 && (
         <Card style={{ marginBottom: 16 }}>
-          <CardTitle>Median VM p95 latency against the VM count</CardTitle>
+          <CardHelpTitle helpKey="pbCompareGraph" />
           <CardBody>
             <Chart
               ariaTitle="p95 latency against VMs"
@@ -76,12 +78,12 @@ const PoolBenchComparePage: React.FC = () => {
       )}
 
       <Card>
-        <CardTitle>Step results</CardTitle>
+        <CardHelpTitle helpKey="pbStepResults" />
         <CardBody>
           <Table aria-label="Runs side by side" variant="compact" role="grid">
             <Thead>
               <Tr>
-                <Th>VMs</Th>
+                <Th info={columnInfo('poolbenchStepVMs')}>VMs</Th>
                 {runs.map((pb) => (
                   <Th key={pb.metadata?.name}>{runLabel(pb)}</Th>
                 ))}

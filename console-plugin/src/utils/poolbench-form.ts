@@ -102,7 +102,7 @@ export const PRESETS: Preset[] = [
   {
     id: 'quick',
     label: 'Quick check',
-    description: '5 VMs on a small share for 10 minutes, to prove the images, the network and the cleanup. About 20 minutes.',
+    description: '5 VMs on a small share, to prove the images, the network and the cleanup. About 15 to 25 minutes.',
     apply: (f) => ({ ...f, shareSizeGB: 200, iops: 3000, tiers: [], stepVMs: 5, maxVMs: 5, settleMinutes: 2, measureMinutes: 5, periodSeconds: 120, burstSeconds: 20 }),
   },
   {

@@ -136,6 +136,74 @@ export const CARD_HELP = {
     title: 'Backed-up Volumes',
     text: 'Each volume the policy backs up, with the restore points you can go back to. A volume marked "no longer backed up" keeps its backups until the keep time has passed.',
   },
+  pbWhatToRun: {
+    title: 'What to run',
+    text: 'Pick a ready-made set of settings, or change them below. Quick check is a short test that the tool works. A tier run finds how many VMs one share carries.',
+  },
+  pbShare: {
+    title: 'Share',
+    text: 'The test makes its own pool with one file share. Its size and IOPS limit set the speed under test. The size must hold the disks of the largest step.',
+  },
+  pbVMs: {
+    title: 'VMs',
+    text: 'The test adds VMs in steps. Some run Windows, the rest Linux. Their CPU and memory count against the room on the nodes.',
+  },
+  pbLoad: {
+    title: 'Load of each VM',
+    text: 'Each VM sends a steady load, and every period a short burst, like a boot, a patch or a backup scan. These numbers set how hard one VM works.',
+  },
+  pbStep: {
+    title: 'Each step, and the knee',
+    text: 'The knee is the VM count where users would start to notice: too many slow VMs, a stall, or a full share. These settings say how long to wait, how long to measure, and what counts as slow.',
+  },
+  pbPlan: {
+    title: 'What the run will do',
+    text: 'The load each step puts on the share, worked out from your settings, and how long the run takes. Check that the last step is not far over the IOPS limit.',
+  },
+  pbChecks: {
+    title: 'Checks before the run',
+    text: 'The run cannot start while a check fails: the VM images must exist, the nodes must have room for the VMs with one node down, and the disks must fit on the share.',
+  },
+  pbStepResults: {
+    title: 'Step results',
+    text: 'One row for each step. A step adds VMs, waits for them to settle, then measures. The last passed step before the knee is what the share carries.',
+  },
+  pbSettings: {
+    title: 'Settings',
+    text: 'What this run was set to do. A run keeps these settings; to change them, start a new run.',
+  },
+  pbTestVMs: {
+    title: 'Test VMs',
+    text: 'The VMs of the run that exist now, with their latest numbers. Lines shows the raw result lines a VM sent.',
+  },
+  pbRunLog: {
+    title: 'Run log',
+    text: 'What the run did and what went wrong, newest first. Control lines show Pause, Resume and Stop. A Warning on a step that is tried again is not a failure.',
+  },
+  pbCompareGraph: {
+    title: 'Median VM p95 latency against the VM count',
+    text: 'One line for each run. A line that turns up steeply marks the knee of that run. A faster share gives a flatter line.',
+  },
+  pbChartVMs: {
+    title: 'VMs running',
+    text: 'How many test VMs run, split by Linux and Windows. Not ready are VMs that are made but have not sent a result yet.',
+  },
+  pbChartIOPS: {
+    title: 'IOPS',
+    text: 'Share is what the share served, Guests is what the VMs did, and IBM operations counts 16 KiB units. The line is the IOPS limit of the share.',
+  },
+  pbChartLatency: {
+    title: 'Latency',
+    text: 'Median VM p95 is the typical VM, Worst VM p95 is the slowest VM, and Share is the average time at the share. The line is the limit for a slow VM.',
+  },
+  pbChartThroughput: {
+    title: 'Throughput',
+    text: 'How many MB a second all VMs read and write, added up.',
+  },
+  pbChartSlow: {
+    title: 'Slow VMs',
+    text: 'The share of VMs whose p95 is over the latency limit. The line is the knee: above it, the step fails.',
+  },
 } satisfies Record<string, CardHelp>;
 
 export type CardHelpKey = keyof typeof CARD_HELP;

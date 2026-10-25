@@ -113,22 +113,32 @@ const RunControls: React.FC<{ pb: PoolBench }> = ({ pb }) => {
           </FlexItem>
         ))}
         <FlexItem align={{ default: 'alignRight' }}>
-          <Button variant="link" onClick={() => downloadText(`${name}-steps.csv`, 'text/csv', stepsCSV(pb))}>
+          <Tooltip content="One row for each step with all its numbers, for a spreadsheet.">
+            <Button variant="link" onClick={() => downloadText(`${name}-steps.csv`, 'text/csv', stepsCSV(pb))}>
             Step table (CSV)
           </Button>
-          <Button variant="link" onClick={() => downloadText(`${name}-report.md`, 'text/markdown', reportMarkdown(pb))}>
+          </Tooltip>
+          <Tooltip content="A short written report of the run, with the result and the settings.">
+            <Button variant="link" onClick={() => downloadText(`${name}-report.md`, 'text/markdown', reportMarkdown(pb))}>
             Report (Markdown)
           </Button>
-          <Button variant="link" onClick={downloadRaw}>
+          </Tooltip>
+          <Tooltip content="Every result line of every VM, for a spreadsheet. The file can be large.">
+            <Button variant="link" onClick={downloadRaw}>
             Raw results (CSV)
           </Button>
-          <Button variant="link" onClick={() => window.print()}>
+          </Tooltip>
+          <Tooltip content="Opens the print dialog of the browser: print the page or save it as a PDF.">
+            <Button variant="link" onClick={() => window.print()}>
             Print or save as PDF
           </Button>
+          </Tooltip>
           {!isActive(pb) && (
+            <Tooltip content="Deletes this run and its results. The test VMs are already gone unless you kept them.">
             <Button variant="link" isDanger isDisabled={!canDelete} onClick={() => setDeleting(true)}>
               Delete run
             </Button>
+          </Tooltip>
           )}
         </FlexItem>
       </Flex>

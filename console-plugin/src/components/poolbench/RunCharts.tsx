@@ -12,6 +12,17 @@ import { PoolBench } from '../../types';
 import { ChartSpec, chartWindow, runCharts } from '../../utils/poolbench-queries';
 import { SeriesData, useRunMetrics } from '../../utils/use-run-metrics';
 import { isActive } from '../../utils/poolbench';
+import CardHelpTitle from '../common/CardHelpTitle';
+import { CardHelpKey } from '../../utils/card-help';
+
+/** The help of each graph, by its title. */
+const CHART_HELP: Record<string, CardHelpKey> = {
+  'VMs running': 'pbChartVMs',
+  IOPS: 'pbChartIOPS',
+  Latency: 'pbChartLatency',
+  Throughput: 'pbChartThroughput',
+  'Slow VMs': 'pbChartSlow',
+};
 
 const HEIGHT = 220;
 
@@ -105,7 +116,7 @@ const RunCharts: React.FC<{ pb: PoolBench }> = ({ pb }) => {
     <Gallery hasGutter minWidths={{ default: '100%', lg: '45%' }}>
       {specs.map((spec) => (
         <Card key={spec.title} isCompact>
-          <CardTitle>{spec.title}</CardTitle>
+          {CHART_HELP[spec.title] ? <CardHelpTitle helpKey={CHART_HELP[spec.title]} /> : <CardTitle>{spec.title}</CardTitle>}
           <CardBody>
             {loading ? (
               <Bullseye style={{ height: HEIGHT }}>
