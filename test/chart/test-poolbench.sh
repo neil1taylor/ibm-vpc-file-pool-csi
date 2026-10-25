@@ -100,4 +100,17 @@ done
 UWM_OFF=$(render --set webhook.certProvider=openshift --set metrics.monitoring.mode=enabled --api-versions monitoring.coreos.com/v1/ServiceMonitor)
 if grep -q -- "--monitoring-poolbench" <<<"$UWM_OFF"; then fail "no PoolBench target while PoolBench is off"; else pass "no PoolBench target while PoolBench is off"; fi
 
+# The console reads the raw results through its plugin proxy, with the person's own token.
+CP=$(render --set poolBench.enabled=true --set webhook.certProvider=openshift --api-versions console.openshift.io/v1/ConsolePlugin)
+check "the results port on the Service" "$(doc "$CP" Service "$D" '.spec.ports[] | select(.name == "results") | .port')" "8444"
+check "the results port on the pod" \
+    "$(doc "$CP" Deployment "$D" '.spec.template.spec.containers[0].ports[] | select(.name == "results") | .containerPort')" "8444"
+check "the console proxies to it" \
+    "$(yq -N eval 'select(.kind == "ConsolePlugin") | .spec.proxy[] | select(.alias == "poolbench") | .endpoint.service.port' - <<<"$CP")" "8444"
+check "with the person's own token" \
+    "$(yq -N eval 'select(.kind == "ConsolePlugin") | .spec.proxy[] | select(.alias == "poolbench") | .authorization' - <<<"$CP")" "UserToken"
+CP_OFF=$(render --api-versions console.openshift.io/v1/ConsolePlugin)
+if yq -N eval 'select(.kind == "ConsolePlugin") | .spec.proxy' - <<<"$CP_OFF" | grep -q poolbench; then
+    fail "no proxy while PoolBench is off"; else pass "no proxy while PoolBench is off"; fi
+
 exit "$FAILED"
