@@ -681,7 +681,11 @@ func TestRunner_StartAfterAGoneRun(t *testing.T) {
 
 func TestRunner_StepErrorShowsInStatus(t *testing.T) {
 	h := newHarness(t, testBench())
-	h.r.Client = interceptor.NewClient(h.c.(client.WithWatch),interceptor.Funcs{
+	watch, ok := h.c.(client.WithWatch)
+	if !ok {
+		t.Fatal("the fake client can watch")
+	}
+	h.r.Client = interceptor.NewClient(watch, interceptor.Funcs{
 		Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
 			if _, ok := obj.(*v1alpha1.FileSharePool); ok {
 				return errors.New("pool refused")
