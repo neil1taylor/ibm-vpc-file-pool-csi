@@ -19,6 +19,10 @@ To make a release:
 
 ## [Unreleased]
 
+### Added
+
+- The `PoolBench` resource and its admission checks: the settings and results of a performance test run that the console will start and show. The service that runs it comes in later changes. See `docs/specs/2026-10-25-poolbench.md`.
+
 ## [v0.14.3] — 2026-10-24
 
 A fix release for the node agent. Volumes of a deleted share no longer stay mounted on nodes, and share metrics are no longer minutes late on a node with dead mounts. No CRD or chart value changes.

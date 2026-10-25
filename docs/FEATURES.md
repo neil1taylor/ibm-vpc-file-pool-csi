@@ -164,7 +164,7 @@ Thin wrapper around the VPC file share API with operational guardrails.
 Defense-in-depth controls for a storage driver running with host access.
 
 - **Path traversal validation** — All mkdir/rm operations validate paths against `^/pvcs/pvc-[a-f0-9-]{36}$` and reject traversal attempts.
-- **Validating admission webhooks** — Beta — Seven validating webhooks cover the CRD types (FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, ReplicationPolicy, BackupPolicy, BackupRestore). A mutating webhook adds the VM hook to VMs with instant snapshots.
+- **Validating admission webhooks** — Beta — Eight validating webhooks cover the CRD types (FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, ReplicationPolicy, BackupPolicy, BackupRestore, PoolBench). A mutating webhook adds the VM hook to VMs with instant snapshots.
 - **RBAC minimal permissions** — Controller and node service accounts use least-privilege roles.
 - **No secrets in logs** — API keys and tokens are never logged. Share IDs and mount target IPs are safe to log.
 

@@ -223,6 +223,7 @@ Validating admission webhooks (`pkg/webhook/`) registered with the controller-ru
 - `ReplicationPolicyValidator` — required fields, Go duration parsing for schedule, maxRetries range.
 - `SnapshotValidator` — required sourceSubVolume and poolName.
 - `VolumeGroupSnapshotValidator` — required fields, failurePolicy enum validation.
+- `PoolBenchValidator` — share size and IOPS against IBM's dp2 table, disks of the largest step fit the share, load and knee ranges, events at a step; settings fixed once the run has started.
 
 ### 10. CRD Controllers
 

@@ -901,6 +901,10 @@ func registerWebhooks(mgr ctrl.Manager) error {
 		WithValidator(&webhook.BackupRestoreValidator{}).Complete(); err != nil {
 		return fmt.Errorf("register BackupRestore webhook: %w", err)
 	}
+	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.PoolBench{}).
+		WithValidator(&webhook.PoolBenchValidator{}).Complete(); err != nil {
+		return fmt.Errorf("register PoolBench webhook: %w", err)
+	}
 	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.Snapshot{}).
 		WithValidator(&webhook.SnapshotValidator{}).Complete(); err != nil {
 		return fmt.Errorf("register Snapshot webhook: %w", err)
