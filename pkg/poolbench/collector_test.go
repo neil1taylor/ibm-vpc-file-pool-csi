@@ -241,3 +241,14 @@ func TestCollector_State(t *testing.T) {
 		t.Fatalf("no token: got %d", rec.Code)
 	}
 }
+
+func TestNewStore_FolderNotWritable(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	if _, err := NewStore(dir, NewMetrics(prometheus.NewRegistry())); err == nil {
+		t.Fatal("a store that cannot write must not start: every result line would be lost")
+	}
+}

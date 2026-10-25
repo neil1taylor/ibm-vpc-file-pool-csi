@@ -53,6 +53,7 @@ check "runs as non-root" "$(doc "$OUT" Deployment "$D" "$SC.runAsNonRoot")" "tru
 check "drops ALL capabilities" "$(doc "$OUT" Deployment "$D" "$SC.capabilities.drop[0]")" "ALL"
 check "read-only root file system" "$(doc "$OUT" Deployment "$D" "$SC.readOnlyRootFilesystem")" "true"
 check "seccomp RuntimeDefault" "$(doc "$OUT" Deployment "$D" '.spec.template.spec.securityContext.seccompProfile.type')" "RuntimeDefault"
+check "the service may write the results volume" "$(doc "$OUT" Deployment "$D" '.spec.template.spec.securityContext.fsGroup')" "65532"
 check "results volume mounted" "$(doc "$OUT" Deployment "$D" '.spec.template.spec.containers[0].volumeMounts[] | select(.name == "results") | .mountPath')" "/results"
 check "results claim" "$(doc "$OUT" PersistentVolumeClaim "$D-results" '.spec.resources.requests.storage')" "5Gi"
 check "collector Service port" "$(doc "$OUT" Service "$D" '.spec.ports[] | select(.name == "collector") | .port')" "8080"

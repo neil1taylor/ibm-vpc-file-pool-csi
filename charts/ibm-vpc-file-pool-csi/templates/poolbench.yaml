@@ -231,8 +231,13 @@ spec:
         app.kubernetes.io/component: poolbench
     spec:
       serviceAccountName: {{ $name }}
+      {{- $podSC := deepCopy (.Values.poolBench.podSecurityContext | default dict) }}
+      {{- $fixedIDs := or (not (.Capabilities.APIVersions.Has "security.openshift.io/v1")) (eq .Release.Namespace "kube-system") }}
+      {{- if and $fixedIDs (not (hasKey $podSC "fsGroup")) }}
+      {{- $_ := set $podSC "fsGroup" 65532 }}
+      {{- end }}
       securityContext:
-        {{- toYaml .Values.poolBench.podSecurityContext | nindent 8 }}
+        {{- toYaml $podSC | nindent 8 }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
