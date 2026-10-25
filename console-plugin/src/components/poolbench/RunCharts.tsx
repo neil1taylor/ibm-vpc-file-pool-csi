@@ -15,8 +15,11 @@ import { isActive } from '../../utils/poolbench';
 
 const HEIGHT = 220;
 
-const clock = (x: Date): string =>
-  `${x.getHours().toString().padStart(2, '0')}:${x.getMinutes().toString().padStart(2, '0')}`;
+/** The axis hands over a Date or a number of milliseconds, depending on its scale. */
+export const clock = (x: Date | number): string => {
+  const d = new Date(x);
+  return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+};
 
 interface Mark {
   label: string;
@@ -51,7 +54,7 @@ const RunChart: React.FC<{ spec: ChartSpec; data: SeriesData[]; marks: Mark[]; s
         />
       }
     >
-      <ChartAxis tickFormat={(t: Date) => clock(t)} tickCount={5} />
+      <ChartAxis tickFormat={(t: Date | number) => clock(t)} tickCount={5} />
       <ChartAxis dependentAxis label={spec.yLabel} />
       <ChartGroup>
         {series.map((s) => (
