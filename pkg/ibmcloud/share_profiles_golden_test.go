@@ -25,11 +25,11 @@ func TestDP2Golden(t *testing.T) {
 	}
 	got = append(got, '\n')
 	if *updateDP2Golden {
-		if err := os.MkdirAll("testdata", 0o750); err != nil {
-			t.Fatal(err)
+		if merr := os.MkdirAll("testdata", 0o750); merr != nil {
+			t.Fatal(merr)
 		}
-		if err := os.WriteFile(dp2GoldenPath, got, 0o600); err != nil {
-			t.Fatal(err)
+		if werr := os.WriteFile(dp2GoldenPath, got, 0o600); werr != nil {
+			t.Fatal(werr)
 		}
 	}
 	want, err := os.ReadFile(dp2GoldenPath)
