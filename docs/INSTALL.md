@@ -379,6 +379,7 @@ kubectl apply -f config/deploy/node.yaml
 | `--monitoring-namespace` | `""` | Controller mode: namespace of the metrics Services that user workload monitoring scrapes. The controller keeps their Endpoints and warns if user workload monitoring is off. Empty turns this off. Helm sets it with the other `--monitoring-*` flags |
 | `--monitoring-controller-service`, `--monitoring-node-service` | `""` | Names of the two Services in the monitoring namespace |
 | `--monitoring-controller-port`, `--monitoring-node-port` | `8080`, `0` | Metrics ports to put in the Endpoints; `0` leaves the node agents out |
+| `--monitoring-poolbench-service`, `--monitoring-poolbench-port` | `""`, `0` | The PoolBench metrics Service in the monitoring namespace and its port; `0` leaves PoolBench out. Set by the chart when `poolBench.enabled` |
 | `--monitoring-selector` | `""` | `key=value,key=value` labels shared by all driver pods |
 | `--node-metrics-cert-dir` | `""` | Node mode: directory with `tls.crt` and `tls.key` for the metrics endpoint; empty makes a self-signed certificate that Prometheus cannot check. Helm mounts a secret there |
 | `--share-stats-interval` | `30s` | Node mode: how often the node agent reads the NFS statistics of its shares. Helm sets it from `node.shareStatsInterval` |

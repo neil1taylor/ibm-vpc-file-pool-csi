@@ -10,6 +10,7 @@ import (
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -279,7 +280,7 @@ func TestRunner_FullRun(t *testing.T) {
 	h.expect(v1alpha1.PoolBenchCleaningUp, "")
 	h.pass()
 	pb = h.expect(v1alpha1.PoolBenchComplete, "")
-	if !pb.Status.CleanedUp || pb.Status.EndTime == nil {
+	if !pb.Status.CleanedUp || pb.Status.EndTime == nil || pb.Status.VMs != 0 || pb.Status.ReadyVMs != 0 {
 		t.Fatalf("cleanup: %+v", pb.Status)
 	}
 	if pb.Status.KneeVMs != 0 || pb.Status.RecommendedVMs != 6 {
@@ -615,4 +616,24 @@ func TestRunner_PauseWhileCreating(t *testing.T) {
 	h.update(func(pb *v1alpha1.PoolBench) { pb.Spec.Control.Paused = false })
 	h.pass()
 	h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageCreating)
+}
+
+// TestRunner_PublishesTheVMCount checks the run gauges that the console's
+// "VMs running" graph reads.
+func TestRunner_PublishesTheVMCount(t *testing.T) {
+	h := newHarness(t, testBench())
+	h.startToMeasuring()
+	m := h.r.Store.metrics
+	if got := testutil.ToFloat64(m.runVMs.WithLabelValues("t10k", "linux")); got != 2 {
+		t.Fatalf("linux VMs: got %v, want 2", got)
+	}
+	if got := testutil.ToFloat64(m.runVMs.WithLabelValues("t10k", "windows")); got != 1 {
+		t.Fatalf("windows VMs: got %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(m.runReady.WithLabelValues("t10k")); got != 3 {
+		t.Fatalf("ready VMs: got %v, want 3", got)
+	}
+	if got := testutil.ToFloat64(m.runStep.WithLabelValues("t10k")); got != 1 {
+		t.Fatalf("step: got %v, want 1", got)
+	}
 }

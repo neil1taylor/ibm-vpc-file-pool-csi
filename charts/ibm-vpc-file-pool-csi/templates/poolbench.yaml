@@ -154,7 +154,9 @@ spec:
     requests:
       storage: {{ .Values.poolBench.results.size }}
 ---
-# The test VMs post their results to the collector port.
+# The test VMs post their results to the collector port. The metrics port
+# serves a certificate for this Service's name: from the OpenShift service CA,
+# from cert-manager (metrics-certs.yaml), or a secret <name>-certs you make.
 apiVersion: v1
 kind: Service
 metadata:
@@ -163,6 +165,10 @@ metadata:
   labels:
     {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
     app.kubernetes.io/component: poolbench
+  {{- if $openshift }}
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: {{ $name }}-certs
+  {{- end }}
 spec:
   selector:
     {{- include "ibm-vpc-file-pool-csi.selectorLabels" . | nindent 4 }}
@@ -234,6 +240,7 @@ spec:
             - "--poolbench-interval={{ .Values.poolBench.interval }}"
             - "--poolbench-run-role={{ $name }}-run"
             - "--poolbench-service-account={{ $name }}"
+            - "--poolbench-metrics-cert-dir=/etc/poolbench/metrics-certs"
             {{- if .Values.node.metricsPort }}
             - "--node-metrics-service={{ $nodeMetrics }}"
             - "--node-metrics-ca=/etc/poolbench/node-ca/{{ ternary "service-ca.crt" "ca.crt" $openshift }}"
@@ -263,6 +270,9 @@ spec:
               mountPath: /results
             - name: tmp
               mountPath: /tmp
+            - name: metrics-certs
+              mountPath: /etc/poolbench/metrics-certs
+              readOnly: true
             {{- if .Values.node.metricsPort }}
             - name: node-ca
               mountPath: /etc/poolbench/node-ca
@@ -272,9 +282,11 @@ spec:
         - name: results
           persistentVolumeClaim:
             claimName: {{ $name }}-results
-        # The self-signed certificate of the metrics endpoint is written here.
         - name: tmp
           emptyDir: {}
+        - name: metrics-certs
+          secret:
+            secretName: {{ $name }}-certs
         {{- if .Values.node.metricsPort }}
         - name: node-ca
           {{- if $openshift }}
@@ -288,4 +300,22 @@ spec:
                 path: ca.crt
           {{- end }}
         {{- end }}
+{{- if and .Values.metrics.serviceMonitor.enabled (not (include "ibm-vpc-file-pool-csi.uwm" .)) (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor") }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "ibm-vpc-file-pool-csi.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: poolbench
+  endpoints:
+    - port: metrics
+      {{- include "ibm-vpc-file-pool-csi.scrapeTLS" (dict "root" . "svc" $name) | nindent 6 }}
+{{- end }}
 {{- end }}

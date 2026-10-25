@@ -324,6 +324,11 @@ The PoolBench service publishes these for the test VMs of a performance test run
 | `poolbench_vm_stalls_total` | Counter | `run`, `vm`, `os` | Phases whose longest I/O took more than 5 seconds. |
 | `poolbench_vm_results_total` | Counter | `run`, `vm`, `os` | Result lines received. |
 | `poolbench_vm_last_result_timestamp_seconds` | Gauge | `run`, `vm`, `os` | Time of the last result. A VM that stops sending is stuck or cannot reach the service. |
+| `poolbench_run_vms` | Gauge | `run`, `os` | Test VMs of the run, by OS (`linux`, `windows`). 0 after the cleanup. |
+| `poolbench_run_ready_vms` | Gauge | `run` | Test VMs of the run that have said they are ready. |
+| `poolbench_run_step` | Gauge | `run` | The current step, from 1. |
+
+The chart scrapes the service like the controller: with a ServiceMonitor in the release namespace, or, with user workload monitoring, through a Service in the monitoring namespace whose Endpoints the controller keeps. The metrics port serves a certificate for `<release>-poolbench.<namespace>.svc` from the same source as the other metrics certificates (`webhook.certProvider`).
 
 ---
 

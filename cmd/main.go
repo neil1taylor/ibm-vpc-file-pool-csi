@@ -150,6 +150,8 @@ func main() {
 	flag.StringVar(&mon.nodeService, "monitoring-node-service", "", "Name of the node agent metrics Service in the monitoring namespace (controller mode)")
 	flag.StringVar(&mon.selector, "monitoring-selector", "", "Labels shared by all driver pods, key=value,key=value (controller mode)")
 	flag.IntVar(&mon.controllerPort, "monitoring-controller-port", 8080, "Port of the controller metrics endpoint (controller mode)")
+	flag.StringVar(&mon.poolBenchService, "monitoring-poolbench-service", "", "Name of the PoolBench metrics Service in the monitoring namespace (controller mode)")
+	flag.IntVar(&mon.poolBenchPort, "monitoring-poolbench-port", 0, "Port of the PoolBench metrics endpoint; 0 leaves PoolBench out (controller mode)")
 	flag.IntVar(&mon.nodePort, "monitoring-node-port", 0, "Port of the node agent metrics endpoint; 0 leaves the node agents out (controller mode)")
 	flag.DurationVar(&shareStatsInterval, "share-stats-interval", 30*time.Second, "How often the node agent reads the NFS statistics of its shares (node mode)")
 	flag.BoolVar(&webhooks.enabled, "enable-webhooks", true, "Serve the validating admission webhooks (needs a serving certificate)")
@@ -317,6 +319,9 @@ type monitoringOptions struct {
 	selector          string
 	controllerPort    int
 	nodePort          int
+	// The PoolBench service's metrics, when it is on.
+	poolBenchService string
+	poolBenchPort    int
 }
 
 // config turns the flags into the syncer's configuration.
@@ -333,6 +338,9 @@ func (o monitoringOptions) config(driverNS string) (monitoring.Config, error) {
 	cfg.Targets = append(cfg.Targets, monitoring.Target{Service: o.controllerService, Component: "controller", Port: int32(o.controllerPort)}) //nolint:gosec // a port number
 	if o.nodePort != 0 {
 		cfg.Targets = append(cfg.Targets, monitoring.Target{Service: o.nodeService, Component: "node", Port: int32(o.nodePort)}) //nolint:gosec // a port number
+	}
+	if o.poolBenchPort != 0 {
+		cfg.Targets = append(cfg.Targets, monitoring.Target{Service: o.poolBenchService, Component: "poolbench", Port: int32(o.poolBenchPort)}) //nolint:gosec // a port number
 	}
 	return cfg, nil
 }

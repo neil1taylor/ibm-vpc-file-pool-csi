@@ -3,6 +3,7 @@
 {{- $ns := .Values.metrics.monitoring.namespace }}
 {{- $ctl := printf "%s-metrics" $name }}
 {{- $node := printf "%s-node-metrics" $name }}
+{{- $pb := printf "%s-poolbench" $name }}
 # Scraping and alerts for OpenShift's user workload monitoring. The driver stays in the
 # release namespace (kube-system); this namespace holds what user workload monitoring
 # reads. It carries no platform monitoring label (Red Hat says not to label other namespaces).
@@ -125,8 +126,26 @@ spec:
       port: {{ .Values.node.metricsPort }}
       protocol: TCP
 {{- end }}
+{{- if .Values.poolBench.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $pb }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: poolbench
+spec:
+  ports:
+    - name: metrics
+      port: 8443
+      protocol: TCP
+{{- end }}
 {{- if .Values.metrics.serviceMonitor.enabled }}
-{{- range $svc := list $ctl $node }}
+{{- $svcs := list $ctl $node }}
+{{- if .Values.poolBench.enabled }}{{- $svcs = append $svcs $pb }}{{- end }}
+{{- range $svc := $svcs }}
 {{- if or (ne $svc $node) $.Values.node.metricsPort }}
 ---
 apiVersion: monitoring.coreos.com/v1
@@ -140,7 +159,7 @@ spec:
   selector:
     matchLabels:
       {{- include "ibm-vpc-file-pool-csi.selectorLabels" $ | nindent 6 }}
-      app.kubernetes.io/component: {{ ternary "node" "controller" (eq $svc $node) }}
+      app.kubernetes.io/component: {{ ternary "poolbench" (ternary "node" "controller" (eq $svc $node)) (eq $svc $pb) }}
   endpoints:
     - port: metrics
       interval: {{ $.Values.metrics.serviceMonitor.interval }}

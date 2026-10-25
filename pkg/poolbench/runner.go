@@ -109,6 +109,8 @@ func (r *Runner) advance(ctx context.Context, pb *v1alpha1.PoolBench) error {
 	}
 	before := pb.Status.DeepCopy()
 	err := r.step(ctx, pb, now)
+	st := &pb.Status
+	r.Store.metrics.setRun(pb.Name, st.VMs-st.WindowsVMs, st.WindowsVMs, st.ReadyVMs, st.Step)
 	if err != nil {
 		klog.ErrorS(err, "PoolBench: step failed", "run", pb.Name, "phase", pb.Status.Phase, "stage", pb.Status.Stage)
 	}
@@ -730,6 +732,7 @@ func (r *Runner) cleanup(ctx context.Context, pb *v1alpha1.PoolBench, now time.T
 		return false, err
 	}
 	pb.Status.CleanedUp = true
+	pb.Status.VMs, pb.Status.WindowsVMs, pb.Status.ReadyVMs = 0, 0, 0
 	r.log(pb, now, "Info", "Cleaned up: the namespace and the pool are gone")
 	return true, nil
 }

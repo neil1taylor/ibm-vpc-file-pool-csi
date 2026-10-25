@@ -72,4 +72,32 @@ for want in pods/exec virtualmachines virtualmachineinstances secrets persistent
 done
 if doc "$OUT" ClusterRoleBinding "$D-run" '.metadata.name' | grep -q .; then fail "the run role is never bound cluster-wide"; else pass "the run role is never bound cluster-wide"; fi
 
+# The metrics of the service are scraped, so the console can draw the live graphs.
+OS=$(render --set poolBench.enabled=true --set webhook.certProvider=openshift --api-versions monitoring.coreos.com/v1/ServiceMonitor --set metrics.monitoring.mode=disabled)
+check "openshift: the service CA makes the metrics certificate" \
+    "$(doc "$OS" Service "$D" '.metadata.annotations."service.beta.openshift.io/serving-cert-secret-name"')" "$D-certs"
+check "the metrics certificate is mounted" \
+    "$(doc "$OS" Deployment "$D" '.spec.template.spec.volumes[] | select(.name == "metrics-certs") | .secret.secretName')" "$D-certs"
+check "the metrics endpoint uses it" \
+    "$(doc "$OS" Deployment "$D" '.spec.template.spec.containers[0].args[] | select(test("^--poolbench-metrics-cert-dir"))')" \
+    "--poolbench-metrics-cert-dir=/etc/poolbench/metrics-certs"
+check "a ServiceMonitor scrapes the service" \
+    "$(doc "$OS" ServiceMonitor "$D" '.spec.selector.matchLabels."app.kubernetes.io/component"')" "poolbench"
+check "it checks the service's certificate name" \
+    "$(doc "$OS" ServiceMonitor "$D" '.spec.endpoints[0].tlsConfig.serverName')" "$D.kube-system.svc"
+CM=$(render --set poolBench.enabled=true --set webhook.certProvider=cert-manager)
+check "cert-manager: a Certificate for the service" "$(doc "$CM" Certificate "$D" '.spec.secretName')" "$D-certs"
+UWM=$(render --set poolBench.enabled=true --set webhook.certProvider=openshift --set metrics.monitoring.mode=enabled \
+    --api-versions monitoring.coreos.com/v1/ServiceMonitor)
+check "user workload monitoring: a Service for the service in the monitoring namespace" \
+    "$(yq -N eval "select(.kind == \"Service\" and .metadata.name == \"$D\" and .metadata.namespace != \"kube-system\") | .spec.ports[0].port" - <<<"$UWM")" "8443"
+check "user workload monitoring: a ServiceMonitor for it" \
+    "$(yq -N eval "select(.kind == \"ServiceMonitor\" and .metadata.name == \"$D\") | .spec.endpoints[0].tlsConfig.serverName" - <<<"$UWM")" "$D.kube-system.svc"
+CTRL_ARGS=$(yq -N eval 'select(.kind == "Deployment" and .metadata.name == "test-ibm-vpc-file-pool-csi-controller") | .spec.template.spec.containers[] | select(.name == "csi-controller") | .args[]' - <<<"$UWM")
+for want in "--monitoring-poolbench-service=$D" "--monitoring-poolbench-port=8443"; do
+    if grep -qxF -- "$want" <<<"$CTRL_ARGS"; then pass "controller keeps its endpoints: $want"; else fail "controller arg $want missing"; fi
+done
+UWM_OFF=$(render --set webhook.certProvider=openshift --set metrics.monitoring.mode=enabled --api-versions monitoring.coreos.com/v1/ServiceMonitor)
+if grep -q -- "--monitoring-poolbench" <<<"$UWM_OFF"; then fail "no PoolBench target while PoolBench is off"; else pass "no PoolBench target while PoolBench is off"; fi
+
 exit "$FAILED"

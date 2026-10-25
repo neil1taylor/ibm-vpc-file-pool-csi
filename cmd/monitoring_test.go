@@ -40,3 +40,15 @@ func TestMonitoringOptions_BadSelector(t *testing.T) {
 		t.Fatal("want an error for a selector without =")
 	}
 }
+
+func TestMonitoringOptions_PoolBenchTarget(t *testing.T) {
+	o := monitoringOptions{namespace: "mon", controllerService: "c", selector: "a=b", controllerPort: 8080,
+		poolBenchService: "rel-poolbench", poolBenchPort: 8443}
+	cfg, err := o.config("kube-system")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Targets) != 2 || cfg.Targets[1].Service != "rel-poolbench" || cfg.Targets[1].Component != "poolbench" || cfg.Targets[1].Port != 8443 {
+		t.Fatalf("targets: %+v", cfg.Targets)
+	}
+}
