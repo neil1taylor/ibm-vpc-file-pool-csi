@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   useK8sWatchResource,
   ListPageHeader,
@@ -7,7 +7,7 @@ import {
 } from '@openshift-console/dynamic-plugin-sdk';
 import { Link } from 'react-router-dom';
 import { Table, Thead, Tr, Th, Td, Tbody } from '@patternfly/react-table';
-import { Alert, Bullseye, Spinner } from '@patternfly/react-core';
+import { Alert, Bullseye, Checkbox, Spinner } from '@patternfly/react-core';
 import { PoolBenchModel } from '../../models';
 import { PoolBench } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
@@ -37,6 +37,14 @@ const PoolBenchListPage: React.FC = () => {
   const sorted = [...(runs || [])].sort((a, b) =>
     (b.metadata?.creationTimestamp || '').localeCompare(a.metadata?.creationTimestamp || ''),
   );
+  const [chosen, setChosen] = useState<string[]>([]);
+  const toggle = (name: string) =>
+    setChosen((c) => (c.includes(name) ? c.filter((x) => x !== name) : [...c, name]));
+  // Compare in the order the runs were made, so a series reads from the slowest tier up.
+  const compareOrder = sorted
+    .map((pb) => pb.metadata?.name || '')
+    .filter((n) => chosen.includes(n))
+    .reverse();
 
   return (
     <>
@@ -47,6 +55,11 @@ const PoolBenchListPage: React.FC = () => {
         >
           New run
         </ListPageCreateLink>
+        {chosen.length >= 2 && (
+          <Link to={`${ROUTES.POOLBENCH_COMPARE}?runs=${compareOrder.join(',')}`} style={{ marginLeft: 16 }}>
+            Compare {chosen.length} runs
+          </Link>
+        )}
       </ListPageHeader>
       <p style={{ padding: '0 24px', color: 'var(--pf-t--global--color--subtle)', margin: '0 0 8px 0' }}>{POOLBENCH_INTRO}</p>
       <ListPageBody>
@@ -67,6 +80,7 @@ const PoolBenchListPage: React.FC = () => {
           <Table aria-label="PoolBench runs" variant="compact">
             <Thead>
               <Tr>
+                <Th screenReaderText="Choose to compare" />
                 <Th>Name</Th>
                 <Th>Share</Th>
                 <Th info={columnInfo('poolbenchPhase')}>State</Th>
@@ -83,6 +97,14 @@ const PoolBenchListPage: React.FC = () => {
                 const st = pb.status || {};
                 return (
                   <Tr key={pb.metadata?.uid || name}>
+                    <Td>
+                      <Checkbox
+                        id={`pb-choose-${name}`}
+                        aria-label={`Choose ${name}`}
+                        isChecked={chosen.includes(name)}
+                        onChange={() => toggle(name)}
+                      />
+                    </Td>
                     <Td dataLabel="Name">
                       <Link to={ROUTES.POOLBENCH_DETAIL.replace(':name', name)}>{name}</Link>
                     </Td>

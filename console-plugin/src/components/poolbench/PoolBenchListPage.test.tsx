@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk';
 import PoolBenchListPage from './PoolBenchListPage';
 
@@ -52,6 +52,16 @@ describe('PoolBenchListPage', () => {
     expect(row.textContent).toContain('Running');
     expect(row.textContent).toContain('step 4 of 6');
     expect(row.textContent).toContain('60');
+  });
+
+  it('compares the runs you tick', () => {
+    render(<PoolBenchListPage />);
+    expect(screen.queryByRole('link', { name: /Compare 2 runs/ })).toBeNull();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Choose t3000' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Choose t10k' }));
+    expect(screen.getByRole('link', { name: /Compare 2 runs/ }).getAttribute('href')).toBe(
+      '/vpc-file-pools/poolbench/~compare?runs=t3000,t10k',
+    );
   });
 
   it('has a button for a new run', () => {
