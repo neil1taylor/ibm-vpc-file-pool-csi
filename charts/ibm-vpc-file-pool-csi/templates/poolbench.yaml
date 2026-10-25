@@ -336,4 +336,68 @@ spec:
     - port: metrics
       {{- include "ibm-vpc-file-pool-csi.scrapeTLS" (dict "root" . "svc" $name) | nindent 6 }}
 {{- end }}
+{{- if .Capabilities.APIVersions.Has "admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy" }}
+---
+# The service's role lets it make and delete namespaces and pools and bind the
+# run role, which RBAC cannot limit by name. This policy does: the service may
+# only touch namespaces and pools named poolbench-*, may delete only a namespace
+# that carries the run label, and may bind only the run role, only in such a
+# namespace.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "DELETE"]
+        resources: ["namespaces"]
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["rolebindings"]
+      - apiGroups: ["storage.ibmcloud.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "DELETE"]
+        resources: ["filesharepools"]
+  matchConditions:
+    - name: poolbench-service
+      expression: "request.userInfo.username == 'system:serviceaccount:{{ .Release.Namespace }}:{{ $name }}'"
+  validations:
+    - expression: >-
+        request.resource.resource == 'rolebindings' ||
+        (request.operation == 'DELETE' ? oldObject.metadata.name : object.metadata.name).startsWith('poolbench-')
+      message: "PoolBench may only make and delete namespaces and pools named poolbench-*"
+    - expression: >-
+        !(request.resource.resource == 'namespaces' && request.operation == 'DELETE') ||
+        (has(oldObject.metadata.labels) && 'storage.ibmcloud.io/poolbench' in oldObject.metadata.labels)
+      message: "PoolBench may only delete a namespace that one of its runs made"
+    - expression: >-
+        !(request.resource.resource == 'namespaces' && request.operation == 'CREATE') ||
+        (has(object.metadata.labels) && 'storage.ibmcloud.io/poolbench' in object.metadata.labels)
+      message: "PoolBench may only make a namespace that carries the run label"
+    - expression: >-
+        request.resource.resource != 'rolebindings' ||
+        (request.namespace.startsWith('poolbench-') &&
+         has(namespaceObject.metadata.labels) && 'storage.ibmcloud.io/poolbench' in namespaceObject.metadata.labels &&
+         object.roleRef.kind == 'ClusterRole' && object.roleRef.name == '{{ $name }}-run' &&
+         object.subjects.size() == 1 && object.subjects[0].kind == 'ServiceAccount' &&
+         object.subjects[0].name == '{{ $name }}' && object.subjects[0].namespace == '{{ .Release.Namespace }}')
+      message: "PoolBench may only bind its run role to itself, in a namespace one of its runs made"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+spec:
+  policyName: {{ $name }}
+  validationActions: ["Deny"]
+{{- end }}
 {{- end }}
