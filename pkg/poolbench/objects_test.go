@@ -33,6 +33,28 @@ func get(t *testing.T, u *unstructured.Unstructured, path ...string) any {
 	return v
 }
 
+// at walks into nested maps and lists: a string key for a map, an int for a list.
+func at(t *testing.T, v any, path ...any) any {
+	t.Helper()
+	for _, p := range path {
+		switch k := p.(type) {
+		case string:
+			m, ok := v.(map[string]any)
+			if !ok {
+				t.Fatalf("not a map at %q", k)
+			}
+			v = m[k]
+		case int:
+			l, ok := v.([]any)
+			if !ok || k >= len(l) {
+				t.Fatalf("not a list of %d at [%d]", k+1, k)
+			}
+			v = l[k]
+		}
+	}
+	return v
+}
+
 func TestWithDefaults(t *testing.T) {
 	s := withDefaults(testBench().Spec)
 	if s.Linux.CPU != 1 || s.Linux.MemoryGiB != 2 || s.Linux.Image != "centos-stream9" || s.Linux.Preference != "centos.stream9" ||
@@ -88,8 +110,8 @@ func TestLinuxVM(t *testing.T) {
 	if vm.GetLabels()[RunLabel] != "t10k" {
 		t.Error("the VM lacks the run label")
 	}
-	tl := get(t, vm, "spec", "template", "metadata", "labels").(map[string]any)
-	if tl[RunLabel] != "t10k" || tl[OSLabel] != "linux" {
+	tl := get(t, vm, "spec", "template", "metadata", "labels")
+	if at(t, tl, RunLabel) != "t10k" || at(t, tl, OSLabel) != "linux" {
 		t.Errorf("template labels: %v", tl)
 	}
 	if get(t, vm, "spec", "runStrategy") != "Always" {
@@ -98,19 +120,16 @@ func TestLinuxVM(t *testing.T) {
 	if get(t, vm, "spec", "preference", "name") != "centos.stream9" {
 		t.Error("preference")
 	}
-	dv := get(t, vm, "spec", "dataVolumeTemplates").([]any)[0].(map[string]any)
-	src := dv["spec"].(map[string]any)["sourceRef"].(map[string]any)
-	st := dv["spec"].(map[string]any)["storage"].(map[string]any)
-	if src["name"] != "centos-stream9" || st["storageClassName"] != "poolbench-t10k" {
-		t.Errorf("root disk: %v %v", src, st)
+	dv := get(t, vm, "spec", "dataVolumeTemplates")
+	if at(t, dv, 0, "spec", "sourceRef", "name") != "centos-stream9" || at(t, dv, 0, "spec", "storage", "storageClassName") != "poolbench-t10k" {
+		t.Errorf("root disk: %v", dv)
 	}
-	if st["resources"].(map[string]any)["requests"].(map[string]any)["storage"] != "30Gi" {
-		t.Errorf("root size: %v", st)
+	if at(t, dv, 0, "spec", "storage", "resources", "requests", "storage") != "30Gi" {
+		t.Errorf("root size: %v", dv)
 	}
-	vols := get(t, vm, "spec", "template", "spec", "volumes").([]any)
-	ci := vols[2].(map[string]any)["cloudInitNoCloud"].(map[string]any)["secretRef"].(map[string]any)
-	if ci["name"] != UserDataSecret {
-		t.Errorf("cloud-init: %v", ci)
+	vols := get(t, vm, "spec", "template", "spec", "volumes")
+	if at(t, vols, 2, "cloudInitNoCloud", "secretRef", "name") != UserDataSecret {
+		t.Errorf("cloud-init: %v", vols)
 	}
 	if get(t, vm, "spec", "template", "spec", "domain", "memory", "guest") != "2Gi" {
 		t.Error("memory")
@@ -119,17 +138,16 @@ func TestLinuxVM(t *testing.T) {
 
 func TestWindowsVM(t *testing.T) {
 	vm := buildVM(testBench(), 3)
-	if get(t, vm, "spec", "template", "metadata", "labels").(map[string]any)[OSLabel] != "windows" {
+	if at(t, get(t, vm, "spec", "template", "metadata", "labels"), OSLabel) != "windows" {
 		t.Error("os label")
 	}
-	disks := get(t, vm, "spec", "template", "spec", "domain", "devices", "disks").([]any)
-	if disks[1].(map[string]any)["serial"] != WindowsDiskSerial {
-		t.Errorf("load disk serial: %v", disks[1])
+	disks := get(t, vm, "spec", "template", "spec", "domain", "devices", "disks")
+	if at(t, disks, 1, "serial") != WindowsDiskSerial {
+		t.Errorf("load disk serial: %v", disks)
 	}
-	vols := get(t, vm, "spec", "template", "spec", "volumes").([]any)
-	sec := vols[2].(map[string]any)["secret"].(map[string]any)
-	if sec["secretName"] != WindowsSecret || sec["volumeLabel"] != "PERFCFG" {
-		t.Errorf("config disk: %v", sec)
+	vols := get(t, vm, "spec", "template", "spec", "volumes")
+	if at(t, vols, 2, "secret", "secretName") != WindowsSecret || at(t, vols, 2, "secret", "volumeLabel") != "PERFCFG" {
+		t.Errorf("config disk: %v", vols)
 	}
 	if get(t, vm, "spec", "template", "spec", "domain", "cpu", "sockets") != int64(2) {
 		t.Error("cpu")

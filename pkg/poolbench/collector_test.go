@@ -228,7 +228,10 @@ func TestCollector_State(t *testing.T) {
 	if rec := get("secret-token"); rec.Code != http.StatusOK || rec.Body.String() != "run\n" {
 		t.Fatalf("got %d %q", rec.Code, rec.Body)
 	}
-	runs := c.Runs.(fakeRuns)
+	runs, ok := c.Runs.(fakeRuns)
+	if !ok {
+		t.Fatal("not the fake")
+	}
 	runs.paused = true
 	c.Runs = runs
 	if rec := get("secret-token"); rec.Code != http.StatusOK || rec.Body.String() != "paused\n" {

@@ -328,16 +328,16 @@ func (r *Runner) prepare(ctx context.Context, pb *v1alpha1.PoolBench) error {
 		ObjectMeta: metav1.ObjectMeta{Name: UserDataSecret, Namespace: ns, Labels: runLabels(pb)},
 		Data:       map[string][]byte{"userdata": []byte(profile.LinuxUserData(url, token))},
 	}
-	if err := r.createIfMissing(ctx, ud); err != nil {
-		return err
+	if cerr := r.createIfMissing(ctx, ud); cerr != nil {
+		return cerr
 	}
 	if windowsCount(&pb.Spec, pb.Spec.MaxVMs) > 0 {
 		win := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: WindowsSecret, Namespace: ns, Labels: runLabels(pb)}, Data: map[string][]byte{}}
 		for name, data := range profile.WindowsFiles(url, token) {
 			win.Data[name] = []byte(data)
 		}
-		if err := r.createIfMissing(ctx, win); err != nil {
-			return err
+		if cerr := r.createIfMissing(ctx, win); cerr != nil {
+			return cerr
 		}
 	}
 	err = r.Client.Get(ctx, client.ObjectKey{Name: ns}, &v1alpha1.FileSharePool{})
