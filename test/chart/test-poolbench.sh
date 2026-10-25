@@ -133,4 +133,7 @@ if grep -q "namespaceObject.metadata.labels" <<<"$VX"; then pass "a binding need
 if grep -q "poolbench-" <<<"$VX"; then
     pass "only names that start with poolbench-"; else fail "the names are not limited"; fi
 
+DEL=$(doc "$VAP" ValidatingAdmissionPolicy "$D" '.spec.validations[] | select(.message | test("delete a namespace or pool")) | .expression')
+if grep -q "oldObject.metadata.labels" <<<"$DEL"; then pass "a pool is deleted only if a run made it"; else fail "a pool can be deleted without the run label"; fi
+
 exit "$FAILED"
