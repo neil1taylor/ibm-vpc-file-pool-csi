@@ -113,4 +113,17 @@ CP_OFF=$(render --api-versions console.openshift.io/v1/ConsolePlugin)
 if yq -N eval 'select(.kind == "ConsolePlugin") | .spec.proxy' - <<<"$CP_OFF" | grep -q poolbench; then
     fail "no proxy while PoolBench is off"; else pass "no proxy while PoolBench is off"; fi
 
+# An admission policy holds the service to its own namespaces and pools, whatever its role allows.
+VAP=$(render --set poolBench.enabled=true --api-versions admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy)
+check "the policy applies to the service account only" \
+    "$(doc "$VAP" ValidatingAdmissionPolicy "$D" '.spec.matchConditions[0].expression')" \
+    "request.userInfo.username == 'system:serviceaccount:kube-system:$D'"
+RULES=$(doc "$VAP" ValidatingAdmissionPolicy "$D" '.spec.matchConstraints.resourceRules[].resources[]')
+for want in namespaces rolebindings filesharepools; do
+    if grep -qxF "$want" <<<"$RULES"; then pass "the policy covers $want"; else fail "the policy does not cover $want"; fi
+done
+check "the policy binding denies" "$(doc "$VAP" ValidatingAdmissionPolicyBinding "$D" '.spec.validationActions[0]')" "Deny"
+if grep -q "poolbench-" <<<"$(doc "$VAP" ValidatingAdmissionPolicy "$D" '.spec.validations[].expression')"; then
+    pass "only names that start with poolbench-"; else fail "the names are not limited"; fi
+
 exit "$FAILED"
