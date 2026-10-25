@@ -21,6 +21,7 @@ To make a release:
 
 ### Added
 
+- The PoolBench collector: test VMs send each result to it, and it keeps the results and publishes them as `poolbench_vm_*` metrics. The Windows load also sends its results to it. The Go code makes the same load and reads results the same way as the Bash test tooling; golden files in `pkg/poolbench/testdata` tie the two together.
 - The `PoolBench` resource and its admission checks: the settings and results of a performance test run that the console will start and show. The service that runs it comes in later changes. See `docs/specs/2026-10-25-poolbench.md`.
 
 ## [v0.14.3] — 2026-10-24

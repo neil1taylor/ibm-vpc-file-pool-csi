@@ -28,6 +28,8 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
+# The Windows load scripts live next to the PoolBench service, which puts the same files on its VMs.
+WINDOWS_DIR="$HERE/../../pkg/poolbench/guest/windows"
 # shellcheck source=profile.sh
 source "$HERE/profile.sh"
 # shellcheck source=report.sh
@@ -129,7 +131,7 @@ windows_config() {
     perf_windows_fill_args "$AREA" >"$dir/fill.args"
     perf_windows_fio_args steady "$AVG" $((PERIOD - BURST_SECS)) "$AREA" >"$dir/steady.args"
     perf_windows_fio_args burst "$BURST" "$BURST_SECS" "$AREA" >"$dir/burst.args"
-    cp "$HERE/windows/load.ps1" "$HERE/windows/perf.ps1" "$dir/"
+    cp "$WINDOWS_DIR/load.ps1" "$WINDOWS_DIR/perf.ps1" "$dir/"
 }
 
 # windows_start_script — the PowerShell the run sends through the guest agent to start a

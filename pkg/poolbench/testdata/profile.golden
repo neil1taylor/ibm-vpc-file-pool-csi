@@ -1,0 +1,95 @@
+== steady jobs
+--name=steady-4k
+--bs=4k
+--rate_iops=10,5
+--name=steady-16k
+--bs=16k
+--rate_iops=6,3
+--name=steady-64k
+--bs=64k
+--rate_iops=4,2
+== burst jobs
+--name=burst-4k
+--bs=4k
+--rate_iops=105,45
+--name=burst-16k
+--bs=16k
+--rate_iops=63,27
+--name=burst-64k
+--bs=64k
+--rate_iops=42,18
+== linux common
+--filename=/dev/vdb
+--direct=1
+--ioengine=libaio
+--rw=randrw
+--rwmixread=70
+--iodepth=4
+--size=3G
+--randrepeat=0
+--lat_percentiles=1
+--time_based
+--group_reporting
+--output-format=json
+== linux fill
+fio --name=fill --filename=/dev/vdb --rw=write --bs=1M --size=3G --direct=1 --ioengine=libaio --iodepth=8
+== windows fill
+--name=fill
+--filename=\\.\PhysicalDrive#PERFDISK
+--rw=write
+--bs=1M
+--size=3G
+--direct=1
+--ioengine=windowsaio
+--thread
+--iodepth=8
+== windows steady
+--filename=\\.\PhysicalDrive#PERFDISK
+--direct=1
+--ioengine=windowsaio
+--rw=randrw
+--rwmixread=70
+--iodepth=4
+--size=3G
+--randrepeat=0
+--lat_percentiles=1
+--time_based
+--group_reporting
+--output-format=json
+--thread
+--runtime=555
+--name=steady-4k
+--bs=4k
+--rate_iops=10,5
+--name=steady-16k
+--bs=16k
+--rate_iops=6,3
+--name=steady-64k
+--bs=64k
+--rate_iops=4,2
+== windows burst
+--filename=\\.\PhysicalDrive#PERFDISK
+--direct=1
+--ioengine=windowsaio
+--rw=randrw
+--rwmixread=70
+--iodepth=4
+--size=3G
+--randrepeat=0
+--lat_percentiles=1
+--time_based
+--group_reporting
+--output-format=json
+--thread
+--runtime=45
+--name=burst-4k
+--bs=4k
+--rate_iops=105,45
+--name=burst-16k
+--bs=16k
+--rate_iops=63,27
+--name=burst-64k
+--bs=64k
+--rate_iops=42,18
+== ibm ops per io
+1.6

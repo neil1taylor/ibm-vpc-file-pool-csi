@@ -22,6 +22,8 @@ The driver emits 37 metrics across nine categories:
 | Backup | 6 | Backup policy health, age of backups, fullness of the snapshot pool and lateness of the export to COS |
 | Share (node agent) | 6 | Bytes written on each share, and NFS operations, latency and bytes of each share, read by the node agents |
 
+The PoolBench service, when it is turned on, adds its own [PoolBench metrics](#poolbench-metrics) for the VMs of a performance test run.
+
 ---
 
 ## Scrape Configuration
@@ -309,6 +311,19 @@ Alert before the snapshot pool reaches the limit, and when it has. At 85% the po
   annotations:
     summary: "Snapshot pool {{ $labels.pool }} is {{ $value }}% full; new backups are stopped"
 ```
+
+### PoolBench Metrics
+
+The PoolBench service publishes these for the test VMs of a performance test run (`docs/specs/2026-10-25-poolbench.md`). Each test VM sends one result after each load phase; the values are those of the VM's last phase. The console's live graphs read them. The series of a run go away when the run is deleted.
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `poolbench_vm_iops` | Gauge | `run`, `vm`, `os`, `phase` | Reads plus writes a second of the VM's last phase. `phase` is `steady` or `burst`. |
+| `poolbench_vm_latency_seconds` | Gauge | `run`, `vm`, `os`, `phase`, `quantile` | Latency of the last phase at `quantile` 0.5, 0.95 and 0.99, the worse of read and write. Total latency, which includes the wait before the I/O is sent. |
+| `poolbench_vm_throughput_bytes_per_second` | Gauge | `run`, `vm`, `os`, `phase` | Read plus write throughput of the last phase. |
+| `poolbench_vm_stalls_total` | Counter | `run`, `vm`, `os` | Phases whose longest I/O took more than 5 seconds. |
+| `poolbench_vm_results_total` | Counter | `run`, `vm`, `os` | Result lines received. |
+| `poolbench_vm_last_result_timestamp_seconds` | Gauge | `run`, `vm`, `os` | Time of the last result. A VM that stops sending is stuck or cannot reach the service. |
 
 ---
 

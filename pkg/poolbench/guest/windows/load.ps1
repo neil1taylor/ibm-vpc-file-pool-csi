@@ -20,10 +20,18 @@ $work = 'C:\perf'
 $fio = 'C:\Program Files\fio\fio.exe'
 New-Item -ItemType Directory -Force $work | Out-Null
 
+# Send writes one line to the serial console and, when the settings name a PoolBench
+# collector, posts it there too. A failed post is dropped: the console line stays.
 function Send([string] $Text) {
     $port = New-Object System.IO.Ports.SerialPort 'COM1', 115200
     $port.Open()
     try { $port.WriteLine($Text) } finally { $port.Close() }
+    if ($settings.collector) {
+        try {
+            Invoke-WebRequest -UseBasicParsing -Method Post -Uri $settings.collector -TimeoutSec 10 `
+                -Headers @{ Authorization = "Bearer $($settings.token)" } -Body $Text | Out-Null
+        } catch { }
+    }
 }
 
 # The load disk is the one with the serial number the VM definition gives it.
