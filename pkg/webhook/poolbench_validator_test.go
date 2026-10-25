@@ -29,7 +29,7 @@ func validPoolBench() *v1alpha1.PoolBench {
 				SteadyIOPS: 30, BurstIOPS: 300, BurstSeconds: 45, PeriodSeconds: 600,
 				ReadPercent: int32p(70), BlockMix: "4k:50 16k:30 64k:20", AreaGiB: 3,
 			},
-			Knee: v1alpha1.PoolBenchKnee{LatencyLimitMs: 20, SlowVMPercent: 25, StallSeconds: 5},
+			Knee:   v1alpha1.PoolBenchKnee{LatencyLimitMs: 20, SlowVMPercent: 25, StallSeconds: 5},
 			Events: []v1alpha1.PoolBenchEvent{{Type: v1alpha1.PoolBenchEventBootStorm, AtVMs: 30}},
 		},
 	}
