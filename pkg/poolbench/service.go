@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -40,6 +41,9 @@ type Options struct {
 	// MetricsAddr and MetricsCertDir serve the metrics over HTTPS.
 	MetricsAddr    string
 	MetricsCertDir string
+	// ResultsAddr serves the raw results to the console's plugin proxy over
+	// HTTPS, with the certificate in MetricsCertDir.
+	ResultsAddr string
 	HealthAddr     string
 	// ResultsDir holds the raw results (a persistent volume).
 	ResultsDir string
@@ -177,6 +181,30 @@ func Run(ctx context.Context, cfg *rest.Config, opts Options) error {
 		return nil
 	})); aerr != nil {
 		return aerr
+	}
+	if opts.ResultsAddr != "" && opts.MetricsCertDir != "" {
+		results := &http.Server{
+			Addr:              opts.ResultsAddr,
+			Handler:           &ResultsServer{Store: store, Auth: NewKubeAuth(clientset)},
+			ReadHeaderTimeout: 10 * time.Second,
+			TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12},
+		}
+		if aerr := mgr.Add(leaderRunnable(func(ctx context.Context) error {
+			go func() {
+				<-ctx.Done()
+				sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				_ = results.Shutdown(sctx)
+			}()
+			klog.InfoS("PoolBench results server listening", "addr", opts.ResultsAddr)
+			serr := results.ListenAndServeTLS(filepath.Join(opts.MetricsCertDir, "tls.crt"), filepath.Join(opts.MetricsCertDir, "tls.key"))
+			if serr != nil && !errors.Is(serr, http.ErrServerClosed) {
+				return serr
+			}
+			return nil
+		})); aerr != nil {
+			return aerr
+		}
 	}
 	return mgr.Start(ctx)
 }

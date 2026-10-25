@@ -200,6 +200,7 @@ func main() {
 	flag.StringVar(&poolBench.CollectorURL, "poolbench-collector-url", "", "How the test VMs reach the collector, for example http://<service>.<namespace>.svc:8080 (poolbench mode)")
 	flag.StringVar(&poolBench.MetricsAddr, "poolbench-metrics-addr", ":8443", "Metrics endpoint, HTTPS with token login (poolbench mode)")
 	flag.StringVar(&poolBench.MetricsCertDir, "poolbench-metrics-cert-dir", "", "Directory with tls.crt and tls.key for the metrics endpoint; empty makes a self-signed certificate (poolbench mode)")
+	flag.StringVar(&poolBench.ResultsAddr, "poolbench-results-addr", ":8444", "Where the raw results are served to the console's plugin proxy, over HTTPS with the metrics certificate (poolbench mode)")
 	flag.StringVar(&poolBench.HealthAddr, "poolbench-health-addr", ":8081", "Health probe endpoint (poolbench mode)")
 	flag.StringVar(&poolBench.ResultsDir, "poolbench-results-dir", "/results", "Folder for the raw results of the test VMs (poolbench mode)")
 	flag.DurationVar(&poolBench.Interval, "poolbench-interval", 15*time.Second, "Time between two passes of the runner (poolbench mode)")

@@ -182,6 +182,11 @@ spec:
       port: 8443
       targetPort: metrics
       protocol: TCP
+    # The console's plugin proxy reads the raw results here, with the person's token.
+    - name: results
+      port: 8444
+      targetPort: results
+      protocol: TCP
 {{- if and $openshift .Values.node.metricsPort }}
 ---
 # The CA of the node agents' certificate, from the OpenShift service CA.
@@ -255,6 +260,8 @@ spec:
               containerPort: 8080
             - name: metrics
               containerPort: 8443
+            - name: results
+              containerPort: 8444
             - name: health
               containerPort: 8081
           livenessProbe:
