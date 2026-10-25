@@ -133,6 +133,13 @@ func (r *Runner) step(ctx context.Context, pb *v1alpha1.PoolBench, now time.Time
 	}
 	switch st.Phase {
 	case "", v1alpha1.PoolBenchPending:
+		if waitFor, err := r.waitingFor(ctx, pb); err != nil || waitFor != "" {
+			if waitFor != "" {
+				st.Phase = v1alpha1.PoolBenchPending
+				st.Message = fmt.Sprintf("Waits for the run %s to end", waitFor)
+			}
+			return err
+		}
 		st.Phase = v1alpha1.PoolBenchChecking
 		st.Namespace, st.PoolName = runName(pb), runName(pb)
 		st.TotalSteps = pb.Spec.MaxVMs / max(pb.Spec.StepVMs, 1)
@@ -162,6 +169,30 @@ func (r *Runner) step(ctx context.Context, pb *v1alpha1.PoolBench, now time.Time
 		_, err := r.cleanup(ctx, pb, now)
 		return err
 	}
+}
+
+// waitingFor is the run that this run must wait for: its spec.startAfter, while
+// that run exists and has not ended. Empty means this run may start.
+func (r *Runner) waitingFor(ctx context.Context, pb *v1alpha1.PoolBench) (string, error) {
+	if pb.Spec.StartAfter == "" {
+		return "", nil
+	}
+	other := &v1alpha1.PoolBench{}
+	err := r.Client.Get(ctx, client.ObjectKey{Name: pb.Spec.StartAfter}, other)
+	if apierrors.IsNotFound(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	switch other.Status.Phase {
+	case v1alpha1.PoolBenchComplete, v1alpha1.PoolBenchStopped, v1alpha1.PoolBenchFailed:
+		// An ended run that still cleans up holds its share and VMs: wait for it too.
+		if other.Status.CleanedUp || other.Spec.KeepAfterEnd {
+			return "", nil
+		}
+	}
+	return other.Name, nil
 }
 
 // log adds an entry to the run's log, which keeps the newest entries.

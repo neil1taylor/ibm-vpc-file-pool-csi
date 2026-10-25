@@ -1,0 +1,62 @@
+[
+  {
+    "maxIOPS": 1000,
+    "maxSizeGB": 39,
+    "minIOPS": 100,
+    "minSizeGB": 10
+  },
+  {
+    "maxIOPS": 2000,
+    "maxSizeGB": 79,
+    "minIOPS": 100,
+    "minSizeGB": 40
+  },
+  {
+    "maxIOPS": 4000,
+    "maxSizeGB": 99,
+    "minIOPS": 100,
+    "minSizeGB": 80
+  },
+  {
+    "maxIOPS": 6000,
+    "maxSizeGB": 499,
+    "minIOPS": 100,
+    "minSizeGB": 100
+  },
+  {
+    "maxIOPS": 10000,
+    "maxSizeGB": 999,
+    "minIOPS": 100,
+    "minSizeGB": 500
+  },
+  {
+    "maxIOPS": 20000,
+    "maxSizeGB": 1999,
+    "minIOPS": 100,
+    "minSizeGB": 1000
+  },
+  {
+    "maxIOPS": 40000,
+    "maxSizeGB": 3999,
+    "minIOPS": 200,
+    "minSizeGB": 2000
+  },
+  {
+    "maxIOPS": 40000,
+    "maxSizeGB": 7999,
+    "minIOPS": 300,
+    "minSizeGB": 4000
+  },
+  {
+    "maxIOPS": 64000,
+    "maxSizeGB": 15999,
+    "minIOPS": 500,
+    "minSizeGB": 8000
+  },
+  {
+    "maxIOPS": 96000,
+    "maxSizeGB": 32000,
+    "minIOPS": 2000,
+    "minSizeGB": 16000
+  }
+]

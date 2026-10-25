@@ -260,6 +260,12 @@ spec:
                   pool, in GB.
                 format: int64
                 type: integer
+              startAfter:
+                description: |-
+                  StartAfter names another run. This run waits until that one has ended, so
+                  the runs of a series (one per share speed) do not load the cluster at the
+                  same time. A run that does not exist holds nothing.
+                type: string
               stepVMs:
                 default: 15
                 description: StepVMs is the number of VMs added at each step.

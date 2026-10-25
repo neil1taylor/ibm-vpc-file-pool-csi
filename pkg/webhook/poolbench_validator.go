@@ -8,6 +8,7 @@ import (
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
@@ -37,6 +38,9 @@ func (v *PoolBenchValidator) ValidateCreate(_ context.Context, pb *v1alpha1.Pool
 	klog.V(4).InfoS("Validating PoolBench create", "name", pb.Name)
 	if len(pb.Name) > maxPoolBenchName {
 		return nil, fmt.Errorf("the name must be at most %d characters, got %d", maxPoolBenchName, len(pb.Name))
+	}
+	if pb.Spec.StartAfter == pb.Name {
+		return nil, fmt.Errorf("spec.startAfter names this run itself, so it would never start")
 	}
 	return nil, validatePoolBenchSpec(&pb.Spec)
 }
@@ -106,6 +110,9 @@ func validatePoolBenchSpec(spec *v1alpha1.PoolBenchSpec) error {
 		if err := validatePoolBenchEvent(spec, e); err != nil {
 			return fmt.Errorf("spec.events[%d]: %v", i, err)
 		}
+	}
+	if spec.StartAfter != "" && len(validation.IsDNS1123Subdomain(spec.StartAfter)) > 0 {
+		return fmt.Errorf("spec.startAfter must be the name of another run, got %q", spec.StartAfter)
 	}
 	if spec.Control.ExtendMinutes < 0 {
 		return fmt.Errorf("spec.control.extendMinutes must be 0 or more, got %d", spec.Control.ExtendMinutes)
