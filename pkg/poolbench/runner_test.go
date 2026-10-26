@@ -1167,15 +1167,24 @@ func TestRunner_BackupOldBackupDoesNotCount(t *testing.T) {
 	h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageEvent)
 }
 
-func TestRunner_BackupGivesUp(t *testing.T) {
+func TestRunner_BackupWaitsLongerThanOtherEvents(t *testing.T) {
 	h := backupBench(t)
 	h.toEndOfMeasuring()
 	h.advance(31 * time.Minute)
+	setBackupStatus(t, h, "Active", "")
+	h.pass()
+	h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageEvent)
+}
+
+func TestRunner_BackupGivesUp(t *testing.T) {
+	h := backupBench(t)
+	h.toEndOfMeasuring()
+	h.advance(61 * time.Minute)
 	setBackupStatus(t, h, "Error", "the snapshot pool \"x\" has no ready share")
 	h.pass()
 	pb := h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageCreating)
 	ev := pb.Status.Events[0]
-	if ev.Ended == nil || !strings.Contains(ev.Message, "not all") || !strings.Contains(ev.Message, "no ready share") {
+	if ev.Ended == nil || !strings.Contains(ev.Message, "not all") || !strings.Contains(ev.Message, "60 minutes") || !strings.Contains(ev.Message, "no ready share") {
 		t.Fatalf("a backup that never ends must say so and why: %+v", ev)
 	}
 }

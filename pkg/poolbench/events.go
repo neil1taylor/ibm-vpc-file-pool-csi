@@ -19,6 +19,19 @@ import (
 // what it has and the run goes on.
 const eventTimeout = 30 * time.Minute
 
+// backupTimeout is the longest a backup may take. A backup copies whole VM
+// disks at the backup policy's copy speed limit, so it takes much longer than
+// the other events.
+const backupTimeout = 60 * time.Minute
+
+// timeoutOf is the longest the event of this type may take.
+func timeoutOf(eventType string) time.Duration {
+	if eventType == v1alpha1.PoolBenchEventBackup {
+		return backupTimeout
+	}
+	return eventTimeout
+}
+
 // patchWindow is how long all VMs run only bursts in a patch window.
 const patchWindow = 10 * time.Minute
 
@@ -87,7 +100,7 @@ func (r *Runner) event(ctx context.Context, pb *v1alpha1.PoolBench, now time.Tim
 		return r.nextStep(ctx, pb, now)
 	}
 	res := &st.Events[len(st.Events)-1]
-	timedOut := now.Sub(st.StageStarted.Time) > eventTimeout
+	timedOut := now.Sub(st.StageStarted.Time) > timeoutOf(res.Type)
 	var done bool
 	var msg string
 	switch res.Type {
@@ -476,7 +489,7 @@ func (r *Runner) pollBackup(ctx context.Context, pb *v1alpha1.PoolBench, started
 	case done >= total:
 		return true, fmt.Sprintf("Backed up %s while they ran; all finished.", vmsText(total))
 	case timedOut:
-		msg := fmt.Sprintf("Backed up %s; not all finished within %d minutes (%d did).", vmsText(total), int(eventTimeout.Minutes()), done)
+		msg := fmt.Sprintf("Backed up %s; not all finished within %d minutes (%d did).", vmsText(total), int(backupTimeout.Minutes()), done)
 		if bp.Status.Phase == "Error" && bp.Status.Message != "" {
 			msg += " The backup said: " + bp.Status.Message
 		}
