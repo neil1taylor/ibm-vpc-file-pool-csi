@@ -720,13 +720,7 @@ func (r *Runner) finishStep(ctx context.Context, pb *v1alpha1.PoolBench, end, no
 	for i := int32(1); i <= n; i++ {
 		results[vmName(i)] = all[vmName(i)]
 	}
-	rules := Rules{
-		SteadySecs:     int64(pb.Spec.Load.PeriodSeconds - pb.Spec.Load.BurstSeconds),
-		BurstSecs:      int64(pb.Spec.Load.BurstSeconds),
-		LatencyLimitMs: float64(pb.Spec.Knee.LatencyLimitMs),
-		StallMs:        float64(pb.Spec.Knee.StallSeconds) * 1000,
-		TargetIOPS:     int64(pb.Spec.Load.SteadyIOPS),
-	}
+	rules := stepRules(pb)
 	s := rules.Step(results, st.StageStarted.Unix(), end.Unix())
 	row := &st.Steps[len(st.Steps)-1]
 	row.GuestIOPS, row.ThroughputKBps = s.GuestIOPS, s.KBps
@@ -764,6 +758,17 @@ func (r *Runner) finishStep(ctx context.Context, pb *v1alpha1.PoolBench, end, no
 		st.Step, row.VMs, s.P95Ms, s.SlowPercent, row.ShareIOPS, verdict))
 
 	return r.nextStep(ctx, pb, now)
+}
+
+// stepRules are the rules a step, and an event, is measured against.
+func stepRules(pb *v1alpha1.PoolBench) Rules {
+	return Rules{
+		SteadySecs:     int64(pb.Spec.Load.PeriodSeconds - pb.Spec.Load.BurstSeconds),
+		BurstSecs:      int64(pb.Spec.Load.BurstSeconds),
+		LatencyLimitMs: float64(pb.Spec.Knee.LatencyLimitMs),
+		StallMs:        float64(pb.Spec.Knee.StallSeconds) * 1000,
+		TargetIOPS:     int64(pb.Spec.Load.SteadyIOPS),
+	}
 }
 
 // cleanup deletes the run's namespace (with its VMs and disks), then its
@@ -843,6 +848,21 @@ func (r *Runner) Paused(ctx context.Context, run string) bool {
 		return false
 	}
 	return pb.Status.Phase == v1alpha1.PoolBenchPaused
+}
+
+// Burst is true during the patch window of a run, for the collector.
+func (r *Runner) Burst(ctx context.Context, run string) bool {
+	pb := &v1alpha1.PoolBench{}
+	if err := r.Client.Get(ctx, client.ObjectKey{Name: run}, pb); err != nil {
+		return false
+	}
+	n := len(pb.Status.Events)
+	if pb.Status.Stage != v1alpha1.PoolBenchStageEvent || n == 0 {
+		return false
+	}
+	last := pb.Status.Events[n-1]
+	return last.Type == v1alpha1.PoolBenchEventPatchWindow && last.Ended == nil && last.Started != nil &&
+		r.Now().Before(last.Started.Add(patchWindow))
 }
 
 // VMByIP finds the test VM of the run whose pod has this IP address, for the collector.

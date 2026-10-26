@@ -3,6 +3,7 @@ package poolbench
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
@@ -14,6 +15,9 @@ import (
 // eventTimeout is the longest an event may take. After it the event ends with
 // what it has and the run goes on.
 const eventTimeout = 30 * time.Minute
+
+// patchWindow is how long all VMs run only bursts in a patch window.
+const patchWindow = 10 * time.Minute
 
 // eventNames are the plain names of the events, for messages.
 var eventNames = map[string]string{
@@ -56,6 +60,8 @@ func (r *Runner) startEvent(ctx context.Context, pb *v1alpha1.PoolBench, ev *v1a
 	switch ev.Type {
 	case v1alpha1.PoolBenchEventBootStorm:
 		err = r.startBootStorm(ctx, pb)
+	case v1alpha1.PoolBenchEventPatchWindow:
+		// The VMs learn of the window from the collector, which reads this stage.
 	default:
 		return r.endEvent(ctx, pb, now, "This event is not available in this version.")
 	}
@@ -78,6 +84,8 @@ func (r *Runner) event(ctx context.Context, pb *v1alpha1.PoolBench, now time.Tim
 	switch res.Type {
 	case v1alpha1.PoolBenchEventBootStorm:
 		done, msg = r.pollBootStorm(ctx, pb, res.Started.Time, now, timedOut)
+	case v1alpha1.PoolBenchEventPatchWindow:
+		done, msg = r.pollPatchWindow(pb, res.Started.Time, now, timedOut)
 	default:
 		done, msg = true, "This event is not available in this version."
 	}
@@ -161,6 +169,50 @@ func (r *Runner) pollBootStorm(ctx context.Context, pb *v1alpha1.PoolBench, star
 		return true, fmt.Sprintf("Restarted %d VMs; all %d VMs sent results again after %d s.", n, n, int64(now.Sub(started).Seconds()))
 	case timedOut:
 		return true, fmt.Sprintf("Restarted %d VMs; not all sent results again within %d minutes (%d did).", n, int(eventTimeout.Minutes()), back)
+	}
+	return false, ""
+}
+
+// pollPatchWindow waits out the window, then waits until every VM has sent a
+// steady result, made after the window, that is under the latency limit. The
+// message gives how the VMs did in the window and how long the recovery took.
+func (r *Runner) pollPatchWindow(pb *v1alpha1.PoolBench, started, now time.Time, timedOut bool) (bool, string) {
+	windowEnd := started.Add(patchWindow)
+	if now.Before(windowEnd) {
+		return false, ""
+	}
+	n := r.target(pb)
+	all := r.Store.Results(pb.Name)
+	results := make(map[string][]Result, n)
+	var back int32
+	for i := int32(1); i <= n; i++ {
+		vm := vmName(i)
+		results[vm] = all[vm]
+		for _, res := range all[vm] {
+			if res.Phase == "steady" && res.Epoch >= windowEnd.Unix() && math.Max(res.ReadP95Ms, res.WriteP95Ms) <= float64(pb.Spec.Knee.LatencyLimitMs) {
+				back++
+				break
+			}
+		}
+	}
+	rules := stepRules(pb)
+	window := rules.Step(results, started.Unix(), windowEnd.Unix())
+	sent := false
+	for _, vmResults := range results {
+		for _, res := range vmResults {
+			sent = sent || (res.Phase == "burst" && rules.InWindow(res, started.Unix(), windowEnd.Unix()))
+		}
+	}
+	in := "No VM sent a result in the window. "
+	if sent {
+		in = fmt.Sprintf("For %d minutes all %d VMs ran only bursts: %d%% of them had a burst p95 over %d ms. ",
+			int(patchWindow.Minutes()), n, window.BurstSlowPercent, BurstSlowMs)
+	}
+	switch {
+	case back == n:
+		return true, in + fmt.Sprintf("All VMs were back under the latency limit %d s after the window.", int64(now.Sub(windowEnd).Seconds()))
+	case timedOut:
+		return true, in + fmt.Sprintf("Not back under the latency limit within %d minutes (%d of %d VMs were).", int(eventTimeout.Minutes()), back, n)
 	}
 	return false, ""
 }

@@ -134,12 +134,19 @@ func (p *Profile) linuxLoadScript() string {
 	for _, phase := range []string{"steady", "burst"} {
 		iops, secs := p.phase(phase)
 		b.WriteString("  while [ \"$(sh /root/state.sh)\" = paused ]; do sleep 30; done\n")
+		if phase == "steady" {
+			// A patch window has only bursts.
+			b.WriteString("  if [ \"$(sh /root/state.sh)\" != burst ]; then\n")
+		}
 		fmt.Fprintf(&b, "  out=$(fio %s --runtime=%d", common, secs)
 		jobs := p.JobList(phase, iops)
 		for i := 0; i+2 < len(jobs); i += 3 {
 			fmt.Fprintf(&b, " \\\n    %s %s %s", jobs[i], jobs[i+1], jobs[i+2])
 		}
 		fmt.Fprintf(&b, " | tr -d '\\n ')\n  sh /root/send.sh \"PERF $(date +%%s) %s $out\"\n", phase)
+		if phase == "steady" {
+			b.WriteString("  fi\n")
+		}
 	}
 	b.WriteString("done\n")
 	return b.String()

@@ -72,23 +72,26 @@ if (-not (Test-Path $filled)) {
 Send 'PERF-READY'
 Start-Sleep -Seconds (Get-Random -Maximum ([int] $settings.period))
 
-# Wait-WhilePaused holds the load while the PoolBench run is paused. If the
-# collector cannot be reached, the load goes on.
+# Get-RunState is the state the PoolBench collector gives: run, paused, or burst
+# (a patch window, when the VMs run only bursts). If the collector cannot be
+# reached, the load goes on as usual.
+function Get-RunState {
+    if (-not $settings.state) { return 'run' }
+    try {
+        return (Invoke-WebRequest -UseBasicParsing -Uri $settings.state -TimeoutSec 10 `
+            -Headers @{ Authorization = "Bearer $($settings.token)" }).Content.Trim()
+    } catch { return 'run' }
+}
+
+# Wait-WhilePaused holds the load while the PoolBench run is paused.
 function Wait-WhilePaused {
-    if (-not $settings.state) { return }
-    while ($true) {
-        try {
-            $state = (Invoke-WebRequest -UseBasicParsing -Uri $settings.state -TimeoutSec 10 `
-                -Headers @{ Authorization = "Bearer $($settings.token)" }).Content.Trim()
-        } catch { return }
-        if ($state -ne 'paused') { return }
-        Start-Sleep -Seconds 30
-    }
+    while ((Get-RunState) -eq 'paused') { Start-Sleep -Seconds 30 }
 }
 
 while ($true) {
     foreach ($phase in 'steady', 'burst') {
         Wait-WhilePaused
+        if ($phase -eq 'steady' -and (Get-RunState) -eq 'burst') { continue }
         $out = & $fio (Get-FioArgs $phase) 2>$null | Out-String
         Send (Format-PerfLine ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) $phase $out)
     }

@@ -631,6 +631,51 @@ func TestRunner_EventOnlyAtItsStep(t *testing.T) {
 	}
 }
 
+func TestRunner_PatchWindow(t *testing.T) {
+	h := newHarness(t, benchWithEvent(v1alpha1.PoolBenchEventPatchWindow, 3))
+	h.toEndOfMeasuring()
+	pb := h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageEvent)
+	if !strings.Contains(pb.Status.Message, "patch window") {
+		t.Fatalf("the message must name the event: %q", pb.Status.Message)
+	}
+	if !h.r.Burst(context.Background(), "t10k") {
+		t.Fatal("the VMs must be told to burst during the window")
+	}
+	// The VMs burst back to back for ten minutes.
+	h.advance(9 * time.Minute)
+	h.pass()
+	h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageEvent)
+	for n := int32(1); n <= 3; n++ {
+		_ = h.r.Store.Add("t10k", VM{Name: vmName(n), OS: "linux"}, "PERF "+itoa(h.now.Unix())+" burst "+fioJSON("lat_ns", 200, 90, 1000000, 4000000, 9000000, 12000000, 2000000, 3000000), h.now)
+	}
+	h.advance(2 * time.Minute)
+	h.pass()
+	if h.r.Burst(context.Background(), "t10k") {
+		t.Fatal("the window is over: the VMs must go back to the normal load")
+	}
+	h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageEvent)
+	// Five minutes after the window every VM has had a normal steady phase again.
+	h.advance(5 * time.Minute)
+	h.results(3, 4000000)
+	h.pass()
+	pb = h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageCreating)
+	ev := pb.Status.Events[0]
+	if ev.Ended == nil || ev.Seconds != 2*60+9*60+5*60+0 || !strings.Contains(ev.Message, "back") || pb.Status.Step != 2 {
+		t.Fatalf("event result: %+v step %d", ev, pb.Status.Step)
+	}
+}
+
+func TestRunner_PatchWindowGivesUp(t *testing.T) {
+	h := newHarness(t, benchWithEvent(v1alpha1.PoolBenchEventPatchWindow, 3))
+	h.toEndOfMeasuring()
+	h.advance(31 * time.Minute)
+	h.pass()
+	pb := h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageCreating)
+	if ev := pb.Status.Events[0]; ev.Ended == nil || !strings.Contains(ev.Message, "Not back") || !strings.Contains(ev.Message, "No VM sent a result in the window") {
+		t.Fatalf("a window that never recovers must say so: %+v", ev)
+	}
+}
+
 func instancesList() *unstructured.UnstructuredList {
 	l := &unstructured.UnstructuredList{}
 	l.SetGroupVersionKind(vmiGVK.GroupVersion().WithKind("VirtualMachineInstanceList"))
