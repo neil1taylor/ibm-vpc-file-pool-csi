@@ -85,5 +85,5 @@ export const verdictText = (pb: PoolBench): string => {
   if (!st.recommendedVMs) {
     return `Users would notice already at ${st.kneeVMs} VMs, the first step. Try a faster share or smaller steps.`;
   }
-  return `Users would notice at ${st.kneeVMs} VMs on ${share}. Recommended: up to ${st.recommendedVMs} VMs.`;
+  return `Users would notice at ${st.kneeVMs} VMs on ${share}. Recommended: up to ${st.recommendedVMs} VMs, the largest step at or below 80% of the knee, so there is room to spare.`;
 };

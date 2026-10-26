@@ -48,8 +48,8 @@ describe('bannerText', () => {
 
   it('uses the message of a run that is not running', () => {
     const pb = running();
-    pb.status = { phase: 'Complete', message: 'Knee at 45 VMs. Recommended: 30 VMs on this share.' };
-    expect(bannerText(pb, NOW)).toBe('Knee at 45 VMs. Recommended: 30 VMs on this share.');
+    pb.status = { phase: 'Complete', message: 'Knee at 45 VMs: the first step where users would notice. Recommended: 30 VMs, the largest step at or below 80% of the knee, to leave room to spare.' };
+    expect(bannerText(pb, NOW)).toBe('Knee at 45 VMs: the first step where users would notice. Recommended: 30 VMs, the largest step at or below 80% of the knee, to leave room to spare.');
   });
 });
 
@@ -110,7 +110,7 @@ describe('verdictText', () => {
     const pb = running();
     pb.status = { phase: 'Complete', kneeVMs: 45, recommendedVMs: 30, steps: [{ vms: 15, pass: true }, { vms: 30, pass: true }, { vms: 45, pass: false }] };
     expect(verdictText(pb)).toBe(
-      'Users would notice at 45 VMs on this 3900 GB share at 10000 IOPS. Recommended: up to 30 VMs.',
+      'Users would notice at 45 VMs on this 3900 GB share at 10000 IOPS. Recommended: up to 30 VMs, the largest step at or below 80% of the knee, so there is room to spare.',
     );
   });
 

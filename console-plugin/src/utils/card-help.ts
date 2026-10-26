@@ -166,7 +166,7 @@ export const CARD_HELP = {
   },
   pbStepResults: {
     title: 'Step results',
-    text: 'One row for each step. A step adds VMs, waits for them to settle, then measures. The last passed step before the knee is what the share carries.',
+    text: 'One row for each step. A step adds VMs, waits for them to settle, then measures. The knee is the first failed step, and Recommended is the largest step at or below 80% of it.',
   },
   pbSettings: {
     title: 'Settings',

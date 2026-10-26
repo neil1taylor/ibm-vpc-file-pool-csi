@@ -85,7 +85,7 @@ describe('reportMarkdown', () => {
   it('has the result, the settings and the step table', () => {
     const md = reportMarkdown(done);
     expect(md).toContain('# PoolBench run t3000');
-    expect(md).toContain('Users would notice at 45 VMs on this 3900 GB share at 3000 IOPS. Recommended: up to 30 VMs.');
+    expect(md).toContain('Users would notice at 45 VMs on this 3900 GB share at 3000 IOPS. Recommended: up to 30 VMs, the largest step at or below 80% of the knee, so there is room to spare.');
     expect(md).toContain('| VMs | Share IOPS |');
     expect(md).toContain('| 45 (15 Windows) | 2300 |');
     expect(md).toContain('30 IOPS steady, 300 IOPS bursts of 45 s every 600 s');

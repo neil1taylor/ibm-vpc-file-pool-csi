@@ -76,7 +76,7 @@ export const COLUMN_HELP = {
   },
   poolbenchRecommended: {
     title: 'Recommended',
-    text: 'The largest step at or below 80% of the knee: how many VMs to put on a share like this one. With no knee it is the largest step measured, so the real limit is higher.',
+    text: 'The largest step at or below 80% of the knee, so there is room to spare: how many VMs to put on a share like this one. VM counts between that step and the knee were not measured. With no knee it is the largest step measured, so the real limit is higher.',
   },
   backupPhase: {
     title: 'Phase',
