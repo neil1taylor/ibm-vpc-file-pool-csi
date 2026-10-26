@@ -46,6 +46,7 @@ var (
 	vmGVK         = schema.GroupVersionKind{Group: "kubevirt.io", Version: "v1", Kind: "VirtualMachine"}
 	vmiGVK        = schema.GroupVersionKind{Group: "kubevirt.io", Version: "v1", Kind: "VirtualMachineInstance"}
 	vmimGVK       = schema.GroupVersionKind{Group: "kubevirt.io", Version: "v1", Kind: "VirtualMachineInstanceMigration"}
+	vmsnapGVK     = schema.GroupVersionKind{Group: "snapshot.kubevirt.io", Version: "v1beta1", Kind: "VirtualMachineSnapshot"}
 	dataSourceGVK = schema.GroupVersionKind{Group: "cdi.kubevirt.io", Version: "v1beta1", Kind: "DataSource"}
 	dataVolumeGVK = schema.GroupVersionKind{Group: "cdi.kubevirt.io", Version: "v1beta1", Kind: "DataVolume"}
 )

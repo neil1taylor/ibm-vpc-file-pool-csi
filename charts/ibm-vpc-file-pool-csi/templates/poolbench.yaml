@@ -107,6 +107,10 @@ rules:
   - apiGroups: ["kubevirt.io"]
     resources: ["virtualmachineinstancemigrations"]
     verbs: ["get", "list", "create"]
+  # The snapshot event takes OpenShift snapshots of some running VMs.
+  - apiGroups: ["snapshot.kubevirt.io"]
+    resources: ["virtualmachinesnapshots"]
+    verbs: ["get", "list", "create"]
   # KubeVirt checks that whoever makes a VM with disk templates may make
   # those disks (DataVolumes) itself.
   - apiGroups: ["cdi.kubevirt.io"]

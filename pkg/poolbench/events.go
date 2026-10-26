@@ -65,6 +65,8 @@ func (r *Runner) startEvent(ctx context.Context, pb *v1alpha1.PoolBench, ev *v1a
 		// The VMs learn of the window from the collector, which reads this stage.
 	case v1alpha1.PoolBenchEventMigration:
 		err = r.startMigration(ctx, pb)
+	case v1alpha1.PoolBenchEventSnapshot:
+		err = r.startSnapshot(ctx, pb)
 	default:
 		return r.endEvent(ctx, pb, now, "This event is not available in this version.")
 	}
@@ -91,6 +93,8 @@ func (r *Runner) event(ctx context.Context, pb *v1alpha1.PoolBench, now time.Tim
 		done, msg = r.pollPatchWindow(pb, res.Started.Time, now, timedOut)
 	case v1alpha1.PoolBenchEventMigration:
 		done, msg = r.pollMigration(ctx, pb, timedOut)
+	case v1alpha1.PoolBenchEventSnapshot:
+		done, msg = r.pollSnapshot(ctx, pb, timedOut)
 	default:
 		done, msg = true, "This event is not available in this version."
 	}
@@ -233,23 +237,32 @@ func vmsText(n int) string {
 	return fmt.Sprintf("%d VMs", n)
 }
 
-// startMigration live-migrates 10 percent of the VMs (at least 1, at most 10)
-// at once, the lowest-numbered ones.
-func (r *Runner) startMigration(ctx context.Context, pb *v1alpha1.PoolBench) error {
+// eventTargets are the VMs a migration, snapshot or backup works on: 10 percent
+// of the running VMs (at least 1, at most 10), the lowest-numbered ones.
+func (r *Runner) eventTargets(ctx context.Context, pb *v1alpha1.PoolBench) ([]string, error) {
 	list := &unstructured.UnstructuredList{}
 	list.SetGroupVersionKind(vmiGVK.GroupVersion().WithKind("VirtualMachineInstanceList"))
 	if err := r.Client.List(ctx, list, client.InNamespace(runName(pb))); err != nil {
-		return fmt.Errorf("cannot list the VMs: %w", err)
+		return nil, fmt.Errorf("cannot list the VMs: %w", err)
 	}
 	if len(list.Items) == 0 {
-		return fmt.Errorf("there is no running VM to move")
+		return nil, fmt.Errorf("there is no running VM to work on")
 	}
 	names := make([]string, 0, len(list.Items))
 	for _, vmi := range list.Items {
 		names = append(names, vmi.GetName())
 	}
 	sort.Strings(names)
-	for _, vm := range names[:max(1, min(10, len(names)/10))] {
+	return names[:max(1, min(10, len(names)/10))], nil
+}
+
+// startMigration live-migrates the target VMs at once.
+func (r *Runner) startMigration(ctx context.Context, pb *v1alpha1.PoolBench) error {
+	vms, err := r.eventTargets(ctx, pb)
+	if err != nil {
+		return err
+	}
+	for _, vm := range vms {
 		m := &unstructured.Unstructured{Object: map[string]interface{}{
 			"spec": map[string]interface{}{"vmiName": vm},
 		}}
@@ -316,4 +329,58 @@ func (r *Runner) migrationTime(ctx context.Context, pb *v1alpha1.PoolBench, vm s
 		return 0
 	}
 	return b.Sub(a)
+}
+
+// startSnapshot takes an OpenShift snapshot of each target VM while it runs.
+// The driver makes the disk snapshots, instantly when the cluster allows it.
+func (r *Runner) startSnapshot(ctx context.Context, pb *v1alpha1.PoolBench) error {
+	vms, err := r.eventTargets(ctx, pb)
+	if err != nil {
+		return err
+	}
+	for _, vm := range vms {
+		snap := &unstructured.Unstructured{Object: map[string]interface{}{
+			"spec": map[string]interface{}{"source": map[string]interface{}{
+				"apiGroup": "kubevirt.io", "kind": "VirtualMachine", "name": vm,
+			}},
+		}}
+		snap.SetGroupVersionKind(vmsnapGVK)
+		snap.SetName("pb-snap-" + vm)
+		snap.SetNamespace(runName(pb))
+		snap.SetLabels(map[string]string{eventLabel: v1alpha1.PoolBenchEventSnapshot})
+		if err := r.createIfMissing(ctx, snap); err != nil {
+			return fmt.Errorf("cannot snapshot %s: %w", vm, err)
+		}
+	}
+	return nil
+}
+
+// pollSnapshot is done when every snapshot the event made is ready or failed.
+func (r *Runner) pollSnapshot(ctx context.Context, pb *v1alpha1.PoolBench, timedOut bool) (bool, string) {
+	list := &unstructured.UnstructuredList{}
+	list.SetGroupVersionKind(vmsnapGVK.GroupVersion().WithKind("VirtualMachineSnapshotList"))
+	if err := r.Client.List(ctx, list, client.InNamespace(runName(pb)), client.MatchingLabels{eventLabel: v1alpha1.PoolBenchEventSnapshot}); err != nil {
+		return false, ""
+	}
+	var ok, failed int
+	for _, snap := range list.Items {
+		ready, _, _ := unstructured.NestedBool(snap.Object, "status", "readyToUse")
+		phase, _, _ := unstructured.NestedString(snap.Object, "status", "phase")
+		switch {
+		case ready:
+			ok++
+		case phase == "Failed":
+			failed++
+		}
+	}
+	total := len(list.Items)
+	switch {
+	case ok+failed == total && failed == 0:
+		return true, fmt.Sprintf("Took a snapshot of %s while they ran; all are ready.", vmsText(total))
+	case ok+failed == total:
+		return true, fmt.Sprintf("Took a snapshot of %s while they ran: %d ready, %d failed.", vmsText(total), ok, failed)
+	case timedOut:
+		return true, fmt.Sprintf("Snapshots of %s; not all were ready within %d minutes (%d were, %d failed).", vmsText(total), int(eventTimeout.Minutes()), ok, failed)
+	}
+	return false, ""
 }
