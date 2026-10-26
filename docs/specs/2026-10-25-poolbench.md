@@ -88,7 +88,7 @@ Before **Run**, a check panel shows: free CPU and memory on the nodes against th
 
 An event is an extra test at a chosen step, on VMs that are already under load. Each event runs once, in its own stage called Event, right after the step's measuring ends. The step's own numbers, and so the knee, stay free of the event. All VMs keep their normal load during the event.
 
-Each event writes one result: when it started and ended, its main time in seconds, and one plain sentence with the numbers. An event never fails the run. If it cannot run, the result says why and the run goes on. Every event ends at the latest 30 minutes after it started.
+Each event writes one result: when it started and ended, its main time in seconds, and one plain sentence with the numbers. An event never fails the run. If it cannot run, the result says why and the run goes on. Every event ends at the latest 30 minutes after it started, except the backup, which gets 60 minutes because it copies whole VM disks at the backup policy's copy speed limit.
 
 | Event | What it does | Main time |
 |---|---|---|
