@@ -47,6 +47,22 @@ Today the copy runs at a fixed limit, 20 MB/s for each disk (`vmCopySpeedLimitMB
 2. The average latency of a share goes up when a copy runs at high speed, so that the signal is real. Measure with PoolBench: a backup event at 20, 50 and 0 (no limit) MB/s, with the VM latency before and during.
 3. Choose the start speed, the step and the default latency limit from check 2, not from this spec.
 
+## What the lab showed (DR, 2026-10-26)
+
+**Check 1 passed.** On a Linux VM with a 30 GB root disk and a 4 GB load disk, `block-job-set-speed` changed the speed of copies that were running, up and down, within seconds. The copy followed the new speed (set to 20, 40 and 80 MB/s, it ran at about 22, 41 and 82 MB/s), and the backup still ended with "all finished". Two runs, one with speeds set by hand: 1,635 s at the fixed 20 MB/s, 555 to 720 s with raised speeds. A Windows VM was not tested; the speed is a setting of QEMU on the node, not of the guest.
+
+**Check 2 gave a first answer, not a final one.** 5 VMs (steady 30 IOPS, bursts of 300) on a 200 GB, 3,000 IOPS share, one VM backing up, speed raised every two minutes. The median p95 latency of the VMs' own I/O:
+
+| Copy speed | Steady | Burst |
+|---|---|---|
+| none (before) | 0.8 ms | 0.8 ms |
+| 20 MB/s | 1.3 ms | 2.0 ms |
+| 40 MB/s | 4.0 ms | 29.2 ms |
+| 80 MB/s | 2.0 ms | 1.1 ms |
+| unlimited | 28.4 ms (worst 497 ms) | 31.3 ms (worst 359 ms) |
+
+What this does show: at 20 MB/s the VMs hardly notice the copy; with no limit the VMs go far over the 20 ms limit for a slow VM. What it does not show: the middle. The 40 and 80 rows do not rise in order, because each VM result covers a 100-second test and the speed steps were two minutes long, so one result mixes two speeds. A VM-result window is too coarse for this. The signal the controller reads, the average latency of the share every 30 s, is much finer. The build therefore starts with a measurement of that signal against copy speed, with a step of at least 5 minutes, before the numbers in "How it works" are fixed.
+
 ## What is not in this step
 
 - The speed of VM snapshots made by copy. They use the same copier, so they can get the same behavior later, but their deadline (`vmSnapshotDeadline`) is worked out from the speed limit and needs its own change.
