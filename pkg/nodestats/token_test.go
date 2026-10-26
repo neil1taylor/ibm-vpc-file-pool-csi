@@ -15,14 +15,17 @@ import (
 
 func fakeTokens(t *testing.T, now *time.Time) (*ServiceAccountTokens, *int) {
 	t.Helper()
-	cs := fake.NewSimpleClientset()
+	cs := fake.NewClientset()
 	calls := 0
 	cs.PrependReactor("create", "serviceaccounts", func(a k8stesting.Action) (bool, runtime.Object, error) {
 		if a.GetSubresource() != "token" {
 			return false, nil, nil
 		}
 		calls++
-		req := a.(k8stesting.CreateAction).GetObject().(*authv1.TokenRequest)
+		req, ok := a.(k8stesting.CreateAction).GetObject().(*authv1.TokenRequest)
+		if !ok {
+			t.Fatalf("unexpected object %T", a.(k8stesting.CreateAction).GetObject())
+		}
 		if req.Spec.ExpirationSeconds == nil || *req.Spec.ExpirationSeconds != 3600 {
 			t.Errorf("expiration = %v, want 3600 s", req.Spec.ExpirationSeconds)
 		}
@@ -60,7 +63,7 @@ func TestServiceAccountTokens_AsksAgainBeforeItEnds(t *testing.T) {
 }
 
 func TestServiceAccountTokens_ErrorIsAnError(t *testing.T) {
-	cs := fake.NewSimpleClientset()
+	cs := fake.NewClientset()
 	cs.PrependReactor("create", "serviceaccounts", func(k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, errors.New("forbidden")
 	})
