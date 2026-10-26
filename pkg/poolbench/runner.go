@@ -570,6 +570,7 @@ func (r *Runner) creating(ctx context.Context, pb *v1alpha1.PoolBench, now time.
 	}
 	if now.Sub(st.StageStarted.Time) > readyTimeout {
 		sort.Strings(notReady)
+		r.logStuck(ctx, pb, now, notReady)
 		if len(notReady) > 10 {
 			notReady = append(notReady[:10], "...")
 		}
@@ -578,6 +579,36 @@ func (r *Runner) creating(ctx context.Context, pb *v1alpha1.PoolBench, now time.
 	}
 	r.describe(pb, now)
 	return nil
+}
+
+// logStuck writes what the cluster says about the first VMs that never became
+// ready, so the cause is still known after the cleanup removes them.
+func (r *Runner) logStuck(ctx context.Context, pb *v1alpha1.PoolBench, now time.Time, vms []string) {
+	if len(vms) > 10 {
+		vms = vms[:10]
+	}
+	for _, name := range vms {
+		vmi := &unstructured.Unstructured{}
+		vmi.SetGroupVersionKind(vmiGVK)
+		if err := r.Client.Get(ctx, client.ObjectKey{Namespace: runName(pb), Name: name}, vmi); err != nil {
+			r.log(pb, now, "Warning", fmt.Sprintf("%s has no running instance (%v)", name, err))
+			continue
+		}
+		phase, _, _ := unstructured.NestedString(vmi.Object, "status", "phase")
+		node, _, _ := unstructured.NestedString(vmi.Object, "status", "nodeName")
+		conds, _, _ := unstructured.NestedSlice(vmi.Object, "status", "conditions")
+		agent := "guest agent not reported"
+		for _, c := range conds {
+			m, _ := c.(map[string]interface{})
+			if m["type"] == "AgentConnected" {
+				agent = "guest agent not connected"
+				if m["status"] == "True" {
+					agent = "guest agent connected"
+				}
+			}
+		}
+		r.log(pb, now, "Warning", fmt.Sprintf("%s never became ready: instance %s on node %s, %s", name, phase, node, agent))
+	}
 }
 
 func settleMinutes(pb *v1alpha1.PoolBench) int32 {

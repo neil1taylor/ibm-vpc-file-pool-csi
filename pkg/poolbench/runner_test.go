@@ -479,6 +479,58 @@ func TestRunner_VMsNeverReady(t *testing.T) {
 	}
 }
 
+func TestRunner_StuckVMStateIsLogged(t *testing.T) {
+	vmi := &unstructured.Unstructured{Object: map[string]interface{}{
+		"status": map[string]interface{}{
+			"phase":    "Running",
+			"nodeName": "worker-7",
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "AgentConnected", "status": "False"},
+				map[string]interface{}{"type": "Ready", "status": "True"},
+			},
+		},
+	}}
+	vmi.SetGroupVersionKind(vmiGVK)
+	vmi.SetName("vm-003")
+	vmi.SetNamespace("poolbench-t10k")
+	h := newHarness(t, testBench(), vmi)
+	h.pass()
+	h.pass()
+	h.poolReady()
+	h.pass()
+	h.ready(1, 2)
+	h.advance(61 * time.Minute)
+	h.pass()
+	var found string
+	for _, e := range h.bench().Status.Log {
+		if strings.Contains(e.Message, "vm-003") && strings.Contains(e.Message, "worker-7") {
+			found = e.Message
+		}
+	}
+	for _, want := range []string{"Running", "worker-7", "guest agent not connected"} {
+		if !strings.Contains(found, want) {
+			t.Fatalf("the log must say %q about the stuck VM, got %q", want, found)
+		}
+	}
+}
+
+func TestRunner_StuckVMWithoutInstance(t *testing.T) {
+	h := newHarness(t, testBench())
+	h.pass()
+	h.pass()
+	h.poolReady()
+	h.pass()
+	h.ready(1, 2)
+	h.advance(61 * time.Minute)
+	h.pass()
+	for _, e := range h.bench().Status.Log {
+		if strings.Contains(e.Message, "vm-003") && strings.Contains(e.Message, "no running instance") {
+			return
+		}
+	}
+	t.Fatal("the log must say that vm-003 has no running instance")
+}
+
 func TestRunner_MissingImage(t *testing.T) {
 	h := newHarness(t, testBench())
 	if err := h.c.Delete(context.Background(), dataSource("win2k22-perf")); err != nil {
