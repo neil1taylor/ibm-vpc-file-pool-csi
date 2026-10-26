@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
 	"time"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
@@ -62,6 +63,8 @@ func (r *Runner) startEvent(ctx context.Context, pb *v1alpha1.PoolBench, ev *v1a
 		err = r.startBootStorm(ctx, pb)
 	case v1alpha1.PoolBenchEventPatchWindow:
 		// The VMs learn of the window from the collector, which reads this stage.
+	case v1alpha1.PoolBenchEventMigration:
+		err = r.startMigration(ctx, pb)
 	default:
 		return r.endEvent(ctx, pb, now, "This event is not available in this version.")
 	}
@@ -86,6 +89,8 @@ func (r *Runner) event(ctx context.Context, pb *v1alpha1.PoolBench, now time.Tim
 		done, msg = r.pollBootStorm(ctx, pb, res.Started.Time, now, timedOut)
 	case v1alpha1.PoolBenchEventPatchWindow:
 		done, msg = r.pollPatchWindow(pb, res.Started.Time, now, timedOut)
+	case v1alpha1.PoolBenchEventMigration:
+		done, msg = r.pollMigration(ctx, pb, timedOut)
 	default:
 		done, msg = true, "This event is not available in this version."
 	}
@@ -215,4 +220,100 @@ func (r *Runner) pollPatchWindow(pb *v1alpha1.PoolBench, started, now time.Time,
 		return true, in + fmt.Sprintf("Not back under the latency limit within %d minutes (%d of %d VMs were).", int(eventTimeout.Minutes()), back, n)
 	}
 	return false, ""
+}
+
+// eventLabel marks the objects an event makes in the run's namespace.
+const eventLabel = "storage.ibmcloud.io/poolbench-event"
+
+// vmsText is "1 VM" or "3 VMs".
+func vmsText(n int) string {
+	if n == 1 {
+		return "1 VM"
+	}
+	return fmt.Sprintf("%d VMs", n)
+}
+
+// startMigration live-migrates 10 percent of the VMs (at least 1, at most 10)
+// at once, the lowest-numbered ones.
+func (r *Runner) startMigration(ctx context.Context, pb *v1alpha1.PoolBench) error {
+	list := &unstructured.UnstructuredList{}
+	list.SetGroupVersionKind(vmiGVK.GroupVersion().WithKind("VirtualMachineInstanceList"))
+	if err := r.Client.List(ctx, list, client.InNamespace(runName(pb))); err != nil {
+		return fmt.Errorf("cannot list the VMs: %w", err)
+	}
+	if len(list.Items) == 0 {
+		return fmt.Errorf("there is no running VM to move")
+	}
+	names := make([]string, 0, len(list.Items))
+	for _, vmi := range list.Items {
+		names = append(names, vmi.GetName())
+	}
+	sort.Strings(names)
+	for _, vm := range names[:max(1, min(10, len(names)/10))] {
+		m := &unstructured.Unstructured{Object: map[string]interface{}{
+			"spec": map[string]interface{}{"vmiName": vm},
+		}}
+		m.SetGroupVersionKind(vmimGVK)
+		m.SetName("pb-mig-" + vm)
+		m.SetNamespace(runName(pb))
+		m.SetLabels(map[string]string{eventLabel: v1alpha1.PoolBenchEventMigration})
+		if err := r.createIfMissing(ctx, m); err != nil {
+			return fmt.Errorf("cannot move %s: %w", vm, err)
+		}
+	}
+	return nil
+}
+
+// pollMigration is done when every migration the event made has ended.
+func (r *Runner) pollMigration(ctx context.Context, pb *v1alpha1.PoolBench, timedOut bool) (bool, string) {
+	list := &unstructured.UnstructuredList{}
+	list.SetGroupVersionKind(vmimGVK.GroupVersion().WithKind("VirtualMachineInstanceMigrationList"))
+	if err := r.Client.List(ctx, list, client.InNamespace(runName(pb)), client.MatchingLabels{eventLabel: v1alpha1.PoolBenchEventMigration}); err != nil {
+		return false, ""
+	}
+	var ok, failed int
+	var slowest time.Duration
+	for _, m := range list.Items {
+		phase, _, _ := unstructured.NestedString(m.Object, "status", "phase")
+		switch phase {
+		case "Succeeded":
+			ok++
+			vm, _, _ := unstructured.NestedString(m.Object, "spec", "vmiName")
+			slowest = max(slowest, r.migrationTime(ctx, pb, vm))
+		case "Failed":
+			failed++
+		}
+	}
+	total := len(list.Items)
+	switch {
+	case ok+failed == total && failed == 0:
+		msg := fmt.Sprintf("Moved %s at once; all finished.", vmsText(total))
+		if slowest > 0 {
+			msg = fmt.Sprintf("Moved %s at once; all finished, the slowest took %d s.", vmsText(total), int64(slowest.Seconds()))
+		}
+		return true, msg
+	case ok+failed == total:
+		return true, fmt.Sprintf("Moved %s at once: %d finished, %d failed.", vmsText(total), ok, failed)
+	case timedOut:
+		return true, fmt.Sprintf("Moved %s at once; not all finished within %d minutes (%d did, %d failed).", vmsText(total), int(eventTimeout.Minutes()), ok, failed)
+	}
+	return false, ""
+}
+
+// migrationTime is how long the last migration of a VM took, from the VM's own
+// record. It is zero when the record has no times.
+func (r *Runner) migrationTime(ctx context.Context, pb *v1alpha1.PoolBench, vm string) time.Duration {
+	vmi := &unstructured.Unstructured{}
+	vmi.SetGroupVersionKind(vmiGVK)
+	if err := r.Client.Get(ctx, client.ObjectKey{Namespace: runName(pb), Name: vm}, vmi); err != nil {
+		return 0
+	}
+	start, _, _ := unstructured.NestedString(vmi.Object, "status", "migrationState", "startTimestamp")
+	end, _, _ := unstructured.NestedString(vmi.Object, "status", "migrationState", "endTimestamp")
+	a, errA := time.Parse(time.RFC3339, start)
+	b, errB := time.Parse(time.RFC3339, end)
+	if errA != nil || errB != nil || b.Before(a) {
+		return 0
+	}
+	return b.Sub(a)
 }
