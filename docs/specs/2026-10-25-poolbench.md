@@ -84,6 +84,22 @@ Before **Run**, a check panel shows: free CPU and memory on the nodes against th
 6. **Event log.** Every stage change, control action, warning and error, with the time.
 7. **Downloads:** step table (CSV), raw VM results (CSV), the report (Markdown), and a print view that the browser saves as PDF.
 
+### Events
+
+An event is an extra test at a chosen step, on VMs that are already under load. Each event runs once, in its own stage called Event, right after the step's measuring ends. The step's own numbers, and so the knee, stay free of the event. All VMs keep their normal load during the event.
+
+Each event writes one result: when it started and ended, its main time in seconds, and one plain sentence with the numbers. An event never fails the run. If it cannot run, the result says why and the run goes on. Every event ends at the latest 30 minutes after it started.
+
+| Event | What it does | Main time |
+|---|---|---|
+| Boot storm | Restarts every VM at once. The load restarts by itself on Linux (a system service) and through the guest agent on Windows. | Until the last VM sends results again |
+| Patch window | All VMs run the burst load without the quiet phase, for 10 minutes, as a patch scan would. | Until the share's p95 is back under the limit |
+| Migration | Live-migrates 10% of the VMs at once (at least 1, at most 10). | Until the last migration ends; failed migrations are counted |
+| Snapshot | Takes an instant snapshot of 10% of the VMs while they run. | Until the last snapshot is ready |
+| Backup | Backs up 10% of the VMs to an object storage bucket. | Until the last backup ends |
+
+The Backup event needs a bucket and its credentials as a Secret, so it is built last and only runs if the form is given them.
+
 ### Other pages
 
 - **Runs list:** name, share size and IOPS, state, VMs now, knee, recommended count, started, run time. A failed run shows its reason in plain words.
@@ -137,3 +153,7 @@ After step 10, the command-line runner stays for the build server until the cons
 - The PDF comes from the browser's print view, so no PDF library is added.
 - Results stay until the run object is deleted; the graphs last as long as Prometheus keeps its data.
 - The command-line runner stays until the console run gives the same result, then becomes a thin starter for PoolBench.
+- Events run after a step's measuring, not during it, so one event cannot push a step over the knee.
+- An event never fails the run; it records why it could not run.
+- Events touch 10% of the VMs (at most 10), except the boot storm and the patch window, which touch all.
+- The Backup event needs a bucket from the person, so it comes last.
