@@ -102,7 +102,11 @@ rules:
     verbs: ["get", "create"]
   - apiGroups: ["kubevirt.io"]
     resources: ["virtualmachineinstances"]
-    verbs: ["get", "list"]
+    verbs: ["get", "list", "delete"]
+  # The migration event moves some running VMs to other nodes.
+  - apiGroups: ["kubevirt.io"]
+    resources: ["virtualmachineinstancemigrations"]
+    verbs: ["get", "list", "create"]
   # KubeVirt checks that whoever makes a VM with disk templates may make
   # those disks (DataVolumes) itself.
   - apiGroups: ["cdi.kubevirt.io"]
