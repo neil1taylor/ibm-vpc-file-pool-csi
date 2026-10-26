@@ -1,4 +1,4 @@
-package poolbench
+package nodestats
 
 import (
 	"context"
@@ -14,6 +14,7 @@ import (
 
 	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -50,7 +51,7 @@ func slice(port int, ips ...string) *discoveryv1.EndpointSlice {
 	}
 }
 
-func TestNodeAgentShares_AddsUpEveryNode(t *testing.T) {
+func TestReader_AddsUpEveryNode(t *testing.T) {
 	var gotAuth []string
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = append(gotAuth, r.Header.Get("Authorization"))
@@ -64,7 +65,7 @@ func TestNodeAgentShares_AddsUpEveryNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := fake.NewClientBuilder().WithScheme(testScheme()).WithObjects(slice(port, host, host)).Build()
-	n := &NodeAgentShares{Client: c, Namespace: "kube-system", Service: "csi-node-metrics", HTTP: srv.Client(), TokenFile: tokenFile}
+	n := &Reader{Client: c, Namespace: "kube-system", Service: "csi-node-metrics", HTTP: srv.Client(), TokenFile: tokenFile}
 	ops, secs, err := n.Totals(context.Background(), "poolbench-t10k")
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +78,7 @@ func TestNodeAgentShares_AddsUpEveryNode(t *testing.T) {
 	}
 }
 
-func TestNodeAgentShares_FailsIfANodeFails(t *testing.T) {
+func TestReader_FailsIfANodeFails(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "no", http.StatusForbidden)
 	}))
@@ -85,16 +86,51 @@ func TestNodeAgentShares_FailsIfANodeFails(t *testing.T) {
 	host, portStr, _ := net.SplitHostPort(srv.Listener.Addr().String())
 	port, _ := strconv.Atoi(portStr)
 	c := fake.NewClientBuilder().WithScheme(testScheme()).WithObjects(slice(port, host)).Build()
-	n := &NodeAgentShares{Client: c, Namespace: "kube-system", Service: "csi-node-metrics", HTTP: srv.Client()}
+	n := &Reader{Client: c, Namespace: "kube-system", Service: "csi-node-metrics", HTTP: srv.Client()}
 	if _, _, err := n.Totals(context.Background(), "poolbench-t10k"); err == nil {
 		t.Fatal("a partial sum would be wrong: want an error")
 	}
 }
 
-func TestNodeAgentShares_NoNodes(t *testing.T) {
+func TestReader_NoNodes(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testScheme()).Build()
-	n := &NodeAgentShares{Client: c, Namespace: "kube-system", Service: "csi-node-metrics", HTTP: http.DefaultClient}
+	n := &Reader{Client: c, Namespace: "kube-system", Service: "csi-node-metrics", HTTP: http.DefaultClient}
 	if _, _, err := n.Totals(context.Background(), "poolbench-t10k"); err == nil {
 		t.Fatal("want an error when no node agent is found")
+	}
+}
+
+func testScheme() *runtime.Scheme {
+	s := runtime.NewScheme()
+	_ = discoveryv1.AddToScheme(s)
+	return s
+}
+
+func TestReader_SendsTheTokenOfTheTokenFunction(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		_, _ = fmt.Fprint(w, agentMetrics)
+	}))
+	defer srv.Close()
+	host, portStr, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	port, _ := strconv.Atoi(portStr)
+	c := fake.NewClientBuilder().WithScheme(testScheme()).WithObjects(slice(port, host)).Build()
+	n := &Reader{Client: c, Namespace: "kube-system", Service: "csi-node-metrics", HTTP: srv.Client(),
+		Token: func(context.Context) (string, error) { return "reader-token", nil }}
+	if _, _, err := n.Totals(context.Background(), "poolbench-t10k"); err != nil {
+		t.Fatal(err)
+	}
+	if gotAuth != "Bearer reader-token" {
+		t.Fatalf("auth header %q", gotAuth)
+	}
+}
+
+func TestReader_ATokenThatCannotBeMadeIsAnError(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(testScheme()).WithObjects(slice(1, "127.0.0.1")).Build()
+	n := &Reader{Client: c, Namespace: "kube-system", Service: "csi-node-metrics", HTTP: http.DefaultClient,
+		Token: func(context.Context) (string, error) { return "", fmt.Errorf("refused") }}
+	if _, _, err := n.Totals(context.Background(), "poolbench-t10k"); err == nil {
+		t.Fatal("without a token the agents refuse; do not send nothing")
 	}
 }

@@ -1,0 +1,85 @@
+{{- if .Values.node.metricsPort }}
+{{- $name := include "ibm-vpc-file-pool-csi.fullname" . }}
+# What the controller needs to read the node agents' share counters
+# (docs/specs/2026-10-26-adaptive-copy-speed.md): the addresses of the agents
+# in its own namespace, the CA of their certificate, and a short-lived token of
+# a service account that can do nothing but read their metrics. The controller
+# never sends its own token to the node agents.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-controller-node-agents
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["list"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    resourceNames: ["{{ $name }}-node-reader"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-controller-node-agents
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}-controller-node-agents
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}-controller
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}-node-reader
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}-node-reader
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+rules:
+  - nonResourceURLs: ["/metrics"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-node-reader
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}-node-reader
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}-node-reader
+    namespace: {{ .Release.Namespace }}
+{{- if eq .Values.webhook.certProvider "openshift" }}
+---
+# The CA of the node agents' certificate, from the OpenShift service CA.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-node-ca
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+  annotations:
+    service.beta.openshift.io/inject-cabundle: "true"
+{{- end }}
+{{- end }}

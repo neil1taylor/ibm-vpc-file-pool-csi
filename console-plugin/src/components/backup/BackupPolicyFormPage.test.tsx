@@ -140,7 +140,7 @@ describe('BackupPolicyFormPage (create)', () => {
   it('explains the VM copy speed and that Red Hat does not support copying a running VM', () => {
     render(<BackupPolicyFormPage />);
     expect(screen.getByText(/Not supported by Red Hat/)).toBeTruthy();
-    expect(screen.getByLabelText('More info for VM copy speed limit (MB/s per disk)')).toBeTruthy();
+    expect(screen.getByLabelText('More info for VM copy highest speed (MB/s per disk)')).toBeTruthy();
   });
 
   it('creates the policy and opens its page', async () => {

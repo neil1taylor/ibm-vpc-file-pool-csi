@@ -3,7 +3,6 @@ package poolbench
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"net/http"
@@ -15,6 +14,7 @@ import (
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/hooks"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/nodemetrics"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/nodestats"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -26,9 +26,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 )
-
-// serviceAccountTokenFile is where a pod finds its service account token.
-const serviceAccountTokenFile = "/var/run/secrets/kubernetes.io/serviceaccount/token" // #nosec G101 -- a path, not a credential
 
 // Options are the settings of the PoolBench service.
 type Options struct {
@@ -77,22 +74,6 @@ var _ manager.LeaderElectionRunnable = leaderRunnable(nil)
 func (f leaderRunnable) Start(ctx context.Context) error { return f(ctx) }
 func (leaderRunnable) NeedLeaderElection() bool          { return true }
 
-func agentHTTPClient(caFile, serverName string) (*http.Client, error) {
-	cfg := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: serverName}
-	if caFile != "" {
-		pem, err := os.ReadFile(caFile) //nolint:gosec // the path is a flag of the service, set by the chart
-		if err != nil {
-			return nil, fmt.Errorf("read the node agents' CA: %w", err)
-		}
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(pem) {
-			return nil, errors.New("the node agents' CA file has no certificate")
-		}
-		cfg.RootCAs = pool
-	}
-	return &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{TLSClientConfig: cfg}}, nil
-}
-
 // Run runs the PoolBench service until ctx ends: the runner, which takes
 // every PoolBench through its stages, and the collector the test VMs send
 // their results to. Both run only on the elected replica, because the
@@ -129,7 +110,7 @@ func Run(ctx context.Context, cfg *rest.Config, opts Options) error {
 	if err != nil {
 		return fmt.Errorf("create clientset: %w", err)
 	}
-	httpClient, err := agentHTTPClient(opts.NodeMetricsCA, opts.NodeMetricsService+"."+opts.Namespace+".svc")
+	httpClient, err := nodestats.NewHTTPClient(opts.NodeMetricsCA, opts.NodeMetricsService+"."+opts.Namespace+".svc")
 	if err != nil {
 		return err
 	}
@@ -149,8 +130,8 @@ func Run(ctx context.Context, cfg *rest.Config, opts Options) error {
 	// Without node agent metrics the steps have no share-side numbers; the
 	// run's log says so at each step.
 	if opts.NodeMetricsService != "" {
-		runner.Shares = &NodeAgentShares{Client: c, Namespace: opts.Namespace, Service: opts.NodeMetricsService,
-			HTTP: httpClient, TokenFile: serviceAccountTokenFile}
+		runner.Shares = &nodestats.Reader{Client: c, Namespace: opts.Namespace, Service: opts.NodeMetricsService,
+			HTTP: httpClient, TokenFile: nodestats.ServiceAccountTokenFile}
 	}
 	if aerr := mgr.Add(leaderRunnable(func(ctx context.Context) error {
 		t := time.NewTicker(opts.Interval)

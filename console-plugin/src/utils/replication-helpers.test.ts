@@ -72,38 +72,46 @@ describe('replicationDestination', () => {
 });
 
 describe('vmCopySpecFields', () => {
-  it('leaves out settings that equal the defaults', () => {
-    expect(vmCopySpecFields({ speedLimitMBps: 20, restorePointKeepHours: 24 })).toEqual({});
+  it('leaves out settings that equal the defaults: no highest speed, 24 hours', () => {
+    expect(vmCopySpecFields({ speedLimitMBps: 0, restorePointKeepHours: 24 })).toEqual({});
   });
 
-  it('sets a changed speed limit, and 0 means unlimited', () => {
+  it('sets a highest speed when there is one', () => {
     expect(vmCopySpecFields({ speedLimitMBps: 50, restorePointKeepHours: 24 })).toEqual({ vmCopySpeedLimitMBps: 50 });
-    expect(vmCopySpecFields({ speedLimitMBps: 0, restorePointKeepHours: 24 })).toEqual({ vmCopySpeedLimitMBps: 0 });
+    expect(vmCopySpecFields({ speedLimitMBps: 20, restorePointKeepHours: 24 })).toEqual({ vmCopySpeedLimitMBps: 20 });
   });
 
   it('sets a changed keep time', () => {
-    expect(vmCopySpecFields({ speedLimitMBps: 20, restorePointKeepHours: 72 })).toEqual({ restorePointKeepHours: 72 });
+    expect(vmCopySpecFields({ speedLimitMBps: 0, restorePointKeepHours: 72 })).toEqual({ restorePointKeepHours: 72 });
   });
 
   it('keeps the keep time at 1 hour or more and the speed at 0 or more', () => {
-    expect(vmCopySpecFields({ speedLimitMBps: -5, restorePointKeepHours: 0 })).toEqual({ vmCopySpeedLimitMBps: 0, restorePointKeepHours: 1 });
+    expect(vmCopySpecFields({ speedLimitMBps: -5, restorePointKeepHours: 0 })).toEqual({ restorePointKeepHours: 1 });
   });
 });
 
 describe('vmCopySettingsText', () => {
-  it('shows defaults when the policy sets nothing', () => {
-    expect(vmCopySettingsText({} as ReplicationPolicySpec)).toEqual({ speed: '20 MB/s per disk (default)', keep: '24 hours (default)' });
+  it('says the copy adapts when the policy sets nothing', () => {
+    expect(vmCopySettingsText({} as ReplicationPolicySpec)).toEqual({
+      speed: 'Adapts to the load on the share (no highest speed)',
+      keep: '24 hours (default)',
+    });
   });
 
-  it('shows what the policy sets', () => {
-    expect(vmCopySettingsText({ vmCopySpeedLimitMBps: 0, restorePointKeepHours: 1 } as ReplicationPolicySpec)).toEqual({
-      speed: 'Unlimited',
-      keep: '1 hour',
-    });
+  it('shows the highest speed an adaptive copy has', () => {
     expect(vmCopySettingsText({ vmCopySpeedLimitMBps: 50, restorePointKeepHours: 72 } as ReplicationPolicySpec)).toEqual({
-      speed: '50 MB/s per disk',
+      speed: 'Adapts to the load on the share, up to 50 MB/s per disk',
       keep: '72 hours',
     });
+    expect(vmCopySettingsText({ vmCopySpeedLimitMBps: 0, restorePointKeepHours: 1 } as ReplicationPolicySpec).speed).toBe(
+      'Adapts to the load on the share (no highest speed)',
+    );
+  });
+
+  it('shows the fixed speed of a copy that does not adapt', () => {
+    expect(vmCopySettingsText({ vmCopyAdaptive: false } as ReplicationPolicySpec).speed).toBe('20 MB/s per disk (fixed, default)');
+    expect(vmCopySettingsText({ vmCopyAdaptive: false, vmCopySpeedLimitMBps: 0 } as ReplicationPolicySpec).speed).toBe('Unlimited (fixed)');
+    expect(vmCopySettingsText({ vmCopyAdaptive: false, vmCopySpeedLimitMBps: 50 } as ReplicationPolicySpec).speed).toBe('50 MB/s per disk (fixed)');
   });
 });
 

@@ -48,6 +48,9 @@ type fakeVMCopier struct {
 	cleanStale int
 	// cancelErr makes Cancel and Finish(true) fail.
 	cancelErr error
+	// speeds holds the speed of each SetSpeed call, in bytes per second.
+	speeds      []int64
+	setSpeedErr error
 }
 
 type fakeStart struct {
@@ -85,6 +88,13 @@ func (f *fakeVMCopier) Progress(_ context.Context, _ vmcopy.VM, _ *vmcopy.Copy) 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.state, f.stateMsg, nil
+}
+
+func (f *fakeVMCopier) SetSpeed(_ context.Context, _ vmcopy.VM, _ *vmcopy.Copy, speed int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.speeds = append(f.speeds, speed)
+	return f.setSpeedErr
 }
 
 func copyVolumes(cp *vmcopy.Copy) []string {
@@ -997,5 +1007,143 @@ func TestVMCopy_CleanupKeepsResourcesOfOtherPolicies(t *testing.T) {
 	e.tick()
 	if n := e.tempObjectCount(t); n != before {
 		t.Errorf("temporary resources = %d, want %d: a live policy's resources must stay", n, before)
+	}
+}
+
+// fakeLatency gives the same reading every time.
+type fakeLatency struct {
+	ms    float64
+	ok    bool
+	pools []string
+}
+
+func (f *fakeLatency) Latency(_ context.Context, pool string) (float64, bool) {
+	f.pools = append(f.pools, pool)
+	return f.ms, f.ok
+}
+
+func (e *vmCopyEnv) adaptive(ms float64, ok bool) *fakeLatency {
+	l := &fakeLatency{ms: ms, ok: ok}
+	e.rc.SetShareLatency(l)
+	return l
+}
+
+func (e *vmCopyEnv) speedNow(t *testing.T) int32 {
+	t.Helper()
+	return e.status(t, vmGuardSV1).VMCopy.SpeedMBps
+}
+
+func TestVMCopy_AdaptiveStartsLowAndGrowsWhileQuiet(t *testing.T) {
+	e := newVMCopyEnv(t)
+	l := e.adaptive(2, true)
+	e.tick() // start
+	if got := e.cop.starts[0].speed; got != 5<<20 {
+		t.Fatalf("start speed = %d, want 5 MB/s", got)
+	}
+	if got := e.speedNow(t); got != 5 {
+		t.Fatalf("status speed = %d, want 5", got)
+	}
+	e.cop.state = vmcopy.Running
+	e.tick()
+	e.tick()
+	if got := e.speedNow(t); got != 15 {
+		t.Fatalf("after two quiet intervals the speed = %d, want 15", got)
+	}
+	if n := len(e.cop.speeds); n != 2 || e.cop.speeds[1] != 15<<20 {
+		t.Fatalf("SetSpeed calls = %v, want 10 then 15 MB/s", e.cop.speeds)
+	}
+	if len(l.pools) == 0 || l.pools[0] != "prod-pool" {
+		t.Fatalf("the latency is of the source pool, got %v", l.pools)
+	}
+}
+
+func TestVMCopy_AdaptiveHalvesOverTheLimit(t *testing.T) {
+	e := newVMCopyEnv(t)
+	l := e.adaptive(2, true)
+	e.tick()
+	e.cop.state = vmcopy.Running
+	e.tick()
+	e.tick() // 15 MB/s
+	l.ms = 40
+	e.tick()
+	if got := e.speedNow(t); got != 7 {
+		t.Fatalf("speed over the limit = %d, want it halved to 7", got)
+	}
+}
+
+func TestVMCopy_AdaptiveLimitComesFromThePolicy(t *testing.T) {
+	e := newVMCopyEnv(t)
+	p := e.k.getPolicy(e.policy)
+	p.Spec.VMCopyMaxLatencyMs = int32Ptr(5)
+	e.k.addPolicy(p)
+	e.adaptive(8, true)
+	e.tick()
+	e.cop.state = vmcopy.Running
+	e.tick()
+	if got := e.speedNow(t); got != 5 {
+		t.Fatalf("8 ms is over a 5 ms limit, the speed must stay at the start: %d", got)
+	}
+}
+
+func TestVMCopy_AdaptiveNoReadingKeepsTheSpeed(t *testing.T) {
+	e := newVMCopyEnv(t)
+	e.adaptive(0, false)
+	e.tick()
+	e.cop.state = vmcopy.Running
+	e.tick()
+	e.tick()
+	if got := e.speedNow(t); got != 5 || len(e.cop.speeds) != 0 {
+		t.Fatalf("without a reading the speed stays at 5, got %d and calls %v", got, e.cop.speeds)
+	}
+}
+
+func TestVMCopy_AdaptiveStopsAtTheHighestSpeed(t *testing.T) {
+	e := newVMCopyEnv(t)
+	p := e.k.getPolicy(e.policy)
+	p.Spec.VMCopySpeedLimitMBps = int32Ptr(10)
+	e.k.addPolicy(p)
+	e.adaptive(2, true)
+	e.tick()
+	e.cop.state = vmcopy.Running
+	for i := 0; i < 4; i++ {
+		e.tick()
+	}
+	if got := e.speedNow(t); got != 10 {
+		t.Fatalf("the highest speed is 10, got %d", got)
+	}
+}
+
+func TestVMCopy_NotAdaptiveKeepsTheFixedSpeed(t *testing.T) {
+	e := newVMCopyEnv(t)
+	p := e.k.getPolicy(e.policy)
+	p.Spec.VMCopyAdaptive = boolPtr(false)
+	p.Spec.VMCopySpeedLimitMBps = int32Ptr(50)
+	e.k.addPolicy(p)
+	e.adaptive(2, true)
+	e.tick()
+	e.cop.state = vmcopy.Running
+	e.tick()
+	if got := e.cop.starts[0].speed; got != 50<<20 || len(e.cop.speeds) != 0 {
+		t.Fatalf("a fixed copy runs at 50 MB/s and never changes, got %d and calls %v", got, e.cop.speeds)
+	}
+}
+
+func TestVMCopy_WithoutAReadingSourceTheSpeedIsFixed(t *testing.T) {
+	e := newVMCopyEnv(t) // no latency source
+	e.tick()
+	if got := e.cop.starts[0].speed; got != 20<<20 {
+		t.Fatalf("without node metrics the copy runs at the old fixed 20 MB/s, got %d", got)
+	}
+}
+
+func TestVMCopy_ASpeedChangeThatFailsIsNotAFailedCopy(t *testing.T) {
+	e := newVMCopyEnv(t)
+	e.adaptive(2, true)
+	e.tick()
+	e.cop.state = vmcopy.Running
+	e.cop.setSpeedErr = fmt.Errorf("QEMU is busy")
+	e.tick()
+	if s := e.status(t, vmGuardSV1); s.VMCopy == nil || s.VMCopy.Phase != "Copying" || s.VMCopy.SpeedMBps != 5 {
+		t.Fatalf("the copy goes on at the old speed: %+v", s.VMCopy)
 	}
 }

@@ -22,9 +22,9 @@ Today the copy runs at a fixed limit, 20 MB/s for each disk (`vmCopySpeedLimitMB
 
 - `vmCopySpeedLimitMBps` stays. With adaptive speed on, it is the **highest** speed for each disk. Default `0` = no highest limit (today the default is 20). With adaptive speed off, it is the fixed speed, as before.
 - `vmCopyAdaptive` (new): `true` or `false`. Default `true`.
-- `vmCopyMaxLatencyMs` (new): the average share latency above which the copy slows down. Default `15`. The webhook refuses a value above 20, the PoolBench limit for a slow VM.
+- `vmCopyMaxLatencyMs` (new): the average share latency above which the copy slows down. Default `15`. The CRD refuses a value above 20, the PoolBench limit for a slow VM.
 
-**While a copy runs.** The speed starts low (5 MB/s for each disk), goes up while the source share is quiet, and goes down at once when its latency passes the limit. The status of the volume shows the speed now (`copySpeedMBps`) and the highest speed reached.
+**While a copy runs.** The speed starts low (5 MB/s for each disk), goes up while the source share is quiet, and goes down at once when its latency passes the limit. The replication status of the volume shows the speed now (`vmCopy.speedMBps`).
 
 **In PoolBench.** The backup event result says how fast the copy went, the average and the highest, and what the VMs' latency did during the event compared with before it. A run can then answer "did the backup slow the VMs, and by how much".
 
@@ -35,7 +35,11 @@ Today the copy runs at a fixed limit, 20 MB/s for each disk (`vmCopySpeedLimitMB
 3. If the latency is under the limit, the speed goes up by 5 MB/s for each disk, up to the highest speed. If it is over the limit, the speed is halved, down to the start speed. A network uses the same rule to share a link: grow slowly, shrink fast.
 4. The new speed is sent to QEMU with `block-job-set-speed`.
 5. If the node agents cannot be read, or the share had no operations in the interval, the speed does not change. A missing reading never speeds the copy up.
-6. Two copies that read the same source share count as one load. The controller raises the speed of one copy at a time, so two copies do not both grow together and overshoot.
+6. The speed of each copy is kept in the status (`vmCopy.speedMBps` of the replication policy's volume), so a restart of the controller goes on from it. Two copies on one source share both follow the same rule: both grow while the share is quiet, and both halve when it is not.
+
+**Smoothing.** The reading is the median of the last three 30-second intervals, and an interval with fewer than 50 operations is not a reading. The lab (see below) showed that one 15-second interval of a busy share can swing by tens of milliseconds, so one bad interval must not decide.
+
+**The token.** The controller does not send its own token to the node agents, because that token has wide rights and a node agent could be taken over. It asks the API server for a one-hour token of a separate service account (`<release>-node-reader`) that may do nothing but read `/metrics`, and renews it ten minutes before it ends.
 
 **Why share latency and not the VM's own latency.** The driver cannot see inside the VM. The share latency is what every VM on that share feels, and it is already measured.
 
@@ -76,5 +80,7 @@ What this does show: at 20 MB/s the VMs hardly notice the copy; with no limit th
 - The signal is the average latency of the source share, the same one PoolBench uses.
 - The rule is: up 5 MB/s each 30 s while quiet, halve when over the limit. The numbers are first guesses; lab check 2 replaces them.
 - A missing reading never raises the speed.
+- The copy falls back to the old fixed speed (20 MB/s unless the policy says otherwise) when the controller cannot read the node agents, so a cluster without node metrics behaves as before.
+- The first build reports the speed in the replication status only. The PoolBench backup event does not report it yet.
 - Snapshots by copy keep the fixed limit in this step.
 - The PoolBench backup event reports the speed and the effect on VM latency, so the result of this work is measured, not claimed.

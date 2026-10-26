@@ -51,10 +51,83 @@ type VMCopier interface {
 	Commit(ctx context.Context, vm vmcopy.VM, cp *vmcopy.Copy) error
 	Cancel(ctx context.Context, vm vmcopy.VM, cp *vmcopy.Copy) error
 	RemoveStale(ctx context.Context, vm vmcopy.VM, volumes []string, keepBitmap string) error
+	// SetSpeed changes the speed limit of a copy that is running.
+	SetSpeed(ctx context.Context, vm vmcopy.VM, cp *vmcopy.Copy, speed int64) error
 	// CleanStaleCopies removes staging files and nodes that an earlier copy
 	// left, keeps every change list, and returns vmcopy.ErrBusy while a copy
 	// runs in the VM.
 	CleanStaleCopies(ctx context.Context, vm vmcopy.VM, volumes []string) error
+}
+
+// ShareLatency gives the average latency of the shares of a pool, in
+// milliseconds, over the last intervals. ok is false when there is no reading.
+type ShareLatency interface {
+	Latency(ctx context.Context, pool string) (ms float64, ok bool)
+}
+
+// SetShareLatency lets copies of running VM disks follow the load on the share
+// they read. Without it, every copy runs at a fixed speed.
+func (rc *ReplicationController) SetShareLatency(l ShareLatency) {
+	rc.shareLatency = l
+}
+
+const (
+	// adaptStartMBps is the speed an adaptive copy begins at, and the lowest it
+	// goes to. adaptStepMBps is how much it grows each time the share is quiet.
+	adaptStartMBps = 5
+	adaptStepMBps  = 5
+	// defaultVMCopyMaxLatencyMs is the share latency above which an adaptive
+	// copy slows down.
+	defaultVMCopyMaxLatencyMs = 15
+)
+
+// vmCopyAdaptive says whether the copy of this policy adapts its speed: the
+// policy allows it (the default) and the driver can read the share's latency.
+func (rc *ReplicationController) vmCopyAdaptive(policy *v1alpha1.ReplicationPolicy) bool {
+	return rc.shareLatency != nil && (policy.Spec.VMCopyAdaptive == nil || *policy.Spec.VMCopyAdaptive)
+}
+
+// vmCopyFixedSpeed is the speed of a copy that does not adapt, in bytes per
+// second. 0 means no limit.
+func vmCopyFixedSpeed(policy *v1alpha1.ReplicationPolicy) int64 {
+	if policy.Spec.VMCopySpeedLimitMBps != nil {
+		return int64(*policy.Spec.VMCopySpeedLimitMBps) << 20
+	}
+	return int64(defaultVMCopySpeedLimitMBps) << 20
+}
+
+func vmCopyAdaptConfig(policy *v1alpha1.ReplicationPolicy) vmcopy.AdaptConfig {
+	cfg := vmcopy.AdaptConfig{Start: adaptStartMBps << 20, Step: adaptStepMBps << 20, LimitMs: defaultVMCopyMaxLatencyMs}
+	if policy.Spec.VMCopySpeedLimitMBps != nil && *policy.Spec.VMCopySpeedLimitMBps > 0 {
+		cfg.Max = int64(*policy.Spec.VMCopySpeedLimitMBps) << 20
+	}
+	if policy.Spec.VMCopyMaxLatencyMs != nil {
+		cfg.LimitMs = float64(*policy.Spec.VMCopyMaxLatencyMs)
+	}
+	return cfg
+}
+
+// adaptVMCopySpeed moves the speed of a running copy one step, by the latency
+// of the share it reads. A change that fails leaves the copy as it was.
+func (rc *ReplicationController) adaptVMCopySpeed(ctx context.Context, policy *v1alpha1.ReplicationPolicy, vm vmcopy.VM, cp *vmcopy.Copy, g *vmGroup) {
+	if !rc.vmCopyAdaptive(policy) {
+		return
+	}
+	ms, ok := rc.shareLatency.Latency(ctx, policy.Spec.SourcePoolName)
+	cur := int64(g.states[0].SpeedMBps) << 20
+	next := vmCopyAdaptConfig(policy).Next(cur, ms, ok)
+	if next == cur {
+		return
+	}
+	if err := rc.vmCopier.SetSpeed(ctx, vm, cp, next); err != nil {
+		klog.V(2).InfoS("Could not change the speed of a VM disk copy", "policy", policy.Name, "vm", klog.KRef(vm.Namespace, vm.Name), "err", err)
+		return
+	}
+	klog.V(4).InfoS("Changed the speed of a VM disk copy", "policy", policy.Name, "vm", klog.KRef(vm.Namespace, vm.Name),
+		"fromMBps", cur>>20, "toMBps", next>>20, "latencyMs", ms)
+	for _, st := range g.states {
+		st.SpeedMBps = int32(next >> 20) // #nosec G115 -- a speed in MB/s fits an int32
+	}
 }
 
 // SetVMCopier turns on copies of running VM disks in direct NFS mode. Without
@@ -225,12 +298,12 @@ func (rc *ReplicationController) startVMCopy(ctx context.Context, policy *v1alph
 		return
 	}
 
-	speed := int64(defaultVMCopySpeedLimitMBps)
-	if policy.Spec.VMCopySpeedLimitMBps != nil {
-		speed = int64(*policy.Spec.VMCopySpeedLimitMBps)
+	speed := vmCopyFixedSpeed(policy)
+	if rc.vmCopyAdaptive(policy) {
+		speed = vmCopyAdaptConfig(policy).Start
 	}
 	id := strconv.FormatInt(rc.nowFunc().UnixNano(), 36)
-	opts := vmcopy.StartOptions{Speed: speed << 20, ID: id, Base: base}
+	opts := vmcopy.StartOptions{Speed: speed, ID: id, Base: base}
 	cp, err := rc.vmCopier.Start(ctx, vm, g.volumes, opts)
 	if errors.Is(err, vmcopy.ErrBaseLost) {
 		// The VM restarted or moved, so QEMU lost the change list.
@@ -255,6 +328,7 @@ func (rc *ReplicationController) startVMCopy(ctx context.Context, policy *v1alph
 			Volume:               g.volumes[i],
 			DiskIndex:            int32(i), // #nosec G115 -- a VM has far fewer than 2^31 disks
 			StagingFile:          cp.Disks[i].StagingFile,
+			SpeedMBps:            int32(speed >> 20), // #nosec G115 -- a speed in MB/s fits an int32
 			Moment:               metav1.NewTime(cp.Moment),
 			FileSystemConsistent: cp.FileSystemConsistent,
 			FreezeError:          cp.FreezeError,
@@ -330,6 +404,7 @@ func (rc *ReplicationController) advanceVMCopy(ctx context.Context, policy *v1al
 		}
 		switch state {
 		case vmcopy.Running:
+			rc.adaptVMCopySpeed(ctx, policy, vm, cp, g)
 			keep("")
 		case vmcopy.Failed, vmcopy.Lost:
 			if err := rc.vmCopier.Finish(ctx, vm, cp, true); err != nil {
