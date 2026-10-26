@@ -22,9 +22,13 @@ func fakeTokens(t *testing.T, now *time.Time) (*ServiceAccountTokens, *int) {
 			return false, nil, nil
 		}
 		calls++
-		req, ok := a.(k8stesting.CreateAction).GetObject().(*authv1.TokenRequest)
-		if !ok {
-			t.Fatalf("unexpected object %T", a.(k8stesting.CreateAction).GetObject())
+		create, isCreate := a.(k8stesting.CreateAction)
+		if !isCreate {
+			t.Fatalf("unexpected action %T", a)
+		}
+		req, isRequest := create.GetObject().(*authv1.TokenRequest)
+		if !isRequest {
+			t.Fatalf("unexpected object %T", create.GetObject())
 		}
 		if req.Spec.ExpirationSeconds == nil || *req.Spec.ExpirationSeconds != 3600 {
 			t.Errorf("expiration = %v, want 3600 s", req.Spec.ExpirationSeconds)
