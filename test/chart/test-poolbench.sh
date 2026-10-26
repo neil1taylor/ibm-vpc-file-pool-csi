@@ -63,6 +63,11 @@ CR=$(doc "$OUT" ClusterRole "$D" '.rules')
 if grep -q "pods/exec" <<<"$CR"; then fail "no pod exec cluster-wide"; else pass "no pod exec cluster-wide"; fi
 if grep -q "virtualmachines" <<<"$CR"; then fail "no VM rights cluster-wide"; else pass "no VM rights cluster-wide"; fi
 if yq -N eval '.[] | select(.resources[] == "secrets")' - <<<"$CR" | grep -q .; then fail "no secret rights cluster-wide"; else pass "no secret rights cluster-wide"; fi
+# The backup event makes and deletes one backup policy, which is cluster-wide; the admission policy limits it.
+check "it may make and delete backup policies" \
+    "$(doc "$OUT" ClusterRole "$D" '.rules[] | select(.resources[] == "backuppolicies") | .verbs | contains(["get", "create", "delete"])')" "true"
+check "it may not change a backup policy" \
+    "$(doc "$OUT" ClusterRole "$D" '.rules[] | select(.resources[] == "backuppolicies") | .verbs | contains(["update"])')" "false"
 check "it may bind only the run role" "$(doc "$OUT" ClusterRole "$D" '.rules[] | select(.verbs[] == "bind") | .resourceNames[0]')" "$D-run"
 check "the cluster role is bound to it" "$(doc "$OUT" ClusterRoleBinding "$D" '.subjects[0].name')" "$D"
 
@@ -74,6 +79,9 @@ done
 # The boot storm restarts VMs by deleting their instance; the migration event makes migrations.
 check "the run role may delete VM instances" \
     "$(doc "$OUT" ClusterRole "$D-run" '.rules[] | select(.resources[] == "virtualmachineinstances") | .verbs | contains(["delete"])')" "true"
+# The backup event labels the disks it backs up.
+if doc "$OUT" ClusterRole "$D-run" '.rules[] | select(.resources[] == "persistentvolumeclaims") | .verbs[]' | grep -qx patch; then
+    pass "the run role may label disks"; else fail "the run role may not label disks"; fi
 # Exec into a VM pod is allowed only for pods that run under the KubeVirt SCC.
 check "the run role may use only the KubeVirt SCC" \
     "$(doc "$OUT" ClusterRole "$D-run" '.rules[] | select(.resources[] == "securitycontextconstraints") | .resourceNames[0] + ":" + .verbs[0]')" "kubevirt-controller:use"
@@ -126,7 +134,7 @@ check "the policy applies to the service account only" \
     "$(doc "$VAP" ValidatingAdmissionPolicy "$D" '.spec.matchConditions[0].expression')" \
     "request.userInfo.username == 'system:serviceaccount:kube-system:$D'"
 RULES=$(doc "$VAP" ValidatingAdmissionPolicy "$D" '.spec.matchConstraints.resourceRules[].resources[]')
-for want in namespaces rolebindings filesharepools; do
+for want in namespaces rolebindings filesharepools backuppolicies; do
     if grep -qxF "$want" <<<"$RULES"; then pass "the policy covers $want"; else fail "the policy does not cover $want"; fi
 done
 check "the policy binding denies" "$(doc "$VAP" ValidatingAdmissionPolicyBinding "$D" '.spec.validationActions[0]')" "Deny"
@@ -135,6 +143,12 @@ if grep -q "object.subjects\[0\].name == '$D'" <<<"$VX"; then pass "a binding ma
 if grep -q "namespaceObject.metadata.labels" <<<"$VX"; then pass "a binding needs a labelled namespace"; else fail "a binding trusts the name only"; fi
 if grep -q "poolbench-" <<<"$VX"; then
     pass "only names that start with poolbench-"; else fail "the names are not limited"; fi
+
+BK=$(doc "$VAP" ValidatingAdmissionPolicy "$D" '.spec.validations[] | select(.message | test("backup policy")) | .expression')
+if grep -q "object.spec.namespaces.size() == 1" <<<"$BK" && grep -q "startsWith('poolbench-')" <<<"$BK"; then pass "a backup policy covers one PoolBench namespace"; else fail "a backup policy may cover other namespaces"; fi
+
+if grep -q "!has(object.spec.export)" <<<"$BK"; then pass "a backup policy never exports to a bucket"; else fail "a backup policy may export to a bucket"; fi
+if grep -q "object.spec.snapshotPool == object.spec.namespaces\[0\] + '-backups'" <<<"$BK"; then pass "a backup policy copies to the backup pool of its own run"; else fail "a backup policy may copy to another pool"; fi
 
 DEL=$(doc "$VAP" ValidatingAdmissionPolicy "$D" '.spec.validations[] | select(.message | test("delete a namespace or pool")) | .expression')
 if grep -q "oldObject.metadata.labels" <<<"$DEL"; then pass "a pool is deleted only if a run made it"; else fail "a pool can be deleted without the run label"; fi

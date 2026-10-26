@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"strings"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud"
@@ -38,6 +39,9 @@ func (v *PoolBenchValidator) ValidateCreate(_ context.Context, pb *v1alpha1.Pool
 	klog.V(4).InfoS("Validating PoolBench create", "name", pb.Name)
 	if len(pb.Name) > maxPoolBenchName {
 		return nil, fmt.Errorf("the name must be at most %d characters, got %d", maxPoolBenchName, len(pb.Name))
+	}
+	if strings.HasSuffix(pb.Name, "-backups") {
+		return nil, fmt.Errorf("the name must not end in -backups: that is the name of the pool of another run's backup event")
 	}
 	if pb.Spec.StartAfter == pb.Name {
 		return nil, fmt.Errorf("spec.startAfter names this run itself, so it would never start")

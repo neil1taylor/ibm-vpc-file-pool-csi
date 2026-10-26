@@ -45,6 +45,7 @@ export const EVENT_OPTIONS: { type: string; label: string; text: string }[] = [
   { type: 'PatchWindow', label: 'Patch window', text: 'Every VM runs only bursts for 10 minutes, as a patch scan would. The time is how long until the VMs are back under the latency limit.' },
   { type: 'Migration', label: 'Live migration', text: 'Moves 10% of the VMs (at most 10) to other nodes at once, while they run. The time is how long until the last move ends.' },
   { type: 'Snapshot', label: 'Snapshot', text: 'Takes a snapshot of 10% of the VMs (at most 10) while they run. The time is how long until the last snapshot is ready.' },
+  { type: 'Backup', label: 'Backup', text: 'Backs up 10% of the VMs (at most 10) while they run, to a second small share the run makes. The time is how long until the last backup ends.' },
 ];
 
 const eventLabel = (type: string): string => EVENT_OPTIONS.find((e) => e.type === type)?.label ?? type;

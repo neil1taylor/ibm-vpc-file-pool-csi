@@ -95,6 +95,37 @@ func buildPool(pb *v1alpha1.PoolBench, zone string) *v1alpha1.FileSharePool {
 	}
 }
 
+// backupPoolName is the pool the backup event copies the backups to. It holds
+// nothing but backups, as a snapshot pool must.
+func backupPoolName(pb *v1alpha1.PoolBench) string { return runName(pb) + "-backups" }
+
+// buildBackupPool is the pool for the backup event: one share with room for a
+// full copy of the disks of the VMs the event backs up, and half as much again.
+// Its IOPS are set high enough that this share is not what slows the backup.
+func buildBackupPool(pb *v1alpha1.PoolBench, zone string) *v1alpha1.FileSharePool {
+	var atVMs int32
+	for _, ev := range pb.Spec.Events {
+		if ev.Type == v1alpha1.PoolBenchEventBackup {
+			atVMs = max(atVMs, ev.AtVMs)
+		}
+	}
+	if atVMs == 0 {
+		atVMs = pb.Spec.MaxVMs
+	}
+	vms := int64(backupTargetCount(int(atVMs)))
+	size := max(100, vms*int64(rootDiskGiB+pb.Spec.Load.AreaGiB+1)*3/2)
+	iops := int64(3000)
+	uid := int64(qemuUID)
+	return &v1alpha1.FileSharePool{
+		ObjectMeta: metav1.ObjectMeta{Name: backupPoolName(pb), Labels: runLabels(pb)},
+		Spec: v1alpha1.FileSharePoolSpec{
+			Zone: zone, Profile: "dp2", ShareSizeGB: size, IOPS: &iops,
+			MaxShares: 1, InitialShares: 1, AutoExpand: false, ExpandThresholdPercent: 80, AllocationStrategy: "spread",
+			DefaultUID: &uid, DefaultGID: &uid, DefaultPermissions: "0777",
+		},
+	}
+}
+
 // buildDataPVC is the load disk of the nth VM: the test area and 1 GiB.
 func buildDataPVC(pb *v1alpha1.PoolBench, n int32) *corev1.PersistentVolumeClaim {
 	class := runName(pb)

@@ -104,7 +104,7 @@ func newHarness(t *testing.T, pb *v1alpha1.PoolBench, extra ...client.Object) *h
 		dataSource("centos-stream9"), dataSource("win2k22-perf"),
 	}
 	c := fake.NewClientBuilder().WithScheme(testScheme()).WithObjects(append(objs, extra...)...).
-		WithStatusSubresource(&v1alpha1.PoolBench{}, &v1alpha1.FileSharePool{}).Build()
+		WithStatusSubresource(&v1alpha1.PoolBench{}, &v1alpha1.FileSharePool{}, &v1alpha1.BackupPolicy{}).Build()
 	store, err := NewStore(t.TempDir(), NewMetrics(prometheus.NewRegistry()))
 	if err != nil {
 		t.Fatal(err)
@@ -1067,5 +1067,169 @@ func TestRunner_StepErrorShowsInStatus(t *testing.T) {
 	}
 	if n != 1 {
 		t.Errorf("the same error is logged once, got %d", n)
+	}
+}
+
+// dataPVCs are the load disks of the named VMs, which the backup event labels.
+func dataPVCs(names ...string) []client.Object {
+	var out []client.Object
+	for _, n := range names {
+		out = append(out, &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: n + "-data", Namespace: "poolbench-t10k"}})
+	}
+	return out
+}
+
+func backupBench(t *testing.T) *harness {
+	t.Helper()
+	objs := append(instances("vm-001", "vm-002", "vm-003"), dataPVCs("vm-001", "vm-002", "vm-003")...)
+	return newHarness(t, benchWithEvent(v1alpha1.PoolBenchEventBackup, 3), objs...)
+}
+
+func backupPolicy(t *testing.T, h *harness) *v1alpha1.BackupPolicy {
+	t.Helper()
+	bp := &v1alpha1.BackupPolicy{}
+	if err := h.c.Get(context.Background(), client.ObjectKey{Name: "poolbench-t10k-backup"}, bp); err != nil {
+		t.Fatalf("the backup policy: %v", err)
+	}
+	return bp
+}
+
+func setBackupStatus(t *testing.T, h *harness, phase, msg string, done ...string) {
+	t.Helper()
+	bp := backupPolicy(t, h)
+	bp.Status = v1alpha1.BackupPolicyStatus{Phase: phase, Message: msg}
+	when := metav1.Time{Time: h.now}
+	for _, pvc := range done {
+		bp.Status.Volumes = append(bp.Status.Volumes, v1alpha1.BackupVolumeStatus{PVCNamespace: "poolbench-t10k", PVCName: pvc, LastBackupTime: &when})
+	}
+	if err := h.c.Status().Update(context.Background(), bp); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunner_Backup(t *testing.T) {
+	h := backupBench(t)
+	h.toEndOfMeasuring()
+	pb := h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageEvent)
+	if !strings.Contains(pb.Status.Message, "backup") {
+		t.Fatalf("the message must name the event: %q", pb.Status.Message)
+	}
+	bk := &v1alpha1.FileSharePool{}
+	if err := h.c.Get(context.Background(), client.ObjectKey{Name: "poolbench-t10k-backups"}, bk); err != nil {
+		t.Fatalf("the pool for the backups: %v", err)
+	}
+	if bk.Labels[RunLabel] != "t10k" || bk.Spec.MaxShares != 1 {
+		t.Fatalf("backup pool: %+v", bk)
+	}
+	bp := backupPolicy(t, h)
+	if bp.Spec.SnapshotPool != "poolbench-t10k-backups" || len(bp.Spec.Namespaces) != 1 || bp.Spec.Namespaces[0] != "poolbench-t10k" ||
+		bp.Labels[RunLabel] != "t10k" || bp.Spec.Selector == nil || bp.Spec.Selector.MatchLabels[backupLabel] != "t10k" {
+		t.Fatalf("backup policy: %+v", bp.Spec)
+	}
+	// 10 percent of 3 VMs is one VM, the first one; only its disk is labelled.
+	for _, n := range []string{"vm-001", "vm-002"} {
+		pvc := &corev1.PersistentVolumeClaim{}
+		if err := h.c.Get(context.Background(), client.ObjectKey{Namespace: "poolbench-t10k", Name: n + "-data"}, pvc); err != nil {
+			t.Fatal(err)
+		}
+		if got := pvc.Labels[backupLabel] == "t10k"; got != (n == "vm-001") {
+			t.Fatalf("%s labelled: %v", n, got)
+		}
+	}
+	h.advance(time.Minute)
+	setBackupStatus(t, h, "Active", "")
+	h.pass()
+	h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageEvent)
+	h.advance(4 * time.Minute)
+	setBackupStatus(t, h, "Active", "", "vm-001-data")
+	h.pass()
+	pb = h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageCreating)
+	ev := pb.Status.Events[0]
+	if ev.Ended == nil || ev.Seconds != 300 || !strings.Contains(ev.Message, "1 VM") || pb.Status.Step != 2 {
+		t.Fatalf("event result: %+v step %d", ev, pb.Status.Step)
+	}
+	if err := h.c.Get(context.Background(), client.ObjectKey{Name: "poolbench-t10k-backup"}, &v1alpha1.BackupPolicy{}); err == nil {
+		t.Fatal("the policy must go when the event ends, or it backs up again")
+	}
+}
+
+func TestRunner_BackupOldBackupDoesNotCount(t *testing.T) {
+	h := backupBench(t)
+	h.toEndOfMeasuring()
+	old := h.now.Add(-time.Hour)
+	bp := backupPolicy(t, h)
+	bp.Status.Volumes = []v1alpha1.BackupVolumeStatus{{PVCNamespace: "poolbench-t10k", PVCName: "vm-001-data", LastBackupTime: &metav1.Time{Time: old}}}
+	if err := h.c.Status().Update(context.Background(), bp); err != nil {
+		t.Fatal(err)
+	}
+	h.advance(time.Minute)
+	h.pass()
+	h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageEvent)
+}
+
+func TestRunner_BackupGivesUp(t *testing.T) {
+	h := backupBench(t)
+	h.toEndOfMeasuring()
+	h.advance(31 * time.Minute)
+	setBackupStatus(t, h, "Error", "the snapshot pool \"x\" has no ready share")
+	h.pass()
+	pb := h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageCreating)
+	ev := pb.Status.Events[0]
+	if ev.Ended == nil || !strings.Contains(ev.Message, "not all") || !strings.Contains(ev.Message, "no ready share") {
+		t.Fatalf("a backup that never ends must say so and why: %+v", ev)
+	}
+}
+
+func TestRunner_BackupWithoutVMs(t *testing.T) {
+	h := newHarness(t, benchWithEvent(v1alpha1.PoolBenchEventBackup, 3))
+	h.toEndOfMeasuring()
+	pb := h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageCreating)
+	if ev := pb.Status.Events[0]; ev.Ended == nil || !strings.Contains(ev.Message, "Not run") {
+		t.Fatalf("an event with no VM to back up must say it did not run: %+v", ev)
+	}
+}
+
+func TestRunner_DeleteRemovesBackupObjects(t *testing.T) {
+	h := backupBench(t)
+	h.toEndOfMeasuring()
+	if err := h.c.Delete(context.Background(), h.bench()); err != nil {
+		t.Fatal(err)
+	}
+	h.pass()
+	h.pass()
+	h.pass()
+	if err := h.c.Get(context.Background(), client.ObjectKey{Name: "poolbench-t10k-backup"}, &v1alpha1.BackupPolicy{}); err == nil {
+		t.Fatal("the backup policy is still there")
+	}
+	if err := h.c.Get(context.Background(), client.ObjectKey{Name: "poolbench-t10k-backups"}, &v1alpha1.FileSharePool{}); err == nil {
+		t.Fatal("the pool of the backups is still there")
+	}
+}
+
+func TestBuildBackupPool(t *testing.T) {
+	pb := benchWithEvent(v1alpha1.PoolBenchEventBackup, 50)
+	pool := buildBackupPool(pb, "eu-de-2")
+	// 5 VMs, each with 30 GiB root and a 1 GiB-over load disk, and room to spare.
+	want := int64(float64(5*(rootDiskGiB+pb.Spec.Load.AreaGiB+1)) * 1.5)
+	if want < 100 {
+		want = 100
+	}
+	if pool.Name != "poolbench-t10k-backups" || pool.Spec.ShareSizeGB != want || *pool.Spec.IOPS != 3000 || pool.Spec.AutoExpand {
+		t.Fatalf("pool: %+v want size %d", pool.Spec, want)
+	}
+}
+
+func TestRunner_DoesNotTouchAPoolOfAnotherRun(t *testing.T) {
+	other := &v1alpha1.FileSharePool{ObjectMeta: metav1.ObjectMeta{Name: "poolbench-t10k-backups", Labels: map[string]string{RunLabel: "t10k-other"}}}
+	h := newHarness(t, benchWithEvent(v1alpha1.PoolBenchEventBackup, 3), other)
+	h.pass()
+	if err := h.r.ensureBackupPool(context.Background(), h.bench()); err == nil {
+		t.Fatal("a pool of another run must not be used as the backup pool")
+	}
+	if _, err := h.r.deletePool(context.Background(), h.bench(), "poolbench-t10k-backups", h.now); err == nil {
+		t.Fatal("a pool of another run must not be deleted")
+	}
+	if err := h.c.Get(context.Background(), client.ObjectKey{Name: "poolbench-t10k-backups"}, &v1alpha1.FileSharePool{}); err != nil {
+		t.Fatalf("the other run's pool is gone: %v", err)
 	}
 }
