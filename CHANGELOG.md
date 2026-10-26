@@ -21,6 +21,12 @@ To make a release:
 
 ### Added
 
+- **The copy of a running VM's disks adapts its speed to the load on the share.** The copy of each disk starts at 5 MB/s, speeds up by 5 MB/s every 30 s while the average latency of the share the VM reads (read from the node agents, median of the last three intervals) stays under 15 ms, and halves when it passes that. New `spec.vmCopyAdaptive` (default `true`) and `spec.vmCopyMaxLatencyMs` (1 to 20, default 15) on `BackupPolicy` and `ReplicationPolicy`; `status.subVolumeStatuses[].vmCopy.speedMBps` shows the speed now. The controller reads the node agents' metrics (`--node-metrics-service`, `--node-metrics-ca`, a ConfigMap or secret for the CA, a Role to list endpoint slices, and `/metrics` read rights). Without them the copy runs at a fixed speed. The reader moved from `pkg/poolbench` to `pkg/nodestats`. See `docs/specs/2026-10-26-adaptive-copy-speed.md`.
+
+### Changed
+
+- **The fixed 20 MB/s default copy speed is gone for adaptive copies.** `spec.vmCopySpeedLimitMBps` is now the highest speed of an adaptive copy; unset means no highest speed. With `vmCopyAdaptive: false`, or when the node agents' metrics cannot be read, it is still the fixed speed (unset means 20, 0 means no limit). Policies that already stored 20 keep it as their highest speed.
+
 - `PoolBench` `spec.startAfter`: a run waits until the named run has ended, so a series of tiers runs one after another. The dp2 size and IOPS table is also written to `pkg/ibmcloud/testdata/dp2-ranges.golden.json` for the console's new-run form.
 - PoolBench metrics are scraped (a ServiceMonitor, or the user workload monitoring Service whose Endpoints the controller keeps, `--monitoring-poolbench-service` and `--monitoring-poolbench-port`), with a certificate for the service's name. New run gauges `poolbench_run_vms`, `poolbench_run_ready_vms` and `poolbench_run_step`.
 - PoolBench: a ValidatingAdmissionPolicy holds the service account to namespaces and pools named `poolbench-*` and to binding only its run role there.

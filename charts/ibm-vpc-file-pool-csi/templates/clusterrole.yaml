@@ -117,6 +117,11 @@ rules:
   - apiGroups: ["authorization.k8s.io"]
     resources: ["subjectaccessreviews"]
     verbs: ["create"]
+  {{- if .Values.node.metricsPort }}
+  # Read the node agents' metrics, so a VM disk copy follows the load on the share
+  - nonResourceURLs: ["/metrics"]
+    verbs: ["get"]
+  {{- end }}
   # Leader election
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]

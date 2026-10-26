@@ -214,6 +214,16 @@ func (in *BackupPolicySpec) DeepCopyInto(out *BackupPolicySpec) {
 		*out = new(int32)
 		**out = **in
 	}
+	if in.VMCopyAdaptive != nil {
+		in, out := &in.VMCopyAdaptive, &out.VMCopyAdaptive
+		*out = new(bool)
+		**out = **in
+	}
+	if in.VMCopyMaxLatencyMs != nil {
+		in, out := &in.VMCopyMaxLatencyMs, &out.VMCopyMaxLatencyMs
+		*out = new(int32)
+		**out = **in
+	}
 	if in.Export != nil {
 		in, out := &in.Export, &out.Export
 		*out = new(BackupExport)
@@ -1210,6 +1220,16 @@ func (in *ReplicationPolicySpec) DeepCopyInto(out *ReplicationPolicySpec) {
 	}
 	if in.VMCopySpeedLimitMBps != nil {
 		in, out := &in.VMCopySpeedLimitMBps, &out.VMCopySpeedLimitMBps
+		*out = new(int32)
+		**out = **in
+	}
+	if in.VMCopyAdaptive != nil {
+		in, out := &in.VMCopyAdaptive, &out.VMCopyAdaptive
+		*out = new(bool)
+		**out = **in
+	}
+	if in.VMCopyMaxLatencyMs != nil {
+		in, out := &in.VMCopyMaxLatencyMs, &out.VMCopyMaxLatencyMs
 		*out = new(int32)
 		**out = **in
 	}

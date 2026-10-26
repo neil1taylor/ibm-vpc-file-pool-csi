@@ -74,6 +74,9 @@ type ReplicationController struct {
 	// vmCopier copies the disks of running VMs. If nil, their volumes are
 	// skipped.
 	vmCopier VMCopier
+	// shareLatency tells how busy the share of a VM is, so that the copy of its
+	// disks can speed up and slow down. If nil, copies run at a fixed speed.
+	shareLatency ShareLatency
 
 	// replicationImage is the container image used for direct-NFS replication Jobs (rsync).
 	replicationImage string

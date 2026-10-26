@@ -1,8 +1,12 @@
-package poolbench
+// Package nodestats reads the NFS counters of a pool from every node agent,
+// through the agents' metrics Service.
+package nodestats
 
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -11,17 +15,39 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	discoveryv1 "k8s.io/api/discovery/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// ServiceAccountTokenFile is where a pod finds its service account token.
+const ServiceAccountTokenFile = "/var/run/secrets/kubernetes.io/serviceaccount/token" // #nosec G101 -- a path, not a credential
+
+// NewHTTPClient makes a client that trusts the node agents' certificate (the
+// CA in caFile; the system roots if it is empty) for the server name given.
+func NewHTTPClient(caFile, serverName string) (*http.Client, error) {
+	cfg := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: serverName}
+	if caFile != "" {
+		pem, err := os.ReadFile(caFile) //nolint:gosec // the path is a flag of the service, set by the chart
+		if err != nil {
+			return nil, fmt.Errorf("read the node agents' CA: %w", err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pem) {
+			return nil, errors.New("the node agents' CA file has no certificate")
+		}
+		cfg.RootCAs = pool
+	}
+	return &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{TLSClientConfig: cfg}}, nil
+}
+
 // maxMetricsBytes bounds what the service reads from one node agent.
 const maxMetricsBytes = 16 << 20
 
-// NodeAgentShares reads a pool's NFS counters from every node agent, through
-// the agents' metrics Service, as the command-line test does.
-type NodeAgentShares struct {
+// Reader reads a pool's NFS counters from every node agent, through the
+// agents' metrics Service, as the command-line test does.
+type Reader struct {
 	Client    client.Client
 	Namespace string
 	Service   string
@@ -35,7 +61,7 @@ type NodeAgentShares struct {
 // Totals adds up the reads and writes of the pool, and the seconds they took,
 // over every node agent. It fails if any agent cannot be read: a partial sum
 // would make the share look idle.
-func (n *NodeAgentShares) Totals(ctx context.Context, pool string) (ops, seconds float64, err error) {
+func (n *Reader) Totals(ctx context.Context, pool string) (ops, seconds float64, err error) {
 	slices := &discoveryv1.EndpointSliceList{}
 	if err := n.Client.List(ctx, slices, client.InNamespace(n.Namespace),
 		client.MatchingLabels{discoveryv1.LabelServiceName: n.Service}); err != nil {
@@ -71,7 +97,7 @@ func (n *NodeAgentShares) Totals(ctx context.Context, pool string) (ops, seconds
 	return ops, seconds, nil
 }
 
-func (n *NodeAgentShares) scrape(ctx context.Context, url, token, pool string) (float64, float64, error) {
+func (n *Reader) scrape(ctx context.Context, url, token, pool string) (float64, float64, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return 0, 0, err

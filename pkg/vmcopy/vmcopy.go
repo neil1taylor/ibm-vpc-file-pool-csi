@@ -361,6 +361,18 @@ func (c *Copier) Progress(ctx context.Context, vm VM, cp *Copy) (State, string, 
 	return state, "", nil
 }
 
+// SetSpeed changes the speed limit of a copy that is running, in bytes per
+// second for each disk. 0 means no limit. It fails if a disk's copy is not
+// running, and the error names the disk.
+func (c *Copier) SetSpeed(ctx context.Context, vm VM, cp *Copy, speed int64) error {
+	for i, d := range cp.Disks {
+		if _, err := c.qmp(ctx, vm, "block-job-set-speed", map[string]any{"device": jobID(cp.ID, i), "speed": speed}); err != nil {
+			return fmt.Errorf("setting the copy speed of %s: %w", d.Volume, err)
+		}
+	}
+	return nil
+}
+
 // Finish releases what QEMU holds for a finished Copy. If removeStaging is
 // true, it also deletes the staging files. It is safe to call more than once.
 func (c *Copier) Finish(ctx context.Context, vm VM, cp *Copy, removeStaging bool) error {

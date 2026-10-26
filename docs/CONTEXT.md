@@ -301,7 +301,7 @@ Example: replicate the pool `production` in Frankfurt to a pool in London every 
 
 ### ReplicationPolicy
 
-A **ReplicationPolicy** names the pool to copy (`sourcePoolName`, with an optional label selector). It names the destination, which is an NFS server or a receiver's URL. It also sets the `schedule`. It also sets the speed limit for VM copies (`vmCopySpeedLimitMBps`, default 20) and optional lifecycle hooks.
+A **ReplicationPolicy** names the pool to copy (`sourcePoolName`, with an optional label selector). It names the destination, which is an NFS server or a receiver's URL. It also sets the `schedule`. It also sets how fast VM copies run (`vmCopyAdaptive`, default true: the copy follows the load on the share; `vmCopySpeedLimitMBps` is the highest speed, or the fixed speed when it does not adapt) and optional lifecycle hooks.
 
 Example: `schedule: 15m`.
 

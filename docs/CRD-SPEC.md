@@ -1376,8 +1376,15 @@ type BackupPolicySpec struct {
     Namespaces []string `json:"namespaces,omitempty"`
     // KeepFor is a Go duration or a number of days ("30d"), at least one hour. Default "7d".
     KeepFor string `json:"keepFor,omitempty"`
-    // VMCopySpeedLimitMBps limits the QEMU copy of each VM disk. Default 20; 0 means no limit.
+    // VMCopySpeedLimitMBps is the highest speed of the QEMU copy of each VM disk, in MB/s.
+    // 0 or unset means there is no highest speed. With VMCopyAdaptive false it is the fixed
+    // speed: 0 means no limit and unset means 20.
     VMCopySpeedLimitMBps *int32 `json:"vmCopySpeedLimitMBps,omitempty"`
+    // VMCopyAdaptive starts the copy slow, speeds it up while the source share is quiet and slows
+    // it down when the share's latency passes VMCopyMaxLatencyMs. Default true.
+    VMCopyAdaptive *bool `json:"vmCopyAdaptive,omitempty"`
+    // VMCopyMaxLatencyMs is the share latency in ms above which the copy slows down. Default 15; 1 to 20.
+    VMCopyMaxLatencyMs *int32 `json:"vmCopyMaxLatencyMs,omitempty"`
     // Suspend stops new backups. Existing backups stay.
     Suspend bool `json:"suspend,omitempty"`
     // Export also sends the backups to an IBM Cloud Object Storage bucket (see below). Optional.
@@ -1651,13 +1658,27 @@ type ReplicationPolicySpec struct {
     // +optional
     RsyncOptions []string `json:"rsyncOptions,omitempty"`
 
-    // VMCopySpeedLimitMBps limits how fast QEMU copies each disk of a running
-    // VM, in megabytes per second. 0 means no limit. The limit also counts
-    // empty disk space. See "Running VM disks" below.
+    // VMCopySpeedLimitMBps is the highest speed, in megabytes per second, of
+    // QEMU's copy of each disk of a running VM; unset or 0 means none. With
+    // VMCopyAdaptive false it is the fixed speed (0 no limit, unset 20). The
+    // copy also counts empty disk space. See "Running VM disks" below.
     // +kubebuilder:validation:Minimum=0
-    // +kubebuilder:default=20
     // +optional
     VMCopySpeedLimitMBps *int32 `json:"vmCopySpeedLimitMBps,omitempty"`
+
+    // VMCopyAdaptive makes the copy start at 5 MB/s for each disk, speed up while
+    // the share the VM reads is quiet, and slow down when its average latency
+    // passes VMCopyMaxLatencyMs. Default true. It needs the node agents' metrics;
+    // without them the copy runs at the fixed speed.
+    // +optional
+    VMCopyAdaptive *bool `json:"vmCopyAdaptive,omitempty"`
+
+    // VMCopyMaxLatencyMs is the share latency, in milliseconds, above which an
+    // adaptive copy slows down. Default 15.
+    // +kubebuilder:validation:Minimum=1
+    // +kubebuilder:validation:Maximum=20
+    // +optional
+    VMCopyMaxLatencyMs *int32 `json:"vmCopyMaxLatencyMs,omitempty"`
 
     // RestorePointKeepHours is how long the destination keeps the restore
     // points of running VM disks. See "Running VM disks" below.

@@ -233,6 +233,12 @@ spec:
                       - volume
                       type: object
                     type: array
+                  speedMBps:
+                    description: |-
+                      SpeedMBps is the speed limit of the copy of each disk now, in megabytes
+                      per second. 0 means no limit. An adaptive copy changes it.
+                    format: int32
+                    type: integer
                   stagingFile:
                     description: StagingFile is the staging file name in the volume's
                       root directory.
