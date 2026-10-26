@@ -68,9 +68,12 @@ check "the cluster role is bound to it" "$(doc "$OUT" ClusterRoleBinding "$D" '.
 
 # The run role: what it needs inside a run's namespace.
 RR=$(doc "$OUT" ClusterRole "$D-run" '.rules[].resources[]')
-for want in pods/exec virtualmachines virtualmachineinstances secrets persistentvolumeclaims datavolumes; do
+for want in pods/exec virtualmachines virtualmachineinstances virtualmachineinstancemigrations secrets persistentvolumeclaims datavolumes; do
     if grep -qxF -- "$want" <<<"$RR"; then pass "run role has $want"; else fail "run role lacks $want"; fi
 done
+# The boot storm restarts VMs by deleting their instance; the migration event makes migrations.
+check "the run role may delete VM instances" \
+    "$(doc "$OUT" ClusterRole "$D-run" '.rules[] | select(.resources[] == "virtualmachineinstances") | .verbs | contains(["delete"])')" "true"
 # Exec into a VM pod is allowed only for pods that run under the KubeVirt SCC.
 check "the run role may use only the KubeVirt SCC" \
     "$(doc "$OUT" ClusterRole "$D-run" '.rules[] | select(.resources[] == "securitycontextconstraints") | .resourceNames[0] + ":" + .verbs[0]')" "kubevirt-controller:use"
