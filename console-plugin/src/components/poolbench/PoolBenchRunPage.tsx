@@ -33,6 +33,7 @@ import { COLUMN_HELP, columnInfo } from '../../utils/column-help';
 import { ROUTES } from '../../constants';
 import {
   bannerText,
+  eventRows,
   expectedEnd,
   isActive,
   ms,
@@ -119,6 +120,31 @@ const SettingsCard: React.FC<{ pb: PoolBench }> = ({ pb }) => {
     </Card>
   );
 };
+
+const EventTable: React.FC<{ pb: PoolBench }> = ({ pb }) => (
+  <Table aria-label="Events" variant="compact" role="grid">
+    <Thead>
+      <Tr>
+        <Th>Event</Th>
+        <Th info={columnInfo('poolbenchEventAt')}>At VMs</Th>
+        <Th info={columnInfo('poolbenchEventState')}>State</Th>
+        <Th info={columnInfo('poolbenchEventTime')}>Time</Th>
+        <Th>What happened</Th>
+      </Tr>
+    </Thead>
+    <Tbody>
+      {eventRows(pb).map((e) => (
+        <Tr key={`${e.name}-${e.atVMs}`}>
+          <Td dataLabel="Event">{e.name}</Td>
+          <Td dataLabel="At VMs">{e.atVMs}</Td>
+          <Td dataLabel="State">{e.state}</Td>
+          <Td dataLabel="Time">{e.time}</Td>
+          <Td dataLabel="What happened">{e.message || '-'}</Td>
+        </Tr>
+      ))}
+    </Tbody>
+  </Table>
+);
 
 const StepTable: React.FC<{ pb: PoolBench }> = ({ pb }) => {
   const steps = pb.status?.steps || [];
@@ -366,6 +392,15 @@ const PoolBenchRunPage: React.FC = () => {
           <StepTable pb={pb} />
         </CardBody>
       </Card>
+
+      {eventRows(pb).length > 0 && (
+        <Card style={{ marginBottom: 16 }}>
+          <CardHelpTitle helpKey="pbEventResults" />
+          <CardBody>
+            <EventTable pb={pb} />
+          </CardBody>
+        </Card>
+      )}
 
       <div style={{ marginBottom: 16 }}>
         <SettingsCard pb={pb} />

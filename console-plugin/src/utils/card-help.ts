@@ -160,6 +160,10 @@ export const CARD_HELP = {
     title: 'Events (optional)',
     text: 'An event is an extra test on VMs that are already busy, such as a restart of all of them. Each one runs once, after the step you choose is measured, so it does not change the knee.',
   },
+  pbEventResults: {
+    title: 'Events',
+    text: 'The extra tests this run does on busy VMs. Each one runs once, after its step is measured. An event never fails the run: if it cannot run, the line says why.',
+  },
   pbPlan: {
     title: 'What the run will do',
     text: 'The load each step puts on the share, worked out from your settings, and how long the run takes. Check that the last step is not far over the IOPS limit.',
