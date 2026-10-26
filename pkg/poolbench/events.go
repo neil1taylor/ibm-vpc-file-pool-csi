@@ -376,9 +376,9 @@ func (r *Runner) pollSnapshot(ctx context.Context, pb *v1alpha1.PoolBench, timed
 	total := len(list.Items)
 	switch {
 	case ok+failed == total && failed == 0:
-		return true, fmt.Sprintf("Took a snapshot of %s while they ran; all are ready.", vmsText(total))
+		return true, fmt.Sprintf("Snapshots of %s, taken while the VMs ran; all are ready.", vmsText(total))
 	case ok+failed == total:
-		return true, fmt.Sprintf("Took a snapshot of %s while they ran: %d ready, %d failed.", vmsText(total), ok, failed)
+		return true, fmt.Sprintf("Snapshots of %s, taken while the VMs ran: %d ready, %d failed.", vmsText(total), ok, failed)
 	case timedOut:
 		return true, fmt.Sprintf("Snapshots of %s; not all were ready within %d minutes (%d were, %d failed).", vmsText(total), int(eventTimeout.Minutes()), ok, failed)
 	}

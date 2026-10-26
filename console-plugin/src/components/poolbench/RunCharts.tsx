@@ -12,6 +12,7 @@ import { PoolBench } from '../../types';
 import { ChartSpec, chartWindow, runCharts } from '../../utils/poolbench-queries';
 import { SeriesData, useRunMetrics } from '../../utils/use-run-metrics';
 import { isActive } from '../../utils/poolbench';
+import { EVENT_OPTIONS } from '../../utils/poolbench-form';
 import CardHelpTitle from '../common/CardHelpTitle';
 import { CardHelpKey } from '../../utils/card-help';
 
@@ -119,9 +120,17 @@ const RunCharts: React.FC<{ pb: PoolBench }> = ({ pb }) => {
   const win = useMemo(() => chartWindow(pb, new Date()), [pb.status?.startTime, pb.status?.endTime]); // eslint-disable-line react-hooks/exhaustive-deps
   const specs = useMemo(() => runCharts(pb), [pb.metadata?.name, pb.spec]); // eslint-disable-line react-hooks/exhaustive-deps
   const { charts, loading, error } = useRunMetrics(specs, win, live);
-  const marks: Mark[] = (pb.status?.steps || [])
-    .filter((s) => s.started)
-    .map((s, i) => ({ label: `Step ${i + 1} (${s.vms} VMs)`, x: Date.parse(s.started as string) / 1000 }));
+  const marks: Mark[] = [
+    ...(pb.status?.steps || [])
+      .filter((s) => s.started)
+      .map((s, i) => ({ label: `Step ${i + 1} (${s.vms} VMs)`, x: Date.parse(s.started as string) / 1000 })),
+    ...(pb.status?.events || [])
+      .filter((e) => e.started)
+      .map((e) => ({
+        label: `${EVENT_OPTIONS.find((o) => o.type === e.type)?.label ?? e.type} (${e.atVMs} VMs)`,
+        x: Date.parse(e.started as string) / 1000,
+      })),
+  ];
 
   if (!win) return <p>The graphs start when the run starts.</p>;
   if (error) {
