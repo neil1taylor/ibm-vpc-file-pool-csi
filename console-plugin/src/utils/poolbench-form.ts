@@ -33,6 +33,25 @@ const READY_MINUTES = 5;
 const MAX_NAME = 40;
 const NAME_RE = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
 
+/** An event the person asks for: a test at one step of the run. */
+export interface FormEvent {
+  type: string;
+  atVMs: number;
+}
+
+/** The events a run can do, in plain words. */
+export const EVENT_OPTIONS: { type: string; label: string; text: string }[] = [
+  { type: 'BootStorm', label: 'Boot storm', text: 'Restarts every VM at once. The time is how long until the last VM sends results again.' },
+  { type: 'PatchWindow', label: 'Patch window', text: 'Every VM runs only bursts for 10 minutes, as a patch scan would. The time is how long until the VMs are back under the latency limit.' },
+  { type: 'Migration', label: 'Live migration', text: 'Moves 10% of the VMs (at most 10) to other nodes at once, while they run. The time is how long until the last move ends.' },
+  { type: 'Snapshot', label: 'Snapshot', text: 'Takes a snapshot of 10% of the VMs (at most 10) while they run. The time is how long until the last snapshot is ready.' },
+];
+
+const eventLabel = (type: string): string => EVENT_OPTIONS.find((e) => e.type === type)?.label ?? type;
+
+/** The step an event gets when the person ticks it: the second step, so the VMs are already busy. */
+export const defaultEventStep = (f: PoolBenchForm): number => Math.min(f.maxVMs, 2 * f.stepVMs);
+
 export interface PoolBenchForm {
   name: string;
   shareSizeGB: number;
@@ -60,6 +79,7 @@ export interface PoolBenchForm {
   stallSeconds: number;
   stopAtKnee: boolean;
   keepAfterEnd: boolean;
+  events: FormEvent[];
 }
 
 /** The 10,000 IOPS tier of the performance test spec. */
@@ -89,6 +109,7 @@ export const defaultForm = (): PoolBenchForm => ({
   stallSeconds: 5,
   stopAtKnee: true,
   keepAfterEnd: false,
+  events: [],
 });
 
 export interface Preset {
@@ -215,6 +236,11 @@ export const validateForm = (f: PoolBenchForm): Partial<Record<keyof PoolBenchFo
   if (f.latencyLimitMs < 1) e.latencyLimitMs = 'At least 1';
   if (f.slowVMPercent < 1 || f.slowVMPercent > 100) e.slowVMPercent = '1 to 100';
   if (f.stallSeconds < 1) e.stallSeconds = 'At least 1';
+  for (const ev of f.events) {
+    if (f.stepVMs >= 1 && (ev.atVMs < f.stepVMs || ev.atVMs > f.maxVMs || ev.atVMs % f.stepVMs !== 0)) {
+      e.events = `${eventLabel(ev.type)} must be a step of the run: a multiple of ${f.stepVMs} VMs, up to ${f.maxVMs}`;
+    }
+  }
   return e;
 };
 
@@ -252,6 +278,7 @@ export const toPoolBenches = (f: PoolBenchForm): PoolBench[] => {
         stopAtKnee: f.stopAtKnee,
       },
       keepAfterEnd: f.keepAfterEnd,
+      events: f.events.length ? [...f.events].sort((a, b) => a.atVMs - b.atVMs).map((ev) => ({ type: ev.type, atVMs: ev.atVMs })) : undefined,
       startAfter: i > 0 ? `${f.name}-${tiers[i - 1]}` : undefined,
     },
   }));

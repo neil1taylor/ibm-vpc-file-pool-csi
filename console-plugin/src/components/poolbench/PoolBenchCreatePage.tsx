@@ -31,8 +31,10 @@ import { CARD_HELP } from '../../utils/card-help';
 import { columnInfo } from '../../utils/column-help';
 import {
   NodeLike,
+  EVENT_OPTIONS,
   PRESETS,
   PoolBenchForm,
+  defaultEventStep,
   defaultForm,
   diskNeedGB,
   dp2Range,
@@ -284,6 +286,44 @@ const PoolBenchCreatePage: React.FC = () => {
               </Grid>
               <Checkbox id="pb-stop" label={<>Stop at the knee <InfoPopover title="Knee" text={CARD_HELP.pbStep.text} ariaLabel="About Stop at the knee" /></>} description="Without it, the run goes on to the largest VM count." isChecked={form.stopAtKnee} onChange={(_e, v) => set('stopAtKnee', v)} style={{ marginTop: 16 }} />
               <Checkbox id="pb-keep" label="Keep the VMs and the pool after the end" description="For a look after the run. They cost money until you clean up." isChecked={form.keepAfterEnd} onChange={(_e, v) => set('keepAfterEnd', v)} />
+            </CardBody>
+          </Card>
+        </StackItem>
+
+        <StackItem>
+          <Card>
+            <CardHelpTitle helpKey="pbEvents" />
+            <CardBody>
+              <Stack hasGutter>
+                {EVENT_OPTIONS.map((opt) => {
+                  const chosen = form.events.find((ev) => ev.type === opt.type);
+                  return (
+                    <StackItem key={opt.type}>
+                      <Checkbox
+                        id={`pb-ev-${opt.type}`}
+                        label={opt.label}
+                        description={opt.text}
+                        isChecked={!!chosen}
+                        onChange={(_e, on) =>
+                          set('events', on ? [...form.events, { type: opt.type, atVMs: defaultEventStep(form) }] : form.events.filter((ev) => ev.type !== opt.type))
+                        }
+                      />
+                      {chosen && (
+                        <div style={{ maxWidth: 240, marginTop: 8, marginLeft: 24 }}>
+                          <NumberField
+                            id={`pb-ev-at-${opt.type}`}
+                            label={`${opt.label} at VMs`}
+                            help="The event runs once, after this step is measured, while all these VMs run. It must be one of the steps of the run."
+                            value={chosen.atVMs}
+                            onChange={(v) => set('events', form.events.map((ev) => (ev.type === opt.type ? { ...ev, atVMs: v } : ev)))}
+                          />
+                        </div>
+                      )}
+                    </StackItem>
+                  );
+                })}
+              </Stack>
+              <Helper error={errors.events} />
             </CardBody>
           </Card>
         </StackItem>
