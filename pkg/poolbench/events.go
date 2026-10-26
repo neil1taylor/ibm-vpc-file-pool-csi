@@ -8,6 +8,8 @@ import (
 	"time"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -67,6 +69,8 @@ func (r *Runner) startEvent(ctx context.Context, pb *v1alpha1.PoolBench, ev *v1a
 		err = r.startMigration(ctx, pb)
 	case v1alpha1.PoolBenchEventSnapshot:
 		err = r.startSnapshot(ctx, pb)
+	case v1alpha1.PoolBenchEventBackup:
+		err = r.startBackup(ctx, pb)
 	default:
 		return r.endEvent(ctx, pb, now, "This event is not available in this version.")
 	}
@@ -95,6 +99,8 @@ func (r *Runner) event(ctx context.Context, pb *v1alpha1.PoolBench, now time.Tim
 		done, msg = r.pollMigration(ctx, pb, timedOut)
 	case v1alpha1.PoolBenchEventSnapshot:
 		done, msg = r.pollSnapshot(ctx, pb, timedOut)
+	case v1alpha1.PoolBenchEventBackup:
+		done, msg = r.pollBackup(ctx, pb, res.Started.Time, timedOut)
 	default:
 		done, msg = true, "This event is not available in this version."
 	}
@@ -110,6 +116,9 @@ func (r *Runner) event(ctx context.Context, pb *v1alpha1.PoolBench, now time.Tim
 func (r *Runner) endEvent(ctx context.Context, pb *v1alpha1.PoolBench, now time.Time, msg string) error {
 	st := &pb.Status
 	res := &st.Events[len(st.Events)-1]
+	if res.Type == v1alpha1.PoolBenchEventBackup {
+		r.stopBackup(ctx, pb, now)
+	}
 	res.Ended = &metav1.Time{Time: now}
 	res.Seconds = int64(now.Sub(res.Started.Time).Seconds())
 	res.Message = msg
@@ -253,8 +262,12 @@ func (r *Runner) eventTargets(ctx context.Context, pb *v1alpha1.PoolBench) ([]st
 		names = append(names, vmi.GetName())
 	}
 	sort.Strings(names)
-	return names[:max(1, min(10, len(names)/10))], nil
+	return names[:backupTargetCount(len(names))], nil
 }
+
+// backupTargetCount is how many of n VMs a migration, snapshot or backup works
+// on: 10 percent, at least 1, at most 10.
+func backupTargetCount(n int) int { return max(1, min(10, n/10)) }
 
 // startMigration live-migrates the target VMs at once.
 func (r *Runner) startMigration(ctx context.Context, pb *v1alpha1.PoolBench) error {
@@ -383,4 +396,99 @@ func (r *Runner) pollSnapshot(ctx context.Context, pb *v1alpha1.PoolBench, timed
 		return true, fmt.Sprintf("Snapshots of %s; not all were ready within %d minutes (%d were, %d failed).", vmsText(total), int(eventTimeout.Minutes()), ok, failed)
 	}
 	return false, ""
+}
+
+// backupLabel is on the load disks the backup event backs up. Its value is the
+// run's name; the event's policy selects the disks by it.
+const backupLabel = "storage.ibmcloud.io/poolbench-backup"
+
+// startBackup labels the load disks of the target VMs and makes a backup policy
+// that selects them. The policy copies them into the run's own backup pool, so
+// the backup load is not on the share under test but the VMs' disks are read
+// from it. The policy goes when the event ends, so it backs up once.
+func (r *Runner) startBackup(ctx context.Context, pb *v1alpha1.PoolBench) error {
+	vms, err := r.eventTargets(ctx, pb)
+	if err != nil {
+		return err
+	}
+	if err := r.ensureBackupPool(ctx, pb); err != nil {
+		return err
+	}
+	for _, vm := range vms {
+		pvc := &corev1.PersistentVolumeClaim{}
+		if err := r.Client.Get(ctx, client.ObjectKey{Namespace: runName(pb), Name: vm + "-data"}, pvc); err != nil {
+			return fmt.Errorf("cannot find the disk of %s: %w", vm, err)
+		}
+		patch := client.MergeFrom(pvc.DeepCopy())
+		if pvc.Labels == nil {
+			pvc.Labels = map[string]string{}
+		}
+		pvc.Labels[backupLabel] = pb.Name
+		if err := r.Client.Patch(ctx, pvc, patch); err != nil {
+			return fmt.Errorf("cannot mark the disk of %s: %w", vm, err)
+		}
+	}
+	bp := &v1alpha1.BackupPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: backupPolicyName(pb), Labels: runLabels(pb)},
+		Spec: v1alpha1.BackupPolicySpec{
+			SnapshotPool: backupPoolName(pb),
+			Schedule:     "1h",
+			KeepFor:      "1h",
+			Selector:     &metav1.LabelSelector{MatchLabels: map[string]string{backupLabel: pb.Name}},
+			Namespaces:   []string{runName(pb)},
+		},
+	}
+	if err := r.createIfMissing(ctx, bp); err != nil {
+		return fmt.Errorf("cannot start the backup: %w", err)
+	}
+	return nil
+}
+
+// ensureBackupPool makes the pool the backups go to, if the run does not have it.
+func (r *Runner) ensureBackupPool(ctx context.Context, pb *v1alpha1.PoolBench) error {
+	return r.ensurePool(ctx, pb, backupPoolName(pb), buildBackupPool)
+}
+
+func backupPolicyName(pb *v1alpha1.PoolBench) string { return runName(pb) + "-backup" }
+
+// pollBackup is done when every target disk has a backup made after the event
+// began. The policy's own message is added when time runs out, to say why.
+func (r *Runner) pollBackup(ctx context.Context, pb *v1alpha1.PoolBench, started time.Time, timedOut bool) (bool, string) {
+	pvcs := &corev1.PersistentVolumeClaimList{}
+	if err := r.Client.List(ctx, pvcs, client.InNamespace(runName(pb)), client.MatchingLabels{backupLabel: pb.Name}); err != nil {
+		return false, ""
+	}
+	bp := &v1alpha1.BackupPolicy{}
+	if err := r.Client.Get(ctx, client.ObjectKey{Name: backupPolicyName(pb)}, bp); err != nil {
+		if apierrors.IsNotFound(err) {
+			return true, "The backup policy is gone, so the backup did not finish."
+		}
+		return false, ""
+	}
+	total := len(pvcs.Items)
+	done := 0
+	for _, v := range bp.Status.Volumes {
+		if v.PVCNamespace == runName(pb) && v.LastBackupTime != nil && !v.LastBackupTime.Time.Before(started) {
+			done++
+		}
+	}
+	switch {
+	case done >= total:
+		return true, fmt.Sprintf("Backed up %s while they ran; all finished.", vmsText(total))
+	case timedOut:
+		msg := fmt.Sprintf("Backed up %s; not all finished within %d minutes (%d did).", vmsText(total), int(eventTimeout.Minutes()), done)
+		if bp.Status.Phase == "Error" && bp.Status.Message != "" {
+			msg += " The backup said: " + bp.Status.Message
+		}
+		return true, msg
+	}
+	return false, ""
+}
+
+// stopBackup deletes the event's backup policy, so it does not back up again.
+func (r *Runner) stopBackup(ctx context.Context, pb *v1alpha1.PoolBench, now time.Time) {
+	bp := &v1alpha1.BackupPolicy{ObjectMeta: metav1.ObjectMeta{Name: backupPolicyName(pb)}}
+	if err := r.Client.Delete(ctx, bp); err != nil && !apierrors.IsNotFound(err) {
+		r.log(pb, now, "Warn", fmt.Sprintf("Could not delete the backup policy: %v", err))
+	}
 }

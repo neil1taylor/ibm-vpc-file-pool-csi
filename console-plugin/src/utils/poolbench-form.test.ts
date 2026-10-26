@@ -141,8 +141,8 @@ describe('room on the nodes', () => {
 });
 
 describe('events', () => {
-  it('offers the four events that exist, each with a plain sentence', () => {
-    expect(EVENT_OPTIONS.map((e) => e.type)).toEqual(['BootStorm', 'PatchWindow', 'Migration', 'Snapshot']);
+  it('offers the five events that exist, each with a plain sentence', () => {
+    expect(EVENT_OPTIONS.map((e) => e.type)).toEqual(['BootStorm', 'PatchWindow', 'Migration', 'Snapshot', 'Backup']);
     for (const e of EVENT_OPTIONS) expect(e.text.length).toBeGreaterThan(20);
   });
 

@@ -398,13 +398,26 @@ func (r *Runner) prepare(ctx context.Context, pb *v1alpha1.PoolBench) error {
 			return cerr
 		}
 	}
-	err = r.Client.Get(ctx, client.ObjectKey{Name: ns}, &v1alpha1.FileSharePool{})
+	if err := r.ensurePool(ctx, pb, ns, buildPool); err != nil {
+		return err
+	}
+	for _, ev := range pb.Spec.Events {
+		if ev.Type == v1alpha1.PoolBenchEventBackup {
+			return r.ensureBackupPool(ctx, pb)
+		}
+	}
+	return nil
+}
+
+// ensurePool makes the pool called name, in the run's zone, if it is missing.
+func (r *Runner) ensurePool(ctx context.Context, pb *v1alpha1.PoolBench, name string, build func(*v1alpha1.PoolBench, string) *v1alpha1.FileSharePool) error {
+	err := r.Client.Get(ctx, client.ObjectKey{Name: name}, &v1alpha1.FileSharePool{})
 	if apierrors.IsNotFound(err) {
 		zone, zerr := r.zone(ctx, pb)
 		if zerr != nil {
 			return zerr
 		}
-		return r.createIfMissing(ctx, buildPool(pb, zone))
+		return r.createIfMissing(ctx, build(pb, zone))
 	}
 	return err
 }
@@ -794,14 +807,14 @@ func (r *Runner) cleanup(ctx context.Context, pb *v1alpha1.PoolBench, now time.T
 	if !apierrors.IsNotFound(err) {
 		return false, err
 	}
-	pool := &v1alpha1.FileSharePool{}
-	err = r.Client.Get(ctx, client.ObjectKey{Name: runName(pb)}, pool)
-	if err == nil && pool.DeletionTimestamp.IsZero() {
-		r.log(pb, now, "Info", "Deleting the test pool and its share")
-		if derr := r.Client.Delete(ctx, pool); derr != nil && !apierrors.IsNotFound(derr) {
-			return false, fmt.Errorf("delete pool: %w", derr)
+	bp := &v1alpha1.BackupPolicy{}
+	err = r.Client.Get(ctx, client.ObjectKey{Name: backupPolicyName(pb)}, bp)
+	if err == nil && bp.DeletionTimestamp.IsZero() {
+		r.log(pb, now, "Info", "Deleting the backup policy")
+		if derr := r.Client.Delete(ctx, bp); derr != nil && !apierrors.IsNotFound(derr) {
+			return false, fmt.Errorf("delete backup policy: %w", derr)
 		}
-		err = r.Client.Get(ctx, client.ObjectKey{Name: runName(pb)}, pool)
+		err = r.Client.Get(ctx, client.ObjectKey{Name: backupPolicyName(pb)}, bp)
 	}
 	if err == nil {
 		return false, nil
@@ -809,9 +822,35 @@ func (r *Runner) cleanup(ctx context.Context, pb *v1alpha1.PoolBench, now time.T
 	if !apierrors.IsNotFound(err) {
 		return false, err
 	}
+	for _, name := range []string{runName(pb), backupPoolName(pb)} {
+		gone, perr := r.deletePool(ctx, pb, name, now)
+		if perr != nil || !gone {
+			return false, perr
+		}
+	}
 	pb.Status.CleanedUp = true
 	pb.Status.VMs, pb.Status.WindowsVMs, pb.Status.ReadyVMs = 0, 0, 0
 	r.log(pb, now, "Info", "Cleaned up: the namespace and the pool are gone")
+	return true, nil
+}
+
+// deletePool deletes the pool called name and says whether it is gone.
+func (r *Runner) deletePool(ctx context.Context, pb *v1alpha1.PoolBench, name string, now time.Time) (bool, error) {
+	pool := &v1alpha1.FileSharePool{}
+	err := r.Client.Get(ctx, client.ObjectKey{Name: name}, pool)
+	if err == nil && pool.DeletionTimestamp.IsZero() {
+		r.log(pb, now, "Info", "Deleting the pool "+name+" and its share")
+		if derr := r.Client.Delete(ctx, pool); derr != nil && !apierrors.IsNotFound(derr) {
+			return false, fmt.Errorf("delete pool: %w", derr)
+		}
+		err = r.Client.Get(ctx, client.ObjectKey{Name: name}, pool)
+	}
+	if err == nil {
+		return false, nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return false, err
+	}
 	return true, nil
 }
 

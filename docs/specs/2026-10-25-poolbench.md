@@ -96,9 +96,9 @@ Each event writes one result: when it started and ended, its main time in second
 | Patch window | All VMs run the burst load without the quiet phase, for 10 minutes, as a patch scan would. | Until the share's p95 is back under the limit |
 | Migration | Live-migrates 10% of the VMs at once (at least 1, at most 10). | Until the last migration ends; failed migrations are counted |
 | Snapshot | Takes an instant snapshot of 10% of the VMs while they run. | Until the last snapshot is ready |
-| Backup | Backs up 10% of the VMs to an object storage bucket. | Until the last backup ends |
+| Backup | Backs up 10% of the VMs (at least 1, at most 10) while they run, with a backup policy, to a second small share that the run makes. | Until the last backup ends |
 
-The Backup event needs a bucket and its credentials as a Secret, so it is built last and only runs if the form is given them.
+The Backup event needs no object storage bucket. The run makes a second pool of one share, sized for a full copy of the target VMs' disks and half as much again, at 3,000 IOPS so the backup share is not what slows the copy. It labels the load disks of the target VMs, makes a backup policy that selects them in the run's namespace and copies to that pool, and deletes the policy when the event ends, so it backs up once. Cleanup deletes the policy and the second pool. Because a backup policy is not tied to a namespace, the service gets get, create and delete on backup policies cluster-wide, and the admission policy lets it make only a policy named `poolbench-*` that copies to a `poolbench-*` pool and covers only `poolbench-*` namespaces.
 
 ### Other pages
 
@@ -156,4 +156,5 @@ After step 10, the command-line runner stays for the build server until the cons
 - Events run after a step's measuring, not during it, so one event cannot push a step over the knee.
 - An event never fails the run; it records why it could not run.
 - Events touch 10% of the VMs (at most 10), except the boot storm and the patch window, which touch all.
-- The Backup event needs a bucket from the person, so it comes last.
+- The Backup event needs no bucket: the run makes a second small share for the backups and removes it at the end. It comes last because it needs wider rights for the service.
+- The backup uses the backup policy's own copy speed limit, so the time is what a customer would see with the defaults.

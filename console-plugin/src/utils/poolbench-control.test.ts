@@ -109,7 +109,7 @@ describe('adding an event to a running run', () => {
   it('offers the events that are not already asked for at this step', () => {
     const run = pb({ phase: 'Running', stage: 'Measuring', step: 2 });
     run.spec.events = [{ type: 'BootStorm', atVMs: 30 }, { type: 'Snapshot', atVMs: 45 }];
-    expect(eventChoices(run).map((e) => e.type)).toEqual(['PatchWindow', 'Migration', 'Snapshot']);
+    expect(eventChoices(run).map((e) => e.type)).toEqual(['PatchWindow', 'Migration', 'Snapshot', 'Backup']);
   });
 
   it('asks for the event at the VM count of the current step, keeping the events already there', () => {
