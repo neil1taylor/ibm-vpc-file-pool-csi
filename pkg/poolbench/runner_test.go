@@ -543,6 +543,100 @@ func TestRunner_SummaryExplainsTheRecommendation(t *testing.T) {
 	}
 }
 
+// toEndOfMeasuring runs step 1 of an event test up to the pass that ends its
+// measuring, leaving the run in the Event stage if an event is due.
+func (h *harness) toEndOfMeasuring() {
+	h.t.Helper()
+	h.startToMeasuring()
+	h.advance(45 * time.Minute)
+	h.results(3, 4000000)
+	h.shares.reads = append(h.shares.reads, PoolBenchCountersReading{ops: 1000 + 2700*60*45, secs: 1 + 2700*60*45*0.0004})
+	h.pass()
+	h.advance(2 * time.Minute)
+	h.pass()
+}
+
+func benchWithEvent(typ string, atVMs int32) *v1alpha1.PoolBench {
+	pb := testBench()
+	pb.Spec.Events = []v1alpha1.PoolBenchEvent{{Type: typ, AtVMs: atVMs}}
+	return pb
+}
+
+func instances(names ...string) []client.Object {
+	var out []client.Object
+	for _, n := range names {
+		u := &unstructured.Unstructured{}
+		u.SetGroupVersionKind(vmiGVK)
+		u.SetName(n)
+		u.SetNamespace("poolbench-t10k")
+		out = append(out, u)
+	}
+	return out
+}
+
+func TestRunner_BootStorm(t *testing.T) {
+	h := newHarness(t, benchWithEvent(v1alpha1.PoolBenchEventBootStorm, 3), instances("vm-001", "vm-002", "vm-003")...)
+	h.toEndOfMeasuring()
+	pb := h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageEvent)
+	if pb.Status.Step != 1 || len(pb.Status.Events) != 1 || pb.Status.Events[0].Type != v1alpha1.PoolBenchEventBootStorm ||
+		pb.Status.Events[0].AtVMs != 3 || pb.Status.Events[0].Started == nil || pb.Status.Events[0].Ended != nil {
+		t.Fatalf("event start: %+v", pb.Status)
+	}
+	if !strings.Contains(pb.Status.Message, "boot storm") {
+		t.Fatalf("the message must name the event: %q", pb.Status.Message)
+	}
+	if n := h.count(instancesList()); n != 0 {
+		t.Fatalf("the boot storm must restart every VM, %d instances are left", n)
+	}
+
+	// Ten minutes later one VM has not sent results again: the event waits,
+	// and the Windows VM is given its load again.
+	before := len(h.starter.started)
+	h.advance(10 * time.Minute)
+	_ = h.r.Store.Add("t10k", VM{Name: "vm-001", OS: "linux"}, "PERF "+itoa(h.now.Unix())+" steady "+fioJSON("lat_ns", 20, 9, 1000000, 4000000, 4000000, 12000000, 2000000, 3000000), h.now)
+	h.pass()
+	h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageEvent)
+	if len(h.starter.started) <= before {
+		t.Fatal("the Windows VM was not given its load again")
+	}
+
+	h.advance(2 * time.Minute)
+	h.results(3, 4000000)
+	h.pass()
+	pb = h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageCreating)
+	ev := pb.Status.Events[0]
+	if ev.Ended == nil || ev.Seconds != 720 || !strings.Contains(ev.Message, "3 VMs") || pb.Status.Step != 2 {
+		t.Fatalf("event result: %+v step %d", ev, pb.Status.Step)
+	}
+}
+
+func TestRunner_BootStormGivesUp(t *testing.T) {
+	h := newHarness(t, benchWithEvent(v1alpha1.PoolBenchEventBootStorm, 3), instances("vm-001", "vm-002", "vm-003")...)
+	h.toEndOfMeasuring()
+	h.advance(31 * time.Minute)
+	h.pass()
+	pb := h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageCreating)
+	ev := pb.Status.Events[0]
+	if ev.Ended == nil || !strings.Contains(ev.Message, "not all") || pb.Status.Step != 2 {
+		t.Fatalf("a boot storm that never ends must say so and let the run go on: %+v", ev)
+	}
+}
+
+func TestRunner_EventOnlyAtItsStep(t *testing.T) {
+	h := newHarness(t, benchWithEvent(v1alpha1.PoolBenchEventBootStorm, 6), instances("vm-001")...)
+	h.toEndOfMeasuring()
+	h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageCreating)
+	if len(h.bench().Status.Events) != 0 {
+		t.Fatal("the event is for step 2")
+	}
+}
+
+func instancesList() *unstructured.UnstructuredList {
+	l := &unstructured.UnstructuredList{}
+	l.SetGroupVersionKind(vmiGVK.GroupVersion().WithKind("VirtualMachineInstanceList"))
+	return l
+}
+
 func TestRunner_MissingImage(t *testing.T) {
 	h := newHarness(t, testBench())
 	if err := h.c.Delete(context.Background(), dataSource("win2k22-perf")); err != nil {

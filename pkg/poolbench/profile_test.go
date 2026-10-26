@@ -86,7 +86,9 @@ func TestUserData(t *testing.T) {
 		"/root/state.sh",
 		"= paused ]",
 		"http://collector.example:8080/v1/runs/t10k/state",
-		"nohup sh /root/load.sh",
+		"/etc/systemd/system/poolbench-load.service",
+		"Restart=always",
+		"systemctl enable --now poolbench-load",
 	} {
 		if !strings.Contains(ud, want) {
 			t.Errorf("user data lacks %q", want)

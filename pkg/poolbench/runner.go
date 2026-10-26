@@ -479,6 +479,8 @@ func (r *Runner) run(ctx context.Context, pb *v1alpha1.PoolBench, now time.Time)
 		return nil
 	case v1alpha1.PoolBenchStageMeasuring:
 		return r.measuring(ctx, pb, now)
+	case v1alpha1.PoolBenchStageEvent:
+		return r.event(ctx, pb, now)
 	}
 	return nil
 }
@@ -514,6 +516,14 @@ func (r *Runner) startCreating(pb *v1alpha1.PoolBench, now time.Time) {
 	r.describe(pb, now)
 }
 
+// currentEventName is the plain name of the event that is running.
+func currentEventName(st *v1alpha1.PoolBenchStatus) string {
+	if n := len(st.Events); n > 0 {
+		return eventNames[st.Events[n-1].Type]
+	}
+	return ""
+}
+
 // describe sets the plain-words message of the current stage.
 func (r *Runner) describe(pb *v1alpha1.PoolBench, now time.Time) {
 	st := &pb.Status
@@ -521,6 +531,7 @@ func (r *Runner) describe(pb *v1alpha1.PoolBench, now time.Time) {
 		v1alpha1.PoolBenchStageCreating:  "making VMs and waiting until each one sends results",
 		v1alpha1.PoolBenchStageSettling:  "letting the share settle after the disk copies",
 		v1alpha1.PoolBenchStageMeasuring: "measuring",
+		v1alpha1.PoolBenchStageEvent:     "running the event: " + currentEventName(st),
 	}[st.Stage]
 	msg := fmt.Sprintf("Step %d of %d: %d VMs (%d Windows), %s", st.Step, st.TotalSteps, r.target(pb), windowsCount(&pb.Spec, r.target(pb)), what)
 	if st.StageEnds != nil && now.Before(st.StageEnds.Time) {
@@ -679,7 +690,7 @@ func (r *Runner) measuring(ctx context.Context, pb *v1alpha1.PoolBench, now time
 	if pb.Spec.Control.SkipStep == st.Step {
 		r.log(pb, now, "Control", fmt.Sprintf("Step %d cut short", st.Step))
 		st.ShareAtEnd = r.readShare(ctx, pb, now)
-		return r.finishStep(pb, now, now, true)
+		return r.finishStep(ctx, pb, now, now, true)
 	}
 	if pb.Spec.Control.Hold || now.Before(st.StageEnds.Time) {
 		r.describe(pb, now)
@@ -692,12 +703,12 @@ func (r *Runner) measuring(ctx context.Context, pb *v1alpha1.PoolBench, now time
 		st.Message = fmt.Sprintf("Step %d of %d: waiting for the last results", st.Step, st.TotalSteps)
 		return nil
 	}
-	return r.finishStep(pb, st.StageEnds.Time, now, false)
+	return r.finishStep(ctx, pb, st.StageEnds.Time, now, false)
 }
 
 // finishStep measures the step that ran from StageStarted to end, then goes
 // to the next step or ends the run.
-func (r *Runner) finishStep(pb *v1alpha1.PoolBench, end, now time.Time, cutShort bool) error {
+func (r *Runner) finishStep(ctx context.Context, pb *v1alpha1.PoolBench, end, now time.Time, cutShort bool) error {
 	st := &pb.Status
 	profile, err := NewProfile(pb.Spec.Load)
 	if err != nil {
@@ -752,14 +763,7 @@ func (r *Runner) finishStep(pb *v1alpha1.PoolBench, end, now time.Time, cutShort
 	r.log(pb, now, "Info", fmt.Sprintf("Step %d: %d VMs, p95 %.1f ms, %d%% slow, share %d IOPS: %s",
 		st.Step, row.VMs, s.P95Ms, s.SlowPercent, row.ShareIOPS, verdict))
 
-	stopAtKnee := pb.Spec.Knee.StopAtKnee == nil || *pb.Spec.Knee.StopAtKnee
-	if (st.KneeVMs > 0 && stopAtKnee) || st.Step >= st.TotalSteps {
-		r.endRun(pb, now, false)
-		return nil
-	}
-	st.Step++
-	r.startCreating(pb, now)
-	return nil
+	return r.nextStep(ctx, pb, now)
 }
 
 // cleanup deletes the run's namespace (with its VMs and disks), then its
