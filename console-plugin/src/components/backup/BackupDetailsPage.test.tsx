@@ -98,13 +98,13 @@ describe('BackupDetailsPage', () => {
     expect(screen.getByRole('link', { name: 'snaps' }).getAttribute('href')).toBe('/vpc-file-pools/pools/snaps');
   });
 
-  it('shows the default VM copy speed when none is set, and "all namespaces"', () => {
+  it('says the VM copy adapts when no highest speed is set, and shows "all namespaces"', () => {
     const p = policy();
     delete p.spec.vmCopySpeedLimitMBps;
     delete p.spec.namespaces;
     watch(p);
     render(<BackupDetailsPage />);
-    expect(screen.getByText(/20 MB\/s per disk \(default\)/)).toBeTruthy();
+    expect(screen.getByText(/Adapts to the load on the share \(no highest speed\)/)).toBeTruthy();
     expect(screen.getByText('All namespaces')).toBeTruthy();
   });
 

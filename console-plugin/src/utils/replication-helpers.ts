@@ -32,13 +32,17 @@ export function replicationDestination(spec: ReplicationPolicySpec | undefined):
   return '-';
 }
 
-export const DEFAULT_VM_COPY_SPEED_MBPS = 20;
+/** The highest copy speed a policy has when it sets none: there is none, the copy adapts to the share. */
+export const DEFAULT_VM_COPY_SPEED_MBPS = 0;
+/** The speed of a copy that does not adapt, when the policy sets none. */
+const FIXED_VM_COPY_SPEED_MBPS = 20;
 export const DEFAULT_RESTORE_POINT_KEEP_HOURS = 24;
 
 /**
  * The spec fields for the VM copy settings. A setting equal to its default is
- * left out, so the controller's default applies. A speed below 0 becomes 0 and
- * a keep time below 1 hour becomes 1, the lowest the CRD accepts.
+ * left out, so the controller's default applies. A highest speed of 0 means
+ * there is none. A speed below 0 becomes 0 and a keep time below 1 hour
+ * becomes 1, the lowest the CRD accepts.
  */
 export function vmCopySpecFields(input: {
   speedLimitMBps: number;
@@ -56,12 +60,19 @@ export function vmCopySpecFields(input: {
 export function vmCopySettingsText(spec: ReplicationPolicySpec): { speed: string; keep: string } {
   const speedValue = spec.vmCopySpeedLimitMBps;
   const keepValue = spec.restorePointKeepHours;
-  const speed =
-    speedValue === undefined
-      ? `${DEFAULT_VM_COPY_SPEED_MBPS} MB/s per disk (default)`
-      : speedValue === 0
-        ? 'Unlimited'
-        : `${speedValue} MB/s per disk`;
+  let speed: string;
+  if (spec.vmCopyAdaptive === false) {
+    speed =
+      speedValue === undefined
+        ? `${FIXED_VM_COPY_SPEED_MBPS} MB/s per disk (fixed, default)`
+        : speedValue === 0
+          ? 'Unlimited (fixed)'
+          : `${speedValue} MB/s per disk (fixed)`;
+  } else {
+    speed = speedValue
+      ? `Adapts to the load on the share, up to ${speedValue} MB/s per disk`
+      : 'Adapts to the load on the share (no highest speed)';
+  }
   const hours = (n: number) => `${n} ${n === 1 ? 'hour' : 'hours'}`;
   const keep =
     keepValue === undefined ? `${hours(DEFAULT_RESTORE_POINT_KEEP_HOURS)} (default)` : hours(keepValue);

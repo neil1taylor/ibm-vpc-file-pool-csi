@@ -85,6 +85,7 @@ spec:
             {{- if .Values.node.metricsPort }}
             # The copy of a running VM's disks follows the load on the share, read from the node agents.
             - "--node-metrics-service={{ include "ibm-vpc-file-pool-csi.fullname" . }}-node-metrics"
+            - "--node-metrics-account={{ include "ibm-vpc-file-pool-csi.fullname" . }}-node-reader"
             - "--node-metrics-ca=/etc/node-metrics-ca/{{ ternary "service-ca.crt" "ca.crt" (eq .Values.webhook.certProvider "openshift") }}"
             {{- end }}
             {{- if include "ibm-vpc-file-pool-csi.uwm" . }}

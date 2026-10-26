@@ -68,6 +68,7 @@ func main() {
 
 		// Node mode metrics flags.
 		nodeMetricsAddr          string
+		nodeMetricsAccount       string
 		nodeMetricsCertDir       string
 		controllerMetricsCertDir string
 		mon                      monitoringOptions
@@ -208,6 +209,7 @@ func main() {
 	flag.StringVar(&poolBench.RunRole, "poolbench-run-role", "", "ClusterRole the service binds to itself in each run's namespace (poolbench mode)")
 	flag.StringVar(&poolBench.ServiceAccount, "poolbench-service-account", "", "The service's own service account, for that binding (poolbench mode)")
 	flag.StringVar(&poolBench.NodeMetricsService, "node-metrics-service", "", "The node agents' metrics Service, read for the share counters (poolbench and controller modes)")
+	flag.StringVar(&nodeMetricsAccount, "node-metrics-account", "", "Service account whose short-lived token the controller sends to the node agents; it may only read their metrics (controller mode)")
 	flag.StringVar(&poolBench.NodeMetricsCA, "node-metrics-ca", "", "File with the CA of the node agents' metrics certificate (poolbench and controller modes)")
 
 	flag.StringVar(&vmGroup, "vm-group", "", "namespace/name of the VM that owns the disk (send-vm-disk mode)")
@@ -224,7 +226,7 @@ func main() {
 			klog.ErrorS(err, "Invalid flag")
 			os.Exit(1)
 		}
-		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, controllerMetricsCertDir, mon, cloneWorkerInterval, goldenImageSyncInterval, cdiCopyPodMemoryLimit, driverImage, webhooks, vmSnapshots, browse, nodeAgentOptions{service: poolBench.NodeMetricsService, caFile: poolBench.NodeMetricsCA})
+		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, controllerMetricsCertDir, mon, cloneWorkerInterval, goldenImageSyncInterval, cdiCopyPodMemoryLimit, driverImage, webhooks, vmSnapshots, browse, nodeAgentOptions{service: poolBench.NodeMetricsService, caFile: poolBench.NodeMetricsCA, account: nodeMetricsAccount})
 	case "receiver":
 		runReceiver(receiverBasePath, receiverAuthTokenFile, receiverListenAddr, receiverTLSCertFile, receiverTLSKeyFile)
 	case "sync-client":
@@ -312,6 +314,9 @@ type browseOptions struct {
 type nodeAgentOptions struct {
 	service string
 	caFile  string
+	// account is the service account whose short-lived token the controller
+	// sends to the node agents. It may only read their metrics.
+	account string
 }
 
 // webhookOptions configures the admission webhook server.
@@ -593,14 +598,15 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metric
 	vmCopier := vmcopy.NewCopier(hooks.NewPodExecer(clientset, restConfig))
 	replController.SetVMCopier(vmCopier)
 	// Without the node agents' metrics the copies run at a fixed speed.
-	if nodeAgents.service != "" {
+	if nodeAgents.service != "" && nodeAgents.account != "" {
 		httpClient, herr := nodestats.NewHTTPClient(nodeAgents.caFile, nodeAgents.service+"."+driverNamespace+".svc")
 		if herr != nil {
 			klog.ErrorS(herr, "Failed to set up the node agents' metrics client; VM disk copies run at a fixed speed")
 		} else {
 			replController.SetShareLatency(&pool.LatencyMeter{
 				Source: &nodestats.Reader{Client: replClient, Namespace: driverNamespace, Service: nodeAgents.service,
-					HTTP: httpClient, TokenFile: nodestats.ServiceAccountTokenFile},
+					HTTP:  httpClient,
+					Token: (&nodestats.ServiceAccountTokens{Clientset: clientset, Namespace: driverNamespace, Name: nodeAgents.account, Now: time.Now}).Token},
 				MinOps: 50, Window: 3, MinGap: 10 * time.Second, Now: time.Now,
 			})
 		}

@@ -105,3 +105,32 @@ func testScheme() *runtime.Scheme {
 	_ = discoveryv1.AddToScheme(s)
 	return s
 }
+
+func TestReader_SendsTheTokenOfTheTokenFunction(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		_, _ = fmt.Fprint(w, agentMetrics)
+	}))
+	defer srv.Close()
+	host, portStr, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	port, _ := strconv.Atoi(portStr)
+	c := fake.NewClientBuilder().WithScheme(testScheme()).WithObjects(slice(port, host)).Build()
+	n := &Reader{Client: c, Namespace: "kube-system", Service: "csi-node-metrics", HTTP: srv.Client(),
+		Token: func(context.Context) (string, error) { return "reader-token", nil }}
+	if _, _, err := n.Totals(context.Background(), "poolbench-t10k"); err != nil {
+		t.Fatal(err)
+	}
+	if gotAuth != "Bearer reader-token" {
+		t.Fatalf("auth header %q", gotAuth)
+	}
+}
+
+func TestReader_ATokenThatCannotBeMadeIsAnError(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(testScheme()).WithObjects(slice(1, "127.0.0.1")).Build()
+	n := &Reader{Client: c, Namespace: "kube-system", Service: "csi-node-metrics", HTTP: http.DefaultClient,
+		Token: func(context.Context) (string, error) { return "", fmt.Errorf("refused") }}
+	if _, _, err := n.Totals(context.Background(), "poolbench-t10k"); err == nil {
+		t.Fatal("without a token the agents refuse; do not send nothing")
+	}
+}

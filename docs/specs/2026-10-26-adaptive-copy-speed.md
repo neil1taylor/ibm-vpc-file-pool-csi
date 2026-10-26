@@ -39,6 +39,8 @@ Today the copy runs at a fixed limit, 20 MB/s for each disk (`vmCopySpeedLimitMB
 
 **Smoothing.** The reading is the median of the last three 30-second intervals, and an interval with fewer than 50 operations is not a reading. The lab (see below) showed that one 15-second interval of a busy share can swing by tens of milliseconds, so one bad interval must not decide.
 
+**The token.** The controller does not send its own token to the node agents, because that token has wide rights and a node agent could be taken over. It asks the API server for a one-hour token of a separate service account (`<release>-node-reader`) that may do nothing but read `/metrics`, and renews it ten minutes before it ends.
+
 **Why share latency and not the VM's own latency.** The driver cannot see inside the VM. The share latency is what every VM on that share feels, and it is already measured.
 
 **Why a slow start and a fast brake.** A backup that is a little too slow costs minutes. A VM that is too slow costs the people who use it. The rule errs on the side of the VM.

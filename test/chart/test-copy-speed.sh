@@ -49,8 +49,18 @@ check "it may list endpoint slices in its own namespace" \
     "$(doc "$OS" Role "$C-node-agents" '.rules[] | select(.resources[] == "endpointslices") | .verbs[0]')" "list"
 check "that role is in the driver namespace" "$(doc "$OS" Role "$C-node-agents" '.metadata.namespace')" "kube-system"
 check "and is bound to the controller" "$(doc "$OS" RoleBinding "$C-node-agents" '.subjects[0].name')" "$C"
-check "it may read /metrics (the node agents check the token)" \
-    "$(doc "$OS" ClusterRole "$C" '.rules[] | select(.nonResourceURLs[] == "/metrics") | .verbs[0]')" "get"
+# The controller does not send its own token to the node agents. It asks for a short-lived token of a
+# service account that can do nothing but read their metrics.
+R=test-ibm-vpc-file-pool-csi-node-reader
+if grep -qxF -- "--node-metrics-account=$R" <<<"$A"; then pass "the controller uses the reader's token"; else fail "no --node-metrics-account"; fi
+check "the reader service account exists" "$(doc "$OS" ServiceAccount "$R" '.metadata.name')" "$R"
+check "the reader may read /metrics" "$(doc "$OS" ClusterRole "$R" '.rules[0].nonResourceURLs[0] + ":" + .rules[0].verbs[0]')" "/metrics:get"
+check "and nothing else" "$(doc "$OS" ClusterRole "$R" '.rules | length')" "1"
+check "the reader's role is bound to it" "$(doc "$OS" ClusterRoleBinding "$R" '.subjects[0].name')" "$R"
+check "the controller may make tokens only for the reader" \
+    "$(doc "$OS" Role "$C-node-agents" '.rules[] | select(.resources[] == "serviceaccounts/token") | .resourceNames[0] + ":" + .verbs[0]')" "$R:create"
+if doc "$OS" ClusterRole "$C" '.rules[] | select(.nonResourceURLs != null) | .nonResourceURLs[]' | grep -qx "/metrics"; then
+    fail "the controller must not read /metrics with its own token"; else pass "the controller has no /metrics right of its own"; fi
 if doc "$OS" ClusterRole "$C" '.rules[].resources[]' | grep -qx endpointslices; then fail "no cluster-wide endpoint slice rights"; else pass "no cluster-wide endpoint slice rights"; fi
 
 exit $FAILED

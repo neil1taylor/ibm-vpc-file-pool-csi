@@ -247,8 +247,11 @@ export interface ReplicationPolicySpec {
   destinationAuthSecretRef?: string;
   /** Secret name in kube-system with a "ca.crt" key. Used in driver-to-driver mode when the receiver has a self-signed certificate. */
   destinationCACertSecretRef?: string;
-  /** Speed limit for copying a running VM's disk, in MB/s for each disk. 0 is unlimited. Default 20. */
+  /** The highest speed of the copy of a running VM's disk, in MB/s for each disk; none if unset or 0. With vmCopyAdaptive false it is the fixed speed (0 unlimited, unset 20). */
   vmCopySpeedLimitMBps?: number;
+  /** The copy starts slow and follows the load on the share. Default true. */
+  vmCopyAdaptive?: boolean;
+  vmCopyMaxLatencyMs?: number;
   /** How long the destination keeps restore points of a running VM's disks. Default 24. */
   restorePointKeepHours?: number;
 }
@@ -352,8 +355,11 @@ export interface BackupPolicySpec {
   namespaces?: string[];
   /** A Go duration or a number of days such as "30d". Default 7d. */
   keepFor?: string;
-  /** MB/s for each disk of a running VM. 0 is unlimited. Default 20. */
+  /** The highest speed of the copy of a running VM's disk, in MB/s for each disk; none if unset or 0. */
   vmCopySpeedLimitMBps?: number;
+  /** The copy starts slow and follows the load on the share. Default true. */
+  vmCopyAdaptive?: boolean;
+  vmCopyMaxLatencyMs?: number;
   suspend?: boolean;
   export?: BackupExport;
 }

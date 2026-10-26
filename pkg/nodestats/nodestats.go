@@ -54,6 +54,9 @@ type Reader struct {
 	// HTTP trusts the agents' certificate (the service CA) and names the
 	// Service in its TLS server name.
 	HTTP *http.Client
+	// Token gives the token the agents check. If nil, the token is read from
+	// TokenFile.
+	Token func(ctx context.Context) (string, error)
 	// TokenFile holds the service account token the agents check.
 	TokenFile string
 }
@@ -68,7 +71,13 @@ func (n *Reader) Totals(ctx context.Context, pool string) (ops, seconds float64,
 		return 0, 0, fmt.Errorf("list the node agents: %w", err)
 	}
 	token := ""
-	if n.TokenFile != "" {
+	if n.Token != nil {
+		t, err := n.Token(ctx)
+		if err != nil {
+			return 0, 0, fmt.Errorf("get the token: %w", err)
+		}
+		token = t
+	} else if n.TokenFile != "" {
 		raw, err := os.ReadFile(n.TokenFile)
 		if err != nil {
 			return 0, 0, fmt.Errorf("read the token: %w", err)

@@ -462,8 +462,8 @@ const ReplicationPolicyCreatePage: React.FC = () => {
         <StackItem>
           <FieldPopover
             fieldId="rp-vm-speed"
-            label="VM Copy Speed Limit (MB/s per disk)"
-            description="How fast a running VM's disk is copied. A higher limit gives a shorter copy and a lower recovery point, but slows the VM's own disk writes more. 0 means unlimited. Default 20."
+            label="VM Copy Highest Speed (MB/s per disk)"
+            description="The copy of a running VM's disk starts slow, speeds up while the share is quiet, and slows down when the share gets busy. This is the highest speed it may reach. 0 means there is no highest speed. Default 0."
           >
             <NumberInput
               id="rp-vm-speed"
