@@ -11,12 +11,23 @@ import {
   ModalFooter,
   ModalHeader,
   ModalVariant,
+  Radio,
   Tooltip,
 } from '@patternfly/react-core';
 import { PoolBenchModel } from '../../models';
 import { PoolBench } from '../../types';
 import { API_GROUP, ROUTES } from '../../constants';
-import { ControlAction, availableActions, controlPatch, downloadText, reportMarkdown, stepsCSV } from '../../utils/poolbench-control';
+import {
+  ControlAction,
+  availableActions,
+  canAddEvent,
+  controlPatch,
+  downloadText,
+  eventChoices,
+  eventPatch,
+  reportMarkdown,
+  stepsCSV,
+} from '../../utils/poolbench-control';
 import { isActive } from '../../utils/poolbench';
 import { errorMessage } from '../../utils/k8s-objects';
 import { RAW_UNAVAILABLE, fetchRawCSV } from '../../utils/poolbench-raw';
@@ -62,6 +73,8 @@ const RunControls: React.FC<{ pb: PoolBench }> = ({ pb }) => {
   const [confirm, setConfirm] = useState<ControlAction | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [eventType, setEventType] = useState('');
   const [error, setError] = useState('');
   const name = pb.metadata?.name || 'run';
 
@@ -73,6 +86,19 @@ const RunControls: React.FC<{ pb: PoolBench }> = ({ pb }) => {
       await k8sPatch({ model: PoolBenchModel, resource: pb, data: controlPatch(pb, action, EXTEND_MINUTES) });
     } catch (err) {
       setError(errorMessage(err, 'The change failed'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addEvent = async () => {
+    setAdding(false);
+    setError('');
+    setBusy(true);
+    try {
+      await k8sPatch({ model: PoolBenchModel, resource: pb, data: eventPatch(pb, eventType) });
+    } catch (err) {
+      setError(errorMessage(err, 'The event could not be added'));
     } finally {
       setBusy(false);
     }
@@ -112,6 +138,15 @@ const RunControls: React.FC<{ pb: PoolBench }> = ({ pb }) => {
             </Tooltip>
           </FlexItem>
         ))}
+        {canAddEvent(pb) && (
+          <FlexItem>
+            <Tooltip content="Asks for an extra test on these busy VMs. It runs once, after this step has been measured.">
+              <Button variant="secondary" isDisabled={!canUpdate || busy} onClick={() => { setEventType(''); setAdding(true); }}>
+                Add an event to this step
+              </Button>
+            </Tooltip>
+          </FlexItem>
+        )}
         <FlexItem align={{ default: 'alignRight' }}>
           <Tooltip content="One row for each step with all its numbers, for a spreadsheet.">
             <Button variant="link" onClick={() => downloadText(`${name}-steps.csv`, 'text/csv', stepsCSV(pb))}>
@@ -151,6 +186,37 @@ const RunControls: React.FC<{ pb: PoolBench }> = ({ pb }) => {
               {ask.button}
             </Button>
             <Button variant="link" onClick={() => setConfirm(null)}>
+              Cancel
+            </Button>
+          </ModalFooter>
+        </Modal>
+      )}
+      {adding && (
+        <Modal variant={ModalVariant.small} isOpen onClose={() => setAdding(false)}>
+          <ModalHeader title="Add an event to this step" />
+          <ModalBody>
+            {eventChoices(pb).length === 0 ? (
+              <p>Every event is already asked for at this step.</p>
+            ) : (
+              eventChoices(pb).map((o) => (
+                <Radio
+                  key={o.type}
+                  id={`pb-add-${o.type}`}
+                  name="pb-add-event"
+                  label={o.label}
+                  description={o.text}
+                  isChecked={eventType === o.type}
+                  onChange={() => setEventType(o.type)}
+                  style={{ marginBottom: 12 }}
+                />
+              ))
+            )}
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="primary" isDisabled={!eventType} onClick={addEvent}>
+              Add the event
+            </Button>
+            <Button variant="link" onClick={() => setAdding(false)}>
               Cancel
             </Button>
           </ModalFooter>

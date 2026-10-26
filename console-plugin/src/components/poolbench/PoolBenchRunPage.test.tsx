@@ -1,6 +1,6 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { consoleFetch, useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk';
+import { consoleFetch, k8sPatch, useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk';
 import PoolBenchRunPage from './PoolBenchRunPage';
 import { PoolBench } from '../../types';
 
@@ -173,6 +173,19 @@ describe('PoolBenchRunPage', () => {
     current = run();
     render(<PoolBenchRunPage />);
     expect(screen.queryByRole('grid', { name: 'Events' })).toBeNull();
+  });
+
+  it('adds an event to the step that is running', async () => {
+    current = run();
+    (k8sPatch as jest.Mock).mockResolvedValue({});
+    render(<PoolBenchRunPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Add an event to this step' }));
+    fireEvent.click(screen.getByRole('radio', { name: /Boot storm/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add the event' }));
+    await waitFor(() => expect(k8sPatch).toHaveBeenCalledTimes(1));
+    expect((k8sPatch as jest.Mock).mock.calls[0][0].data).toEqual([
+      { op: 'add', path: '/spec/events', value: [{ type: 'BootStorm', atVMs: 45 }] },
+    ]);
   });
 
   it('warns while the test VMs and pool are kept after the end', () => {
