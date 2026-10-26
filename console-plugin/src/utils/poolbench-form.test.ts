@@ -2,7 +2,9 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
   DP2_RANGES,
+  EVENT_OPTIONS,
   PRESETS,
+  defaultEventStep,
   defaultForm,
   diskNeedGB,
   dp2Range,
@@ -135,5 +137,36 @@ describe('room on the nodes', () => {
       status: { allocatable: { memory: mem } },
     });
     expect(nPlusOneMemoryGiB([n('100Gi'), n('120Gi'), n('110Gi'), n('500Gi', false), n('90Gi', true, true)])).toBe(210);
+  });
+});
+
+describe('events', () => {
+  it('offers the four events that exist, each with a plain sentence', () => {
+    expect(EVENT_OPTIONS.map((e) => e.type)).toEqual(['BootStorm', 'PatchWindow', 'Migration', 'Snapshot']);
+    for (const e of EVENT_OPTIONS) expect(e.text.length).toBeGreaterThan(20);
+  });
+
+  it('has none by default, and suggests the second step', () => {
+    expect(defaultForm().events).toEqual([]);
+    expect(defaultEventStep(defaultForm())).toBe(30);
+    expect(defaultEventStep({ ...defaultForm(), stepVMs: 5, maxVMs: 5 })).toBe(5);
+  });
+
+  it('refuses an event at a VM count that is not a step of the run', () => {
+    expect(validateForm({ ...defaultForm(), events: [{ type: 'BootStorm', atVMs: 30 }] }).events).toBeUndefined();
+    expect(validateForm({ ...defaultForm(), events: [{ type: 'BootStorm', atVMs: 31 }] }).events).toMatch(/step/);
+    expect(validateForm({ ...defaultForm(), events: [{ type: 'BootStorm', atVMs: 105 }] }).events).toMatch(/step/);
+  });
+
+  it('puts the events of the form into each run, in step order', () => {
+    const runs = toPoolBenches({
+      ...defaultForm(),
+      tiers: [3000, 10000],
+      events: [{ type: 'Snapshot', atVMs: 60 }, { type: 'BootStorm', atVMs: 30 }],
+    });
+    for (const r of runs) {
+      expect(r.spec.events).toEqual([{ type: 'BootStorm', atVMs: 30 }, { type: 'Snapshot', atVMs: 60 }]);
+    }
+    expect(toPoolBenches(defaultForm())[0].spec.events).toBeUndefined();
   });
 });

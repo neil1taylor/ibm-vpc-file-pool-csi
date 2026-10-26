@@ -156,6 +156,10 @@ export const CARD_HELP = {
     title: 'Each step, and the knee',
     text: 'The knee is the VM count where users would start to notice: too many slow VMs, a stall, or a full share. These settings say how long to wait, how long to measure, and what counts as slow.',
   },
+  pbEvents: {
+    title: 'Events (optional)',
+    text: 'An event is an extra test on VMs that are already busy, such as a restart of all of them. Each one runs once, after the step you choose is measured, so it does not change the knee.',
+  },
   pbPlan: {
     title: 'What the run will do',
     text: 'The load each step puts on the share, worked out from your settings, and how long the run takes. Check that the last step is not far over the IOPS limit.',

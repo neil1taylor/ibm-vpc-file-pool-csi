@@ -76,6 +76,28 @@ describe('PoolBenchCreatePage', () => {
     expect(push).toHaveBeenCalledWith('/vpc-file-pools/poolbench/perf-test');
   });
 
+  it('adds the events the person ticks, at the step they choose', async () => {
+    nodes = [node('w1', 256), node('w2', 256), node('w3', 256)];
+    render(<PoolBenchCreatePage />);
+    fireEvent.click(screen.getByRole('checkbox', { name: /Boot storm/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Live migration/ }));
+    fireEvent.change(screen.getByLabelText('Live migration at VMs'), { target: { value: '45' } });
+    fireEvent.click(runButton());
+    await waitFor(() => expect(k8sCreate).toHaveBeenCalledTimes(1));
+    expect((k8sCreate as jest.Mock).mock.calls[0][0].data.spec.events).toEqual([
+      { type: 'BootStorm', atVMs: 30 },
+      { type: 'Migration', atVMs: 45 },
+    ]);
+  });
+
+  it('refuses an event at a VM count that is not a step', () => {
+    render(<PoolBenchCreatePage />);
+    fireEvent.click(screen.getByRole('checkbox', { name: /Snapshot/ }));
+    fireEvent.change(screen.getByLabelText('Snapshot at VMs'), { target: { value: '31' } });
+    expect(screen.getByText(/must be a step/)).toBeTruthy();
+    expect(runButton()).toHaveProperty('disabled', true);
+  });
+
   it('makes one run per tier for the three tiers', async () => {
     nodes = [node('w1', 256), node('w2', 256), node('w3', 256)];
     render(<PoolBenchCreatePage />);
