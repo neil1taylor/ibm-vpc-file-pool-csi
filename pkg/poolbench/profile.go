@@ -171,6 +171,20 @@ func indent(s, prefix string) string {
 	return prefix + strings.Join(lines, "\n"+prefix) + "\n"
 }
 
+// loadService runs the load as a system service, so it starts again after a
+// restart of the VM (the boot storm event).
+const loadService = `[Unit]
+Description=PoolBench load
+After=network-online.target
+
+[Service]
+ExecStart=/bin/sh /root/load.sh
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+`
+
 // LinuxUserData is the cloud-init file of a Linux VM: it writes the load and
 // send scripts, installs fio, fills the test area, says PERF-READY, and starts
 // the load. It holds the run's token, so it is kept in a Secret.
@@ -183,8 +197,10 @@ func (p *Profile) LinuxUserData(url, token string) string {
 	b.WriteString(indent(stateScript(url, token), "      "))
 	b.WriteString("  - path: /root/load.sh\n    permissions: \"0755\"\n    content: |\n")
 	b.WriteString(indent(p.linuxLoadScript(), "      "))
+	b.WriteString("  - path: /etc/systemd/system/poolbench-load.service\n    permissions: \"0644\"\n    content: |\n")
+	b.WriteString(indent(loadService, "      "))
 	fmt.Fprintf(&b, "runcmd:\n  - |\n    set -e\n    dnf install -y -q fio\n    %s > /dev/null\n    sh /root/send.sh PERF-READY\n", p.LinuxFill())
-	b.WriteString("  - \"nohup sh /root/load.sh > /dev/null 2>&1 &\"\n")
+	b.WriteString("  - systemctl daemon-reload\n  - systemctl enable --now poolbench-load\n")
 	return b.String()
 }
 
