@@ -126,6 +126,18 @@ export const COLUMN_HELP = {
     title: 'Run time',
     text: 'How long the run has taken, or took in all. It includes the cleanup at the end.',
   },
+  poolbenchEventAt: {
+    title: 'At VMs',
+    text: 'The step the event runs after. All the VMs of that step are running, with their normal load, while it runs.',
+  },
+  poolbenchEventState: {
+    title: 'State',
+    text: 'Waits means the run has not reached that step. Running means the event is going on now. Done means it has ended.',
+  },
+  poolbenchEventTime: {
+    title: 'Time',
+    text: 'The main time of the event. For a boot storm it is how long until the last VM sends results again, and for a migration or snapshot how long until the last one ends.',
+  },
   poolbenchStepVMs: {
     title: 'VMs',
     text: 'How many test VMs ran in this step, and how many of them run Windows. Each step adds more VMs to the same share.',

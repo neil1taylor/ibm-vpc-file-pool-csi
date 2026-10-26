@@ -146,6 +146,35 @@ describe('PoolBenchRunPage', () => {
     expect(rows[3].textContent).toContain('Fail');
   });
 
+  it('shows the events of the run: the result of each one that ran, and those that wait', () => {
+    current = run();
+    current.spec = { ...current.spec, events: [{ type: 'BootStorm', atVMs: 30 }, { type: 'PatchWindow', atVMs: 45 }, { type: 'Snapshot', atVMs: 60 }] };
+    current.status = {
+      ...current.status,
+      events: [
+        { type: 'BootStorm', atVMs: 30, started: '2026-10-25T10:50:00Z', ended: '2026-10-25T10:54:15Z', seconds: 255, message: 'Restarted 30 VMs; all 30 VMs sent results again after 255 s.' },
+        { type: 'PatchWindow', atVMs: 45, started: '2026-10-25T11:50:00Z' },
+      ],
+    };
+    render(<PoolBenchRunPage />);
+    const rows = within(screen.getByRole('grid', { name: 'Events' })).getAllByRole('row');
+    expect(rows).toHaveLength(4);
+    expect(rows[1].textContent).toContain('Boot storm');
+    expect(rows[1].textContent).toContain('30');
+    expect(rows[1].textContent).toContain('4 min 15 s');
+    expect(rows[1].textContent).toContain('all 30 VMs sent results again');
+    expect(rows[2].textContent).toContain('Patch window');
+    expect(rows[2].textContent).toContain('Running');
+    expect(rows[3].textContent).toContain('Snapshot');
+    expect(rows[3].textContent).toContain('Waits for the step with 60 VMs');
+  });
+
+  it('has no events card when the run has no events', () => {
+    current = run();
+    render(<PoolBenchRunPage />);
+    expect(screen.queryByRole('grid', { name: 'Events' })).toBeNull();
+  });
+
   it('warns while the test VMs and pool are kept after the end', () => {
     current = run();
     current.spec = { ...current.spec, keepAfterEnd: true };

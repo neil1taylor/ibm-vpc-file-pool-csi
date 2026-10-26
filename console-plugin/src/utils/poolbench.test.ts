@@ -1,6 +1,8 @@
 import { PoolBench } from '../types';
 import {
   bannerText,
+  eventRows,
+  eventTime,
   expectedEnd,
   isActive,
   ms,
@@ -102,6 +104,31 @@ describe('stepMarks', () => {
     expect(stepMarks(pb, 45)).toEqual(['Knee']);
     expect(stepMarks(pb, 30)).toEqual(['Recommended']);
     expect(stepMarks(pb, 15)).toEqual([]);
+  });
+});
+
+describe('eventRows', () => {
+  it('joins the events asked for with their results, in step order, and says what each waits for', () => {
+    const pb = running();
+    pb.spec = { ...pb.spec, events: [{ type: 'Snapshot', atVMs: 60 }, { type: 'BootStorm', atVMs: 30 }] };
+    pb.status = { phase: 'Running', events: [{ type: 'BootStorm', atVMs: 30, seconds: 75, ended: '2026-10-25T10:00:00Z', message: 'ok' }] };
+    expect(eventRows(pb)).toEqual([
+      { name: 'Boot storm', atVMs: 30, state: 'Done', time: '1 min 15 s', message: 'ok' },
+      { name: 'Snapshot', atVMs: 60, state: 'Waits for the step with 60 VMs', time: '-', message: '' },
+    ]);
+  });
+
+  it('shows a result for an event that was started by a person after the run began', () => {
+    const pb = running();
+    pb.status = { phase: 'Running', events: [{ type: 'Migration', atVMs: 15 }] };
+    expect(eventRows(pb)).toEqual([{ name: 'Live migration', atVMs: 15, state: 'Running', time: '-', message: '' }]);
+  });
+
+  it('writes a time in minutes and seconds', () => {
+    expect(eventTime(45)).toBe('45 s');
+    expect(eventTime(255)).toBe('4 min 15 s');
+    expect(eventTime(3600)).toBe('60 min 0 s');
+    expect(eventTime(undefined)).toBe('-');
   });
 });
 

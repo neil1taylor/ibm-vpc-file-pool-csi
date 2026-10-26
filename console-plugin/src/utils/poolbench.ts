@@ -1,4 +1,5 @@
 import { PoolBench, PoolBenchStepResult } from '../types';
+import { EVENT_OPTIONS } from './poolbench-form';
 
 /** About how long the VMs of a step take to be made and send results, from the lab runs. */
 const READY_MINUTES = 5;
@@ -86,4 +87,40 @@ export const verdictText = (pb: PoolBench): string => {
     return `Users would notice already at ${st.kneeVMs} VMs, the first step. Try a faster share or smaller steps.`;
   }
   return `Users would notice at ${st.kneeVMs} VMs on ${share}. Recommended: up to ${st.recommendedVMs} VMs, the largest step at or below 80% of the knee, so there is room to spare.`;
+};
+
+/** A time in seconds as minutes and seconds. */
+export const eventTime = (seconds: number | undefined): string => {
+  if (seconds === undefined || seconds === null) return '-';
+  return seconds < 60 ? `${seconds} s` : `${Math.floor(seconds / 60)} min ${seconds % 60} s`;
+};
+
+export interface EventRow {
+  name: string;
+  atVMs: number;
+  state: string;
+  time: string;
+  message: string;
+}
+
+/** The events asked for and the results of those that started, in step order. */
+export const eventRows = (pb: PoolBench): EventRow[] => {
+  const asked = [...(pb.spec.events || [])];
+  for (const r of pb.status?.events || []) {
+    if (!asked.some((e) => e.type === r.type && e.atVMs === r.atVMs)) asked.push({ type: r.type, atVMs: r.atVMs });
+  }
+  return asked
+    .sort((a, b) => a.atVMs - b.atVMs)
+    .map((e) => {
+      const result = (pb.status?.events || []).find((r) => r.type === e.type && r.atVMs === e.atVMs);
+      const name = EVENT_OPTIONS.find((o) => o.type === e.type)?.label ?? e.type;
+      if (!result) return { name, atVMs: e.atVMs, state: `Waits for the step with ${e.atVMs} VMs`, time: '-', message: '' };
+      return {
+        name,
+        atVMs: e.atVMs,
+        state: result.ended ? 'Done' : 'Running',
+        time: result.ended ? eventTime(result.seconds) : '-',
+        message: result.message || '',
+      };
+    });
 };
