@@ -127,6 +127,9 @@ describe('room on the nodes', () => {
     expect(quantityGiB('1048576Ki')).toBe(1);
     expect(quantityGiB('2048Mi')).toBe(2);
     expect(quantityGiB(String(2 ** 30))).toBe(1);
+    // Some clusters (ROVS) report node memory in milli-bytes.
+    expect(quantityGiB('388858399457280m')).toBeCloseTo(362.15, 2);
+    expect(quantityGiB('1073741824000m')).toBe(1);
     expect(quantityGiB(undefined)).toBe(0);
   });
 

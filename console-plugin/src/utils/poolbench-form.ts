@@ -286,12 +286,12 @@ export const toPoolBenches = (f: PoolBenchForm): PoolBench[] => {
 };
 
 const UNITS: Record<string, number> = {
-  Ki: 2 ** 10, Mi: 2 ** 20, Gi: 2 ** 30, Ti: 2 ** 40, K: 1e3, M: 1e6, G: 1e9, T: 1e12, '': 1,
+  Ki: 2 ** 10, Mi: 2 ** 20, Gi: 2 ** 30, Ti: 2 ** 40, K: 1e3, M: 1e6, G: 1e9, T: 1e12, m: 1e-3, '': 1,
 };
 
-/** A Kubernetes memory quantity in GiB. */
+/** A Kubernetes memory quantity in GiB. The unit m is a thousandth of a byte, which some clusters use for node memory. */
 export const quantityGiB = (q: string | undefined): number => {
-  const m = /^(\d+(?:\.\d+)?)(Ki|Mi|Gi|Ti|K|M|G|T)?$/.exec(q || '');
+  const m = /^(\d+(?:\.\d+)?)(Ki|Mi|Gi|Ti|K|M|G|T|m)?$/.exec(q || '');
   return m ? (Number(m[1]) * UNITS[m[2] || '']) / 2 ** 30 : 0;
 };
 
