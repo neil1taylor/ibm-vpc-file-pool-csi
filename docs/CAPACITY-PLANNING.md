@@ -86,6 +86,26 @@ See [PERFORMANCE-TUNING.md — IOPS Planning](PERFORMANCE-TUNING.md#iops-plannin
 
 ---
 
+## How Many VMs One Share Carries (Measured)
+
+These numbers come from the PoolBench performance test on the DR lab cluster. The test adds VMs to one 3,900 GB share in steps of 15, up to 90. One VM in three runs Windows Server 2022, the others CentOS Stream 9. Each VM does 30 IOPS all the time and a burst of 300 IOPS for 45 seconds every 10 minutes (70% reads, blocks of 4, 16 and 64 KiB).
+
+The **knee** is the first VM count where users would notice: more than a quarter of the VMs have a p95 latency over 20 ms, a burst is slow, an I/O stalls, or the share is at its IOPS limit. **Recommended** is the largest step at or below 80% of the knee, so there is room to spare.
+
+| Share IOPS | Knee | Recommended | What happened |
+|---|---|---|---|
+| 3,000 | 45 VMs | 30 VMs | At 45 VMs, 91% of the VMs were slow (p95 29.8 ms). At 30 VMs none were slow (p95 1.2 ms). |
+| 10,000 | None up to 90 VMs | 90 VMs or more | No slow VMs at any step. At 90 VMs the VMs asked for 7,603 of the 10,000 IOPS IBM counts. |
+
+- The VMs ask for more than their own IOPS suggest: IBM counts one operation for every 16 KiB of an I/O, so a share reaches its limit before the VMs' own IOPS do. PoolBench shows both numbers.
+- Making and filling new VMs is itself heavy. On a 3,000 IOPS share, 15 new VMs slowed the running VMs for about 20 minutes. Add VMs to a busy share in small groups.
+- The 20,000 IOPS tier was not measured: 90 VMs is already more than the cluster's memory allows with one node down.
+- The 3,000 IOPS result is the same from the command-line test and from the console.
+
+To measure your own share size, speed and VM mix, use the PoolBench page in the console (see [FEATURES.md](FEATURES.md#poolbench--experimental)).
+
+---
+
 ## Binpack vs Spread
 
 | Factor | Spread | Binpack |

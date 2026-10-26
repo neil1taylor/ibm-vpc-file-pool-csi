@@ -414,6 +414,10 @@ With `binpack`, most PVCs are on 1-2 shares, so most nodes only connect to 1-2 m
 
 ## Benchmarking
 
+### PoolBench: VMs on a Share
+
+To find how many VMs a share carries, use PoolBench (the **PoolBench** tab under VPC File Pools in the console). It makes its own pool, adds Linux and Windows test VMs in steps, finds the knee, and can also restart all VMs, run a patch window, live-migrate and snapshot VMs under load. The results of the lab runs are in [CAPACITY-PLANNING.md](CAPACITY-PLANNING.md#how-many-vms-one-share-carries-measured). The fio examples below are for a single PVC.
+
 ### fio Pod for Sequential I/O
 
 ```yaml
