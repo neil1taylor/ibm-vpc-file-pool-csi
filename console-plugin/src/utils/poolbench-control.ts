@@ -1,5 +1,6 @@
 import { PoolBench, PoolBenchStepResult } from '../types';
-import { isActive, resultLabel, stepMarks, verdictText } from './poolbench';
+import { eventRows, isActive, resultLabel, stepMarks, verdictText } from './poolbench';
+import { EVENT_OPTIONS } from './poolbench-form';
 
 export type ControlAction = 'pause' | 'resume' | 'hold' | 'release' | 'extend' | 'skip' | 'stop' | 'cleanup';
 
@@ -21,6 +22,32 @@ export const availableActions = (pb: PoolBench): ControlAction[] => {
   out.push('stop');
   return out;
 };
+
+/** The VM count of the step that is running now. */
+const currentStepVMs = (pb: PoolBench): number => (pb.status?.step || 0) * (pb.spec.stepVMs || 0);
+
+/** An event can be added while the VMs of a step are made, settle or are measured. */
+export const canAddEvent = (pb: PoolBench): boolean => {
+  const st = pb.status || {};
+  return (
+    !pb.spec.control?.stop &&
+    (st.phase === 'Running' || st.phase === 'Paused') &&
+    (st.stage === 'Creating' || st.stage === 'Settling' || st.stage === 'Measuring') &&
+    currentStepVMs(pb) > 0
+  );
+};
+
+/** The events that are not yet asked for at the step that is running. */
+export const eventChoices = (pb: PoolBench) =>
+  EVENT_OPTIONS.filter((o) => !(pb.spec.events || []).some((e) => e.type === o.type && e.atVMs === currentStepVMs(pb)));
+
+/** The JSON patch that asks for an event at the step that is running; it runs after that step is measured. */
+export const eventPatch = (
+  pb: PoolBench,
+  type: string,
+): Array<{ op: 'add'; path: string; value: NonNullable<PoolBench['spec']['events']> }> => [
+  { op: 'add', path: '/spec/events', value: [...(pb.spec.events || []), { type, atVMs: currentStepVMs(pb) }] },
+];
 
 type Control = NonNullable<PoolBench['spec']['control']>;
 
@@ -90,6 +117,19 @@ export const stepsCSV = (pb: PoolBench): string => {
 
 const md = (micros?: number): string => (micros === undefined ? '-' : `${(micros / 1000).toFixed(1)} ms`);
 
+const eventsSection = (pb: PoolBench): string[] => {
+  const rows = eventRows(pb);
+  if (rows.length === 0) return [];
+  return [
+    '## Events',
+    '',
+    '| Event | At VMs | State | Time | What happened |',
+    '|---|---|---|---|---|',
+    ...rows.map((e) => `| ${e.name} | ${e.atVMs} | ${e.state} | ${e.time} | ${e.message || '-'} |`),
+    '',
+  ];
+};
+
 /** The run as a Markdown report: the result in one sentence, the settings, and the step table. */
 export const reportMarkdown = (pb: PoolBench): string => {
   const s = pb.spec;
@@ -119,6 +159,7 @@ export const reportMarkdown = (pb: PoolBench): string => {
         `| ${r.vms} (${r.windowsVMs ?? 0} Windows) | ${r.shareIOPS ?? '-'} | ${r.guestIOPS ?? '-'} | ${r.ibmOps ?? '-'} | ${md(r.shareLatencyMicros)} | ${md(r.p50Micros)} | ${md(r.p95Micros)} | ${md(r.p99Micros)} | ${r.slowPercent ?? 0}% | ${r.stalls ?? 0} | ${r.ended ? resultLabel(r) : 'In progress'}${stepMarks(pb, r.vms).length ? `, ${stepMarks(pb, r.vms).join(', ')}` : ''} |`,
     ),
     '',
+    ...eventsSection(pb),
   ];
   return lines.join('\n');
 };

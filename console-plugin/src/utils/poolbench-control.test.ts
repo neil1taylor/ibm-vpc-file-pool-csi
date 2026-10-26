@@ -1,5 +1,5 @@
 import { PoolBench } from '../types';
-import { availableActions, controlPatch, reportMarkdown, stepsCSV } from './poolbench-control';
+import { availableActions, canAddEvent, controlPatch, eventChoices, eventPatch, reportMarkdown, stepsCSV } from './poolbench-control';
 
 const pb = (status: PoolBench['status'], control: PoolBench['spec']['control'] = {}, keep = false): PoolBench => ({
   metadata: { name: 't3000' },
@@ -89,5 +89,47 @@ describe('reportMarkdown', () => {
     expect(md).toContain('| VMs | Share IOPS |');
     expect(md).toContain('| 45 (15 Windows) | 2300 |');
     expect(md).toContain('30 IOPS steady, 300 IOPS bursts of 45 s every 600 s');
+  });
+});
+
+describe('adding an event to a running run', () => {
+  it('is possible while the VMs are made, settle or are measured, also while paused', () => {
+    for (const [phase, stage] of [['Running', 'Creating'], ['Running', 'Settling'], ['Running', 'Measuring'], ['Paused', 'Measuring']] as const) {
+      expect(canAddEvent(pb({ phase, stage, step: 2 }))).toBe(true);
+    }
+  });
+
+  it('is not possible during an event, after the end, or once a stop is asked', () => {
+    expect(canAddEvent(pb({ phase: 'Running', stage: 'Event', step: 2 }))).toBe(false);
+    expect(canAddEvent(pb({ phase: 'Complete', step: 2 }))).toBe(false);
+    expect(canAddEvent(pb({ phase: 'Running', stage: 'Measuring', step: 2 }, { stop: true }))).toBe(false);
+    expect(canAddEvent(pb({ phase: 'Running', stage: 'Preparing' }))).toBe(false);
+  });
+
+  it('offers the events that are not already asked for at this step', () => {
+    const run = pb({ phase: 'Running', stage: 'Measuring', step: 2 });
+    run.spec.events = [{ type: 'BootStorm', atVMs: 30 }, { type: 'Snapshot', atVMs: 45 }];
+    expect(eventChoices(run).map((e) => e.type)).toEqual(['PatchWindow', 'Migration', 'Snapshot']);
+  });
+
+  it('asks for the event at the VM count of the current step, keeping the events already there', () => {
+    const run = pb({ phase: 'Running', stage: 'Measuring', step: 2 });
+    run.spec.events = [{ type: 'BootStorm', atVMs: 30 }];
+    expect(eventPatch(run, 'Migration')).toEqual([
+      { op: 'add', path: '/spec/events', value: [{ type: 'BootStorm', atVMs: 30 }, { type: 'Migration', atVMs: 30 }] },
+    ]);
+  });
+});
+
+describe('reportMarkdown events', () => {
+  it('lists the events and what happened', () => {
+    const run = pb({
+      phase: 'Complete',
+      events: [{ type: 'BootStorm', atVMs: 30, seconds: 255, ended: '2026-10-25T10:00:00Z', message: 'Restarted 30 VMs; all 30 VMs sent results again after 255 s.' }],
+    });
+    const md = reportMarkdown(run);
+    expect(md).toContain('## Events');
+    expect(md).toContain('| Boot storm | 30 | Done | 4 min 15 s | Restarted 30 VMs; all 30 VMs sent results again after 255 s. |');
+    expect(reportMarkdown(pb({ phase: 'Complete' }))).not.toContain('## Events');
   });
 });
