@@ -140,7 +140,7 @@ describe('PoolBenchRunPage', () => {
     steps[2] = { ...steps[1], vms: 45, windowsVMs: 15, pass: false, slowPercent: 76 };
     current.status = { ...current.status, phase: 'Complete', stage: undefined, kneeVMs: 45, recommendedVMs: 30, message: 'Knee at 45 VMs.', steps };
     render(<PoolBenchRunPage />);
-    expect(screen.getByText(/Users would notice at 45 VMs on this 3900 GB share at 3000 IOPS. Recommended: up to 30 VMs./)).toBeTruthy();
+    expect(screen.getByText(/Users would notice at 45 VMs on this 3900 GB share at 3000 IOPS. Recommended: up to 30 VMs, the largest step at or below 80% of the knee, so there is room to spare./)).toBeTruthy();
     const rows = within(screen.getByRole('grid', { name: 'Step results' })).getAllByRole('row');
     expect(rows[3].textContent).toContain('Knee');
     expect(rows[3].textContent).toContain('Fail');

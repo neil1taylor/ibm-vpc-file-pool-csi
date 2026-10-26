@@ -531,6 +531,18 @@ func TestRunner_StuckVMWithoutInstance(t *testing.T) {
 	t.Fatal("the log must say that vm-003 has no running instance")
 }
 
+func TestRunner_SummaryExplainsTheRecommendation(t *testing.T) {
+	h := newHarness(t, testBench())
+	pb := testBench()
+	pb.Status.Steps = []v1alpha1.PoolBenchStepResult{{VMs: 15}, {VMs: 30}, {VMs: 45}}
+	pb.Status.KneeVMs, pb.Status.RecommendedVMs = 45, 30
+	want := "Knee at 45 VMs: the first step where users would notice. " +
+		"Recommended: 30 VMs, the largest step at or below 80% of the knee, to leave room to spare."
+	if got := h.r.summary(pb); got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
 func TestRunner_MissingImage(t *testing.T) {
 	h := newHarness(t, testBench())
 	if err := h.c.Delete(context.Background(), dataSource("win2k22-perf")); err != nil {

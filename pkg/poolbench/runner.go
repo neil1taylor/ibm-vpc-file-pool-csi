@@ -238,7 +238,8 @@ func (r *Runner) summary(pb *v1alpha1.PoolBench) string {
 	case st.RecommendedVMs == 0:
 		return fmt.Sprintf("Knee at %d VMs, the first step: users would notice already.", st.KneeVMs)
 	}
-	return fmt.Sprintf("Knee at %d VMs. Recommended: %d VMs on this share.", st.KneeVMs, st.RecommendedVMs)
+	return fmt.Sprintf("Knee at %d VMs: the first step where users would notice. "+
+		"Recommended: %d VMs, the largest step at or below 80%% of the knee, to leave room to spare.", st.KneeVMs, st.RecommendedVMs)
 }
 
 // check makes sure the images exist and the largest step fits the nodes with
