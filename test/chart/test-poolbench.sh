@@ -145,8 +145,10 @@ if grep -q "poolbench-" <<<"$VX"; then
     pass "only names that start with poolbench-"; else fail "the names are not limited"; fi
 
 BK=$(doc "$VAP" ValidatingAdmissionPolicy "$D" '.spec.validations[] | select(.message | test("backup policy")) | .expression')
-if grep -q "object.spec.snapshotPool.startsWith('poolbench-')" <<<"$BK"; then pass "a backup policy copies only to a PoolBench pool"; else fail "a backup policy may copy anywhere"; fi
-if grep -q "object.spec.namespaces" <<<"$BK" && grep -q "startsWith('poolbench-')" <<<"$BK"; then pass "a backup policy covers only PoolBench namespaces"; else fail "a backup policy may cover other namespaces"; fi
+if grep -q "object.spec.namespaces.size() == 1" <<<"$BK" && grep -q "startsWith('poolbench-')" <<<"$BK"; then pass "a backup policy covers one PoolBench namespace"; else fail "a backup policy may cover other namespaces"; fi
+
+if grep -q "!has(object.spec.export)" <<<"$BK"; then pass "a backup policy never exports to a bucket"; else fail "a backup policy may export to a bucket"; fi
+if grep -q "object.spec.snapshotPool == object.spec.namespaces\[0\] + '-backups'" <<<"$BK"; then pass "a backup policy copies to the backup pool of its own run"; else fail "a backup policy may copy to another pool"; fi
 
 DEL=$(doc "$VAP" ValidatingAdmissionPolicy "$D" '.spec.validations[] | select(.message | test("delete a namespace or pool")) | .expression')
 if grep -q "oldObject.metadata.labels" <<<"$DEL"; then pass "a pool is deleted only if a run made it"; else fail "a pool can be deleted without the run label"; fi

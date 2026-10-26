@@ -1218,3 +1218,18 @@ func TestBuildBackupPool(t *testing.T) {
 		t.Fatalf("pool: %+v want size %d", pool.Spec, want)
 	}
 }
+
+func TestRunner_DoesNotTouchAPoolOfAnotherRun(t *testing.T) {
+	other := &v1alpha1.FileSharePool{ObjectMeta: metav1.ObjectMeta{Name: "poolbench-t10k-backups", Labels: map[string]string{RunLabel: "t10k-other"}}}
+	h := newHarness(t, benchWithEvent(v1alpha1.PoolBenchEventBackup, 3), other)
+	h.pass()
+	if err := h.r.ensureBackupPool(context.Background(), h.bench()); err == nil {
+		t.Fatal("a pool of another run must not be used as the backup pool")
+	}
+	if _, err := h.r.deletePool(context.Background(), h.bench(), "poolbench-t10k-backups", h.now); err == nil {
+		t.Fatal("a pool of another run must not be deleted")
+	}
+	if err := h.c.Get(context.Background(), client.ObjectKey{Name: "poolbench-t10k-backups"}, &v1alpha1.FileSharePool{}); err != nil {
+		t.Fatalf("the other run's pool is gone: %v", err)
+	}
+}

@@ -411,13 +411,17 @@ func (r *Runner) prepare(ctx context.Context, pb *v1alpha1.PoolBench) error {
 
 // ensurePool makes the pool called name, in the run's zone, if it is missing.
 func (r *Runner) ensurePool(ctx context.Context, pb *v1alpha1.PoolBench, name string, build func(*v1alpha1.PoolBench, string) *v1alpha1.FileSharePool) error {
-	err := r.Client.Get(ctx, client.ObjectKey{Name: name}, &v1alpha1.FileSharePool{})
+	pool := &v1alpha1.FileSharePool{}
+	err := r.Client.Get(ctx, client.ObjectKey{Name: name}, pool)
 	if apierrors.IsNotFound(err) {
 		zone, zerr := r.zone(ctx, pb)
 		if zerr != nil {
 			return zerr
 		}
 		return r.createIfMissing(ctx, build(pb, zone))
+	}
+	if err == nil && pool.Labels[RunLabel] != pb.Name {
+		return fmt.Errorf("the pool %s belongs to another run or to no run", name)
 	}
 	return err
 }
@@ -838,6 +842,9 @@ func (r *Runner) cleanup(ctx context.Context, pb *v1alpha1.PoolBench, now time.T
 func (r *Runner) deletePool(ctx context.Context, pb *v1alpha1.PoolBench, name string, now time.Time) (bool, error) {
 	pool := &v1alpha1.FileSharePool{}
 	err := r.Client.Get(ctx, client.ObjectKey{Name: name}, pool)
+	if err == nil && pool.Labels[RunLabel] != pb.Name {
+		return false, fmt.Errorf("the pool %s belongs to another run or to no run, so it is not deleted", name)
+	}
 	if err == nil && pool.DeletionTimestamp.IsZero() {
 		r.log(pb, now, "Info", "Deleting the pool "+name+" and its share")
 		if derr := r.Client.Delete(ctx, pool); derr != nil && !apierrors.IsNotFound(derr) {

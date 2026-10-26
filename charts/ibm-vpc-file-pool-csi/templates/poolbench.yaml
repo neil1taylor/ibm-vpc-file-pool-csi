@@ -412,10 +412,11 @@ spec:
       message: "PoolBench may only bind its run role to itself, in a namespace one of its runs made"
     - expression: >-
         request.resource.resource != 'backuppolicies' || request.operation == 'DELETE' ||
-        (object.spec.snapshotPool.startsWith('poolbench-') &&
-         has(object.spec.namespaces) && object.spec.namespaces.size() > 0 &&
-         object.spec.namespaces.all(n, n.startsWith('poolbench-')))
-      message: "PoolBench may only make a backup policy that copies to a PoolBench pool and covers PoolBench namespaces"
+        (!has(object.spec.export) &&
+         has(object.spec.namespaces) && object.spec.namespaces.size() == 1 &&
+         object.spec.namespaces[0].startsWith('poolbench-') &&
+         object.spec.snapshotPool == object.spec.namespaces[0] + '-backups')
+      message: "PoolBench may only make a backup policy for one PoolBench namespace that copies to that run's backup pool and exports nowhere"
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

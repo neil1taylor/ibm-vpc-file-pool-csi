@@ -51,6 +51,7 @@ func TestPoolBenchValidator_RefusesCreate(t *testing.T) {
 		mutate func(*v1alpha1.PoolBench)
 		want   string
 	}{
+		{"name that would collide with the backup pool of another run", func(p *v1alpha1.PoolBench) { p.Name = "t-backups" }, "name"},
 		{"name too long for the run namespace", func(p *v1alpha1.PoolBench) { p.Name = strings.Repeat("a", 41) }, "name"},
 		{"not dp2", func(p *v1alpha1.PoolBench) { p.Spec.Profile = "tier-3iops" }, "profile"},
 		{"share too small for IBM", func(p *v1alpha1.PoolBench) { p.Spec.ShareSizeGB = 5 }, "shareSizeGB"},
