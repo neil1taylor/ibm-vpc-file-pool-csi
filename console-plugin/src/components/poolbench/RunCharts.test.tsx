@@ -76,6 +76,17 @@ describe('RunCharts', () => {
     expect(lines).toContain('Step 2 (30 VMs):2');
   });
 
+  it('marks the start of each event', () => {
+    const withEvents: PoolBench = {
+      ...pb,
+      status: { ...pb.status, events: [{ type: 'BootStorm', atVMs: 15, started: '2026-10-25T09:10:00Z' }, { type: 'Snapshot', atVMs: 30 }] },
+    };
+    render(<RunCharts pb={withEvents} />);
+    const lines = screen.getAllByTestId('line').map((l) => l.textContent);
+    expect(lines).toContain('Boot storm (15 VMs):2');
+    expect(lines.some((l) => l?.startsWith('Snapshot'))).toBe(false);
+  });
+
   it('says there is no data yet for a graph without points', () => {
     render(<RunCharts pb={pb} />);
     expect(screen.getAllByText(/No data yet/).length).toBe(4);
