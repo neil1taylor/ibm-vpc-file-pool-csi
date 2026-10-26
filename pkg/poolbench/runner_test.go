@@ -31,7 +31,7 @@ func testScheme() *runtime.Scheme {
 	_ = rbacv1.AddToScheme(s)
 	_ = discoveryv1.AddToScheme(s)
 	_ = v1alpha1.AddToScheme(s)
-	for _, gvk := range []schema.GroupVersionKind{vmGVK, vmiGVK, dataSourceGVK, dataVolumeGVK} {
+	for _, gvk := range []schema.GroupVersionKind{vmGVK, vmiGVK, vmimGVK, dataSourceGVK, dataVolumeGVK} {
 		s.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
 		s.AddKnownTypeWithName(gvk.GroupVersion().WithKind(gvk.Kind+"List"), &unstructured.UnstructuredList{})
 	}
@@ -673,6 +673,87 @@ func TestRunner_PatchWindowGivesUp(t *testing.T) {
 	pb := h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageCreating)
 	if ev := pb.Status.Events[0]; ev.Ended == nil || !strings.Contains(ev.Message, "Not back") || !strings.Contains(ev.Message, "No VM sent a result in the window") {
 		t.Fatalf("a window that never recovers must say so: %+v", ev)
+	}
+}
+
+func migrations(t *testing.T, h *harness) []unstructured.Unstructured {
+	t.Helper()
+	l := &unstructured.UnstructuredList{}
+	l.SetGroupVersionKind(vmimGVK.GroupVersion().WithKind("VirtualMachineInstanceMigrationList"))
+	if err := h.c.List(context.Background(), l, client.InNamespace("poolbench-t10k")); err != nil {
+		t.Fatal(err)
+	}
+	return l.Items
+}
+
+func setMigrationPhase(t *testing.T, h *harness, phase string) {
+	t.Helper()
+	for _, m := range migrations(t, h) {
+		_ = unstructured.SetNestedField(m.Object, phase, "status", "phase")
+		if err := h.c.Update(context.Background(), &m); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestRunner_Migration(t *testing.T) {
+	h := newHarness(t, benchWithEvent(v1alpha1.PoolBenchEventMigration, 3), instances("vm-001", "vm-002", "vm-003")...)
+	h.toEndOfMeasuring()
+	pb := h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageEvent)
+	if !strings.Contains(pb.Status.Message, "live migration") {
+		t.Fatalf("the message must name the event: %q", pb.Status.Message)
+	}
+	// 10 percent of 3 VMs is one VM, the first one.
+	ms := migrations(t, h)
+	if len(ms) != 1 {
+		t.Fatalf("want 1 migration, got %d", len(ms))
+	}
+	if got, _, _ := unstructured.NestedString(ms[0].Object, "spec", "vmiName"); got != "vm-001" {
+		t.Fatalf("migration of %q, want vm-001", got)
+	}
+	h.advance(time.Minute)
+	setMigrationPhase(t, h, "Running")
+	h.pass()
+	h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageEvent)
+	h.advance(2 * time.Minute)
+	setMigrationPhase(t, h, "Succeeded")
+	h.pass()
+	pb = h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageCreating)
+	ev := pb.Status.Events[0]
+	if ev.Ended == nil || ev.Seconds != 180 || !strings.Contains(ev.Message, "1 VM") || strings.Contains(ev.Message, "failed") || pb.Status.Step != 2 {
+		t.Fatalf("event result: %+v step %d", ev, pb.Status.Step)
+	}
+}
+
+func TestRunner_MigrationFailed(t *testing.T) {
+	h := newHarness(t, benchWithEvent(v1alpha1.PoolBenchEventMigration, 3), instances("vm-001", "vm-002", "vm-003")...)
+	h.toEndOfMeasuring()
+	h.advance(time.Minute)
+	setMigrationPhase(t, h, "Failed")
+	h.pass()
+	pb := h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageCreating)
+	if ev := pb.Status.Events[0]; !strings.Contains(ev.Message, "1 failed") {
+		t.Fatalf("a failed migration must be counted: %+v", ev)
+	}
+}
+
+func TestRunner_MigrationGivesUp(t *testing.T) {
+	h := newHarness(t, benchWithEvent(v1alpha1.PoolBenchEventMigration, 3), instances("vm-001", "vm-002", "vm-003")...)
+	h.toEndOfMeasuring()
+	h.advance(31 * time.Minute)
+	h.pass()
+	pb := h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageCreating)
+	if ev := pb.Status.Events[0]; ev.Ended == nil || !strings.Contains(ev.Message, "not all") {
+		t.Fatalf("a migration that never ends must say so: %+v", ev)
+	}
+}
+
+func TestRunner_MigrationWithoutVMs(t *testing.T) {
+	h := newHarness(t, benchWithEvent(v1alpha1.PoolBenchEventMigration, 3))
+	h.toEndOfMeasuring()
+	pb := h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageCreating)
+	if ev := pb.Status.Events[0]; ev.Ended == nil || !strings.Contains(ev.Message, "Not run") {
+		t.Fatalf("an event with no VM to move must say it did not run: %+v", ev)
 	}
 }
 
