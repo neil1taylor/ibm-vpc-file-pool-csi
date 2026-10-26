@@ -46,6 +46,8 @@ type Runs interface {
 	VMByIP(ctx context.Context, run, ip string) (VM, bool)
 	// Paused is true while the run is paused; the VMs then hold their load.
 	Paused(ctx context.Context, run string) bool
+	// Burst is true during a patch window; the VMs then run only bursts.
+	Burst(ctx context.Context, run string) bool
 }
 
 // validName is a Kubernetes object name; it keeps file paths inside the store.
@@ -238,7 +240,7 @@ func (s *Store) Forget(run string) error {
 // The VM is found from the address the post comes from, so a VM cannot post
 // as another one. Before each load phase a VM asks whether the run is paused:
 //
-//	GET /v1/runs/<run>/state   ->   "run" or "paused"
+//	GET /v1/runs/<run>/state   ->   "run", "paused" or "burst"
 type Collector struct {
 	Store *Store
 	Runs  Runs
@@ -272,8 +274,11 @@ func (c *Collector) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if what == "state" {
 		state := "run"
-		if c.Runs.Paused(r.Context(), run) {
+		switch {
+		case c.Runs.Paused(r.Context(), run):
 			state = "paused"
+		case c.Runs.Burst(r.Context(), run):
+			state = "burst"
 		}
 		_, _ = fmt.Fprintln(w, state)
 		return

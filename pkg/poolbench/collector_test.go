@@ -19,7 +19,10 @@ type fakeRuns struct {
 	token  string
 	vms    map[string]VM // by IP
 	paused bool
+	burst  bool
 }
+
+func (f fakeRuns) Burst(_ context.Context, run string) bool { return f.burst && run == "t10k" }
 
 func (f fakeRuns) Paused(_ context.Context, run string) bool { return f.paused && run == "t10k" }
 
@@ -239,6 +242,16 @@ func TestCollector_State(t *testing.T) {
 	}
 	if rec := get(""); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("no token: got %d", rec.Code)
+	}
+	runs.paused, runs.burst = false, true
+	c.Runs = runs
+	if rec := get("secret-token"); rec.Body.String() != "burst\n" {
+		t.Fatalf("a patch window must say burst, got %q", rec.Body)
+	}
+	runs.paused = true
+	c.Runs = runs
+	if rec := get("secret-token"); rec.Body.String() != "paused\n" {
+		t.Fatalf("a pause wins over a patch window, got %q", rec.Body)
 	}
 }
 

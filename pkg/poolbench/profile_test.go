@@ -146,3 +146,17 @@ func TestWindowsLoadRunsOnce(t *testing.T) {
 		}
 	}
 }
+
+// TestLoadSkipsTheQuietPhaseInAPatchWindow: while the collector says burst, a VM runs only bursts,
+// as a patch scan would, on Linux and on Windows.
+func TestLoadSkipsTheQuietPhaseInAPatchWindow(t *testing.T) {
+	p, _ := NewProfile(defaultLoad())
+	linux := p.LinuxUserData("http://collector.example:8080/v1/runs/t10k/results", "TOKEN123")
+	if !strings.Contains(linux, `!= burst ]; then`) {
+		t.Error("the Linux load does not skip the steady phase while the state is burst")
+	}
+	win := p.WindowsFiles("http://collector.example:8080/v1/runs/t10k/results", "TOKEN123")["load.ps1"]
+	if !strings.Contains(win, "-eq 'burst'") {
+		t.Error("the Windows load does not skip the steady phase while the state is burst")
+	}
+}
