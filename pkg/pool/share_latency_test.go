@@ -1,10 +1,14 @@
 package pool
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
+
+	"k8s.io/klog/v2"
 )
 
 type fakeTotals struct {
@@ -118,5 +122,20 @@ func TestLatencyMeter_OldReadingsExpire(t *testing.T) {
 	now = now.Add(5 * time.Minute)
 	if _, ok := m.Latency(context.Background(), "p"); ok {
 		t.Fatal("a reading from five minutes ago is not a reading")
+	}
+}
+
+func TestLatencyMeter_LogsWhyItCannotRead(t *testing.T) {
+	var out bytes.Buffer
+	klog.LogToStderr(false)
+	klog.SetOutput(&out)
+	t.Cleanup(func() { klog.LogToStderr(true); klog.SetOutput(nil) })
+	now := time.Now()
+	f := &fakeTotals{err: errors.New("node agent 10.0.0.1: HTTP 401")}
+	m := newMeter(f, &now)
+	_, _ = m.Latency(context.Background(), "p")
+	klog.Flush()
+	if !strings.Contains(out.String(), "HTTP 401") {
+		t.Fatalf("the failure was not logged: %q", out.String())
 	}
 }

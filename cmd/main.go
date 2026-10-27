@@ -14,6 +14,7 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -376,6 +377,11 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metric
 	}
 	if err := batchv1.AddToScheme(scheme); err != nil {
 		klog.ErrorS(err, "Failed to add batchv1 types to scheme")
+		os.Exit(1)
+	}
+	// The share latency reader lists the node agents' EndpointSlices.
+	if err := discoveryv1.AddToScheme(scheme); err != nil {
+		klog.ErrorS(err, "Failed to add discoveryv1 types to scheme")
 		os.Exit(1)
 	}
 

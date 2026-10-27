@@ -5,6 +5,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"k8s.io/klog/v2"
 )
 
 // ShareTotals reads the NFS read and write operations of a pool's shares, and
@@ -15,6 +17,9 @@ type ShareTotals interface {
 
 // maxReadingAge is how long an interval reading stays valid.
 const maxReadingAge = 2 * time.Minute
+
+// logGap is the shortest time between two logged read failures of one pool.
+const logGap = 5 * time.Minute
 
 // LatencyMeter turns the growing totals of a pool into the average latency of
 // its shares over the last intervals. The speed of a VM disk copy follows it.
@@ -35,11 +40,12 @@ type LatencyMeter struct {
 }
 
 type poolReading struct {
-	have    bool
-	at      time.Time
-	ops     float64
-	secs    float64
-	samples []latencySample
+	loggedAt time.Time
+	have     bool
+	at       time.Time
+	ops      float64
+	secs     float64
+	samples  []latencySample
 }
 
 type latencySample struct {
@@ -67,6 +73,11 @@ func (m *LatencyMeter) Latency(ctx context.Context, pool string) (float64, bool)
 	}
 	ops, secs, err := m.Source.Totals(ctx, pool)
 	if err != nil {
+		// A copy keeps its speed without a reading, so say why there is none.
+		if now.Sub(p.loggedAt) >= logGap {
+			klog.ErrorS(err, "Cannot read the latency of the pool's shares; VM disk copies keep their speed", "pool", pool)
+			p.loggedAt = now
+		}
 		return 0, false
 	}
 	if p.have {
