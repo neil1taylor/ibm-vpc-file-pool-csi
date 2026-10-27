@@ -10,8 +10,11 @@ import (
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // A BackupPolicy with spec.export also sends its backups to a COS bucket. When
@@ -115,6 +118,7 @@ func (bc *BackupController) reconcileExport(ctx context.Context, bp *v1alpha1.Ba
 	if bp.Spec.Export == nil {
 		clearExportStatus(st)
 		delete(bc.exports, bp.Name)
+		bc.releaseStaleExportHolds(ctx, bp.Name, "")
 		return
 	}
 	repo, keep, err := exportRepoOf(bp)
@@ -162,6 +166,8 @@ func (bc *BackupController) reconcileExport(ctx context.Context, bp *v1alpha1.Ba
 		}
 	}
 
+	copying := bc.volumesBeingCopied(ctx, bp.Name)
+
 export:
 	for _, i := range due {
 		v := &st.Volumes[i]
@@ -173,6 +179,20 @@ export:
 		}
 		sh, found := shareByID(shares, shareOfEntry(*v, shares))
 		if !found || !shareReady(sh) {
+			continue
+		}
+		switch bc.takeExportHold(ctx, bp.Name, v.SubVolumeName, now, state.active == v.SubVolumeName, copying) {
+		case holdWait:
+			continue
+		case holdExpired:
+			key := exportKeyPrefix + bp.Name + "-" + v.SubVolumeName
+			if _, stopErr := bc.shareData.Stop(ctx, key); stopErr != nil {
+				klog.ErrorS(stopErr, "Failed to stop an export Job that passed the hold limit", "policy", bp.Name, "volume", v.SubVolumeName)
+			}
+			bc.releaseExportHold(ctx, bp.Name, v.SubVolumeName)
+			v.ExportError = fmt.Sprintf("the export took longer than %d hours, so it was stopped; it is tried again", int(exportHoldLimit.Hours()))
+			state.failedAt[v.SubVolumeName] = now
+			state.active = ""
 			continue
 		}
 		base := backupBasePath + "/" + bp.Name
@@ -191,6 +211,7 @@ export:
 			klog.ErrorS(jobErr, "Export of a backup to COS failed", "policy", bp.Name, "volume", v.SubVolumeName)
 			state.failedAt[v.SubVolumeName] = now
 			state.active = ""
+			bc.releaseExportHold(ctx, bp.Name, v.SubVolumeName)
 		case !done:
 			state.active = v.SubVolumeName
 			break export
@@ -199,9 +220,11 @@ export:
 			v.ExportedTime, v.ExportedBytes, v.ExportError = &m, out.Bytes, ""
 			delete(state.failedAt, v.SubVolumeName)
 			state.active = ""
+			bc.releaseExportHold(ctx, bp.Name, v.SubVolumeName)
 			klog.V(2).InfoS("Exported a backup to COS", "policy", bp.Name, "volume", v.SubVolumeName, "moment", out.Moment, "bytes", out.Bytes)
 		}
 	}
+	bc.releaseStaleExportHolds(ctx, bp.Name, state.active)
 	bc.maintainExport(ctx, bp, st, repo, keep, state, now)
 }
 
@@ -276,4 +299,125 @@ func (bc *BackupController) deleteExportMetrics(policy string) {
 	metrics.BackupExportOldestUnexportedAgeSeconds.DeleteLabelValues(policy)
 	metrics.BackupExportNewestAgeSeconds.DeleteLabelValues(policy)
 	delete(bc.exportReported, policy)
+}
+
+const (
+	// exportHoldAnnotation is set on a SubVolume while the export of its backup
+	// runs. Its value is "<policy>/<time the hold began>". The replication
+	// controller makes no new local backup of a held volume.
+	exportHoldAnnotation = "storage.ibmcloud.io/export-hold"
+	// exportHoldLimit is the longest a hold lasts. After it the export is
+	// stopped and tried again later, so a stuck Job cannot stop backups.
+	exportHoldLimit = 6 * time.Hour
+)
+
+// holdResult tells the export loop what to do with a volume.
+type holdResult int
+
+const (
+	holdTaken   holdResult = iota // the volume is held by this policy: export it
+	holdWait                      // do not export it now
+	holdExpired                   // the hold passed its limit
+)
+
+// volumesBeingCopied lists the volumes of a policy whose local backup is being
+// copied now. An export must not start on one of them, because the copy changes
+// the folder the export reads.
+func (bc *BackupController) volumesBeingCopied(ctx context.Context, policy string) map[string]bool {
+	busy := map[string]bool{}
+	rps := &v1alpha1.ReplicationPolicyList{}
+	if err := bc.client.List(ctx, rps, client.MatchingLabels{backupPolicyLabel: policy}); err != nil {
+		klog.ErrorS(err, "Failed to list the replication policies of a backup policy", "policy", policy)
+		return busy
+	}
+	for _, rp := range rps.Items {
+		for _, s := range rp.Status.SubVolumeStatuses {
+			if s.LastError == "sync in progress" || s.VMCopy != nil {
+				busy[s.SubVolumeName] = true
+			}
+		}
+	}
+	return busy
+}
+
+// takeExportHold marks the volume as held by the export of this policy, so the
+// replication controller makes no new backup of it while the export reads it.
+// A running export keeps the hold it has. An export that has not started waits
+// if a copy of the volume runs or another policy holds the volume.
+func (bc *BackupController) takeExportHold(ctx context.Context, policy, svName string, now time.Time, running bool, copying map[string]bool) holdResult {
+	sv := &v1alpha1.SubVolume{}
+	if err := bc.client.Get(ctx, types.NamespacedName{Name: svName}, sv); err != nil {
+		klog.ErrorS(err, "Failed to read a SubVolume to hold it for an export", "policy", policy, "volume", svName)
+		return holdWait
+	}
+	owner, since, held := parseExportHold(sv.Annotations[exportHoldAnnotation])
+	switch {
+	case held && owner != policy:
+		return holdWait
+	case held && now.Sub(since) > exportHoldLimit:
+		return holdExpired
+	case held:
+		return holdTaken
+	case !running && copying[svName]:
+		return holdWait
+	}
+	patch := client.MergeFrom(sv.DeepCopy())
+	if sv.Annotations == nil {
+		sv.Annotations = map[string]string{}
+	}
+	sv.Annotations[exportHoldAnnotation] = policy + "/" + now.UTC().Format(time.RFC3339)
+	if err := bc.client.Patch(ctx, sv, patch); err != nil {
+		klog.ErrorS(err, "Failed to hold a SubVolume for an export", "policy", policy, "volume", svName)
+		return holdWait
+	}
+	return holdTaken
+}
+
+// releaseExportHold removes the hold of this policy from a volume.
+func (bc *BackupController) releaseExportHold(ctx context.Context, policy, svName string) {
+	sv := &v1alpha1.SubVolume{}
+	if err := bc.client.Get(ctx, types.NamespacedName{Name: svName}, sv); err != nil {
+		if !apierrors.IsNotFound(err) {
+			klog.ErrorS(err, "Failed to read a SubVolume to release its export hold", "policy", policy, "volume", svName)
+		}
+		return
+	}
+	if owner, _, held := parseExportHold(sv.Annotations[exportHoldAnnotation]); !held || owner != policy {
+		return
+	}
+	patch := client.MergeFrom(sv.DeepCopy())
+	delete(sv.Annotations, exportHoldAnnotation)
+	if err := bc.client.Patch(ctx, sv, patch); err != nil {
+		klog.ErrorS(err, "Failed to release the export hold of a SubVolume", "policy", policy, "volume", svName)
+	}
+}
+
+// releaseStaleExportHolds removes the holds of this policy that have no export
+// Job behind them: a Job that ended while the controller was down, or a policy
+// that lost its export block. keep is the volume whose export is running.
+func (bc *BackupController) releaseStaleExportHolds(ctx context.Context, policy, keep string) {
+	svs := &v1alpha1.SubVolumeList{}
+	if err := bc.client.List(ctx, svs); err != nil {
+		klog.ErrorS(err, "Failed to list SubVolumes to release export holds", "policy", policy)
+		return
+	}
+	for i := range svs.Items {
+		sv := &svs.Items[i]
+		if owner, _, held := parseExportHold(sv.Annotations[exportHoldAnnotation]); held && owner == policy && sv.Name != keep {
+			bc.releaseExportHold(ctx, policy, sv.Name)
+		}
+	}
+}
+
+// parseExportHold reads the value of the hold annotation.
+func parseExportHold(value string) (policy string, since time.Time, ok bool) {
+	policy, stamp, found := strings.Cut(value, "/")
+	if !found || policy == "" {
+		return "", time.Time{}, false
+	}
+	since, err := time.Parse(time.RFC3339, stamp)
+	if err != nil {
+		return "", time.Time{}, false
+	}
+	return policy, since, true
 }

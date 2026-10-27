@@ -19,6 +19,10 @@ To make a release:
 
 ## [Unreleased]
 
+### Fixed
+
+- A COS export can no longer be torn (issue #310). While the export of a volume runs, the next local backup of that volume waits, so the export does not hold a mix of two moments. Other volumes are not held; a hold ends with the export or after 6 hours. Restore points of a volume get older by the length of its export.
+
 ### Added
 
 - PoolBench: the backup event reports the average and highest copy speed of the running-VM copies (`status.events[].copySpeedAvgMBps`, `copySpeedMaxMBps`) and the VMs' p95 latency during the backup against the step before it (`p95Micros`, `p95BeforeMicros`). The event message says both.

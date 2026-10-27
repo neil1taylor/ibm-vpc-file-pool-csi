@@ -461,6 +461,10 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 	activeJobs := int32(0)
 	skipped := 0
 
+	// A volume whose backup is being sent to COS gets no new copy until the
+	// export has read it, or the export would hold a mix of two moments.
+	matched, heldByExport := splitHeldByExport(matched)
+
 	// Disks of running VMs take the VM copy path, if it is on.
 	matched, vmRes := rc.processVMVolumes(ctx, policy, matched, true)
 	svStatuses = append(svStatuses, vmRes.statuses...)
@@ -481,6 +485,10 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 		st.LastError = lastError
 		st.VMCopy = nil
 		return st
+	}
+
+	for _, sv := range heldByExport {
+		svStatuses = append(svStatuses, carry(sv.Name, heldByExportMessage))
 	}
 
 	round := rc.cycleResults(policyName)
@@ -712,6 +720,22 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 		"subVolumes", total,
 		"duration", duration.String(),
 	)
+}
+
+// heldByExportMessage is the status of a volume that waits for its COS export.
+// It is not an error: the volume is copied again when the export ends.
+const heldByExportMessage = "held: export to COS running"
+
+// splitHeldByExport separates the volumes that a COS export holds from the rest.
+func splitHeldByExport(svs []v1alpha1.SubVolume) (free, held []v1alpha1.SubVolume) {
+	for _, sv := range svs {
+		if _, _, isHeld := parseExportHold(sv.Annotations[exportHoldAnnotation]); isHeld {
+			held = append(held, sv)
+		} else {
+			free = append(free, sv)
+		}
+	}
+	return free, held
 }
 
 // runningVMPod returns the name of a KubeVirt pod that is running or starting
