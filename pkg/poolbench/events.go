@@ -113,6 +113,7 @@ func (r *Runner) event(ctx context.Context, pb *v1alpha1.PoolBench, now time.Tim
 	case v1alpha1.PoolBenchEventSnapshot:
 		done, msg = r.pollSnapshot(ctx, pb, timedOut)
 	case v1alpha1.PoolBenchEventBackup:
+		r.sampleCopySpeed(ctx, pb, res)
 		done, msg = r.pollBackup(ctx, pb, res.Started.Time, timedOut)
 	default:
 		done, msg = true, "This event is not available in this version."
@@ -131,6 +132,7 @@ func (r *Runner) endEvent(ctx context.Context, pb *v1alpha1.PoolBench, now time.
 	res := &st.Events[len(st.Events)-1]
 	if res.Type == v1alpha1.PoolBenchEventBackup {
 		r.stopBackup(ctx, pb, now)
+		msg += r.backupNumbers(pb, res, now)
 	}
 	res.Ended = &metav1.Time{Time: now}
 	res.Seconds = int64(now.Sub(res.Started.Time).Seconds())
@@ -415,6 +417,10 @@ func (r *Runner) pollSnapshot(ctx context.Context, pb *v1alpha1.PoolBench, timed
 // run's name; the event's policy selects the disks by it.
 const backupLabel = "storage.ibmcloud.io/poolbench-backup"
 
+// backupPolicyLabel is on the replication policies a backup policy makes. It is
+// the same label as in pkg/pool, which this package does not import.
+const backupPolicyLabel = "storage.ibmcloud.io/backup-policy"
+
 // startBackup labels the load disks of the target VMs and makes a backup policy
 // that selects them. The policy copies them into the run's own backup pool, so
 // the backup load is not on the share under test but the VMs' disks are read
@@ -496,6 +502,50 @@ func (r *Runner) pollBackup(ctx context.Context, pb *v1alpha1.PoolBench, started
 		return true, msg
 	}
 	return false, ""
+}
+
+// sampleCopySpeed adds a reading of the speed of every copy of a running VM
+// disk that the event's backup policy has now to the event's result.
+func (r *Runner) sampleCopySpeed(ctx context.Context, pb *v1alpha1.PoolBench, res *v1alpha1.PoolBenchEventResult) {
+	policies := &v1alpha1.ReplicationPolicyList{}
+	if err := r.Client.List(ctx, policies, client.MatchingLabels{backupPolicyLabel: backupPolicyName(pb)}); err != nil {
+		return
+	}
+	for _, rp := range policies.Items {
+		for _, sv := range rp.Status.SubVolumeStatuses {
+			if sv.VMCopy == nil || sv.VMCopy.SpeedMBps <= 0 {
+				continue
+			}
+			res.CopySpeedSumMBps += int64(sv.VMCopy.SpeedMBps)
+			res.CopySpeedSamples++
+			res.CopySpeedMaxMBps = max(res.CopySpeedMaxMBps, sv.VMCopy.SpeedMBps)
+		}
+	}
+}
+
+// backupNumbers sets the copy speed average and the VMs' latency in the result
+// of the backup event that ends now, and returns the sentences that say them.
+func (r *Runner) backupNumbers(pb *v1alpha1.PoolBench, res *v1alpha1.PoolBenchEventResult, now time.Time) string {
+	var text string
+	if res.CopySpeedSamples > 0 {
+		res.CopySpeedAvgMBps = int32(math.Round(float64(res.CopySpeedSumMBps) / float64(res.CopySpeedSamples))) // #nosec G115 -- an average of int32 speeds
+		text += fmt.Sprintf(" The copy speed averaged %d MB/s and reached %d MB/s.", res.CopySpeedAvgMBps, res.CopySpeedMaxMBps)
+	}
+	st := &pb.Status
+	n := r.target(pb)
+	all := r.Store.Results(pb.Name)
+	results := make(map[string][]Result, n)
+	for i := int32(1); i <= n; i++ {
+		results[vmName(i)] = all[vmName(i)]
+	}
+	during := stepRules(pb).Step(results, res.Started.Unix(), now.Unix())
+	if during.P95Ms > 0 && len(st.Steps) > 0 {
+		res.P95Micros = int64(during.P95Ms * 1000)
+		res.P95BeforeMicros = st.Steps[len(st.Steps)-1].P95Micros
+		text += fmt.Sprintf(" The VMs' p95 latency was %.1f ms during the backup and %.1f ms before.",
+			float64(res.P95Micros)/1000, float64(res.P95BeforeMicros)/1000)
+	}
+	return text
 }
 
 // stopBackup deletes the event's backup policy, so it does not back up again.

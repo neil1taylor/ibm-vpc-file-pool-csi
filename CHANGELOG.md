@@ -19,6 +19,10 @@ To make a release:
 
 ## [Unreleased]
 
+### Added
+
+- PoolBench: the backup event reports the average and highest copy speed of the running-VM copies (`status.events[].copySpeedAvgMBps`, `copySpeedMaxMBps`) and the VMs' p95 latency during the backup against the step before it (`p95Micros`, `p95BeforeMicros`). The event message says both.
+
 ## [v0.15.0] — 2026-10-27
 
 ### Added

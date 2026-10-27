@@ -457,6 +457,27 @@ type PoolBenchEventResult struct {
 	Seconds int64 `json:"seconds,omitempty"`
 	// +optional
 	Message string `json:"message,omitempty"`
+
+	// CopySpeedAvgMBps and CopySpeedMaxMBps are the average and the highest
+	// speed, in megabytes per second, of the copies of running VM disks while
+	// a backup event ran. They are 0 when no such copy ran. While the event
+	// runs, CopySpeedSumMBps and CopySpeedSamples hold the readings added up
+	// and counted; the average is set when the event ends.
+	// +optional
+	CopySpeedAvgMBps int32 `json:"copySpeedAvgMBps,omitempty"`
+	// +optional
+	CopySpeedMaxMBps int32 `json:"copySpeedMaxMBps,omitempty"`
+	// +optional
+	CopySpeedSumMBps int64 `json:"copySpeedSumMBps,omitempty"`
+	// +optional
+	CopySpeedSamples int32 `json:"copySpeedSamples,omitempty"`
+
+	// P95Micros is the VMs' p95 latency (the median over all VMs) while a
+	// backup event ran, and P95BeforeMicros the same in the step before it.
+	// +optional
+	P95Micros int64 `json:"p95Micros,omitempty"`
+	// +optional
+	P95BeforeMicros int64 `json:"p95BeforeMicros,omitempty"`
 }
 
 // PoolBenchLogEntry is one line of a run's log.

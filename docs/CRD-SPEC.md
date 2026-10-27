@@ -1543,7 +1543,7 @@ type PoolBenchStatus struct {
     Steps          []PoolBenchStepResult  // one per step: vms, share, guest and IBM IOPS, share latency, p50/p95/p99, throughput, slow %, burst slow %, stalls, at limit, time to ready, pass, cutShort
     KneeVMs        int32                  // the first failed step; 0: no knee
     RecommendedVMs int32                  // 80% of the knee, down to a step; or the largest passed step
-    Events         []PoolBenchEventResult
+    Events         []PoolBenchEventResult // a backup event also has copySpeedAvgMBps and copySpeedMaxMBps (running-VM copies), p95Micros and p95BeforeMicros (the VMs' latency during the event and in the step before)
     Log            []PoolBenchLogEntry    // the newest entries: Info, Warning, Error, Control
     CleanedUp      bool                   // the VMs, pool and namespace are gone and the VPC no longer lists the share
 }
