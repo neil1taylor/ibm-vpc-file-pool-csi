@@ -78,3 +78,8 @@ reason = "react-router: fix only in v7; the OpenShift console SDK pins v6"
 id = "GHSA-wrjc-x8rr-h8h6"
 ignoreUntil = 2026-12-31
 reason = "react-router: fix only in v7; the OpenShift console SDK pins v6"
+
+[[IgnoredVulns]]
+id = "GHSA-gcqx-w48m-w2h4"
+ignoreUntil = 2026-12-31
+reason = "deepmerge: no fixed version; reached only through jest-config, the test runner"

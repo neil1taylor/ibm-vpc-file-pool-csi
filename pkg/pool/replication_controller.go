@@ -463,7 +463,7 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 
 	// A volume whose backup is being sent to COS gets no new copy until the
 	// export has read it, or the export would hold a mix of two moments.
-	matched, heldByExport := splitHeldByExport(matched)
+	matched, heldByExport := rc.splitHeldByExport(ctx, policy, matched)
 
 	// Disks of running VMs take the VM copy path, if it is on.
 	matched, vmRes := rc.processVMVolumes(ctx, policy, matched, true)
@@ -727,15 +727,47 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 const heldByExportMessage = "held: export to COS running"
 
 // splitHeldByExport separates the volumes that a COS export holds from the rest.
-func splitHeldByExport(svs []v1alpha1.SubVolume) (free, held []v1alpha1.SubVolume) {
+// With VM disk copies on, a hold on one disk of a running VM holds every disk
+// of that VM, because a VM copy takes all its disks in one step. A volume whose
+// VM copy runs is never held: the copy would lose its tracking and stay in the VM.
+func (rc *ReplicationController) splitHeldByExport(ctx context.Context, policy *v1alpha1.ReplicationPolicy, svs []v1alpha1.SubVolume) (free, held []v1alpha1.SubVolume) {
+	copying := map[string]bool{}
+	for _, st := range policy.Status.SubVolumeStatuses {
+		if st.VMCopy != nil {
+			copying[st.SubVolumeName] = true
+		}
+	}
 	for _, sv := range svs {
-		if _, _, isHeld := parseExportHold(sv.Annotations[exportHoldAnnotation]); isHeld {
+		if _, _, isHeld := parseExportHold(sv.Annotations[exportHoldAnnotation]); isHeld && !copying[sv.Name] {
 			held = append(held, sv)
 		} else {
 			free = append(free, sv)
 		}
 	}
-	return free, held
+	if len(held) == 0 || len(free) == 0 || rc.vmCopier == nil {
+		return free, held
+	}
+	heldPods := map[types.UID]bool{}
+	unknownNamespaces := map[string]bool{}
+	for i := range held {
+		pod, _, err := rc.vmPodForClaim(ctx, held[i].Spec.PVCNamespace, held[i].Spec.PVCName)
+		switch {
+		case err != nil:
+			unknownNamespaces[held[i].Spec.PVCNamespace] = true
+		case pod != nil:
+			heldPods[pod.UID] = true
+		}
+	}
+	var stillFree []v1alpha1.SubVolume
+	for _, sv := range free {
+		pod, _, err := rc.vmPodForClaim(ctx, sv.Spec.PVCNamespace, sv.Spec.PVCName)
+		if !copying[sv.Name] && (err != nil || unknownNamespaces[sv.Spec.PVCNamespace] || (pod != nil && heldPods[pod.UID])) {
+			held = append(held, sv)
+			continue
+		}
+		stillFree = append(stillFree, sv)
+	}
+	return stillFree, held
 }
 
 // runningVMPod returns the name of a KubeVirt pod that is running or starting

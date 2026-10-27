@@ -22,7 +22,7 @@ To make a release:
 ### Fixed
 
 - The adaptive copy speed now changes the speed of a VM copy that has two disks when one disk has finished. Before, the change failed on the finished disk and the disk that still copied kept its first speed (issue #313).
-- A COS export can no longer be torn (issue #310). While the export of a volume runs, the next local backup of that volume waits, so the export does not hold a mix of two moments. Other volumes are not held; a hold ends with the export or after 6 hours. Restore points of a volume get older by the length of its export.
+- A COS export can no longer be torn (issue #310). While the export of a volume runs, the next local backup of that volume waits, so the export does not hold a mix of two moments. Other volumes are not held, but all disks of a running VM are held together (issue #315: before, the other disk was copied alone, from another moment, and the VM could not be copied again); a hold ends with the export or after 6 hours. Restore points of a volume get older by the length of its export.
 
 ### Added
 
