@@ -113,21 +113,32 @@ func (rc *ReplicationController) adaptVMCopySpeed(ctx context.Context, policy *v
 	if !rc.vmCopyAdaptive(policy) {
 		return
 	}
-	ms, ok := rc.shareLatency.Latency(ctx, policy.Spec.SourcePoolName)
-	cur := int64(g.states[0].SpeedMBps) << 20
-	next := vmCopyAdaptConfig(policy).Next(cur, ms, ok)
-	if next == cur {
+	next, changed := stepVMCopySpeed(ctx, rc.shareLatency, rc.vmCopier, vmCopyAdaptConfig(policy), vm, cp, policy.Spec.SourcePoolName, g.states[0].SpeedMBps)
+	if !changed {
 		return
 	}
-	if err := rc.vmCopier.SetSpeed(ctx, vm, cp, next); err != nil {
-		klog.V(2).InfoS("Could not change the speed of a VM disk copy", "policy", policy.Name, "vm", klog.KRef(vm.Namespace, vm.Name), "err", err)
-		return
-	}
-	klog.V(4).InfoS("Changed the speed of a VM disk copy", "policy", policy.Name, "vm", klog.KRef(vm.Namespace, vm.Name),
-		"fromMBps", cur>>20, "toMBps", next>>20, "latencyMs", ms)
 	for _, st := range g.states {
-		st.SpeedMBps = int32(next >> 20) // #nosec G115 -- a speed in MB/s fits an int32
+		st.SpeedMBps = next
 	}
+}
+
+// stepVMCopySpeed moves the speed of a running copy one step by the latency of
+// the pool it reads, and returns the new speed in MB/s. changed is false when
+// the speed stayed, or when QEMU would not take the change.
+func stepVMCopySpeed(ctx context.Context, latency ShareLatency, copier VMCopier, cfg vmcopy.AdaptConfig, vm vmcopy.VM, cp *vmcopy.Copy, pool string, curMBps int32) (nextMBps int32, changed bool) {
+	ms, ok := latency.Latency(ctx, pool)
+	cur := int64(curMBps) << 20
+	next := cfg.Next(cur, ms, ok)
+	if next == cur {
+		return curMBps, false
+	}
+	if err := copier.SetSpeed(ctx, vm, cp, next); err != nil {
+		klog.V(2).InfoS("Could not change the speed of a VM disk copy", "vm", klog.KRef(vm.Namespace, vm.Name), "err", err)
+		return curMBps, false
+	}
+	klog.V(4).InfoS("Changed the speed of a VM disk copy", "vm", klog.KRef(vm.Namespace, vm.Name),
+		"fromMBps", cur>>20, "toMBps", next>>20, "latencyMs", ms)
+	return int32(next >> 20), true // #nosec G115 -- a speed in MB/s fits an int32
 }
 
 // SetVMCopier turns on copies of running VM disks in direct NFS mode. Without

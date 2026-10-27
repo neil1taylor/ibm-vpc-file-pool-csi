@@ -34,6 +34,13 @@ const (
 	// VolumeSnapshotClass gave, because the copy loop does not see the class.
 	snapshotSpeedAnnotation = "storage.ibmcloud.io/vm-copy-speed-mbps"
 
+	// snapshotFixedAnnotation is "true" when the class turned adapting off.
+	snapshotFixedAnnotation = "storage.ibmcloud.io/vm-copy-fixed"
+
+	// snapshotAdaptiveParam is the VolumeSnapshotClass parameter that turns
+	// adapting off ("false"). Adapting is the default.
+	snapshotAdaptiveParam = "vmCopyAdaptive"
+
 	// snapshotSpeedParam is the VolumeSnapshotClass parameter.
 	snapshotSpeedParam = "vmCopySpeedLimitMBps"
 
@@ -72,6 +79,42 @@ const snapshotDeletingAnnotation = "storage.ibmcloud.io/deleting"
 type vmSnapshots struct {
 	copier VMCopier
 	kube   client.Client
+	// latency lets copies follow the load on the share. Without it they run at a fixed speed.
+	latency ShareLatency
+}
+
+// SetVMSnapshotLatency lets the QEMU copies of snapshots follow the load on the
+// share they read. Call it after SetVMSnapshots.
+func (m *Manager) SetVMSnapshotLatency(l ShareLatency) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.vm != nil {
+		m.vm.latency = l
+	}
+}
+
+// snapshotAdaptive says whether the copy of a snapshot adapts its speed.
+func snapshotAdaptive(vm *vmSnapshots, snap *v1alpha1.Snapshot) bool {
+	return vm.latency != nil && snap.Annotations[snapshotFixedAnnotation] != "true"
+}
+
+// snapshotStartMBps is the speed an adapting snapshot copy begins at and
+// never goes below.
+func snapshotStartMBps(snap *v1alpha1.Snapshot) int64 {
+	if n, err := strconv.ParseInt(snap.Annotations[snapshotSpeedAnnotation], 10, 64); err == nil && n >= 1 {
+		return min(adaptStartMBps, n)
+	}
+	return adaptStartMBps
+}
+
+// snapshotAdaptConfig is the rule for an adapting snapshot copy. The class's
+// speed limit, if any, is the highest speed.
+func snapshotAdaptConfig(snap *v1alpha1.Snapshot) vmcopy.AdaptConfig {
+	cfg := vmcopy.AdaptConfig{Start: snapshotStartMBps(snap) << 20, Step: adaptStepMBps << 20, LimitMs: defaultVMCopyMaxLatencyMs}
+	if n, err := strconv.ParseInt(snap.Annotations[snapshotSpeedAnnotation], 10, 64); err == nil && n >= 1 {
+		cfg.Max = n << 20
+	}
+	return cfg
 }
 
 // SetVMSnapshots turns on QEMU copies for snapshots of running VM disks.
@@ -110,6 +153,19 @@ func vmSnapshotDeadline(sizeGB, speedMBps int64) time.Duration {
 		speedMBps = defaultVMCopySpeedLimitMBps
 	}
 	return vmSnapshotMinDeadline + time.Duration(2*sizeGB*1024/speedMBps)*time.Second
+}
+
+// snapshotFixed checks the adapting parameter of a snapshot class. It is true
+// when the class turned adapting off.
+func snapshotFixed(params map[string]string) (bool, error) {
+	switch v := params[snapshotAdaptiveParam]; v {
+	case "", "true":
+		return false, nil
+	case "false":
+		return true, nil
+	default:
+		return false, fmt.Errorf("%w: %s must be true or false, got %q", ErrInvalidSnapshotParameter, snapshotAdaptiveParam, v)
+	}
 }
 
 func snapshotSpeedMBps(snap *v1alpha1.Snapshot) int64 {
@@ -431,7 +487,11 @@ func (m *Manager) startVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, snap
 		return
 	}
 	id := newSnapshotCopyID(now)
-	cp, err := vm.copier.Start(ctx, target, volumes, vmcopy.StartOptions{Speed: snapshotSpeedMBps(snap) << 20, ID: id})
+	speedMBps := snapshotSpeedMBps(snap)
+	if snapshotAdaptive(vm, snap) {
+		speedMBps = snapshotStartMBps(snap)
+	}
+	cp, err := vm.copier.Start(ctx, target, volumes, vmcopy.StartOptions{Speed: speedMBps << 20, ID: id})
 	if err != nil {
 		m.vmSnapshotTryFailed(ctx, snap, fmt.Sprintf("start the VM disk copy: %v", err))
 		return
@@ -460,6 +520,7 @@ func (m *Manager) startVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, snap
 		FreezeError:          cp.FreezeError,
 		Bitmap:               cp.Bitmap,
 		SetDisks:             setDisks,
+		SpeedMBps:            int32(speedMBps), // #nosec G115 -- a speed in MB/s fits an int32
 	}
 	snap.Status.CopyID = id
 	snap.Status.VMCopySet = nil
@@ -670,7 +731,11 @@ func (m *Manager) watchVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, snap
 		return
 	}
 	if started := snap.Status.VMCopyStarted; started != nil {
-		if limit := vmSnapshotDeadline(snap.Spec.SizeGB, snapshotSpeedMBps(snap)); m.timeNow().Sub(started.Time) > limit {
+		slowest := snapshotSpeedMBps(snap)
+		if snapshotAdaptive(vm, snap) {
+			slowest = snapshotStartMBps(snap)
+		}
+		if limit := vmSnapshotDeadline(snap.Spec.SizeGB, slowest); m.timeNow().Sub(started.Time) > limit {
 			cancel(fmt.Sprintf("the copy ran longer than %s, so it was cancelled", limit.Round(time.Minute)))
 			return
 		}
@@ -683,6 +748,7 @@ func (m *Manager) watchVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, snap
 	}
 	switch state {
 	case vmcopy.Running:
+		m.adaptSnapshotCopySpeed(ctx, vm, snap, target, cp)
 	case vmcopy.Failed, vmcopy.Lost:
 		if err := vm.copier.Finish(ctx, target, cp, true); err != nil {
 			klog.ErrorS(err, "Failed to clean up a failed VM snapshot copy", "snapshot", snap.Name)
@@ -699,6 +765,25 @@ func (m *Manager) watchVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, snap
 		m.saveSnapshotStatus(ctx, snap)
 		m.watchVMSnapshotApply(ctx, vm, snap)
 	}
+}
+
+// adaptSnapshotCopySpeed moves the speed of a running snapshot copy one step,
+// by the latency of the share the VM reads.
+func (m *Manager) adaptSnapshotCopySpeed(ctx context.Context, vm *vmSnapshots, snap *v1alpha1.Snapshot, target vmcopy.VM, cp *vmcopy.Copy) {
+	if !snapshotAdaptive(vm, snap) {
+		return
+	}
+	sv, err := m.k8sClient.GetSubVolume(ctx, snap.Spec.SourceSubVolume)
+	if err != nil {
+		return
+	}
+	st := snap.Status.VMCopy
+	next, changed := stepVMCopySpeed(ctx, vm.latency, vm.copier, snapshotAdaptConfig(snap), target, cp, sv.Spec.PoolName, st.SpeedMBps)
+	if !changed {
+		return
+	}
+	st.SpeedMBps = next
+	m.saveSnapshotStatus(ctx, snap)
 }
 
 // watchJoinedVMSnapshot follows the snapshot that owns the QEMU copy. It does

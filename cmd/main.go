@@ -604,17 +604,19 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metric
 	vmCopier := vmcopy.NewCopier(hooks.NewPodExecer(clientset, restConfig))
 	replController.SetVMCopier(vmCopier)
 	// Without the node agents' metrics the copies run at a fixed speed.
+	var shareLatency *pool.LatencyMeter
 	if nodeAgents.service != "" && nodeAgents.account != "" {
 		httpClient, herr := nodestats.NewHTTPClient(nodeAgents.caFile, nodeAgents.service+"."+driverNamespace+".svc")
 		if herr != nil {
 			klog.ErrorS(herr, "Failed to set up the node agents' metrics client; VM disk copies run at a fixed speed")
 		} else {
-			replController.SetShareLatency(&pool.LatencyMeter{
+			shareLatency = &pool.LatencyMeter{
 				Source: &nodestats.Reader{Client: replClient, Namespace: driverNamespace, Service: nodeAgents.service,
 					HTTP:  httpClient,
 					Token: (&nodestats.ServiceAccountTokens{Clientset: clientset, Namespace: driverNamespace, Name: nodeAgents.account, Now: time.Now}).Token},
 				MinOps: 50, Window: 3, MinGap: 10 * time.Second, Now: time.Now,
-			})
+			}
+			replController.SetShareLatency(shareLatency)
 		}
 	}
 	go replController.Run(signalCtx)
@@ -632,6 +634,9 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metric
 	// Snapshots of running VM disks are QEMU copies. The same commands run in
 	// the VM pod; a timer on the leader moves each copy forward.
 	poolManager.SetVMSnapshots(vmCopier, replClient)
+	if shareLatency != nil {
+		poolManager.SetVMSnapshotLatency(shareLatency)
+	}
 
 	// Instant snapshots of VM disks change the disk's file chain in the VM
 	// pod, or with a Job in the virt-launcher image when the VM is stopped.

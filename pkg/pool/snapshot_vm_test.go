@@ -767,3 +767,63 @@ func TestAdvanceVMSnapshots_DiskHotPluggedAfterTheSnapshotFailsAtOnceWithAReason
 		t.Errorf("no copy may be recorded: %+v", s.Status.VMCopy)
 	}
 }
+
+func TestVMSnapshot_AdaptiveStartsLowAndGrowsWhileQuiet(t *testing.T) {
+	e := newVMSnapEnv(t)
+	e.startVM()
+	l := &fakeLatency{ms: 2, ok: true}
+	e.mgr.SetVMSnapshotLatency(l)
+	e.create(nil)
+	e.tick() // starts the copy
+	if got := e.cop.starts[0].speed; got != 15<<20 {
+		t.Fatalf("start speed = %d, want 15 MB/s", got)
+	}
+	e.tick()
+	e.tick()
+	if got := e.snap().Status.VMCopy.SpeedMBps; got != 25 {
+		t.Fatalf("after two quiet intervals the speed = %d, want 25", got)
+	}
+	if len(l.pools) == 0 || l.pools[0] != "test-pool" {
+		t.Fatalf("the latency is of the source pool, got %v", l.pools)
+	}
+	l.ms = 40
+	e.tick()
+	if got := e.snap().Status.VMCopy.SpeedMBps; got != 15 {
+		t.Fatalf("over the limit the speed = %d, want it halved, not below 15", got)
+	}
+}
+
+func TestVMSnapshot_ClassLimitIsTheHighestSpeed(t *testing.T) {
+	e := newVMSnapEnv(t)
+	e.startVM()
+	e.mgr.SetVMSnapshotLatency(&fakeLatency{ms: 2, ok: true})
+	e.create(map[string]string{"vmCopySpeedLimitMBps": "20"})
+	e.tick()
+	e.tick()
+	e.tick()
+	e.tick()
+	if got := e.snap().Status.VMCopy.SpeedMBps; got != 20 {
+		t.Fatalf("speed = %d, want the class limit 20 as the highest", got)
+	}
+}
+
+func TestVMSnapshot_ClassCanTurnAdaptingOff(t *testing.T) {
+	e := newVMSnapEnv(t)
+	e.startVM()
+	e.mgr.SetVMSnapshotLatency(&fakeLatency{ms: 2, ok: true})
+	e.create(map[string]string{"vmCopyAdaptive": "false", "vmCopySpeedLimitMBps": "50"})
+	e.tick()
+	e.tick()
+	e.tick()
+	if got := e.cop.starts[0].speed; got != 50<<20 || len(e.cop.speeds) != 0 {
+		t.Fatalf("start speed %d, SetSpeed calls %v: a fixed copy keeps its speed", got, e.cop.speeds)
+	}
+}
+
+func TestCreateSnapshot_RejectsBadAdaptiveValue(t *testing.T) {
+	e := newVMSnapEnv(t)
+	e.startVM()
+	if _, err := e.mgr.CreateSnapshot(e.ctx, "bad-adaptive", "test-pool/share-1/"+testPVName, map[string]string{"vmCopyAdaptive": "maybe"}); err == nil {
+		t.Fatal("want an error for vmCopyAdaptive: maybe")
+	}
+}
