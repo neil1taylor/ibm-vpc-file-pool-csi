@@ -362,13 +362,26 @@ func (c *Copier) Progress(ctx context.Context, vm VM, cp *Copy) (State, string, 
 }
 
 // SetSpeed changes the speed limit of a copy that is running, in bytes per
-// second for each disk. 0 means no limit. It fails if a disk's copy is not
-// running, and the error names the disk.
+// second for each disk. 0 means no limit. A disk whose copy has ended is left
+// alone, because QEMU refuses the change and the other disks still copy. It
+// fails if no disk's copy is running, and the error names the first disk.
 func (c *Copier) SetSpeed(ctx context.Context, vm VM, cp *Copy, speed int64) error {
+	jobs, err := c.queryJobs(ctx, vm)
+	if err != nil {
+		return err
+	}
+	changed := 0
 	for i, d := range cp.Disks {
+		if j, ok := jobs[jobID(cp.ID, i)]; ok && j.Status == "concluded" {
+			continue
+		}
 		if _, err := c.qmp(ctx, vm, "block-job-set-speed", map[string]any{"device": jobID(cp.ID, i), "speed": speed}); err != nil {
 			return fmt.Errorf("setting the copy speed of %s: %w", d.Volume, err)
 		}
+		changed++
+	}
+	if changed == 0 && len(cp.Disks) > 0 {
+		return fmt.Errorf("setting the copy speed of %s: the copy has ended", cp.Disks[0].Volume)
 	}
 	return nil
 }

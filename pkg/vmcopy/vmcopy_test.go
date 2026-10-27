@@ -912,3 +912,24 @@ func TestSetSpeedOfAFinishedCopyIsAnError(t *testing.T) {
 		t.Fatalf("want an error that names the disk, got %v", err)
 	}
 }
+
+func TestSetSpeedSkipsADiskWhoseCopyHasEnded(t *testing.T) {
+	f := newFakeLauncher()
+	c := newTestCopier(f)
+	ctx := context.Background()
+	cp, err := c.Start(ctx, testVM, []string{"rootdisk", "datadisk"}, StartOptions{Speed: 5 << 20, ID: "a1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	f.jobs["repl-a1-0"].status = "concluded"
+	f.mu.Unlock()
+	if err := c.SetSpeed(ctx, testVM, cp, 40<<20); err != nil {
+		t.Fatalf("SetSpeed with one disk finished: %v", err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if got := f.jobs["repl-a1-1"].speed; got != 40<<20 {
+		t.Errorf("the disk that still copies has speed %d, want %d", got, 40<<20)
+	}
+}
