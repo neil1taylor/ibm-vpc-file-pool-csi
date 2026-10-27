@@ -1011,7 +1011,7 @@ type SnapshotStatus struct {
 
 If a running (or starting) KubeVirt VM uses the source claim, the snapshot is a QEMU copy of that one disk, not a file copy. The Snapshot gets the annotation `storage.ibmcloud.io/snapshot-method: vm`. The controller freezes the guest for a moment, has QEMU copy the disk to a staging file, and an `apply-vm-disk` Job writes a raw `disk.img` into the snapshot folder. The snapshot is ready when the Job ends. `status.consistency` says whether the guest was frozen.
 
-- The `VolumeSnapshotClass` parameter `vmCopySpeedLimitMBps` (whole number, default 20) limits how much the copy slows the VM. The value is kept in the annotation `storage.ibmcloud.io/vm-copy-speed-mbps`.
+- The copy adapts its speed to the load on the share the VM reads: it starts at 15 MB/s and follows the rule of `ReplicationPolicy.spec.vmCopyAdaptive`. The `VolumeSnapshotClass` parameter `vmCopySpeedLimitMBps` (whole number) is the highest speed. It is kept in the annotation `storage.ibmcloud.io/vm-copy-speed-mbps`. The parameter `vmCopyAdaptive: "false"` (annotation `storage.ibmcloud.io/vm-copy-fixed`) makes the copy run at that speed (default 20) instead. `status.vmCopy.speedMBps` shows the speed now.
 - A live migration cancels the copy. A cancelled or failed copy is tried again after a minute; after 3 tries the snapshot is `Failed` and `status.message` says why.
 - A copy that runs much longer than the disk needs (2 hours plus twice the time at the speed limit) is cancelled and counts as one try.
 - If the VM stops before the copy starts, the snapshot is a file copy. If a VM starts during a file copy, the folder is discarded and the snapshot is copied again with QEMU.
