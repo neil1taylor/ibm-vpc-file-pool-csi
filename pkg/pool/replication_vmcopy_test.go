@@ -1037,20 +1037,20 @@ func TestVMCopy_AdaptiveStartsLowAndGrowsWhileQuiet(t *testing.T) {
 	e := newVMCopyEnv(t)
 	l := e.adaptive(2, true)
 	e.tick() // start
-	if got := e.cop.starts[0].speed; got != 5<<20 {
-		t.Fatalf("start speed = %d, want 5 MB/s", got)
+	if got := e.cop.starts[0].speed; got != 15<<20 {
+		t.Fatalf("start speed = %d, want 15 MB/s", got)
 	}
-	if got := e.speedNow(t); got != 5 {
-		t.Fatalf("status speed = %d, want 5", got)
+	if got := e.speedNow(t); got != 15 {
+		t.Fatalf("status speed = %d, want 15", got)
 	}
 	e.cop.state = vmcopy.Running
 	e.tick()
 	e.tick()
-	if got := e.speedNow(t); got != 15 {
-		t.Fatalf("after two quiet intervals the speed = %d, want 15", got)
+	if got := e.speedNow(t); got != 25 {
+		t.Fatalf("after two quiet intervals the speed = %d, want 25", got)
 	}
-	if n := len(e.cop.speeds); n != 2 || e.cop.speeds[1] != 15<<20 {
-		t.Fatalf("SetSpeed calls = %v, want 10 then 15 MB/s", e.cop.speeds)
+	if n := len(e.cop.speeds); n != 2 || e.cop.speeds[1] != 25<<20 {
+		t.Fatalf("SetSpeed calls = %v, want 20 then 25 MB/s", e.cop.speeds)
 	}
 	if len(l.pools) == 0 || l.pools[0] != "prod-pool" {
 		t.Fatalf("the latency is of the source pool, got %v", l.pools)
@@ -1063,11 +1063,11 @@ func TestVMCopy_AdaptiveHalvesOverTheLimit(t *testing.T) {
 	e.tick()
 	e.cop.state = vmcopy.Running
 	e.tick()
-	e.tick() // 15 MB/s
+	e.tick() // 25 MB/s
 	l.ms = 40
 	e.tick()
-	if got := e.speedNow(t); got != 7 {
-		t.Fatalf("speed over the limit = %d, want it halved to 7", got)
+	if got := e.speedNow(t); got != 15 {
+		t.Fatalf("speed over the limit = %d, want it halved but not below the lowest, 15", got)
 	}
 }
 
@@ -1080,7 +1080,7 @@ func TestVMCopy_AdaptiveLimitComesFromThePolicy(t *testing.T) {
 	e.tick()
 	e.cop.state = vmcopy.Running
 	e.tick()
-	if got := e.speedNow(t); got != 5 {
+	if got := e.speedNow(t); got != 15 {
 		t.Fatalf("8 ms is over a 5 ms limit, the speed must stay at the start: %d", got)
 	}
 }
@@ -1092,15 +1092,15 @@ func TestVMCopy_AdaptiveNoReadingKeepsTheSpeed(t *testing.T) {
 	e.cop.state = vmcopy.Running
 	e.tick()
 	e.tick()
-	if got := e.speedNow(t); got != 5 || len(e.cop.speeds) != 0 {
-		t.Fatalf("without a reading the speed stays at 5, got %d and calls %v", got, e.cop.speeds)
+	if got := e.speedNow(t); got != 15 || len(e.cop.speeds) != 0 {
+		t.Fatalf("without a reading the speed stays at 15, got %d and calls %v", got, e.cop.speeds)
 	}
 }
 
 func TestVMCopy_AdaptiveStopsAtTheHighestSpeed(t *testing.T) {
 	e := newVMCopyEnv(t)
 	p := e.k.getPolicy(e.policy)
-	p.Spec.VMCopySpeedLimitMBps = int32Ptr(10)
+	p.Spec.VMCopySpeedLimitMBps = int32Ptr(20)
 	e.k.addPolicy(p)
 	e.adaptive(2, true)
 	e.tick()
@@ -1108,8 +1108,8 @@ func TestVMCopy_AdaptiveStopsAtTheHighestSpeed(t *testing.T) {
 	for i := 0; i < 4; i++ {
 		e.tick()
 	}
-	if got := e.speedNow(t); got != 10 {
-		t.Fatalf("the highest speed is 10, got %d", got)
+	if got := e.speedNow(t); got != 20 {
+		t.Fatalf("the highest speed is 20, got %d", got)
 	}
 }
 
@@ -1143,7 +1143,7 @@ func TestVMCopy_ASpeedChangeThatFailsIsNotAFailedCopy(t *testing.T) {
 	e.cop.state = vmcopy.Running
 	e.cop.setSpeedErr = fmt.Errorf("QEMU is busy")
 	e.tick()
-	if s := e.status(t, vmGuardSV1); s.VMCopy == nil || s.VMCopy.Phase != "Copying" || s.VMCopy.SpeedMBps != 5 {
+	if s := e.status(t, vmGuardSV1); s.VMCopy == nil || s.VMCopy.Phase != "Copying" || s.VMCopy.SpeedMBps != 15 {
 		t.Fatalf("the copy goes on at the old speed: %+v", s.VMCopy)
 	}
 }

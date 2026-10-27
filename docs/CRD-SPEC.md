@@ -1666,7 +1666,7 @@ type ReplicationPolicySpec struct {
     // +optional
     VMCopySpeedLimitMBps *int32 `json:"vmCopySpeedLimitMBps,omitempty"`
 
-    // VMCopyAdaptive makes the copy start at 5 MB/s for each disk, speed up while
+    // VMCopyAdaptive makes the copy start at 15 MB/s for each disk, speed up while
     // the share the VM reads is quiet, and slow down when its average latency
     // passes VMCopyMaxLatencyMs. Default true. It needs the node agents' metrics;
     // without them the copy runs at the fixed speed.

@@ -74,7 +74,7 @@ func (rc *ReplicationController) SetShareLatency(l ShareLatency) {
 const (
 	// adaptStartMBps is the speed an adaptive copy begins at, and the lowest it
 	// goes to. adaptStepMBps is how much it grows each time the share is quiet.
-	adaptStartMBps = 5
+	adaptStartMBps = 15
 	adaptStepMBps  = 5
 	// defaultVMCopyMaxLatencyMs is the share latency above which an adaptive
 	// copy slows down.
