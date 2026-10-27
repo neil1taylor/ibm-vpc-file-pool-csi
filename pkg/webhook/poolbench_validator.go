@@ -51,6 +51,10 @@ func (v *PoolBenchValidator) ValidateCreate(_ context.Context, pb *v1alpha1.Pool
 
 func (v *PoolBenchValidator) ValidateUpdate(_ context.Context, oldPB, pb *v1alpha1.PoolBench) (admission.Warnings, error) {
 	klog.V(4).InfoS("Validating PoolBench update", "name", pb.Name)
+	// A run made before a rule was added must still finish and be cleaned up.
+	if reflect.DeepEqual(oldPB.Spec, pb.Spec) {
+		return nil, nil
+	}
 	if err := validatePoolBenchSpec(&pb.Spec); err != nil {
 		return nil, err
 	}
