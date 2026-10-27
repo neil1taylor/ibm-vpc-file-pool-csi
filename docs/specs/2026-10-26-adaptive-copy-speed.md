@@ -24,13 +24,13 @@ Today the copy runs at a fixed limit, 20 MB/s for each disk (`vmCopySpeedLimitMB
 - `vmCopyAdaptive` (new): `true` or `false`. Default `true`.
 - `vmCopyMaxLatencyMs` (new): the average share latency above which the copy slows down. Default `15`. The CRD refuses a value above 20, the PoolBench limit for a slow VM.
 
-**While a copy runs.** The speed starts low (5 MB/s for each disk), goes up while the source share is quiet, and goes down at once when its latency passes the limit. The replication status of the volume shows the speed now (`vmCopy.speedMBps`).
+**While a copy runs.** The speed starts low (15 MB/s for each disk), goes up while the source share is quiet, and goes down at once when its latency passes the limit. The replication status of the volume shows the speed now (`vmCopy.speedMBps`).
 
 **In PoolBench.** The backup event result says how fast the copy went, the average and the highest, and what the VMs' latency did during the event compared with before it. A run can then answer "did the backup slow the VMs, and by how much".
 
 ## How it works
 
-1. The copy starts at the start speed (5 MB/s for each disk).
+1. The copy starts at the start speed (15 MB/s for each disk).
 2. Every 30 s, for each running copy, the controller reads the average latency of the source share over the last interval (the change in `execute_seconds_total` divided by the change in `operations_total`, from every node agent, as PoolBench does).
 3. If the latency is under the limit, the speed goes up by 5 MB/s for each disk, up to the highest speed. If it is over the limit, the speed is halved, down to the start speed. A network uses the same rule to share a link: grow slowly, shrink fast.
 4. The new speed is sent to QEMU with `block-job-set-speed`.

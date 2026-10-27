@@ -176,7 +176,7 @@ EOF
 
 The fields that matter for a VM:
 
-- `vmCopyAdaptive` (default `true`) makes the copy of each disk start at 5 MB/s, speed up while the share the VM reads is quiet, and slow down when the share's average latency passes `vmCopyMaxLatencyMs` (default 15 ms). `vmCopySpeedLimitMBps` sets the highest speed; by default there is none. With `vmCopyAdaptive: false` it is the fixed speed instead (default 20; `0` means no limit). At 20 MB/s a VM kept 93% of its write speed in a lab test. The copy counts empty space too, so a first copy of a large disk takes long.
+- `vmCopyAdaptive` (default `true`) makes the copy of each disk start at 15 MB/s, speed up while the share the VM reads is quiet, and slow down when the share's average latency passes `vmCopyMaxLatencyMs` (default 15 ms). `vmCopySpeedLimitMBps` sets the highest speed; by default there is none. With `vmCopyAdaptive: false` it is the fixed speed instead (default 20; `0` means no limit). At 20 MB/s a VM kept 93% of its write speed in a lab test. The copy counts empty space too, so a first copy of a large disk takes long.
 - `restorePointKeepHours` is how long the destination keeps earlier moments. It is `24` by default. The disk uses more space the more the VM writes.
 - `schedule` is how often a new copy starts.
 

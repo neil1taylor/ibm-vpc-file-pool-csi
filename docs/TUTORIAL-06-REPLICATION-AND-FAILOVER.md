@@ -1138,7 +1138,7 @@ kubectl failover plan --nfs-mount-path /data --list-moments
 kubectl failover execute --nfs-mount-path /data --prepare-only --rewind-to 2026-10-20T10:30:00Z
 ```
 
-The policy fields `vmCopyAdaptive` (default `true`), `vmCopySpeedLimitMBps` (the highest speed; none by default) and `restorePointKeepHours` (default 24) control the copy speed and how long the destination keeps restore points. An adaptive copy starts at 5 MB/s for each disk, speeds up while the share the VM reads is quiet, and slows down when the share's latency passes `vmCopyMaxLatencyMs` (default 15). Without the node agents' metrics, or with `vmCopyAdaptive: false`, the copy runs at the fixed `vmCopySpeedLimitMBps` (default 20; 0 means no limit).
+The policy fields `vmCopyAdaptive` (default `true`), `vmCopySpeedLimitMBps` (the highest speed; none by default) and `restorePointKeepHours` (default 24) control the copy speed and how long the destination keeps restore points. An adaptive copy starts at 15 MB/s for each disk, speeds up while the share the VM reads is quiet, and slows down when the share's latency passes `vmCopyMaxLatencyMs` (default 15). Without the node agents' metrics, or with `vmCopyAdaptive: false`, the copy runs at the fixed `vmCopySpeedLimitMBps` (default 20; 0 means no limit).
 
 See [CROSS-REGION-DR.md](CROSS-REGION-DR.md), "Running VM disks", for the details and the lab results.
 
