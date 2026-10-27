@@ -166,7 +166,7 @@ func (bc *BackupController) reconcileExport(ctx context.Context, bp *v1alpha1.Ba
 		}
 	}
 
-	copying := bc.volumesBeingCopied(ctx, bp.Name)
+	copying, copiesKnown := bc.volumesBeingCopied(ctx, bp.Name)
 
 export:
 	for _, i := range due {
@@ -179,6 +179,9 @@ export:
 		}
 		sh, found := shareByID(shares, shareOfEntry(*v, shares))
 		if !found || !shareReady(sh) {
+			continue
+		}
+		if !copiesKnown && state.active != v.SubVolumeName {
 			continue
 		}
 		switch bc.takeExportHold(ctx, bp.Name, v.SubVolumeName, now, state.active == v.SubVolumeName, copying) {
@@ -323,12 +326,13 @@ const (
 // volumesBeingCopied lists the volumes of a policy whose local backup is being
 // copied now. An export must not start on one of them, because the copy changes
 // the folder the export reads.
-func (bc *BackupController) volumesBeingCopied(ctx context.Context, policy string) map[string]bool {
-	busy := map[string]bool{}
+// It reports known=false when it cannot tell, and the caller starts no export.
+func (bc *BackupController) volumesBeingCopied(ctx context.Context, policy string) (busy map[string]bool, known bool) {
+	busy = map[string]bool{}
 	rps := &v1alpha1.ReplicationPolicyList{}
 	if err := bc.client.List(ctx, rps, client.MatchingLabels{backupPolicyLabel: policy}); err != nil {
 		klog.ErrorS(err, "Failed to list the replication policies of a backup policy", "policy", policy)
-		return busy
+		return nil, false
 	}
 	for _, rp := range rps.Items {
 		for _, s := range rp.Status.SubVolumeStatuses {
@@ -337,7 +341,7 @@ func (bc *BackupController) volumesBeingCopied(ctx context.Context, policy strin
 			}
 		}
 	}
-	return busy
+	return busy, true
 }
 
 // takeExportHold marks the volume as held by the export of this policy, so the

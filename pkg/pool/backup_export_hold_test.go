@@ -1,6 +1,8 @@
 package pool
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -8,6 +10,8 @@ import (
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 func (e *cosEnv) holdOf(sv *v1alpha1.SubVolume) string {
@@ -140,5 +144,20 @@ func TestBackupExport_AVolumeHeldByAnotherPolicyWaits(t *testing.T) {
 	}
 	if h := e.holdOf(e.a); !strings.HasPrefix(h, "other/") {
 		t.Errorf("hold of another policy = %q, want it left alone", h)
+	}
+}
+
+func TestBackupExport_IfTheCopiesCannotBeListedTheyAreNotKnown(t *testing.T) {
+	e := newCOSEnv(t, nil)
+	e.bc.client = interceptor.NewClient(e.c.(client.WithWatch), interceptor.Funcs{
+		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			if _, ok := list.(*v1alpha1.ReplicationPolicyList); ok {
+				return errors.New("the API server is not reachable")
+			}
+			return c.List(ctx, list, opts...)
+		},
+	})
+	if _, known := e.bc.volumesBeingCopied(e.ctx, "nightly"); known {
+		t.Errorf("volumesBeingCopied said it knew, although it could not list; an export would start on a volume that may be copied")
 	}
 }
