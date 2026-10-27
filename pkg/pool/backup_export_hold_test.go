@@ -149,7 +149,11 @@ func TestBackupExport_AVolumeHeldByAnotherPolicyWaits(t *testing.T) {
 
 func TestBackupExport_IfTheCopiesCannotBeListedTheyAreNotKnown(t *testing.T) {
 	e := newCOSEnv(t, nil)
-	e.bc.client = interceptor.NewClient(e.c.(client.WithWatch), interceptor.Funcs{
+	withWatch, ok := e.c.(client.WithWatch)
+	if !ok {
+		t.Fatal("the fake client cannot watch")
+	}
+	e.bc.client = interceptor.NewClient(withWatch, interceptor.Funcs{
 		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
 			if _, ok := list.(*v1alpha1.ReplicationPolicyList); ok {
 				return errors.New("the API server is not reachable")
