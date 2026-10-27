@@ -165,3 +165,21 @@ func TestPoolBenchValidator_Update(t *testing.T) {
 		}
 	})
 }
+
+// A run made before a rule was added must still be able to finish and be
+// cleaned up: an update that leaves the spec as it was is not checked against
+// the spec rules.
+func TestPoolBenchValidateUpdate_UnchangedSpecIsNotChecked(t *testing.T) {
+	old := validPoolBench()
+	old.Status.Phase = v1alpha1.PoolBenchComplete
+	old.Spec.MeasureMinutes = 1 // fails today's rules
+	cur := old.DeepCopy()
+	cur.Status.Message = "cleaning up"
+	if _, err := (&PoolBenchValidator{}).ValidateUpdate(context.Background(), old, cur); err != nil {
+		t.Fatalf("an update that does not touch the spec must pass: %v", err)
+	}
+	cur.Spec.MeasureMinutes = 2
+	if _, err := (&PoolBenchValidator{}).ValidateUpdate(context.Background(), old, cur); err == nil {
+		t.Fatal("a changed spec must still be checked")
+	}
+}
