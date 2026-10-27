@@ -13,7 +13,7 @@ For pictures you can click through, see the [interactive diagrams](diagrams/inde
 - [How good a copy is](#how-good-a-copy-is): moment, file-system consistent, crash consistent, file copy, guest freeze
 - [Backup](#backup): backup, BackupPolicy, snapshot pool, keep time, restore, BackupRestore, restore point, change list, COS export, lock, backup key, browse session, browse helper
 - [Replication and failover](#replication-and-failover): replication, ReplicationPolicy, destination, receiver, rewind, failover
-- [Other words](#other-words): golden image, lifecycle hook, group snapshot, user workload monitoring, command-line plugins
+- [Other words](#other-words): golden image, lifecycle hook, group snapshot, adaptive copy speed, PoolBench, knee, user workload monitoring, command-line plugins
 
 ---
 
@@ -356,6 +356,24 @@ Example: do not create one; use a VM snapshot instead.
 **User workload monitoring** is the part of OpenShift's monitoring that reads your own projects. OpenShift's platform monitoring reads only the platform projects, and Red Hat does not support adding your own projects to it. The driver runs in `kube-system`, so its alerts and scraping are in a small namespace, `ibm-vpc-file-pool-csi-monitoring`, that only user workload monitoring reads. An admin turns it on once with `enableUserWorkload: true` in `openshift-monitoring/cluster-monitoring-config`. Without it **no alert fires**. See [MONITORING.md](MONITORING.md#where-alerts-run-on-openshift).
 
 Example: `oc -n openshift-user-workload-monitoring get pods` lists `prometheus-user-workload` when it is on.
+
+### Adaptive copy speed
+
+The **adaptive copy speed** is how fast a copy of a running VM disk goes. It covers replication, backup and snapshot copies. The copy starts at 15 MB/s. It speeds up by 5 MB/s every 30 seconds while the share the VM reads is quiet. It halves, never below 15 MB/s, when the average latency of the share passes `vmCopyMaxLatencyMs` (15 ms by default). `vmCopySpeedLimitMBps` is the highest speed; unset means none. With `vmCopyAdaptive: false`, or when the node agents' metrics cannot be read, the copy runs at a fixed speed instead.
+
+Example: a backup of one VM disk went from 15 to 25 MB/s in 90 seconds while the share stayed quiet.
+
+### PoolBench
+
+**PoolBench** is a storage performance test that the console starts. A `PoolBench` resource makes a new pool with one share and adds test VMs in steps. Each VM runs a steady load with short bursts. The test measures each step, finds the knee, and deletes everything it made. It is off by default (`poolBench.enabled`).
+
+Example: a Quick check with 5 test VMs on a 200 GB share at 3,000 IOPS.
+
+### Knee
+
+The **knee** is the first step of a PoolBench run where users would notice that the share is slow: the latency passes its limit, too many VMs are slow, or a VM stalls. PoolBench recommends 80% of the knee, rounded down to a step.
+
+Example: "Knee at 45 VMs" means the 45-VM step failed, so the run recommends 30 VMs.
 
 ### Command-line plugins
 

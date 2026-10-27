@@ -45,7 +45,7 @@ Before upgrading, complete every item:
 | v0.11.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.12.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.13.0–v0.13.2 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
-| v0.14.0–v0.14.3 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
+| v0.14.0–v0.15.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
 
 ---
 
@@ -124,6 +124,24 @@ kubectl get crd filesharepools.storage.ibmcloud.io -o json | \
 ---
 
 ## Version-Specific Upgrade Notes
+
+### Upgrading to v0.15.0 (from v0.14.3)
+
+**Changes:**
+- Copies of running VM disks (replication, backup and snapshot copies) adapt their speed to the load on the share the VM reads. A copy starts at 15 MB/s, speeds up by 5 MB/s every 30 seconds while the share is quiet, and halves (never below 15 MB/s) when the average latency of the share passes `vmCopyMaxLatencyMs` (15 ms by default).
+- **The fixed 20 MB/s default is gone for adaptive copies.** `vmCopySpeedLimitMBps` is now the highest speed, and unset means there is no highest speed. If you rely on 20 MB/s as a ceiling, set `vmCopySpeedLimitMBps: 20`. To keep a fixed speed, set `vmCopyAdaptive: false` on the policy (or on the `VolumeSnapshotClass`).
+- PoolBench, a storage performance test in the console. It is off by default (`poolBench.enabled`).
+
+**CRD changes (additive):** the new `PoolBench` resource, and `vmCopyAdaptive` and `vmCopyMaxLatencyMs` on `BackupPolicy` and `ReplicationPolicy`. `vmCopySpeedLimitMBps` no longer has a default of 20. The status of a replication volume shows the speed now in `vmCopy.speedMBps`.
+
+**New objects from the chart:** a service account `<release>-node-reader` that can only read the node agents' `/metrics`; a Role for the controller (list endpoint slices, create a token of that one account); a ConfigMap `<release>-node-ca` that the OpenShift service CA fills in. On a cluster without the OpenShift service CA, copies stay at the fixed speed.
+
+**Action required:**
+1. Apply the CRDs: `kubectl apply --server-side --force-conflicts -f config/crd/`.
+2. Upgrade with Helm. Set both `image.tag` and `consolePlugin.image.tag` if you pin image tags. No chart value changes are needed.
+3. Check the controller log: a line "Cannot read the latency of the pool's shares" means the copies stay at their fixed speed, and the line says why.
+
+To go back, run `helm rollback`. The older driver works with the new CRDs.
 
 ### Upgrading to v0.14.3 (from v0.14.2)
 

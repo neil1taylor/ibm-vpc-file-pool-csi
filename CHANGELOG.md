@@ -19,6 +19,8 @@ To make a release:
 
 ## [Unreleased]
 
+## [v0.15.0] — 2026-10-27
+
 ### Added
 
 - **The copy of a running VM's disks adapts its speed to the load on the share.** The copy of each disk starts at 15 MB/s, speeds up by 5 MB/s every 30 s while the average latency of the share the VM reads (read from the node agents, median of the last three intervals) stays under 15 ms, and halves when it passes that. New `spec.vmCopyAdaptive` (default `true`) and `spec.vmCopyMaxLatencyMs` (1 to 20, default 15) on `BackupPolicy` and `ReplicationPolicy`; `status.subVolumeStatuses[].vmCopy.speedMBps` shows the speed now. The controller reads the node agents' metrics (`--node-metrics-service`, `--node-metrics-ca`, a ConfigMap or secret for the CA, a Role to list endpoint slices). It does not send its own token to the node agents: it asks for a one-hour token of a service account `<release>-node-reader`, which can only read `/metrics` (`--node-metrics-account`). The console forms say "highest speed" and show "Adapts to the load on the share". Without them the copy runs at a fixed speed. The reader moved from `pkg/poolbench` to `pkg/nodestats`. See `docs/specs/2026-10-26-adaptive-copy-speed.md`.
@@ -48,6 +50,11 @@ To make a release:
 - The PoolBench runner: it takes a `PoolBench` through its checks, makes the run's namespace, secrets, pool and VMs step by step, measures each step, finds the knee, and cleans up; pause, hold, measure longer, skip and stop work; a restart of the service goes on from the status. Each test VM waits before a load phase while the run is paused.
 - The PoolBench collector: test VMs send each result to it, and it keeps the results and publishes them as `poolbench_vm_*` metrics. The Windows load also sends its results to it. The Go code makes the same load and reads results the same way as the Bash test tooling; golden files in `pkg/poolbench/testdata` tie the two together.
 - The `PoolBench` resource and its admission checks: the settings and results of a performance test run that the console will start and show. The service that runs it comes in later changes. See `docs/specs/2026-10-25-poolbench.md`.
+
+### Fixed
+
+- A `PoolBench` run made before a spec rule was added can finish and be cleaned up. The webhook no longer checks the spec on an update that leaves the spec as it was.
+- The controller can read the node agents' metrics: it registers the EndpointSlice type, without which the adaptive copy speed could never read a latency and stayed at its start speed.
 
 ## [v0.14.3] — 2026-10-24
 

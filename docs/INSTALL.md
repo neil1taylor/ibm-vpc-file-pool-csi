@@ -420,7 +420,8 @@ kubectl apply -f config/deploy/node.yaml
 | `--poolbench-results-dir` | `/results` | Folder for the raw results of the test VMs (poolbench mode) |
 | `--poolbench-interval` | `15s` | Time between two passes of the runner (poolbench mode) |
 | `--poolbench-run-role`, `--poolbench-service-account` | `""` | The ClusterRole the service binds to its own service account in each run's namespace (poolbench mode). Set by the chart |
-| `--node-metrics-service`, `--node-metrics-ca` | `""` | The node agents' metrics Service and the file with the CA of their certificate, for the share's counters (poolbench mode). Set by the chart |
+| `--node-metrics-service`, `--node-metrics-ca` | `""` | The node agents' metrics Service and the file with the CA of their certificate, for the share's counters (poolbench and controller modes). Set by the chart |
+| `--node-metrics-account` | `""` | Controller mode: the service account whose short-lived token the controller sends to the node agents, so that copies of running VM disks can follow the load on the share. It may only read their `/metrics`. Without it, or without `--node-metrics-service`, the copies run at a fixed speed. Set by the chart |
 
 **Key unwrap flags** (`--mode=unwrap-backup-key`, run by the COS export and restore Jobs):
 
