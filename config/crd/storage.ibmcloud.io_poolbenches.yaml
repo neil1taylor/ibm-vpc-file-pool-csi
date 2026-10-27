@@ -341,11 +341,38 @@ spec:
                     atVMs:
                       format: int32
                       type: integer
+                    copySpeedAvgMBps:
+                      description: |-
+                        CopySpeedAvgMBps and CopySpeedMaxMBps are the average and the highest
+                        speed, in megabytes per second, of the copies of running VM disks while
+                        a backup event ran. They are 0 when no such copy ran. While the event
+                        runs, CopySpeedSumMBps and CopySpeedSamples hold the readings added up
+                        and counted; the average is set when the event ends.
+                      format: int32
+                      type: integer
+                    copySpeedMaxMBps:
+                      format: int32
+                      type: integer
+                    copySpeedSamples:
+                      format: int32
+                      type: integer
+                    copySpeedSumMBps:
+                      format: int64
+                      type: integer
                     ended:
                       format: date-time
                       type: string
                     message:
                       type: string
+                    p95BeforeMicros:
+                      format: int64
+                      type: integer
+                    p95Micros:
+                      description: |-
+                        P95Micros is the VMs' p95 latency (the median over all VMs) while a
+                        backup event ran, and P95BeforeMicros the same in the step before it.
+                      format: int64
+                      type: integer
                     seconds:
                       description: |-
                         Seconds is the event's main measure: for a boot storm, the time until

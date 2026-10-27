@@ -104,7 +104,7 @@ func newHarness(t *testing.T, pb *v1alpha1.PoolBench, extra ...client.Object) *h
 		dataSource("centos-stream9"), dataSource("win2k22-perf"),
 	}
 	c := fake.NewClientBuilder().WithScheme(testScheme()).WithObjects(append(objs, extra...)...).
-		WithStatusSubresource(&v1alpha1.PoolBench{}, &v1alpha1.FileSharePool{}, &v1alpha1.BackupPolicy{}).Build()
+		WithStatusSubresource(&v1alpha1.PoolBench{}, &v1alpha1.FileSharePool{}, &v1alpha1.BackupPolicy{}, &v1alpha1.ReplicationPolicy{}).Build()
 	store, err := NewStore(t.TempDir(), NewMetrics(prometheus.NewRegistry()))
 	if err != nil {
 		t.Fatal(err)
@@ -1150,6 +1150,81 @@ func TestRunner_Backup(t *testing.T) {
 	}
 	if err := h.c.Get(context.Background(), client.ObjectKey{Name: "poolbench-t10k-backup"}, &v1alpha1.BackupPolicy{}); err == nil {
 		t.Fatal("the policy must go when the event ends, or it backs up again")
+	}
+}
+
+// setCopySpeeds makes the backup policy's copies show these speeds, one copy of
+// a running VM disk for each speed. No speed means no copy runs.
+func setCopySpeeds(t *testing.T, h *harness, speeds ...int32) {
+	t.Helper()
+	ctx := context.Background()
+	rp := &v1alpha1.ReplicationPolicy{}
+	key := client.ObjectKey{Name: "poolbench-t10k-backup-s1"}
+	if err := h.c.Get(ctx, key, rp); err != nil {
+		rp = &v1alpha1.ReplicationPolicy{ObjectMeta: metav1.ObjectMeta{Name: key.Name, Labels: map[string]string{backupPolicyLabel: "poolbench-t10k-backup"}}}
+		if err := h.c.Create(ctx, rp); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rp.Status.SubVolumeStatuses = nil
+	for i, s := range speeds {
+		rp.Status.SubVolumeStatuses = append(rp.Status.SubVolumeStatuses, v1alpha1.SubVolumeReplicationStatus{
+			SubVolumeName: fmt.Sprintf("sv-%d", i), VMCopy: &v1alpha1.VMCopyState{SpeedMBps: s}})
+	}
+	if err := h.c.Status().Update(ctx, rp); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunner_BackupReportsCopySpeed(t *testing.T) {
+	h := backupBench(t)
+	h.toEndOfMeasuring()
+	for _, speed := range []int32{15, 20, 30} {
+		h.advance(time.Minute)
+		setBackupStatus(t, h, "Active", "")
+		setCopySpeeds(t, h, speed)
+		h.pass()
+		h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageEvent)
+	}
+	h.advance(time.Minute)
+	setCopySpeeds(t, h)
+	setBackupStatus(t, h, "Active", "", "vm-001-data")
+	h.pass()
+	ev := h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageCreating).Status.Events[0]
+	if ev.CopySpeedAvgMBps != 22 || ev.CopySpeedMaxMBps != 30 {
+		t.Fatalf("average and highest copy speed: %+v", ev)
+	}
+	if !strings.Contains(ev.Message, "22 MB/s") || !strings.Contains(ev.Message, "30 MB/s") {
+		t.Fatalf("the message must give the copy speeds: %q", ev.Message)
+	}
+}
+
+func TestRunner_BackupWithNoCopyHasNoSpeed(t *testing.T) {
+	h := backupBench(t)
+	h.toEndOfMeasuring()
+	h.advance(time.Minute)
+	setBackupStatus(t, h, "Active", "", "vm-001-data")
+	h.pass()
+	ev := h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageCreating).Status.Events[0]
+	if ev.CopySpeedAvgMBps != 0 || ev.CopySpeedMaxMBps != 0 || strings.Contains(ev.Message, "MB/s") {
+		t.Fatalf("a backup with no running-VM copy must not claim a speed: %+v", ev)
+	}
+}
+
+func TestRunner_BackupReportsVMLatency(t *testing.T) {
+	h := backupBench(t)
+	h.toEndOfMeasuring()
+	// A steady phase lasts 555 s, so the event must be longer for a result to lie inside it.
+	h.advance(12 * time.Minute)
+	h.results(3, 12000000)
+	setBackupStatus(t, h, "Active", "", "vm-001-data")
+	h.pass()
+	ev := h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageCreating).Status.Events[0]
+	if ev.P95Micros != 12000 || ev.P95BeforeMicros != 4000 {
+		t.Fatalf("p95 during and before the backup: %+v", ev)
+	}
+	if !strings.Contains(ev.Message, "12.0 ms") || !strings.Contains(ev.Message, "4.0 ms") {
+		t.Fatalf("the message must give both latencies: %q", ev.Message)
 	}
 }
 
