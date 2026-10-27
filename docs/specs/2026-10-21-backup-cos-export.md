@@ -139,6 +139,7 @@ Each part is a PR with its tests, and updates the docs and the release test run 
 - Maintenance runs every maintenance interval, not on a fixed daily timer: a day for a normal keep time, an hour for the 25-hour test lock. This keeps lock extension ahead of a short lock.
 - Snapshots past the keep time are deleted by age in the maintenance Job. Kopia can only expire by count, so the export tells Kopia to keep every snapshot and the Job does the expiry.
 - A failed export is tried again after 5 minutes, and a volume that keeps failing does not hold up the others.
+- While the export of a volume runs, the next local backup of that volume waits, so the export reads a disk that does not change. See `2026-10-27-export-reads-a-steady-disk.md`.
 - The controller keeps exporting while a policy is suspended: suspend stops new local backups, not the copy of moments that already exist.
 - A failed maintenance run is written to the controller log and tried again; it is not in the status yet.
 - Release test (part 6): the COS checks run inside the existing stage 18 script, on the same policy and the same three volumes, so the VM is built once. They are on when `COS_BUCKET` is set (in the environment or in `~/.config/pool-csi/cos-stage.env`) and reported as "not checked" otherwise. A partly filled configuration fails the stage at the start, before the 60 to 90 minutes of setup.
