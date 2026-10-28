@@ -84,7 +84,7 @@ func OpenDiskView(disk string, at time.Time) (dv *DiskView, err error) {
 	// The view keeps the folder handle open; on failure it is closed here.
 	defer func() {
 		if err != nil {
-			d.Close()
+			_ = d.Close()
 			dv = nil
 		}
 	}()
