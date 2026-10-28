@@ -19,6 +19,10 @@ To make a release:
 
 ## [Unreleased]
 
+## [v0.15.2] — 2026-10-28
+
+A small fix release. No CRD changes and no chart value changes.
+
 ### Fixed
 
 - The volume resizer sidecar can watch pods. The controller role allowed only `get` and `list` on pods, so the sidecar logged "Failed to watch *v1.Pod" for ever and, on some clusters, restarted without end (161 restarts in a day on one cluster).
