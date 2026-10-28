@@ -231,7 +231,7 @@ func TestKopia_AtMostProcsRunAtOnce(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
-	if _, err := k.Object(ctx, "k1"); !errors.Is(err, context.DeadlineExceeded) {
+	if _, err = k.Object(ctx, "k1"); !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("the second child started while the first was open: %v", err)
 	}
 	_ = first.Close()
@@ -359,10 +359,10 @@ func TestRealKopia_ReadsTheShapesItWrites(t *testing.T) {
 		t.Errorf("sub/z = %q", buf[:n])
 	}
 	_ = f.Close()
-	if _, err := tr.Open(p("to-etc/passwd")); code(err) != "link_refused" {
+	if _, err = tr.Open(p("to-etc/passwd")); code(err) != "link_refused" {
 		t.Errorf("a path through a link: %v", err)
 	}
-	if _, err := tr.Open(p("sub/rel")); code(err) != "link_refused" {
+	if _, err = tr.Open(p("sub/rel")); code(err) != "link_refused" {
 		t.Errorf("a relative link: %v", err)
 	}
 	// A wrong backup key fails with words, and the key is not in them.

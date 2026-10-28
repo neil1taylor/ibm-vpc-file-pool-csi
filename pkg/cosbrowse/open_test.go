@@ -141,7 +141,7 @@ func TestOpen_EmergencyKeyIsUsedOnlyWhenKeyProtectIsUnreachable(t *testing.T) {
 
 	// A refusal is not hidden by the emergency key.
 	fk2 := newFakeKopia(t)
-	if _, err := openWithFake(t, fk2, src, files, &fakeUnwrapper{err: errors.New("403 forbidden")}, &bytes.Buffer{}); err == nil {
+	if _, err = openWithFake(t, fk2, src, files, &fakeUnwrapper{err: errors.New("403 forbidden")}, &bytes.Buffer{}); err == nil {
 		t.Error("a refusal from Key Protect was hidden by the emergency key")
 	}
 

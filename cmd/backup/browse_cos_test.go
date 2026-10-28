@@ -61,7 +61,7 @@ func TestFromCOSEmergencyKeyNeedsASecretAndNeverAFile(t *testing.T) {
 		t.Fatalf("bucket = %+v, %v", tg.bucket, err)
 	}
 	flags["emergency-key-secret"] = ""
-	if _, err := parseTarget(flags); err == nil || !strings.Contains(err.Error(), "--emergency-key-secret") {
+	if _, err = parseTarget(flags); err == nil || !strings.Contains(err.Error(), "--emergency-key-secret") {
 		t.Errorf("err = %v", err)
 	}
 	_, err = parseTarget(bucketArgs("--backup-key-file", "/tmp/key"))

@@ -60,8 +60,8 @@ func sourceOf(flags map[string]string) (source string, bucket *v1alpha1.BrowseFr
 		Bucket: flags["bucket"], Endpoint: flags["endpoint"], Prefix: flags["prefix"], Volume: flags["volume"],
 		CredentialsSecret: orFlag(flags, "credentials-secret", "cos-credentials"),
 	}
-	switch {
-	case flags["emergency-key-only"] == "true":
+	switch flags["emergency-key-only"] {
+	case "true":
 		if flags["emergency-key-secret"] == "" {
 			return "", nil, errors.New("--emergency-key-only needs --emergency-key-secret NAME")
 		}

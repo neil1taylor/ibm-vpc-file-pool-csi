@@ -27,7 +27,7 @@ const (
 
 	maxSnapshotListBytes = 256 << 20
 	maxStderrBytes       = 8 << 10
-	defaultKopiaProcs    = 12
+	defaultKopiaProcs    = 16
 )
 
 // KopiaConfig is how to run the Kopia program against one repository.
@@ -44,7 +44,7 @@ type KopiaConfig struct {
 	AccessKey, SecretKey, Password string
 	// ContentCacheMB and MetadataCacheMB limit Kopia's cache on disk.
 	ContentCacheMB, MetadataCacheMB int
-	// Procs is how many Kopia programs run at once. Zero means 12.
+	// Procs is how many Kopia programs run at once. Zero means 16.
 	Procs int
 	// backend replaces the S3 words of the connect command. Tests use it to
 	// open a repository in a folder.

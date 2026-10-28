@@ -22,7 +22,7 @@ import (
 // package and never put in the environment of the process or of Kopia, except
 // for the COS key and the backup key in the environment of the Kopia child.
 const (
-	CredentialsDir   = "/var/run/pool-csi/cos-credentials"
+	CredentialsDir   = "/var/run/pool-csi/cos-credentials" //nolint:gosec // a folder path, not a credential
 	WrappedKeyDir    = "/var/run/pool-csi/backup-key-wrapped"
 	APIKeyDir        = "/var/run/pool-csi/keyprotect-apikey" //nolint:gosec // a folder path, not a credential
 	EmergencyKeyDir  = "/var/run/pool-csi/backup-key-emergency"

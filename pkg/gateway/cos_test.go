@@ -398,8 +398,8 @@ func TestRestoreFromANamedBucket(t *testing.T) {
 	}
 	noClass["targetName"] = "back2"
 	delete(noClass, "storageClassName")
-	if resp, body := e.do("POST", "/v1/restores", "alice-token", noClass); resp.StatusCode != 400 || !strings.Contains(string(body), "storageClassName") {
-		t.Errorf("no class: %d %s", resp.StatusCode, body)
+	if r, b := e.do("POST", "/v1/restores", "alice-token", noClass); r.StatusCode != 400 || !strings.Contains(string(b), "storageClassName") {
+		t.Errorf("no class: %d %s", r.StatusCode, b)
 	}
 	// The status is shown only while the right holds.
 	var r Restore
