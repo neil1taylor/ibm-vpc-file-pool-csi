@@ -264,3 +264,34 @@ func TestBrowseGuest_NoSubVolumeNoHold(t *testing.T) {
 		t.Fatalf("a volume that is gone must not make the session wait: %q", msg)
 	}
 }
+
+func TestBrowseGuest_TheConsistencyOfTheNewestCopyGoesToTheHelper(t *testing.T) {
+	e := newGuestEnv(t)
+	bp := e.bp("nightly")
+	for i := range bp.Status.Volumes {
+		bp.Status.Volumes[i].Consistency = "CrashConsistent"
+	}
+	if err := e.c.Status().Update(e.ctx, bp); err != nil {
+		t.Fatal(err)
+	}
+	e.openGuest("bb1")
+	e.reconcile()
+	// A pass of the policy controller keeps what the replication status says; with
+	// none, the last value stays.
+	if got := e.jobs.started["uid-bb1"].Consistency; got != "CrashConsistent" {
+		t.Errorf("Consistency = %q", got)
+	}
+}
+
+func TestBrowseGuest_AHelperThatIsNotReadyInTimeEndsInWords(t *testing.T) {
+	e := newGuestEnv(t)
+	e.openGuest("bb1")
+	e.reconcile()
+	e.jobs.state["uid-bb1"] = BrowseJobState{Exists: true} // the pod is up, the reader is not ready
+	e.now = e.now.Add(defaultBrowseGuestStartTimeout + time.Minute)
+	e.reconcile()
+	bb := e.bb("bb1")
+	if bb.Status.Phase != "Failed" || !strings.Contains(bb.Status.Message, "not ready") {
+		t.Fatalf("status = %+v", bb.Status)
+	}
+}

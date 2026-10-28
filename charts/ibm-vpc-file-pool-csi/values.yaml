@@ -129,6 +129,31 @@ backupBrowse:
     # A session on COS ends if its helper is not ready after this long, usually
     # because a Secret named by the export block is missing.
     startTimeout: 5m
+  # Browsing the files inside a VM disk without starting the VM (issue #92, phase
+  # 5). The helper shows the disk, read-only and at the chosen moment, to a small
+  # appliance VM (libguestfs) in an ordinary pod with no extra rights. It needs its
+  # own image (Dockerfile.browse-guest, built from CentOS Stream 9), so it is off
+  # until you have built and pushed that image. While a session is open, the next
+  # backup copy of that one disk waits, for 2 hours at most (maxLife above).
+  guest:
+    enabled: false
+    image:
+      repository: de.icr.io/ibm-vpc-file-pool-csi/browse-guest
+      # Empty means the same tag as the driver image.
+      tag: ""
+    # Ask the pod for the KVM device (devices.kubevirt.io/kvm), which makes the
+    # appliance start in about 1.5 seconds instead of about 12. A pod that asks
+    # waits until a node has the device, so turn it on only where nodes have it
+    # (bare metal workers with OpenShift Virtualization).
+    kvmDevice: false
+    # Limits of the helper pod. Empty means 1 CPU and 1Gi (the appliance peaked at
+    # about 550 MiB in the lab).
+    cpuLimit: ""
+    memoryLimit: ""
+    # A session on a VM disk ends if its helper is not ready after this long. The
+    # time includes waiting for a backup copy that is being written and the start
+    # of the appliance (10 minutes at most).
+    startTimeout: 20m
 
 # The backup gateway: the one door to browse sessions (issue #92). Users talk
 # to it with their own Kubernetes token; it checks every call with a token review

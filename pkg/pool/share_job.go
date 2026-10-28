@@ -113,6 +113,8 @@ type ShareJobRunner struct {
 	driverImage   string
 	launcherImage string
 	browseImage   string
+	guestImage    string
+	guestCfg      BrowseGuestConfig
 	// browsePullSecrets are the pull Secrets of browse helper pods.
 	browsePullSecrets []string
 	// browseCOSCPU and browseCOSMemory are the limits of the helper pod that

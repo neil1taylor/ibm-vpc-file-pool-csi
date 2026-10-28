@@ -303,6 +303,11 @@ func (d *DiskView) check() error {
 	return nil
 }
 
+// Err says whether the view is still good: nil, or ErrDiskChanged once the
+// backup disk or its undo folder has changed. It looks at the disk at most every
+// two seconds.
+func (d *DiskView) Err() error { return d.check() }
+
 // diskName is the name of the disk in the folder.
 func (d *DiskView) diskName() string { return d.diskInfo.Name() }
 

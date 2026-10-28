@@ -457,6 +457,11 @@ kubectl apply -f config/deploy/node.yaml
 |------|---------|-------------|
 | `--browse-image` | `""` | Image of the browse helper. Empty turns browse sessions off |
 | `--browse-namespace` | `ibm-vpc-file-pool-csi-browse` | Namespace of the helper pods and the session Secrets |
+| `--browse-guest-image` | `""` | Image of the helper that reads the file systems inside a VM disk. Empty turns browsing inside VM disks off |
+| `--browse-guest-kvm` | `false` | Ask the VM disk helper pod for the KVM device (`devices.kubevirt.io/kvm`) |
+| `--browse-guest-cpu-limit` | `""` | CPU limit of the VM disk helper pod. Empty means `1` |
+| `--browse-guest-memory-limit` | `""` | Memory limit of the VM disk helper pod. Empty means `1Gi` |
+| `--browse-guest-start-timeout` | `20m` | A session on a VM disk ends if its helper is not ready after this long |
 | `--browse-image-pull-secrets` | `""` | Comma-separated names of the Secrets, in the driver namespace, that pull the browse image from a private registry. The chart sets it from `imagePullSecrets` |
 | `--browse-idle` | `15m` | End a session after this long without use |
 | `--browse-max-life` | `2h` | End a session after this long, even if in use |

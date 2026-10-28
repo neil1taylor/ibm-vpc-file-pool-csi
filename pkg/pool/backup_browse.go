@@ -42,6 +42,11 @@ const (
 	defaultBrowseMaxSessions     = 5
 	defaultBrowseMaxPerNamespace = 2
 	defaultBrowseClosedKeep      = 10 * time.Minute
+
+	// defaultBrowseGuestStartTimeout is how long a session on a VM disk may be
+	// Starting: a copy to wait for (5 minutes), the appliance (10 minutes at most)
+	// and the pull of the image.
+	defaultBrowseGuestStartTimeout = 20 * time.Minute
 )
 
 // BrowseConfig sets the limits of browse sessions.
@@ -60,6 +65,9 @@ type BrowseConfig struct {
 	// are. A session that reads a backup in COS runs its helper there, with a copy
 	// of the session Secret. Empty turns browsing of COS backups off.
 	COSNamespace string
+	// GuestStartTimeout is how long a session on a VM disk may wait for its
+	// helper to be ready. Zero means 20 minutes.
+	GuestStartTimeout time.Duration
 	// COSStartTimeout is how long a session that reads COS may wait for its
 	// helper to be ready. Zero means five minutes.
 	COSStartTimeout time.Duration
@@ -341,6 +349,11 @@ func (bc *BackupController) watchBrowse(ctx context.Context, bb *v1alpha1.Backup
 		}
 		bb.Status.PodIP, bb.Status.Port = st.PodIP, browsePort
 		bc.setBrowseStatus(ctx, bb, browsePhaseReady, "")
+	case bb.Status.Phase == browsePhaseStarting && bb.Spec.Guest && bb.Status.StartedTime != nil &&
+		bc.nowFunc().Sub(bb.Status.StartedTime.Time) >= bc.guestStartTimeout():
+		bc.endBrowse(ctx, bb, counts, browsePhaseFailed, "", fmt.Sprintf(
+			"the reader of the VM disk was not ready after %s. Check that the guest image can be pulled; without the KVM device the reader can be slow",
+			bc.guestStartTimeout()))
 	case bb.Status.Phase == browsePhaseStarting && browseIsCOS(&bb.Spec) && bb.Status.StartedTime != nil &&
 		bc.nowFunc().Sub(bb.Status.StartedTime.Time) >= bc.cosStartTimeout():
 		bc.endBrowse(ctx, bb, counts, browsePhaseFailed, "", fmt.Sprintf(
@@ -407,6 +420,9 @@ func (bc *BackupController) browseRequest(ctx context.Context, bb *v1alpha1.Back
 		// A VM disk keeps its earlier moments as undo files next to the disk,
 		// not as a moments folder: the helper rebuilds the old view from them.
 		req.Guest = true
+		if c := entry.Consistency; c == "FileSystemConsistent" || c == "CrashConsistent" {
+			req.Consistency = c
+		}
 		if sp.Moment != nil {
 			req.At = sp.Moment.Time
 		}
@@ -600,4 +616,11 @@ func (bc *BackupController) sweepBrowseHolds(ctx context.Context, sessions []v1a
 			klog.ErrorS(err, "Failed to release a browse hold", "volume", sv.Name)
 		}
 	}
+}
+
+func (bc *BackupController) guestStartTimeout() time.Duration {
+	if bc.browse.GuestStartTimeout > 0 {
+		return bc.browse.GuestStartTimeout
+	}
+	return defaultBrowseGuestStartTimeout
 }

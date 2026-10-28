@@ -158,6 +158,11 @@ func main() {
 	flag.StringVar(&browse.cosCPU, "browse-cos-cpu-limit", "", "CPU limit of the helper pod that reads a backup in COS; empty means 1 (controller mode)")
 	flag.StringVar(&browse.cosMemory, "browse-cos-memory-limit", "", "Memory limit of the helper pod that reads a backup in COS; empty means 1Gi (controller mode)")
 	flag.DurationVar(&browse.cfg.COSStartTimeout, "browse-cos-start-timeout", 5*time.Minute, "End a browse session on COS whose helper is not ready after this long (controller mode)")
+	flag.StringVar(&browse.guestImage, "browse-guest-image", "", "Image of the helper that reads the file systems inside a VM disk (libguestfs); empty turns browsing inside VM disks off (controller mode)")
+	flag.BoolVar(&browse.guestKVM, "browse-guest-kvm", false, "Ask the VM disk helper pod for the KVM device (devices.kubevirt.io/kvm); set it only where nodes have one (controller mode)")
+	flag.StringVar(&browse.guestCPU, "browse-guest-cpu-limit", "", "CPU limit of the VM disk helper pod; empty means 1 (controller mode)")
+	flag.StringVar(&browse.guestMemory, "browse-guest-memory-limit", "", "Memory limit of the VM disk helper pod; empty means 1Gi (controller mode)")
+	flag.DurationVar(&browse.cfg.GuestStartTimeout, "browse-guest-start-timeout", 20*time.Minute, "End a browse session on a VM disk whose helper is not ready after this long (controller mode)")
 	flag.IntVar(&browse.restoreMaxRunning, "file-restore-max-running", 5, "How many file restores run at once in the cluster; more wait (controller mode)")
 
 	// Backup gateway flags (gateway mode).
@@ -360,9 +365,13 @@ type browseOptions struct {
 	// cosEnabled lets sessions and restores read backups exported to COS. Their
 	// helpers run in the driver namespace, where the COS and Key Protect Secrets
 	// are, with the limits cosCPU and cosMemory.
-	cosEnabled bool
-	cosCPU     string
-	cosMemory  string
+	cosEnabled  bool
+	cosCPU      string
+	guestImage  string
+	guestKVM    bool
+	guestCPU    string
+	guestMemory string
+	cosMemory   string
 	// restoreMaxBytes is the most one file restore writes.
 	restoreMaxBytes int64
 	// restoreMaxRunning is how many file restores run at once.
@@ -651,6 +660,9 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metric
 		browseRunner := pool.NewShareJobRunner(shareJobClient, browse.namespace, pool.DefaultCloneImage)
 		browseRunner.SetBrowseImage(browse.image)
 		browse.cfg.Namespace = browse.namespace
+		if browse.guestImage != "" {
+			browseRunner.SetBrowseGuest(browse.guestImage, pool.BrowseGuestConfig{KVM: browse.guestKVM, CPU: browse.guestCPU, Memory: browse.guestMemory})
+		}
 		if browse.pullSecrets != "" {
 			names := strings.Split(browse.pullSecrets, ",")
 			browseRunner.SetBrowsePullSecrets(names)

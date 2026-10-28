@@ -115,6 +115,13 @@ Browse a backup and restore single files (issue #92). Added in phase 1 of `docs/
 | `backupBrowse.cos.cpuLimit` | string | `""` | CPU limit of the helper pod that reads COS. Empty means `1` |
 | `backupBrowse.cos.memoryLimit` | string | `""` | Memory limit of the helper pod that reads COS. Empty means `1Gi` (Kopia and its cache need more than a helper that reads a folder) |
 | `backupBrowse.cos.startTimeout` | string | `5m` | A session on COS ends if its helper is not ready after this long, usually because a Secret named by the export block is missing or lacks a key; the message names the Secrets to check |
+| `backupBrowse.guest.enabled` | bool | `false` | Browse the files inside a VM disk without starting the VM (issue #92, phase 5). Needs the guest image (`Dockerfile.browse-guest`, CentOS Stream 9 with libguestfs), so it is off until you have built and pushed it. While a session is open, the next backup copy of that one disk waits (`held: waiting for a browse session`), for at most the hard limit of a session. Keep `backupBrowse.maxLife` at 2h30m or less: a hold older than 3 hours is ignored |
+| `backupBrowse.guest.image.repository` | string | `de.icr.io/ibm-vpc-file-pool-csi/browse-guest` | The VM disk helper image |
+| `backupBrowse.guest.image.tag` | string | `""` | Empty means the tag of the driver image |
+| `backupBrowse.guest.kvmDevice` | bool | `false` | Ask the helper pod for the KVM device (`devices.kubevirt.io/kvm`). With it the appliance starts in about 1.5 seconds, without it in about 12 (and every folder opened or file read starts one). A pod that asks waits until a node has the device, so turn it on only where nodes have it |
+| `backupBrowse.guest.cpuLimit` | string | `""` | CPU limit of the helper pod. Empty means `1` |
+| `backupBrowse.guest.memoryLimit` | string | `""` | Memory limit. Empty means `1Gi` (the appliance peaked at about 550 MiB in the lab) |
+| `backupBrowse.guest.startTimeout` | string | `20m` | A session on a VM disk ends if its helper is not ready after this long. It covers waiting for a backup copy that is being written (5 minutes at most) and the start of the appliance (10 minutes at most) |
 
 The chart also makes, in the browse namespace, a Role that lets the controller make, change and delete Secrets there (the session Secrets, and copies of the image pull secrets, which the controller copies from the release namespace), and a NetworkPolicy that lets only the backup gateway pods of the release namespace reach the helper pods, on port 8443. **Moving from the earlier part:** sessions that were open in the release namespace are not followed; they end by themselves within 2 hours and their objects are removed with them.
 

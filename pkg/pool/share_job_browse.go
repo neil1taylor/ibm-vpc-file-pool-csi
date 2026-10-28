@@ -49,6 +49,9 @@ type BrowseJobRequest struct {
 	// the files of that folder. MomentsPath is not used: the earlier moments of
 	// a VM disk are undo files next to the disk.
 	Guest bool
+	// Consistency is the consistency of the newest copy of the VM disk
+	// (FileSystemConsistent or CrashConsistent); empty if not known. Guest only.
+	Consistency string
 }
 
 // BrowseJobState says what the helper pod of a session is doing.
@@ -83,10 +86,30 @@ func (r *ShareJobRunner) SetBrowseImage(image string) { r.browseImage = image }
 // helper pod uses to pull its image from a private registry.
 func (r *ShareJobRunner) SetBrowsePullSecrets(names []string) { r.browsePullSecrets = names }
 
+// BrowseGuestConfig sets the pod of a session on the file systems inside a VM
+// disk. A field that is empty gets its default.
+type BrowseGuestConfig struct {
+	// KVM asks the pod for the KVM device (devices.kubevirt.io/kvm), which makes
+	// the appliance about ten times faster. A pod that asks for it waits until a
+	// node has one, so set it only on a cluster where nodes do.
+	KVM bool
+	// CPU and Memory are the pod's limits; the defaults are 1 and 1Gi (the lab
+	// peak was 550 MiB for the appliance).
+	CPU, Memory string
+	// TmpSize limits each of the two scratch folders (/tmp and /var/tmp); the
+	// default is 1Gi.
+	TmpSize string
+}
+
+// SetBrowseGuest turns on sessions on the file systems inside VM disks, with the
+// guest helper image.
+func (r *ShareJobRunner) SetBrowseGuest(image string, cfg BrowseGuestConfig) {
+	r.guestImage, r.guestCfg = image, cfg
+}
+
 // GuestEnabled says whether sessions on the file systems inside VM disks can
-// start. They need the guest helper image, which a later change adds; until then
-// the answer is no and a session that asks fails in words.
-func (r *ShareJobRunner) GuestEnabled() bool { return false }
+// start: the guest helper image is set.
+func (r *ShareJobRunner) GuestEnabled() bool { return r.guestImage != "" }
 
 // Namespace is where the helper pods run.
 func (r *ShareJobRunner) Namespace() string { return r.namespace }
@@ -116,7 +139,7 @@ func (r *ShareJobRunner) StartBrowse(ctx context.Context, req BrowseJobRequest) 
 	if req.COS != nil {
 		return r.startBrowseCOS(ctx, req)
 	}
-	if req.Guest {
+	if req.Guest && r.guestImage == "" {
 		return errNoBrowseGuest
 	}
 	if err := util.ValidateBackupPath(req.LatestPath); err != nil {
@@ -127,11 +150,22 @@ func (r *ShareJobRunner) StartBrowse(ctx context.Context, req BrowseJobRequest) 
 			return err
 		}
 	}
+	if req.Consistency != "" && req.Consistency != "FileSystemConsistent" && req.Consistency != "CrashConsistent" {
+		return errors.New("the consistency of the copy is not one that the helper knows")
+	}
 	args := []string{"/usr/local/bin/browse", "--mode=browse-server", "--root=/latest", fmt.Sprintf("--listen=:%d", browsePort),
 		"--token-file=/etc/browse/token", "--tls-cert-file=/etc/browse/tls.crt", "--tls-key-file=/etc/browse/tls.key",
 		"--idle=" + req.Idle.String(), "--max-life=" + req.MaxLife.String()}
 	folders := []folderMount{{share: 0, subPath: strings.TrimPrefix(req.LatestPath, "/"), at: "/latest"}}
-	if req.MomentsPath != "" {
+	if req.Guest {
+		args = append(args, "--guest", "--guest-socket=/tmp/disk.sock", "--guest-appliance=/opt/guestfs-appliance")
+		if req.Consistency != "" {
+			args = append(args, "--guest-consistency="+req.Consistency)
+		}
+		if !req.At.IsZero() {
+			args = append(args, "--at="+req.At.UTC().Format(time.RFC3339))
+		}
+	} else if req.MomentsPath != "" {
 		args = append(args, "--moments=/moments")
 		if !req.At.IsZero() {
 			args = append(args, "--at="+req.At.UTC().Format(time.RFC3339))
@@ -163,6 +197,9 @@ func (r *ShareJobRunner) StartBrowse(ctx context.Context, req BrowseJobRequest) 
 				Path: "/healthz", Port: intstr.FromInt32(browsePort), Scheme: corev1.URISchemeHTTPS}},
 			PeriodSeconds: 2,
 		},
+	}
+	if req.Guest {
+		r.shapeGuest(&shape)
 	}
 	key := browseKey(req.ID)
 	err := r.client.Get(ctx, types.NamespacedName{Namespace: r.namespace, Name: shareJobName(key)}, &batchv1.Job{})
@@ -232,4 +269,34 @@ func (r *ShareJobRunner) BrowseSessions(ctx context.Context) ([]string, error) {
 	}
 	sort.Strings(names)
 	return names, nil
+}
+
+// kvmResource is the KVM device that the KubeVirt device plugin offers.
+const kvmResource corev1.ResourceName = "devices.kubevirt.io/kvm"
+
+// shapeGuest changes the pod of a session to the one that runs the appliance:
+// the guest image, two scratch folders (the appliance writes its files there; the
+// root file system stays read-only), the larger limits, and the KVM device if
+// told to. It has no more rights than the plain helper.
+func (r *ShareJobRunner) shapeGuest(shape *jobShape) {
+	cpu := orDefault(r.guestCfg.CPU, "1")
+	mem := orDefault(r.guestCfg.Memory, "1Gi")
+	tmp := resource.MustParse(orDefault(r.guestCfg.TmpSize, "1Gi"))
+	shape.image = r.guestImage
+	for _, d := range []string{"tmp", "var-tmp"} {
+		shape.volumes = append(shape.volumes, corev1.Volume{Name: "guest-" + d, VolumeSource: corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: &tmp}}})
+	}
+	shape.mounts = append(shape.mounts,
+		corev1.VolumeMount{Name: "guest-tmp", MountPath: "/tmp"},
+		corev1.VolumeMount{Name: "guest-var-tmp", MountPath: "/var/tmp"})
+	res := &corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("250m"), corev1.ResourceMemory: resource.MustParse("512Mi")},
+		Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(cpu), corev1.ResourceMemory: resource.MustParse(mem)},
+	}
+	if r.guestCfg.KVM {
+		one := resource.MustParse("1")
+		res.Requests[kvmResource], res.Limits[kvmResource] = one, one
+	}
+	shape.resources = res
 }

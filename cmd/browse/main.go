@@ -20,6 +20,7 @@ import (
 
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/browse"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/cosbrowse"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/guestfs"
 	"k8s.io/klog/v2"
 )
 
@@ -30,6 +31,11 @@ const modeServer = "browse-server"
 // openCOS opens a backup in COS. Tests replace it.
 var openCOS = func(ctx context.Context, src cosbrowse.Source, at time.Time, kopia, stateDir string, log io.Writer) (*cosbrowse.Opened, error) {
 	return cosbrowse.Open(ctx, src, at, cosbrowse.OpenOptions{Kopia: kopia, StateDir: stateDir, Log: log})
+}
+
+// newToolRunner makes the runner of the libguestfs tools. Tests replace it.
+var newToolRunner = func(appliance string, kvm bool) guestfs.Runner {
+	return &guestfs.ExecRunner{Env: guestfs.Environment(appliance, kvm)}
 }
 
 func main() {
@@ -58,6 +64,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 	at := fs.String("at", "", "read the newest moment at or before this time (RFC 3339); needs --moments")
 	tlsCert := fs.String("tls-cert-file", "", "the session certificate (PEM)")
 	tlsKey := fs.String("tls-key-file", "", "the session key (PEM)")
+	guest := fs.Bool("guest", false, "read the file systems inside the VM disk in --root (disk.img) through a read-only appliance, instead of the files of --root")
+	guestSocket := fs.String("guest-socket", "/tmp/disk.sock", "private socket where the disk is served to the appliance (--guest)")
+	guestAppliance := fs.String("guest-appliance", "", "folder with the prebuilt libguestfs appliance (--guest); empty uses the tools' default")
+	guestConsistency := fs.String("guest-consistency", "", "FileSystemConsistent or CrashConsistent: how the newest copy of the disk was taken (--guest)")
 	termLog := fs.String("termination-log", "/dev/termination-log", "file that gets the reason the session ended")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -68,6 +78,15 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 		return 2
 	case *cosSource != "" && (*root != "" || *moments != ""):
 		_, _ = fmt.Fprintln(stderr, "--cos-source cannot be used with --root or --moments")
+		return 2
+	case *guest && (*cosSource != "" || *moments != ""):
+		_, _ = fmt.Fprintln(stderr, "--guest cannot be used with --cos-source or --moments: a VM disk keeps its earlier moments next to the disk")
+		return 2
+	case *guest && !strings.HasPrefix(*guestSocket, "/"):
+		_, _ = fmt.Fprintln(stderr, "--guest-socket must be an absolute path")
+		return 2
+	case *guestConsistency != "" && *guestConsistency != consistencyFS && *guestConsistency != consistencyCrash:
+		_, _ = fmt.Fprintln(stderr, "--guest-consistency must be FileSystemConsistent or CrashConsistent")
 		return 2
 	case *cosSource == "" && *root == "":
 		_, _ = fmt.Fprintln(stderr, "--root is required")
@@ -111,7 +130,15 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 		tree browse.Tree
 		walk bool
 	)
-	if *cosSource != "" {
+	if *guest {
+		g, gerr := openGuestSession(ctx, *root, atTime, *guestSocket, *guestAppliance, *guestConsistency)
+		if gerr != nil {
+			failStart(stderr, *termLog, gerr)
+			return 1
+		}
+		defer g.Close()
+		opts.InfoFunc, opts.Moments, tree = g.info, g.Opened.Moments, g.Opened.Tree
+	} else if *cosSource != "" {
 		cosTree, info, moments, cerr := startCOS(ctx, *cosSource, atTime, *kopia, *kopiaState, stderr)
 		if cerr != nil {
 			failStart(stderr, *termLog, cerr)
@@ -152,6 +179,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 	ln := tls.NewListener(rawLn, tlsConfig)
 	opened := "openat2"
 	switch {
+	case *guest:
+		opened = "the guest file systems of the VM disk, through a read-only appliance"
 	case *cosSource != "":
 		opened = "object IDs from the COS repository"
 	case walk:
