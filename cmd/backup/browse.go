@@ -35,7 +35,7 @@ type gwClient struct {
 
 // booleanFlags never take a value.
 var booleanFlags = map[string]bool{"wait": true, "yes": true, "dry-run": true, "existing-bucket": true, "from-cos": true,
-	"skip-marker-cleanup": true, "moments": true}
+	"skip-marker-cleanup": true, "moments": true, "existing": true, "new-claim": true}
 
 // positional returns the arguments that are not flags and not flag values.
 func positional(args []string) []string {

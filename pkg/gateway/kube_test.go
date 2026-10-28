@@ -87,3 +87,30 @@ func TestKubeCanReadBackups(t *testing.T) {
 		t.Errorf("empty namespace: %v %v", ok, err)
 	}
 }
+
+func TestKubeCanAsksForTheRightInTheNamespace(t *testing.T) {
+	cs := fake.NewClientset()
+	var got authzv1.SubjectAccessReviewSpec
+	cs.PrependReactor("create", "subjectaccessreviews", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		sar, _ := a.(k8stesting.CreateAction).GetObject().(*authzv1.SubjectAccessReview)
+		got = sar.Spec
+		sar.Status = authzv1.SubjectAccessReviewStatus{Allowed: true}
+		return true, sar, nil
+	})
+	k := NewKubeAuth(cs)
+	u := User{Name: "alice", UID: "u1", Groups: []string{"devs"}}
+	ok, err := k.Can(context.Background(), u, Access{Namespace: "apps", Verb: "create", Resource: "persistentvolumeclaims"})
+	if err != nil || !ok {
+		t.Fatalf("allowed: %v %v", ok, err)
+	}
+	ra := got.ResourceAttributes
+	if ra == nil || ra.Namespace != "apps" || ra.Verb != "create" || ra.Group != "" || ra.Resource != "persistentvolumeclaims" || got.User != "alice" || got.UID != "u1" {
+		t.Errorf("review = %+v", got)
+	}
+	// A right that names no namespace, verb or resource is never asked: it would mean something wider.
+	for _, a := range []Access{{Verb: "create", Resource: "persistentvolumeclaims"}, {Namespace: "apps", Resource: "persistentvolumeclaims"}, {Namespace: "apps", Verb: "create"}} {
+		if ok, err := k.Can(context.Background(), u, a); ok || err == nil {
+			t.Errorf("%+v: %v %v", a, ok, err)
+		}
+	}
+}

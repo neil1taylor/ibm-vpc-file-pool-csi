@@ -146,6 +146,8 @@ backupGateway:
   sessionWait: 20s
   # The largest single file or tar a user may download.
   maxDownloadBytes: 53687091200
+  # File restores one user may have that have not ended. More are refused.
+  maxOpenRestores: 10
 poolBench:
   # PoolBench runs storage performance tests with test VMs, started from the
   # console (docs/specs/2026-10-25-poolbench.md). Each run makes its own

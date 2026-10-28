@@ -45,11 +45,16 @@ func (k *KubeAuth) Authenticate(ctx context.Context, token string) (User, error)
 // in the namespace. The resource is a rights-only name: no object of that kind
 // exists.
 func (k *KubeAuth) CanReadBackups(ctx context.Context, u User, namespace string) (bool, error) {
-	if namespace == "" {
-		return false, errors.New("a namespace is required")
+	return k.Can(ctx, u, Access{Namespace: namespace, Verb: RightsVerb, Group: RightsGroup, Resource: RightsResource})
+}
+
+// Can asks a SubjectAccessReview, as the user, for one right in a namespace.
+func (k *KubeAuth) Can(ctx context.Context, u User, a Access) (bool, error) {
+	if a.Namespace == "" || a.Verb == "" || a.Resource == "" {
+		return false, errors.New("a namespace, a verb and a resource are required")
 	}
 	spec := authzv1.SubjectAccessReviewSpec{
-		ResourceAttributes: &authzv1.ResourceAttributes{Namespace: namespace, Verb: RightsVerb, Group: RightsGroup, Resource: RightsResource},
+		ResourceAttributes: &authzv1.ResourceAttributes{Namespace: a.Namespace, Verb: a.Verb, Group: a.Group, Resource: a.Resource},
 		User:               u.Name, UID: u.UID, Groups: u.Groups,
 	}
 	if len(u.Extra) > 0 {

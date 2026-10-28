@@ -66,7 +66,7 @@ func main() {
 			os.Exit(1)
 		}
 		return
-	case "ls", "get", "browse":
+	case "ls", "get", "browse", "restore-files":
 		// They talk to the backup gateway with the caller's own token.
 		if err := runBrowseCommand(context.Background(), os.Args[1], os.Stdout, os.Args[2:]); err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -117,6 +117,7 @@ Usage:
   kubectl backup ls  [flags] [PATH]                 List a folder inside a backup (your own rights; see below)
   kubectl backup get [flags] PATH                   Download a file, or a folder as a tar, from a backup
   kubectl backup browse [flags]                     Open a browse session by hand, or --close NAME
+  kubectl backup restore-files [flags]              Copy chosen files and folders from a backup into a claim (your own rights; see below)
   kubectl backup restore [flags]                    Make a new PVC from a backup
   kubectl backup delete  [flags]                    Remove all backups of one volume, for good
   kubectl backup cos-setup [flags]                  Make the COS bucket, keys and lock for the export (your own IBM Cloud login)
@@ -136,6 +137,18 @@ ls, get and browse flags (they use your own kubeconfig token, and need the right
   --driver-namespace   Where the driver runs (default kube-system)
   --timeout         How long to wait for a session to be ready (default 5m)
   A name that is not text is shown as \xNN, and you can type it the same way. Sessions end after 15 minutes without use.
+
+restore-files flags (your own token again; you need "get backupfiles" in the namespace of the backed-up claim, and the right to create claims in the namespace of the target; an existing claim also needs the right to update it):
+  --policy, --pvc, --moment   As for ls: the backup to take the files from
+  --path            A file or folder to restore, as ls prints it. Give it more than once. A folder comes with everything in it; / is the whole volume
+  --paths-file      A file with one path on each line, for many paths
+  --to              The target claim, as NAMESPACE/NAME (required)
+  --new-claim       Make the claim and fill it (the default). It must not exist. It is sized to the files plus 20%, at least 1 GiB
+  --size-gb, --storage-class   New claim only: the size, and the class (default: the class of the backed-up claim)
+  --existing        Write a new folder, restored-<policy>-<moment>, into the claim, which must exist. Nothing in it changes and nothing is written over
+  --wait            Wait until the restore is done and say where the files are. --timeout sets how long (default 30m)
+  --status NAME     Show a restore you asked for earlier
+  A claim that holds a VM disk is never a target, and a file is never put back in place. Files go to a new claim or a new folder.
 
 Delete flags:
   --policy          The BackupPolicy that holds the backup (required)
@@ -433,7 +446,7 @@ func waitRestore(ctx context.Context, c client.Client, out io.Writer, name strin
 	}
 }
 
-// runBrowseCommand runs ls, get or browse through the gateway.
+// runBrowseCommand runs ls, get, browse or restore-files through the gateway.
 func runBrowseCommand(ctx context.Context, cmd string, out io.Writer, args []string) error {
 	gw, err := newGatewayClient(ctx, parseBrowseArgs(args))
 	if err != nil {
@@ -444,6 +457,8 @@ func runBrowseCommand(ctx context.Context, cmd string, out io.Writer, args []str
 		return runLs(ctx, gw, out, args)
 	case "get":
 		return runGet(ctx, gw, out, args)
+	case "restore-files":
+		return runRestoreFiles(ctx, gw, out, args)
 	}
 	return runBrowse(ctx, gw, out, args)
 }

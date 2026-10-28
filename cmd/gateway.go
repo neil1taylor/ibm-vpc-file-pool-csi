@@ -25,7 +25,9 @@ type gatewayOptions struct {
 	keyFile     string
 	sessionWait time.Duration
 	maxDownload int64
-	authCache   time.Duration
+	// maxOpenRestores limits the file restores one user has that have not ended.
+	maxOpenRestores int
+	authCache       time.Duration
 	// browseNamespace holds the session Secrets and helper pods.
 	browseNamespace string
 }
@@ -66,6 +68,7 @@ func runGateway(o gatewayOptions) {
 		EventNamespace:   driverNamespace,
 		SessionWait:      o.sessionWait,
 		MaxDownloadBytes: o.maxDownload,
+		MaxOpenRestores:  o.maxOpenRestores,
 		AuthCacheTTL:     o.authCache,
 	})
 	srv := &http.Server{

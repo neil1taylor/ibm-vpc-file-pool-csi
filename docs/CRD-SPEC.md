@@ -1508,7 +1508,7 @@ A session ends when the helper stops by itself (idle, default 15 minutes), when 
 
 ## BackupFileRestore
 
-Cluster-scoped. Copies chosen files and folders out of one backup into a claim: a new claim, or a new folder in an existing claim (issue #92). The backup gateway makes it for a user after it checks the user's rights; a cluster administrator may make one by hand. Short name `bfr`. The webhook refuses a change to the spec.
+Cluster-scoped. Copies chosen files and folders out of one backup into a claim: a new claim, or a new folder in an existing claim (issue #92). The backup gateway makes it for a user after it checks the user's rights (`kubectl backup restore-files`); a cluster administrator may make one by hand. Short name `bfr`. The webhook refuses a change to the spec.
 
 ```go
 type BackupFileRestoreSpec struct {

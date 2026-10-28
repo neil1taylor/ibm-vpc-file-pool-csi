@@ -128,6 +128,7 @@ The one door to browse sessions (issue #92). Users talk to it with their own Kub
 | `backupGateway.route.host` | string | `""` | Empty lets OpenShift choose the host |
 | `backupGateway.sessionWait` | string | `20s` | How long a request that asks to wait (`?wait=true`) holds for the helper pod to be ready. Keep it under your proxy's timeout (the OpenShift router cuts a request after 30 seconds). `kubectl backup` does not ask to wait: it polls |
 | `backupGateway.maxDownloadBytes` | int | `53687091200` | The largest single file or tar a user may download (50 GiB) |
+| `backupGateway.maxOpenRestores` | int | `10` | File restores one user may have that have not ended. A request over the limit is refused (HTTP 429) |
 | `backupGateway.resources` | object | small | Requests and limits |
 
 When the gateway runs on OpenShift, the chart also adds a `backup-gateway` entry to the ConsolePlugin proxy (user token, the gateway Service on port 8443) and sets `fileBrowse: "true"` in the settings ConfigMap, so the Backups pages show **Browse files**. There is no value for either.

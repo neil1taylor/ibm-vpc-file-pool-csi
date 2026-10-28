@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -46,6 +47,33 @@ type fakeAuthz struct {
 	mu     sync.Mutex
 	rights map[string]map[string]bool // user -> namespace -> may
 	asked  []string
+	// access holds the other rights, by user, namespace, verb and resource.
+	access map[string]bool
+	err    bool // every Can fails
+}
+
+func accessKey(user string, a Access) string {
+	return user + "|" + a.Namespace + "|" + a.Verb + "|" + a.Group + "|" + a.Resource
+}
+
+func (f *fakeAuthz) Can(_ context.Context, u User, a Access) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asked = append(f.asked, accessKey(u.Name, a))
+	if f.err {
+		return false, errors.New("the access review failed")
+	}
+	return f.access[accessKey(u.Name, a)], nil
+}
+
+// allow gives a user a right on a resource in a namespace.
+func (f *fakeAuthz) allow(user, ns, verb, resource string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.access == nil {
+		f.access = map[string]bool{}
+	}
+	f.access[accessKey(user, Access{Namespace: ns, Verb: verb, Resource: resource})] = true
 }
 
 func (f *fakeAuthz) CanReadBackups(_ context.Context, u User, ns string) (bool, error) {
@@ -179,7 +207,7 @@ func newEnv(t *testing.T, cfg Config, tree browse.Tree) *env {
 	s := runtime.NewScheme()
 	_ = corev1.AddToScheme(s)
 	_ = v1alpha1.AddToScheme(s)
-	c := fakeclient.NewClientBuilder().WithScheme(s).WithStatusSubresource(&v1alpha1.BackupBrowse{}, &v1alpha1.BackupPolicy{}).Build()
+	c := fakeclient.NewClientBuilder().WithScheme(s).WithStatusSubresource(&v1alpha1.BackupBrowse{}, &v1alpha1.BackupPolicy{}, &v1alpha1.BackupFileRestore{}).Build()
 	e := &env{t: t, c: c, authz: &fakeAuthz{rights: map[string]map[string]bool{}}}
 	e.authz.set("alice", "apps", true)
 	e.authz.set("bob", "shop", true)

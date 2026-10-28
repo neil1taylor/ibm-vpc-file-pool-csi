@@ -54,6 +54,49 @@ type Session struct {
 	Message string `json:"message,omitempty"`
 }
 
+// Access is one right to check as the user.
+type Access struct {
+	Namespace string
+	Group     string
+	Resource  string
+	Verb      string
+}
+
+// RestoreRequest asks to copy chosen files out of one backup into a claim.
+// Paths are in the escaped form that `kubectl backup ls` prints.
+type RestoreRequest struct {
+	Policy           string     `json:"policy"`
+	Namespace        string     `json:"namespace"`
+	PVC              string     `json:"pvc"`
+	Moment           *time.Time `json:"moment,omitempty"`
+	Paths            []string   `json:"paths"`
+	TargetNamespace  string     `json:"targetNamespace"`
+	TargetName       string     `json:"targetName"`
+	Existing         bool       `json:"existing,omitempty"`
+	SizeGB           int64      `json:"sizeGB,omitempty"`
+	StorageClassName string     `json:"storageClassName,omitempty"`
+}
+
+// Restore is what a user sees of a BackupFileRestore.
+type Restore struct {
+	Name            string     `json:"name"`
+	Phase           string     `json:"phase"`
+	Message         string     `json:"message,omitempty"`
+	TargetNamespace string     `json:"targetNamespace"`
+	TargetName      string     `json:"targetName"`
+	Existing        bool       `json:"existing,omitempty"`
+	Folder          string     `json:"folder,omitempty"`
+	SizeGB          int64      `json:"sizeGB,omitempty"`
+	RestoredMoment  *time.Time `json:"restoredMoment,omitempty"`
+	Latest          bool       `json:"latest,omitempty"`
+	Files           int        `json:"files"`
+	Dirs            int        `json:"dirs"`
+	Links           int        `json:"links"`
+	Skipped         int        `json:"skipped"`
+	Unreadable      int        `json:"unreadable"`
+	Bytes           int64      `json:"bytes"`
+}
+
 // ErrorBody is the body of every error.
 type ErrorBody struct {
 	Code    string `json:"code"`
