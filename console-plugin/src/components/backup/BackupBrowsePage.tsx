@@ -8,6 +8,7 @@ import {
   Button,
   Card,
   CardBody,
+  Checkbox,
   FormSelect,
   FormSelectOption,
   Label,
@@ -42,6 +43,15 @@ import {
   momentToISO,
   parseBrowseQuery,
 } from '../../utils/backup-browse';
+import {
+  SelectionMap,
+
+  canSelect,
+  selectionKey,
+  selectionSummary,
+  toggleSelected,
+} from '../../utils/backup-file-restore';
+import RestoreFilesDialog from './RestoreFilesDialog';
 import { useBrowseSession } from '../../utils/use-browse-session';
 import { BROWSE_GUIDE } from '../../utils/help-links';
 import CardHelpTitle from '../common/CardHelpTitle';
@@ -73,6 +83,8 @@ const BackupBrowsePage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState<GatewayError | undefined>();
   const [moments, setMoments] = useState<string[]>([]);
+  const [selected, setSelected] = useState<SelectionMap>(() => new Map());
+  const [restoring, setRestoring] = useState(false);
   const request = useRef(0);
   const dropPending = () => {
     request.current++;
@@ -82,6 +94,14 @@ const BackupBrowsePage: React.FC = () => {
   useEffect(() => {
     setPath((p) => (p.length ? [] : p));
   }, [sessionName]);
+
+  // The choice belongs to one claim at one moment. It survives a folder change and an ended session
+  // (the restore does not use the session), and it is dropped when the claim or the moment changes.
+  const choiceOf = `${claim}|${moment}`;
+  useEffect(() => {
+    setSelected((old) => (old.size ? new Map() : old));
+    setRestoring(false);
+  }, [choiceOf]);
 
   const load = (cursor?: string) => {
     if (!sessionName) return;
@@ -182,6 +202,7 @@ const BackupBrowsePage: React.FC = () => {
 
   function listing(): React.ReactNode {
     const sessionId = sessionName as string;
+    const pageChoosable = entries.filter(canSelect);
     const crumbs = path.map((seg, i) => ({ seg, label: escapeName(fromB64(seg)), upTo: path.slice(0, i + 1) }));
     return (
       <>
@@ -209,8 +230,21 @@ const BackupBrowsePage: React.FC = () => {
                 )}
               </Breadcrumb>
             </ToolbarItem>
-            {/* File actions for the folder on screen. Download is the only one; the file restore dialog adds its button to this group. */}
+            {/* File actions: the choice made in the table (count, total, restore, clear) and the download of this folder. */}
             <ToolbarGroup align={{ default: 'alignEnd' }} data-testid="file-actions">
+              <ToolbarItem>
+                <SelectionSummary selected={selected} />
+              </ToolbarItem>
+              <ToolbarItem>
+                <Button variant="primary" isDisabled={selected.size === 0} onClick={() => setRestoring(true)}>
+                  Restore selected
+                </Button>
+              </ToolbarItem>
+              <ToolbarItem>
+                <Button variant="link" isDisabled={selected.size === 0} onClick={() => setSelected(new Map())}>
+                  Clear
+                </Button>
+              </ToolbarItem>
               <ToolbarItem>
                 <a href={downloadUrl(sessionId, 'tar', path)} download>
                   Download this folder as tar
@@ -230,6 +264,25 @@ const BackupBrowsePage: React.FC = () => {
           <Table aria-label="Files and folders" variant="compact">
             <Thead>
               <Tr>
+                <Th screenReaderText="Choose">
+                  <Checkbox
+                    id="choose-all"
+                    aria-label="Choose all on this page"
+                    isChecked={pageChoosable.length > 0 && pageChoosable.every((e) => selected.has(selectionKey([...path, e.name])))}
+                    isDisabled={pageChoosable.length === 0}
+                    onChange={(_e, on) =>
+                      setSelected((old) => {
+                        const out = new Map(old);
+                        pageChoosable.forEach((e) => {
+                          const key = selectionKey([...path, e.name]);
+                          if (on) out.set(key, { path: [...path, e.name], entry: e });
+                          else out.delete(key);
+                        });
+                        return out;
+                      })
+                    }
+                  />
+                </Th>
                 <Th>Name</Th>
                 <Th>Size</Th>
                 <Th>Changed</Th>
@@ -242,6 +295,8 @@ const BackupBrowsePage: React.FC = () => {
                 <EntryRow
                   key={e.name}
                   entry={e}
+                  isChosen={selected.has(selectionKey([...path, e.name]))}
+                  onChoose={() => setSelected((old) => toggleSelected(old, { path: [...path, e.name], entry: e }))}
                   onOpen={() => setPath([...path, e.name])}
                   fileLink={downloadUrl(sessionId, 'file', [...path, e.name])}
                   tarLink={downloadUrl(sessionId, 'tar', [...path, e.name])}
@@ -303,19 +358,45 @@ const BackupBrowsePage: React.FC = () => {
         <CardHelpTitle helpKey="backupBrowseFiles" />
         <CardBody>{body}</CardBody>
       </Card>
+      {restoring && (
+        <RestoreFilesDialog
+          policy={name}
+          namespace={namespace}
+          pvc={pvc}
+          moment={moment}
+          selected={selected}
+          onClose={() => setRestoring(false)}
+        />
+      )}
     </PageSection>
+  );
+};
+
+/** How many are chosen and how big, in words. A folder is counted without a size: it is measured when the restore runs. */
+const SelectionSummary: React.FC<{ selected: SelectionMap }> = ({ selected }) => {
+  if (selected.size === 0) return <span>Nothing chosen</span>;
+  const s = selectionSummary(selected);
+  const parts = [`${s.files} ${s.files === 1 ? 'file' : 'files'}${s.files ? ` (${formatSize(s.fileBytes)})` : ''}`];
+  if (s.folders) parts.push(`${s.folders} ${s.folders === 1 ? 'folder' : 'folders'} with everything in it`);
+  if (s.links) parts.push(`${s.links} ${s.links === 1 ? 'link' : 'links'}`);
+  return (
+    <span data-testid="selection-summary">
+      <strong>{s.count} chosen</strong>: {parts.join(', ')}
+    </span>
   );
 };
 
 interface RowProps {
   entry: BrowseEntry;
+  isChosen: boolean;
+  onChoose: () => void;
   onOpen: () => void;
   fileLink: string;
   tarLink: string;
 }
 
 /** One name of a folder. Names and link texts are put in as text and never as HTML. */
-const EntryRow: React.FC<RowProps> = ({ entry, onOpen, fileLink, tarLink }) => {
+const EntryRow: React.FC<RowProps> = ({ entry, isChosen, onChoose, onOpen, fileLink, tarLink }) => {
   const kind = entryKind(entry);
   const label = entryText(entry);
   let name: React.ReactNode = label;
@@ -338,6 +419,9 @@ const EntryRow: React.FC<RowProps> = ({ entry, onOpen, fileLink, tarLink }) => {
   else if (kind === 'other') note = <Label isCompact>Special file, not shown</Label>;
   return (
     <Tr>
+      <Td dataLabel="Choose">
+        {canSelect(entry) && <Checkbox id={`choose-${entry.name}`} aria-label={`Choose ${label}`} isChecked={isChosen} onChange={onChoose} />}
+      </Td>
       <Td dataLabel="Name">{name}</Td>
       <Td dataLabel="Size">{kind === 'file' ? formatSize(entry.size) : ''}</Td>
       <Td dataLabel="Changed">{timeText(entry.mtime)}</Td>
