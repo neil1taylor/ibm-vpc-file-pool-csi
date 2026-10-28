@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -241,6 +243,35 @@ func TestRestoreOpenRestoresPerUserAreLimited(t *testing.T) {
 	}
 	if resp, body := e.do("POST", "/v1/restores", "alice-token", req); resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("after the restores ended: %d %s", resp.StatusCode, body)
+	}
+}
+
+// The cap holds when requests arrive at the same time (or at two gateway
+// replicas): a restore takes one of a user's numbered slots, and a slot that is
+// taken cannot be created again.
+func TestRestoreCapHoldsForParallelRequests(t *testing.T) {
+	e := newRestoreEnv(t)
+	e.g.cfg.MaxOpenRestores = 3
+	var wg sync.WaitGroup
+	var accepted, refused atomic.Int32
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			req := newReq()
+			req["targetName"] = "p" + string(rune('a'+i))
+			resp, _ := e.do("POST", "/v1/restores", "alice-token", req)
+			switch resp.StatusCode {
+			case http.StatusAccepted:
+				accepted.Add(1)
+			case http.StatusTooManyRequests:
+				refused.Add(1)
+			}
+		}(i)
+	}
+	wg.Wait()
+	if accepted.Load() != 3 || refused.Load() != 7 || len(e.restores()) != 3 {
+		t.Fatalf("accepted %d refused %d made %d", accepted.Load(), refused.Load(), len(e.restores()))
 	}
 }
 

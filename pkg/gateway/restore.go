@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -149,21 +150,12 @@ func (g *Gateway) handleRestoreCreate(w http.ResponseWriter, r *http.Request, u 
 		writeError(w, http.StatusConflict, "exists", "that claim exists; a restore into a new claim never writes over one")
 		return
 	}
-	open, err := g.openRestores(ctx, u)
+	fr, err := g.createInSlot(ctx, u, spec)
+	if errors.Is(err, errNoSlot) {
+		writeError(w, http.StatusTooManyRequests, "too_many", fmt.Sprintf("you have %d restores that have not ended; the limit is %d", g.cfg.MaxOpenRestores, g.cfg.MaxOpenRestores))
+		return
+	}
 	if err != nil {
-		klog.ErrorS(err, "Count the open file restores failed")
-		writeError(w, http.StatusInternalServerError, "internal", "cannot make the restore")
-		return
-	}
-	if open >= g.cfg.MaxOpenRestores {
-		writeError(w, http.StatusTooManyRequests, "too_many", fmt.Sprintf("you have %d restores that have not ended; the limit is %d", open, g.cfg.MaxOpenRestores))
-		return
-	}
-	fr := &v1alpha1.BackupFileRestore{
-		ObjectMeta: metav1.ObjectMeta{GenerateName: "bfr-", Labels: map[string]string{userLabel: userHash(u.Name)}},
-		Spec:       spec,
-	}
-	if err := g.c.Create(ctx, fr); err != nil {
 		if apierrors.IsInvalid(err) || apierrors.IsForbidden(err) {
 			badRequest(w, "the restore was refused: "+firstLine(err.Error()))
 			return
@@ -182,19 +174,45 @@ func (g *Gateway) handleRestoreCreate(w http.ResponseWriter, r *http.Request, u 
 	writeJSON(w, http.StatusAccepted, restoreOf(fr))
 }
 
-// openRestores counts the restores of a user that have not ended.
-func (g *Gateway) openRestores(ctx context.Context, u User) (int, error) {
-	list := &v1alpha1.BackupFileRestoreList{}
-	if err := g.c.List(ctx, list, client.MatchingLabels{userLabel: userHash(u.Name)}); err != nil {
-		return 0, err
-	}
-	n := 0
-	for _, fr := range list.Items {
-		if fr.Spec.RequestedBy == u.Name && fr.Status.Phase != "Done" && fr.Status.Phase != "Failed" {
-			n++
+var errNoSlot = errors.New("all restore slots of the user are taken")
+
+// createInSlot makes the restore in one of the user's numbered slots. The name
+// of a restore is bfr-<user hash>-<slot>, so the API server refuses a second
+// object in a slot that is taken, however many requests or gateway replicas
+// arrive at once. A slot whose restore has ended is freed and used again.
+func (g *Gateway) createInSlot(ctx context.Context, u User, spec v1alpha1.BackupFileRestoreSpec) (*v1alpha1.BackupFileRestore, error) {
+	hash := userHash(u.Name)[:16]
+	for slot := 0; slot < g.cfg.MaxOpenRestores; slot++ {
+		name := fmt.Sprintf("bfr-%s-%d", hash, slot)
+		for attempt := 0; attempt < 2; attempt++ {
+			fr := &v1alpha1.BackupFileRestore{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{userLabel: userHash(u.Name)}},
+				Spec:       spec,
+			}
+			err := g.c.Create(ctx, fr)
+			if err == nil {
+				return fr, nil
+			}
+			if !apierrors.IsAlreadyExists(err) {
+				return nil, err
+			}
+			old := &v1alpha1.BackupFileRestore{}
+			if gerr := g.c.Get(ctx, types.NamespacedName{Name: name}, old); gerr != nil {
+				if apierrors.IsNotFound(gerr) {
+					continue
+				}
+				return nil, gerr
+			}
+			if old.Status.Phase != "Done" && old.Status.Phase != "Failed" {
+				break // taken by a restore that has not ended: try the next slot
+			}
+			uid := old.UID
+			if derr := g.c.Delete(ctx, old, client.Preconditions{UID: &uid}); derr != nil && !apierrors.IsNotFound(derr) {
+				break
+			}
 		}
 	}
-	return n, nil
+	return nil, errNoSlot
 }
 
 func firstLine(s string) string {

@@ -52,7 +52,8 @@ type Config struct {
 	// AuthCacheTTL keeps a token review result for this long. Zero turns the cache off.
 	AuthCacheTTL time.Duration
 	// MaxOpenRestores limits the file restores one user has that have not ended.
-	// Zero means 10.
+	// Each restore takes one of that many numbered slots (bfr-<user>-<n>), so
+	// the limit holds for parallel requests and several replicas. Zero means 10.
 	MaxOpenRestores int
 }
 

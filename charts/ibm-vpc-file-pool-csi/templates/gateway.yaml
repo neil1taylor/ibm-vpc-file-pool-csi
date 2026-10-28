@@ -39,7 +39,8 @@ rules:
   # Ask for a file restore, and show the user its status. The controller runs it.
   - apiGroups: ["storage.ibmcloud.io"]
     resources: ["backupfilerestores"]
-    verbs: ["get", "list", "create"]
+    # delete: a slot whose restore has ended is freed for the user's next restore.
+    verbs: ["get", "list", "create", "delete"]
   # Read the target claim of a restore to take its UID and to tell a claim that
   # exists from one that does not, after the user's rights on it were checked.
   - apiGroups: [""]
