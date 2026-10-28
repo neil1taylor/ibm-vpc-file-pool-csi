@@ -67,6 +67,8 @@ func TestFailoverValidator_SpecErrors(t *testing.T) {
 		"no source, default": {v1alpha1.FailoverSpec{Action: v1alpha1.FailoverActionPlan}, "spec.source"},
 		"bad source":         {v1alpha1.FailoverSpec{Source: "Not A Name", Action: v1alpha1.FailoverActionPlan}, "spec.source"},
 		"bad VM name":        {v1alpha1.FailoverSpec{Source: "recv", Action: v1alpha1.FailoverActionPlan, VMs: []string{"ns/vm", "justaname"}}, "spec.vms"},
+		"relative basePath":  {v1alpha1.FailoverSpec{Source: "recv", Action: v1alpha1.FailoverActionPlan, BasePath: "repl"}, "spec.basePath"},
+		"basePath with ..":   {v1alpha1.FailoverSpec{Source: "recv", Action: v1alpha1.FailoverActionPlan, BasePath: "/a/../b"}, "spec.basePath"},
 		"bad namespace":      {v1alpha1.FailoverSpec{Source: "recv", Action: v1alpha1.FailoverActionPlan, Namespace: "No_Good"}, "spec.namespace"},
 	} {
 		t.Run(name, func(t *testing.T) {

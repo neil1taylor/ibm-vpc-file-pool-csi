@@ -165,6 +165,25 @@ failover plan --nfs-mount-path ${FAILOVER_PATH} --rewind-to ${MOMENT}
 
 **Expected:** the plan now says `rewind (copies the whole disk into a new folder)` for the disks that are ahead of the moment. The tool uses the newest moment at or before `--rewind-to`.
 
+### Or use the Failover resource and the console
+
+The same plan and failover can run without a shell. On the DR cluster, a cluster admin creates a `Failover` (or uses the Recovery page in the console). The receiver's data claim is a claim that the driver provisioned, and the controller finds its share address by itself. Part 12 used `destinationBasePath: /repl`, so the copies are in the `repl` folder of the claim, and the Failover must say so with `basePath`:
+
+```bash
+dr apply -f - <<'YAML'
+apiVersion: storage.ibmcloud.io/v1alpha1
+kind: Failover
+metadata:
+  name: plan-1
+spec:
+  action: Plan
+  basePath: /repl
+YAML
+dr get failover plan-1 -o yaml
+```
+
+**Expected:** `phase: Planned`, with the VMs and the moments in the status. If `basePath` is wrong, the Plan fails and says which folder it looked for; if it finds copies in another folder it names the `basePath` to use. An Execute needs a Plan with the same `basePath` and a `drPool`. The Recovery page does not set `basePath`: with a `destinationBasePath` other than `/`, make the Plan and the Execute with `kubectl` as above, or use `destinationBasePath: /` for the policy.
+
 ---
 
 ## Step 4: Rewind the disks (optional)

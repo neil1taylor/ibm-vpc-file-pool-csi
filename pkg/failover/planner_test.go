@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -94,40 +95,57 @@ func TestPlanner_DiscoversMetadataFiles(t *testing.T) {
 	}
 }
 
-func TestPlanner_EmptyDirectory(t *testing.T) {
+func TestPlanner_EmptyDirectoryIsAnError(t *testing.T) {
 	tmpDir := t.TempDir()
-	pvcsDir := filepath.Join(tmpDir, "pvcs")
-	if err := os.MkdirAll(pvcsDir, 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(tmpDir, "pvcs"), 0755); err != nil {
 		t.Fatal(err)
 	}
-
-	nfsOps := pool.NewRealNFSOperations()
-	planner := NewPlanner(nfsOps)
-
-	plan, err := planner.Plan(tmpDir)
-	if err != nil {
-		t.Fatalf("Plan failed: %v", err)
+	_, err := NewPlanner(pool.NewRealNFSOperations()).Plan(tmpDir)
+	if err == nil {
+		t.Fatal("a pvcs folder with no replicated volume must fail the Plan")
 	}
-
-	if len(plan.SubVolumes) != 0 {
-		t.Errorf("expected 0 SubVolumes for empty directory, got %d", len(plan.SubVolumes))
+	for _, want := range []string{filepath.Join(tmpDir, "pvcs"), "replicated volume", "destinationBasePath"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q should mention %q", err, want)
+		}
 	}
 }
 
-func TestPlanner_NonExistentDirectory(t *testing.T) {
+func TestPlanner_MissingPvcsFolderIsAnError(t *testing.T) {
 	tmpDir := t.TempDir()
-	// Don't create the pvcs subdirectory.
-
-	nfsOps := pool.NewRealNFSOperations()
-	planner := NewPlanner(nfsOps)
-
-	plan, err := planner.Plan(tmpDir)
-	if err != nil {
-		t.Fatalf("Plan failed: %v", err)
+	_, err := NewPlanner(pool.NewRealNFSOperations()).Plan(tmpDir)
+	if err == nil {
+		t.Fatal("a claim with no pvcs folder must fail the Plan")
 	}
+	for _, want := range []string{filepath.Join(tmpDir, "pvcs"), "destinationBasePath", "basePath"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q should mention %q", err, want)
+		}
+	}
+}
 
-	if len(plan.SubVolumes) != 0 {
-		t.Errorf("expected 0 SubVolumes for non-existent directory, got %d", len(plan.SubVolumes))
+func TestPlanner_NamesTheBasePathWhereCopiesAre(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeTestMetadata(t, filepath.Join(tmpDir, "repl", "pvcs", "pvc-aaa"), &pool.SubVolumeMetadata{
+		SubVolumeName: "pvc-aaa", Spec: v1alpha1.SubVolumeSpec{PVCName: "a", PVCNamespace: "ns"}, LastSyncTime: time.Now(),
+	})
+	_, err := NewPlanner(pool.NewRealNFSOperations()).Plan(tmpDir)
+	if err == nil || !strings.Contains(err.Error(), "basePath: /repl") {
+		t.Fatalf("err = %v, want a hint to set basePath: /repl", err)
+	}
+}
+
+func TestPlanner_ThePvcsFolderHoldingOnlyBrokenMetadataIsAnError(t *testing.T) {
+	tmpDir := t.TempDir()
+	bad := filepath.Join(tmpDir, "pvcs", "pvc-bad")
+	if err := os.MkdirAll(bad, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bad, ".subvolume-metadata.json"), []byte("{nope"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewPlanner(pool.NewRealNFSOperations()).Plan(tmpDir); err == nil {
+		t.Fatal("no usable volume must fail the Plan")
 	}
 }
 
@@ -166,5 +184,16 @@ func TestPlanner_CorruptJSON(t *testing.T) {
 	}
 	if plan.SubVolumes[0].SubVolumeName != "pvc-good" {
 		t.Errorf("expected pvc-good, got %s", plan.SubVolumes[0].SubVolumeName)
+	}
+}
+
+func TestPlanner_NamesAPvcsBasePath(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeTestMetadata(t, filepath.Join(tmpDir, "pvcs", "pvcs", "pvc-aaa"), &pool.SubVolumeMetadata{
+		SubVolumeName: "pvc-aaa", Spec: v1alpha1.SubVolumeSpec{PVCName: "a", PVCNamespace: "ns"}, LastSyncTime: time.Now(),
+	})
+	_, err := NewPlanner(pool.NewRealNFSOperations()).Plan(tmpDir)
+	if err == nil || !strings.Contains(err.Error(), "basePath: /pvcs") {
+		t.Fatalf("err = %v, want a hint to set basePath: /pvcs", err)
 	}
 }

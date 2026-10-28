@@ -1,9 +1,11 @@
 package failover
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/pool"
@@ -64,13 +66,16 @@ func NewPlanner(nfsOps pool.NFSOperations) *Planner {
 }
 
 // Plan scans nfsMountPath/pvcs/ for SubVolume metadata files and returns a FailoverPlan.
+// It fails, with a message that says what it looked for and where, if there is
+// no pvcs folder or no replicated volume in it: an empty plan would look like
+// a copy with nothing to fail over.
 func (p *Planner) Plan(nfsMountPath string) (*FailoverPlan, error) {
 	pvcsDir := filepath.Join(nfsMountPath, "pvcs")
 
 	entries, err := os.ReadDir(pvcsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &FailoverPlan{NFSMountPath: nfsMountPath}, nil
+			return nil, noCopiesError(nfsMountPath, fmt.Sprintf("there is no folder %s", pvcsDir))
 		}
 		return nil, fmt.Errorf("read pvcs directory %s: %w", pvcsDir, err)
 	}
@@ -118,9 +123,75 @@ func (p *Planner) Plan(nfsMountPath string) (*FailoverPlan, error) {
 		}
 	}
 
+	if len(plan.SubVolumes) == 0 {
+		return nil, noCopiesError(nfsMountPath, fmt.Sprintf("the folder %s holds no replicated volume (no subfolder with a readable %s)", pvcsDir, ".subvolume-metadata.json"))
+	}
+
 	if !oldestSync.IsZero() {
 		plan.RPO = now.Sub(oldestSync)
 	}
 
 	return plan, nil
+}
+
+// noCopiesError explains an empty plan. A replication writes its copies to
+// <claim>/<destinationBasePath>/pvcs/<volume>, and the plan reads only
+// <claim>/<spec.basePath>/pvcs, so a base path that differs from the policy's
+// hides every copy. If copies are found below the mount, it names the base
+// path to use.
+func noCopiesError(mountPath, what string) error {
+	msg := fmt.Sprintf("no replicated volumes to fail over: %s. A failover looks for <claim>/<basePath>/pvcs/<volume>/.subvolume-metadata.json on the claim mounted at %s; the replication wrote the copies under the ReplicationPolicy's destinationBasePath, so spec.basePath must equal it", what, mountPath)
+	if found := findCopyBases(mountPath, 3); len(found) > 0 {
+		msg += fmt.Sprintf(". Copies were found under: %s; set basePath: %s", strings.Join(found, ", "), found[0])
+	}
+	return errors.New(msg)
+}
+
+// findCopyBases returns the folders (relative to root, with a leading slash)
+// at most depth levels down that hold a pvcs folder with a replicated volume.
+func findCopyBases(root string, depth int) []string {
+	var found []string
+	var walk func(rel string, level int)
+	walk = func(rel string, level int) {
+		entries, err := os.ReadDir(filepath.Join(root, rel))
+		if err != nil {
+			return
+		}
+		for _, e := range entries {
+			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			child := rel + "/" + e.Name()
+			if e.Name() == "pvcs" {
+				if rel != "" && holdsCopy(filepath.Join(root, child)) {
+					found = append(found, rel)
+				}
+				if rel != "" {
+					continue
+				}
+				// A base path of /pvcs puts the copies in <claim>/pvcs/pvcs.
+			}
+			if level < depth {
+				walk(child, level+1)
+			}
+		}
+	}
+	walk("", 1)
+	return found
+}
+
+func holdsCopy(pvcsDir string) bool {
+	entries, err := os.ReadDir(pvcsDir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(pvcsDir, e.Name(), ".subvolume-metadata.json")); err == nil {
+			return true
+		}
+	}
+	return false
 }
