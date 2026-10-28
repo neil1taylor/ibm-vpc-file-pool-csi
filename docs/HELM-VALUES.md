@@ -131,6 +131,8 @@ The one door to browse sessions (issue #92). Users talk to it with their own Kub
 | `backupGateway.maxOpenRestores` | int | `10` | File restores one user may have that have not ended. A request over the limit is refused (HTTP 429) |
 | `backupGateway.resources` | object | small | Requests and limits |
 
+When the gateway runs on OpenShift, the chart also adds a `backup-gateway` entry to the ConsolePlugin proxy (user token, the gateway Service on port 8443) and sets `fileBrowse: "true"` in the settings ConfigMap, so the Backups pages show **Browse files**. There is no value for either.
+
 The chart also makes the ClusterRoles `backup-file-reader` and `backup-file-restorer` (see BACKUP-RECOVERY.md), a ServiceAccount for the gateway with only the rights it needs, and the ConfigMap `backup-gateway-info` that every signed-in user may read (that one ConfigMap and no other).
 
 ## PoolBench

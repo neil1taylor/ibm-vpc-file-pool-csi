@@ -91,4 +91,37 @@ fi
 check "config/rbac: backup-file-reader" "$ROOT/config/rbac/backup-file-roles.yaml" 'name: backup-file-reader'
 check "config/rbac: aggregation into admin" "$ROOT/config/rbac/backup-file-roles.yaml" 'rbac.authorization.k8s.io/aggregate-to-admin: "true"'
 
+# The console reaches the gateway through the plugin proxy, with the person's own token.
+if command -v yq >/dev/null; then
+    CPAPI="--api-versions console.openshift.io/v1/ConsolePlugin"
+    proxy() { yq -N eval "select(.kind == \"ConsolePlugin\") | .spec.proxy[] | select(.alias == \"$2\") | $3" - <<<"$1"; }
+    both=$(helm template test "$CHART" --namespace kube-system $CPAPI --set poolBench.enabled=true)
+    only_gw=$(helm template test "$CHART" --namespace kube-system $CPAPI)
+    only_pb=$(helm template test "$CHART" --namespace kube-system $CPAPI --set poolBench.enabled=true --set backupGateway.enabled=false)
+    nogw_browse=$(helm template test "$CHART" --namespace kube-system $CPAPI --set backupBrowse.enabled=false)
+    none=$(helm template test "$CHART" --namespace kube-system $CPAPI --set backupGateway.enabled=false)
+    eq() { if [ "$2" = "$3" ]; then pass "$1"; else fail "$1 (got: $2, want: $3)"; fi; }
+    eq "the proxy names the gateway Service" "$(proxy "$only_gw" backup-gateway .endpoint.service.name)" "test-ibm-vpc-file-pool-csi-gateway"
+    eq "the proxy uses the gateway port" "$(proxy "$only_gw" backup-gateway .endpoint.service.port)" "8443"
+    eq "the proxy passes the person's own token" "$(proxy "$only_gw" backup-gateway .authorization)" "UserToken"
+    eq "the proxy is in the release namespace" "$(proxy "$only_gw" backup-gateway .endpoint.service.namespace)" "kube-system"
+    eq "with PoolBench on both proxies are there (poolbench)" "$(proxy "$both" poolbench .endpoint.service.port)" "8444"
+    eq "with PoolBench on both proxies are there (gateway)" "$(proxy "$both" backup-gateway .endpoint.service.port)" "8443"
+    eq "PoolBench alone: no gateway proxy" "$(proxy "$only_pb" backup-gateway .authorization)" ""
+    eq "PoolBench alone: its proxy stays" "$(proxy "$only_pb" poolbench .authorization)" "UserToken"
+    eq "gateway off: no proxy key at all" "$(yq -N eval 'select(.kind == "ConsolePlugin") | .spec.proxy' - <<<"$none")" "null"
+    eq "no browse namespace, no gateway proxy" "$(proxy "$nogw_browse" backup-gateway .authorization)" ""
+    eq "the console proxy and the gateway Service agree on the name" \
+        "$(yq -N eval 'select(.kind == "Service" and .metadata.name == "test-ibm-vpc-file-pool-csi-gateway") | .metadata.name' - <<<"$only_gw")" \
+        "$(proxy "$only_gw" backup-gateway .endpoint.service.name)"
+else
+    fail "yq is required for the plugin proxy checks"
+fi
+
+# The console reads from the settings ConfigMap whether the file browser exists.
+check "settings: the file browser is on" "$PLAIN" 'fileBrowse: "true"'
+absent "settings: off with the gateway" "$OFF" 'fileBrowse: "true"'
+check "settings: false with the gateway off" "$OFF" 'fileBrowse: "false"'
+check "settings: false with browse off" "$NOBROWSE" 'fileBrowse: "false"'
+
 exit "$FAILED"

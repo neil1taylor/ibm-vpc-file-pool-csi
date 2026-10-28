@@ -16,10 +16,12 @@ spec:
       basePath: /
   i18n:
     loadType: Preload
-  {{- if .Values.poolBench.enabled }}
-  # The PoolBench pages read a run's raw results from the PoolBench service, with
-  # the person's own token; the service checks that they may get the run.
+  {{- $gateway := and .Values.backupGateway.enabled .Values.backupBrowse.enabled }}
+  {{- if or .Values.poolBench.enabled $gateway }}
   proxy:
+  {{- if .Values.poolBench.enabled }}
+    # The PoolBench pages read a run's raw results from the PoolBench service, with
+    # the person's own token; the service checks that they may get the run.
     - alias: poolbench
       authorization: UserToken
       endpoint:
@@ -28,5 +30,20 @@ spec:
           name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-poolbench
           namespace: {{ .Release.Namespace }}
           port: 8444
+  {{- end }}
+  {{- if $gateway }}
+    # The file browser of the Backups pages talks to the backup gateway with the
+    # person's own token. The gateway checks it and the person's right to read the
+    # backups of the volume's namespace on every call. The browser never holds
+    # any other credential.
+    - alias: backup-gateway
+      authorization: UserToken
+      endpoint:
+        type: Service
+        service:
+          name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-gateway
+          namespace: {{ .Release.Namespace }}
+          port: 8443
+  {{- end }}
   {{- end }}
 {{- end }}

@@ -35,6 +35,7 @@ export const ROUTES = {
   BACKUP_DETAIL: '/vpc-file-pools/backups/:name',
   BACKUP_EDIT: '/vpc-file-pools/backups/:name/edit',
   BACKUP_RESTORE: '/vpc-file-pools/backups/:name/restore',
+  BACKUP_BROWSE: '/vpc-file-pools/backups/:name/browse',
   MONITORING: '/vpc-file-pools/monitoring',
   POOLBENCH: '/vpc-file-pools/poolbench',
   POOLBENCH_CREATE: '/vpc-file-pools/poolbench/~new',

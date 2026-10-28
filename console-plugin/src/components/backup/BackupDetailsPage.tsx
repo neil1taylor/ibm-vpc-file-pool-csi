@@ -31,6 +31,7 @@ import { BACKUP_DELETE_NOTE } from './backup-texts';
 import BackupProblemBanner from './BackupProblemBanner';
 import BackupCOSTab from './BackupCOSTab';
 import BackupVolumesTable from './BackupVolumesTable';
+import { useDriverSettings } from '../../utils/use-driver-settings';
 import { vmCopySettingsText } from '../../utils/replication-helpers';
 import { suspendPatch } from '../../utils/backup-helpers';
 import { errorMessage } from '../../utils/k8s-objects';
@@ -53,6 +54,7 @@ const BackupDetailsPage: React.FC = () => {
   const [actionError, setActionError] = useState('');
   const [canUpdate] = useAccessReview({ group: API_GROUP, resource: 'backuppolicies', verb: 'update' });
   const [canDelete] = useAccessReview({ group: API_GROUP, resource: 'backuppolicies', verb: 'delete' });
+  const settings = useDriverSettings();
   const [policy, loaded, loadError] = useK8sWatchResource<BackupPolicy>({
     groupVersionKind: {
       group: BackupPolicyModel.apiGroup,
@@ -206,6 +208,7 @@ const BackupDetailsPage: React.FC = () => {
         </Card>
         <BackupVolumesTable
           policy={policy}
+          settings={settings}
           deleteClaim={new URLSearchParams(location.search).get('claim') || undefined}
           onDeleteClosed={() => {
             if (location.search) history.replace(ROUTES.BACKUP_DETAIL.replace(':name', name));

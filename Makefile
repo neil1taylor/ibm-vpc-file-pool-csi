@@ -52,8 +52,8 @@ test-scripts:
 	bash test/chart/test-uwm.sh
 	bash test/chart/test-console-plugin.sh
 	bash test/chart/test-poolbench.sh
-	bash test/chart/test-browse.sh
 	bash test/chart/test-gateway.sh
+	bash test/chart/test-browse.sh
 	bash test/chart/test-file-restore.sh
 	bash test/chart/test-copy-speed.sh
 	bash test/release/test-runner.sh

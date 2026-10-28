@@ -10,6 +10,9 @@ export const GUIDE_BASE = 'https://github.com/neil1taylor/ibm-vpc-file-pool-csi/
 export const SUPPORT_URL = `${GUIDE_BASE}SUPPORT.md`;
 export const DIAGNOSTICS_URL = `${GUIDE_BASE}SUPPORT.md#3-collect-diagnostics-for-a-support-case`;
 
+/** The guide for the file browser of the Backups pages. */
+export const BROWSE_GUIDE = `${GUIDE_BASE}BACKUP-RECOVERY.md#browse-and-download-files-in-the-console`;
+
 /** Troubleshooting sections for the banners. */
 export const TROUBLESHOOTING = {
   pvc: `${GUIDE_BASE}TROUBLESHOOTING.md#pvc-issues`,

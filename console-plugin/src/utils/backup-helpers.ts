@@ -114,15 +114,14 @@ export function policyProblem(policy: BackupPolicy): PolicyProblem | undefined {
   return { title: 'The policy has an error', text: message };
 }
 
-/** The settings the console reads about the driver. */
+/** The settings ConfigMap the chart makes (ibm-vpc-file-pool-csi-settings), as the console reads it. */
 export interface DriverSettings {
-  /** True once the file-restore feature (issue #92) is built and on. */
-  fileRestore?: boolean;
+  data?: Record<string, string>;
 }
 
-/** The "Browse files" action is shown only when the file-restore feature is present. */
+/** The "Browse files" action is shown only when the chart says the backup gateway runs (data.fileBrowse is "true"). */
 export function browseFilesAvailable(settings: DriverSettings | undefined): boolean {
-  return settings?.fileRestore === true;
+  return settings?.data?.fileBrowse === 'true';
 }
 
 // ── Restore ──

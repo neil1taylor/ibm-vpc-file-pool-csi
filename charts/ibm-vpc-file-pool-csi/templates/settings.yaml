@@ -9,6 +9,8 @@ metadata:
     {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
 data:
   vmSnapshotMethod: {{ .Values.vmSnapshots.method | quote }}
+  # "true" when the backup gateway runs, so the Backups pages show Browse files.
+  fileBrowse: {{ and .Values.backupGateway.enabled .Values.backupBrowse.enabled | quote }}
 ---
 # Ordinary console users cannot read ConfigMaps in this namespace. This Role lets
 # every signed-in user get this one ConfigMap by name, and nothing else.
