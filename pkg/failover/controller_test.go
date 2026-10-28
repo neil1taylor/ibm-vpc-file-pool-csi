@@ -119,7 +119,7 @@ func planMessage(t *testing.T) string {
 		}},
 		Volumes: []v1alpha1.FailoverVolume{
 			{SubVolume: "pvc-a", PVCName: "disk-a", PVCNamespace: "ns", RequestedGB: 10, SubPath: "/pvcs/pvc-a", Policy: "p", LastSync: metav1.NewTime(m2)},
-			{SubVolume: "pvc-plain", PVCName: "data", PVCNamespace: "ns", RequestedGB: 5, SubPath: "/pvcs/pvc-plain", Policy: "p", LastSync: metav1.NewTime(m2)},
+			{SubVolume: "pvc-0c", PVCName: "data", PVCNamespace: "ns", RequestedGB: 5, SubPath: "/pvcs/pvc-0c", Policy: "p", LastSync: metav1.NewTime(m2)},
 		},
 	}})
 	if err != nil {

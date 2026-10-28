@@ -2,6 +2,7 @@ package replication
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -87,6 +88,15 @@ func SendVMDiskFile(ctx context.Context, c *SyncClient, stagingPath string, a VM
 func ApplyVMDisk(stagingPath, diskPath string, opts ApplyOptions) (VMDiskResult, error) {
 	var res VMDiskResult
 	f, img, err := openStaging(stagingPath)
+	if errors.Is(err, os.ErrNotExist) {
+		// An earlier run may have applied the copy and deleted the staging
+		// file, and its Job may have been deleted before the controller read
+		// the result. If the disk shows this copy, the run is done.
+		if applied, aerr := CopyApplied(diskPath, opts); aerr == nil && applied {
+			return restorePointsResult(res, diskPath)
+		}
+		return res, err
+	}
 	if err != nil {
 		return res, err
 	}
@@ -98,6 +108,11 @@ func ApplyVMDisk(stagingPath, diskPath string, opts ApplyOptions) (VMDiskResult,
 	if err = os.Remove(stagingPath); err != nil {
 		return res, fmt.Errorf("deleting staging file: %w", err)
 	}
+	return restorePointsResult(res, diskPath)
+}
+
+// restorePointsResult adds the disk's restore points to res.
+func restorePointsResult(res VMDiskResult, diskPath string) (VMDiskResult, error) {
 	points, err := RestorePoints(diskPath)
 	if err != nil {
 		return res, err

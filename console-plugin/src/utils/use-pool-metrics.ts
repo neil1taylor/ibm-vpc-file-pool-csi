@@ -80,15 +80,21 @@ export async function checkPrometheusConnection(): Promise<{
   }
 }
 
-function resultToNumber(results: PrometheusResult[], pool?: string, label = 'pool'): number {
+/** Prometheus answers NaN or Inf when there is no data (for example a P95 with no samples). That is "no data", so 0. */
+const finiteOrZero = (value: string): number => {
+  const n = parseFloat(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+export function resultToNumber(results: PrometheusResult[], pool?: string, label = 'pool'): number {
   const match = pool
     ? results.find((r) => r.metric[label] === pool)
     : results[0];
-  return match ? parseFloat(match.value[1]) : 0;
+  return match ? finiteOrZero(match.value[1]) : 0;
 }
 
-function resultSum(results: PrometheusResult[]): number {
-  return results.reduce((sum, r) => sum + parseFloat(r.value[1] || '0'), 0);
+export function resultSum(results: PrometheusResult[]): number {
+  return results.reduce((sum, r) => sum + finiteOrZero(r.value[1] || '0'), 0);
 }
 
 function resultsByLabel(results: PrometheusResult[], label: string): Record<string, number> {
@@ -140,8 +146,8 @@ export function usePoolMetrics(poolNames: string[], refreshInterval = 30000): Me
         queryPrometheus(`sum(rate(${METRICS.VPC_API_CALLS_TOTAL}[5m]))`),
         queryPrometheus(`sum(rate(${METRICS.VPC_API_CALLS_TOTAL}{status="error"}[5m]))`),
         queryPrometheus(metricQueries.apiP95),
-        queryPrometheus(METRICS.SNAPSHOTS_TOTAL),
-        queryPrometheus(METRICS.CLONES_TOTAL),
+        queryPrometheus(`${METRICS.SNAPSHOTS_TOTAL}{operation="create",status="success"}`),
+        queryPrometheus(`${METRICS.CLONES_TOTAL}{status="async_success"}`),
         queryPrometheus(metricQueries.cloneMedian),
         queryPrometheus(METRICS.GROUP_SNAPSHOTS_TOTAL),
         queryPrometheus(`sum(rate(${METRICS.REPLICATION_SYNC_TOTAL}[5m]))`),
@@ -155,7 +161,8 @@ export function usePoolMetrics(poolNames: string[], refreshInterval = 30000): Me
           allocatedGB: resultToNumber(allocated, pool),
           shareCount: resultToNumber(shares, pool),
           pvcCount: resultToNumber(pvcs, pool),
-          allocationRate1h: resultToNumber(rate, pool),
+          // rate() is per second; the dashboard shows per hour.
+          allocationRate1h: resultToNumber(rate, pool) * 3600,
           p95LatencySeconds: resultToNumber(latency, pool),
           replicationLagSeconds: resultToNumber(lag, pool, 'source_pool'),
         };

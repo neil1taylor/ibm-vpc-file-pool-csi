@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What QEMU Does</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#f4f6f8; --panel:#ffffff; --fg:#161d26; --muted:#5a6675; --line:#d5dce4; --share:#e9eef4;
+  --ok:#0e6b4f; --warn:#8a5300; --bad:#b3261e; --btn:#0f4fd6; --btn-fg:#ffffff;
+  --l0:#2b6f8f; --l1:#d9780f; --l2:#7a4fb0; --l3:#c43d63; --l4:#3a8a2b; --l5:#8d9124;
+  --font:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#10161d; --panel:#18212b; --fg:#e6ebf1; --muted:#9aa7b6; --line:#2b3745; --share:#1d2834;
+  --ok:#5fd0a6; --warn:#e0a24a; --bad:#ff8a80; --btn:#6c9bff; --btn-fg:#0b1220;
+  --l0:#5fb3d6; --l1:#f0a04b; --l2:#b595e6; --l3:#ee7f9b; --l4:#7fcb6a; --l5:#c4c76a; color-scheme:dark;}}
+:root[data-theme="dark"]{
+  --bg:#10161d; --panel:#18212b; --fg:#e6ebf1; --muted:#9aa7b6; --line:#2b3745; --share:#1d2834;
+  --ok:#5fd0a6; --warn:#e0a24a; --bad:#ff8a80; --btn:#6c9bff; --btn-fg:#0b1220;
+  --l0:#5fb3d6; --l1:#f0a04b; --l2:#b595e6; --l3:#ee7f9b; --l4:#7fcb6a; --l5:#c4c76a; color-scheme:dark;}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 var(--font);margin:0;
+  padding-block:24px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+main{max-width:860px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+nav.top{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:.85rem;color:var(--muted)}
+nav.top a{color:var(--btn);text-decoration:none}
+nav.top a:hover{text-decoration:underline}
+nav.top .off{opacity:.5}
+h1{font-size:1.5rem;line-height:1.2;margin:0;font-weight:600;text-wrap:balance}
+h2{font-size:.75rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0;font-weight:600}
+p{margin:0;max-width:65ch}
+.lead{color:var(--muted)}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button{font:inherit;font-weight:500;border:1px solid var(--line);background:var(--panel);color:var(--fg);padding:8px 14px;border-radius:6px;cursor:pointer}
+button.primary{background:var(--btn);color:var(--btn-fg);border-color:var(--btn)}
+button.on{outline:2px solid var(--btn);outline-offset:-2px;font-weight:600}
+button:disabled{opacity:.45;cursor:not-allowed}
+button:focus-visible{outline:2px solid var(--btn);outline-offset:2px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.share{background:var(--share);border:1px solid var(--line);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.mono{font-family:var(--mono);font-size:.85rem}
+.log{border-left:3px solid var(--btn);padding:6px 12px;min-height:3.4em;background:var(--panel)}
+.stats{display:flex;flex-wrap:wrap;gap:16px;color:var(--muted);font-size:.9rem}
+.stats b{color:var(--fg);font-variant-numeric:tabular-nums}
+.hint{font-size:.85rem;color:var(--muted)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:.82rem;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{display:inline-block;width:16px;height:16px;border-radius:4px;border:2px solid var(--c,var(--line));background:color-mix(in srgb,var(--c,transparent) 22%,var(--panel))}
+.sw.dash{border-style:dashed;background:transparent}
+.sw.out{box-shadow:0 0 0 2px var(--fg)}
+.blk{font-family:var(--mono);font-size:.82rem;text-align:center;padding:5px 8px;border-radius:4px;border:2px solid var(--c,var(--line));background:color-mix(in srgb,var(--c,transparent) 22%,var(--panel));min-width:0;white-space:nowrap}
+.blk.dash{border-style:dashed;background:transparent;color:var(--muted)}
+.blk.new{box-shadow:0 0 0 2px var(--fg)}
+.blk.bad{--c:var(--bad)}
+.chip{display:inline-block;font-size:.76rem;font-weight:600;padding:1px 8px;border-radius:10px;border:1px solid var(--line)}
+.chip.ok{color:var(--ok);border-color:var(--ok)}
+.chip.warn{color:var(--warn);border-color:var(--warn)}
+.chip.bad{color:var(--bad);border-color:var(--bad)}
+@media (prefers-reduced-motion:no-preference){.blk{transition:background .25s,border-color .25s}}
+[hidden]{display:none !important}
+.row{display:grid;grid-template-columns:150px minmax(0,1fr);gap:10px;align-items:center}
+.row .who{display:flex;flex-direction:column}
+.row .who b{font-weight:600}
+.row .who span{font-size:.8rem;color:var(--muted)}
+.cells{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:3px}
+.cells i{font-style:normal;font-family:var(--mono);font-size:.75rem;text-align:center;padding:5px 0;border-radius:4px;
+  border:2px solid var(--c,var(--line));background:color-mix(in srgb,var(--c,transparent) 22%,var(--panel));min-width:0}
+.cells i.none{border:2px dashed var(--line);background:transparent;color:transparent}
+.cells i.bad{--c:var(--bad);color:var(--bad);font-weight:600}
+.cells i.new{box-shadow:0 0 0 2px var(--fg)}
+.cells i.cut{box-shadow:0 0 0 2px var(--fg)}
+.group{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line);padding-top:10px}
+.group:first-child{border-top:0;padding-top:0}
+ul.plain{margin:0;padding-left:1.2em;max-width:65ch}
+ul.plain li{margin:2px 0}
+.cells i.skip{border:2px dashed var(--line);background:transparent;color:var(--muted)}
+@media (max-width:620px){.row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+<nav class="top" aria-label="Pages"><a href="index.html">All pages</a><a href="10-several-disks-one-moment.html">&larr; Previous page</a><a href="vm-snapshot-chain.html">Next page &rarr;</a></nav>
+  <div>
+    <h1>What QEMU Does</h1>
+    <p class="lead"><b>QEMU</b> is the program that runs each VM. It runs in the VM's pod, in the container called <span class="mono">compute</span>. It reads and writes the VM's disk file, <span class="mono">disk.img</span>, on the share. The driver does not run VMs. It sends commands to QEMU when it needs a copy of a running VM's disk. This page shows one disk of 12 blocks. The number in a block is its version. The version goes up each time the guest writes to that block.</p>
+  </div>
+
+  <section class="card" aria-label="What the driver asks QEMU to do">
+    <h2>What the driver asks QEMU to do</h2>
+    <ul class="plain">
+      <li><b>Copy all the disks of a VM at one moment.</b> Replication, backup to COS and snapshots of a running VM use this copy.</li>
+      <li><b>Keep a change list.</b> A change list records which blocks the guest wrote after a copy started. The next copy then holds only those blocks.</li>
+      <li><b>Start a new file for an instant snapshot</b>, and merge files when you delete a snapshot. The <a href="vm-snapshot-chain.html">snapshot chain page</a> shows this.</li>
+    </ul>
+    <p class="hint">The driver sends these commands with <span class="mono">virsh</span> in the <span class="mono">compute</span> container. Red Hat does not support commands sent to QEMU in this way. When the VM is stopped, QEMU does not run, so the driver works on the files with Jobs.</p>
+  </section>
+
+  <div class="bar">
+    <button class="primary" id="b-write">Guest writes a block</button>
+    <button id="b-start">Start a copy</button>
+    <button id="b-step">QEMU copies 3 blocks</button>
+    <button id="b-move">Move the VM to another node</button>
+    <button id="b-reset">Start again</button>
+  </div>
+  <p class="hint">Try this: start a copy, let the guest write, and let QEMU copy until it is done. Then write some more and start a second copy. Then start a third copy and move the VM while it runs.</p>
+
+  <section class="card" aria-label="The disk, the change list and the copy">
+    <h2>What you see</h2>
+    <div id="views"></div>
+    <div class="legend">
+      <span><i class="sw" style="--c:var(--l0)"></i>a block, coloured by its version</span>
+      <span><i class="sw" style="--c:var(--l3)"></i>&#9679; = in the change list</span>
+      <span><i class="sw dash"></i>not copied yet, or no change list</span>
+      <span><i class="sw out"></i>the block that just changed</span>
+    </div>
+  </section>
+
+  <div class="stats" aria-live="polite">
+    <span>VM runs on: <b id="st-node">node A</b></span>
+    <span>Copy: <b id="st-copy">none</b></span>
+    <span>Blocks left to copy: <b id="st-left">0</b></span>
+    <span>Old blocks saved before a write: <b id="st-saved">0</b></span>
+    <span>Copy shows the moment it started: <b id="st-match">no copy</b></span>
+  </div>
+  <div class="log" id="log" aria-live="polite"></div>
+
+  <section class="card" aria-label="Rules">
+    <h2>What to know</h2>
+    <ul class="plain">
+      <li>When a copy starts, the guest is frozen for about 0.15 seconds. The freeze makes the guest write its pending data to disk. It needs the guest agent in the VM. Without the guest agent, the copy is only crash consistent: the same as the disk after a power cut.</li>
+      <li>QEMU writes the copy to a <b>staging file</b>: a file next to <span class="mono">disk.img</span> on the same share. Its name starts with <span class="mono">.repl-staging-</span>.</li>
+      <li>If the guest writes a block that QEMU has not copied yet, QEMU first copies the old block. So the copy always shows the moment it started, even while the guest writes.</li>
+      <li>QEMU copies slowly on purpose, 20 MB/s for each disk by default, so the VM keeps its speed. You can change the limit.</li>
+      <li>The speed limit also counts the empty parts of a disk. So a large disk takes time even when it holds little data.</li>
+      <li>The change list is only in QEMU's memory. If the VM moves to another node or restarts, a new QEMU starts with no change list. The next copy is then a full copy.</li>
+      <li>A live migration fails while QEMU copies. So when a move starts, the driver stops the copy and deletes the staging file. The move then goes ahead.</li>
+      <li>Only one copy runs in a VM at a time.</li>
+    </ul>
+    <p class="hint">Lab results, rovslab, 20 October 2026: the freeze paused the guest for 0.15 to 0.17 seconds. With no speed limit, the guest wrote 10 to 20 times slower during a copy. At 20 MB/s it kept almost all its speed. A 20 GiB disk with 2 GB of data took about 18 minutes at 20 MB/s.</p>
+  </section>
+
+</main>
+<script>
+(function(){
+  var N=12, STEP=3, SEQ=[2,7,4,10,1,7,12,5,9,3,6,8,11,2,7,4];
+  var disk, wi, node, cl, hasBase, copy, last, touched;
+  function el(i){return document.getElementById(i);}
+  function col(v){return "var(--l"+((v-1)%6)+")";}
+  function reset(){
+    disk=[]; for(var k=1;k<=N;k++) disk[k]=1;
+    wi=0; node="A"; cl=null; hasBase=false; copy=null; last=null; touched=0;
+    say("The VM runs on node A. Every block of <span class=\"mono\">disk.img</span> is at version 1. QEMU has no change list yet, because no copy has started.");
+  }
+  function say(h){ el("log").innerHTML=h; render(); }
+  function pending(c){ var n=0; c.want.forEach(function(k){ if(!(k in c.got)) n++; }); return n; }
+  function matches(c){ return c.want.every(function(k){ return !(k in c.got) || c.got[k]===c.moment[k]; }); }
+  function row(name,sub,body){ return '<div class="row"><div class="who"><b>'+name+'</b><span>'+sub+'</span></div>'+body+'</div>'; }
+  function diskCells(){
+    var h='<div class="cells">';
+    for(var k=1;k<=N;k++) h+='<i style="--c:'+col(disk[k])+'"'+(k===touched?' class="new"':'')+'>'+disk[k]+'</i>';
+    return h+'</div>';
+  }
+  function clCells(){
+    var h='<div class="cells">';
+    for(var k=1;k<=N;k++) h+= cl&&cl[k] ? '<i style="--c:var(--l3)">&#9679;</i>' : '<i class="none">'+k+'</i>';
+    return h+'</div>';
+  }
+  function copyCells(c){
+    var h='<div class="cells">';
+    for(var k=1;k<=N;k++){
+      if(c.want.indexOf(k)<0) h+='<i class="skip">-</i>';
+      else if(k in c.got) h+='<i style="--c:'+col(c.got[k])+'">'+c.got[k]+'</i>';
+      else h+='<i class="none">'+k+'</i>';
+    }
+    return h+'</div>';
+  }
+  function render(){
+    var v='<div class="group">'+row("disk.img, now","what the VM sees",diskCells())+
+      row("Change list","in QEMU's memory, node "+node+(cl?"":": none"),clCells())+'</div>';
+    var c=copy||last;
+    if(c) v+='<div class="group">'+row("Staging file",(c.kind==="full"?"full copy":"change copy")+(copy?", running":", done")+"; - = not in this copy",copyCells(c))+'</div>';
+    el("views").innerHTML='<div style="display:flex;flex-direction:column;gap:12px">'+v+'</div>';
+    el("st-node").textContent="node "+node;
+    el("st-copy").textContent=copy?(copy.kind==="full"?"full copy, running":"change copy, running"):(last?"last copy done":"none");
+    el("st-left").textContent=copy?String(pending(copy)):"0";
+    el("st-saved").textContent=c?String(c.saved):"0";
+    el("st-match").textContent=c?(matches(c)?"yes":"no"):"no copy";
+    el("b-start").disabled=!!copy;
+    el("b-step").disabled=!copy;
+  }
+  el("b-write").onclick=function(){
+    var k=SEQ[wi%SEQ.length]; wi++; touched=k;
+    var msg="";
+    if(copy && copy.want.indexOf(k)>=0 && !(k in copy.got)){
+      copy.got[k]=disk[k]; copy.saved++;
+      msg=" QEMU had not copied block "+k+" yet, so it <b>first copied the old version "+disk[k]+"</b> to the staging file. The copy still shows its moment.";
+    }
+    disk[k]++;
+    if(cl){ cl[k]=true; msg+=" QEMU marked block "+k+" in the change list."; }
+    else msg+=" There is no change list, so QEMU does not record the write.";
+    say("The guest wrote block "+k+". It is now version "+disk[k]+"."+msg);
+  };
+  el("b-start").onclick=function(){
+    var full=!(hasBase&&cl), want=[];
+    if(full){ for(var k=1;k<=N;k++) want.push(k); }
+    else { for(var j=1;j<=N;j++) if(cl[j]) want.push(j); }
+    var moment=disk.slice();
+    copy={kind:full?"full":"change", want:want, got:{}, moment:moment, saved:0}; last=null; touched=0;
+    cl={}; hasBase=false;
+    var why=full?"This is a <b>full copy</b>: every block, because QEMU has no change list from a finished copy.":"This is a <b>change copy</b>: only the "+want.length+" block"+(want.length===1?"":"s")+" in the change list.";
+    say("The guest was frozen for an instant. In that instant QEMU started the copy and a new, empty change list. Then the guest thawed. "+why);
+    if(!want.length){ copy.kind="change"; finish(); }
+  };
+  function finish(){
+    last=copy; copy=null; hasBase=true;
+    say("<b>The copy is done.</b> It shows the disk at the moment the copy started. For replication or a backup, a Job now sends it on. The change list since that moment stays in QEMU, so the next copy can be a change copy.");
+  }
+  el("b-step").onclick=function(){
+    var n=0; touched=0;
+    for(var i=0;i<copy.want.length&&n<STEP;i++){ var k=copy.want[i]; if(!(k in copy.got)){ copy.got[k]=disk[k]; n++; } }
+    if(!pending(copy)){ finish(); return; }
+    say("QEMU copied "+n+" more block"+(n===1?"":"s")+". It copies slowly on purpose, so the VM keeps its speed. "+pending(copy)+" left.");
+  };
+  el("b-move").onclick=function(){
+    var was=copy; node=node==="A"?"B":"A"; touched=0;
+    copy=null; last=null; cl=null; hasBase=false;
+    say((was?"A copy was running. A live migration fails while QEMU copies, so <b>the driver stopped the copy and deleted the staging file</b>. ":"")+
+      "The VM moved to node "+node+". A new QEMU runs it there, and <b>the change list is gone</b>. The disk itself did not change: it is on the share. The next copy is a full copy.");
+  };
+  el("b-reset").onclick=reset;
+  reset();
+})();
+</script>
+</body>
+</html>

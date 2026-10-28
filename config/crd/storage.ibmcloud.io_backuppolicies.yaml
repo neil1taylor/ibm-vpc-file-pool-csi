@@ -1,0 +1,387 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: backuppolicies.storage.ibmcloud.io
+spec:
+  group: storage.ibmcloud.io
+  names:
+    kind: BackupPolicy
+    listKind: BackupPolicyList
+    plural: backuppolicies
+    shortNames:
+    - bp
+    singular: backuppolicy
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.snapshotPool
+      name: Pool
+      type: string
+    - jsonPath: .spec.schedule
+      name: Schedule
+      type: string
+    - jsonPath: .spec.keepFor
+      name: Keep
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.volumeCount
+      name: Volumes
+      type: integer
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          BackupPolicy backs up the PVCs it selects, and the VMs whose disks it
+          selects, into a pool that holds only backups. The controller makes a
+          ReplicationPolicy for each source pool and keeps it in step. See
+          docs/specs/2026-10-21-backup-to-snapshot-pool.md.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: BackupPolicySpec defines what is backed up, where, how often
+              and for how long.
+            properties:
+              export:
+                description: |-
+                  Export also sends the backups to an IBM Cloud Object Storage bucket.
+                  Without it, backups stay in the snapshot pool. An export problem never
+                  stops the backups to the snapshot pool. See
+                  docs/specs/2026-10-21-backup-cos-export.md.
+                properties:
+                  backupKeySecret:
+                    description: |-
+                      BackupKeySecret names the Secret with the backup key, wrapped by Key
+                      Protect (wrappedKey). The readable key is never stored. The controller
+                      never reads the Secret: only the Jobs do, and they unwrap the key in memory.
+                    minLength: 1
+                    type: string
+                  bucket:
+                    description: Bucket is the name of the COS bucket.
+                    minLength: 1
+                    type: string
+                  credentialsSecret:
+                    description: |-
+                      CredentialsSecret names the Secret with the driver's COS key (an HMAC key:
+                      access_key_id and secret_access_key).
+                    minLength: 1
+                    type: string
+                  emergencyKeySecret:
+                    description: |-
+                      EmergencyKeySecret names an optional Secret (key: backupKey) with the
+                      readable backup key. The Jobs use it only when Key Protect cannot be
+                      reached. Storing it in the cluster weakens the Key Protect protection; most
+                      users keep the emergency copy outside the cluster and leave this empty.
+                    type: string
+                  endpoint:
+                    description: |-
+                      Endpoint is the S3 host of the bucket, such as
+                      s3.eu-de.cloud-object-storage.appdomain.cloud.
+                    minLength: 1
+                    type: string
+                  keepFor:
+                    default: 30d
+                    description: |-
+                      KeepFor is how long exported backups are kept: a Go duration, or a number
+                      of days such as "30d". With a Compliance lock it is at least 25 hours.
+                    type: string
+                  keyProtect:
+                    description: KeyProtect says which root key unwraps the backup
+                      key and how to log in.
+                    properties:
+                      apiKeySecret:
+                        description: |-
+                          APIKeySecret names the Secret (key: apikey) with the IBM Cloud API key that
+                          has the Reader role on the root key.
+                        minLength: 1
+                        type: string
+                      instanceID:
+                        description: InstanceID is the GUID of the Key Protect instance.
+                        minLength: 1
+                        type: string
+                      region:
+                        description: Region is the region of the Key Protect instance,
+                          such as eu-de.
+                        minLength: 1
+                        type: string
+                      rootKeyID:
+                        description: RootKeyID is the ID of the root key that wrapped
+                          the backup key.
+                        minLength: 1
+                        type: string
+                    required:
+                    - apiKeySecret
+                    - instanceID
+                    - region
+                    - rootKeyID
+                    type: object
+                  lock:
+                    default: Compliance
+                    description: Lock is Compliance (nobody can delete or shorten
+                      the keep time) or None.
+                    enum:
+                    - Compliance
+                    - None
+                    type: string
+                  prefix:
+                    description: Prefix is a folder in the bucket. The policy's own
+                      area is below it.
+                    type: string
+                  schedule:
+                    description: |-
+                      Schedule is a Go duration such as "6h": the most often a volume is sent.
+                      Empty means after each local backup.
+                    type: string
+                required:
+                - backupKeySecret
+                - bucket
+                - credentialsSecret
+                - endpoint
+                - keyProtect
+                type: object
+              keepFor:
+                default: 7d
+                description: |-
+                  KeepFor is how long backups are kept: a Go duration, or a number of days
+                  such as "30d". At least one hour.
+                type: string
+              namespaces:
+                description: Namespaces limits the PVCs to these namespaces. Empty
+                  means all.
+                items:
+                  type: string
+                type: array
+              schedule:
+                description: 'Schedule is a Go duration such as "6h": how often a
+                  backup is made.'
+                type: string
+              selector:
+                description: |-
+                  Selector selects PVCs by label. A VM is selected through its disks: if
+                  any disk matches, all disks of the VM are backed up. It must select
+                  something: an empty selector is refused.
+                properties:
+                  matchExpressions:
+                    description: matchExpressions is a list of label selector requirements.
+                      The requirements are ANDed.
+                    items:
+                      description: |-
+                        A label selector requirement is a selector that contains values, a key, and an operator that
+                        relates the key and values.
+                      properties:
+                        key:
+                          description: key is the label key that the selector applies
+                            to.
+                          type: string
+                        operator:
+                          description: |-
+                            operator represents a key's relationship to a set of values.
+                            Valid operators are In, NotIn, Exists and DoesNotExist.
+                          type: string
+                        values:
+                          description: |-
+                            values is an array of string values. If the operator is In or NotIn,
+                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                            the values array must be empty. This array is replaced during a strategic
+                            merge patch.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      map is equivalent to an element of matchExpressions, whose key field is "key", the
+                      operator is "In", and the values array contains only "value". The requirements are ANDed.
+                    type: object
+                type: object
+                x-kubernetes-map-type: atomic
+              snapshotPool:
+                description: |-
+                  SnapshotPool is the pool that holds the backups. It must hold no workload
+                  claims, so a lost or full data share does not take the backups with it.
+                type: string
+              suspend:
+                description: Suspend stops new backups. Existing backups stay.
+                type: boolean
+              vmCopyAdaptive:
+                description: |-
+                  VMCopyAdaptive makes the copy start slow, speed up while the share the VM
+                  reads is quiet, and slow down when its latency passes VMCopyMaxLatencyMs.
+                  Default true. See docs/specs/2026-10-26-adaptive-copy-speed.md.
+                type: boolean
+              vmCopyMaxLatencyMs:
+                description: |-
+                  VMCopyMaxLatencyMs is the average latency of the share, in milliseconds,
+                  above which an adaptive copy slows down. Default 15.
+                format: int32
+                maximum: 20
+                minimum: 1
+                type: integer
+              vmCopySpeedLimitMBps:
+                description: |-
+                  VMCopySpeedLimitMBps is the highest speed, in megabytes per second, of
+                  QEMU's copy of each disk of a running VM. 0 or unset means there is no
+                  highest speed. When the copy does not adapt (VMCopyAdaptive is false), it
+                  is the fixed speed instead: 0 means no limit and unset means 20.
+                format: int32
+                minimum: 0
+                type: integer
+            required:
+            - schedule
+            - selector
+            - snapshotPool
+            type: object
+          status:
+            description: BackupPolicyStatus reports what the policy does.
+            properties:
+              message:
+                description: Message says why the policy is in Error, or why it is
+                  Suspended.
+                type: string
+              phase:
+                description: Phase is Active, Suspended or Error.
+                enum:
+                - Active
+                - Suspended
+                - Error
+                type: string
+              replicationPolicies:
+                description: |-
+                  ReplicationPolicies names the ReplicationPolicy objects the controller
+                  made for this policy, one for each source pool.
+                items:
+                  type: string
+                type: array
+              volumeCount:
+                description: VolumeCount is the number of volumes the policy backs
+                  up.
+                format: int32
+                type: integer
+              volumes:
+                description: Volumes lists each backed-up volume.
+                items:
+                  description: BackupVolumeStatus is the state of one backed-up volume.
+                  properties:
+                    bytesWritten:
+                      description: BytesWritten is what the newest backup wrote.
+                      format: int64
+                      type: integer
+                    consistency:
+                      description: |-
+                        Consistency is FileSystemConsistent or CrashConsistent for a VM disk
+                        and FileCopy for any other volume.
+                      type: string
+                    exportError:
+                      description: |-
+                        ExportError is the last error of the volume's export. The export is tried
+                        again; the local backup is not affected.
+                      type: string
+                    exportedBytes:
+                      description: ExportedBytes is how much the newest export sent
+                        to COS.
+                      format: int64
+                      type: integer
+                    exportedTime:
+                      description: |-
+                        ExportedTime is the moment of the newest copy in COS. Set only when the
+                        policy has an export block.
+                      format: date-time
+                      type: string
+                    lastBackupTime:
+                      description: LastBackupTime is the moment of the newest backup.
+                      format: date-time
+                      type: string
+                    lastError:
+                      description: LastError is the last error of the volume's backup.
+                      type: string
+                    oldestBackupTime:
+                      description: OldestBackupTime is the moment of the oldest restore
+                        point that is kept.
+                      format: date-time
+                      type: string
+                    pvcName:
+                      type: string
+                    pvcNamespace:
+                      description: PVCNamespace and PVCName name the claim.
+                      type: string
+                    requestedGB:
+                      description: |-
+                        RequestedGB and StorageClassName are what the volume had, so a restore can
+                        make a volume like it after the volume is gone.
+                      format: int64
+                      type: integer
+                    restorePoints:
+                      description: RestorePoints counts the older moments that can
+                        be restored.
+                      format: int32
+                      type: integer
+                    retained:
+                      description: |-
+                        Retained is true when the policy no longer backs up the volume (it was
+                        deleted, or no longer matches the selector). Its existing backups stay
+                        until the keep time has passed since the last backup.
+                      type: boolean
+                    shareID:
+                      description: |-
+                        ShareID is the share of the snapshot pool that holds the backups of this
+                        volume. It is chosen when the volume is first backed up and never changes,
+                        because the backups stay where they are. A restore reads from it. An entry
+                        with no ShareID was made when the snapshot pool had one share; it belongs
+                        to the first share of the pool.
+                      type: string
+                    storageClassName:
+                      type: string
+                    subPath:
+                      description: |-
+                        SubPath is the folder of the volume on its share (/pvcs/pvc-...). The
+                        backup is in the same place below the policy's folder. A restore needs
+                        it after the volume is gone.
+                      type: string
+                    subVolumeName:
+                      description: SubVolumeName is the SubVolume of the claim.
+                      type: string
+                    vmName:
+                      description: VMName is the VirtualMachine the disk belongs to,
+                        if any.
+                      type: string
+                  required:
+                  - pvcName
+                  - pvcNamespace
+                  - subVolumeName
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

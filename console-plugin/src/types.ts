@@ -108,6 +108,7 @@ export interface GoldenImageNamespaceStatus {
 export interface ShareDrainStatus {
   shareID: string;
   remainingSubVolumes: number;
+  remainingSnapshots?: number;
   drained: boolean;
   drainStartedAt?: string;
 }
@@ -145,6 +146,9 @@ export interface SubVolumeStatus {
   createdAt?: string;
   cloneStatus?: string;
   cloneProgress?: CloneProgress;
+  /** Instant-snapshot chain of the VM disk, newest file first; the last file is disk.img. */
+  diskChain?: string[];
+  chainOperation?: string;
 }
 
 export interface CloneProgress {
@@ -243,6 +247,13 @@ export interface ReplicationPolicySpec {
   destinationAuthSecretRef?: string;
   /** Secret name in kube-system with a "ca.crt" key. Used in driver-to-driver mode when the receiver has a self-signed certificate. */
   destinationCACertSecretRef?: string;
+  /** The highest speed of the copy of a running VM's disk, in MB/s for each disk; none if unset or 0. With vmCopyAdaptive false it is the fixed speed (0 unlimited, unset 20). */
+  vmCopySpeedLimitMBps?: number;
+  /** The copy starts slow and follows the load on the share. Default true. */
+  vmCopyAdaptive?: boolean;
+  vmCopyMaxLatencyMs?: number;
+  /** How long the destination keeps restore points of a running VM's disks. Default 24. */
+  restorePointKeepHours?: number;
 }
 
 export interface ReplicationPolicyStatus {
@@ -252,6 +263,8 @@ export interface ReplicationPolicyStatus {
   subVolumeStatuses?: SubVolumeReplicationStatus[];
   consecutiveFailures: number;
   lastError?: string;
+  /** `ReceiverReachable` is set by the controller for driver-to-driver policies. */
+  conditions?: Condition[];
 }
 
 export interface SubVolumeReplicationStatus {
@@ -259,6 +272,18 @@ export interface SubVolumeReplicationStatus {
   lastSyncTime?: string;
   bytesSynced?: number;
   lastError?: string;
+  /** Running VM disks only: the moment the last good copy shows. */
+  copyMoment?: string;
+  consistency?: 'FileSystemConsistent' | 'CrashConsistent';
+  /** Why a copy is only crash consistent. */
+  consistencyReason?: string;
+  /** Empty means the next copy is a full copy. */
+  vmChangeList?: string;
+  /** How many earlier copies the destination keeps, and the moment of the oldest. */
+  restorePoints?: number;
+  oldestRestorePoint?: string;
+  /** A copy that is not finished. */
+  vmCopy?: { id: string; phase: string };
 }
 
 // ── Hooks ──
@@ -314,4 +339,229 @@ export interface LabelSelectorRequirement {
   key: string;
   operator: 'In' | 'NotIn' | 'Exists' | 'DoesNotExist';
   values?: string[];
+}
+
+// ── BackupPolicy ──
+
+export interface BackupPolicy extends K8sResourceCommon {
+  spec: BackupPolicySpec;
+  status?: BackupPolicyStatus;
+}
+
+export interface BackupPolicySpec {
+  snapshotPool: string;
+  schedule: string;
+  selector: LabelSelector;
+  namespaces?: string[];
+  /** A Go duration or a number of days such as "30d". Default 7d. */
+  keepFor?: string;
+  /** The highest speed of the copy of a running VM's disk, in MB/s for each disk; none if unset or 0. */
+  vmCopySpeedLimitMBps?: number;
+  /** The copy starts slow and follows the load on the share. Default true. */
+  vmCopyAdaptive?: boolean;
+  vmCopyMaxLatencyMs?: number;
+  suspend?: boolean;
+  export?: BackupExport;
+}
+
+export interface BackupExport {
+  bucket: string;
+  endpoint: string;
+  prefix?: string;
+  credentialsSecret: string;
+  backupKeySecret: string;
+  keyProtect: {
+    instanceID: string;
+    region: string;
+    rootKeyID: string;
+    apiKeySecret: string;
+  };
+  emergencyKeySecret?: string;
+  keepFor?: string;
+  lock?: 'Compliance' | 'None';
+  schedule?: string;
+}
+
+export interface BackupPolicyStatus {
+  phase?: string;
+  message?: string;
+  volumeCount?: number;
+  replicationPolicies?: string[];
+  volumes?: BackupVolumeStatus[];
+}
+
+export interface BackupVolumeStatus {
+  pvcNamespace: string;
+  pvcName: string;
+  subVolumeName: string;
+  vmName?: string;
+  subPath?: string;
+  shareID?: string;
+  requestedGB?: number;
+  storageClassName?: string;
+  retained?: boolean;
+  lastBackupTime?: string;
+  oldestBackupTime?: string;
+  restorePoints?: number;
+  bytesWritten?: number;
+  /** FileSystemConsistent or CrashConsistent for a VM disk, FileCopy for any other volume. */
+  consistency?: string;
+  lastError?: string;
+  exportedTime?: string;
+  exportedBytes?: number;
+  exportError?: string;
+}
+
+// ── BackupRestore ──
+
+export interface BackupRestore extends K8sResourceCommon {
+  spec: BackupRestoreSpec;
+  status?: BackupRestoreStatus;
+}
+
+export interface BackupRestoreSpec {
+  policy: string;
+  sourceNamespace?: string;
+  sourceName?: string;
+  moment?: string;
+  targetNamespace: string;
+  targetName: string;
+  storageClassName?: string;
+  fromCOS?: RestoreFromCOS;
+}
+
+export interface RestoreFromCOS {
+  bucket: string;
+  endpoint: string;
+  prefix?: string;
+  credentialsSecret: string;
+  volume: string;
+  sizeGB: number;
+  backupKeySecret?: string;
+  keyProtect?: { instanceID: string; region: string; rootKeyID: string; apiKeySecret: string };
+  emergencyKeySecret?: string;
+  emergencyKeyOnly?: boolean;
+}
+
+export interface BackupRestoreStatus {
+  phase?: 'Pending' | 'Provisioning' | 'Restoring' | 'Done' | 'Failed';
+  message?: string;
+  restoredMoment?: string;
+  latest?: boolean;
+  fetched?: boolean;
+  copied?: boolean;
+}
+
+// ── PoolBench ──
+
+export interface PoolBench extends K8sResourceCommon {
+  spec: PoolBenchSpec;
+  status?: PoolBenchStatus;
+}
+
+export interface PoolBenchVM {
+  cpu?: number;
+  memoryGiB?: number;
+  image?: string;
+  imageNamespace?: string;
+  preference?: string;
+  rootDiskGiB?: number;
+}
+
+export interface PoolBenchSpec {
+  zone?: string;
+  profile?: string;
+  shareSizeGB: number;
+  iops: number;
+  stepVMs?: number;
+  maxVMs?: number;
+  /** Every Nth VM runs Windows; 0 is Linux only. */
+  windowsEvery?: number;
+  linux?: PoolBenchVM;
+  windows?: PoolBenchVM;
+  load?: {
+    steadyIOPS?: number;
+    burstIOPS?: number;
+    burstSeconds?: number;
+    periodSeconds?: number;
+    readPercent?: number;
+    blockMix?: string;
+    areaGiB?: number;
+  };
+  settleMinutes?: number;
+  measureMinutes?: number;
+  knee?: {
+    latencyLimitMs?: number;
+    slowVMPercent?: number;
+    stallSeconds?: number;
+    stopAtKnee?: boolean;
+  };
+  events?: { type: string; atVMs: number }[];
+  /** This run waits until the named run has ended. */
+  startAfter?: string;
+  keepAfterEnd?: boolean;
+  control?: {
+    paused?: boolean;
+    hold?: boolean;
+    stop?: boolean;
+    skipStep?: number;
+    extendStep?: number;
+    extendMinutes?: number;
+  };
+}
+
+export type PoolBenchPhase =
+  | 'Pending'
+  | 'Checking'
+  | 'Running'
+  | 'Paused'
+  | 'CleaningUp'
+  | 'Complete'
+  | 'Stopped'
+  | 'Failed';
+
+export interface PoolBenchStepResult {
+  vms: number;
+  windowsVMs?: number;
+  shareIOPS?: number;
+  guestIOPS?: number;
+  ibmOps?: number;
+  shareLatencyMicros?: number;
+  p50Micros?: number;
+  p95Micros?: number;
+  p99Micros?: number;
+  throughputKBps?: number;
+  slowPercent?: number;
+  burstSlowPercent?: number;
+  stalls?: number;
+  atLimit?: boolean;
+  readySeconds?: number;
+  pass: boolean;
+  cutShort?: boolean;
+  started?: string;
+  ended?: string;
+}
+
+export interface PoolBenchStatus {
+  phase?: PoolBenchPhase;
+  stage?: 'Preparing' | 'Creating' | 'Settling' | 'Measuring' | 'Event';
+  step?: number;
+  totalSteps?: number;
+  vms?: number;
+  windowsVMs?: number;
+  readyVMs?: number;
+  namespace?: string;
+  poolName?: string;
+  startTime?: string;
+  endTime?: string;
+  stageStarted?: string;
+  stageEnds?: string;
+  pausedAt?: string;
+  message?: string;
+  steps?: PoolBenchStepResult[];
+  kneeVMs?: number;
+  recommendedVMs?: number;
+  events?: { type: string; atVMs: number; started?: string; ended?: string; seconds?: number; message?: string }[];
+  log?: { time: string; kind: 'Info' | 'Warning' | 'Error' | 'Control'; message: string }[];
+  cleanedUp?: boolean;
 }

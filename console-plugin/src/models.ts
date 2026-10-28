@@ -56,6 +56,73 @@ export const ReplicationPolicyModel: K8sModel = {
   namespaced: false,
 };
 
+export const BackupPolicyModel: K8sModel = {
+  apiGroup: API_GROUP,
+  apiVersion: API_VERSION,
+  kind: 'BackupPolicy',
+  plural: 'backuppolicies',
+  abbr: 'BP',
+  label: 'BackupPolicy',
+  labelPlural: 'BackupPolicies',
+  namespaced: false,
+};
+
+export const BackupRestoreModel: K8sModel = {
+  apiGroup: API_GROUP,
+  apiVersion: API_VERSION,
+  kind: 'BackupRestore',
+  plural: 'backuprestores',
+  abbr: 'BR',
+  label: 'BackupRestore',
+  labelPlural: 'BackupRestores',
+  namespaced: false,
+};
+
+export const PoolBenchModel: K8sModel = {
+  apiGroup: API_GROUP,
+  apiVersion: API_VERSION,
+  kind: 'PoolBench',
+  plural: 'poolbenches',
+  abbr: 'PB',
+  label: 'PoolBench',
+  labelPlural: 'PoolBenches',
+  namespaced: false,
+};
+
+/** KubeVirt's running VM, for the VMs of a PoolBench run. */
+export const VirtualMachineInstanceModel: K8sModel = {
+  apiGroup: 'kubevirt.io',
+  apiVersion: 'v1',
+  kind: 'VirtualMachineInstance',
+  plural: 'virtualmachineinstances',
+  abbr: 'VMI',
+  label: 'VirtualMachineInstance',
+  labelPlural: 'VirtualMachineInstances',
+  namespaced: true,
+};
+
+/** CDI's image source, for the images of the PoolBench test VMs. */
+export const DataSourceModel: K8sModel = {
+  apiGroup: 'cdi.kubevirt.io',
+  apiVersion: 'v1beta1',
+  kind: 'DataSource',
+  plural: 'datasources',
+  abbr: 'DS',
+  label: 'DataSource',
+  labelPlural: 'DataSources',
+  namespaced: true,
+};
+
+export const NodeModel: K8sModel = {
+  apiVersion: 'v1',
+  kind: 'Node',
+  plural: 'nodes',
+  abbr: 'N',
+  label: 'Node',
+  labelPlural: 'Nodes',
+  namespaced: false,
+};
+
 // ── Standard Kubernetes kinds used by the create pages ──
 
 export const PersistentVolumeClaimModel: K8sModel = {
@@ -66,6 +133,16 @@ export const PersistentVolumeClaimModel: K8sModel = {
   label: 'PersistentVolumeClaim',
   labelPlural: 'PersistentVolumeClaims',
   namespaced: true,
+};
+
+export const PersistentVolumeModel: K8sModel = {
+  apiVersion: 'v1',
+  kind: 'PersistentVolume',
+  plural: 'persistentvolumes',
+  abbr: 'PV',
+  label: 'PersistentVolume',
+  labelPlural: 'PersistentVolumes',
+  namespaced: false,
 };
 
 export const DeploymentModel: K8sModel = {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"regexp"
+	"strings"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -12,7 +14,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/util"
 )
+
+// subPathRule is the rule the API server applies to spec.subPath of a
+// SubVolume. The executor applies it first, so a dry run finds what a real run
+// would be refused for.
+var subPathRule = regexp.MustCompile(v1alpha1.SubPathPattern)
 
 const (
 	// FailoverSourceLabel marks SubVolumes created by the failover CLI.
@@ -54,20 +63,53 @@ func (e *Executor) printf(format string, args ...any) {
 
 // Execute creates SubVolume CRs, PVs, and PVCs for each SubVolume in the plan.
 func (e *Executor) Execute(ctx context.Context, plan *FailoverPlan, opts ExecuteOptions) error {
+	for i := range plan.SubVolumes {
+		sv := &plan.SubVolumes[i]
+		if sv.Rewind {
+			sv.SubPath = rewoundSubPath(sv.SubPath, sv.VMMoment)
+		}
+		if !subPathRule.MatchString(sv.SubPath) {
+			return fmt.Errorf("failover SubVolume %s: folder %q is not accepted (it must match %s)", sv.SubVolumeName, sv.SubPath, v1alpha1.SubPathPattern)
+		}
+	}
+	mountOptions, err := e.mountOptions(ctx, opts.DRPoolName)
+	if err != nil {
+		return err
+	}
 	for _, sv := range plan.SubVolumes {
 		ns := sv.PVCNamespace
 		if opts.NamespaceOverride != "" {
 			ns = opts.NamespaceOverride
 		}
 
-		if err := e.executeOne(ctx, sv, ns, opts); err != nil {
+		if err := e.executeOne(ctx, sv, ns, mountOptions, opts); err != nil {
 			return fmt.Errorf("failover SubVolume %s: %w", sv.SubVolumeName, err)
 		}
 	}
 	return nil
 }
 
-func (e *Executor) executeOne(ctx context.Context, sv FailoverSubVolumePlan, namespace string, opts ExecuteOptions) error {
+// mountOptions are the NFS options the pool's own PersistentVolumes are mounted
+// with. The PVs made here point at the pool's share but are not made by the
+// driver, so kubelet mounts them with exactly the options given to it. Without
+// "sec=sys" every file on the share belongs to UID 99 and a VM cannot open its
+// disk. A pool that cannot be read (no client, or not found) gives the defaults.
+func (e *Executor) mountOptions(ctx context.Context, poolName string) ([]string, error) {
+	if e.client == nil {
+		return util.PoolMountOptions(nil), nil
+	}
+	pool := &v1alpha1.FileSharePool{}
+	if err := e.client.Get(ctx, client.ObjectKey{Name: poolName}, pool); err != nil {
+		if !errors.IsNotFound(err) {
+			return nil, fmt.Errorf("read pool %s: %w", poolName, err)
+		}
+		e.printf("Pool %s not found; using the default mount options\n", poolName)
+		return util.PoolMountOptions(nil), nil
+	}
+	return util.PoolMountOptions(pool.Spec.MountOptions), nil
+}
+
+func (e *Executor) executeOne(ctx context.Context, sv FailoverSubVolumePlan, namespace string, mountOptions []string, opts ExecuteOptions) error {
 	svName := sv.SubVolumeName
 	pvName := "dr-" + svName
 	pvcName := sv.PVCName
@@ -119,6 +161,7 @@ func (e *Executor) executeOne(ctx context.Context, sv FailoverSubVolumePlan, nam
 				},
 			},
 			PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimRetain,
+			MountOptions:                  mountOptions,
 			ClaimRef: &corev1.ObjectReference{
 				Name:      pvcName,
 				Namespace: namespace,
@@ -128,6 +171,9 @@ func (e *Executor) executeOne(ctx context.Context, sv FailoverSubVolumePlan, nam
 
 	// 3. Build PVC spec.
 	storageRequest := resource.MustParse(fmt.Sprintf("%dGi", sv.RequestedGB))
+	// An empty class, not a missing one: a missing class takes the cluster's
+	// default StorageClass, and the claim then binds to nothing.
+	noClass := ""
 	pvcObj := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      pvcName,
@@ -140,13 +186,14 @@ func (e *Executor) executeOne(ctx context.Context, sv FailoverSubVolumePlan, nam
 					corev1.ResourceStorage: storageRequest,
 				},
 			},
-			VolumeName: pvName,
+			VolumeName:       pvName,
+			StorageClassName: &noClass,
 		},
 	}
 
 	if opts.DryRun {
 		e.printf("[dry-run] Would create SubVolume %s\n", svName)
-		e.printf("[dry-run] Would create PV %s (nfs://%s%s)\n", pvName, opts.DRShareIP, nfsPath)
+		e.printf("[dry-run] Would create PV %s (nfs://%s%s, mount options %s)\n", pvName, opts.DRShareIP, nfsPath, strings.Join(mountOptions, ","))
 		e.printf("[dry-run] Would create PVC %s/%s (bound to %s)\n", namespace, pvcName, pvName)
 		return nil
 	}

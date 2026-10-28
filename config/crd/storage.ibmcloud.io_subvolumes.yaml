@@ -119,9 +119,12 @@ spec:
                   Empty for non-clone SubVolumes.
                 type: string
               subPath:
-                description: SubPath is the subdirectory path within the share (e.g.,
-                  "/pvcs/pvc-abc123").
-                pattern: ^/pvcs/pvc-[a-f0-9-]+$
+                description: |-
+                  SubPath is the subdirectory path within the share (e.g., "/pvcs/pvc-abc123").
+                  A failover to an earlier restore point uses the folder
+                  "/pvcs/pvc-abc123.rewind-<epoch>"; no other suffix is allowed.
+                  The pattern must equal SubPathPattern.
+                pattern: ^/pvcs/pvc-[a-f0-9-]+(\.rewind-[0-9]{1,12})?$
                 type: string
               uid:
                 description: UID is the Unix UID for the subdirectory owner.
@@ -145,6 +148,13 @@ spec:
                   subdirectory.
                 format: int64
                 type: integer
+              chainOperation:
+                description: |-
+                  ChainOperation names the work that changes DiskChain: a Job while the
+                  VM is stopped, or a merge that QEMU runs in a running VM. Nothing else
+                  changes the disk, and a VM that uses the disk is not started, while it
+                  is set.
+                type: string
               cloneProgress:
                 description: CloneProgress tracks bytes copied during a clone operation.
                 properties:
@@ -246,6 +256,14 @@ spec:
                   share.
                 format: date-time
                 type: string
+              diskChain:
+                description: |-
+                  DiskChain is the instant-snapshot chain of the VM disk in the volume
+                  folder, newest file first. The last file is disk.img. It is empty for a
+                  volume that has no instant snapshots.
+                items:
+                  type: string
+                type: array
               lastUsageCheck:
                 description: LastUsageCheck is when ActualUsageBytes was last updated.
                 format: date-time

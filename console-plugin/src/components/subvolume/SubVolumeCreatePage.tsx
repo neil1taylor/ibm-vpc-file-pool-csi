@@ -29,6 +29,8 @@ import { ROUTES } from '../../constants';
 import { hasUsableShare } from '../../utils/pool-helpers';
 import { buildPVC, errorMessage, isValidK8sName, pvcPath } from '../../utils/k8s-objects';
 import FieldPopover from '../common/FieldPopover';
+import { useBackupPolicies } from '../../utils/use-backup-policies';
+import { isSnapshotPool } from '../../utils/snapshot-pools';
 
 const SubVolumeCreatePage: React.FC = () => {
   const history = useHistory();
@@ -40,6 +42,7 @@ const SubVolumeCreatePage: React.FC = () => {
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
 
+  const policies = useBackupPolicies();
   const [pools, poolsLoaded] = useK8sWatchResource<FileSharePool[]>({
     groupVersionKind: {
       group: FileSharePoolModel.apiGroup,
@@ -49,7 +52,7 @@ const SubVolumeCreatePage: React.FC = () => {
     isList: true,
   });
 
-  const usablePools = (pools || []).filter(hasUsableShare);
+  const usablePools = (pools || []).filter((p) => hasUsableShare(p) && !isSnapshotPool(p.metadata?.name || '', policies));
   const selectedPool = usablePools.find((p) => p.metadata?.name === poolName);
   const tiers = selectedPool?.spec?.tiers ?? [];
 

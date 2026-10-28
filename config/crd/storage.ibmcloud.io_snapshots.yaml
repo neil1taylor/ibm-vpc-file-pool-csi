@@ -95,6 +95,11 @@ spec:
             type: object
           status:
             properties:
+              chainFile:
+                description: |-
+                  ChainFile is the file of the source disk's chain that holds an instant
+                  snapshot. It changes when a newer snapshot of the disk is merged into it.
+                type: string
               consistency:
                 description: |-
                   Consistency of a snapshot of a running VM's disk.
@@ -107,6 +112,11 @@ spec:
               consistencyReason:
                 description: ConsistencyReason says why a snapshot is only crash consistent.
                 type: string
+              copyID:
+                description: |-
+                  CopyID names the QEMU copy that made this snapshot. Snapshots of the
+                  disks of one VM that show the same moment have the same CopyID.
+                type: string
               copyMoment:
                 description: CopyMoment is the moment a snapshot of a running VM's
                   disk shows.
@@ -116,8 +126,18 @@ spec:
                 description: CreationTime is when the snapshot was created.
                 format: date-time
                 type: string
+              mergeChild:
+                description: |-
+                  MergeChild is the newer file that is merged into ChainFile while the
+                  snapshot is deleted.
+                type: string
               message:
                 description: Message says what a snapshot waits for or why it failed.
+                type: string
+              methodReason:
+                description: |-
+                  MethodReason says why a snapshot of a VM disk is a copy and not an
+                  instant snapshot.
                 type: string
               phase:
                 description: Phase is the snapshot lifecycle state.
@@ -163,6 +183,12 @@ spec:
                     type: string
                   incremental:
                     type: boolean
+                  leader:
+                    description: |-
+                      Leader names the Snapshot that owns the QEMU copy, when this Snapshot
+                      joined a copy that another Snapshot of the same VM started. It is empty
+                      on the owner. Only a snapshot copy sets it.
+                    type: string
                   moment:
                     description: Moment is the moment the copy shows.
                     format: date-time
@@ -187,6 +213,32 @@ spec:
                     type: string
                   podUID:
                     type: string
+                  setDisks:
+                    description: |-
+                      SetDisks lists every disk of the QEMU copy, in the order QEMU numbered
+                      them. Only a snapshot copy sets it, on the owner and on joined Snapshots.
+                    items:
+                      description: VMCopyDisk is one disk of a QEMU copy that covers
+                        several disks of a VM.
+                      properties:
+                        stagingFile:
+                          description: StagingFile is the staging file name in the
+                            volume's root directory.
+                          type: string
+                        volume:
+                          description: Volume is the pod volume name of the disk.
+                          type: string
+                      required:
+                      - stagingFile
+                      - volume
+                      type: object
+                    type: array
+                  speedMBps:
+                    description: |-
+                      SpeedMBps is the speed limit of the copy of each disk now, in megabytes
+                      per second. 0 means no limit. An adaptive copy changes it.
+                    format: int32
+                    type: integer
                   stagingFile:
                     description: StagingFile is the staging file name in the volume's
                       root directory.
@@ -223,6 +275,82 @@ spec:
                   try.
                 format: date-time
                 type: string
+              vmCopySet:
+                description: |-
+                  VMCopySet is the set of disks that the QEMU copy of this snapshot
+                  covered. Other Snapshots of the same VM join the set for a while. When
+                  the time to join has passed, the controller deletes the staging files
+                  of the disks that no Snapshot claimed, and clears the set.
+                properties:
+                  bitmap:
+                    description: Bitmap is the change list the copy started on each
+                      disk.
+                    type: string
+                  disks:
+                    description: Disks are the disks of the set, in the order QEMU
+                      numbered them.
+                    items:
+                      description: VMCopySetDisk is one disk of a VMCopySet.
+                      properties:
+                        stagingFile:
+                          description: StagingFile is the staging file name in the
+                            volume's root directory.
+                          type: string
+                        subVolume:
+                          description: SubVolume is the name of the SubVolume of the
+                            disk.
+                          type: string
+                        volume:
+                          description: Volume is the pod volume name of the disk.
+                          type: string
+                      required:
+                      - stagingFile
+                      - subVolume
+                      - volume
+                      type: object
+                    type: array
+                  fileSystemConsistent:
+                    description: FileSystemConsistent is true if the guest was frozen
+                      for the copy.
+                    type: boolean
+                  freezeError:
+                    description: FreezeError is the freeze error, if the freeze failed.
+                    type: string
+                  id:
+                    description: ID is the copy id.
+                    type: string
+                  joinUntil:
+                    description: JoinUntil is the time after which no more Snapshots
+                      join the set.
+                    format: date-time
+                    type: string
+                  moment:
+                    description: Moment is the moment the copy shows.
+                    format: date-time
+                    type: string
+                  podName:
+                    type: string
+                  podNamespace:
+                    description: PodNamespace, PodName and PodUID identify the VM
+                      pod that made the copy.
+                    type: string
+                  podUID:
+                    type: string
+                  vmiName:
+                    description: VMIName is the VirtualMachineInstance name.
+                    type: string
+                required:
+                - bitmap
+                - disks
+                - fileSystemConsistent
+                - id
+                - joinUntil
+                - moment
+                - podName
+                - podNamespace
+                - podUID
+                - vmiName
+                type: object
               vmCopyStarted:
                 description: |-
                   VMCopyStarted is when the current copy try started. A try that runs

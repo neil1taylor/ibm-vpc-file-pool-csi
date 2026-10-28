@@ -63,6 +63,10 @@ type ApplyOptions struct {
 
 	// beforeDiskWrite runs before each write to the disk (tests only).
 	beforeDiskWrite func() error
+	// dirtyLimit is how much is written to a file before it is synced; 0 means
+	// maxDirtyBytes. onDirtySync runs after each such sync (tests only).
+	dirtyLimit  int64
+	onDirtySync func()
 }
 
 // ApplyResult says what ApplyCopy did.
@@ -170,7 +174,7 @@ func ApplyCopy(src CopySource, disk string, opts ApplyOptions) (ApplyResult, err
 
 	fi, err := v.diskInfo()
 	if errors.Is(err, os.ErrNotExist) {
-		n, werr := writeNewDiskFrom(src, v)
+		n, werr := writeNewDiskFrom(src, v, opts)
 		res.ChangedBytes = n
 		return res, werr
 	}
@@ -213,6 +217,7 @@ func ApplyCopy(src CopySource, disk string, opts ApplyOptions) (ApplyResult, err
 			return res, err
 		}
 	}
+	diskOut := &boundedWriterAt{w: f, bound: opts.bound(f)}
 	err = forEachNewChunk(src, opts.Full, func(off int64, data []byte) error {
 		if !changed[off] {
 			return nil
@@ -222,7 +227,7 @@ func ApplyCopy(src CopySource, disk string, opts ApplyOptions) (ApplyResult, err
 				return herr
 			}
 		}
-		_, werr := f.WriteAt(data, off)
+		_, werr := diskOut.WriteAt(data, off)
 		return werr
 	})
 	if err != nil {
@@ -254,7 +259,7 @@ func ApplyCopy(src CopySource, disk string, opts ApplyOptions) (ApplyResult, err
 }
 
 // writeNewDiskFrom makes a new disk from a copy, in one step.
-func writeNewDiskFrom(src CopySource, v *volume) (int64, error) {
+func writeNewDiskFrom(src CopySource, v *volume, opts ApplyOptions) (int64, error) {
 	tmp := v.disk + newDiskSuffix
 	if err := v.root.Remove(tmp); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return 0, err
@@ -271,11 +276,12 @@ func writeNewDiskFrom(src CopySource, v *volume) (int64, error) {
 		return 0, err
 	}
 	var n int64
+	bound := opts.bound(f)
 	err = src.Walk(func(e qcow2.Extent) error {
 		if e.Kind != qcow2.Data {
 			return nil
 		}
-		w, cerr := io.Copy(io.NewOffsetWriter(f, e.Offset), src.DataReader(e))
+		w, cerr := io.Copy(&boundedWriter{w: io.NewOffsetWriter(f, e.Offset), bound: bound}, src.DataReader(e))
 		n += w
 		return cerr
 	})
@@ -352,7 +358,7 @@ func writeUndo(v *volume, name string, src CopySource, disk *os.File, oldSize in
 		return nil, err
 	}
 	defer func() { _ = uf.Close() }()
-	w := bufio.NewWriterSize(uf, 1<<20)
+	w := bufio.NewWriterSize(&boundedWriter{w: uf, bound: opts.bound(uf)}, 1<<20)
 	hdr := make([]byte, 0, 40)
 	hdr = append(hdr, undoMagic...)
 	hdr = binary.BigEndian.AppendUint64(hdr, uint64(opts.From.UnixNano())) // #nosec G115 -- a time, stored bit for bit
@@ -620,6 +626,42 @@ func pruneUndo(v *volume, cutoff time.Time) error {
 	return nil
 }
 
+// CopyApplied reports whether the disk already shows the copy that opts
+// describes, so a run whose staging file is gone can count as done. It is
+// true if a restore point records a change to opts.To. For a first copy
+// (opts.From is zero) it is also true if the disk exists and has no undo
+// files at all, since a first copy makes the disk in one step and leaves none.
+func CopyApplied(disk string, opts ApplyOptions) (bool, error) {
+	v, err := openVolume(disk)
+	if err != nil {
+		return false, err
+	}
+	defer v.close()
+	if _, err = v.diskInfo(); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	files, err := appliedUndo(v)
+	if err != nil {
+		return false, err
+	}
+	for _, u := range files {
+		if u.hdr.to.Equal(opts.To) {
+			return true, nil
+		}
+	}
+	if !opts.From.IsZero() {
+		return false, nil
+	}
+	entries, err := v.undoEntries()
+	if err != nil {
+		return false, err
+	}
+	return len(entries) == 0, nil
+}
+
 // RestorePoints lists the moments the disk can be rewound to, oldest first.
 // The latest copy, in the disk itself, is not included.
 func RestorePoints(disk string) ([]time.Time, error) {
@@ -641,7 +683,7 @@ func RestorePoints(disk string) ([]time.Time, error) {
 
 // Rewind writes to out a disk as it was at restore point to. It does not
 // change the latest disk, except to roll back a copy that stopped half way.
-func Rewind(disk string, to time.Time, out string) error {
+func Rewind(disk string, to time.Time, out string) (err error) {
 	v, err := openVolume(disk)
 	if err != nil {
 		return err
@@ -670,9 +712,15 @@ func Rewind(disk string, to time.Time, out string) error {
 	defer func() { _ = in.Close() }()
 	f, err := os.OpenFile(out, os.O_RDWR|os.O_CREATE|os.O_EXCL, diskFileMode) // #nosec G304 -- path chosen by the caller
 	if err != nil {
-		return err
+		return err // out exists or cannot be made: it is not ours to remove
 	}
-	defer func() { _ = f.Close() }()
+	// From here out is our file: a failure leaves no partial disk.
+	defer func() {
+		_ = f.Close()
+		if err != nil {
+			_ = os.Remove(out)
+		}
+	}()
 	if _, err = io.Copy(f, in); err != nil {
 		return err
 	}

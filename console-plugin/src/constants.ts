@@ -2,6 +2,9 @@ export const API_GROUP = 'storage.ibmcloud.io';
 export const API_VERSION = 'v1alpha1';
 export const API_GROUP_VERSION = `${API_GROUP}/${API_VERSION}`;
 
+/** Where the Helm chart installs the driver by default, and where its share Jobs run (pkg/pool DefaultDriverNamespace). */
+export const DRIVER_NAMESPACE = 'kube-system';
+
 export const PLUGIN_NAME = 'ibm-vpc-file-pool-csi';
 
 // Routes
@@ -25,7 +28,17 @@ export const ROUTES = {
   REPLICATION: '/vpc-file-pools/replication',
   REPLICATION_CREATE: '/vpc-file-pools/replication/~new',
   REPLICATION_DETAIL: '/vpc-file-pools/replication/:name',
+  BACKUPS: '/vpc-file-pools/backups',
+  BACKUP_CREATE: '/vpc-file-pools/backups/~new',
+  BACKUP_COS_RESTORE: '/vpc-file-pools/backups/~cos-restore',
+  BACKUP_DETAIL: '/vpc-file-pools/backups/:name',
+  BACKUP_EDIT: '/vpc-file-pools/backups/:name/edit',
+  BACKUP_RESTORE: '/vpc-file-pools/backups/:name/restore',
   MONITORING: '/vpc-file-pools/monitoring',
+  POOLBENCH: '/vpc-file-pools/poolbench',
+  POOLBENCH_CREATE: '/vpc-file-pools/poolbench/~new',
+  POOLBENCH_COMPARE: '/vpc-file-pools/poolbench/~compare',
+  POOLBENCH_DETAIL: '/vpc-file-pools/poolbench/:name',
 } as const;
 
 // Prometheus metric names

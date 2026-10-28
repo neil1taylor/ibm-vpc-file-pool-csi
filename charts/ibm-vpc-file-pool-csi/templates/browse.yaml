@@ -1,0 +1,57 @@
+{{- if .Values.backupBrowse.enabled }}
+# The controller makes and deletes the Secrets of browse sessions (a token, a
+# certificate and a key). It may do so only in this namespace, so the
+# cluster-wide role does not carry these verbs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-browse
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-browse
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-browse
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-controller
+    namespace: {{ .Release.Namespace }}
+---
+# Only the backup gateway may reach a helper pod, and only on the helper's
+# port. A helper holds another namespace's files, so no other pod may talk to it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-browse
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: storage.ibmcloud.io/browse
+        operator: Exists
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "ibm-vpc-file-pool-csi.name" . }}
+              app.kubernetes.io/component: backup-gateway
+      ports:
+        - protocol: TCP
+          port: 8443
+{{- end }}

@@ -22,10 +22,26 @@ rules:
   - apiGroups: ["storage.ibmcloud.io"]
     resources: ["failovers", "failovers/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # Pod access for lifecycle hook execution (ExecHook)
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["backuppolicies", "backuppolicies/status", "backuppolicies/finalizers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["backuprestores", "backuprestores/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Browse sessions: the gateway makes them, the controller runs them.
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["backupbrowses", "backupbrowses/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Backup policies back up a VM whole: they read the VM's volumes to find
+  # all of its disks.
+  - apiGroups: ["kubevirt.io"]
+    resources: ["virtualmachines"]
+    verbs: ["get", "list"]
+  # Pod access for lifecycle hook execution (ExecHook). The volume resizer
+  # sidecar also watches pods to see a volume that a pod still uses.
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get", "list"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["pods/exec"]
     verbs: ["create"]
@@ -34,6 +50,28 @@ rules:
   - apiGroups: ["kubevirt.io"]
     resources: ["virtualmachineinstancemigrations"]
     verbs: ["list"]
+  # Instant VM snapshots (docs/VM-INSTANT-SNAPSHOTS.md): the controller reads the
+  # Sidecar feature gate and a stopped VM's disks, records each disk's
+  # newest snapshot file on the running VMI, and keeps the hook script in a
+  # ConfigMap in the VM's namespace. It reads virt-operator to find the
+  # virt-launcher image, which has qemu-img, for Jobs on stopped VMs' disks.
+  - apiGroups: ["kubevirt.io"]
+    resources: ["kubevirts", "virtualmachines"]
+    verbs: ["get", "list"]
+  - apiGroups: ["kubevirt.io"]
+    resources: ["virtualmachineinstances"]
+    verbs: ["get", "list", "patch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["ibm-vpc-file-pool-vm-hook"]
+    verbs: ["update"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["virt-operator"]
+    verbs: ["get"]
   # OpenShift allows exec into a pod only to a user who could create that
   # pod. VM pods run under the kubevirt-controller SCC, so replication needs
   # "use" on it to freeze a VM and start a disk copy. This adds no power to
@@ -74,6 +112,13 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]
+  # Check the caller of the metrics endpoint (token and rights)
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["subjectaccessreviews"]
+    verbs: ["create"]
   # Leader election
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
@@ -149,6 +194,17 @@ rules:
   - apiGroups: ["storage.ibmcloud.io"]
     resources: ["subvolumes"]
     verbs: ["get"]
+  # FileSharePool read access (names the shares in the per-share metrics)
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["filesharepools"]
+    verbs: ["get", "list"]
+  # Check the caller of the node metrics endpoint (token and rights)
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["subjectaccessreviews"]
+    verbs: ["create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

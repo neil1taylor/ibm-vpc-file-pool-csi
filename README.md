@@ -25,23 +25,39 @@ VPC File Share (1 TB)
 
 This reduces VPC API calls, speeds up PVC provisioning (mkdir vs. 30-90s share creation), and lowers cost by consolidating storage.
 
+## Use cases and status
+
+**Included** means it is in the latest release (the first one to have it is in the Since column) and in the driver today, with its maturity: **GA** (ready for production), **Beta** (tested, may change) or **Experimental** (works in the lab; use only for data you can lose). **In progress** means it is being built. **Agreed, not built** means the spec is agreed and building has not started. **Proposed** means a spec is still under review. Details are in [FEATURES.md](docs/FEATURES.md).
+
+| Use case | Status | Since | Notes |
+| --- | --- | --- | --- |
+| Many volumes on a few shared file shares | Included, GA | v0.1.0 | The core of the driver. A volume is ready in under a second. |
+| A pool grows by itself when it fills | Included, GA | v0.1.0 | New shares are added in the background. Pools are in one zone. |
+| Several pools and speed tiers in one cluster | Included, Beta | v0.2.0 | One StorageClass per pool or tier. |
+| Take a share out of service (drain) | Included, GA | v0.4.0 | From the command line or the console. |
+| VMs from the OpenShift catalog on a pool | Included, Beta | v0.14.0 | The driver raises the memory limit of OpenShift's disk copy pods, which otherwise run out of memory on NFS. |
+| Snapshot and restore one volume | Included, Beta | v0.4.0 | A full copy on the same share. |
+| Snapshot of a running VM, all disks at one moment | Included, Beta | v0.14.0 | A short guest freeze. Red Hat does not support the method. |
+| Instant VM snapshots (no copy) | Included, Experimental | v0.14.0 | Needs a KubeVirt setting that Red Hat does not support. |
+| Clone a volume | Included, Beta | v0.4.0 |  |
+| Move volumes from another storage class into a pool | Included, Beta | v0.4.0 | Works for a user with only the edit role since this release (issue #196). |
+| Scheduled backups to a backup pool, with restore points | Included, Experimental | v0.14.0 | Restore and delete from the command line or the console. |
+| A second backup copy in IBM Cloud Object Storage | Included, Experimental | v0.14.0 | Locked bucket; key held in Key Protect. |
+| Browse a backup and restore single files | In progress |  | Spec: [backup-file-restore](docs/specs/2026-10-22-backup-file-restore.md). |
+| Copy volumes to another cluster on a schedule | Included, Beta | v0.5.0 | Direct NFS or HTTPS receiver. |
+| Copy running VMs to another cluster, rewind and fail over | Included, Experimental | v0.14.0 | Restore points; `kubectl failover`. Red Hat does not support the method. |
+| Recover from a replication in the console | In progress |  | Issue #44. |
+| Continuous protection of VMs, recovery point of seconds | Agreed, not built |  | Like Zerto or Veeam CDP. Spec: [vm-continuous-data-protection](docs/specs/2026-10-22-vm-continuous-data-protection.md). |
+| Survive the loss of a zone | Agreed, not built |  | Spec: [zone-loss](docs/specs/2026-10-22-zone-loss.md). |
+| Snapshot of a whole pool | Agreed, not built |  | Spec: [pool-snapshots](docs/specs/2026-10-22-pool-snapshots.md). |
+| Metrics and alerts | Included, GA | v0.2.0 | On OpenShift, user workload monitoring must be on ([MONITORING.md](docs/MONITORING.md)). |
+| OpenShift console pages | Included, Beta | v0.12.0 | Pools, volumes, snapshots, replication, backups, monitoring, with help on each card and column. |
+| Group snapshots (`VolumeGroupSnapshot`) | Not active |  | The code exists; nothing acts on it. A VM snapshot already gives one moment for all its disks. |
+| Golden image syncer | Hidden |  | Use the standard OpenShift catalog instead. |
+
 ## Architecture
 
-```
-Workload Pod
-    │ bind-mount /data
-    ▼
-CSI Node Agent (DaemonSet)
-    │ NFS mount per share, bind-mount per PVC
-    │
-CSI Controller (Deployment)
-    │ CreateVolume / DeleteVolume
-    ▼
-Pool Manager
-    │ share selection (spread/binpack), mkdir, capacity tracking
-    ▼
-IBM VPC Client ──► VPC File Share API
-```
+![The workload pod gets its mount from the CSI Node Agent; the CSI Controller calls the Pool Manager, which calls the IBM VPC Client and the VPC File Share API](docs/images/readme-architecture.drawio.svg)
 
 **Key components:**
 
@@ -53,42 +69,29 @@ IBM VPC Client ──► VPC File Share API
 | Share Selection | `pkg/pool/share.go` | Spread (most free) or binpack (least free) strategy |
 | Clone Worker | `pkg/pool/clone_worker.go` | Async clone operations |
 | Replication Controller | `pkg/pool/replication_controller.go` | Cross-region disaster recovery with incremental rsync |
-| Hook Orchestrator | `pkg/hooks/` | Lifecycle hooks (exec + HTTP) for replication and group snapshots |
+| Hook Orchestrator | `pkg/hooks/` | Lifecycle hooks (exec + HTTP) for replication |
 | Admission Webhooks | `pkg/webhook/` | Validating webhooks for all CRD types |
 | Migration CLI | `pkg/migrate/` | Migrate PVCs from stock IBM CSI driver |
 | IBM VPC Client | `pkg/ibmcloud/client.go` | Thin wrapper around VPC file share API |
-| CRD Types | `api/v1alpha1/` | FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, ReplicationPolicy, Hook |
+| CRD Types | `api/v1alpha1/` | FileSharePool, SubVolume, Snapshot, ReplicationPolicy, BackupPolicy, BackupRestore, VolumeGroupSnapshot (not active), Hook |
 
 ## CRDs
 
 - **FileSharePool** (cluster-scoped) — defines a pool of VPC file shares with allocation strategy, auto-expansion, and capacity limits
 - **SubVolume** (cluster-scoped) — tracks individual PVC allocations: which share, subdirectory path, requested size, and clone/snapshot state
-- **Snapshot** (cluster-scoped) — tracks point-in-time directory copies of SubVolumes
-- **VolumeGroupSnapshot** (cluster-scoped) — coordinates multi-PVC consistent snapshots with pre/post-snapshot lifecycle hooks
-- **ReplicationPolicy** (cluster-scoped) — defines cross-region replication relationships between pools with pre/post-sync lifecycle hooks and incremental rsync
+- **Snapshot** (cluster-scoped) — tracks a snapshot of a SubVolume on the same share
+- **ReplicationPolicy** (cluster-scoped) — defines replication from a pool to a destination, with pre/post-sync lifecycle hooks and incremental rsync
+- **BackupPolicy** (cluster-scoped) — backs up the PVCs and VMs it selects into a snapshot pool, on a schedule
+- **BackupRestore** (cluster-scoped) — one request to restore a backup into a new PVC
+- **VolumeGroupSnapshot** (cluster-scoped) — not active; nothing acts on it
+
+The words used here (pool, share, moment, snapshot pool and others) are defined once in [CONTEXT.md](docs/CONTEXT.md).
 
 ## Glossary
 
 ### Core Concepts
 
-| Term | Definition |
-|------|-----------|
-| **Pool** (FileSharePool) | A group of VPC file shares managed as a unit, defined by a FileSharePool CR |
-| **Share** (VPC File Share) | An NFS-exported block of cloud storage created via the IBM VPC API; each pool contains one or more shares |
-| **SubVolume** | A subdirectory on a share that backs a single PVC, tracked by a SubVolume CR |
-| **Subdirectory** | The physical directory on the NFS share (e.g., `/pvcs/pvc-abc123`), created by the node agent during publish |
-| **Mount Target** | The VPC-managed NFS endpoint (IP address) used to mount a share on worker nodes |
-| **Allocation** | The process of selecting a share, recording a SubVolume CR, and creating a subdirectory for a new PVC |
-| **Staging** | Per-node NFS mount of a share at a staging directory; done once per share per node |
-| **Tier** | A named performance level within a pool (e.g., "standard", "premium"), each with its own VPC profile, share size, and StorageClass |
-| **Spread** | Allocation strategy that places each new PVC on the share with the most free capacity, distributing PVCs evenly across shares |
-| **Binpack** | Allocation strategy that places each new PVC on the share with the least free capacity that still fits, filling shares sequentially |
-| **Draining** | Share state where no new PVCs are allocated but existing PVCs continue to work; used to decommission a share gracefully |
-| **Expanding** | Pool state when a new VPC file share is being created because utilization crossed the `expandThresholdPercent` threshold |
-| **Golden Image** | A pre-configured VM boot disk image (e.g., CentOS, Fedora) provisioned on pool storage for rapid VM creation via cloning |
-| **Clone Worker** | Background goroutine that copies data for volume clones asynchronously with a Kubernetes Job, allowing `CreateVolume` to return immediately |
-| **Hook Orchestrator** | Component that executes lifecycle hooks (exec commands or HTTP webhooks) before/after replication syncs and group snapshots |
-| **Incremental Sync** | rsync-based replication that transfers only changed files between source and destination, instead of full directory copies |
+The project's own words (pool, share, SubVolume, tier, drain, golden image, clone, hook and the rest) are defined once in [CONTEXT.md](docs/CONTEXT.md).
 
 ### IBM Cloud VPC
 
@@ -96,8 +99,8 @@ IBM VPC Client ──► VPC File Share API
 |------|-----------|
 | **dp2** | The only VPC file share profile. IOPS range from 100 to 96,000; if `spec.iops` is not set, each share gets 100 IOPS whatever its size |
 | **IOPS** | I/O Operations Per Second; the performance budget for a share, shared by all PVCs on that share |
-| **VPC Access Mode** | File share access control mode where shares are exported under a shared FQDN and differentiated by their NFS export path |
-| **Security Group Mode** | Alternative file share access control mode using VPC security groups; incompatible with VPC mount targets |
+| **VPC Access Mode** | The older file share access control mode. Shares are exported under a shared FQDN and differ by their NFS export path. Existing shares still work. The driver no longer creates them |
+| **Security Group Mode** | The file share access control mode the driver uses for every new share. A security group on the mount target's virtual network interface decides who can mount. By default it is the cluster's own security group |
 | **root_squash** | NFS server mapping of root (UID 0) to nobody (UID 65534); always enabled on VPC file shares, cannot be disabled |
 | **initial_owner** | VPC API parameter setting the UID/GID ownership of the share's root directory at creation time |
 | **Transit Gateway** | IBM Cloud service connecting VPCs across regions over the private backbone; required for cross-region replication |
@@ -123,7 +126,7 @@ IBM VPC Client ──► VPC File Share API
 |------|-----------|
 | **Provisioner** | The CSI driver identifier in a StorageClass (e.g., `vpc-file-pool.csi.ibm.io`); determines which driver handles PVC requests |
 | **Sidecars** | Standard Kubernetes CSI helper containers (csi-provisioner, csi-resizer, csi-snapshotter, liveness-probe, node-driver-registrar) that translate Kubernetes events into CSI gRPC calls |
-| **NodeStageVolume** | CSI RPC that mounts the entire NFS share to a staging directory on the node; called once per share per node |
+| **NodeStageVolume** | CSI RPC that mounts the entire NFS share at the staging folder kubelet gives for the volume; called once per staged volume on a node |
 | **NodePublishVolume** | CSI RPC that bind-mounts a SubVolume's subdirectory from the staging path into the pod's volume path |
 | **VolumeContentSource** | Field in `CreateVolume` indicating the new volume should be populated from an existing snapshot or volume (clone) |
 | **fsGroupPolicy** | CSI driver spec field controlling whether kubelet recursively `chown`s mounts to the pod's `fsGroup`; set to `None` to avoid failures with root_squash |
@@ -174,7 +177,7 @@ make deploy
 make helm-install
 ```
 
-See [INSTALL.md](INSTALL.md) for full setup instructions including IBM Cloud API key configuration.
+See [INSTALL.md](docs/INSTALL.md) for full setup instructions including IBM Cloud API key configuration.
 
 ### Create a Pool
 
@@ -243,60 +246,60 @@ go test ./pkg/pool/ -v -race -run TestAllocate_SpreadStrategy
 
 | Document | Description |
 |----------|-------------|
-| [INSTALL.md](INSTALL.md) | Build, deploy, and Helm chart |
-| [USER-GUIDE.md](USER-GUIDE.md) | End-user guide: pools, PVCs, snapshots, clones |
-| [FAQ.md](FAQ.md) | Frequently asked questions |
+| [INSTALL.md](docs/INSTALL.md) | Build, deploy, and Helm chart |
+| [USER-GUIDE.md](docs/USER-GUIDE.md) | End-user guide: pools, PVCs, snapshots, clones |
+| [FAQ.md](docs/FAQ.md) | Frequently asked questions |
 | [examples/](examples/) | Ready-to-use YAML examples |
 
 ### Operations
 
 | Document | Description |
 |----------|-------------|
-| [UPGRADE-GUIDE.md](UPGRADE-GUIDE.md) | Version upgrade procedures and compatibility matrix |
-| [DAY2-OPERATIONS.md](DAY2-OPERATIONS.md) | Production runbook: health checks, draining, failover |
-| [MONITORING.md](MONITORING.md) | Metrics reference, alerting rules, Grafana dashboard |
-| [CAPACITY-PLANNING.md](CAPACITY-PLANNING.md) | Sizing guidance, cost estimation, example configurations |
-| [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md) | Snapshot scheduling, DR setup, recovery runbooks |
-| [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Comprehensive troubleshooting guide |
-| [PERFORMANCE-TUNING.md](PERFORMANCE-TUNING.md) | NFS tuning, IOPS planning, benchmarking |
+| [UPGRADE-GUIDE.md](docs/UPGRADE-GUIDE.md) | Version upgrade procedures and compatibility matrix |
+| [DAY2-OPERATIONS.md](docs/DAY2-OPERATIONS.md) | Production runbook: health checks, draining, failover |
+| [MONITORING.md](docs/MONITORING.md) | Metrics reference, alerting rules, Grafana dashboard |
+| [CAPACITY-PLANNING.md](docs/CAPACITY-PLANNING.md) | Sizing guidance, cost estimation, example configurations |
+| [BACKUP-RECOVERY.md](docs/BACKUP-RECOVERY.md) | Snapshot scheduling, DR setup, recovery runbooks |
+| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Comprehensive troubleshooting guide |
+| [PERFORMANCE-TUNING.md](docs/PERFORMANCE-TUNING.md) | NFS tuning, IOPS planning, benchmarking |
 
 ### Configuration Reference
 
 | Document | Description |
 |----------|-------------|
-| [HELM-VALUES.md](HELM-VALUES.md) | Complete Helm chart values reference |
-| [CRD-SPEC.md](CRD-SPEC.md) | FileSharePool and SubVolume CRD definitions |
-| [API-KEY-SETUP.md](API-KEY-SETUP.md) | Authentication via secret-common-lib |
+| [HELM-VALUES.md](docs/HELM-VALUES.md) | Complete Helm chart values reference |
+| [CRD-SPEC.md](docs/CRD-SPEC.md) | FileSharePool and SubVolume CRD definitions |
+| [API-KEY-SETUP.md](docs/API-KEY-SETUP.md) | Authentication via secret-common-lib |
 
 ### Architecture & Design
 
 | Document | Description |
 |----------|-------------|
-| [FEATURES.md](FEATURES.md) | Complete feature catalog with comparison table |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | System design and data flows |
-| [CSI-INTERFACE.md](CSI-INTERFACE.md) | CSI gRPC method implementations |
-| [IBM-VPC-API.md](IBM-VPC-API.md) | VPC API client wrapper design |
-| [CONSISTENCY-MODEL.md](CONSISTENCY-MODEL.md) | NFS consistency guarantees and limitations |
-| [VOLUME-CLONING.md](VOLUME-CLONING.md) | Volume cloning design and usage |
-| [VOLUME-GROUP-SNAPSHOTS.md](VOLUME-GROUP-SNAPSHOTS.md) | Multi-PVC coordinated snapshots |
-| [CROSS-REGION-DR.md](CROSS-REGION-DR.md) | Cross-region disaster recovery |
+| [FEATURES.md](docs/FEATURES.md) | Complete feature catalog with comparison table |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design and data flows |
+| [CSI-INTERFACE.md](docs/CSI-INTERFACE.md) | CSI gRPC method implementations |
+| [IBM-VPC-API.md](docs/IBM-VPC-API.md) | VPC API client wrapper design |
+| [CONSISTENCY-MODEL.md](docs/CONSISTENCY-MODEL.md) | NFS consistency guarantees and limitations |
+| [VOLUME-CLONING.md](docs/VOLUME-CLONING.md) | Volume cloning design and usage |
+| [VOLUME-GROUP-SNAPSHOTS.md](docs/VOLUME-GROUP-SNAPSHOTS.md) | Multi-PVC coordinated snapshots |
+| [CROSS-REGION-DR.md](docs/CROSS-REGION-DR.md) | Cross-region disaster recovery |
 
 ### Platform-Specific
 
 | Document | Description |
 |----------|-------------|
-| [VPC-NETWORKING.md](VPC-NETWORKING.md) | VPC network configuration for NFS |
-| [VM-DISK-FORMATS.md](VM-DISK-FORMATS.md) | KubeVirt disk image format requirements |
-| [GOLDEN-IMAGE-WORKFLOW.md](GOLDEN-IMAGE-WORKFLOW.md) | Automated VM golden image provisioning |
-| [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md) | Known limitations and workarounds |
-| [SECURITY.md](SECURITY.md) | Security policy and hardening guide |
+| [VPC-NETWORKING.md](docs/VPC-NETWORKING.md) | VPC network configuration for NFS |
+| [VM-DISK-FORMATS.md](docs/VM-DISK-FORMATS.md) | KubeVirt disk image format requirements |
+| [GOLDEN-IMAGE-WORKFLOW.md](docs/GOLDEN-IMAGE-WORKFLOW.md) | Automated VM golden image provisioning |
+| [KNOWN-LIMITATIONS.md](docs/KNOWN-LIMITATIONS.md) | Known limitations and workarounds |
+| [SECURITY.md](docs/SECURITY.md) | Security policy and hardening guide |
 
 ### Development
 
 | Document | Description |
 |----------|-------------|
-| [CODING-GUIDELINES.md](CODING-GUIDELINES.md) | Go conventions and patterns |
-| [TESTING.md](TESTING.md) | Testing strategy and coverage targets |
+| [CODING-GUIDELINES.md](docs/CODING-GUIDELINES.md) | Go conventions and patterns |
+| [TESTING.md](docs/TESTING.md) | Testing strategy and coverage targets |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Developer guide and contribution process |
 
 ### Release

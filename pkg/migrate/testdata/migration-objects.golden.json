@@ -26,9 +26,9 @@
           "command": [
             "sh",
             "-c",
-            "\nset -e\napk add --no-cache rsync \u003e/dev/null 2\u003e\u00261\necho \"=== Migration started ===\"\necho \"Source: /source\"\necho \"Target: /target\"\nSOURCE_COUNT=$(find /source -type f | wc -l)\necho \"Source file count: $SOURCE_COUNT\"\nrsync -avz --progress /source/ /target/\nTARGET_COUNT=$(find /target -type f | wc -l)\necho \"Target file count: $TARGET_COUNT\"\necho \"=== Migration complete ===\"\nif [ \"$SOURCE_COUNT\" = \"$TARGET_COUNT\" ]; then\n  echo \"VERIFICATION: OK (file counts match: $SOURCE_COUNT)\"\n  exit 0\nelse\n  echo \"VERIFICATION: FAILED (source=$SOURCE_COUNT target=$TARGET_COUNT)\"\n  exit 1\nfi\n"
+            "\nset -e\necho \"=== Migration started ===\"\necho \"Source: /source\"\necho \"Target: /target\"\nSOURCE_COUNT=$(find /source -type f | wc -l)\necho \"Source file count: $SOURCE_COUNT\"\nrsync -rltSv --omit-dir-times --progress /source/ /target/\nTARGET_COUNT=$(find /target -type f | wc -l)\necho \"Target file count: $TARGET_COUNT\"\necho \"=== Migration complete ===\"\nif [ \"$SOURCE_COUNT\" = \"$TARGET_COUNT\" ]; then\n  echo \"VERIFICATION: OK (file counts match: $SOURCE_COUNT)\"\n  exit 0\nelse\n  echo \"VERIFICATION: FAILED (source=$SOURCE_COUNT target=$TARGET_COUNT)\"\n  exit 1\nfi\n"
           ],
-          "image": "alpine:3.20",
+          "image": "image-registry.openshift-image-registry.svc:5000/openshift/tools:latest",
           "name": "migrate",
           "resources": {
             "limits": {
@@ -38,6 +38,14 @@
             "requests": {
               "cpu": "100m",
               "memory": "128Mi"
+            }
+          },
+          "securityContext": {
+            "allowPrivilegeEscalation": false,
+            "capabilities": {
+              "drop": [
+                "ALL"
+              ]
             }
           },
           "volumeMounts": [
@@ -54,6 +62,11 @@
         }
       ],
       "restartPolicy": "Never",
+      "securityContext": {
+        "seccompProfile": {
+          "type": "RuntimeDefault"
+        }
+      },
       "volumes": [
         {
           "name": "source",

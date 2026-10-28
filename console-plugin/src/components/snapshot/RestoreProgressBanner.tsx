@@ -7,6 +7,8 @@ import { SubVolume } from '../../types';
 import { PersistentVolumeClaim, pvcPath } from '../../utils/k8s-objects';
 import { humanizeBytes } from '../../utils/resource-helpers';
 import { restoreProgress } from '../../utils/restore-helpers';
+import { TROUBLESHOOTING } from '../../utils/help-links';
+import HelpLink from '../common/HelpLink';
 
 /**
  * Follows a new claim made from a snapshot (a restore) or from another volume (a clone): the copy percent,
@@ -52,7 +54,8 @@ const RestoreProgressBanner: React.FC<{ namespace: string; name: string; source?
     case 'failed':
       return (
         <Alert variant="danger" title={`${doing} failed`} isInline>
-          {progress.error} The claim {claimLink} was not deleted. See the log of the copy Job in the driver namespace.
+          {progress.error} The claim {claimLink} was not deleted. See the log of the copy Job in the driver namespace.{' '}
+          <HelpLink href={TROUBLESHOOTING.pvc} label="Troubleshooting" testId="banner-help" />
         </Alert>
       );
     case 'copying':

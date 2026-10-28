@@ -27,7 +27,7 @@ If all three commands pass, your environment is ready.
 
 | Tool | Version | Purpose |
 |------|---------|---------|
-| Go | 1.25+ | Build and test |
+| Go | 1.26+ | Build and test |
 | golangci-lint | v2 | Linting (install: `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest`) |
 | controller-gen | v0.18+ | CRD generation (install: `go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest`) |
 | Docker or Podman | Latest | Container image builds |
@@ -86,11 +86,11 @@ go tool cover -func=coverage.out
 | `pkg/ibmcloud/` | 60% |
 | `pkg/util/` | 90% |
 
-See [TESTING.md](TESTING.md) for the complete testing strategy, fake/mock patterns, and test case specifications.
+See [TESTING.md](docs/TESTING.md) for the complete testing strategy, fake/mock patterns, and test case specifications.
 
 ## Code Style
 
-Follow the conventions in [CODING-GUIDELINES.md](CODING-GUIDELINES.md). Key points:
+Follow the conventions in [CODING-GUIDELINES.md](docs/CODING-GUIDELINES.md). Key points:
 
 - **Error handling:** Wrap with `fmt.Errorf("context: %w", err)`, define sentinel errors, check with `errors.Is`
 - **Context:** Every I/O function takes `context.Context` as its first argument
@@ -126,7 +126,7 @@ See [SKILL.md](SKILL.md) for detailed guidance on implementing specific types of
 2. Run `make generate` to regenerate CRD schemas
 3. Manually update `zz_generated.deepcopy.go` for any new nested types (see the controller-gen caveat above)
 4. Update `config/crd/` with the regenerated YAML
-5. Update [CRD-SPEC.md](CRD-SPEC.md) to reflect the changes
+5. Update [CRD-SPEC.md](docs/CRD-SPEC.md) to reflect the changes
 
 ### New CSI Methods
 
@@ -196,7 +196,7 @@ Include:
 - Relevant logs (controller and node agent)
 - Pool and PVC configuration (sanitized)
 
-See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for diagnostic commands to gather this information.
+See [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for diagnostic commands to gather this information.
 
 ### Feature Requests
 
@@ -208,3 +208,9 @@ Include:
 ## License
 
 By contributing, you agree that your contributions will be licensed under the [Apache License 2.0](LICENSE).
+
+## Where the documents are
+
+The guides are in `docs/`. Only README, CHANGELOG, CONTRIBUTING, CLAUDE.md and SKILL.md stay in the root. Link from a guide to a root file with `../` (for example `../CHANGELOG.md`). The docs site fixes these links when it builds (`hack/mkdocs_hooks.py`).
+
+If your branch edited a guide before it moved, `git merge origin/main` stops with "deleted by them" for that file. Run `hack/follow-docs-move.sh` to carry your edits into `docs/`, then commit the merge.

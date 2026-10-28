@@ -1,6 +1,9 @@
 import { FileSharePool, PoolShareStatus } from '../types';
 import {
+  drainConsequences,
+  drainListAfter,
   hasUsableShare,
+  isDraining,
   parseSecurityGroupIDs,
   poolPhaseReason,
   shareHealth,
@@ -102,5 +105,50 @@ describe('parseSecurityGroupIDs', () => {
 
   it('returns an empty list for blank input', () => {
     expect(parseSecurityGroupIDs('  \n ')).toEqual([]);
+  });
+});
+
+describe('drainListAfter', () => {
+  it('adds a share to the drain list once', () => {
+    expect(drainListAfter(undefined, 'share-1', 'drain')).toEqual(['share-1']);
+    expect(drainListAfter(['share-2'], 'share-1', 'drain')).toEqual(['share-2', 'share-1']);
+    expect(drainListAfter(['share-1'], 'share-1', 'drain')).toEqual(['share-1']);
+  });
+
+  it('takes a share off the list and keeps the others', () => {
+    expect(drainListAfter(['share-1', 'share-2'], 'share-1', 'return')).toEqual(['share-2']);
+    expect(drainListAfter(['share-1'], 'share-1', 'return')).toEqual([]);
+    expect(drainListAfter(undefined, 'share-1', 'return')).toEqual([]);
+  });
+});
+
+describe('isDraining', () => {
+  it('is true for a share on the pool drain list', () => {
+    const pool = { spec: { drainShares: ['share-1'] } } as unknown as FileSharePool;
+    expect(isDraining(pool, 'share-1')).toBe(true);
+    expect(isDraining(pool, 'share-2')).toBe(false);
+    expect(isDraining({ spec: {} } as unknown as FileSharePool, 'share-1')).toBe(false);
+  });
+});
+
+describe('drainConsequences', () => {
+  const share = (pvcCount: number) => ({ shareID: 's', shareName: 'n', pvcCount }) as PoolShareStatus;
+
+  it('says what draining does and that no data moves', () => {
+    const text = drainConsequences(share(3), 'drain').join(' ');
+    expect(text).toMatch(/new volumes/i);
+    expect(text).toMatch(/3 existing volumes/);
+    expect(text).toMatch(/no data (is )?moved?|does not move/i);
+  });
+
+  it('uses the singular for one volume and says so for none', () => {
+    expect(drainConsequences(share(1), 'drain').join(' ')).toMatch(/1 existing volume\b/);
+    expect(drainConsequences(share(0), 'drain').join(' ')).not.toMatch(/existing volume/);
+  });
+
+  it('for a return, warns to keep the share on the list while deleting it', () => {
+    const text = drainConsequences(share(0), 'return').join(' ');
+    expect(text).toMatch(/new volumes again/i);
+    expect(text).toMatch(/deleting the share/i);
   });
 });

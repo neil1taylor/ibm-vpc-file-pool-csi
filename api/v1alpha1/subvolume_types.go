@@ -4,6 +4,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// SubPathPattern is the rule for spec.subPath of a SubVolume: a volume folder,
+// or the folder a failover to an earlier restore point makes next to it
+// (".rewind-<epoch>"). The kubebuilder marker on SubVolumeSpec.SubPath must
+// hold the same text; a test compares it with the generated CRD.
+const SubPathPattern = `^/pvcs/pvc-[a-f0-9-]+(\.rewind-[0-9]{1,12})?$`
+
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=sv
@@ -43,8 +49,11 @@ type SubVolumeSpec struct {
 	ShareExportPath string `json:"shareExportPath,omitempty"`
 
 	// SubPath is the subdirectory path within the share (e.g., "/pvcs/pvc-abc123").
+	// A failover to an earlier restore point uses the folder
+	// "/pvcs/pvc-abc123.rewind-<epoch>"; no other suffix is allowed.
+	// The pattern must equal SubPathPattern.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Pattern=`^/pvcs/pvc-[a-f0-9-]+$`
+	// +kubebuilder:validation:Pattern=`^/pvcs/pvc-[a-f0-9-]+(\.rewind-[0-9]{1,12})?$`
 	SubPath string `json:"subPath"`
 
 	// RequestedGB is the capacity requested by the PVC.
@@ -121,6 +130,19 @@ type SubVolumeStatus struct {
 	// CloneProgress tracks bytes copied during a clone operation.
 	// +optional
 	CloneProgress *CloneProgress `json:"cloneProgress,omitempty"`
+
+	// DiskChain is the instant-snapshot chain of the VM disk in the volume
+	// folder, newest file first. The last file is disk.img. It is empty for a
+	// volume that has no instant snapshots.
+	// +optional
+	DiskChain []string `json:"diskChain,omitempty"`
+
+	// ChainOperation names the work that changes DiskChain: a Job while the
+	// VM is stopped, or a merge that QEMU runs in a running VM. Nothing else
+	// changes the disk, and a VM that uses the disk is not started, while it
+	// is set.
+	// +optional
+	ChainOperation string `json:"chainOperation,omitempty"`
 }
 
 // CloneProgress tracks the data copy progress for a clone operation.

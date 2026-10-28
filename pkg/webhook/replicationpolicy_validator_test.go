@@ -267,3 +267,81 @@ func containsString(s, substr string) bool {
 	}
 	return false
 }
+
+func TestReplicationPolicyValidator_MomentsRefuseInPlaceRsync(t *testing.T) {
+	v := &ReplicationPolicyValidator{}
+	for _, flag := range []string{"--inplace", "--append", "--append-verify"} {
+		rp := validReplicationPolicy()
+		keep := int32(24)
+		rp.Spec.MomentKeepHours = &keep
+		rp.Spec.RsyncOptions = []string{flag}
+		if _, err := v.ValidateCreate(context.Background(), rp); err == nil {
+			t.Errorf("%s with momentKeepHours: want an error, because it changes files that older moments link", flag)
+		}
+		rp.Spec.MomentKeepHours = nil
+		if _, err := v.ValidateCreate(context.Background(), rp); err != nil {
+			t.Errorf("%s without momentKeepHours: %v", flag, err)
+		}
+	}
+}
+
+func TestReplicationPolicyValidator_Create_RsyncOptionWithShellCharacters(t *testing.T) {
+	v := &ReplicationPolicyValidator{}
+	for _, opt := range []string{
+		"--compress; id",
+		"--compress && id",
+		"--exclude=$(id)",
+		"--exclude=`id`",
+		"--exclude='x'",
+		"--exclude=\"x\"",
+		"--compress\nid",
+		"--compress | id",
+		"--exclude=a b",
+		"",
+	} {
+		rp := validReplicationPolicy()
+		rp.Spec.RsyncOptions = []string{opt}
+		if _, err := v.ValidateCreate(context.Background(), rp); err == nil {
+			t.Errorf("expected error for rsync option %q", opt)
+		}
+	}
+}
+
+func TestReplicationPolicyValidator_MomentKeepHoursNotNegative(t *testing.T) {
+	rp := validReplicationPolicy()
+	neg := int32(-1)
+	rp.Spec.MomentKeepHours = &neg
+	if _, err := (&ReplicationPolicyValidator{}).ValidateCreate(context.Background(), rp); err == nil {
+		t.Error("want an error for a negative momentKeepHours")
+	}
+}
+
+func TestReplicationPolicyValidator_Create_DestinationBasePathUnsafe(t *testing.T) {
+	v := &ReplicationPolicyValidator{}
+	for _, p := range []string{
+		"/pvcs\"; id; \"",
+		"/pvcs$(id)",
+		"/pvcs`id`",
+		"pvcs",
+		"/pvcs/../etc",
+		"/pvcs with space",
+		"/pvcs\nid",
+	} {
+		rp := validReplicationPolicy()
+		rp.Spec.DestinationBasePath = p
+		if _, err := v.ValidateCreate(context.Background(), rp); err == nil {
+			t.Errorf("expected error for destinationBasePath %q", p)
+		}
+	}
+}
+
+func TestReplicationPolicyValidator_Create_DestinationBasePathSafe(t *testing.T) {
+	v := &ReplicationPolicyValidator{}
+	for _, p := range []string{"/pvcs", "/", "/dr/site-1/pvcs_a.b"} {
+		rp := validReplicationPolicy()
+		rp.Spec.DestinationBasePath = p
+		if _, err := v.ValidateCreate(context.Background(), rp); err != nil {
+			t.Errorf("unexpected error for destinationBasePath %q: %v", p, err)
+		}
+	}
+}

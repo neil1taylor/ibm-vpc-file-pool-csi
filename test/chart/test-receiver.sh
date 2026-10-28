@@ -48,4 +48,42 @@ else
     fail "receiver disabled: a receiver pod was rendered"
 fi
 
+# The receiver takes data from outside the cluster. It must not run with the
+# controller's account, which reads Secrets and execs into pods everywhere
+# (issue #89). It never calls the Kubernetes API, so it gets an account of its
+# own and no API token.
+receiver_pod() { awk '/^kind: Deployment/{d=1; buf=""} d{buf=buf $0 "\n"} /^---/{if (buf ~ /component: replication-receiver/) {printf "%s", buf; exit} d=0; buf=""} END{if (buf ~ /component: replication-receiver/) printf "%s", buf}' <<<"$1"; }
+
+RENDERED="$(render)"
+SA=$(receiver_pod "$RENDERED" | awk '/serviceAccountName:/{print $2; exit}')
+if [ -n "$SA" ] && [[ "$SA" == *-receiver ]]; then
+    pass "the receiver runs as its own account ($SA)"
+else
+    fail "the receiver runs as '$SA', want an account that ends in -receiver"
+fi
+
+if receiver_pod "$RENDERED" | grep -q "automountServiceAccountToken: false"; then
+    pass "the receiver pod mounts no API token"
+else
+    fail "the receiver pod mounts an API token"
+fi
+
+if grep -q "^  name: .*-receiver$" <<<"$(awk '/^kind: ServiceAccount/{k=1} /^---/{k=0} k' <<<"$RENDERED")"; then
+    pass "the receiver account is rendered"
+else
+    fail "no ServiceAccount for the receiver is rendered"
+fi
+
+if grep -q "name: .*-receiver" <<<"$(awk '/^kind: (ClusterRoleBinding|RoleBinding)/{k=1} /^---/{k=0} k' <<<"$RENDERED")"; then
+    fail "the receiver account is bound to a role"
+else
+    pass "the receiver account has no role binding"
+fi
+
+if receiver_pod "$RENDERED" | grep -q "allowPrivilegeEscalation: false"; then
+    pass "the receiver cannot gain more privilege"
+else
+    fail "the receiver may gain privilege (allowPrivilegeEscalation is not false)"
+fi
+
 exit "$FAILED"

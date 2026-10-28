@@ -33,9 +33,11 @@ import { ReplicationPolicyModel } from '../../models';
 import { ReplicationPolicy, Hook } from '../../types';
 import PhaseStatus from '../common/PhaseStatus';
 import DeleteModal from '../common/DeleteModal';
+import { describeReceiverReachable, vmCopySettingsText } from '../../utils/replication-helpers';
+import VolumeStatusTable from './VolumeStatusTable';
 import { secretsMadeFor } from '../../utils/receiver-objects';
 import { deleteMadeSecrets } from '../../utils/receiver-secrets';
-import { formatAge, formatDuration, humanizeBytes } from '../../utils/resource-helpers';
+import { formatAge, formatDuration } from '../../utils/resource-helpers';
 import { ROUTES } from '../../constants';
 
 const renderHooksReadOnly = (hooks: Hook[] | undefined, title: string) => {
@@ -168,6 +170,7 @@ const ReplicationPolicyDetailsPage: React.FC = () => {
   };
 
   const isReceiverMode = !!spec.destinationEndpoint;
+  const receiver = describeReceiverReachable(policy);
 
   const renderOverview = () => (
     <Card>
@@ -194,6 +197,15 @@ const ReplicationPolicyDetailsPage: React.FC = () => {
                   <code>{spec.destinationEndpoint}</code>
                 </DescriptionListDescription>
               </DescriptionListGroup>
+              {receiver && (
+                <DescriptionListGroup>
+                  <DescriptionListTerm>Receiver Status</DescriptionListTerm>
+                  <DescriptionListDescription>
+                    <Label color={receiver.color}>{receiver.label}</Label>
+                    {receiver.detail && <span style={{ marginLeft: 8 }}>{receiver.detail}</span>}
+                  </DescriptionListDescription>
+                </DescriptionListGroup>
+              )}
               <DescriptionListGroup>
                 <DescriptionListTerm>Auth Secret</DescriptionListTerm>
                 <DescriptionListDescription>
@@ -265,6 +277,14 @@ const ReplicationPolicyDetailsPage: React.FC = () => {
             <DescriptionListDescription>
               {spec.maxParallelSyncs ?? 1}
             </DescriptionListDescription>
+          </DescriptionListGroup>
+          <DescriptionListGroup>
+            <DescriptionListTerm>VM Copy Speed Limit</DescriptionListTerm>
+            <DescriptionListDescription>{vmCopySettingsText(spec).speed}</DescriptionListDescription>
+          </DescriptionListGroup>
+          <DescriptionListGroup>
+            <DescriptionListTerm>Restore Point Keep Time</DescriptionListTerm>
+            <DescriptionListDescription>{vmCopySettingsText(spec).keep}</DescriptionListDescription>
           </DescriptionListGroup>
           {!isReceiverMode && (
             <DescriptionListGroup>
@@ -338,48 +358,7 @@ const ReplicationPolicyDetailsPage: React.FC = () => {
     </Card>
   );
 
-  const renderSyncStatuses = () => {
-    const statuses = status?.subVolumeStatuses;
-    if (!statuses || statuses.length === 0) {
-      return (
-        <Alert variant="info" title="No sync status" isInline style={{ marginTop: 16 }}>
-          No SubVolume sync statuses have been reported yet.
-        </Alert>
-      );
-    }
-
-    return (
-      <Card style={{ marginTop: 16 }}>
-        <CardTitle>Sync Status</CardTitle>
-        <CardBody>
-          <Table aria-label="SubVolume sync statuses" variant="compact">
-            <Thead>
-              <Tr>
-                <Th>SubVolume Name</Th>
-                <Th>Last Sync Time</Th>
-                <Th>Bytes Synced</Th>
-                <Th>Last Error</Th>
-              </Tr>
-            </Thead>
-            <Tbody>
-              {statuses.map((svStatus) => (
-                <Tr key={svStatus.subVolumeName}>
-                  <Td>{svStatus.subVolumeName}</Td>
-                  <Td>{svStatus.lastSyncTime ? formatAge(svStatus.lastSyncTime) : '-'}</Td>
-                  <Td>
-                    {svStatus.bytesSynced != null
-                      ? humanizeBytes(svStatus.bytesSynced)
-                      : '-'}
-                  </Td>
-                  <Td>{svStatus.lastError || '-'}</Td>
-                </Tr>
-              ))}
-            </Tbody>
-          </Table>
-        </CardBody>
-      </Card>
-    );
-  };
+  const renderSyncStatuses = () => <VolumeStatusTable statuses={status?.subVolumeStatuses} />;
 
   return (
     <>

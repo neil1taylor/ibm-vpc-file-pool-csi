@@ -19,14 +19,29 @@ spec:
         app.kubernetes.io/component: controller
     spec:
       serviceAccountName: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-controller
+      {{- $podSC := deepCopy (.Values.controller.podSecurityContext | default dict) }}
+      {{- $fixedIDs := or (not (.Capabilities.APIVersions.Has "security.openshift.io/v1")) (eq .Release.Namespace "kube-system") }}
+      {{- if and $fixedIDs (not (hasKey $podSC "fsGroup")) }}
+      {{- $_ := set $podSC "fsGroup" 65532 }}
+      {{- end }}
+      {{- $sidecarSC := deepCopy (.Values.controller.sidecarSecurityContext | default dict) }}
+      {{- if and $fixedIDs (not (hasKey $sidecarSC "runAsUser")) }}
+      {{- $_ := set $sidecarSC "runAsUser" 65532 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml $podSC | nindent 8 }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       containers:
         - name: csi-controller
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ include "ibm-vpc-file-pool-csi.driverImage" . }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.controller.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           args:
             - "--mode=controller"
             - "--endpoint=unix:///csi/csi.sock"
@@ -48,9 +63,45 @@ spec:
             - "--golden-image-sync-interval={{ .Values.goldenImageSyncer.interval }}"
             {{- end }}
             - "--cdi-copy-pod-memory-limit={{ .Values.cdi.copyPodMemoryLimit }}"
-            - "--driver-image={{ .Values.image.repository }}:{{ .Values.image.tag }}"
+            - "--driver-image={{ include "ibm-vpc-file-pool-csi.driverImage" . }}"
             {{- if .Values.replicationReceiver.pvcName }}
             - "--failover-default-source={{ .Values.replicationReceiver.pvcName }}"
+            {{- end }}
+            {{- if .Values.backupBrowse.enabled }}
+            - "--browse-image={{ .Values.backupBrowse.image.repository }}:{{ .Values.backupBrowse.image.tag | default (include "ibm-vpc-file-pool-csi.imageTag" .) }}"
+            {{- if .Values.imagePullSecrets }}
+            - "--browse-image-pull-secrets={{ range $i, $s := .Values.imagePullSecrets }}{{ if $i }},{{ end }}{{ $s.name }}{{ end }}"
+            {{- end }}
+            - "--browse-idle={{ .Values.backupBrowse.idle }}"
+            - "--browse-max-life={{ .Values.backupBrowse.maxLife }}"
+            - "--browse-max-sessions={{ .Values.backupBrowse.maxSessions }}"
+            - "--browse-max-sessions-per-namespace={{ .Values.backupBrowse.maxSessionsPerNamespace }}"
+            {{- end }}
+            {{- if not (has .Values.vmSnapshots.method (list "auto" "copy")) }}
+            {{- fail "vmSnapshots.method must be auto or copy" }}
+            {{- end }}
+            - "--vm-snapshot-method={{ .Values.vmSnapshots.method }}"
+            {{- with .Values.vmSnapshots.launcherImage }}
+            - "--virt-launcher-image={{ . }}"
+            {{- end }}
+            - "--metrics-cert-dir=/etc/metrics-certs"
+            {{- if .Values.node.metricsPort }}
+            # The copy of a running VM's disks follows the load on the share, read from the node agents.
+            - "--node-metrics-service={{ include "ibm-vpc-file-pool-csi.fullname" . }}-node-metrics"
+            - "--node-metrics-account={{ include "ibm-vpc-file-pool-csi.fullname" . }}-node-reader"
+            - "--node-metrics-ca=/etc/node-metrics-ca/{{ ternary "service-ca.crt" "ca.crt" (eq .Values.webhook.certProvider "openshift") }}"
+            {{- end }}
+            {{- if include "ibm-vpc-file-pool-csi.uwm" . }}
+            - "--monitoring-namespace={{ .Values.metrics.monitoring.namespace }}"
+            - "--monitoring-controller-service={{ include "ibm-vpc-file-pool-csi.fullname" . }}-metrics"
+            - "--monitoring-controller-port={{ .Values.metrics.port }}"
+            - "--monitoring-node-service={{ include "ibm-vpc-file-pool-csi.fullname" . }}-node-metrics"
+            - "--monitoring-node-port={{ .Values.node.metricsPort }}"
+            {{- if .Values.poolBench.enabled }}
+            - "--monitoring-poolbench-service={{ include "ibm-vpc-file-pool-csi.fullname" . }}-poolbench"
+            - "--monitoring-poolbench-port=8443"
+            {{- end }}
+            - "--monitoring-selector=app.kubernetes.io/name={{ include "ibm-vpc-file-pool-csi.name" . }},app.kubernetes.io/instance={{ .Release.Name }}"
             {{- end }}
             {{- if .Values.webhook.enabled }}
             - "--webhook-port={{ .Values.webhook.port }}"
@@ -101,6 +152,14 @@ spec:
           volumeMounts:
             - name: socket-dir
               mountPath: /csi
+            - name: metrics-certs
+              mountPath: /etc/metrics-certs
+              readOnly: true
+            {{- if .Values.node.metricsPort }}
+            - name: node-ca
+              mountPath: /etc/node-metrics-ca
+              readOnly: true
+            {{- end }}
             {{- if .Values.webhook.enabled }}
             - name: webhook-certs
               mountPath: /tmp/k8s-webhook-server/serving-certs
@@ -123,6 +182,10 @@ spec:
 
         - name: csi-provisioner
           image: {{ .Values.sidecars.provisioner.image }}
+          {{- with $sidecarSC }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           args:
             - "--csi-address=/csi/csi.sock"
             - "--feature-gates=Topology=true"
@@ -148,6 +211,10 @@ spec:
 
         - name: csi-resizer
           image: {{ .Values.sidecars.resizer.image }}
+          {{- with $sidecarSC }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           args:
             - "--csi-address=/csi/csi.sock"
             - "--leader-election"
@@ -170,6 +237,10 @@ spec:
 
         - name: csi-snapshotter
           image: {{ .Values.sidecars.snapshotter.image }}
+          {{- with $sidecarSC }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           args:
             - "--csi-address=/csi/csi.sock"
             - "--leader-election"
@@ -192,6 +263,10 @@ spec:
 
         - name: liveness-probe
           image: {{ .Values.sidecars.liveness.image }}
+          {{- with $sidecarSC }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           args:
             - "--csi-address=/csi/csi.sock"
           {{- with .Values.sidecars.liveness.resources }}
@@ -205,6 +280,10 @@ spec:
         {{- if .Values.secretProvider.managed }}
         - name: storage-secret-sidecar
           image: {{ .Values.secretProvider.sidecar.image }}
+          {{- with $sidecarSC }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           args:
             - "--endpoint=$(ENDPOINT)"
           env:
@@ -229,6 +308,23 @@ spec:
       volumes:
         - name: socket-dir
           emptyDir: {}
+        - name: metrics-certs
+          secret:
+            secretName: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-metrics-certs
+            defaultMode: 0400
+        {{- if .Values.node.metricsPort }}
+        - name: node-ca
+          {{- if eq .Values.webhook.certProvider "openshift" }}
+          configMap:
+            name: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-node-ca
+          {{- else }}
+          secret:
+            secretName: {{ include "ibm-vpc-file-pool-csi.fullname" . }}-node-metrics-certs
+            items:
+              - key: ca.crt
+                path: ca.crt
+          {{- end }}
+        {{- end }}
         {{- if .Values.webhook.enabled }}
         - name: webhook-certs
           secret:

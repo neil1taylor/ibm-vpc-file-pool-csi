@@ -143,6 +143,13 @@ type mockK8sClient struct {
 	snapshots      map[string]*v1alpha1.Snapshot
 	groupSnapshots map[string]*v1alpha1.VolumeGroupSnapshot
 	getErr         error
+	// openRestore and openRestoreErr answer HasOpenRestore.
+	openRestore    bool
+	openRestoreErr error
+	// snapshotPools maps a pool name to the BackupPolicy that uses it as its
+	// snapshot pool; snapshotPoolErr answers BackupPolicyUsingPool with an error.
+	snapshotPools   map[string]string
+	snapshotPoolErr error
 }
 
 func newMockK8sClient() *mockK8sClient {
@@ -186,6 +193,14 @@ func (m *mockK8sClient) ListSubVolumes(_ context.Context, _ string) ([]v1alpha1.
 
 func (m *mockK8sClient) ListSubVolumesByShare(_ context.Context, _ string) ([]v1alpha1.SubVolume, error) {
 	return nil, nil
+}
+
+func (m *mockK8sClient) HasOpenRestore(_ context.Context, _, _ string) (bool, error) {
+	return m.openRestore, m.openRestoreErr
+}
+
+func (m *mockK8sClient) BackupPolicyUsingPool(_ context.Context, poolName string) (string, error) {
+	return m.snapshotPools[poolName], m.snapshotPoolErr
 }
 
 func (m *mockK8sClient) ListCloneSubVolumes(_ context.Context) ([]v1alpha1.SubVolume, error) {
@@ -2265,5 +2280,91 @@ func TestCreateVolume_Idempotent_ReturnsFullVolumeContext(t *testing.T) {
 		if got := resp.GetVolume().VolumeContext[key]; got != value {
 			t.Errorf("VolumeContext[%q] = %q, want %q", key, got, value)
 		}
+	}
+}
+
+func TestCreateVolume_HoldsAVolumeThatABackupRestoreIsFilling(t *testing.T) {
+	pm := &mockPoolManager{allocateResult: &pool.AllocationResult{ShareID: "share-1", MountTargetIP: "10.240.0.1", SubPath: "/pvcs/pvc-test", SharePath: "/"}}
+	k := newMockK8sClient()
+	k.openRestore = true
+	d := newTestDriver(pm, k)
+	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name: "pvc-test",
+		Parameters: map[string]string{
+			"pool": "my-pool", "csi.storage.k8s.io/pvc/name": "my-pvc", "csi.storage.k8s.io/pvc/namespace": "my-ns",
+		},
+		CapacityRange: &csi.CapacityRange{RequiredBytes: gbToBytes(5)},
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume failed: %v", err)
+	}
+	if !pm.lastAllocateReq.RestorePending {
+		t.Error("the volume must be made held back: a pod could mount it before the copy starts")
+	}
+}
+
+func TestCreateVolume_RefusesWhenItCannotTellIfARestoreIsOpen(t *testing.T) {
+	pm := &mockPoolManager{allocateResult: &pool.AllocationResult{ShareID: "share-1", MountTargetIP: "10.240.0.1", SubPath: "/pvcs/pvc-test", SharePath: "/"}}
+	k := newMockK8sClient()
+	k.openRestoreErr = fmt.Errorf("api down")
+	d := newTestDriver(pm, k)
+	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name:          "pvc-test",
+		Parameters:    map[string]string{"pool": "my-pool", "csi.storage.k8s.io/pvc/name": "my-pvc", "csi.storage.k8s.io/pvc/namespace": "my-ns"},
+		CapacityRange: &csi.CapacityRange{RequiredBytes: gbToBytes(5)},
+	})
+	if status.Code(err) != codes.Unavailable {
+		t.Errorf("code = %v, want Unavailable (a retry is safe)", status.Code(err))
+	}
+}
+
+func TestCreateVolume_RefusesAPoolThatHoldsBackups(t *testing.T) {
+	tests := []struct {
+		name   string
+		source *csi.VolumeContentSource
+	}{
+		{name: "new volume"},
+		{name: "restore of a snapshot", source: &csi.VolumeContentSource{Type: &csi.VolumeContentSource_Snapshot{
+			Snapshot: &csi.VolumeContentSource_SnapshotSource{SnapshotId: "backups/share-1/snap-1"}}}},
+		{name: "clone", source: &csi.VolumeContentSource{Type: &csi.VolumeContentSource_Volume{
+			Volume: &csi.VolumeContentSource_VolumeSource{VolumeId: "data/share-1/pvc-src"}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pm := &mockPoolManager{allocateResult: &pool.AllocationResult{ShareID: "share-1", MountTargetIP: "10.240.0.1", SubPath: "/pvcs/pvc-test", SharePath: "/"}}
+			k := newMockK8sClient()
+			k.snapshotPools = map[string]string{"backups": "nightly"}
+			d := newTestDriver(pm, k)
+			_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+				Name:                "pvc-test",
+				Parameters:          map[string]string{"pool": "backups"},
+				CapacityRange:       &csi.CapacityRange{RequiredBytes: gbToBytes(5)},
+				VolumeContentSource: tt.source,
+			})
+			if status.Code(err) != codes.FailedPrecondition {
+				t.Fatalf("code = %v, want FailedPrecondition: a volume on a snapshot pool stops the policy's backups", status.Code(err))
+			}
+			if !strings.Contains(err.Error(), "nightly") {
+				t.Errorf("error %q does not name the policy that uses the pool", err)
+			}
+			if pm.lastAllocateReq.PVName != "" {
+				t.Error("the pool manager was asked to allocate on the snapshot pool")
+			}
+		})
+	}
+}
+
+func TestCreateVolume_RetriesWhenItCannotTellIfThePoolHoldsBackups(t *testing.T) {
+	pm := &mockPoolManager{allocateResult: &pool.AllocationResult{ShareID: "share-1", MountTargetIP: "10.240.0.1", SubPath: "/pvcs/pvc-test", SharePath: "/"}}
+	k := newMockK8sClient()
+	k.snapshotPoolErr = fmt.Errorf("api down")
+	d := newTestDriver(pm, k)
+	_, err := d.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name:          "pvc-test",
+		Parameters:    map[string]string{"pool": "my-pool"},
+		CapacityRange: &csi.CapacityRange{RequiredBytes: gbToBytes(5)},
+	})
+	if status.Code(err) != codes.Unavailable {
+		t.Errorf("code = %v, want Unavailable (a retry is safe)", status.Code(err))
 	}
 }

@@ -106,15 +106,30 @@ type ReplicationPolicySpec struct {
 	// +optional
 	DestinationCACertSecretRef string `json:"destinationCACertSecretRef,omitempty"`
 
-	// VMCopySpeedLimitMBps limits how fast QEMU copies each disk of a running
-	// VM, in megabytes per second. A copy slows the VM's own disk writes; at
-	// 20 MB/s a VM kept 93% of its write speed in a lab test. The limit also
-	// counts empty disk space, so a full copy of a large disk takes long.
-	// 0 means no limit.
+	// VMCopySpeedLimitMBps is the speed of QEMU's copy of each disk of a running
+	// VM, in megabytes per second. When the copy adapts (VMCopyAdaptive), it is
+	// the highest speed; 0 or unset means there is no highest speed. When the
+	// copy does not adapt, it is the fixed speed; 0 means no limit and unset
+	// means 20. The limit also counts empty disk space, so a full copy of a
+	// large disk takes long at a low speed.
 	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:default=20
 	// +optional
 	VMCopySpeedLimitMBps *int32 `json:"vmCopySpeedLimitMBps,omitempty"`
+
+	// VMCopyAdaptive makes the copy start slow and speed up while the share the
+	// VM reads is quiet, and slow down when its latency passes
+	// VMCopyMaxLatencyMs. Default true. It needs the driver to read the node
+	// agents' metrics; without them the copy runs at the fixed speed.
+	// See docs/specs/2026-10-26-adaptive-copy-speed.md.
+	// +optional
+	VMCopyAdaptive *bool `json:"vmCopyAdaptive,omitempty"`
+
+	// VMCopyMaxLatencyMs is the average latency of the share, in milliseconds,
+	// above which an adaptive copy slows down. Default 15.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=20
+	// +optional
+	VMCopyMaxLatencyMs *int32 `json:"vmCopyMaxLatencyMs,omitempty"`
 
 	// RestorePointKeepHours is how long the destination keeps the restore
 	// points of running VM disks, so a failover can rewind to an earlier
@@ -124,6 +139,15 @@ type ReplicationPolicySpec struct {
 	// +kubebuilder:default=24
 	// +optional
 	RestorePointKeepHours *int32 `json:"restorePointKeepHours,omitempty"`
+
+	// MomentKeepHours keeps earlier moments of volumes that are not VM disks, as
+	// folders of hard links next to the destination (in .moments). A file that
+	// did not change takes no extra space. A moment older than this many hours is
+	// removed after each sync. Unset or 0 keeps none. Needs rsync: it is used
+	// even when IncrementalSync is false. BackupPolicy sets this.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	MomentKeepHours *int32 `json:"momentKeepHours,omitempty"`
 
 	// PreSyncHooks are hooks executed before each replication sync cycle.
 	// +optional
@@ -159,6 +183,13 @@ type ReplicationPolicyStatus struct {
 	// LastError is the error message from the most recent failure.
 	// +optional
 	LastError string `json:"lastError,omitempty"`
+
+	// Conditions holds the receiver check. ReceiverReachable is True when the
+	// receiver answers, its certificate is trusted and it accepts the token. It is
+	// set only for policies in driver-to-driver (receiver) mode. A False result
+	// does not stop replication; it explains why a sync fails.
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // SubVolumeReplicationStatus tracks the replication state of a single SubVolume.
@@ -244,6 +275,11 @@ type VMCopyState struct {
 	// StagingFile is the staging file name in the volume's root directory.
 	StagingFile string `json:"stagingFile"`
 
+	// SpeedMBps is the speed limit of the copy of each disk now, in megabytes
+	// per second. 0 means no limit. An adaptive copy changes it.
+	// +optional
+	SpeedMBps int32 `json:"speedMBps,omitempty"`
+
 	// Moment is the moment the copy shows.
 	Moment metav1.Time `json:"moment"`
 
@@ -261,6 +297,26 @@ type VMCopyState struct {
 	Base string `json:"base,omitempty"`
 	// +optional
 	Incremental bool `json:"incremental,omitempty"`
+
+	// Leader names the Snapshot that owns the QEMU copy, when this Snapshot
+	// joined a copy that another Snapshot of the same VM started. It is empty
+	// on the owner. Only a snapshot copy sets it.
+	// +optional
+	Leader string `json:"leader,omitempty"`
+
+	// SetDisks lists every disk of the QEMU copy, in the order QEMU numbered
+	// them. Only a snapshot copy sets it, on the owner and on joined Snapshots.
+	// +optional
+	SetDisks []VMCopyDisk `json:"setDisks,omitempty"`
+}
+
+// VMCopyDisk is one disk of a QEMU copy that covers several disks of a VM.
+type VMCopyDisk struct {
+	// Volume is the pod volume name of the disk.
+	Volume string `json:"volume"`
+
+	// StagingFile is the staging file name in the volume's root directory.
+	StagingFile string `json:"stagingFile"`
 }
 
 // +kubebuilder:object:root=true

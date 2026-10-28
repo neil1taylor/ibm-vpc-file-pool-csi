@@ -243,12 +243,11 @@ func TestBuildMigrationPod_ScriptFailsWhenCountsDiffer(t *testing.T) {
 					}
 				}
 			}
-			// Use the test folders, and replace the package install and the copy
-			// with no-ops, so only the file count check runs.
+			// Use the test folders, and replace the copy with a no-op, so only
+			// the file count check runs.
 			s := strings.ReplaceAll(script, "/source", filepath.Join(dir, "source"))
 			s = strings.ReplaceAll(s, "/target", filepath.Join(dir, "target"))
-			s = strings.ReplaceAll(s, "apk add", "true")
-			s = strings.ReplaceAll(s, "rsync -avz --progress", "true")
+			s = strings.ReplaceAll(s, "rsync -rltSv --omit-dir-times --progress", "true")
 			err := exec.Command("sh", "-c", s).Run()
 			if (err != nil) != tt.wantExit {
 				t.Errorf("script error = %v, want non-zero exit %v", err, tt.wantExit)

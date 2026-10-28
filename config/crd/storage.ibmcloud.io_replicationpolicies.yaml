@@ -124,6 +124,16 @@ spec:
                 format: int32
                 minimum: 0
                 type: integer
+              momentKeepHours:
+                description: |-
+                  MomentKeepHours keeps earlier moments of volumes that are not VM disks, as
+                  folders of hard links next to the destination (in .moments). A file that
+                  did not change takes no extra space. A moment older than this many hours is
+                  removed after each sync. Unset or 0 keeps none. Needs rsync: it is used
+                  even when IncrementalSync is false. BackupPolicy sets this.
+                format: int32
+                minimum: 0
+                type: integer
               postSyncHooks:
                 description: PostSyncHooks are hooks executed after each replication
                   sync cycle.
@@ -390,14 +400,30 @@ spec:
                     type: object
                 type: object
                 x-kubernetes-map-type: atomic
-              vmCopySpeedLimitMBps:
-                default: 20
+              vmCopyAdaptive:
                 description: |-
-                  VMCopySpeedLimitMBps limits how fast QEMU copies each disk of a running
-                  VM, in megabytes per second. A copy slows the VM's own disk writes; at
-                  20 MB/s a VM kept 93% of its write speed in a lab test. The limit also
-                  counts empty disk space, so a full copy of a large disk takes long.
-                  0 means no limit.
+                  VMCopyAdaptive makes the copy start slow and speed up while the share the
+                  VM reads is quiet, and slow down when its latency passes
+                  VMCopyMaxLatencyMs. Default true. It needs the driver to read the node
+                  agents' metrics; without them the copy runs at the fixed speed.
+                  See docs/specs/2026-10-26-adaptive-copy-speed.md.
+                type: boolean
+              vmCopyMaxLatencyMs:
+                description: |-
+                  VMCopyMaxLatencyMs is the average latency of the share, in milliseconds,
+                  above which an adaptive copy slows down. Default 15.
+                format: int32
+                maximum: 20
+                minimum: 1
+                type: integer
+              vmCopySpeedLimitMBps:
+                description: |-
+                  VMCopySpeedLimitMBps is the speed of QEMU's copy of each disk of a running
+                  VM, in megabytes per second. When the copy adapts (VMCopyAdaptive), it is
+                  the highest speed; 0 or unset means there is no highest speed. When the
+                  copy does not adapt, it is the fixed speed; 0 means no limit and unset
+                  means 20. The limit also counts empty disk space, so a full copy of a
+                  large disk takes long at a low speed.
                 format: int32
                 minimum: 0
                 type: integer
@@ -411,6 +437,67 @@ spec:
             description: ReplicationPolicyStatus describes the observed state of a
               replication policy.
             properties:
+              conditions:
+                description: |-
+                  Conditions holds the receiver check. ReceiverReachable is True when the
+                  receiver answers, its certificate is trusted and it accepts the token. It is
+                  set only for policies in driver-to-driver (receiver) mode. A False result
+                  does not stop replication; it explains why a sync fails.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
               consecutiveFailures:
                 description: |-
                   ConsecutiveFailures counts sequential failed replication cycles.
@@ -520,6 +607,12 @@ spec:
                           type: string
                         incremental:
                           type: boolean
+                        leader:
+                          description: |-
+                            Leader names the Snapshot that owns the QEMU copy, when this Snapshot
+                            joined a copy that another Snapshot of the same VM started. It is empty
+                            on the owner. Only a snapshot copy sets it.
+                          type: string
                         moment:
                           description: Moment is the moment the copy shows.
                           format: date-time
@@ -544,6 +637,33 @@ spec:
                           type: string
                         podUID:
                           type: string
+                        setDisks:
+                          description: |-
+                            SetDisks lists every disk of the QEMU copy, in the order QEMU numbered
+                            them. Only a snapshot copy sets it, on the owner and on joined Snapshots.
+                          items:
+                            description: VMCopyDisk is one disk of a QEMU copy that
+                              covers several disks of a VM.
+                            properties:
+                              stagingFile:
+                                description: StagingFile is the staging file name
+                                  in the volume's root directory.
+                                type: string
+                              volume:
+                                description: Volume is the pod volume name of the
+                                  disk.
+                                type: string
+                            required:
+                            - stagingFile
+                            - volume
+                            type: object
+                          type: array
+                        speedMBps:
+                          description: |-
+                            SpeedMBps is the speed limit of the copy of each disk now, in megabytes
+                            per second. 0 means no limit. An adaptive copy changes it.
+                          format: int32
+                          type: integer
                         stagingFile:
                           description: StagingFile is the staging file name in the
                             volume's root directory.

@@ -74,6 +74,13 @@ beforeEach(() => jest.clearAllMocks());
 const createButton = () => screen.getByRole('button', { name: 'Restore' }) as HTMLButtonElement;
 
 describe('RestoreSnapshotPage', () => {
+  it('does not offer the storage class of a snapshot pool', () => {
+    watch({ ...base(), StorageClass: [...storageClasses, { metadata: { name: 'backups' }, provisioner: DRIVER, parameters: { pool: 'backups' } }], BackupPolicy: [{ metadata: { name: 'nightly' }, spec: { snapshotPool: 'backups' } }] });
+    render(<RestoreSnapshotPage />);
+    expect(screen.getByRole('option', { name: 'pool-a' })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: 'backups' })).toBeNull();
+  });
+
   it('opens with defaults: name <source>-restored, the snapshot size, the source class, and the namespace fixed', () => {
     watch(base());
     render(<RestoreSnapshotPage />);
@@ -130,6 +137,23 @@ describe('RestoreSnapshotPage', () => {
     expect(screen.queryByText(/taken while a VM was running/i)).toBeNull();
   });
 
+  it('says a running VM is copied at one moment, explains a crash consistent copy, and points to no future step', () => {
+    watch({
+      ...base(),
+      VirtualMachine: [
+        {
+          metadata: { name: 'vm1', namespace: 'apps' },
+          spec: { template: { spec: { volumes: [{ persistentVolumeClaim: { claimName: 'data' } }] } } },
+        },
+      ],
+    });
+    render(<RestoreSnapshotPage />);
+    expect(screen.getByText(/froze the guest and copied the disk at one moment/i)).toBeTruthy();
+    expect(screen.getByText(/crash consistent/i)).toBeTruthy();
+    expect(screen.queryByText(/step 7/i)).toBeNull();
+    expect(screen.queryByText(/may not boot/i)).toBeNull();
+  });
+
   it('shows the pool free space and warns when the size is more than that', () => {
     watch(base());
     render(<RestoreSnapshotPage />);
@@ -137,6 +161,19 @@ describe('RestoreSnapshotPage', () => {
     fireEvent.change(screen.getByLabelText(/^Size \(GiB\)( \*)?$/), { target: { value: '80' } });
     expect(screen.getByText(/more than the free space/i)).toBeTruthy();
     expect(createButton().disabled).toBe(false);
+  });
+
+  it('says which right is missing, instead of spinning, when the user may not read VolumeSnapshotContents (#186)', () => {
+    watch(base());
+    const answer = (useK8sWatchResource as jest.Mock).getMockImplementation()!;
+    (useK8sWatchResource as jest.Mock).mockImplementation((req: { groupVersionKind: { kind: string } } | null) =>
+      req?.groupVersionKind.kind === 'VolumeSnapshotContent'
+        ? [[], false, { code: 403, message: 'volumesnapshotcontents is forbidden' }]
+        : answer(req),
+    );
+    render(<RestoreSnapshotPage />);
+    expect(screen.getByText(/You are not allowed to read VolumeSnapshotContents/)).toBeTruthy();
+    expect(screen.queryByRole('progressbar')).toBeNull();
   });
 
   it('shows the reason and no form when no VolumeSnapshot points to the snapshot', () => {
@@ -151,6 +188,19 @@ describe('RestoreSnapshotPage', () => {
     render(<RestoreSnapshotPage />);
     expect(screen.getByText(/not ready/i)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Restore' })).toBeNull();
+  });
+
+  it('does not call its own new claim a name that is taken, after the restore starts', async () => {
+    const data = base();
+    watch(data);
+    (k8sCreate as jest.Mock).mockImplementation(async () => {
+      data.PersistentVolumeClaim.push({ ...sourcePVC, metadata: { name: 'data-restored', namespace: 'apps' } });
+      return {};
+    });
+    render(<RestoreSnapshotPage />);
+    fireEvent.click(createButton());
+    expect(await screen.findByText(/Restoring/)).toBeTruthy();
+    expect(screen.queryByText(/already exists/)).toBeNull();
   });
 
   it('creates a claim with the VolumeSnapshot as its data source and then shows the copy banner', async () => {

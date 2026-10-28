@@ -1,0 +1,436 @@
+{{- if .Values.poolBench.enabled }}
+{{- $name := printf "%s-poolbench" (include "ibm-vpc-file-pool-csi.fullname" .) }}
+{{- $nodeMetrics := printf "%s-node-metrics" (include "ibm-vpc-file-pool-csi.fullname" .) }}
+{{- $openshift := eq .Values.webhook.certProvider "openshift" }}
+# The PoolBench service (docs/specs/2026-10-25-poolbench.md). It runs with its
+# own service account. Cluster-wide it may only make and delete namespaces and
+# pools, read nodes, pods and images, and bind the run role. It gets its rights
+# to VMs, disks, secrets and pod exec only inside each run's own namespace,
+# where it binds the run role to itself.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["poolbenches"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["poolbenches/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["filesharepools"]
+    verbs: ["get", "create", "delete"]
+  # The backup event makes one backup policy, which is cluster-wide, and deletes
+  # it when the event ends. The admission policy below limits what it may name.
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["backuppolicies"]
+    verbs: ["get", "create", "delete"]
+  # The backup event reads the copy speed from the replication policies the
+  # backup policy makes.
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["replicationpolicies"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["nodes", "pods"]
+    verbs: ["list"]
+  - apiGroups: ["cdi.kubevirt.io"]
+    resources: ["datasources"]
+    verbs: ["get"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "create"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    verbs: ["bind"]
+    resourceNames: ["{{ $name }}-run"]
+  # The node agents check the token of whoever reads their metrics.
+  - nonResourceURLs: ["/metrics"]
+    verbs: ["get"]
+  # Its own metrics endpoint checks the token of whoever reads it.
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["subjectaccessreviews"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+# The rights in a run's namespace. The service binds this role there with a
+# RoleBinding; it is never bound cluster-wide.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}-run
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets", "persistentvolumeclaims"]
+    verbs: ["get", "create"]
+  # The backup event labels the load disks of the VMs it backs up.
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["list", "patch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  # OpenShift refuses an exec into a pod unless the user may use the SCC the
+  # pod runs under. KubeVirt's launcher pods run under this one.
+  - apiGroups: ["security.openshift.io"]
+    resources: ["securitycontextconstraints"]
+    resourceNames: ["kubevirt-controller"]
+    verbs: ["use"]
+  - apiGroups: ["kubevirt.io"]
+    resources: ["virtualmachines"]
+    verbs: ["get", "create"]
+  - apiGroups: ["kubevirt.io"]
+    resources: ["virtualmachineinstances"]
+    verbs: ["get", "list", "delete"]
+  # The migration event moves some running VMs to other nodes.
+  - apiGroups: ["kubevirt.io"]
+    resources: ["virtualmachineinstancemigrations"]
+    verbs: ["get", "list", "create"]
+  # The snapshot event takes OpenShift snapshots of some running VMs.
+  - apiGroups: ["snapshot.kubevirt.io"]
+    resources: ["virtualmachinesnapshots"]
+    verbs: ["get", "list", "create"]
+  # KubeVirt checks that whoever makes a VM with disk templates may make
+  # those disks (DataVolumes) itself.
+  - apiGroups: ["cdi.kubevirt.io"]
+    resources: ["datavolumes"]
+    verbs: ["list", "create"]
+---
+# In its own namespace: leader election, and the node agents' addresses.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "create", "update"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}-results
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.poolBench.results.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.poolBench.results.size }}
+---
+# The test VMs post their results to the collector port. The metrics port
+# serves a certificate for this Service's name: from the OpenShift service CA,
+# from cert-manager (metrics-certs.yaml), or a secret <name>-certs you make.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: poolbench
+  {{- if $openshift }}
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: {{ $name }}-certs
+  {{- end }}
+spec:
+  selector:
+    {{- include "ibm-vpc-file-pool-csi.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: poolbench
+  ports:
+    - name: collector
+      port: 8080
+      targetPort: collector
+      protocol: TCP
+    - name: metrics
+      port: 8443
+      targetPort: metrics
+      protocol: TCP
+    # The console's plugin proxy reads the raw results here, with the person's token.
+    - name: results
+      port: 8444
+      targetPort: results
+      protocol: TCP
+{{- if and $openshift .Values.node.metricsPort }}
+---
+# The CA of the node agents' certificate, from the OpenShift service CA.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-service-ca
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+  annotations:
+    service.beta.openshift.io/inject-cabundle: "true"
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: poolbench
+spec:
+  replicas: 1
+  # The results volume is ReadWriteOnce: the old pod must stop first.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "ibm-vpc-file-pool-csi.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: poolbench
+  template:
+    metadata:
+      labels:
+        {{- include "ibm-vpc-file-pool-csi.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: poolbench
+    spec:
+      serviceAccountName: {{ $name }}
+      {{- $podSC := deepCopy (.Values.poolBench.podSecurityContext | default dict) }}
+      {{- $fixedIDs := or (not (.Capabilities.APIVersions.Has "security.openshift.io/v1")) (eq .Release.Namespace "kube-system") }}
+      {{- if and $fixedIDs (not (hasKey $podSC "fsGroup")) }}
+      {{- $_ := set $podSC "fsGroup" 65532 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml $podSC | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: poolbench
+          image: "{{ include "ibm-vpc-file-pool-csi.driverImage" . }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.poolBench.securityContext | nindent 12 }}
+          args:
+            - "--mode=poolbench"
+            - "--v={{ .Values.logLevel }}"
+            - "--poolbench-collector-url=http://{{ $name }}.{{ .Release.Namespace }}.svc.cluster.local:8080"
+            - "--poolbench-results-dir=/results"
+            - "--poolbench-interval={{ .Values.poolBench.interval }}"
+            - "--poolbench-run-role={{ $name }}-run"
+            - "--poolbench-service-account={{ $name }}"
+            - "--poolbench-metrics-cert-dir=/etc/poolbench/metrics-certs"
+            {{- if .Values.node.metricsPort }}
+            - "--node-metrics-service={{ $nodeMetrics }}"
+            - "--node-metrics-ca=/etc/poolbench/node-ca/{{ ternary "service-ca.crt" "ca.crt" $openshift }}"
+            {{- end }}
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          ports:
+            - name: collector
+              containerPort: 8080
+            - name: metrics
+              containerPort: 8443
+            - name: results
+              containerPort: 8444
+            - name: health
+              containerPort: 8081
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.poolBench.resources | nindent 12 }}
+          volumeMounts:
+            - name: results
+              mountPath: /results
+            - name: tmp
+              mountPath: /tmp
+            - name: metrics-certs
+              mountPath: /etc/poolbench/metrics-certs
+              readOnly: true
+            {{- if .Values.node.metricsPort }}
+            - name: node-ca
+              mountPath: /etc/poolbench/node-ca
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: results
+          persistentVolumeClaim:
+            claimName: {{ $name }}-results
+        - name: tmp
+          emptyDir: {}
+        - name: metrics-certs
+          secret:
+            secretName: {{ $name }}-certs
+        {{- if .Values.node.metricsPort }}
+        - name: node-ca
+          {{- if $openshift }}
+          configMap:
+            name: {{ $name }}-service-ca
+          {{- else }}
+          secret:
+            secretName: {{ $nodeMetrics }}-certs
+            items:
+              - key: ca.crt
+                path: ca.crt
+          {{- end }}
+        {{- end }}
+{{- if and .Values.metrics.serviceMonitor.enabled (not (include "ibm-vpc-file-pool-csi.uwm" .)) (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor") }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "ibm-vpc-file-pool-csi.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: poolbench
+  endpoints:
+    - port: metrics
+      {{- include "ibm-vpc-file-pool-csi.scrapeTLS" (dict "root" . "svc" $name) | nindent 6 }}
+{{- end }}
+{{- if .Capabilities.APIVersions.Has "admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy" }}
+---
+# The service's role lets it make and delete namespaces and pools and bind the
+# run role, which RBAC cannot limit by name. This policy does: the service may
+# only touch namespaces, pools and backup policies named poolbench-*, may delete only a namespace
+# or pool that carries the run label, and may bind only the run role, only in such a
+# namespace.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "DELETE"]
+        resources: ["namespaces"]
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["rolebindings"]
+      - apiGroups: ["storage.ibmcloud.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "DELETE"]
+        resources: ["filesharepools"]
+      - apiGroups: ["storage.ibmcloud.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "DELETE"]
+        resources: ["backuppolicies"]
+  matchConditions:
+    - name: poolbench-service
+      expression: "request.userInfo.username == 'system:serviceaccount:{{ .Release.Namespace }}:{{ $name }}'"
+  validations:
+    - expression: >-
+        request.resource.resource == 'rolebindings' ||
+        (request.operation == 'DELETE' ? oldObject.metadata.name : object.metadata.name).startsWith('poolbench-')
+      message: "PoolBench may only make and delete namespaces and pools named poolbench-*"
+    - expression: >-
+        request.operation != 'DELETE' ||
+        (has(oldObject.metadata.labels) && 'storage.ibmcloud.io/poolbench' in oldObject.metadata.labels)
+      message: "PoolBench may only delete a namespace or pool that one of its runs made"
+    - expression: >-
+        request.operation != 'CREATE' || request.resource.resource == 'rolebindings' ||
+        (has(object.metadata.labels) && 'storage.ibmcloud.io/poolbench' in object.metadata.labels)
+      message: "PoolBench may only make a namespace or pool that carries the run label"
+    - expression: >-
+        request.resource.resource != 'rolebindings' ||
+        (request.namespace.startsWith('poolbench-') &&
+         has(namespaceObject.metadata.labels) && 'storage.ibmcloud.io/poolbench' in namespaceObject.metadata.labels &&
+         object.roleRef.kind == 'ClusterRole' && object.roleRef.name == '{{ $name }}-run' &&
+         object.subjects.size() == 1 && object.subjects[0].kind == 'ServiceAccount' &&
+         object.subjects[0].name == '{{ $name }}' && object.subjects[0].namespace == '{{ .Release.Namespace }}')
+      message: "PoolBench may only bind its run role to itself, in a namespace one of its runs made"
+    - expression: >-
+        request.resource.resource != 'backuppolicies' || request.operation == 'DELETE' ||
+        (!has(object.spec.export) &&
+         has(object.spec.namespaces) && object.spec.namespaces.size() == 1 &&
+         object.spec.namespaces[0].startsWith('poolbench-') &&
+         object.spec.snapshotPool == object.spec.namespaces[0] + '-backups')
+      message: "PoolBench may only make a backup policy for one PoolBench namespace that copies to that run's backup pool and exports nowhere"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+spec:
+  policyName: {{ $name }}
+  validationActions: ["Deny"]
+{{- end }}
+{{- end }}
