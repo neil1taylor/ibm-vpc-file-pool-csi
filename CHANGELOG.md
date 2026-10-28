@@ -19,6 +19,10 @@ To make a release:
 
 ## [Unreleased]
 
+### Fixed
+
+- The volume resizer sidecar can watch pods. The controller role allowed only `get` and `list` on pods, so the sidecar logged "Failed to watch *v1.Pod" for ever and, on some clusters, restarted without end (161 restarts in a day on one cluster).
+
 ## [v0.15.1] — 2026-10-28
 
 A fix release. A COS export of a backup no longer reads a disk that changes under it, and the adaptive copy speed works for VMs with several disks. One additive CRD change (PoolBench status). No chart value changes.
