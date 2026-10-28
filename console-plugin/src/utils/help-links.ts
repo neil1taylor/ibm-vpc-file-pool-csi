@@ -13,6 +13,9 @@ export const DIAGNOSTICS_URL = `${GUIDE_BASE}SUPPORT.md#3-collect-diagnostics-fo
 /** The guide for the file browser of the Backups pages. */
 export const BROWSE_GUIDE = `${GUIDE_BASE}BACKUP-RECOVERY.md#browse-and-download-files-in-the-console`;
 
+/** The guide for restoring chosen files from a backup in the console. */
+export const RESTORE_FILES_GUIDE = `${GUIDE_BASE}BACKUP-RECOVERY.md#restore-files-in-the-console`;
+
 /** Troubleshooting sections for the banners. */
 export const TROUBLESHOOTING = {
   pvc: `${GUIDE_BASE}TROUBLESHOOTING.md#pvc-issues`,

@@ -13,6 +13,15 @@ jest.mock('react-router-dom', () => ({
   Link: ({ to, children }: { to: string; children: React.ReactNode }) => <a href={to}>{children}</a>,
 }));
 
+jest.mock('./RestoreFilesDialog', () => ({
+  __esModule: true,
+  default: (p: { policy: string; namespace: string; pvc: string; moment: string; selected: Map<string, unknown>; onClose: () => void }) => (
+    <div data-testid="restore-dialog">
+      {`${p.policy} ${p.namespace}/${p.pvc} moment=${p.moment} count=${p.selected.size}`}
+      <button onClick={p.onClose}>close-dialog</button>
+    </div>
+  ),
+}));
 jest.mock('../../utils/use-browse-session', () => ({ useBrowseSession: jest.fn() }));
 jest.mock('../../utils/backup-browse', () => ({
   ...jest.requireActual('../../utils/backup-browse'),
@@ -190,7 +199,7 @@ describe('BackupBrowsePage downloads', () => {
     for (const l of links) expect(l).not.toMatch(/token|bearer|authorization/i);
   });
 
-  it('downloads the current folder as a tar from the file actions, and holds no restore button yet', async () => {
+  it('downloads the current folder as a tar from the file actions, next to the restore button', async () => {
     (listFolder as jest.Mock).mockResolvedValue({ entries: [entry('var', { type: 'dir' })] });
     render(<BackupBrowsePage />);
     fireEvent.click(await screen.findByRole('button', { name: 'var' }));
@@ -198,7 +207,7 @@ describe('BackupBrowsePage downloads', () => {
     const link = within(actions).getByRole('link', { name: /Download this folder/ });
     expect(link.getAttribute('href')).toContain('type=tar');
     expect(link.getAttribute('href')).toContain(encodeURIComponent(toB64(text('var'))));
-    expect(screen.queryByText(/Restore/)).toBeNull();
+    expect(within(actions).getByRole('button', { name: 'Restore selected' })).toBeTruthy();
   });
 
   it('downloads the whole backup from the root', async () => {
@@ -240,5 +249,111 @@ describe('BackupBrowsePage help', () => {
     const help = await screen.findByTestId('browse-help-link');
     expect(help.getAttribute('href')).toContain('BACKUP-RECOVERY.md#browse-and-download-files-in-the-console');
     expect(help.getAttribute('rel')).toContain('noopener');
+  });
+});
+
+describe('BackupBrowsePage choosing files to restore', () => {
+  const rowOf = (name: string) => screen.getByText(name).closest('tr') as HTMLElement;
+
+  it('has a checkbox on files, folders and links, and none on what cannot be restored', async () => {
+    (listFolder as jest.Mock).mockResolvedValue({
+      entries: [
+        entry('a.txt'),
+        entry('var', { type: 'dir' }),
+        entry('ln', { type: 'symlink', link: toB64(text('/etc')) }),
+        entry('secret.key', { readable: false }),
+        entry('sock', { type: 'socket' }),
+      ],
+    });
+    render(<BackupBrowsePage />);
+    await screen.findByText('a.txt');
+    expect(within(rowOf('a.txt')).getByRole('checkbox', { name: 'Choose a.txt' })).toBeTruthy();
+    expect(within(rowOf('var')).getByRole('checkbox', { name: 'Choose var' })).toBeTruthy();
+    expect(screen.getByRole('checkbox', { name: 'Choose ln' })).toBeTruthy();
+    expect(within(rowOf('secret.key')).queryByRole('checkbox')).toBeNull();
+    expect(within(rowOf('sock')).queryByRole('checkbox')).toBeNull();
+  });
+
+  it('shows the count and the total of the chosen files, and turns the action on', async () => {
+    (listFolder as jest.Mock).mockResolvedValue({ entries: [entry('a.txt', { size: 1024 }), entry('b.txt', { size: 2048 }), entry('var', { type: 'dir' })] });
+    render(<BackupBrowsePage />);
+    await screen.findByText('a.txt');
+    const action = screen.getByRole('button', { name: 'Restore selected' }) as HTMLButtonElement;
+    expect(action.disabled).toBe(true);
+    expect(screen.getByText('Nothing chosen')).toBeTruthy();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Choose a.txt' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Choose b.txt' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Choose var' }));
+    expect(screen.getByTestId('selection-summary').textContent).toMatch(/3 chosen/);
+    expect(screen.getByTestId('selection-summary').textContent).toMatch(/2 files/);
+    expect(screen.getByTestId('selection-summary').textContent).toMatch(/3\.0 KiB/);
+    expect(screen.getByTestId('selection-summary').textContent).toMatch(/1 folder.*everything in it/);
+    expect(action.disabled).toBe(false);
+  });
+
+  it('chooses and clears every entry of the page', async () => {
+    (listFolder as jest.Mock).mockResolvedValue({ entries: [entry('a'), entry('b'), entry('c', { readable: false })] });
+    render(<BackupBrowsePage />);
+    await screen.findByText('a');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Choose all on this page' }));
+    expect(screen.getByTestId('selection-summary').textContent).toMatch(/2 chosen/);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Choose all on this page' }));
+    expect(screen.getByText('Nothing chosen')).toBeTruthy();
+  });
+
+  it('keeps the choice while you open another folder, and goes back to it', async () => {
+    (listFolder as jest.Mock).mockImplementation((_s: string, path: string[]) =>
+      Promise.resolve({ entries: path.length === 0 ? [entry('var', { type: 'dir' }), entry('top.txt')] : [entry('index.php')] }),
+    );
+    render(<BackupBrowsePage />);
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Choose top.txt' }));
+    fireEvent.click(screen.getByRole('button', { name: 'var' }));
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Choose index.php' }));
+    expect(screen.getByTestId('selection-summary').textContent).toMatch(/2 chosen/);
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Folders' })).getByRole('button', { name: 'Backup root' }));
+    expect(((await screen.findByRole('checkbox', { name: 'Choose top.txt' })) as HTMLInputElement).checked).toBe(true);
+  });
+
+  it('clears the choice with one button', async () => {
+    (listFolder as jest.Mock).mockResolvedValue({ entries: [entry('a')] });
+    render(<BackupBrowsePage />);
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Choose a' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    expect(screen.getByText('Nothing chosen')).toBeTruthy();
+  });
+
+  it('opens the restore dialog with the claim, the moment and the choice', async () => {
+    mockSearch = '?claim=apps%2Fdb&moment=2026-10-22T09%3A15%3A00Z';
+    (listFolder as jest.Mock).mockResolvedValue({ entries: [entry('a')] });
+    render(<BackupBrowsePage />);
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Choose a' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restore selected' }));
+    expect(screen.getByTestId('restore-dialog').textContent).toContain('nightly apps/db moment=2026-10-22T09:15:00Z count=1');
+    fireEvent.click(screen.getByRole('button', { name: 'close-dialog' }));
+    expect(screen.queryByTestId('restore-dialog')).toBeNull();
+    // The choice is kept after the dialog is closed.
+    expect(screen.getByTestId('selection-summary').textContent).toMatch(/1 chosen/);
+  });
+
+  it('names a chosen name as text only', async () => {
+    const hostile = '<img src=x onerror=alert(1)>';
+    (listFolder as jest.Mock).mockResolvedValue({ entries: [entry(hostile)] });
+    const { container } = render(<BackupBrowsePage />);
+    expect(await screen.findByRole('checkbox', { name: `Choose ${hostile}` })).toBeTruthy();
+    expect(container.querySelector('img')).toBeNull();
+  });
+
+  it('forgets the choice when another moment is chosen, but not when the session only ends', async () => {
+    (listFolder as jest.Mock).mockResolvedValue({ entries: [entry('a')] });
+    const { rerender } = render(<BackupBrowsePage />);
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Choose a' }));
+    (useBrowseSession as jest.Mock).mockReturnValue({ status: 'ended', reopen });
+    rerender(<BackupBrowsePage />);
+    (useBrowseSession as jest.Mock).mockReturnValue({ status: 'ready', session: 'bb-2', reopen });
+    rerender(<BackupBrowsePage />);
+    expect(((await screen.findByRole('checkbox', { name: 'Choose a' })) as HTMLInputElement).checked).toBe(true);
+    mockSearch = '?claim=apps%2Fdb&moment=2026-10-21T09%3A15%3A00Z';
+    rerender(<BackupBrowsePage />);
+    await screen.findByText('Nothing chosen');
   });
 });
