@@ -31,6 +31,7 @@ check "chart: the webhook path" "$RENDERED" 'path: /validate-storage-ibmcloud-io
 check "chart: the webhook sees the resource" "$RENDERED" 'resources: ["backupfilerestores"]'
 check "chart: the size limit of one restore defaults to 200 GiB" "$RENDERED" '--file-restore-max-bytes=214748364800'
 check "chart: the size limit can be set" "$SET" '--file-restore-max-bytes=1073741824'
+check "chart: at most 5 restores run at once by default" "$RENDERED" '--file-restore-max-running=5'
 check "the CRD is in config/crd" "$ROOT/config/crd/storage.ibmcloud.io_backupfilerestores.yaml" 'kind: BackupFileRestore'
 
 # The controller must not be able to delete ConfigMaps: the list of paths of a

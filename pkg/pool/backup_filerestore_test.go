@@ -545,6 +545,40 @@ func TestFileRestore_OpensAClaimWhoseRestoreIsDone(t *testing.T) {
 	}
 }
 
+func TestFileRestore_OnlyAFewRunAtOnce(t *testing.T) {
+	e := newFileRestoreEnv(t)
+	e.bc.SetFileRestore(e.jobs, FileRestoreConfig{MaxRunning: 2})
+	for _, n := range []string{"w1", "w2", "w3"} {
+		e.existingClaim(n)
+	}
+	for i, n := range []string{"w1", "w2", "w3"} {
+		e.now = e.now.Add(time.Second)
+		e.existing("f"+string(rune('1'+i)), n)
+	}
+	e.reconcile()
+	for _, n := range []string{"f1", "f2"} {
+		if st := e.fr(n).Status; st.Phase != "Restoring" {
+			t.Errorf("%s status %+v", n, st)
+		}
+	}
+	st := e.fr("f3").Status
+	if st.Phase != "Pending" || !strings.Contains(st.Message, "limit is 2") {
+		t.Fatalf("third restore status %+v", st)
+	}
+	for _, c := range e.jobs.calls {
+		if c.Key == "filerestore-uid-f3" {
+			t.Fatal("the third restore started a Job over the limit")
+		}
+	}
+	// One ends; the waiting one goes on.
+	e.jobs.answer[filerestore.ModeFolder] = fakeJobAnswer{done: true, out: filerestore.Outcome{Folder: "x"}}
+	e.reconcile()
+	e.reconcile()
+	if st := e.fr("f3").Status; st.Phase != "Done" {
+		t.Fatalf("third restore status %+v", st)
+	}
+}
+
 func TestFileRestore_DoesNothingWithoutJobs(t *testing.T) {
 	e := newRestoreEnv(t)
 	fr := &v1alpha1.BackupFileRestore{ObjectMeta: metav1.ObjectMeta{Name: "f1", UID: "u"},

@@ -114,6 +114,8 @@ backupBrowse:
   # The most one file restore writes, in bytes (200 GiB). A restore of more is
   # refused before it starts.
   restoreMaxBytes: 214748364800
+  # File restores that run at once in the cluster. More wait.
+  restoreMaxRunning: 5
 
 # The backup gateway: the one door to browse sessions (issue #92). Users talk
 # to it with their own Kubernetes token; it checks every call with a token review

@@ -37,6 +37,9 @@ const (
 	// DefaultFileRestoreKeep is how long an ended file restore stays visible.
 	DefaultFileRestoreKeep = 24 * time.Hour
 
+	// DefaultFileRestoreMaxRunning is how many file restores run at once.
+	DefaultFileRestoreMaxRunning = 5
+
 	// fileRestoreMargin is the room a new claim gets over the chosen files, in
 	// percent. The minimum is one GiB.
 	fileRestoreMargin = 20
@@ -49,6 +52,8 @@ type FileRestoreConfig struct {
 	MaxBytes int64
 	// Keep is how long an ended restore stays visible.
 	Keep time.Duration
+	// MaxRunning is how many restores may run at once in the cluster. More wait.
+	MaxRunning int
 }
 
 // FileRestoreRequest asks for the Job of one file restore.
@@ -104,11 +109,20 @@ func (bc *BackupController) SetFileRestore(jobs FileRestoreJobs, cfg FileRestore
 	if cfg.Keep <= 0 {
 		cfg.Keep = DefaultFileRestoreKeep
 	}
+	if cfg.MaxRunning <= 0 {
+		cfg.MaxRunning = DefaultFileRestoreMaxRunning
+	}
 	bc.fileJobs, bc.fileCfg = jobs, cfg
 }
 
 func fileRestoreEnded(phase string) bool {
 	return phase == restorePhaseDone || phase == restorePhaseFailed
+}
+
+// fileRestoreActive says if a restore has started its work: it has a Job, or is
+// making the claim for one.
+func fileRestoreActive(phase string) bool {
+	return phase == restorePhaseMeasuring || phase == restorePhaseProvisioning || phase == restorePhaseRestoring
 }
 
 func (bc *BackupController) reconcileFileRestores(ctx context.Context) {
@@ -131,6 +145,12 @@ func (bc *BackupController) reconcileFileRestores(ctx context.Context) {
 	// Only one restore at a time writes into one existing claim: the first that
 	// has not ended holds it.
 	held := map[string]bool{}
+	running := 0
+	for i := range items {
+		if fileRestoreActive(items[i].Status.Phase) {
+			running++
+		}
+	}
 	for i := range items {
 		fr := &items[i]
 		if fileRestoreEnded(fr.Status.Phase) {
@@ -145,7 +165,18 @@ func (bc *BackupController) reconcileFileRestores(ctx context.Context) {
 			}
 			held[k] = true
 		}
+		// A restore that has not started waits for a free place. Each one holds a
+		// Job, and two share mounts, while it runs.
+		wasActive := fileRestoreActive(fr.Status.Phase)
+		if !wasActive && running >= bc.fileCfg.MaxRunning {
+			bc.setFileRestoreStatus(ctx, fr, restorePhasePending,
+				fmt.Sprintf("waiting: %d restores are running and the limit is %d", running, bc.fileCfg.MaxRunning))
+			continue
+		}
 		bc.reconcileFileRestore(ctx, fr)
+		if !wasActive && fileRestoreActive(fr.Status.Phase) {
+			running++
+		}
 	}
 }
 
