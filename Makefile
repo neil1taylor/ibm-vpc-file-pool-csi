@@ -46,6 +46,7 @@ test-scripts:
 	bash test/chart/test-vm-snapshots.sh
 	bash test/chart/test-settings.sh
 	bash test/chart/test-clusterrole.sh
+	bash test/chart/test-failover.sh
 	bash test/chart/test-hardening.sh
 	bash test/chart/test-node-metrics.sh
 	bash test/chart/test-uwm.sh

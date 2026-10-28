@@ -164,10 +164,11 @@ func runPlan(args []string) error {
 		return fmt.Errorf("--nfs-mount-path is required")
 	}
 
-	nfsOps := pool.NewRealNFSOperations()
-	planner := failover.NewPlanner(nfsOps)
+	if flags["list-moments"] == "true" {
+		return runListMoments(flags)
+	}
 
-	plan, err := planner.Plan(nfsMountPath)
+	plan, _, err := planFromFlags(pool.NewRealNFSOperations(), flags, time.Now())
 	if err != nil {
 		return err
 	}
@@ -175,22 +176,6 @@ func runPlan(args []string) error {
 	if len(plan.SubVolumes) == 0 {
 		fmt.Printf("No SubVolume metadata found at %s/pvcs/\n", nfsMountPath)
 		return nil
-	}
-
-	vmOpts, err := vmOptionsFromFlags(flags, time.Now())
-	if err != nil {
-		return err
-	}
-	if flags["list-moments"] == "true" {
-		moments, merr := plan.CommonMoments(vmOpts)
-		if merr != nil {
-			return merr
-		}
-		printMoments(os.Stdout, moments)
-		return nil
-	}
-	if err = plan.ResolveVMs(vmOpts); err != nil {
-		return err
 	}
 
 	fmt.Printf("Failover Plan\n")
@@ -216,6 +201,30 @@ func runPlan(args []string) error {
 	return nil
 }
 
+// runListMoments lists the moments each running VM can show. It does not
+// choose one, so it works even where choosing would be refused.
+func runListMoments(flags map[string]string) error {
+	nfsMountPath := flags["nfs-mount-path"]
+	plan, err := failover.NewPlanner(pool.NewRealNFSOperations()).Plan(nfsMountPath)
+	if err != nil {
+		return err
+	}
+	if len(plan.SubVolumes) == 0 {
+		fmt.Printf("No SubVolume metadata found at %s/pvcs/\n", nfsMountPath)
+		return nil
+	}
+	vmOpts, err := vmOptionsFromFlags(flags, time.Now())
+	if err != nil {
+		return err
+	}
+	moments, err := plan.CommonMoments(vmOpts)
+	if err != nil {
+		return err
+	}
+	printMoments(os.Stdout, moments)
+	return nil
+}
+
 func runExecute(args []string) error {
 	flags := parseFlags(args)
 	nfsMountPath := flags["nfs-mount-path"]
@@ -238,9 +247,7 @@ func runExecute(args []string) error {
 	}
 
 	// Build the plan first.
-	nfsOps := pool.NewRealNFSOperations()
-	planner := failover.NewPlanner(nfsOps)
-	plan, err := planner.Plan(nfsMountPath)
+	plan, _, err := planFromFlags(pool.NewRealNFSOperations(), flags, time.Now())
 	if err != nil {
 		return err
 	}
@@ -250,13 +257,6 @@ func runExecute(args []string) error {
 		return nil
 	}
 
-	vmOpts, err := vmOptionsFromFlags(flags, time.Now())
-	if err != nil {
-		return err
-	}
-	if err = plan.ResolveVMs(vmOpts); err != nil {
-		return err
-	}
 	printVMPlan(os.Stdout, plan)
 
 	if prepareOnly {
@@ -309,6 +309,18 @@ func runExecute(args []string) error {
 
 	exec := failover.NewExecutor(c, os.Stdout)
 	return exec.Execute(context.Background(), plan, opts)
+}
+
+// planFromFlags builds the plan for the share named by --nfs-mount-path. It
+// calls the same function as the driver's failover Job, so the two cannot
+// differ. It returns the options it used, for listing moments.
+func planFromFlags(nfsOps pool.NFSOperations, flags map[string]string, now time.Time) (*failover.FailoverPlan, failover.VMOptions, error) {
+	vmOpts, err := vmOptionsFromFlags(flags, now)
+	if err != nil {
+		return nil, vmOpts, err
+	}
+	plan, err := failover.BuildPlan(nfsOps, flags["nfs-mount-path"], vmOpts)
+	return plan, vmOpts, err
 }
 
 // vmOptionsFromFlags reads the flags that choose the moment of running VM disks.

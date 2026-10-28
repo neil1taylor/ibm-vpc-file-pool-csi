@@ -367,7 +367,7 @@ kubectl apply -f config/deploy/node.yaml
 |------|---------|-------------|
 | `--endpoint` | `unix:///csi/csi.sock` | CSI gRPC endpoint |
 | `--node-id` | (required) | Kubernetes node name |
-| `--mode` | `controller` | `controller`, `node`, `receiver`, `sync-client`, `check-receiver`, `apply-vm-disk`, `send-vm-disk`, or `restore-vm-disk`, `unwrap-backup-key`, `register-console-plugin`, or `unregister-console-plugin`, or `enable-sidecar-gate`, or `poolbench` (the PoolBench service, a Deployment when `poolBench.enabled`; all but the first three and `poolbench` are run as Jobs; `check-receiver` is run by the console's receiver setup; `register-console-plugin`, `unregister-console-plugin` and `enable-sidecar-gate` are the chart's hook Jobs) |
+| `--mode` | `controller` | `controller`, `node`, `receiver`, `sync-client`, `check-receiver`, `apply-vm-disk`, `send-vm-disk`, or `restore-vm-disk`, `unwrap-backup-key`, `register-console-plugin`, or `unregister-console-plugin`, or `enable-sidecar-gate`, or `failover` (the Job for a `Failover` resource), or `poolbench` (the PoolBench service, a Deployment when `poolBench.enabled`; all but the first three and `poolbench` are run as Jobs; `check-receiver` is run by the console's receiver setup; `register-console-plugin`, `unregister-console-plugin` and `enable-sidecar-gate` are the chart's hook Jobs) |
 | `--region` | Auto-discovered | IBM Cloud region |
 | `--vpc-id` | Auto-discovered | VPC ID for mount targets |
 | `--subnet-id` | Auto-discovered | Worker subnet IDs for mount targets, comma-separated; the controller uses the one in each pool's zone |
@@ -388,6 +388,8 @@ kubectl apply -f config/deploy/node.yaml
 | `--driver-image` | `""` | Driver container image for receiver-mode sync-client Jobs (auto-set by Helm) |
 | `--vm-snapshot-method` | `auto` | `auto`: instant VM disk snapshots where the KubeVirt `Sidecar` feature gate is on; `copy`: VM disk snapshots are always copies. Helm sets it from `vmSnapshots.method`. See [VM-INSTANT-SNAPSHOTS.md](VM-INSTANT-SNAPSHOTS.md) |
 | `--virt-launcher-image` | `""` | KubeVirt virt-launcher image for VM disk snapshot Jobs; empty reads it from virt-operator. Helm sets it from `vmSnapshots.launcherImage` |
+| `--failover-default-source` | `""` | Destination claim a `Failover` reads when it names none. Helm sets it from `replicationReceiver.pvcName` |
+| `--nfs-mount-path`, `--failover-action`, `--rewind-to`, `--force`, `--failover-expect` | | Failover mode only: the Job started for a `Failover` resource sets them. `--failover-action` is `Plan` or `Execute`; `--failover-expect` is the confirmed plan as JSON |
 | `--enable-webhooks` | `true` | Serve the validating admission webhooks. Helm sets `false` when `webhook.enabled=false` |
 | `--webhook-port` | `9443` | Port of the admission webhook server. Helm sets it from `webhook.port` |
 | `--receiver-tls-cert-file` | `""` | TLS certificate file for receiver HTTPS. Empty = plain HTTP |

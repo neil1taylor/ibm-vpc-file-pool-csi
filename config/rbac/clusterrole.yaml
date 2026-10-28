@@ -20,6 +20,9 @@ rules:
     resources: ["volumegroupsnapshots", "volumegroupsnapshots/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["failovers", "failovers/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["storage.ibmcloud.io"]
     resources: ["backuppolicies", "backuppolicies/status", "backuppolicies/finalizers"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["storage.ibmcloud.io"]
@@ -215,3 +218,18 @@ subjects:
   - kind: ServiceAccount
     name: ibm-vpc-file-pool-csi-node
     namespace: kube-system
+---
+# Lets a person plan and run failovers from the destination claim. Failovers
+# move production VMs, so this role is bound to nobody by default: bind it to
+# the cluster admins who may do this.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ibm-vpc-file-pool-csi-failover-admin
+rules:
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["failovers"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["failovers/status"]
+    verbs: ["get"]

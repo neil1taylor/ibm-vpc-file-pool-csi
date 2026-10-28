@@ -5,12 +5,15 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/failover"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/pool"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/qcow2"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/replication"
 )
@@ -118,6 +121,81 @@ func TestExecute_PrepareOnlyRewindsWithoutACluster(t *testing.T) {
 	}
 	if latest, _ := os.ReadFile(disk); !bytes.Equal(latest, now) {
 		t.Error("the latest disk was changed")
+	}
+}
+
+// twoDiskShare is a destination share with one VM of two disks, each able to
+// show m2 or m1, and one plain volume.
+func twoDiskShare(t *testing.T, m1, m2 time.Time) string {
+	t.Helper()
+	root := t.TempDir()
+	for _, name := range []string{"pvc-a", "pvc-b", "pvc-plain"} {
+		dir := filepath.Join(root, "pvcs", name)
+		if err := os.MkdirAll(dir, 0o777); err != nil {
+			t.Fatal(err)
+		}
+		meta := `{"subVolumeName":"` + name + `","spec":{"subPath":"/pvcs/` + name + `","pvcName":"c-` + name + `","pvcNamespace":"ns","requestedGB":1},"lastSyncTime":"` + m2.Format(time.RFC3339) + `","replicationPolicy":"p"}`
+		if err := os.WriteFile(filepath.Join(dir, ".subvolume-metadata.json"), []byte(meta), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if name == "pvc-plain" {
+			continue
+		}
+		disk := filepath.Join(dir, "disk.img")
+		if _, err := replication.ApplyCopy(testCopy{bytes.Repeat([]byte{1}, 4096)}, disk, replication.ApplyOptions{To: m1, Full: true, Now: m1}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := replication.ApplyCopy(testCopy{bytes.Repeat([]byte{2}, 4096)}, disk, replication.ApplyOptions{From: m1, To: m2, Full: true, Now: m2}); err != nil {
+			t.Fatal(err)
+		}
+		if err := replication.WriteMoment(dir, m2, "ns/vm"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+// The console runs the failover Job, and the CLI runs on a host. Both must
+// give the same plan from the same share.
+func TestCLIAndJobModeBuildTheSamePlan(t *testing.T) {
+	m1 := time.Date(2026, 10, 20, 10, 0, 0, 0, time.UTC)
+	m2 := m1.Add(time.Hour)
+	now := m2.Add(10 * time.Minute)
+	root := twoDiskShare(t, m1, m2)
+	nfs := pool.NewRealNFSOperations()
+
+	for _, rewind := range []string{"", m1.Add(time.Minute).Format(time.RFC3339)} {
+		flags := map[string]string{"nfs-mount-path": root}
+		req := failover.Request{MountPath: root, Action: v1alpha1.FailoverActionPlan, Now: now}
+		if rewind != "" {
+			flags["rewind-to"] = rewind
+			at, err := time.Parse(time.RFC3339, rewind)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.RewindTo = &at
+		}
+
+		plan, opts, err := planFromFlags(nfs, flags, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		moments, err := plan.CommonMoments(opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fromCLI := failover.NewResult(plan, moments)
+
+		fromJob, err := failover.RunJob(nfs, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(fromCLI, fromJob) {
+			t.Errorf("rewind-to %q: the CLI and the Job differ\nCLI: %+v\nJob: %+v", rewind, fromCLI, fromJob)
+		}
+		if len(fromJob.VMs) != 1 || len(fromJob.Volumes) != 3 {
+			t.Errorf("rewind-to %q: unexpected plan %+v", rewind, fromJob)
+		}
 	}
 }
 

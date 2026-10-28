@@ -1989,6 +1989,68 @@ kubectl annotate replicationpolicy <name> storage.ibmcloud.io/paused-
 
 ---
 
+## Failover
+
+Cluster-scoped resource (short name `fo`). Asks the driver on the destination (DR) cluster to read a replicated copy and plan, or carry out, a failover. A controller (on the leader) starts a Job in the driver's namespace that mounts the destination claim and runs `--mode=failover`, which runs the same code as `kubectl failover` (`pkg/failover`). The Job writes its result as JSON in its termination message (plain JSON, or `gz:` plus base64 gzip if larger than 3800 bytes), and the controller copies it into `status`. Go types: `api/v1alpha1/failover_types.go`.
+
+### Spec
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `source` | string | Destination claim to read, in the driver's namespace. Empty means the Helm value `replicationReceiver.pvcName` |
+| `action` | `Plan` \| `Execute` | Required. `Plan` reads and reports; `Execute` also makes the SubVolume, PV and PVC objects |
+| `rewindTo` | time | The newest moment at or before it is used for each running VM |
+| `namespace` | string | Namespace of the PVCs that are made (Execute) |
+| `force` | bool | Go on although a copy may still be applied; an unfinished copy is rolled back first |
+| `drPool` | string | FileSharePool the new SubVolumes belong to. Required for Execute |
+| `drShareIP`, `drExportPath` | string | NFS server and export of the claim. Empty means they are read from the claim's NFS volume |
+
+The spec cannot change after creation.
+
+### Status
+
+| Field | Meaning |
+|-------|---------|
+| `phase` | `Planning`, `Planned`, `Executing`, `Done` or `Failed` |
+| `message` | Why it failed |
+| `source` | The claim that was read |
+| `startedAt`, `finishedAt` | Bounds of the run |
+| `rpo` | Age of the oldest moment that will be shown |
+| `vms[]` | Each running VM: `name` (`namespace/name`), `moment` it will show, `moments` (all moments its disks can show, newest first) and `disks[]` (`subVolume`, `rewind`: false is "in place", true copies the whole disk) |
+| `volumes[]` | Every volume that is failed over, with its claim, size, folder (`subPath`, the new folder for a rewound disk), owner and policy |
+| `momentsTruncated` | The lists of moments were cut to fit the termination message (newest kept) |
+| `createdPVCs[]` | The PVCs an Execute made |
+
+### Example
+
+```yaml
+apiVersion: storage.ibmcloud.io/v1alpha1
+kind: Failover
+metadata:
+  name: plan-1
+spec:
+  action: Plan
+---
+apiVersion: storage.ibmcloud.io/v1alpha1
+kind: Failover
+metadata:
+  name: go-1
+spec:
+  action: Execute
+  drPool: dr-production
+  rewindTo: "2026-10-21T10:30:00Z"   # same as the Plan
+```
+
+### Safety
+
+- An `Execute` is refused (by the webhook, and again by the controller) unless a `Plan` with the same source and `rewindTo` is `Planned` and finished in the last 15 minutes.
+- The Job gets the confirmed plan (the moment of each VM and the volume names). If the share now gives another plan, the Job stops before it rewinds or changes anything, and the Failover is `Failed` with the difference.
+- A volume that has a failed-over SubVolume (label `storage.ibmcloud.io/failover-source`) on this cluster is refused, so a VM is not failed over twice.
+- The Job runs as user 107, because that user owns the replicated disks. A rewind never changes the latest disk.
+- RBAC: the ClusterRole `<release>-failover-admin` gives access to `failovers`. It is bound to nobody.
+
+---
+
 ## StorageClass Parameters
 
 **Auto-creation:** When a FileSharePool reaches `Ready`, the controller automatically creates a matching StorageClass named after the pool (e.g., pool `general-purpose` gets StorageClass `general-purpose`). For tiered pools, one StorageClass per tier is created (e.g., `general-purpose-standard`, `general-purpose-premium`). Auto-created StorageClasses have an OwnerReference to the pool and are garbage-collected when the pool is deleted.

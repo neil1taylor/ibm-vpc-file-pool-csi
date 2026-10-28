@@ -19,6 +19,10 @@ To make a release:
 
 ## [Unreleased]
 
+### Added
+
+- **A `Failover` resource plans and carries out a failover on the destination cluster (#44, step 1).** The new cluster-scoped `Failover` (short name `fo`) has `action: Plan` or `Execute`, and optional `source`, `rewindTo`, `namespace` and `force`. A controller on the leader starts a Job in `kube-system` that mounts the destination claim and runs the new driver mode `--mode=failover`. That mode runs the same code as `kubectl failover` (`failover.BuildPlan`, which the CLI now calls too), and a test checks that the CLI and the Job give the same plan from the same share. The Job reports in its termination message; the status then lists each VM, the moment it will show, the moments to choose from, which disks must be rewound, the volumes and the RPO. For an `Execute` the controller also makes the SubVolume, PV and PVC objects. A validating webhook refuses an `Execute` unless a `Plan` for the same source and `rewindTo` finished in the last 15 minutes, and refuses a VM or claim that was failed over on this cluster before. The Job checks the confirmed plan against the share again before it changes anything. New ClusterRole `<release>-failover-admin`, bound to nobody. The `Execute` also needs `drPool` (the CLI's `--dr-pool`); `drShareIP` and `drExportPath` default to the NFS volume behind the claim. Experimental. The console page is the next step.
+
 ### Fixed
 
 - The design rules in CLAUDE.md now name the one case where a volume request creates a share: auto-expand (issue #222). The code and docs/ARCHITECTURE.md already did this; the rule text said never.
