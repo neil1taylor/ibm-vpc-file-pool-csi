@@ -168,6 +168,14 @@ func (g *Gateway) handleRestoreCreate(w http.ResponseWriter, r *http.Request, u 
 			writeError(w, serr.status, serr.code, serr.msg)
 			return
 		}
+		if vol.VMName != "" {
+			if src == v1alpha1.BackupSourceCOS {
+				e := vmDiskInCOS()
+				writeError(w, e.status, e.code, e.msg)
+				return
+			}
+			spec.Guest = true
+		}
 		spec.Source = src
 	}
 	if req.Moment != nil {
@@ -272,6 +280,9 @@ func restoreSourceText(spec *v1alpha1.BackupFileRestoreSpec) string {
 	if spec.FromCOS != nil {
 		return "volume " + spec.FromCOS.Volume
 	}
+	if spec.Guest {
+		return "VM disk " + spec.SourceNamespace + "/" + spec.SourceName
+	}
 	return spec.SourceNamespace + "/" + spec.SourceName
 }
 
@@ -293,7 +304,7 @@ func restoreOf(fr *v1alpha1.BackupFileRestore) Restore {
 		phase = "Pending"
 	}
 	out := Restore{
-		Name: fr.Name, Source: sourceName(fr.Spec.Source), Phase: phase, Message: st.Message,
+		Name: fr.Name, Source: sourceName(fr.Spec.Source), Guest: fr.Spec.Guest, Phase: phase, Message: st.Message,
 		TargetNamespace: fr.Spec.TargetNamespace, TargetName: fr.Spec.TargetName, Existing: fr.Spec.Existing,
 		Folder: st.Folder, SizeGB: st.SizeGB, Latest: st.Latest,
 		Files: st.Files, Dirs: st.Dirs, Links: st.Links, Skipped: st.Skipped, Unreadable: st.Unreadable, Bytes: st.Bytes,

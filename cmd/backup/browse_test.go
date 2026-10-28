@@ -35,6 +35,10 @@ type stubGateway struct {
 	tarBytes []byte
 	fileErr  *gateway.ErrorBody
 	denied   bool
+	info     browse.Info
+	listed   []string // the paths asked for with list, escaped
+	statted  []string
+	guest    bool
 	// slowStart makes a new session Pending until it has been asked about twice.
 	slowStart bool
 	asks      int
@@ -70,7 +74,7 @@ func (s *stubGateway) handler(t *testing.T) http.Handler {
 		if s.slowStart {
 			phase = "Pending"
 		}
-		_ = json.NewEncoder(w).Encode(gateway.Session{Name: "bb-abc", Phase: phase})
+		_ = json.NewEncoder(w).Encode(gateway.Session{Name: "bb-abc", Phase: phase, Guest: s.guest})
 	})
 	mux.HandleFunc("GET /v1/sessions/{name}", func(w http.ResponseWriter, r *http.Request) {
 		rec(r)
@@ -91,10 +95,18 @@ func (s *stubGateway) handler(t *testing.T) http.Handler {
 		rec(r)
 		var req browse.ListRequest
 		_ = json.NewDecoder(r.Body).Decode(&req)
+		s.mu.Lock()
+		s.listed = append(s.listed, strings.TrimPrefix(browse.JoinPath(req.Path), "/"))
+		s.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(s.pages[string(req.Cursor)])
 	})
 	mux.HandleFunc("POST /v1/sessions/{name}/stat", func(w http.ResponseWriter, r *http.Request) {
 		rec(r)
+		var req browse.PathRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		s.mu.Lock()
+		s.statted = append(s.statted, strings.TrimPrefix(browse.JoinPath(req.Path), "/"))
+		s.mu.Unlock()
 		if s.statErr != nil {
 			fail(w, 404, *s.statErr)
 			return
@@ -112,6 +124,10 @@ func (s *stubGateway) handler(t *testing.T) http.Handler {
 	mux.HandleFunc("POST /v1/sessions/{name}/tar", func(w http.ResponseWriter, r *http.Request) {
 		rec(r)
 		_, _ = w.Write(s.tarBytes)
+	})
+	mux.HandleFunc("POST /v1/sessions/{name}/info", func(w http.ResponseWriter, r *http.Request) {
+		rec(r)
+		_ = json.NewEncoder(w).Encode(s.info)
 	})
 	mux.HandleFunc("POST /v1/sessions/{name}/moments", func(w http.ResponseWriter, r *http.Request) {
 		rec(r)

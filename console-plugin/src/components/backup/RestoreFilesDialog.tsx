@@ -58,6 +58,8 @@ interface Props {
   pvc: string;
   /** RFC 3339, or empty for the latest copy. */
   moment: string;
+  /** True when the files are inside a VM disk: the paths begin with a file system of the guest. */
+  guest?: boolean;
   selected: SelectionMap;
   onClose: () => void;
 }
@@ -80,7 +82,7 @@ export function resultText(r: Restore): string {
  * claim, through the backup gateway. It never writes over anything. After the person confirms, it follows the
  * restore by short requests until the restore is Done or Failed. Names are only ever shown as text.
  */
-const RestoreFilesDialog: React.FC<Props> = ({ policy, namespace, pvc, moment, selected, onClose }) => {
+const RestoreFilesDialog: React.FC<Props> = ({ policy, namespace, pvc, moment, guest, selected, onClose }) => {
   const [targetNamespace, setTargetNamespace] = useState(namespace);
   const [targetName, setTargetName] = useState(defaultClaimName(pvc));
   const [existing, setExisting] = useState(false);
@@ -193,7 +195,14 @@ const RestoreFilesDialog: React.FC<Props> = ({ policy, namespace, pvc, moment, s
         A restore never writes over a file or a claim that exists, and never puts a file back in its old place. Your pods keep running with what they
         have.
       </Alert>
-      {!moment && (
+      {guest && (
+        <Alert variant="info" isInline title="Files from inside a VM disk">
+          The files are read from the disk without starting the VM. The name of the file system stays at the top of what is written (for example
+          rhel-root/etc/hosts), and you copy the files into the VM from the new claim or folder. This can take long for many small files. The next
+          backup of the disk waits while the restore runs.
+        </Alert>
+      )}
+      {!moment && !guest && (
         <Alert variant="warning" isInline title="You chose the Latest copy">
           The next backup replaces files in it one at a time, so a file can change while it is copied. Go back and choose a moment to restore a copy
           that stays as it is.

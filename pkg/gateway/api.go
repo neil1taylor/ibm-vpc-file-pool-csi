@@ -70,6 +70,10 @@ type Session struct {
 	Message string `json:"message,omitempty"`
 	// Source is "local" or "cos": where this session reads its backup.
 	Source string `json:"source"`
+	// Guest is true when the session reads the file systems inside a VM disk:
+	// the top level folders are then the guest's file systems, and the paths of
+	// a restore start with one.
+	Guest bool `json:"guest,omitempty"`
 }
 
 // Access is one right to check as the user.
@@ -106,7 +110,9 @@ type RestoreRequest struct {
 type Restore struct {
 	Name string `json:"name"`
 	// Source is "local" or "cos": where the restore reads its backup.
-	Source          string     `json:"source"`
+	Source string `json:"source"`
+	// Guest is true when the restore reads files from inside a VM disk.
+	Guest           bool       `json:"guest,omitempty"`
 	Phase           string     `json:"phase"`
 	Message         string     `json:"message,omitempty"`
 	TargetNamespace string     `json:"targetNamespace"`

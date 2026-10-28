@@ -62,6 +62,13 @@ describe('RestoreFilesDialog form', () => {
     expect(screen.getByText(/with everything in it/i)).toBeTruthy();
   });
 
+  it('explains a restore from inside a VM disk: the file system stays at the top, and it can be slow', () => {
+    render(<RestoreFilesDialog policy="nightly" namespace="apps" pvc="web-root" moment="" guest selected={selected()} onClose={onClose} />);
+    expect(screen.getByText('Files from inside a VM disk')).toBeTruthy();
+    expect(screen.getByText(/name of the file system stays at the top/)).toBeTruthy();
+    expect(screen.queryByText('You chose the Latest copy')).toBeNull();
+  });
+
   it('warns that the latest copy can change', () => {
     renderDialog(selected(), '');
     expect(screen.getByText(/You chose the Latest copy/)).toBeTruthy();

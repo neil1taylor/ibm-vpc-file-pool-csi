@@ -1,7 +1,7 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import BackupBrowsePage from './BackupBrowsePage';
-import { BrowseEntry, GatewayError, listFolder, listMoments, toB64 } from '../../utils/backup-browse';
+import { BrowseEntry, GatewayError, getInfo, listFolder, listMoments, toB64 } from '../../utils/backup-browse';
 import { useBrowseSession } from '../../utils/use-browse-session';
 
 let mockSearch = '?claim=apps%2Fdb';
@@ -15,9 +15,9 @@ jest.mock('react-router-dom', () => ({
 
 jest.mock('./RestoreFilesDialog', () => ({
   __esModule: true,
-  default: (p: { policy: string; namespace: string; pvc: string; moment: string; selected: Map<string, unknown>; onClose: () => void }) => (
+  default: (p: { policy: string; namespace: string; pvc: string; moment: string; guest?: boolean; selected: Map<string, unknown>; onClose: () => void }) => (
     <div data-testid="restore-dialog">
-      {`${p.policy} ${p.namespace}/${p.pvc} moment=${p.moment} count=${p.selected.size}`}
+      {`${p.policy} ${p.namespace}/${p.pvc} moment=${p.moment} count=${p.selected.size}${p.guest ? ' guest' : ''}`}
       <button onClick={p.onClose}>close-dialog</button>
     </div>
   ),
@@ -27,6 +27,7 @@ jest.mock('../../utils/backup-browse', () => ({
   ...jest.requireActual('../../utils/backup-browse'),
   listFolder: jest.fn(),
   listMoments: jest.fn(),
+  getInfo: jest.fn(),
 }));
 
 const text = (s: string) => new Uint8Array(Buffer.from(s, 'utf8'));
@@ -51,6 +52,7 @@ beforeEach(() => {
   (useBrowseSession as jest.Mock).mockReturnValue(ready);
   (listMoments as jest.Mock).mockResolvedValue(['20261021T091500Z', '20261022T091500Z']);
   (listFolder as jest.Mock).mockResolvedValue({ entries: [] });
+  (getInfo as jest.Mock).mockResolvedValue({ moment: '', latest: true });
 });
 
 describe('BackupBrowsePage states', () => {
@@ -355,5 +357,87 @@ describe('BackupBrowsePage choosing files to restore', () => {
     mockSearch = '?claim=apps%2Fdb&moment=2026-10-21T09%3A15%3A00Z';
     rerender(<BackupBrowsePage />);
     await screen.findByText('Nothing chosen');
+  });
+});
+
+describe('BackupBrowsePage VM disks', () => {
+  const guestReady = { status: 'ready', session: 'bb-1', guest: true, reopen };
+  const fsEntries = [
+    entry('rhel-root', { type: 'dir', mode: 0o555, size: 40e9, note: 'xfs root' }),
+    entry('sdb1', { type: 'dir', mode: 0o555, readable: false, note: 'This volume is encrypted with BitLocker. Nobody can read it without the key.' }),
+  ];
+
+  beforeEach(() => {
+    (useBrowseSession as jest.Mock).mockReturnValue(guestReady);
+    (listFolder as jest.Mock).mockResolvedValue({ entries: fsEntries });
+  });
+
+  it('says the reader may take minutes while it starts', () => {
+    (useBrowseSession as jest.Mock).mockReturnValue({ status: 'starting', guest: true, message: 'waiting: a backup copy of this disk is running', reopen });
+    render(<BackupBrowsePage />);
+    expect(screen.getByText(/can take a few minutes/i)).toBeTruthy();
+    expect(screen.getByText(/a backup copy of this disk is running/)).toBeTruthy();
+  });
+
+  it('asks for a file system at the top, and lists each with its note', async () => {
+    render(<BackupBrowsePage />);
+    expect(await screen.findByText('rhel-root')).toBeTruthy();
+    expect(screen.getByText(/Choose a file system/)).toBeTruthy();
+    expect(screen.getByText('xfs root')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'rhel-root' })).toBeTruthy();
+  });
+
+  it('shows a volume that cannot be read with the reason, and offers nothing for it', async () => {
+    render(<BackupBrowsePage />);
+    expect(await screen.findByText('sdb1')).toBeTruthy();
+    expect(screen.getByText('Cannot be read here')).toBeTruthy();
+    expect(screen.getByText(/encrypted with BitLocker/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'sdb1' })).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: 'Choose sdb1' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Download as tar' })).toBeTruthy(); // only for rhel-root
+    expect(screen.getAllByRole('link', { name: 'Download as tar' }).length).toBe(1);
+  });
+
+  it('shows the notices of the session, such as a crash copy', async () => {
+    (getInfo as jest.Mock).mockResolvedValue({
+      guest: true,
+      consistency: 'CrashConsistent',
+      notices: ['This copy was taken while the VM was running. The newest changes may be missing.'],
+    });
+    render(<BackupBrowsePage />);
+    expect(await screen.findByText(/taken while the VM was running/)).toBeTruthy();
+    expect(getInfo).toHaveBeenCalledWith('bb-1');
+  });
+
+  it('asks nothing about notices for a plain volume', async () => {
+    (useBrowseSession as jest.Mock).mockReturnValue(ready);
+    (listFolder as jest.Mock).mockResolvedValue({ entries: [] });
+    render(<BackupBrowsePage />);
+    await screen.findByTestId('file-actions');
+    expect(getInfo).not.toHaveBeenCalled();
+  });
+
+  it('does not offer a tar of the whole disk, and names the top of the disk', async () => {
+    render(<BackupBrowsePage />);
+    const actions = await screen.findByTestId('file-actions');
+    expect(within(actions).queryByRole('link', { name: /Download this folder/ })).toBeNull();
+    expect(screen.getByText('VM disk')).toBeTruthy();
+    fireEvent.click(await screen.findByRole('button', { name: 'rhel-root' }));
+    const after = await screen.findByTestId('file-actions');
+    expect(within(after).getByRole('link', { name: /Download this folder/ })).toBeTruthy();
+  });
+
+  it('explains that the disk is held instead of warning that the latest copy changes', async () => {
+    render(<BackupBrowsePage />);
+    await screen.findByTestId('file-actions');
+    expect(screen.queryByText(/latest copy may change/i)).toBeNull();
+    expect(screen.getByText(/next backup of this disk waits/i)).toBeTruthy();
+  });
+
+  it('tells the restore dialog that it is a VM disk', async () => {
+    render(<BackupBrowsePage />);
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Choose rhel-root' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restore selected' }));
+    expect(screen.getByTestId('restore-dialog').textContent).toContain('guest');
   });
 });

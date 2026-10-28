@@ -34,6 +34,7 @@ import {
   entryText,
   escapeName,
   formatSize,
+  getInfo,
   fromB64,
   gatewayErrorText,
   linkText,
@@ -75,6 +76,7 @@ const BackupBrowsePage: React.FC = () => {
 
   const session = useBrowseSession(namespace ? { policy: name, namespace, pvc, ...(moment ? { moment } : {}) } : undefined);
   const sessionName = session.status === 'ready' ? session.session : undefined;
+  const guest = !!session.guest;
 
   // The folder: base64 names exactly as the gateway sent them. Names are never decoded and encoded again.
   const [path, setPath] = useState<string[]>([]);
@@ -83,6 +85,7 @@ const BackupBrowsePage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState<GatewayError | undefined>();
   const [moments, setMoments] = useState<string[]>([]);
+  const [notices, setNotices] = useState<string[]>([]);
   const [selected, setSelected] = useState<SelectionMap>(() => new Map());
   const [restoring, setRestoring] = useState(false);
   const request = useRef(0);
@@ -146,6 +149,25 @@ const BackupBrowsePage: React.FC = () => {
     };
   }, [sessionName]);
 
+  // A session on a VM disk says things a person should know, such as that a copy was taken while the VM ran.
+  useEffect(() => {
+    if (!sessionName || !guest) {
+      setNotices([]);
+      return undefined;
+    }
+    let cancelled = false;
+    getInfo(sessionName)
+      .then((info) => {
+        if (!cancelled) setNotices(info.notices || []);
+      })
+      .catch(() => {
+        if (!cancelled) setNotices([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionName, guest]);
+
   const momentOptions = useMemo(() => {
     const isos = moments.map(momentToISO).filter((m): m is string => !!m);
     isos.sort().reverse();
@@ -191,7 +213,14 @@ const BackupBrowsePage: React.FC = () => {
         <Bullseye style={{ minHeight: 160 }}>
           <div style={{ textAlign: 'center' }}>
             <Spinner size="lg" aria-label="Starting the reader" />
-            <p>Starting the reader. This takes a few seconds.</p>
+            {guest ? (
+              <p>
+                Starting the reader of the VM disk. This can take a few minutes: it waits for a backup copy that is being written, then
+                starts a small virtual machine that reads the disk. The VM itself is not started.
+              </p>
+            ) : (
+              <p>Starting the reader. This takes a few seconds.</p>
+            )}
             {session.message && <p>{session.message}</p>}
           </div>
         </Bullseye>
@@ -202,6 +231,7 @@ const BackupBrowsePage: React.FC = () => {
 
   function listing(): React.ReactNode {
     const sessionId = sessionName as string;
+    const rootLabel = guest ? 'VM disk' : 'Backup root';
     const pageChoosable = entries.filter(canSelect);
     const crumbs = path.map((seg, i) => ({ seg, label: escapeName(fromB64(seg)), upTo: path.slice(0, i + 1) }));
     return (
@@ -211,10 +241,10 @@ const BackupBrowsePage: React.FC = () => {
             <ToolbarItem>
               <Breadcrumb aria-label="Folders">
                 {path.length === 0 ? (
-                  <BreadcrumbItem isActive>Backup root</BreadcrumbItem>
+                  <BreadcrumbItem isActive>{rootLabel}</BreadcrumbItem>
                 ) : (
                   <BreadcrumbItem component="button" onClick={() => setPath([])}>
-                    Backup root
+                    {rootLabel}
                   </BreadcrumbItem>
                 )}
                 {crumbs.map((c, i) =>
@@ -245,14 +275,25 @@ const BackupBrowsePage: React.FC = () => {
                   Clear
                 </Button>
               </ToolbarItem>
-              <ToolbarItem>
-                <a href={downloadUrl(sessionId, 'tar', path)} download>
-                  Download this folder as tar
-                </a>
-              </ToolbarItem>
+              {!(guest && path.length === 0) && (
+                <ToolbarItem>
+                  <a href={downloadUrl(sessionId, 'tar', path)} download>
+                    Download this folder as tar
+                  </a>
+                </ToolbarItem>
+              )}
             </ToolbarGroup>
           </ToolbarContent>
         </Toolbar>
+        {notices.map((n) => (
+          <Alert key={n} variant="warning" isInline title={n} style={{ marginBottom: 16 }} />
+        ))}
+        {guest && path.length === 0 && (
+          <Alert variant="info" isInline title="Choose a file system" style={{ marginBottom: 16 }}>
+            These are the partitions and volumes inside the VM disk. A volume that is encrypted or has a file system that cannot be read here
+            is listed with the reason. To get such a volume back, restore the whole disk.
+          </Alert>
+        )}
         {listError && !isEnded(listError) && (
           <Alert variant="danger" isInline title="Cannot list this folder" style={{ marginBottom: 16 }}>
             {gatewayErrorText(listError, namespace)}
@@ -295,6 +336,7 @@ const BackupBrowsePage: React.FC = () => {
                 <EntryRow
                   key={e.name}
                   entry={e}
+                  guest={guest}
                   isChosen={selected.has(selectionKey([...path, e.name]))}
                   onChoose={() => setSelected((old) => toggleSelected(old, { path: [...path, e.name], entry: e }))}
                   onOpen={() => setPath([...path, e.name])}
@@ -346,10 +388,17 @@ const BackupBrowsePage: React.FC = () => {
                 <FormSelectOption key={m} value={m} label={momentLabel(m)} />
               ))}
             </FormSelect>
-            {!moment && (
-              <Alert variant="info" isInline isPlain title="The latest copy may change while you look" style={{ marginTop: 8 }}>
-                The next backup replaces files in it one at a time. Choose a moment to look at a copy that stays as it is.
+            {guest ? (
+              <Alert variant="info" isInline isPlain title="The next backup of this disk waits while you look" style={{ marginTop: 8 }}>
+                A VM disk is shown as it was at the moment you choose, without starting the VM. While this page is open the next backup copy of
+                the disk is held back, for 2 hours at most. Close the page when you are done.
               </Alert>
+            ) : (
+              !moment && (
+                <Alert variant="info" isInline isPlain title="The latest copy may change while you look" style={{ marginTop: 8 }}>
+                  The next backup replaces files in it one at a time. Choose a moment to look at a copy that stays as it is.
+                </Alert>
+              )
             )}
           </CardBody>
         </Card>
@@ -364,6 +413,7 @@ const BackupBrowsePage: React.FC = () => {
           namespace={namespace}
           pvc={pvc}
           moment={moment}
+          guest={guest}
           selected={selected}
           onClose={() => setRestoring(false)}
         />
@@ -388,6 +438,7 @@ const SelectionSummary: React.FC<{ selected: SelectionMap }> = ({ selected }) =>
 
 interface RowProps {
   entry: BrowseEntry;
+  guest?: boolean;
   isChosen: boolean;
   onChoose: () => void;
   onOpen: () => void;
@@ -396,7 +447,7 @@ interface RowProps {
 }
 
 /** One name of a folder. Names and link texts are put in as text and never as HTML. */
-const EntryRow: React.FC<RowProps> = ({ entry, isChosen, onChoose, onOpen, fileLink, tarLink }) => {
+const EntryRow: React.FC<RowProps> = ({ entry, guest, isChosen, onChoose, onOpen, fileLink, tarLink }) => {
   const kind = entryKind(entry);
   const label = entryText(entry);
   let name: React.ReactNode = label;
@@ -414,7 +465,16 @@ const EntryRow: React.FC<RowProps> = ({ entry, isChosen, onChoose, onOpen, fileL
     );
   }
   let note: React.ReactNode = '';
-  if (!entry.readable) note = <Label color="orange" isCompact>Not readable</Label>;
+  if (!entry.readable) {
+    note = (
+      <>
+        <Label color="orange" isCompact>
+          {guest ? 'Cannot be read here' : 'Not readable'}
+        </Label>
+        {entry.note && <div>{entry.note}</div>}
+      </>
+    );
+  } else if (entry.note) note = entry.note;
   else if (kind === 'link') note = <Label isCompact>Link, not followed</Label>;
   else if (kind === 'other') note = <Label isCompact>Special file, not shown</Label>;
   return (

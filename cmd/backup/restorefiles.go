@@ -114,7 +114,12 @@ func restoreRequestOf(args []string, flags map[string]string) (gateway.RestoreRe
 		return req, errors.New(strings.ReplaceAll(cerr.Error(), "spec.paths", "--path"))
 	}
 	for _, p := range parsed {
-		req.Paths = append(req.Paths, browse.JoinPath(p))
+		// --fs puts the file system of a VM disk in front of every path.
+		withFSPath, ferr := withFS(flags, p)
+		if ferr != nil {
+			return req, ferr
+		}
+		req.Paths = append(req.Paths, browse.JoinPath(withFSPath))
 	}
 	return req, nil
 }
