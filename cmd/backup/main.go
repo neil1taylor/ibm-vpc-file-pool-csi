@@ -207,6 +207,13 @@ Restore from COS (restore --from-cos). It needs no BackupPolicy and no snapshot 
   cos-list takes the same source flags and --volume (optional) and --driver-image (default: the controller's image).
   It runs a read-only Job in the cluster, so the cluster must be able to reach the bucket
 
+Backups in COS (ls, get, browse and restore-files). By itself the gateway reads COS when a moment is only there:
+  --from-cos        Read the backup from the COS bucket that the policy's export block names
+  --from-cos --policy AREA --bucket B --endpoint HOST --volume pvc-<uuid> [--prefix P]   Name a bucket directly, for a backup that
+                    no policy of this cluster describes. No --pvc. You must be allowed to read the Secrets it names in the driver namespace.
+                    It takes the key flags of restore --from-cos (--kp-*, --credentials-secret, --backup-key-secret);
+                    for a readable key give --emergency-key-secret NAME --emergency-key-only. A new claim needs --storage-class
+
 All commands:
   --kubeconfig      Path to kubeconfig (default: ~/.kube/config)
 `)
@@ -225,7 +232,7 @@ func parseFlags(args []string) map[string]string {
 			flags[arg[:idx]] = arg[idx+1:]
 			continue
 		}
-		if arg == "wait" || arg == "yes" || arg == "dry-run" || arg == "existing-bucket" || arg == "from-cos" || arg == "skip-marker-cleanup" || arg == "moments" {
+		if arg == "wait" || arg == "yes" || arg == "dry-run" || arg == "existing-bucket" || arg == "from-cos" || arg == "skip-marker-cleanup" || arg == "moments" || arg == "emergency-key-only" {
 			flags[arg] = "true"
 			continue
 		}

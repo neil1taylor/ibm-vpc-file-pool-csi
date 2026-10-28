@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/browse"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/filerestore"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/gateway"
@@ -71,6 +72,7 @@ func restoreRequestOf(args []string, flags map[string]string) (gateway.RestoreRe
 		return req, errors.New("restore-files takes --policy and --pvc, not --session")
 	}
 	req.Policy, req.Namespace, req.PVC, req.Moment = t.policy, t.namespace, t.pvc, t.moment
+	req.Source, req.FromCOS = t.source, t.bucket
 	to := flags["to"]
 	ns, name, ok := strings.Cut(to, "/")
 	if !ok || ns == "" || name == "" {
@@ -89,6 +91,9 @@ func restoreRequestOf(args []string, flags map[string]string) (gateway.RestoreRe
 		req.SizeGB = n
 	}
 	req.StorageClassName = flags["storage-class"]
+	if req.FromCOS != nil && !req.Existing && req.StorageClassName == "" {
+		return req, errors.New("--storage-class is required for a new claim when the bucket is named: COS does not keep the class of the backed-up claim")
+	}
 	if req.Existing && (req.SizeGB != 0 || req.StorageClassName != "") {
 		return req, errors.New("--size-gb and --storage-class are for a new claim; an existing claim keeps its size and class")
 	}
@@ -148,8 +153,15 @@ func runRestoreFiles(ctx context.Context, gw *gwClient, out io.Writer, args []st
 	if req.Moment != nil {
 		when = "the backup at or before " + req.Moment.UTC().Format(time.RFC3339)
 	}
-	_, _ = fmt.Fprintf(out, "Restore %s asked: %d paths from %s/%s (policy %s, %s) into %s\n",
-		r.Name, len(req.Paths), req.Namespace, req.PVC, req.Policy, when, where)
+	from := req.Namespace + "/" + req.PVC
+	switch {
+	case req.FromCOS != nil:
+		from = "volume " + req.FromCOS.Volume + " in the COS bucket " + req.FromCOS.Bucket
+	case r.Source == v1alpha1.BackupSourceCOS:
+		from += " in COS"
+	}
+	_, _ = fmt.Fprintf(out, "Restore %s asked: %d paths from %s (policy %s, %s) into %s\n",
+		r.Name, len(req.Paths), from, req.Policy, when, where)
 	if flags["wait"] != "true" {
 		_, _ = fmt.Fprintf(out, "Follow it with: kubectl backup restore-files --status %s\n", r.Name)
 		return nil

@@ -73,9 +73,18 @@ func cosSource(flags map[string]string) (block *v1alpha1.RestoreFromCOS, keyFile
 		block.EmergencyKeyOnly = true
 		return block, keyFile, nil
 	}
+	if err = keyProtectFlags(flags, block); err != nil {
+		return nil, "", err
+	}
+	return block, "", nil
+}
+
+// keyProtectFlags reads the flags that say which Key Protect root key unwraps
+// the backup key and which Secrets hold the wrapped key and the API key.
+func keyProtectFlags(flags map[string]string, block *v1alpha1.RestoreFromCOS) error {
 	for _, f := range []string{"kp-instance", "kp-region", "kp-root-key"} {
 		if flags[f] == "" {
-			return nil, "", fmt.Errorf("--%s is required (or give --backup-key-file to use the readable backup key without Key Protect)", f)
+			return fmt.Errorf("--%s is required (or give a readable backup key instead, to use it without Key Protect)", f)
 		}
 	}
 	block.BackupKeySecret = orFlag(flags, "backup-key-secret", "cos-backup-key")
@@ -83,7 +92,7 @@ func cosSource(flags map[string]string) (block *v1alpha1.RestoreFromCOS, keyFile
 		InstanceID: flags["kp-instance"], Region: flags["kp-region"], RootKeyID: flags["kp-root-key"],
 		APIKeySecret: orFlag(flags, "kp-api-key-secret", "keyprotect-apikey"),
 	}
-	return block, "", nil
+	return nil
 }
 
 func orFlag(flags map[string]string, name, def string) string {
