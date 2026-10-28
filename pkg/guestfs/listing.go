@@ -49,7 +49,7 @@ func parseListing(in io.Reader, limit int) ([]browse.Entry, error) {
 			e.Size = n
 		}
 		if m, perr := strconv.ParseUint(strings.TrimSpace(rec[1]), 8, 32); perr == nil {
-			e.Mode = uint32(m) & 0o7777
+			e.Mode = uint32(m) & 0o7777 //nolint:gosec // ParseUint was limited to 32 bits
 		}
 		if e.Type == browse.TypeSymlink && len(rec) > 4 {
 			e.Link = []byte(rec[4])
