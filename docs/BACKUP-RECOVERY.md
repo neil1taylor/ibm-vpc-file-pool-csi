@@ -649,9 +649,38 @@ On a policy page, the **Browse files** action of a volume opens the file browser
 - **Names.** A name is always shown as text, never as HTML. Characters that are not printable, and bytes that are not valid text, are shown as `\xNN` (and a backslash as `\\`), the same as `kubectl backup ls`, so you can find the same file with both.
 - **Moment.** The picker offers **Latest copy** and every moment folder, newest first. Choosing one closes the session and opens a new one at that moment. The latest copy can change while you look, because the next backup replaces files in it one at a time; an older moment does not change until the keep time removes it.
 - **Download.** **Download** saves one file; **Download as tar** (on a folder, or **Download this folder as tar** above the table, which at the root is the whole backup) saves a folder as a tar. They are plain links to the gateway through the console's plugin proxy: the console session supplies your token, so no token is in the link, and the browser writes the file to disk as it arrives (no copy in memory). The gateway answers with `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox; default-src 'none'`, `Cache-Control: no-store` and a type of `application/octet-stream` (`application/x-tar` for a folder), so a backup file can never be shown as a page of the console. The audit Event is the same as for `kubectl backup get`. A download is one file or one folder at a time, up to the gateway limit (`backupGateway.maxDownloadBytes`, 50 GiB); a tar does not tell the browser what it left out (the command line shows that).
-- **Not in the console yet.** Restoring files into a claim. The toolbar above the file list is where that action will be added.
+- **Restore.** Tick files, folders and links, and press **Restore selected** (see "Restore files in the console" below).
+- **Not in the console yet.** COS backups and VM disks.
 
 **Security notes.** The browser holds only your own token, which the console proxy adds; the gateway checks it and your right on every call. The link of a download holds the names of the path (base64), so the console's and the browser's logs can show them; file contents and tokens are never in a link. A failed download shows as a failed download in the browser (the error text is not shown there): the usual causes are a file over the limit or a session that ended. `kubectl backup get` gives the exact message.
+
+### Restore files in the console
+
+In the file browser, each file, folder and link has a checkbox (an entry the reader cannot open, and a device, pipe or socket, has none). The line above the table says how many you chose and how big the files are: for example "3 chosen: 2 files (3.0 KiB), 1 folder with everything in it". A folder is restored with everything in it, and a link is restored as a link (it is not followed). Your choice stays when you open another folder, and is dropped when you change the moment. **Clear** drops it at once. If you choose a folder and a file inside it, the file is not written twice.
+
+**Restore selected** opens a dialog. It shows what will be written, from which backup and moment, and where it goes:
+
+| Where | What happens |
+|-------|--------------|
+| **A new claim** (the default) | The claim is made in the namespace you type (the namespace of the backed-up claim by default), named `<claim>-restored` by default. Leave the size empty and the driver measures the chosen files first and makes the claim that size plus 20%, at least 1 GiB; or type a size in GiB. The storage class is the one of the backed-up claim unless you choose another |
+| **A new folder in an existing claim** | The files go into a new folder at the top of the claim, named `restored-<policy>-<moment>`. Nothing else in the claim changes. The choice is turned off, with the missing rights named, if you may not do it (see below) |
+
+A restore never writes over a file or a claim that exists, and never puts a file back in its old place. The dialog says so before you confirm. If you chose the **Latest copy**, it also warns that the next backup can change files while they are copied; choose a moment for a copy that stays as it is.
+
+**Rights.** You need `get backupfiles` in the namespace of the backed-up claim (you have it, or you could not browse). For a new claim you also need `create` on `persistentvolumeclaims` in the target namespace; for an existing claim also `update` on `persistentvolumeclaims` and `create` on `pods` there. The dialog asks the cluster about the namespace you type, and turns off what you may not do; the gateway checks again.
+
+**Progress.** After you confirm, the dialog shows the phase: Waiting to start (`Pending`), Measuring the size of the chosen files (`Measuring`), Making the claim (`Provisioning`), Copying the files (`Restoring`), then Done or Failed. It asks the gateway every 2 seconds with a short request, and stops when the restore ends or the dialog closes; the restore goes on without the dialog, and a restore you closed is still shown by `kubectl backup restore-files --status NAME` (the dialog shows the name when it cannot follow the restore any more). When it is done, the dialog links to the claim and names the folder, and shows the counts (files, folders, links), the size, anything left out, and the moment that was restored. When it fails, it shows the reason; a claim made for the failed restore stays held back from pods, so delete it before you ask again.
+
+**Refusals, in plain words.**
+
+| Answer | The dialog says |
+|--------|-----------------|
+| 403 | Which right is missing: `get backupfiles` in the source namespace, `create` (and `update`) on `persistentvolumeclaims` in the target namespace, or `create` on `pods` for an existing claim |
+| 404 | There is no backup of this volume any more, or the chosen existing claim does not exist |
+| 409 | A claim with that name already exists; a button fills in another name (`name-2`, `name-3`) |
+| 429 | You have too many open restores (10 by default, `backupGateway.maxOpenRestores`); wait for one to end |
+
+A restore takes at most 1000 chosen entries; choose a folder that holds them instead. Names are shown as text only, in the same escaped form as `kubectl backup ls`, and the console sends them to the gateway in that form. The browser holds only your own token; no file content is ever in a request.
 
 ### Can the helper read other users' files?
 

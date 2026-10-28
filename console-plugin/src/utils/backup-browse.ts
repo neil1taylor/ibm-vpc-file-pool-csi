@@ -229,7 +229,7 @@ async function toGatewayError(err: unknown): Promise<GatewayError> {
   return new GatewayError(res.status, code, message);
 }
 
-async function call<T>(method: string, path: string, body?: unknown, extra: RequestInit = {}): Promise<T> {
+export async function call<T>(method: string, path: string, body?: unknown, extra: RequestInit = {}): Promise<T> {
   try {
     const res = await consoleFetch(`${GATEWAY_BASE}${path}`, {
       method,
