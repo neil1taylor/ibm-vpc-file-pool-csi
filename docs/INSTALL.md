@@ -367,7 +367,7 @@ kubectl apply -f config/deploy/node.yaml
 |------|---------|-------------|
 | `--endpoint` | `unix:///csi/csi.sock` | CSI gRPC endpoint |
 | `--node-id` | (required) | Kubernetes node name |
-| `--mode` | `controller` | `controller`, `node`, `receiver`, `sync-client`, `check-receiver`, `apply-vm-disk`, `send-vm-disk`, or `restore-vm-disk`, `unwrap-backup-key`, `register-console-plugin`, or `unregister-console-plugin`, or `enable-sidecar-gate`, or `failover` (the Job for a `Failover` resource), or `poolbench` (the PoolBench service, a Deployment when `poolBench.enabled`; all but the first three and `poolbench` are run as Jobs; `check-receiver` is run by the console's receiver setup; `register-console-plugin`, `unregister-console-plugin` and `enable-sidecar-gate` are the chart's hook Jobs) |
+| `--mode` | `controller` | `controller`, `node`, `receiver`, `sync-client`, `check-receiver`, `apply-vm-disk`, `send-vm-disk`, or `restore-vm-disk`, `unwrap-backup-key`, `backup-gateway`, `register-console-plugin`, or `unregister-console-plugin`, or `enable-sidecar-gate`, or `failover` (the Job for a `Failover` resource), or `poolbench` (the PoolBench service, a Deployment when `poolBench.enabled`; all but the first three and `poolbench` are run as Jobs; `check-receiver` is run by the console's receiver setup; `register-console-plugin`, `unregister-console-plugin` and `enable-sidecar-gate` are the chart's hook Jobs) |
 | `--region` | Auto-discovered | IBM Cloud region |
 | `--vpc-id` | Auto-discovered | VPC ID for mount targets |
 | `--subnet-id` | Auto-discovered | Worker subnet IDs for mount targets, comma-separated; the controller uses the one in each pool's zone |
@@ -437,11 +437,23 @@ kubectl apply -f config/deploy/node.yaml
 | `--emergency-key-file` | `""` | Optional file with the readable backup key, used only when Key Protect is down |
 | `--key-out` | `""` | File to write the readable key to, mode 0400; it must not exist |
 
+**Backup gateway flags** (mode `backup-gateway`, set by the `backupGateway.*` chart values):
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--gateway-listen` | `:8443` | Address to listen on |
+| `--gateway-tls-cert-file`, `--gateway-tls-key-file` | (required) | The serving certificate. It is read again when the files change. The gateway is never served in plain HTTP |
+| `--gateway-browse-namespace` | `ibm-vpc-file-pool-csi-browse` | Where the session Secrets are |
+| `--gateway-session-wait` | `20s` | How long a request that asks to wait holds for the session to be ready; keep it under the proxy timeout |
+| `--gateway-max-download-bytes` | `53687091200` | Largest single file or tar |
+| `--gateway-auth-cache` | `10s` | How long a token review is kept; `0` checks every call. The right on the namespace is checked on every call regardless |
+
 **Browse session flags of the controller** (set by the `backupBrowse.*` chart values):
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--browse-image` | `""` | Image of the browse helper. Empty turns browse sessions off |
+| `--browse-namespace` | `ibm-vpc-file-pool-csi-browse` | Namespace of the helper pods and the session Secrets |
 | `--browse-image-pull-secrets` | `""` | Comma-separated names of the Secrets, in the driver namespace, that pull the browse image from a private registry. The chart sets it from `imagePullSecrets` |
 | `--browse-idle` | `15m` | End a session after this long without use |
 | `--browse-max-life` | `2h` | End a session after this long, even if in use |

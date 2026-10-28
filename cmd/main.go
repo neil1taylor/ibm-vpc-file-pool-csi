@@ -89,6 +89,7 @@ func main() {
 		// VM disk snapshot flags.
 		vmSnapshots vmSnapshotOptions
 		browse      browseOptions
+		gw          gatewayOptions
 
 		// Sync-client mode flags.
 		receiverEndpoint string
@@ -144,11 +145,21 @@ func main() {
 
 	// Browse sessions (single-file restore, issue #92).
 	flag.StringVar(&browse.image, "browse-image", "", "Image of the browse helper; empty turns browse sessions off (controller mode)")
+	flag.StringVar(&browse.namespace, "browse-namespace", "ibm-vpc-file-pool-csi-browse", "Namespace of the browse sessions: their helper pods and Secrets. It holds nothing else (controller mode)")
 	flag.StringVar(&browse.pullSecrets, "browse-image-pull-secrets", "", "Comma-separated names of the Secrets, in the driver namespace, that pull the browse image from a private registry")
 	flag.DurationVar(&browse.cfg.Idle, "browse-idle", 15*time.Minute, "End a browse session after this long without use")
 	flag.DurationVar(&browse.cfg.MaxLife, "browse-max-life", 2*time.Hour, "End a browse session after this long, even if in use")
 	flag.IntVar(&browse.cfg.MaxSessions, "browse-max-sessions", 5, "Open browse sessions in the cluster; more wait")
 	flag.IntVar(&browse.cfg.MaxPerNamespace, "browse-max-sessions-per-namespace", 2, "Open browse sessions for the claims of one namespace; more wait")
+
+	// Backup gateway flags (gateway mode).
+	flag.StringVar(&gw.listen, "gateway-listen", ":8443", "Address the backup gateway listens on (backup-gateway mode)")
+	flag.StringVar(&gw.certFile, "gateway-tls-cert-file", "", "Serving certificate of the backup gateway (PEM); read again when it changes")
+	flag.StringVar(&gw.keyFile, "gateway-tls-key-file", "", "Serving key of the backup gateway (PEM)")
+	flag.DurationVar(&gw.sessionWait, "gateway-session-wait", 20*time.Second, "How long a request that asks to wait holds for a browse session to be ready (keep it under the proxy timeout)")
+	flag.Int64Var(&gw.maxDownload, "gateway-max-download-bytes", 50<<30, "Largest single file or tar a user may download")
+	flag.StringVar(&gw.browseNamespace, "gateway-browse-namespace", "ibm-vpc-file-pool-csi-browse", "Namespace of the browse sessions: their Secrets and helper pods (backup-gateway mode)")
+	flag.DurationVar(&gw.authCache, "gateway-auth-cache", 10*time.Second, "How long a token review is kept; 0 checks every call")
 
 	// Replication controller flags.
 	flag.StringVar(&driverImage, "driver-image", "", "Driver container image for receiver-mode sync-client Jobs")
@@ -245,6 +256,8 @@ func main() {
 			os.Exit(1)
 		}
 		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, controllerMetricsCertDir, mon, cloneWorkerInterval, goldenImageSyncInterval, cdiCopyPodMemoryLimit, driverImage, failoverSource, webhooks, vmSnapshots, browse, nodeAgentOptions{service: poolBench.NodeMetricsService, caFile: poolBench.NodeMetricsCA, account: nodeMetricsAccount})
+	case "backup-gateway":
+		runGateway(gw)
 	case "receiver":
 		runReceiver(receiverBasePath, receiverAuthTokenFile, receiverListenAddr, receiverTLSCertFile, receiverTLSKeyFile)
 	case "sync-client":
@@ -326,6 +339,7 @@ func runConsolePlugin(mode, name string) {
 type browseOptions struct {
 	image       string
 	pullSecrets string
+	namespace   string
 	cfg         pool.BrowseConfig
 }
 
@@ -604,12 +618,18 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metric
 	backupController := pool.NewBackupController(replClient)
 	backupController.SetShareData(shareRunner)
 	if browse.image != "" {
-		shareRunner.SetBrowseImage(browse.image)
+		// Helper pods and session Secrets live in their own namespace, which holds
+		// nothing else, so the gateway's right to read Secrets reaches nothing
+		// else. The pods mount NFS directly, so they can run there.
+		browseRunner := pool.NewShareJobRunner(shareJobClient, browse.namespace, pool.DefaultCloneImage)
+		browseRunner.SetBrowseImage(browse.image)
+		browse.cfg.Namespace = browse.namespace
 		if browse.pullSecrets != "" {
-			shareRunner.SetBrowsePullSecrets(strings.Split(browse.pullSecrets, ","))
+			names := strings.Split(browse.pullSecrets, ",")
+			browseRunner.SetBrowsePullSecrets(names)
+			browse.cfg.PullSecrets, browse.cfg.PullSecretNamespace = names, driverNamespace
 		}
-		browse.cfg.Namespace = driverNamespace
-		backupController.SetBrowse(shareRunner, browse.cfg)
+		backupController.SetBrowse(browseRunner, browse.cfg)
 	}
 	replController.SetOnProcessed(backupController.Kick)
 	hookOrchestrator := hooks.NewOrchestrator(

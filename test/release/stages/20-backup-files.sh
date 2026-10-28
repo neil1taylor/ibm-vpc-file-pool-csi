@@ -12,6 +12,12 @@
 # checks TLS with the pinned certificate, the token, the latest copy and the
 # first moment, the locked-down helper pod, the NetworkPolicy, and that closing
 # or deleting a session leaves nothing behind.
+# Part 3, the gateway: the same script goes on with real users. A namespace admin
+# lists and downloads through `kubectl backup ls/get/browse` with no setup; a user
+# with only the view role, an admin of another namespace and a user whose binding
+# was removed get "forbidden"; the audit Events name the user and the path and
+# hold no token or content. Needs the kubectl-backup binary (RT_BACKUP_BIN, built
+# into test/release/bin by remote.sh).
 
 # A pool takes 5 to 15 minutes to become ready; the rest is under 5 minutes.
 RT_STAGE_TIMEOUT=7200
@@ -23,6 +29,7 @@ E2E_LOG="$RT_OUT/backup-files-e2e.log"
 E2E_SESSION="$HERE_STAGE/../../e2e/test-backup-browse-session.sh"
 SESSION_PREFIX=$(rt_name bsess)
 SESSION_LOG="$RT_OUT/backup-browse-session-e2e.log"
+BACKUP_BIN="${RT_BACKUP_BIN:-$(dirname "$RT_LIB")/bin/kubectl-backup}"
 
 run() {
     local tool rc fail_line
@@ -52,7 +59,7 @@ run() {
 
     [ -f "$E2E_SESSION" ] || skip "no end-to-end script at $E2E_SESSION"
     rt_log "running $E2E_SESSION"
-    env PREFIX="$SESSION_PREFIX" bash "$E2E_SESSION" >"$SESSION_LOG" 2>&1
+    env PREFIX="$SESSION_PREFIX" BACKUP_BIN="$BACKUP_BIN" bash "$E2E_SESSION" >"$SESSION_LOG" 2>&1
     rc=$?
     cat "$SESSION_LOG"
     if fail_line=$(first_fail_line "$SESSION_LOG"); then
@@ -70,6 +77,18 @@ run() {
     check "another pod cannot reach the helper" log_has_pass "$SESSION_LOG" "NetworkPolicy"
     check "closing a session leaves nothing behind" log_has_pass "$SESSION_LOG" "closing a session removes"
     check "deleting a session leaves nothing behind" log_has_pass "$SESSION_LOG" "deleting a session removes"
+    check "no session object is in the driver namespace" log_has_pass "$SESSION_LOG" "no session object is in the driver namespace"
+    if grep -qF "NOT CHECKED: the backup gateway is not installed" "$SESSION_LOG"; then
+        not_checked "browsing through the gateway with real users" "the backup gateway is not installed"
+    else
+        check "a namespace admin lists a backup through kubectl backup with no setup" log_has_pass "$SESSION_LOG" "a namespace admin lists the backup"
+        check "kubectl backup get downloads a file, at the latest copy and at a moment" log_has_pass "$SESSION_LOG" "downloads the older content"
+        check "a user with only the view role is forbidden" log_has_pass "$SESSION_LOG" "a user with only the view role: forbidden"
+        check "an admin of another namespace is forbidden" log_has_pass "$SESSION_LOG" "an admin of another namespace: forbidden"
+        check "a removed binding stops access at once" log_has_pass "$SESSION_LOG" "a user whose binding was removed: forbidden"
+        check "a call with no token is refused" log_has_pass "$SESSION_LOG" "a call with no token is refused"
+        check "the audit Events name the user and the path and hold no secrets" log_has_pass "$SESSION_LOG" "hold no token and no content"
+    fi
 }
 
 cleanup() {
@@ -81,6 +100,6 @@ cleanup() {
     oc delete filesharepool "$PREFIX-pool" --ignore-not-found --wait=false
     oc delete backupbrowse -l "$SESSION_PREFIX-test=yes" --ignore-not-found --wait=false
     oc delete backuppolicy "$SESSION_PREFIX-policy" --ignore-not-found --wait=false
-    oc delete namespace "$SESSION_PREFIX-test" --ignore-not-found --wait=true --timeout=900s
+    oc delete namespace "$SESSION_PREFIX-test" "$SESSION_PREFIX-test-other" --ignore-not-found --wait=true --timeout=900s
     oc delete filesharepool "$SESSION_PREFIX-src" "$SESSION_PREFIX-snap" --ignore-not-found --wait=false
 }

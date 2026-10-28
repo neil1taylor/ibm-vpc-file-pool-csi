@@ -11,7 +11,7 @@ For pictures you can click through, see the [interactive diagrams](diagrams/inde
 - [Storage](#storage): pool, share, mount target, SubVolume, volume, plain volume, VM disk, allocation strategy, auto-expand, tier, drain, StorageClass, staging, reclaim policy
 - [Copies in the same pool](#copies-in-the-same-pool): snapshot, file snapshot, QEMU copy, instant snapshot, chain, overlay file, VM hook, Sidecar gate, flatten, clone
 - [How good a copy is](#how-good-a-copy-is): moment, file-system consistent, crash consistent, file copy, guest freeze
-- [Backup](#backup): backup, BackupPolicy, snapshot pool, keep time, restore, BackupRestore, restore point, change list, COS export, lock, backup key, browse session, browse helper
+- [Backup](#backup): backup, BackupPolicy, snapshot pool, keep time, restore, BackupRestore, restore point, change list, COS export, lock, backup key, browse session, backup gateway, backupfiles, browse helper
 - [Replication and failover](#replication-and-failover): replication, ReplicationPolicy, destination, receiver, rewind, failover
 - [Other words](#other-words): golden image, lifecycle hook, group snapshot, adaptive copy speed, PoolBench, knee, user workload monitoring, command-line plugins
 
@@ -282,6 +282,18 @@ Example: restore with `--backup-key-file ./backup-key.txt` if Key Protect is gon
 A **browse session** is one open look into one backup, kept as a `BackupBrowse` resource. Users never make or see it: the backup gateway makes it after checking their rights. The backup controller runs a browse helper for it and ends it when idle, at the hard limit, or when it is closed.
 
 Example: session for the backup of `apps/db`, open for 20 minutes, closed because it was idle.
+
+### Backup gateway
+
+The **backup gateway** is the one door to browse sessions. Users send it their own Kubernetes token (with `kubectl backup ls/get/browse`). It checks the token and, on every call, the right to read the backups of the claim's namespace, opens or reuses the user's session, relays the call to the helper pod, and writes an audit Event.
+
+Example: `kubectl backup ls --policy nightly --pvc apps/db /var/www`.
+
+### backupfiles
+
+**backupfiles** is a rights-only resource name (group `storage.ibmcloud.io`). No object of that kind is ever stored. RBAC uses it to say "may read the backups of this namespace": `get backupfiles` in namespace N. The role `backup-file-reader` carries it, and the built-in `admin` role includes it.
+
+Example: a RoleBinding to `backup-file-reader` in `apps` lets Alice browse the backups of the claims of `apps`.
 
 ### Browse helper
 

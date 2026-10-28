@@ -1,0 +1,323 @@
+{{- if and .Values.backupGateway.enabled .Values.backupBrowse.enabled }}
+{{- $name := printf "%s-gateway" (include "ibm-vpc-file-pool-csi.fullname" .) }}
+{{- $tlsSecret := .Values.backupGateway.tls.secretName | default (printf "%s-tls" $name) }}
+{{- $openshift := .Capabilities.APIVersions.Has "route.openshift.io/v1" }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup-gateway
+---
+# What the gateway may do in the cluster. It reads no Secrets here: a Role below
+# gives it the session Secrets of its own namespace only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup-gateway
+rules:
+  # Check who the caller is and what they may do.
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["subjectaccessreviews"]
+    verbs: ["create"]
+  # Which volumes have backups.
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["backuppolicies"]
+    verbs: ["get", "list"]
+  # Open, reuse and close sessions. The controller runs them.
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["backupbrowses"]
+    verbs: ["get", "list", "create", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup-gateway
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup-gateway
+rules:
+  # The audit trail.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup-gateway
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+# The token and the certificate of a session, to talk to its helper pod. Only in
+# the browse namespace, which holds nothing else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-secrets
+  namespace: {{ .Values.backupBrowse.namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup-gateway
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-secrets
+  namespace: {{ .Values.backupBrowse.namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup-gateway
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}-secrets
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+# The rights-only name "backupfiles": no object of that kind exists. It lets
+# RBAC say "may read the backups of this namespace". The reader is added to the
+# built-in "admin" role, so a namespace admin can read their own namespace's
+# backups with no setup. Another namespace's backups need a RoleBinding.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: backup-file-reader
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    rbac.authorization.k8s.io/aggregate-to-admin: "true"
+rules:
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["backupfiles"]
+    verbs: ["get"]
+---
+# For people who may also restore files out of a namespace's backups (later part).
+# The rights to make claims in the target namespace are separate.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: backup-file-restorer
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["backupfiles"]
+    verbs: ["get"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup-gateway
+  {{- if and $openshift (not .Values.backupGateway.tls.secretName) }}
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: {{ $tlsSecret }}
+  {{- end }}
+spec:
+  selector:
+    {{- include "ibm-vpc-file-pool-csi.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: backup-gateway
+  ports:
+    - name: https
+      port: 8443
+      targetPort: https
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup-gateway
+spec:
+  replicas: {{ .Values.backupGateway.replicas }}
+  selector:
+    matchLabels:
+      {{- include "ibm-vpc-file-pool-csi.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: backup-gateway
+  template:
+    metadata:
+      labels:
+        {{- include "ibm-vpc-file-pool-csi.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: backup-gateway
+    spec:
+      serviceAccountName: {{ $name }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: gateway
+          image: "{{ include "ibm-vpc-file-pool-csi.driverImage" . }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          args:
+            - --mode=backup-gateway
+            - --gateway-listen=:8443
+            - --gateway-browse-namespace={{ .Values.backupBrowse.namespace }}
+            - --gateway-tls-cert-file=/etc/gateway-tls/tls.crt
+            - --gateway-tls-key-file=/etc/gateway-tls/tls.key
+            - --gateway-session-wait={{ .Values.backupGateway.sessionWait }}
+            - --gateway-max-download-bytes={{ int64 .Values.backupGateway.maxDownloadBytes }}
+            - -v={{ .Values.logLevel }}
+          ports:
+            - name: https
+              containerPort: 8443
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: https
+              scheme: HTTPS
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: https
+              scheme: HTTPS
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.backupGateway.resources | nindent 12 }}
+          volumeMounts:
+            - name: gateway-tls
+              mountPath: /etc/gateway-tls
+              readOnly: true
+      volumes:
+        - name: gateway-tls
+          secret:
+            secretName: {{ $tlsSecret }}
+---
+# The address of the gateway, for "kubectl backup". Every signed-in user may read
+# this one ConfigMap and no other in this namespace.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backup-gateway-info
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup-gateway
+data:
+  {{- $route := lookup "route.openshift.io/v1" "Route" .Release.Namespace $name }}
+  {{- $host := .Values.backupGateway.route.host }}
+  {{- if and (not $host) $route }}{{ $host = $route.spec.host }}{{ end }}
+  {{- if .Values.backupGateway.url }}
+  url: {{ .Values.backupGateway.url | quote }}
+  {{- else if $host }}
+  url: {{ printf "https://%s" $host | quote }}
+  {{- else }}
+  url: ""
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-info
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup-gateway
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["backup-gateway-info"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-info
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup-gateway
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}-info
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: system:authenticated
+{{- if and .Values.backupGateway.route.enabled $openshift }}
+---
+# Reencrypt: the router answers with the cluster's ingress certificate, which is
+# for the Route's host, and encrypts again to the gateway, whose service
+# certificate (made by the service CA, which the router trusts) is for the
+# service name. A passthrough Route would show the service certificate to the
+# client, and the host name would not match.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup-gateway
+spec:
+  {{- with .Values.backupGateway.route.host }}
+  host: {{ . }}
+  {{- end }}
+  to:
+    kind: Service
+    name: {{ $name }}
+  port:
+    targetPort: https
+  tls:
+    termination: reencrypt
+    insecureEdgeTerminationPolicy: Redirect
+{{- end }}
+{{- end }}
