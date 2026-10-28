@@ -1051,10 +1051,11 @@ func (f vmCopyFlags) applyOptions(now time.Time) (replication.ApplyOptions, erro
 // applyVMDiskMessage is the termination message of an apply-vm-disk Job.
 func applyVMDiskMessage(res replication.VMDiskResult) string {
 	msg := struct {
-		BytesWritten       int64      `json:"bytesWritten"`
-		RestorePoints      int        `json:"restorePoints"`
-		OldestRestorePoint *time.Time `json:"oldestRestorePoint,omitempty"`
-	}{res.ChangedBytes, res.RestorePoints, res.OldestRestorePoint}
+		BytesWritten        int64       `json:"bytesWritten"`
+		RestorePoints       int         `json:"restorePoints"`
+		OldestRestorePoint  *time.Time  `json:"oldestRestorePoint,omitempty"`
+		RestorePointMoments []time.Time `json:"restorePointMoments,omitempty"`
+	}{res.ChangedBytes, res.RestorePoints, res.OldestRestorePoint, res.RestorePointMoments}
 	b, _ := json.Marshal(msg)
 	return string(b)
 }
@@ -1101,12 +1102,13 @@ func sendVMDiskArgs(f vmCopyFlags, destBasePath, subPath, svName, copyID, vmGrou
 // failed, so the Job is not retried: the controller makes the next copy full.
 func sendVMDiskMessage(res replication.VMSendResult, wrongBase *replication.WrongBaseError) string {
 	msg := struct {
-		BytesWritten       int64      `json:"bytesWritten"`
-		RestorePoints      int32      `json:"restorePoints"`
-		OldestRestorePoint *time.Time `json:"oldestRestorePoint,omitempty"`
-		WrongBase          bool       `json:"wrongBase,omitempty"`
-		DiskMoment         string     `json:"diskMoment,omitempty"`
-	}{res.SentBytes, res.RestorePoints, res.OldestRestorePoint, false, ""}
+		BytesWritten        int64       `json:"bytesWritten"`
+		RestorePoints       int32       `json:"restorePoints"`
+		OldestRestorePoint  *time.Time  `json:"oldestRestorePoint,omitempty"`
+		RestorePointMoments []time.Time `json:"restorePointMoments,omitempty"`
+		WrongBase           bool        `json:"wrongBase,omitempty"`
+		DiskMoment          string      `json:"diskMoment,omitempty"`
+	}{res.SentBytes, res.RestorePoints, res.OldestRestorePoint, res.RestorePointMoments, false, ""}
 	if wrongBase != nil {
 		msg.WrongBase, msg.DiskMoment = true, wrongBase.DiskMoment
 	}

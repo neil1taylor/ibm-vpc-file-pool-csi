@@ -58,6 +58,14 @@ export const COLUMN_HELP = {
     title: 'Restore Points',
     text: 'How many earlier copies of a running VM disk the destination keeps, so a failover can go back to an earlier moment.',
   },
+  recoveryCopyMoment: {
+    title: 'Copy Moment',
+    text: 'How long ago the newest copy of the VM was made. All disks of the VM show this moment. A warning means the copy is older than twice the schedule: check that replication is running.',
+  },
+  recoveryMoments: {
+    title: 'Moments to Recover To',
+    text: 'The moments that every disk of the VM can show: the copy moment and the restore points all disks have. A recovery must use one of these, or the disks would show different times. Newest first, as ages; the list can be a few minutes old.',
+  },
   syncNextCopy: {
     title: 'Next Copy',
     text: 'For a running VM disk: whether the next copy sends only the blocks changed since the last copy, or the full disk. A full copy is needed again, for example, after the VM moved to another node.',

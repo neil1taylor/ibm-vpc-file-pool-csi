@@ -30,6 +30,8 @@ type VMDiskResult struct {
 	// and OldestRestorePoint the oldest of them.
 	RestorePoints      int
 	OldestRestorePoint *time.Time
+	// RestorePointMoments lists them, oldest first.
+	RestorePointMoments []time.Time
 }
 
 // openStaging opens a staging file as a qcow2 image. It refuses a name that
@@ -118,6 +120,7 @@ func restorePointsResult(res VMDiskResult, diskPath string) (VMDiskResult, error
 		return res, err
 	}
 	res.RestorePoints = len(points)
+	res.RestorePointMoments = points
 	if len(points) > 0 {
 		res.OldestRestorePoint = &points[0]
 	}

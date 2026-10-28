@@ -1,5 +1,6 @@
 import {
   describeReceiverReachable,
+  describeVMRecovery,
   describeVolumeStatus,
   destinationSpecFields,
   replicationDestination,
@@ -222,5 +223,73 @@ describe('describeReceiverReachable', () => {
       ]),
     );
     expect(view).toEqual({ label: 'Not reachable', color: 'red', detail: 'token refused' });
+  });
+});
+
+describe('describeVMRecovery', () => {
+  const now = new Date('2026-10-20T12:00:00Z');
+  beforeEach(() => jest.useFakeTimers().setSystemTime(now));
+  afterEach(() => jest.useRealTimers());
+
+  it('shows the copy moment, consistency and the moments all disks share', () => {
+    const [v] = describeVMRecovery(
+      [
+        {
+          name: 'default/web',
+          subVolumes: ['pvc-a', 'pvc-b'],
+          copyMoment: '2026-10-20T11:00:00Z',
+          consistency: 'FileSystemConsistent',
+          commonMoments: ['2026-10-20T11:00:00Z', '2026-10-20T10:00:00Z', '2026-10-20T09:00:00Z'],
+        },
+      ],
+      '2h',
+      now,
+    );
+    expect(v.name).toBe('default/web');
+    expect(v.disks).toBe(2);
+    expect(v.copyMoment).toBe('1h');
+    expect(v.consistency).toBe('File-system consistent');
+    expect(v.consistencyWarning).toBe(false);
+    expect(v.momentCount).toBe(3);
+    expect(v.moments).toEqual(['1h', '2h', '3h']);
+    expect(v.stale).toBe(false);
+  });
+
+  it('warns when the newest copy is older than twice the schedule', () => {
+    const vm = (copyMoment: string) => ({ name: 'default/web', subVolumes: ['a'], copyMoment, commonMoments: [copyMoment] });
+    expect(describeVMRecovery([vm('2026-10-20T07:59:00Z')], '2h', now)[0].stale).toBe(true);
+    expect(describeVMRecovery([vm('2026-10-20T08:01:00Z')], '2h', now)[0].stale).toBe(false);
+    expect(describeVMRecovery([vm('2026-10-20T07:59:00Z')], '2h', now)[0].staleText).toMatch(/older than twice the 2h schedule/);
+  });
+
+  it('warns when the VM has no copy at all, or the schedule cannot be read', () => {
+    const none = describeVMRecovery([{ name: 'default/web', subVolumes: ['a'] }], '2h', now)[0];
+    expect(none.copyMoment).toBe('-');
+    expect(none.momentCount).toBe(0);
+    expect(none.stale).toBe(true);
+    const odd = describeVMRecovery([{ name: 'x', subVolumes: ['a'], copyMoment: '2020-01-01T00:00:00Z' }], 'weekly', now)[0];
+    expect(odd.stale).toBe(false);
+  });
+
+  it('flags a crash consistent copy and caps the list of moments', () => {
+    const moments = Array.from({ length: 8 }, (_, i) => new Date(now.getTime() - (i + 1) * 60000).toISOString());
+    const [v] = describeVMRecovery(
+      [{ name: 'a/b', subVolumes: ['x'], copyMoment: moments[0], consistency: 'CrashConsistent', commonMoments: moments }],
+      '1h',
+      now,
+    );
+    expect(v.consistencyWarning).toBe(true);
+    expect(v.momentCount).toBe(8);
+    expect(v.moments).toHaveLength(5);
+  });
+
+  it('says there is nothing to recover to when the disks share no moment', () => {
+    const [v] = describeVMRecovery(
+      [{ name: 'a/b', subVolumes: ['x', 'y'], copyMoment: '2026-10-20T11:00:00Z', commonMoments: [] }],
+      '2h',
+      now,
+    );
+    expect(v.momentCount).toBe(0);
+    expect(v.noCommonMoment).toBe(true);
   });
 });

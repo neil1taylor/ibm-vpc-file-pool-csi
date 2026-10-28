@@ -792,6 +792,7 @@ func (c *vmCall) commit() {
 	out := CommitResponse{ChangedBytes: res.ChangedBytes, RolledBack: res.RolledBack}
 	if points, perr := RestorePoints(c.disk); perr == nil {
 		out.RestorePoints = int32(len(points)) // #nosec G115 -- a handful
+		out.RestorePointMoments = points
 		if len(points) > 0 {
 			out.OldestRestorePoint = &points[0]
 		}

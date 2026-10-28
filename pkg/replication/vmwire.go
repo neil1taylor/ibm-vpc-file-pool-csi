@@ -173,6 +173,9 @@ type CommitResponse struct {
 	// and OldestRestorePoint the oldest of them.
 	RestorePoints      int32      `json:"restorePoints"`
 	OldestRestorePoint *time.Time `json:"oldestRestorePoint,omitempty"`
+	// RestorePointMoments lists them, oldest first. The source uses them to
+	// find the moments all disks of a VM share.
+	RestorePointMoments []time.Time `json:"restorePointMoments,omitempty"`
 }
 
 // DiskMomentHeader is the response header of the compare call. It holds the

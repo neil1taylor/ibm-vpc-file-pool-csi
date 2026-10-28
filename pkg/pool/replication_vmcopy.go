@@ -542,6 +542,11 @@ func (rc *ReplicationController) advanceVMCopy(ctx context.Context, policy *v1al
 					t := metav1.NewTime(*o)
 					s.OldestRestorePoint = &t
 				}
+				s.RestorePointMoments = nil
+				for _, m := range results[i].RestorePointMoments {
+					s.RestorePointMoments = append(s.RestorePointMoments, metav1.NewTime(m))
+				}
+				s.VMName = ns + "/" + st.VMIName
 				rc.recordSubVolumeSyncTime(policy.Name, sv.Name)
 			}
 			res.statuses = append(res.statuses, s)
@@ -619,6 +624,7 @@ func (rc *ReplicationController) advanceVMCopies(ctx context.Context, policy *v1
 			policy.Status.LastError = ""
 		}
 	}
+	policy.Status.VMs = vmReplicationStatuses(policy.Status.SubVolumeStatuses)
 	if err := rc.k8sClient.UpdateReplicationPolicyStatus(ctx, policy); err != nil {
 		klog.ErrorS(err, "Failed to update policy status for VM disk copies", "policy", policy.Name)
 	}
@@ -883,4 +889,71 @@ func (rc *ReplicationController) ensureVMSendJob(ctx context.Context, policy *v1
 	}
 	klog.V(2).InfoS("Created VM disk send Job", "job", klog.KRef(replJobNamespace, jobName), "policy", policy.Name, "subVolume", sv.Name, "endpoint", policy.Spec.DestinationEndpoint)
 	return nil
+}
+
+// vmReplicationStatuses builds the per-VM status from the per-disk statuses.
+// The common moments of a VM are the moments every one of its disks can show:
+// each disk shows its copy moment and can be rewound to its restore points.
+// Rewinding disks to different moments would give the guest a mix of two
+// times, so a moment only one disk has is not listed. A disk with no known
+// copy moment leaves the VM with no common moment.
+func vmReplicationStatuses(statuses []v1alpha1.SubVolumeReplicationStatus) []v1alpha1.VMReplicationStatus {
+	byVM := map[string][]v1alpha1.SubVolumeReplicationStatus{}
+	for _, s := range statuses {
+		if s.VMName != "" {
+			byVM[s.VMName] = append(byVM[s.VMName], s)
+		}
+	}
+	names := make([]string, 0, len(byVM))
+	for n := range byVM {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+
+	out := make([]v1alpha1.VMReplicationStatus, 0, len(names))
+	for _, n := range names {
+		disks := byVM[n]
+		sort.Slice(disks, func(i, j int) bool { return disks[i].SubVolumeName < disks[j].SubVolumeName })
+		vm := v1alpha1.VMReplicationStatus{Name: n}
+		var common map[time.Time]bool
+		for _, d := range disks {
+			vm.SubVolumes = append(vm.SubVolumes, d.SubVolumeName)
+			if d.Consistency == consistencyCrash {
+				vm.Consistency = consistencyCrash
+			} else if vm.Consistency == "" {
+				vm.Consistency = d.Consistency
+			}
+			if d.CopyMoment == nil {
+				common = map[time.Time]bool{}
+				continue
+			}
+			if vm.CopyMoment == nil || d.CopyMoment.Before(vm.CopyMoment) {
+				m := *d.CopyMoment
+				vm.CopyMoment = &m
+			}
+			set := map[time.Time]bool{d.CopyMoment.UTC(): true}
+			for _, rp := range d.RestorePointMoments {
+				set[rp.UTC()] = true
+			}
+			if common == nil {
+				common = set
+				continue
+			}
+			for m := range common {
+				if !set[m] {
+					delete(common, m)
+				}
+			}
+		}
+		moments := make([]time.Time, 0, len(common))
+		for m := range common {
+			moments = append(moments, m)
+		}
+		sort.Slice(moments, func(i, j int) bool { return moments[i].After(moments[j]) })
+		for _, m := range moments {
+			vm.CommonMoments = append(vm.CommonMoments, metav1.NewTime(m))
+		}
+		out = append(out, vm)
+	}
+	return out
 }

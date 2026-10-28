@@ -176,6 +176,12 @@ type ReplicationPolicyStatus struct {
 	// +optional
 	SubVolumeStatuses []SubVolumeReplicationStatus `json:"subVolumeStatuses,omitempty"`
 
+	// VMs lists, for each running VM in the policy, the moments the whole VM
+	// can be recovered to. It is the source cluster's view of the destination
+	// and can be a few minutes old; a Failover plan is the exact view.
+	// +optional
+	VMs []VMReplicationStatus `json:"vms,omitempty"`
+
 	// ConsecutiveFailures counts sequential failed replication cycles.
 	// Resets to 0 on success.
 	ConsecutiveFailures int32 `json:"consecutiveFailures"`
@@ -238,10 +244,43 @@ type SubVolumeReplicationStatus struct {
 	// +optional
 	OldestRestorePoint *metav1.Time `json:"oldestRestorePoint,omitempty"`
 
+	// RestorePointMoments lists the moments of those restore points, oldest
+	// first. It is what the destination reported after the last good copy.
+	// +optional
+	RestorePointMoments []metav1.Time `json:"restorePointMoments,omitempty"`
+
+	// VMName is "namespace/name" of the VM that owns this disk. It is set for
+	// the disks of running VMs only.
+	// +optional
+	VMName string `json:"vmName,omitempty"`
+
 	// VMCopy is the state of a running VM disk copy that is not finished.
 	// The controller uses it to continue the copy across cycles and restarts.
 	// +optional
 	VMCopy *VMCopyState `json:"vmCopy,omitempty"`
+}
+
+// VMReplicationStatus is the replication state of one running VM.
+type VMReplicationStatus struct {
+	// Name is "namespace/name" of the VM.
+	Name string `json:"name"`
+
+	// SubVolumes are the VM's disks in this policy.
+	SubVolumes []string `json:"subVolumes"`
+
+	// CopyMoment is the moment of the newest copy, and Consistency says how
+	// consistent it is. They are the oldest copy moment among the disks.
+	// +optional
+	CopyMoment *metav1.Time `json:"copyMoment,omitempty"`
+	// +kubebuilder:validation:Enum=FileSystemConsistent;CrashConsistent
+	// +optional
+	Consistency string `json:"consistency,omitempty"`
+
+	// CommonMoments are the moments that ALL disks of the VM can show: the
+	// copy moment and the restore points every disk has. Newest first. A
+	// recovery must use one of these, or the disks would not match.
+	// +optional
+	CommonMoments []metav1.Time `json:"commonMoments,omitempty"`
 }
 
 // VMCopyState is the state of an unfinished copy of a running VM's disk.

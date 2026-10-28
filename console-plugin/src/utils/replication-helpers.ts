@@ -1,4 +1,5 @@
-import { ReplicationPolicy, ReplicationPolicySpec, SubVolumeReplicationStatus } from '../types';
+import { ReplicationPolicy, ReplicationPolicySpec, SubVolumeReplicationStatus, VMReplicationStatus } from '../types';
+import { parseGoDuration } from './backup-policy-form';
 import { formatAge } from './resource-helpers';
 
 interface DestinationInput {
@@ -149,4 +150,65 @@ export function describeReceiverReachable(policy: ReplicationPolicy): ReceiverRe
   if (!cond) return { label: 'Checking...', color: 'grey', detail: '' };
   if (cond.status === 'True') return { label: 'Reachable', color: 'green', detail: '' };
   return { label: 'Not reachable', color: 'red', detail: cond.message || cond.reason || '' };
+}
+
+export interface VMRecoveryView {
+  name: string;
+  disks: number;
+  /** How long ago the newest copy was made, or '-'. */
+  copyMoment: string;
+  consistency: string;
+  /** True when the copy is only crash consistent. */
+  consistencyWarning: boolean;
+  /** How many moments all disks of the VM share. */
+  momentCount: number;
+  /** The newest of those moments, as ages. */
+  moments: string[];
+  /** True when the disks share no moment, so the VM cannot be recovered to a matching state. */
+  noCommonMoment: boolean;
+  /** True when the newest copy is older than twice the schedule. */
+  stale: boolean;
+  staleText: string;
+}
+
+const MAX_MOMENTS_SHOWN = 5;
+
+/**
+ * What the policy page shows for each running VM: the copy moment, whether it is consistent, the moments a
+ * recovery can use, and a warning if the data is stale. Stale means the newest copy is older than twice the
+ * schedule, or there is no copy. A schedule that is not a duration never makes a copy stale.
+ */
+export function describeVMRecovery(
+  vms: VMReplicationStatus[] | undefined,
+  schedule: string | undefined,
+  now: Date = new Date(),
+): VMRecoveryView[] {
+  const scheduleMs = schedule ? parseGoDuration(schedule) : undefined;
+  return (vms || []).map((vm) => {
+    const moments = vm.commonMoments || [];
+    let stale = false;
+    let staleText = '';
+    if (!vm.copyMoment) {
+      stale = true;
+      staleText = 'No copy yet';
+    } else if (scheduleMs && now.getTime() - new Date(vm.copyMoment).getTime() > 2 * scheduleMs) {
+      stale = true;
+      staleText = `Newest copy is older than twice the ${schedule} schedule`;
+    }
+    let consistency = '-';
+    if (vm.consistency === 'FileSystemConsistent') consistency = 'File-system consistent';
+    if (vm.consistency === 'CrashConsistent') consistency = 'Crash consistent';
+    return {
+      name: vm.name,
+      disks: vm.subVolumes.length,
+      copyMoment: formatAge(vm.copyMoment),
+      consistency,
+      consistencyWarning: vm.consistency === 'CrashConsistent',
+      momentCount: moments.length,
+      moments: moments.slice(0, MAX_MOMENTS_SHOWN).map((m) => formatAge(m)),
+      noCommonMoment: moments.length === 0,
+      stale,
+      staleText,
+    };
+  });
 }
