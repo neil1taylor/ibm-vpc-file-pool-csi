@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/browse"
@@ -91,6 +93,7 @@ func (g *Gateway) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/sessions/{name}", g.auth(g.handleStatus))
 	mux.HandleFunc("DELETE /v1/sessions/{name}", g.auth(g.handleClose))
 	mux.HandleFunc("POST /v1/sessions/{name}/{op}", g.auth(g.handleOp))
+	mux.HandleFunc("GET /v1/sessions/{name}/download", g.auth(g.handleDownload))
 	// Anything else needs a token too, and is not found.
 	mux.HandleFunc("/", g.auth(func(w http.ResponseWriter, _ *http.Request, _ User) {
 		writeError(w, http.StatusNotFound, "not_found", "no such call")
@@ -455,7 +458,40 @@ func (g *Gateway) handleOp(w http.ResponseWriter, r *http.Request, u User) {
 	if !ok {
 		return
 	}
-	op := r.PathValue("op")
+	g.forward(w, r, u, bb, r.PathValue("op"))
+}
+
+// handleDownload serves one file ("type=file") or one folder as a tar
+// ("type=tar") to a GET, which is what a browser can stream to disk. The path
+// is one "p" value per name, each name in base64 as in the other calls. It takes
+// the same steps as the POST calls and sets headers that make a browser save the
+// reply and never show it.
+func (g *Gateway) handleDownload(w http.ResponseWriter, r *http.Request, u User) {
+	bb, ok := g.session(w, r, u)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	op := q.Get("type")
+	if (op != "file" && op != "tar") || (op == "file" && len(q["p"]) == 0) {
+		writeError(w, http.StatusBadRequest, "bad_path", "the request is not valid")
+		return
+	}
+	names := make([]string, 0, len(q["p"]))
+	for _, p := range q["p"] {
+		j, _ := json.Marshal(p)
+		names = append(names, string(j))
+	}
+	body := `{"path":[` + strings.Join(names, ",") + `]}`
+	if op == "file" {
+		body = `{"path":[` + strings.Join(names, ",") + `],"length":-1}`
+	}
+	r.Body = io.NopCloser(strings.NewReader(body))
+	g.forward(w, r, u, bb, op)
+}
+
+// forward checks one call to the helper, sends it on and relays the reply.
+func (g *Gateway) forward(w http.ResponseWriter, r *http.Request, u User, bb *v1alpha1.BackupBrowse, op string) {
 	body, path, err := opBody(op, r)
 	switch {
 	case errors.Is(err, errUnknownOp):
@@ -505,6 +541,9 @@ func (g *Gateway) relay(w http.ResponseWriter, r *http.Request, u User, bb *v1al
 		if v := resp.Header.Get(h); v != "" {
 			w.Header().Set(h, v)
 		}
+	}
+	if (op == "file" || op == "tar") && resp.StatusCode == http.StatusOK {
+		setDownloadHeaders(w, op, path)
 	}
 	if op == "tar" && resp.StatusCode == http.StatusOK {
 		w.Header().Set("Trailer", "X-Browse-Report")
@@ -578,4 +617,76 @@ func (g *Gateway) audit(ctx context.Context, bb *v1alpha1.BackupBrowse, reason, 
 	if err := g.c.Create(ctx, ev); err != nil {
 		klog.ErrorS(err, "Could not write an audit Event", "session", bb.Name)
 	}
+}
+
+// setDownloadHeaders makes a browser save a reply and never show it. The reply
+// is a backup file that someone else controlled, and the console serves it from
+// its own origin, so it must never be taken for a page: it is always a download,
+// never sniffed, and sandboxed if it is opened anyway.
+func setDownloadHeaders(w http.ResponseWriter, op string, path [][]byte) {
+	h := w.Header()
+	if op == "tar" {
+		h.Set("Content-Type", "application/x-tar")
+	} else {
+		h.Set("Content-Type", "application/octet-stream")
+	}
+	h.Set("Content-Disposition", contentDisposition(op, path))
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Content-Security-Policy", "sandbox; default-src 'none'")
+	h.Set("Cache-Control", "no-store")
+}
+
+// contentDisposition names the saved file after the last name of the path. A
+// name that is not plain printable text, or that holds a quote, a backslash,
+// a slash or a percent sign, is replaced, so the header cannot be broken out of.
+func contentDisposition(op string, path [][]byte) string {
+	ext, name := "", "download"
+	if op == "tar" {
+		ext, name = ".tar", "backup"
+	}
+	fallback := name
+	if len(path) > 0 {
+		if n := path[len(path)-1]; safeFileName(n) {
+			name = string(n)
+			if isASCII(name) {
+				fallback = name
+			}
+		}
+	}
+	return fmt.Sprintf(`attachment; filename="%s%s"; filename*=UTF-8''%s%s`, fallback, ext, attrEscape(name), ext)
+}
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] > unicode.MaxASCII {
+			return false
+		}
+	}
+	return true
+}
+
+func safeFileName(n []byte) bool {
+	if len(n) == 0 || !utf8.Valid(n) {
+		return false
+	}
+	for _, r := range string(n) {
+		if r == '"' || r == '\\' || r == '/' || r == '%' || !unicode.IsPrint(r) {
+			return false
+		}
+	}
+	return true
+}
+
+// attrEscape percent-encodes everything but the characters RFC 5987 allows in a value.
+func attrEscape(s string) string {
+	var b strings.Builder
+	for _, c := range []byte(s) {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', strings.IndexByte("!#$&+-.^_`|~", c) >= 0:
+			b.WriteByte(c)
+		default:
+			fmt.Fprintf(&b, "%%%02X", c)
+		}
+	}
+	return b.String()
 }

@@ -191,10 +191,12 @@ describe('policyProblem', () => {
 });
 
 describe('browseFilesAvailable', () => {
-  it('is off until the file-restore feature says it is present', () => {
+  it('is off until the chart says the backup gateway runs', () => {
     expect(browseFilesAvailable(undefined)).toBe(false);
     expect(browseFilesAvailable({})).toBe(false);
-    expect(browseFilesAvailable({ fileRestore: true })).toBe(true);
+    expect(browseFilesAvailable({ data: { vmSnapshotMethod: 'auto' } })).toBe(false);
+    expect(browseFilesAvailable({ data: { fileBrowse: 'false' } })).toBe(false);
+    expect(browseFilesAvailable({ data: { fileBrowse: 'true' } })).toBe(true);
   });
 });
 
