@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -710,5 +711,104 @@ func TestSessionStatusForTheOwner(t *testing.T) {
 	}
 	if strings.Contains(string(body), e.h.token) || strings.Contains(string(body), "127.0.0.1") {
 		t.Errorf("status leaks internals: %s", body)
+	}
+}
+
+// A browser starts a download with a GET (through the console proxy, which adds
+// the user's token), so the gateway has a GET route for one file or one folder.
+func TestDownloadByGet(t *testing.T) {
+	e := newEnv(t, Config{}, memTree{})
+	e.readySession("s1", "alice", "apps", "db")
+
+	resp, body := e.do("GET", "/v1/sessions/s1/download?type=file&p="+url.QueryEscape(b64("index.php")), "alice-token", nil)
+	if resp.StatusCode != 200 || string(body) != "xxxxx" {
+		t.Fatalf("file: %d %q", resp.StatusCode, body)
+	}
+	h := resp.Header
+	if cd := h.Get("Content-Disposition"); !strings.HasPrefix(cd, "attachment;") || !strings.Contains(cd, `filename="index.php"`) || !strings.Contains(cd, "filename*=UTF-8''index.php") {
+		t.Errorf("Content-Disposition: %q", cd)
+	}
+	for k, want := range map[string]string{
+		"X-Content-Type-Options":  "nosniff",
+		"Content-Security-Policy": "sandbox; default-src 'none'",
+		"Cache-Control":           "no-store",
+		"Content-Type":            "application/octet-stream",
+	} {
+		if got := h.Get(k); got != want {
+			t.Errorf("%s: %q, want %q", k, got, want)
+		}
+	}
+
+	resp, body = e.do("GET", "/v1/sessions/s1/download?type=tar&p="+url.QueryEscape(b64("www")), "alice-token", nil)
+	if resp.StatusCode != 200 || !bytes.Contains(body, []byte("a.txt")) {
+		t.Fatalf("tar: %d", resp.StatusCode)
+	}
+	if cd := resp.Header.Get("Content-Disposition"); !strings.Contains(cd, `filename="www.tar"`) {
+		t.Errorf("tar Content-Disposition: %q", cd)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/x-tar" {
+		t.Errorf("tar Content-Type: %q", ct)
+	}
+
+	// A name that is not safe text gets a plain file name, and the quote cannot break out of the header.
+	resp, _ = e.do("GET", "/v1/sessions/s1/download?type=file&p="+url.QueryEscape(b64("a\"b\r\nX: y")), "alice-token", nil)
+	if cd := resp.Header.Get("Content-Disposition"); strings.ContainsAny(cd, "\r\n") || !strings.Contains(cd, `filename="download"`) {
+		t.Errorf("unsafe name: %q", cd)
+	}
+	resp, _ = e.do("GET", "/v1/sessions/s1/download?type=file&p="+url.QueryEscape(b64("café.txt")), "alice-token", nil)
+	if cd := resp.Header.Get("Content-Disposition"); !strings.Contains(cd, "filename*=UTF-8''caf%C3%A9.txt") {
+		t.Errorf("accented name: %q", cd)
+	}
+}
+
+func TestDownloadByGetKeepsEveryRule(t *testing.T) {
+	e := newEnv(t, Config{MaxDownloadBytes: 1000}, memTree{big: 5000})
+	e.readySession("s1", "alice", "apps", "db")
+	f := "/v1/sessions/s1/download?type=file&p=" + url.QueryEscape(b64("big"))
+
+	if r, _ := e.do("GET", f, "", nil); r.StatusCode != 401 {
+		t.Errorf("no token: %d", r.StatusCode)
+	}
+	if r, _ := e.do("GET", f, "bob-token", nil); r.StatusCode != 404 {
+		t.Errorf("another user's session: %d", r.StatusCode)
+	}
+	e.authz.set("alice", "apps", false)
+	if r, _ := e.do("GET", f, "alice-token", nil); r.StatusCode != 403 {
+		t.Errorf("rights removed: %d", r.StatusCode)
+	}
+	e.authz.set("alice", "apps", true)
+	if r, _ := e.do("GET", f, "alice-token", nil); r.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Errorf("over the limit: %d", r.StatusCode)
+	}
+	for _, bad := range []string{"type=shell", "type=file&p=" + url.QueryEscape(b64("..")), "type=file&p=!!!notbase64", "type=file&p=" + url.QueryEscape(b64("a/b"))} {
+		if r, _ := e.do("GET", "/v1/sessions/s1/download?"+bad, "alice-token", nil); r.StatusCode != 400 && r.StatusCode != 404 {
+			t.Errorf("%s: %d", bad, r.StatusCode)
+		}
+	}
+	// A file download needs a path; only a folder download may be the whole backup.
+	if r, _ := e.do("GET", "/v1/sessions/s1/download?type=file", "alice-token", nil); r.StatusCode != 400 {
+		t.Errorf("file without a path: %d", r.StatusCode)
+	}
+	e2 := newEnv(t, Config{}, memTree{})
+	e2.readySession("s1", "alice", "apps", "db")
+	e2.do("GET", "/v1/sessions/s1/download?type=file&p="+url.QueryEscape(b64("index.php")), "alice-token", nil)
+	found := false
+	for _, ev := range e2.events() {
+		if ev.Reason == "FileDownloaded" && strings.Contains(ev.Message, "alice") && strings.Contains(ev.Message, "index.php") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("a download by GET must write the audit Event")
+	}
+}
+
+// The reply to a POST download carries the same safe headers, for kubectl and for any other client.
+func TestPostDownloadsHaveSafeHeaders(t *testing.T) {
+	e := newEnv(t, Config{}, memTree{})
+	e.readySession("s1", "alice", "apps", "db")
+	resp, _ := e.do("POST", "/v1/sessions/s1/file", "alice-token", map[string]any{"path": []string{b64("index.php")}, "length": -1})
+	if resp.Header.Get("X-Content-Type-Options") != "nosniff" || !strings.HasPrefix(resp.Header.Get("Content-Disposition"), "attachment") {
+		t.Errorf("headers: %v", resp.Header)
 	}
 }

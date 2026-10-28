@@ -30,6 +30,7 @@ jest.mock('./replicationpolicy/ReplicationPolicyListPage', () => ({ __esModule: 
 jest.mock('./replicationpolicy/ReplicationPolicyDetailsPage', () => ({ __esModule: true, default: () => null }));
 jest.mock('./replicationpolicy/ReplicationPolicyCreatePage', () => ({ __esModule: true, default: () => null }));
 jest.mock('./backup/BackupListPage', () => ({ __esModule: true, default: () => null }));
+jest.mock('./backup/BackupBrowsePage', () => ({ __esModule: true, default: () => null }));
 jest.mock('./backup/BackupRestorePage', () => ({ __esModule: true, default: () => null }));
 jest.mock('./backup/BackupPolicyFormPage', () => ({ __esModule: true, default: () => null }));
 jest.mock('./backup/BackupCOSRestorePage', () => ({ __esModule: true, default: () => null }));
@@ -55,6 +56,7 @@ const cases: Array<[string, string]> = [
   ['/vpc-file-pools/replication/dr', 'TUTORIAL-06-REPLICATION-AND-FAILOVER.md'],
   ['/vpc-file-pools/replication/~recovery', 'TUTORIAL-06-REPLICATION-AND-FAILOVER.md'],
   ['/vpc-file-pools/migrate', 'TUTORIAL-08-MIGRATION-AND-CONSOLE.md'],
+  ['/vpc-file-pools/backups/nightly/browse', 'TUTORIAL-10-BACKUP-AND-RESTORE.md'],
 ];
 
 describe('every page has a Help link with the right guide', () => {

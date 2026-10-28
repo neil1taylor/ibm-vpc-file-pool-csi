@@ -11,6 +11,7 @@ import {
   exportStateText,
 } from '../../utils/backup-helpers';
 import { restorePath } from '../../utils/backup-helpers';
+import { browsePath } from '../../utils/backup-browse';
 import { columnInfo } from '../../utils/column-help';
 import { API_GROUP } from '../../constants';
 import CardHelpTitle from '../common/CardHelpTitle';
@@ -18,13 +19,26 @@ import DeleteBackupsDialog from './DeleteBackupsDialog';
 
 interface Props {
   policy: BackupPolicy;
-  /** What the console knows about the driver. The Browse files action shows only when file restore is present. */
+  /** What the console knows about the driver. The Browse files action shows only when the backup gateway runs. */
   settings?: DriverSettings;
   /** A claim ("namespace/name") whose Delete backups dialog opens at once, as when a link names it. */
   deleteClaim?: string;
   /** Called when the Delete backups dialog is closed. */
   onDeleteClosed?: () => void;
 }
+
+/**
+ * Opens the file browser of a volume. The gateway checks the right on every call; this check only keeps the
+ * console from offering a page that will say "forbidden": get on backupfiles in the claim's namespace.
+ */
+const BrowseFilesAction: React.FC<{ policy: string; namespace: string; name: string }> = ({ policy, namespace, name }) => {
+  const [canBrowse] = useAccessReview({ group: API_GROUP, resource: 'backupfiles', verb: 'get', namespace });
+  return canBrowse ? (
+    <Link to={browsePath(policy, `${namespace}/${name}`)}>Browse files</Link>
+  ) : (
+    <span>Browse files (needs the right to get backupfiles in {namespace})</span>
+  );
+};
 
 const EXPORT_COLOR = { ok: 'green', warning: 'orange', danger: 'red' } as const;
 
@@ -47,7 +61,9 @@ const BackupVolumesTable: React.FC<Props> = ({ policy, settings, deleteClaim, on
       { title: 'Delete backups', onClick: () => setDeleting(volume) },
     ];
     if (browseFilesAvailable(settings)) {
-      actions.push({ title: 'Browse files' });
+      actions.push({
+        title: <BrowseFilesAction policy={policy.metadata?.name || ''} namespace={volume.pvcNamespace} name={volume.pvcName} />,
+      });
     }
     return actions;
   };

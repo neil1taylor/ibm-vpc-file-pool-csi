@@ -304,9 +304,27 @@ describe('BackupVolumesTable', () => {
       screen.getByRole('menuitem', { name: /Restore.*create BackupRestore/ }).getAttribute('aria-disabled') === 'true').toBe(true);
   });
 
-  it('shows the Browse files action on each volume when the feature is present', () => {
-    render(<BackupVolumesTable policy={policy()} settings={{ fileRestore: true }} />);
+  it('shows the Browse files action on each volume when the gateway runs, and links to the file browser', () => {
+    render(<BackupVolumesTable policy={policy()} settings={{ data: { fileBrowse: 'true' } }} />);
     fireEvent.click(screen.getAllByRole('button', { name: 'Kebab toggle' })[0]);
-    expect(screen.getByText('Browse files')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Browse files' }).getAttribute('href')).toBe(
+      '/vpc-file-pools/backups/nightly/browse?claim=apps%2Fdisk-1',
+    );
+  });
+
+  it('hides Browse files when the gateway is off', () => {
+    render(<BackupVolumesTable policy={policy()} settings={{ data: { fileBrowse: 'false' } }} />);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Kebab toggle' })[0]);
+    expect(screen.queryByText(/Browse files/)).toBeNull();
+  });
+
+  it('names the missing right instead of offering a page that says forbidden', () => {
+    (useAccessReview as jest.Mock).mockImplementation((a: { resource: string }) => [a.resource !== 'backupfiles', false]);
+    render(<BackupVolumesTable policy={policy()} settings={{ data: { fileBrowse: 'true' } }} />);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Kebab toggle' })[0]);
+    expect(screen.queryByRole('link', { name: 'Browse files' })).toBeNull();
+    expect(screen.getByText(/needs the right to get backupfiles in apps/)).toBeTruthy();
+    const rights = (useAccessReview as jest.Mock).mock.calls.map((c) => c[0]).find((a) => a.resource === 'backupfiles');
+    expect(rights).toEqual({ group: 'storage.ibmcloud.io', resource: 'backupfiles', verb: 'get', namespace: 'apps' });
   });
 });
