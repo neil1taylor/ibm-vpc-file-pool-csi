@@ -2081,9 +2081,12 @@ Cluster-scoped resource (short name `fo`). Asks the driver on the destination (D
 | `namespace` | string | Namespace of the PVCs that are made (Execute) |
 | `force` | bool | Go on although a copy may still be applied; an unfinished copy is rolled back first |
 | `drPool` | string | FileSharePool the new SubVolumes belong to. Required for Execute |
-| `drShareIP`, `drExportPath` | string | NFS server and export of the claim. Empty means they are read from the claim's NFS volume |
+| `basePath` | string | The folder of the claim that holds the copies: the ReplicationPolicy's `destinationBasePath`. The copies are read from `<claim>/<basePath>/pvcs`. Empty means `/` (the claim's root). An absolute path of letters, digits, `.`, `_`, `-` and `/`, without `..`. An Execute needs a Plan with the same `basePath` |
+| `drShareIP`, `drExportPath` | string | NFS server and export of the claim's folder (without `basePath`, which is added). Empty means they are read from the claim's volume: an NFS volume (its server and path), or a volume of this driver (the `server` attribute, and the `share` attribute plus the `subDir` attribute). Set them to override |
 
 The spec cannot change after creation.
+
+A Plan fails (it is not an empty `Planned`) if the claim has no `<basePath>/pvcs` folder, or the folder holds no replicated volume. The message says what was looked for and where. If copies exist under another folder of the claim, it names the `basePath` to use.
 
 ### Status
 
