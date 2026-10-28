@@ -117,6 +117,7 @@ func main() {
 		nfsMountPath   string
 		failoverAction string
 		failoverRewind string
+		failoverVMs    string
 		failoverForce  bool
 		failoverExpect string
 		failoverSource string
@@ -209,6 +210,7 @@ func main() {
 	flag.StringVar(&nfsMountPath, "nfs-mount-path", "", "Mount path of the destination share (failover mode)")
 	flag.StringVar(&failoverAction, "failover-action", "", "Plan or Execute (failover mode)")
 	flag.StringVar(&failoverRewind, "rewind-to", "", "Use the newest moment at or before this time, RFC 3339 (failover mode)")
+	flag.StringVar(&failoverVMs, "vms", "", "Comma-separated VMs (namespace/name) to fail over; empty means all (failover mode)")
 	flag.BoolVar(&failoverForce, "force", false, "Go on although a copy may still be applied to a disk (failover mode)")
 	flag.StringVar(&failoverExpect, "failover-expect", "", "JSON of the confirmed plan; an Execute refuses if the share no longer matches it (failover mode)")
 	flag.StringVar(&failoverSource, "failover-default-source", "", "Destination claim a Failover reads when it names none (controller mode)")
@@ -267,7 +269,7 @@ func main() {
 	case "apply-vm-disk":
 		runApplyVMDisk(stagingPath, diskPath, vmCopy)
 	case "failover":
-		runFailover(nfsMountPath, failoverAction, failoverRewind, failoverForce, failoverExpect)
+		runFailover(nfsMountPath, failoverAction, failoverRewind, failoverVMs, failoverForce, failoverExpect)
 	case "restore-vm-disk":
 		runRestoreVMDisk(backupDisk, outDisk, restoreMoment)
 	case "unwrap-backup-key":

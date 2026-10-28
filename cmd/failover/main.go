@@ -7,7 +7,7 @@
 //
 // Usage:
 //
-//	kubectl failover plan     --nfs-mount-path /repl/dst/10.245.3.8 [--list-moments] [--rewind-to TIME]
+//	kubectl failover plan     --nfs-mount-path /repl/dst/10.245.3.8 [--list-moments] [--rewind-to TIME] [--vms ns/name,...]
 //	kubectl failover execute  --nfs-mount-path /repl/dst/10.245.3.8 --dr-pool dr-production --dr-share-ip 10.245.3.8 [--dry-run] [--rewind-to TIME] [--force]
 //	kubectl failover status
 package main
@@ -81,6 +81,7 @@ Plan flags:
   --nfs-mount-path     Local mount path of the destination NFS share (required)
   --list-moments       For each running VM, list the moments all its disks can show, and exit
   --rewind-to          Use the newest moment at or before this time (RFC 3339) for running VMs
+  --vms                Only these VMs, as namespace/name separated by commas. Volumes that are not VM disks are left out
   --force              Go on although a copy may still be applied to a disk
 
 Execute flags:
@@ -90,6 +91,7 @@ Execute flags:
   --dr-export-path     NFS export path for VPC access mode (optional)
   --namespace, -n      Override PVC namespace (optional)
   --rewind-to          Use the newest moment at or before this time (RFC 3339) for running VMs
+  --vms                Only these VMs, as namespace/name separated by commas. Volumes that are not VM disks are left out
   --force              Go on although a copy may still be applied to a disk. An unfinished copy is rolled back first
   --prepare-only       Only roll back and rewind running VM disks, then stop. Needs no cluster and no --dr-pool or --dr-share-ip
   --dry-run            Print what would happen without making changes
@@ -333,6 +335,11 @@ func vmOptionsFromFlags(flags map[string]string, now time.Time) (failover.VMOpti
 		}
 		o.RewindTo = &t
 	}
+	vms, err := failover.ParseVMs(flags["vms"])
+	if err != nil {
+		return o, fmt.Errorf("--vms: %w", err)
+	}
+	o.VMs = vms
 	return o, nil
 }
 

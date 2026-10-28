@@ -389,7 +389,7 @@ kubectl apply -f config/deploy/node.yaml
 | `--vm-snapshot-method` | `auto` | `auto`: instant VM disk snapshots where the KubeVirt `Sidecar` feature gate is on; `copy`: VM disk snapshots are always copies. Helm sets it from `vmSnapshots.method`. See [VM-INSTANT-SNAPSHOTS.md](VM-INSTANT-SNAPSHOTS.md) |
 | `--virt-launcher-image` | `""` | KubeVirt virt-launcher image for VM disk snapshot Jobs; empty reads it from virt-operator. Helm sets it from `vmSnapshots.launcherImage` |
 | `--failover-default-source` | `""` | Destination claim a `Failover` reads when it names none. Helm sets it from `replicationReceiver.pvcName` |
-| `--nfs-mount-path`, `--failover-action`, `--rewind-to`, `--force`, `--failover-expect` | | Failover mode only: the Job started for a `Failover` resource sets them. `--failover-action` is `Plan` or `Execute`; `--failover-expect` is the confirmed plan as JSON |
+| `--nfs-mount-path`, `--failover-action`, `--rewind-to`, `--vms`, `--force`, `--failover-expect` | | Failover mode only: the Job started for a `Failover` resource sets them. `--failover-action` is `Plan` or `Execute`; `--vms` is a comma-separated list of `namespace/name` (empty means all VMs); `--failover-expect` is the confirmed plan as JSON |
 | `--enable-webhooks` | `true` | Serve the validating admission webhooks. Helm sets `false` when `webhook.enabled=false` |
 | `--webhook-port` | `9443` | Port of the admission webhook server. Helm sets it from `webhook.port` |
 | `--receiver-tls-cert-file` | `""` | TLS certificate file for receiver HTTPS. Empty = plain HTTP |

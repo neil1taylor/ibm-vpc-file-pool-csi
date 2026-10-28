@@ -66,6 +66,7 @@ func TestFailoverValidator_SpecErrors(t *testing.T) {
 		"unknown action":     {v1alpha1.FailoverSpec{Source: "recv", Action: "Destroy"}, "spec.action"},
 		"no source, default": {v1alpha1.FailoverSpec{Action: v1alpha1.FailoverActionPlan}, "spec.source"},
 		"bad source":         {v1alpha1.FailoverSpec{Source: "Not A Name", Action: v1alpha1.FailoverActionPlan}, "spec.source"},
+		"bad VM name":        {v1alpha1.FailoverSpec{Source: "recv", Action: v1alpha1.FailoverActionPlan, VMs: []string{"ns/vm", "justaname"}}, "spec.vms"},
 		"bad namespace":      {v1alpha1.FailoverSpec{Source: "recv", Action: v1alpha1.FailoverActionPlan, Namespace: "No_Good"}, "spec.namespace"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -137,5 +138,40 @@ func TestFailoverValidator_TheSpecCannotChange(t *testing.T) {
 	changed.Spec.Action = v1alpha1.FailoverActionExecute
 	if _, err := v.ValidateUpdate(context.Background(), old, changed); err == nil {
 		t.Error("a change to the spec must be refused")
+	}
+}
+
+func TestFailoverValidator_ExecuteNeedsAPlanWithTheSameVMs(t *testing.T) {
+	ctx := context.Background()
+	plan := planFailover("fresh", "recv", failoverNow.Add(-time.Minute))
+	plan.Spec.VMs = []string{"ns/vm"}
+	v := newFailoverValidator(t, "recv", plan)
+
+	f := executeFailover("recv")
+	if _, err := v.ValidateCreate(ctx, f); err == nil || !strings.Contains(err.Error(), "spec.vms") {
+		t.Errorf("Execute for all VMs after a Plan for one: err = %v", err)
+	}
+	f.Spec.VMs = []string{"ns/other"}
+	if _, err := v.ValidateCreate(ctx, f); err == nil || !strings.Contains(err.Error(), "spec.vms") {
+		t.Errorf("Execute for another VM: err = %v", err)
+	}
+	f.Spec.VMs = []string{"ns/vm", "ns/vm"}
+	if _, err := v.ValidateCreate(ctx, f); err != nil {
+		t.Errorf("the same set must pass: %v", err)
+	}
+}
+
+func TestFailoverValidator_AFailedOverVMDoesNotBlockAnotherVMsFailover(t *testing.T) {
+	// The Plan covers only ns/vm2 (volume pvc-c); ns/vm (pvc-a) was failed over before.
+	plan := planFailover("fresh", "recv", failoverNow.Add(-time.Minute))
+	plan.Spec.VMs = []string{"ns/vm2"}
+	plan.Status.VMs = []v1alpha1.FailoverVM{{Name: "ns/vm2", Disks: []v1alpha1.FailoverDisk{{SubVolume: "pvc-c"}}}}
+	plan.Status.Volumes = []v1alpha1.FailoverVolume{{SubVolume: "pvc-c", PVCName: "disk-c", PVCNamespace: "ns"}}
+	done := &v1alpha1.SubVolume{ObjectMeta: metav1.ObjectMeta{Name: "pvc-a", Labels: map[string]string{"storage.ibmcloud.io/failover-source": "p"}}}
+	v := newFailoverValidator(t, "recv", plan, done)
+	f := executeFailover("recv")
+	f.Spec.VMs = []string{"ns/vm2"}
+	if _, err := v.ValidateCreate(context.Background(), f); err != nil {
+		t.Errorf("err = %v", err)
 	}
 }

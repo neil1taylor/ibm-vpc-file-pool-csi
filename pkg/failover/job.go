@@ -76,7 +76,9 @@ type Request struct {
 	// Action is Plan or Execute.
 	Action   string
 	RewindTo *time.Time
-	Force    bool
+	// VMs limits the run to these VMs ("namespace/name"); empty means all.
+	VMs   []string
+	Force bool
 	// Now is the current time; zero means time.Now().
 	Now time.Time
 	// Expect, if set, must match the plan found now, or an Execute refuses
@@ -104,7 +106,7 @@ func RunJob(nfsOps pool.NFSOperations, req Request) (*Result, error) {
 	if now.IsZero() {
 		now = time.Now()
 	}
-	opts := VMOptions{RewindTo: req.RewindTo, Force: req.Force, Now: now}
+	opts := VMOptions{RewindTo: req.RewindTo, Force: req.Force, Now: now, VMs: req.VMs}
 	plan, err := BuildPlan(nfsOps, req.MountPath, opts)
 	if err != nil {
 		return nil, err

@@ -60,6 +60,16 @@ type FailoverSpec struct {
 	// +optional
 	RewindTo *metav1.Time `json:"rewindTo,omitempty"`
 
+	// VMs limits the failover to these running VMs, each as "namespace/name".
+	// All disks of a chosen VM come together. Unset means every VM on the
+	// copy, and also the volumes that are not VM disks; a filter leaves those
+	// out. A name that is not on the copy is refused. An Execute needs a Plan
+	// with the same list (the order does not matter).
+	// +listType=set
+	// +kubebuilder:validation:MaxItems=100
+	// +optional
+	VMs []string `json:"vms,omitempty"`
+
 	// Namespace overrides the namespace of the PVCs that are made.
 	// +optional
 	Namespace string `json:"namespace,omitempty"`

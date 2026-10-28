@@ -36,6 +36,7 @@ import {
   planRemainingMs,
   receiverClaims,
   scheduleOfVM,
+  scopeOfPlan,
 } from '../../utils/failover-helpers';
 import { errorMessage } from '../../utils/k8s-objects';
 import { formatDuration } from '../../utils/resource-helpers';
@@ -62,7 +63,10 @@ const useNow = (): number => {
 
 const minutes = (ms: number) => Math.max(1, Math.ceil(ms / 60000));
 
-/** The moment the operator chose, and the Plan that must show it before the confirm dialog opens. */
+/**
+ * What the operator chose, and the Plan that must show it before the confirm dialog opens. For one VM the Plan
+ * is made for that VM only (spec.vms). An empty vm means every VM on the copy: the Plan on screen is used.
+ */
 interface Choice {
   vm: string;
   moment: string;
@@ -104,6 +108,7 @@ const RecoveryPage: React.FC = () => {
   const [activePlanName, setActivePlanName] = useState('');
   const [selectedVM, setSelectedVM] = useState('');
   const [choice, setChoice] = useState<Choice | undefined>();
+  const [lastRun, setLastRun] = useState<(Choice & { rewindTo?: string }) | undefined>();
   const [executeName, setExecuteName] = useState('');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
@@ -118,18 +123,20 @@ const RecoveryPage: React.FC = () => {
   const plan = activePlanName
     ? failovers.find((f) => f.metadata?.name === activePlanName)
     : findPlan(failovers, source);
+  const choicePlan = choice ? failovers.find((f) => f.metadata?.name === choice.planName) : undefined;
   const execute = executeName ? failovers.find((f) => f.metadata?.name === executeName) : undefined;
   const executeState = execute ? describeFailoverState(execute, now) : undefined;
 
   const createPlan = useCallback(
-    async (opts: { rewindTo?: string; force?: boolean }): Promise<string> => {
+    async (opts: { rewindTo?: string; force?: boolean; vms?: string[] }): Promise<string> => {
       setError('');
       setCreating(true);
       try {
         const request = buildFailover({ action: 'Plan', source, ...opts }, Date.now());
         const made = await k8sCreate<Failover>({ model: FailoverModel, data: request });
         const name = made?.metadata?.name || request.metadata!.name!;
-        setActivePlanName(name);
+        // The table keeps showing the plan for all VMs; a plan for chosen VMs only feeds the confirm dialog.
+        if (!opts.vms?.length) setActivePlanName(name);
         return name;
       } catch (err: unknown) {
         setError(errorMessage(err, 'Failed to make the plan'));
@@ -154,6 +161,7 @@ const RecoveryPage: React.FC = () => {
     setActivePlanName('');
     setSelectedVM('');
     setChoice(undefined);
+    setLastRun(undefined);
     autoPlanned.current = false;
   };
 
@@ -213,34 +221,55 @@ const RecoveryPage: React.FC = () => {
     void createPlan({ force: true, rewindTo: plan?.spec?.rewindTo });
   };
 
+  /** Plan the chosen VM again with force, and open the dialog for the new plan when it is ready. */
+  const planVMAgainWithForce = async (run: Choice & { rewindTo?: string }) => {
+    setExecuteName('');
+    setDialogError('');
+    const name = await createPlan({ vms: [run.vm], rewindTo: run.rewindTo, force: true });
+    if (name) setChoice({ vm: run.vm, moment: run.moment, planName: name });
+  };
+
+  const forceAfterFailedExecute = () => {
+    if (lastRun?.vm) void planVMAgainWithForce(lastRun);
+    else planAgainWithForce();
+  };
+
+  // Failing over one VM makes a new Plan for that VM only. The Execute must match its VM list.
   const startFailOver = async (moment: string) => {
     if (!plan || !selectedVM) return;
     setDialogError('');
-    if (!needsNewPlan(plan, selectedVM, moment)) {
-      setChoice({ vm: selectedVM, moment, planName: plan.metadata!.name! });
-      return;
-    }
-    const name = await createPlan({ rewindTo: moment, force: forcedPlan });
+    setChoice(undefined);
+    const rewindTo = needsNewPlan(plan, selectedVM, moment) ? moment : undefined;
+    const name = await createPlan({ vms: [selectedVM], rewindTo, force: forcedPlan });
     if (name) setChoice({ vm: selectedVM, moment, planName: name });
   };
 
-  const confirm = async (drPool: string) => {
+  // The explicit option for every VM on the copy uses the plan on screen, which covers all of them.
+  const startFailOverAll = () => {
     if (!plan) return;
+    setDialogError('');
+    setChoice({ vm: '', moment: '', planName: plan.metadata!.name! });
+  };
+
+  const confirm = async (drPool: string) => {
+    if (!choicePlan || !choice) return;
     setDialogError('');
     setCreating(true);
     try {
       const request = buildFailover(
         {
           action: 'Execute',
-          source: failoverSource(plan),
-          rewindTo: plan.spec.rewindTo,
-          force: plan.spec.force,
+          source: failoverSource(choicePlan),
+          rewindTo: choicePlan.spec.rewindTo,
+          force: choicePlan.spec.force,
+          vms: scopeOfPlan(choicePlan),
           drPool,
         },
         Date.now(),
       );
       const made = await k8sCreate<Failover>({ model: FailoverModel, data: request });
       setExecuteName(made?.metadata?.name || request.metadata!.name!);
+      setLastRun({ ...choice, rewindTo: choicePlan.spec.rewindTo });
       setChoice(undefined);
     } catch (err: unknown) {
       setDialogError(errorMessage(err, 'Failed to start the failover'));
@@ -249,9 +278,12 @@ const RecoveryPage: React.FC = () => {
     }
   };
 
-  const choicePlanReady = !!choice && !!plan && plan.metadata?.name === choice.planName && planned;
-  const choiceMismatch = choicePlanReady && needsNewPlan(plan!, choice!.vm, choice!.moment);
-  const dialogOpen = choicePlanReady && !choiceMismatch && !expired;
+  const choiceState = choicePlan ? describeFailoverState(choicePlan, now) : undefined;
+  const choiceWorking = !!choice && choice.vm !== '' && (!choicePlan || !!choiceState?.working);
+  const choicePlanReady = !!choice && !!choicePlan && choicePlan.status?.phase === 'Planned';
+  const choiceExpired = choicePlanReady && planRemainingMs(choicePlan!, now) === 0;
+  const choiceMismatch = choicePlanReady && choice!.vm !== '' && needsNewPlan(choicePlan!, choice!.vm, choice!.moment);
+  const dialogOpen = choicePlanReady && !choiceMismatch && !choiceExpired;
 
   return (
     <PageSection variant="default">
@@ -300,8 +332,44 @@ const RecoveryPage: React.FC = () => {
               failover={execute}
               now={now}
               isBusy={creating}
-              onPlanWithForce={planAgainWithForce}
+              onPlanWithForce={forceAfterFailedExecute}
             />
+          </StackItem>
+        )}
+
+        {choiceWorking && (
+          <StackItem>
+            <Alert
+              variant="info"
+              isInline
+              customIcon={<Spinner size="md" />}
+              title={`Still working: the plan for ${choice!.vm} is being made`}
+            >
+              <p>The driver is reading the disks of this VM. The confirm dialog opens when the plan is ready.</p>
+              {choiceState?.elapsed && <p>{`Running for ${choiceState.elapsed}.`}</p>}
+            </Alert>
+          </StackItem>
+        )}
+
+        {choice && choicePlan && choiceState?.failed && (
+          <StackItem>
+            <Alert variant="danger" isInline title={`The plan for ${choice.vm || 'all VMs'} failed`}>
+              <p>{choiceState.message || 'The driver gave no reason.'}</p>
+              {isBusyMessage(choiceState.message) && choice.vm !== '' && (
+                <ForceOption
+                  onPlanWithForce={() => void planVMAgainWithForce({ ...choice, rewindTo: choicePlan.spec.rewindTo })}
+                  isBusy={creating}
+                />
+              )}
+            </Alert>
+          </StackItem>
+        )}
+
+        {choice && choicePlanReady && choiceExpired && (
+          <StackItem>
+            <Alert variant="warning" isInline title="This plan is too old to fail over from">
+              Choose the failover again to make a new plan.
+            </Alert>
           </StackItem>
         )}
 
@@ -374,7 +442,20 @@ const RecoveryPage: React.FC = () => {
                 {rows.length === 0 ? (
                   <p>The copy holds no running VM that can be failed over.</p>
                 ) : (
-                  <RecoveryVMTable rows={rows} staleness={staleness} onSelect={setSelectedVM} />
+                  <>
+                    <RecoveryVMTable rows={rows} staleness={staleness} onSelect={setSelectedVM} />
+                    <p style={{ marginTop: 12 }}>
+                      Choose a VM to fail over that VM only. To fail over every VM on the copy at once, use the
+                      button below.
+                    </p>
+                    <Button
+                      variant="secondary"
+                      onClick={startFailOverAll}
+                      isDisabled={expired || creating || executeRunning}
+                    >
+                      Fail over all VMs
+                    </Button>
+                  </>
                 )}
               </CardBody>
             </Card>
@@ -401,9 +482,9 @@ const RecoveryPage: React.FC = () => {
         )}
       </Stack>
 
-      {dialogOpen && plan && choice && (
+      {dialogOpen && choicePlan && choice && (
         <FailoverConfirmModal
-          plan={plan}
+          plan={choicePlan}
           vmName={choice.vm}
           pools={(poolList || []).map((p) => p.metadata?.name || '').filter(Boolean)}
           creating={creating}

@@ -44,6 +44,8 @@ export interface FailoverRequest {
   action: FailoverSpec['action'];
   source?: string;
   rewindTo?: string;
+  /** Only these VMs ("namespace/name"). Empty or unset means every VM on the copy. */
+  vms?: string[];
   force?: boolean;
   drPool?: string;
 }
@@ -53,6 +55,7 @@ export function buildFailover(input: FailoverRequest, nowMs: number): Failover {
   const spec: FailoverSpec = { action: input.action };
   if (input.source) spec.source = input.source;
   if (input.rewindTo) spec.rewindTo = input.rewindTo;
+  if (input.vms && input.vms.length > 0) spec.vms = [...input.vms];
   if (input.force) spec.force = true;
   if (input.drPool) spec.drPool = input.drPool;
   return {
@@ -65,6 +68,9 @@ export function buildFailover(input: FailoverRequest, nowMs: number): Failover {
     spec,
   };
 }
+
+/** The VMs a Failover is limited to. Empty means every VM on the copy. */
+export const scopeOfPlan = (f: Failover): string[] => f.spec?.vms || [];
 
 export const failoverSource = (f: Failover): string => f.status?.source || f.spec?.source || '';
 
@@ -122,10 +128,14 @@ export function planRemainingMs(plan: Failover, now: number): number {
   return Math.max(0, ms(plan.status.finishedAt) + PLAN_USABLE_MS - now);
 }
 
-/** The newest Plan for a source. An empty source means the default one: the Plans that name no source. */
+/**
+ * The newest Plan for all VMs of a source: the one the VM table shows. A Plan for chosen VMs is made when the
+ * operator fails over one VM, and is not a list of what the copy holds. An empty source means the default one:
+ * the Plans that name no source.
+ */
 export function findPlan(all: Failover[], source: string): Failover | undefined {
   const matches = all.filter((f) => {
-    if (f.spec?.action !== 'Plan') return false;
+    if (f.spec?.action !== 'Plan' || scopeOfPlan(f).length > 0) return false;
     return source === '' ? !f.spec.source : failoverSource(f) === source;
   });
   return matches.sort((a, b) =>
@@ -259,14 +269,14 @@ export interface PVCToCreate {
 export interface ExecuteSummary {
   vms: Array<{ name: string; moment: string; disks: number; rewindDisks: number }>;
   rewindDisks: number;
-  /** Every PVC the failover makes. A failover covers the whole source, not one VM. */
+  /** Every PVC the failover makes. A plan for chosen VMs lists only theirs; a plan for all VMs lists all. */
   pvcs: PVCToCreate[];
   /** The PVCs of the VM the operator chose. */
   chosenPVCs: PVCToCreate[];
   otherVMs: number;
 }
 
-/** What an Execute of this plan does. It fails over everything on the copy, so the summary lists all of it. */
+/** What an Execute of this plan does. It covers the VMs of the plan: one VM, or every VM on the copy. */
 export function executeSummary(plan: Failover, chosenVM: string): ExecuteSummary {
   const vms = (plan.status?.vms || []).map((vm) => ({
     name: vm.name,
@@ -292,10 +302,9 @@ export function executeSummary(plan: Failover, chosenVM: string): ExecuteSummary
   };
 }
 
-/** What the operator types to confirm: the VM name if it is the only VM, else the source claim (the whole copy fails over). */
+/** What the operator types to confirm: the VM name for one VM, or the source claim when every VM on the copy fails over. */
 export function confirmationWord(plan: Failover, chosenVM: string): string {
-  const vms = plan.status?.vms || [];
-  if (vms.length <= 1) return vms[0]?.name || chosenVM;
+  if (chosenVM) return chosenVM;
   return failoverSource(plan) || 'failover';
 }
 

@@ -29,7 +29,7 @@ func plainShare(t *testing.T) string {
 var jobNow = time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 
 func TestFailoverJobMessage_PlanGivesAResultTheControllerCanRead(t *testing.T) {
-	msg, err := failoverJobMessage(pool.NewRealNFSOperations(), plainShare(t), "Plan", "", false, "", jobNow)
+	msg, err := failoverJobMessage(pool.NewRealNFSOperations(), plainShare(t), "Plan", "", "", false, "", jobNow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,15 +44,17 @@ func TestFailoverJobMessage_PlanGivesAResultTheControllerCanRead(t *testing.T) {
 
 func TestFailoverJobMessage_AFailureIsReportedInTheMessage(t *testing.T) {
 	for name, tc := range map[string]struct {
-		action, rewind, expect, want string
+		action, rewind, vms, expect, want string
 	}{
-		"bad action":       {"Destroy", "", "", "unknown action"},
-		"bad rewind time":  {"Plan", "yesterday", "", "rewindTo"},
-		"bad expectation":  {"Execute", "", "{not json", "expect"},
-		"plan has changed": {"Execute", "", `{"vms":{},"volumes":["pvc-other"]}`, "no longer matches"},
+		"bad action":       {"Destroy", "", "", "", "unknown action"},
+		"bad rewind time":  {"Plan", "yesterday", "", "", "rewindTo"},
+		"bad expectation":  {"Execute", "", "", "{not json", "expect"},
+		"plan has changed": {"Execute", "", "", `{"vms":{},"volumes":["pvc-other"]}`, "no longer matches"},
+		"unknown VM":       {"Plan", "", "ns/nope, ns/other", "", "ns/nope"},
+		"bad VM name":      {"Plan", "", "not-a-vm", "", "namespace/name"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			msg, err := failoverJobMessage(pool.NewRealNFSOperations(), plainShare(t), tc.action, tc.rewind, false, tc.expect, jobNow)
+			msg, err := failoverJobMessage(pool.NewRealNFSOperations(), plainShare(t), tc.action, tc.rewind, tc.vms, false, tc.expect, jobNow)
 			if err == nil {
 				t.Fatal("expected an error")
 			}
