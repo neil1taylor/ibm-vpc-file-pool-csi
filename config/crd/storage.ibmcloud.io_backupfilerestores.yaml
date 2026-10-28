@@ -119,7 +119,8 @@ spec:
                 description: |-
                   TargetUID is the UID of the existing claim, taken when the user's rights
                   were checked. The restore refuses if the claim was deleted and made again
-                  since. The gateway sets it; it is required with existing.
+                  since. The gateway sets it. If it is unset, the controller takes the UID of
+                  the claim the first time it sees it.
                 type: string
             required:
             - paths
