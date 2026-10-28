@@ -727,6 +727,10 @@ func (m *Manager) CreateSnapshot(ctx context.Context, snapshotName, sourceVolume
 	if err != nil {
 		return nil, err
 	}
+	fixed, err := snapshotFixed(params)
+	if err != nil {
+		return nil, err
+	}
 
 	// 3. Fetch source SubVolume CR
 	sv, err := m.k8sClient.GetSubVolume(ctx, pvName)
@@ -784,6 +788,9 @@ func (m *Manager) CreateSnapshot(ctx context.Context, snapshotName, sourceVolume
 	annotations := map[string]string{snapshotMethodAnnotation: method}
 	if speed != "" {
 		annotations[snapshotSpeedAnnotation] = speed
+	}
+	if fixed {
+		annotations[snapshotFixedAnnotation] = "true"
 	}
 	snap := &v1alpha1.Snapshot{
 		ObjectMeta: metav1.ObjectMeta{

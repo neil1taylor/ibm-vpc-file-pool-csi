@@ -80,7 +80,9 @@ done
 
 ### How Auto-Expansion Works
 
-When the pool's allocated capacity crosses `expandThresholdPercent` (default 80%), the reconciler creates a new VPC file share in the background. This takes 30-90 seconds. During expansion, the pool phase changes to `Expanding` and new PVC requests may see a brief "pool is expanding, retry shortly" message before the share is ready.
+When the pool's allocated capacity crosses `expandThresholdPercent` (default 80%), the reconciler creates a new VPC file share in the background. This takes 30-90 seconds. A PVC request that finds no share with room, while `autoExpand` is on, also creates the share itself (the request waits for the VPC call and the provisioner retries). During expansion, the pool phase changes to `Expanding` and new PVC requests may see a brief "pool is expanding, retry shortly" message before the share is ready.
+
+![When allocation passes the threshold the pool becomes Expanding while a new VPC file share is made, then returns to Ready](images/day2-operations-expansion.drawio.svg)
 
 ### Triggering Manual Expansion
 

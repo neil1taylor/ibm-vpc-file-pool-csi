@@ -52,12 +52,26 @@ type BackupPolicySpec struct {
 	// +optional
 	KeepFor string `json:"keepFor,omitempty"`
 
-	// VMCopySpeedLimitMBps limits how fast QEMU copies each disk of a running
-	// VM, in megabytes per second. 0 means no limit.
+	// VMCopySpeedLimitMBps is the highest speed, in megabytes per second, of
+	// QEMU's copy of each disk of a running VM. 0 or unset means there is no
+	// highest speed. When the copy does not adapt (VMCopyAdaptive is false), it
+	// is the fixed speed instead: 0 means no limit and unset means 20.
 	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:default=20
 	// +optional
 	VMCopySpeedLimitMBps *int32 `json:"vmCopySpeedLimitMBps,omitempty"`
+
+	// VMCopyAdaptive makes the copy start slow, speed up while the share the VM
+	// reads is quiet, and slow down when its latency passes VMCopyMaxLatencyMs.
+	// Default true. See docs/specs/2026-10-26-adaptive-copy-speed.md.
+	// +optional
+	VMCopyAdaptive *bool `json:"vmCopyAdaptive,omitempty"`
+
+	// VMCopyMaxLatencyMs is the average latency of the share, in milliseconds,
+	// above which an adaptive copy slows down. Default 15.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=20
+	// +optional
+	VMCopyMaxLatencyMs *int32 `json:"vmCopyMaxLatencyMs,omitempty"`
 
 	// Suspend stops new backups. Existing backups stay.
 	// +optional

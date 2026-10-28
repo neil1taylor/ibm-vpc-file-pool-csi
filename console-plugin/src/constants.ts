@@ -35,6 +35,10 @@ export const ROUTES = {
   BACKUP_EDIT: '/vpc-file-pools/backups/:name/edit',
   BACKUP_RESTORE: '/vpc-file-pools/backups/:name/restore',
   MONITORING: '/vpc-file-pools/monitoring',
+  POOLBENCH: '/vpc-file-pools/poolbench',
+  POOLBENCH_CREATE: '/vpc-file-pools/poolbench/~new',
+  POOLBENCH_COMPARE: '/vpc-file-pools/poolbench/~compare',
+  POOLBENCH_DETAIL: '/vpc-file-pools/poolbench/:name',
 } as const;
 
 // Prometheus metric names

@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
@@ -34,22 +33,6 @@ func newVMTestClient(t *testing.T) *vmTestClient {
 	srv := httptest.NewServer(rcv.httpServer.Handler)
 	t.Cleanup(srv.Close)
 	return &vmTestClient{t: t, srv: srv, rcv: rcv, base: base}
-}
-
-// diskLockHeld reports whether a call holds the lock of any disk of the receiver.
-func (c *vmTestClient) diskLockHeld() bool {
-	held := false
-	c.rcv.vmLocks.Range(func(_, v any) bool {
-		if m, ok := v.(*sync.Mutex); ok {
-			if m.TryLock() {
-				m.Unlock()
-			} else {
-				held = true
-			}
-		}
-		return !held
-	})
-	return held
 }
 
 func (c *vmTestClient) diskPath() string { return filepath.Join(c.base, "pvcs", testSV, "disk.img") }
@@ -448,15 +431,24 @@ func TestReceiverVM_OneCallPerDiskAtATime(t *testing.T) {
 		close(release)
 	}()
 	<-started
-	// Let the first call take the lock: write one record, then wait until a disk lock is held. Asking the
-	// receiver for its lock is exact; calling it a second time and hoping the first call has arrived is not.
+	// Write one record. A pipe write returns when the HTTP client has taken the record, not when the
+	// receiver has read it. So wait until the receiver has made the folder of the first call: it makes
+	// the folder after it took the disk lock, so the first call holds the lock from then on.
+	// The test must not probe the lock: a probe takes it for a moment, and a first call that arrives
+	// then is turned away as busy.
 	var rec bytes.Buffer
 	_ = WriteUploadRecord(&rec, UploadRecord{Off: 0, Data: bytes.Repeat([]byte{1}, chunk)})
-	_, _ = pw.Write(rec.Bytes())
+	if _, err := pw.Write(rec.Bytes()); err != nil {
+		t.Fatalf("the first call did not read its body: %v", err)
+	}
+	session := filepath.Join(c.base, "pvcs", testSV, incomingDirName, "88888888-1")
 	deadline := time.Now().Add(10 * time.Second)
-	for !c.diskLockHeld() {
+	for {
+		if _, err := os.Stat(session); err == nil {
+			break
+		}
 		if time.Now().After(deadline) {
-			t.Fatal("the first call did not take the disk lock")
+			t.Fatalf("the first call did not start its upload in 10 seconds")
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

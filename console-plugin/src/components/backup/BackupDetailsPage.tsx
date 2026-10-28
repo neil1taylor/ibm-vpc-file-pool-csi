@@ -198,7 +198,7 @@ const BackupDetailsPage: React.FC = () => {
                 {spec.namespaces && spec.namespaces.length > 0 ? spec.namespaces.join(', ') : 'All namespaces'}
               </Term>
               <Term term="VM Copy Speed Limit">
-                {vmCopySettingsText({ vmCopySpeedLimitMBps: spec.vmCopySpeedLimitMBps } as never).speed}
+                {vmCopySettingsText({ vmCopySpeedLimitMBps: spec.vmCopySpeedLimitMBps, vmCopyAdaptive: spec.vmCopyAdaptive } as never).speed}
               </Term>
               <Term term="Export to COS">{spec.export ? `On, bucket ${spec.export.bucket}` : 'Off'}</Term>
             </DescriptionList>

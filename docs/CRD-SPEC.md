@@ -25,6 +25,14 @@ var (
 
 ---
 
+## How the resources relate
+
+![The CRDs and the fields that link them: SubVolume, Snapshot, ReplicationPolicy and BackupPolicy all point to a FileSharePool](images/crd-spec-relationships.drawio.svg)
+
+Each arrow is labelled with the field that holds the reference.
+
+---
+
 ## FileSharePool
 
 Cluster-scoped resource. Defines a pool of VPC file shares that back PVC subdirectories.
@@ -632,8 +640,11 @@ type SubVolumeSpec struct {
     ShareExportPath string `json:"shareExportPath,omitempty"`
 
     // SubPath is the subdirectory path within the share (e.g., "/pvcs/pvc-abc123").
+    // A failover to an earlier restore point uses the folder
+    // "/pvcs/pvc-abc123.rewind-<epoch>"; no other suffix is allowed.
+    // The pattern must equal SubPathPattern.
     // +kubebuilder:validation:Required
-    // +kubebuilder:validation:Pattern=`^/pvcs/pvc-[a-f0-9-]+$`
+    // +kubebuilder:validation:Pattern=`^/pvcs/pvc-[a-f0-9-]+(\.rewind-[0-9]{1,12})?$`
     SubPath string `json:"subPath"`
 
     // RequestedGB is the capacity requested by the PVC.
@@ -1000,11 +1011,11 @@ type SnapshotStatus struct {
 
 If a running (or starting) KubeVirt VM uses the source claim, the snapshot is a QEMU copy of that one disk, not a file copy. The Snapshot gets the annotation `storage.ibmcloud.io/snapshot-method: vm`. The controller freezes the guest for a moment, has QEMU copy the disk to a staging file, and an `apply-vm-disk` Job writes a raw `disk.img` into the snapshot folder. The snapshot is ready when the Job ends. `status.consistency` says whether the guest was frozen.
 
-- The `VolumeSnapshotClass` parameter `vmCopySpeedLimitMBps` (whole number, default 20) limits how much the copy slows the VM. The value is kept in the annotation `storage.ibmcloud.io/vm-copy-speed-mbps`.
+- The copy adapts its speed to the load on the share the VM reads: it starts at 15 MB/s and follows the rule of `ReplicationPolicy.spec.vmCopyAdaptive`. The `VolumeSnapshotClass` parameter `vmCopySpeedLimitMBps` (whole number) is the highest speed. It is kept in the annotation `storage.ibmcloud.io/vm-copy-speed-mbps`. The parameter `vmCopyAdaptive: "false"` (annotation `storage.ibmcloud.io/vm-copy-fixed`) makes the copy run at that speed (default 20) instead. `status.vmCopy.speedMBps` shows the speed now.
 - A live migration cancels the copy. A cancelled or failed copy is tried again after a minute; after 3 tries the snapshot is `Failed` and `status.message` says why.
 - A copy that runs much longer than the disk needs (2 hours plus twice the time at the speed limit) is cancelled and counts as one try.
 - If the VM stops before the copy starts, the snapshot is a file copy. If a VM starts during a file copy, the folder is discarded and the snapshot is copied again with QEMU.
-- Each Snapshot covers one claim, but the controller copies all the pool disks of the VM at one moment. The first Snapshot of a VM starts the QEMU copy of every pool disk and records the set in `status.vmCopySet` (disks, staging files, and `joinUntil`, 10 minutes after the start). A Snapshot of another disk of the same VM that starts before `joinUntil` joins the copy: its `status.vmCopy.leader` names the first Snapshot, and it shows the same moment. `status.copyID` is the same on all of them. After `joinUntil`, the controller deletes the staging files of the disks no Snapshot claimed, and clears `status.vmCopySet`. If the first Snapshot's copy is cancelled, the joined Snapshots try again.
+- Each Snapshot covers one claim, but the controller copies all the pool disks of the VM at one moment. The first Snapshot of a VM starts the QEMU copy of every pool disk and records the set in `status.vmCopySet` (disks, staging files, and `joinUntil`, 10 minutes after the start). A Snapshot of another disk of the same VM that starts before `joinUntil` joins the copy: its `status.vmCopy.leader` names the first Snapshot, and it shows the same moment. `status.copyID` is the same on all of them. `status.vmCopy.setDisks` lists every disk of the copy in the order QEMU numbered them, and each entry of `status.vmCopySet.disks` names its `volume`, `stagingFile` and `subVolume`. After `joinUntil`, the controller deletes the staging files of the disks no Snapshot claimed, and clears `status.vmCopySet`. If the first Snapshot's copy is cancelled, the joined Snapshots try again.
 - While a snapshot copies a VM, replication of the same VM waits (and the other way round).
 
 ### Example Snapshot CR
@@ -1365,8 +1376,15 @@ type BackupPolicySpec struct {
     Namespaces []string `json:"namespaces,omitempty"`
     // KeepFor is a Go duration or a number of days ("30d"), at least one hour. Default "7d".
     KeepFor string `json:"keepFor,omitempty"`
-    // VMCopySpeedLimitMBps limits the QEMU copy of each VM disk. Default 20; 0 means no limit.
+    // VMCopySpeedLimitMBps is the highest speed of the QEMU copy of each VM disk, in MB/s.
+    // 0 or unset means there is no highest speed. With VMCopyAdaptive false it is the fixed
+    // speed: 0 means no limit and unset means 20.
     VMCopySpeedLimitMBps *int32 `json:"vmCopySpeedLimitMBps,omitempty"`
+    // VMCopyAdaptive starts the copy slow, speeds it up while the source share is quiet and slows
+    // it down when the share's latency passes VMCopyMaxLatencyMs. Default true.
+    VMCopyAdaptive *bool `json:"vmCopyAdaptive,omitempty"`
+    // VMCopyMaxLatencyMs is the share latency in ms above which the copy slows down. Default 15; 1 to 20.
+    VMCopyMaxLatencyMs *int32 `json:"vmCopyMaxLatencyMs,omitempty"`
     // Suspend stops new backups. Existing backups stay.
     Suspend bool `json:"suspend,omitempty"`
     // Export also sends the backups to an IBM Cloud Object Storage bucket (see below). Optional.
@@ -1415,6 +1433,8 @@ Status: `phase` (`Active`, `Suspended`, `Error`; `Error` is also set, with the u
 **Export to COS.** With `spec.export`, when the local backup of a volume has a moment newer than the last one exported, the controller starts an export Job for the volume (one at a time for each policy). The Job mounts the snapshot pool's share read-only and sends the backup folder and the moments folder to a Kopia repository in the bucket, in the area `<prefix>/<policy>/`. Each volume's status then has `exportedTime` (the moment of the newest copy in COS), `exportedBytes` (what the last export sent) and `exportError` (the last error; the export is tried again after 5 minutes). Once a volume is exported, a maintenance Job runs once every maintenance interval (a day, or less for a short keep time; one hour at the least): it extends the locks of chunks still in use and deletes the Kopia snapshots older than `keepFor`. The rule for the shortest Compliance lock is in one helper (`v1alpha1.MinComplianceKeepFor`): the keep time must be at least the maintenance interval plus 24 hours, so 25 hours at the least; the webhook and the controller both use it. An export problem never changes `phase` and never stops the backups to the snapshot pool. Removing `spec.export` clears the three export fields; backups already in COS stay until their lock ends. **Key handling.** The backup key is stored only as a Key Protect-wrapped copy (in `backupKeySecret`, and next to the backups in the bucket). Each export and maintenance Job mounts the wrapped key, the API key and the optional emergency key as read-only Secret files, runs the driver in mode `unwrap-backup-key` (which asks Key Protect to unwrap the key and writes it, mode 0400, to a memory-backed folder), lets Kopia read it, and removes the file. The controller never reads these Secrets and never calls Key Protect. If Key Protect is unreachable and `emergencyKeySecret` is set, the Job uses that key and logs that it did; a refusal from Key Protect (a wrong root key, a bad API key) is an error and never falls back. `kubectl backup cos-setup` makes the wrapped key; see'; see `docs/specs/2026-10-21-backup-cos-export.md`.
 
 A volume belongs to one policy. A second policy that selects it skips it and says so in its `message`. The policy name goes into a label value, so it has at most 63 characters.
+
+Each entry of `status.volumes[]` names the claim (`pvcNamespace`, `pvcName`), its SubVolume (`subVolumeName`) and, for a VM disk, the VM (`vmName`).
 
 A snapshot pool may have several shares. A volume gets a share when it is first backed up (the one with room that holds the fewest volumes) and keeps it; `status.volumes[].shareID` names it, and a restore reads from it. An entry with no `shareID` was made when the pool had one share and belongs to the first share. A policy makes one ReplicationPolicy for each source pool and share (the SubVolumes carry `storage.ibmcloud.io/backup-share`). A new volume that no ready share below 85% can take waits, with its `lastError` saying so.
 
@@ -1486,9 +1506,58 @@ A session ends when the helper stops by itself (idle, default 15 minutes), when 
 
 ---
 
+## PoolBench
+
+Cluster-scoped. One performance test run: a new pool with one share, and test VMs added in steps until users would notice the share is slow. The PoolBench service (off by default) makes and deletes everything the run needs, in the run's own namespace `poolbench-<name>`. Short name `pb`. See `docs/specs/2026-10-25-poolbench.md`.
+
+```go
+type PoolBenchSpec struct {
+    Zone           string            `json:"zone,omitempty"`           // default: the zone with the most workers
+    Profile        string            `json:"profile,omitempty"`        // dp2 only
+    ShareSizeGB    int64             `json:"shareSizeGB"`
+    IOPS           int64             `json:"iops"`                     // must fit IBM's dp2 table for the size
+    StepVMs        int32             `json:"stepVMs,omitempty"`        // default 15
+    MaxVMs         int32             `json:"maxVMs,omitempty"`         // default 90; a whole number of steps, at most 500
+    WindowsEvery   *int32            `json:"windowsEvery,omitempty"`   // default 3; 0: Linux only
+    Linux          PoolBenchVM       `json:"linux,omitempty"`          // cpu, memoryGiB, image, imageNamespace, preference, rootDiskGiB
+    Windows        PoolBenchVM       `json:"windows,omitempty"`
+    Load           PoolBenchLoad     `json:"load,omitempty"`           // steadyIOPS 30, burstIOPS 300, burstSeconds 45, periodSeconds 600, readPercent 70, blockMix "4k:50 16k:30 64k:20", areaGiB 3
+    SettleMinutes  *int32            `json:"settleMinutes,omitempty"`  // default 15
+    MeasureMinutes int32             `json:"measureMinutes,omitempty"` // default 45; at least 2 x period - burst seconds
+    Knee           PoolBenchKnee     `json:"knee,omitempty"`           // latencyLimitMs 20, slowVMPercent 25, stallSeconds 5, stopAtKnee (default true)
+    Events         []PoolBenchEvent  `json:"events,omitempty"`         // type BootStorm, PatchWindow, Migration, Snapshot or Backup; atVMs: a step of the run
+    StartAfter     string            `json:"startAfter,omitempty"`     // wait until this other run has ended (a series of tiers)
+    KeepAfterEnd   bool              `json:"keepAfterEnd,omitempty"`   // keep the VMs and pool after the end
+    Control        PoolBenchControl  `json:"control,omitempty"`        // paused, hold, stop, skipStep, extendStep, extendMinutes
+}
+
+type PoolBenchStatus struct {
+    Phase          string                 `json:"phase,omitempty"`  // Pending, Checking, Running, Paused, CleaningUp, Complete, Stopped, Failed
+    Stage          string                 `json:"stage,omitempty"`  // Preparing, Creating, Settling, Measuring, Event
+    Step, TotalSteps                      int32
+    VMs, WindowsVMs, ReadyVMs             int32
+    Namespace, PoolName                   string
+    StartTime, EndTime, StageStarted, StageEnds, PausedAt *metav1.Time
+    ShareAtStart, ShareAtEnd *PoolBenchCounters // the share's NFS counters (ops, micros, at) at the start and end of the measuring
+    Message        string
+    Steps          []PoolBenchStepResult  // one per step: vms, share, guest and IBM IOPS, share latency, p50/p95/p99, throughput, slow %, burst slow %, stalls, at limit, time to ready, pass, cutShort
+    KneeVMs        int32                  // the first failed step; 0: no knee
+    RecommendedVMs int32                  // 80% of the knee, down to a step; or the largest passed step
+    Events         []PoolBenchEventResult // a backup event also has copySpeedAvgMBps and copySpeedMaxMBps (running-VM copies), p95Micros and p95BeforeMicros (the VMs' latency during the event and in the step before)
+    Log            []PoolBenchLogEntry    // the newest entries: Info, Warning, Error, Control
+    CleanedUp      bool                   // the VMs, pool and namespace are gone and the VPC no longer lists the share
+}
+```
+
+The webhook refuses a share size or IOPS outside IBM's `dp2` table, a share too small for the disks of the largest step (each VM has its root disk and a load disk one GiB larger than its test area), a load that is not a steady rate and a longer, faster burst, a block mix whose shares do not add up to 100, and an event that is not at a step of the run. The name may be at most 40 characters, so the run's namespace fits a label value. Once the run has started, only `spec.control` may change, and events may only be added (the console adds one to run an event now).
+
+**How a run goes.** With `spec.startAfter`, the run stays `Pending` until the named run has ended and cleaned up (a run that does not exist holds nothing). `Checking`: the images must exist and the largest step must fit the workers' free memory with one node down; if not, the run fails and makes nothing. Then the service makes the namespace `poolbench-<name>` (with the run's token, the Linux cloud-init and the Windows config disk as Secrets) and the pool `poolbench-<name>` (one share of the size and IOPS under test, never grown). For each step: `Creating` makes the new VMs and waits, up to 60 minutes, until every VM has sent PERF-READY and every disk copy has ended; `Settling` waits `settleMinutes`; `Measuring` reads the share's counters, waits `measureMinutes`, reads them again, waits 90 seconds for the last results, and writes the step's row. The knee rule is that of the command-line test: more than `slowVMPercent` of the VMs slow or with a slow burst, any stall, or the share at 95% of its IOPS limit. At the knee (unless `stopAtKnee` is false) or after the last step the run cleans up: it deletes the namespace, then the pool, and ends `Complete` (or `Stopped` after `control.stop`). A failed run also cleans up and stays `Failed`. `control.paused` stops the clock, and each VM asks the service before each load phase and waits while the run is paused. Deleting a `PoolBench` cleans up first (finalizer `storage.ibmcloud.io/poolbench`) and then forgets its results.
+
+---
+
 ## ReplicationPolicy
 
-Cluster-scoped resource. Defines a replication relationship between a source FileSharePool on the local cluster and a destination NFS server for cross-region disaster recovery. Uses rsync-based incremental replication over Transit Gateway or VPN.
+Cluster-scoped resource. Defines a replication relationship between a source FileSharePool on the local cluster and a destination NFS server for cross-region disaster recovery. In direct NFS mode it uses rsync (incremental) over Transit Gateway or VPN. In receiver mode (`destinationEndpoint`) it uploads the whole folder as a tar stream each cycle.
 
 ### Go Type Definition
 
@@ -1560,7 +1629,8 @@ type ReplicationPolicySpec struct {
     MaxRetries int32 `json:"maxRetries"`
 
     // IncrementalSync enables rsync-based incremental replication instead of full copy.
-    // When true (default), only changed files are transferred.
+    // When true (default), only changed files are transferred. Applies to direct NFS mode only;
+    // receiver mode (destinationEndpoint) uploads the whole folder each cycle.
     // +kubebuilder:default=true
     // +optional
     IncrementalSync *bool `json:"incrementalSync,omitempty"`
@@ -1588,13 +1658,27 @@ type ReplicationPolicySpec struct {
     // +optional
     RsyncOptions []string `json:"rsyncOptions,omitempty"`
 
-    // VMCopySpeedLimitMBps limits how fast QEMU copies each disk of a running
-    // VM, in megabytes per second. 0 means no limit. The limit also counts
-    // empty disk space. See "Running VM disks" below.
+    // VMCopySpeedLimitMBps is the highest speed, in megabytes per second, of
+    // QEMU's copy of each disk of a running VM; unset or 0 means none. With
+    // VMCopyAdaptive false it is the fixed speed (0 no limit, unset 20). The
+    // copy also counts empty disk space. See "Running VM disks" below.
     // +kubebuilder:validation:Minimum=0
-    // +kubebuilder:default=20
     // +optional
     VMCopySpeedLimitMBps *int32 `json:"vmCopySpeedLimitMBps,omitempty"`
+
+    // VMCopyAdaptive makes the copy start at 15 MB/s for each disk, speed up while
+    // the share the VM reads is quiet, and slow down when its average latency
+    // passes VMCopyMaxLatencyMs. Default true. It needs the node agents' metrics;
+    // without them the copy runs at the fixed speed.
+    // +optional
+    VMCopyAdaptive *bool `json:"vmCopyAdaptive,omitempty"`
+
+    // VMCopyMaxLatencyMs is the share latency, in milliseconds, above which an
+    // adaptive copy slows down. Default 15.
+    // +kubebuilder:validation:Minimum=1
+    // +kubebuilder:validation:Maximum=20
+    // +optional
+    VMCopyMaxLatencyMs *int32 `json:"vmCopyMaxLatencyMs,omitempty"`
 
     // RestorePointKeepHours is how long the destination keeps the restore
     // points of running VM disks. See "Running VM disks" below.
@@ -1898,7 +1982,7 @@ kubectl annotate replicationpolicy <name> storage.ibmcloud.io/paused-
 ### Replication Behavior
 
 - Each replication cycle iterates over all SubVolumes matching the `subVolumeSelector` (or all SubVolumes in the pool if no selector is set).
-- For each SubVolume, an incremental rsync copies changed files from the source subdirectory to the destination NFS server at `destinationBasePath/<subPath>`.
+- For each SubVolume in direct NFS mode, an incremental rsync copies changed files from the source subdirectory to the destination NFS server at `destinationBasePath/<subPath>`. In receiver mode, the whole subdirectory is tarred and uploaded to the receiver each cycle.
 - `consecutiveFailures` increments on each failed cycle and resets to 0 on success. When it reaches `maxRetries`, the policy transitions to `Paused`.
 - `conditions` has `ReceiverReachable` for a policy with `destinationEndpoint` (driver-to-driver mode); direct-NFS policies have none. The controller reads the token and CA Secrets in `kube-system`, calls the receiver's `/api/v1/health` and `/api/v1/auth-check`, and records `True` (reason `Reachable`) or `False` with one reason and a plain message: `CertificateNotTrusted`, `TokenRefused`, `StorageNotReachable`, `ReceiverTooOld`, `CannotConnect`, `TimedOut`, `SecretMissing` or `BadInput`. It checks when it first sees the policy and then once per `schedule`. A `False` result does not pause or stop replication; it explains why a sync fails.
 - Per-SubVolume status in `subVolumeStatuses` allows operators to identify which volumes are failing independently.

@@ -594,3 +594,38 @@ func seriesCount(c prometheus.Collector) int {
 	}
 	return n
 }
+
+func TestBackupController_CopySpeedSettingsReachTheReplicationPolicy(t *testing.T) {
+	e := newBackupEnv(t)
+	e.addClaim("apps", "db", "data-a", yes)
+	e.policy("nightly", func(p *v1alpha1.BackupPolicy) {
+		no, ms := false, int32(10)
+		p.Spec.VMCopyAdaptive = &no
+		p.Spec.VMCopyMaxLatencyMs = &ms
+	})
+	e.reconcile()
+	sp := e.repls()[0].Spec
+	if sp.VMCopyAdaptive == nil || *sp.VMCopyAdaptive || sp.VMCopyMaxLatencyMs == nil || *sp.VMCopyMaxLatencyMs != 10 {
+		t.Fatalf("adaptive = %v, max latency = %v, want false and 10", sp.VMCopyAdaptive, sp.VMCopyMaxLatencyMs)
+	}
+	if sp.VMCopySpeedLimitMBps != nil {
+		t.Fatalf("a policy with no speed limit has none, got %d: the 20 MB/s default is gone", *sp.VMCopySpeedLimitMBps)
+	}
+}
+
+func TestBackupController_ACopySpeedChangeReachesAnExistingReplicationPolicy(t *testing.T) {
+	e := newBackupEnv(t)
+	e.addClaim("apps", "db", "data-a", yes)
+	e.policy("nightly", nil)
+	e.reconcile()
+	bp := e.bp("nightly")
+	ms := int32(8)
+	bp.Spec.VMCopyMaxLatencyMs = &ms
+	if err := e.c.Update(e.ctx, bp); err != nil {
+		t.Fatal(err)
+	}
+	e.reconcile()
+	if got := e.repls()[0].Spec.VMCopyMaxLatencyMs; got == nil || *got != 8 {
+		t.Fatalf("the change must reach the replication policy, got %v", got)
+	}
+}

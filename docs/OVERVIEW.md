@@ -9,21 +9,7 @@ The driver runs two things on your cluster:
 1. **Controller** (one instance) — decides *where* each PVC goes
 2. **Node Agent** (one per worker node) — does the actual *mounting*
 
-```
-                    PVC created
-                        │
-                        ▼
-              ┌──────────────────┐
-              │    Controller    │   "Put this PVC on share #2"
-              │  (1 per cluster) │
-              └────────┬─────────┘
-                       │ records a SubVolume CR
-                       ▼
-              ┌──────────────────┐
-              │   Node Agent     │   "Mount share #2, bind-mount
-              │  (1 per node)    │    the subdirectory into the pod"
-              └──────────────────┘
-```
+![A created PVC goes to the controller, which records a SubVolume CR; the node agent then mounts the share and bind-mounts the subdirectory into the pod](images/overview-controller-and-node-agent.drawio.svg)
 
 ## Controller
 
@@ -44,12 +30,12 @@ This takes less than a second because it's just picking an existing share and wr
 
 The Pool Manager is a background reconciler that handles the slow VPC API work so the controller doesn't have to:
 
-- Creates new VPC file shares when the pool is running low on space (auto-expansion)
+- Creates new VPC file shares when the pool is running low on space (auto-expansion). A PVC request that finds no share with room, with `autoExpand` on, also creates one itself and is told to retry.
 - Monitors share health via the VPC API
 - Marks unhealthy shares as draining (no new PVCs, existing ones keep working)
 - Updates pool status and Prometheus metrics
 
-VPC API calls take 30-90 seconds each, which is why they happen here in the background — never during a PVC create request.
+VPC API calls take 30-90 seconds each, which is why they happen here in the background. The one exception is auto-expand: a PVC create request that finds no share with room calls the VPC API itself (see [Architecture](ARCHITECTURE.md)).
 
 For the Pool Manager interface and reconciliation data flows, see [Architecture > Pool Manager](ARCHITECTURE.md#3-pool-manager).
 
@@ -59,24 +45,25 @@ The node agent is a DaemonSet (one pod per worker node). It handles the actual N
 
 **When a pod starts** that uses a pooled PVC, the node agent on that node:
 
-1. **Mounts the NFS share** — if it isn't already mounted on this node. Uses `soft,timeo=600,retrans=3` so pods get errors instead of hanging if NFS goes down.
+1. **Mounts the NFS share** — at the staging folder kubelet gives for this volume, if that folder is not already mounted. Uses `soft,timeo=600,retrans=3` so pods get errors instead of hanging if NFS goes down.
 2. **Creates the subdirectory** — `/pvcs/pvc-xyz` on the share, if it doesn't already exist (with the configured UID/GID/permissions).
 3. **Bind-mounts the subdirectory** into the pod's volume path. The pod only sees its own subdirectory, not the whole share.
 
-**When a pod stops**, the node agent removes the bind-mount. The NFS share stays mounted as long as other PVCs on that node still use it.
+**When a pod stops**, the node agent removes the bind-mount. The NFS mount stays as long as another pod on that node still uses the same volume.
 
 ### Mount Caching
 
-The node agent keeps one NFS mount per share per node. If 10 PVCs on the same node all use the same share, there's still just one NFS connection — each PVC gets its own bind-mount of its subdirectory.
+The node agent keeps one NFS mount per staged volume. A second pod on the same volume reuses that mount. A different volume on the same share is mounted again (the volume ID includes the PV name, so kubelet gives it its own staging folder). Each pod gets its own bind-mount of its volume's subdirectory.
 
 ```
-NFS mount (1 per share per node):
-  10.240.1.5:/ → /staging/{share-id}/
+NFS mount (1 per staged volume):
+  10.240.1.5:/ → <staging folder of volume aaa>/
+  10.240.1.5:/ → <staging folder of volume bbb>/
 
-Bind-mounts (1 per PVC):
-  /staging/{share-id}/pvcs/pvc-aaa/ → Pod A /data/
-  /staging/{share-id}/pvcs/pvc-bbb/ → Pod B /data/
-  /staging/{share-id}/pvcs/pvc-ccc/ → Pod C /data/
+Bind-mounts (1 per pod):
+  <staging folder of aaa>/pvcs/pvc-aaa/ → Pod A /data/
+  <staging folder of aaa>/pvcs/pvc-aaa/ → Pod A2 /data/   (reuses the mount)
+  <staging folder of bbb>/pvcs/pvc-bbb/ → Pod B /data/
 ```
 
 For cross-zone IP selection and the nsenter mount wrapper, see [Architecture > CSI Node Agent](ARCHITECTURE.md#2-csi-node-agent-daemonset).

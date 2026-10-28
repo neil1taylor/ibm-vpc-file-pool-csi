@@ -8,11 +8,16 @@ import {
   disksWithInstantSnapshots,
   instantSnapshotState,
   KubeVirtLike,
+  SETTINGS_CONFIGMAP,
+  SettingsConfigMapLike,
+  snapshotMode,
+  vmSnapshotMethod,
 } from '../../utils/instant-snapshots';
 
 /**
- * Shows whether VM disk snapshots are instant (the KubeVirt Sidecar feature gate is on) or full copies.
- * It only shows the setting: turning the gate on or off is a cluster administrator's step.
+ * Shows how the driver takes VM disk snapshots: instant, or full copies. Instant needs two things: the driver
+ * set to auto (read from the settings ConfigMap the Helm chart renders) and the KubeVirt Sidecar feature gate on.
+ * It only shows the mode: turning the gate on or off is a cluster administrator's step.
  */
 const InstantSnapshotStatus: React.FC = () => {
   const [expanded, setExpanded] = useState(false);
@@ -33,24 +38,51 @@ const InstantSnapshotStatus: React.FC = () => {
     isList: true,
   });
 
-  const state = instantSnapshotState(kubevirts, kvLoaded, kvError);
+  const [settings] = useK8sWatchResource<SettingsConfigMapLike>({
+    groupVersionKind: { version: 'v1', kind: 'ConfigMap' },
+    name: SETTINGS_CONFIGMAP.name,
+    namespace: SETTINGS_CONFIGMAP.namespace,
+  });
 
-  if (state === 'unknown') {
+  const gate = instantSnapshotState(kubevirts, kvLoaded, kvError);
+  const mode = snapshotMode(vmSnapshotMethod(settings), gate);
+
+  if (mode === 'unknown-setting') {
     return (
-      <Alert variant="custom" title="Instant VM snapshots: unknown" isInline isPlain>
+      <Alert variant="custom" title="VM snapshots: unknown" isInline isPlain>
+        The driver does not report its setting. A driver older than this console, or one the console cannot read the
+        settings of, does not publish it. The Helm value <code>vmSnapshots.method</code> says how it takes VM disk
+        snapshots.
+      </Alert>
+    );
+  }
+
+  if (mode === 'unknown') {
+    return (
+      <Alert variant="custom" title="VM snapshots: unknown" isInline isPlain>
         The console cannot read the KubeVirt settings. Reading them needs permission to read KubeVirt in the
         OpenShift Virtualization namespace, and OpenShift Virtualization must be installed.
       </Alert>
     );
   }
 
-  if (state === 'off') {
+  if (mode === 'copy-setting') {
     return (
-      <Alert variant="info" title="Instant VM snapshots: off" isInline>
-        VM disk snapshots are full copies. A copy takes longer and uses as much space as the disk. To make
-        snapshots instant, a cluster administrator turns on the KubeVirt Sidecar feature gate: install the driver
-        with the Helm value <code>vmSnapshots.enableSidecarGate=true</code>, or run{' '}
-        <code>hack/sidecar-gate.sh on</code> from the driver repository. Red Hat does not support this setting.
+      <Alert variant="info" title="VM snapshots: copy" isInline>
+        The driver is set to copy (the Helm value <code>vmSnapshots.method=copy</code>). Each VM disk snapshot copies
+        the disk: it takes longer and uses as much space as the disk. Nothing else on the cluster is changed.
+      </Alert>
+    );
+  }
+
+  if (mode === 'copy-gate') {
+    return (
+      <Alert variant="info" title="VM snapshots: copy" isInline>
+        The driver would take instant snapshots, but the KubeVirt Sidecar feature gate is off, so each VM disk
+        snapshot copies the disk. A copy takes longer and uses as much space as the disk. To make snapshots instant,
+        a cluster administrator turns on the gate: install the driver with the Helm value{' '}
+        <code>vmSnapshots.enableSidecarGate=true</code>, or run <code>hack/sidecar-gate.sh on</code> from the driver
+        repository. Red Hat does not support this setting.
       </Alert>
     );
   }
@@ -58,11 +90,11 @@ const InstantSnapshotStatus: React.FC = () => {
   const disks = disksWithInstantSnapshots(subvolumes, vms);
   const count = `${disks.length} VM disk${disks.length === 1 ? ' has' : 's have'} instant snapshots`;
   return (
-    <Alert variant="success" title="Instant VM snapshots: on" isInline>
+    <Alert variant="success" title="VM snapshots: instant" isInline>
       <p>
-        VM disk snapshots are instant: each snapshot is a new overlay file and nothing is copied (unless the driver
-        was installed with <code>vmSnapshots.method=copy</code>). If the KubeVirt Sidecar feature gate is turned
-        off, the VMs listed here would not start until their disks are flattened with{' '}
+        VM disk snapshots are instant: each snapshot is a new overlay file and nothing is copied. The driver is set to
+        auto and the KubeVirt Sidecar feature gate is on. If the gate is turned off, the VMs listed here would not
+        start until their disks are flattened with{' '}
         <code>kubectl pool-snapshots flatten &lt;vm&gt; -n &lt;namespace&gt;</code>.
       </p>
       {disks.length === 0 ? (

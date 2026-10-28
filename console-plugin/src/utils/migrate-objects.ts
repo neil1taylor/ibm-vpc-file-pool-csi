@@ -4,22 +4,26 @@ import { PersistentVolumeClaim } from './k8s-objects';
 // pkg/migrate/golden_test.go writes them to a golden file, and migrate-objects.test.ts compares
 // these builders with that file, so the two cannot drift apart.
 
-export const MIGRATION_IMAGE = 'alpine:3.20';
+/** The OpenShift tools image: it holds rsync and find, needs no pull secret and runs as any user id (issue #196). */
+export const MIGRATION_IMAGE = 'image-registry.openshift-image-registry.svc:5000/openshift/tools:latest';
 export const LABEL_MIGRATION = 'vpc-file-pool-csi.ibm.io/migration';
 export const ANNOTATION_SOURCE_PVC = 'vpc-file-pool-csi.ibm.io/source-pvc';
 export const ANNOTATION_TARGET_PVC = 'vpc-file-pool-csi.ibm.io/target-pvc';
 export const ANNOTATION_POOL = 'vpc-file-pool-csi.ibm.io/pool';
 
-/** Installs rsync, copies, then compares file counts. A count mismatch fails the pod. */
+/**
+ * Copies, then compares file counts. A count mismatch fails the pod.
+ * The copy runs as the user the cluster gives the pod, so it sets no owners or modes, and it leaves the
+ * times of the new claim's top folder alone (it belongs to the pool's user).
+ */
 const MIGRATION_SCRIPT = `
 set -e
-apk add --no-cache rsync >/dev/null 2>&1
 echo "=== Migration started ==="
 echo "Source: /source"
 echo "Target: /target"
 SOURCE_COUNT=$(find /source -type f | wc -l)
 echo "Source file count: $SOURCE_COUNT"
-rsync -avz --progress /source/ /target/
+rsync -rltSv --omit-dir-times --progress /source/ /target/
 TARGET_COUNT=$(find /target -type f | wc -l)
 echo "Target file count: $TARGET_COUNT"
 echo "=== Migration complete ==="
@@ -81,10 +85,12 @@ export function buildMigrationPod(input: { namespace: string; sourcePVC: string 
     },
     spec: {
       restartPolicy: 'Never',
+      securityContext: { seccompProfile: { type: 'RuntimeDefault' } },
       containers: [
         {
           name: 'migrate',
           image: MIGRATION_IMAGE,
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ['ALL'] } },
           command: ['sh', '-c', MIGRATION_SCRIPT],
           volumeMounts: [
             { name: 'source', mountPath: '/source', readOnly: true },

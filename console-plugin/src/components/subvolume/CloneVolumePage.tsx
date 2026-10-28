@@ -28,7 +28,6 @@ import {
 import { FileSharePool, SubVolume } from '../../types';
 import { ROUTES } from '../../constants';
 import {
-  CSI_DRIVER_NAME,
   PersistentVolumeClaim,
   StorageClass,
   VirtualMachineLike,
@@ -44,6 +43,8 @@ import {
 } from '../../utils/restore-helpers';
 import FieldPopover from '../common/FieldPopover';
 import RestoreProgressBanner from '../snapshot/RestoreProgressBanner';
+import { useBackupPolicies } from '../../utils/use-backup-policies';
+import { volumeClasses } from '../../utils/snapshot-pools';
 
 const gvk = (model: { apiGroup?: string; apiVersion: string; kind: string }) => ({
   group: model.apiGroup,
@@ -63,6 +64,7 @@ const CloneVolumePage: React.FC = () => {
     groupVersionKind: gvk(SubVolumeModel),
     name,
   });
+  const policies = useBackupPolicies();
   const [storageClasses, classesLoaded] = useK8sWatchResource<StorageClass[]>({
     groupVersionKind: gvk(StorageClassModel),
     isList: true,
@@ -149,12 +151,13 @@ const CloneVolumePage: React.FC = () => {
 
   const minGiB = cloneDefaults({ subvolume, sourcePVC, storageClasses: storageClasses || [] }).sizeGiB;
   const errors = validateRestore(form, {
-    existingNames: (pvcs || []).map((p) => p.metadata?.name || ''),
+    // The claim this page made is not a name taken by someone else.
+    existingNames: (pvcs || []).map((p) => p.metadata?.name || '').filter((n) => n !== createdName),
     minGiB,
     minLabel: "the volume's",
   });
   const valid = !errors.name && !errors.size && !!form.storageClass;
-  const driverClasses = (storageClasses || []).filter((sc) => sc.provisioner === CSI_DRIVER_NAME);
+  const driverClasses = volumeClasses(storageClasses || [], policies);
   const showVMWarning = !vmsError && vmUsesPVC(vms || [], namespace, sourcePVCName);
   const freeGB = pool?.status ? pool.status.totalCapacityGB - pool.status.totalAllocatedGB : undefined;
 

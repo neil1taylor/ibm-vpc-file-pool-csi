@@ -8,28 +8,7 @@ Decision framework for sizing pools, selecting profiles, and planning growth. Th
 
 Use this to determine your pool configuration:
 
-```
-1. What workload type?
-   ├── General (configs, logs, small apps) ──→ Profile: dp2, Share: 1-2 TB, Strategy: spread
-   ├── Database / analytics ──→ Profile: dp2 (set spec.iops), Share: 2-4 TB, Strategy: spread
-   ├── CI/CD ephemeral ──→ Profile: dp2, Share: 500 GB-1 TB, Strategy: binpack
-   ├── ML/AI training ──→ Profile: dp2, Share: 4-16 TB, Strategy: spread
-   └── KubeVirt VMs ──→ Profile: dp2, Share: 2-4 TB, Strategy: spread, UID: 107
-
-2. How many trust boundaries?
-   ├── Single team / single tenant ──→ 1 pool
-   ├── Multiple teams, same trust level ──→ 1 pool with tiers
-   └── Multiple teams, different trust levels ──→ Separate pools per trust boundary
-
-3. How many zones?
-   ├── Pods in one zone ──→ 1 pool in that zone
-   ├── Pods in many zones, shared data ──→ 1 pool (its one mount target serves every zone)
-   └── Zone-isolated data ──→ 1 pool per zone
-
-4. Need DR?
-   ├── No ──→ Done
-   └── Yes ──→ Add ReplicationPolicy + destination pool in DR region
-```
+![Four questions (workload type, trust boundaries, zones, DR) and the pool setting each answer gives](images/capacity-planning-decisions.drawio.svg)
 
 ---
 
@@ -104,6 +83,26 @@ spec:
 | ML training with sequential large reads | Leave `spec.iops` unset — throughput is more relevant than IOPS |
 
 See [PERFORMANCE-TUNING.md — IOPS Planning](PERFORMANCE-TUNING.md#iops-planning) for the full IOPS table and calculation examples.
+
+---
+
+## How Many VMs One Share Carries (Measured)
+
+These numbers come from the PoolBench performance test on the DR lab cluster. The test adds VMs to one 3,900 GB share in steps of 15, up to 90. One VM in three runs Windows Server 2022, the others CentOS Stream 9. Each VM does 30 IOPS all the time and a burst of 300 IOPS for 45 seconds every 10 minutes (70% reads, blocks of 4, 16 and 64 KiB).
+
+The **knee** is the first VM count where users would notice: more than a quarter of the VMs have a p95 latency over 20 ms, a burst is slow, an I/O stalls, or the share is at its IOPS limit. **Recommended** is the largest step at or below 80% of the knee, so there is room to spare.
+
+| Share IOPS | Knee | Recommended | What happened |
+|---|---|---|---|
+| 3,000 | 45 VMs | 30 VMs | At 45 VMs, 91% of the VMs were slow (p95 29.8 ms). At 30 VMs none were slow (p95 1.2 ms). |
+| 10,000 | None up to 90 VMs | 90 VMs or more | No slow VMs at any step. At 90 VMs the VMs asked for 7,603 of the 10,000 IOPS IBM counts. |
+
+- The VMs ask for more than their own IOPS suggest: IBM counts one operation for every 16 KiB of an I/O, so a share reaches its limit before the VMs' own IOPS do. PoolBench shows both numbers.
+- Making and filling new VMs is itself heavy. On a 3,000 IOPS share, 15 new VMs slowed the running VMs for about 20 minutes. Add VMs to a busy share in small groups.
+- The 20,000 IOPS tier was not measured: 90 VMs is already more than the cluster's memory allows with one node down.
+- The 3,000 IOPS result is the same from the command-line test and from the console.
+
+To measure your own share size, speed and VM mix, use the PoolBench page in the console (see [FEATURES.md](FEATURES.md#poolbench--experimental)).
 
 ---
 
@@ -397,7 +396,7 @@ spec:
   defaultUID: 107          # QEMU user
   defaultGID: 107
   defaultPermissions: "0777"
-  goldenImages:            # Auto-provision golden images for KubeVirt
+  goldenImages:            # Hidden feature: auto-provision golden images for KubeVirt
     enabled: true
     targetNamespaces:
       - openshift-virtualization-os-images

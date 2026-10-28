@@ -39,6 +39,7 @@ type fakeLauncher struct {
 type fakeJob struct {
 	status string // running, concluded
 	err    string
+	speed  int64 // bytes per second, set by blockdev-backup or block-job-set-speed
 }
 
 func newFakeLauncher() *fakeLauncher {
@@ -307,6 +308,15 @@ func (f *fakeLauncher) qmp(in string) (string, string, error) {
 		}
 		b, _ := json.Marshal(map[string]any{"return": jobs})
 		return string(b), "", nil
+	case "block-job-set-speed":
+		id, _ := req.Arguments["device"].(string)
+		speed, _ := req.Arguments["speed"].(float64)
+		j, ok2 := f.jobs[id]
+		if !ok2 || j.status != "running" {
+			return qmpErr("Block job '" + id + "' not found")
+		}
+		j.speed = int64(speed)
+		return ok, "", nil
 	case "block-job-cancel":
 		id, _ := req.Arguments["device"].(string)
 		j, ok2 := f.jobs[id]
@@ -866,5 +876,60 @@ func TestVolumeOfFile(t *testing.T) {
 		if got := volumeOfFile(tt.file); got != tt.want {
 			t.Errorf("volumeOfFile(%q) = %q, want %q", tt.file, got, tt.want)
 		}
+	}
+}
+
+func TestSetSpeed(t *testing.T) {
+	f := newFakeLauncher()
+	c := newTestCopier(f)
+	ctx := context.Background()
+	cp, err := c.Start(ctx, testVM, []string{"rootdisk", "datadisk"}, StartOptions{Speed: 5 << 20, ID: "a1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SetSpeed(ctx, testVM, cp, 40<<20); err != nil {
+		t.Fatalf("SetSpeed: %v", err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, id := range []string{"repl-a1-0", "repl-a1-1"} {
+		if got := f.jobs[id].speed; got != 40<<20 {
+			t.Fatalf("job %s speed %d, want %d", id, got, 40<<20)
+		}
+	}
+}
+
+func TestSetSpeedOfAFinishedCopyIsAnError(t *testing.T) {
+	f := newFakeLauncher()
+	c := newTestCopier(f)
+	ctx := context.Background()
+	cp, err := c.Start(ctx, testVM, []string{"rootdisk"}, StartOptions{ID: "a1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.finishJobs("")
+	if err := c.SetSpeed(ctx, testVM, cp, 40<<20); err == nil || !strings.Contains(err.Error(), "rootdisk") {
+		t.Fatalf("want an error that names the disk, got %v", err)
+	}
+}
+
+func TestSetSpeedSkipsADiskWhoseCopyHasEnded(t *testing.T) {
+	f := newFakeLauncher()
+	c := newTestCopier(f)
+	ctx := context.Background()
+	cp, err := c.Start(ctx, testVM, []string{"rootdisk", "datadisk"}, StartOptions{Speed: 5 << 20, ID: "a1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	f.jobs["repl-a1-0"].status = "concluded"
+	f.mu.Unlock()
+	if err := c.SetSpeed(ctx, testVM, cp, 40<<20); err != nil {
+		t.Fatalf("SetSpeed with one disk finished: %v", err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if got := f.jobs["repl-a1-1"].speed; got != 40<<20 {
+		t.Errorf("the disk that still copies has speed %d, want %d", got, 40<<20)
 	}
 }

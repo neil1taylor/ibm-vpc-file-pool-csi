@@ -16,7 +16,7 @@ Hands-on tutorials covering every major capability of the pool CSI driver. Each 
 | 4 | [Pool Configuration](TUTORIAL-04-POOL-CONFIGURATION.md) | Multi-tier pools, spread vs binpack strategies, auto-expansion, share draining |
 | 5 | [Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md) | CDI native mode and custom syncer for automatic KubeVirt golden image provisioning |
 | 6 | [Replication and Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md) | Direct NFS and driver-to-driver cross-region replication, pause/resume, failover CLI |
-| 7 | [Monitoring](TUTORIAL-07-MONITORING.md) | Prometheus metrics (31 metrics), ServiceMonitor, alerting rules, Grafana dashboard |
+| 7 | [Monitoring](TUTORIAL-07-MONITORING.md) | Prometheus metrics (37 metrics), ServiceMonitor, alerting rules, Grafana dashboard |
 | 8 | [Migration and Console Plugin](TUTORIAL-08-MIGRATION-AND-CONSOLE.md) | PVC migration from stock driver, OpenShift console plugin walkthrough |
 | 9 | [COS Bucket for Backups](TUTORIAL-09-COS-BACKUP-BUCKET.md) | Locked COS bucket, a key that cannot delete or unlock, a CBR rule that limits it to the cluster |
 | 10 | [Backup and Restore](TUTORIAL-10-BACKUP-AND-RESTORE.md) | Back up a volume on a schedule to a snapshot pool, list the moments, restore one, delete backups |
@@ -24,29 +24,16 @@ Hands-on tutorials covering every major capability of the pool CSI driver. Each 
 | 12 | [Replicating Running VMs](TUTORIAL-12-REPLICATING-RUNNING-VMS.md) | Copy a running VM with all disks at one moment to a second cluster through a receiver |
 | 13 | [Failover of Running VMs](TUTORIAL-13-FAILOVER-OF-RUNNING-VMS.md) | Plan, rewind and fail over replicated VMs with `kubectl failover` |
 | 14 | [Restore a Snapshot in the Console](TUTORIAL-14-CONSOLE-RESTORE.md) | Make a snapshot and restore it to a new PVC in the OpenShift console |
+| 15 | [Make a VM from the Catalog on a Pool](TUTORIAL-15-VM-FROM-THE-CATALOG.md) | Pick a catalog image and an instance type, choose the pool's StorageClass for the boot disk, and let CDI copy the image |
+| 16 | [Backups, Clones and Replication Setup in the Console](TUTORIAL-16-CONSOLE-BACKUPS-CLONES-RECEIVER.md) | Schedule and restore backups, clone a volume, and set up a replication receiver in the console |
 
 ---
 
 ## Reading Order
 
-```
-Part 1 (foundation — do this first)
-├── Part 2 (snapshots/clones)
-│   └── Part 3 (group snapshots/hooks)
-├── Part 4 (pool configuration)
-│   └── Part 5 (golden images)
-├── Part 6 (replication/failover)
-├── Part 7 (monitoring)
-├── Part 8 (migration/console)
-├── Part 9 (COS bucket for backups)
-├── Part 10 (backup and restore)
-├── Part 11 (instant VM snapshots)
-├── Part 12 (replicating running VMs)
-│   └── Part 13 (failover of running VMs)
-└── Part 14 (restore a snapshot in the console)
-```
+![Part 1 comes first; Parts 2 to 16 follow from it, with Part 3 after Part 2, Part 5 after Part 4 and Part 13 after Part 12](images/tutorial-reading-order.drawio.svg)
 
-Parts 2-14 are independent of each other, except that Part 13 follows Part 12. Pick whichever is relevant to your use case.
+Parts 2-16 are independent of each other, except that Part 13 follows Part 12. Pick whichever is relevant to your use case.
 
 ---
 

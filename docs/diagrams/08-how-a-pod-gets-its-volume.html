@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How a Pod Gets Its Volume</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#f4f6f8; --panel:#ffffff; --fg:#161d26; --muted:#5a6675; --line:#d5dce4; --share:#e9eef4;
+  --ok:#0e6b4f; --warn:#8a5300; --bad:#b3261e; --btn:#0f4fd6; --btn-fg:#ffffff;
+  --l0:#2b6f8f; --l1:#d9780f; --l2:#7a4fb0; --l3:#c43d63; --l4:#3a8a2b; --l5:#8d9124;
+  --font:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#10161d; --panel:#18212b; --fg:#e6ebf1; --muted:#9aa7b6; --line:#2b3745; --share:#1d2834;
+  --ok:#5fd0a6; --warn:#e0a24a; --bad:#ff8a80; --btn:#6c9bff; --btn-fg:#0b1220;
+  --l0:#5fb3d6; --l1:#f0a04b; --l2:#b595e6; --l3:#ee7f9b; --l4:#7fcb6a; --l5:#c4c76a; color-scheme:dark;}}
+:root[data-theme="dark"]{
+  --bg:#10161d; --panel:#18212b; --fg:#e6ebf1; --muted:#9aa7b6; --line:#2b3745; --share:#1d2834;
+  --ok:#5fd0a6; --warn:#e0a24a; --bad:#ff8a80; --btn:#6c9bff; --btn-fg:#0b1220;
+  --l0:#5fb3d6; --l1:#f0a04b; --l2:#b595e6; --l3:#ee7f9b; --l4:#7fcb6a; --l5:#c4c76a; color-scheme:dark;}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 var(--font);margin:0;
+  padding-block:24px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+main{max-width:860px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+nav.top{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:.85rem;color:var(--muted)}
+nav.top a{color:var(--btn);text-decoration:none}
+nav.top a:hover{text-decoration:underline}
+nav.top .off{opacity:.5}
+h1{font-size:1.5rem;line-height:1.2;margin:0;font-weight:600;text-wrap:balance}
+h2{font-size:.75rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0;font-weight:600}
+p{margin:0;max-width:65ch}
+.lead{color:var(--muted)}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button{font:inherit;font-weight:500;border:1px solid var(--line);background:var(--panel);color:var(--fg);padding:8px 14px;border-radius:6px;cursor:pointer}
+button.primary{background:var(--btn);color:var(--btn-fg);border-color:var(--btn)}
+button.on{outline:2px solid var(--btn);outline-offset:-2px;font-weight:600}
+button:disabled{opacity:.45;cursor:not-allowed}
+button:focus-visible{outline:2px solid var(--btn);outline-offset:2px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.share{background:var(--share);border:1px solid var(--line);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.mono{font-family:var(--mono);font-size:.85rem}
+.log{border-left:3px solid var(--btn);padding:6px 12px;min-height:3.4em;background:var(--panel)}
+.stats{display:flex;flex-wrap:wrap;gap:16px;color:var(--muted);font-size:.9rem}
+.stats b{color:var(--fg);font-variant-numeric:tabular-nums}
+.hint{font-size:.85rem;color:var(--muted)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:.82rem;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{display:inline-block;width:16px;height:16px;border-radius:4px;border:2px solid var(--c,var(--line));background:color-mix(in srgb,var(--c,transparent) 22%,var(--panel))}
+.sw.dash{border-style:dashed;background:transparent}
+.sw.out{box-shadow:0 0 0 2px var(--fg)}
+.blk{font-family:var(--mono);font-size:.82rem;text-align:center;padding:5px 8px;border-radius:4px;border:2px solid var(--c,var(--line));background:color-mix(in srgb,var(--c,transparent) 22%,var(--panel));min-width:0;white-space:nowrap}
+.blk.dash{border-style:dashed;background:transparent;color:var(--muted)}
+.blk.new{box-shadow:0 0 0 2px var(--fg)}
+.blk.bad{--c:var(--bad)}
+.chip{display:inline-block;font-size:.76rem;font-weight:600;padding:1px 8px;border-radius:10px;border:1px solid var(--line)}
+.chip.ok{color:var(--ok);border-color:var(--ok)}
+.chip.warn{color:var(--warn);border-color:var(--warn)}
+.chip.bad{color:var(--bad);border-color:var(--bad)}
+@media (prefers-reduced-motion:no-preference){.blk{transition:background .25s,border-color .25s}}
+[hidden]{display:none !important}
+.fold{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.fbox{border:2px solid var(--c,var(--line));border-radius:6px;padding:6px 8px;background:color-mix(in srgb,var(--c,transparent) 12%,var(--panel));display:flex;flex-direction:column;gap:4px;min-width:0}
+.fbox.dash{border-style:dashed;background:transparent}
+.fbox.mute{opacity:.55}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}
+.pod{border:1px solid var(--line);border-left:6px solid var(--c);border-radius:8px;padding:10px;background:var(--panel);display:flex;flex-direction:column;gap:8px;min-width:0}
+.pod .top{display:flex;justify-content:space-between;gap:6px;flex-wrap:wrap;align-items:center}
+.mnt{border:1px solid var(--line);border-radius:6px;padding:8px;background:var(--panel);display:flex;flex-direction:column;gap:6px;min-width:0;border-left:6px solid var(--c)}
+</style>
+</head>
+<body>
+<main>
+<nav class="top" aria-label="Pages"><a href="index.html">All pages</a><a href="07-cloning-a-vm-disk.html">&larr; Previous page</a><a href="09-pool-filling-up.html">Next page &rarr;</a></nav>
+  <div>
+    <h1>How a Pod Gets Its Volume</h1>
+    <p class="lead">A pod runs on a worker node. Its volume is a folder on a share in the VPC. The driver's <b>node agent</b> runs on every node. It connects the node to the share (an <b>NFS mount</b>), then gives each pod only its own folder (a <b>bind mount</b>). This page starts and stops four pods so you can see each step.</p>
+  </div>
+
+  <div class="bar">
+    <button class="primary" id="bnext">Next step</button>
+    <button id="bclone" disabled>The clone copy ends</button>
+    <button id="breset">Start again</button>
+  </div>
+  <p class="hint">Press <b>Next step</b> to follow the story, or use the Start and Stop buttons on the pods in any order. Volume <b>ccc</b> is a clone: its data is still being copied, so a pod cannot use it yet. A block with a white outline is new.</p>
+
+  <section class="share" aria-label="The share in the VPC">
+    <h2>In the VPC · one share, three volume folders</h2>
+    <div class="fold" id="share"></div>
+  </section>
+
+  <section class="share" aria-label="The worker node">
+    <h2>On the worker node · what the node agent has mounted</h2>
+    <div id="mounts" class="grid2"></div>
+    <h2>Pods on this node · what each pod sees</h2>
+    <div id="pods" class="grid2"></div>
+    <div class="legend">
+      <span><i class="sw" style="--c:var(--l0)"></i>volume aaa</span>
+      <span><i class="sw" style="--c:var(--l1)"></i>volume bbb</span>
+      <span><i class="sw" style="--c:var(--l2)"></i>volume ccc (a clone)</span>
+      <span><i class="sw dash"></i>not there yet</span>
+      <span><i class="sw out"></i>new in the last step</span>
+      <span><span class="chip ok">Running</span> <span class="chip warn">Waiting</span> <span class="chip">Stopped</span></span>
+    </div>
+  </section>
+
+  <div class="stats" aria-live="polite">
+    <span>NFS mounts of the share on this node: <b id="st-nfs">0</b></span>
+    <span>Bind mounts into pods: <b id="st-bind">0</b></span>
+    <span>Times the NFS mount was skipped: <b id="st-skip">0</b></span>
+  </div>
+  <div class="log" id="log" aria-live="polite"></div>
+
+</main>
+<script>
+(function(){
+  var VOLS={aaa:{c:0,files:["a1","a2"]},bbb:{c:1,files:["b1","b2"]},ccc:{c:2,files:["c1","c2"]}};
+  var PODS=[{n:1,vol:"aaa"},{n:2,vol:"aaa"},{n:3,vol:"bbb"},{n:4,vol:"ccc"}];
+  var SCRIPT=[["start",1],["start",2],["start",3],["start",4],["clone"],["stop",1],["stop",2]];
+  var folder, staged, pod, cloneDone, nfs, bind, skip, step, newKey;
+  function el(i){return document.getElementById(i);}
+  function say(h){el("log").innerHTML=h; render();}
+  function reset(){
+    folder={aaa:false,bbb:false,ccc:false}; staged={aaa:false,bbb:false,ccc:false};
+    pod={1:"Stopped",2:"Stopped",3:"Stopped",4:"Stopped"};
+    cloneDone=false; nfs=0; bind=0; skip=0; step=0; newKey=null;
+    say("The share holds the data of three volumes. Their folders do not exist yet: the driver only <b>recorded</b> each volume when the PVC was made. The node has mounted nothing. Press <b>Next step</b>.");
+  }
+  function active(vol){return PODS.some(function(p){return p.vol===vol&&pod[p.n]!=="Stopped";});}
+  function start(n){
+    var p=PODS[n-1], vol=p.vol; newKey=null;
+    if(pod[n]==="Running"){say("Pod "+n+" is already running.");return;}
+    var parts=["<b>Pod "+n+" starts and wants volume "+vol+".</b>"];
+    if(staged[vol]){
+      skip++; parts.push("Kubernetes does not stage the volume a second time, because this node already staged it. <b>No new NFS mount.</b>");
+    } else {
+      staged[vol]=true; nfs++; newKey="mount-"+vol;
+      parts.push("<b>Stage:</b> the node agent mounts the whole share over NFS at a staging folder for volume "+vol+". Options: <span class='mono'>nfsvers=4.1, soft, timeo=600, retrans=3, sec=sys</span>. <span class='mono'>soft</span> means a pod does not hang for ever if the share goes away, and <span class='mono'>sec=sys</span> lets the folder owner be set.");
+    }
+    if(vol==="ccc" && !cloneDone){
+      pod[n]="Waiting"; newKey="pod-"+n;
+      parts.push("<b>Publish is refused (clone gate):</b> the clone copy has not ended, so the folder is still empty. The node agent answers \"Unavailable\". The pod waits and Kubernetes tries again by itself.");
+      say(parts.join(" ")); return;
+    }
+    publish(n,parts);
+  }
+  function publish(n,parts){
+    var vol=PODS[n-1].vol;
+    if(!folder[vol]){
+      folder[vol]=true;
+      parts.push("<b>Publish:</b> the folder <span class='mono'>/pvcs/pvc-"+vol+"</span> is made now, on the first mount, with the owner and permissions from the pool settings.");
+    } else parts.push("<b>Publish:</b> the folder is there already.");
+    bind++; pod[n]="Running"; newKey="pod-"+n;
+    parts.push("The node agent <b>bind-mounts</b> only that folder into pod "+n+". The pod cannot see the other folders on the share.");
+    say(parts.join(" "));
+  }
+  function stop(n){
+    var p=PODS[n-1], vol=p.vol; newKey=null;
+    if(pod[n]==="Stopped"){say("Pod "+n+" is not running.");return;}
+    var was=pod[n]; pod[n]="Stopped";
+    var parts=["<b>Pod "+n+" stops.</b>"];
+    if(was==="Running"){ bind--; parts.push("<b>Unpublish:</b> the bind mount into the pod is removed."); }
+    if(!active(vol)){ staged[vol]=false; nfs--; parts.push("No pod on this node uses volume "+vol+" any more, so <b>unstage</b> removes its NFS mount."); }
+    else parts.push("Another pod still uses volume "+vol+", so the NFS mount stays.");
+    parts.push("The data in the folder is <b>not</b> deleted.");
+    say(parts.join(" "));
+  }
+  function cloneEnds(){
+    cloneDone=true; newKey="folder-ccc";
+    var parts=["<b>The clone copy ends.</b> The folder of volume ccc now holds its data."];
+    PODS.forEach(function(p){ if(p.vol==="ccc"&&pod[p.n]==="Waiting"){ parts.push("Kubernetes retries pod "+p.n+"."); publish(p.n,parts); } });
+    if(parts.length===1) say(parts.join(" ")); 
+  }
+  function next(){
+    if(step>=SCRIPT.length){say("The story is finished. Press <b>Start again</b>, or try the Start and Stop buttons.");return;}
+    var s=SCRIPT[step++];
+    if(s[0]==="start") start(s[1]); else if(s[0]==="stop") stop(s[1]); else cloneEnds();
+  }
+  function folderBox(v,ctx){
+    var d=VOLS[v], made=folder[v], c="var(--l"+d.c+")";
+    var files;
+    if(v==="ccc"&&!cloneDone) files='<span class="blk dash">clone copy running</span>';
+    else if(!made) files='<span class="blk dash">no folder yet</span>';
+    else files=d.files.map(function(f){return '<span class="blk" style="--c:'+c+'">'+f+'</span>';}).join("");
+    return '<div class="fbox '+((made&&!(v==="ccc"&&!cloneDone))?'':'dash')+'" style="--c:'+c+(newKey==="folder-"+v?';box-shadow:0 0 0 2px var(--fg)':'')+'"><span class="mono">pvc-'+v+'</span><div class="fold">'+files+'</div></div>';
+  }
+  function render(){
+    el("share").innerHTML=["aaa","bbb","ccc"].map(function(v){return folderBox(v);}).join("");
+    var m="";
+    ["aaa","bbb","ccc"].forEach(function(v){
+      if(!staged[v]) return;
+      var c="var(--l"+VOLS[v].c+")", isNew=newKey==="mount-"+v;
+      m+='<div class="mnt" style="--c:'+c+(isNew?';box-shadow:0 0 0 2px var(--fg)':'')+'"><b>NFS mount for volume '+v+'</b><span class="hint">The node sees the whole share through this mount.</span><div class="fold">'+
+        ["aaa","bbb","ccc"].map(function(x){return '<span class="blk'+(x===v?'':' dash')+'" style="--c:'+c+'">pvc-'+x+'</span>';}).join("")+'</div></div>';
+    });
+    el("mounts").innerHTML=m||'<div class="mnt" style="--c:var(--line)"><span class="blk dash">No NFS mounts on this node</span></div>';
+    var ph="";
+    PODS.forEach(function(p){
+      var c="var(--l"+VOLS[p.vol].c+")", st=pod[p.n], cls=st==="Running"?"ok":(st==="Waiting"?"warn":"");
+      var body;
+      if(st==="Running") body='<div class="hint">Bind mount: sees only</div><div class="fold"><span class="blk" style="--c:'+c+'">pvc-'+p.vol+'</span>'+VOLS[p.vol].files.map(function(f){return '<span class="blk" style="--c:'+c+'">'+f+'</span>';}).join("")+'</div>';
+      else if(st==="Waiting") body='<span class="blk dash">waiting for the clone copy</span>';
+      else body='<span class="blk dash">no bind mount</span>';
+      ph+='<div class="pod" style="--c:'+c+(newKey==="pod-"+p.n?';box-shadow:0 0 0 2px var(--fg)':'')+'"><div class="top"><b>Pod '+p.n+' · volume '+p.vol+'</b><span class="chip '+cls+'">'+st+'</span></div>'+body+
+        '<div><button data-pod="'+p.n+'">'+(st==="Stopped"?"Start pod "+p.n:"Stop pod "+p.n)+'</button></div></div>';
+    });
+    el("pods").innerHTML=ph;
+    el("st-nfs").textContent=nfs; el("st-bind").textContent=bind; el("st-skip").textContent=skip;
+    el("bclone").disabled=cloneDone;
+    el("bnext").disabled=step>=SCRIPT.length;
+  }
+  el("pods").addEventListener("click",function(e){
+    var b=e.target.closest("button"); if(!b) return;
+    var n=+b.getAttribute("data-pod"); if(pod[n]==="Stopped") start(n); else stop(n);
+  });
+  el("bnext").onclick=next; el("bclone").onclick=cloneEnds; el("breset").onclick=reset;
+  reset();
+})();
+
+</script>
+</body>
+</html>

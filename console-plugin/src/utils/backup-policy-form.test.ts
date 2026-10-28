@@ -21,7 +21,7 @@ const form = (over: Partial<BackupPolicyForm> = {}): BackupPolicyForm => ({
   keepFor: '7d',
   labels: [{ key: 'backup', value: 'yes' }],
   namespaces: '',
-  vmCopySpeed: 20,
+  vmCopySpeed: 0,
   suspend: false,
   ...over,
 });
@@ -116,10 +116,10 @@ describe('buildBackupPolicy', () => {
     });
   });
 
-  it('adds namespaces, a changed copy speed (even 0) and suspend', () => {
-    const bp = buildBackupPolicy(form({ namespaces: 'apps, web', vmCopySpeed: 0, suspend: true }));
+  it('adds namespaces, a highest copy speed and suspend', () => {
+    const bp = buildBackupPolicy(form({ namespaces: 'apps, web', vmCopySpeed: 20, suspend: true }));
     expect(bp.spec.namespaces).toEqual(['apps', 'web']);
-    expect(bp.spec.vmCopySpeedLimitMBps).toBe(0);
+    expect(bp.spec.vmCopySpeedLimitMBps).toBe(20);
     expect(bp.spec.suspend).toBe(true);
     expect(buildBackupPolicy(form({ vmCopySpeed: 50 })).spec.vmCopySpeedLimitMBps).toBe(50);
   });
@@ -154,7 +154,7 @@ describe('buildBackupPolicy', () => {
   });
 
   it('removes a setting that the form puts back to its default or empty', () => {
-    const bp = buildBackupPolicy(form({ vmCopySpeed: 20, labels: [] }), existing());
+    const bp = buildBackupPolicy(form({ vmCopySpeed: 0, labels: [] }), existing());
     expect(bp.spec.vmCopySpeedLimitMBps).toBeUndefined();
     expect(bp.spec.selector.matchLabels).toBeUndefined();
   });
@@ -182,7 +182,7 @@ describe('policyToForm', () => {
         { key: 'c', value: 'd' },
       ],
       namespaces: 'apps, web',
-      vmCopySpeed: 20,
+      vmCopySpeed: 0,
       suspend: true,
     });
   });

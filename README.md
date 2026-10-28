@@ -27,51 +27,37 @@ This reduces VPC API calls, speeds up PVC provisioning (mkdir vs. 30-90s share c
 
 ## Use cases and status
 
-**Included** means it is in the driver today, with its maturity: **GA** (ready for production), **Beta** (tested, may change) or **Experimental** (works in the lab; use only for data you can lose). **In progress** means it is being built. **Agreed, not built** means the spec is agreed and building has not started. **Proposed** means a spec is still under review. Details are in [FEATURES.md](docs/FEATURES.md).
+**Included** means it is in the latest release (the first one to have it is in the Since column) and in the driver today, with its maturity: **GA** (ready for production), **Beta** (tested, may change) or **Experimental** (works in the lab; use only for data you can lose). **In progress** means it is being built. **Agreed, not built** means the spec is agreed and building has not started. **Proposed** means a spec is still under review. Details are in [FEATURES.md](docs/FEATURES.md).
 
-| Use case | Status | Notes |
-|---|---|---|
-| Many volumes on a few shared file shares | Included, GA | The core of the driver. A volume is ready in under a second. |
-| A pool grows by itself when it fills | Included, GA | New shares are added in the background. Pools are in one zone. |
-| Several pools and speed tiers in one cluster | Included, Beta | One StorageClass per pool or tier. |
-| Take a share out of service (drain) | Included, GA | From the command line or the console. |
-| VMs from the OpenShift catalog on a pool | Included, Beta | The driver raises the memory limit of OpenShift's disk copy pods, which otherwise run out of memory on NFS. |
-| Snapshot and restore one volume | Included, Beta | A full copy on the same share. |
-| Snapshot of a running VM, all disks at one moment | Included, Beta | A short guest freeze. Red Hat does not support the method. |
-| Instant VM snapshots (no copy) | Included, Experimental | Needs a KubeVirt setting that Red Hat does not support. |
-| Clone a volume | Included, Beta | |
-| Move volumes from another storage class into a pool | Included, Beta | Known bug for normal users on OpenShift (issue #196). |
-| Scheduled backups to a backup pool, with restore points | Included, Experimental | Restore and delete from the command line or the console. |
-| A second backup copy in IBM Cloud Object Storage | Included, Experimental | Locked bucket; key held in Key Protect. |
-| Browse a backup and restore single files | In progress | Spec: [backup-file-restore](docs/specs/2026-10-22-backup-file-restore.md). |
-| Copy volumes to another cluster on a schedule | Included, Beta | Direct NFS or HTTPS receiver. |
-| Copy running VMs to another cluster, rewind and fail over | Included, Experimental | Restore points; `kubectl failover`. Red Hat does not support the method. |
-| Recover from a replication in the console | In progress | Issue #44. |
-| Continuous protection of VMs, recovery point of seconds | Agreed, not built | Like Zerto or Veeam CDP. Spec: [vm-continuous-data-protection](docs/specs/2026-10-22-vm-continuous-data-protection.md). |
-| Survive the loss of a zone | Agreed, not built | Spec: [zone-loss](docs/specs/2026-10-22-zone-loss.md). |
-| Snapshot of a whole pool | Agreed, not built | Spec: [pool-snapshots](docs/specs/2026-10-22-pool-snapshots.md). |
-| Metrics and alerts | Included, GA | On OpenShift, user workload monitoring must be on ([MONITORING.md](docs/MONITORING.md)). |
-| OpenShift console pages | Included, Beta | Pools, volumes, snapshots, replication, backups, monitoring, with help on each card and column. |
-| Group snapshots (`VolumeGroupSnapshot`) | Not active | The code exists; nothing acts on it. A VM snapshot already gives one moment for all its disks. |
-| Golden image syncer | Hidden | Use the standard OpenShift catalog instead. |
+| Use case | Status | Since | Notes |
+| --- | --- | --- | --- |
+| Many volumes on a few shared file shares | Included, GA | v0.1.0 | The core of the driver. A volume is ready in under a second. |
+| A pool grows by itself when it fills | Included, GA | v0.1.0 | New shares are added in the background. Pools are in one zone. |
+| Several pools and speed tiers in one cluster | Included, Beta | v0.2.0 | One StorageClass per pool or tier. |
+| Take a share out of service (drain) | Included, GA | v0.4.0 | From the command line or the console. |
+| VMs from the OpenShift catalog on a pool | Included, Beta | v0.14.0 | The driver raises the memory limit of OpenShift's disk copy pods, which otherwise run out of memory on NFS. |
+| Snapshot and restore one volume | Included, Beta | v0.4.0 | A full copy on the same share. |
+| Snapshot of a running VM, all disks at one moment | Included, Beta | v0.14.0 | A short guest freeze. Red Hat does not support the method. |
+| Instant VM snapshots (no copy) | Included, Experimental | v0.14.0 | Needs a KubeVirt setting that Red Hat does not support. |
+| Clone a volume | Included, Beta | v0.4.0 |  |
+| Move volumes from another storage class into a pool | Included, Beta | v0.4.0 | Works for a user with only the edit role since this release (issue #196). |
+| Scheduled backups to a backup pool, with restore points | Included, Experimental | v0.14.0 | Restore and delete from the command line or the console. |
+| A second backup copy in IBM Cloud Object Storage | Included, Experimental | v0.14.0 | Locked bucket; key held in Key Protect. |
+| Browse a backup and restore single files | In progress |  | Spec: [backup-file-restore](docs/specs/2026-10-22-backup-file-restore.md). |
+| Copy volumes to another cluster on a schedule | Included, Beta | v0.5.0 | Direct NFS or HTTPS receiver. |
+| Copy running VMs to another cluster, rewind and fail over | Included, Experimental | v0.14.0 | Restore points; `kubectl failover`. Red Hat does not support the method. |
+| Recover from a replication in the console | In progress |  | Issue #44. |
+| Continuous protection of VMs, recovery point of seconds | Agreed, not built |  | Like Zerto or Veeam CDP. Spec: [vm-continuous-data-protection](docs/specs/2026-10-22-vm-continuous-data-protection.md). |
+| Survive the loss of a zone | Agreed, not built |  | Spec: [zone-loss](docs/specs/2026-10-22-zone-loss.md). |
+| Snapshot of a whole pool | Agreed, not built |  | Spec: [pool-snapshots](docs/specs/2026-10-22-pool-snapshots.md). |
+| Metrics and alerts | Included, GA | v0.2.0 | On OpenShift, user workload monitoring must be on ([MONITORING.md](docs/MONITORING.md)). |
+| OpenShift console pages | Included, Beta | v0.12.0 | Pools, volumes, snapshots, replication, backups, monitoring, with help on each card and column. |
+| Group snapshots (`VolumeGroupSnapshot`) | Not active |  | The code exists; nothing acts on it. A VM snapshot already gives one moment for all its disks. |
+| Golden image syncer | Hidden |  | Use the standard OpenShift catalog instead. |
 
 ## Architecture
 
-```
-Workload Pod
-    │ bind-mount /data
-    ▼
-CSI Node Agent (DaemonSet)
-    │ NFS mount per share, bind-mount per PVC
-    │
-CSI Controller (Deployment)
-    │ CreateVolume / DeleteVolume
-    ▼
-Pool Manager
-    │ share selection (spread/binpack), mkdir, capacity tracking
-    ▼
-IBM VPC Client ──► VPC File Share API
-```
+![The workload pod gets its mount from the CSI Node Agent; the CSI Controller calls the Pool Manager, which calls the IBM VPC Client and the VPC File Share API](docs/images/readme-architecture.drawio.svg)
 
 **Key components:**
 
@@ -140,7 +126,7 @@ The project's own words (pool, share, SubVolume, tier, drain, golden image, clon
 |------|-----------|
 | **Provisioner** | The CSI driver identifier in a StorageClass (e.g., `vpc-file-pool.csi.ibm.io`); determines which driver handles PVC requests |
 | **Sidecars** | Standard Kubernetes CSI helper containers (csi-provisioner, csi-resizer, csi-snapshotter, liveness-probe, node-driver-registrar) that translate Kubernetes events into CSI gRPC calls |
-| **NodeStageVolume** | CSI RPC that mounts the entire NFS share to a staging directory on the node; called once per share per node |
+| **NodeStageVolume** | CSI RPC that mounts the entire NFS share at the staging folder kubelet gives for the volume; called once per staged volume on a node |
 | **NodePublishVolume** | CSI RPC that bind-mounts a SubVolume's subdirectory from the staging path into the pod's volume path |
 | **VolumeContentSource** | Field in `CreateVolume` indicating the new volume should be populated from an existing snapshot or volume (clone) |
 | **fsGroupPolicy** | CSI driver spec field controlling whether kubelet recursively `chown`s mounts to the pod's `fsGroup`; set to `None` to avoid failures with root_squash |

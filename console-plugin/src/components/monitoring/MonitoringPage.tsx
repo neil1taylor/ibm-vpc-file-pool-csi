@@ -5,7 +5,6 @@ import {
   Grid,
   GridItem,
   Card,
-  CardTitle,
   CardBody,
   Split,
   SplitItem,

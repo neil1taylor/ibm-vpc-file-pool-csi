@@ -525,10 +525,6 @@ func backupKeepHours(bp *v1alpha1.BackupPolicy) int32 {
 // desiredReplicationSpec is what the ReplicationPolicy for one source pool and
 // one share of the snapshot pool must say.
 func desiredReplicationSpec(bp *v1alpha1.BackupPolicy, pool string, share v1alpha1.PoolShareStatus) v1alpha1.ReplicationPolicySpec {
-	speed := int32(defaultVMCopySpeedLimitMBps)
-	if bp.Spec.VMCopySpeedLimitMBps != nil {
-		speed = *bp.Spec.VMCopySpeedLimitMBps
-	}
 	keep := backupKeepHours(bp)
 	export := share.ExportPath
 	if export == "" {
@@ -543,7 +539,9 @@ func desiredReplicationSpec(bp *v1alpha1.BackupPolicy, pool string, share v1alph
 		SubVolumeSelector:     &metav1.LabelSelector{MatchLabels: map[string]string{backupPolicyLabel: bp.Name, backupShareLabel: share.ShareID}},
 		MaxRetries:            backupMaxRetries,
 		MaxParallelSyncs:      backupMaxParallelSyncs,
-		VMCopySpeedLimitMBps:  &speed,
+		VMCopySpeedLimitMBps:  bp.Spec.VMCopySpeedLimitMBps,
+		VMCopyAdaptive:        bp.Spec.VMCopyAdaptive,
+		VMCopyMaxLatencyMs:    bp.Spec.VMCopyMaxLatencyMs,
 		RestorePointKeepHours: &keep,
 		MomentKeepHours:       &keep,
 	}
@@ -553,9 +551,17 @@ func sameReplicationSpec(a, b v1alpha1.ReplicationPolicySpec) bool {
 	return a.SourcePoolName == b.SourcePoolName && a.DestinationNFSServer == b.DestinationNFSServer &&
 		a.DestinationExportPath == b.DestinationExportPath && a.DestinationBasePath == b.DestinationBasePath &&
 		a.Schedule == b.Schedule && a.MaxRetries == b.MaxRetries && a.MaxParallelSyncs == b.MaxParallelSyncs &&
-		ptrEq(a.VMCopySpeedLimitMBps, b.VMCopySpeedLimitMBps) && ptrEq(a.RestorePointKeepHours, b.RestorePointKeepHours) &&
+		ptrEq(a.VMCopySpeedLimitMBps, b.VMCopySpeedLimitMBps) && ptrEq(a.VMCopyMaxLatencyMs, b.VMCopyMaxLatencyMs) &&
+		boolPtrEq(a.VMCopyAdaptive, b.VMCopyAdaptive) && ptrEq(a.RestorePointKeepHours, b.RestorePointKeepHours) &&
 		ptrEq(a.MomentKeepHours, b.MomentKeepHours) &&
 		equality.Semantic.DeepEqual(a.SubVolumeSelector, b.SubVolumeSelector)
+}
+
+func boolPtrEq(a, b *bool) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 func ptrEq(a, b *int32) bool {
@@ -594,6 +600,7 @@ func (bc *BackupController) ensureReplicationPolicy(ctx context.Context, bp *v1a
 	rp.Spec.DestinationBasePath, rp.Spec.Schedule, rp.Spec.SubVolumeSelector = want.DestinationBasePath, want.Schedule, want.SubVolumeSelector
 	rp.Spec.MaxRetries, rp.Spec.MaxParallelSyncs = want.MaxRetries, want.MaxParallelSyncs
 	rp.Spec.VMCopySpeedLimitMBps, rp.Spec.RestorePointKeepHours = want.VMCopySpeedLimitMBps, want.RestorePointKeepHours
+	rp.Spec.VMCopyAdaptive, rp.Spec.VMCopyMaxLatencyMs = want.VMCopyAdaptive, want.VMCopyMaxLatencyMs
 	rp.Spec.MomentKeepHours = want.MomentKeepHours
 	setPaused(rp, paused)
 	return bc.client.Update(ctx, rp)

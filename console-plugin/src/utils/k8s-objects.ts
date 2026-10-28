@@ -16,6 +16,7 @@ export interface PersistentVolumeClaim extends K8sResourceCommon {
 
 export interface StorageClass extends K8sResourceCommon {
   provisioner: string;
+  parameters?: Record<string, string>;
 }
 
 /** A VolumeSnapshotClass or VolumeGroupSnapshotClass. */

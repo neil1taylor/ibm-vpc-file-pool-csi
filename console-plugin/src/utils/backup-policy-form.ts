@@ -101,7 +101,7 @@ export function validateBackupPolicyForm(
     errors.labels = 'Add at least one label. A policy with no labels would back up every volume, so it is refused.';
   }
   if (!Number.isInteger(form.vmCopySpeed) || form.vmCopySpeed < 0) {
-    errors.vmCopySpeed = 'Use a whole number of 0 or more. 0 means no limit.';
+    errors.vmCopySpeed = 'Use a whole number of 0 or more. 0 means no highest speed.';
   }
   return errors;
 }

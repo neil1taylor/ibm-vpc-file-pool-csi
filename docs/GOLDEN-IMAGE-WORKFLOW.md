@@ -104,6 +104,8 @@ spec:
 
 ### What the Syncer Creates
 
+![The syncer finds OS images in DataImportCron resources and creates a DataVolume and PVC, a DataSource and a Template for each](images/golden-image-workflow-syncer.drawio.svg)
+
 For each discovered image and each target namespace:
 
 | Resource | Name | Purpose |

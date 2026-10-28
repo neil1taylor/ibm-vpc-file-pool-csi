@@ -88,6 +88,8 @@ Controls how the IBM Cloud API key is injected into the controller.
 
 ## Golden Image Syncer
 
+> **Hidden feature.** The code is kept for possible later use. The recommended way to make VMs is the standard OpenShift Virtualization catalog.
+
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `cdi.copyPodMemoryLimit` | string | `8Gi` | The controller keeps the memory limit of CDI's copy pods at least this high, through the OpenShift Virtualization `HyperConverged` setting `spec.resourceRequirements.storageWorkloads`. CDI's default of 600M is too small for copies onto NFS: the pod is killed. On rovslab, a 25 GB copy failed with 2Gi and finished with 8Gi. Empty turns the check off |
@@ -128,6 +130,22 @@ The one door to browse sessions (issue #92). Users talk to it with their own Kub
 
 The chart also makes the ClusterRoles `backup-file-reader` and `backup-file-restorer` (see BACKUP-RECOVERY.md), a ServiceAccount for the gateway with only the rights it needs, and the ConfigMap `backup-gateway-info` that every signed-in user may read (that one ConfigMap and no other).
 
+## PoolBench
+
+The storage performance test service (`docs/specs/2026-10-25-poolbench.md`). Off by default. When on, the chart renders one Deployment (`--mode=poolbench`, the driver image), its own service account, a cluster role, a run role, the collector Service, and the results volume.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `poolBench.enabled` | bool | `false` | Turns the PoolBench service on |
+| `poolBench.interval` | string | `15s` | Time between two passes of the runner |
+| `poolBench.results.size` | string | `5Gi` | Size of the volume that keeps the test VMs' raw results until a run is deleted |
+| `poolBench.results.storageClass` | string | `""` | Class of the results volume; empty uses the cluster's default class |
+| `poolBench.podSecurityContext` | object | seccomp `RuntimeDefault` | Pod security context. Where the user ID is fixed (off OpenShift, or in `kube-system`) the chart adds `fsGroup: 65532` unless you set one, so the service can write the results volume |
+| `poolBench.securityContext` | object | non-root, read-only root, no privilege escalation, all capabilities dropped | Container security context |
+| `poolBench.resources` | object | 50m CPU, 64Mi memory requested, 256Mi limit | Container resources |
+
+Rights: cluster-wide the service may make and delete namespaces, pools and backup policies (the backup event), list nodes and pods (for the room check), read images, read and update `PoolBench` objects, and bind one role, `<release>-poolbench-run`. It binds that role to itself in each run's own namespace; the role gives it secrets, claims (it also labels them), VMs, disks, pods and pod exec there and nowhere else. RBAC cannot limit namespace deletes or role bindings by name, so where the cluster has `ValidatingAdmissionPolicy` (Kubernetes 1.30 and later, OpenShift 4.17 and later) the chart adds a policy that lets the service make and delete only namespaces, pools and backup policies named `poolbench-*`, delete only a namespace, pool or policy that carries the run label, make only a backup policy for one `poolbench-*` namespace that copies to that run's backup pool and exports nowhere, and bind only the run role, only in such a namespace. It reads the node agents' metrics for the share's counters, trusting their certificate as the ServiceMonitors do (the service CA, or the `ca.crt` of `<release>-node-metrics-certs`). Its own metrics (port 8443) are scraped like the controller's; their certificate is the secret `<release>-poolbench-certs`, made by the OpenShift service CA or cert-manager, or by you with `webhook.certProvider=manual`. Without that secret the pod does not start. When the console plugin is on, the chart also adds a proxy `poolbench` to the ConsolePlugin: the console passes the person's own token to port 8444 of the service, which checks with a TokenReview and an access review that the person may get the run before it returns its raw results. The console trusts the service's certificate only when it comes from the OpenShift service CA (`webhook.certProvider=openshift`).
+
 ## Replication Receiver
 
 Configuration for the driver-to-driver cross-region replication receiver. Deploy this on the **destination** cluster. Source cluster sync-client Jobs upload data via HTTPS.
@@ -142,7 +160,7 @@ Configuration for the driver-to-driver cross-region replication receiver. Deploy
 | `replicationReceiver.securityContext` | object | no escalation, `runAsNonRoot`, drop ALL, seccomp `RuntimeDefault` | Container security context of the receiver |
 | `replicationReceiver.resources.requests.cpu` | string | `100m` | Receiver CPU request |
 | `replicationReceiver.resources.requests.memory` | string | `256Mi` | Receiver memory request |
-| `replicationReceiver.resources.limits.memory` | string | `512Mi` | Receiver memory limit |
+| `replicationReceiver.resources.limits.memory` | string | `1Gi` | Receiver memory limit. The receiver needs about 100 MiB itself. Pages of files on NFS count against the limit and the kernel drops them as it needs room, so the memory shown for a busy receiver stays near the limit; that is normal. The receiver forces its data out every 32 MiB and drops cached pages. A 512Mi limit survived an 11 GiB VM disk send in a lab test; the default adds room |
 | `replicationReceiver.tls.enabled` | bool | `false` | Enable native TLS on the receiver (certificates provisioned by cert-manager) |
 | `replicationReceiver.tls.additionalDNSNames` | list | `[]` | Extra DNS SANs for the receiver TLS certificate (e.g., custom ingress hostnames). On OpenShift, the Route hostname is added automatically |
 | `replicationReceiver.tls.certManager.issuerKind` | string | `Issuer` | cert-manager issuer kind: `Issuer` (namespace-scoped) or `ClusterIssuer` |
@@ -165,6 +183,8 @@ See [VM-INSTANT-SNAPSHOTS.md](VM-INSTANT-SNAPSHOTS.md).
 | `vmSnapshots.method` | string | `auto` | `auto`: a snapshot of a KubeVirt VM disk is instant (a new overlay file, nothing copied) where the KubeVirt `Sidecar` feature gate is on, and a copy elsewhere. It adds the VM hook webhook. `copy`: every VM disk snapshot is a copy, and there is no VM hook webhook. Red Hat does not support the `Sidecar` feature gate |
 | `vmSnapshots.enableSidecarGate` | bool | `false` | Turn on the KubeVirt `Sidecar` feature gate, which instant snapshots need. A hook Job adds one entry to the `HyperConverged` `kubevirt.kubevirt.io/jsonpatch` annotation after each install and upgrade, and keeps the other entries. Only that Job's service account gets rights on `HyperConverged`: get and update on the object named `kubevirt-hyperconverged`, nothing else. The gate is cluster-wide: once it is on, anyone who can create or edit a VM can add a hook sidecar container to that VM's pod (see SECURITY.md). Setting it back to `false` or uninstalling does **not** turn the gate off, because VMs with instant snapshots cannot start without it. Needs `vmSnapshots.method=auto`. Red Hat does not support settings made through that annotation |
 | `vmSnapshots.launcherImage` | string | `""` | KubeVirt's virt-launcher image, which has `qemu-img`, for the Jobs that change a stopped VM's snapshot files and that restore instant snapshots. Empty reads it from the virt-operator Deployment in the namespace of the `KubeVirt` resource |
+
+The chart also renders a ConfigMap `ibm-vpc-file-pool-csi-settings` in the release namespace. It holds `vmSnapshotMethod`, the value of `vmSnapshots.method`, and no secret. A Role lets every signed-in user `get` that one ConfigMap by name, and nothing else in the namespace. The console reads it to show whether snapshots are instant or copies.
 
 ## Webhook
 

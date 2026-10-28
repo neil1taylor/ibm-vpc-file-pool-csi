@@ -22,6 +22,8 @@ The driver emits 37 metrics across nine categories:
 | Backup | 6 | Backup policy health, age of backups, fullness of the snapshot pool and lateness of the export to COS |
 | Share (node agent) | 6 | Bytes written on each share, and NFS operations, latency and bytes of each share, read by the node agents |
 
+The PoolBench service, when it is turned on, adds its own [PoolBench metrics](#poolbench-metrics) for the VMs of a performance test run.
+
 ---
 
 ## Scrape Configuration
@@ -39,6 +41,8 @@ What the chart does instead (`metrics.monitoring.mode: auto`, which applies when
 - Two Services there have no selector. The controller keeps their `Endpoints` up to date every minute (the controller pod's IP, and the IP of each ready node agent; node agents use the host network). Kubernetes mirrors them to EndpointSlices.
 - The `ServiceMonitor` objects send the token of a service account in that namespace (kept in a Secret, because user workload monitoring does not read files) and trust the OpenShift service CA from a ConfigMap in that namespace. They check the certificate against the names of the Services in `kube-system`, which is what the service CA issued it for.
 - The chart never changes `cluster-monitoring-config`.
+
+![The monitoring namespace holds Services, ServiceMonitors and the PrometheusRule; user workload monitoring reads them and scrapes the controller and node agents](images/monitoring-user-workload.drawio.svg)
 
 **The admin step.** Turn user workload monitoring on once per cluster. The chart does not do this, because it is a cluster-wide setting that belongs to the cluster admin:
 
@@ -229,11 +233,11 @@ kill %1
 
 ### Share Metrics (Node Agent)
 
-Each node agent reads the NFS shares mounted on its node, every `--share-stats-interval` (30 s). It reads the NFS counters in `/proc/self/mountstats` and runs `statfs` on the share mount; it never walks the files. `pool` and `share` are the same names as the controller's per-share metrics. A share mounted on several nodes is reported by each node (the scrape adds an `instance` label), so use `max by (pool, share)` for the space metrics and `sum by (pool, share)` for the traffic counters. A share that is mounted nowhere has no series. A share whose pool cannot be found has `pool="unknown"`.
+Each node agent reads the NFS shares mounted on its node, every `--share-stats-interval` (30 s). It reads the NFS counters in `/proc/self/mountstats` and runs `statfs` on the share mount, up to 8 mounts at once; it never walks the files. `pool` and `share` are the same names as the controller's per-share metrics. A share mounted on several nodes is reported by each node (the scrape adds an `instance` label), so use `max by (pool, share)` for the space metrics and `sum by (pool, share)` for the traffic counters. A share that is mounted nowhere has no series. A share whose pool cannot be found has `pool="unknown"`.
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `vpc_file_pool_share_used_bytes` | Gauge | `pool`, `share` | Bytes written on the share (size minus free, from `statfs`). Absent when `statfs` fails or takes more than 10 s. |
+| `vpc_file_pool_share_used_bytes` | Gauge | `pool`, `share` | Bytes written on the share (size minus free, from `statfs`). Absent when `statfs` fails or takes more than 10 s; after a failure the node agent does not try that mount again for 5 minutes. |
 | `vpc_file_pool_share_size_bytes` | Gauge | `pool`, `share` | Size of the share as the NFS client sees it. |
 | `vpc_file_pool_share_nfs_operations_total` | Counter | `pool`, `share`, `op` | NFS operations done by this node. `op` is `read`, `write` or `other` (all metadata calls). `rate()` of `read` and `write` is the IOPS. |
 | `vpc_file_pool_share_nfs_rtt_seconds_total` | Counter | `pool`, `share`, `op` | Seconds spent between sending a request and getting the reply (the network and the server). |
@@ -308,6 +312,24 @@ Alert before the snapshot pool reaches the limit, and when it has. At 85% the po
     summary: "Snapshot pool {{ $labels.pool }} is {{ $value }}% full; new backups are stopped"
 ```
 
+### PoolBench Metrics
+
+The PoolBench service publishes these for the test VMs of a performance test run (`docs/specs/2026-10-25-poolbench.md`). Each test VM sends one result after each load phase; the values are those of the VM's last phase. The console's live graphs read them. The series of a run go away when the run is deleted.
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `poolbench_vm_iops` | Gauge | `run`, `vm`, `os`, `phase` | Reads plus writes a second of the VM's last phase. `phase` is `steady` or `burst`. |
+| `poolbench_vm_latency_seconds` | Gauge | `run`, `vm`, `os`, `phase`, `quantile` | Latency of the last phase at `quantile` 0.5, 0.95 and 0.99, the worse of read and write. Total latency, which includes the wait before the I/O is sent. |
+| `poolbench_vm_throughput_bytes_per_second` | Gauge | `run`, `vm`, `os`, `phase` | Read plus write throughput of the last phase. |
+| `poolbench_vm_stalls_total` | Counter | `run`, `vm`, `os` | Phases whose longest I/O took more than 5 seconds. |
+| `poolbench_vm_results_total` | Counter | `run`, `vm`, `os` | Result lines received. |
+| `poolbench_vm_last_result_timestamp_seconds` | Gauge | `run`, `vm`, `os` | Time of the last result. A VM that stops sending is stuck or cannot reach the service. |
+| `poolbench_run_vms` | Gauge | `run`, `os` | Test VMs of the run, by OS (`linux`, `windows`). 0 after the cleanup. |
+| `poolbench_run_ready_vms` | Gauge | `run` | Test VMs of the run that have said they are ready. |
+| `poolbench_run_step` | Gauge | `run` | The current step, from 1. |
+
+The chart scrapes the service like the controller: with a ServiceMonitor in the release namespace, or, with user workload monitoring, through a Service in the monitoring namespace whose Endpoints the controller keeps. The metrics port serves a certificate for `<release>-poolbench.<namespace>.svc` from the same source as the other metrics certificates (`webhook.certProvider`).
+
 ---
 
 ## Alerting Rules
@@ -333,7 +355,7 @@ The chart ships these alerts as a `PrometheusRule` (on by default; it is made on
 | `VPCFilePoolExportLate` / `ExportMomentWaiting` | warning | The COS copy is over 12 h late |
 | `VPCFilePoolSnapshotPoolNearlyFull` / `Full` | warning / critical | A snapshot pool share is above 75% / 85% |
 
-**Per-share NFS latency and IOPS are not available.** The driver does not measure them: the node agent only mounts shares and keeps no read or write counters, and the controller never touches the NFS data. The two per-share metrics show how much of a share is promised to PVCs, not how much is written or how fast it answers. Use the node exporter's NFS client metrics for latency and IOPS until the node agent reports them.
+**Per-share NFS latency and IOPS** come from the node agents, which read the NFS client counters of each staged share (the `vpc_file_pool_share_nfs_*` metrics). The two alerts for them judge only a share that has real traffic.
 
 **Console dashboard.** The dashboard's "Firing Alerts" card asks the cluster Prometheus (`/api/prometheus`) for firing alerts named `VPCFilePool*`. It also asks which alert rules that Prometheus has loaded; if it has none of the driver's, the card says so and does not claim that no alert is firing. OpenShift's platform Prometheus loads rules only from namespaces it watches (`openshift-*`, or `kube-*` with the `openshift.io/cluster-monitoring` label); if the chart is installed in another namespace, the rules need user workload monitoring, which the console queries through a different route that this card does not use.
 

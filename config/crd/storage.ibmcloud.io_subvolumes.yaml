@@ -119,9 +119,12 @@ spec:
                   Empty for non-clone SubVolumes.
                 type: string
               subPath:
-                description: SubPath is the subdirectory path within the share (e.g.,
-                  "/pvcs/pvc-abc123").
-                pattern: ^/pvcs/pvc-[a-f0-9-]+$
+                description: |-
+                  SubPath is the subdirectory path within the share (e.g., "/pvcs/pvc-abc123").
+                  A failover to an earlier restore point uses the folder
+                  "/pvcs/pvc-abc123.rewind-<epoch>"; no other suffix is allowed.
+                  The pattern must equal SubPathPattern.
+                pattern: ^/pvcs/pvc-[a-f0-9-]+(\.rewind-[0-9]{1,12})?$
                 type: string
               uid:
                 description: UID is the Unix UID for the subdirectory owner.

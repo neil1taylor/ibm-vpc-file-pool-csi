@@ -148,6 +148,8 @@ Change the user name in `virtctl ssh` to the user of your guest image. `virtctl 
 
 **Expected:** a chain of three files. A disk may have at most 16 snapshots.
 
+![After two snapshots the disk is a chain of three files: the VM writes to the newest, and each file is backed by the one before](images/tutorial-11-snapshot-chain.drawio.svg)
+
 ---
 
 ## Step 5: Delete the first snapshot while the VM runs

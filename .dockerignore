@@ -11,3 +11,5 @@ test
 charts
 config
 .dockerignore
+.env
+.env.*

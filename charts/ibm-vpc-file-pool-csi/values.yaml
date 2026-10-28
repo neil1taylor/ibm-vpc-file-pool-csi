@@ -141,12 +141,33 @@ backupGateway:
   sessionWait: 20s
   # The largest single file or tar a user may download.
   maxDownloadBytes: 53687091200
+poolBench:
+  # PoolBench runs storage performance tests with test VMs, started from the
+  # console (docs/specs/2026-10-25-poolbench.md). Each run makes its own
+  # namespace and pool and deletes them at the end. Off by default: when on,
+  # the service may make namespaces, pools and VMs.
+  enabled: false
+  # Time between two passes of the runner.
+  interval: 15s
+  # The raw results of the test VMs, kept until a run is deleted.
+  results:
+    size: 5Gi
+    # Empty uses the cluster's default storage class.
+    storageClass: ""
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    runAsNonRoot: true
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
   resources:
     requests:
       cpu: 50m
       memory: 64Mi
     limits:
-      cpu: 500m
       memory: 256Mi
 
 cdi:
@@ -348,12 +369,17 @@ replicationReceiver:
       drop: ["ALL"]
     seccompProfile:
       type: RuntimeDefault
+  # Memory: the receiver itself needs about 100 MiB. Pages of files on NFS count
+  # against the limit and the kernel drops them as it needs room, so the memory
+  # use of a busy receiver stays near the limit; that is normal. It forces its
+  # data out and drops cached pages, so a 512Mi limit also survived the send of
+  # an 11 GiB VM disk in a lab test. 1Gi leaves room.
   resources:
     requests:
       cpu: 100m
       memory: 256Mi
     limits:
-      memory: 512Mi
+      memory: 1Gi
   # TLS configuration for the receiver HTTPS endpoint.
   tls:
     # Enable native TLS on the receiver (certificates provisioned by cert-manager).

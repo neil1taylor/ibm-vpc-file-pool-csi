@@ -154,6 +154,10 @@ func (f *fakeK8sClient) ListCloneSubVolumes(_ context.Context) ([]v1alpha1.SubVo
 	return result, nil
 }
 
+func (f *fakeK8sClient) BackupPolicyUsingPool(_ context.Context, _ string) (string, error) {
+	return "", nil
+}
+
 func (f *fakeK8sClient) HasOpenRestore(_ context.Context, _, _ string) (bool, error) {
 	return false, nil
 }

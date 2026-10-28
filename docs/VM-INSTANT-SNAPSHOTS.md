@@ -14,9 +14,23 @@ Status: **built, Experimental.** Tested by hand on rovslab on 21 October 2026 (r
    **Red Hat does not support this setting**, and `HyperConverged` then reports `TaintedConfiguration=True`.
 3. Take a snapshot from the console's VM Snapshots tab, or with a `VirtualMachineSnapshot`. The VolumeSnapshots are ready at once.
 
-The console's Pools and Snapshots pages show whether instant snapshots are on, and which VMs have them.
+The console's Pools and Snapshots pages show how the driver takes VM disk snapshots: instant, copy, or unknown. The box says instant only when the driver is set to `auto` and the gate is on, and it lists the VMs that have instant snapshots. It reads the driver's setting from the ConfigMap `ibm-vpc-file-pool-csi-settings`, which the chart renders; a driver that does not publish it shows "unknown".
 
 To stop: delete the VMs' snapshots (`kubectl pool-snapshots flatten <vm> -n <namespace>` for each VM), then remove the operation from the annotation. A VM with snapshots does not start while the gate is off. The chart never removes the gate, not when you uninstall and not when you set `vmSnapshots.enableSidecarGate=false`, so turning it off is always a step you take on purpose.
+
+## Choosing a setting
+
+Three combinations of the two Helm values are possible. Pick one for each cluster.
+
+| Setting | What happens | Benefit | Consequence |
+|---|---|---|---|
+| `vmSnapshots.method=copy` | Every VM disk snapshot is a full copy of the disk file. There is no VM hook webhook. | Touches nothing else on the cluster. No webhook, no feature gate. | Slow on big disks: a copy of a 30 GB disk with 2 GB used took 165 s (restore test below). Uses as much storage as the disk holds. |
+| `vmSnapshots.method=auto`, gate off (`enableSidecarGate=false`, the default) | Snapshots are copies, as with `copy`. The driver also adds the VM hook webhook. | None over `copy`. | One more moving part and no gain. |
+| `vmSnapshots.method=auto`, gate on (`enableSidecarGate=true`) | Snapshots are instant: a new overlay file, nothing copied. 2 s for a running Linux VM with the guest frozen (test below). | Fast, and almost no extra storage. | Red Hat does not support the gate, and `HyperConverged` reports `TaintedConfiguration=True`. The gate is cluster-wide: anyone who can create or edit a VM can add a hook sidecar container to that VM's pod (see [SECURITY.md](SECURITY.md#kubevirt-sidecar-feature-gate)). The chart never turns the gate off, not even on uninstall, because VMs with instant snapshots cannot start without it. |
+
+**Existing VMs.** Turning the gate on does not change a VM by itself. The driver adds its hook only to a VM whose disks have a snapshot chain, and only while the gate is on. A VM that was never snapshotted by the driver is left alone. This guide has not checked whether KubeVirt restarts its own components when the feature gate list changes.
+
+**Shared clusters.** On a cluster that also runs other teams' VMs, use `copy` unless those teams agree to the gate. The gate is the only setting in this table that changes the cluster, not just the driver.
 
 ## In one paragraph
 
@@ -48,6 +62,8 @@ After two snapshots:
 
 This set of files is a **chain**. Each file holds only the parts of the disk that changed after the file before it.
 
+![The VM reads and writes the newest file, which points back through snap-1.qcow2 to disk.img](images/vm-instant-snapshots-chain.drawio.svg)
+
 ### Writes and reads
 
 - **Writes** always go to the newest file.
@@ -60,6 +76,8 @@ This set of files is a **chain**. Each file holds only the parts of the disk tha
 2. The driver runs one command in the VM's pod: `virsh snapshot-create-as ... --disk-only`. QEMU starts the new file and switches to it.
 3. The guest is thawed. The VM never stops.
 4. The driver makes the frozen file read-only and records the chain.
+
+![Steps 1 to 4: freeze the guest, create the new file with virsh, thaw the guest, then make the frozen file read-only](images/vm-instant-snapshots-take.drawio.svg)
 
 ### Deleting a snapshot (merge)
 
@@ -74,6 +92,8 @@ OpenShift restores a snapshot by making a new disk. The driver makes that disk w
 KubeVirt, which starts the VM, always opens `disk.img` as a plain file. On its own, it does not know about the chain. If it opened `disk.img` after a restart, every write since the first snapshot would be missing.
 
 So the driver adds a **hook** to each VM with a pool disk. A hook is a small extra container in the VM's pod. KubeVirt calls it just before the VM starts, and it changes how the VM opens its disks: "open the newest file in the chain, as a qcow2 file". QEMU then follows the chain down to `disk.img`.
+
+![The webhook adds the hook sidecar to the VM's pod, and the hook makes QEMU open the newest file of the chain](images/vm-instant-snapshots-hook.drawio.svg)
 
 - The driver adds the hook by itself when a VM that has snapshots starts. A VM without snapshots is not changed. You make VMs the normal way, from the standard catalog, with the pool's StorageClass.
 - A running VM does not need the hook to take a snapshot or to live-migrate. The hook is only needed at the next start.

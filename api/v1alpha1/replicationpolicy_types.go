@@ -106,15 +106,30 @@ type ReplicationPolicySpec struct {
 	// +optional
 	DestinationCACertSecretRef string `json:"destinationCACertSecretRef,omitempty"`
 
-	// VMCopySpeedLimitMBps limits how fast QEMU copies each disk of a running
-	// VM, in megabytes per second. A copy slows the VM's own disk writes; at
-	// 20 MB/s a VM kept 93% of its write speed in a lab test. The limit also
-	// counts empty disk space, so a full copy of a large disk takes long.
-	// 0 means no limit.
+	// VMCopySpeedLimitMBps is the speed of QEMU's copy of each disk of a running
+	// VM, in megabytes per second. When the copy adapts (VMCopyAdaptive), it is
+	// the highest speed; 0 or unset means there is no highest speed. When the
+	// copy does not adapt, it is the fixed speed; 0 means no limit and unset
+	// means 20. The limit also counts empty disk space, so a full copy of a
+	// large disk takes long at a low speed.
 	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:default=20
 	// +optional
 	VMCopySpeedLimitMBps *int32 `json:"vmCopySpeedLimitMBps,omitempty"`
+
+	// VMCopyAdaptive makes the copy start slow and speed up while the share the
+	// VM reads is quiet, and slow down when its latency passes
+	// VMCopyMaxLatencyMs. Default true. It needs the driver to read the node
+	// agents' metrics; without them the copy runs at the fixed speed.
+	// See docs/specs/2026-10-26-adaptive-copy-speed.md.
+	// +optional
+	VMCopyAdaptive *bool `json:"vmCopyAdaptive,omitempty"`
+
+	// VMCopyMaxLatencyMs is the average latency of the share, in milliseconds,
+	// above which an adaptive copy slows down. Default 15.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=20
+	// +optional
+	VMCopyMaxLatencyMs *int32 `json:"vmCopyMaxLatencyMs,omitempty"`
 
 	// RestorePointKeepHours is how long the destination keeps the restore
 	// points of running VM disks, so a failover can rewind to an earlier
@@ -259,6 +274,11 @@ type VMCopyState struct {
 
 	// StagingFile is the staging file name in the volume's root directory.
 	StagingFile string `json:"stagingFile"`
+
+	// SpeedMBps is the speed limit of the copy of each disk now, in megabytes
+	// per second. 0 means no limit. An adaptive copy changes it.
+	// +optional
+	SpeedMBps int32 `json:"speedMBps,omitempty"`
 
 	// Moment is the moment the copy shows.
 	Moment metav1.Time `json:"moment"`

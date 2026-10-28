@@ -297,6 +297,8 @@ oc get sc | grep "(default)"
 
 The custom syncer is a background controller built into the CSI driver. When configured via `spec.goldenImages`, it discovers CDI DataImportCron images, imports each one with a CDI DataVolume on the pool StorageClass, and creates ready-to-clone PVCs and OpenShift Templates in target namespaces.
 
+![The golden image syncer finds a DataImportCron, makes a DataVolume on the pool StorageClass, and makes the golden PVC and the OpenShift Template](images/tutorial-05-golden-image-syncer.drawio.svg)
+
 ### Step 2a: Configure the Pool with Golden Images
 
 ```bash

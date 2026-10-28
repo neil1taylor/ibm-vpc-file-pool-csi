@@ -47,34 +47,13 @@ A new ROKS or ROVS cluster does not have it.
 
 The CSI driver supports two replication modes, each suited to different network topologies:
 
-```
-                     ┌──────────────────────────────────────────────────────┐
- DIRECT NFS MODE     │  Source Cluster           Destination Cluster       │
-                     │                                                      │
-                     │  ┌─────────┐   rsync    ┌──────────────┐            │
-                     │  │ rsync   │──────────> │ Destination   │            │
-                     │  │ Job     │  (NFS)     │ NFS Share     │            │
-                     │  └────┬────┘            └──────────────┘            │
-                     │       │                                              │
-                     │  Source NFS      Transit Gateway / VPN               │
-                     └──────────────────────────────────────────────────────┘
-
-                     ┌──────────────────────────────────────────────────────┐
- DRIVER-TO-DRIVER    │  Source Cluster           Destination Cluster       │
-                     │                                                      │
-                     │  ┌─────────┐   HTTPS    ┌──────────────┐            │
-                     │  │ tar +   │──────────> │ Replication   │            │
-                     │  │ upload  │  (PUT)     │ Receiver Pod  │            │
-                     │  │ Job     │            │  ↓             │            │
-                     │  └────┬────┘            │ Destination   │            │
-                     │       │                 │ NFS Share     │            │
-                     │  Source NFS             └──────────────┘            │
-                     └──────────────────────────────────────────────────────┘
-```
-
 **Direct NFS mode** -- The source cluster mounts the destination NFS share and uses rsync to transfer SubVolume data. This requires NFS reachability between clusters (Transit Gateway or VPN). Supports rsync incremental sync for bandwidth efficiency.
 
+![Direct NFS mode: an rsync Job in the source cluster copies to the destination NFS share through a Transit Gateway or VPN](images/tutorial-06-direct-nfs.drawio.svg)
+
 **Driver-to-driver mode** -- The source cluster creates Jobs that tar SubVolume data and upload it via HTTPS PUT to a receiver pod on the destination cluster. Works across any network that allows HTTPS. The receiver extracts the tar stream to the destination NFS share.
+
+![Driver-to-driver mode: a tar and upload Job sends the data over HTTPS PUT to the receiver pod, which extracts it onto the destination NFS share](images/tutorial-06-driver-to-driver.drawio.svg)
 
 The rsync and tar copies apply to volumes that are not disks of a running VM. The controller copies a running VM's disks with QEMU instead. See [Running VMs](#running-vms).
 
@@ -1159,7 +1138,7 @@ kubectl failover plan --nfs-mount-path /data --list-moments
 kubectl failover execute --nfs-mount-path /data --prepare-only --rewind-to 2026-10-20T10:30:00Z
 ```
 
-The policy fields `vmCopySpeedLimitMBps` (default 20) and `restorePointKeepHours` (default 24) control the copy speed and how long the destination keeps restore points.
+The policy fields `vmCopyAdaptive` (default `true`), `vmCopySpeedLimitMBps` (the highest speed; none by default) and `restorePointKeepHours` (default 24) control the copy speed and how long the destination keeps restore points. An adaptive copy starts at 15 MB/s for each disk, speeds up while the share the VM reads is quiet, and slows down when the share's latency passes `vmCopyMaxLatencyMs` (default 15). Without the node agents' metrics, or with `vmCopyAdaptive: false`, the copy runs at the fixed `vmCopySpeedLimitMBps` (default 20; 0 means no limit).
 
 See [CROSS-REGION-DR.md](CROSS-REGION-DR.md), "Running VM disks", for the details and the lab results.
 

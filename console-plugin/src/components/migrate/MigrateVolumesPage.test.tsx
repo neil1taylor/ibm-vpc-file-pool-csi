@@ -42,6 +42,18 @@ const migrateButton = (claim: string) =>
   within(screen.getByRole('row', { name: new RegExp(claim) })).getByRole('button', { name: 'Migrate' }) as HTMLButtonElement;
 
 describe('MigrateVolumesPage', () => {
+  it('does not offer a snapshot pool as the target', () => {
+    const data = base();
+    data.StorageClass.push({ metadata: { name: 'backups' }, provisioner: DRIVER, parameters: { pool: 'backups' } });
+    data.FileSharePool.push({ metadata: { name: 'backups' }, spec: {}, status: { totalCapacityGB: 1000, totalAllocatedGB: 0 } });
+    data.BackupPolicy = [{ metadata: { name: 'nightly' }, spec: { snapshotPool: 'backups' } }];
+    watch(data);
+    render(<MigrateVolumesPage />);
+    fireEvent.click(migrateButton('data'));
+    expect(screen.getAllByRole('option', { name: /pool-a/ }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('option', { name: /backups/ })).toBeNull();
+  });
+
   it('lists the claims of the first namespace and source class, with size and phase', () => {
     watch(base());
     render(<MigrateVolumesPage />);

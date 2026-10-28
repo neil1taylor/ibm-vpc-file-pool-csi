@@ -4,6 +4,8 @@ This page defines each word once. Other pages link here instead of defining the 
 
 The meanings come from the code (`api/v1alpha1/` and `pkg/`). If a page disagrees with this one, this one is right, and the page is a bug. Please report it.
 
+For pictures you can click through, see the [interactive diagrams](diagrams/index.html).
+
 **Contents**
 
 - [Storage](#storage): pool, share, mount target, SubVolume, volume, plain volume, VM disk, allocation strategy, auto-expand, tier, drain, StorageClass, staging, reclaim policy
@@ -11,11 +13,13 @@ The meanings come from the code (`api/v1alpha1/` and `pkg/`). If a page disagree
 - [How good a copy is](#how-good-a-copy-is): moment, file-system consistent, crash consistent, file copy, guest freeze
 - [Backup](#backup): backup, BackupPolicy, snapshot pool, keep time, restore, BackupRestore, restore point, change list, COS export, lock, backup key, browse session, backup gateway, backupfiles, browse helper
 - [Replication and failover](#replication-and-failover): replication, ReplicationPolicy, destination, receiver, rewind, failover
-- [Other words](#other-words): golden image, lifecycle hook, group snapshot, user workload monitoring, command-line plugins
+- [Other words](#other-words): golden image, lifecycle hook, group snapshot, adaptive copy speed, PoolBench, knee, user workload monitoring, command-line plugins
 
 ---
 
 ## Storage
+
+![A pool holds shares; a share has a mount target and one folder for each volume; a SubVolume records each volume; the node agent mounts through the mount target](images/context-storage.drawio.svg)
 
 ### Pool
 
@@ -25,7 +29,7 @@ Example: the pool `general-purpose` has 3 shares of 1000 GB each, and every PVC 
 
 ### Share
 
-A **share** is one VPC file share: an NFS export that IBM Cloud runs for you. A pool holds one or more shares. The driver creates a share in the background when a pool needs room, never while a PVC is being made.
+A **share** is one VPC file share: an NFS export that IBM Cloud runs for you. A pool holds one or more shares. The driver creates a share in the background when a pool needs room. One exception: with auto-expand on, a PVC request that finds no share with room makes the share itself, and is told to retry.
 
 Example: `r006-1234...` is a share of 1000 GB. It holds the folders of 40 PVCs.
 
@@ -43,7 +47,7 @@ Example: `kubectl get subvolume pvc-0a1b...` shows the pool, the share and the f
 
 ### Volume
 
-A **volume** is a PVC that uses a pool StorageClass. Its data is a folder (`/pvcs/pvc-<uuid>`) on one share. The docs also call this folder the subdirectory or the `subPath`. Many volumes share one NFS mount on a node; each pod sees only its own folder.
+A **volume** is a PVC that uses a pool StorageClass. Its data is a folder (`/pvcs/pvc-<uuid>`) on one share. The docs also call this folder the subdirectory or the `subPath`. Each staged volume has its own NFS mount on a node (a second pod on the same volume reuses it); each pod sees only its own folder.
 
 Example: the PVC `db-data` in the namespace `apps` is a volume of 20 GB.
 
@@ -67,7 +71,7 @@ Example: with `spread`, three new 10 GB volumes go to three different shares.
 
 ### Auto-expand
 
-**Auto-expand** (`spec.autoExpand`) lets the pool add a share by itself in the background. It starts when the space given to volumes crosses `expandThresholdPercent` (default 80) of the pool, and stops at `maxShares`. While it works, the pool phase is `Expanding`. If a request finds no room while the pool expands, it is told to retry shortly. If the pool is at `maxShares` and full, it is refused.
+**Auto-expand** (`spec.autoExpand`) lets the pool add a share by itself. The background reconciler starts one when the space given to volumes crosses `expandThresholdPercent` (default 80) of the pool, and it stops at `maxShares`. A volume request that finds no share with room also makes a share itself (`tryAutoExpand`, inside `Allocate`), and gets a retry error. While it works, the pool phase is `Expanding`. If a request finds no room while the pool expands, it is told to retry shortly. If the pool is at `maxShares` and full, it is refused.
 
 Example: a pool of 2 shares of 1000 GB adds a third when volumes hold 1600 GB.
 
@@ -269,7 +273,7 @@ Example: `keepFor: 30d` with `lock: Compliance` holds each exported backup for 3
 
 ### Backup key
 
-The **backup key** encrypts exported backups. The driver stores it only wrapped by an IBM Key Protect root key. The readable key is shown once, by `kubectl backup cos-setup`, and you must keep a copy outside IBM Cloud.
+The **backup key** encrypts exported backups. The driver stores it only wrapped by an IBM Key Protect root key. Jobs unwrap it with the API key of a service ID (held in a Secret) that has the Reader role on the root key. The readable key is shown once, by `kubectl backup cos-setup`, and you must keep a copy outside IBM Cloud.
 
 Example: restore with `--backup-key-file ./backup-key.txt` if Key Protect is gone.
 
@@ -303,13 +307,13 @@ Example: it lists `/var/www` of last night's backup of the volume `web-data`.
 
 ### Replication
 
-**Replication** copies volumes to a destination on a schedule. The destination is another pool or another cluster. If the source site is lost, you can start the workload there. By default it keeps only the latest copy of a plain volume (a backup keeps more moments). A plain volume is copied with rsync, and only the files that changed cross the network (`incrementalSync`, on by default). A running VM is copied with a QEMU copy, all disks at one moment. The destination keeps restore points of VM disks for `restorePointKeepHours` (default 24).
+**Replication** copies volumes to a destination on a schedule. The destination is another pool or another cluster. If the source site is lost, you can start the workload there. By default it keeps only the latest copy of a plain volume (a backup keeps more moments). A plain volume is copied in one of two ways. In direct NFS mode (no `destinationEndpoint`), rsync copies it and only the files that changed cross the network (`incrementalSync`, on by default). In receiver mode (`destinationEndpoint` set, the mode for another cluster), the driver packs the whole folder into one tar stream and uploads all of it each cycle (`pkg/replication/syncclient.go`); `incrementalSync` does not reduce what is sent. A running VM is copied with a QEMU copy, all disks at one moment. The destination keeps restore points of VM disks for `restorePointKeepHours` (default 24).
 
 Example: replicate the pool `production` in Frankfurt to a pool in London every 15 minutes.
 
 ### ReplicationPolicy
 
-A **ReplicationPolicy** names the pool to copy (`sourcePoolName`, with an optional label selector). It names the destination, which is an NFS server or a receiver's URL. It also sets the `schedule`. It also sets the speed limit for VM copies (`vmCopySpeedLimitMBps`, default 20) and optional lifecycle hooks.
+A **ReplicationPolicy** names the pool to copy (`sourcePoolName`, with an optional label selector). It names the destination, which is an NFS server or a receiver's URL. It also sets the `schedule`. It also sets how fast VM copies run (`vmCopyAdaptive`, default true: the copy follows the load on the share; `vmCopySpeedLimitMBps` is the highest speed, or the fixed speed when it does not adapt) and optional lifecycle hooks.
 
 Example: `schedule: 15m`.
 
@@ -364,6 +368,24 @@ Example: do not create one; use a VM snapshot instead.
 **User workload monitoring** is the part of OpenShift's monitoring that reads your own projects. OpenShift's platform monitoring reads only the platform projects, and Red Hat does not support adding your own projects to it. The driver runs in `kube-system`, so its alerts and scraping are in a small namespace, `ibm-vpc-file-pool-csi-monitoring`, that only user workload monitoring reads. An admin turns it on once with `enableUserWorkload: true` in `openshift-monitoring/cluster-monitoring-config`. Without it **no alert fires**. See [MONITORING.md](MONITORING.md#where-alerts-run-on-openshift).
 
 Example: `oc -n openshift-user-workload-monitoring get pods` lists `prometheus-user-workload` when it is on.
+
+### Adaptive copy speed
+
+The **adaptive copy speed** is how fast a copy of a running VM disk goes. It covers replication, backup and snapshot copies. The copy starts at 15 MB/s. It speeds up by 5 MB/s every 30 seconds while the share the VM reads is quiet. It halves, never below 15 MB/s, when the average latency of the share passes `vmCopyMaxLatencyMs` (15 ms by default). `vmCopySpeedLimitMBps` is the highest speed; unset means none. With `vmCopyAdaptive: false`, or when the node agents' metrics cannot be read, the copy runs at a fixed speed instead.
+
+Example: a backup of one VM disk went from 15 to 25 MB/s in 90 seconds while the share stayed quiet.
+
+### PoolBench
+
+**PoolBench** is a storage performance test that the console starts. A `PoolBench` resource makes a new pool with one share and adds test VMs in steps. Each VM runs a steady load with short bursts. The test measures each step, finds the knee, and deletes everything it made. It is off by default (`poolBench.enabled`).
+
+Example: a Quick check with 5 test VMs on a 200 GB share at 3,000 IOPS.
+
+### Knee
+
+The **knee** is the first step of a PoolBench run where users would notice that the share is slow: the latency passes its limit, too many VMs are slow, or a VM stalls. PoolBench recommends 80% of the knee, rounded down to a step.
+
+Example: "Knee at 45 VMs" means the 45-VM step failed, so the run recommends 30 VMs.
 
 ### Command-line plugins
 

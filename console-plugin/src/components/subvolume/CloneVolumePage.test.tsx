@@ -78,12 +78,32 @@ describe('CloneVolumePage', () => {
     expect(screen.queryByRole('option', { name: 'gp' })).toBeNull();
   });
 
+  it('does not offer the storage class of a snapshot pool', () => {
+    watch({ ...base(), StorageClass: [...storageClasses, { metadata: { name: 'backups' }, provisioner: DRIVER, parameters: { pool: 'backups' } }], BackupPolicy: [{ metadata: { name: 'nightly' }, spec: { snapshotPool: 'backups' } }] });
+    render(<CloneVolumePage />);
+    expect(screen.getByRole('option', { name: 'pool-a' })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: 'backups' })).toBeNull();
+  });
+
   it('refuses a size under the volume size', () => {
     watch(base());
     render(<CloneVolumePage />);
     fireEvent.change(screen.getByLabelText(/^Size \(GiB\)( \*)?$/), { target: { value: '5' } });
     expect(screen.getByText(/at least 10 GiB \(the volume's size\)/)).toBeTruthy();
     expect(cloneButton().disabled).toBe(true);
+  });
+
+  it('does not call its own new claim a name that is taken, after the clone starts', async () => {
+    const data = base();
+    watch(data);
+    (k8sCreate as jest.Mock).mockImplementation(async () => {
+      data.PersistentVolumeClaim.push({ ...sourcePVC, metadata: { name: 'data-clone', namespace: 'apps' } });
+      return {};
+    });
+    render(<CloneVolumePage />);
+    fireEvent.click(cloneButton());
+    expect(await screen.findByText(/Cloning/)).toBeTruthy();
+    expect(screen.queryByText(/already exists/)).toBeNull();
   });
 
   it('refuses a name that a claim already has', () => {

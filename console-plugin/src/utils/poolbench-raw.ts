@@ -1,0 +1,25 @@
+import { consoleFetch } from '@openshift-console/dynamic-plugin-sdk';
+import { PLUGIN_NAME } from '../constants';
+
+/**
+ * The PoolBench service's raw results, through the console's plugin proxy
+ * (alias "poolbench"). The proxy passes the person's own token; the service
+ * checks that they may get the run.
+ */
+const base = (run: string): string => `/api/proxy/plugin/${PLUGIN_NAME}/poolbench/v1/runs/${encodeURIComponent(run)}`;
+
+/**
+ * The text of a reply. consoleFetchText reads a reply as text only when its type is exactly
+ * "text/plain", so a reply of "text/plain; charset=utf-8" or "text/csv" would be read as JSON.
+ */
+const fetchText = async (url: string): Promise<string> => (await consoleFetch(url)).text();
+
+/** Every result line of every VM of a run, as CSV. */
+export const fetchRawCSV = (run: string): Promise<string> => fetchText(`${base(run)}/raw.csv`);
+
+/** The raw lines one VM of a run sent. */
+export const fetchVMLines = (run: string, vm: string): Promise<string> =>
+  fetchText(`${base(run)}/vms/${encodeURIComponent(vm)}/log`);
+
+export const RAW_UNAVAILABLE =
+  'The raw results need the PoolBench service and the console proxy to it (the chart adds it when the console plugin is on).';

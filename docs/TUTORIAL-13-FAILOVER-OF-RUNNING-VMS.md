@@ -13,6 +13,8 @@ What the failover tool does and does not do:
 - For a running VM, it picks the newest moment that all disks of the VM can show, so the disks fit each other. It rolls back a copy that stopped half way.
 - It does **not** make the VM, start the workload or change DNS. You apply the VM definition yourself.
 
+![The failover tool reads the replicated folders on the destination share and makes a SubVolume, PV and PVC for each volume; you apply the VM](images/tutorial-13-failover.drawio.svg)
+
 > **Rewind before you start the VM.** A VM that runs on the latest disk writes to it. After that, the disk no longer matches its restore points, and the tool refuses to rewind it. If you may want an earlier moment, rewind first.
 
 ---
@@ -22,22 +24,60 @@ What the failover tool does and does not do:
 - The destination cluster from Part 12: the receiver, the pool `dr-vm-pool`, and the volume `repl-destination-data` in `kube-system`.
 - A place to run the failover tool where the destination share is mounted. The tool reads the replicated folders from a mounted share. There are two ways:
   - **A host** that can reach the destination share over NFS and the DR cluster's API. A VSI in the destination VPC works. A host in another VPC usually cannot reach the share (the NFS port times out).
-  - **The receiver pod.** It already mounts the share at `/data` and has a service account for the DR cluster, so it needs no NFS route and no kubeconfig. This is the way used in the steps below.
-- The failover tool, built for Linux x86 (the receiver pod and most hosts):
+  - **A pod next to the share.** The receiver pod cannot do this: it has no rights on the Kubernetes API. Make a pod that mounts the receiver volume (`repl-destination-data`, at `/data`) and runs under a service account that may create SubVolumes, PersistentVolumes and PersistentVolumeClaims and read FileSharePools. This is the way used in the steps below.
+- The failover tool, built for Linux x86 (the failover pod and most hosts):
 
 ```bash
 make build-failover        # makes bin/kubectl-failover; set GOOS=linux GOARCH=amd64 on another system
 ```
 
-For a host, copy it to `/usr/local/bin/` and check `kubectl failover version`. For the receiver pod, copy it in (the driver image does not contain it):
+For a host, copy it to `/usr/local/bin/` and check `kubectl failover version`.
+
+**The failover pod.** Make a service account with these rights and a pod that mounts the receiver volume. Any image with a shell works; the driver image does:
 
 ```bash
-RECEIVER_POD=$(dr get pods -n kube-system -l app.kubernetes.io/component=replication-receiver -o jsonpath='{.items[0].metadata.name}')
-dr exec -i -n kube-system ${RECEIVER_POD} -- sh -c 'cat > /tmp/kubectl-failover && chmod +x /tmp/kubectl-failover' < bin/kubectl-failover
-failover() { dr exec -n kube-system ${RECEIVER_POD} -- /tmp/kubectl-failover "$@"; }
+cat <<EOF | dr apply -f -
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: failover-tool, namespace: kube-system}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: failover-tool}
+rules:
+  - {apiGroups: ["storage.ibmcloud.io"], resources: ["subvolumes"], verbs: ["get", "list", "create"]}
+  - {apiGroups: ["storage.ibmcloud.io"], resources: ["filesharepools"], verbs: ["get", "list"]}
+  - {apiGroups: [""], resources: ["persistentvolumes", "persistentvolumeclaims"], verbs: ["get", "list", "create"]}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: failover-tool}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: failover-tool}
+subjects: [{kind: ServiceAccount, name: failover-tool, namespace: kube-system}]
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: failover-tool, namespace: kube-system}
+spec:
+  serviceAccountName: failover-tool
+  imagePullSecrets: [{name: all-icr-io}]
+  securityContext: {runAsUser: 107, runAsGroup: 107, runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: tool
+      image: de.icr.io/ibm-vpc-file-pool-csi/driver:<your image tag>
+      command: ["sleep", "infinity"]
+      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: ["ALL"]}}
+      volumeMounts: [{name: data, mountPath: /data}]
+  volumes:
+    - name: data
+      persistentVolumeClaim: {claimName: repl-destination-data}
+EOF
+dr wait --for=condition=Ready pod/failover-tool -n kube-system
+dr exec -i -n kube-system failover-tool -- sh -c 'cat > /tmp/kubectl-failover && chmod +x /tmp/kubectl-failover' < bin/kubectl-failover
+failover() { dr exec -n kube-system failover-tool -- /tmp/kubectl-failover "$@"; }
 ```
 
-Below, `failover <args>` is the receiver-pod way. On a host, read `kubectl failover <args>` instead, and add `--kubeconfig ${DR_KUBECONFIG}` to `execute` and `status`.
+Below, `failover <args>` is the pod way. On a host, read `kubectl failover <args>` instead, and add `--kubeconfig ${DR_KUBECONFIG}` to `execute` and `status`. Delete the pod, the ClusterRole and the binding when the failover is done.
 
 Set the names from Part 12:
 
@@ -73,10 +113,10 @@ export RECV_SUB=$(dr get subvolume ${RECV_PV} -o jsonpath='{.spec.subPath}')
 echo "${DR_IP} export='${DR_EXPORT}' receiver folder=${RECV_SUB}"
 ```
 
-**In the receiver pod,** the share is already mounted. The receiver volume is mounted at `/data`, so the replicated folders are in `/data/repl/pvcs`:
+**In the failover pod,** the receiver volume is mounted at `/data`, so the replicated folders are in `/data/repl/pvcs`:
 
 ```bash
-dr exec -n kube-system ${RECEIVER_POD} -- ls /data/repl/pvcs
+dr exec -n kube-system failover-tool -- ls /data/repl/pvcs
 export FAILOVER_PATH=/data/repl
 ```
 
@@ -168,49 +208,23 @@ failover status
 
 **Expected:** `Created SubVolume`, `Created PV` and `Created PVC` for each volume (the dry run shows three lines for each volume and makes nothing). The PV path ends in `.../repl/pvcs/pvc-<uuid>`. The status table shows each PVC as `Bound` after a few seconds. The PVs have the prefix `dr-`. The PVCs keep the namespace and name they had on the source cluster. Running `execute` again skips what exists.
 
-The PVs that the tool makes have no mount options, and the NFS mount must use `sec=sys`. Without it, QEMU cannot open the disk: the VM does not start and its events say `Could not open '.../disk.img': Permission denied`. Add the mount options to each PV before you start the VM:
-
-```bash
-for pv in $(dr get pv -o name | grep '/dr-pvc-'); do
-  dr patch ${pv} --type=merge -p '{"spec":{"mountOptions":["nfsvers=4.1","sec=sys","soft","timeo=600","retrans=3"]}}'
-done
-```
-
-(The loop picks every PV whose name starts with `dr-pvc-`. On a cluster that has other such PVs, name yours.) The PVCs may also show the cluster's default StorageClass, because the tool does not set one. They are bound to their PVs by name, so this does no harm.
+The PVs carry the pool's NFS mount options, including `sec=sys`, and the PVCs name no StorageClass, so the cluster default class does not apply. Check: `dr get pv dr-pvc-<uuid> -o jsonpath='{.spec.mountOptions}'`.
 
 ### An earlier moment (after Step 4)
 
-`failover execute --rewind-to ${MOMENT}` fails at the moment, because the SubVolume it tries to make has a path with `.rewind-<epoch>` in it, and the SubVolume CRD only accepts `/pvcs/pvc-<uuid>`:
-
-```
-Error: failover SubVolume pvc-...: create SubVolume CR: SubVolume.storage.ibmcloud.io "pvc-..." is invalid: spec.subPath: Invalid value: "/pvcs/pvc-....rewind-1792684470": spec.subPath in body should match '^/pvcs/pvc-[a-f0-9-]+$'
-```
-
-(The dry run does not show this, and shows the path of the latest disk.) Until this is fixed, make the PV and the PVC of a rewound disk yourself. Do this for each disk. `<volume>` is the source folder name `pvc-<uuid>` from the plan, `<epoch>` the number in the `.rewind-<epoch>` folder name, and `<name>` and `<size>` the PVC name and size from the plan:
+Add `--rewind-to ${MOMENT}`. A dry run shows the rewound folder (`...pvc-<uuid>.rewind-<epoch>`) in each PV path and checks it the same way as a real run:
 
 ```bash
-cat <<EOF | dr apply -f -
-apiVersion: v1
-kind: PersistentVolume
-metadata: {name: rewind-<name>}
-spec:
-  capacity: {storage: <size>Gi}
-  accessModes: [ReadWriteMany]
-  persistentVolumeReclaimPolicy: Retain
-  mountOptions: [nfsvers=4.1, sec=sys, soft, timeo=600, retrans=3]
-  nfs: {server: "${DR_IP}", path: "${DR_EXPORT_PATH}/pvcs/<volume>.rewind-<epoch>"}
-  claimRef: {namespace: vms, name: <name>}
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata: {name: <name>, namespace: vms}
-spec:
-  storageClassName: ""
-  volumeName: rewind-<name>
-  accessModes: [ReadWriteMany]
-  resources: {requests: {storage: <size>Gi}}
-EOF
+failover execute --nfs-mount-path ${FAILOVER_PATH} \
+  --dr-pool ${DR_POOL} --dr-share-ip ${DR_IP} --dr-export-path "${DR_EXPORT_PATH}" \
+  --rewind-to ${MOMENT} --dry-run
+
+failover execute --nfs-mount-path ${FAILOVER_PATH} \
+  --dr-pool ${DR_POOL} --dr-share-ip ${DR_IP} --dr-export-path "${DR_EXPORT_PATH}" \
+  --rewind-to ${MOMENT}
 ```
+
+Apply the current SubVolume CRD (`config/crd`) first: older ones refuse the `.rewind-<epoch>` folder.
 
 ---
 
@@ -240,7 +254,7 @@ dr delete pvc -n vms --all
 sudo umount /mnt/dr      # only if you mounted the share on a host
 ```
 
-The PVs that failover made have names that start with `dr-`. Their SubVolumes have the label `storage.ibmcloud.io/failover-source`. Both have the reclaim policy `Retain`, so deleting a PVC keeps the data on the share. Delete the PVs and SubVolumes last, when you no longer need the data. The PVs you made yourself for a rewound disk are named in your manifest. The data of the rewound disks is in the `.rewind-<epoch>` folders of the receiver volume. They are deleted with the receiver volume.
+The PVs that failover made have names that start with `dr-`. Their SubVolumes have the label `storage.ibmcloud.io/failover-source`. Both have the reclaim policy `Retain`, so deleting a PVC keeps the data on the share. Delete the PVs and SubVolumes last, when you no longer need the data. The data of the rewound disks is in the `.rewind-<epoch>` folders of the receiver volume. They are deleted with the receiver volume.
 
 ---
 

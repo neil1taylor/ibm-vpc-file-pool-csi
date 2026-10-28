@@ -14,6 +14,13 @@ import (
 // unknownPool labels a share whose pool the node could not look up.
 const unknownPool = "unknown"
 
+const (
+	// statfsParallel is how many statfs calls a refresh makes at once.
+	statfsParallel = 8
+	// statfsBackoff is how long a mount whose statfs failed is left alone.
+	statfsBackoff = 5 * time.Minute
+)
+
 // ShareRef names a share the way the controller's metrics do.
 type ShareRef struct {
 	Pool  string
@@ -30,6 +37,8 @@ type Config struct {
 	Statfs func(ctx context.Context, path string) (total, free uint64, err error)
 	// Resolve maps an NFS export path to the pool and share it belongs to.
 	Resolve func(ctx context.Context) (map[string]ShareRef, error)
+	// Now gives the time; nil means time.Now.
+	Now func() time.Time
 }
 
 type shareSample struct {
@@ -52,6 +61,8 @@ type Collector struct {
 	samples []shareSample
 	names   map[string]ShareRef // last good export path -> share lookup
 
+	failedAt map[string]time.Time // mount point -> last failed statfs; only Refresh uses it
+
 	usedDesc, sizeDesc, opsDesc, rttDesc, execDesc, bytesDesc *prometheus.Desc
 }
 
@@ -60,8 +71,9 @@ func NewCollector(cfg Config) *Collector {
 	l := []string{"pool", "share"}
 	lo := []string{"pool", "share", "op"}
 	return &Collector{
-		cfg:   cfg,
-		names: map[string]ShareRef{},
+		cfg:      cfg,
+		names:    map[string]ShareRef{},
+		failedAt: map[string]time.Time{},
 		usedDesc: prometheus.NewDesc("vpc_file_pool_share_used_bytes",
 			"Bytes written on one share of the pool, from statfs on the share mount of this node", l, nil),
 		sizeDesc: prometheus.NewDesc("vpc_file_pool_share_size_bytes",
@@ -117,6 +129,7 @@ func (c *Collector) Refresh(ctx context.Context) {
 	c.mu.RUnlock()
 
 	var samples []shareSample
+	var paths []string
 	for _, m := range mounts {
 		if !c.isStaging(m.MountPoint) {
 			continue
@@ -136,19 +149,105 @@ func (c *Collector) Refresh(ctx context.Context) {
 		}
 		s.bytesRead = m.Ops["READ"].BytesRecv
 		s.bytesWrit = m.Ops["WRITE"].BytesSent
-
-		total, free, err := c.cfg.Statfs(ctx, m.MountPoint)
-		if err != nil {
-			klog.V(2).InfoS("statfs failed on share mount", "share", ref.Share, "err", err)
-		} else if total >= free {
-			s.hasSpace, s.total, s.used = true, total, total-free
-		}
 		samples = append(samples, s)
+		paths = append(paths, m.MountPoint)
 	}
 
+	c.addSpace(ctx, samples, paths)
+
 	c.mu.Lock()
-	c.samples = samples
+	c.samples = mergeByShare(samples)
 	c.mu.Unlock()
+}
+
+// addSpace fills in the size and used bytes of each sample from statfs on its
+// mount point. A stale mount of a deleted share waits for the whole statfs
+// timeout, so the calls run side by side, and a mount whose statfs failed is
+// left alone for statfsBackoff. Its counters are still reported.
+func (c *Collector) addSpace(ctx context.Context, samples []shareSample, paths []string) {
+	now := time.Now
+	if c.cfg.Now != nil {
+		now = c.cfg.Now
+	}
+	start := now()
+
+	current := map[string]bool{}
+	for _, p := range paths {
+		current[p] = true
+	}
+	for p := range c.failedAt {
+		if !current[p] {
+			delete(c.failedAt, p)
+		}
+	}
+
+	asked := make([]bool, len(samples))
+	failed := make([]bool, len(samples))
+	sem := make(chan struct{}, statfsParallel)
+	var wg sync.WaitGroup
+	for i, p := range paths {
+		if at, ok := c.failedAt[p]; ok && start.Sub(at) < statfsBackoff {
+			continue
+		}
+		asked[i] = true
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			total, free, err := c.cfg.Statfs(ctx, p)
+			if err != nil {
+				klog.V(2).InfoS("statfs failed on share mount", "share", samples[i].ref.Share, "err", err)
+				failed[i] = true
+			} else if total >= free {
+				samples[i].hasSpace, samples[i].total, samples[i].used = true, total, total-free
+			}
+		}()
+	}
+	wg.Wait()
+
+	for i, p := range paths {
+		switch {
+		case failed[i]:
+			c.failedAt[p] = start
+		case asked[i]:
+			delete(c.failedAt, p)
+		}
+	}
+}
+
+// mergeByShare keeps one sample for each share. Kubelet gives each volume its
+// own staging path, so a node can hold several staging mounts of the same
+// share, and some of them can be stale mounts of a deleted pool. Prometheus
+// refuses a scrape that holds the same series twice, which made the whole
+// endpoint answer HTTP 500. The mounts of one share on one node go to the same
+// NFS server, and every counter only grows, so the larger value is the newer
+// reading and is never counted twice.
+func mergeByShare(samples []shareSample) []shareSample {
+	var merged []shareSample
+	index := map[ShareRef]int{}
+	for _, s := range samples {
+		i, seen := index[s.ref]
+		if !seen {
+			index[s.ref] = len(merged)
+			merged = append(merged, s)
+			continue
+		}
+		m := &merged[i]
+		if !m.hasSpace && s.hasSpace {
+			m.hasSpace, m.total, m.used = true, s.total, s.used
+		}
+		for k, st := range s.ops {
+			cur := m.ops[k]
+			cur.Ops = max(cur.Ops, st.Ops)
+			cur.RTTMillis = max(cur.RTTMillis, st.RTTMillis)
+			cur.ExecMillis = max(cur.ExecMillis, st.ExecMillis)
+			m.ops[k] = cur
+		}
+		m.bytesRead = max(m.bytesRead, s.bytesRead)
+		m.bytesWrit = max(m.bytesWrit, s.bytesWrit)
+	}
+	return merged
 }
 
 // Run refreshes now and then every interval, until ctx ends.

@@ -803,6 +803,8 @@ func (d *Driver) ControllerModifyVolume(ctx, req) { return Unimplemented }
 
 ## Node Service
 
+![Kubelet stages the volume by mounting the whole share, then publishes it by bind-mounting the subDir into the pod path](images/csi-interface-node-mount.drawio.svg)
+
 ### Capabilities
 
 ```go
@@ -830,7 +832,7 @@ func (d *Driver) NodeGetCapabilities(ctx context.Context, req *csi.NodeGetCapabi
 
 ### NodeStageVolume
 
-Mounts the whole NFS share to a staging directory. Called once per share per node (not once per PVC).
+Mounts the whole NFS share at the staging folder kubelet gives for the volume. Called once per staged volume on a node (the volume ID includes the PV name, so a different volume on the same share is mounted again). A second pod on the same volume reuses the mount.
 
 ```go
 func (d *Driver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
@@ -985,19 +987,12 @@ This prevents pods from seeing partially-copied data. The kubelet's exponential 
 ### NodeUnpublishVolume
 
 ```go
-func (d *Driver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
+func (d *Driver) NodeUnpublishVolume(_ context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
     targetPath := req.GetTargetPath()
 
-    // Unmount the bind mount
-    if err := d.mounter.Unmount(targetPath); err != nil {
+    if err := d.unmountAndRemove(targetPath); err != nil {
         return nil, status.Errorf(codes.Internal, "unmount failed: %v", err)
     }
-
-    // Clean up the directory
-    if err := os.Remove(targetPath); err != nil && !os.IsNotExist(err) {
-        return nil, status.Errorf(codes.Internal, "failed to remove target dir: %v", err)
-    }
-
     return &csi.NodeUnpublishVolumeResponse{}, nil
 }
 ```
@@ -1005,26 +1000,25 @@ func (d *Driver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublish
 ### NodeUnstageVolume
 
 ```go
-func (d *Driver) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageVolumeRequest) (*csi.NodeUnstageVolumeResponse, error) {
+func (d *Driver) NodeUnstageVolume(_ context.Context, req *csi.NodeUnstageVolumeRequest) (*csi.NodeUnstageVolumeResponse, error) {
     stagingPath := req.GetStagingTargetPath()
 
-    // Check if any PVCs still reference this staging mount
-    // The kubelet only calls Unstage after all Unpublish calls for this volume,
-    // so this should be safe to unmount.
-
-    if err := d.mounter.Unmount(stagingPath); err != nil {
+    if err := d.unmountAndRemove(stagingPath); err != nil {
         return nil, status.Errorf(codes.Internal, "NFS unmount failed: %v", err)
     }
-
     d.mountCache.Remove(stagingPath)
-
-    if err := os.Remove(stagingPath); err != nil && !os.IsNotExist(err) {
-        return nil, status.Errorf(codes.Internal, "failed to remove staging dir: %v", err)
-    }
-
     return &csi.NodeUnstageVolumeResponse{}, nil
 }
 ```
+
+Both calls share `unmountAndRemove`:
+
+1. It reads the kernel's mount list (`/proc/mounts`). It does not call `stat` on the path, because `stat` on the mount of a deleted share waits for the NFS server.
+2. A path that is gone or not mounted is a success. Kubelet repeats a call that ended after its deadline, and the repeat must succeed, or kubelet repeats it forever.
+3. If the path is mounted, it runs `umount`. If `umount` has no answer in 30 s, the NFS server is gone, and the driver detaches the mount (`MNT_DETACH`), which does not wait for the server.
+4. It removes the directory.
+
+When a pool is deleted soon after its last volume, the share can be gone before kubelet unstages the volume. Kubelet's own check of the mount point then waits about 3 minutes before it calls the driver, so the unstage ends about 4 minutes after the share was deleted.
 
 ### NodeGetVolumeStats
 

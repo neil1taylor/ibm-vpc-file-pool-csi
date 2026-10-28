@@ -9,6 +9,10 @@
 # Before a Job changes the files of a VM disk, the controller lists the
 # VirtualMachineInstances, so a VM that starts is seen. That needs "list".
 #
+# The volume resizer sidecar watches pods, so it can see a volume that a pod
+# still uses. Without "watch" on pods it logs "Failed to watch *v1.Pod" for
+# ever, and on some clusters it restarts without end.
+#
 # Usage: bash test/chart/test-clusterrole.sh
 # Requires: helm.
 
@@ -49,6 +53,19 @@ for file in "$RENDERED" "$ROOT/config/rbac/clusterrole.yaml"; do
         pass "$name: the controller may list VirtualMachineInstances"
     else
         fail "$name: the controller role cannot list VirtualMachineInstances"
+    fi
+done
+
+# pod_verbs FILE prints the verbs of the rule for pods.
+pod_verbs() { grep -A1 -F 'resources: ["pods"]' "$1" | grep 'verbs:' || true; }
+
+for file in "$RENDERED" "$ROOT/config/rbac/clusterrole.yaml"; do
+    name="chart"
+    [ "$file" = "$RENDERED" ] || name="config/rbac"
+    if pod_verbs "$file" | grep -qF '"watch"'; then
+        pass "$name: the controller may watch pods (the volume resizer needs it)"
+    else
+        fail "$name: the controller role cannot watch pods, so the volume resizer fails"
     fi
 done
 

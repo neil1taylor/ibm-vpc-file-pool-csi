@@ -1,6 +1,12 @@
 import { SubVolume } from '../types';
 import { VirtualMachineLike } from './k8s-objects';
-import { disksWithInstantSnapshots, instantSnapshotState, KubeVirtLike } from './instant-snapshots';
+import {
+  disksWithInstantSnapshots,
+  instantSnapshotState,
+  KubeVirtLike,
+  snapshotMode,
+  vmSnapshotMethod,
+} from './instant-snapshots';
 
 const kubevirt = (gates?: string[]): KubeVirtLike => ({
   metadata: { name: 'kubevirt-kubevirt-hyperconverged', namespace: 'openshift-cnv' },
@@ -17,6 +23,43 @@ const subvolume = (namespace: string, claim: string, diskChain?: string[]): SubV
 const vm = (namespace: string, name: string, claims: string[]): VirtualMachineLike => ({
   metadata: { namespace, name },
   spec: { template: { spec: { volumes: claims.map((c) => ({ persistentVolumeClaim: { claimName: c } })) } } },
+});
+
+describe('snapshotMode', () => {
+  it('is copy when the driver is set to copy, whatever the gate says', () => {
+    expect(snapshotMode('copy', 'on')).toBe('copy-setting');
+    expect(snapshotMode('copy', 'off')).toBe('copy-setting');
+    expect(snapshotMode('copy', 'unknown')).toBe('copy-setting');
+  });
+  it('is instant only when the driver is set to auto and the gate is on', () => {
+    expect(snapshotMode('auto', 'on')).toBe('instant');
+  });
+  it('is copy because of the gate when the driver is set to auto and the gate is off', () => {
+    expect(snapshotMode('auto', 'off')).toBe('copy-gate');
+  });
+  it('is unknown when the driver is set to auto and the gate cannot be read', () => {
+    expect(snapshotMode('auto', 'unknown')).toBe('unknown');
+  });
+  it('is unknown, never a guess, when the driver does not report its setting', () => {
+    expect(snapshotMode(undefined, 'on')).toBe('unknown-setting');
+    expect(snapshotMode(undefined, 'off')).toBe('unknown-setting');
+    expect(snapshotMode(undefined, 'unknown')).toBe('unknown-setting');
+  });
+  it('is unknown for a setting the console does not know', () => {
+    expect(snapshotMode('sometime-later', 'on')).toBe('unknown-setting');
+  });
+});
+
+describe('vmSnapshotMethod', () => {
+  it('reads the method from the settings ConfigMap', () => {
+    expect(vmSnapshotMethod({ metadata: { name: 's' }, data: { vmSnapshotMethod: 'copy' } })).toBe('copy');
+  });
+  it('is undefined when there is no ConfigMap, no data, or no such key', () => {
+    expect(vmSnapshotMethod(undefined)).toBeUndefined();
+    expect(vmSnapshotMethod([] as never)).toBeUndefined();
+    expect(vmSnapshotMethod({ metadata: { name: 's' } })).toBeUndefined();
+    expect(vmSnapshotMethod({ metadata: { name: 's' }, data: { other: 'x' } })).toBeUndefined();
+  });
 });
 
 describe('instantSnapshotState', () => {

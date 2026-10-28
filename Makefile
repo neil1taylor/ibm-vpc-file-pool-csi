@@ -44,14 +44,18 @@ test-scripts:
 	bash test/chart/test-diagnostics.sh
 	bash test/chart/test-doc-links.sh
 	bash test/chart/test-vm-snapshots.sh
+	bash test/chart/test-settings.sh
 	bash test/chart/test-clusterrole.sh
 	bash test/chart/test-hardening.sh
 	bash test/chart/test-node-metrics.sh
 	bash test/chart/test-uwm.sh
 	bash test/chart/test-console-plugin.sh
+	bash test/chart/test-poolbench.sh
+	bash test/chart/test-copy-speed.sh
 	bash test/release/test-runner.sh
 	bash test/e2e/lib/test-detect-zone.sh
 	bash test/e2e/lib/test-backup-cos.sh
+	bash test/perf/test-perf.sh
 
 test-integration:
 	go test ./test/integration/ -v -race -count=1 -tags=integration

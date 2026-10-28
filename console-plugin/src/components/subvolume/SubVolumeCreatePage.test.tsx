@@ -40,6 +40,17 @@ describe('SubVolumeCreatePage', () => {
     expect(screen.queryByRole('option', { name: /no-target/ })).toBeNull();
   });
 
+  it('does not offer a snapshot pool', () => {
+    (useK8sWatchResource as jest.Mock).mockImplementation((req: { groupVersionKind: { kind: string } }) =>
+      req.groupVersionKind.kind === 'BackupPolicy'
+        ? [[{ metadata: { name: 'nightly' }, spec: { snapshotPool: 'tiered' } }], true, undefined]
+        : [pools, true, undefined],
+    );
+    render(<SubVolumeCreatePage />);
+    expect(screen.getByRole('option', { name: /usable/ })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: /tiered/ })).toBeNull();
+  });
+
   it('creates a PVC and opens its console page', async () => {
     (k8sCreate as jest.Mock).mockResolvedValue({});
     render(<SubVolumeCreatePage />);

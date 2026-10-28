@@ -88,6 +88,19 @@ func (r *realClient) ListCloneSubVolumes(ctx context.Context) ([]v1alpha1.SubVol
 	return list.Items, nil
 }
 
+func (r *realClient) BackupPolicyUsingPool(ctx context.Context, poolName string) (string, error) {
+	list := &v1alpha1.BackupPolicyList{}
+	if err := r.client.List(ctx, list); err != nil {
+		return "", err
+	}
+	for i := range list.Items {
+		if list.Items[i].Spec.SnapshotPool == poolName {
+			return list.Items[i].Name, nil
+		}
+	}
+	return "", nil
+}
+
 func (r *realClient) HasOpenRestore(ctx context.Context, pvcNamespace, pvcName string) (bool, error) {
 	list := &v1alpha1.BackupRestoreList{}
 	if err := r.client.List(ctx, list); err != nil {

@@ -193,7 +193,7 @@ vpc_file_pool_share_count{pool="monitored-pool"} 1
 
 ## Step 4: Key Metrics Walkthrough
 
-The driver exposes 31 metrics across eight categories. This section walks through the first six categories (24 metrics) with PromQL queries and explains what to look for. The backup and CDI metrics are in [MONITORING.md](MONITORING.md).
+The driver exposes 37 metrics across nine categories. This section walks through the first six categories (24 metrics) with PromQL queries and explains what to look for. The backup, CDI and per-share (node agent) metrics are in [MONITORING.md](MONITORING.md).
 
 ### Allocation Metrics (9 metrics)
 

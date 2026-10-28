@@ -9,22 +9,17 @@ reason = "golang.org/x/crypto: no fixed version yet; indirect dependency"
 
 # Console plugin, build tools only. They are not in the plugin image, which holds the built files and nginx.
 [[IgnoredVulns]]
-id = "GHSA-vfj7-8cjw-p6xm"
-ignoreUntil = 2026-12-31
-reason = "braces: no fixed version; build tool only"
-
-[[IgnoredVulns]]
 id = "GHSA-86w9-cpqp-85rv"
 ignoreUntil = 2026-12-31
 reason = "node-forge: no fixed version; reached only through webpack-dev-server"
 
 [[IgnoredVulns]]
-id = "GHSA-hp3w-g68c-fv3c"
+id = "GHSA-5c6j-r48x-rmvq"
 ignoreUntil = 2026-12-31
-reason = "sprintf-js: no fixed version; build tool only"
+reason = "serialize-javascript: fix needs a new major version; build tool only"
 
 [[IgnoredVulns]]
-id = "GHSA-5c6j-r48x-rmvq"
+id = "GHSA-m5mm-p8h7-m29v"
 ignoreUntil = 2026-12-31
 reason = "serialize-javascript: fix needs a new major version; build tool only"
 
@@ -83,3 +78,8 @@ reason = "react-router: fix only in v7; the OpenShift console SDK pins v6"
 id = "GHSA-wrjc-x8rr-h8h6"
 ignoreUntil = 2026-12-31
 reason = "react-router: fix only in v7; the OpenShift console SDK pins v6"
+
+[[IgnoredVulns]]
+id = "GHSA-gcqx-w48m-w2h4"
+ignoreUntil = 2026-12-31
+reason = "deepmerge: no fixed version; reached only through jest-config, the test runner"

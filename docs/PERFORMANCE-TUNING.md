@@ -137,11 +137,7 @@ The pool manager supports two share selection strategies: `spread` and `binpack`
 
 **How it works:** When a new PVC is allocated, the manager selects the share with the most free capacity. PVCs are distributed evenly across all shares.
 
-```
-Share-1: [PVC-1] [PVC-4] [PVC-7]     ← 30% used
-Share-2: [PVC-2] [PVC-5] [PVC-8]     ← 30% used
-Share-3: [PVC-3] [PVC-6] [PVC-9]     ← 30% used
-```
+![Spread: nine PVCs are spread evenly over three shares, each 30% used](images/performance-tuning-spread.drawio.svg)
 
 **Pros:**
 - Lower blast radius — if one share fails, only ~1/N of PVCs are affected
@@ -156,11 +152,7 @@ Share-3: [PVC-3] [PVC-6] [PVC-9]     ← 30% used
 
 **How it works:** When a new PVC is allocated, the manager selects the share with the least free capacity that still fits the request. Shares are filled sequentially.
 
-```
-Share-1: [PVC-1] [PVC-2] [PVC-3] [PVC-4] [PVC-5]  ← 90% used
-Share-2: [PVC-6] [PVC-7]                             ← 25% used
-Share-3: (empty)                                      ← 0% used
-```
+![Binpack: five PVCs fill Share-1 (90% used), two are on Share-2, and Share-3 is empty](images/performance-tuning-binpack.drawio.svg)
 
 **Pros:**
 - Fewer shares in active use — saves VPC quota
@@ -339,12 +331,13 @@ rate(vpc_file_pool_api_calls_total{operation="create_share"}[1h]) * 3600
 
 ### Mount Caching
 
-The CSI node agent maintains one NFS mount per share per node. Multiple PVCs on the same share reuse this single NFS mount via bind-mounts. This means:
+The CSI node agent mounts NFS once per staged volume (kubelet gives each volume its own staging folder, because the volume ID includes the PV name). This means:
 
-- **First PVC on a node** from a given share: NFS mount (1-2 seconds)
-- **Subsequent PVCs on the same node** from the same share: bind-mount only (~10 ms)
+- **First pod on a volume on a node**: NFS mount (1-2 seconds)
+- **A second pod on the same volume on the same node**: bind-mount only (~10 ms)
+- **A different volume on the same share**: its own NFS mount
 
-This is why the `spread` strategy can increase mount latency on large clusters — more shares means more NFS mounts per node. With `binpack`, a single share serves many PVCs, and most nodes only need one NFS mount.
+The number of NFS mounts on a node follows the number of staged volumes, not the number of shares.
 
 ### Worker Node NFS Client Tuning
 
@@ -420,6 +413,10 @@ With `binpack`, most PVCs are on 1-2 shares, so most nodes only connect to 1-2 m
 ---
 
 ## Benchmarking
+
+### PoolBench: VMs on a Share
+
+To find how many VMs a share carries, use PoolBench (the **PoolBench** tab under VPC File Pools in the console). It makes its own pool, adds Linux and Windows test VMs in steps, finds the knee, and can also restart all VMs, run a patch window, live-migrate and snapshot VMs under load. The results of the lab runs are in [CAPACITY-PLANNING.md](CAPACITY-PLANNING.md#how-many-vms-one-share-carries-measured). The fio examples below are for a single PVC.
 
 ### fio Pod for Sequential I/O
 

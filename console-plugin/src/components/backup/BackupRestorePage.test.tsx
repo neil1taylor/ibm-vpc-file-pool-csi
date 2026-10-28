@@ -56,12 +56,14 @@ const classes = [
 
 let claims: Array<{ metadata: { name: string } }> = [];
 let restore: unknown;
+let policies: unknown[] = [];
 
 beforeEach(() => {
   jest.clearAllMocks();
   mockSearch = '';
   claims = [];
   restore = undefined;
+  policies = [];
   (useAccessReview as jest.Mock).mockReturnValue([true, false]);
   (k8sCreate as jest.Mock).mockResolvedValue({});
   (useK8sWatchResource as jest.Mock).mockImplementation(
@@ -69,7 +71,7 @@ beforeEach(() => {
       if (!req) return [undefined, true, undefined];
       switch (req.groupVersionKind.kind) {
         case 'BackupPolicy':
-          return [policy, true, undefined];
+          return [req.isList ? policies : policy, true, undefined];
         case 'StorageClass':
           return [classes, true, undefined];
         case 'PersistentVolumeClaim':
@@ -86,6 +88,18 @@ beforeEach(() => {
 const restoreButton = () => screen.getByRole('button', { name: 'Restore' }) as HTMLButtonElement;
 
 describe('BackupRestorePage', () => {
+  it('does not offer the storage class of a snapshot pool', () => {
+    policies = [{ metadata: { name: 'nightly' }, spec: { snapshotPool: 'snaps' } }];
+    classes.push({ metadata: { name: 'snaps' }, provisioner: 'vpc-file-pool.csi.ibm.io', parameters: { pool: 'snaps' } } as never);
+    try {
+      render(<BackupRestorePage />);
+      expect(screen.getByRole('option', { name: 'pool-a' })).toBeTruthy();
+      expect(screen.queryByRole('option', { name: 'snaps' })).toBeNull();
+    } finally {
+      classes.pop();
+    }
+  });
+
   it('starts with the first volume, the latest backup, a new name and the same namespace', () => {
     render(<BackupRestorePage />);
     expect((screen.getByLabelText(/^Volume/) as HTMLSelectElement).value).toBe('apps/data');
@@ -150,6 +164,18 @@ describe('BackupRestorePage', () => {
     expect(within(dialog).getByText(/A new claim apps\/data-restored is made/)).toBeTruthy();
     expect(within(dialog).getByText(/Nothing is overwritten/)).toBeTruthy();
     expect(within(dialog).getByText(/takes time/)).toBeTruthy();
+  });
+
+  it('does not call its own new claim a name that is taken, after the restore starts', async () => {
+    (k8sCreate as jest.Mock).mockImplementation(async () => {
+      claims = [{ metadata: { name: 'data-restored' } }];
+      return {};
+    });
+    render(<BackupRestorePage />);
+    fireEvent.click(restoreButton());
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Restore' }));
+    expect(await screen.findByText(/the request is starting/)).toBeTruthy();
+    expect(screen.queryByText(/already exists/)).toBeNull();
   });
 
   it('creates one BackupRestore for the latest backup, and follows it', async () => {

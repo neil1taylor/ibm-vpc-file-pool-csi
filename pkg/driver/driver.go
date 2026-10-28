@@ -8,6 +8,7 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"time"
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc"
@@ -53,6 +54,11 @@ type Driver struct {
 	ready        <-chan struct{}
 	nodeZone     string
 	nodeZoneOnce sync.Once
+
+	// unmountTimeout and detach replace defaultUnmountTimeout and detachMount
+	// in tests; zero values mean the defaults.
+	unmountTimeout time.Duration
+	detach         func(path string) error
 }
 
 // NewDriver creates a new CSI driver instance.

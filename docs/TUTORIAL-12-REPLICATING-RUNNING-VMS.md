@@ -15,6 +15,8 @@ How it works, in short:
 4. QEMU keeps a change list. The next copy holds only the blocks that changed.
 5. Before the receiver changes a block, it saves the old contents in an undo file. The undo files are restore points.
 
+![QEMU writes a staging file, a Job sends it over HTTPS to the receiver, and the receiver applies it to the disk and keeps undo files](images/tutorial-12-vm-copy.drawio.svg)
+
 ---
 
 ## Prerequisites
@@ -114,11 +116,10 @@ helm upgrade ibm-vpc-file-pool-csi charts/ibm-vpc-file-pool-csi \
   --set replicationReceiver.enabled=true \
   --set replicationReceiver.pvcName=repl-destination-data \
   --set replicationReceiver.authSecretName=repl-receiver-token \
-  --set replicationReceiver.tls.enabled=true \
-  --set replicationReceiver.resources.limits.memory=2Gi
+  --set replicationReceiver.tls.enabled=true
 ```
 
-The memory limit matters. The receiver writes the whole disk through NFS, and the kernel keeps the written pages in memory that counts against the container limit. With the default limit of `512Mi`, the receiver was killed (`OOMKilled`) during the first copy of an 11 GiB disk, and the copy could not be resumed (see the note in Step 4). With `2Gi`, the same copy ran with the memory use rising to the limit (almost all of it cache) and no restart.
+The receiver writes whole disks through NFS. Pages of files on NFS count against the container's memory limit, so the memory use of a busy receiver stays near the limit; that is normal, because the kernel drops the pages as it needs room. The receiver forces its data out every 32 MiB and drops the cached pages, and the default limit is `1Gi` (see [HELM-VALUES.md](HELM-VALUES.md)). Older versions with a `512Mi` limit were killed (`OOMKilled`) during the first copy of an 11 GiB disk.
 
 The chart makes a Deployment, a Service, a TLS certificate (it needs cert-manager) and, on OpenShift, a Route.
 
@@ -168,14 +169,14 @@ spec:
   schedule: 15m
   maxRetries: 3
   maxParallelSyncs: 2
-  vmCopySpeedLimitMBps: 20
+  vmCopyAdaptive: true
   restorePointKeepHours: 24
 EOF
 ```
 
 The fields that matter for a VM:
 
-- `vmCopySpeedLimitMBps` limits each disk copy. At 20 MB/s a VM kept 93% of its write speed in a lab test. The limit also counts empty space, so a first copy of a large disk takes long. `0` means no limit.
+- `vmCopyAdaptive` (default `true`) makes the copy of each disk start at 15 MB/s, speed up while the share the VM reads is quiet, and slow down when the share's average latency passes `vmCopyMaxLatencyMs` (default 15 ms). `vmCopySpeedLimitMBps` sets the highest speed; by default there is none. With `vmCopyAdaptive: false` it is the fixed speed instead (default 20; `0` means no limit). At 20 MB/s a VM kept 93% of its write speed in a lab test. The copy counts empty space too, so a first copy of a large disk takes long.
 - `restorePointKeepHours` is how long the destination keeps earlier moments. It is `24` by default. The disk uses more space the more the VM writes.
 - `schedule` is how often a new copy starts.
 
@@ -194,7 +195,7 @@ The phase of a copy is `Copying` while QEMU writes the staging file, and `Sendin
 
 Plan on this: in a lab test, a 12 GiB root disk and a 2 GiB data disk took 10 minutes to copy at 20 MB/s, and 4 more minutes to send. The first status can appear several minutes after you create the policy.
 
-> **If a copy stays in `Sending` for a long time** and `lastError` is empty, look at the Jobs: `src get jobs -n kube-system | grep vm-to-dr`. A Job in `Failed` state means the send failed. Read the reason from a pod while it runs (`src logs -n kube-system <pod>`). If the receiver was restarted during an upload (for example `OOMKilled`), the receiver may answer `the upload record file is damaged`, and the copy cannot continue by itself. What worked in the lab to start over: delete the policy, delete its Jobs and temporary PVCs and PVs (see Clean up), delete the folder `<receiver volume>/repl` on the receiver, delete the `.repl-staging-*` file in the source volumes, restart the VM (this drops the change list), and make the policy again.
+> **If a copy fails,** the status shows it: `lastError` of the disk says `apply Job failed for <volume> (<reason>)`, for example when the receiver was restarted during the upload. The next cycle starts a new copy by itself. A receiver that was killed while it stored records cuts away the damaged end of its upload record, and the Job resumes. You do not need to clean up. To see why a Job failed, read the log of its pod while it runs: `src logs -n kube-system <pod>`.
 
 `consistency` can also be `CrashConsistent`. Then `consistencyReason` says why, for example that the guest agent did not answer. A VM that starts from a crash consistent copy may need a file-system check, as after a power loss.
 

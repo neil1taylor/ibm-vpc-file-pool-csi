@@ -6,13 +6,16 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
+	"time"
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
+	mount "k8s.io/mount-utils"
 
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/pool"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/util"
@@ -61,7 +64,7 @@ func (d *Driver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRe
 	source := fmt.Sprintf("%s:%s", server, sharePath)
 
 	mountOptions := mergeNFSMountOptions(
-		[]string{"nfsvers=4.1", "soft", "timeo=600", "retrans=3", "sec=sys"},
+		util.DefaultNFSMountOptions(),
 		req.GetVolumeCapability().GetMount().GetMountFlags(),
 	)
 
@@ -192,12 +195,8 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 func (d *Driver) NodeUnpublishVolume(_ context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
 	targetPath := req.GetTargetPath()
 
-	if err := d.mounter.Unmount(targetPath); err != nil {
+	if err := d.unmountAndRemove(targetPath); err != nil {
 		return nil, status.Errorf(codes.Internal, "unmount failed: %v", err)
-	}
-
-	if err := os.Remove(targetPath); err != nil && !os.IsNotExist(err) {
-		return nil, status.Errorf(codes.Internal, "failed to remove target dir: %v", err)
 	}
 
 	klog.V(2).InfoS("Unpublished volume", "targetPath", targetPath)
@@ -208,18 +207,67 @@ func (d *Driver) NodeUnpublishVolume(_ context.Context, req *csi.NodeUnpublishVo
 func (d *Driver) NodeUnstageVolume(_ context.Context, req *csi.NodeUnstageVolumeRequest) (*csi.NodeUnstageVolumeResponse, error) {
 	stagingPath := req.GetStagingTargetPath()
 
-	if err := d.mounter.Unmount(stagingPath); err != nil {
+	if err := d.unmountAndRemove(stagingPath); err != nil {
 		return nil, status.Errorf(codes.Internal, "NFS unmount failed: %v", err)
 	}
 
 	d.mountCache.Remove(stagingPath)
 
-	if err := os.Remove(stagingPath); err != nil && !os.IsNotExist(err) {
-		return nil, status.Errorf(codes.Internal, "failed to remove staging dir: %v", err)
-	}
-
 	klog.V(2).InfoS("Unstaged volume", "stagingPath", stagingPath)
 	return &csi.NodeUnstageVolumeResponse{}, nil
+}
+
+// defaultUnmountTimeout is how long a plain umount may wait before the mount
+// is detached. The NFS server of a deleted share never answers, and kubelet
+// gives a node call two minutes.
+const defaultUnmountTimeout = 30 * time.Second
+
+// unmountAndRemove unmounts path if it is mounted, then removes the directory.
+// It reads the kernel's mount list instead of calling stat on path, because
+// stat on the mount of a dead NFS server waits too. A path that is gone or not
+// mounted is not an error: kubelet repeats a call that ended after its
+// deadline, and the repeat must succeed or kubelet repeats it forever.
+func (d *Driver) unmountAndRemove(path string) error {
+	mps, err := d.mounter.List()
+	if err != nil {
+		return fmt.Errorf("list mounts: %w", err)
+	}
+	if slices.ContainsFunc(mps, func(mp mount.MountPoint) bool { return mp.Path == path }) {
+		if err := d.unmountOrDetach(path); err != nil {
+			return err
+		}
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove %s: %w", path, err)
+	}
+	return nil
+}
+
+// unmountOrDetach unmounts path. If umount has no answer in time, the NFS
+// server is gone: umount then waits inside the kernel, where killing it does not
+// help, so the mount is detached instead, which does not wait for the server.
+func (d *Driver) unmountOrDetach(path string) error {
+	timeout := d.unmountTimeout
+	if timeout == 0 {
+		timeout = defaultUnmountTimeout
+	}
+	done := make(chan error, 1) // buffered: the late answer of a hung umount is dropped
+	go func() { done <- d.mounter.Unmount(path) }()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(timeout):
+	}
+
+	detach := d.detach
+	if detach == nil {
+		detach = detachMount
+	}
+	klog.InfoS("Unmount had no answer; detaching the mount", "path", path, "after", timeout)
+	if err := detach(path); err != nil {
+		return fmt.Errorf("detach %s: %w", path, err)
+	}
+	return nil
 }
 
 // NodeGetVolumeStats reports per-PVC capacity and usage.
@@ -325,60 +373,9 @@ func dirUsageBytes(root string) (int64, error) {
 	return total, err
 }
 
-// mergeNFSMountOptions merges custom mount flags with safe NFS defaults.
-// Custom flags override defaults with the same key (e.g. "timeo=300" overrides
-// "timeo=600"). The "soft" default is always preserved unless the custom flags
-// explicitly include "hard".
-func mergeNFSMountOptions(defaults, custom []string) []string {
-	if len(custom) == 0 {
-		return defaults
-	}
-
-	// optKey extracts the key portion of a mount option (before '=').
-	optKey := func(opt string) string {
-		for i, c := range opt {
-			if c == '=' {
-				return opt[:i]
-			}
-		}
-		return opt
-	}
-
-	// Build a map of default options keyed by their prefix.
-	merged := make(map[string]string, len(defaults)+len(custom))
-	order := make([]string, 0, len(defaults)+len(custom))
-	for _, opt := range defaults {
-		key := optKey(opt)
-		merged[key] = opt
-		order = append(order, key)
-	}
-
-	// Apply custom options, overriding defaults with the same key.
-	hasHard := false
-	for _, opt := range custom {
-		key := optKey(opt)
-		if key == "hard" {
-			hasHard = true
-		}
-		if _, exists := merged[key]; !exists {
-			order = append(order, key)
-		}
-		merged[key] = opt
-	}
-
-	// If "hard" was explicitly specified, remove "soft" (they're mutually exclusive).
-	if hasHard {
-		delete(merged, "soft")
-	}
-
-	result := make([]string, 0, len(merged))
-	for _, key := range order {
-		if opt, ok := merged[key]; ok {
-			result = append(result, opt)
-		}
-	}
-	return result
-}
+// mergeNFSMountOptions merges custom mount flags with safe NFS defaults. See
+// util.MergeNFSMountOptions.
+var mergeNFSMountOptions = util.MergeNFSMountOptions
 
 // NodeGetInfo returns the node ID and accessible topology (zone).
 func (d *Driver) NodeGetInfo(ctx context.Context, _ *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {

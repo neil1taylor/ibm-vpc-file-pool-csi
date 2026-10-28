@@ -34,11 +34,13 @@ import {
   parseRestoreQuery,
   validateBackupRestore,
 } from '../../utils/backup-helpers';
-import { CSI_DRIVER_NAME, PersistentVolumeClaim, StorageClass, errorMessage } from '../../utils/k8s-objects';
+import { PersistentVolumeClaim, StorageClass, errorMessage } from '../../utils/k8s-objects';
 import { toYAML } from '../../utils/yaml-lite';
 import FieldPopover from '../common/FieldPopover';
 import NoAccessNote from '../common/NoAccessNote';
 import BackupRestoreBanner from './BackupRestoreBanner';
+import { useBackupPolicies } from '../../utils/use-backup-policies';
+import { volumeClasses } from '../../utils/snapshot-pools';
 
 const gvk = (model: { apiGroup?: string; apiVersion: string; kind: string }) => ({
   group: model.apiGroup,
@@ -59,6 +61,7 @@ const BackupRestorePage: React.FC = () => {
   const query = useMemo(() => parseRestoreQuery(location.search), [location.search]);
 
   const [policy, loaded, loadError] = useK8sWatchResource<BackupPolicy>({ groupVersionKind: gvk(BackupPolicyModel), name });
+  const policies = useBackupPolicies();
   const [storageClasses] = useK8sWatchResource<StorageClass[]>({ groupVersionKind: gvk(StorageClassModel), isList: true });
   const [canCreate] = useAccessReview({ group: API_GROUP, resource: 'backuprestores', verb: 'create' });
 
@@ -144,11 +147,15 @@ const BackupRestorePage: React.FC = () => {
   const moment = useMoment ? localInputToISO(momentText) : '';
   const errors = validateBackupRestore(
     { targetNamespace, targetName, moment: useMoment ? moment || 'invalid' : '' },
-    { existingNames: (claims || []).map((c) => c.metadata?.name || ''), oldestBackupTime: volume?.oldestBackupTime },
+    {
+      // The claim this page made is not a name taken by someone else.
+      existingNames: (claims || []).map((c) => c.metadata?.name || '').filter((n) => n !== created?.target),
+      oldestBackupTime: volume?.oldestBackupTime,
+    },
   );
   if (useMoment && !momentText) errors.moment = 'Choose a time, or restore the latest backup.';
   const valid = !!volume && !errors.targetNamespace && !errors.targetName && !errors.moment;
-  const driverClasses = (storageClasses || []).filter((sc) => sc.provisioner === CSI_DRIVER_NAME);
+  const driverClasses = volumeClasses(storageClasses || [], policies);
 
   const request = volume
     ? buildBackupRestore(

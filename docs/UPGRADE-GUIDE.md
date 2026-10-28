@@ -2,6 +2,8 @@
 
 This guide covers upgrading the driver between versions without data loss or downtime.
 
+![The upgrade path: pre-flight checks, new CRDs, helm upgrade, rollout watch, post-upgrade checks](images/upgrade-guide-steps.drawio.svg)
+
 ---
 
 ## Pre-Flight Checklist
@@ -43,6 +45,7 @@ Before upgrading, complete every item:
 | v0.11.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.12.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.13.0–v0.13.2 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
+| v0.14.0–v0.15.3 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
 
 ---
 
@@ -66,7 +69,7 @@ helm upgrade ibm-vpc-file-pool-csi charts/ibm-vpc-file-pool-csi/ \
   --timeout 5m
 
 # 4. Watch rollout
-kubectl rollout status deployment/vpc-file-pool-csi-controller -n kube-system
+kubectl rollout status deployment/ibm-vpc-file-pool-csi-controller -n kube-system
 kubectl rollout status daemonset/ibm-vpc-file-pool-csi-node -n kube-system
 ```
 
@@ -84,7 +87,7 @@ kubectl apply -f config/controller/
 kubectl apply -f config/node/
 
 # 4. Watch rollout
-kubectl rollout status deployment/vpc-file-pool-csi-controller -n kube-system
+kubectl rollout status deployment/ibm-vpc-file-pool-csi-controller -n kube-system
 kubectl rollout status daemonset/ibm-vpc-file-pool-csi-node -n kube-system
 ```
 
@@ -121,6 +124,120 @@ kubectl get crd filesharepools.storage.ibmcloud.io -o json | \
 ---
 
 ## Version-Specific Upgrade Notes
+
+### Upgrading to v0.15.3 (from v0.15.2)
+
+**Changes:**
+- PoolBench: the backup event reports the copy speed. The PoolBench service can now read replication policies. Before, it read no speed and said nothing.
+
+**CRD changes:** none. No chart value changes.
+
+**Action required:** upgrade with Helm (the role is part of the chart). Set `image.tag` if you pin it. The console plugin image did not change.
+
+To go back, run `helm rollback`.
+
+### Upgrading to v0.15.2 (from v0.15.1)
+
+**Changes:**
+- The controller role can watch pods, so the volume resizer sidecar stops logging "Failed to watch *v1.Pod" and stops restarting.
+
+**CRD changes:** none. No chart value changes. The driver and console plugin images did not change.
+
+**Action required:** upgrade with Helm (the role is part of the chart). Set `image.tag` if you pin it.
+
+To go back, run `helm rollback`.
+
+### Upgrading to v0.15.1 (from v0.15.0)
+
+**Changes:**
+- A COS export of a backup no longer reads a disk that changes under it (issue #310). While the export of a volume runs, the next local backup of that volume waits; all disks of a running VM wait together. The volume's status says `held: export to COS running`. A hold ends with the export, or after 6 hours.
+- The adaptive copy speed now also changes the speed of the disks that still copy when another disk of the VM has finished (issue #313).
+- PoolBench: the backup event reports the copy speed and the latency of the VMs during the backup.
+
+**CRD changes (additive):** new fields in the status of `PoolBench` events. The SubVolume gets a short-lived annotation `storage.ibmcloud.io/export-hold` while an export runs. No chart value changes.
+
+**Action required:**
+1. Apply the CRDs: `kubectl apply --server-side --force-conflicts -f config/crd/`.
+2. Upgrade with Helm. Set `image.tag` if you pin it. The console plugin image did not change.
+
+To go back, run `helm rollback`. The older driver ignores the annotation.
+
+### Upgrading to v0.15.0 (from v0.14.3)
+
+**Changes:**
+- Copies of running VM disks (replication, backup and snapshot copies) adapt their speed to the load on the share the VM reads. A copy starts at 15 MB/s, speeds up by 5 MB/s every 30 seconds while the share is quiet, and halves (never below 15 MB/s) when the average latency of the share passes `vmCopyMaxLatencyMs` (15 ms by default).
+- **The fixed 20 MB/s default is gone for adaptive copies.** `vmCopySpeedLimitMBps` is now the highest speed, and unset means there is no highest speed. If you rely on 20 MB/s as a ceiling, set `vmCopySpeedLimitMBps: 20`. To keep a fixed speed, set `vmCopyAdaptive: false` on the policy (or on the `VolumeSnapshotClass`).
+- PoolBench, a storage performance test in the console. It is off by default (`poolBench.enabled`).
+
+**CRD changes (additive):** the new `PoolBench` resource, and `vmCopyAdaptive` and `vmCopyMaxLatencyMs` on `BackupPolicy` and `ReplicationPolicy`. `vmCopySpeedLimitMBps` no longer has a default of 20. The status of a replication volume shows the speed now in `vmCopy.speedMBps`.
+
+**New objects from the chart:** a service account `<release>-node-reader` that can only read the node agents' `/metrics`; a Role for the controller (list endpoint slices, create a token of that one account); a ConfigMap `<release>-node-ca` that the OpenShift service CA fills in. On a cluster without the OpenShift service CA, copies stay at the fixed speed.
+
+**Action required:**
+1. Apply the CRDs: `kubectl apply --server-side --force-conflicts -f config/crd/`.
+2. Upgrade with Helm. Set both `image.tag` and `consolePlugin.image.tag` if you pin image tags. No chart value changes are needed.
+3. Check the controller log: a line "Cannot read the latency of the pool's shares" means the copies stay at their fixed speed, and the line says why.
+
+To go back, run `helm rollback`. The older driver works with the new CRDs.
+
+### Upgrading to v0.14.3 (from v0.14.2)
+
+**Changes:** the node agent finishes the unmount of a volume whose share was already deleted. Before, such a volume stayed on the node, and kubelet repeated a failing unmount forever. Share metrics are no longer minutes late on a node with dead mounts. See `CHANGELOG.md`.
+
+**CRD changes:** none.
+
+**Action required:**
+1. Upgrade with Helm. No CRD step, and no chart value changes. Set both `image.tag` and `consolePlugin.image.tag` if you pin image tags.
+2. Nothing to clean by hand. After the upgrade, kubelet's next retries remove the leftover volumes of deleted shares from each node. Each one takes up to about 4 minutes. To check a node, count the folders under `<kubelet dir>/plugins/kubernetes.io/csi/vpc-file-pool.csi.ibm.io/`: only volumes in use stay.
+
+### Upgrading to v0.14.2 (from v0.14.1)
+
+**Changes:** the node agent `/metrics` endpoint no longer answers HTTP 500 when a node holds the same share twice, so share metrics and the alerts built on them work again on those nodes. The driver refuses CreateVolume on a backup policy's snapshot pool (FailedPrecondition, naming the policy), and the console leaves those pools out of its lists. The console clone banner follows the copy, a refused "Delete backups" dialog says "Close", and the clone and restore pages no longer call their own new claim a taken name. See `CHANGELOG.md`.
+
+**CRD changes:** none.
+
+**Action required:**
+1. Upgrade with Helm. No CRD step, and no chart value changes.
+2. Upgrade the driver and the console plugin image to v0.14.2 together. If you pin image tags, set both `image.tag` and `consolePlugin.image.tag`.
+3. If a volume already sits on a backup policy's snapshot pool, it stays. Only new volumes on that pool are refused. Move the volume off the pool so the policy backs up again.
+
+### Upgrading to v0.14.1 (from v0.14.0)
+
+**Changes:** the console box on the Snapshots and Pools pages now shows how the driver takes VM disk snapshots: instant, copy, or unknown. Before, it read only the KubeVirt `Sidecar` gate and said "on" even when the driver was set to `vmSnapshots.method=copy`. The driver code is the same as v0.14.0.
+
+**CRD changes:** none.
+
+**Action required:**
+1. Upgrade with Helm. No CRD step.
+2. The chart now renders a ConfigMap `ibm-vpc-file-pool-csi-settings` (key `vmSnapshotMethod`, no secret) in the release namespace, and a Role and RoleBinding that let every signed-in user `get` that one ConfigMap by name. Nothing else in the namespace becomes readable. The console reads it.
+3. Upgrade the console plugin image to v0.14.1 with the chart. A console plugin that is newer than the driver shows "unknown" until the driver is upgraded too.
+
+### Upgrading to v0.14.0 (from v0.13.2)
+
+**Changes:** shares use security group access mode; VM snapshots and replication use a QEMU copy of running VMs; golden images are imported by CDI; new console pages. See `CHANGELOG.md` for the full list.
+
+**CRD changes (additive):** `FileSharePool.spec.securityGroupIDs`, new status fields on `Snapshot` (`consistency`, `copyMoment`) and `ReplicationPolicy` (restore points, copy moments), and `ReplicationPolicy.spec.vmCopySpeedLimitMBps`.
+
+**Action required:**
+1. Apply updated CRDs: `kubectl apply -f config/crd/`
+2. Upgrade with Helm. The controller ClusterRole gains permissions (DataVolumes, DataSources, KubeVirt migrations, the `kubevirt-controller` SCC, `hyperconvergeds`) and loses ImageStreams and RoleBindings.
+3. Shares you made before this version in VPC access mode keep working until IBM ends support on 6 May 2027. New shares use security group access mode. The driver does not change an existing share.
+4. If the Prometheus Operator API is present, the chart now creates a ServiceMonitor by default (`metrics.serviceMonitor.enabled`).
+5. **BREAKING: the controller metrics endpoint (`:8080/metrics`) is now HTTPS with a token login (PR #174).** Anything that scraped it over plain HTTP must change to HTTPS with a bearer token. The node agent also serves metrics on port 9810 over HTTPS.
+6. **On OpenShift, alerts need user workload monitoring turned on** (`enableUserWorkload: true`); without it no alert fires. The chart does not change that setting. The command is in `docs/INSTALL.md`.
+7. The guides moved into `docs/` (PR #184). README, CHANGELOG, CONTRIBUTING, CLAUDE.md and SKILL.md stay in the root. Update bookmarks; the console help links already point to `docs/`. A branch that edits a guide at its old place: run `hack/follow-docs-move.sh` after `git merge origin/main`.
+8. Hardening (PRs #156, #105, #203): the image runs as user 65532 (the node agent stays root), the replication receiver has its own ServiceAccount, and receiver TLS stays off by default (turning it on needs cert-manager and a trusted CA on the source cluster).
+9. The default image tag is `v` plus the chart `appVersion`, not `latest`.
+10. **The replication receiver memory limit is raised from `512Mi` to `1Gi`** (`replicationReceiver.resources.limits.memory`). If you set your own value, check that it is at least `512Mi`. The receiver now forces data out every 32 MiB for VM disks and plain files (PRs #219, #226).
+11. **Failover:** apply the new SubVolume CRD (`config/crd`) before `kubectl failover execute --rewind-to`. The dry run now needs `--kubeconfig` because it reads the pool for the mount options. PVs it makes now carry `sec=sys`, and its PVCs bind only to the PV it made (PR #218).
+12. **Migrating a claim** (`kubectl migrate`, console page) now runs as the namespace's user with the cluster's `openshift/tools` image. Owners are not kept and files unreadable to that user are not copied (PR #207; `KNOWN-LIMITATIONS.md`).
+13. Snapshot records of failed snapshots (not ready, older than 2 minutes, no VolumeSnapshotContent) are removed by the controller, including old leftovers (PR #204).
+
+**Fixes in this release:** instant VM snapshot of a disk not owned by user 107 is refused and leaves the chain clean (#191, PR #194); replication and backup status follow the Jobs within seconds (#192, PR #197); the restore page no longer spins without the right to read VolumeSnapshotContents (#186, PR #188); a VM disk copy no longer sticks when its apply Job expires (#160, PR #161); `kubectl backup cos-list` works (PR #183).
+
+**Also fixed:** receiver damaged upload record and Failed Jobs with in-place restarts (#213, PR #219); failover rewind path rule, mount options and StorageClass (#209 to #211, PR #218); plain-file receiver memory (#225, PR #226); #214 and #215 verified fixed by #161 and #197 (tests in PR #217).
+
+**Not in this release:** auto-expand making a share inside the volume request (#222), the console restore banner (#224), failback (no command, untested), and file-level restore from a backup (issue #92). Parts 1 and 2 (the browse helper and the `BackupBrowse` resource with its session controller) are in the code, but nothing creates a `BackupBrowse`, so users see no change.
 
 ### Upgrading to v0.13.2 (from v0.13.1)
 
@@ -461,7 +578,7 @@ EOF
 kubectl get pvc upgrade-test-pvc -w  # Should bind within seconds
 
 # 5. Verify metrics endpoint (if applicable)
-kubectl port-forward -n kube-system svc/vpc-file-pool-csi-controller 8080:8080 &
+kubectl port-forward -n kube-system svc/ibm-vpc-file-pool-csi-metrics 8080:8080 &
 curl -s http://localhost:8080/metrics | grep vpc_file_pool | head -5
 kill %1
 

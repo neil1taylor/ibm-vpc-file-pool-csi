@@ -74,6 +74,9 @@ type ReplicationController struct {
 	// vmCopier copies the disks of running VMs. If nil, their volumes are
 	// skipped.
 	vmCopier VMCopier
+	// shareLatency tells how busy the share of a VM is, so that the copy of its
+	// disks can speed up and slow down. If nil, copies run at a fixed speed.
+	shareLatency ShareLatency
 
 	// replicationImage is the container image used for direct-NFS replication Jobs (rsync).
 	replicationImage string
@@ -458,6 +461,10 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 	activeJobs := int32(0)
 	skipped := 0
 
+	// A volume whose backup is being sent to COS gets no new copy until the
+	// export has read it, or the export would hold a mix of two moments.
+	matched, heldByExport := rc.splitHeldByExport(ctx, policy, matched)
+
 	// Disks of running VMs take the VM copy path, if it is on.
 	matched, vmRes := rc.processVMVolumes(ctx, policy, matched, true)
 	svStatuses = append(svStatuses, vmRes.statuses...)
@@ -478,6 +485,10 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 		st.LastError = lastError
 		st.VMCopy = nil
 		return st
+	}
+
+	for _, sv := range heldByExport {
+		svStatuses = append(svStatuses, carry(sv.Name, heldByExportMessage))
 	}
 
 	round := rc.cycleResults(policyName)
@@ -553,7 +564,11 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 				rc.cleanupReplicationResources(ctx, policy, svCopy.Name)
 			} else {
 				// Job failed.
-				finish(carry(svCopy.Name, "replication Job failed after retries"), fmt.Sprintf("%s: replication Job failed", svCopy.Name))
+				msg := "replication Job failed after retries"
+				if jobRes.Failure != "" {
+					msg += " (" + jobRes.Failure + ")"
+				}
+				finish(carry(svCopy.Name, msg), fmt.Sprintf("%s: replication Job failed", svCopy.Name))
 				rc.cleanupReplicationResources(ctx, policy, svCopy.Name)
 			}
 			continue
@@ -705,6 +720,54 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 		"subVolumes", total,
 		"duration", duration.String(),
 	)
+}
+
+// heldByExportMessage is the status of a volume that waits for its COS export.
+// It is not an error: the volume is copied again when the export ends.
+const heldByExportMessage = "held: export to COS running"
+
+// splitHeldByExport separates the volumes that a COS export holds from the rest.
+// With VM disk copies on, a hold on one disk of a running VM holds every disk
+// of that VM, because a VM copy takes all its disks in one step. A volume whose
+// VM copy runs is never held: the copy would lose its tracking and stay in the VM.
+func (rc *ReplicationController) splitHeldByExport(ctx context.Context, policy *v1alpha1.ReplicationPolicy, svs []v1alpha1.SubVolume) (free, held []v1alpha1.SubVolume) {
+	copying := map[string]bool{}
+	for _, st := range policy.Status.SubVolumeStatuses {
+		if st.VMCopy != nil {
+			copying[st.SubVolumeName] = true
+		}
+	}
+	for _, sv := range svs {
+		if _, _, isHeld := parseExportHold(sv.Annotations[exportHoldAnnotation]); isHeld && !copying[sv.Name] {
+			held = append(held, sv)
+		} else {
+			free = append(free, sv)
+		}
+	}
+	if len(held) == 0 || len(free) == 0 || rc.vmCopier == nil {
+		return free, held
+	}
+	heldPods := map[types.UID]bool{}
+	unknownNamespaces := map[string]bool{}
+	for i := range held {
+		pod, _, err := rc.vmPodForClaim(ctx, held[i].Spec.PVCNamespace, held[i].Spec.PVCName)
+		switch {
+		case err != nil:
+			unknownNamespaces[held[i].Spec.PVCNamespace] = true
+		case pod != nil:
+			heldPods[pod.UID] = true
+		}
+	}
+	var stillFree []v1alpha1.SubVolume
+	for _, sv := range free {
+		pod, _, err := rc.vmPodForClaim(ctx, sv.Spec.PVCNamespace, sv.Spec.PVCName)
+		if !copying[sv.Name] && (err != nil || unknownNamespaces[sv.Spec.PVCNamespace] || (pod != nil && heldPods[pod.UID])) {
+			held = append(held, sv)
+			continue
+		}
+		stillFree = append(stillFree, sv)
+	}
+	return stillFree, held
 }
 
 // runningVMPod returns the name of a KubeVirt pod that is running or starting
@@ -1406,11 +1469,21 @@ func (rc *ReplicationController) checkReplicationJob(ctx context.Context, policy
 	if job.Spec.BackoffLimit != nil {
 		backoffLimit = *job.Spec.BackoffLimit
 	}
-	if job.Status.Failed >= backoffLimit+1 {
-		return true, false, replJobResult{}, nil
+	if job.Status.Failed >= backoffLimit+1 || jobHasFailed(job) {
+		return true, false, replJobResult{Failure: jobFailure(job)}, nil
 	}
 
 	return false, false, replJobResult{}, nil // still running
+}
+
+// jobFailure says why Kubernetes failed a Job, from its Failed condition.
+func jobFailure(job *batchv1.Job) string {
+	for _, c := range job.Status.Conditions {
+		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue {
+			return strings.TrimSuffix(c.Reason+": "+c.Message, ": ")
+		}
+	}
+	return ""
 }
 
 // replicationJobExists reports whether the replication Job of a SubVolume exists.
@@ -1487,6 +1560,8 @@ type replJobResult struct {
 	// another moment than the copy starts from, and DiskMoment says which.
 	WrongBase  bool   `json:"wrongBase,omitempty"`
 	DiskMoment string `json:"diskMoment,omitempty"`
+	// Failure says why a Job failed (not part of the pod message).
+	Failure string `json:"-"`
 }
 
 // readJobResult reads the result from the completed pod's termination

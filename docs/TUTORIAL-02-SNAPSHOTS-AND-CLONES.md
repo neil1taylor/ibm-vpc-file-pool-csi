@@ -353,7 +353,7 @@ Wait for the PVC to bind:
 
 ```bash
 oc get pvc restored-data -n ${TUTORIAL_NS} -w
-# The PVC may stay Pending until the restore copy has finished
+# The PVC binds at once. The restore copy runs behind it, and a pod cannot mount it until the copy has finished
 ```
 
 Mount the restored PVC in a reader pod and verify the data:
@@ -969,6 +969,8 @@ ibmcloud is shares
 ---
 
 ## Key Concepts
+
+![A snapshot is made from a PVC and restored to a new PVC; a clone is a new PVC that a Clone Worker Job fills with a copy](images/tutorial-02-snapshot-restore-clone.drawio.svg)
 
 ### Snapshots vs Clones
 

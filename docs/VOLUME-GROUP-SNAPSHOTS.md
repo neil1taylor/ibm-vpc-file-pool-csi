@@ -63,18 +63,7 @@ Single-volume only       Independent snapshots  Unbounded (no coordination)
 
 #### Best Case: With Quiesce Hooks
 
-```
-Time ──────────────────────────────────────────────────────►
-
-  App writes ──►  FREEZE  ──────────────────────  THAW  ──► App writes
-                    │                                │
-                    ├─ Copy SubVolume A (WAL)        │
-                    ├─ Copy SubVolume B (data)       │
-                    ├─ Copy SubVolume C (config)     │
-                    │                                │
-                    └── All copies consistent ───────┘
-                         (app was frozen)
-```
+![The application freezes, three SubVolumes are copied, then the application thaws, so all copies are consistent](images/volume-group-snapshots-quiesce.drawio.svg)
 
 The application freezes writes before any copies begin and resumes after all copies complete. All snapshots represent the exact same application state. This is the only way to guarantee cross-PVC consistency.
 
@@ -82,19 +71,7 @@ The application freezes writes before any copies begin and resumes after all cop
 
 #### Default: No Quiesce (Best-Effort Coordinated)
 
-```
-Time ──────────────────────────────────────────────────────►
-
-  App writes ──────────────────────────────────────────────►
-                    │                                │
-                    ├─ Copy SubVolume A (10s)         │
-                    │     ├─ Copy SubVolume B (45s)   │
-                    │     │     ├─ Copy SubVolume C (2s)
-                    │     │     │                     │
-                    t0    t1    t2                    t3
-                    │◄──────── 57s ────────────────►│
-                         inconsistency window
-```
+![The SubVolumes are copied one after another while the application keeps writing, giving a 57 second inconsistency window](images/volume-group-snapshots-no-quiesce.drawio.svg)
 
 SubVolumes are copied sequentially. The inconsistency window equals the time from the first copy starting to the last copy completing. During this window, the application continues writing. SubVolume A's snapshot is from time t0, but SubVolume C's snapshot is from time t2. If the application wrote data between t0 and t2 that created cross-PVC dependencies, those dependencies are broken in the snapshot set.
 
@@ -189,125 +166,59 @@ func (d *Driver) ControllerGetCapabilities(...) {
 
 ### Component Interaction
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        Kubernetes Cluster                            │
-│                                                                      │
-│  User creates                                                        │
-│  VolumeGroupSnapshot CR                                              │
-│       │                                                              │
-│       ▼                                                              │
-│  ┌──────────────────────┐                                            │
-│  │ csi-group-snapshotter│                                            │
-│  │ sidecar              │                                            │
-│  │                      │                                            │
-│  │ Resolves PVC list    │                                            │
-│  │ from label selector  │                                            │
-│  │ or explicit list     │                                            │
-│  └──────────┬───────────┘                                            │
-│             │ CreateVolumeGroupSnapshot gRPC                         │
-│             │ (name, [vol-id-1, vol-id-2, vol-id-3])                 │
-│             ▼                                                        │
-│  ┌──────────────────────────────────────────────┐                    │
-│  │              CSI Controller                    │                    │
-│  │                                                │                    │
-│  │  1. Parse source volume IDs                    │                    │
-│  │  2. Validate all belong to same pool           │                    │
-│  │  3. Execute optional pre-snapshot hooks         │                    │
-│  │  4. Create VolumeGroupSnapshot CR              │                    │
-│  │  5. For each source volume (in order):         │                    │
-│  │     └─ PoolManager.CreateSnapshot()            │                    │
-│  │  6. Execute optional post-snapshot hooks        │                    │
-│  │  7. Update VolumeGroupSnapshot status          │                    │
-│  │  8. Return group snapshot + member snapshots    │                    │
-│  │                                                │                    │
-│  └──────────┬─────────────────────────────────────┘                    │
-│             │                                                        │
-│             ▼                                                        │
-│  ┌──────────────────────┐     ┌──────────────────────┐              │
-│  │    Pool Manager       │     │    Hook Executor      │              │
-│  │                       │     │                       │              │
-│  │  CreateSnapshot() x N │     │  Pre:  exec / webhook │              │
-│  │  (reuses Phase 4a)    │     │  Post: exec / webhook │              │
-│  │                       │     │  Timeout enforcement   │              │
-│  └───────────────────────┘     └───────────────────────┘              │
-│                                                                      │
-└──────────────────────────────────────────────────────────────────────┘
-```
+![The VolumeGroupSnapshot CR reaches the CSI Controller through the sidecar; the controller uses the Pool Manager and the Hook Executor](images/volume-group-snapshots-components.drawio.svg)
+
+- **csi-group-snapshotter sidecar:** resolves the PVC list from a label selector or an explicit list, then calls `CreateVolumeGroupSnapshot` with the name and the volume IDs.
+- **CSI Controller:**
+  1. Parse the source volume IDs.
+  2. Validate that all belong to the same pool.
+  3. Execute the optional pre-snapshot hooks.
+  4. Create the VolumeGroupSnapshot CR.
+  5. For each source volume (in order): `PoolManager.CreateSnapshot()`.
+  6. Execute the optional post-snapshot hooks.
+  7. Update the VolumeGroupSnapshot status.
+  8. Return the group snapshot and the member snapshots.
+- **Pool Manager:** `CreateSnapshot()` x N (reuses Phase 4a).
+- **Hook Executor:** pre and post hooks by exec or webhook, with timeout enforcement.
 
 ### Data Flow: CreateVolumeGroupSnapshot
 
-```
-1. User creates VolumeGroupSnapshot CR
-   (references VolumeGroupSnapshotClass + PVCs via label selector or list)
-       │
-2. csi-group-snapshotter sidecar resolves PVCs to CSI volume IDs
-       │
-3. Calls CreateVolumeGroupSnapshot gRPC with:
-   - group_snapshot_name
-   - source_volume_ids: [vol-1, vol-2, vol-3]
-   - parameters: (from VolumeGroupSnapshotClass)
-       │
-4. CSI Controller receives the call
-       │
-       ├─ 4a. Parse all volume IDs → extract pool names
-       ├─ 4b. Validate all volumes belong to the same pool
-       │       (cross-pool group snapshots are not supported)
-       ├─ 4c. Fetch VolumeGroupSnapshot parameters (hook config, ordering)
-       │
-5. Pre-snapshot hooks (if configured)
-       │
-       ├─ 5a. For each hook target pod:
-       │       Execute quiesce command (exec into pod or call webhook)
-       ├─ 5b. Wait for all hooks to succeed (with timeout)
-       ├─ 5c. If any hook fails:
-       │       Execute thaw hooks for already-quiesced targets
-       │       Return error (no snapshots taken)
-       │
-6. Create individual snapshots (reuses Phase 4a infrastructure)
-       │
-       ├─ 6a. Create VolumeGroupSnapshot CR (status: Creating)
-       ├─ 6b. For each source volume (in configured order):
-       │       ├─ Call PoolManager.CreateSnapshot()
-       │       ├─ Record individual Snapshot CR name in group status
-       │       └─ If snapshot fails:
-       │           ├─ Execute thaw hooks (even on failure)
-       │           ├─ Mark group as PartialFailure
-       │           └─ Continue or abort (per policy)
-       │
-7. Post-snapshot hooks (if configured)
-       │
-       ├─ 7a. Execute thaw commands on all hook target pods
-       ├─ 7b. Log but do not fail if thaw hooks error
-       │       (snapshots are already taken -- thaw is best-effort)
-       │
-8. Update VolumeGroupSnapshot CR status
-       │
-       ├─ Members: [snap-1, snap-2, snap-3]
-       ├─ ReadyToUse: true (if all members ready)
-       ├─ ConsistencyLevel: "ApplicationConsistent" or "BestEffort"
-       │
-9. Return CreateVolumeGroupSnapshotResponse
-       ├─ group_snapshot_id
-       └─ snapshots[]: individual snapshot details
-```
+![The sidecar calls the CSI Controller, which runs pre-snapshot hooks, creates the snapshots, runs post-snapshot hooks and updates the status; a failure thaws the targets](images/volume-group-snapshots-create.drawio.svg)
+
+1. The user creates a VolumeGroupSnapshot CR (it references a VolumeGroupSnapshotClass and the PVCs by label selector or list).
+2. The `csi-group-snapshotter` sidecar resolves the PVCs to CSI volume IDs.
+3. It calls the `CreateVolumeGroupSnapshot` gRPC with `group_snapshot_name`, `source_volume_ids: [vol-1, vol-2, vol-3]` and `parameters` (from the VolumeGroupSnapshotClass).
+4. The CSI Controller receives the call:
+   - 4a. Parse all volume IDs and extract the pool names.
+   - 4b. Validate that all volumes belong to the same pool (cross-pool group snapshots are not supported).
+   - 4c. Fetch the VolumeGroupSnapshot parameters (hook config, ordering).
+5. Pre-snapshot hooks (if configured):
+   - 5a. For each hook target pod, execute the quiesce command (exec into the pod or call a webhook).
+   - 5b. Wait for all hooks to succeed (with timeout).
+   - 5c. If any hook fails, execute the thaw hooks for the targets already quiesced, and return an error (no snapshots taken).
+6. Create the individual snapshots (reuses the Phase 4a infrastructure):
+   - 6a. Create the VolumeGroupSnapshot CR (status: Creating).
+   - 6b. For each source volume (in the configured order): call `PoolManager.CreateSnapshot()` and record the individual Snapshot CR name in the group status. If a snapshot fails, execute the thaw hooks (even on failure), mark the group as PartialFailure, and continue or abort (per policy).
+7. Post-snapshot hooks (if configured):
+   - 7a. Execute the thaw commands on all hook target pods.
+   - 7b. Log but do not fail if a thaw hook errors (the snapshots are already taken, so thaw is best-effort).
+8. Update the VolumeGroupSnapshot CR status:
+   - Members: `[snap-1, snap-2, snap-3]`
+   - ReadyToUse: true (if all members are ready)
+   - ConsistencyLevel: `"ApplicationConsistent"` or `"BestEffort"`
+9. Return `CreateVolumeGroupSnapshotResponse` with `group_snapshot_id` and `snapshots[]` (the individual snapshot details).
 
 ### Data Flow: DeleteVolumeGroupSnapshot
 
-```
-1. User deletes VolumeGroupSnapshot CR
-       │
-2. csi-group-snapshotter calls DeleteVolumeGroupSnapshot gRPC
-       │
-3. CSI Controller receives the call
-       │
-       ├─ 3a. Fetch VolumeGroupSnapshot CR
-       ├─ 3b. For each member snapshot:
-       │       └─ Call PoolManager.DeleteSnapshot()
-       ├─ 3c. Delete VolumeGroupSnapshot CR
-       │
-4. Return success
-```
+![Deleting the group makes the controller delete each member snapshot, then the VolumeGroupSnapshot CR](images/volume-group-snapshots-delete.drawio.svg)
+
+1. The user deletes the VolumeGroupSnapshot CR.
+2. `csi-group-snapshotter` calls the `DeleteVolumeGroupSnapshot` gRPC.
+3. The CSI Controller receives the call:
+   - 3a. Fetch the VolumeGroupSnapshot CR.
+   - 3b. For each member snapshot, call `PoolManager.DeleteSnapshot()`.
+   - 3c. Delete the VolumeGroupSnapshot CR.
+4. Return success.
 
 ---
 
@@ -756,49 +667,24 @@ Sequence:
 
 ### Timeout and Failure Handling
 
-```
-Pre-snapshot Hook Execution:
+![Each pre-snapshot hook runs and waits; success goes to the next hook, failure follows onFailure](images/volume-group-snapshots-pre-hook.drawio.svg)
 
-  For each hook in preSnapshotHooks:
-    │
-    ├─ Execute hook (exec or webhook)
-    │
-    ├─ Wait up to timeoutSeconds
-    │   │
-    │   ├─ Success → record result, continue to next hook
-    │   │
-    │   └─ Failure or timeout:
-    │       │
-    │       ├─ If onFailure == "FailGroup":
-    │       │   ├─ Execute ALL postSnapshotHooks (thaw everything quiesced so far)
-    │       │   └─ Return error (no snapshots taken)
-    │       │
-    │       └─ If onFailure == "Continue":
-    │           ├─ Record failure, set consistencyLevel = "BestEffort"
-    │           └─ Continue to next hook
-    │
-  All hooks done → proceed to snapshot copies
-```
+For each hook in `preSnapshotHooks`: execute the hook (exec or webhook) and wait up to `timeoutSeconds`.
+
+- **Success:** record the result and continue to the next hook.
+- **Failure or timeout, `onFailure == "FailGroup"`:** execute ALL `postSnapshotHooks` (thaw everything quiesced so far) and return an error (no snapshots taken).
+- **Failure or timeout, `onFailure == "Continue"`:** record the failure, set `consistencyLevel = "BestEffort"`, and continue to the next hook.
+
+When all hooks are done, the controller proceeds to the snapshot copies.
 
 **Critical safety rule:** Post-snapshot (thaw) hooks are ALWAYS executed if any pre-snapshot (quiesce) hook succeeded, regardless of whether the snapshot copies succeed or fail. An application left in a frozen state is worse than a failed snapshot. Thaw hook failures are logged but never cause the group snapshot operation to fail.
 
-```
-Post-snapshot Hook Execution:
+![Each post-snapshot hook runs and waits; a failure is logged and the next hook still runs](images/volume-group-snapshots-post-hook.drawio.svg)
 
-  For each hook in postSnapshotHooks:
-    │
-    ├─ Execute hook (exec or webhook)
-    │
-    ├─ Wait up to timeoutSeconds
-    │   │
-    │   ├─ Success → record result
-    │   │
-    │   └─ Failure or timeout:
-    │       ├─ Log error at klog.ErrorS level
-    │       ├─ Record failure in HookResults
-    │       ├─ Emit Kubernetes Warning event
-    │       └─ Continue to next hook (NEVER abort thaw)
-```
+For each hook in `postSnapshotHooks`: execute the hook (exec or webhook) and wait up to `timeoutSeconds`.
+
+- **Success:** record the result.
+- **Failure or timeout:** log the error at `klog.ErrorS` level, record the failure in `HookResults`, emit a Kubernetes Warning event, and continue to the next hook (NEVER abort thaw).
 
 ### Hook Execution Order
 
@@ -861,28 +747,25 @@ When a member snapshot fails, the behavior depends on `failurePolicy`:
 
 **Abort (default):**
 
-```
-Copy SubVolume A  → Success  (Snapshot CR created)
-Copy SubVolume B  → FAILURE
-                      │
-                      ├─ Execute post-snapshot hooks (thaw)
-                      ├─ Delete Snapshot CR for SubVolume A (rollback)
-                      ├─ Mark VolumeGroupSnapshot as Failed
-                      └─ Return error to CSI sidecar
-```
+![With Abort, a failed copy thaws the targets, rolls back the earlier Snapshot CR and fails the group](images/volume-group-snapshots-failure-abort.drawio.svg)
+
+Copy SubVolume A succeeds (Snapshot CR created). Copy SubVolume B fails. Then the controller:
+
+- Executes the post-snapshot hooks (thaw).
+- Deletes the Snapshot CR for SubVolume A (rollback).
+- Marks the VolumeGroupSnapshot as Failed.
+- Returns an error to the CSI sidecar.
 
 **Continue:**
 
-```
-Copy SubVolume A  → Success  (Snapshot CR created)
-Copy SubVolume B  → FAILURE  (logged, skip)
-Copy SubVolume C  → Success  (Snapshot CR created)
-                      │
-                      ├─ Execute post-snapshot hooks (thaw)
-                      ├─ Mark VolumeGroupSnapshot as PartialFailure
-                      ├─ Members: [A: Ready, B: Failed, C: Ready]
-                      └─ Return success with partial results
-```
+![With Continue, a failed copy is logged and skipped, the targets thaw, and the group is marked PartialFailure](images/volume-group-snapshots-failure-continue.drawio.svg)
+
+Copy SubVolume A succeeds (Snapshot CR created). Copy SubVolume B fails (logged, skipped). Copy SubVolume C succeeds (Snapshot CR created). Then the controller:
+
+- Executes the post-snapshot hooks (thaw).
+- Marks the VolumeGroupSnapshot as PartialFailure.
+- Sets Members to `[A: Ready, B: Failed, C: Ready]`.
+- Returns success with partial results.
 
 ### Rollback on Abort
 

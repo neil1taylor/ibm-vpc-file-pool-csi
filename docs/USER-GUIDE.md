@@ -6,20 +6,7 @@ For the meaning of project words such as pool, share, SubVolume and snapshot, se
 
 The IBM VPC File Pool CSI Driver changes the relationship between PVCs and VPC file shares. Instead of one PVC creating one share, many PVCs share a common pool of large file shares. Each PVC gets its own subdirectory on a share.
 
-```
-Traditional (stock IBM CSI):          Pool-based (this driver):
-
-PVC-1 → Share-1 (10 GB)              PVC-1 ──┐
-PVC-2 → Share-2 (10 GB)              PVC-2 ──┤
-PVC-3 → Share-3 (10 GB)              PVC-3 ──┼──→ Share-1 (2 TB)
-PVC-4 → Share-4 (10 GB)              PVC-4 ──┤    /pvcs/pvc-1/
-PVC-5 → Share-5 (10 GB)              PVC-5 ──┘    /pvcs/pvc-2/
-                                                    /pvcs/pvc-3/
-5 shares, 50 GB billed               PVC-6 ──┐    /pvcs/pvc-4/
-                                      PVC-7 ──┼──→ Share-2 (2 TB)    /pvcs/pvc-5/
-                                      ...     ┘
-                                      1-2 shares, capacity shared
-```
+![With the stock driver each PVC gets its own 10 GB share; with this driver many PVCs share one 2 TB share, each in its own subdirectory](images/user-guide-pooling.drawio.svg)
 
 This means PVCs provision in under a second (a mkdir vs. a 30-90 second API call), you use a fraction of your 300-share quota, and small PVCs don't each waste a 10 GB minimum allocation.
 
@@ -392,7 +379,7 @@ Use the standard OpenShift Virtualization catalog. The driver needs no special i
 3. For the boot disk, choose the pool's StorageClass.
 4. Create the VM.
 
-CDI copies the catalog image onto the pool, then the VM starts. On rovslab, a RHEL 9 VM had its guest agent about 103 seconds after it was created.
+CDI copies the catalog image onto the pool, then the VM starts. [Part 15 of the tutorial series](TUTORIAL-15-VM-FROM-THE-CATALOG.md) walks through it. On rovslab, a RHEL 9 VM had its guest agent about 103 seconds after it was created.
 
 The controller keeps the memory limit of CDI's copy pods at least 8Gi. Without it, the copy pod is killed for lack of memory. On ROVS, IBM manages the virtualization settings; see [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md#cdi-containerized-data-importer-compatibility). If a copy fails, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md#cdi-copy-pod-oomkilled-when-a-vm-disk-is-copied-onto-a-pool).
 

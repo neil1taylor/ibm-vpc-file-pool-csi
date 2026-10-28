@@ -66,6 +66,18 @@ export const COLUMN_HELP = {
     title: 'Status',
     text: 'Copying or Sending while a copy of a running VM disk is in progress, and the last message for the volume. An orange message only says the volume is waiting; a red message is an error to read.',
   },
+  poolbenchPhase: {
+    title: 'State',
+    text: 'Checking and Running mean the run goes on; Paused means someone paused it. CleaningUp deletes the test VMs and the pool. Complete and Stopped have a result; Failed says why on its row and on its page.',
+  },
+  poolbenchKnee: {
+    title: 'Knee',
+    text: 'The VM count of the first step where users would notice: too many VMs slow, any stall, or the share at its IOPS limit. A dash means no knee was found up to the last step measured.',
+  },
+  poolbenchRecommended: {
+    title: 'Recommended',
+    text: 'The largest step at or below 80% of the knee, so there is room to spare: how many VMs to put on a share like this one. VM counts between that step and the knee were not measured. With no knee it is the largest step measured, so the real limit is higher.',
+  },
   backupPhase: {
     title: 'Phase',
     text: 'Active means the policy makes backups on its schedule, and Suspended means someone stopped new backups (existing backups stay). Error means something is wrong, such as a snapshot pool that is more than 85% full: read the message on the page.',
@@ -97,6 +109,118 @@ export const COLUMN_HELP = {
   backupVolumeExport: {
     title: 'Export',
     text: 'Whether the newest backup of this volume reached the COS bucket, and how long ago. A failure is tried again by itself and never stops the backups in the snapshot pool.',
+  },
+  poolbenchShare: {
+    title: 'Share',
+    text: 'The one file share of the test pool, as size and speed: GB and the IOPS limit. All test VMs of the run use this share.',
+  },
+  poolbenchVMsNow: {
+    title: 'VMs now',
+    text: 'How many test VMs the run has now, and how many of them run Windows. A run that has ended shows the count of its last step.',
+  },
+  poolbenchStarted: {
+    title: 'Started',
+    text: 'When the run began.',
+  },
+  poolbenchRunTime: {
+    title: 'Run time',
+    text: 'How long the run has taken, or took in all. It includes the cleanup at the end.',
+  },
+  poolbenchEventAt: {
+    title: 'At VMs',
+    text: 'The step the event runs after. All the VMs of that step are running, with their normal load, while it runs.',
+  },
+  poolbenchEventState: {
+    title: 'State',
+    text: 'Waits means the run has not reached that step. Running means the event is going on now. Done means it has ended.',
+  },
+  poolbenchEventTime: {
+    title: 'Time',
+    text: 'The main time of the event. For a boot storm it is how long until the last VM sends results again, and for a migration or snapshot how long until the last one ends.',
+  },
+  poolbenchStepVMs: {
+    title: 'VMs',
+    text: 'How many test VMs ran in this step, and how many of them run Windows. Each step adds more VMs to the same share.',
+  },
+  poolbenchShareIOPS: {
+    title: 'Share IOPS',
+    text: 'How many operations a second the share served, counted at the share by the driver. Compare with Guest IOPS: they should be close.',
+  },
+  poolbenchGuestIOPS: {
+    title: 'Guest IOPS',
+    text: 'How many I/O a second the VMs say they did, added up for all VMs.',
+  },
+  poolbenchIBMOps: {
+    title: 'IBM operations',
+    text: 'IBM counts one operation for each 16 KiB of an I/O, so a large I/O counts more than once. The percent is the part of the share IOPS limit used. At 95% the share is full and the step fails.',
+  },
+  poolbenchShareLatency: {
+    title: 'Share latency',
+    text: 'The average time the share took to answer one request, measured at the node. It does not include the VM.',
+  },
+  poolbenchP50: {
+    title: 'p50',
+    text: 'The typical latency: half of the I/O finished in this time or faster. The value is the median over all VMs.',
+  },
+  poolbenchP95: {
+    title: 'p95',
+    text: 'Out of 100 I/O, 95 finished in this time or faster. The knee rule uses it. The value is the median over all VMs, each taken at its worst.',
+  },
+  poolbenchP99: {
+    title: 'p99',
+    text: 'Out of 100 I/O, 99 finished in this time or faster. It shows the rare slow I/O that users still feel.',
+  },
+  poolbenchSlowVMs: {
+    title: 'Slow VMs',
+    text: 'The share of VMs whose p95 is over the latency limit. When it is over the limit set for the knee, the step fails.',
+  },
+  poolbenchStalls: {
+    title: 'Stalls',
+    text: 'How many I/O took longer than the stall time. One stall is enough to fail the step.',
+  },
+  poolbenchReadyAfter: {
+    title: 'Ready after',
+    text: 'How long the new VMs of this step took until all were up, had copied their disks and sent their first result.',
+  },
+  poolbenchResult: {
+    title: 'Result',
+    text: 'Pass means users would not notice; Fail means too many slow VMs, a stall, or a full share. Knee is the first failed step, and Recommended is the VM count to plan for.',
+  },
+  poolbenchVMOS: {
+    title: 'OS',
+    text: 'The operating system of the test VM: Linux (CentOS Stream 9) or Windows Server 2022.',
+  },
+  poolbenchVMNode: {
+    title: 'Node',
+    text: 'The worker node that runs the VM. VMs on the same node share its CPU, memory and network.',
+  },
+  poolbenchVMState: {
+    title: 'State',
+    text: 'The state of the VM in OpenShift Virtualization. Running is normal. Scheduling and Pending mean it is not up yet.',
+  },
+  poolbenchLastIOPS: {
+    title: 'Last IOPS',
+    text: 'The I/O a second this VM reported in its latest result, outside its bursts.',
+  },
+  poolbenchLastP95: {
+    title: 'Last p95',
+    text: 'Out of 100 I/O of this VM, 95 finished in this time or faster, in its latest result. Compare with the latency limit.',
+  },
+  poolbenchWindowsCount: {
+    title: 'Windows',
+    text: 'How many of the VMs in this step run Windows Server 2022. The others run Linux.',
+  },
+  poolbenchSteadyGuest: {
+    title: 'Steady guest IOPS',
+    text: 'What all VMs of this step will ask for between bursts, added up. This is the planned load; the run page shows what the VMs really did.',
+  },
+  poolbenchOfLimit: {
+    title: 'Of the limit',
+    text: 'The IBM operations as a part of the IOPS limit of the share. At 95% the step fails.',
+  },
+  poolbenchAllBurst: {
+    title: 'If all burst at once',
+    text: 'The IBM operations if every VM burst at the same moment. It is a worst case, and it may be over the limit.',
   },
 } satisfies Record<string, ColumnHelp>;
 

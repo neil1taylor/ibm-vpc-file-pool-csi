@@ -7,6 +7,8 @@ Back up a volume on a schedule into a pool that holds only backups. Change the v
 **Time:** about 30 minutes, most of it waiting for backups.
 **Status:** backups are Experimental. See [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md) for the full reference.
 
+![A BackupPolicy copies the volume into the snapshot pool, and kubectl backup restore makes a new PVC from a chosen moment](images/tutorial-10-backup-restore.drawio.svg)
+
 ---
 
 ## Prerequisites
@@ -37,7 +39,7 @@ oc create namespace ${NS}
 
 ## Step 2: Make a data pool and a snapshot pool
 
-The data pool holds your volume. The snapshot pool holds only backups, so a lost or full data share does not take the backups with it. The driver refuses a snapshot pool that holds any volume.
+The data pool holds your volume. The snapshot pool holds only backups, so a lost or full data share does not take the backups with it. The driver refuses a snapshot pool that holds any volume, and it refuses to make a volume on a pool that a policy uses as its snapshot pool.
 
 Pick the zone of your cluster's workers:
 

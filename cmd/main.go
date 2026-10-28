@@ -14,6 +14,7 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -37,7 +38,9 @@ import (
 	_ "github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics" // Register Prometheus collectors via init()
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/monitoring"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/nodemetrics"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/nodestats"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/pool"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/poolbench"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/replication"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/vmcopy"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/vmsnap"
@@ -66,6 +69,7 @@ func main() {
 
 		// Node mode metrics flags.
 		nodeMetricsAddr          string
+		nodeMetricsAccount       string
 		nodeMetricsCertDir       string
 		controllerMetricsCertDir string
 		mon                      monitoringOptions
@@ -100,6 +104,9 @@ func main() {
 		stagingPath string
 		diskPath    string
 		vmCopy      vmCopyFlags
+
+		// PoolBench mode flags.
+		poolBench poolbench.Options
 
 		// Send-vm-disk mode flags (it also uses the sync-client flags).
 		vmGroup string
@@ -157,6 +164,8 @@ func main() {
 	flag.StringVar(&mon.nodeService, "monitoring-node-service", "", "Name of the node agent metrics Service in the monitoring namespace (controller mode)")
 	flag.StringVar(&mon.selector, "monitoring-selector", "", "Labels shared by all driver pods, key=value,key=value (controller mode)")
 	flag.IntVar(&mon.controllerPort, "monitoring-controller-port", 8080, "Port of the controller metrics endpoint (controller mode)")
+	flag.StringVar(&mon.poolBenchService, "monitoring-poolbench-service", "", "Name of the PoolBench metrics Service in the monitoring namespace (controller mode)")
+	flag.IntVar(&mon.poolBenchPort, "monitoring-poolbench-port", 0, "Port of the PoolBench metrics endpoint; 0 leaves PoolBench out (controller mode)")
 	flag.IntVar(&mon.nodePort, "monitoring-node-port", 0, "Port of the node agent metrics endpoint; 0 leaves the node agents out (controller mode)")
 	flag.DurationVar(&shareStatsInterval, "share-stats-interval", 30*time.Second, "How often the node agent reads the NFS statistics of its shares (node mode)")
 	flag.BoolVar(&webhooks.enabled, "enable-webhooks", true, "Serve the validating admission webhooks (needs a serving certificate)")
@@ -201,6 +210,20 @@ func main() {
 	flag.StringVar(&unwrap.emergencyKeyFile, "emergency-key-file", "", "Optional file with the readable backup key, used only when Key Protect is down (unwrap-backup-key mode)")
 	flag.StringVar(&unwrap.keyOut, "key-out", "", "File to write the readable key to, mode 0400; it must not exist (unwrap-backup-key mode)")
 
+	flag.StringVar(&poolBench.CollectorAddr, "poolbench-collector-addr", ":8080", "Where the collector listens for the test VMs (poolbench mode)")
+	flag.StringVar(&poolBench.CollectorURL, "poolbench-collector-url", "", "How the test VMs reach the collector, for example http://<service>.<namespace>.svc.cluster.local:8080 (poolbench mode)")
+	flag.StringVar(&poolBench.MetricsAddr, "poolbench-metrics-addr", ":8443", "Metrics endpoint, HTTPS with token login (poolbench mode)")
+	flag.StringVar(&poolBench.MetricsCertDir, "poolbench-metrics-cert-dir", "", "Directory with tls.crt and tls.key for the metrics endpoint; empty makes a self-signed certificate (poolbench mode)")
+	flag.StringVar(&poolBench.ResultsAddr, "poolbench-results-addr", ":8444", "Where the raw results are served to the console's plugin proxy, over HTTPS with the metrics certificate (poolbench mode)")
+	flag.StringVar(&poolBench.HealthAddr, "poolbench-health-addr", ":8081", "Health probe endpoint (poolbench mode)")
+	flag.StringVar(&poolBench.ResultsDir, "poolbench-results-dir", "/results", "Folder for the raw results of the test VMs (poolbench mode)")
+	flag.DurationVar(&poolBench.Interval, "poolbench-interval", 15*time.Second, "Time between two passes of the runner (poolbench mode)")
+	flag.StringVar(&poolBench.RunRole, "poolbench-run-role", "", "ClusterRole the service binds to itself in each run's namespace (poolbench mode)")
+	flag.StringVar(&poolBench.ServiceAccount, "poolbench-service-account", "", "The service's own service account, for that binding (poolbench mode)")
+	flag.StringVar(&poolBench.NodeMetricsService, "node-metrics-service", "", "The node agents' metrics Service, read for the share counters (poolbench and controller modes)")
+	flag.StringVar(&nodeMetricsAccount, "node-metrics-account", "", "Service account whose short-lived token the controller sends to the node agents; it may only read their metrics (controller mode)")
+	flag.StringVar(&poolBench.NodeMetricsCA, "node-metrics-ca", "", "File with the CA of the node agents' metrics certificate (poolbench and controller modes)")
+
 	flag.StringVar(&vmGroup, "vm-group", "", "namespace/name of the VM that owns the disk (send-vm-disk mode)")
 	flag.StringVar(&copyID, "copy-id", "", "Name of this copy attempt; a repeat with the same name resumes (send-vm-disk mode)")
 
@@ -215,7 +238,7 @@ func main() {
 			klog.ErrorS(err, "Invalid flag")
 			os.Exit(1)
 		}
-		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, controllerMetricsCertDir, mon, cloneWorkerInterval, goldenImageSyncInterval, cdiCopyPodMemoryLimit, driverImage, webhooks, vmSnapshots, browse)
+		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, controllerMetricsCertDir, mon, cloneWorkerInterval, goldenImageSyncInterval, cdiCopyPodMemoryLimit, driverImage, webhooks, vmSnapshots, browse, nodeAgentOptions{service: poolBench.NodeMetricsService, caFile: poolBench.NodeMetricsCA, account: nodeMetricsAccount})
 	case "backup-gateway":
 		runGateway(gw)
 	case "receiver":
@@ -236,6 +259,16 @@ func main() {
 		runConsolePlugin(mode, consolePluginName)
 	case "enable-sidecar-gate":
 		runEnableSidecarGate()
+	case "poolbench":
+		ctrl.SetLogger(klog.NewKlogr())
+		poolBench.Namespace = os.Getenv("POD_NAMESPACE")
+		if poolBench.Namespace == "" {
+			poolBench.Namespace = driverNamespace
+		}
+		if err := poolbench.Run(ctrl.SetupSignalHandler(), ctrl.GetConfigOrDie(), poolBench); err != nil {
+			klog.ErrorS(err, "PoolBench service stopped")
+			os.Exit(1)
+		}
 	default:
 		runNode(endpoint, nodeID, mode, nodeMetricsAddr, nodeMetricsCertDir, shareStatsInterval)
 	}
@@ -291,6 +324,16 @@ type browseOptions struct {
 	cfg         pool.BrowseConfig
 }
 
+// nodeAgentOptions say where to read the node agents' share counters, so that
+// the copy of a running VM's disks can follow the load on its share.
+type nodeAgentOptions struct {
+	service string
+	caFile  string
+	// account is the service account whose short-lived token the controller
+	// sends to the node agents. It may only read their metrics.
+	account string
+}
+
 // webhookOptions configures the admission webhook server.
 type webhookOptions struct {
 	enabled bool
@@ -306,6 +349,9 @@ type monitoringOptions struct {
 	selector          string
 	controllerPort    int
 	nodePort          int
+	// The PoolBench service's metrics, when it is on.
+	poolBenchService string
+	poolBenchPort    int
 }
 
 // config turns the flags into the syncer's configuration.
@@ -323,10 +369,13 @@ func (o monitoringOptions) config(driverNS string) (monitoring.Config, error) {
 	if o.nodePort != 0 {
 		cfg.Targets = append(cfg.Targets, monitoring.Target{Service: o.nodeService, Component: "node", Port: int32(o.nodePort)}) //nolint:gosec // a port number
 	}
+	if o.poolBenchPort != 0 {
+		cfg.Targets = append(cfg.Targets, monitoring.Target{Service: o.poolBenchService, Component: "poolbench", Port: int32(o.poolBenchPort)}) //nolint:gosec // a port number
+	}
 	return cfg, nil
 }
 
-func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metricsCertDir string, mon monitoringOptions, cloneWorkerInterval, goldenImageSyncInterval time.Duration, cdiCopyPodMemoryLimit, driverImage string, webhooks webhookOptions, vmSnapshots vmSnapshotOptions, browse browseOptions) {
+func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metricsCertDir string, mon monitoringOptions, cloneWorkerInterval, goldenImageSyncInterval time.Duration, cdiCopyPodMemoryLimit, driverImage string, webhooks webhookOptions, vmSnapshots vmSnapshotOptions, browse browseOptions, nodeAgents nodeAgentOptions) {
 	scheme := runtime.NewScheme()
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
 		klog.ErrorS(err, "Failed to add CRD types to scheme")
@@ -342,6 +391,11 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metric
 	}
 	if err := batchv1.AddToScheme(scheme); err != nil {
 		klog.ErrorS(err, "Failed to add batchv1 types to scheme")
+		os.Exit(1)
+	}
+	// The share latency reader lists the node agents' EndpointSlices.
+	if err := discoveryv1.AddToScheme(scheme); err != nil {
+		klog.ErrorS(err, "Failed to add discoveryv1 types to scheme")
 		os.Exit(1)
 	}
 
@@ -569,6 +623,22 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metric
 	// Copies of running VM disks run commands in the VM pods, as hooks do.
 	vmCopier := vmcopy.NewCopier(hooks.NewPodExecer(clientset, restConfig))
 	replController.SetVMCopier(vmCopier)
+	// Without the node agents' metrics the copies run at a fixed speed.
+	var shareLatency *pool.LatencyMeter
+	if nodeAgents.service != "" && nodeAgents.account != "" {
+		httpClient, herr := nodestats.NewHTTPClient(nodeAgents.caFile, nodeAgents.service+"."+driverNamespace+".svc")
+		if herr != nil {
+			klog.ErrorS(herr, "Failed to set up the node agents' metrics client; VM disk copies run at a fixed speed")
+		} else {
+			shareLatency = &pool.LatencyMeter{
+				Source: &nodestats.Reader{Client: replClient, Namespace: driverNamespace, Service: nodeAgents.service,
+					HTTP:  httpClient,
+					Token: (&nodestats.ServiceAccountTokens{Clientset: clientset, Namespace: driverNamespace, Name: nodeAgents.account, Now: time.Now}).Token},
+				MinOps: 50, Window: 3, MinGap: 10 * time.Second, Now: time.Now,
+			}
+			replController.SetShareLatency(shareLatency)
+		}
+	}
 	go replController.Run(signalCtx)
 
 	// Watch the Jobs in the driver's namespace, so a controller that waits for
@@ -584,6 +654,9 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metric
 	// Snapshots of running VM disks are QEMU copies. The same commands run in
 	// the VM pod; a timer on the leader moves each copy forward.
 	poolManager.SetVMSnapshots(vmCopier, replClient)
+	if shareLatency != nil {
+		poolManager.SetVMSnapshotLatency(shareLatency)
+	}
 
 	// Instant snapshots of VM disks change the disk's file chain in the VM
 	// pod, or with a Job in the virt-launcher image when the VM is stopped.
@@ -920,6 +993,10 @@ func registerWebhooks(mgr ctrl.Manager) error {
 	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.BackupRestore{}).
 		WithValidator(&webhook.BackupRestoreValidator{}).Complete(); err != nil {
 		return fmt.Errorf("register BackupRestore webhook: %w", err)
+	}
+	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.PoolBench{}).
+		WithValidator(&webhook.PoolBenchValidator{}).Complete(); err != nil {
+		return fmt.Errorf("register PoolBench webhook: %w", err)
 	}
 	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.Snapshot{}).
 		WithValidator(&webhook.SnapshotValidator{}).Complete(); err != nil {

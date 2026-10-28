@@ -74,6 +74,13 @@ beforeEach(() => jest.clearAllMocks());
 const createButton = () => screen.getByRole('button', { name: 'Restore' }) as HTMLButtonElement;
 
 describe('RestoreSnapshotPage', () => {
+  it('does not offer the storage class of a snapshot pool', () => {
+    watch({ ...base(), StorageClass: [...storageClasses, { metadata: { name: 'backups' }, provisioner: DRIVER, parameters: { pool: 'backups' } }], BackupPolicy: [{ metadata: { name: 'nightly' }, spec: { snapshotPool: 'backups' } }] });
+    render(<RestoreSnapshotPage />);
+    expect(screen.getByRole('option', { name: 'pool-a' })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: 'backups' })).toBeNull();
+  });
+
   it('opens with defaults: name <source>-restored, the snapshot size, the source class, and the namespace fixed', () => {
     watch(base());
     render(<RestoreSnapshotPage />);
@@ -181,6 +188,19 @@ describe('RestoreSnapshotPage', () => {
     render(<RestoreSnapshotPage />);
     expect(screen.getByText(/not ready/i)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Restore' })).toBeNull();
+  });
+
+  it('does not call its own new claim a name that is taken, after the restore starts', async () => {
+    const data = base();
+    watch(data);
+    (k8sCreate as jest.Mock).mockImplementation(async () => {
+      data.PersistentVolumeClaim.push({ ...sourcePVC, metadata: { name: 'data-restored', namespace: 'apps' } });
+      return {};
+    });
+    render(<RestoreSnapshotPage />);
+    fireEvent.click(createButton());
+    expect(await screen.findByText(/Restoring/)).toBeTruthy();
+    expect(screen.queryByText(/already exists/)).toBeNull();
   });
 
   it('creates a claim with the VolumeSnapshot as its data source and then shows the copy banner', async () => {

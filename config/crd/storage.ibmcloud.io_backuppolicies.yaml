@@ -232,11 +232,26 @@ spec:
               suspend:
                 description: Suspend stops new backups. Existing backups stay.
                 type: boolean
-              vmCopySpeedLimitMBps:
-                default: 20
+              vmCopyAdaptive:
                 description: |-
-                  VMCopySpeedLimitMBps limits how fast QEMU copies each disk of a running
-                  VM, in megabytes per second. 0 means no limit.
+                  VMCopyAdaptive makes the copy start slow, speed up while the share the VM
+                  reads is quiet, and slow down when its latency passes VMCopyMaxLatencyMs.
+                  Default true. See docs/specs/2026-10-26-adaptive-copy-speed.md.
+                type: boolean
+              vmCopyMaxLatencyMs:
+                description: |-
+                  VMCopyMaxLatencyMs is the average latency of the share, in milliseconds,
+                  above which an adaptive copy slows down. Default 15.
+                format: int32
+                maximum: 20
+                minimum: 1
+                type: integer
+              vmCopySpeedLimitMBps:
+                description: |-
+                  VMCopySpeedLimitMBps is the highest speed, in megabytes per second, of
+                  QEMU's copy of each disk of a running VM. 0 or unset means there is no
+                  highest speed. When the copy does not adapt (VMCopyAdaptive is false), it
+                  is the fixed speed instead: 0 means no limit and unset means 20.
                 format: int32
                 minimum: 0
                 type: integer

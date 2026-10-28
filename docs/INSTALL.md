@@ -20,6 +20,8 @@ The end-to-end process from source code to a working driver on your cluster:
 
 Each step is covered in detail below.
 
+![The install path: build, image build, image push, helm install, end-to-end tests](images/install-steps.drawio.svg)
+
 ---
 
 ## Prerequisites
@@ -365,7 +367,7 @@ kubectl apply -f config/deploy/node.yaml
 |------|---------|-------------|
 | `--endpoint` | `unix:///csi/csi.sock` | CSI gRPC endpoint |
 | `--node-id` | (required) | Kubernetes node name |
-| `--mode` | `controller` | `controller`, `node`, `receiver`, `sync-client`, `check-receiver`, `apply-vm-disk`, `send-vm-disk`, or `restore-vm-disk`, `unwrap-backup-key`, `backup-gateway`, `register-console-plugin`, or `unregister-console-plugin`, or `enable-sidecar-gate` (all but the first three are run as Jobs; `check-receiver` is run by the console's receiver setup; `register-console-plugin`, `unregister-console-plugin` and `enable-sidecar-gate` are the chart's hook Jobs) |
+| `--mode` | `controller` | `controller`, `node`, `receiver`, `sync-client`, `check-receiver`, `apply-vm-disk`, `send-vm-disk`, or `restore-vm-disk`, `unwrap-backup-key`, `backup-gateway`, `register-console-plugin`, or `unregister-console-plugin`, or `enable-sidecar-gate`, or `poolbench` (the PoolBench service, a Deployment when `poolBench.enabled`; all but the first three and `poolbench` are run as Jobs; `check-receiver` is run by the console's receiver setup; `register-console-plugin`, `unregister-console-plugin` and `enable-sidecar-gate` are the chart's hook Jobs) |
 | `--region` | Auto-discovered | IBM Cloud region |
 | `--vpc-id` | Auto-discovered | VPC ID for mount targets |
 | `--subnet-id` | Auto-discovered | Worker subnet IDs for mount targets, comma-separated; the controller uses the one in each pool's zone |
@@ -377,6 +379,7 @@ kubectl apply -f config/deploy/node.yaml
 | `--monitoring-namespace` | `""` | Controller mode: namespace of the metrics Services that user workload monitoring scrapes. The controller keeps their Endpoints and warns if user workload monitoring is off. Empty turns this off. Helm sets it with the other `--monitoring-*` flags |
 | `--monitoring-controller-service`, `--monitoring-node-service` | `""` | Names of the two Services in the monitoring namespace |
 | `--monitoring-controller-port`, `--monitoring-node-port` | `8080`, `0` | Metrics ports to put in the Endpoints; `0` leaves the node agents out |
+| `--monitoring-poolbench-service`, `--monitoring-poolbench-port` | `""`, `0` | The PoolBench metrics Service in the monitoring namespace and its port; `0` leaves PoolBench out. Set by the chart when `poolBench.enabled` |
 | `--monitoring-selector` | `""` | `key=value,key=value` labels shared by all driver pods |
 | `--node-metrics-cert-dir` | `""` | Node mode: directory with `tls.crt` and `tls.key` for the metrics endpoint; empty makes a self-signed certificate that Prometheus cannot check. Helm mounts a secret there |
 | `--share-stats-interval` | `30s` | Node mode: how often the node agent reads the NFS statistics of its shares. Helm sets it from `node.shareStatsInterval` |
@@ -409,6 +412,28 @@ kubectl apply -f config/deploy/node.yaml
 | `--restore-moment` | `""` | Moment to restore, RFC 3339; empty for the latest (restore-vm-disk mode). Set by the backup restore Job |
 | `--vm-group` | `""` | `namespace/name` of the VM that owns the disk (send-vm-disk mode). Set by the replication controller |
 | `--copy-id` | `""` | Name of this copy attempt; a repeat with the same name resumes it (send-vm-disk mode). Set by the replication controller |
+| `--poolbench-collector-addr` | `:8080` | Where the collector listens for the test VMs (poolbench mode) |
+| `--poolbench-collector-url` | `""` | How the test VMs reach the collector, `http://<service>.<namespace>.svc.cluster.local:8080` (poolbench mode). Set by the chart |
+| `--poolbench-metrics-addr`, `--poolbench-metrics-cert-dir` | `:8443`, `""` | Metrics endpoint over HTTPS with token login; an empty folder makes a self-signed certificate (poolbench mode) |
+| `--poolbench-results-addr` | `:8444` | Where the raw results are served to the console's plugin proxy, over HTTPS with the metrics certificate; each request carries the person's token, and the service checks that they may get the run (poolbench mode) |
+| `--poolbench-health-addr` | `:8081` | Health probe endpoint (poolbench mode) |
+| `--poolbench-results-dir` | `/results` | Folder for the raw results of the test VMs (poolbench mode) |
+| `--poolbench-interval` | `15s` | Time between two passes of the runner (poolbench mode) |
+| `--poolbench-run-role`, `--poolbench-service-account` | `""` | The ClusterRole the service binds to its own service account in each run's namespace (poolbench mode). Set by the chart |
+| `--node-metrics-service`, `--node-metrics-ca` | `""` | The node agents' metrics Service and the file with the CA of their certificate, for the share's counters (poolbench and controller modes). Set by the chart |
+| `--node-metrics-account` | `""` | Controller mode: the service account whose short-lived token the controller sends to the node agents, so that copies of running VM disks can follow the load on the share. It may only read their `/metrics`. Without it, or without `--node-metrics-service`, the copies run at a fixed speed. Set by the chart |
+
+**Key unwrap flags** (`--mode=unwrap-backup-key`, run by the COS export and restore Jobs):
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--kp-region` | `""` | Key Protect region |
+| `--kp-instance` | `""` | Key Protect instance ID |
+| `--kp-root-key` | `""` | Key Protect root key ID |
+| `--wrapped-key-file` | `""` | File with the backup key wrapped by Key Protect |
+| `--api-key-file` | `""` | File with the IBM Cloud API key for Key Protect |
+| `--emergency-key-file` | `""` | Optional file with the readable backup key, used only when Key Protect is down |
+| `--key-out` | `""` | File to write the readable key to, mode 0400; it must not exist |
 
 **Backup gateway flags** (mode `backup-gateway`, set by the `backupGateway.*` chart values):
 
@@ -427,7 +452,7 @@ kubectl apply -f config/deploy/node.yaml
 |------|---------|-------------|
 | `--browse-image` | `""` | Image of the browse helper. Empty turns browse sessions off |
 | `--browse-namespace` | `ibm-vpc-file-pool-csi-browse` | Namespace of the helper pods and the session Secrets |
-| `--browse-image-pull-secrets` | `""` | Names of Secrets in the driver namespace that the controller copies into the browse namespace, for the helper image |
+| `--browse-image-pull-secrets` | `""` | Comma-separated names of the Secrets, in the driver namespace, that pull the browse image from a private registry. The chart sets it from `imagePullSecrets` |
 | `--browse-idle` | `15m` | End a session after this long without use |
 | `--browse-max-life` | `2h` | End a session after this long, even if in use |
 | `--browse-max-sessions` | `5` | Open sessions in the cluster. More wait |

@@ -283,8 +283,16 @@ func runExecute(args []string) error {
 	}
 
 	if dryRun {
-		// Dry-run doesn't need a real client.
-		exec := failover.NewExecutor(nil, os.Stdout)
+		// A dry run makes nothing. It reads the pool, if the cluster can be
+		// reached, so it shows the mount options the PVs will get. It still
+		// shows the rewound folders and checks them like a real run.
+		c, cerr := buildClient(kubeconfig)
+		if cerr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: cannot reach the cluster (%v); the dry run shows the default mount options\n", cerr)
+			exec := failover.NewExecutor(nil, os.Stdout)
+			return exec.Execute(context.Background(), plan, opts)
+		}
+		exec := failover.NewExecutor(c, os.Stdout)
 		return exec.Execute(context.Background(), plan, opts)
 	}
 

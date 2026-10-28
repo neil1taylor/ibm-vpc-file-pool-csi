@@ -7,7 +7,7 @@ Design document for cross-region replication of pooled file share data.
 **Last updated:** 2026-02-17
 
 > **Implementation note:** The implementation simplifies several aspects of this design:
-> - Uses `SyncDir` (rsync-based incremental) by default, with `CopyDir` (full copy) as fallback when `incrementalSync` is disabled
+> - Direct NFS mode uses `SyncDir` (rsync-based incremental) by default, with `CopyDir` (full copy) as fallback when `incrementalSync` is disabled. Receiver mode (`destinationEndpoint`) does not use rsync: it tars and uploads the whole folder each cycle
 > - Uses `time.Duration` schedule intervals instead of cron expressions
 > - Destination is specified via `DestinationNFSServer` IP rather than a pool reference with share mappings
 > - Pre/post-sync lifecycle hooks are implemented (Phase 5) — supports both exec (pod command) and HTTP hook types with configurable abort/continue-on-error policies
@@ -20,28 +20,7 @@ Phase 4d adds optional cross-region disaster recovery for FileSharePool volumes.
 
 This feature is **not** a general-purpose replication engine. It is designed for a narrow set of workloads where file-level consistency is sufficient and where the application can tolerate a non-zero Recovery Point Objective (RPO). It is explicitly unsuitable for workloads that require crash consistency, cross-file transactional guarantees, or intra-file point-in-time consistency.
 
-```
-Region: us-south                          Region: us-east
-┌────────────────────────────┐            ┌────────────────────────────┐
-│  ROKS Cluster (Primary)    │            │  ROKS Cluster (DR)         │
-│                            │            │                            │
-│  FileSharePool             │            │  FileSharePool             │
-│  "production"              │            │  "dr-production"           │
-│  ┌──────────────────────┐  │            │  ┌──────────────────────┐  │
-│  │ Share pool-prod-1    │  │            │  │ Share pool-dr-1      │  │
-│  │  /pvcs/pvc-aaa/      │──┼── rsync ──┼─▶│  /pvcs/pvc-aaa/      │  │
-│  │  /pvcs/pvc-bbb/      │──┼── rsync ──┼─▶│  /pvcs/pvc-bbb/      │  │
-│  │  /pvcs/pvc-ccc/      │──┼── rsync ──┼─▶│  /pvcs/pvc-ccc/      │  │
-│  └──────────────────────┘  │            │  └──────────────────────┘  │
-│                            │            │                            │
-│  ReplicationPolicy CR      │            │                            │
-│  (controller runs here)    │            │                            │
-└────────────────────────────┘            └────────────────────────────┘
-        │                                          ▲
-        │         IBM Cloud Transit Gateway         │
-        └──────────────────────────────────────────┘
-              (cross-region private connectivity)
-```
+![A primary region replicates its pool shares to a DR region with rsync over a Transit Gateway](images/cross-region-dr-overview.drawio.svg)
 
 ---
 
@@ -134,26 +113,9 @@ The following workloads MUST NOT be copied with rsync. A file copy of them produ
 
 **Why it fails:** A VM performs scattered random writes within a single disk image file (`disk.img`). Even though rsync copies files, the problem is intra-file inconsistency during active VM operation. The VM writes block 1000 at T1, block 50000 at T2, block 3000 at T3 -- all within the same file. rsync reads this file while the VM is writing, producing a copy where some blocks are from T1, others from T2, others from T3. The result is a disk image with a structurally broken filesystem inside the VM.
 
-```
-Source VM disk.img (40 GB raw):
+![rsync reads a running VM disk in order while the VM writes, so the destination holds blocks from different times](images/cross-region-dr-vm-blocks.drawio.svg)
 
-  Block 1000:  written at T1 (new)   ┐
-  Block 2000:  written at T1 (new)   │  rsync reads these blocks
-  Block 3000:  written at T3 (new)   │  at different points in time
-  Block 4000:  not yet written (old)  │  during its sequential scan
-  Block 5000:  written at T2 (new)   ┘
-
-Destination disk.img after rsync:
-
-  Block 1000:  T1 version   ← some blocks from T1
-  Block 2000:  T1 version
-  Block 3000:  old version  ← rsync read this BEFORE T3 write
-  Block 4000:  old version
-  Block 5000:  old version  ← rsync read this BEFORE T2 write
-
-  Result: ext4/xfs journal inside the VM is inconsistent.
-  The VM will not boot, or will boot with filesystem corruption.
-```
+The ext4 or xfs journal inside the VM is inconsistent. The VM will not boot, or it boots with filesystem corruption.
 
 This is NOT a file-level consistency problem (rsync is reading one file). It is an intra-file consistency problem: the file's internal structure (filesystem metadata, journal, block allocation tables) requires all blocks to be from the same point in time, and rsync cannot provide that for a file being actively mutated by a VM.
 
@@ -252,43 +214,11 @@ Replication cycle with quiesce:
 
 ### Component Diagram
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                     Source Cluster (Primary)                         │
-│                                                                     │
-│  ┌──────────────────────┐   ┌──────────────────────────────────┐   │
-│  │ CSI Controller Pod   │   │ Replication Controller (goroutine)│   │
-│  │                      │   │                                    │   │
-│  │ CreateVolume         │   │  For each ReplicationPolicy:       │   │
-│  │ DeleteVolume         │   │  1. List matching SubVolumes       │   │
-│  │ Pool Manager         │   │  2. Create K8s Jobs per SubVolume  │   │
-│  └──────────────────────┘   │  3. Update status on completion    │   │
-│                             └──────────────────────────────────┘   │
-│  ┌──────────────────────┐          │                                │
-│  │ FileSharePool CRs    │          │ Creates Jobs:                  │
-│  │ SubVolume CRs        │          │                                │
-│  │ ReplicationPolicy CRs│   ┌──────┴─────────────────────────────┐ │
-│  └──────────────────────┘   │ Direct NFS:  rsync Job (CentOS)    │ │
-│                             │ Driver-to-Driver: sync-client Job   │ │
-│                             │   (driver image, tar over HTTPS)    │ │
-│                             └──────┬─────────────────────────────┘ │
-│                                    │                                │
-└────────────────────────────────────┼───────────────────────────────┘
-                                     │
-           Direct NFS: rsync over    │  Driver-to-Driver: HTTPS PUT
-           Transit Gateway/VPN       │  via OpenShift Route
-                                     │
-┌────────────────────────────────────┼───────────────────────────────┐
-│                                    ▼                                │
-│     ┌──────────────────────────────────────────────────────┐       │
-│     │ Direct NFS mode:    Destination NFS share (mounted)  │       │
-│     │ Driver-to-Driver:   Replication Receiver service     │       │
-│     │                     (extracts tar, writes metadata)  │       │
-│     └──────────────────────────────────────────────────────┘       │
-│                                                                     │
-│                    Destination Cluster (DR)                          │
-└─────────────────────────────────────────────────────────────────────┘
-```
+![The replication controller in the CSI controller pod creates rsync Jobs for Direct NFS or sync-client Jobs for Driver-to-Driver mode](images/cross-region-dr-components.drawio.svg)
+
+- **Source cluster (Primary):** the CSI Controller Pod holds the CSI Controller (CreateVolume, DeleteVolume, Pool Manager) and the Replication Controller (goroutine). For each ReplicationPolicy the Replication Controller lists the matching SubVolumes, creates Kubernetes Jobs per SubVolume, and updates the status on completion. It reads the FileSharePool, SubVolume and ReplicationPolicy CRs.
+- **Jobs:** in Direct NFS mode, an rsync Job (CentOS). In Driver-to-Driver mode, a sync-client Job (driver image, tar over HTTPS).
+- **Destination cluster (DR):** in Direct NFS mode, the destination NFS share (mounted); rsync goes over Transit Gateway or VPN. In Driver-to-Driver mode, the Replication Receiver service (extracts the tar, writes metadata); the data goes as an HTTPS PUT via an OpenShift Route.
 
 ### Replication Controller
 
@@ -388,32 +318,27 @@ Notes:
 
 ### Replication Data Flow
 
-```
+![One replication cycle for one SubVolume: resolve the SubVolume, mount both shares, run rsync, record the result and calculate the RPO](images/cross-region-dr-data-flow.drawio.svg)
+
 Replication cycle (one SubVolume):
 
-  1. Replication controller reads ReplicationPolicy CR
-         │
-  2. Resolves source SubVolume: pvc-aaa on pool "production", share pool-prod-1
-         │
-  3. Mounts source share (if not cached):
-         NFS mount 10.240.1.5:/ → /repl/source/pool-prod-1/
-         │
-  4. Mounts destination share (cross-region, if not cached):
-         NFS mount 10.245.3.8:/ → /repl/dest/pool-dr-1/
-         │
-  5. Run rsync:
-         rsync -a --delete \
-           /repl/source/pool-prod-1/pvcs/pvc-aaa/ \
-           /repl/dest/pool-dr-1/pvcs/pvc-aaa/
-         │
-  6. Record result in ReplicationPolicy.status:
-         lastSyncTime: "2026-02-16T14:30:00Z"
-         lastSyncDurationSeconds: 45
-         lastSyncBytesTransferred: 104857600
-         │
-  7. Calculate and report RPO:
-         currentRPO = now - lastSyncTime
-```
+1. The replication controller reads the ReplicationPolicy CR.
+2. It resolves the source SubVolume: `pvc-aaa` on pool `production`, share `pool-prod-1`.
+3. It mounts the source share (if not cached): NFS mount `10.240.1.5:/` at `/repl/source/pool-prod-1/`.
+4. It mounts the destination share (cross-region, if not cached): NFS mount `10.245.3.8:/` at `/repl/dest/pool-dr-1/`.
+5. It runs rsync:
+   ```
+   rsync -a --delete \
+     /repl/source/pool-prod-1/pvcs/pvc-aaa/ \
+     /repl/dest/pool-dr-1/pvcs/pvc-aaa/
+   ```
+6. It records the result in `ReplicationPolicy.status`:
+   ```
+   lastSyncTime: "2026-02-16T14:30:00Z"
+   lastSyncDurationSeconds: 45
+   lastSyncBytesTransferred: 104857600
+   ```
+7. It calculates and reports the RPO: `currentRPO = now - lastSyncTime`.
 
 ---
 
@@ -933,35 +858,29 @@ Is RPO tolerance > 15 minutes?
 
 ## Failover Procedure
 
-Failover is a manual process. Automated failover is explicitly out of scope for Phase 4d because the replication is async and the consistency guarantees are limited. An automated failover that activates a potentially inconsistent replica without human review would be dangerous.
+Failover is a manual decision. Automated failover is explicitly out of scope for Phase 4d because the replication is async and the consistency guarantees are limited. An automated failover that activates a potentially inconsistent replica without human review would be dangerous. A person starts each failover. The `kubectl failover` plugin ([Failover CLI](#failover-cli)) then does the repetitive work of steps 3 and 4 below.
 
-### Manual Failover Steps
+### Failover Steps
 
-```
-1. STOP source workloads (or confirm source region is down)
-       │
-2. Verify last successful replication time:
-       kubectl get replicationpolicy prod-to-dr-east -o jsonpath='{.status.lastSyncTime}'
-       │
-       ├── If RPO is acceptable, proceed
-       └── If RPO is too large, consider data loss implications before proceeding
-       │
-3. On DR cluster, create SubVolume CRs matching the source:
-       (The replication controller copies DATA but not CRs.
-        SubVolume CRs must be created on the DR cluster to register
-        the replicated subdirectories with the DR pool manager.)
-       │
-4. Create PVs and PVCs on the DR cluster referencing the DR pool:
-       (Use the same PVC names/namespaces as source for application compatibility)
-       │
-5. Deploy workloads on DR cluster
-       │
-6. Verify application health
-```
+![Manual failover: stop the source, check the last sync time against the RPO, then create SubVolume CRs, PVs and PVCs on the DR cluster and deploy](images/cross-region-dr-failover.drawio.svg)
+
+1. Stop the source workloads (or confirm the source region is down).
+2. Verify the last successful replication time:
+   ```
+   kubectl get replicationpolicy prod-to-dr-east -o jsonpath='{.status.lastSyncTime}'
+   ```
+   - If the RPO is acceptable, proceed.
+   - If the RPO is too large, consider the data loss implications before proceeding.
+3. On the DR cluster, create SubVolume CRs matching the source. The replication controller copies DATA but not CRs. SubVolume CRs must be created on the DR cluster to register the replicated subdirectories with the DR pool manager.
+4. Create PVs and PVCs on the DR cluster that reference the DR pool. Use the same PVC names and namespaces as the source for application compatibility.
+
+   Run `kubectl failover plan` to see what will be made, then `kubectl failover execute` to make the SubVolume CRs, PVs and PVCs for you (see [Failover CLI](#failover-cli)). You can also make them by hand.
+5. Deploy the workloads on the DR cluster.
+6. Verify application health.
 
 ### Failback
 
-Failback reverses the process: create a ReplicationPolicy on the DR cluster pointing back to the original region. Sync data from DR to primary, then shift workloads back.
+There is no failback command. `kubectl failover` works in one direction only: it turns replicated data on a destination into live PVCs. To go back, you use the same steps in the other direction: create a ReplicationPolicy on the DR cluster that points back to the original region, wait for the data to arrive, stop the workload on the DR cluster, run `kubectl failover` on the original cluster, and start the workload there. A `Failover` resource that would automate this is only a proposal (a draft pull request) and does not exist.
 
 ---
 
@@ -971,32 +890,9 @@ If IBM VPC adds native file share snapshot support (an atomic, point-in-time cap
 
 ### With Native Share Snapshots
 
-```
-Current (rsync, no snapshots):
+![Today rsync copies live data file by file; with native share snapshots the driver would snapshot atomically, ship the snapshot and restore from it](images/cross-region-dr-native-snapshots.drawio.svg)
 
-  Source share                    Destination share
-  ┌──────────┐    rsync           ┌──────────┐
-  │ live data │──(file by file)──▶│ replica   │
-  │ (changing)│                   │ (fuzzy)   │
-  └──────────┘                    └──────────┘
-  Each file consistent, but cross-file consistency is NOT guaranteed.
-
-
-Future (snapshot + ship):
-
-  Source share                    Destination share
-  ┌──────────┐                    ┌──────────┐
-  │ live data │                   │ replica   │
-  └─────┬────┘                    └──────────┘
-        │ atomic                       ▲
-        │ snapshot                     │ restore from snapshot
-        ▼                              │
-  ┌──────────┐    transfer        ┌──────────┐
-  │ snapshot  │──(block delta)───▶│ snapshot  │
-  │ (frozen)  │                   │ (frozen)  │
-  └──────────┘                    └──────────┘
-  ALL files consistent with each other at the snapshot point in time.
-```
+With rsync and no snapshots, each file is consistent, but cross-file consistency is NOT guaranteed. With snapshot and ship, ALL files are consistent with each other at the snapshot point in time.
 
 ### Improvements Native Snapshots Would Enable
 
