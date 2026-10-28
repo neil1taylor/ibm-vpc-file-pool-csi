@@ -10,6 +10,9 @@
 #     when it ends. Set COS_DR_CLUSTER=NAME to repeat the restore in that cluster; if it is in
 #     another resource group, also set COS_DR_RESOURCE_GROUP=NAME.
 #     COS_QUICK=1 RT_STAGES=18 gives the fast COS run (about 25 minutes; see stage 18).
+#     Stage 21 (failover of chosen VMs) needs a second cluster, the DR cluster: set RT_DR_CLUSTER=NAME
+#     (and RT_DR_RESOURCE_GROUP=NAME if it is in another resource group). Its admin kubeconfig is
+#     copied for this run only. Without it the stage skips. About 3 hours.
 #   bash test/release/remote.sh report RUN_ID             copy the report folder back and print it
 #
 # Needs: ibmcloud (logged in), go, ssh access to the build server.
@@ -79,16 +82,31 @@ start() {
         fi
     fi
 
+    # The DR cluster of stage 21: an admin kubeconfig for this run only, deleted when it ends.
+    dr_env=""
+    if [ -n "${RT_DR_CLUSTER:-}" ]; then
+        kubeconfig=$(mktemp -d)
+        if [ -n "${RT_DR_RESOURCE_GROUP:-}" ]; then
+            home_group="$(ibmcloud target --output json | jq -r '.resource_group.name')"
+            ibmcloud target -g "$RT_DR_RESOURCE_GROUP" >/dev/null
+        fi
+        ibmcloud ks cluster config --cluster "$RT_DR_CLUSTER" --admin --output yaml >"$kubeconfig/config"
+        [ -z "${RT_DR_RESOURCE_GROUP:-}" ] || ibmcloud target -g "$home_group" >/dev/null
+        build "umask 077 && cat > ~/release-test/kubeconfig-failover-dr-$id" <"$kubeconfig/config"
+        find "$kubeconfig" -type f -delete; rmdir "$kubeconfig"
+        dr_env="RT_DR_KUBECONFIG=\$HOME/release-test/kubeconfig-failover-dr-$id"
+    fi
+
     # The metadata service needs the trusted profile's ID. Without it the VPC
     # checks report "not checked" and the run goes on.
     profile_id=$(ibmcloud iam trusted-profile "$VPC_PROFILE" --id 2>/dev/null | tail -1 | grep '^Profile-' || true)
 
     # Only the run goes to the background, with every stream redirected, so
     # this SSH session can end at once.
-    build "cd ~/release-test/src || exit 1; nohup bash -c 'KUBECONFIG=\$HOME/release-test/kubeconfig-$id RT_ID=$id $cos_env \
+    build "cd ~/release-test/src || exit 1; nohup bash -c 'KUBECONFIG=\$HOME/release-test/kubeconfig-$id RT_ID=$id $cos_env $dr_env \
         RT_VPC_PROFILE_ID=$profile_id \
         bash test/release/run.sh --cluster $cluster ${version:+--version $version} ${RT_STAGES:+--stages $RT_STAGES} --out \$HOME/release-test/out/$id; \
-        rm -f \$HOME/release-test/kubeconfig-$id \$HOME/release-test/kubeconfig-dr-$id; find \$HOME/release-test/cos-$id -type f -delete 2>/dev/null; rmdir \$HOME/release-test/cos-$id 2>/dev/null' >\$HOME/release-test/out/$id.log 2>&1 </dev/null &"
+        rm -f \$HOME/release-test/kubeconfig-$id \$HOME/release-test/kubeconfig-dr-$id \$HOME/release-test/kubeconfig-failover-dr-$id; find \$HOME/release-test/cos-$id -type f -delete 2>/dev/null; rmdir \$HOME/release-test/cos-$id 2>/dev/null' >\$HOME/release-test/out/$id.log 2>&1 </dev/null &"
     echo "Started run $id on $cluster."
     echo "Report: bash test/release/remote.sh report $id"
 }
