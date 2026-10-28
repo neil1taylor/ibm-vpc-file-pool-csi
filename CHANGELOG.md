@@ -19,6 +19,10 @@ To make a release:
 
 ## [Unreleased]
 
+## [v0.15.3] — 2026-10-28
+
+A small fix release. No CRD changes and no chart value changes.
+
 ### Fixed
 
 - PoolBench: the backup event now reports the copy speed (`copySpeedAvgMBps`, `copySpeedMaxMBps`). The PoolBench service had no right to read replication policies, so it read no speed and said nothing. The chart role now allows `get` and `list` on replication policies, and the service logs an error if the read fails.
