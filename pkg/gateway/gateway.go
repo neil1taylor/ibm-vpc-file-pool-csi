@@ -51,6 +51,9 @@ type Config struct {
 	MaxDownloadBytes int64
 	// AuthCacheTTL keeps a token review result for this long. Zero turns the cache off.
 	AuthCacheTTL time.Duration
+	// MaxOpenRestores limits the file restores one user has that have not ended.
+	// Zero means 10.
+	MaxOpenRestores int
 }
 
 const (
@@ -79,6 +82,9 @@ type cachedUser struct {
 func New(c client.Client, authn Authenticator, authz Authorizer, cfg Config) *Gateway {
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = time.Second
+	}
+	if cfg.MaxOpenRestores <= 0 {
+		cfg.MaxOpenRestores = defaultMaxOpenRestores
 	}
 	return &Gateway{c: c, authn: authn, authz: authz, cfg: cfg,
 		cache: map[[sha256.Size]byte]cachedUser{}, helpers: map[[sha256.Size]byte]*http.Client{}}

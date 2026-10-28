@@ -15,10 +15,15 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// maxFileRestoreSizeGB is the largest claim a file restore may make.
-const maxFileRestoreSizeGB = 32000
+const (
+	// maxFileRestoreSizeGB is the largest claim a file restore may make.
+	maxFileRestoreSizeGB = 32000
+	// defaultMaxOpenRestores is how many restores one user may have open.
+	defaultMaxOpenRestores = 10
+)
 
 func badRequest(w http.ResponseWriter, msg string) {
 	writeError(w, http.StatusBadRequest, "bad_request", msg)
@@ -144,6 +149,16 @@ func (g *Gateway) handleRestoreCreate(w http.ResponseWriter, r *http.Request, u 
 		writeError(w, http.StatusConflict, "exists", "that claim exists; a restore into a new claim never writes over one")
 		return
 	}
+	open, err := g.openRestores(ctx, u)
+	if err != nil {
+		klog.ErrorS(err, "Count the open file restores failed")
+		writeError(w, http.StatusInternalServerError, "internal", "cannot make the restore")
+		return
+	}
+	if open >= g.cfg.MaxOpenRestores {
+		writeError(w, http.StatusTooManyRequests, "too_many", fmt.Sprintf("you have %d restores that have not ended; the limit is %d", open, g.cfg.MaxOpenRestores))
+		return
+	}
 	fr := &v1alpha1.BackupFileRestore{
 		ObjectMeta: metav1.ObjectMeta{GenerateName: "bfr-", Labels: map[string]string{userLabel: userHash(u.Name)}},
 		Spec:       spec,
@@ -165,6 +180,21 @@ func (g *Gateway) handleRestoreCreate(w http.ResponseWriter, r *http.Request, u 
 		fmt.Sprintf("user %s asked to restore %s from %s/%s of policy %s, %s, into %s",
 			u.Name, strings.Join(paths, ", "), req.Namespace, req.PVC, req.Policy, momentText(req.Moment), where))
 	writeJSON(w, http.StatusAccepted, restoreOf(fr))
+}
+
+// openRestores counts the restores of a user that have not ended.
+func (g *Gateway) openRestores(ctx context.Context, u User) (int, error) {
+	list := &v1alpha1.BackupFileRestoreList{}
+	if err := g.c.List(ctx, list, client.MatchingLabels{userLabel: userHash(u.Name)}); err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, fr := range list.Items {
+		if fr.Spec.RequestedBy == u.Name && fr.Status.Phase != "Done" && fr.Status.Phase != "Failed" {
+			n++
+		}
+	}
+	return n, nil
 }
 
 func firstLine(s string) string {

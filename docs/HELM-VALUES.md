@@ -127,6 +127,7 @@ The one door to browse sessions (issue #92). Users talk to it with their own Kub
 | `backupGateway.route.host` | string | `""` | Empty lets OpenShift choose the host |
 | `backupGateway.sessionWait` | string | `20s` | How long a request that asks to wait (`?wait=true`) holds for the helper pod to be ready. Keep it under your proxy's timeout (the OpenShift router cuts a request after 30 seconds). `kubectl backup` does not ask to wait: it polls |
 | `backupGateway.maxDownloadBytes` | int | `53687091200` | The largest single file or tar a user may download (50 GiB) |
+| `backupGateway.maxOpenRestores` | int | `10` | File restores one user may have that have not ended. A request over the limit is refused (HTTP 429) |
 | `backupGateway.resources` | object | small | Requests and limits |
 
 The chart also makes the ClusterRoles `backup-file-reader` and `backup-file-restorer` (see BACKUP-RECOVERY.md), a ServiceAccount for the gateway with only the rights it needs, and the ConfigMap `backup-gateway-info` that every signed-in user may read (that one ConfigMap and no other).

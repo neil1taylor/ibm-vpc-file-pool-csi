@@ -448,6 +448,7 @@ kubectl apply -f config/deploy/node.yaml
 | `--gateway-browse-namespace` | `ibm-vpc-file-pool-csi-browse` | Where the session Secrets are |
 | `--gateway-session-wait` | `20s` | How long a request that asks to wait holds for the session to be ready; keep it under the proxy timeout |
 | `--gateway-max-download-bytes` | `53687091200` | Largest single file or tar |
+| `--gateway-max-open-restores` | `10` | File restores one user may have that have not ended. More are refused |
 | `--gateway-auth-cache` | `10s` | How long a token review is kept; `0` checks every call. The right on the namespace is checked on every call regardless |
 
 **Browse session flags of the controller** (set by the `backupBrowse.*` chart values):

@@ -212,6 +212,38 @@ func TestRestoreRefusals(t *testing.T) {
 	}
 }
 
+// One user cannot start unlimited restores: each one is a Job that mounts shares.
+func TestRestoreOpenRestoresPerUserAreLimited(t *testing.T) {
+	e := newRestoreEnv(t)
+	e.g.cfg.MaxOpenRestores = 3
+	for i := 0; i < 3; i++ {
+		req := newReq()
+		req["targetName"] = "c" + string(rune('a'+i))
+		if resp, body := e.do("POST", "/v1/restores", "alice-token", req); resp.StatusCode != http.StatusAccepted {
+			t.Fatalf("restore %d: %d %s", i, resp.StatusCode, body)
+		}
+	}
+	req := newReq()
+	req["targetName"] = "cx"
+	resp, body := e.do("POST", "/v1/restores", "alice-token", req)
+	if resp.StatusCode != http.StatusTooManyRequests || !strings.Contains(string(body), "3") {
+		t.Fatalf("the fourth: %d %s", resp.StatusCode, body)
+	}
+	// Another user is not held back by alice's restores.
+	e.authz.allow("bob", "shop", "create", "persistentvolumeclaims")
+	e.claim("shop", "x", "bobs-uid")
+	// A restore that has ended no longer counts.
+	for _, fr := range e.restores() {
+		fr.Status.Phase = "Done"
+		if err := e.c.Status().Update(context.Background(), &fr); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if resp, body := e.do("POST", "/v1/restores", "alice-token", req); resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("after the restores ended: %d %s", resp.StatusCode, body)
+	}
+}
+
 func TestRestoreStatusIsForTheOwnerOnly(t *testing.T) {
 	e := newRestoreEnv(t)
 	_, body := e.do("POST", "/v1/restores", "alice-token", newReq())

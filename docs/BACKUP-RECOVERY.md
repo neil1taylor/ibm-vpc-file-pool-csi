@@ -592,7 +592,7 @@ kubectl backup restore-files --policy nightly --pvc apps/db --moment 2026-10-21T
 kubectl backup restore-files --status bfr-abc12
 ```
 
-`--path` is given once for each file or folder, as `kubectl backup ls` prints it (a name that is not text is `\xNN`); `--paths-file` reads one path on each line. `--to NAMESPACE/CLAIM` is the target. The default is a new claim (`--new-claim`, with `--size-gb` and `--storage-class` if you want to choose); `--existing` writes a new folder into a claim that exists. `--wait` follows the restore to the end and says where the files are; without it the command prints the name of the restore and `--status NAME` shows it later. A restore is shown only to the user who asked for it.
+`--path` is given once for each file or folder, as `kubectl backup ls` prints it (a name that is not text is `\xNN`); `--paths-file` reads one path on each line. `--to NAMESPACE/CLAIM` is the target. The default is a new claim (`--new-claim`, with `--size-gb` and `--storage-class` if you want to choose); `--existing` writes a new folder into a claim that exists. `--wait` follows the restore to the end and says where the files are; without it the command prints the name of the restore and `--status NAME` shows it later. A restore is shown only to the user who asked for it. A user may have 10 restores that have not ended (`backupGateway.maxOpenRestores`); more are refused.
 
 | What you ask for | You need |
 |------------------|----------|
