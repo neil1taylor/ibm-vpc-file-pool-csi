@@ -34,10 +34,11 @@ rules:
   - apiGroups: ["kubevirt.io"]
     resources: ["virtualmachines"]
     verbs: ["get", "list"]
-  # Pod access for lifecycle hook execution (ExecHook)
+  # Pod access for lifecycle hook execution (ExecHook). The volume resizer
+  # sidecar also watches pods to see a volume that a pod still uses.
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get", "list"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["pods/exec"]
     verbs: ["create"]
