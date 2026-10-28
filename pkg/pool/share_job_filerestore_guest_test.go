@@ -69,6 +69,12 @@ func TestRunFileRestore_GuestJobShape(t *testing.T) {
 	if _, ok := ctr.Resources.Limits[kvmResource]; !ok {
 		t.Errorf("limits = %v: the KVM device was configured", ctr.Resources.Limits)
 	}
+	if pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken {
+		t.Error("the pod parses a hostile guest disk: it must not get a service account token")
+	}
+	if pod.HostNetwork || pod.HostPID || pod.HostIPC {
+		t.Error("no host namespaces")
+	}
 	if job.Spec.ActiveDeadlineSeconds == nil || *job.Spec.ActiveDeadlineSeconds != int64((2*time.Hour).Seconds()) {
 		t.Errorf("deadline %v, want 2 hours: the disk is held for the length of the Job", job.Spec.ActiveDeadlineSeconds)
 	}

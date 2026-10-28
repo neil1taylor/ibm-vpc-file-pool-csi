@@ -100,7 +100,7 @@ func (r *ShareJobRunner) RunFileRestore(ctx context.Context, req FileRestoreRequ
 			Items:                []corev1.KeyToPath{{Key: "paths", Path: "paths"}},
 		}}}}, cosVolumes...),
 		mounts:         append([]corev1.VolumeMount{{Name: "paths", MountPath: fileRestorePathsMount, ReadOnly: true}}, cosMounts...),
-		noToken:        req.COS != nil,
+		noToken:        req.COS != nil || req.Guest != nil, // a Job that parses a guest disk or holds keys never gets the API token
 		owner:          &owner,
 		hardened:       hardened,
 		addCaps:        caps,
