@@ -1,0 +1,197 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: backupfilerestores.storage.ibmcloud.io
+spec:
+  group: storage.ibmcloud.io
+  names:
+    kind: BackupFileRestore
+    listKind: BackupFileRestoreList
+    plural: backupfilerestores
+    shortNames:
+    - bfr
+    singular: backupfilerestore
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.policy
+      name: Policy
+      type: string
+    - jsonPath: .spec.sourceName
+      name: Source
+      type: string
+    - jsonPath: .spec.targetName
+      name: Target
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          BackupFileRestore asks the driver to copy chosen files and folders out of a
+          backup into a claim: a new claim, or a new folder in an existing claim. It
+          never writes over a file that exists and never writes into a VM disk. The
+          backup gateway makes it for a user after it checks the user's rights; a
+          cluster administrator may make one by hand. See
+          docs/specs/2026-10-22-backup-file-restore.md.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: BackupFileRestoreSpec says what to restore, and where to.
+            properties:
+              existing:
+                description: |-
+                  Existing restores into a new folder of the claim, which must exist. Unset
+                  makes a new claim, which must not exist.
+                type: boolean
+              moment:
+                description: |-
+                  Moment is the time to restore from. The newest backup at or before it is
+                  used. Unset means the latest copy.
+                format: date-time
+                type: string
+              paths:
+                description: |-
+                  Paths are the files and folders to restore, below the root of the
+                  backed-up volume, one path each in the escaped form that `kubectl backup`
+                  prints (a backslash is written \\ and a byte that is not text \xNN). A
+                  folder is restored with everything in it. The path / restores the whole
+                  volume.
+                items:
+                  type: string
+                maxItems: 1000
+                minItems: 1
+                type: array
+              policy:
+                description: Policy is the BackupPolicy that holds the backup.
+                type: string
+              requestedBy:
+                description: |-
+                  RequestedBy is the user who asked, for the audit trail. The gateway sets
+                  it from the user's token; it is not used to decide anything.
+                type: string
+              sizeGB:
+                description: |-
+                  SizeGB is the size of a new claim. Unset sizes it to the chosen files plus
+                  20%, at least 1 GiB. Not used with existing.
+                format: int64
+                type: integer
+              sourceName:
+                type: string
+              sourceNamespace:
+                description: |-
+                  SourceNamespace and SourceName name the claim that was backed up. The
+                  claim may be gone: the policy remembers its backups until the keep time.
+                type: string
+              storageClassName:
+                description: |-
+                  StorageClassName is the class of a new claim. Unset means the class of the
+                  backed-up claim.
+                type: string
+              targetName:
+                type: string
+              targetNamespace:
+                description: TargetNamespace and TargetName name the claim that gets
+                  the files.
+                type: string
+              targetUID:
+                description: |-
+                  TargetUID is the UID of the existing claim, taken when the user's rights
+                  were checked. The restore refuses if the claim was deleted and made again
+                  since. The gateway sets it; it is required with existing.
+                type: string
+            required:
+            - paths
+            - policy
+            - sourceName
+            - sourceNamespace
+            - targetName
+            - targetNamespace
+            type: object
+          status:
+            description: BackupFileRestoreStatus reports how far the restore is.
+            properties:
+              bytes:
+                format: int64
+                type: integer
+              dirs:
+                type: integer
+              endedTime:
+                description: EndedTime is when the restore reached Done or Failed.
+                format: date-time
+                type: string
+              files:
+                description: |-
+                  Files, Dirs and Links count what was written; Skipped counts devices,
+                  pipes and sockets left out, and Unreadable counts entries the reader could
+                  not read. Bytes is the size of the files.
+                type: integer
+              folder:
+                description: Folder is the folder made in an existing claim.
+                type: string
+              latest:
+                description: Latest is true if the newest backup was read.
+                type: boolean
+              links:
+                type: integer
+              message:
+                description: Message says what the restore waits for, or why it failed.
+                type: string
+              phase:
+                description: |-
+                  Phase is Pending, Measuring (a new claim is being sized), Provisioning (the
+                  claim is being made), Restoring (the copy runs), Done or Failed.
+                enum:
+                - Pending
+                - Measuring
+                - Provisioning
+                - Restoring
+                - Done
+                - Failed
+                type: string
+              restoredMoment:
+                description: |-
+                  RestoredMoment is the moment of the backup that was read. Unset if it is
+                  not known (the first copy of a volume).
+                format: date-time
+                type: string
+              sizeGB:
+                description: SizeGB is the size chosen for a new claim.
+                format: int64
+                type: integer
+              skipped:
+                type: integer
+              targetUID:
+                description: |-
+                  TargetUID is the UID of the claim this restore writes to. It is set the
+                  first time the claim is seen, and the restore refuses a claim with another UID.
+                type: string
+              unreadable:
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

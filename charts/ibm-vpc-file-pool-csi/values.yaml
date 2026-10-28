@@ -111,6 +111,9 @@ backupBrowse:
   # Open sessions in the cluster, and for the claims of one namespace. More wait.
   maxSessions: 5
   maxSessionsPerNamespace: 2
+  # The most one file restore writes, in bytes (200 GiB). A restore of more is
+  # refused before it starts.
+  restoreMaxBytes: 214748364800
 
 # The backup gateway: the one door to browse sessions (issue #92). Users talk
 # to it with their own Kubernetes token; it checks every call with a token review

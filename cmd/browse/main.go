@@ -7,15 +7,12 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"io/fs"
 	"net"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -92,7 +89,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 		return 1
 	}
 	opts := browse.Options{Idle: *idle, MaxLife: *maxLife, MaxStreams: *streams}
-	readRoot, info, err := chooseRoot(*root, *moments, atTime)
+	readRoot, info, err := browse.ChooseRoot(*root, *moments, atTime)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "%v\n", err)
 		return 1
@@ -100,7 +97,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 	opts.Info = info
 	if *moments != "" {
 		momentsDir := *moments
-		opts.Moments = func() ([]string, error) { return momentNames(momentsDir) }
+		opts.Moments = func() ([]string, error) { return browse.MomentNames(momentsDir) }
 	}
 	server, tree, err := newServer(strings.TrimSpace(string(raw)), readRoot, opts)
 	if err != nil {
@@ -160,59 +157,4 @@ func loadTLS(certFile, keyFile string) (*tls.Config, error) {
 		return nil, fmt.Errorf("cannot read the session certificate key")
 	}
 	return browse.ServerTLSConfig(cert, key)
-}
-
-// chooseRoot says which folder to read. Without --at it is the latest copy.
-// With --at it is the newest moment folder at or before the time; with no
-// moment folders yet, the only copy is the latest one. The info says which
-// moment the session reads.
-func chooseRoot(latest, momentsDir string, at time.Time) (string, browse.Info, error) {
-	if momentsDir == "" {
-		return latest, browse.Info{Latest: true}, nil
-	}
-	names, err := momentNames(momentsDir)
-	if err != nil {
-		return "", browse.Info{}, err
-	}
-	pick, newest, err := browse.PickMoment(names, at)
-	if err != nil {
-		return "", browse.Info{}, err
-	}
-	if pick == "" {
-		return latest, browse.Info{Latest: true}, nil
-	}
-	if at.IsZero() {
-		return latest, browse.Info{Moment: pick, Latest: true}, nil
-	}
-	return filepath.Join(momentsDir, pick), browse.Info{Moment: pick, Latest: newest}, nil
-}
-
-// momentNames lists the moments folder through the safe reader, so a link
-// named like a moment is not taken for a folder.
-func momentNames(dir string) ([]string, error) {
-	tree, err := browse.NewTree(dir)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil, nil // no moments yet
-		}
-		return nil, fmt.Errorf("open the moments folder: %w", err)
-	}
-	defer func() { _ = tree.Close() }()
-	var names []string
-	var cursor []byte
-	for {
-		page, err := tree.List(nil, cursor, 1000)
-		if err != nil {
-			return nil, fmt.Errorf("list the moments folder: %w", err)
-		}
-		for _, e := range page.Entries {
-			if e.Type == browse.TypeDir {
-				names = append(names, string(e.Name))
-			}
-		}
-		if len(page.Next) == 0 {
-			return names, nil
-		}
-		cursor = page.Next
-	}
 }

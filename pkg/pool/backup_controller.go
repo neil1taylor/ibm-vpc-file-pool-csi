@@ -78,6 +78,9 @@ type BackupController struct {
 	// browseJobs and browse run browse sessions; nil browseJobs means off.
 	browseJobs BrowseJobs
 	browse     BrowseConfig
+	// fileJobs and fileCfg run file restores; nil fileJobs means off.
+	fileJobs FileRestoreJobs
+	fileCfg  FileRestoreConfig
 }
 
 // NewBackupController returns a controller that reads and writes with c. It
@@ -157,6 +160,7 @@ func (bc *BackupController) ReconcileAll(ctx context.Context) {
 	}
 	bc.reconcileRestores(ctx)
 	bc.reconcileBrowses(ctx)
+	bc.reconcileFileRestores(ctx)
 }
 
 // tidyDeleted removes the labels and the ReplicationPolicies of policies that

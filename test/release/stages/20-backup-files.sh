@@ -20,7 +20,7 @@
 # into test/release/bin by remote.sh).
 
 # A pool takes 5 to 15 minutes to become ready; the rest is under 5 minutes.
-RT_STAGE_TIMEOUT=7200
+RT_STAGE_TIMEOUT=10800
 
 HERE_STAGE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 E2E="$HERE_STAGE/../../e2e/test-backup-files.sh"
@@ -29,6 +29,9 @@ E2E_LOG="$RT_OUT/backup-files-e2e.log"
 E2E_SESSION="$HERE_STAGE/../../e2e/test-backup-browse-session.sh"
 SESSION_PREFIX=$(rt_name bsess)
 SESSION_LOG="$RT_OUT/backup-browse-session-e2e.log"
+E2E_RESTORE="$HERE_STAGE/../../e2e/test-backup-file-restore.sh"
+RESTORE_PREFIX=$(rt_name frest)
+RESTORE_LOG="$RT_OUT/backup-file-restore-e2e.log"
 BACKUP_BIN="${RT_BACKUP_BIN:-$(dirname "$RT_LIB")/bin/kubectl-backup}"
 
 run() {
@@ -89,6 +92,41 @@ run() {
         check "a call with no token is refused" log_has_pass "$SESSION_LOG" "a call with no token is refused"
         check "the audit Events name the user and the path and hold no secrets" log_has_pass "$SESSION_LOG" "hold no token and no content"
     fi
+
+    [ -f "$E2E_RESTORE" ] || skip "no end-to-end script at $E2E_RESTORE"
+    rt_log "running $E2E_RESTORE"
+    env PREFIX="$RESTORE_PREFIX" bash "$E2E_RESTORE" >"$RESTORE_LOG" 2>&1
+    rc=$?
+    cat "$RESTORE_LOG"
+    if fail_line=$(first_fail_line "$RESTORE_LOG"); then
+        check "the file restore script reported: $fail_line" false
+    elif [ "$rc" -ne 0 ]; then
+        check "the file restore script exited with $rc and no FAIL line (see backup-file-restore-e2e.log)" false
+    else
+        check "the file restore script ended without a FAIL line" true
+    fi
+    check "a restore into a new claim ends Done" log_has_pass "$RESTORE_LOG" "a restore into a new claim ends Done"
+    check "the new claim is sized by the Job that measures" log_has_pass "$RESTORE_LOG" "sized the claim to 1 GiB"
+    check "the new claim holds the latest content" log_has_pass "$RESTORE_LOG" "the new claim holds the latest content"
+    check "the 40 MiB file has the same checksum" log_has_pass "$RESTORE_LOG" "same checksum"
+    check "files with mode 0600 get the owner of the pool and keep their mode" log_has_pass "$RESTORE_LOG" "files with mode 0600 keep their mode"
+    check "a folder with mode 0700 is restored whole" log_has_pass "$RESTORE_LOG" "a folder with mode 0700 is restored whole, with the pool"
+    check "a name with a newline is restored" log_has_pass "$RESTORE_LOG" "a name with a newline is restored"
+    check "a link is restored as a link and not followed" log_has_pass "$RESTORE_LOG" "restored as a link, not followed"
+    check "only the chosen paths are restored" log_has_pass "$RESTORE_LOG" "only the chosen paths"
+    check "a restore at the first moment brings back the first content" log_has_pass "$RESTORE_LOG" "brings back the first content"
+    check "a new folder in an existing claim, with the backup's owners kept" log_has_pass "$RESTORE_LOG" "keep the backup's owners"
+    check "a folder with mode 0700 owned by another user is restored whole in an existing claim" log_has_pass "$RESTORE_LOG" "owned by another user is restored whole"
+    check "the claim's own file is untouched" log_has_pass "$RESTORE_LOG" "the claim's own file is untouched"
+    check "a second restore takes the next free folder name" log_has_pass "$RESTORE_LOG" "takes the next free name"
+    check "no staging folder is left" log_has_pass "$RESTORE_LOG" "no staging folder is left in the claim"
+    check "a claim that holds disk.img is refused" log_has_pass "$RESTORE_LOG" "holds disk.img is refused"
+    check "files that do not fit are refused before they are copied" log_has_pass "$RESTORE_LOG" "do not fit in the claim are refused"
+    check "a path that is not in the backup fails the restore" log_has_pass "$RESTORE_LOG" "not in the backup fails"
+    check "the webhook refuses a path with .." log_has_pass "$RESTORE_LOG" "the webhook refuses a path with .."
+    check "no Job or share claim of a restore is left" log_has_pass "$RESTORE_LOG" "no Job or share claim of a restore is left"
+    check "deleting a restore removes its list of paths" log_has_pass "$RESTORE_LOG" "deleting a restore removes its list of paths"
+    check "the Events name no path" log_has_pass "$RESTORE_LOG" "the Events name no path"
 }
 
 cleanup() {
@@ -102,4 +140,8 @@ cleanup() {
     oc delete backuppolicy "$SESSION_PREFIX-policy" --ignore-not-found --wait=false
     oc delete namespace "$SESSION_PREFIX-test" "$SESSION_PREFIX-test-other" --ignore-not-found --wait=true --timeout=900s
     oc delete filesharepool "$SESSION_PREFIX-src" "$SESSION_PREFIX-snap" --ignore-not-found --wait=false
+    oc delete backupfilerestore -l "$RESTORE_PREFIX-test=yes" --ignore-not-found --wait=false
+    oc delete backuppolicy "$RESTORE_PREFIX-policy" --ignore-not-found --wait=false
+    oc delete namespace "$RESTORE_PREFIX-test" --ignore-not-found --wait=true --timeout=900s
+    oc delete filesharepool "$RESTORE_PREFIX-src" "$RESTORE_PREFIX-snap" "$RESTORE_PREFIX-plain" --ignore-not-found --wait=false
 }

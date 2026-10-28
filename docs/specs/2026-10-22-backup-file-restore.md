@@ -268,3 +268,17 @@ Not yet tested: a real Windows disk with BitLocker or a hibernated system, btrfs
 - The audit Events are written in the driver namespace on the `BackupBrowse` (a cluster-scoped object).
 - A session belongs to the user who made it; another user, even with the same rights, sees "no such session".
 - The helper has a `/v1/moments` call so that `kubectl backup ls --moments` can list the moment folders.
+
+## Changes made while building phase 2 (28 Oct 2026)
+
+- The restore Job is the driver program (`--mode=restore-files`, package `pkg/filerestore`), not a shell script with `cp -a`. It reads the backup through the browse helper's handle-based reader and writes the target the same way (`mkdirat`, `symlinkat`, `openat` with `O_EXCL` and `O_NOFOLLOW`, no link followed). Reason: an existing claim is open to its users, so the target is as untrusted as the backup.
+- Paths are `spec.paths`, a list of escaped strings (the form `kubectl backup ls` prints), kept in a ConfigMap that the restore owns and mounted as a file. At most 1000 paths, 256 KiB together.
+- The squashed-root question, write side: the order is times, then mode, then owner for a file, and a folder is finished only after everything in it is written (like `cp -a`, which the lab proved). The owner is the one the pool configures for the claim (`defaultUID`, `defaultGID`); without one, the backup's owner is kept. If an owner cannot be set, the restore fails and removes what it wrote. Stage 20 part 4 checks both cases on the lab (a pool with owner 107 and a pool with none, files of users 1000 and 2000).
+- Into an existing claim the Job writes a hidden folder `.restoring-<restore UID>` and renames it to `restored-<policy>-<moment>` (a suffix if the name exists). NFS has no rename that refuses to replace; the name is checked just before.
+- The Job mounts the whole share that holds the target claim (the claim's folder may not exist before the Job, and a folder that does not exist cannot be mounted), and opens only the claim's folder below it, one name at a time. An existing claim whose folder does not exist yet is refused.
+- A new claim is sized by a read-only measure Job first (skipped when `sizeGB` is given), because the controller has no NFS access.
+- The claim's UID is pinned (`spec.targetUID`, set by the gateway; otherwise the first UID the controller sees), so a claim deleted and made again is refused. The new claim made for a restore carries the restore's name and UID as annotations, and both must match.
+- The Job keeps only the `CHOWN` and `FOWNER` capabilities. It has a 4 hour deadline.
+- Limit of one restore: the least of 200 GiB (`backupBrowse.restoreMaxBytes`), the free space of the share, and, for an existing claim, its size less what it holds.
+- The setuid and setgid bits are removed from everything restored.
+

@@ -67,6 +67,7 @@ spec:
             {{- if .Values.replicationReceiver.pvcName }}
             - "--failover-default-source={{ .Values.replicationReceiver.pvcName }}"
             {{- end }}
+            - "--file-restore-max-bytes={{ int64 .Values.backupBrowse.restoreMaxBytes }}"
             {{- if .Values.backupBrowse.enabled }}
             - "--browse-image={{ .Values.backupBrowse.image.repository }}:{{ .Values.backupBrowse.image.tag | default (include "ibm-vpc-file-pool-csi.imageTag" .) }}"
             {{- if .Values.imagePullSecrets }}

@@ -11,7 +11,7 @@ For pictures you can click through, see the [interactive diagrams](diagrams/inde
 - [Storage](#storage): pool, share, mount target, SubVolume, volume, plain volume, VM disk, allocation strategy, auto-expand, tier, drain, StorageClass, staging, reclaim policy
 - [Copies in the same pool](#copies-in-the-same-pool): snapshot, file snapshot, QEMU copy, instant snapshot, chain, overlay file, VM hook, Sidecar gate, flatten, clone
 - [How good a copy is](#how-good-a-copy-is): moment, file-system consistent, crash consistent, file copy, guest freeze
-- [Backup](#backup): backup, BackupPolicy, snapshot pool, keep time, restore, BackupRestore, restore point, change list, COS export, lock, backup key, browse session, backup gateway, backupfiles, browse helper
+- [Backup](#backup): backup, BackupPolicy, snapshot pool, keep time, restore, BackupRestore, file restore, restore point, change list, COS export, lock, backup key, browse session, backup gateway, backupfiles, browse helper
 - [Replication and failover](#replication-and-failover): replication, ReplicationPolicy, destination, receiver, rewind, failover
 - [Other words](#other-words): golden image, lifecycle hook, group snapshot, adaptive copy speed, PoolBench, knee, user workload monitoring, command-line plugins
 
@@ -300,6 +300,12 @@ Example: a RoleBinding to `backup-file-reader` in `apps` lets Alice browse the b
 The **browse helper** is a small program in its own image (`browse`) that reads one backup folder, read-only, for the browse feature. It runs in a pod as root with no capabilities, on a read-only mount. It never follows a link, and it ends by itself when idle or after a time limit. Users never talk to it directly.
 
 Example: it lists `/var/www` of last night's backup of the volume `web-data`.
+
+### File restore
+
+A **file restore** copies chosen files and folders out of one backup into a claim, kept as a `BackupFileRestore` resource. The target is a new claim, or a new folder in an existing claim. It never writes over a file that exists and never writes into a VM disk. It is not a **restore** (a whole volume, `BackupRestore`).
+
+Example: restore `/etc/app` and `/var/www/html/index.php` from last night's backup of `web/data` into the new folder `restored-nightly-20261021T093000Z` of the claim `web/data`.
 
 ---
 

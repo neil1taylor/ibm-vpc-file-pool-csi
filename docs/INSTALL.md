@@ -367,7 +367,7 @@ kubectl apply -f config/deploy/node.yaml
 |------|---------|-------------|
 | `--endpoint` | `unix:///csi/csi.sock` | CSI gRPC endpoint |
 | `--node-id` | (required) | Kubernetes node name |
-| `--mode` | `controller` | `controller`, `node`, `receiver`, `sync-client`, `check-receiver`, `apply-vm-disk`, `send-vm-disk`, or `restore-vm-disk`, `unwrap-backup-key`, `backup-gateway`, `register-console-plugin`, or `unregister-console-plugin`, or `enable-sidecar-gate`, or `failover` (the Job for a `Failover` resource), or `poolbench` (the PoolBench service, a Deployment when `poolBench.enabled`; all but the first three and `poolbench` are run as Jobs; `check-receiver` is run by the console's receiver setup; `register-console-plugin`, `unregister-console-plugin` and `enable-sidecar-gate` are the chart's hook Jobs) |
+| `--mode` | `controller` | `controller`, `node`, `receiver`, `sync-client`, `check-receiver`, `apply-vm-disk`, `send-vm-disk`, or `restore-vm-disk`, `restore-files` (the copy Job of a `BackupFileRestore`), `unwrap-backup-key`, `backup-gateway`, `register-console-plugin`, or `unregister-console-plugin`, or `enable-sidecar-gate`, or `failover` (the Job for a `Failover` resource), or `poolbench` (the PoolBench service, a Deployment when `poolBench.enabled`; all but the first three and `poolbench` are run as Jobs; `check-receiver` is run by the console's receiver setup; `register-console-plugin`, `unregister-console-plugin` and `enable-sidecar-gate` are the chart's hook Jobs) |
 | `--region` | Auto-discovered | IBM Cloud region |
 | `--vpc-id` | Auto-discovered | VPC ID for mount targets |
 | `--subnet-id` | Auto-discovered | Worker subnet IDs for mount targets, comma-separated; the controller uses the one in each pool's zone |
@@ -412,6 +412,8 @@ kubectl apply -f config/deploy/node.yaml
 | `--keep` | `24h` | How long restore points are kept (apply-vm-disk and send-vm-disk modes). Set by the replication controller |
 | `--backup-disk`, `--out-disk` | `""` | The backed-up VM disk to read and the new disk to write (restore-vm-disk mode). Set by the backup restore Job |
 | `--restore-moment` | `""` | Moment to restore, RFC 3339; empty for the latest (restore-vm-disk mode). Set by the backup restore Job |
+| `--restore-files-spec` | `""` | JSON of the file restore: mode (`measure`, `new-claim` or `folder`), where the backup and the claim are mounted, owner, limits (restore-files mode). Set by the file restore Job |
+| `--restore-files-paths` | `""` | The file that lists the paths to restore, one per line in escaped form. Paths are never arguments (restore-files mode). Set by the file restore Job |
 | `--vm-group` | `""` | `namespace/name` of the VM that owns the disk (send-vm-disk mode). Set by the replication controller |
 | `--copy-id` | `""` | Name of this copy attempt; a repeat with the same name resumes it (send-vm-disk mode). Set by the replication controller |
 | `--poolbench-collector-addr` | `:8080` | Where the collector listens for the test VMs (poolbench mode) |
@@ -459,6 +461,7 @@ kubectl apply -f config/deploy/node.yaml
 | `--browse-max-life` | `2h` | End a session after this long, even if in use |
 | `--browse-max-sessions` | `5` | Open sessions in the cluster. More wait |
 | `--browse-max-sessions-per-namespace` | `2` | Open sessions for the claims of one namespace. More wait |
+| `--file-restore-max-bytes` | `214748364800` | The most one file restore writes. Set by `backupBrowse.restoreMaxBytes` |
 
 **Browse helper flags** (`browse`, its own image; the driver starts it, you do not run it by hand):
 

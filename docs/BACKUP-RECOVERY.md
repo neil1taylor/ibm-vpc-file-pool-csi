@@ -543,7 +543,8 @@ The goal (issue #92) is to look inside a backup and get back one file or folder 
 - **The browse helper** (`cmd/browse`, image `browse`). It reads one backup folder, read-only. It lists a folder in pages of 1000 names, describes a name, reads a byte range of a file, and streams a folder as a tar. It never follows a symbolic link: a link is listed with its text, a download of a link is refused, and a tar keeps it as a link. A path is a list of names, so a name with a newline or bytes that are not text works. Every call needs the session token. The helper ends by itself after 15 minutes without use, or after 2 hours.
 - **Browse sessions (part 2).** A `BackupBrowse` resource per open session; the controller starts the helper pod for it, with a random token and a per-session TLS certificate in a Secret, and removes everything when the session ends. The helper serves only over TLS. Defaults: 15 minutes idle, 2 hours hard limit, 5 open sessions in the cluster and 2 for each namespace; all are Helm values (`backupBrowse.*`).
 - **The gateway and `kubectl backup` (part 3).** `kubectl backup ls`, `get` and `browse` list and download files and folders of a plain volume's backup, at the latest copy or at a moment. See "Browse from the command line" below.
-- **Not built yet:** restoring files into a claim (`restore-files`), the console pages, COS backups and VM disks.
+- **Restore of files (part 4, resource and Job).** A `BackupFileRestore` copies chosen files and folders out of a backup into a new claim or into a new folder of an existing claim. See "Restore files into a claim" below. Users cannot ask for it yet: only a cluster administrator can make the resource by hand. The gateway and `kubectl backup restore-files` come next.
+- **Not built yet:** the console pages, COS backups and VM disks.
 
 ### Browse from the command line
 
@@ -579,9 +580,50 @@ To let someone read another namespace's backups: `kubectl create rolebinding NAM
 
 **Where it runs.** Helper pods and their Secrets are in their own namespace, `ibm-vpc-file-pool-csi-browse` (`backupBrowse.namespace`), which holds nothing else, so the gateway can read Secrets only there. The namespace allows root pods without capabilities (Pod Security level `baseline`); on OpenShift one SCC allows exactly that.
 
+### Restore files into a claim
+
+A `BackupFileRestore` (cluster scoped, short name `bfr`) copies the files and folders you list out of one backup into a claim. It is the file version of a `BackupRestore`. Today a cluster administrator makes it by hand; the gateway and `kubectl backup restore-files` will make it for users.
+
+```yaml
+apiVersion: storage.ibmcloud.io/v1alpha1
+kind: BackupFileRestore
+metadata:
+  name: web-files-1
+spec:
+  policy: nightly
+  sourceNamespace: web          # the claim that was backed up
+  sourceName: data
+  moment: "2026-10-21T09:30:00Z"   # optional: the newest backup at or before it; unset is the latest copy
+  paths:                           # a folder is restored with everything in it; "/" is the whole volume
+    - /var/www/html/index.php
+    - /etc/app
+  targetNamespace: web
+  targetName: data-restored
+  existing: false               # false: make a new claim. true: write a new folder into targetName
+```
+
+**Two targets.**
+
+| Target | What happens |
+|--------|--------------|
+| A new claim (`existing: false`) | The claim must not exist. The controller first runs a Job that only reads and adds up the size of the chosen files (skipped if you set `sizeGB`). The claim gets that size plus 20%, rounded up to a whole GiB, at least 1 GiB, and the class of the backed-up claim (or `storageClassName`). Pods are held back from the claim until the copy ends, as in a whole-volume restore. The tree under the volume's root is kept: `/var/www/html/index.php` becomes `/var/www/html/index.php` in the new claim |
+| An existing claim (`existing: true`) | The files go into a new folder at the top of the claim, named `restored-<policy>-<moment>` (`-latest` for the latest copy; `-2`, `-3` if the name exists). Nothing else of the claim changes. The claim keeps working for its pods |
+
+A restore never writes over a file that exists, and nothing is put back in place. Download a file with `kubectl backup get` instead, or copy from the restored folder.
+
+**What is copied.** Regular files, folders and symbolic links. A link is copied as a link and never followed. Devices, pipes and sockets are left out and counted. A file or folder the reader cannot read inside a chosen folder is left out and counted (`status.unreadable`); a chosen path that is missing or unreadable ends the restore with an error. File times are kept. The setuid and setgid bits are removed. Extended attributes and ACLs are not copied.
+
+**Owners and modes.** Everything restored gets the owner that the claim is configured with (`defaultUID` and `defaultGID` of the pool, for example 107 on KubeVirt pools); modes are kept. If the pool configures no owner, the files keep the owner they had in the backup. The folder itself gets the pool's `defaultPermissions` (or 0755). The Job sets times, then mode, then owner, for each file, and finishes a folder only after everything in it is written, so a folder with mode 0500 or a file with mode 0600 owned by another user is restored whole. If an owner cannot be set, the restore fails and removes what it wrote: files that nobody can read are worse than no restore. NFS maps root to an ordinary user on VPC file shares; reading was proven on the lab in phase 1 (below), and writing is checked by stage 20 of the release test.
+
+**Safety.** The list of paths is a file in a ConfigMap that the restore owns, never an argument or part of a script. The Job is the driver program itself (`--mode=restore-files`), not a shell. It reads the backup read-only through the same handle-based reader as browsing, and writes the destination the same way: every name is made with `mkdirat`, `symlinkat` or `openat` with `O_EXCL` and `O_NOFOLLOW`, in a folder reached one name at a time without following a link. A person who puts a link into a claim while the restore runs makes it fail; it cannot make it write somewhere else. Into an existing claim the Job writes a hidden folder first (`.restoring-<restore UID>`) and renames it to its final name at the end, so nobody sees a half-written folder, and a failed or repeated try leaves nothing. The Job has no service account token, a read-only root file system and no capability except `CHOWN` and `FOWNER`.
+
+**Refused.** A claim that holds a VM disk (`disk.img`): a VM disk is never a target. A claim with no data folder yet (start a pod that uses it first). A claim that is being restored, or that another restore is writing into (the second restore waits). A claim that was deleted and made again since the request (the claim's UID is pinned when the request is first seen, or when the gateway checked the user's rights). Files that do not fit: the Job checks before it copies, against the least of 200 GiB (`backupBrowse.restoreMaxBytes`), the free space of the share, and, for an existing claim, its size less what it holds.
+
+**Status.** `phase` (`Pending`, `Measuring`, `Provisioning`, `Restoring`, `Done`, `Failed`), `message`, `folder`, `restoredMoment`, `latest`, `sizeGB`, the counts `files`, `dirs`, `links`, `skipped`, `unreadable` and `bytes`, and `endedTime`. A failed copy into a new claim leaves the claim held back; delete it and ask again. An ended restore is removed after 24 hours. The controller writes an Event on the restore when it ends. The Job gets 4 hours.
+
 ### Can the helper read other users' files?
 
-Yes. VPC file shares map root to an ordinary user, so this was a real question. It was tested on the lab (22 Oct 2026) with a volume filled by users 1000, 2000 and root: files with mode 0600, folders with mode 0700, a link to `/etc`, a name with a newline. The helper (user 0, no capabilities, read-only NFS mount with `sec=sys`) listed and read all of them. A `cp -a` as root, which is how the restore Job copies, read all of them too. The only failures in that copy were changes of owner into a scratch folder that was not on the share, which the restore Job does on the share. A pipe could not be created on the share by a normal user (`mkfifo` is refused), so the share holds none.
+Yes. VPC file shares map root to an ordinary user, so this was a real question. It was tested on the lab (22 Oct 2026) with a volume filled by users 1000, 2000 and root: files with mode 0600, folders with mode 0700, a link to `/etc`, a name with a newline. The helper (user 0, no capabilities, read-only NFS mount with `sec=sys`) listed and read all of them. A `cp -a` as root, which is how the whole-volume restore Job copies, read all of them too. The file restore Job reads the same way as the helper. The only failures in that copy were changes of owner into a scratch folder that was not on the share, which the restore Job does on the share. A pipe could not be created on the share by a normal user (`mkfifo` is refused), so the share holds none.
 
 ## Cross-Region Replication
 

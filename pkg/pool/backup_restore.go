@@ -200,16 +200,19 @@ func (bc *BackupController) openFinishedRestores(ctx context.Context) {
 		if err := bc.client.Get(ctx, types.NamespacedName{Namespace: sv.Spec.PVCNamespace, Name: sv.Spec.PVCName}, pvc); err != nil {
 			continue
 		}
-		name := pvc.Annotations[backupRestoreAnnotation]
-		if name == "" {
+		if name := pvc.Annotations[backupRestoreAnnotation]; name != "" {
+			br := &v1alpha1.BackupRestore{}
+			if err := bc.client.Get(ctx, types.NamespacedName{Name: name}, br); err == nil && br.Status.Phase == restorePhaseDone {
+				bc.setSubVolumeRestoreLabel(ctx, sv, false)
+			}
 			continue
 		}
-		br := &v1alpha1.BackupRestore{}
-		if err := bc.client.Get(ctx, types.NamespacedName{Name: name}, br); err != nil {
-			continue
-		}
-		if br.Status.Phase == restorePhaseDone {
-			bc.setSubVolumeRestoreLabel(ctx, sv, false)
+		if name := pvc.Annotations[backupFileRestoreAnnotation]; name != "" {
+			fr := &v1alpha1.BackupFileRestore{}
+			if err := bc.client.Get(ctx, types.NamespacedName{Name: name}, fr); err == nil &&
+				fr.Status.Phase == restorePhaseDone && string(fr.UID) == pvc.Annotations[backupFileRestoreUIDAnnotation] {
+				bc.setSubVolumeRestoreLabel(ctx, sv, false)
+			}
 		}
 	}
 }
@@ -251,25 +254,43 @@ func (bc *BackupController) ensureRestoreTarget(ctx context.Context, br *v1alpha
 	if size < 1 {
 		size = 1
 	}
-	pvc = &corev1.PersistentVolumeClaim{
+	if err := bc.createRestorePVC(ctx, sp.TargetNamespace, sp.TargetName, class, size, map[string]string{backupRestoreAnnotation: br.Name}); err != nil {
+		return nil, err
+	}
+	klog.V(2).InfoS("Made the PVC for a backup restore", "restore", br.Name, "pvc", klog.KRef(sp.TargetNamespace, sp.TargetName))
+	return bc.getRestorePVC(ctx, sp.TargetNamespace, sp.TargetName)
+}
+
+// getRestorePVC reads the claim a restore made.
+func (bc *BackupController) getRestorePVC(ctx context.Context, ns, name string) (*corev1.PersistentVolumeClaim, error) {
+	pvc := &corev1.PersistentVolumeClaim{}
+	if err := bc.client.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, pvc); err != nil {
+		return nil, fmt.Errorf("get the target PVC: %w", err)
+	}
+	return pvc, nil
+}
+
+// createRestorePVC makes the new claim of a restore. The annotations name the
+// restore that made it, so no other restore ever uses it.
+func (bc *BackupController) createRestorePVC(ctx context.Context, ns, name, class string, sizeGB int64, annotations map[string]string) error {
+	pvc := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace:   sp.TargetNamespace,
-			Name:        sp.TargetName,
-			Annotations: map[string]string{backupRestoreAnnotation: br.Name},
+			Namespace:   ns,
+			Name:        name,
+			Annotations: annotations,
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			StorageClassName: &class,
 			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
 			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{corev1.ResourceStorage: *resource.NewQuantity(size<<30, resource.BinarySI)},
+				Requests: corev1.ResourceList{corev1.ResourceStorage: *resource.NewQuantity(sizeGB<<30, resource.BinarySI)},
 			},
 		},
 	}
 	if err := bc.client.Create(ctx, pvc); err != nil {
-		return nil, fmt.Errorf("make the target PVC: %w", err)
+		return fmt.Errorf("make the target PVC: %w", err)
 	}
-	klog.V(2).InfoS("Made the PVC for a backup restore", "restore", br.Name, "pvc", klog.KRef(sp.TargetNamespace, sp.TargetName))
-	return pvc, nil
+	return nil
 }
 
 // setSubVolumeRestoreLabel holds a volume back from pods, or lets them have it.
