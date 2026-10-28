@@ -147,11 +147,11 @@ test/              → Integration and e2e tests (unit tests live next to code)
 
 ## Key Design Rules
 
-1. **CreateVolume picks an existing share + records SubVolume CR** — never creates VPC shares in the hot path
+1. **CreateVolume picks an existing share + records SubVolume CR** — never creates VPC shares in the hot path, with one exception: when no share fits and `autoExpand` is on, `Allocate` creates one share (the sidecar timeout of 300 s covers the wait) and returns a retriable error if it is not ready yet
 2. **All state in CRDs** — no external DB, no ConfigMaps for state
 3. **Node mounts cached** — one NFS mount per share per node, PVCs bind-mount subdirectories
 4. **Fail safe** — return retriable gRPC errors, never silently overcommit
-5. **VPC API calls are expensive (30-90s)** — belong in pool manager's background reconciliation, not CSI handlers
+5. **VPC API calls are expensive (30-90s)** — belong in pool manager's background reconciliation, not CSI handlers (except the auto-expand share in rule 1)
 
 ## Testing Conventions
 
