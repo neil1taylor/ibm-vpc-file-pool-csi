@@ -154,6 +154,7 @@ func main() {
 	flag.IntVar(&browse.cfg.MaxSessions, "browse-max-sessions", 5, "Open browse sessions in the cluster; more wait")
 	flag.IntVar(&browse.cfg.MaxPerNamespace, "browse-max-sessions-per-namespace", 2, "Open browse sessions for the claims of one namespace; more wait")
 	flag.Int64Var(&browse.restoreMaxBytes, "file-restore-max-bytes", 200<<30, "The most one file restore writes, in bytes; a bigger one is refused (controller mode)")
+	flag.IntVar(&browse.restoreMaxRunning, "file-restore-max-running", 5, "How many file restores run at once in the cluster; more wait (controller mode)")
 
 	// Backup gateway flags (gateway mode).
 	flag.StringVar(&gw.listen, "gateway-listen", ":8443", "Address the backup gateway listens on (backup-gateway mode)")
@@ -354,6 +355,8 @@ type browseOptions struct {
 	cfg         pool.BrowseConfig
 	// restoreMaxBytes is the most one file restore writes.
 	restoreMaxBytes int64
+	// restoreMaxRunning is how many file restores run at once.
+	restoreMaxRunning int
 }
 
 // nodeAgentOptions say where to read the node agents' share counters, so that
@@ -630,7 +633,7 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metric
 	// it after each pass. See the Job watch below.
 	backupController := pool.NewBackupController(replClient)
 	backupController.SetShareData(shareRunner)
-	backupController.SetFileRestore(shareRunner, pool.FileRestoreConfig{MaxBytes: browse.restoreMaxBytes})
+	backupController.SetFileRestore(shareRunner, pool.FileRestoreConfig{MaxBytes: browse.restoreMaxBytes, MaxRunning: browse.restoreMaxRunning})
 	if browse.image != "" {
 		// Helper pods and session Secrets live in their own namespace, which holds
 		// nothing else, so the gateway's right to read Secrets reaches nothing

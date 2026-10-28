@@ -463,6 +463,7 @@ kubectl apply -f config/deploy/node.yaml
 | `--browse-max-sessions` | `5` | Open sessions in the cluster. More wait |
 | `--browse-max-sessions-per-namespace` | `2` | Open sessions for the claims of one namespace. More wait |
 | `--file-restore-max-bytes` | `214748364800` | The most one file restore writes. Set by `backupBrowse.restoreMaxBytes` |
+| `--file-restore-max-running` | `5` | How many file restores run at once in the cluster. More wait. Set by `backupBrowse.restoreMaxRunning` |
 
 **Browse helper flags** (`browse`, its own image; the driver starts it, you do not run it by hand):
 
