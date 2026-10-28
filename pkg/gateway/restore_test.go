@@ -23,6 +23,7 @@ func newRestoreEnv(t *testing.T) *env {
 	e := newEnv(t, Config{}, memTree{})
 	e.authz.allow("alice", "apps", "create", "persistentvolumeclaims")
 	e.authz.allow("alice", "apps", "update", "persistentvolumeclaims")
+	e.authz.allow("alice", "apps", "create", "pods")
 	return e
 }
 
@@ -133,6 +134,39 @@ func TestRestoreRightsAreChecked(t *testing.T) {
 				t.Fatal("a restore was made for a user who may not")
 			}
 		})
+	}
+}
+
+// Writing files into a claim is the same power as mounting it. A user who can
+// edit the claim object but cannot start a pod must not write into its data, and
+// the refusal is the same whether the claim exists or not.
+func TestRestoreIntoAnExistingClaimNeedsTheRightToStartPods(t *testing.T) {
+	e := newRestoreEnv(t)
+	e.g.authn = fakeAuthn{users: map[string]User{"dave-token": {Name: "dave"}}}
+	e.authz.set("dave", "apps", true)
+	e.authz.allow("dave", "apps", "create", "persistentvolumeclaims")
+	e.authz.allow("dave", "apps", "update", "persistentvolumeclaims")
+	e.claim("apps", "work", "u1")
+	var answers []string
+	for _, target := range []string{"work", "not-there"} {
+		req := newReq()
+		req["existing"], req["targetName"] = true, target
+		resp, body := e.do("POST", "/v1/restores", "dave-token", req)
+		if resp.StatusCode != 403 || !strings.Contains(string(body), "start pods") {
+			t.Fatalf("%s: %d %s", target, resp.StatusCode, body)
+		}
+		answers = append(answers, string(body))
+	}
+	if answers[0] != answers[1] {
+		t.Errorf("the refusal tells whether the claim exists: %q and %q", answers[0], answers[1])
+	}
+	if len(e.restores()) != 0 {
+		t.Fatal("a restore was made")
+	}
+	// A new claim needs no pod right: the user only makes a claim.
+	req := newReq()
+	if resp, body := e.do("POST", "/v1/restores", "dave-token", req); resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("new claim: %d %s", resp.StatusCode, body)
 	}
 }
 

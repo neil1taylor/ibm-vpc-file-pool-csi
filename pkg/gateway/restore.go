@@ -110,6 +110,13 @@ func (g *Gateway) handleRestoreCreate(w http.ResponseWriter, r *http.Request, u 
 		writeError(w, http.StatusForbidden, "forbidden", "you may not create or change claims in that namespace")
 		return
 	}
+	// Writing files into a claim is the same power as mounting it, so an existing
+	// claim also needs the right to start pods. This is checked before the claim
+	// is looked at, so the refusal does not tell whether the claim exists.
+	if req.Existing && !g.canDo(ctx, u, Access{Namespace: req.TargetNamespace, Resource: "pods", Verb: "create"}) {
+		writeError(w, http.StatusForbidden, "forbidden", "you may not start pods in that namespace, and writing files into an existing claim needs that right")
+		return
+	}
 	policy := &v1alpha1.BackupPolicy{}
 	found := false
 	if perr := g.c.Get(ctx, types.NamespacedName{Name: req.Policy}, policy); perr == nil {

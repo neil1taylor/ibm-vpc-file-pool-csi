@@ -27,7 +27,7 @@ type gatewayOptions struct {
 	maxDownload int64
 	// maxOpenRestores limits the file restores one user has that have not ended.
 	maxOpenRestores int
-	authCache   time.Duration
+	authCache       time.Duration
 	// browseNamespace holds the session Secrets and helper pods.
 	browseNamespace string
 }

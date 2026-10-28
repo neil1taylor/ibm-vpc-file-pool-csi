@@ -599,7 +599,7 @@ kubectl backup restore-files --status bfr-abc12
 |------------------|----------|
 | Any restore | `get backupfiles` in the namespace of the **backed-up claim** (the built-in `admin` role has it; `backup-file-reader` and `backup-file-restorer` carry it) |
 | Into a new claim | also `create` on `persistentvolumeclaims` in the **target** namespace |
-| Into an existing claim | also `update` on `persistentvolumeclaims` in the target namespace |
+| Into an existing claim | also `update` on `persistentvolumeclaims` and `create` on `pods` in the target namespace (writing files into a claim is the same power as mounting it) |
 
 So an admin of namespace B can restore a file from the backup of namespace A into a claim of B only if someone with rights in A gave them `backup-file-reader` there. Without it they get the same "forbidden" whether the volume exists or not. The gateway reads the existing claim only after both rights are known, and takes its UID, so a claim that is deleted and made again before the restore runs is refused. Each request writes an audit Event `FileRestoreRequested` on the restore (in the driver namespace): the user, the volume, the moment, the target and the **paths**, never contents or tokens. The controller writes `FileRestoreDone` or `FileRestoreFailed` with counts only.
 
