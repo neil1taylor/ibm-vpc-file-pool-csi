@@ -19,6 +19,10 @@ To make a release:
 
 ## [Unreleased]
 
+### Fixed
+
+- PoolBench: when no whole steady phase of the VMs lies inside a backup event, the event says it has no latency figure. Before, it said nothing, so a short backup looked like a missing number.
+
 ## [v0.15.3] — 2026-10-28
 
 A small fix release. No CRD changes and no chart value changes.

@@ -546,6 +546,8 @@ func (r *Runner) backupNumbers(pb *v1alpha1.PoolBench, res *v1alpha1.PoolBenchEv
 		res.P95BeforeMicros = st.Steps[len(st.Steps)-1].P95Micros
 		text += fmt.Sprintf(" The VMs' p95 latency was %.1f ms during the backup and %.1f ms before.",
 			float64(res.P95Micros)/1000, float64(res.P95BeforeMicros)/1000)
+	} else {
+		text += " There is no latency figure: no whole steady phase of the VMs lay inside the backup."
 	}
 	return text
 }

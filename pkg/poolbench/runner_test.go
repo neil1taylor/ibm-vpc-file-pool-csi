@@ -1211,6 +1211,19 @@ func TestRunner_BackupWithNoCopyHasNoSpeed(t *testing.T) {
 	}
 }
 
+func TestRunner_BackupTooShortForLatencySaysSo(t *testing.T) {
+	h := backupBench(t)
+	h.toEndOfMeasuring()
+	// A steady phase lasts 555 s, so no whole phase lies inside a one-minute event.
+	h.advance(time.Minute)
+	setBackupStatus(t, h, "Active", "", "vm-001-data")
+	h.pass()
+	ev := h.expect(v1alpha1.PoolBenchRunning, v1alpha1.PoolBenchStageCreating).Status.Events[0]
+	if ev.P95Micros != 0 || !strings.Contains(ev.Message, "no latency") {
+		t.Fatalf("a backup with no whole steady phase must say it has no latency figure: %+v", ev)
+	}
+}
+
 func TestRunner_BackupReportsVMLatency(t *testing.T) {
 	h := backupBench(t)
 	h.toEndOfMeasuring()
