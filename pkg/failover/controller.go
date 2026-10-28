@@ -11,6 +11,7 @@ import (
 	"time"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/util"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -32,6 +33,10 @@ const (
 	// qemuUser is the user the receiver and KubeVirt's QEMU run as. It owns the
 	// replicated disks, and root cannot read them over NFS (root_squash).
 	qemuUser = 107
+
+	// csiDriverName is this driver's CSI name (driver.DriverName; a test keeps
+	// the two equal). The controller does not import the driver package.
+	csiDriverName = "vpc-file-pool.csi.ibm.io"
 
 	failoverJobNameMax = 52
 	mountDir           = "/data"
@@ -133,13 +138,19 @@ func (c *Controller) fail(ctx context.Context, f *v1alpha1.Failover, reason stri
 	return nil
 }
 
-// shareAddress says where the destination claim lives, for the PV of each
-// failed-over volume. Fields set in the spec win; the rest come from the NFS
-// volume behind the claim.
+// shareAddress says where the destination copies live, for the PV of each
+// failed-over volume: the server, and the export path of the folder that holds
+// the "pvcs" folder (the claim's folder, plus spec.basePath). Fields set in the
+// spec win; the rest come from the volume behind the claim, which is an NFS
+// volume or a CSI volume of this driver.
 func (c *Controller) shareAddress(ctx context.Context, f *v1alpha1.Failover, source string) (ip, export string, err error) {
+	base, err := BasePathOf(f)
+	if err != nil {
+		return "", "", err
+	}
 	ip, export = f.Spec.DRShareIP, f.Spec.DRExportPath
 	if ip != "" {
-		return ip, export, nil
+		return ip, strings.TrimRight(export, "/") + base, nil
 	}
 	pvc := &corev1.PersistentVolumeClaim{}
 	if err = c.client.Get(ctx, types.NamespacedName{Namespace: c.namespace, Name: source}, pvc); err != nil {
@@ -149,13 +160,49 @@ func (c *Controller) shareAddress(ctx context.Context, f *v1alpha1.Failover, sou
 	if err = c.client.Get(ctx, types.NamespacedName{Name: pvc.Spec.VolumeName}, pv); err != nil {
 		return "", "", fmt.Errorf("get the volume of claim %s: %w", source, err)
 	}
-	if pv.Spec.NFS == nil {
-		return "", "", fmt.Errorf("the volume of claim %s is not an NFS volume; set spec.drShareIP and spec.drExportPath", source)
+	switch {
+	case pv.Spec.NFS != nil:
+		if export == "" {
+			export = strings.TrimRight(pv.Spec.NFS.Path, "/")
+		}
+		return pv.Spec.NFS.Server, strings.TrimRight(export, "/") + base, nil
+	case pv.Spec.CSI != nil:
+		server, claimDir, cerr := csiClaimAddress(pv.Spec.CSI)
+		if cerr != nil {
+			return "", "", fmt.Errorf("the volume of claim %s: %v; set spec.drShareIP and spec.drExportPath", source, cerr)
+		}
+		if export == "" {
+			export = claimDir
+		}
+		return server, strings.TrimRight(export, "/") + base, nil
+	default:
+		return "", "", fmt.Errorf("the volume of claim %s is neither an NFS volume nor a volume of this driver; set spec.drShareIP and spec.drExportPath", source)
 	}
-	if export == "" {
-		export = strings.TrimRight(pv.Spec.NFS.Path, "/")
+}
+
+// csiClaimAddress reads where a claim that this driver provisioned lives: the
+// server, and the export path of the claim's folder, which is the share's
+// export path plus the folder inside the share. These are the attributes that
+// NodeStageVolume (server, share) and NodePublishVolume (subDir) use.
+func csiClaimAddress(csi *corev1.CSIPersistentVolumeSource) (server, claimDir string, err error) {
+	if csi.Driver != csiDriverName {
+		return "", "", fmt.Errorf("is a volume of CSI driver %q, not of %s", csi.Driver, csiDriverName)
 	}
-	return pv.Spec.NFS.Server, export, nil
+	server = csi.VolumeAttributes["server"]
+	share := csi.VolumeAttributes["share"]
+	subDir := csi.VolumeAttributes["subDir"]
+	switch {
+	case server == "":
+		return "", "", fmt.Errorf("has no server in its volume attributes")
+	case !strings.HasPrefix(share, "/"):
+		return "", "", fmt.Errorf("has no usable share (export path) in its volume attributes: %q", share)
+	case !util.ValidBasePath(strings.TrimRight(share, "/") + "/x"):
+		return "", "", fmt.Errorf("has an unsafe share (export path) in its volume attributes: %q", share)
+	}
+	if err = util.ValidateSubDir(subDir); err != nil {
+		return "", "", fmt.Errorf("has an unsafe subDir in its volume attributes: %v", err)
+	}
+	return server, strings.TrimRight(share, "/") + subDir, nil
 }
 
 // begin checks a new Failover and starts its Job.
@@ -166,6 +213,10 @@ func (c *Controller) begin(ctx context.Context, f *v1alpha1.Failover, all []v1al
 	}
 	if c.driverImage == "" {
 		return c.fail(ctx, f, "the controller has no driver image for the failover Job")
+	}
+	base, berr := BasePathOf(f)
+	if berr != nil {
+		return c.fail(ctx, f, berr.Error())
 	}
 	pvc := &corev1.PersistentVolumeClaim{}
 	err := c.client.Get(ctx, types.NamespacedName{Namespace: c.namespace, Name: source}, pvc)
@@ -178,7 +229,7 @@ func (c *Controller) begin(ctx context.Context, f *v1alpha1.Failover, all []v1al
 
 	args := []string{
 		"--mode=failover",
-		"--nfs-mount-path=" + mountDir,
+		"--nfs-mount-path=" + mountDir + base,
 		"--failover-action=" + f.Spec.Action,
 	}
 	if f.Spec.RewindTo != nil {

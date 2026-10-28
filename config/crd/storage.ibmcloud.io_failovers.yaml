@@ -68,6 +68,12 @@ spec:
                 - Plan
                 - Execute
                 type: string
+              basePath:
+                description: |-
+                  BasePath is the folder of the claim that holds the copies: the
+                  ReplicationPolicy's destinationBasePath. The copies are then at
+                  <claim>/<basePath>/pvcs. Unset means "/", the claim's root.
+                type: string
               drExportPath:
                 type: string
               drPool:
@@ -78,8 +84,9 @@ spec:
               drShareIP:
                 description: |-
                   DRShareIP and DRExportPath are the NFS server and export of the
-                  destination claim. Unset means they are read from the claim's volume,
-                  which must then be an NFS volume.
+                  destination claim. Unset means they are read from the claim's volume: an
+                  NFS volume, or a CSI volume of this driver (its server, share and
+                  subDir attributes).
                 type: string
               force:
                 description: |-

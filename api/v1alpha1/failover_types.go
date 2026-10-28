@@ -84,9 +84,16 @@ type FailoverSpec struct {
 	// +optional
 	DRPool string `json:"drPool,omitempty"`
 
+	// BasePath is the folder of the claim that holds the copies: the
+	// ReplicationPolicy's destinationBasePath. The copies are then at
+	// <claim>/<basePath>/pvcs. Unset means "/", the claim's root.
+	// +optional
+	BasePath string `json:"basePath,omitempty"`
+
 	// DRShareIP and DRExportPath are the NFS server and export of the
-	// destination claim. Unset means they are read from the claim's volume,
-	// which must then be an NFS volume.
+	// destination claim. Unset means they are read from the claim's volume: an
+	// NFS volume, or a CSI volume of this driver (its server, share and
+	// subDir attributes).
 	// +optional
 	DRShareIP string `json:"drShareIP,omitempty"`
 	// +optional

@@ -93,6 +93,9 @@ func (v *FailoverValidator) validateSpec(spec *v1alpha1.FailoverSpec) error {
 			return fmt.Errorf("spec.vms: %w", err)
 		}
 	}
+	if _, err := failover.BasePathOf(&v1alpha1.Failover{Spec: *spec}); err != nil {
+		return err
+	}
 	if spec.Namespace != "" {
 		if errs := validation.IsDNS1123Label(spec.Namespace); len(errs) > 0 {
 			return fmt.Errorf("spec.namespace is not a namespace name: %v", errs)

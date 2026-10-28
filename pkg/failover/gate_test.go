@@ -106,3 +106,21 @@ func TestExpectationFromPlan(t *testing.T) {
 		t.Errorf("targets = %+v, want one for each planned volume", e.Targets)
 	}
 }
+
+func TestFindPlan_NeedsTheSameBasePath(t *testing.T) {
+	p := planned("p", "recv", m3.Add(-time.Minute), nil)
+	p.Spec.BasePath = "/repl"
+	exec := &v1alpha1.Failover{Spec: v1alpha1.FailoverSpec{Source: "recv", Action: v1alpha1.FailoverActionExecute}}
+	if _, err := FindPlan([]v1alpha1.Failover{p}, exec, "", m3); err == nil || !strings.Contains(err.Error(), "basePath") {
+		t.Fatalf("err = %v, want a refusal that names basePath", err)
+	}
+	exec.Spec.BasePath = "/repl/"
+	if _, err := FindPlan([]v1alpha1.Failover{p}, exec, "", m3); err != nil {
+		t.Fatalf("same base path (trailing slash aside) should match: %v", err)
+	}
+	exec.Spec.BasePath = "/"
+	p.Spec.BasePath = ""
+	if _, err := FindPlan([]v1alpha1.Failover{p}, exec, "", m3); err != nil {
+		t.Fatalf("unset and / are the same: %v", err)
+	}
+}
