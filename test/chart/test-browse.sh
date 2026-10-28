@@ -73,7 +73,7 @@ absent "no pull secrets, no flag" "$ON" '--browse-image-pull-secrets'
 find "$PULL" -delete
 absent "off: no browse image" "$OFF" '--browse-image'
 absent "off: no NetworkPolicy" "$OFF" 'kind: NetworkPolicy'
-absent "off: no Role" "$OFF" 'kind: Role'
+absent "off: nothing in the browse namespace" "$OFF" 'namespace: ibm-vpc-file-pool-csi-browse'
 
 # The non-Helm role has the same rule.
 check "config/rbac: the controller manages BackupBrowse objects" "$ROOT/config/rbac/clusterrole.yaml" '"backupbrowses"'

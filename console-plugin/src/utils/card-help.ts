@@ -136,6 +136,14 @@ export const CARD_HELP = {
     title: 'Backed-up Volumes',
     text: 'Each volume the policy backs up, with the restore points you can go back to. A volume marked "no longer backed up" keeps its backups until the keep time has passed.',
   },
+  backupBrowseFiles: {
+    title: 'Files in this backup',
+    text: 'The folders and files of one backup at the moment you chose. You only look: nothing in the backup can change. A link is shown with the place it points to and is never followed, and a file marked Not readable is kept for another user, so the reader cannot open it.',
+  },
+  backupBrowseMoment: {
+    title: 'Moment',
+    text: 'Which copy of the volume you look at. The latest copy is the newest backup, and the next backup replaces files in it one at a time, so it can change while you look. An older moment never changes until the keep time removes it.',
+  },
   pbWhatToRun: {
     title: 'What to run',
     text: 'Pick a ready-made set of settings, or change them below. Quick check is a short test that the tool works. A tier run finds how many VMs one share carries.',

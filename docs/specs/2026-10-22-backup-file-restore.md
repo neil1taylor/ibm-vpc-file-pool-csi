@@ -268,3 +268,4 @@ Not yet tested: a real Windows disk with BitLocker or a hibernated system, btrfs
 - The audit Events are written in the driver namespace on the `BackupBrowse` (a cluster-scoped object).
 - A session belongs to the user who made it; another user, even with the same rights, sees "no such session".
 - The helper has a `/v1/moments` call so that `kubectl backup ls --moments` can list the moment folders.
+- The console file browser (phase 3, first half) downloads with a GET route on the gateway, `GET /v1/sessions/{name}/download?type=file|tar&p=<base64 name>...`, because a browser can stream a large download to disk only from a GET. It takes the same steps as the POST calls. Every file and tar reply now carries `Content-Disposition: attachment`, `nosniff`, a sandbox Content-Security-Policy and `no-store`, since the console proxy serves it from the console's own origin. The console shows the action when the settings ConfigMap says `fileBrowse: "true"`.

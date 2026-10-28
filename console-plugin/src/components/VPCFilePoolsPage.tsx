@@ -79,6 +79,9 @@ const BackupPolicyFormPage = React.lazy(
 const BackupCOSRestorePage = React.lazy(
   () => import('./backup/BackupCOSRestorePage'),
 );
+const BackupBrowsePage = React.lazy(
+  () => import('./backup/BackupBrowsePage'),
+);
 const BackupRestorePage = React.lazy(
   () => import('./backup/BackupRestorePage'),
 );
@@ -171,6 +174,7 @@ const VPCFilePoolsPage: React.FC = () => {
           <Route exact path={ROUTES.BACKUP_CREATE} component={BackupPolicyFormPage} />
           <Route exact path={ROUTES.BACKUP_EDIT} component={BackupPolicyFormPage} />
           <Route exact path={ROUTES.BACKUP_RESTORE} component={BackupRestorePage} />
+          <Route exact path={ROUTES.BACKUP_BROWSE} component={BackupBrowsePage} />
           <Route exact path={ROUTES.BACKUP_DETAIL} component={BackupDetailsPage} />
           <Route exact path={ROUTES.POOLBENCH_CREATE} component={PoolBenchCreatePage} />
           <Route exact path={ROUTES.POOLBENCH_COMPARE} component={PoolBenchComparePage} />
