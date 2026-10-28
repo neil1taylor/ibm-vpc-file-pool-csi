@@ -2062,6 +2062,7 @@ Cluster-scoped resource (short name `fo`). Asks the driver on the destination (D
 | `source` | string | Destination claim to read, in the driver's namespace. Empty means the Helm value `replicationReceiver.pvcName` |
 | `action` | `Plan` \| `Execute` | Required. `Plan` reads and reports; `Execute` also makes the SubVolume, PV and PVC objects |
 | `rewindTo` | time | The newest moment at or before it is used for each running VM |
+| `vms` | []string | Only these running VMs, each as `namespace/name`. Empty (the default) means every VM on the copy and every volume that is not a VM disk, as before. With a list, all disks of a chosen VM come together, and nothing else is planned or failed over: no other VM and no plain volume. A name that is not a running VM on the copy fails the Plan and lists the VMs that are. The order and repeats do not matter |
 | `namespace` | string | Namespace of the PVCs that are made (Execute) |
 | `force` | bool | Go on although a copy may still be applied; an unfinished copy is rolled back first |
 | `drPool` | string | FileSharePool the new SubVolumes belong to. Required for Execute |
@@ -2101,12 +2102,22 @@ spec:
   action: Execute
   drPool: dr-production
   rewindTo: "2026-10-21T10:30:00Z"   # same as the Plan
+---
+# Fail over one VM. The Plan and the Execute name the same VMs.
+apiVersion: storage.ibmcloud.io/v1alpha1
+kind: Failover
+metadata:
+  name: plan-web
+spec:
+  action: Plan
+  vms: ["apps/web"]
 ```
 
 ### Safety
 
-- An `Execute` is refused (by the webhook, and again by the controller) unless a `Plan` with the same source and `rewindTo` is `Planned` and finished in the last 15 minutes.
+- An `Execute` is refused (by the webhook, and again by the controller) unless a `Plan` with the same source, `rewindTo` and `vms` (compared as sets) is `Planned` and finished in the last 15 minutes.
 - The Job gets the confirmed plan (the moment of each VM and the volume names). If the share now gives another plan, the Job stops before it rewinds or changes anything, and the Failover is `Failed` with the difference.
+- With `vms` set, the Job reads and checks only the chosen VMs. A copy that is still being applied to another VM, or another VM with no moment at or before `rewindTo`, does not block the chosen ones. The status, the created objects and the "already failed over" check cover only the chosen VMs.
 - A volume that has a failed-over SubVolume (label `storage.ibmcloud.io/failover-source`) on this cluster is refused, so a VM is not failed over twice.
 - The Job runs as user 107, because that user owns the replicated disks. A rewind never changes the latest disk.
 - RBAC: the ClusterRole `<release>-failover-admin` gives access to `failovers`. It is bound to nobody.

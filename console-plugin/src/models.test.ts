@@ -1,6 +1,7 @@
 import {
   BackupPolicyModel,
   BackupRestoreModel,
+  FailoverModel,
   KubeVolumeGroupSnapshotModel,
   PersistentVolumeModel,
   PersistentVolumeClaimModel,
@@ -47,5 +48,17 @@ describe('Backup models', () => {
 describe('PersistentVolumeModel', () => {
   it('describes the cluster-wide PV that the backup Jobs use', () => {
     expect(PersistentVolumeModel).toMatchObject({ apiVersion: 'v1', kind: 'PersistentVolume', plural: 'persistentvolumes', namespaced: false });
+  });
+});
+
+describe('FailoverModel', () => {
+  it('describes the cluster-scoped Failover resource', () => {
+    expect(FailoverModel).toMatchObject({
+      apiGroup: 'storage.ibmcloud.io',
+      apiVersion: 'v1alpha1',
+      kind: 'Failover',
+      plural: 'failovers',
+      namespaced: false,
+    });
   });
 });

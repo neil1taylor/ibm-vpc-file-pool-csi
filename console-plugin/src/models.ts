@@ -89,6 +89,17 @@ export const PoolBenchModel: K8sModel = {
   namespaced: false,
 };
 
+export const FailoverModel: K8sModel = {
+  apiGroup: API_GROUP,
+  apiVersion: API_VERSION,
+  kind: 'Failover',
+  plural: 'failovers',
+  abbr: 'FO',
+  label: 'Failover',
+  labelPlural: 'Failovers',
+  namespaced: false,
+};
+
 /** KubeVirt's running VM, for the VMs of a PoolBench run. */
 export const VirtualMachineInstanceModel: K8sModel = {
   apiGroup: 'kubevirt.io',

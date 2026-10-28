@@ -580,3 +580,74 @@ export interface PoolBenchStatus {
   log?: { time: string; kind: 'Info' | 'Warning' | 'Error' | 'Control'; message: string }[];
   cleanedUp?: boolean;
 }
+
+// ── Failover ──
+
+/** Asks the driver on the destination (DR) cluster to plan, or carry out, a failover. Cluster scoped. */
+export interface Failover extends K8sResourceCommon {
+  spec: FailoverSpec;
+  status?: FailoverStatus;
+}
+
+export interface FailoverSpec {
+  /** The destination claim to read. Empty means the claim the Helm chart names for the receiver. */
+  source?: string;
+  action: 'Plan' | 'Execute';
+  /** Limits the moment of each VM to the newest one at or before it. */
+  rewindTo?: string;
+  /** Only these VMs ("namespace/name"). Empty means every VM on the copy. */
+  vms?: string[];
+  namespace?: string;
+  force?: boolean;
+  /** The FileSharePool the new SubVolumes belong to. Required for Execute. */
+  drPool?: string;
+}
+
+export type FailoverPhase = 'Planning' | 'Planned' | 'Executing' | 'Done' | 'Failed';
+
+export interface FailoverStatus {
+  phase?: FailoverPhase;
+  message?: string;
+  source?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  /** Go duration, for example "1h5m0s". */
+  rpo?: string;
+  vms?: FailoverVM[];
+  volumes?: FailoverVolume[];
+  momentsTruncated?: boolean;
+  createdPVCs?: FailoverPVC[];
+}
+
+export interface FailoverVM {
+  /** namespace/name */
+  name: string;
+  /** The moment the failed-over disks will show. */
+  moment: string;
+  /** The moments all disks of the VM can show, newest first. */
+  moments?: string[];
+  disks: FailoverDisk[];
+}
+
+export interface FailoverDisk {
+  subVolume: string;
+  /** True if the disk is rewound to the VM's moment (it copies the whole disk). */
+  rewind: boolean;
+}
+
+export interface FailoverVolume {
+  subVolume: string;
+  pvcName: string;
+  pvcNamespace: string;
+  requestedGB: number;
+  subPath: string;
+  policy?: string;
+  lastSync: string;
+}
+
+export interface FailoverPVC {
+  namespace: string;
+  name: string;
+  pv: string;
+  subVolume: string;
+}

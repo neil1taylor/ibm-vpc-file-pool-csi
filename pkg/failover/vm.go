@@ -25,6 +25,12 @@ type VMOptions struct {
 	Force bool
 	// Now is the current time.
 	Now time.Time
+	// VMs, if set, limits the plan to these VMs ("namespace/name"). Every disk
+	// of a chosen VM is kept, and nothing else: not another VM, and not a
+	// volume that is not a VM disk. A name that is not on the copy is refused.
+	// Disks of the other VMs are not looked at, so a copy still being applied
+	// to one of them does not block the chosen VMs.
+	VMs []string
 }
 
 // diskInGroup is one disk of a running VM at the destination.
@@ -46,6 +52,8 @@ const diskFile = "disk.img"
 // VM, the moments all its disks can show. It changes nothing.
 func (p *FailoverPlan) analyzeVMs(opts VMOptions) (map[string]*vmGroupAnalysis, error) {
 	groups := map[string]*vmGroupAnalysis{}
+	filter := vmSet(opts.VMs)
+	found := map[string]bool{}
 	var busy []string
 	for i, sv := range p.SubVolumes {
 		if sv.LocalDir == "" {
@@ -62,14 +70,19 @@ func (p *FailoverPlan) analyzeVMs(opts VMOptions) (map[string]*vmGroupAnalysis, 
 		if !st.MomentKnown && st.VMGroup == "" {
 			continue // not a disk the receiver wrote
 		}
+		key := st.VMGroup
+		if key == "" {
+			key = "volume/" + sv.SubVolumeName
+		} else {
+			found[key] = true
+		}
+		if filter != nil && !filter[key] {
+			continue // not a chosen VM
+		}
 		if on, lerr := replication.LeaseActive(sv.LocalDir, opts.Now); lerr != nil {
 			return nil, fmt.Errorf("checking for a running commit on %s: %w", sv.SubVolumeName, lerr)
 		} else if on && !opts.Force {
 			busy = append(busy, sv.SubVolumeName)
-		}
-		key := st.VMGroup
-		if key == "" {
-			key = "volume/" + sv.SubVolumeName
 		}
 		g := groups[key]
 		if g == nil {
@@ -77,6 +90,9 @@ func (p *FailoverPlan) analyzeVMs(opts VMOptions) (map[string]*vmGroupAnalysis, 
 			groups[key] = g
 		}
 		g.disks = append(g.disks, diskInGroup{idx: i, name: sv.SubVolumeName, state: st})
+	}
+	if err := unknownVMs(opts.VMs, found); err != nil {
+		return nil, err
 	}
 	if len(busy) > 0 {
 		return nil, fmt.Errorf("a copy is still being applied to %s; wait for it to end, or use --force (an unfinished copy is rolled back first)", strings.Join(busy, ", "))
@@ -118,6 +134,34 @@ func (p *FailoverPlan) analyzeVMs(opts VMOptions) (map[string]*vmGroupAnalysis, 
 		}
 	}
 	return groups, nil
+}
+
+func unknownVMs(want []string, found map[string]bool) error {
+	var missing, have []string
+	for _, v := range NormalizeVMs(want) {
+		if !found[v] {
+			missing = append(missing, v)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	for v := range found {
+		have = append(have, v)
+	}
+	sort.Strings(have)
+	list := "none"
+	if len(have) > 0 {
+		list = strings.Join(have, ", ")
+	}
+	return fmt.Errorf("spec.vms names %s, which %s not a running VM on the copy; the VMs on the copy are: %s", strings.Join(missing, ", "), pluralIs(len(missing)), list)
+}
+
+func pluralIs(n int) string {
+	if n == 1 {
+		return "is"
+	}
+	return "are"
 }
 
 func noCommonMoment(key string, g *vmGroupAnalysis, opts VMOptions) error {
@@ -175,8 +219,28 @@ func (p *FailoverPlan) ResolveVMs(opts VMOptions) error {
 			sv.LastSyncTime = chosen
 		}
 	}
+	if len(opts.VMs) > 0 {
+		p.keepOnly(groups)
+	}
 	p.recomputeRPO(opts.Now)
 	return nil
+}
+
+// keepOnly drops every volume that is not a disk in groups.
+func (p *FailoverPlan) keepOnly(groups map[string]*vmGroupAnalysis) {
+	keep := map[int]bool{}
+	for _, g := range groups {
+		for _, d := range g.disks {
+			keep[d.idx] = true
+		}
+	}
+	kept := make([]FailoverSubVolumePlan, 0, len(keep))
+	for i, sv := range p.SubVolumes {
+		if keep[i] {
+			kept = append(kept, sv)
+		}
+	}
+	p.SubVolumes = kept
 }
 
 func (p *FailoverPlan) recomputeRPO(now time.Time) {

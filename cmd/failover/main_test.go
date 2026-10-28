@@ -212,3 +212,20 @@ func TestBuildClient_UsesKUBECONFIGVariable(t *testing.T) {
 		t.Fatalf("buildClient did not use KUBECONFIG: %v", err)
 	}
 }
+
+func TestVMOptionsFromFlags_VMs(t *testing.T) {
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	o, err := vmOptionsFromFlags(map[string]string{"vms": "ns/b, ns/a,ns/b"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(o.VMs, []string{"ns/a", "ns/b"}) {
+		t.Errorf("VMs = %v", o.VMs)
+	}
+	if o, err = vmOptionsFromFlags(map[string]string{}, now); err != nil || o.VMs != nil {
+		t.Errorf("no flag: %+v %v", o, err)
+	}
+	if _, err = vmOptionsFromFlags(map[string]string{"vms": "justaname"}, now); err == nil || !strings.Contains(err.Error(), "--vms") {
+		t.Errorf("err = %v, want one that names --vms", err)
+	}
+}

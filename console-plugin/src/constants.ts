@@ -27,6 +27,7 @@ export const ROUTES = {
   GROUP_SNAPSHOT_DETAIL: '/vpc-file-pools/group-snapshots/:name',
   REPLICATION: '/vpc-file-pools/replication',
   REPLICATION_CREATE: '/vpc-file-pools/replication/~new',
+  RECOVERY: '/vpc-file-pools/replication/~recovery',
   REPLICATION_DETAIL: '/vpc-file-pools/replication/:name',
   BACKUPS: '/vpc-file-pools/backups',
   BACKUP_CREATE: '/vpc-file-pools/backups/~new',

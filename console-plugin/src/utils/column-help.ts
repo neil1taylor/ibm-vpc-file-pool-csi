@@ -66,6 +66,14 @@ export const COLUMN_HELP = {
     title: 'Moments to Recover To',
     text: 'The moments that every disk of the VM can show: the copy moment and the restore points all disks have. A recovery must use one of these, or the disks would show different times. Newest first, as ages; the list can be a few minutes old.',
   },
+  recoveryPlanMoment: {
+    title: 'Will Show',
+    text: 'The moment the VM shows after a failover, and how long ago that was. It is the newest moment all disks of the VM share, unless you choose an earlier one.',
+  },
+  recoveryRewindDisks: {
+    title: 'Disks to Rewind',
+    text: 'A disk that does not show the moment of the VM must be rewound to it. A rewind copies the whole disk and takes minutes; the other disks are used in place.',
+  },
   syncNextCopy: {
     title: 'Next Copy',
     text: 'For a running VM disk: whether the next copy sends only the blocks changed since the last copy, or the full disk. A full copy is needed again, for example, after the VM moved to another node.',

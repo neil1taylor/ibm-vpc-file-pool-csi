@@ -184,6 +184,9 @@ func (c *Controller) begin(ctx context.Context, f *v1alpha1.Failover, all []v1al
 	if f.Spec.RewindTo != nil {
 		args = append(args, "--rewind-to="+f.Spec.RewindTo.UTC().Format(time.RFC3339))
 	}
+	if vms := NormalizeVMs(f.Spec.VMs); vms != nil {
+		args = append(args, "--vms="+strings.Join(vms, ","))
+	}
 	if f.Spec.Force {
 		args = append(args, "--force")
 	}

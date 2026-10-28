@@ -1,5 +1,5 @@
 import { ReplicationPolicy, ReplicationPolicySpec, SubVolumeReplicationStatus, VMReplicationStatus } from '../types';
-import { parseGoDuration } from './backup-policy-form';
+import { copyStaleness } from './failover-helpers';
 import { formatAge } from './resource-helpers';
 
 interface DestinationInput {
@@ -183,18 +183,11 @@ export function describeVMRecovery(
   schedule: string | undefined,
   now: Date = new Date(),
 ): VMRecoveryView[] {
-  const scheduleMs = schedule ? parseGoDuration(schedule) : undefined;
   return (vms || []).map((vm) => {
     const moments = vm.commonMoments || [];
-    let stale = false;
-    let staleText = '';
-    if (!vm.copyMoment) {
-      stale = true;
-      staleText = 'No copy yet';
-    } else if (scheduleMs && now.getTime() - new Date(vm.copyMoment).getTime() > 2 * scheduleMs) {
-      stale = true;
-      staleText = `Newest copy is older than twice the ${schedule} schedule`;
-    }
+    const staleness = copyStaleness(vm.copyMoment, schedule, now.getTime());
+    const stale = staleness.stale;
+    const staleText = staleness.stale ? staleness.text : '';
     let consistency = '-';
     if (vm.consistency === 'FileSystemConsistent') consistency = 'File-system consistent';
     if (vm.consistency === 'CrashConsistent') consistency = 'Crash consistent';
