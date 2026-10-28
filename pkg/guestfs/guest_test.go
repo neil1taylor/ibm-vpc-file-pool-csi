@@ -266,15 +266,15 @@ func TestOpenAndRead(t *testing.T) {
 		t.Errorf("size = %d", file.Size())
 	}
 	buf := make([]byte, 5)
-	if n, err := file.ReadAt(buf, 0); err != nil || string(buf[:n]) != "hello" {
-		t.Fatalf("%q %v", buf[:n], err)
+	if n, rerr := file.ReadAt(buf, 0); rerr != nil || string(buf[:n]) != "hello" {
+		t.Fatalf("%q %v", buf[:n], rerr)
 	}
 	// Going on from where it stopped reuses the stream; going back starts again.
-	if n, err := file.ReadAt(buf, 5); err != nil || string(buf[:n]) != " worl" {
-		t.Fatalf("%q %v", buf[:n], err)
+	if n, rerr := file.ReadAt(buf, 5); rerr != nil || string(buf[:n]) != " worl" {
+		t.Fatalf("%q %v", buf[:n], rerr)
 	}
-	if n, err := file.ReadAt(buf, 1); err != nil || string(buf[:n]) != "ello " {
-		t.Fatalf("%q %v", buf[:n], err)
+	if n, rerr := file.ReadAt(buf, 1); rerr != nil || string(buf[:n]) != "ello " {
+		t.Fatalf("%q %v", buf[:n], rerr)
 	}
 	// A read that reaches the end says so.
 	n, err := file.ReadAt(buf, 10)

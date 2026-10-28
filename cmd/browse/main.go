@@ -137,7 +137,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 			return 1
 		}
 		defer g.Close()
-		opts.InfoFunc, opts.Moments, tree = g.info, g.Opened.Moments, g.Opened.Tree
+		opts.InfoFunc, opts.Moments, tree = g.info, g.Moments, g.Tree
 	} else if *cosSource != "" {
 		cosTree, info, moments, cerr := startCOS(ctx, *cosSource, atTime, *kopia, *kopiaState, stderr)
 		if cerr != nil {
