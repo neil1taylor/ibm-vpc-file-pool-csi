@@ -363,7 +363,8 @@ func transmit(ctx context.Context, rw io.ReadWriter, exp Export, opts Options) e
 		}
 		typ := binary.BigEndian.Uint16(h[6:])
 		handle := h[8:16]
-		off, length := binary.BigEndian.Uint64(h[16:]), int64(binary.BigEndian.Uint32(h[24:]))
+		off, rawLen := binary.BigEndian.Uint64(h[16:]), binary.BigEndian.Uint32(h[24:])
+		length := int64(rawLen)
 		switch typ {
 		case cmdDisc:
 			return nil
@@ -387,7 +388,7 @@ func transmit(ctx context.Context, rw io.ReadWriter, exp Export, opts Options) e
 				return err
 			}
 		case cmdRead:
-			if length == 0 || length > maxRead || off > usize || uint64(length) > usize-off {
+			if length == 0 || length > maxRead || off > usize || uint64(rawLen) > usize-off {
 				if err := writeReply(rw, errInval, handle, nil); err != nil {
 					return err
 				}
