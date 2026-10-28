@@ -66,6 +66,7 @@ func runGateway(o gatewayOptions) {
 	g := gateway.New(c, auth, auth, gateway.Config{
 		SessionNamespace: o.browseNamespace,
 		EventNamespace:   driverNamespace,
+		DriverNamespace:  driverNamespace,
 		SessionWait:      o.sessionWait,
 		MaxDownloadBytes: o.maxDownload,
 		MaxOpenRestores:  o.maxOpenRestores,

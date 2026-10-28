@@ -79,6 +79,16 @@ spec:
             - "--browse-max-life={{ .Values.backupBrowse.maxLife }}"
             - "--browse-max-sessions={{ .Values.backupBrowse.maxSessions }}"
             - "--browse-max-sessions-per-namespace={{ .Values.backupBrowse.maxSessionsPerNamespace }}"
+            - "--browse-cos={{ .Values.backupBrowse.cos.enabled }}"
+            {{- if .Values.backupBrowse.cos.enabled }}
+            {{- with .Values.backupBrowse.cos.cpuLimit }}
+            - "--browse-cos-cpu-limit={{ . }}"
+            {{- end }}
+            {{- with .Values.backupBrowse.cos.memoryLimit }}
+            - "--browse-cos-memory-limit={{ . }}"
+            {{- end }}
+            - "--browse-cos-start-timeout={{ .Values.backupBrowse.cos.startTimeout }}"
+            {{- end }}
             {{- end }}
             {{- if not (has .Values.vmSnapshots.method (list "auto" "copy")) }}
             {{- fail "vmSnapshots.method must be auto or copy" }}

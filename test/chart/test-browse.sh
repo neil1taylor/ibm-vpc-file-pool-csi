@@ -91,6 +91,35 @@ else
     pass "every Secrets Role for sessions is in the browse namespace"
 fi
 
+# Browsing backups in COS. The helper pods that read COS run in the release
+# namespace, where the COS and Key Protect Secrets are, so the keys are never
+# copied to the browse namespace (the gateway may read Secrets there).
+COSOFF="$(mktemp)"
+COSSET="$(mktemp)"
+helm template test "$CHART" --namespace kube-system --set backupBrowse.cos.enabled=false > "$COSOFF"
+helm template test "$CHART" --namespace kube-system --set backupBrowse.cos.cpuLimit=2 \
+    --set backupBrowse.cos.memoryLimit=3Gi --set backupBrowse.cos.startTimeout=9m > "$COSSET"
+check "cos: on by default" "$ON" '--browse-cos=true'
+check "cos: default start timeout" "$ON" '--browse-cos-start-timeout=5m'
+absent "cos: no limit flags unless set (cpu)" "$ON" '--browse-cos-cpu-limit'
+absent "cos: no limit flags unless set (memory)" "$ON" '--browse-cos-memory-limit'
+check "cos: the cpu limit can be set" "$COSSET" '--browse-cos-cpu-limit=2'
+check "cos: the memory limit can be set" "$COSSET" '--browse-cos-memory-limit=3Gi'
+check "cos: the start timeout can be set" "$COSSET" '--browse-cos-start-timeout=9m'
+check "cos: it can be turned off" "$COSOFF" '--browse-cos=false'
+absent "cos off: no start timeout flag" "$COSOFF" '--browse-cos-start-timeout'
+check "cos: the controller may make and delete Secrets in the release namespace, and only that" "$ON" 'verbs: ["create", "delete"]'
+absent "cos off: no Role for session Secrets in the release namespace" "$COSOFF" 'verbs: ["create", "delete"]'
+check "cos: a NetworkPolicy guards the helper pods in the release namespace" "$ON" 'name: test-ibm-vpc-file-pool-csi-browse-cos'
+absent "cos off: that NetworkPolicy is not rendered" "$COSOFF" 'name: test-ibm-vpc-file-pool-csi-browse-cos'
+# The Role and its binding belong to the controller; the gateway is not a subject.
+COSDOCS="$(mktemp)"
+awk -v RS='\n---\n' '/name: test-ibm-vpc-file-pool-csi-browse-cos\n/ && /kind: (Role|RoleBinding)\n/' "$ON" > "$COSDOCS"
+check "cos: the binding is for the controller" "$COSDOCS" 'name: test-ibm-vpc-file-pool-csi-controller'
+absent "cos: the gateway has no right to Secrets in the release namespace" "$COSDOCS" 'backup-gateway'
+absent "cos: the Role cannot read Secrets" "$COSDOCS" '"get"'
+find "$COSOFF" "$COSSET" "$COSDOCS" -delete
+
 # OpenShift: one SCC lets the helper run as root with no capabilities.
 SCC="$(mktemp)"
 helm template test "$CHART" --namespace kube-system --api-versions security.openshift.io/v1 > "$SCC"
