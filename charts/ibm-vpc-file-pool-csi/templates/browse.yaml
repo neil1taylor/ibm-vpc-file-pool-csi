@@ -74,6 +74,67 @@ spec:
       ports:
         - protocol: TCP
           port: 8443
+{{- if .Values.backupBrowse.cos.enabled }}
+---
+# A backup in COS is read by a helper pod in the driver's own namespace, where the
+# COS and Key Protect Secrets are (a pod mounts only Secrets of its own namespace).
+# The controller keeps a copy of each session's token and certificate there, for
+# the helper to mount. It may make and delete Secrets in this namespace; it reads
+# the others' metadata only. The gateway has no right to read Secrets here.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $fullname }}-browse-cos
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $fullname }}-browse-cos
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $fullname }}-browse-cos
+subjects:
+  - kind: ServiceAccount
+    name: {{ $fullname }}-controller
+    namespace: {{ .Release.Namespace }}
+---
+# Only the backup gateway may reach a helper pod that reads COS, and only on the
+# helper's port. The policy selects the helper pods by their label and nothing
+# else in this namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-browse-cos
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: storage.ibmcloud.io/browse
+        operator: Exists
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "ibm-vpc-file-pool-csi.name" . }}
+              app.kubernetes.io/component: backup-gateway
+      ports:
+        - protocol: TCP
+          port: 8443
+{{- end }}
 {{- if .Capabilities.APIVersions.Has "security.openshift.io/v1" }}
 ---
 # On OpenShift the helper pod needs to run as root. This SCC allows that and

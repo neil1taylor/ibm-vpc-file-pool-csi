@@ -34,8 +34,23 @@
 # namespace restore into a claim of their own; a restore is shown only to the
 # user who asked; the audit Event names the user and the paths and holds no token.
 
+# Part 6, backups in COS: test/e2e/test-backup-files-cos.sh backs up a pod volume
+# with the policy's export block on, waits until the moments are in the bucket, and
+# reads them with `kubectl backup ls/get/restore-files --from-cos` as real users:
+# the latest copy and the first moment, a link as a link, a file of another owner,
+# the checksum, a restore into a new claim, at the first moment and into a new
+# folder of an existing claim. The helper pod has no service account token, runs as
+# an ordinary user and mounts no share; the COS and Key Protect Secrets are not in
+# the browse namespace; another pod cannot reach it. The wrong people are forbidden,
+# naming a bucket directly needs the right to read its Secrets, a wrong root key, a
+# missing Secret and a wrong COS key are said in words, no key reaches a log, an
+# Event or a status, and nothing is left behind. It needs the COS configuration of
+# stage 18 (see test/e2e/lib/backup-cos.sh) and is "not checked" without it. It
+# cannot test a moment that the local keep time has removed: that takes too long.
+
 # A pool takes 5 to 15 minutes to become ready; the rest is under 5 minutes.
-RT_STAGE_TIMEOUT=10800
+# The COS part adds up to an hour (the export of two moments, then the restores).
+RT_STAGE_TIMEOUT=14400
 
 HERE_STAGE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 E2E="$HERE_STAGE/../../e2e/test-backup-files.sh"
@@ -47,6 +62,9 @@ SESSION_LOG="$RT_OUT/backup-browse-session-e2e.log"
 E2E_RESTORE="$HERE_STAGE/../../e2e/test-backup-file-restore.sh"
 RESTORE_PREFIX=$(rt_name frest)
 RESTORE_LOG="$RT_OUT/backup-file-restore-e2e.log"
+E2E_COS="$HERE_STAGE/../../e2e/test-backup-files-cos.sh"
+COSF_PREFIX=$(rt_name fcos)
+COSF_LOG="$RT_OUT/backup-files-cos-e2e.log"
 BACKUP_BIN="${RT_BACKUP_BIN:-$(dirname "$RT_LIB")/bin/kubectl-backup}"
 
 run() {
@@ -158,6 +176,67 @@ run() {
         check "the audit Events name the user and the paths" log_has_pass "$RESTORE_LOG" "the audit Events name the user and the paths"
         check "the audit Events hold no token" log_has_pass "$RESTORE_LOG" "the audit Events hold no token"
     fi
+
+    [ -f "$E2E_COS" ] || skip "no end-to-end script at $E2E_COS"
+    rt_log "running $E2E_COS"
+    env PREFIX="$COSF_PREFIX" BACKUP_BIN="$BACKUP_BIN" bash "$E2E_COS" >"$COSF_LOG" 2>&1
+    rc=$?
+    cat "$COSF_LOG"
+    if fail_line=$(first_fail_line "$COSF_LOG"); then
+        check "the COS browse script reported: $fail_line" false
+    elif [ "$rc" -ne 0 ]; then
+        check "the COS browse script exited with $rc and no FAIL line (see backup-files-cos-e2e.log)" false
+    else
+        check "the COS browse script ended without a FAIL line" true
+    fi
+    if grep -qF "NOT CHECKED: no COS bucket is configured" "$COSF_LOG"; then
+        not_checked "browsing and restoring files from a backup in COS" "no COS bucket is configured (COS_BUCKET)"
+    elif grep -qF "NOT CHECKED: the backup gateway is not installed" "$COSF_LOG"; then
+        not_checked "browsing and restoring files from a backup in COS with real users" "the backup gateway is not installed"
+    else
+        check "a namespace admin lists a backup in COS with no setup" log_has_pass "$COSF_LOG" "lists the backup in COS with no setup"
+        check "the latest copy is read from COS" log_has_pass "$COSF_LOG" "the latest copy is read from COS"
+        check "the first moment is read from COS" log_has_pass "$COSF_LOG" "the first moment is read from COS"
+        check "a file made after the first moment is not in it" log_has_pass "$COSF_LOG" "a file made after the first moment is not in it"
+        check "a file from COS has the same checksum" log_has_pass "$COSF_LOG" "a file from COS has the same checksum"
+        check "a link is listed as a link and is not followed" log_has_pass "$COSF_LOG" "a path through a link is refused"
+        check "a name with a newline is listed escaped" log_has_pass "$COSF_LOG" "a name with a newline is listed escaped"
+        check "a file with mode 0600 of another owner is read" log_has_pass "$COSF_LOG" "a file with mode 0600 of another owner is read"
+        check "the moments in COS can be listed" log_has_pass "$COSF_LOG" "the moments in COS can be listed"
+        check "the session reads the policy's bucket and names none" log_has_pass "$COSF_LOG" "names none"
+        check "the COS helper has no service account token and mounts no share" log_has_pass "$COSF_LOG" "no service account token, no host path and mounts no share"
+        check "the COS helper runs as an ordinary user with no capability" log_has_pass "$COSF_LOG" "an ordinary user with every capability dropped"
+        check "the keys are mounted read-only" log_has_pass "$COSF_LOG" "the keys are mounted read-only"
+        check "the browse namespace never holds the COS or Key Protect keys" log_has_pass "$COSF_LOG" "session Secrets only, never the COS or Key Protect keys"
+        check "another pod cannot reach the COS helper" log_has_pass "$COSF_LOG" "another pod cannot reach the COS helper"
+        check "a restore from COS reads COS" log_has_pass "$COSF_LOG" "the restore read COS"
+        check "a restore from COS into a new claim holds the latest content" log_has_pass "$COSF_LOG" "into a new claim holds the latest content"
+        check "the restored file has the same checksum" log_has_pass "$COSF_LOG" "the restored file has the same checksum"
+        check "restored files get the pool's owner and keep their mode" log_has_pass "$COSF_LOG" "keep their mode"
+        check "a newline name and a link are restored" log_has_pass "$COSF_LOG" "a name with a newline is restored, and a link is restored as a link"
+        check "a restore from COS at the first moment brings back the first content" log_has_pass "$COSF_LOG" "brings back the first content"
+        check "a restore from COS into an existing claim writes a new folder" log_has_pass "$COSF_LOG" "into an existing claim writes a new folder"
+        check "a user with only the view role is forbidden" log_has_pass "$COSF_LOG" "a user with only the view role: forbidden"
+        check "an admin of another namespace is forbidden" log_has_pass "$COSF_LOG" "an admin of another namespace: forbidden"
+        check "a removed binding stops access at once" log_has_pass "$COSF_LOG" "a user whose binding was removed: forbidden"
+        check "naming a bucket needs the right to read its Secrets" log_has_pass "$COSF_LOG" "forbidden to a namespace admin who cannot read its Secrets"
+        check "someone who may read the Secrets reads a bucket named directly" log_has_pass "$COSF_LOG" "reads a bucket named directly"
+        check "a file from a bucket named directly has the same checksum" log_has_pass "$COSF_LOG" "a file from a bucket named directly has the same checksum"
+        check "a bucket named directly serves the first moment" log_has_pass "$COSF_LOG" "a bucket named directly serves the first moment"
+        check "files are restored from a bucket named directly" log_has_pass "$COSF_LOG" "restored from a bucket named directly are in the new claim"
+        check "a wrong Key Protect root key is said in words" log_has_pass "$COSF_LOG" "a wrong Key Protect root key:"
+        check "a Secret that does not exist is said in words" log_has_pass "$COSF_LOG" "a Secret that does not exist:"
+        check "a wrong COS key is said in words" log_has_pass "$COSF_LOG" "a wrong COS key:"
+        check "a prefix with no repository fails in words" log_has_pass "$COSF_LOG" "a prefix with no repository:"
+        check "a volume that was never backed up is said in words" log_has_pass "$COSF_LOG" "a volume that was never backed up:"
+        check "no key is in a log, an Event or a status" log_has_pass "$COSF_LOG" "no COS key, API key or wrapped key is in"
+        check "the audit Events say the backup was read from COS" log_has_pass "$COSF_LOG" "say the backup was read from COS"
+        check "a COS session has its Secret in both namespaces while it is open" log_has_pass "$COSF_LOG" "has its Secret in both namespaces"
+        check "closing a COS session leaves nothing behind" log_has_pass "$COSF_LOG" "closing a COS session removes"
+        check "deleting a COS session leaves nothing behind" log_has_pass "$COSF_LOG" "deleting a COS session removes"
+        check "no pod, Job or Secret of any session is left in either namespace" log_has_pass "$COSF_LOG" "no pod, Job or Secret of any session of this test is left"
+        check "no Job or pod of a restore or a session is left" log_has_pass "$COSF_LOG" "no Job or pod of a restore or a session is left"
+    fi
 }
 
 cleanup() {
@@ -175,4 +254,9 @@ cleanup() {
     oc delete backuppolicy "$RESTORE_PREFIX-policy" --ignore-not-found --wait=false
     oc delete namespace "$RESTORE_PREFIX-test" --ignore-not-found --wait=true --timeout=900s
     oc delete filesharepool "$RESTORE_PREFIX-src" "$RESTORE_PREFIX-snap" "$RESTORE_PREFIX-plain" --ignore-not-found --wait=false
+    oc delete backuppolicy "$COSF_PREFIX-policy" --ignore-not-found --wait=false
+    oc delete namespace "$COSF_PREFIX-test" "$COSF_PREFIX-test-other" --ignore-not-found --wait=true --timeout=900s
+    oc delete filesharepool "$COSF_PREFIX-src" "$COSF_PREFIX-snap" "$COSF_PREFIX-plain" --ignore-not-found --wait=false
+    oc delete rolebinding "$COSF_PREFIX-cosadmin" -n "$RT_DRIVER_NS" --ignore-not-found
+    oc delete secret "$COSF_PREFIX-cos-credentials" "$COSF_PREFIX-cos-backup-key" "$COSF_PREFIX-kp-apikey" "$COSF_PREFIX-cos-bad" -n "$RT_DRIVER_NS" --ignore-not-found
 }

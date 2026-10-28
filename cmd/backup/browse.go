@@ -22,6 +22,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/browse"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/gateway"
 )
@@ -35,7 +36,7 @@ type gwClient struct {
 
 // booleanFlags never take a value.
 var booleanFlags = map[string]bool{"wait": true, "yes": true, "dry-run": true, "existing-bucket": true, "from-cos": true,
-	"skip-marker-cleanup": true, "moments": true, "existing": true, "new-claim": true}
+	"skip-marker-cleanup": true, "moments": true, "existing": true, "new-claim": true, "emergency-key-only": true}
 
 // positional returns the arguments that are not flags and not flag values.
 func positional(args []string) []string {
@@ -137,6 +138,10 @@ type target struct {
 	policy, namespace, pvc string
 	moment                 *time.Time
 	session                string
+	// source is "cos" for --from-cos, and empty to let the gateway choose.
+	source string
+	// bucket names a bucket directly (--from-cos with --bucket).
+	bucket *v1alpha1.BrowseFromCOS
 }
 
 func parseTarget(flags map[string]string) (target, error) {
@@ -144,12 +149,24 @@ func parseTarget(flags map[string]string) (target, error) {
 	if t.session != "" {
 		return t, nil
 	}
-	t.policy = flags["policy"]
-	ns, name, ok := strings.Cut(flags["pvc"], "/")
-	if t.policy == "" || !ok || ns == "" || name == "" {
-		return t, errors.New("--policy and --pvc NAMESPACE/NAME are required (or --session NAME)")
+	var err error
+	if t.source, t.bucket, err = sourceOf(flags); err != nil {
+		return t, err
 	}
-	t.namespace, t.pvc = ns, name
+	t.policy = flags["policy"]
+	if t.bucket != nil {
+		// A bucket named directly has no claim in this cluster; the policy is
+		// only the name of its area in the bucket.
+		if t.policy == "" || flags["pvc"] != "" {
+			return t, errors.New("naming a bucket takes --policy (the policy's area in the bucket) and --volume, and no --pvc")
+		}
+	} else {
+		ns, name, ok := strings.Cut(flags["pvc"], "/")
+		if t.policy == "" || !ok || ns == "" || name == "" {
+			return t, errors.New("--policy and --pvc NAMESPACE/NAME are required (or --session NAME)")
+		}
+		t.namespace, t.pvc = ns, name
+	}
 	if m := flags["moment"]; m != "" {
 		v, err := time.Parse(time.RFC3339, m)
 		if err != nil {
@@ -172,7 +189,7 @@ func (g *gwClient) openSession(ctx context.Context, t target, timeout time.Durat
 		return t.session, nil
 	}
 	var s gateway.Session
-	req := gateway.SessionRequest{Policy: t.policy, Namespace: t.namespace, PVC: t.pvc, Moment: t.moment}
+	req := gateway.SessionRequest{Policy: t.policy, Namespace: t.namespace, PVC: t.pvc, Moment: t.moment, Source: t.source, FromCOS: t.bucket}
 	if err := g.doJSON(ctx, http.MethodPost, "/v1/sessions", req, &s); err != nil {
 		return "", err
 	}

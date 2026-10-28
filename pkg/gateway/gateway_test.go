@@ -53,7 +53,7 @@ type fakeAuthz struct {
 }
 
 func accessKey(user string, a Access) string {
-	return user + "|" + a.Namespace + "|" + a.Verb + "|" + a.Group + "|" + a.Resource
+	return user + "|" + a.Namespace + "|" + a.Verb + "|" + a.Group + "|" + a.Resource + "|" + a.Name
 }
 
 func (f *fakeAuthz) Can(_ context.Context, u User, a Access) (bool, error) {
@@ -74,6 +74,16 @@ func (f *fakeAuthz) allow(user, ns, verb, resource string) {
 		f.access = map[string]bool{}
 	}
 	f.access[accessKey(user, Access{Namespace: ns, Verb: verb, Resource: resource})] = true
+}
+
+// allowSecret gives a user the right to read one named Secret in a namespace.
+func (f *fakeAuthz) allowSecret(user, ns, name string, may bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.access == nil {
+		f.access = map[string]bool{}
+	}
+	f.access[accessKey(user, Access{Namespace: ns, Verb: "get", Resource: "secrets", Name: name})] = may
 }
 
 func (f *fakeAuthz) CanReadBackups(_ context.Context, u User, ns string) (bool, error) {

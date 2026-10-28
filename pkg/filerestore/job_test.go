@@ -5,6 +5,7 @@ package filerestore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/browse"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/cosbrowse"
 )
 
 func TestParsePaths(t *testing.T) {
@@ -169,5 +171,77 @@ func TestOutcomeFitsTheTerminationMessage(t *testing.T) {
 	var o Outcome
 	if err := json.Unmarshal([]byte(msg), &o); err != nil || o.Error == "" {
 		t.Fatalf("not valid JSON: %v", err)
+	}
+}
+
+func cosSource() *cosbrowse.Source {
+	return &cosbrowse.Source{
+		Endpoint: "s3.eu-de.cloud-object-storage.appdomain.cloud", Bucket: "my-bucket", Prefix: "p/pol/", Policy: "pol",
+		Volume:     "pvc-0a1b2c3d-0a1b-0a1b-0a1b-0a1b2c3d4e5f",
+		KeyProtect: &cosbrowse.KeyProtect{Region: "eu-de", InstanceID: "i1", RootKeyID: "r1"},
+	}
+}
+
+// A job that reads a backup in COS gets its tree from COS, with the time the
+// controller chose, and never looks at the folders of a snapshot pool.
+func TestRunJobReadsABackupInCOS(t *testing.T) {
+	var gotSource cosbrowse.Source
+	var gotAt time.Time
+	closed := false
+	deps := jobDeps{
+		choose: func(string, string, time.Time) (string, browse.Info, error) {
+			t.Error("a COS job looked for a folder on a share")
+			return "", browse.Info{}, nil
+		},
+		open: func(string) (browse.Tree, func() error, error) {
+			t.Error("a COS job opened a folder on a share")
+			return nil, nil, nil
+		},
+		openCOS: func(_ context.Context, src cosbrowse.Source, at time.Time) (browse.Tree, browse.Info, func() error, error) {
+			gotSource, gotAt = src, at
+			return sampleTree(), browse.Info{Moment: "20261022T091500Z"}, func() error { closed = true; return nil }, nil
+		},
+	}
+	spec := JobSpec{Mode: ModeMeasure, COS: cosSource(), At: "2026-10-22T10:00:00Z"}
+	out, err := runJob(context.Background(), spec, writePaths(t, "/var/www/html"), deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Bytes != 25 || out.Files != 3 || out.Moment != "2026-10-22T09:15:00Z" {
+		t.Fatalf("outcome %+v", out)
+	}
+	if gotSource.Volume != cosSource().Volume || !gotAt.Equal(time.Date(2026, 10, 22, 10, 0, 0, 0, time.UTC)) || !closed {
+		t.Errorf("source %+v, at %v, closed %v", gotSource, gotAt, closed)
+	}
+}
+
+func TestRunJobFromCOSSaysWhyItCannotOpenTheBackup(t *testing.T) {
+	deps := jobDeps{openCOS: func(context.Context, cosbrowse.Source, time.Time) (browse.Tree, browse.Info, func() error, error) {
+		return nil, browse.Info{}, nil, errors.New("COS refused the key: check the COS key Secret")
+	}}
+	out, err := runJob(context.Background(), JobSpec{Mode: ModeMeasure, COS: cosSource()}, writePaths(t, "/a"), deps)
+	if err == nil || !strings.Contains(out.Error, "COS refused the key") {
+		t.Fatalf("err %v outcome %+v", err, out)
+	}
+}
+
+func TestBadCOSJobSpecsAreRefused(t *testing.T) {
+	bad := cosSource()
+	bad.Volume = "../x"
+	cases := map[string]JobSpec{
+		"both sources":   {Mode: ModeMeasure, Latest: "/src", COS: cosSource()},
+		"with moments":   {Mode: ModeMeasure, Moments: "/moments", COS: cosSource()},
+		"a bad source":   {Mode: ModeMeasure, COS: bad},
+		"a bad moment":   {Mode: ModeMeasure, COS: cosSource(), At: "yesterday"},
+		"no mode at all": {COS: cosSource()},
+	}
+	deps := jobDeps{openCOS: func(context.Context, cosbrowse.Source, time.Time) (browse.Tree, browse.Info, func() error, error) {
+		t.Error("a bad spec reached the repository")
+		return nil, browse.Info{}, nil, errors.New("no")
+	}}
+	for name, spec := range cases {
+		if _, err := runJob(context.Background(), spec, writePaths(t, "/a"), deps); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
 	}
 }

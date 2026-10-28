@@ -149,3 +149,8 @@ func tarRegular(t Tree, tw *tar.Writer, rep *TarReport, path [][]byte, hdr *tar.
 	rep.Files++
 	return nil
 }
+
+// WriteTar writes the file or folder at path of any Tree to w as a tar stream,
+// the way a folder on disk is written. A Tree that is not a folder on disk (a
+// backup read from COS) uses it for its Tar method.
+func WriteTar(t Tree, w io.Writer, path [][]byte) (TarReport, error) { return writeTar(t, w, path) }

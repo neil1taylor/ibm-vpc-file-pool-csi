@@ -7,6 +7,8 @@ package gateway
 
 import (
 	"time"
+
+	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 )
 
 // Rights-only name. No object of this kind is ever stored: it exists so that
@@ -36,6 +38,11 @@ type Volume struct {
 	RestorePoints    int32      `json:"restorePoints"`
 	Consistency      string     `json:"consistency,omitempty"`
 	Retained         bool       `json:"retained,omitempty"`
+	// Exported is true when the policy sends its backups to COS and this volume
+	// has a copy there; ExportedTime is the moment of the newest copy. The
+	// moments that the local keep time has removed may still be in COS.
+	Exported     bool       `json:"exported,omitempty"`
+	ExportedTime *time.Time `json:"exportedTime,omitempty"`
 }
 
 // SessionRequest asks for a session on one backup of one volume. A nil Moment
@@ -45,6 +52,15 @@ type SessionRequest struct {
 	Namespace string     `json:"namespace"`
 	PVC       string     `json:"pvc"`
 	Moment    *time.Time `json:"moment,omitempty"`
+	// Source is "local" (the snapshot pool), "cos" (the bucket of the policy's
+	// export block) or empty: the gateway then reads COS when the moment is
+	// only there, and the snapshot pool otherwise.
+	Source string `json:"source,omitempty"`
+	// FromCOS names a bucket directly, for a backup that no policy of this
+	// cluster describes. Only a person who may read the named Secrets in the
+	// driver namespace may use it. Namespace and PVC are then empty and Policy
+	// is the area of the bucket.
+	FromCOS *v1alpha1.BrowseFromCOS `json:"fromCOS,omitempty"`
 }
 
 // Session is what a user sees of a BackupBrowse.
@@ -52,6 +68,8 @@ type Session struct {
 	Name    string `json:"name"`
 	Phase   string `json:"phase"`
 	Message string `json:"message,omitempty"`
+	// Source is "local" or "cos": where this session reads its backup.
+	Source string `json:"source"`
 }
 
 // Access is one right to check as the user.
@@ -60,26 +78,35 @@ type Access struct {
 	Group     string
 	Resource  string
 	Verb      string
+	// Name limits the right to one object (for example one Secret). Empty means
+	// any object.
+	Name string
 }
 
 // RestoreRequest asks to copy chosen files out of one backup into a claim.
 // Paths are in the escaped form that `kubectl backup ls` prints.
 type RestoreRequest struct {
-	Policy           string     `json:"policy"`
-	Namespace        string     `json:"namespace"`
-	PVC              string     `json:"pvc"`
-	Moment           *time.Time `json:"moment,omitempty"`
-	Paths            []string   `json:"paths"`
-	TargetNamespace  string     `json:"targetNamespace"`
-	TargetName       string     `json:"targetName"`
-	Existing         bool       `json:"existing,omitempty"`
-	SizeGB           int64      `json:"sizeGB,omitempty"`
-	StorageClassName string     `json:"storageClassName,omitempty"`
+	Policy    string     `json:"policy"`
+	Namespace string     `json:"namespace"`
+	PVC       string     `json:"pvc"`
+	Moment    *time.Time `json:"moment,omitempty"`
+	Paths     []string   `json:"paths"`
+	// Source and FromCOS are those of SessionRequest. With FromCOS a new claim
+	// needs storageClassName, because COS does not keep the class of the claim.
+	Source           string                  `json:"source,omitempty"`
+	FromCOS          *v1alpha1.BrowseFromCOS `json:"fromCOS,omitempty"`
+	TargetNamespace  string                  `json:"targetNamespace"`
+	TargetName       string                  `json:"targetName"`
+	Existing         bool                    `json:"existing,omitempty"`
+	SizeGB           int64                   `json:"sizeGB,omitempty"`
+	StorageClassName string                  `json:"storageClassName,omitempty"`
 }
 
 // Restore is what a user sees of a BackupFileRestore.
 type Restore struct {
-	Name            string     `json:"name"`
+	Name string `json:"name"`
+	// Source is "local" or "cos": where the restore reads its backup.
+	Source          string     `json:"source"`
 	Phase           string     `json:"phase"`
 	Message         string     `json:"message,omitempty"`
 	TargetNamespace string     `json:"targetNamespace"`

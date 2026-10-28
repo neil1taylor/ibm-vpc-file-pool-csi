@@ -73,6 +73,9 @@ type FileRestoreRequest struct {
 	LatestPath  string
 	MomentsPath string
 	At          time.Time
+	// COS, if set, reads the backup from COS instead of the snapshot pool. Backup,
+	// LatestPath and MomentsPath are then not used.
+	COS *FileRestoreCOS
 	// Dest is the share that holds the target claim, and Volume the claim's
 	// folder on it, like /pvcs/pvc-.... Not used for ModeMeasure.
 	Dest   ShareMount
@@ -89,6 +92,16 @@ type FileRestoreRequest struct {
 	// with. Nil and empty keep the backup's own.
 	UID, GID    *int64
 	Permissions string
+}
+
+// FileRestoreCOS says which backup in COS a file restore reads.
+type FileRestoreCOS struct {
+	// Repo is where the repository is and which Secrets open it. Only the names
+	// of the Secrets are here.
+	Repo ExportRepo
+	// Policy is the area of the bucket, and Volume the backed-up volume.
+	Policy string
+	Volume string
 }
 
 // FileRestoreJobs runs the Jobs of file restores.
@@ -244,6 +257,10 @@ func fileRestoreOwner(fr *v1alpha1.BackupFileRestore) metav1.OwnerReference {
 
 func (bc *BackupController) reconcileFileRestore(ctx context.Context, fr *v1alpha1.BackupFileRestore) {
 	sp := fr.Spec
+	if sp.Source == v1alpha1.BackupSourceCOS || sp.FromCOS != nil {
+		bc.reconcileFileRestoreFromCOS(ctx, fr)
+		return
+	}
 	policy := &v1alpha1.BackupPolicy{}
 	if err := bc.client.Get(ctx, types.NamespacedName{Name: sp.Policy}, policy); err != nil {
 		if apierrors.IsNotFound(err) {

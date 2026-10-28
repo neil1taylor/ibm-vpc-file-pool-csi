@@ -65,6 +65,91 @@ spec:
                   Existing restores into a new folder of the claim, which must exist. Unset
                   makes a new claim, which must not exist.
                 type: boolean
+              fromCOS:
+                description: |-
+                  FromCOS names a bucket directly. It is for a cluster administrator, for a
+                  backup that no policy of this cluster describes; policy is then only the
+                  name of the policy's area in the bucket, sourceNamespace holds "-" and
+                  sourceName the volume, and storageClassName must be set for a new claim.
+                  Source must be cos.
+                properties:
+                  backupKeySecret:
+                    description: |-
+                      BackupKeySecret names the Secret with the backup key wrapped by Key
+                      Protect (wrappedKey). Not used with emergencyKeyOnly.
+                    type: string
+                  bucket:
+                    description: Bucket is the name of the COS bucket.
+                    minLength: 1
+                    type: string
+                  credentialsSecret:
+                    description: |-
+                      CredentialsSecret names the Secret (in the driver's namespace) with the
+                      COS key: access_key_id and secret_access_key.
+                    minLength: 1
+                    type: string
+                  emergencyKeyOnly:
+                    description: |-
+                      EmergencyKeyOnly makes the helper use the readable key in
+                      emergencyKeySecret and never call Key Protect.
+                    type: boolean
+                  emergencyKeySecret:
+                    description: |-
+                      EmergencyKeySecret names a Secret (key: backupKey) with the readable
+                      backup key.
+                    type: string
+                  endpoint:
+                    description: Endpoint is the S3 host of the bucket.
+                    minLength: 1
+                    type: string
+                  keyProtect:
+                    description: |-
+                      KeyProtect says which root key unwraps the backup key. Not used with
+                      emergencyKeyOnly.
+                    properties:
+                      apiKeySecret:
+                        description: |-
+                          APIKeySecret names the Secret (key: apikey) with the IBM Cloud API key that
+                          has the Reader role on the root key.
+                        minLength: 1
+                        type: string
+                      instanceID:
+                        description: InstanceID is the GUID of the Key Protect instance.
+                        minLength: 1
+                        type: string
+                      region:
+                        description: Region is the region of the Key Protect instance,
+                          such as eu-de.
+                        minLength: 1
+                        type: string
+                      rootKeyID:
+                        description: RootKeyID is the ID of the root key that wrapped
+                          the backup key.
+                        minLength: 1
+                        type: string
+                    required:
+                    - apiKeySecret
+                    - instanceID
+                    - region
+                    - rootKeyID
+                    type: object
+                  prefix:
+                    description: |-
+                      Prefix is the folder in the bucket that was set on the policy's export
+                      block. The area of the policy (spec.policy) is below it.
+                    type: string
+                  volume:
+                    description: |-
+                      Volume is the backed-up volume, as `kubectl backup cos-list` shows it
+                      (pvc- and a UUID).
+                    minLength: 1
+                    type: string
+                required:
+                - bucket
+                - credentialsSecret
+                - endpoint
+                - volume
+                type: object
               moment:
                 description: |-
                   Moment is the time to restore from. The newest backup at or before it is
@@ -97,6 +182,15 @@ spec:
                   20%, at least 1 GiB. Not used with existing.
                 format: int64
                 type: integer
+              source:
+                description: |-
+                  Source says where the backup is read from: local (the snapshot pool, the
+                  default) or cos (the Kopia repository in the COS bucket that the policy's
+                  export block names, or that fromCOS names).
+                enum:
+                - local
+                - cos
+                type: string
               sourceName:
                 type: string
               sourceNamespace:

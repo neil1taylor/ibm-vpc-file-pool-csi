@@ -44,10 +44,27 @@ func (g *Gateway) canDo(ctx context.Context, u User, a Access) bool {
 // checkRestoreRequest checks the shape of a request and returns the paths in
 // their one canonical escaped form. The message names no path.
 func checkRestoreRequest(req *RestoreRequest) ([]string, error) {
-	for _, f := range []struct{ name, value string }{
+	required := []struct{ name, value string }{
 		{"policy", req.Policy}, {"namespace", req.Namespace}, {"pvc", req.PVC},
 		{"targetNamespace", req.TargetNamespace}, {"targetName", req.TargetName},
-	} {
+	}
+	if req.FromCOS != nil {
+		// A bucket named directly has no claim in this cluster.
+		if req.Namespace != "" || req.PVC != "" {
+			return nil, fmt.Errorf("namespace and pvc are not used with fromCOS")
+		}
+		if req.Source != "" && req.Source != v1alpha1.BackupSourceCOS {
+			return nil, fmt.Errorf(`source must be "cos" with fromCOS`)
+		}
+		if !req.Existing && req.StorageClassName == "" {
+			return nil, fmt.Errorf("storageClassName is required for a new claim: COS does not keep the class of the backed-up claim")
+		}
+		if err := checkFromCOS(req.Policy, req.FromCOS); err != nil {
+			return nil, err
+		}
+		required = []struct{ name, value string }{{"policy", req.Policy}, {"targetNamespace", req.TargetNamespace}, {"targetName", req.TargetName}}
+	}
+	for _, f := range required {
 		if f.value == "" {
 			return nil, fmt.Errorf("%s is required", f.name)
 		}
@@ -55,12 +72,18 @@ func checkRestoreRequest(req *RestoreRequest) ([]string, error) {
 	if len(validation.IsDNS1123Subdomain(req.Policy)) > 0 || len(req.Policy) > 63 {
 		return nil, fmt.Errorf("policy is not a policy name")
 	}
-	for _, f := range []struct{ name, value string }{{"namespace", req.Namespace}, {"targetNamespace", req.TargetNamespace}} {
+	namespaces := []struct{ name, value string }{{"targetNamespace", req.TargetNamespace}}
+	claims := []struct{ name, value string }{{"targetName", req.TargetName}}
+	if req.FromCOS == nil {
+		namespaces = append(namespaces, struct{ name, value string }{"namespace", req.Namespace})
+		claims = append(claims, struct{ name, value string }{"pvc", req.PVC})
+	}
+	for _, f := range namespaces {
 		if len(validation.IsDNS1123Label(f.value)) > 0 {
 			return nil, fmt.Errorf("%s is not a namespace name", f.name)
 		}
 	}
-	for _, f := range []struct{ name, value string }{{"pvc", req.PVC}, {"targetName", req.TargetName}} {
+	for _, f := range claims {
 		if len(validation.IsDNS1123Subdomain(f.value)) > 0 {
 			return nil, fmt.Errorf("%s is not a claim name", f.name)
 		}
@@ -95,8 +118,13 @@ func (g *Gateway) handleRestoreCreate(w http.ResponseWriter, r *http.Request, u 
 	}
 	ctx := r.Context()
 	// The right on the source comes first: nothing is looked up for a user who
-	// may not read it.
-	if !g.allowed(ctx, u, req.Namespace) {
+	// may not read it. A bucket named directly needs the right to read its Secrets.
+	if req.FromCOS != nil {
+		if !g.mayUseBucket(ctx, u, req.FromCOS) {
+			writeError(w, http.StatusForbidden, "forbidden", "you may not read the Secrets of that bucket in the driver namespace, and naming a bucket directly needs that right")
+			return
+		}
+	} else if !g.allowed(ctx, u, req.Namespace) {
 		forbidden(w)
 		return
 	}
@@ -117,23 +145,30 @@ func (g *Gateway) handleRestoreCreate(w http.ResponseWriter, r *http.Request, u 
 		writeError(w, http.StatusForbidden, "forbidden", "you may not start pods in that namespace, and writing files into an existing claim needs that right")
 		return
 	}
-	policy := &v1alpha1.BackupPolicy{}
-	found := false
-	if perr := g.c.Get(ctx, types.NamespacedName{Name: req.Policy}, policy); perr == nil {
-		for _, v := range policy.Status.Volumes {
-			if v.PVCNamespace == req.Namespace && v.PVCName == req.PVC && v.SubPath != "" {
-				found = true
-			}
-		}
-	}
-	if !found {
-		writeError(w, http.StatusNotFound, "not_found", "no backup of that volume")
-		return
-	}
 	spec := v1alpha1.BackupFileRestoreSpec{
 		Policy: req.Policy, SourceNamespace: req.Namespace, SourceName: req.PVC, Paths: paths,
 		TargetNamespace: req.TargetNamespace, TargetName: req.TargetName, Existing: req.Existing,
 		SizeGB: req.SizeGB, StorageClassName: req.StorageClassName, RequestedBy: u.Name,
+	}
+	if req.FromCOS != nil {
+		spec.Source, spec.FromCOS = v1alpha1.BackupSourceCOS, req.FromCOS.DeepCopy()
+		spec.SourceNamespace, spec.SourceName = v1alpha1.NoNamespace, req.FromCOS.Volume
+	} else {
+		policy := &v1alpha1.BackupPolicy{}
+		var vol *v1alpha1.BackupVolumeStatus
+		if perr := g.c.Get(ctx, types.NamespacedName{Name: req.Policy}, policy); perr == nil {
+			vol = findVolume(policy, req.Namespace, req.PVC)
+		}
+		if vol == nil {
+			writeError(w, http.StatusNotFound, "not_found", "no backup of that volume")
+			return
+		}
+		src, serr := chooseSource(policy, vol, req.Moment, req.Source)
+		if serr != nil {
+			writeError(w, serr.status, serr.code, serr.msg)
+			return
+		}
+		spec.Source = src
 	}
 	if req.Moment != nil {
 		m := metav1.NewTime(*req.Moment)
@@ -176,8 +211,8 @@ func (g *Gateway) handleRestoreCreate(w http.ResponseWriter, r *http.Request, u 
 		where = "a new folder in the claim " + req.TargetNamespace + "/" + req.TargetName
 	}
 	g.auditObject(ctx, "BackupFileRestore", fr.Name, fr.UID, "FileRestoreRequested",
-		fmt.Sprintf("user %s asked to restore %s from %s/%s of policy %s, %s, into %s",
-			u.Name, strings.Join(paths, ", "), req.Namespace, req.PVC, req.Policy, momentText(req.Moment), where))
+		fmt.Sprintf("user %s asked to restore %s from %s of policy %s, %s, %s, into %s",
+			u.Name, strings.Join(paths, ", "), restoreSourceText(&spec), req.Policy, momentText(req.Moment), restoreOriginText(&spec), where))
 	writeJSON(w, http.StatusAccepted, restoreOf(fr))
 }
 
@@ -232,6 +267,25 @@ func firstLine(s string) string {
 	return s
 }
 
+// restoreSourceText names the claim a restore reads, for the audit trail.
+func restoreSourceText(spec *v1alpha1.BackupFileRestoreSpec) string {
+	if spec.FromCOS != nil {
+		return "volume " + spec.FromCOS.Volume
+	}
+	return spec.SourceNamespace + "/" + spec.SourceName
+}
+
+// restoreOriginText says where the restore reads its backup.
+func restoreOriginText(spec *v1alpha1.BackupFileRestoreSpec) string {
+	switch {
+	case spec.FromCOS != nil:
+		return "from the COS bucket " + spec.FromCOS.Bucket
+	case spec.Source == v1alpha1.BackupSourceCOS:
+		return "from COS"
+	}
+	return "from the snapshot pool"
+}
+
 func restoreOf(fr *v1alpha1.BackupFileRestore) Restore {
 	st := fr.Status
 	phase := st.Phase
@@ -239,7 +293,7 @@ func restoreOf(fr *v1alpha1.BackupFileRestore) Restore {
 		phase = "Pending"
 	}
 	out := Restore{
-		Name: fr.Name, Phase: phase, Message: st.Message,
+		Name: fr.Name, Source: sourceName(fr.Spec.Source), Phase: phase, Message: st.Message,
 		TargetNamespace: fr.Spec.TargetNamespace, TargetName: fr.Spec.TargetName, Existing: fr.Spec.Existing,
 		Folder: st.Folder, SizeGB: st.SizeGB, Latest: st.Latest,
 		Files: st.Files, Dirs: st.Dirs, Links: st.Links, Skipped: st.Skipped, Unreadable: st.Unreadable, Bytes: st.Bytes,
@@ -264,7 +318,7 @@ func (g *Gateway) handleRestoreStatus(w http.ResponseWriter, r *http.Request, u 
 		writeError(w, http.StatusNotFound, "not_found", "no such restore")
 		return
 	}
-	if !g.allowed(r.Context(), u, fr.Spec.SourceNamespace) {
+	if !g.mayRead(r.Context(), u, fr.Spec.SourceNamespace, fr.Spec.FromCOS) {
 		forbidden(w)
 		return
 	}

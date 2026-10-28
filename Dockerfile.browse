@@ -1,8 +1,12 @@
 # The browse helper: reads one backup, read-only, for the browse feature.
 # It is a separate image from the driver so that the helper holds nothing else
-# (no Kopia, no VPC client). See docs/specs/2026-10-22-backup-file-restore.md.
-# This image reads plain volumes. The VM disk helper (libguestfs, CentOS) is a
-# later image.
+# (no VPC client, no controller). See docs/specs/2026-10-22-backup-file-restore.md.
+#
+# It reads two kinds of backup:
+#   - a backup folder on the snapshot pool's share, mounted read-only;
+#   - a backup exported to COS, through the Kopia command-line program (a child
+#     process, never linked in). The keys are Secrets mounted as files.
+# The VM disk helper (libguestfs, CentOS) is a later image.
 FROM docker.io/library/golang:1.26 AS builder
 
 WORKDIR /workspace
@@ -10,15 +14,30 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY pkg/browse/ pkg/browse/
+COPY pkg/cosbrowse/ pkg/cosbrowse/
+COPY pkg/keyprotect/ pkg/keyprotect/
 COPY cmd/browse/ cmd/browse/
 ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.version=${VERSION}" -o /browse ./cmd/browse
 
+# The Kopia command-line program: the same version and checksum as the driver
+# image (a test keeps the two Dockerfiles in step). The SHA-256 is from
+# checksums.txt of the official release.
+ARG KOPIA_VERSION=0.23.1
+ARG KOPIA_SHA256=416d0f84a3dbb321a8b2d8f0997b1a0a6e915babe79ee76fa6e4d2bd1e1c5178
+RUN curl -fsSL -o /tmp/kopia.tar.gz "https://github.com/kopia/kopia/releases/download/v${KOPIA_VERSION}/kopia-${KOPIA_VERSION}-linux-x64.tar.gz" && \
+    echo "${KOPIA_SHA256}  /tmp/kopia.tar.gz" | sha256sum -c - && \
+    tar -xzf /tmp/kopia.tar.gz -C /tmp "kopia-${KOPIA_VERSION}-linux-x64/kopia" && \
+    install -m 0755 "/tmp/kopia-${KOPIA_VERSION}-linux-x64/kopia" /kopia
+
 FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
 
 COPY --from=builder /browse /usr/local/bin/browse
+COPY --from=builder /kopia /usr/local/bin/kopia
 
-# The pod runs this as root with every capability dropped, on a read-only mount.
-# The chart sets that; root here only means the image does not forbid it.
+# The pod for a folder on the share runs this as root with every capability
+# dropped, on a read-only mount. The pod for a backup in COS runs as an
+# ordinary user. The chart sets both; root here only means the image does not
+# forbid it.
 USER 0
 ENTRYPOINT ["/usr/local/bin/browse"]

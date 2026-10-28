@@ -116,6 +116,19 @@ backupBrowse:
   restoreMaxBytes: 214748364800
   # File restores that run at once in the cluster. More wait.
   restoreMaxRunning: 5
+  # Browsing and restoring files from backups that a policy exported to COS
+  # (policy spec.export). The helper pods that read COS run in the driver's own
+  # namespace, next to the COS and Key Protect Secrets, so those keys are never
+  # copied to the browse namespace, where the gateway may read Secrets. They run as
+  # an ordinary user with no service account token.
+  cos:
+    enabled: true
+    # Limits of the helper pod that reads COS. Empty means 1 CPU and 1Gi.
+    cpuLimit: ""
+    memoryLimit: ""
+    # A session on COS ends if its helper is not ready after this long, usually
+    # because a Secret named by the export block is missing.
+    startTimeout: 5m
 
 # The backup gateway: the one door to browse sessions (issue #92). Users talk
 # to it with their own Kubernetes token; it checks every call with a token review
