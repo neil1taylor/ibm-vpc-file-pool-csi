@@ -48,8 +48,11 @@ func (f *fakeFileRestoreJobs) callsFor(mode string) []FileRestoreRequest {
 	return out
 }
 
-func failedJob(reason string) error {
-	return &shareJobFailure{job: "j", msg: filerestore.EncodeOutcome(filerestore.Outcome{Error: reason})}
+// refused is what a Job answers when it decided the restore cannot go on: it
+// exited with code 0 and wrote the reason (a Job that is started again after a
+// failure would lose the message).
+func refused(reason string) fakeJobAnswer {
+	return fakeJobAnswer{done: true, out: filerestore.Outcome{Error: reason}}
 }
 
 type fileRestoreEnv struct {
@@ -293,10 +296,25 @@ func TestFileRestore_FailedJobShowsTheReasonAndEnds(t *testing.T) {
 	e := newFileRestoreEnv(t)
 	e.existingClaim("work")
 	e.existing("f1", "work")
-	e.jobs.answer[filerestore.ModeFolder] = fakeJobAnswer{err: failedJob("not enough space: the chosen files need 10 bytes and 5 bytes can be written")}
+	e.jobs.answer[filerestore.ModeFolder] = refused("not enough space: the chosen files need 10 bytes and 5 bytes can be written")
 	e.reconcile()
 	st := e.fr("f1").Status
 	if st.Phase != "Failed" || !strings.Contains(st.Message, "not enough space") || st.EndedTime == nil {
+		t.Fatalf("status %+v", st)
+	}
+	if st.Files != 0 || st.Folder != "" {
+		t.Fatalf("a refused restore must not report a result: %+v", st)
+	}
+}
+
+func TestFileRestore_AJobThatFailedWithoutAReasonStillEnds(t *testing.T) {
+	e := newFileRestoreEnv(t)
+	e.existingClaim("work")
+	e.existing("f1", "work")
+	e.jobs.answer[filerestore.ModeFolder] = fakeJobAnswer{err: &shareJobFailure{job: "j"}}
+	e.reconcile()
+	st := e.fr("f1").Status
+	if st.Phase != "Failed" || !strings.Contains(st.Message, "failed or ran out of time") {
 		t.Fatalf("status %+v", st)
 	}
 }
@@ -450,7 +468,7 @@ func TestFileRestore_AFailedCopyKeepsTheNewClaimHeldBack(t *testing.T) {
 	_ = e.c.Update(e.ctx, pvc)
 	pvc.Status.Phase = corev1.ClaimBound
 	_ = e.c.Status().Update(e.ctx, pvc)
-	e.jobs.answer[filerestore.ModeNewClaim] = fakeJobAnswer{err: failedJob("set the owner: operation not permitted")}
+	e.jobs.answer[filerestore.ModeNewClaim] = refused("set the owner: operation not permitted")
 	e.reconcile()
 	st := e.fr("f1").Status
 	if st.Phase != "Failed" || !strings.Contains(st.Message, "operation not permitted") || !strings.Contains(st.Message, "held back") {
@@ -458,6 +476,19 @@ func TestFileRestore_AFailedCopyKeepsTheNewClaimHeldBack(t *testing.T) {
 	}
 	if e.sv(sv.Name).Labels[RestorePendingLabel] != "true" {
 		t.Fatal("a half-filled claim was opened to pods")
+	}
+}
+
+func TestFileRestore_AMeasureJobThatRefusesFailsBeforeAClaimIsMade(t *testing.T) {
+	e := newFileRestoreEnv(t)
+	e.request("f1", nil)
+	e.jobs.answer[filerestore.ModeMeasure] = refused("a path is not in the backup")
+	e.reconcile()
+	if st := e.fr("f1").Status; st.Phase != "Failed" || !strings.Contains(st.Message, "not in the backup") {
+		t.Fatalf("status %+v", st)
+	}
+	if err := e.c.Get(e.ctx, types.NamespacedName{Namespace: "apps", Name: "db-files"}, &corev1.PersistentVolumeClaim{}); !apierrors.IsNotFound(err) {
+		t.Fatal("a claim was made")
 	}
 }
 

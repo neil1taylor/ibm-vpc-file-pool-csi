@@ -19,11 +19,13 @@ func TestRestoreFilesMainRefusesABadSpec(t *testing.T) {
 	}
 }
 
-func TestRestoreFilesMainWritesTheReasonForAFailure(t *testing.T) {
+// A refusal ends with exit code 0, so that the Job is not started again (which
+// would lose the message) and the controller reads the reason.
+func TestRestoreFilesMainWritesTheReasonForARefusalAndExitsZero(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "termination-log")
 	spec := `{"mode":"measure","latest":"/src"}`
-	if code := restoreFilesMain(spec, filepath.Join(t.TempDir(), "missing"), log); code != 1 {
-		t.Fatalf("exit code %d", code)
+	if code := restoreFilesMain(spec, filepath.Join(t.TempDir(), "missing"), log); code != 0 {
+		t.Fatalf("exit code %d, want 0 for a decided failure", code)
 	}
 	b, err := os.ReadFile(log)
 	if err != nil {

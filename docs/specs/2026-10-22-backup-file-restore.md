@@ -281,4 +281,6 @@ Not yet tested: a real Windows disk with BitLocker or a hibernated system, btrfs
 - The Job keeps only the `CHOWN` and `FOWNER` capabilities. It has a 4 hour deadline.
 - Limit of one restore: the least of 200 GiB (`backupBrowse.restoreMaxBytes`), the free space of the share, and, for an existing claim, its size less what it holds.
 - The setuid and setgid bits are removed from everything restored.
+- A refusal by the Job (no room, a VM disk claim, a missing path, an owner it cannot set) ends the Job with exit code 0 and the reason in its termination message. A Job that failed with a non-zero code is started again by Kubernetes in the same pod, which loses the message. The controller reads `error` in the outcome as a failed restore. Only a Job that was stopped, or ran out of its 4 hours, ends as a failed Job, and then the reason is "the copy Job failed or ran out of time".
+- One rare repeat can happen: a Job's objects are removed when it succeeds, before the controller saves `Done`. If that save fails, the next pass runs the Job again, and an existing claim gets a second folder (`-2`). Nothing is lost or written over.
 

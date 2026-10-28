@@ -223,6 +223,23 @@ func TestRunFileRestore_SuccessReturnsTheOutcome(t *testing.T) {
 	}
 }
 
+// A Job that decided to refuse exits with code 0 and the reason in its message.
+// The runner hands the outcome on; the controller reads the reason from it.
+func TestRunFileRestore_ARefusalIsADoneJobWithAReason(t *testing.T) {
+	r, c := newApplyRunner()
+	ctx := context.Background()
+	req := fileRestoreRequest(filerestore.ModeFolder)
+	if _, _, err := r.RunFileRestore(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	setJobStatus(t, c, "filerestore-uid-1", 1, 0)
+	addTerminationMessage(t, c, "filerestore-uid-1", filerestore.EncodeOutcome(filerestore.Outcome{Error: "this claim holds a VM disk"}))
+	done, out, err := r.RunFileRestore(ctx, req)
+	if err != nil || !done || out.Error != "this claim holds a VM disk" {
+		t.Fatalf("= %v %+v %v", done, out, err)
+	}
+}
+
 func TestRunFileRestore_FailureCarriesTheReasonTheJobWrote(t *testing.T) {
 	r, c := newApplyRunner()
 	ctx := context.Background()

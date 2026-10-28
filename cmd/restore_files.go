@@ -24,7 +24,9 @@ func runRestoreFiles(specJSON, pathsFile string) {
 	os.Exit(restoreFilesMain(specJSON, pathsFile, "/dev/termination-log"))
 }
 
-// restoreFilesMain returns the exit code.
+// restoreFilesMain returns the exit code: 0 when the Job reached a decision,
+// good or bad (the outcome in the termination log says which), 2 for a bad
+// command line, 1 when it was stopped.
 func restoreFilesMain(specJSON, pathsFile, terminationLog string) int {
 	var spec filerestore.JobSpec
 	if err := json.Unmarshal([]byte(specJSON), &spec); err != nil || pathsFile == "" {
@@ -41,7 +43,16 @@ func restoreFilesMain(specJSON, pathsFile, terminationLog string) int {
 	_ = os.WriteFile(terminationLog, []byte(filerestore.EncodeOutcome(out)), 0o600) //nolint:gosec // the path is a fixed argument of the caller
 	if err != nil {
 		klog.ErrorS(err, "File restore failed", "mode", spec.Mode)
-		return 1
+		// The Job runs with a restart policy that starts the container again after
+		// a failure, which loses the message, and a refusal (no room, a VM disk
+		// claim, a missing path) would only fail again. So a failure the Job has
+		// decided on ends with exit code 0 and the reason in the message; the
+		// controller reads it as a failed restore. Only a Job that was stopped
+		// (SIGTERM, or its time) exits with an error, and is not tried again by us.
+		if ctx.Err() != nil {
+			return 1
+		}
+		return 0
 	}
 	klog.InfoS("File restore done", "mode", spec.Mode, "files", out.Files, "dirs", out.Dirs, "links", out.Links,
 		"skipped", out.Skipped, "unreadable", out.Unreadable, "bytes", out.Bytes)

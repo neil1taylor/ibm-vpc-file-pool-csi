@@ -268,7 +268,7 @@ func (bc *BackupController) reconcileFileRestore(ctx context.Context, fr *v1alph
 func fileRestoreFailureReason(err error) string {
 	var f *shareJobFailure
 	if !errors.As(err, &f) || f.msg == "" {
-		return "the copy Job failed"
+		return "the copy Job failed or ran out of time"
 	}
 	var out filerestore.Outcome
 	if json.Unmarshal([]byte(f.msg), &out) == nil && out.Error != "" {
@@ -291,6 +291,13 @@ func (bc *BackupController) runFileRestoreJob(ctx context.Context, fr *v1alpha1.
 	}
 	if !done {
 		bc.setFileRestoreStatus(ctx, fr, phase, working)
+		return out, false
+	}
+	if out.Error != "" {
+		// The Job ended with exit code 0 and a reason: it decided the restore
+		// cannot go on (no room, a VM disk claim, a missing path, an owner it
+		// cannot set). It removed what it wrote.
+		bc.failFileRestore(ctx, fr, out.Error+onFail)
 		return out, false
 	}
 	return out, true
