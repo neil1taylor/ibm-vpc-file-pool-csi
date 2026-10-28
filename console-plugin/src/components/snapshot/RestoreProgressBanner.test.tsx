@@ -10,7 +10,7 @@ jest.mock('react-router-dom', () => ({
 function watch(data: Record<string, unknown>) {
   (useK8sWatchResource as jest.Mock).mockImplementation((req: { groupVersionKind: { kind: string } } | null) => [
     req ? data[req.groupVersionKind.kind] : undefined,
-    true,
+    req ? req.groupVersionKind.kind in data : true,
     undefined,
   ]);
 }
@@ -38,12 +38,18 @@ describe('RestoreProgressBanner', () => {
   });
 
   it('says it is ready, with a link to the claim, when the claim is Bound', () => {
-    watch({ PersistentVolumeClaim: pvc('Bound', 'pvc-x') });
+    watch({ PersistentVolumeClaim: pvc('Bound', 'pvc-x'), SubVolume: { metadata: { name: 'pvc-x' }, status: { cloneStatus: 'Complete' } } });
     render(<RestoreProgressBanner namespace="apps" name="data-restored" />);
     expect(screen.getByText(/ready/i)).toBeTruthy();
     expect(screen.getByRole('link', { name: 'data-restored' }).getAttribute('href')).toBe(
       '/k8s/ns/apps/persistentvolumeclaims/data-restored',
     );
+  });
+
+  it('does not say ready while the SubVolume is not read yet', () => {
+    watch({ PersistentVolumeClaim: pvc('Bound', 'pvc-x') });
+    render(<RestoreProgressBanner namespace="apps" name="data-restored" />);
+    expect(screen.queryByText(/ready/i)).toBeNull();
   });
 
   it('shows the copy error and does not delete anything when the copy failed', () => {
@@ -72,7 +78,7 @@ describe('RestoreProgressBanner', () => {
   });
 
   it('says the cloned volume is ready when the claim is Bound', () => {
-    watch({ PersistentVolumeClaim: pvc('Bound', 'pvc-x') });
+    watch({ PersistentVolumeClaim: pvc('Bound', 'pvc-x'), SubVolume: { metadata: { name: 'pvc-x' }, status: { cloneStatus: 'Complete' } } });
     render(<RestoreProgressBanner namespace="apps" name="data-restored" source="volume" />);
     expect(screen.getByText(/The cloned volume is ready/)).toBeTruthy();
   });
