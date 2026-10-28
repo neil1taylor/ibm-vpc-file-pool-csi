@@ -563,6 +563,14 @@ spec:
                     oldestRestorePoint:
                       format: date-time
                       type: string
+                    restorePointMoments:
+                      description: |-
+                        RestorePointMoments lists the moments of those restore points, oldest
+                        first. It is what the destination reported after the last good copy.
+                      items:
+                        format: date-time
+                        type: string
+                      type: array
                     restorePoints:
                       description: |-
                         RestorePoints is how many earlier copies of a running VM's disk the
@@ -689,8 +697,55 @@ spec:
                       - vmiName
                       - volume
                       type: object
+                    vmName:
+                      description: |-
+                        VMName is "namespace/name" of the VM that owns this disk. It is set for
+                        the disks of running VMs only.
+                      type: string
                   required:
                   - subVolumeName
+                  type: object
+                type: array
+              vms:
+                description: |-
+                  VMs lists, for each running VM in the policy, the moments the whole VM
+                  can be recovered to. It is the source cluster's view of the destination
+                  and can be a few minutes old; a Failover plan is the exact view.
+                items:
+                  description: VMReplicationStatus is the replication state of one
+                    running VM.
+                  properties:
+                    commonMoments:
+                      description: |-
+                        CommonMoments are the moments that ALL disks of the VM can show: the
+                        copy moment and the restore points every disk has. Newest first. A
+                        recovery must use one of these, or the disks would not match.
+                      items:
+                        format: date-time
+                        type: string
+                      type: array
+                    consistency:
+                      enum:
+                      - FileSystemConsistent
+                      - CrashConsistent
+                      type: string
+                    copyMoment:
+                      description: |-
+                        CopyMoment is the moment of the newest copy, and Consistency says how
+                        consistent it is. They are the oldest copy moment among the disks.
+                      format: date-time
+                      type: string
+                    name:
+                      description: Name is "namespace/name" of the VM.
+                      type: string
+                    subVolumes:
+                      description: SubVolumes are the VM's disks in this policy.
+                      items:
+                        type: string
+                      type: array
+                  required:
+                  - name
+                  - subVolumes
                   type: object
                 type: array
             required:

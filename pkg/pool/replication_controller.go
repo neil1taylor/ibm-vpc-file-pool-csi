@@ -666,6 +666,7 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 			policy.Status.LastError = ""
 		}
 		policy.Status.SubVolumeStatuses = svStatuses
+		policy.Status.VMs = vmReplicationStatuses(svStatuses)
 		if err := rc.k8sClient.UpdateReplicationPolicyStatus(ctx, policy); err != nil {
 			klog.ErrorS(err, "Failed to update policy status (cycle in progress)", "policy", policyName)
 		}
@@ -682,6 +683,7 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 		// Set the per-volume statuses first, so the one status write in
 		// handleFailure carries them with the failure count.
 		policy.Status.SubVolumeStatuses = svStatuses
+		policy.Status.VMs = vmReplicationStatuses(svStatuses)
 		rc.handleFailure(ctx, policy, combinedErr, start)
 		return
 	}
@@ -701,6 +703,7 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 	policy.Status.LastSyncTime = &now
 	policy.Status.LastSyncDuration = duration.String()
 	policy.Status.SubVolumeStatuses = svStatuses
+	policy.Status.VMs = vmReplicationStatuses(svStatuses)
 	policy.Status.ConsecutiveFailures = 0
 	policy.Status.LastError = vmProblemsError(skipped, vmRes.failed)
 
@@ -1556,6 +1559,8 @@ type replJobResult struct {
 	BytesWritten       int64      `json:"bytesWritten"`
 	RestorePoints      int32      `json:"restorePoints"`
 	OldestRestorePoint *time.Time `json:"oldestRestorePoint,omitempty"`
+	// RestorePointMoments lists the restore points, oldest first.
+	RestorePointMoments []time.Time `json:"restorePointMoments,omitempty"`
 	// WrongBase is true if a send-vm-disk Job found the far-site disk at
 	// another moment than the copy starts from, and DiskMoment says which.
 	WrongBase  bool   `json:"wrongBase,omitempty"`

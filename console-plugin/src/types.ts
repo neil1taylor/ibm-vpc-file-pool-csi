@@ -261,10 +261,22 @@ export interface ReplicationPolicyStatus {
   lastSyncTime?: string;
   lastSyncDuration?: string;
   subVolumeStatuses?: SubVolumeReplicationStatus[];
+  /** One entry for each running VM: the moments all its disks share. */
+  vms?: VMReplicationStatus[];
   consecutiveFailures: number;
   lastError?: string;
   /** `ReceiverReachable` is set by the controller for driver-to-driver policies. */
   conditions?: Condition[];
+}
+
+/** A running VM in a policy. commonMoments are the moments ALL its disks can show, newest first. */
+export interface VMReplicationStatus {
+  /** namespace/name */
+  name: string;
+  subVolumes: string[];
+  copyMoment?: string;
+  consistency?: 'FileSystemConsistent' | 'CrashConsistent';
+  commonMoments?: string[];
 }
 
 export interface SubVolumeReplicationStatus {
@@ -282,6 +294,9 @@ export interface SubVolumeReplicationStatus {
   /** How many earlier copies the destination keeps, and the moment of the oldest. */
   restorePoints?: number;
   oldestRestorePoint?: string;
+  restorePointMoments?: string[];
+  /** namespace/name of the VM that owns the disk. */
+  vmName?: string;
   /** A copy that is not finished. */
   vmCopy?: { id: string; phase: string };
 }

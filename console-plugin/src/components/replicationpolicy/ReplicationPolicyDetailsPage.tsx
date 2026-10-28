@@ -35,6 +35,7 @@ import PhaseStatus from '../common/PhaseStatus';
 import DeleteModal from '../common/DeleteModal';
 import { describeReceiverReachable, vmCopySettingsText } from '../../utils/replication-helpers';
 import VolumeStatusTable from './VolumeStatusTable';
+import VMRecoveryTable from './VMRecoveryTable';
 import { secretsMadeFor } from '../../utils/receiver-objects';
 import { deleteMadeSecrets } from '../../utils/receiver-secrets';
 import { formatAge, formatDuration } from '../../utils/resource-helpers';
@@ -398,6 +399,7 @@ const ReplicationPolicyDetailsPage: React.FC = () => {
           </GridItem>
         </Grid>
 
+        <VMRecoveryTable vms={status?.vms} schedule={spec.schedule} />
         {renderSyncStatuses()}
         {renderHooksReadOnly(spec.preSyncHooks, 'Pre-Sync Hooks')}
         {renderHooksReadOnly(spec.postSyncHooks, 'Post-Sync Hooks')}

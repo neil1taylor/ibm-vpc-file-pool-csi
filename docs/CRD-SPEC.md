@@ -1741,6 +1741,16 @@ type ReplicationPolicyStatus struct {
     // +optional
     SubVolumeStatuses []SubVolumeReplicationStatus `json:"subVolumeStatuses,omitempty"`
 
+    // VMs lists each running VM: its disks, the copy moment and consistency
+    // (the oldest copy among the disks), and CommonMoments, the moments ALL
+    // its disks can show (the copy moment and the restore points every disk
+    // has), newest first. Rewinding disks to different moments would give the
+    // guest a mix of two times, so a recovery must use one of these. This is
+    // the source cluster's view of the destination and can be a few minutes
+    // old; a Failover plan is the exact view.
+    // +optional
+    VMs []VMReplicationStatus `json:"vms,omitempty"`
+
     // ConsecutiveFailures counts sequential failed replication cycles.
     // Resets to 0 on success.
     ConsecutiveFailures int32 `json:"consecutiveFailures"`
@@ -1797,6 +1807,14 @@ type SubVolumeReplicationStatus struct {
     RestorePoints int32 `json:"restorePoints,omitempty"`
     // +optional
     OldestRestorePoint *metav1.Time `json:"oldestRestorePoint,omitempty"`
+
+    // RestorePointMoments lists those restore points, oldest first.
+    // +optional
+    RestorePointMoments []metav1.Time `json:"restorePointMoments,omitempty"`
+
+    // VMName is "namespace/name" of the VM that owns the disk.
+    // +optional
+    VMName string `json:"vmName,omitempty"`
 
     // VMCopy is the state of an unfinished running VM disk copy: copy ID,
     // phase (Copying or Sending), VM pod name and UID, VMI name, pod volume

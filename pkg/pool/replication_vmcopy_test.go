@@ -1147,3 +1147,100 @@ func TestVMCopy_ASpeedChangeThatFailsIsNotAFailedCopy(t *testing.T) {
 		t.Fatalf("the copy goes on at the old speed: %+v", s.VMCopy)
 	}
 }
+
+// finishCopyWithPoints runs a VM copy to the end. Each apply Job reports the
+// restore points of its disk, by SubVolume.
+func (e *vmCopyEnv) finishCopyWithPoints(t *testing.T, points map[string]string) {
+	t.Helper()
+	e.tick()
+	e.cop.state = vmcopy.Done
+	e.tick()
+	for sv, list := range points {
+		job := e.job(t, sv)
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: job.Name + "-x", Namespace: replJobNamespace, Labels: job.Spec.Template.Labels},
+			Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
+				State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+					Message: `{"bytesWritten":1,"restorePoints":2,"restorePointMoments":[` + list + `]}`,
+				}},
+			}}},
+		}
+		if err := e.dc.Create(e.ctx, pod); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.succeedJobs(t)
+	e.tick()
+}
+
+func momentsOf(ts []metav1.Time) []string {
+	var out []string
+	for _, t := range ts {
+		out = append(out, t.UTC().Format("15:04"))
+	}
+	return out
+}
+
+func TestVMCopy_CommonMomentsAreThoseAllDisksShare(t *testing.T) {
+	e := newVMCopyEnv(t)
+	e.finishCopyWithPoints(t, map[string]string{
+		vmGuardSV1: `"2026-10-20T09:00:00Z","2026-10-20T10:00:00Z","2026-10-20T11:00:00Z"`,
+		vmGuardSV2: `"2026-10-20T10:00:00Z","2026-10-20T11:00:00Z","2026-10-20T11:30:00Z"`,
+	})
+	if got := momentsOf(e.status(t, vmGuardSV1).RestorePointMoments); strings.Join(got, ",") != "09:00,10:00,11:00" {
+		t.Errorf("disk restore points = %v", got)
+	}
+	vms := e.k.getPolicy(e.policy).Status.VMs
+	if len(vms) != 1 {
+		t.Fatalf("VMs = %+v, want one", vms)
+	}
+	vm := vms[0]
+	if vm.Name != "default/web" || strings.Join(vm.SubVolumes, ",") != vmGuardSV1+","+vmGuardSV2 {
+		t.Errorf("VM = %+v", vm)
+	}
+	// 11:30 is on one disk only and 09:00 on the other only: neither is a
+	// moment the whole VM can show.
+	if got := strings.Join(momentsOf(vm.CommonMoments), ","); got != "12:00,11:00,10:00" {
+		t.Errorf("common moments = %s, want 12:00,11:00,10:00 (newest first)", got)
+	}
+	if vm.CopyMoment == nil || vm.Consistency != "FileSystemConsistent" {
+		t.Errorf("copy moment/consistency = %v/%q", vm.CopyMoment, vm.Consistency)
+	}
+}
+
+func TestVMCopy_DisksAtDifferentMomentsShareOnlyRestorePoints(t *testing.T) {
+	prev := []v1alpha1.SubVolumeReplicationStatus{
+		{SubVolumeName: "a", VMName: "ns/vm", CopyMoment: mtime("12:00"), RestorePointMoments: mtimes("10:00", "11:00")},
+		{SubVolumeName: "b", VMName: "ns/vm", CopyMoment: mtime("11:00"), RestorePointMoments: mtimes("10:00")},
+	}
+	vms := vmReplicationStatuses(prev)
+	if got := strings.Join(momentsOf(vms[0].CommonMoments), ","); got != "11:00,10:00" {
+		t.Errorf("common = %s", got)
+	}
+	// A disk with no known copy leaves no common moment at all.
+	prev[1].CopyMoment = nil
+	if got := vmReplicationStatuses(prev)[0].CommonMoments; len(got) != 0 {
+		t.Errorf("common = %v, want none", got)
+	}
+}
+
+func TestVMCopy_PlainVolumesAreNotListedAsVMs(t *testing.T) {
+	vms := vmReplicationStatuses([]v1alpha1.SubVolumeReplicationStatus{{SubVolumeName: "x", CopyMoment: mtime("12:00")}})
+	if len(vms) != 0 {
+		t.Errorf("VMs = %+v", vms)
+	}
+}
+
+func mtime(hhmm string) *metav1.Time {
+	t, _ := time.Parse("2006-01-02 15:04", "2026-10-20 "+hhmm)
+	m := metav1.NewTime(t)
+	return &m
+}
+
+func mtimes(hhmm ...string) []metav1.Time {
+	var out []metav1.Time
+	for _, h := range hhmm {
+		out = append(out, *mtime(h))
+	}
+	return out
+}

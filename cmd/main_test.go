@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -134,5 +135,18 @@ func TestCheckReceiverResult(t *testing.T) {
 				t.Errorf("got (%q, %d), want (%q, %d)", line, code, tt.wantLine, tt.wantCode)
 			}
 		})
+	}
+}
+
+func TestVMDiskMessages_CarryTheRestorePointMoments(t *testing.T) {
+	a := time.Date(2026, 10, 20, 13, 0, 0, 0, time.UTC)
+	b := a.Add(time.Hour)
+	want := `"restorePointMoments":["2026-10-20T13:00:00Z","2026-10-20T14:00:00Z"]`
+	apply := applyVMDiskMessage(replication.VMDiskResult{RestorePointMoments: []time.Time{a, b}})
+	send := sendVMDiskMessage(replication.VMSendResult{CommitResponse: replication.CommitResponse{RestorePointMoments: []time.Time{a, b}}}, nil)
+	for name, got := range map[string]string{"apply": apply, "send": send} {
+		if !strings.Contains(got, want) {
+			t.Errorf("%s message %s lacks %s", name, got, want)
+		}
 	}
 }
