@@ -263,8 +263,8 @@ func TestRunJobReadsAVMDisk(t *testing.T) {
 			t.Error("a guest job read the backup folder as files")
 			return nil, nil, nil
 		},
-		openGuest: func(_ context.Context, disk string, g GuestSource, at time.Time) (browse.Tree, browse.Info, func() error, error) {
-			gotDisk, gotGuest, gotAt = disk, g, at
+		openGuest: func(_ context.Context, latest, moments string, g GuestSource, at time.Time) (browse.Tree, browse.Info, func() error, error) {
+			gotDisk, gotGuest, gotAt = latest+"|"+moments, g, at
 			return sampleTree(), browse.Info{Moment: "20261022T091500Z", Guest: true}, func() error { closed = true; return nil }, nil
 		},
 	}
@@ -277,14 +277,14 @@ func TestRunJobReadsAVMDisk(t *testing.T) {
 	if out.Bytes != 25 || out.Files != 3 || out.Moment != "2026-10-22T09:15:00Z" {
 		t.Fatalf("outcome %+v", out)
 	}
-	if gotDisk != "/src/disk.img" || gotGuest.Consistency != "CrashConsistent" || gotGuest.Socket != "/tmp/disk.sock" ||
+	if gotDisk != "/src|" || gotGuest.Consistency != "CrashConsistent" || gotGuest.Socket != "/tmp/disk.sock" ||
 		!gotAt.Equal(time.Date(2026, 10, 22, 10, 0, 0, 0, time.UTC)) || !closed {
 		t.Errorf("disk %q, guest %+v, at %v, closed %v", gotDisk, gotGuest, gotAt, closed)
 	}
 }
 
 func TestRunJobFromAVMDiskSaysWhyItCannotOpenTheDisk(t *testing.T) {
-	deps := jobDeps{openGuest: func(context.Context, string, GuestSource, time.Time) (browse.Tree, browse.Info, func() error, error) {
+	deps := jobDeps{openGuest: func(context.Context, string, string, GuestSource, time.Time) (browse.Tree, browse.Info, func() error, error) {
 		return nil, browse.Info{}, nil, errors.New("the reader could not list the file systems of the disk")
 	}}
 	out, err := runJob(context.Background(), JobSpec{Mode: ModeMeasure, Latest: "/src", Guest: &GuestSource{Socket: "/tmp/d.sock"}}, writePaths(t, "/a"), deps)
@@ -294,14 +294,13 @@ func TestRunJobFromAVMDiskSaysWhyItCannotOpenTheDisk(t *testing.T) {
 }
 
 func TestBadGuestJobSpecsAreRefused(t *testing.T) {
-	deps := jobDeps{openGuest: func(context.Context, string, GuestSource, time.Time) (browse.Tree, browse.Info, func() error, error) {
+	deps := jobDeps{openGuest: func(context.Context, string, string, GuestSource, time.Time) (browse.Tree, browse.Info, func() error, error) {
 		t.Error("a bad spec reached the disk")
 		return nil, browse.Info{}, nil, errors.New("no")
 	}}
 	g := &GuestSource{Socket: "/tmp/d.sock"}
 	for name, spec := range map[string]JobSpec{
 		"with COS":             {Mode: ModeMeasure, Latest: "", COS: cosSource(), Guest: g},
-		"with moments":         {Mode: ModeMeasure, Latest: "/src", Moments: "/moments", Guest: g},
 		"no folder":            {Mode: ModeMeasure, Guest: g},
 		"no socket":            {Mode: ModeMeasure, Latest: "/src", Guest: &GuestSource{}},
 		"relative socket":      {Mode: ModeMeasure, Latest: "/src", Guest: &GuestSource{Socket: "d.sock"}},

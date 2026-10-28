@@ -46,8 +46,9 @@ type BrowseJobRequest struct {
 	// not used.
 	COS *BrowseCOSRequest
 	// Guest reads the file systems inside the VM disk at LatestPath instead of
-	// the files of that folder. MomentsPath is not used: the earlier moments of
-	// a VM disk are undo files next to the disk.
+	// the files of that folder. The earlier moments of a VM disk are undo files
+	// next to the disk; MomentsPath is set only for a disk that was copied as
+	// plain files (a stopped VM), where each moment is a folder with its own disk.img.
 	Guest bool
 	// Consistency is the consistency of the newest copy of the VM disk
 	// (FileSystemConsistent or CrashConsistent); empty if not known. Guest only.
@@ -162,15 +163,13 @@ func (r *ShareJobRunner) StartBrowse(ctx context.Context, req BrowseJobRequest) 
 		if req.Consistency != "" {
 			args = append(args, "--guest-consistency="+req.Consistency)
 		}
-		if !req.At.IsZero() {
-			args = append(args, "--at="+req.At.UTC().Format(time.RFC3339))
-		}
-	} else if req.MomentsPath != "" {
+	}
+	if req.MomentsPath != "" {
 		args = append(args, "--moments=/moments")
-		if !req.At.IsZero() {
-			args = append(args, "--at="+req.At.UTC().Format(time.RFC3339))
-		}
 		folders = append(folders, folderMount{share: 0, subPath: strings.TrimPrefix(req.MomentsPath, "/"), at: "/moments"})
+	}
+	if !req.At.IsZero() && (req.Guest || req.MomentsPath != "") {
+		args = append(args, "--at="+req.At.UTC().Format(time.RFC3339))
 	}
 	owner := req.Owner
 	shape := jobShape{

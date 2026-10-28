@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"time"
 
@@ -24,6 +25,12 @@ type OpenOptions struct {
 	At time.Time
 	// Socket is the path of the private socket where the disk is served.
 	Socket string
+	// Moments, if set, is the folder of earlier moments of a disk that was copied
+	// as plain files (a VM that was stopped when it was backed up): each moment is
+	// a folder named like 20261022T091500Z that holds its own disk.img. The moment
+	// is chosen like a plain volume's, and At must be a whole-second time. Empty
+	// means the disk keeps its earlier moments as undo files next to it.
+	Moments string
 	// Runner runs the libguestfs tools.
 	Runner Runner
 	// Crash is the Crash option of Guest.
@@ -95,15 +102,25 @@ func Open(ctx context.Context, o OpenOptions) (*Opened, error) {
 	if !socketRe.MatchString(o.Socket) {
 		return nil, errors.New("the socket path is not a plain absolute path")
 	}
+	disk, at := o.Disk, AtEndOfSecond(o.At)
+	var info browse.Info
+	momentsFolder := o.Moments != ""
+	if momentsFolder {
+		root, ci, cerr := browse.ChooseRoot(filepath.Dir(o.Disk), o.Moments, o.At)
+		if cerr != nil {
+			return nil, fmt.Errorf("the backup disk cannot be opened: %w", cerr)
+		}
+		disk, at, info = filepath.Join(root, "disk.img"), time.Time{}, ci
+	}
 	sleep := o.Sleep
 	if sleep == nil {
 		sleep = time.Sleep
 	}
 	wait, poll := orDuration(o.Wait, 5*time.Minute), orDuration(o.Poll, 5*time.Second)
-	view, err := replication.OpenDiskView(o.Disk, AtEndOfSecond(o.At))
+	view, err := replication.OpenDiskView(disk, at)
 	for waited := time.Duration(0); errors.Is(err, replication.ErrCopyInProgress) && waited < wait; waited += poll {
 		sleep(poll)
-		view, err = replication.OpenDiskView(o.Disk, AtEndOfSecond(o.At))
+		view, err = replication.OpenDiskView(disk, at)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("the backup disk cannot be opened: %w", err)
@@ -124,6 +141,9 @@ func Open(ctx context.Context, o OpenOptions) (*Opened, error) {
 	op := &Opened{View: view, cancel: cancel, done: done, socket: o.Socket}
 	op.Tree = New(sctx, Options{Drive: "nbd+unix:///?socket=" + o.Socket, Runner: o.Runner, Crash: o.Crash, Check: view.Err})
 	op.Moments = func() ([]string, error) { return Moments(o.Disk) }
+	if momentsFolder {
+		op.Moments = func() ([]string, error) { return browse.MomentNames(o.Moments) }
+	}
 	lctx, lcancel := context.WithTimeout(sctx, orDuration(o.StartTimeout, 10*time.Minute))
 	defer lcancel()
 	if _, err = op.Tree.Filesystems(lctx); err != nil {
@@ -134,10 +154,15 @@ func Open(ctx context.Context, o OpenOptions) (*Opened, error) {
 		}
 		return nil, err
 	}
-	op.Info = browse.Info{Latest: view.Latest(), Guest: true}
-	if view.MomentKnown() {
-		op.Info.Moment = view.Moment().UTC().Format(browse.MomentLayout)
+	if momentsFolder {
+		op.Info = info
+	} else {
+		op.Info = browse.Info{Latest: view.Latest()}
+		if view.MomentKnown() {
+			op.Info.Moment = view.Moment().UTC().Format(browse.MomentLayout)
+		}
 	}
+	op.Info.Guest = true
 	return op, nil
 }
 

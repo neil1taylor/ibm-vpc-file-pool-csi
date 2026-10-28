@@ -295,3 +295,40 @@ func TestBrowseGuest_AHelperThatIsNotReadyInTimeEndsInWords(t *testing.T) {
 		t.Fatalf("status = %+v", bb.Status)
 	}
 }
+
+func (e *browseEnv) setConsistency(c string, restorePoints int32) {
+	e.t.Helper()
+	bp := e.bp("nightly")
+	for i := range bp.Status.Volumes {
+		bp.Status.Volumes[i].Consistency, bp.Status.Volumes[i].RestorePoints = c, restorePoints
+	}
+	if err := e.c.Status().Update(e.ctx, bp); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// A VM that was stopped when it was backed up is copied as plain files: its
+// earlier moments are folders, not undo files.
+func TestBrowseGuest_AStoppedVMsDiskReadsTheMomentsFolder(t *testing.T) {
+	e := newGuestEnv(t)
+	e.setConsistency("FileCopy", 3)
+	e.openGuest("bb1")
+	e.reconcile()
+	req := e.jobs.started["uid-bb1"]
+	if want := "/backup/nightly/.moments" + e.claim.Spec.SubPath; req.MomentsPath != want {
+		t.Errorf("MomentsPath = %q, want %q", req.MomentsPath, want)
+	}
+	if req.Consistency != "" {
+		t.Errorf("Consistency = %q: a file copy has none to pass on", req.Consistency)
+	}
+}
+
+func TestBrowseGuest_AVMCopyKeepsNoMomentsFolder(t *testing.T) {
+	e := newGuestEnv(t)
+	e.setConsistency("CrashConsistent", 3)
+	e.openGuest("bb1")
+	e.reconcile()
+	if req := e.jobs.started["uid-bb1"]; req.MomentsPath != "" {
+		t.Errorf("MomentsPath = %q: undo files sit next to the disk", req.MomentsPath)
+	}
+}

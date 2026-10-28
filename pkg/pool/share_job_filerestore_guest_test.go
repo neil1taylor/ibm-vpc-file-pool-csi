@@ -102,7 +102,6 @@ func TestRunFileRestore_GuestMeasureJobOnlyReads(t *testing.T) {
 
 func TestRunFileRestore_GuestRefusesWhatItCannotCheck(t *testing.T) {
 	cases := map[string]func(*FileRestoreRequest){
-		"moments folder": func(r *FileRestoreRequest) { r.MomentsPath = testBackupMoments },
 		"COS": func(r *FileRestoreRequest) {
 			r.COS = &FileRestoreCOS{Repo: testExportRepo(), Policy: "p", Volume: testExportVolume}
 		},
@@ -116,5 +115,28 @@ func TestRunFileRestore_GuestRefusesWhatItCannotCheck(t *testing.T) {
 		if _, _, err := r.RunFileRestore(context.Background(), req); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+func TestRunFileRestore_GuestOfAFileCopyMountsTheMomentsFolder(t *testing.T) {
+	r, c := newApplyRunner()
+	r.SetBrowseGuest(testGuestImage, BrowseGuestConfig{})
+	req := guestFileRestoreRequest(filerestore.ModeFolder)
+	req.MomentsPath = testBackupMoments
+	if _, _, err := r.RunFileRestore(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	job := fileRestoreJob(t, c)
+	if spec := jobSpecOf(t, job); spec.Moments != "/moments" || spec.Guest == nil {
+		t.Errorf("spec = %+v", spec)
+	}
+	found := false
+	for _, m := range job.Spec.Template.Spec.Containers[0].VolumeMounts {
+		if m.MountPath == "/moments" && m.ReadOnly {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("no read-only /moments mount")
 	}
 }

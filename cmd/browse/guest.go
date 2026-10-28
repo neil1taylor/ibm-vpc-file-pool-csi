@@ -24,14 +24,16 @@ type guestSession struct {
 
 // openGuestSession shows the disk in root (disk.img) to the appliance and lists
 // its file systems. It takes the disk by the name disk.img only, as the backup
-// of a VM disk always has.
-func openGuestSession(ctx context.Context, root string, at time.Time, socket, appliance, consistency string) (*guestSession, error) {
+// of a VM disk always has. With a moments folder, the disk was copied as plain
+// files (the VM was stopped) and each moment is a folder with its own disk.img.
+func openGuestSession(ctx context.Context, root, moments string, at time.Time, socket, appliance, consistency string) (*guestSession, error) {
 	opened, err := guestfs.Open(ctx, guestfs.OpenOptions{
-		Disk:   filepath.Join(root, "disk.img"),
-		At:     at,
-		Socket: socket,
-		Runner: newToolRunner(appliance, guestfs.HasKVM()),
-		Crash:  consistency == consistencyCrash,
+		Disk:    filepath.Join(root, "disk.img"),
+		Moments: moments,
+		At:      at,
+		Socket:  socket,
+		Runner:  newToolRunner(appliance, guestfs.HasKVM()),
+		Crash:   consistency == consistencyCrash,
 	})
 	if err != nil {
 		return nil, err

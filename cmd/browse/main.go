@@ -90,8 +90,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 	case *cosSource != "" && (*root != "" || *moments != ""):
 		_, _ = fmt.Fprintln(stderr, "--cos-source cannot be used with --root or --moments")
 		return 2
-	case *guest && (*cosSource != "" || *moments != ""):
-		_, _ = fmt.Fprintln(stderr, "--guest cannot be used with --cos-source or --moments: a VM disk keeps its earlier moments next to the disk")
+	case *guest && *cosSource != "":
+		_, _ = fmt.Fprintln(stderr, "--guest cannot be used with --cos-source")
 		return 2
 	case *guest && !strings.HasPrefix(*guestSocket, "/"):
 		_, _ = fmt.Fprintln(stderr, "--guest-socket must be an absolute path")
@@ -142,7 +142,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 		walk bool
 	)
 	if *guest {
-		g, gerr := openGuestSession(ctx, *root, atTime, *guestSocket, *guestAppliance, *guestConsistency)
+		g, gerr := openGuestSession(ctx, *root, *moments, atTime, *guestSocket, *guestAppliance, *guestConsistency)
 		if gerr != nil {
 			failStart(stderr, *termLog, gerr)
 			return 1

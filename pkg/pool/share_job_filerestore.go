@@ -146,14 +146,21 @@ func (r *ShareJobRunner) fileRestoreSpec(req FileRestoreRequest) (filerestore.Jo
 		if r.guestImage == "" {
 			return spec, errors.New("restoring files from inside a VM disk needs the guest image, which is not set")
 		}
-		if req.COS != nil || req.MomentsPath != "" {
-			return spec, errors.New("a VM disk is read from its backup folder only, not from COS and with no moments folder")
+		if req.COS != nil {
+			return spec, errors.New("a VM disk is read from its backup folder only, not from COS")
+		}
+		if req.MomentsPath != "" {
+			if err := checkBackupFolders(req.LatestPath, req.MomentsPath); err != nil {
+				return spec, err
+			}
 		}
 		if c := req.Guest.Consistency; c != "" && c != "FileSystemConsistent" && c != "CrashConsistent" {
 			return spec, errors.New("the consistency of the copy is not one that the Job knows")
 		}
-		if err := util.ValidateBackupPath(req.LatestPath); err != nil {
-			return spec, err
+		if req.MomentsPath == "" {
+			if err := util.ValidateBackupPath(req.LatestPath); err != nil {
+				return spec, err
+			}
 		}
 	case req.COS != nil:
 		if req.LatestPath != "" || req.MomentsPath != "" {

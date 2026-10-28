@@ -410,14 +410,18 @@ func (bc *BackupController) browseRequest(ctx context.Context, bb *v1alpha1.Back
 	}
 	switch {
 	case sp.Guest:
-		// A VM disk keeps its earlier moments as undo files next to the disk,
-		// not as a moments folder: the helper rebuilds the old view from them.
+		// A VM disk copied by the VM copy keeps its earlier moments as undo files
+		// next to the disk: the helper rebuilds the old view from them. One copied
+		// as plain files has a moments folder, like any volume.
 		req.Guest = true
 		if c := entry.Consistency; c == "FileSystemConsistent" || c == "CrashConsistent" {
 			req.Consistency = c
 		}
 		if sp.Moment != nil {
 			req.At = sp.Moment.Time
+		}
+		if guestFileCopy(entry) && entry.RestorePoints > 0 {
+			req.MomentsPath = policyBase + "/.moments" + entry.SubPath
 		}
 		return req, entry.SubVolumeName, nil
 	case entry.RestorePoints > 0:
@@ -640,6 +644,14 @@ func (bc *BackupController) sweepBrowseHolds(ctx context.Context) {
 			klog.ErrorS(err, "Failed to release a browse hold", "volume", sv.Name)
 		}
 	}
+}
+
+// guestFileCopy says a VM disk was copied as plain files, not by the VM copy
+// that keeps undo files: that is how a VM that was stopped is backed up. Its
+// earlier moments are then folders in the moments folder, each with its own
+// disk.img, as for any other volume. The copy path says so in the consistency.
+func guestFileCopy(entry *v1alpha1.BackupVolumeStatus) bool {
+	return entry.Consistency == consistencyFileCopy
 }
 
 func (bc *BackupController) guestStartTimeout() time.Duration {

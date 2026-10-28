@@ -144,3 +144,35 @@ func TestStartBrowse_GuestRefusesAnUnknownConsistency(t *testing.T) {
 		t.Fatal("a value that is not one of the two must be refused")
 	}
 }
+
+// A VM disk that was copied as plain files (the VM was stopped) keeps its
+// earlier moments as folders, so the helper gets the moments folder too.
+func TestStartBrowse_GuestOfAFileCopyMountsTheMomentsFolder(t *testing.T) {
+	r, c := newBrowseRunner()
+	r.SetBrowseGuest(testGuestImage, BrowseGuestConfig{})
+	req := guestRequest()
+	req.MomentsPath = testMomentsPath
+	req.At = time.Date(2026, 10, 22, 10, 30, 0, 0, time.UTC)
+	if err := r.StartBrowse(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	ctr := browseJob(t, c, "bb-1").Spec.Template.Spec.Containers[0]
+	args := strings.Join(ctr.Command, " ")
+	for _, want := range []string{"--guest", "--moments=/moments", "--at=2026-10-22T10:30:00Z"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("command lacks %q: %s", want, args)
+		}
+	}
+	found := false
+	for _, m := range ctr.VolumeMounts {
+		if m.MountPath == "/moments" {
+			found = true
+			if !m.ReadOnly || m.SubPath == "" {
+				t.Errorf("/moments = %+v", m)
+			}
+		}
+	}
+	if !found {
+		t.Error("the moments folder is not mounted")
+	}
+}

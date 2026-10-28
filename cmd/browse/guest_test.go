@@ -162,7 +162,6 @@ func TestGuestModeRefusesBadArguments(t *testing.T) {
 	base := []string{"--mode", "browse-server", "--token-file", tok, "--tls-cert-file", crt, "--tls-key-file", key}
 	for name, c := range map[string][]string{
 		"no root":         append([]string{"--guest"}, base...),
-		"with moments":    append([]string{"--guest", "--root", root, "--moments", root}, base...),
 		"with cos":        append([]string{"--guest", "--cos-source", "{}"}, base...),
 		"bad consistency": append([]string{"--guest", "--root", root, "--guest-consistency", "Maybe"}, base...),
 		"bad socket":      append([]string{"--guest", "--root", root, "--guest-socket", "relative"}, base...),

@@ -45,8 +45,9 @@ type JobSpec struct {
 	COS *cosbrowse.Source `json:"cos,omitempty"`
 	// Guest says the backup is a VM disk: Latest holds disk.img, and the Job
 	// reads the file systems inside it through a read-only appliance. The first
-	// name of each path is then the file system (sda1, rhel-root). Moments is
-	// not used: the earlier moments of a VM disk are undo files next to the disk.
+	// name of each path is then the file system (sda1, rhel-root). The earlier
+	// moments of a VM disk are undo files next to the disk; only a disk that was
+	// copied as plain files (a stopped VM) has a Moments folder.
 	Guest *GuestSource `json:"guest,omitempty"`
 	// Dest is the share that holds the claim.
 	Dest string `json:"dest,omitempty"`
@@ -178,8 +179,8 @@ func (s JobSpec) validate() (time.Time, uint32, error) {
 	}
 	switch {
 	case s.Guest != nil:
-		if s.COS != nil || s.Moments != "" || s.Latest == "" {
-			return at, 0, errors.New("a VM disk is read from its backup folder (latest) only, with no moments folder and not from COS")
+		if s.COS != nil || s.Latest == "" {
+			return at, 0, errors.New("a VM disk is read from its backup folder (latest), not from COS")
 		}
 		if err := s.Guest.validate(); err != nil {
 			return at, 0, err
@@ -219,7 +220,7 @@ type jobDeps struct {
 	// openCOS opens a backup in COS.
 	openCOS func(ctx context.Context, src cosbrowse.Source, at time.Time) (browse.Tree, browse.Info, func() error, error)
 	// openGuest opens the file systems inside the VM disk at disk.
-	openGuest func(ctx context.Context, disk string, g GuestSource, at time.Time) (browse.Tree, browse.Info, func() error, error)
+	openGuest func(ctx context.Context, latest, moments string, g GuestSource, at time.Time) (browse.Tree, browse.Info, func() error, error)
 }
 
 func realDeps() jobDeps {
@@ -231,9 +232,9 @@ func realDeps() jobDeps {
 			}
 			return o.Tree, o.Info, o.Close, nil
 		},
-		openGuest: func(ctx context.Context, disk string, g GuestSource, at time.Time) (browse.Tree, browse.Info, func() error, error) {
+		openGuest: func(ctx context.Context, latest, moments string, g GuestSource, at time.Time) (browse.Tree, browse.Info, func() error, error) {
 			o, err := guestfs.Open(ctx, guestfs.OpenOptions{
-				Disk: disk, At: at, Socket: g.Socket, Crash: g.Consistency == "CrashConsistent",
+				Disk: strings.TrimSuffix(latest, "/") + "/disk.img", Moments: moments, At: at, Socket: g.Socket, Crash: g.Consistency == "CrashConsistent",
 				Runner: &guestfs.ExecRunner{Env: guestfs.Environment(g.Appliance, guestfs.HasKVM())},
 			})
 			if err != nil {
@@ -331,7 +332,7 @@ func runJob(ctx context.Context, spec JobSpec, pathsFile string, deps jobDeps) (
 // a repository in COS.
 func openBackup(ctx context.Context, spec JobSpec, at time.Time, deps jobDeps) (browse.Tree, browse.Info, func() error, error) {
 	if spec.Guest != nil {
-		tree, info, closeTree, err := deps.openGuest(ctx, strings.TrimSuffix(spec.Latest, "/")+"/disk.img", *spec.Guest, at)
+		tree, info, closeTree, err := deps.openGuest(ctx, spec.Latest, spec.Moments, *spec.Guest, at)
 		if err != nil {
 			// The reason is already a sentence for a person.
 			return nil, browse.Info{}, nil, err

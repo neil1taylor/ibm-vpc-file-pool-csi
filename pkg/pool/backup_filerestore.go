@@ -342,6 +342,9 @@ func (bc *BackupController) reconcileFileRestore(ctx context.Context, fr *v1alph
 		if c := entry.Consistency; c == "FileSystemConsistent" || c == "CrashConsistent" {
 			req.Guest.Consistency = c
 		}
+		if guestFileCopy(entry) && entry.RestorePoints > 0 {
+			req.MomentsPath = policyBase + "/.moments" + entry.SubPath
+		}
 	case entry.RestorePoints > 0:
 		req.MomentsPath = policyBase + "/.moments" + entry.SubPath
 	}

@@ -200,3 +200,21 @@ func TestFileRestoreGuest_TheConsistencyAndTheMomentGoToTheJob(t *testing.T) {
 		t.Errorf("request = %+v", req)
 	}
 }
+
+func TestFileRestoreGuest_AStoppedVMsDiskReadsTheMomentsFolder(t *testing.T) {
+	e := newGuestRestoreEnv(t)
+	bp := e.bp("nightly")
+	for i := range bp.Status.Volumes {
+		bp.Status.Volumes[i].Consistency, bp.Status.Volumes[i].RestorePoints = "FileCopy", 3
+	}
+	if err := e.c.Status().Update(e.ctx, bp); err != nil {
+		t.Fatal(err)
+	}
+	e.guestRestore("f1", nil)
+	e.jobs.answer[filerestore.ModeMeasure] = fakeJobAnswer{}
+	e.reconcile()
+	req := e.jobs.callsFor(filerestore.ModeMeasure)[0]
+	if want := "/backup/nightly/.moments" + e.claim.Spec.SubPath; req.MomentsPath != want || req.Guest == nil {
+		t.Errorf("request = %+v", req)
+	}
+}

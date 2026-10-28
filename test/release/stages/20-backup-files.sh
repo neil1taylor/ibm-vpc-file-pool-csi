@@ -48,6 +48,16 @@
 # stage 18 (see test/e2e/lib/backup-cos.sh) and is "not checked" without it. It
 # cannot test a moment that the local keep time has removed: that takes too long.
 
+# Part 7, VM disks: test/e2e/test-backup-files-vm.sh makes three small VM disks
+# (XFS on LVM, ext4, NTFS) with libguestfs in the guest image, backs them up
+# twice, and reads them with `kubectl backup ls/get/browse/restore-files --fs` as
+# real users, without starting the VM: the latest copy and the first moment, a
+# checksum, a restore with the file system name kept, the hold on the disk while a
+# session is open, the locked-down helper pod, the wrong people, and that nothing
+# is left. It needs the guest image (RT_GUEST_IMAGE, with backupBrowse.guest on)
+# and is "not checked" without it. The undo-file path of a running VM is covered by
+# unit tests and by the backups of stage 18, not by this script.
+
 # A pool takes 5 to 15 minutes to become ready; the rest is under 5 minutes.
 # The COS part adds up to an hour (the export of two moments, then the restores).
 RT_STAGE_TIMEOUT=14400
@@ -65,6 +75,9 @@ RESTORE_LOG="$RT_OUT/backup-file-restore-e2e.log"
 E2E_COS="$HERE_STAGE/../../e2e/test-backup-files-cos.sh"
 COSF_PREFIX=$(rt_name fcos)
 COSF_LOG="$RT_OUT/backup-files-cos-e2e.log"
+E2E_VM="$HERE_STAGE/../../e2e/test-backup-files-vm.sh"
+VMF_PREFIX=$(rt_name fvm)
+VMF_LOG="$RT_OUT/backup-files-vm-e2e.log"
 BACKUP_BIN="${RT_BACKUP_BIN:-$(dirname "$RT_LIB")/bin/kubectl-backup}"
 
 run() {
@@ -237,6 +250,46 @@ run() {
         check "no pod, Job or Secret of any session is left in either namespace" log_has_pass "$COSF_LOG" "no pod, Job or Secret of any session of this test is left"
         check "no Job or pod of a restore or a session is left" log_has_pass "$COSF_LOG" "no Job or pod of a restore or a session is left"
     fi
+
+    [ -f "$E2E_VM" ] || skip "no end-to-end script at $E2E_VM"
+    rt_log "running $E2E_VM"
+    env PREFIX="$VMF_PREFIX" BACKUP_BIN="$BACKUP_BIN" GUEST_IMAGE="${RT_GUEST_IMAGE:-}" bash "$E2E_VM" >"$VMF_LOG" 2>&1
+    rc=$?
+    cat "$VMF_LOG"
+    if fail_line=$(first_fail_line "$VMF_LOG"); then
+        check "the VM disk browse script reported: $fail_line" false
+    elif [ "$rc" -ne 0 ]; then
+        check "the VM disk browse script exited with $rc and no FAIL line (see backup-files-vm-e2e.log)" false
+    else
+        check "the VM disk browse script ended without a FAIL line" true
+    fi
+    if grep -qF "NOT CHECKED: no guest image" "$VMF_LOG"; then
+        not_checked "browsing and restoring files inside a VM disk" "no guest image (RT_GUEST_IMAGE)"
+    elif grep -qF "NOT CHECKED: the backup gateway is not installed" "$VMF_LOG"; then
+        not_checked "browsing and restoring files inside a VM disk with real users" "the backup gateway is not installed"
+    else
+        check "the policy sees the claims as disks of a VM" log_has_pass "$VMF_LOG" "disks of a VM"
+        check "ls lists the logical volume of an LVM disk, not its physical volume" log_has_pass "$VMF_LOG" "file systems of an LVM disk"
+        check "ls lists the file system of the ext4 disk" log_has_pass "$VMF_LOG" "file system of the ext4 disk"
+        check "ls lists the NTFS file system" log_has_pass "$VMF_LOG" "NTFS file system"
+        check "XFS on LVM: the latest copy reads the changed content" log_has_pass "$VMF_LOG" "latest copy reads 'second'"
+        check "XFS on LVM: the first moment reads the first content without starting the VM" log_has_pass "$VMF_LOG" "first moment reads 'first'"
+        check "a file from the XFS volume has the same checksum" log_has_pass "$VMF_LOG" "same checksum"
+        check "ext4: a file is read" log_has_pass "$VMF_LOG" "ext4: a file is read"
+        check "NTFS: a file is read" log_has_pass "$VMF_LOG" "NTFS: a file is read"
+        check "a name with a newline is listed escaped" log_has_pass "$VMF_LOG" "newline is listed escaped"
+        check "an open session holds the disk" log_has_pass "$VMF_LOG" "the disk is held"
+        check "closing the session ends the hold" log_has_pass "$VMF_LOG" "closing the session ends the hold"
+        check "a restore keeps the file system name at the top" log_has_pass "$VMF_LOG" "file system name at the top"
+        check "the restore is a guest restore" log_has_pass "$VMF_LOG" "the restore is a guest restore"
+        check "the hold ends with the restore" log_has_pass "$VMF_LOG" "the hold ends with the restore"
+        check "the guest helper has no token and no host path" log_has_pass "$VMF_LOG" "no service account token and no host path"
+        check "the guest helper has no capability and no privilege" log_has_pass "$VMF_LOG" "no capability, no privilege"
+        check "the backup is mounted read-only" log_has_pass "$VMF_LOG" "mounted read-only"
+        check "a user with only the view role is forbidden" log_has_pass "$VMF_LOG" "only the view role: forbidden"
+        check "no helper pod or Job of a session is left" log_has_pass "$VMF_LOG" "no helper pod or Job of a session is left"
+        check "no Job or pod of a restore is left" log_has_pass "$VMF_LOG" "no Job or pod of a restore is left"
+    fi
 }
 
 cleanup() {
@@ -257,6 +310,9 @@ cleanup() {
     oc delete backuppolicy "$COSF_PREFIX-policy" --ignore-not-found --wait=false
     oc delete namespace "$COSF_PREFIX-test" "$COSF_PREFIX-test-other" --ignore-not-found --wait=true --timeout=900s
     oc delete filesharepool "$COSF_PREFIX-src" "$COSF_PREFIX-snap" "$COSF_PREFIX-plain" --ignore-not-found --wait=false
+    oc delete backuppolicy "$VMF_PREFIX-policy" --ignore-not-found --wait=false
+    oc delete namespace "$VMF_PREFIX-test" --ignore-not-found --wait=true --timeout=900s
+    oc delete filesharepool "$VMF_PREFIX-src" "$VMF_PREFIX-snap" --ignore-not-found --wait=false
     oc delete rolebinding "$COSF_PREFIX-cosadmin" -n "$RT_DRIVER_NS" --ignore-not-found
     oc delete secret "$COSF_PREFIX-cos-credentials" "$COSF_PREFIX-cos-backup-key" "$COSF_PREFIX-kp-apikey" "$COSF_PREFIX-cos-bad" -n "$RT_DRIVER_NS" --ignore-not-found
 }
