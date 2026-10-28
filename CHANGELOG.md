@@ -19,6 +19,10 @@ To make a release:
 
 ## [Unreleased]
 
+## [v0.16.0] — 2026-10-28
+
+A feature release. **Failover from the console:** a new `Failover` resource plans and runs a failover on the destination cluster, for all VMs or for chosen VMs, and the console has a Recovery page for it. **Files from a backup:** browse, download and restore single files and folders from the backups of plain volumes, in the snapshot pool or in COS, from the command line and the console, through a new backup gateway. Two new CRDs (`Failover`, `BackupFileRestore`), new chart objects (the gateway, a browse namespace) and a new role. VM disks inside backups are not covered yet.
+
 ### Added
 
 - **Release test stage 21: failover of chosen VMs, and a browser test of the Recovery page (issues #44 step 4 and #46).** New stage `test/release/stages/21-failover.sh` (needs a second cluster: `RT_DR_CLUSTER=NAME bash test/release/remote.sh start CLUSTER TAG`). It replicates two running VMs and a plain volume to a receiver on the DR cluster and checks that a Plan with `vms` shows only the chosen VM; an Execute with a different list is refused and makes nothing; an Execute for one VM with `rewindTo` makes only that VM's PVCs, PVs and SubVolumes and rewinds only its two disks; the VM boots on DR from the chosen moment (no XFS errors, every logged file with its checksum, no file after the moment); a second Execute is refused as already failed over; and the second VM fails over in the Recovery page. The new Playwright test `console-plugin/integration-tests/tests/recovery.spec.ts` covers the VM table, the detail view, the typed VM name, the cancelled dialog and the progress to Done. The browser tests for drain, migration and clone (#46 items 5, 6 and 7) already exist (`drain.spec.ts`, `migrate.spec.ts`, `clone.spec.ts`, run by stage 16). Not run on a cluster yet. See [TESTING.md](docs/TESTING.md).
