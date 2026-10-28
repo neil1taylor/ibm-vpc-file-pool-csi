@@ -54,7 +54,7 @@ func (k *KubeAuth) Can(ctx context.Context, u User, a Access) (bool, error) {
 		return false, errors.New("a namespace, a verb and a resource are required")
 	}
 	spec := authzv1.SubjectAccessReviewSpec{
-		ResourceAttributes: &authzv1.ResourceAttributes{Namespace: a.Namespace, Verb: a.Verb, Group: a.Group, Resource: a.Resource},
+		ResourceAttributes: &authzv1.ResourceAttributes{Namespace: a.Namespace, Verb: a.Verb, Group: a.Group, Resource: a.Resource, Name: a.Name},
 		User:               u.Name, UID: u.UID, Groups: u.Groups,
 	}
 	if len(u.Extra) > 0 {

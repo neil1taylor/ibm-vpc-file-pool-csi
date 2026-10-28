@@ -9,6 +9,7 @@ import (
 // +kubebuilder:resource:scope=Cluster,shortName=bb
 // +kubebuilder:printcolumn:name="Policy",type=string,JSONPath=`.spec.policy`
 // +kubebuilder:printcolumn:name="Claim",type=string,JSONPath=`.spec.pvcName`
+// +kubebuilder:printcolumn:name="Source",type=string,JSONPath=`.spec.source`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 
 // BackupBrowse is one open session on one backup of one volume. Users never
@@ -47,6 +48,21 @@ type BackupBrowseSpec struct {
 	// +optional
 	RequestedBy string `json:"requestedBy,omitempty"`
 
+	// Source says where the backup is read from: local (the snapshot pool, the
+	// default) or cos (the Kopia repository in the COS bucket that the policy's
+	// export block names). A COS session needs the policy to have an export
+	// block, unless fromCOS is set.
+	// +kubebuilder:validation:Enum=local;cos
+	// +optional
+	Source string `json:"source,omitempty"`
+
+	// FromCOS names a bucket directly. It is for a cluster administrator, for a
+	// backup that no policy of this cluster describes; policy is then only the
+	// name of the policy's area in the bucket, and pvcNamespace and pvcName
+	// hold "-" and the volume. Source must be cos.
+	// +optional
+	FromCOS *BrowseFromCOS `json:"fromCOS,omitempty"`
+
 	// Close ends the session. The gateway sets it when a user is done.
 	// +optional
 	Close bool `json:"close,omitempty"`
@@ -70,10 +86,17 @@ type BackupBrowseStatus struct {
 	// +optional
 	Port int32 `json:"port,omitempty"`
 
-	// SecretName is the Secret, in the driver namespace, that holds the session
+	// SecretName is the Secret, in the browse namespace, that holds the session
 	// token and the session certificate and key. It is owned by this resource.
+	// A session that reads COS has a copy in the driver namespace, which its
+	// helper mounts; the gateway reads only the one in the browse namespace.
 	// +optional
 	SecretName string `json:"secretName,omitempty"`
+
+	// StartedTime is when the helper pod was started. A session that reads COS
+	// fails if its helper is not ready a few minutes after this.
+	// +optional
+	StartedTime *metav1.Time `json:"startedTime,omitempty"`
 
 	// EndReason is why a session closed: idle, max-life, closed or stopped.
 	// +optional

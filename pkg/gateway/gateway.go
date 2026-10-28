@@ -19,6 +19,7 @@ import (
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/browse"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -45,6 +46,10 @@ type Config struct {
 	SessionNamespace string
 	// EventNamespace is where the audit Events are written.
 	EventNamespace string
+	// DriverNamespace is where the COS and Key Protect Secrets are. A person who
+	// names a bucket directly must be allowed to read the Secrets it names there.
+	// Empty means EventNamespace, which is the driver namespace.
+	DriverNamespace string
 	// SessionWait is how long a request to open a session waits for it to be Ready.
 	SessionWait time.Duration
 	// PollInterval is how often it looks while waiting.
@@ -125,8 +130,10 @@ func writeError(w http.ResponseWriter, status int, code, msg string) {
 // forbidden says the same thing for a namespace that has backups and for one
 // that has none, so it does not show what exists.
 func forbidden(w http.ResponseWriter) {
-	writeError(w, http.StatusForbidden, "forbidden", "you may not read the backups of that namespace")
+	writeError(w, http.StatusForbidden, "forbidden", forbiddenMessage)
 }
+
+const forbiddenMessage = "you may not read the backups of that namespace"
 
 func notFoundSession(w http.ResponseWriter) {
 	writeError(w, http.StatusNotFound, "not_found", "no such session")
@@ -224,6 +231,10 @@ func (g *Gateway) handleVolumes(w http.ResponseWriter, r *http.Request, u User) 
 			}
 			out := Volume{Policy: p.Name, Namespace: ns, PVC: v.PVCName, VM: v.VMName, RestorePoints: v.RestorePoints,
 				Consistency: v.Consistency, Retained: v.Retained}
+			if p.Spec.Export != nil && v.ExportedTime != nil {
+				t := v.ExportedTime.Time
+				out.Exported, out.ExportedTime = true, &t
+			}
 			if v.LastBackupTime != nil {
 				t := v.LastBackupTime.Time
 				out.LastBackupTime = &t
@@ -244,37 +255,20 @@ func (g *Gateway) handleCreate(w http.ResponseWriter, r *http.Request, u User) {
 		writeError(w, http.StatusBadRequest, "bad_request", "the request is not valid")
 		return
 	}
-	if req.Policy == "" || req.Namespace == "" || req.PVC == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "policy, namespace and pvc are required")
+	spec, serr := g.sessionSpec(r.Context(), u, &req)
+	if serr != nil {
+		writeError(w, serr.status, serr.code, serr.msg)
 		return
 	}
-	// The right comes first: nothing is looked up for a user who may not read.
-	if !g.allowed(r.Context(), u, req.Namespace) {
-		forbidden(w)
-		return
-	}
-	policy := &v1alpha1.BackupPolicy{}
-	found := false
-	if err := g.c.Get(r.Context(), types.NamespacedName{Name: req.Policy}, policy); err == nil {
-		for _, v := range policy.Status.Volumes {
-			if v.PVCNamespace == req.Namespace && v.PVCName == req.PVC && v.SubPath != "" {
-				found = true
-			}
-		}
-	}
-	if !found {
-		writeError(w, http.StatusNotFound, "not_found", "no backup of that volume")
-		return
-	}
-	bb, created, err := g.findOrCreate(r.Context(), u, req)
+	bb, created, err := g.findOrCreate(r.Context(), u, spec, req.Moment)
 	if err != nil {
 		klog.ErrorS(err, "Make a browse session failed")
 		writeError(w, http.StatusInternalServerError, "internal", "cannot make the session")
 		return
 	}
 	if created {
-		g.audit(r.Context(), bb, "SessionStarted", fmt.Sprintf("user %s opened a browse session on %s/%s of policy %s, %s",
-			u.Name, req.Namespace, req.PVC, req.Policy, momentText(req.Moment)))
+		g.audit(r.Context(), bb, "SessionStarted", fmt.Sprintf("user %s opened a browse session on %s of policy %s, %s, %s",
+			u.Name, claimText(&spec), spec.Policy, momentText(req.Moment), sourceText(&spec)))
 	}
 	status := http.StatusAccepted
 	if r.URL.Query().Get("wait") == "true" {
@@ -284,6 +278,60 @@ func (g *Gateway) handleCreate(w http.ResponseWriter, r *http.Request, u User) {
 		status = http.StatusOK
 	}
 	writeJSON(w, status, sessionOf(bb))
+}
+
+// claimText names the claim of a session for the audit trail.
+func claimText(spec *v1alpha1.BackupBrowseSpec) string {
+	if spec.FromCOS != nil {
+		return "volume " + spec.FromCOS.Volume
+	}
+	return spec.PVCNamespace + "/" + spec.PVCName
+}
+
+// sessionSpec checks a request and works out the session it asks for. The right
+// comes first: nothing is looked up for a user who may not read.
+func (g *Gateway) sessionSpec(ctx context.Context, u User, req *SessionRequest) (v1alpha1.BackupBrowseSpec, *sourceError) {
+	bad := func(msg string) (v1alpha1.BackupBrowseSpec, *sourceError) {
+		return v1alpha1.BackupBrowseSpec{}, &sourceError{http.StatusBadRequest, "bad_request", msg}
+	}
+	spec := v1alpha1.BackupBrowseSpec{Policy: req.Policy, RequestedBy: u.Name}
+	if req.FromCOS != nil {
+		if req.Namespace != "" || req.PVC != "" {
+			return bad("namespace and pvc are not used with fromCOS")
+		}
+		if req.Source != "" && req.Source != v1alpha1.BackupSourceCOS {
+			return bad(`source must be "cos" with fromCOS`)
+		}
+		if err := checkFromCOS(req.Policy, req.FromCOS); err != nil {
+			return bad(err.Error())
+		}
+		if !g.mayUseBucket(ctx, u, req.FromCOS) {
+			return v1alpha1.BackupBrowseSpec{}, &sourceError{http.StatusForbidden, "forbidden", "you may not read the Secrets of that bucket in the driver namespace, and naming a bucket directly needs that right"}
+		}
+		spec.PVCNamespace, spec.PVCName = v1alpha1.NoNamespace, req.FromCOS.Volume
+		spec.Source, spec.FromCOS = v1alpha1.BackupSourceCOS, req.FromCOS.DeepCopy()
+		return spec, nil
+	}
+	if req.Policy == "" || req.Namespace == "" || req.PVC == "" {
+		return bad("policy, namespace and pvc are required")
+	}
+	if !g.allowed(ctx, u, req.Namespace) {
+		return v1alpha1.BackupBrowseSpec{}, &sourceError{http.StatusForbidden, "forbidden", forbiddenMessage}
+	}
+	policy := &v1alpha1.BackupPolicy{}
+	var vol *v1alpha1.BackupVolumeStatus
+	if err := g.c.Get(ctx, types.NamespacedName{Name: req.Policy}, policy); err == nil {
+		vol = findVolume(policy, req.Namespace, req.PVC)
+	}
+	if vol == nil {
+		return v1alpha1.BackupBrowseSpec{}, &sourceError{http.StatusNotFound, "not_found", "no backup of that volume"}
+	}
+	src, serr := chooseSource(policy, vol, req.Moment, req.Source)
+	if serr != nil {
+		return v1alpha1.BackupBrowseSpec{}, serr
+	}
+	spec.PVCNamespace, spec.PVCName, spec.Source = req.Namespace, req.PVC, src
+	return spec, nil
 }
 
 func momentText(m *time.Time) string {
@@ -298,7 +346,7 @@ func sessionOf(bb *v1alpha1.BackupBrowse) Session {
 	if phase == "" {
 		phase = "Pending"
 	}
-	return Session{Name: bb.Name, Phase: phase, Message: bb.Status.Message}
+	return Session{Name: bb.Name, Phase: phase, Message: bb.Status.Message, Source: sourceName(bb.Spec.Source)}
 }
 
 func sameMoment(a *metav1.Time, b *time.Time) bool {
@@ -308,8 +356,26 @@ func sameMoment(a *metav1.Time, b *time.Time) bool {
 	return a.Time.Equal(*b)
 }
 
-// findOrCreate returns the user's open session on this backup, or makes one.
-func (g *Gateway) findOrCreate(ctx context.Context, u User, req SessionRequest) (*v1alpha1.BackupBrowse, bool, error) {
+// sameBackup says whether an open session reads the backup a request asks for:
+// the same policy, claim, moment and source.
+func sameBackup(a, b *v1alpha1.BackupBrowseSpec, moment *time.Time) bool {
+	if a.Policy != b.Policy || a.PVCNamespace != b.PVCNamespace || a.PVCName != b.PVCName ||
+		sourceName(a.Source) != sourceName(b.Source) || !sameMoment(a.Moment, moment) {
+		return false
+	}
+	switch {
+	case a.FromCOS == nil && b.FromCOS == nil:
+		return true
+	case a.FromCOS == nil || b.FromCOS == nil:
+		return false
+	}
+	return equality.Semantic.DeepEqual(a.FromCOS, b.FromCOS)
+}
+
+// findOrCreate returns the user's open session on this backup, or makes one. A
+// session on the snapshot pool is never reused for a request for COS, nor the
+// other way round.
+func (g *Gateway) findOrCreate(ctx context.Context, u User, want v1alpha1.BackupBrowseSpec, moment *time.Time) (*v1alpha1.BackupBrowse, bool, error) {
 	list := &v1alpha1.BackupBrowseList{}
 	if err := g.c.List(ctx, list, client.MatchingLabels{userLabel: userHash(u.Name)}); err != nil {
 		return nil, false, err
@@ -319,16 +385,16 @@ func (g *Gateway) findOrCreate(ctx context.Context, u User, req SessionRequest) 
 		if b.Spec.RequestedBy != u.Name || b.Spec.Close || b.Status.Phase == "Closed" || b.Status.Phase == "Failed" {
 			continue
 		}
-		if b.Spec.Policy == req.Policy && b.Spec.PVCNamespace == req.Namespace && b.Spec.PVCName == req.PVC && sameMoment(b.Spec.Moment, req.Moment) {
+		if sameBackup(&b.Spec, &want, moment) {
 			return b, false, nil
 		}
 	}
 	bb := &v1alpha1.BackupBrowse{
 		ObjectMeta: metav1.ObjectMeta{GenerateName: "bb-", Labels: map[string]string{userLabel: userHash(u.Name)}},
-		Spec:       v1alpha1.BackupBrowseSpec{Policy: req.Policy, PVCNamespace: req.Namespace, PVCName: req.PVC, RequestedBy: u.Name},
+		Spec:       want,
 	}
-	if req.Moment != nil {
-		m := metav1.NewTime(*req.Moment)
+	if moment != nil {
+		m := metav1.NewTime(*moment)
 		bb.Spec.Moment = &m
 	}
 	if err := g.c.Create(ctx, bb); err != nil {
@@ -373,7 +439,7 @@ func (g *Gateway) session(w http.ResponseWriter, r *http.Request, u User) (*v1al
 		notFoundSession(w)
 		return nil, false
 	}
-	if !g.allowed(r.Context(), u, bb.Spec.PVCNamespace) {
+	if !g.mayRead(r.Context(), u, bb.Spec.PVCNamespace, bb.Spec.FromCOS) {
 		forbidden(w)
 		return nil, false
 	}
@@ -400,8 +466,8 @@ func (g *Gateway) handleClose(w http.ResponseWriter, r *http.Request, u User) {
 			writeError(w, http.StatusInternalServerError, "internal", "cannot close the session")
 			return
 		}
-		g.audit(r.Context(), bb, "SessionClosed", fmt.Sprintf("user %s closed the browse session on %s/%s of policy %s",
-			u.Name, bb.Spec.PVCNamespace, bb.Spec.PVCName, bb.Spec.Policy))
+		g.audit(r.Context(), bb, "SessionClosed", fmt.Sprintf("user %s closed the browse session on %s of policy %s, %s",
+			u.Name, claimText(&bb.Spec), bb.Spec.Policy, sourceText(&bb.Spec)))
 	}
 	writeJSON(w, http.StatusOK, sessionOf(bb))
 }
@@ -562,11 +628,11 @@ func (g *Gateway) relay(w http.ResponseWriter, r *http.Request, u User, bb *v1al
 	if resp.StatusCode == http.StatusOK {
 		switch op {
 		case "file":
-			g.audit(r.Context(), bb, "FileDownloaded", fmt.Sprintf("user %s downloaded %s from %s/%s of policy %s, %s",
-				u.Name, browse.JoinPath(path), bb.Spec.PVCNamespace, bb.Spec.PVCName, bb.Spec.Policy, momentTextOf(bb)))
+			g.audit(r.Context(), bb, "FileDownloaded", fmt.Sprintf("user %s downloaded %s from %s of policy %s, %s, %s",
+				u.Name, browse.JoinPath(path), claimText(&bb.Spec), bb.Spec.Policy, momentTextOf(bb), sourceText(&bb.Spec)))
 		case "tar":
-			g.audit(r.Context(), bb, "FolderDownloaded", fmt.Sprintf("user %s downloaded %s as a tar from %s/%s of policy %s, %s",
-				u.Name, browse.JoinPath(path), bb.Spec.PVCNamespace, bb.Spec.PVCName, bb.Spec.Policy, momentTextOf(bb)))
+			g.audit(r.Context(), bb, "FolderDownloaded", fmt.Sprintf("user %s downloaded %s as a tar from %s of policy %s, %s, %s",
+				u.Name, browse.JoinPath(path), claimText(&bb.Spec), bb.Spec.Policy, momentTextOf(bb), sourceText(&bb.Spec)))
 		}
 	}
 	w.WriteHeader(resp.StatusCode)

@@ -45,6 +45,21 @@ type BackupFileRestoreSpec struct {
 	// +optional
 	Moment *metav1.Time `json:"moment,omitempty"`
 
+	// Source says where the backup is read from: local (the snapshot pool, the
+	// default) or cos (the Kopia repository in the COS bucket that the policy's
+	// export block names, or that fromCOS names).
+	// +kubebuilder:validation:Enum=local;cos
+	// +optional
+	Source string `json:"source,omitempty"`
+
+	// FromCOS names a bucket directly. It is for a cluster administrator, for a
+	// backup that no policy of this cluster describes; policy is then only the
+	// name of the policy's area in the bucket, sourceNamespace holds "-" and
+	// sourceName the volume, and storageClassName must be set for a new claim.
+	// Source must be cos.
+	// +optional
+	FromCOS *BrowseFromCOS `json:"fromCOS,omitempty"`
+
 	// Paths are the files and folders to restore, below the root of the
 	// backed-up volume, one path each in the escaped form that `kubectl backup`
 	// prints (a backslash is written \\ and a byte that is not text \xNN). A

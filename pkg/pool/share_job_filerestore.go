@@ -47,34 +47,49 @@ func (r *ShareJobRunner) RunFileRestore(ctx context.Context, req FileRestoreRequ
 	if err != nil {
 		return false, filerestore.Outcome{}, err
 	}
-	shares := []ShareMount{req.Backup}
-	folders := []folderMount{{share: 0, subPath: strings.TrimPrefix(req.LatestPath, "/"), at: spec.Latest, readOnly: true}}
-	if req.MomentsPath != "" {
-		folders = append(folders, folderMount{share: 0, subPath: strings.TrimPrefix(req.MomentsPath, "/"), at: spec.Moments, readOnly: true})
+	var shares []ShareMount
+	var folders []folderMount
+	var cosVolumes []corev1.Volume
+	var cosMounts []corev1.VolumeMount
+	if req.COS != nil {
+		// The backup is read from COS: there is no share to mount for it, and the
+		// Job holds the keys, so it gets no service account token.
+		cosVolumes, cosMounts = cosSecretVolumes(req.COS.Repo)
+	} else {
+		shares = []ShareMount{req.Backup}
+		folders = []folderMount{{share: 0, subPath: strings.TrimPrefix(req.LatestPath, "/"), at: spec.Latest, readOnly: true}}
+		if req.MomentsPath != "" {
+			folders = append(folders, folderMount{share: 0, subPath: strings.TrimPrefix(req.MomentsPath, "/"), at: spec.Moments, readOnly: true})
+		}
 	}
 	hardened := true
 	var caps []corev1.Capability
+	runAs := int64(0)
 	if req.Mode != filerestore.ModeMeasure {
 		// The whole share, because the claim's folder may not exist before the
 		// Job makes it, and a folder that does not exist cannot be mounted. The
 		// Job opens only the claim's folder below it, one name at a time.
+		folders = append(folders, folderMount{share: len(shares), at: spec.Dest})
 		shares = append(shares, req.Dest)
-		folders = append(folders, folderMount{share: 1, at: spec.Dest})
 		caps = []corev1.Capability{"CHOWN", "FOWNER"}
+	} else if req.COS != nil {
+		// Measuring a backup in COS writes nothing and reads no share.
+		runAs = cosHelperUser
 	}
 	owner := req.Owner
 	shape := jobShape{
 		image: r.driverImage,
 		command: []string{"/usr/local/bin/vpc-file-pool-csi", "--mode=restore-files",
 			"--restore-files-spec=" + string(specJSON), "--restore-files-paths=" + fileRestorePathsFile},
-		runAsUser: 0,
+		runAsUser: runAs,
 		folders:   folders,
 		readOnly:  req.Mode == filerestore.ModeMeasure,
-		volumes: []corev1.Volume{{Name: "paths", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+		volumes: append([]corev1.Volume{{Name: "paths", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
 			LocalObjectReference: corev1.LocalObjectReference{Name: pathsConfigMapName(req.Key)},
 			Items:                []corev1.KeyToPath{{Key: "paths", Path: "paths"}},
-		}}}},
-		mounts:         []corev1.VolumeMount{{Name: "paths", MountPath: fileRestorePathsMount, ReadOnly: true}},
+		}}}}, cosVolumes...),
+		mounts:         append([]corev1.VolumeMount{{Name: "paths", MountPath: fileRestorePathsMount, ReadOnly: true}}, cosMounts...),
+		noToken:        req.COS != nil,
 		owner:          &owner,
 		hardened:       hardened,
 		addCaps:        caps,
@@ -112,22 +127,38 @@ func (r *ShareJobRunner) fileRestoreSpec(req FileRestoreRequest) (filerestore.Jo
 	if _, err := filerestore.CheckPaths(req.Paths); err != nil {
 		return spec, err
 	}
-	if req.MomentsPath != "" {
+	switch {
+	case req.COS != nil:
+		if req.LatestPath != "" || req.MomentsPath != "" {
+			return spec, errors.New("a restore from COS names no backup folder")
+		}
+	case req.MomentsPath != "":
 		if err := checkBackupFolders(req.LatestPath, req.MomentsPath); err != nil {
 			return spec, err
 		}
-	} else if err := util.ValidateBackupPath(req.LatestPath); err != nil {
-		return spec, err
+	default:
+		if err := util.ValidateBackupPath(req.LatestPath); err != nil {
+			return spec, err
+		}
 	}
 	if req.Permissions != "" && !validPermissionsPattern.MatchString(req.Permissions) {
 		return spec, fmt.Errorf("invalid permissions %q", req.Permissions)
 	}
 	spec = filerestore.JobSpec{
-		Mode: req.Mode, Latest: "/src", MaxBytes: req.MaxBytes,
+		Mode: req.Mode, MaxBytes: req.MaxBytes,
 		UID: req.UID, GID: req.GID, Permissions: req.Permissions, CapacityBytes: req.CapacityBytes,
 	}
-	if req.MomentsPath != "" {
-		spec.Moments = "/moments"
+	if req.COS != nil {
+		src, err := checkCOSSource(req.COS.Repo, req.COS.Policy, req.COS.Volume)
+		if err != nil {
+			return spec, err
+		}
+		spec.COS = &src
+	} else {
+		spec.Latest = "/src"
+		if req.MomentsPath != "" {
+			spec.Moments = "/moments"
+		}
 	}
 	if !req.At.IsZero() {
 		spec.At = req.At.UTC().Format(time.RFC3339)

@@ -41,6 +41,10 @@ type BrowseJobRequest struct {
 	MaxLife    time.Duration
 	// Owner is set on every object made, so deleting the BackupBrowse removes them.
 	Owner metav1.OwnerReference
+	// COS, if set, reads a backup in COS instead of a folder on Share. The
+	// helper then mounts no share, and Share, LatestPath and MomentsPath are
+	// not used.
+	COS *BrowseCOSRequest
 }
 
 // BrowseJobState says what the helper pod of a session is doing.
@@ -94,6 +98,9 @@ func (r *ShareJobRunner) StartBrowse(ctx context.Context, req BrowseJobRequest) 
 	}
 	if req.Idle <= 0 || req.MaxLife <= 0 {
 		return errors.New("a browse session needs an idle limit and a hard limit")
+	}
+	if req.COS != nil {
+		return r.startBrowseCOS(ctx, req)
 	}
 	if err := util.ValidateBackupPath(req.LatestPath); err != nil {
 		return err

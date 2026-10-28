@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/browse"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/cosbrowse"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/util"
 )
 
@@ -34,9 +35,13 @@ type JobSpec struct {
 	Mode string `json:"mode"`
 	// Latest and Moments are where the backup is mounted. At picks a moment; it
 	// is empty for the latest copy.
-	Latest  string `json:"latest"`
+	Latest  string `json:"latest,omitempty"`
 	Moments string `json:"moments,omitempty"`
 	At      string `json:"at,omitempty"`
+	// COS reads the backup from the Kopia repository in COS instead. Latest and
+	// Moments are then empty. The keys are Secrets mounted as files at the fixed
+	// places of package cosbrowse; none is in the spec.
+	COS *cosbrowse.Source `json:"cos,omitempty"`
 	// Dest is the share that holds the claim.
 	Dest string `json:"dest,omitempty"`
 	// Volume is the new claim's folder below Dest, like pvcs/pvc-...
@@ -137,7 +142,15 @@ func (s JobSpec) validate() (time.Time, uint32, error) {
 	default:
 		return at, 0, fmt.Errorf("unknown mode %q", s.Mode)
 	}
-	if s.Latest == "" {
+	switch {
+	case s.COS != nil:
+		if s.Latest != "" || s.Moments != "" {
+			return at, 0, errors.New("a backup in COS has no latest or moments folder")
+		}
+		if err := s.COS.Validate(); err != nil {
+			return at, 0, err
+		}
+	case s.Latest == "":
 		return at, 0, errors.New("latest is required")
 	}
 	if s.At != "" {
@@ -162,10 +175,19 @@ func (s JobSpec) validate() (time.Time, uint32, error) {
 type jobDeps struct {
 	choose func(latest, moments string, at time.Time) (string, browse.Info, error)
 	open   func(root string) (browse.Tree, func() error, error)
+	// openCOS opens a backup in COS.
+	openCOS func(ctx context.Context, src cosbrowse.Source, at time.Time) (browse.Tree, browse.Info, func() error, error)
 }
 
 func realDeps() jobDeps {
 	return jobDeps{
+		openCOS: func(ctx context.Context, src cosbrowse.Source, at time.Time) (browse.Tree, browse.Info, func() error, error) {
+			o, err := cosbrowse.Open(ctx, src, at, cosbrowse.OpenOptions{})
+			if err != nil {
+				return nil, browse.Info{}, nil, err
+			}
+			return o.Tree, o.Info, o.Close, nil
+		},
 		choose: browse.ChooseRoot,
 		open: func(root string) (browse.Tree, func() error, error) {
 			t, err := browse.NewTree(root)
@@ -199,13 +221,9 @@ func runJob(ctx context.Context, spec JobSpec, pathsFile string, deps jobDeps) (
 	if err != nil {
 		return fail(err)
 	}
-	root, info, err := deps.choose(spec.Latest, spec.Moments, at)
+	tree, info, closeTree, err := openBackup(ctx, spec, at, deps)
 	if err != nil {
-		return fail(fmt.Errorf("choose the moment: %w", err))
-	}
-	tree, closeTree, err := deps.open(root)
-	if err != nil {
-		return fail(fmt.Errorf("open the backup: %w", err))
+		return fail(err)
 	}
 	defer func() { _ = closeTree() }()
 
@@ -254,4 +272,26 @@ func runJob(ctx context.Context, spec JobSpec, pathsFile string, deps jobDeps) (
 		out.Folder = name
 	}
 	return out, nil
+}
+
+// openBackup opens the backup the spec names: a folder of the snapshot pool or
+// a repository in COS.
+func openBackup(ctx context.Context, spec JobSpec, at time.Time, deps jobDeps) (browse.Tree, browse.Info, func() error, error) {
+	if spec.COS != nil {
+		tree, info, closeTree, err := deps.openCOS(ctx, *spec.COS, at)
+		if err != nil {
+			// The reason is already a sentence for a person.
+			return nil, browse.Info{}, nil, err
+		}
+		return tree, info, closeTree, nil
+	}
+	root, info, err := deps.choose(spec.Latest, spec.Moments, at)
+	if err != nil {
+		return nil, browse.Info{}, nil, fmt.Errorf("choose the moment: %w", err)
+	}
+	tree, closeTree, err := deps.open(root)
+	if err != nil {
+		return nil, browse.Info{}, nil, fmt.Errorf("open the backup: %w", err)
+	}
+	return tree, info, closeTree, nil
 }

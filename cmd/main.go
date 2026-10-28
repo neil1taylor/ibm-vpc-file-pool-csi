@@ -154,6 +154,10 @@ func main() {
 	flag.IntVar(&browse.cfg.MaxSessions, "browse-max-sessions", 5, "Open browse sessions in the cluster; more wait")
 	flag.IntVar(&browse.cfg.MaxPerNamespace, "browse-max-sessions-per-namespace", 2, "Open browse sessions for the claims of one namespace; more wait")
 	flag.Int64Var(&browse.restoreMaxBytes, "file-restore-max-bytes", 200<<30, "The most one file restore writes, in bytes; a bigger one is refused (controller mode)")
+	flag.BoolVar(&browse.cosEnabled, "browse-cos", true, "Let browse sessions and file restores read backups that were exported to COS (controller mode)")
+	flag.StringVar(&browse.cosCPU, "browse-cos-cpu-limit", "", "CPU limit of the helper pod that reads a backup in COS; empty means 1 (controller mode)")
+	flag.StringVar(&browse.cosMemory, "browse-cos-memory-limit", "", "Memory limit of the helper pod that reads a backup in COS; empty means 1Gi (controller mode)")
+	flag.DurationVar(&browse.cfg.COSStartTimeout, "browse-cos-start-timeout", 5*time.Minute, "End a browse session on COS whose helper is not ready after this long (controller mode)")
 	flag.IntVar(&browse.restoreMaxRunning, "file-restore-max-running", 5, "How many file restores run at once in the cluster; more wait (controller mode)")
 
 	// Backup gateway flags (gateway mode).
@@ -353,6 +357,12 @@ type browseOptions struct {
 	pullSecrets string
 	namespace   string
 	cfg         pool.BrowseConfig
+	// cosEnabled lets sessions and restores read backups exported to COS. Their
+	// helpers run in the driver namespace, where the COS and Key Protect Secrets
+	// are, with the limits cosCPU and cosMemory.
+	cosEnabled bool
+	cosCPU     string
+	cosMemory  string
 	// restoreMaxBytes is the most one file restore writes.
 	restoreMaxBytes int64
 	// restoreMaxRunning is how many file restores run at once.
@@ -646,7 +656,25 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metric
 			browseRunner.SetBrowsePullSecrets(names)
 			browse.cfg.PullSecrets, browse.cfg.PullSecretNamespace = names, driverNamespace
 		}
-		backupController.SetBrowse(browseRunner, browse.cfg)
+		var browseJobs pool.BrowseJobs = browseRunner
+		if browse.cosEnabled {
+			// The COS key and the Key Protect key are Secrets of the driver
+			// namespace, and a pod mounts only Secrets of its own namespace. So these
+			// helpers run there, and the keys are not copied to where the gateway can
+			// read Secrets.
+			cosRunner := pool.NewShareJobRunner(shareJobClient, driverNamespace, pool.DefaultCloneImage)
+			cosRunner.SetBrowseImage(browse.image)
+			if browse.pullSecrets != "" {
+				cosRunner.SetBrowsePullSecrets(strings.Split(browse.pullSecrets, ","))
+			}
+			if err := cosRunner.SetBrowseCOSResources(browse.cosCPU, browse.cosMemory); err != nil {
+				klog.ErrorS(err, "Bad limits for the helper that reads COS")
+				os.Exit(1)
+			}
+			browseJobs = &pool.BrowseRouter{Folder: browseRunner, COS: cosRunner}
+			browse.cfg.COSNamespace = driverNamespace
+		}
+		backupController.SetBrowse(browseJobs, browse.cfg)
 	}
 	replController.SetOnProcessed(backupController.Kick)
 	hookOrchestrator := hooks.NewOrchestrator(

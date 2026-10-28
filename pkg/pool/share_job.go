@@ -115,6 +115,9 @@ type ShareJobRunner struct {
 	browseImage   string
 	// browsePullSecrets are the pull Secrets of browse helper pods.
 	browsePullSecrets []string
+	// browseCOSCPU and browseCOSMemory are the limits of the helper pod that
+	// reads a backup in COS. Empty means the defaults.
+	browseCOSCPU, browseCOSMemory string
 }
 
 // SetLauncherImage sets KubeVirt's virt-launcher image, which has qemu-img,
@@ -202,6 +205,10 @@ type jobShape struct {
 	addCaps []corev1.Capability
 	// session makes a pod that runs once, with a deadline, and never restarts.
 	session bool
+	// noToken keeps the Kubernetes API token out of the pod. A pod that holds the
+	// backup key or the COS key must never have it. A pod with no folder mounts
+	// gets the token unless this is set.
+	noToken bool
 	// activeDeadline is the Job's time limit in seconds. A session always has
 	// one; any other Job has one only if this is set.
 	activeDeadline int64
@@ -494,7 +501,7 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
 					// A Job that opens VM disk files needs no API access.
-					AutomountServiceAccountToken: boolPtr(shape.folders == nil),
+					AutomountServiceAccountToken: boolPtr(shape.folders == nil && !shape.noToken),
 					RestartPolicy:                restart,
 					SecurityContext:              podSecurityContext(shape.runAsUser),
 					InitContainers:               initContainers,

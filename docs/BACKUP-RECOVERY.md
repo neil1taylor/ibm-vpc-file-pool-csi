@@ -545,7 +545,9 @@ The goal (issue #92) is to look inside a backup and get back one file or folder 
 - **The gateway and `kubectl backup` (part 3).** `kubectl backup ls`, `get` and `browse` list and download files and folders of a plain volume's backup, at the latest copy or at a moment. See "Browse from the command line" below.
 - **Restore of files (parts 4 and 5).** A `BackupFileRestore` copies chosen files and folders out of a backup into a new claim or into a new folder of an existing claim. Users ask for it with `kubectl backup restore-files`, through the gateway, which checks their rights on both namespaces. See "Restore files into a claim" below.
 - **The console file browser (phase 3, first half).** A **Browse files** action on each volume of a policy opens a page that lists folders and files, with a moment picker and downloads. See "Browse and download files in the console" below.
-- **Not built yet:** the console restore dialog, COS backups and VM disks.
+- **Backups in COS (phase 4).** The same commands read a plain volume's backup from the policy's COS bucket. See "Files from a backup in COS" below.
+- **The console restore dialog (phase 3, second half).** See "Restore files in the console" below.
+- **Not built yet:** VM disks (snapshot pool and COS), and in the console a switch to read from COS by hand.
 
 ### Browse from the command line
 
@@ -650,9 +652,50 @@ On a policy page, the **Browse files** action of a volume opens the file browser
 - **Moment.** The picker offers **Latest copy** and every moment folder, newest first. Choosing one closes the session and opens a new one at that moment. The latest copy can change while you look, because the next backup replaces files in it one at a time; an older moment does not change until the keep time removes it.
 - **Download.** **Download** saves one file; **Download as tar** (on a folder, or **Download this folder as tar** above the table, which at the root is the whole backup) saves a folder as a tar. They are plain links to the gateway through the console's plugin proxy: the console session supplies your token, so no token is in the link, and the browser writes the file to disk as it arrives (no copy in memory). The gateway answers with `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox; default-src 'none'`, `Cache-Control: no-store` and a type of `application/octet-stream` (`application/x-tar` for a folder), so a backup file can never be shown as a page of the console. The audit Event is the same as for `kubectl backup get`. A download is one file or one folder at a time, up to the gateway limit (`backupGateway.maxDownloadBytes`, 50 GiB); a tar does not tell the browser what it left out (the command line shows that).
 - **Restore.** Tick files, folders and links, and press **Restore selected** (see "Restore files in the console" below).
-- **Not in the console yet.** COS backups and VM disks.
+- **Not in the console yet.** A switch to read from COS by hand, and the moments that only COS holds (the picker lists the moments of the snapshot pool; the gateway does choose COS by itself when a session or restore asks for a moment older than every local restore point). VM disks.
 
 **Security notes.** The browser holds only your own token, which the console proxy adds; the gateway checks it and your right on every call. The link of a download holds the names of the path (base64), so the console's and the browser's logs can show them; file contents and tokens are never in a link. A failed download shows as a failed download in the browser (the error text is not shown there): the usual causes are a file over the limit or a session that ended. `kubectl backup get` gives the exact message.
+
+### Files from a backup in COS
+
+A policy with an export block sends its backups to a COS bucket (see "Export to COS" below). You can browse and restore files from there, with the same commands and the same rights as for the snapshot pool. The moments that the local keep time has removed are still in COS until the COS keep time ends.
+
+```
+kubectl backup ls  --from-cos --policy nightly --pvc apps/db --moment 2026-09-01T09:00:00Z /var/www
+kubectl backup get --from-cos --policy nightly --pvc apps/db /etc/app.conf --out ./restored/
+kubectl backup restore-files --from-cos --policy nightly --pvc apps/db --path /etc/app --to apps/db-files --wait
+```
+
+**Which source.** `--from-cos` asks for COS. Without it the gateway chooses: COS when the moment is older than the oldest local restore point, or when no local copy is left and the volume has been exported; the snapshot pool otherwise. The gateway's volume list (`GET /v1/volumes`) shows `exported` and `exportedTime` for a volume that has a copy in COS; `kubectl get backuppolicy NAME -o yaml` shows `exportedTime` too. A session on COS and a session on the snapshot pool are never mixed up: a request for one never reuses a session of the other. The reply names the source of the session.
+
+**Which backup in the bucket.** The policy's export block names the bucket, the prefix, the Secrets and the Key Protect key, so a user names none of them. The volume is the one the policy keeps for the claim. For a moment, the reader takes the oldest export made at or after it (it holds the earlier moments too), then the newest moment folder at or before it, the same rule as `ChooseRoot` for a folder on a share. The latest copy is the newest export. `ls --moments` lists the moments in every export, so it shows what only COS holds.
+
+**A bucket that no policy describes.** After a loss, in a new cluster, a cluster administrator can name the bucket: `--from-cos --policy AREA --bucket B --endpoint HOST --volume pvc-<uuid> [--prefix P]` with the key flags of `restore --from-cos` (`--kp-instance`, `--kp-region`, `--kp-root-key`, `--credentials-secret`, `--backup-key-secret`, `--kp-api-key-secret`). `--policy` is the policy's area in the bucket, and there is no `--pvc`. A readable key is given as a Secret in the driver namespace (`--emergency-key-secret NAME --emergency-key-only`), not as a file: a session lasts too long to keep a Secret that the command made. The gateway allows this only to someone who may `get` every Secret the request names, in the driver namespace (checked for each Secret by name, and again on every later call), because the helper would mount them. A new claim needs `--storage-class`, because COS does not keep it. The endpoint must be a COS S3 host (the key is sent to it); the request is checked by the command, the gateway and the controller.
+
+**How it works.** The helper pod runs the pinned Kopia program as a child process, read-only (`kopia repository connect --readonly`, no credentials stored). It does not mount a share. It reads the COS key, the wrapped backup key and the Key Protect API key as read-only files, unwraps the backup key with Key Protect in its own memory (the controller never holds it), and gives Kopia the COS key and the backup key in an explicit environment and nowhere else: the Key Protect API key and the wrapped key never reach Kopia, and no key is on a command line. Kopia is run for the list of snapshots (`snapshot list --json`) and for one object at a time (`show <object ID>`); a folder is a JSON list that the reader parses. The file restore Job uses the same reader and writes the claim with the same safe writer as for a local backup.
+
+**What keeps one volume out of another.** The helper's keys can read the whole policy area, which holds other namespaces' volumes. So: only snapshots whose tag names the volume **and** whose source path is exactly `/share0/backup/<policy>/pvcs/<volume>` (or its `.moments` twin) are used, a test tries a tag of this volume on another volume's path, a path of this volume on another volume's tag, another policy's area, and paths that look like these with `..` or an extra name. A user's path is never an argument to Kopia: the reader starts at the root object of the chosen snapshot and walks down by the object IDs that it reads from the repository, comparing each name with the names in that one folder. Each object ID is checked to be letters and digits before it is given to Kopia, so it cannot be an option. A name that cannot occur in a path (empty, `.`, `..`, with `/` or a NUL byte) is left out of the list and cannot be reached, and the same name twice in a folder is reported as damage. There is no file system under the reader, so a symbolic link is only text: it is listed with its target, a path through one is refused, and a download of one is refused.
+
+**Where it runs.** The helper pod and the file restore Job for COS run in the **driver namespace**, next to the COS and Key Protect Secrets (a pod can mount only Secrets of its own namespace). The keys are not copied to the browse namespace, where the gateway may read Secrets. The controller keeps a second copy of each session's token and certificate in the driver namespace for the pod to mount, owned by the session and removed with it; the gateway reads only the first copy. The pods have no service account token, a read-only root file system, no capabilities, run as an ordinary user, and are reachable only by the gateway (a NetworkPolicy). The controller may make and delete Secrets in the driver namespace, nothing more (a Role); it checks from their metadata that the Secrets the export block names exist, and does not read them.
+
+![The COS helper pod runs in the driver namespace next to the keys; the browse namespace holds only the session Secret that the gateway reads](images/backup-recovery-cos-browse.drawio.svg)
+
+**When it fails.** The helper stops before it listens and puts the reason in the session status, in words and with no key in them:
+
+| Cause | What you read |
+|-------|---------------|
+| A Secret named by the export block is missing | `the Secret "x" that the export block names does not exist in namespace kube-system` |
+| A Secret lacks a key, or the image cannot be pulled | After five minutes: `the helper pod was not ready after 5m0s. Check that the Secrets ... hold the keys access_key_id, secret_access_key, wrappedKey and apikey` |
+| Key Protect refuses the root key or the API key | `the backup key could not be unwrapped: ...` (the emergency key does not hide a refusal) |
+| Key Protect cannot be reached and there is no emergency key | `cannot reach Key Protect and no emergency key is set` |
+| The COS key is wrong or may not read the bucket | `COS refused the key: check the COS key Secret, that it may read this bucket, and the context-based restriction (CBR) rules` |
+| The bucket or the endpoint is wrong | `the bucket does not exist at this COS endpoint` or `COS cannot be reached from the cluster` |
+| Wrong prefix or policy | `there is no backup repository at this bucket and prefix` |
+| The backup key does not open the repository | `the backup key does not open the repository in COS` |
+| No export of the volume | `no backup of volume pvc-... was found in the COS bucket area of policy ...` |
+| No moment at or before the time | `no backup at or before ...` |
+
+**Limits.** Each folder step and each file is one run of the Kopia program, which opens the repository first. On a local repository that takes about 0.2 seconds; against a real bucket it will be more (not measured yet). A folder listing is cached, and at most 16 runs happen at once, so browsing is quick but a restore of many thousands of small files is slow. For a whole volume use `kubectl backup restore --from-cos`. A folder can hold up to a million names, and the helper pod gets 1 CPU and 1 GiB by default (`backupBrowse.cos.*`). A file name that is not valid text may come back under a different name: Kopia writes names into a JSON list, and JSON cannot hold arbitrary bytes (to be checked on the lab; the snapshot pool keeps such names exactly). A file's content is read from the start each time, so reading backward costs a restart of that file. VM disks in COS are phase 6 of the design.
 
 ### Restore files in the console
 

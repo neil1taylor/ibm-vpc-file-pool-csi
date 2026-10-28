@@ -1486,6 +1486,8 @@ type BackupBrowseSpec struct {
     PVCName      string       `json:"pvcName"`
     Moment       *metav1.Time `json:"moment,omitempty"`       // the newest backup at or before it; unset: the latest copy
     RequestedBy  string       `json:"requestedBy,omitempty"`  // the user, for the audit trail; decides nothing
+    Source       string       `json:"source,omitempty"`       // local (the snapshot pool, the default) or cos (the policy's export bucket)
+    FromCOS      *BrowseFromCOS `json:"fromCOS,omitempty"`    // a bucket named directly (a cluster administrator); source must be cos
     Close        bool         `json:"close,omitempty"`        // end the session
 }
 
@@ -1495,12 +1497,15 @@ type BackupBrowseStatus struct {
     PodIP      string       `json:"podIP,omitempty"`      // where the helper answers, over TLS
     Port       int32        `json:"port,omitempty"`
     SecretName string       `json:"secretName,omitempty"` // token, tls.crt, tls.key; owned by this resource
+    StartedTime *metav1.Time `json:"startedTime,omitempty"` // when the helper was started; a COS session fails if it is not ready 5 minutes later
     EndReason  string       `json:"endReason,omitempty"`  // idle, max-life, closed, stopped
     EndedTime  *metav1.Time `json:"endedTime,omitempty"`
 }
 ```
 
 For each session the controller makes a Secret with a random token and a new self-signed TLS certificate and key, and a Job whose one pod (the browse image) mounts only this volume's backup folder, and its moments folder if it has earlier moments, read-only down to the NFS export. The pod has no service account token, runs as root with every capability dropped on a read-only root file system, and serves its API over TLS. The gateway trusts exactly that certificate. Every object of a session (Job, share volume and claim, Secret) is named and labelled with the **UID** of the `BackupBrowse`, never its name, and owned by it, so a session deleted and made again with the same name cannot get the old session's Secret or pod, which still mounts the old volume.
+
+**With `spec.source: cos`** the session reads the Kopia repository in the COS bucket that the policy's `spec.export` names (the volume is the one the policy keeps for the claim), or, with `spec.fromCOS`, the bucket the block names (`bucket`, `endpoint`, `prefix`, `credentialsSecret`, `volume`, `backupKeySecret`, `keyProtect`, `emergencyKeySecret`, `emergencyKeyOnly`; the same checks as `BackupRestore.spec.fromCOS`, and the endpoint must be a COS S3 host). For `fromCOS`, `spec.policy` is the policy's area in the bucket and `pvcNamespace` and `pvcName` hold `-` and the volume. The helper pod runs in the **driver namespace**, next to the COS and Key Protect Secrets, which the controller never reads (it checks from their metadata that they exist, and fails the session in words if one does not). It mounts no share, has no service account token and runs as an ordinary user. The controller keeps a copy of the session Secret in the driver namespace for it to mount; the gateway reads only the one in the browse namespace. A helper that stops with an error puts its reason in the termination log, and the status message shows it. A COS session whose helper is not ready after five minutes ends as `Failed` with a message that names the Secrets to check.
 
 A session ends when the helper stops by itself (idle, default 15 minutes), when it is 2 hours old (the hard limit, counted from creation, so a controller restart does not extend it), when `spec.close` is set, or when the helper fails. The controller stops the Job, removes the Secret, and removes the record 10 minutes later. `Pending` means the session waits for a free slot (5 in the cluster and 2 for the claims of one namespace by default) or for a ready share in the snapshot pool. A request for a policy or a claim that has no backup fails at once. A moment before the first earlier moment, or any moment of a volume with no earlier moments yet, reads the latest copy, as a restore does. Helper Jobs and Secrets whose session is gone are removed on the next pass, also after a restart. See `docs/specs/2026-10-22-backup-file-restore.md`.
 
@@ -1516,6 +1521,8 @@ type BackupFileRestoreSpec struct {
     SourceNamespace  string       `json:"sourceNamespace"`           // the claim that was backed up; it may be gone
     SourceName       string       `json:"sourceName"`
     Moment           *metav1.Time `json:"moment,omitempty"`          // the newest backup at or before it; unset: the latest copy
+    Source           string       `json:"source,omitempty"`          // local (the default) or cos
+    FromCOS          *BrowseFromCOS `json:"fromCOS,omitempty"`       // a bucket named directly (a cluster administrator); sourceNamespace holds "-", sourceName the volume, storageClassName is required for a new claim
     Paths            []string     `json:"paths"`                     // 1 to 1000, escaped form ("\\" and "\xNN"); "/" is the whole volume
     TargetNamespace  string       `json:"targetNamespace"`
     TargetName       string       `json:"targetName"`
@@ -1543,6 +1550,8 @@ type BackupFileRestoreStatus struct {
     EndedTime      *metav1.Time `json:"endedTime,omitempty"`
 }
 ```
+
+**With `spec.source: cos`** (or `spec.fromCOS`) the Job reads the backup from COS, as a browse session does, and runs in the driver namespace with the COS and Key Protect Secrets mounted as files, no service account token and a read-only root file system. Everything else is the same: the targets, the checks, the owner, the space limit. A new claim takes its class from the policy's record of the volume, or from `spec.storageClassName` when the bucket is named directly (COS does not keep the class). Each file is one run of the Kopia program (about 0.2 seconds on a local repository; not yet measured against a real bucket), so a restore of many thousands of small files is slow; the Job gets 4 hours.
 
 A path is a list of names below the root of the backed-up volume, written as text: `/` separates names, a backslash is `\\`, and a byte that is not text is `\xNN` (so a name with a newline is `\x0a`). `..`, an empty name and a NUL byte are refused. The list is at most 1000 paths, 4096 bytes each, 256 KiB together; the controller keeps it in a ConfigMap that the restore owns and mounts it into the Job as a file.
 
