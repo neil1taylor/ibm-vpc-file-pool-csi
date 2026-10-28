@@ -36,6 +36,11 @@ rules:
   - apiGroups: ["storage.ibmcloud.io"]
     resources: ["backuppolicies"]
     verbs: ["get", "create", "delete"]
+  # The backup event reads the copy speed from the replication policies the
+  # backup policy makes.
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["replicationpolicies"]
+    verbs: ["get", "list"]
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get", "create", "delete"]
