@@ -41,6 +41,20 @@ const (
 // been removed, so the next call starts a new one.
 var ErrShareJobFailed = errors.New("share data job failed")
 
+// shareJobFailure is ErrShareJobFailed, with what the Job's container wrote to
+// its termination log before it failed. The message is the Job's own output and
+// may be empty.
+type shareJobFailure struct {
+	job string
+	msg string
+}
+
+func (e *shareJobFailure) Error() string {
+	return fmt.Sprintf("%s: %s", ErrShareJobFailed, e.job)
+}
+
+func (e *shareJobFailure) Is(target error) bool { return target == ErrShareJobFailed }
+
 var validPermissionsPattern = regexp.MustCompile(`^0?[0-7]{3}$`)
 
 // ShareMount identifies the NFS export of one file share.
@@ -184,8 +198,12 @@ type jobShape struct {
 	// hardened gives the main container no privilege escalation, no
 	// capabilities and a read-only root file system.
 	hardened bool
+	// addCaps are the capabilities a hardened container gets back.
+	addCaps []corev1.Capability
 	// session makes a pod that runs once, with a deadline, and never restarts.
-	session        bool
+	session bool
+	// activeDeadline is the Job's time limit in seconds. A session always has
+	// one; any other Job has one only if this is set.
 	activeDeadline int64
 	// readiness is the main container's readiness probe.
 	readiness *corev1.Probe
@@ -198,6 +216,8 @@ type folderMount struct {
 	share   int
 	subPath string
 	at      string
+	// readOnly mounts this folder read-only even if the Job's other mounts are not.
+	readOnly bool
 }
 
 // ShareFolder is one folder on a share.
@@ -337,8 +357,9 @@ func (r *ShareJobRunner) runMessage(ctx context.Context, key string, shares []Sh
 		r.cleanup(ctx, jobName, len(shares))
 		return true, msg, nil
 	case job.Status.Failed > shareJobBackoffLimit || jobHasFailed(job):
+		msg := r.terminationMessage(ctx, jobName)
 		r.cleanup(ctx, jobName, len(shares))
-		return false, "", fmt.Errorf("%w: %s", ErrShareJobFailed, jobName)
+		return false, "", &shareJobFailure{job: jobName, msg: msg}
 	default:
 		return false, "", nil
 	}
@@ -416,7 +437,7 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 	if shape.folders != nil {
 		mounts = nil
 		for _, f := range shape.folders {
-			mounts = append(mounts, corev1.VolumeMount{Name: fmt.Sprintf("share%d", f.share), MountPath: f.at, SubPath: f.subPath, ReadOnly: shape.readOnly})
+			mounts = append(mounts, corev1.VolumeMount{Name: fmt.Sprintf("share%d", f.share), MountPath: f.at, SubPath: f.subPath, ReadOnly: shape.readOnly || f.readOnly})
 		}
 	}
 
@@ -453,13 +474,15 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 	var deadline *int64
 	if shape.session {
 		backoffLimit, restart, deadline = 0, corev1.RestartPolicyNever, &shape.activeDeadline
+	} else if shape.activeDeadline > 0 {
+		deadline = &shape.activeDeadline
 	}
 	var containerSecurity *corev1.SecurityContext
 	if shape.hardened {
 		containerSecurity = &corev1.SecurityContext{
 			AllowPrivilegeEscalation: boolPtr(false),
 			ReadOnlyRootFilesystem:   boolPtr(true),
-			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}, Add: shape.addCaps},
 		}
 	}
 	job := &batchv1.Job{

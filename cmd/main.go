@@ -126,6 +126,7 @@ func main() {
 		backupDisk    string
 		outDisk       string
 		restoreMoment string
+		restoreFiles  struct{ spec, paths string }
 		unwrap        unwrapOptions
 
 		// Console plugin modes.
@@ -134,7 +135,7 @@ func main() {
 
 	flag.StringVar(&endpoint, "endpoint", "unix:///csi/csi.sock", "CSI endpoint")
 	flag.StringVar(&nodeID, "node-id", "", "Node ID")
-	flag.StringVar(&mode, "mode", "controller", "Driver mode: controller, node, receiver, sync-client, check-receiver, apply-vm-disk, send-vm-disk, restore-vm-disk, unwrap-backup-key, register-console-plugin, unregister-console-plugin, enable-sidecar-gate, or failover")
+	flag.StringVar(&mode, "mode", "controller", "Driver mode: controller, node, receiver, sync-client, check-receiver, apply-vm-disk, send-vm-disk, restore-vm-disk, restore-files, unwrap-backup-key, register-console-plugin, unregister-console-plugin, enable-sidecar-gate, or failover")
 	flag.StringVar(&consolePluginName, "console-plugin-name", "ibm-vpc-file-pool-csi", "ConsolePlugin to turn on or off in the OpenShift console (register-console-plugin and unregister-console-plugin modes)")
 	flag.StringVar(&region, "region", "", "IBM Cloud region (e.g. us-south); auto-discovered from secret provider if omitted")
 	flag.StringVar(&vpcID, "vpc-id", "", "IBM Cloud VPC ID for creating file share mount targets")
@@ -152,6 +153,8 @@ func main() {
 	flag.DurationVar(&browse.cfg.MaxLife, "browse-max-life", 2*time.Hour, "End a browse session after this long, even if in use")
 	flag.IntVar(&browse.cfg.MaxSessions, "browse-max-sessions", 5, "Open browse sessions in the cluster; more wait")
 	flag.IntVar(&browse.cfg.MaxPerNamespace, "browse-max-sessions-per-namespace", 2, "Open browse sessions for the claims of one namespace; more wait")
+	flag.Int64Var(&browse.restoreMaxBytes, "file-restore-max-bytes", 200<<30, "The most one file restore writes, in bytes; a bigger one is refused (controller mode)")
+	flag.IntVar(&browse.restoreMaxRunning, "file-restore-max-running", 5, "How many file restores run at once in the cluster; more wait (controller mode)")
 
 	// Backup gateway flags (gateway mode).
 	flag.StringVar(&gw.listen, "gateway-listen", ":8443", "Address the backup gateway listens on (backup-gateway mode)")
@@ -220,6 +223,10 @@ func main() {
 	flag.StringVar(&outDisk, "out-disk", "", "New disk image to write; it must not exist (restore-vm-disk mode)")
 	flag.StringVar(&restoreMoment, "restore-moment", "", "Moment to restore, RFC 3339; empty for the latest backup (restore-vm-disk mode)")
 
+	// Restore-files flags.
+	flag.StringVar(&restoreFiles.spec, "restore-files-spec", "", "JSON of the file restore: mode, where the backup and the target are mounted, owner (restore-files mode)")
+	flag.StringVar(&restoreFiles.paths, "restore-files-paths", "", "File that lists the paths to restore, one per line in escaped form; paths are never arguments (restore-files mode)")
+
 	// Unwrap-backup-key flags.
 	flag.StringVar(&unwrap.region, "kp-region", "", "Key Protect region (unwrap-backup-key mode)")
 	flag.StringVar(&unwrap.instance, "kp-instance", "", "Key Protect instance ID (unwrap-backup-key mode)")
@@ -272,6 +279,8 @@ func main() {
 		runFailover(nfsMountPath, failoverAction, failoverRewind, failoverVMs, failoverForce, failoverExpect)
 	case "restore-vm-disk":
 		runRestoreVMDisk(backupDisk, outDisk, restoreMoment)
+	case "restore-files":
+		runRestoreFiles(restoreFiles.spec, restoreFiles.paths)
 	case "unwrap-backup-key":
 		runUnwrapBackupKey(unwrap)
 	case "send-vm-disk":
@@ -343,6 +352,10 @@ type browseOptions struct {
 	pullSecrets string
 	namespace   string
 	cfg         pool.BrowseConfig
+	// restoreMaxBytes is the most one file restore writes.
+	restoreMaxBytes int64
+	// restoreMaxRunning is how many file restores run at once.
+	restoreMaxRunning int
 }
 
 // nodeAgentOptions say where to read the node agents' share counters, so that
@@ -619,6 +632,7 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metric
 	// it after each pass. See the Job watch below.
 	backupController := pool.NewBackupController(replClient)
 	backupController.SetShareData(shareRunner)
+	backupController.SetFileRestore(shareRunner, pool.FileRestoreConfig{MaxBytes: browse.restoreMaxBytes, MaxRunning: browse.restoreMaxRunning})
 	if browse.image != "" {
 		// Helper pods and session Secrets live in their own namespace, which holds
 		// nothing else, so the gateway's right to read Secrets reaches nothing
@@ -1029,6 +1043,10 @@ func registerWebhooks(mgr ctrl.Manager, failoverSource string) error {
 	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.BackupRestore{}).
 		WithValidator(&webhook.BackupRestoreValidator{}).Complete(); err != nil {
 		return fmt.Errorf("register BackupRestore webhook: %w", err)
+	}
+	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.BackupFileRestore{}).
+		WithValidator(&webhook.BackupFileRestoreValidator{}).Complete(); err != nil {
+		return fmt.Errorf("register BackupFileRestore webhook: %w", err)
 	}
 	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.PoolBench{}).
 		WithValidator(&webhook.PoolBenchValidator{}).Complete(); err != nil {

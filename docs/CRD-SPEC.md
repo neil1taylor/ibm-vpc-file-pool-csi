@@ -1506,6 +1506,50 @@ A session ends when the helper stops by itself (idle, default 15 minutes), when 
 
 ---
 
+## BackupFileRestore
+
+Cluster-scoped. Copies chosen files and folders out of one backup into a claim: a new claim, or a new folder in an existing claim (issue #92). The backup gateway makes it for a user after it checks the user's rights; a cluster administrator may make one by hand. Short name `bfr`. The webhook refuses a change to the spec.
+
+```go
+type BackupFileRestoreSpec struct {
+    Policy           string       `json:"policy"`
+    SourceNamespace  string       `json:"sourceNamespace"`           // the claim that was backed up; it may be gone
+    SourceName       string       `json:"sourceName"`
+    Moment           *metav1.Time `json:"moment,omitempty"`          // the newest backup at or before it; unset: the latest copy
+    Paths            []string     `json:"paths"`                     // 1 to 1000, escaped form ("\\" and "\xNN"); "/" is the whole volume
+    TargetNamespace  string       `json:"targetNamespace"`
+    TargetName       string       `json:"targetName"`
+    Existing         bool         `json:"existing,omitempty"`        // false: a new claim; true: a new folder in the claim
+    SizeGB           int64        `json:"sizeGB,omitempty"`          // new claim only; unset: the files plus 20%, at least 1
+    StorageClassName string       `json:"storageClassName,omitempty"` // new claim only; unset: the class of the backed-up claim
+    TargetUID        types.UID    `json:"targetUID,omitempty"`       // existing claim only; the gateway sets it
+    RequestedBy      string       `json:"requestedBy,omitempty"`     // the user, for the audit trail; decides nothing
+}
+
+type BackupFileRestoreStatus struct {
+    Phase          string       `json:"phase,omitempty"`   // Pending, Measuring, Provisioning, Restoring, Done, Failed
+    Message        string       `json:"message,omitempty"`
+    TargetUID      types.UID    `json:"targetUID,omitempty"` // the claim this restore writes to; another UID is refused
+    SizeGB         int64        `json:"sizeGB,omitempty"`    // the size chosen for a new claim
+    Folder         string       `json:"folder,omitempty"`    // the folder made in an existing claim
+    RestoredMoment *metav1.Time `json:"restoredMoment,omitempty"`
+    Latest         bool         `json:"latest,omitempty"`
+    Files          int          `json:"files,omitempty"`      // what was written
+    Dirs           int          `json:"dirs,omitempty"`
+    Links          int          `json:"links,omitempty"`
+    Skipped        int          `json:"skipped,omitempty"`    // devices, pipes and sockets left out
+    Unreadable     int          `json:"unreadable,omitempty"` // entries the reader could not read
+    Bytes          int64        `json:"bytes,omitempty"`
+    EndedTime      *metav1.Time `json:"endedTime,omitempty"`
+}
+```
+
+A path is a list of names below the root of the backed-up volume, written as text: `/` separates names, a backslash is `\\`, and a byte that is not text is `\xNN` (so a name with a newline is `\x0a`). `..`, an empty name and a NUL byte are refused. The list is at most 1000 paths, 4096 bytes each, 256 KiB together; the controller keeps it in a ConfigMap that the restore owns and mounts it into the Job as a file.
+
+Into a new claim the controller works in this order: it runs a read-only Job that adds up the size of the chosen files (`Measuring`, skipped when `sizeGB` is set; more than the limit, 200 GiB by default, fails the restore), makes the claim with the annotations `storage.ibmcloud.io/backup-file-restore` and `.../backup-file-restore-uid` (both must match; a claim that exists is never used), waits for the driver to bind it, holds pods back with the label `storage.ibmcloud.io/restore-pending`, runs the copy Job (`Restoring`), saves `Done`, and only then lets pods have the claim. Into an existing claim there is no sizing and no hold-back: the copy Job writes a hidden staging folder in the claim's folder and renames it to `restored-<policy>-<moment>` (a suffix if the name exists). The restore refuses a claim whose UID is not the one pinned in `spec.targetUID` (or, if that is unset, the one first seen), a claim that holds `disk.img`, a claim being restored, and, while another restore into the same claim has not ended, waits. The Job is named by the **UID** of the restore, never its name, and owned by it, as are its share objects and the ConfigMap of paths. A restore that has ended is removed after 24 hours. See `docs/specs/2026-10-22-backup-file-restore.md` and [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md#restore-files-into-a-claim).
+
+---
+
 ## PoolBench
 
 Cluster-scoped. One performance test run: a new pool with one share, and test VMs added in steps until users would notice the share is slow. The PoolBench service (off by default) makes and deletes everything the run needs, in the run's own namespace `poolbench-<name>`. Short name `pb`. See `docs/specs/2026-10-25-poolbench.md`.

@@ -28,6 +28,12 @@ rules:
   - apiGroups: ["storage.ibmcloud.io"]
     resources: ["backuprestores", "backuprestores/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # File restores: the gateway makes them, the controller runs them. The
+  # controller keeps the list of paths of a restore in a ConfigMap that the
+  # restore owns, so the garbage collector removes it with the restore.
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["backupfilerestores", "backupfilerestores/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   # Browse sessions: the gateway makes them, the controller runs them.
   - apiGroups: ["storage.ibmcloud.io"]
     resources: ["backupbrowses", "backupbrowses/status"]

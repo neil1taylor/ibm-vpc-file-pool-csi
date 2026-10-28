@@ -114,7 +114,7 @@ Run a single test: `go test ./pkg/pool/ -v -race -run TestPoolManager_Allocate`
 
 **Hook Orchestrator** (`pkg/hooks/`) — Executes lifecycle hooks (exec commands or HTTP webhooks) before/after replication syncs and group snapshots.
 
-**Admission Webhooks** (`pkg/webhook/`) — Eight validating webhooks covering FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, ReplicationPolicy, BackupPolicy, BackupRestore, and PoolBench CRDs.
+**Admission Webhooks** (`pkg/webhook/`) — Ten validating webhooks covering FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, ReplicationPolicy, Failover, BackupPolicy, BackupRestore, BackupFileRestore, and PoolBench CRDs.
 
 **CSI Node Agent** (DaemonSet) — Mounts NFS shares once per node, bind-mounts subdirectories into pod paths. Maintains mount cache.
 

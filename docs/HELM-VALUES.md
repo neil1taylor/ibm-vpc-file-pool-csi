@@ -109,6 +109,8 @@ Browse a backup and restore single files (issue #92). Added in phase 1 of `docs/
 | `backupBrowse.maxLife` | string | `2h` | A session ends after this long, even if in use |
 | `backupBrowse.maxSessions` | int | `5` | Open sessions in the cluster. More wait |
 | `backupBrowse.maxSessionsPerNamespace` | int | `2` | Open sessions for the claims of one namespace. More wait |
+| `backupBrowse.restoreMaxBytes` | int | `214748364800` | The most one file restore (`BackupFileRestore`) writes, 200 GiB. A restore of more is refused before it copies. It is a controller setting and works even when `backupBrowse.enabled` is `false` |
+| `backupBrowse.restoreMaxRunning` | int | `5` | File restores that run at once in the cluster. More wait, oldest first. Each running restore holds a Job and two share mounts. Works even when `backupBrowse.enabled` is `false` |
 
 The chart also makes, in the browse namespace, a Role that lets the controller make, change and delete Secrets there (the session Secrets, and copies of the image pull secrets, which the controller copies from the release namespace), and a NetworkPolicy that lets only the backup gateway pods of the release namespace reach the helper pods, on port 8443. **Moving from the earlier part:** sessions that were open in the release namespace are not followed; they end by themselves within 2 hours and their objects are removed with them.
 

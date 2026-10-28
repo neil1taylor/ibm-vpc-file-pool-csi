@@ -38,7 +38,7 @@ func newBackupEnv(t *testing.T) *backupEnv {
 	s.AddKnownTypeWithName(vmGVK, &unstructured.Unstructured{})
 	s.AddKnownTypeWithName(vmGVK.GroupVersion().WithKind("VirtualMachineList"), &unstructured.UnstructuredList{})
 	c := fakeclient.NewClientBuilder().WithScheme(s).
-		WithStatusSubresource(&v1alpha1.BackupPolicy{}, &v1alpha1.ReplicationPolicy{}, &v1alpha1.BackupRestore{}, &v1alpha1.BackupBrowse{}).Build()
+		WithStatusSubresource(&v1alpha1.BackupPolicy{}, &v1alpha1.ReplicationPolicy{}, &v1alpha1.BackupRestore{}, &v1alpha1.BackupBrowse{}, &v1alpha1.BackupFileRestore{}).Build()
 	e := &backupEnv{t: t, c: c, bc: NewBackupController(c), ctx: context.Background()}
 	e.addPool("backups", "10.240.9.9", "/export_backups")
 	e.addPool("data-a", "10.240.1.1", "/export_a")
