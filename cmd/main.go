@@ -32,6 +32,7 @@ import (
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/consoleplugin"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/driver"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/failover"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/hooks"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/k8s"
@@ -112,6 +113,14 @@ func main() {
 		vmGroup string
 		copyID  string
 
+		// Failover mode flags (the controller also uses failoverSource).
+		nfsMountPath   string
+		failoverAction string
+		failoverRewind string
+		failoverForce  bool
+		failoverExpect string
+		failoverSource string
+
 		// Restore-vm-disk mode flags.
 		backupDisk    string
 		outDisk       string
@@ -124,7 +133,7 @@ func main() {
 
 	flag.StringVar(&endpoint, "endpoint", "unix:///csi/csi.sock", "CSI endpoint")
 	flag.StringVar(&nodeID, "node-id", "", "Node ID")
-	flag.StringVar(&mode, "mode", "controller", "Driver mode: controller, node, receiver, sync-client, check-receiver, apply-vm-disk, send-vm-disk, restore-vm-disk, unwrap-backup-key, register-console-plugin, unregister-console-plugin, or enable-sidecar-gate")
+	flag.StringVar(&mode, "mode", "controller", "Driver mode: controller, node, receiver, sync-client, check-receiver, apply-vm-disk, send-vm-disk, restore-vm-disk, unwrap-backup-key, register-console-plugin, unregister-console-plugin, enable-sidecar-gate, or failover")
 	flag.StringVar(&consolePluginName, "console-plugin-name", "ibm-vpc-file-pool-csi", "ConsolePlugin to turn on or off in the OpenShift console (register-console-plugin and unregister-console-plugin modes)")
 	flag.StringVar(&region, "region", "", "IBM Cloud region (e.g. us-south); auto-discovered from secret provider if omitted")
 	flag.StringVar(&vpcID, "vpc-id", "", "IBM Cloud VPC ID for creating file share mount targets")
@@ -196,6 +205,14 @@ func main() {
 	flag.BoolVar(&vmCopy.full, "full", false, "The copy holds the whole disk (apply-vm-disk mode)")
 	flag.DurationVar(&vmCopy.keep, "keep", 24*time.Hour, "How long restore points are kept (apply-vm-disk mode)")
 
+	// Failover flags.
+	flag.StringVar(&nfsMountPath, "nfs-mount-path", "", "Mount path of the destination share (failover mode)")
+	flag.StringVar(&failoverAction, "failover-action", "", "Plan or Execute (failover mode)")
+	flag.StringVar(&failoverRewind, "rewind-to", "", "Use the newest moment at or before this time, RFC 3339 (failover mode)")
+	flag.BoolVar(&failoverForce, "force", false, "Go on although a copy may still be applied to a disk (failover mode)")
+	flag.StringVar(&failoverExpect, "failover-expect", "", "JSON of the confirmed plan; an Execute refuses if the share no longer matches it (failover mode)")
+	flag.StringVar(&failoverSource, "failover-default-source", "", "Destination claim a Failover reads when it names none (controller mode)")
+
 	// Restore-vm-disk flags.
 	flag.StringVar(&backupDisk, "backup-disk", "", "Backed-up VM disk image to restore from (restore-vm-disk mode)")
 	flag.StringVar(&outDisk, "out-disk", "", "New disk image to write; it must not exist (restore-vm-disk mode)")
@@ -238,7 +255,7 @@ func main() {
 			klog.ErrorS(err, "Invalid flag")
 			os.Exit(1)
 		}
-		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, controllerMetricsCertDir, mon, cloneWorkerInterval, goldenImageSyncInterval, cdiCopyPodMemoryLimit, driverImage, webhooks, vmSnapshots, browse, nodeAgentOptions{service: poolBench.NodeMetricsService, caFile: poolBench.NodeMetricsCA, account: nodeMetricsAccount})
+		runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, controllerMetricsCertDir, mon, cloneWorkerInterval, goldenImageSyncInterval, cdiCopyPodMemoryLimit, driverImage, failoverSource, webhooks, vmSnapshots, browse, nodeAgentOptions{service: poolBench.NodeMetricsService, caFile: poolBench.NodeMetricsCA, account: nodeMetricsAccount})
 	case "backup-gateway":
 		runGateway(gw)
 	case "receiver":
@@ -249,6 +266,8 @@ func main() {
 		runCheckReceiver(receiverEndpoint, authTokenFile, caCertFile)
 	case "apply-vm-disk":
 		runApplyVMDisk(stagingPath, diskPath, vmCopy)
+	case "failover":
+		runFailover(nfsMountPath, failoverAction, failoverRewind, failoverForce, failoverExpect)
 	case "restore-vm-disk":
 		runRestoreVMDisk(backupDisk, outDisk, restoreMoment)
 	case "unwrap-backup-key":
@@ -375,7 +394,7 @@ func (o monitoringOptions) config(driverNS string) (monitoring.Config, error) {
 	return cfg, nil
 }
 
-func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metricsCertDir string, mon monitoringOptions, cloneWorkerInterval, goldenImageSyncInterval time.Duration, cdiCopyPodMemoryLimit, driverImage string, webhooks webhookOptions, vmSnapshots vmSnapshotOptions, browse browseOptions, nodeAgents nodeAgentOptions) {
+func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metricsCertDir string, mon monitoringOptions, cloneWorkerInterval, goldenImageSyncInterval time.Duration, cdiCopyPodMemoryLimit, driverImage, failoverSource string, webhooks webhookOptions, vmSnapshots vmSnapshotOptions, browse browseOptions, nodeAgents nodeAgentOptions) {
 	scheme := runtime.NewScheme()
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
 		klog.ErrorS(err, "Failed to add CRD types to scheme")
@@ -470,7 +489,7 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metric
 	// webhook server only when a webhook is registered, so with webhooks
 	// disabled the controller needs no serving certificate.
 	if webhooks.enabled {
-		if err = registerWebhooks(mgr); err != nil {
+		if err = registerWebhooks(mgr, failoverSource); err != nil {
 			klog.ErrorS(err, "Failed to register webhooks")
 			os.Exit(1)
 		}
@@ -689,6 +708,17 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metric
 		return nil
 	})); addErr != nil {
 		klog.ErrorS(addErr, "Failed to add the backup policy controller")
+		os.Exit(1)
+	}
+
+	// Failovers: a Job reads the destination claim and plans or carries out a
+	// failover. Runs on the leader only.
+	failoverController := failover.NewController(replClient, driverNamespace, driverImage, failoverSource)
+	if addErr := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		failoverController.Run(ctx)
+		return nil
+	})); addErr != nil {
+		klog.ErrorS(addErr, "Failed to add the failover controller")
 		os.Exit(1)
 	}
 
@@ -973,7 +1003,7 @@ func discoverNetworkConfig(ctx context.Context, clientset kubernetes.Interface, 
 }
 
 // registerWebhooks registers the validating webhook for each CRD type.
-func registerWebhooks(mgr ctrl.Manager) error {
+func registerWebhooks(mgr ctrl.Manager, failoverSource string) error {
 	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.FileSharePool{}).
 		WithValidator(&webhook.FileSharePoolValidator{}).Complete(); err != nil {
 		return fmt.Errorf("register FileSharePool webhook: %w", err)
@@ -985,6 +1015,10 @@ func registerWebhooks(mgr ctrl.Manager) error {
 	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.ReplicationPolicy{}).
 		WithValidator(&webhook.ReplicationPolicyValidator{}).Complete(); err != nil {
 		return fmt.Errorf("register ReplicationPolicy webhook: %w", err)
+	}
+	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.Failover{}).
+		WithValidator(&webhook.FailoverValidator{Reader: mgr.GetAPIReader(), DefaultSource: failoverSource}).Complete(); err != nil {
+		return fmt.Errorf("register Failover webhook: %w", err)
 	}
 	if err := ctrl.NewWebhookManagedBy(mgr, &v1alpha1.BackupPolicy{}).
 		WithValidator(&webhook.BackupPolicyValidator{}).Complete(); err != nil {

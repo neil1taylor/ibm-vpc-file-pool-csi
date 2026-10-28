@@ -64,6 +64,9 @@ spec:
             {{- end }}
             - "--cdi-copy-pod-memory-limit={{ .Values.cdi.copyPodMemoryLimit }}"
             - "--driver-image={{ include "ibm-vpc-file-pool-csi.driverImage" . }}"
+            {{- if .Values.replicationReceiver.pvcName }}
+            - "--failover-default-source={{ .Values.replicationReceiver.pvcName }}"
+            {{- end }}
             {{- if .Values.backupBrowse.enabled }}
             - "--browse-image={{ .Values.backupBrowse.image.repository }}:{{ .Values.backupBrowse.image.tag | default (include "ibm-vpc-file-pool-csi.imageTag" .) }}"
             {{- if .Values.imagePullSecrets }}
