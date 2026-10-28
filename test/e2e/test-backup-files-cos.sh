@@ -243,6 +243,22 @@ bk() { # bk <kubeconfig> <command> <args...>
     "$BACKUP_BIN" "$1" --kubeconfig "$kc" --gateway "https://$GW_ROUTE" "${GW_CA[@]}" "${@:2}"
 }
 FROM_POLICY=(--from-cos --policy "$POLICY" --pvc "$NS/data")
+gone() { # gone <uid>: no pod, Job or Secret of the session in either namespace
+    [ -z "$(oc get pod,job,secret -n "$DRIVER_NS" -l "storage.ibmcloud.io/browse=$1" -o name 2>/dev/null)" ] &&
+        [ -z "$(oc get pod,job,secret -n "$BROWSE_NS" -l "storage.ibmcloud.io/browse=$1" -o name 2>/dev/null)" ]
+}
+# Sessions on a bucket named directly all count against the namespace "-", which allows 2 open sessions
+# (backupBrowse.maxSessionsPerNamespace), and the cluster allows 5. So every section closes its sessions.
+none_open() {
+    [ "$(oc get backupbrowse -o json | jq --arg p "$POLICY" '[.items[] | select(.spec.policy == $p and ((.status.phase // "") | IN("Pending","Starting","Ready")))] | length')" = 0 ]
+}
+close_all() {
+    local name
+    while read -r name; do
+        [ -n "$name" ] && oc patch backupbrowse "$name" --type merge -p '{"spec":{"close":true}}' >/dev/null
+    done < <(oc get backupbrowse -o json | jq -r --arg p "$POLICY" '.items[] | select(.spec.policy == $p and ((.status.phase // "") | IN("Pending","Starting","Ready"))) | .metadata.name')
+    wait_until 300 "the sessions of this test to close" none_open
+}
 wait_until 300 "the gateway to answer for COS" bk "$ALICE" ls "${FROM_POLICY[@]}" --timeout 5m /
 
 # ---- 1. read the bucket of the policy's export block --------------------------------------------
@@ -294,6 +310,7 @@ else
 fi
 oc get secret "browse-$BUID" -n "$DRIVER_NS" -o json | jq -e --arg u "$BUID" '.metadata.ownerReferences[0].uid == $u' >/dev/null \
     && pass "the helper's copy of the session Secret is owned by the session" || fail "the copy has no owner"
+oc logs -n "$DRIVER_NS" -l "storage.ibmcloud.io/browse=$BUID" --tail=-1 >"$WORK/helper-$BUID.log" 2>&1 || true
 POD_IP=$(oc get backupbrowse "$BB" -o jsonpath='{.status.podIP}')
 if oc run probe -n "$NS" --rm -i --restart=Never --image="$IMG" --command -- \
     sh -c "curl -sk -m 8 -o /dev/null https://$POD_IP:8443/healthz" >/dev/null 2>&1; then
@@ -374,6 +391,8 @@ OUT=$(inspect work "echo \"mine=\$(cat mine.txt)\"; cd '$FOLDER'; echo \"s=\$(st
 grep -q "^mine=mine$" <<<"$OUT" && grep -q "^s=1000:1000 600$" <<<"$OUT" && grep -q "^link=/etc$" <<<"$OUT" \
     && pass "a restore from COS into an existing claim writes a new folder, keeps the backup's owners and leaves the claim's file" || fail "existing claim: $OUT"
 
+close_all
+
 # ---- 4. who may read -----------------------------------------------------------------------------
 expect_forbidden() { # expect_forbidden <description> <kubeconfig>
     local out
@@ -397,13 +416,16 @@ fi
 grep -q "Secrets" <<<"$out" && pass "naming a bucket directly is forbidden to a namespace admin who cannot read its Secrets" || fail "alice naming a bucket: $out"
 OUT=$(bk "$COSADMIN" ls "${BUCKET_FLAGS[@]}" /) || fail "cosadmin could not name the bucket: $OUT"
 grep -q "v.txt" <<<"$OUT" && pass "someone who may read the Secrets reads a bucket named directly, with no policy lookup" || fail "named bucket ls: $OUT"
-bk "$COSADMIN" get "${BUCKET_FLAGS[@]}" /big/blob --out "$WORK/named" >/dev/null 2>&1 || { mkdir "$WORK/named" && bk "$COSADMIN" get "${BUCKET_FLAGS[@]}" /big/blob --out "$WORK/named" >/dev/null; }
+mkdir "$WORK/named"
+bk "$COSADMIN" get "${BUCKET_FLAGS[@]}" /big/blob --out "$WORK/named" >/dev/null
 [ "$(sha256sum "$WORK/named/blob" | awk '{print $1}')" = "$BLOB_SHA" ] && pass "a file from a bucket named directly has the same checksum" || fail "named bucket checksum"
 bk "$COSADMIN" get "${BUCKET_FLAGS[@]}" --moment "$FIRST" /v.txt --out - | grep -q first && pass "a bucket named directly serves the first moment" || fail "named bucket first moment"
 bk "$COSADMIN" restore-files "${BUCKET_FLAGS[@]}" --to "$NS/$PREFIX-named" --storage-class "$SRC" --path /docs --wait --timeout 40m >/dev/null \
     || fail "restore-files from a bucket named directly failed"
 OUT=$(inspect "$PREFIX-named" 'echo "docs=$(cat docs/a.txt)"')
 grep -q "^docs=one$" <<<"$OUT" && pass "files restored from a bucket named directly are in the new claim" || fail "named restore: $OUT"
+
+close_all
 
 # ---- 6. failures are said in words ------------------------------------------------------------------
 expect_words() { # expect_words <description> <pattern> <args...>
@@ -429,6 +451,7 @@ oc get secret "$KEY_SECRET" -n "$DRIVER_NS" -o jsonpath='{.data.wrappedKey}' | b
     oc logs -n "$DRIVER_NS" deploy/ibm-vpc-file-pool-csi-controller -c csi-controller --since=6h 2>&1 || true
     oc logs -n "$DRIVER_NS" "$GW_DEPLOY" --since=6h 2>&1 || true
     for p in $(oc get pod -n "$DRIVER_NS" -l storage.ibmcloud.io/browse -o name 2>/dev/null); do oc logs -n "$DRIVER_NS" "$p" 2>&1 || true; done
+    cat "$WORK"/helper-*.log 2>/dev/null || true
     oc get events -A -o json 2>&1 || true
     oc get backupbrowse,backupfilerestore -o json 2>&1 || true
 } >"$K/all"
@@ -442,23 +465,32 @@ EV=$(oc get events -n "$DRIVER_NS" -o json | jq -r '.items[] | select(.reason ==
 grep -q "system:serviceaccount:$NS:alice" <<<"$EV" && grep -q "from COS" <<<"$EV" && pass "the audit Events name the user and say the backup was read from COS" || fail "audit events: $EV"
 
 # ---- 8. nothing is left ------------------------------------------------------------------------------------
-gone() { # gone <uid>: no pod, Job or Secret of the session in either namespace
-    [ -z "$(oc get pod,job,secret -n "$DRIVER_NS" -l "storage.ibmcloud.io/browse=$1" -o name 2>/dev/null)" ] &&
-        [ -z "$(oc get pod,job,secret -n "$BROWSE_NS" -l "storage.ibmcloud.io/browse=$1" -o name 2>/dev/null)" ]
+close_all
+session_of() { # session_of <flags...>: open a session by hand and print its name
+    bk "$COSADMIN" browse "$@" | awk '{print $2}'
 }
-oc patch backupbrowse "$BB" --type merge -p '{"spec":{"close":true}}' >/dev/null
-closed() { [ "$(oc get backupbrowse "$BB" -o jsonpath='{.status.phase}')" = Closed ]; }
+S1=$(session_of "${BUCKET_FLAGS[@]}")
+[ -n "$S1" ] || fail "browse printed no session"
+UID1=$(oc get backupbrowse "$S1" -o jsonpath='{.metadata.uid}')
+[ -n "$(oc get secret "browse-$UID1" -n "$DRIVER_NS" -o name 2>/dev/null)" ] && [ -n "$(oc get secret "browse-$UID1" -n "$BROWSE_NS" -o name 2>/dev/null)" ] \
+    && pass "a COS session has its Secret in both namespaces while it is open" || fail "the session Secrets: driver=$(oc get secret -n "$DRIVER_NS" -l "storage.ibmcloud.io/browse=$UID1" -o name) browse=$(oc get secret -n "$BROWSE_NS" -l "storage.ibmcloud.io/browse=$UID1" -o name)"
+bk "$COSADMIN" browse --close "$S1" >/dev/null
+closed() { [ "$(oc get backupbrowse "$S1" -o jsonpath='{.status.phase}')" = Closed ]; }
 wait_until 240 "the COS session to close" closed
-wait_until 240 "the closed COS session's objects to go" gone "$BUID"
+wait_until 240 "the closed COS session's objects to go" gone "$UID1"
 pass "closing a COS session removes its pod, Job and both copies of its Secret"
-# Every session of this test names the test's policy. Deleting them tests the other way to end a session.
-SESSIONS=$(oc get backupbrowse -o json | jq -r --arg p "$POLICY" '.items[] | select(.spec.policy == $p) | "\(.metadata.name) \(.metadata.uid)"')
-while read -r name uid; do
-    [ -n "$name" ] || continue
-    oc delete backupbrowse "$name" --wait=true >/dev/null
-    wait_until 240 "the objects of the deleted session $name to go" gone "$uid"
-done <<<"$SESSIONS"
-pass "deleting COS sessions removes their pods, Jobs and Secrets in both namespaces"
+S2=$(session_of "${BUCKET_FLAGS[@]}" --moment "$FIRST")
+[ -n "$S2" ] || fail "browse printed no second session"
+UID2=$(oc get backupbrowse "$S2" -o jsonpath='{.metadata.uid}')
+oc delete backupbrowse "$S2" --wait=true >/dev/null
+wait_until 240 "the objects of the deleted session to go" gone "$UID2"
+pass "deleting a COS session removes its pod, Job and both copies of its Secret"
+close_all
+# Every session of this test names the test's policy; none is left behind.
+for uid in $(oc get backupbrowse -o json | jq -r --arg p "$POLICY" '.items[] | select(.spec.policy == $p) | .metadata.uid'); do
+    wait_until 240 "the objects of an ended session to go" gone "$uid"
+done
+pass "no pod, Job or Secret of any session of this test is left in either namespace"
 [ -z "$(oc get pod,job -n "$DRIVER_NS" -o name 2>/dev/null | grep -E 'filerestore|browse' || true)" ] \
     && pass "no Job or pod of a restore or a session is left" || fail "a Job or pod is left: $(oc get pod,job -n "$DRIVER_NS" -o name | grep -E 'filerestore|browse')"
 log "all checks passed"

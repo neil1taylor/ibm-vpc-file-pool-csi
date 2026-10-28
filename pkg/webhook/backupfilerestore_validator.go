@@ -56,15 +56,14 @@ func validateBackupFileRestoreSpec(spec *v1alpha1.BackupFileRestoreSpec) error {
 	if errs := validation.IsDNS1123Subdomain(spec.Policy); len(errs) > 0 || len(spec.Policy) > 63 {
 		return fmt.Errorf("spec.policy %q is not a policy name (up to 63 characters)", spec.Policy)
 	}
-	for _, ns := range []struct{ field, value string }{{"sourceNamespace", spec.SourceNamespace}, {"targetNamespace", spec.TargetNamespace}} {
-		if errs := validation.IsDNS1123Label(ns.value); len(errs) > 0 {
-			return fmt.Errorf("spec.%s is not a namespace name: %v", ns.field, errs)
-		}
+	if err := validateBackupSource(spec); err != nil {
+		return err
 	}
-	for _, n := range []struct{ field, value string }{{"sourceName", spec.SourceName}, {"targetName", spec.TargetName}} {
-		if errs := validation.IsDNS1123Subdomain(n.value); len(errs) > 0 {
-			return fmt.Errorf("spec.%s is not a PVC name: %v", n.field, errs)
-		}
+	if errs := validation.IsDNS1123Label(spec.TargetNamespace); len(errs) > 0 {
+		return fmt.Errorf("spec.targetNamespace is not a namespace name: %v", errs)
+	}
+	if errs := validation.IsDNS1123Subdomain(spec.TargetName); len(errs) > 0 {
+		return fmt.Errorf("spec.targetName is not a PVC name: %v", errs)
 	}
 	if _, err := filerestore.CheckPaths(spec.Paths); err != nil {
 		return err
@@ -83,6 +82,40 @@ func validateBackupFileRestoreSpec(spec *v1alpha1.BackupFileRestoreSpec) error {
 	}
 	if spec.TargetUID != "" {
 		return fmt.Errorf("spec.targetUID is for an existing claim; a new claim does not exist yet")
+	}
+	return nil
+}
+
+// validateBackupSource checks where the backup is read from. A backup in the
+// snapshot pool, or in the COS bucket of a policy, is named by the claim that
+// was backed up. A bucket named directly (spec.fromCOS) has no claim in this
+// cluster: the policy is only the area in the bucket, the source namespace holds
+// "-" and the source name is the volume. The webhook guards objects made by hand
+// too, so the block gets the same checks the gateway and the controller make.
+func validateBackupSource(spec *v1alpha1.BackupFileRestoreSpec) error {
+	if spec.FromCOS == nil {
+		if errs := validation.IsDNS1123Label(spec.SourceNamespace); len(errs) > 0 {
+			return fmt.Errorf("spec.sourceNamespace is not a namespace name: %v", errs)
+		}
+		if errs := validation.IsDNS1123Subdomain(spec.SourceName); len(errs) > 0 {
+			return fmt.Errorf("spec.sourceName is not a PVC name: %v", errs)
+		}
+		return nil
+	}
+	if spec.Source != v1alpha1.BackupSourceCOS {
+		return fmt.Errorf("spec.source must be %q when spec.fromCOS is set", v1alpha1.BackupSourceCOS)
+	}
+	if spec.SourceNamespace != v1alpha1.NoNamespace {
+		return fmt.Errorf("spec.sourceNamespace must be %q when spec.fromCOS is set: the bucket names no claim of this cluster", v1alpha1.NoNamespace)
+	}
+	if spec.SourceName != spec.FromCOS.Volume {
+		return fmt.Errorf("spec.sourceName must be the volume of spec.fromCOS when it is set")
+	}
+	if err := spec.FromCOS.Validate(); err != nil {
+		return err
+	}
+	if !spec.Existing && spec.StorageClassName == "" {
+		return fmt.Errorf("spec.storageClassName is required for a new claim when spec.fromCOS is set: COS does not keep the class of the backed-up claim")
 	}
 	return nil
 }

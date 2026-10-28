@@ -231,8 +231,10 @@ run() {
         check "a volume that was never backed up is said in words" log_has_pass "$COSF_LOG" "a volume that was never backed up:"
         check "no key is in a log, an Event or a status" log_has_pass "$COSF_LOG" "no COS key, API key or wrapped key is in"
         check "the audit Events say the backup was read from COS" log_has_pass "$COSF_LOG" "say the backup was read from COS"
+        check "a COS session has its Secret in both namespaces while it is open" log_has_pass "$COSF_LOG" "has its Secret in both namespaces"
         check "closing a COS session leaves nothing behind" log_has_pass "$COSF_LOG" "closing a COS session removes"
-        check "deleting COS sessions leaves nothing behind" log_has_pass "$COSF_LOG" "deleting COS sessions removes"
+        check "deleting a COS session leaves nothing behind" log_has_pass "$COSF_LOG" "deleting a COS session removes"
+        check "no pod, Job or Secret of any session is left in either namespace" log_has_pass "$COSF_LOG" "no pod, Job or Secret of any session of this test is left"
         check "no Job or pod of a restore or a session is left" log_has_pass "$COSF_LOG" "no Job or pod of a restore or a session is left"
     fi
 }
