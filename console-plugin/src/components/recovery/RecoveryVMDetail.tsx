@@ -12,7 +12,7 @@ interface Props {
   disabledReason?: string;
 }
 
-/** One VM: its disks, and the moments it can show, newest first. The operator chooses a moment and starts the failover. */
+/** One VM: its disks, and the moments it can show, newest first. The operator chooses a moment and fails over this VM only. */
 const RecoveryVMDetail: React.FC<Props> = ({ detail, onBack, onFailOver, isDisabled, disabledReason }) => {
   const current = detail.moments.find((m) => m.isCurrent) || detail.moments[0];
   const [moment, setMoment] = useState(current?.iso || '');
@@ -80,7 +80,7 @@ const RecoveryVMDetail: React.FC<Props> = ({ detail, onBack, onFailOver, isDisab
       </StackItem>
       <StackItem>
         <Button variant="danger" onClick={() => onFailOver(moment)} isDisabled={isDisabled || !moment}>
-          Fail over
+          Fail over this VM
         </Button>
         {disabledReason && <span style={{ marginLeft: 12 }}>{disabledReason}</span>}
       </StackItem>

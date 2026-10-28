@@ -15,9 +15,9 @@ import (
 )
 
 // FailoverValidator validates Failover create and update requests. An Execute
-// moves production VMs, so it is refused unless a Plan for the same source
-// finished in the last 15 minutes, and refused for a VM that was failed over
-// on this cluster already. The Job that runs the Execute checks the plan
+// moves production VMs, so it is refused unless a Plan for the same source,
+// rewindTo and VM filter finished in the last 15 minutes, and refused for a VM
+// that was failed over on this cluster already. The Job that runs the Execute checks the plan
 // against the share again, because only the Job can read the share.
 type FailoverValidator struct {
 	// Reader reads Failovers and SubVolumes without a cache, so a Plan that
@@ -86,6 +86,11 @@ func (v *FailoverValidator) validateSpec(spec *v1alpha1.FailoverSpec) error {
 	if spec.Source != "" {
 		if errs := validation.IsDNS1123Subdomain(spec.Source); len(errs) > 0 {
 			return fmt.Errorf("spec.source is not a claim name: %v", errs)
+		}
+	}
+	for _, vm := range spec.VMs {
+		if err := failover.ValidateVMName(vm); err != nil {
+			return fmt.Errorf("spec.vms: %w", err)
 		}
 	}
 	if spec.Namespace != "" {

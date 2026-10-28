@@ -2,6 +2,7 @@ package failover
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
@@ -45,8 +46,16 @@ func rewindText(t *time.Time) string {
 	return t.UTC().Format(time.RFC3339)
 }
 
+func vmsText(vms []string) string {
+	n := NormalizeVMs(vms)
+	if n == nil {
+		return "unset: all VMs"
+	}
+	return strings.Join(n, ", ")
+}
+
 // FindPlan returns the newest Plan that an Execute may rely on: a Plan for the
-// same source and the same rewindTo that finished within PlanMaxAge. Otherwise
+// same source, rewindTo and VM filter that finished within PlanMaxAge. Otherwise
 // it says what is missing.
 func FindPlan(all []v1alpha1.Failover, exec *v1alpha1.Failover, defaultSource string, now time.Time) (*v1alpha1.Failover, error) {
 	source := EffectiveSource(exec, defaultSource)
@@ -55,7 +64,7 @@ func FindPlan(all []v1alpha1.Failover, exec *v1alpha1.Failover, defaultSource st
 	}
 	want := rewindOf(exec)
 	var best *v1alpha1.Failover
-	var staleSource, wrongRewind bool
+	var staleSource, wrongRewind, wrongVMs bool
 	for i := range all {
 		p := &all[i]
 		if p.Spec.Action != v1alpha1.FailoverActionPlan || p.Status.Phase != v1alpha1.FailoverPhasePlanned || p.Status.FinishedAt == nil {
@@ -66,6 +75,10 @@ func FindPlan(all []v1alpha1.Failover, exec *v1alpha1.Failover, defaultSource st
 		}
 		if !sameRewind(rewindOf(p), want) {
 			wrongRewind = true
+			continue
+		}
+		if !SameVMs(p.Spec.VMs, exec.Spec.VMs) {
+			wrongVMs = true
 			continue
 		}
 		if now.Sub(p.Status.FinishedAt.Time) > PlanMaxAge {
@@ -84,6 +97,8 @@ func FindPlan(all []v1alpha1.Failover, exec *v1alpha1.Failover, defaultSource st
 		return nil, fmt.Errorf("the Plan for source %q is older than %d minutes; create a new Failover with action Plan, check it, and then Execute", source, int(PlanMaxAge.Minutes()))
 	case wrongRewind:
 		return nil, fmt.Errorf("no Plan for source %q has spec.rewindTo %s; plan with the same rewindTo that you execute", source, rewindText(want))
+	case wrongVMs:
+		return nil, fmt.Errorf("no Plan for source %q has the same spec.vms (%s); plan with the same VMs that you execute", source, vmsText(exec.Spec.VMs))
 	default:
 		return nil, fmt.Errorf("no finished Plan for source %q within the last %d minutes; create a Failover with action Plan first", source, int(PlanMaxAge.Minutes()))
 	}

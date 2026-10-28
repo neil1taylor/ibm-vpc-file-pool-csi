@@ -14,6 +14,7 @@ import {
   planRemainingMs,
   receiverClaims,
   scheduleOfVM,
+  scopeOfPlan,
 } from './failover-helpers';
 
 const NOW = new Date('2026-10-28T12:00:00Z').getTime();
@@ -78,6 +79,11 @@ describe('buildFailover', () => {
       drPool: 'dr-pool',
     });
     expect(f.metadata?.name).toMatch(/^console-execute-/);
+  });
+
+  it('sets vms when given, and leaves it out when empty', () => {
+    expect(buildFailover({ action: 'Plan', vms: ['apps/web'] }, NOW).spec).toEqual({ action: 'Plan', vms: ['apps/web'] });
+    expect(buildFailover({ action: 'Plan', vms: [] }, NOW).spec).toEqual({ action: 'Plan' });
   });
 
   it('leaves force out when it is false', () => {
@@ -147,6 +153,11 @@ describe('findPlan', () => {
   });
   it('ignores Plans for another source', () => {
     expect(findPlan([plan({ spec: { action: 'Plan', source: 'other' }, status: { source: 'other' } })], 'dr-data')).toBeUndefined();
+  });
+  it('ignores Plans for chosen VMs: the table shows the plan for all VMs', () => {
+    const one = plan({ metadata: { name: 'one', creationTimestamp: '2026-10-28T11:59:50Z' }, spec: { action: 'Plan', source: 'dr-data', vms: ['apps/web'] } });
+    expect(findPlan([older, one], 'dr-data')?.metadata?.name).toBe('old');
+    expect(findPlan([one], 'dr-data')).toBeUndefined();
   });
   it('matches a Plan that used the default source when no source is chosen', () => {
     const p = plan({ spec: { action: 'Plan' } });
@@ -250,6 +261,15 @@ describe('executeSummary', () => {
     expect(s.otherVMs).toBe(1);
     expect(s.chosenPVCs.map((p) => p.name)).toEqual(['web-root', 'web-data']);
   });
+  it('for a plan of one VM lists only that VM and its PVCs, with no other VMs', () => {
+    const p = plan({ spec: { action: 'Plan', source: 'dr-data', vms: ['apps/web'] } });
+    p.status!.vms = [p.status!.vms![0]];
+    p.status!.volumes = p.status!.volumes!.slice(0, 2);
+    const s = executeSummary(p, 'apps/web');
+    expect(s.vms.map((v) => v.name)).toEqual(['apps/web']);
+    expect(s.otherVMs).toBe(0);
+    expect(s.pvcs.map((x) => x.name)).toEqual(['web-root', 'web-data']);
+  });
   it('moves the PVCs to the namespace override when there is one', () => {
     const p = plan();
     p.spec.namespace = 'dr';
@@ -258,11 +278,18 @@ describe('executeSummary', () => {
 });
 
 describe('confirmationWord', () => {
-  it('is the VM name when the plan has one VM, and the source claim when it has several', () => {
+  it('is the VM name for one VM, and the source claim for all VMs', () => {
     const p = plan();
-    expect(confirmationWord(p, 'apps/web')).toBe('dr-data');
-    p.status!.vms = [p.status!.vms![0]];
     expect(confirmationWord(p, 'apps/web')).toBe('apps/web');
+    expect(confirmationWord(p, '')).toBe('dr-data');
+    expect(confirmationWord(plan({ status: { phase: 'Planned' }, spec: { action: 'Plan' } }), '')).toBe('failover');
+  });
+});
+
+describe('scopeOfPlan', () => {
+  it('is the VM names in spec.vms, or empty for all VMs', () => {
+    expect(scopeOfPlan(plan())).toEqual([]);
+    expect(scopeOfPlan(plan({ spec: { action: 'Plan', vms: ['apps/web'] } }))).toEqual(['apps/web']);
   });
 });
 

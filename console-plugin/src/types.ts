@@ -595,6 +595,8 @@ export interface FailoverSpec {
   action: 'Plan' | 'Execute';
   /** Limits the moment of each VM to the newest one at or before it. */
   rewindTo?: string;
+  /** Only these VMs ("namespace/name"). Empty means every VM on the copy. */
+  vms?: string[];
   namespace?: string;
   force?: boolean;
   /** The FileSharePool the new SubVolumes belong to. Required for Execute. */

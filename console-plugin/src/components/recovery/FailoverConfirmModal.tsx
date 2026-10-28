@@ -20,6 +20,7 @@ import { ageText, confirmationWord, executeSummary } from '../../utils/failover-
 
 interface Props {
   plan: Failover;
+  /** The VM to fail over. Empty means every VM on the copy. */
   vmName: string;
   /** Names of the FileSharePools on this cluster. */
   pools: string[];
@@ -31,22 +32,23 @@ interface Props {
 
 /**
  * The last step before a failover. It says what will happen: the VM and its moment, the disks that are
- * rewound, and the PVCs that are made. A failover covers everything on the copy, so every VM is listed.
- * The operator types a word to confirm.
+ * rewound, and the PVCs that are made. The plan is for the chosen VM only, or for every VM on the copy (then
+ * every VM is listed). The operator types the VM name, or the source name for every VM, to confirm.
  */
 const FailoverConfirmModal: React.FC<Props> = ({ plan, vmName, pools, creating, error, onConfirm, onClose }) => {
   const [typed, setTyped] = useState('');
   const [chosenPool, setChosenPool] = useState('');
   const summary = executeSummary(plan, vmName);
   const word = confirmationWord(plan, vmName);
+  const all = vmName === '';
   const chosen = summary.vms.find((v) => v.name === vmName);
   const pool = chosenPool || (pools.length === 1 ? pools[0] : '');
   const canGo = typed === word && !!pool && !creating;
   const disks = (n: number) => `${n} ${n === 1 ? 'disk' : 'disks'} to rewind`;
 
   return (
-    <Modal variant={ModalVariant.medium} isOpen onClose={onClose} aria-label={`Fail over ${vmName}`}>
-      <ModalHeader title={`Fail over ${vmName}?`} />
+    <Modal variant={ModalVariant.medium} isOpen onClose={onClose} aria-label={all ? 'Fail over all VMs' : `Fail over ${vmName}`}>
+      <ModalHeader title={all ? 'Fail over all VMs?' : `Fail over ${vmName}?`} />
       <ModalBody>
         <Stack hasGutter>
           {chosen && (
@@ -54,11 +56,23 @@ const FailoverConfirmModal: React.FC<Props> = ({ plan, vmName, pools, creating, 
               {`${vmName} will show the copy from ${chosen.moment} (${ageText(chosen.moment, Date.now())} ago).`}
             </StackItem>
           )}
-          {summary.otherVMs > 0 && (
+          {!all && (
             <StackItem>
-              <Alert variant="warning" isInline title={`This fails over all ${summary.vms.length} VMs on the copy`}>
-                A failover covers everything the copy holds, not only {vmName}. Each other VM shows the newest moment
-                it has at or before the chosen one.
+              Only {vmName} fails over. The other VMs on the copy are not changed.
+            </StackItem>
+          )}
+          {all && summary.vms.length > 0 && (
+            <StackItem>
+              <Alert
+                variant="warning"
+                isInline
+                title={
+                  summary.vms.length === 1
+                    ? 'This fails over the one VM on the copy, and every volume that is not a VM disk'
+                    : `This fails over all ${summary.vms.length} VMs on the copy, and every volume that is not a VM disk`
+                }
+              >
+                Each VM shows the newest moment it has. To fail over one VM, go back and choose it.
                 <ul>
                   {summary.vms.map((v) => (
                     <li key={v.name}>{`${v.name}: ${v.moment}, ${disks(v.rewindDisks)}`}</li>

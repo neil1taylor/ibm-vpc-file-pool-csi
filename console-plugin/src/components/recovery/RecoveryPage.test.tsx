@@ -176,6 +176,28 @@ describe('RecoveryPage busy copy and force', () => {
   });
 });
 
+/** A finished Plan for one VM: what the driver makes when the page asks for that VM only. */
+const vmPlan = (name: string, specOver: Record<string, unknown> = {}, vm = 'apps/web') => {
+  const p = plannedPlan({
+    metadata: { name, creationTimestamp: '2026-10-28T12:00:00Z' },
+    spec: { action: 'Plan', source: 'dr-data', vms: [vm], ...specOver },
+  }) as { status: { vms: Array<{ name: string; disks: Array<{ subVolume: string }> }>; volumes: Array<{ subVolume: string }>; finishedAt: string } };
+  p.status.vms = p.status.vms.filter((v) => v.name === vm);
+  const disks = new Set(p.status.vms.flatMap((v) => v.disks.map((d) => d.subVolume)));
+  p.status.volumes = p.status.volumes.filter((v) => disks.has(v.subVolume));
+  p.status.finishedAt = '2026-10-28T12:00:00Z';
+  return p;
+};
+
+/** The driver finishes the Plan the page just made for a VM. */
+const finishVMPlan = (specOver: Record<string, unknown> = {}) => {
+  const name = created().find((c) => c.spec.action === 'Plan').metadata.name;
+  data.Failover = [...(data.Failover as unknown[]), vmPlan(name, specOver)];
+  act(() => {
+    jest.advanceTimersByTime(1500);
+  });
+};
+
 describe('RecoveryPage VM detail', () => {
   const openDetail = () => {
     render(<RecoveryPage />);
@@ -197,53 +219,88 @@ describe('RecoveryPage VM detail', () => {
     expect(screen.getByRole('button', { name: 'apps/web' })).toBeTruthy();
   });
 
-  it('opens the confirm dialog from the plan on screen for the newest moment, without a new plan', () => {
+  it('makes a Plan for this VM only, and opens the dialog when it is ready', async () => {
     openDetail();
-    fireEvent.click(screen.getByRole('button', { name: 'Fail over' }));
-    expect(screen.getByRole('dialog')).toBeTruthy();
-    expect(k8sCreate).not.toHaveBeenCalled();
-  });
-
-  it('makes a new Plan with rewindTo for an older moment and opens the dialog when it is ready', async () => {
-    openDetail();
-    fireEvent.click(screen.getByRole('radio', { name: /2026-10-28T11:00:00Z|11:00/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Fail over' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Fail over this VM' }));
     await waitFor(() => expect(k8sCreate).toHaveBeenCalledTimes(1));
-    expect(created()[0].spec).toEqual({ action: 'Plan', source: 'dr-data', rewindTo: '2026-10-28T11:00:00Z' });
+    expect(created()[0].spec).toEqual({ action: 'Plan', source: 'dr-data', vms: ['apps/web'] });
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(screen.getByText(/still working/i)).toBeTruthy();
+    // The table still shows the plan for all VMs, and not the plan for this VM.
+    finishVMPlan();
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
+    expect(screen.getByText('Disks of apps/web')).toBeTruthy();
+  });
 
-    // The driver finishes the new plan.
-    const newName = created()[0].metadata.name;
-    const replanned = plannedPlan({
-      metadata: { name: newName, creationTimestamp: '2026-10-28T12:00:00Z' },
-      spec: { action: 'Plan', source: 'dr-data', rewindTo: '2026-10-28T11:00:00Z' },
-    });
-    (replanned.status as { vms: Array<{ moment: string }>; finishedAt: string }).vms[0].moment = '2026-10-28T11:00:00Z';
-    (replanned.status as { finishedAt: string }).finishedAt = '2026-10-28T12:00:00Z';
+  it('makes a Plan with rewindTo for an older moment', async () => {
+    openDetail();
+    fireEvent.click(screen.getByRole('radio', { name: /2026-10-28T11:00:00Z|11:00/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Fail over this VM' }));
+    await waitFor(() => expect(k8sCreate).toHaveBeenCalledTimes(1));
+    expect(created()[0].spec).toEqual({ action: 'Plan', source: 'dr-data', vms: ['apps/web'], rewindTo: '2026-10-28T11:00:00Z' });
+
+    const replanned = vmPlan(created()[0].metadata.name, { rewindTo: '2026-10-28T11:00:00Z' });
+    (replanned.status.vms[0] as unknown as { moment: string }).moment = '2026-10-28T11:00:00Z';
     data.Failover = [plannedPlan(), replanned];
     act(() => {
       jest.advanceTimersByTime(1500);
     });
     await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
   });
+
+  it('does not open the dialog when the plan for the VM shows another moment than the chosen one', async () => {
+    openDetail();
+    fireEvent.click(screen.getByRole('radio', { name: /2026-10-28T11:00:00Z|11:00/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Fail over this VM' }));
+    await waitFor(() => expect(k8sCreate).toHaveBeenCalledTimes(1));
+    finishVMPlan({ rewindTo: '2026-10-28T11:00:00Z' }); // it shows 11:30, not 11:00
+    await waitFor(() => expect(screen.getByText(/does not show the moment you chose/i)).toBeTruthy());
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('shows the refusal when the plan for the VM fails, and offers force for a busy copy', async () => {
+    openDetail();
+    fireEvent.click(screen.getByRole('button', { name: 'Fail over this VM' }));
+    await waitFor(() => expect(k8sCreate).toHaveBeenCalledTimes(1));
+    const name = created()[0].metadata.name;
+    data.Failover = [
+      plannedPlan(),
+      { ...vmPlan(name), status: { phase: 'Failed', message: 'a copy is still being applied to pvc-a; wait for it to end, or use --force' } },
+    ];
+    act(() => {
+      jest.advanceTimersByTime(1500);
+    });
+    await waitFor(() => expect(screen.getByText(/a copy is still being applied to pvc-a/)).toBeTruthy());
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.click(screen.getByRole('checkbox', { name: /rolled back/i }));
+    (k8sCreate as jest.Mock).mockClear();
+    fireEvent.click(screen.getByRole('button', { name: /plan again with force/i }));
+    await waitFor(() => expect(k8sCreate).toHaveBeenCalledTimes(1));
+    expect(created()[0].spec).toEqual({ action: 'Plan', source: 'dr-data', vms: ['apps/web'], force: true });
+  });
 });
 
 describe('RecoveryPage confirm dialog and execute', () => {
-  const openDialog = () => {
+  const openDialog = async (): Promise<HTMLElement> => {
     render(<RecoveryPage />);
     fireEvent.click(screen.getByRole('button', { name: 'apps/web' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Fail over' }));
-    return screen.getByRole('dialog');
+    fireEvent.click(screen.getByRole('button', { name: 'Fail over this VM' }));
+    await waitFor(() => expect(k8sCreate).toHaveBeenCalledTimes(1));
+    finishVMPlan();
+    const dialog = await screen.findByRole('dialog');
+    (k8sCreate as jest.Mock).mockClear();
+    return dialog;
   };
+  const executes = () => created().filter((c) => c.spec.action === 'Execute');
 
-  it('names the VM, the moment, the disks to rewind and the PVCs that will be made', () => {
-    const dialog = openDialog();
+  it('names the VM, the moment, the disks to rewind and the PVCs that will be made', async () => {
+    const dialog = await openDialog();
     expect(within(dialog).getAllByText(/apps\/web/).length).toBeGreaterThan(0);
     expect(within(dialog).getByText(/2026-10-28T11:30:00Z/)).toBeTruthy();
     expect(within(dialog).getByText(/1 disk to rewind/)).toBeTruthy();
     expect(within(dialog).getByText('apps/web-root')).toBeTruthy();
     expect(within(dialog).getByText('apps/web-data')).toBeTruthy();
+    expect(within(dialog).queryByText(/fails over all/i)).toBeNull();
   });
 
   it('needs the VM name typed, and the DR pool chosen when there are several', async () => {
@@ -251,7 +308,7 @@ describe('RecoveryPage confirm dialog and execute', () => {
       { metadata: { name: 'dr-pool' }, spec: {}, status: { phase: 'Ready' } },
       { metadata: { name: 'dr-pool-2' }, spec: {}, status: { phase: 'Ready' } },
     ];
-    const dialog = openDialog();
+    const dialog = await openDialog();
     const go = within(dialog).getByRole('button', { name: 'Fail over' });
     expect(go).toBeDisabled();
     fireEvent.change(within(dialog).getByLabelText(/type apps\/web/i), { target: { value: 'apps/web' } });
@@ -260,42 +317,7 @@ describe('RecoveryPage confirm dialog and execute', () => {
     expect(go).toBeEnabled();
   });
 
-  it('creates an Execute with the source and rewindTo of the confirmed plan', async () => {
-    const dialog = openDialog();
-    fireEvent.change(within(dialog).getByLabelText(/type apps\/web/i), { target: { value: 'apps/web' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Fail over' }));
-    await waitFor(() => expect(k8sCreate).toHaveBeenCalledTimes(1));
-    expect(created()[0].spec).toEqual({ action: 'Execute', source: 'dr-data', drPool: 'dr-pool' });
-  });
-
-  it('copies rewindTo and force from the plan', async () => {
-    data.Failover = [
-      plannedPlan({
-        spec: { action: 'Plan', source: 'dr-data', rewindTo: '2026-10-28T11:30:00Z', force: true },
-      }),
-    ];
-    const dialog = openDialog();
-    fireEvent.change(within(dialog).getByLabelText(/type apps\/web/i), { target: { value: 'apps/web' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Fail over' }));
-    await waitFor(() => expect(k8sCreate).toHaveBeenCalledTimes(1));
-    expect(created()[0].spec).toEqual({
-      action: 'Execute',
-      source: 'dr-data',
-      rewindTo: '2026-10-28T11:30:00Z',
-      force: true,
-      drPool: 'dr-pool',
-    });
-  });
-
-  it('shows the refusal of the webhook in the dialog', async () => {
-    (k8sCreate as jest.Mock).mockRejectedValue(new Error('the Plan for source "dr-data" is older than 15 minutes'));
-    const dialog = openDialog();
-    fireEvent.change(within(dialog).getByLabelText(/type apps\/web/i), { target: { value: 'apps/web' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Fail over' }));
-    await waitFor(() => expect(within(dialog).getByText(/older than 15 minutes/)).toBeTruthy());
-  });
-
-  it('says the whole copy fails over when the plan has several VMs, and asks for the source name', () => {
+  it('asks for the VM name even when the copy holds other VMs, and does not fail them over', async () => {
     const p = plannedPlan();
     (p.status as { vms: unknown[] }).vms.push({
       name: 'apps/db',
@@ -303,9 +325,79 @@ describe('RecoveryPage confirm dialog and execute', () => {
       disks: [{ subVolume: 'pvc-c', rewind: false }],
     });
     data.Failover = [p];
-    const dialog = openDialog();
+    const dialog = await openDialog();
+    expect(within(dialog).getByLabelText(/type apps\/web/i)).toBeTruthy();
+    expect(within(dialog).queryByText(/apps\/db/)).toBeNull();
+    fireEvent.change(within(dialog).getByLabelText(/type apps\/web/i), { target: { value: 'apps/web' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Fail over' }));
+    await waitFor(() => expect(executes()).toHaveLength(1));
+    expect(executes()[0].spec.vms).toEqual(['apps/web']);
+  });
+
+  it('creates an Execute for the VM with the source of the confirmed plan', async () => {
+    const dialog = await openDialog();
+    fireEvent.change(within(dialog).getByLabelText(/type apps\/web/i), { target: { value: 'apps/web' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Fail over' }));
+    await waitFor(() => expect(executes()).toHaveLength(1));
+    expect(executes()[0].spec).toEqual({ action: 'Execute', source: 'dr-data', vms: ['apps/web'], drPool: 'dr-pool' });
+  });
+
+  it('copies rewindTo, force and vms from the plan the dialog was opened for', async () => {
+    data.Failover = [plannedPlan({ spec: { action: 'Plan', source: 'dr-data', force: true } })];
+    render(<RecoveryPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'apps/web' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Fail over this VM' }));
+    await waitFor(() => expect(k8sCreate).toHaveBeenCalledTimes(1));
+    expect(created()[0].spec).toEqual({ action: 'Plan', source: 'dr-data', vms: ['apps/web'], force: true });
+    finishVMPlan({ rewindTo: '2026-10-28T11:30:00Z', force: true });
+    const dialog = await screen.findByRole('dialog');
+    (k8sCreate as jest.Mock).mockClear();
+    fireEvent.change(within(dialog).getByLabelText(/type apps\/web/i), { target: { value: 'apps/web' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Fail over' }));
+    await waitFor(() => expect(executes()).toHaveLength(1));
+    expect(executes()[0].spec).toEqual({
+      action: 'Execute',
+      source: 'dr-data',
+      rewindTo: '2026-10-28T11:30:00Z',
+      force: true,
+      vms: ['apps/web'],
+      drPool: 'dr-pool',
+    });
+  });
+
+  it('shows the refusal of the webhook in the dialog', async () => {
+    const dialog = await openDialog();
+    (k8sCreate as jest.Mock).mockRejectedValue(new Error('the Plan for source "dr-data" is older than 15 minutes'));
+    fireEvent.change(within(dialog).getByLabelText(/type apps\/web/i), { target: { value: 'apps/web' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Fail over' }));
+    await waitFor(() => expect(within(dialog).getByText(/older than 15 minutes/)).toBeTruthy());
+  });
+});
+
+describe('RecoveryPage fail over all VMs', () => {
+  const withTwoVMs = () => {
+    const p = plannedPlan();
+    (p.status as { vms: unknown[] }).vms.push({
+      name: 'apps/db',
+      moment: '2026-10-28T11:30:00Z',
+      disks: [{ subVolume: 'pvc-c', rewind: false }],
+    });
+    (p.status as { volumes: unknown[] }).volumes.push(volume('pvc-c', 'db-root'));
+    data.Failover = [p];
+  };
+
+  it('offers an explicit all-VMs option that uses the plan on screen and asks for the source name', async () => {
+    withTwoVMs();
+    render(<RecoveryPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Fail over all VMs' }));
+    const dialog = screen.getByRole('dialog');
+    expect(k8sCreate).not.toHaveBeenCalled();
     expect(within(dialog).getByText(/all 2 VMs/i)).toBeTruthy();
-    expect(within(dialog).getByLabelText(/type dr-data/i)).toBeTruthy();
+    expect(within(dialog).getByText('apps/db-root')).toBeTruthy();
+    fireEvent.change(within(dialog).getByLabelText(/type dr-data/i), { target: { value: 'dr-data' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Fail over' }));
+    await waitFor(() => expect(k8sCreate).toHaveBeenCalledTimes(1));
+    expect(created()[0].spec).toEqual({ action: 'Execute', source: 'dr-data', drPool: 'dr-pool' });
   });
 });
 
@@ -315,7 +407,7 @@ describe('RecoveryPage progress and result', () => {
       plannedPlan(),
       {
         metadata: { name: 'console-execute-1', creationTimestamp: '2026-10-28T11:59:00Z' },
-        spec: { action: 'Execute', source: 'dr-data', drPool: 'dr-pool' },
+        spec: { action: 'Execute', source: 'dr-data', drPool: 'dr-pool', vms: ['apps/web'] },
         status,
       },
     ];
@@ -323,12 +415,14 @@ describe('RecoveryPage progress and result', () => {
   const runExecute = async () => {
     render(<RecoveryPage />);
     fireEvent.click(screen.getByRole('button', { name: 'apps/web' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Fail over' }));
-    const dialog = screen.getByRole('dialog');
+    fireEvent.click(screen.getByRole('button', { name: 'Fail over this VM' }));
+    await waitFor(() => expect(k8sCreate).toHaveBeenCalledTimes(1));
+    finishVMPlan();
+    const dialog = await screen.findByRole('dialog');
     fireEvent.change(within(dialog).getByLabelText(/type apps\/web/i), { target: { value: 'apps/web' } });
     (k8sCreate as jest.Mock).mockImplementation(async ({ data: d }) => ({ ...d, metadata: { ...d.metadata, name: 'console-execute-1' } }));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Fail over' }));
-    await waitFor(() => expect(k8sCreate).toHaveBeenCalled());
+    await waitFor(() => expect(k8sCreate).toHaveBeenCalledTimes(2));
   };
 
   it('shows a clear still-working state while the Execute runs', async () => {
@@ -336,7 +430,7 @@ describe('RecoveryPage progress and result', () => {
     await runExecute();
     await waitFor(() => expect(screen.getByText(/the failover is running/i)).toBeTruthy());
     expect(screen.getByText(/can take minutes/i)).toBeTruthy();
-    expect(screen.getByText(/2m 30s/)).toBeTruthy();
+    expect(screen.getByText(/2m 3\ds/)).toBeTruthy();
   });
 
   it('lists the created PVCs with links when done', async () => {
