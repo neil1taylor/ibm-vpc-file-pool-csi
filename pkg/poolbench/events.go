@@ -12,6 +12,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -509,6 +510,7 @@ func (r *Runner) pollBackup(ctx context.Context, pb *v1alpha1.PoolBench, started
 func (r *Runner) sampleCopySpeed(ctx context.Context, pb *v1alpha1.PoolBench, res *v1alpha1.PoolBenchEventResult) {
 	policies := &v1alpha1.ReplicationPolicyList{}
 	if err := r.Client.List(ctx, policies, client.MatchingLabels{backupPolicyLabel: backupPolicyName(pb)}); err != nil {
+		klog.ErrorS(err, "PoolBench: cannot read the copy speed of the backup", "run", pb.Name)
 		return
 	}
 	for _, rp := range policies.Items {

@@ -68,6 +68,11 @@ check "it may make and delete backup policies" \
     "$(doc "$OUT" ClusterRole "$D" '.rules[] | select(.resources[] == "backuppolicies") | .verbs | contains(["get", "create", "delete"])')" "true"
 check "it may not change a backup policy" \
     "$(doc "$OUT" ClusterRole "$D" '.rules[] | select(.resources[] == "backuppolicies") | .verbs | contains(["update"])')" "false"
+# The backup event reads the speed of the copies from the replication policies a backup policy makes.
+check "it may read replication policies" \
+    "$(doc "$OUT" ClusterRole "$D" '.rules[] | select(.resources[] == "replicationpolicies") | .verbs | contains(["get", "list"])')" "true"
+check "it may not change a replication policy" \
+    "$(doc "$OUT" ClusterRole "$D" '.rules[] | select(.resources[] == "replicationpolicies") | .verbs | contains(["update"])')" "false"
 check "it may bind only the run role" "$(doc "$OUT" ClusterRole "$D" '.rules[] | select(.verbs[] == "bind") | .resourceNames[0]')" "$D-run"
 check "the cluster role is bound to it" "$(doc "$OUT" ClusterRoleBinding "$D" '.subjects[0].name')" "$D"
 
