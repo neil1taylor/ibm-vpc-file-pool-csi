@@ -431,14 +431,26 @@ func TestReceiverVM_OneCallPerDiskAtATime(t *testing.T) {
 		close(release)
 	}()
 	<-started
-	// Write one record. The pipe write returns only when the receiver has read it, and the receiver
-	// takes the disk lock before it reads the body, so the first call holds the lock from here on.
+	// Write one record. A pipe write returns when the HTTP client has taken the record, not when the
+	// receiver has read it. So wait until the receiver has made the folder of the first call: it makes
+	// the folder after it took the disk lock, so the first call holds the lock from then on.
 	// The test must not probe the lock: a probe takes it for a moment, and a first call that arrives
 	// then is turned away as busy.
 	var rec bytes.Buffer
 	_ = WriteUploadRecord(&rec, UploadRecord{Off: 0, Data: bytes.Repeat([]byte{1}, chunk)})
 	if _, err := pw.Write(rec.Bytes()); err != nil {
 		t.Fatalf("the first call did not read its body: %v", err)
+	}
+	session := filepath.Join(c.base, "pvcs", testSV, incomingDirName, "88888888-1")
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(session); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the first call did not start its upload in 10 seconds")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	if code, _ := c.do(http.MethodPut, c.url("88888888-2", ""), bytes.NewReader(nil), "test-token-123"); code != http.StatusTooManyRequests {
 		t.Fatalf("second call got %d, want 429", code)

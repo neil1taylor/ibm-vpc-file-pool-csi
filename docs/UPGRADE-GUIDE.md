@@ -45,7 +45,7 @@ Before upgrading, complete every item:
 | v0.11.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.12.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.13.0–v0.13.2 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
-| v0.14.0–v0.15.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
+| v0.14.0–v0.15.1 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
 
 ---
 
@@ -124,6 +124,21 @@ kubectl get crd filesharepools.storage.ibmcloud.io -o json | \
 ---
 
 ## Version-Specific Upgrade Notes
+
+### Upgrading to v0.15.1 (from v0.15.0)
+
+**Changes:**
+- A COS export of a backup no longer reads a disk that changes under it (issue #310). While the export of a volume runs, the next local backup of that volume waits; all disks of a running VM wait together. The volume's status says `held: export to COS running`. A hold ends with the export, or after 6 hours.
+- The adaptive copy speed now also changes the speed of the disks that still copy when another disk of the VM has finished (issue #313).
+- PoolBench: the backup event reports the copy speed and the latency of the VMs during the backup.
+
+**CRD changes (additive):** new fields in the status of `PoolBench` events. The SubVolume gets a short-lived annotation `storage.ibmcloud.io/export-hold` while an export runs. No chart value changes.
+
+**Action required:**
+1. Apply the CRDs: `kubectl apply --server-side --force-conflicts -f config/crd/`.
+2. Upgrade with Helm. Set `image.tag` if you pin it. The console plugin image did not change.
+
+To go back, run `helm rollback`. The older driver ignores the annotation.
 
 ### Upgrading to v0.15.0 (from v0.14.3)
 

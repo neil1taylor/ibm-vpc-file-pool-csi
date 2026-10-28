@@ -19,6 +19,10 @@ To make a release:
 
 ## [Unreleased]
 
+## [v0.15.1] — 2026-10-28
+
+A fix release. A COS export of a backup no longer reads a disk that changes under it, and the adaptive copy speed works for VMs with several disks. One additive CRD change (PoolBench status). No chart value changes.
+
 ### Fixed
 
 - The adaptive copy speed now changes the speed of a VM copy that has two disks when one disk has finished. Before, the change failed on the finished disk and the disk that still copied kept its first speed (issue #313).
