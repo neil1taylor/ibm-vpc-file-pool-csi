@@ -543,7 +543,7 @@ The goal (issue #92) is to look inside a backup and get back one file or folder 
 - **The browse helper** (`cmd/browse`, image `browse`). It reads one backup folder, read-only. It lists a folder in pages of 1000 names, describes a name, reads a byte range of a file, and streams a folder as a tar. It never follows a symbolic link: a link is listed with its text, a download of a link is refused, and a tar keeps it as a link. A path is a list of names, so a name with a newline or bytes that are not text works. Every call needs the session token. The helper ends by itself after 15 minutes without use, or after 2 hours.
 - **Browse sessions (part 2).** A `BackupBrowse` resource per open session; the controller starts the helper pod for it, with a random token and a per-session TLS certificate in a Secret, and removes everything when the session ends. The helper serves only over TLS. Defaults: 15 minutes idle, 2 hours hard limit, 5 open sessions in the cluster and 2 for each namespace; all are Helm values (`backupBrowse.*`).
 - **The gateway and `kubectl backup` (part 3).** `kubectl backup ls`, `get` and `browse` list and download files and folders of a plain volume's backup, at the latest copy or at a moment. See "Browse from the command line" below.
-- **Restore of files (part 4, resource and Job).** A `BackupFileRestore` copies chosen files and folders out of a backup into a new claim or into a new folder of an existing claim. See "Restore files into a claim" below. Users cannot ask for it yet: only a cluster administrator can make the resource by hand. The gateway and `kubectl backup restore-files` come next.
+- **Restore of files (parts 4 and 5).** A `BackupFileRestore` copies chosen files and folders out of a backup into a new claim or into a new folder of an existing claim. Users ask for it with `kubectl backup restore-files`, through the gateway, which checks their rights on both namespaces. See "Restore files into a claim" below.
 - **Not built yet:** the console pages, COS backups and VM disks.
 
 ### Browse from the command line
@@ -582,7 +582,25 @@ To let someone read another namespace's backups: `kubectl create rolebinding NAM
 
 ### Restore files into a claim
 
-A `BackupFileRestore` (cluster scoped, short name `bfr`) copies the files and folders you list out of one backup into a claim. It is the file version of a `BackupRestore`. Today a cluster administrator makes it by hand; the gateway and `kubectl backup restore-files` will make it for users.
+A `BackupFileRestore` (cluster scoped, short name `bfr`) copies the files and folders you list out of one backup into a claim. It is the file version of a `BackupRestore`. Users do not make it: `kubectl backup restore-files` asks the gateway, which checks their rights and makes it (below). A cluster administrator may also make it by hand, as here.
+
+#### From the command line
+
+```
+kubectl backup restore-files --policy nightly --pvc apps/db --path /var/www/index.php --path /etc/app --to apps/db-files --wait
+kubectl backup restore-files --policy nightly --pvc apps/db --moment 2026-10-21T09:30:00Z --paths-file paths.txt --to apps/db --existing --wait
+kubectl backup restore-files --status bfr-abc12
+```
+
+`--path` is given once for each file or folder, as `kubectl backup ls` prints it (a name that is not text is `\xNN`); `--paths-file` reads one path on each line. `--to NAMESPACE/CLAIM` is the target. The default is a new claim (`--new-claim`, with `--size-gb` and `--storage-class` if you want to choose); `--existing` writes a new folder into a claim that exists. `--wait` follows the restore to the end and says where the files are; without it the command prints the name of the restore and `--status NAME` shows it later. A restore is shown only to the user who asked for it.
+
+| What you ask for | You need |
+|------------------|----------|
+| Any restore | `get backupfiles` in the namespace of the **backed-up claim** (the built-in `admin` role has it; `backup-file-reader` and `backup-file-restorer` carry it) |
+| Into a new claim | also `create` on `persistentvolumeclaims` in the **target** namespace |
+| Into an existing claim | also `update` on `persistentvolumeclaims` in the target namespace |
+
+So an admin of namespace B can restore a file from the backup of namespace A into a claim of B only if someone with rights in A gave them `backup-file-reader` there. Without it they get the same "forbidden" whether the volume exists or not. The gateway reads the existing claim only after both rights are known, and takes its UID, so a claim that is deleted and made again before the restore runs is refused. Each request writes an audit Event `FileRestoreRequested` on the restore (in the driver namespace): the user, the volume, the moment, the target and the **paths**, never contents or tokens. The controller writes `FileRestoreDone` or `FileRestoreFailed` with counts only.
 
 ```yaml
 apiVersion: storage.ibmcloud.io/v1alpha1

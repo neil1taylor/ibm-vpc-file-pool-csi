@@ -18,6 +18,21 @@
 # was removed get "forbidden"; the audit Events name the user and the path and
 # hold no token or content. Needs the kubectl-backup binary (RT_BACKUP_BIN, built
 # into test/release/bin by remote.sh).
+# Part 4, restore of files: test/e2e/test-backup-file-restore.sh makes
+# BackupFileRestore objects by hand (as the gateway will) on a volume with files
+# of three owners, a 0600 file and a 0700 folder owned by other users, a link, a
+# name with a newline and a 40 MiB file with a checksum. It restores into a new
+# claim (sized by the Job that measures), at the first moment, and into an
+# existing claim of a pool with no configured owner, and checks owners, modes,
+# links and the checksum; refusals (a claim with disk.img, no room, a missing
+# path, a path with ".."); and that nothing is left behind.
+# Part 5, restore through the gateway: the same script goes on with real users.
+# A namespace admin runs `kubectl backup restore-files` into a new claim and a
+# new folder of an existing claim with no setup; a user with only the view role,
+# an admin of another namespace, and a user whose binding was removed are
+# forbidden; a RoleBinding to backup-file-reader lets an admin of another
+# namespace restore into a claim of their own; a restore is shown only to the
+# user who asked; the audit Event names the user and the paths and holds no token.
 
 # A pool takes 5 to 15 minutes to become ready; the rest is under 5 minutes.
 RT_STAGE_TIMEOUT=10800
@@ -127,6 +142,22 @@ run() {
     check "no Job or share claim of a restore is left" log_has_pass "$RESTORE_LOG" "no Job or share claim of a restore is left"
     check "deleting a restore removes its list of paths" log_has_pass "$RESTORE_LOG" "deleting a restore removes its list of paths"
     check "the Events name no path" log_has_pass "$RESTORE_LOG" "the Events name no path"
+    if grep -qF "NOT CHECKED: the backup gateway is not installed" "$RESTORE_LOG"; then
+        not_checked "restoring files through the gateway with real users" "the backup gateway is not installed"
+    else
+        check "a namespace admin restores into a new claim through kubectl backup with no setup" log_has_pass "$RESTORE_LOG" "restores into a new claim with kubectl backup restore-files and no setup"
+        check "the files restored by a user are in the new claim" log_has_pass "$RESTORE_LOG" "restored by a user are in the new claim"
+        check "a user restores into a new folder of an existing claim" log_has_pass "$RESTORE_LOG" "a user restores into a new folder of an existing claim"
+        check "a user with only the view role is forbidden" log_has_pass "$RESTORE_LOG" "a user with only the view role: forbidden"
+        check "an admin of another namespace is forbidden" log_has_pass "$RESTORE_LOG" "an admin of another namespace: forbidden"
+        check "nobody restores into a namespace where they cannot make claims" log_has_pass "$RESTORE_LOG" "cannot make claims: forbidden"
+        check "a refused request makes no restore and no claim" log_has_pass "$RESTORE_LOG" "a refused request made no claim"
+        check "backup-file-reader lets an admin of another namespace restore into their own claim" log_has_pass "$RESTORE_LOG" "backup-file-reader in the source namespace"
+        check "a restore is shown only to the user who asked" log_has_pass "$RESTORE_LOG" "sees no such restore"
+        check "a removed binding stops access at once" log_has_pass "$RESTORE_LOG" "a user whose binding was removed: forbidden"
+        check "the audit Events name the user and the paths" log_has_pass "$RESTORE_LOG" "the audit Events name the user and the paths"
+        check "the audit Events hold no token" log_has_pass "$RESTORE_LOG" "the audit Events hold no token"
+    fi
 }
 
 cleanup() {

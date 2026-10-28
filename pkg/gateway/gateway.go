@@ -32,6 +32,8 @@ type Authenticator interface {
 // Authorizer says whether a user may read the backups of a namespace.
 type Authorizer interface {
 	CanReadBackups(ctx context.Context, u User, namespace string) (bool, error)
+	// Can says whether the user may do one thing in a namespace.
+	Can(ctx context.Context, u User, a Access) (bool, error)
 }
 
 // Config sets the gateway's limits.
@@ -91,6 +93,8 @@ func (g *Gateway) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/sessions/{name}", g.auth(g.handleStatus))
 	mux.HandleFunc("DELETE /v1/sessions/{name}", g.auth(g.handleClose))
 	mux.HandleFunc("POST /v1/sessions/{name}/{op}", g.auth(g.handleOp))
+	mux.HandleFunc("POST /v1/restores", g.auth(g.handleRestoreCreate))
+	mux.HandleFunc("GET /v1/restores/{name}", g.auth(g.handleRestoreStatus))
 	// Anything else needs a token too, and is not found.
 	mux.HandleFunc("/", g.auth(func(w http.ResponseWriter, _ *http.Request, _ User) {
 		writeError(w, http.StatusNotFound, "not_found", "no such call")
@@ -562,20 +566,25 @@ func (l *limitWriter) Write(p []byte) (int, error) {
 // audit writes a Kubernetes Event on the session: who, which volume, which
 // paths. Never contents, tokens or keys. A failure to write is logged only.
 func (g *Gateway) audit(ctx context.Context, bb *v1alpha1.BackupBrowse, reason, msg string) {
+	g.auditObject(ctx, "BackupBrowse", bb.Name, bb.UID, reason, msg)
+}
+
+// auditObject writes an Event on a session or a restore.
+func (g *Gateway) auditObject(ctx context.Context, kind, name string, uid types.UID, reason, msg string) {
 	if len(msg) > maxMessage {
 		msg = msg[:maxMessage] + "..."
 	}
-	klog.InfoS("Browse audit", "session", bb.Name, "reason", reason, "message", msg)
+	klog.InfoS("Backup audit", "kind", kind, "name", name, "reason", reason, "message", msg)
 	now := metav1.NewTime(time.Now())
 	ev := &corev1.Event{
 		ObjectMeta: metav1.ObjectMeta{GenerateName: "browse-audit-", Namespace: g.cfg.EventNamespace},
-		InvolvedObject: corev1.ObjectReference{APIVersion: v1alpha1.GroupVersion.String(), Kind: "BackupBrowse",
-			Name: bb.Name, UID: bb.UID},
+		InvolvedObject: corev1.ObjectReference{APIVersion: v1alpha1.GroupVersion.String(), Kind: kind,
+			Name: name, UID: uid},
 		Reason: reason, Message: msg, Type: corev1.EventTypeNormal,
 		Source:         corev1.EventSource{Component: "backup-gateway"},
 		FirstTimestamp: now, LastTimestamp: now, Count: 1,
 	}
 	if err := g.c.Create(ctx, ev); err != nil {
-		klog.ErrorS(err, "Could not write an audit Event", "session", bb.Name)
+		klog.ErrorS(err, "Could not write an audit Event", "kind", kind, "name", name)
 	}
 }

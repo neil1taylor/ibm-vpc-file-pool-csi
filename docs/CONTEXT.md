@@ -285,7 +285,7 @@ Example: session for the backup of `apps/db`, open for 20 minutes, closed becaus
 
 ### Backup gateway
 
-The **backup gateway** is the one door to browse sessions. Users send it their own Kubernetes token (with `kubectl backup ls/get/browse`). It checks the token and, on every call, the right to read the backups of the claim's namespace, opens or reuses the user's session, relays the call to the helper pod, and writes an audit Event.
+The **backup gateway** is the one door to browse sessions and file restores. Users send it their own Kubernetes token (with `kubectl backup ls/get/browse/restore-files`). It checks the token and, on every call, the right to read the backups of the claim's namespace (and for a restore the right to make claims in the target namespace), opens or reuses the user's session or makes the file restore, relays the call to the helper pod, and writes an audit Event.
 
 Example: `kubectl backup ls --policy nightly --pvc apps/db /var/www`.
 
@@ -303,7 +303,7 @@ Example: it lists `/var/www` of last night's backup of the volume `web-data`.
 
 ### File restore
 
-A **file restore** copies chosen files and folders out of one backup into a claim, kept as a `BackupFileRestore` resource. The target is a new claim, or a new folder in an existing claim. It never writes over a file that exists and never writes into a VM disk. It is not a **restore** (a whole volume, `BackupRestore`).
+A **file restore** copies chosen files and folders out of one backup into a claim, kept as a `BackupFileRestore` resource. Users ask for it with `kubectl backup restore-files`; the gateway makes the resource. The target is a new claim, or a new folder in an existing claim. It never writes over a file that exists and never writes into a VM disk. It is not a **restore** (a whole volume, `BackupRestore`).
 
 Example: restore `/etc/app` and `/var/www/html/index.php` from last night's backup of `web/data` into the new folder `restored-nightly-20261021T093000Z` of the claim `web/data`.
 

@@ -36,6 +36,15 @@ rules:
   - apiGroups: ["storage.ibmcloud.io"]
     resources: ["backupbrowses"]
     verbs: ["get", "list", "create", "update"]
+  # Ask for a file restore, and show the user its status. The controller runs it.
+  - apiGroups: ["storage.ibmcloud.io"]
+    resources: ["backupfilerestores"]
+    verbs: ["get", "list", "create"]
+  # Read the target claim of a restore to take its UID and to tell a claim that
+  # exists from one that does not, after the user's rights on it were checked.
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
