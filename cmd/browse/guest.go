@@ -44,11 +44,11 @@ func openGuestSession(ctx context.Context, root, moments string, at time.Time, s
 // info is what the session reports about itself, with the notices as they are
 // now: a file system that had to be read without its journal adds one.
 func (g *guestSession) info() browse.Info {
-	info := g.Opened.Info
+	info := g.Info
 	info.Consistency = g.consistency
 	if g.consistency == consistencyCrash {
 		info.Notices = append(info.Notices, crashNotice)
 	}
-	info.Notices = append(info.Notices, g.Opened.Tree.Notices()...)
+	info.Notices = append(info.Notices, g.Tree.Notices()...)
 	return info
 }
