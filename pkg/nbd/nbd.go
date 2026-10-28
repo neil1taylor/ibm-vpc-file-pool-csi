@@ -347,6 +347,7 @@ func writeReply(w io.Writer, code uint32, handle []byte, data []byte) error {
 // marked read-only, and a client that sends them anyway changes nothing.
 func transmit(ctx context.Context, rw io.ReadWriter, exp Export, opts Options) error {
 	size := exp.Size()
+	usize := uint64(size) //nolint:gosec // the caller checked that size is not negative
 	maxRead := int64(opts.maxRead())
 	var buf []byte
 	for {
@@ -386,7 +387,7 @@ func transmit(ctx context.Context, rw io.ReadWriter, exp Export, opts Options) e
 				return err
 			}
 		case cmdRead:
-			if length == 0 || length > maxRead || off > uint64(size) || uint64(length) > uint64(size)-off { // #nosec G115 -- size is not negative
+			if length == 0 || length > maxRead || off > usize || uint64(length) > usize-off {
 				if err := writeReply(rw, errInval, handle, nil); err != nil {
 					return err
 				}
@@ -400,7 +401,7 @@ func transmit(ctx context.Context, rw io.ReadWriter, exp Export, opts Options) e
 			binary.BigEndian.PutUint32(out[4:], 0)
 			copy(out[8:], handle)
 			n, err := exp.ReadAt(out[16:], int64(off)) // #nosec G115 -- checked against the size
-			if err != nil && !(errors.Is(err, io.EOF) && int64(n) == length) {
+			if err != nil && (!errors.Is(err, io.EOF) || int64(n) != length) {
 				if werr := writeReply(rw, errIO, handle, nil); werr != nil {
 					return werr
 				}
