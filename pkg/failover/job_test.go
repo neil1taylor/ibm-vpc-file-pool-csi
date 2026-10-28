@@ -128,6 +128,42 @@ func TestRunJob_ExecuteRefusesWhenAVolumeAppeared(t *testing.T) {
 	}
 }
 
+func TestRunJob_ExecuteRefusesWhenAVolumeChangedWhereItGoes(t *testing.T) {
+	root := fakeShare(t)
+	good := func() map[string]VolumeTarget {
+		return map[string]VolumeTarget{
+			"pvc-a":     {PVCName: "disk-pvc-a", PVCNamespace: "ns", SubPath: "/pvcs/pvc-a"},
+			"pvc-b":     {PVCName: "disk-pvc-b", PVCNamespace: "ns", SubPath: "/pvcs/pvc-b"},
+			"pvc-plain": {PVCName: "data", PVCNamespace: "ns", SubPath: "/pvcs/pvc-plain"},
+		}
+	}
+	// The names and moments are as confirmed, but the share now sends the claim
+	// somewhere else than the operator saw.
+	for name, change := range map[string]func(map[string]VolumeTarget){
+		"namespace":   func(m map[string]VolumeTarget) { v := m["pvc-plain"]; v.PVCNamespace = "other"; m["pvc-plain"] = v },
+		"claim name":  func(m map[string]VolumeTarget) { v := m["pvc-plain"]; v.PVCName = "elsewhere"; m["pvc-plain"] = v },
+		"folder":      func(m map[string]VolumeTarget) { v := m["pvc-plain"]; v.SubPath = "/pvcs/pvc-b"; m["pvc-plain"] = v },
+		"permissions": func(m map[string]VolumeTarget) { v := m["pvc-plain"]; v.Permissions = "0777"; m["pvc-plain"] = v },
+	} {
+		targets := good()
+		change(targets)
+		expect := &Expectation{
+			VMs:     map[string]time.Time{"ns/vm": m2},
+			Volumes: []string{"pvc-a", "pvc-b", "pvc-plain"},
+			Targets: targets,
+		}
+		_, err := RunJob(pool.NewRealNFSOperations(), Request{MountPath: root, Action: v1alpha1.FailoverActionExecute, Now: m3, Expect: expect})
+		if err == nil || !strings.Contains(err.Error(), "pvc-plain") {
+			t.Errorf("%s changed: err = %v, want a refusal that names the volume", name, err)
+		}
+	}
+	// And the unchanged targets go ahead.
+	expect := &Expectation{VMs: map[string]time.Time{"ns/vm": m2}, Volumes: []string{"pvc-a", "pvc-b", "pvc-plain"}, Targets: good()}
+	if _, err := RunJob(pool.NewRealNFSOperations(), Request{MountPath: root, Action: v1alpha1.FailoverActionExecute, Now: m3, Expect: expect}); err != nil {
+		t.Fatalf("unchanged targets: %v", err)
+	}
+}
+
 func TestRunJob_ExecuteWithTheConfirmedPlanGoesAhead(t *testing.T) {
 	root := fakeShare(t)
 	expect := &Expectation{

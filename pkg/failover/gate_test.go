@@ -102,4 +102,7 @@ func TestExpectationFromPlan(t *testing.T) {
 	if !e.VMs["ns/vm"].Equal(m2) || len(e.Volumes) != 2 {
 		t.Errorf("expectation = %+v", e)
 	}
+	if len(e.Targets) != 2 {
+		t.Errorf("targets = %+v, want one for each planned volume", e.Targets)
+	}
 }
