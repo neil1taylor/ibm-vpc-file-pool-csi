@@ -462,6 +462,9 @@ kubectl apply -f config/deploy/node.yaml
 | `--browse-max-life` | `2h` | End a session after this long, even if in use |
 | `--browse-max-sessions` | `5` | Open sessions in the cluster. More wait |
 | `--browse-max-sessions-per-namespace` | `2` | Open sessions for the claims of one namespace. More wait |
+| `--browse-cos` | `true` | Let sessions and file restores read backups exported to COS. Their helper pods run in the driver namespace. Set by `backupBrowse.cos.enabled` |
+| `--browse-cos-cpu-limit`, `--browse-cos-memory-limit` | `""` (1 CPU, 1Gi) | Limits of the helper pod that reads COS |
+| `--browse-cos-start-timeout` | `5m` | End a session on COS whose helper is not ready after this long |
 | `--file-restore-max-bytes` | `214748364800` | The most one file restore writes. Set by `backupBrowse.restoreMaxBytes` |
 | `--file-restore-max-running` | `5` | How many file restores run at once in the cluster. More wait. Set by `backupBrowse.restoreMaxRunning` |
 
@@ -470,11 +473,13 @@ kubectl apply -f config/deploy/node.yaml
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--mode` | (required) | `browse-server` |
-| `--root` | (required) | The latest copy of the backup, mounted read-only |
+| `--root` | (required unless `--cos-source`) | The latest copy of the backup, mounted read-only |
 | `--moments` | `""` | The folder of earlier moments (`20261022T091500Z`, ...). Needed for `--at` |
 | `--at` | `""` | Read the newest moment at or before this time (RFC 3339) instead of the latest copy |
 | `--tls-cert-file`, `--tls-key-file` | (required) | The session certificate and key. The API is never served in plain HTTP |
 | `--token-file` | (required) | File that holds the session token (at least 16 characters) |
+| `--cos-source` | `""` | JSON that names a backup exported to COS (endpoint, bucket, prefix, policy, volume, Key Protect root key; no secret in it). Replaces `--root` and `--moments`. The keys are Secrets mounted as files at fixed places; the helper unwraps the backup key in memory and runs Kopia read-only as a child |
+| `--kopia`, `--kopia-state-dir` | `kopia`, `/tmp/kopia` | The Kopia program and a writable folder for its settings and cache (with `--cos-source`) |
 | `--listen` | `:8080` | Address to listen on |
 | `--idle` | `15m` | End the session after this long without use |
 | `--max-life` | `2h` | End the session after this long, even if in use |
