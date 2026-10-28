@@ -42,6 +42,32 @@ type Expectation struct {
 	VMs map[string]time.Time `json:"vms"`
 	// Volumes are the SubVolume names that were planned.
 	Volumes []string `json:"volumes"`
+	// Targets say, for each planned SubVolume, where the failed-over volume
+	// goes: the claim, the folder and its owner. The names and moments alone
+	// would let the share change these after the operator confirmed.
+	Targets map[string]VolumeTarget `json:"targets,omitempty"`
+}
+
+// VolumeTarget is what the operator saw for one volume in the Plan.
+type VolumeTarget struct {
+	PVCName      string `json:"pvcName"`
+	PVCNamespace string `json:"pvcNamespace"`
+	SubPath      string `json:"subPath"`
+	UID          *int64 `json:"uid,omitempty"`
+	GID          *int64 `json:"gid,omitempty"`
+	Permissions  string `json:"permissions,omitempty"`
+}
+
+func sameInt64(a, b *int64) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+func (t VolumeTarget) differsFrom(sv FailoverSubVolumePlan) bool {
+	return t.PVCName != sv.PVCName || t.PVCNamespace != sv.PVCNamespace || t.SubPath != sv.SubPath ||
+		t.Permissions != sv.Permissions || !sameInt64(t.UID, sv.UID) || !sameInt64(t.GID, sv.GID)
 }
 
 // Request is one run of the failover Job.
@@ -155,6 +181,8 @@ func (e *Expectation) Check(plan *FailoverPlan) error {
 	for _, sv := range plan.SubVolumes {
 		if !planned[sv.SubVolumeName] {
 			problems = append(problems, fmt.Sprintf("volume %s was not in the plan", sv.SubVolumeName))
+		} else if want, ok := e.Targets[sv.SubVolumeName]; e.Targets != nil && (!ok || want.differsFrom(sv)) {
+			problems = append(problems, fmt.Sprintf("volume %s now goes to a different claim, folder or owner than the plan showed", sv.SubVolumeName))
 		}
 	}
 	if len(problems) > 0 {

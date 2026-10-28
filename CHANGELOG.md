@@ -27,6 +27,7 @@ To make a release:
 
 ### Fixed
 
+- Failover: an Execute now also refuses when a planned volume would go to a different claim, namespace, folder or owner than the confirmed Plan showed. Before, it compared only the VM names, their moments and the volume names, so the share could change where a volume went after the operator confirmed.
 - The design rules in CLAUDE.md now name the one case where a volume request creates a share: auto-expand (issue #222). The code and docs/ARCHITECTURE.md already did this; the rule text said never.
 - Console: the restore and clone banner no longer says "ready" when the claim is Bound but the copy state of its SubVolume has not been read yet (issue #224).
 - PoolBench: when no whole steady phase of the VMs lies inside a backup event, the event says it has no latency figure. Before, it said nothing, so a short backup looked like a missing number.

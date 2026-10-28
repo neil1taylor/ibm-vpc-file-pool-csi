@@ -96,8 +96,13 @@ func ExpectationFromPlan(p *v1alpha1.Failover) *Expectation {
 	for _, vm := range p.Status.VMs {
 		e.VMs[vm.Name] = vm.Moment.Time
 	}
+	e.Targets = map[string]VolumeTarget{}
 	for _, v := range p.Status.Volumes {
 		e.Volumes = append(e.Volumes, v.SubVolume)
+		e.Targets[v.SubVolume] = VolumeTarget{
+			PVCName: v.PVCName, PVCNamespace: v.PVCNamespace, SubPath: v.SubPath,
+			UID: v.UID, GID: v.GID, Permissions: v.Permissions,
+		}
 	}
 	return e
 }
