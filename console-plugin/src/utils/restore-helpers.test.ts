@@ -190,6 +190,10 @@ describe('restoreProgress', () => {
     expect(restoreProgress(pvc('Bound', 'pvc-x'), sub({ cloneStatus: 'Complete' }))).toEqual({ state: 'ready' });
   });
 
+  it('is waiting when the claim is Bound but the SubVolume has not been read yet', () => {
+    expect(restoreProgress(pvc('Bound', 'pvc-x'), undefined, false)).toEqual({ state: 'waiting' });
+  });
+
   it('shows the percent copied while the claim is Pending and the copy runs', () => {
     const p = restoreProgress(pvc('Pending', 'pvc-x'), sub({ cloneStatus: 'InProgress', cloneProgress: { bytesCopied: 5, totalBytes: 20 } }));
     expect(p).toEqual({ state: 'copying', percent: 25, copiedBytes: 5, totalBytes: 20 });
