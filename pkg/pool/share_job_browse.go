@@ -45,6 +45,10 @@ type BrowseJobRequest struct {
 	// helper then mounts no share, and Share, LatestPath and MomentsPath are
 	// not used.
 	COS *BrowseCOSRequest
+	// Guest reads the file systems inside the VM disk at LatestPath instead of
+	// the files of that folder. MomentsPath is not used: the earlier moments of
+	// a VM disk are undo files next to the disk.
+	Guest bool
 }
 
 // BrowseJobState says what the helper pod of a session is doing.
@@ -66,6 +70,9 @@ type BrowseJobs interface {
 	// BrowseSessions lists the names of the sessions that have a helper Job.
 	BrowseSessions(ctx context.Context) ([]string, error)
 	Namespace() string
+	// GuestEnabled says whether a session may read the file systems inside a VM
+	// disk, which needs the guest helper image.
+	GuestEnabled() bool
 }
 
 // SetBrowseImage sets the image of the browse helper. Without it, sessions
@@ -76,8 +83,15 @@ func (r *ShareJobRunner) SetBrowseImage(image string) { r.browseImage = image }
 // helper pod uses to pull its image from a private registry.
 func (r *ShareJobRunner) SetBrowsePullSecrets(names []string) { r.browsePullSecrets = names }
 
+// GuestEnabled says whether sessions on the file systems inside VM disks can
+// start. They need the guest helper image, which a later change adds; until then
+// the answer is no and a session that asks fails in words.
+func (r *ShareJobRunner) GuestEnabled() bool { return false }
+
 // Namespace is where the helper pods run.
 func (r *ShareJobRunner) Namespace() string { return r.namespace }
+
+var errNoBrowseGuest = errors.New("browsing the files inside a VM disk is not set up")
 
 // browsePort is where the helper answers, over TLS.
 const browsePort = 8443
@@ -101,6 +115,9 @@ func (r *ShareJobRunner) StartBrowse(ctx context.Context, req BrowseJobRequest) 
 	}
 	if req.COS != nil {
 		return r.startBrowseCOS(ctx, req)
+	}
+	if req.Guest {
+		return errNoBrowseGuest
 	}
 	if err := util.ValidateBackupPath(req.LatestPath); err != nil {
 		return err

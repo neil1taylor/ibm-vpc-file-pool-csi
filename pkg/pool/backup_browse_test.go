@@ -22,6 +22,7 @@ type fakeBrowseJobs struct {
 	stopped  map[string]int
 	stopDone bool
 	orphans  []string
+	guest    bool
 }
 
 func newFakeBrowseJobs() *fakeBrowseJobs {
@@ -52,7 +53,8 @@ func (f *fakeBrowseJobs) BrowseSessions(context.Context) ([]string, error) {
 	}
 	return names, nil
 }
-func (f *fakeBrowseJobs) Namespace() string { return testDriverNS }
+func (f *fakeBrowseJobs) Namespace() string  { return testDriverNS }
+func (f *fakeBrowseJobs) GuestEnabled() bool { return f.guest }
 
 type browseEnv struct {
 	*restoreEnv

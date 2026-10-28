@@ -63,6 +63,15 @@ type BackupBrowseSpec struct {
 	// +optional
 	FromCOS *BrowseFromCOS `json:"fromCOS,omitempty"`
 
+	// Guest reads the file systems inside a VM disk instead of the files of the
+	// backup folder. The helper then shows the disk as it was at the moment, to a
+	// small read-only appliance VM that reads the partitions and the file systems
+	// of the guest. It needs the policy's volume to be a VM disk. The session
+	// holds the disk's next backup copy while it is open. The gateway sets it for
+	// every VM disk.
+	// +optional
+	Guest bool `json:"guest,omitempty"`
+
 	// Close ends the session. The gateway sets it when a user is done.
 	// +optional
 	Close bool `json:"close,omitempty"`

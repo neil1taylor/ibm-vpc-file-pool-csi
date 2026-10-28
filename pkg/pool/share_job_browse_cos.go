@@ -257,3 +257,7 @@ func (b *BrowseRouter) BrowseSessions(ctx context.Context) ([]string, error) {
 
 // Namespace is the browse namespace.
 func (b *BrowseRouter) Namespace() string { return b.Folder.Namespace() }
+
+// GuestEnabled says whether sessions on the file systems inside VM disks may
+// start. They run with the folder runner, in the browse namespace.
+func (b *BrowseRouter) GuestEnabled() bool { return b.Folder.GuestEnabled() }

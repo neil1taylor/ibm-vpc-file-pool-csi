@@ -547,7 +547,8 @@ The goal (issue #92) is to look inside a backup and get back one file or folder 
 - **The console file browser (phase 3, first half).** A **Browse files** action on each volume of a policy opens a page that lists folders and files, with a moment picker and downloads. See "Browse and download files in the console" below.
 - **Backups in COS (phase 4).** The same commands read a plain volume's backup from the policy's COS bucket. See "Files from a backup in COS" below.
 - **The console restore dialog (phase 3, second half).** See "Restore files in the console" below.
-- **Not built yet:** VM disks (snapshot pool and COS), and in the console a switch to read from COS by hand.
+- **VM disks (phase 5, in development).** The files inside a VM disk, without starting the VM. See "Files inside a VM disk" below.
+- **Not built yet:** VM disks in COS (phase 6), and in the console a switch to read from COS by hand.
 
 ### Browse from the command line
 
@@ -724,6 +725,15 @@ A restore never writes over a file or a claim that exists, and never puts a file
 | 429 | You have too many open restores (10 by default, `backupGateway.maxOpenRestores`); wait for one to end |
 
 A restore takes at most 1000 chosen entries; choose a folder that holds them instead. Names are shown as text only, in the same escaped form as `kubectl backup ls`, and the console sends them to the gateway in that form. The browser holds only your own token; no file content is ever in a request.
+
+### Files inside a VM disk (in development)
+
+The backup of a VM disk is one raw disk, `disk.img`, plus an undo file for each older moment. To look inside it without starting the VM, a helper pod runs a small read-only appliance VM (libguestfs) that reads the guest file systems, and a read-only disk server shows it the disk as it was at the moment you chose. Built so far:
+
+- **The disk view** (`replication.OpenDiskView`). It shows the disk as it was at any restore point, read-only, with no copy and no scratch space: a read takes the bytes from the latest disk and applies the undo files, newest first, to just the range that was asked for. A test checks, for random histories (writes, zeros, growing and shrinking disks, partial and full copies), that every moment reads byte for byte what `RestoreDisk` writes. The view never writes: it does not roll back a copy that stopped half way and does not remove a half-written undo file. If the disk or the undo folder changes while a view is open, for example because a new copy started, every read fails and the session must be opened again.
+- **The disk server** (`pkg/nbd`). It gives a view to the appliance as a network block device on a private local socket. Only reads are answered; a write, trim or zero request is refused, and the export is marked read-only. The appliance parses file systems that someone else wrote, so the server treats it as hostile: it bounds every request, answers every option it does not know with "unsupported" and never allocates more than a read may ask for.
+- **The hold.** A session on a VM disk (`BackupBrowse.spec.guest`) holds the disk's next backup copy while it is open, because a half-applied copy has the disk and the undo files out of step. The controller takes the hold before the helper starts, then waits until a copy that is already running has ended; the session shows `Pending` with the reason. A held volume gets no new copy (`held: waiting for a browse session` in the policy status, and all disks of a running VM are held together, because one VM copy takes all its disks). The hold ends when the helper is gone, at the latest at the session's hard limit (2 hours); a hold older than 3 hours is ignored, so a stopped controller cannot stop backups for good. Other volumes are not held. A backup of that one volume can be late by up to 2 hours.
+- **Not built yet:** the guest helper image, the file system picker and the commands. Until the image is set, a session that asks for a VM disk fails with a plain sentence.
 
 ### Can the helper read other users' files?
 

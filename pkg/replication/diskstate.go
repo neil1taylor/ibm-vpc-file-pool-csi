@@ -43,13 +43,23 @@ type DiskState struct {
 // ReadDiskState reads the state of the disk. It does not change anything. A
 // copy that stopped half way does not affect it: only completed copies count.
 func ReadDiskState(disk string) (DiskState, error) {
-	var st DiskState
 	v, err := openVolume(disk)
 	if err != nil {
-		return st, err
+		return DiskState{}, err
 	}
 	defer v.close()
-	if st.Moment, st.MomentKnown, err = v.moment(); err != nil {
+	files, err := appliedUndo(v)
+	if err != nil {
+		return DiskState{}, err
+	}
+	return v.stateFrom(files)
+}
+
+// stateFrom is ReadDiskState for the restore point undo files already listed.
+func (v *volume) stateFrom(files []undoFile) (DiskState, error) {
+	var st DiskState
+	var err error
+	if st.Moment, st.MomentKnown, err = v.momentFrom(files); err != nil {
 		return st, err
 	}
 	mf, err := v.readMomentFile()
@@ -64,10 +74,6 @@ func ReadDiskState(disk string) (DiskState, error) {
 		if fi, derr := v.diskInfo(); derr == nil && mf.DiskMtimeNs != 0 && fi.ModTime().UnixNano() != mf.DiskMtimeNs {
 			st.Modified = !st.Unfinished
 		}
-	}
-	files, err := appliedUndo(v)
-	if err != nil {
-		return st, err
 	}
 	for _, u := range files {
 		if u.hdr.from.Unix() > 0 {

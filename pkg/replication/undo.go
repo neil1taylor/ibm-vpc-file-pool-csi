@@ -437,7 +437,8 @@ type undoHeader struct {
 }
 
 // readUndo checks an undo file and calls fn for each record, if fn is not nil.
-func readUndo(v *volume, path string, fn func(off int64, data []byte) error) (undoHeader, error) {
+// pos is where the record's data starts in the undo file.
+func readUndo(v *volume, path string, fn func(off int64, data []byte, pos int64) error) (undoHeader, error) {
 	var h undoHeader
 	f, err := v.root.Open(path)
 	if err != nil {
@@ -461,6 +462,7 @@ func readUndo(v *volume, path string, fn func(off int64, data []byte) error) (un
 	remaining := fi.Size() - 40 - int64(len(undoEndMagic)) - 8 // bytes of records
 	buf := make([]byte, compareChunk)
 	var records uint64
+	pos := int64(40) // where the next record starts
 	for remaining > 0 {
 		var rec [16]byte
 		if _, err = io.ReadFull(r, rec[:]); err != nil {
@@ -474,12 +476,13 @@ func readUndo(v *volume, path string, fn func(off int64, data []byte) error) (un
 			return h, fmt.Errorf("undo file %s is cut short: %w", path, err)
 		}
 		if fn != nil {
-			if err = fn(off, buf[:n]); err != nil {
+			if err = fn(off, buf[:n], pos+16); err != nil {
 				return h, err
 			}
 		}
 		records++
 		remaining -= 16 + n
+		pos += 16 + n
 	}
 	end := make([]byte, len(undoEndMagic)+8)
 	if _, err = io.ReadFull(r, end); err != nil || string(end[:len(undoEndMagic)]) != undoEndMagic ||
@@ -496,7 +499,7 @@ func applyUndo(v *volume, name string, f *os.File) error {
 	if err != nil {
 		return err
 	}
-	if _, err = readUndo(v, name, func(off int64, data []byte) error {
+	if _, err = readUndo(v, name, func(off int64, data []byte, _ int64) error {
 		_, werr := f.WriteAt(data, off)
 		return werr
 	}); err != nil {
