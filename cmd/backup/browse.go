@@ -68,7 +68,8 @@ func fsName(s string) (string, error) {
 		return "", fmt.Errorf("--fs %q is not the name of a file system; run ls without --fs to list them", s)
 	}
 	for _, r := range n {
-		if r > 0x7f || !(r == '.' || r == '_' || r == '+' || r == '-' || (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')) {
+		plain := r == '.' || r == '_' || r == '+' || r == '-' || (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+		if !plain {
 			return "", fmt.Errorf("--fs %q is not the name of a file system; run ls without --fs to list them", s)
 		}
 	}
