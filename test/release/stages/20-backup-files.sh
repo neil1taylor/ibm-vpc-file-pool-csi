@@ -18,6 +18,14 @@
 # was removed get "forbidden"; the audit Events name the user and the path and
 # hold no token or content. Needs the kubectl-backup binary (RT_BACKUP_BIN, built
 # into test/release/bin by remote.sh).
+# Part 4, restore of files: test/e2e/test-backup-file-restore.sh makes
+# BackupFileRestore objects by hand (as the gateway will) on a volume with files
+# of three owners, a 0600 file and a 0700 folder owned by other users, a link, a
+# name with a newline and a 40 MiB file with a checksum. It restores into a new
+# claim (sized by the Job that measures), at the first moment, and into an
+# existing claim of a pool with no configured owner, and checks owners, modes,
+# links and the checksum; refusals (a claim with disk.img, no room, a missing
+# path, a path with ".."); and that nothing is left behind.
 
 # A pool takes 5 to 15 minutes to become ready; the rest is under 5 minutes.
 RT_STAGE_TIMEOUT=10800
