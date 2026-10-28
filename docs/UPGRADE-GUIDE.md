@@ -45,7 +45,7 @@ Before upgrading, complete every item:
 | v0.11.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.12.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.13.0–v0.13.2 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
-| v0.14.0–v0.15.1 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
+| v0.14.0–v0.15.2 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
 
 ---
 
@@ -124,6 +124,17 @@ kubectl get crd filesharepools.storage.ibmcloud.io -o json | \
 ---
 
 ## Version-Specific Upgrade Notes
+
+### Upgrading to v0.15.2 (from v0.15.1)
+
+**Changes:**
+- The controller role can watch pods, so the volume resizer sidecar stops logging "Failed to watch *v1.Pod" and stops restarting.
+
+**CRD changes:** none. No chart value changes. The driver and console plugin images did not change.
+
+**Action required:** upgrade with Helm (the role is part of the chart). Set `image.tag` if you pin it.
+
+To go back, run `helm rollback`.
 
 ### Upgrading to v0.15.1 (from v0.15.0)
 
