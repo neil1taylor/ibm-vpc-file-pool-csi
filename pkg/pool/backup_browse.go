@@ -56,6 +56,13 @@ type BrowseConfig struct {
 	MaxSessions, MaxPerNamespace int
 	// ClosedKeep is how long a closed or failed session stays visible.
 	ClosedKeep time.Duration
+	// COSNamespace is the driver namespace, where the COS and Key Protect Secrets
+	// are. A session that reads a backup in COS runs its helper there, with a copy
+	// of the session Secret. Empty turns browsing of COS backups off.
+	COSNamespace string
+	// COSStartTimeout is how long a session that reads COS may wait for its
+	// helper to be ready. Zero means five minutes.
+	COSStartTimeout time.Duration
 	// PullSecrets are Secrets in PullSecretNamespace (the driver namespace) that
 	// are copied into Namespace, so the helper pods can pull their image. The
 	// browse namespace holds nothing else of the driver's.
@@ -125,6 +132,7 @@ func (bc *BackupController) reconcileBrowses(ctx context.Context) {
 	}
 	bc.copyPullSecrets(ctx)
 	bc.sweepBrowseOrphans(ctx, known)
+	bc.sweepCOSSessionCopies(ctx, known)
 	for i := range items {
 		bb := &items[i]
 		if bb.Status.Phase == browsePhaseClosed || bb.Status.Phase == browsePhaseFailed {
@@ -199,6 +207,7 @@ func (bc *BackupController) tidyEndedBrowse(ctx context.Context, bb *v1alpha1.Ba
 		return
 	}
 	bc.deleteBrowseSecret(ctx, browseSecretName(string(bb.UID)))
+	bc.deleteCOSSessionCopy(ctx, browseSecretName(string(bb.UID)))
 	if bb.Status.EndedTime != nil && bc.nowFunc().Sub(bb.Status.EndedTime.Time) >= bc.browse.ClosedKeep {
 		if err := bc.client.Delete(ctx, bb); err != nil && !apierrors.IsNotFound(err) {
 			klog.ErrorS(err, "Failed to delete an ended BackupBrowse", "session", bb.Name)
@@ -262,11 +271,23 @@ func (bc *BackupController) startBrowse(ctx context.Context, bb *v1alpha1.Backup
 		bc.setBrowseStatus(ctx, bb, browsePhasePending, fmt.Sprintf("make the session Secret: %v", err))
 		return
 	}
+	if req.COS != nil && bc.browse.COSNamespace != bc.browse.Namespace {
+		if err := bc.ensureCOSSessionCopy(ctx, bb); err != nil {
+			bc.setBrowseStatus(ctx, bb, browsePhasePending, fmt.Sprintf("make the session Secret for the helper: %v", err))
+			return
+		}
+	}
 	if err := bc.browseJobs.StartBrowse(ctx, req); err != nil {
+		if errors.Is(err, errNoBrowseCOS) {
+			bc.endBrowse(ctx, bb, counts, browsePhaseFailed, "", "browsing a backup in COS is not turned on in this installation")
+			return
+		}
 		bc.setBrowseStatus(ctx, bb, browsePhasePending, fmt.Sprintf("start the helper: %v", err))
 		return
 	}
 	bb.Status.SecretName = req.SecretName
+	now := metav1.NewTime(bc.nowFunc())
+	bb.Status.StartedTime = &now
 	counts.add(bb.Spec.PVCNamespace)
 	bc.setBrowseStatus(ctx, bb, browsePhaseStarting, "starting the helper pod")
 }
@@ -296,13 +317,20 @@ func (bc *BackupController) watchBrowse(ctx context.Context, bb *v1alpha1.Backup
 		}
 		bc.endBrowse(ctx, bb, counts, browsePhaseClosed, reason, "")
 	case st.Finished:
-		bc.endBrowse(ctx, bb, counts, browsePhaseFailed, "", "the helper pod failed")
+		// The helper writes the reason it could not start to its termination log,
+		// in words, with no key in them.
+		bc.endBrowse(ctx, bb, counts, browsePhaseFailed, "", helperFailure(st.Reason))
 	case st.Ready && st.PodIP != "":
 		if bb.Status.Phase == browsePhaseReady && bb.Status.PodIP == st.PodIP {
 			return
 		}
 		bb.Status.PodIP, bb.Status.Port = st.PodIP, browsePort
 		bc.setBrowseStatus(ctx, bb, browsePhaseReady, "")
+	case bb.Status.Phase == browsePhaseStarting && browseIsCOS(&bb.Spec) && bb.Status.StartedTime != nil &&
+		bc.nowFunc().Sub(bb.Status.StartedTime.Time) >= bc.cosStartTimeout():
+		bc.endBrowse(ctx, bb, counts, browsePhaseFailed, "", fmt.Sprintf(
+			"the helper pod was not ready after %s. Check that the Secrets named by the export block exist in namespace %s and hold the keys access_key_id, secret_access_key, wrappedKey and apikey, and that the image can be pulled",
+			bc.cosStartTimeout(), bc.browse.COSNamespace))
 	}
 }
 
@@ -310,6 +338,9 @@ func (bc *BackupController) watchBrowse(ctx context.Context, bb *v1alpha1.Backup
 // restoreFailure ends the session; any other error leaves it waiting.
 func (bc *BackupController) browseRequest(ctx context.Context, bb *v1alpha1.BackupBrowse) (BrowseJobRequest, error) {
 	sp := bb.Spec
+	if browseIsCOS(&sp) {
+		return bc.browseCOSRequest(ctx, bb)
+	}
 	policy := &v1alpha1.BackupPolicy{}
 	if err := bc.client.Get(ctx, types.NamespacedName{Name: sp.Policy}, policy); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -391,6 +422,19 @@ func (bc *BackupController) ensureBrowseSecret(ctx context.Context, bb *v1alpha1
 		return err
 	}
 	return nil
+}
+
+// helperFailure is the status message of a helper that stopped with an error.
+// The reason is the termination message the helper wrote; it is limited in size
+// and never holds a key.
+func helperFailure(reason string) string {
+	if reason == "" {
+		return "the helper pod failed"
+	}
+	if len(reason) > 600 {
+		reason = reason[:600] + "..."
+	}
+	return "the helper pod failed: " + reason
 }
 
 // copyPullSecrets keeps copies of the image pull Secrets in the browse namespace.
