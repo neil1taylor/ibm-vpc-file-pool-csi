@@ -106,7 +106,7 @@ func (g *Gateway) handleRestoreCreate(w http.ResponseWriter, r *http.Request, u 
 	}
 	policy := &v1alpha1.BackupPolicy{}
 	found := false
-	if err := g.c.Get(ctx, types.NamespacedName{Name: req.Policy}, policy); err == nil {
+	if perr := g.c.Get(ctx, types.NamespacedName{Name: req.Policy}, policy); perr == nil {
 		for _, v := range policy.Status.Volumes {
 			if v.PVCNamespace == req.Namespace && v.PVCName == req.PVC && v.SubPath != "" {
 				found = true
@@ -190,7 +190,7 @@ func restoreOf(fr *v1alpha1.BackupFileRestore) Restore {
 		Files: st.Files, Dirs: st.Dirs, Links: st.Links, Skipped: st.Skipped, Unreadable: st.Unreadable, Bytes: st.Bytes,
 	}
 	if st.RestoredMoment != nil {
-		t := st.RestoredMoment.Time.UTC()
+		t := st.RestoredMoment.UTC()
 		out.RestoredMoment = &t
 	}
 	return out
