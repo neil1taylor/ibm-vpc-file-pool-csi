@@ -17,10 +17,12 @@ RUN go mod download
 COPY pkg/browse/ pkg/browse/
 COPY pkg/cosbrowse/ pkg/cosbrowse/
 COPY pkg/keyprotect/ pkg/keyprotect/
+COPY pkg/filerestore/ pkg/filerestore/
 COPY pkg/guestfs/ pkg/guestfs/
 COPY pkg/nbd/ pkg/nbd/
 COPY pkg/qcow2/ pkg/qcow2/
 COPY pkg/replication/ pkg/replication/
+COPY pkg/util/ pkg/util/
 COPY cmd/browse/ cmd/browse/
 ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.version=${VERSION}" -o /browse ./cmd/browse

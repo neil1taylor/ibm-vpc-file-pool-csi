@@ -260,7 +260,7 @@ func TestBrowseGuest_NoSubVolumeNoHold(t *testing.T) {
 	// disk any more, so there is nothing to hold, and the backup can be read.
 	e := newGuestEnv(t)
 	e.openGuest("bb1")
-	if msg := e.bc.holdForGuest(e.ctx, e.bb("bb1"), "pvc-that-is-gone"); msg != "" {
+	if msg := e.bc.holdForGuest(e.ctx, "uid-bb1", "nightly", "pvc-that-is-gone", true); msg != "" {
 		t.Fatalf("a volume that is gone must not make the session wait: %q", msg)
 	}
 }

@@ -21,6 +21,11 @@ const (
 	// fileRestoreDeadline is the hard stop of a file restore Job.
 	fileRestoreDeadline = 4 * time.Hour
 
+	// guestFileRestoreDeadline is the hard stop of a file restore Job that reads a
+	// VM disk. The disk is held (its next backup copy waits) while the Job runs,
+	// and a hold is promised for 2 hours at most.
+	guestFileRestoreDeadline = 2 * time.Hour
+
 	fileRestorePathsMount = "/etc/filerestore"
 	fileRestorePathsFile  = fileRestorePathsMount + "/paths"
 )
@@ -77,9 +82,15 @@ func (r *ShareJobRunner) RunFileRestore(ctx context.Context, req FileRestoreRequ
 		runAs = cosHelperUser
 	}
 	owner := req.Owner
+	image, program, deadline := r.driverImage, "/usr/local/bin/vpc-file-pool-csi", fileRestoreDeadline
+	if req.Guest != nil {
+		// The driver image has no libguestfs: the guest image runs the Job with its
+		// own program, which has the same restore mode.
+		image, program, deadline = r.guestImage, "/usr/local/bin/browse", guestFileRestoreDeadline
+	}
 	shape := jobShape{
-		image: r.driverImage,
-		command: []string{"/usr/local/bin/vpc-file-pool-csi", "--mode=restore-files",
+		image: image,
+		command: []string{program, "--mode=restore-files",
 			"--restore-files-spec=" + string(specJSON), "--restore-files-paths=" + fileRestorePathsFile},
 		runAsUser: runAs,
 		folders:   folders,
@@ -93,7 +104,10 @@ func (r *ShareJobRunner) RunFileRestore(ctx context.Context, req FileRestoreRequ
 		owner:          &owner,
 		hardened:       hardened,
 		addCaps:        caps,
-		activeDeadline: int64(fileRestoreDeadline.Seconds()),
+		activeDeadline: int64(deadline.Seconds()),
+	}
+	if req.Guest != nil {
+		r.shapeGuest(&shape)
 	}
 	done, msg, err := r.runMessage(ctx, req.Key, shares, shape)
 	if err != nil || !done {
@@ -128,6 +142,19 @@ func (r *ShareJobRunner) fileRestoreSpec(req FileRestoreRequest) (filerestore.Jo
 		return spec, err
 	}
 	switch {
+	case req.Guest != nil:
+		if r.guestImage == "" {
+			return spec, errors.New("restoring files from inside a VM disk needs the guest image, which is not set")
+		}
+		if req.COS != nil || req.MomentsPath != "" {
+			return spec, errors.New("a VM disk is read from its backup folder only, not from COS and with no moments folder")
+		}
+		if c := req.Guest.Consistency; c != "" && c != "FileSystemConsistent" && c != "CrashConsistent" {
+			return spec, errors.New("the consistency of the copy is not one that the Job knows")
+		}
+		if err := util.ValidateBackupPath(req.LatestPath); err != nil {
+			return spec, err
+		}
 	case req.COS != nil:
 		if req.LatestPath != "" || req.MomentsPath != "" {
 			return spec, errors.New("a restore from COS names no backup folder")
@@ -158,6 +185,9 @@ func (r *ShareJobRunner) fileRestoreSpec(req FileRestoreRequest) (filerestore.Jo
 		spec.Latest = "/src"
 		if req.MomentsPath != "" {
 			spec.Moments = "/moments"
+		}
+		if req.Guest != nil {
+			spec.Guest = &filerestore.GuestSource{Socket: "/tmp/disk.sock", Appliance: "/opt/guestfs-appliance", Consistency: req.Guest.Consistency}
 		}
 	}
 	if !req.At.IsZero() {

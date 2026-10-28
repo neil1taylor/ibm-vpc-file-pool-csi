@@ -23,6 +23,7 @@ type fakeFileRestoreJobs struct {
 	calls []FileRestoreRequest
 	// answer is what the Job does for a mode.
 	answer map[string]fakeJobAnswer
+	guest  bool
 }
 
 type fakeJobAnswer struct {
@@ -36,7 +37,8 @@ func (f *fakeFileRestoreJobs) RunFileRestore(_ context.Context, req FileRestoreR
 	a := f.answer[req.Mode]
 	return a.done, a.out, a.err
 }
-func (f *fakeFileRestoreJobs) Namespace() string { return testDriverNS }
+func (f *fakeFileRestoreJobs) Namespace() string  { return testDriverNS }
+func (f *fakeFileRestoreJobs) GuestEnabled() bool { return f.guest }
 
 func (f *fakeFileRestoreJobs) callsFor(mode string) []FileRestoreRequest {
 	var out []FileRestoreRequest

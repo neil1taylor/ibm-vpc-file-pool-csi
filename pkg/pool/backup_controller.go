@@ -161,6 +161,7 @@ func (bc *BackupController) ReconcileAll(ctx context.Context) {
 	bc.reconcileRestores(ctx)
 	bc.reconcileBrowses(ctx)
 	bc.reconcileFileRestores(ctx)
+	bc.sweepBrowseHolds(ctx)
 }
 
 // tidyDeleted removes the labels and the ReplicationPolicies of policies that

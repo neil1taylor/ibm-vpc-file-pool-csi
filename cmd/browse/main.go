@@ -20,13 +20,19 @@ import (
 
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/browse"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/cosbrowse"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/filerestore"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/guestfs"
 	"k8s.io/klog/v2"
 )
 
 var version = "dev"
 
-const modeServer = "browse-server"
+const (
+	modeServer = "browse-server"
+	// modeRestoreFiles runs a file restore Job that reads the file systems inside
+	// a VM disk. The driver image has no libguestfs, so this image runs it.
+	modeRestoreFiles = "restore-files"
+)
 
 // openCOS opens a backup in COS. Tests replace it.
 var openCOS = func(ctx context.Context, src cosbrowse.Source, at time.Time, kopia, stateDir string, log io.Writer) (*cosbrowse.Opened, error) {
@@ -50,7 +56,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 	fs := flag.NewFlagSet("browse", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	klog.InitFlags(fs)
-	mode := fs.String("mode", "", "what to run; only "+modeServer+" exists")
+	mode := fs.String("mode", "", "what to run: "+modeServer+" or "+modeRestoreFiles)
+	restoreSpec := fs.String("restore-files-spec", "", "JSON of the file restore (restore-files mode)")
+	restorePaths := fs.String("restore-files-paths", "", "file that lists the paths to restore, one per line in escaped form (restore-files mode)")
 	root := fs.String("root", "", "the folder that holds the backup, mounted read-only (not used with --cos-source)")
 	cosSource := fs.String("cos-source", "", "JSON that names a backup exported to COS to read instead of a folder; the keys are files at fixed places (no secret is in it)")
 	kopia := fs.String("kopia", "kopia", "the Kopia program (used with --cos-source)")
@@ -72,9 +80,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	if *mode == modeRestoreFiles {
+		return filerestore.Main(*restoreSpec, *restorePaths, *termLog)
+	}
 	switch {
 	case *mode != modeServer:
-		_, _ = fmt.Fprintf(stderr, "--mode must be %s\n", modeServer)
+		_, _ = fmt.Fprintf(stderr, "--mode must be %s or %s\n", modeServer, modeRestoreFiles)
 		return 2
 	case *cosSource != "" && (*root != "" || *moments != ""):
 		_, _ = fmt.Fprintln(stderr, "--cos-source cannot be used with --root or --moments")

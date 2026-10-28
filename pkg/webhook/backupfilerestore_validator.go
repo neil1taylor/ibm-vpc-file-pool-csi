@@ -59,6 +59,9 @@ func validateBackupFileRestoreSpec(spec *v1alpha1.BackupFileRestoreSpec) error {
 	if err := validateBackupSource(spec); err != nil {
 		return err
 	}
+	if spec.Guest && (spec.Source == v1alpha1.BackupSourceCOS || spec.FromCOS != nil) {
+		return fmt.Errorf("spec.guest (files inside a VM disk) is for a backup in the snapshot pool; a VM disk in COS is not supported yet")
+	}
 	if errs := validation.IsDNS1123Label(spec.TargetNamespace); len(errs) > 0 {
 		return fmt.Errorf("spec.targetNamespace is not a namespace name: %v", errs)
 	}

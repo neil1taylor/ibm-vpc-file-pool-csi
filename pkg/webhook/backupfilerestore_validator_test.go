@@ -98,6 +98,34 @@ func bucketBlock() *v1alpha1.BrowseFromCOS {
 
 // A restore from COS: the policy may not exist in this cluster, and a bucket
 // named directly has no claim here, so the source namespace holds "-".
+func TestBackupFileRestoreValidatorGuest(t *testing.T) {
+	cases := []struct {
+		name    string
+		mutate  func(*v1alpha1.BackupFileRestoreSpec)
+		wantErr string
+	}{
+		{"a VM disk", func(s *v1alpha1.BackupFileRestoreSpec) { s.Guest = true; s.Paths = []string{"/sda1/etc/hosts"} }, ""},
+		{"a VM disk in the snapshot pool, by name", func(s *v1alpha1.BackupFileRestoreSpec) {
+			s.Guest, s.Source = true, v1alpha1.BackupSourceLocal
+		}, ""},
+		{"a VM disk in COS", func(s *v1alpha1.BackupFileRestoreSpec) { s.Guest, s.Source = true, v1alpha1.BackupSourceCOS }, "spec.guest"},
+	}
+	v := &BackupFileRestoreValidator{}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			br := validFileRestore()
+			c.mutate(&br.Spec)
+			_, err := v.ValidateCreate(context.Background(), br)
+			switch {
+			case c.wantErr == "" && err != nil:
+				t.Fatalf("unexpected error: %v", err)
+			case c.wantErr != "" && (err == nil || !strings.Contains(err.Error(), c.wantErr)):
+				t.Fatalf("error = %v, want one that mentions %q", err, c.wantErr)
+			}
+		})
+	}
+}
+
 func TestBackupFileRestoreValidatorFromCOS(t *testing.T) {
 	named := func(s *v1alpha1.BackupFileRestoreSpec) {
 		s.Source, s.FromCOS = v1alpha1.BackupSourceCOS, bucketBlock()

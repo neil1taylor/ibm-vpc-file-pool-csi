@@ -139,7 +139,7 @@ func (bc *BackupController) reconcileBrowses(ctx context.Context) {
 		}
 	}
 	bc.copyPullSecrets(ctx)
-	helpers, listed := bc.sweepBrowseOrphans(ctx, known)
+	bc.sweepBrowseOrphans(ctx, known)
 	bc.sweepCOSSessionCopies(ctx, known)
 	for i := range items {
 		bb := &items[i]
@@ -149,22 +149,16 @@ func (bc *BackupController) reconcileBrowses(ctx context.Context) {
 		}
 		bc.reconcileBrowse(ctx, bb, counts)
 	}
-	if listed {
-		bc.sweepBrowseHolds(ctx, items, helpers)
-	}
 }
 
 // sweepBrowseOrphans removes the helper Jobs and Secrets of sessions that no
 // longer exist, for example after the BackupBrowse was deleted.
-func (bc *BackupController) sweepBrowseOrphans(ctx context.Context, known map[string]bool) (helpers map[string]bool, listed bool) {
+func (bc *BackupController) sweepBrowseOrphans(ctx context.Context, known map[string]bool) {
 	names, err := bc.browseJobs.BrowseSessions(ctx)
 	if err != nil {
 		klog.ErrorS(err, "Failed to list browse helper Jobs")
 	}
-	listed = err == nil
-	helpers = map[string]bool{}
 	for _, n := range names {
-		helpers[n] = true
 		if !known[n] {
 			if _, err := bc.browseJobs.StopBrowse(ctx, n); err != nil {
 				klog.ErrorS(err, "Failed to stop the helper of a vanished browse session", "session", n)
@@ -174,7 +168,7 @@ func (bc *BackupController) sweepBrowseOrphans(ctx context.Context, known map[st
 	secrets := &corev1.SecretList{}
 	if err := bc.client.List(ctx, secrets, client.InNamespace(bc.browse.Namespace), client.HasLabels{browseLabel}); err != nil {
 		klog.ErrorS(err, "Failed to list browse Secrets")
-		return helpers, listed
+		return
 	}
 	for i := range secrets.Items {
 		s := &secrets.Items[i]
@@ -182,7 +176,6 @@ func (bc *BackupController) sweepBrowseOrphans(ctx context.Context, known map[st
 			bc.deleteBrowseSecret(ctx, s.Name)
 		}
 	}
-	return helpers, listed
 }
 
 func browseSecretName(session string) string { return "browse-" + session }
@@ -285,7 +278,7 @@ func (bc *BackupController) startBrowse(ctx context.Context, bb *v1alpha1.Backup
 	if req.Guest {
 		// The disk is held before anything else: from now on no new backup copy
 		// starts. A copy that is running is waited for.
-		if msg := bc.holdForGuest(ctx, bb, svName); msg != "" {
+		if msg := bc.holdForGuest(ctx, string(bb.UID), bb.Spec.Policy, svName, true); msg != "" {
 			bc.setBrowseStatus(ctx, bb, browsePhasePending, msg)
 			return
 		}
@@ -539,13 +532,16 @@ func equalSecretData(a, b map[string][]byte) bool {
 	return true
 }
 
-// holdForGuest holds the disk of a session that reads a VM disk, and says why
-// the session must wait, or returns "" if it may start. The hold comes first:
+// holdForGuest holds the disk for a session or a file restore that reads a VM
+// disk (session is the UID of either), and says why it must wait, or returns ""
+// if it may start. A restore whose Job already runs asks for the hold again
+// without waiting (waitForCopy false): a copy that began before the hold cannot
+// be waited out by a Job that is already reading. The hold comes first:
 // once it is on the SubVolume, the replication controller starts no new copy of
 // the disk (or of any disk of the same running VM). Only then is a copy that is
 // already running waited for. The other order would leave a gap in which a copy
 // could start between the check and the hold.
-func (bc *BackupController) holdForGuest(ctx context.Context, bb *v1alpha1.BackupBrowse, svName string) string {
+func (bc *BackupController) holdForGuest(ctx context.Context, session, policy, svName string, waitForCopy bool) string {
 	sv := &v1alpha1.SubVolume{}
 	if err := bc.client.Get(ctx, types.NamespacedName{Name: svName}, sv); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -553,7 +549,6 @@ func (bc *BackupController) holdForGuest(ctx context.Context, bb *v1alpha1.Backu
 		}
 		return fmt.Sprintf("waiting: cannot read the volume to hold it: %v", err)
 	}
-	session := string(bb.UID)
 	if value := addBrowseHold(sv.Annotations[browseHoldAnnotation], session, bc.nowFunc()); value != sv.Annotations[browseHoldAnnotation] {
 		patch := client.MergeFrom(sv.DeepCopy())
 		if sv.Annotations == nil {
@@ -561,25 +556,57 @@ func (bc *BackupController) holdForGuest(ctx context.Context, bb *v1alpha1.Backu
 		}
 		sv.Annotations[browseHoldAnnotation] = value
 		if err := bc.client.Patch(ctx, sv, patch); err != nil {
-			klog.ErrorS(err, "Failed to hold a SubVolume for a browse session", "session", bb.Name, "volume", svName)
+			klog.ErrorS(err, "Failed to hold a SubVolume for a browse session", "session", session, "volume", svName)
 			return fmt.Sprintf("waiting: cannot hold the disk of the volume: %v", err)
 		}
 	}
-	busy, known := bc.volumesBeingCopied(ctx, bb.Spec.Policy)
+	if !waitForCopy {
+		return ""
+	}
+	busy, known := bc.volumesBeingCopied(ctx, policy)
 	if !known || busy[svName] {
 		return "waiting: a backup copy of this disk is running; the session starts when it has ended"
 	}
 	return ""
 }
 
-// sweepBrowseHolds removes the holds that no session needs: of a session that no
-// longer exists, of one that has ended and has no helper any more, and any that
-// are older than the limit. A hold stays while the helper may still read the
-// disk. helpers holds the sessions that have a helper Job.
-func (bc *BackupController) sweepBrowseHolds(ctx context.Context, sessions []v1alpha1.BackupBrowse, helpers map[string]bool) {
-	phase := map[string]string{}
-	for i := range sessions {
-		phase[string(sessions[i].UID)] = sessions[i].Status.Phase
+// sweepBrowseHolds removes the holds that nothing needs: of a session or file
+// restore that no longer exists, of a session that has ended and has no helper
+// any more, of a restore that has ended, and any that are older than the limit.
+// A hold stays while a helper or a restore Job may still read the disk.
+func (bc *BackupController) sweepBrowseHolds(ctx context.Context) {
+	live := map[string]bool{}
+	helpers := map[string]bool{}
+	if bc.browseJobs != nil {
+		names, err := bc.browseJobs.BrowseSessions(ctx)
+		if err != nil {
+			klog.ErrorS(err, "Failed to list browse helper Jobs to release holds")
+			return
+		}
+		for _, n := range names {
+			helpers[n] = true
+		}
+	}
+	sessions := &v1alpha1.BackupBrowseList{}
+	if err := bc.client.List(ctx, sessions); err != nil {
+		klog.ErrorS(err, "Failed to list browse sessions to release holds")
+		return
+	}
+	for i := range sessions.Items {
+		ph := sessions.Items[i].Status.Phase
+		if ph != browsePhaseClosed && ph != browsePhaseFailed {
+			live[string(sessions.Items[i].UID)] = true
+		}
+	}
+	restores := &v1alpha1.BackupFileRestoreList{}
+	if err := bc.client.List(ctx, restores); err != nil {
+		klog.ErrorS(err, "Failed to list file restores to release holds")
+		return
+	}
+	for i := range restores.Items {
+		if !fileRestoreEnded(restores.Items[i].Status.Phase) {
+			live[string(restores.Items[i].UID)] = true
+		}
 	}
 	svs := &v1alpha1.SubVolumeList{}
 	if err := bc.client.List(ctx, svs); err != nil {
@@ -595,10 +622,7 @@ func (bc *BackupController) sweepBrowseHolds(ctx context.Context, sessions []v1a
 		}
 		var keep []browseHold
 		for _, h := range parseBrowseHolds(value) {
-			ph, exists := phase[h.session]
-			ended := ph == browsePhaseClosed || ph == browsePhaseFailed
-			live := (exists && !ended) || helpers[h.session]
-			if live && now.Sub(h.since) < browseHoldLimit {
+			if (live[h.session] || helpers[h.session]) && now.Sub(h.since) < browseHoldLimit {
 				keep = append(keep, h)
 			}
 		}

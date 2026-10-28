@@ -1526,6 +1526,7 @@ type BackupFileRestoreSpec struct {
     Moment           *metav1.Time `json:"moment,omitempty"`          // the newest backup at or before it; unset: the latest copy
     Source           string       `json:"source,omitempty"`          // local (the default) or cos
     FromCOS          *BrowseFromCOS `json:"fromCOS,omitempty"`       // a bucket named directly (a cluster administrator); sourceNamespace holds "-", sourceName the volume, storageClassName is required for a new claim
+    Guest            bool         `json:"guest,omitempty"`           // restore files from inside a VM disk; the first name of each path is a file system of the guest
     Paths            []string     `json:"paths"`                     // 1 to 1000, escaped form ("\\" and "\xNN"); "/" is the whole volume
     TargetNamespace  string       `json:"targetNamespace"`
     TargetName       string       `json:"targetName"`
@@ -1553,6 +1554,8 @@ type BackupFileRestoreStatus struct {
     EndedTime      *metav1.Time `json:"endedTime,omitempty"`
 }
 ```
+
+**With `spec.guest`** the volume must be a VM disk in the snapshot pool (not COS; the webhook and the controller refuse it). The Job runs in the **guest image** with the program `browse --mode=restore-files`, which has the same restore code, and reads the file systems inside `disk.img` through the read-only appliance, as a guest browse session does. The first name of each path is the file system (`/sda1/etc/hosts`) and it is kept in the restored tree (`sda1/etc/hosts` in the new claim). The Job has a pod like the guest helper (two size-limited scratch folders, 1 CPU and 1 GiB, the KVM device if configured) plus `CHOWN` and `FOWNER` and the target share. It has a **2 hour** deadline, not 4, because the disk is held for as long as the restore runs: the controller adds the restore's UID to the annotation `storage.ibmcloud.io/browse-hold` on the volume's SubVolume before the first Job, waits while a backup copy of the disk is running (only before the Job starts), and removes the entry when the restore has ended. The restore fails in words if the volume is not a VM disk, or the guest image is not set.
 
 **With `spec.source: cos`** (or `spec.fromCOS`) the Job reads the backup from COS, as a browse session does, and runs in the driver namespace with the COS and Key Protect Secrets mounted as files, no service account token and a read-only root file system. Everything else is the same: the targets, the checks, the owner, the space limit. A new claim takes its class from the policy's record of the volume, or from `spec.storageClassName` when the bucket is named directly (COS does not keep the class). Each file is one run of the Kopia program (about 0.2 seconds on a local repository; not yet measured against a real bucket), so a restore of many thousands of small files is slow; the Job gets 4 hours.
 

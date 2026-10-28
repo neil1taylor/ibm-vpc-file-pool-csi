@@ -661,7 +661,10 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metric
 		browseRunner.SetBrowseImage(browse.image)
 		browse.cfg.Namespace = browse.namespace
 		if browse.guestImage != "" {
-			browseRunner.SetBrowseGuest(browse.guestImage, pool.BrowseGuestConfig{KVM: browse.guestKVM, CPU: browse.guestCPU, Memory: browse.guestMemory})
+			guestCfg := pool.BrowseGuestConfig{KVM: browse.guestKVM, CPU: browse.guestCPU, Memory: browse.guestMemory}
+			browseRunner.SetBrowseGuest(browse.guestImage, guestCfg)
+			// File restores from a VM disk run in the driver namespace, with the same image.
+			shareRunner.SetBrowseGuest(browse.guestImage, guestCfg)
 		}
 		if browse.pullSecrets != "" {
 			names := strings.Split(browse.pullSecrets, ",")

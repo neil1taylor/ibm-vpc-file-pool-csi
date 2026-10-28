@@ -76,6 +76,11 @@ type FileRestoreRequest struct {
 	// COS, if set, reads the backup from COS instead of the snapshot pool. Backup,
 	// LatestPath and MomentsPath are then not used.
 	COS *FileRestoreCOS
+	// Guest, if set, reads the file systems inside the VM disk in LatestPath
+	// (the backup folder holds disk.img). The Job then runs in the guest image,
+	// and the first name of every path is a file system of the guest. MomentsPath
+	// is not used. The disk is held for the length of the restore.
+	Guest *FileRestoreGuest
 	// Dest is the share that holds the target claim, and Volume the claim's
 	// folder on it, like /pvcs/pvc-.... Not used for ModeMeasure.
 	Dest   ShareMount
@@ -92,6 +97,13 @@ type FileRestoreRequest struct {
 	// with. Nil and empty keep the backup's own.
 	UID, GID    *int64
 	Permissions string
+}
+
+// FileRestoreGuest says a file restore reads a VM disk.
+type FileRestoreGuest struct {
+	// Consistency is how the newest copy of the disk was taken
+	// (FileSystemConsistent or CrashConsistent); empty if not known.
+	Consistency string
 }
 
 // FileRestoreCOS says which backup in COS a file restore reads.
@@ -112,6 +124,9 @@ type FileRestoreJobs interface {
 	RunFileRestore(ctx context.Context, req FileRestoreRequest) (bool, filerestore.Outcome, error)
 	// Namespace is where the Jobs run.
 	Namespace() string
+	// GuestEnabled says whether a restore may read the file systems inside a VM
+	// disk, which needs the guest helper image.
+	GuestEnabled() bool
 }
 
 // SetFileRestore turns on file restores.
@@ -257,6 +272,10 @@ func fileRestoreOwner(fr *v1alpha1.BackupFileRestore) metav1.OwnerReference {
 
 func (bc *BackupController) reconcileFileRestore(ctx context.Context, fr *v1alpha1.BackupFileRestore) {
 	sp := fr.Spec
+	if sp.Guest && (sp.Source == v1alpha1.BackupSourceCOS || sp.FromCOS != nil) {
+		bc.failFileRestore(ctx, fr, "the files inside a VM disk can be restored only from a backup in the snapshot pool, not yet from COS")
+		return
+	}
 	if sp.Source == v1alpha1.BackupSourceCOS || sp.FromCOS != nil {
 		bc.reconcileFileRestoreFromCOS(ctx, fr)
 		return
@@ -281,6 +300,23 @@ func (bc *BackupController) reconcileFileRestore(ctx context.Context, fr *v1alph
 		bc.failFileRestore(ctx, fr, fmt.Sprintf("policy %s has no backup of %s/%s", sp.Policy, sp.SourceNamespace, sp.SourceName))
 		return
 	}
+	if sp.Guest {
+		switch {
+		case entry.VMName == "":
+			bc.failFileRestore(ctx, fr, fmt.Sprintf("%s/%s is not a VM disk, so it has no guest file systems to restore from", sp.SourceNamespace, sp.SourceName))
+			return
+		case !bc.fileJobs.GuestEnabled():
+			bc.failFileRestore(ctx, fr, "restoring files from inside a VM disk is not turned on in this installation (backupBrowse.guest.image is not set)")
+			return
+		}
+		// The disk is held before anything else, and a copy that is running is
+		// waited for, but only while the restore has not started its Job.
+		wasActive := fileRestoreActive(fr.Status.Phase)
+		if msg := bc.holdForGuest(ctx, string(fr.UID), policy.Name, entry.SubVolumeName, !wasActive); msg != "" {
+			bc.setFileRestoreStatus(ctx, fr, restorePhasePending, msg)
+			return
+		}
+	}
 	svs := &v1alpha1.SubVolumeList{}
 	if err := bc.client.List(ctx, svs); err != nil {
 		bc.setFileRestoreStatus(ctx, fr, restorePhasePending, fmt.Sprintf("list SubVolumes: %v", err))
@@ -298,8 +334,15 @@ func (bc *BackupController) reconcileFileRestore(ctx context.Context, fr *v1alph
 		Paths: sp.Paths, Policy: policy.Name, MaxBytes: bc.fileCfg.MaxBytes,
 	}
 	// A volume without moments has no moments folder, and a folder that is not
-	// there cannot be mounted read-only.
-	if entry.RestorePoints > 0 {
+	// there cannot be mounted read-only. A VM disk keeps its earlier moments as
+	// undo files next to the disk, and the Job rebuilds the old view from them.
+	switch {
+	case sp.Guest:
+		req.Guest = &FileRestoreGuest{}
+		if c := entry.Consistency; c == "FileSystemConsistent" || c == "CrashConsistent" {
+			req.Guest.Consistency = c
+		}
+	case entry.RestorePoints > 0:
 		req.MomentsPath = policyBase + "/.moments" + entry.SubPath
 	}
 	if sp.Moment != nil {
