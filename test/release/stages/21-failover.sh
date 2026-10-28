@@ -42,12 +42,11 @@
 # The stage makes everything with names that start with rt-<run id> and deletes only those.
 # It never touches other namespaces on either cluster (for example ovl-test).
 #
-# The receiver's data claim is a static NFS volume on the folder of a claim of the DR pool.
-# The failover controller reads the share address from an NFS volume behind the claim; a
-# claim that the driver provisions has a CSI volume, and then an Execute needs
-# spec.drShareIP and spec.drExportPath (the console never sets them).
-# The policy uses destinationBasePath "/", so the copy is at the root of the claim:
-# the failover Job reads only <claim>/pvcs.
+# The receiver's data claim is an ordinary claim of the DR pool, as in the tutorials: a CSI
+# volume of the driver. The failover controller reads the share address from its volume
+# attributes, so an Execute (and the console) needs no spec.drShareIP or spec.drExportPath.
+# The policy uses destinationBasePath "/" because the console's Recovery page does not set
+# spec.basePath; the copy is then at the root of the claim, at <claim>/pvcs.
 
 RT_STAGE_TIMEOUT=14400
 
@@ -150,6 +149,16 @@ plan_until_ok() {
         plan_ok "$PLAN_NAME" Plan "$@"
     }
     wait_until 2400 30 plan_attempt "$@"
+}
+
+# plan_without_copies NAME — a Plan on a base path with no copies ends Failed, and the message says where it looked.
+plan_without_copies() {
+    local name=$1 msg
+    make_failover "$name" Plan 'basePath: /nothing-here' || return 1
+    finish_failover "$name" Failed 600 >/dev/null || { echo "the Plan did not end Failed (phase: $(fo_field "$name" .status.phase))"; return 1; }
+    msg=$(fo_field "$name" .status.message)
+    echo "message: $msg"
+    echo "$msg" | grep -qF 'destinationBasePath' && echo "$msg" | grep -qF '/nothing-here/pvcs'
 }
 
 # refused TEXT NAME ACTION [SPEC LINE]... — the API server refuses to create the Failover, with TEXT in the answer.
@@ -385,7 +394,7 @@ GUEST
 # --- The receiver on the DR cluster -------------------------------------------
 
 start_receiver() {
-    local image dir token server export_path base_pv sub
+    local image dir token
     image=$(dr oc get deploy -n "$RT_DRIVER_NS" -l "app.kubernetes.io/component=controller" \
         -o jsonpath='{.items[0].spec.template.spec.containers[?(@.name=="csi-controller")].image}')
     dir=$(mktemp -d)
@@ -404,42 +413,15 @@ start_receiver() {
     oc label secret -n "$RT_DRIVER_NS" "$RECV-ca" "$RECV-token" "$RECV_LABEL" || return 1
     rm -rf "$dir"
 
-    # A claim of the DR pool makes the folder. A static NFS volume on that folder is the receiver's data claim.
+    # The data claim is a claim of the DR pool; the receiver writes into its folder.
     dr oc apply -f - >/dev/null <<YAML || return 1
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata: {name: $RECV-base, namespace: $RT_DRIVER_NS, labels: {pool-csi-test: $RECV}}
-spec:
-  storageClassName: $DST_POOL
-  accessModes: [ReadWriteMany]
-  volumeMode: Filesystem
-  resources: {requests: {storage: 80Gi}}
-YAML
-    wait_until 600 5 dr base_is_bound || return 1
-    server=$(dr pool_field "$DST_POOL" '.status.shares[0].mountTargetIP')
-    export_path=$(dr pool_field "$DST_POOL" '.status.shares[0].exportPath')
-    base_pv=$(dr oc get pvc -n "$RT_DRIVER_NS" "$RECV-base" -o jsonpath='{.spec.volumeName}')
-    sub=$(dr oc get subvolume "$base_pv" -o jsonpath='{.spec.subPath}')
-    [ -n "$server" ] && [ -n "$sub" ] || { echo "no mount target address ($server) or folder ($sub) for the receiver claim"; return 1; }
-    dr oc apply -f - >/dev/null <<YAML || return 1
-apiVersion: v1
-kind: PersistentVolume
-metadata: {name: $RECV-pv, labels: {pool-csi-test: $RECV}}
-spec:
-  capacity: {storage: 80Gi}
-  accessModes: [ReadWriteMany]
-  persistentVolumeReclaimPolicy: Retain
-  mountOptions: [nfsvers=4.1, sec=sys, soft, timeo=600, retrans=3]
-  nfs: {server: "$server", path: "${export_path%/}$sub"}
-  claimRef: {namespace: $RT_DRIVER_NS, name: $RECV-data}
----
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata: {name: $RECV-data, namespace: $RT_DRIVER_NS, labels: {pool-csi-test: $RECV}}
 spec:
-  storageClassName: ""
-  volumeName: $RECV-pv
+  storageClassName: $DST_POOL
   accessModes: [ReadWriteMany]
+  volumeMode: Filesystem
   resources: {requests: {storage: 80Gi}}
 ---
 apiVersion: apps/v1
@@ -501,7 +483,6 @@ YAML
     wait_until 600 5 dr data_is_bound || return 1
     wait_until 300 10 dr oc rollout status "deploy/$RECV" -n "$RT_DRIVER_NS" --timeout=10s
 }
-base_is_bound() { [ "$(oc get pvc -n "$RT_DRIVER_NS" "$RECV-base" -o jsonpath='{.status.phase}')" = Bound ]; }
 data_is_bound() { [ "$(oc get pvc -n "$RT_DRIVER_NS" "$RECV-data" -o jsonpath='{.status.phase}')" = Bound ]; }
 
 claims_bound() { [ "$(oc get pvc -n "$NS" -o json | jq '[.items[] | select(.status.phase == "Bound")] | length')" = 5 ]; }
@@ -735,7 +716,7 @@ run() {
     both_pools_ready || stop "a pool did not become Ready: source '$(pool_field "$SRC_POOL" .status.phase)', DR '$(dr pool_field "$DST_POOL" .status.phase)'"
     check "the namespace $NS exists on both clusters" make_namespaces
 
-    check "the receiver runs on the DR cluster, with a static NFS claim as its data" start_receiver
+    check "the receiver runs on the DR cluster, with a claim of the DR pool as its data" start_receiver
     wait_until 60 5 dr oc get deploy -n "$RT_DRIVER_NS" "$RECV" >/dev/null || stop "the receiver was not made"
 
     source_claims || stop "the claims on the source pool were not made"
@@ -802,6 +783,9 @@ YAML
     oc annotate replicationpolicy "$POLICY" storage.ibmcloud.io/paused=true --overwrite >/dev/null
     check "no copy is running after the pause" wait_until 1800 15 no_copy_running
     no_copy_running || stop "a VM copy is still running 30 minutes after the pause"
+
+    # A Plan on a folder with no copies fails and says so; it is not an empty "Planned".
+    check "a Plan with basePath /nothing-here fails and names destinationBasePath" plan_without_copies "$(fo_name nb)"
 
     a_svs=$(printf '%s\n' "$(sv_of_claim a-root)" "$(sv_of_claim a-data)" | LC_ALL=C sort | paste -sd, -)
 
@@ -931,7 +915,7 @@ cleanup() {
     for sv in $(dr oc get subvolumes -l storage.ibmcloud.io/failover-source -o json 2>/dev/null | jq -r --arg ns "$NS" '.items[] | select(.spec.pvcNamespace == $ns) | .metadata.name'); do
         dr oc delete subvolume "$sv" --ignore-not-found --wait=false >/dev/null 2>&1 || true
     done
-    # The receiver, its static volume, and the claim that made its folder.
+    # The receiver and its data claim.
     dr oc delete deploy,svc,route,secret,pvc -n "$RT_DRIVER_NS" -l "$RECV_LABEL" --ignore-not-found --wait=false >/dev/null 2>&1 || true
     dr oc delete pv -l "$RECV_LABEL" --ignore-not-found --wait=false >/dev/null 2>&1 || true
     dr oc delete filesharepool "$DST_POOL" --ignore-not-found --wait=false >/dev/null 2>&1 || true
