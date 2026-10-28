@@ -53,6 +53,7 @@ const cases: Array<[string, string]> = [
   ['/vpc-file-pools/pools/general-purpose', 'TUTORIAL-01-POOL-CREATION.md'],
   ['/vpc-file-pools/snapshots/snap-1', 'TUTORIAL-02-SNAPSHOTS-AND-CLONES.md'],
   ['/vpc-file-pools/replication/dr', 'TUTORIAL-06-REPLICATION-AND-FAILOVER.md'],
+  ['/vpc-file-pools/replication/~recovery', 'TUTORIAL-06-REPLICATION-AND-FAILOVER.md'],
   ['/vpc-file-pools/migrate', 'TUTORIAL-08-MIGRATION-AND-CONSOLE.md'],
 ];
 

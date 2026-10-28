@@ -160,6 +160,9 @@ const ReplicationPolicyListPage: React.FC = () => {
         >
           Create ReplicationPolicy
         </ListPageCreateLink>
+        <Link to={ROUTES.RECOVERY} style={{ marginLeft: 16 }}>
+          Recovery
+        </Link>
       </ListPageHeader>
       <p style={{ padding: '0 24px', color: 'var(--pf-t--global--color--subtle)', margin: '0 0 8px 0' }}>
         Replication Policies define cross-region disaster recovery by syncing SubVolume data from a source pool to a destination pool on a configurable schedule.
