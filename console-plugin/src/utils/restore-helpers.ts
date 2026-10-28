@@ -171,8 +171,14 @@ export function vmUsesPVC(vms: VirtualMachineLike[], namespace: string, pvcName:
 }
 
 /** What the restore banner shows, from the new claim and its SubVolume. */
-export function restoreProgress(pvc: PersistentVolumeClaim | undefined, subvolume: SubVolume | undefined): RestoreProgress {
+export function restoreProgress(
+  pvc: PersistentVolumeClaim | undefined,
+  subvolume: SubVolume | undefined,
+  subvolumeLoaded = true,
+): RestoreProgress {
   if (!pvc) return { state: 'waiting' };
+  // Until the SubVolume is read, its copy state is not known, so the claim being Bound says nothing.
+  if (pvc.spec?.volumeName && !subvolumeLoaded) return { state: 'waiting' };
   const clone = subvolume?.status;
   // A clone's claim is Bound at once, while its copy still runs; only the
   // SubVolume says when the copy has ended.

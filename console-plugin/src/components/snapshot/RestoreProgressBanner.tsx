@@ -28,7 +28,7 @@ const RestoreProgressBanner: React.FC<{ namespace: string; name: string; source?
   });
   // The SubVolume has the name of the claim's volume, which exists once the driver has made it.
   const volumeName = pvc?.spec?.volumeName;
-  const [subvolume] = useK8sWatchResource<SubVolume>(
+  const [subvolume, subvolumeLoaded] = useK8sWatchResource<SubVolume>(
     volumeName
       ? {
           groupVersionKind: {
@@ -41,7 +41,7 @@ const RestoreProgressBanner: React.FC<{ namespace: string; name: string; source?
       : null,
   );
 
-  const progress = restoreProgress(pvc, subvolume);
+  const progress = restoreProgress(pvc, subvolume, subvolumeLoaded);
   const claimLink = <Link to={pvcPath(namespace, name)}>{name}</Link>;
 
   switch (progress.state) {
