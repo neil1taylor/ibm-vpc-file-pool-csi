@@ -548,3 +548,12 @@ func removeTree(dirfd int, name string) error {
 	}
 	return nil
 }
+
+// folderOwner is the owner of a folder, without following a link in its last name.
+func folderOwner(path string) (uid, gid int64, err error) {
+	var st unix.Stat_t
+	if err := retry(func() error { return unix.Stat(path, &st) }); err != nil {
+		return 0, 0, fmt.Errorf("read the owner of the claim folder: %w", err)
+	}
+	return int64(st.Uid), int64(st.Gid), nil
+}

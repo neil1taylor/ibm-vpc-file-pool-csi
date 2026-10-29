@@ -271,14 +271,16 @@ func TestFolderDestAtTheClaimFolderRefusesAVMDisk(t *testing.T) {
 func TestWriterSpecIsChecked(t *testing.T) {
 	one := int64(1)
 	for name, s := range map[string]WriterSpec{
-		"no owner":          {Mode: ModeFolder, Socket: "/s", Dest: "/d", Staging: StagingName("u"), Policy: "p"},
-		"no gid":            {Mode: ModeFolder, Socket: "/s", Dest: "/d", Staging: StagingName("u"), Policy: "p", UID: &one},
-		"bad permissions":   {Mode: ModeFolder, Socket: "/s", Dest: "/d", Staging: StagingName("u"), Policy: "p", UID: &one, GID: &one, Permissions: "4777"},
-		"relative":          {Mode: ModeFolder, Socket: "s", Dest: "/d", Staging: StagingName("u"), Policy: "p"},
-		"new claim, no vol": {Mode: ModeNewClaim, Socket: "/s", Dest: "/d"},
-		"folder, no policy": {Mode: ModeFolder, Socket: "/s", Dest: "/d", Staging: StagingName("u")},
-		"bad staging":       {Mode: ModeFolder, Socket: "/s", Dest: "/d", Staging: "../x", Policy: "p"},
-		"measure":           {Mode: ModeMeasure, Socket: "/s", Dest: "/d"},
+		"no owner":                    {Mode: ModeFolder, Socket: "/s", Dest: "/d", Staging: StagingName("u"), Policy: "p"},
+		"no gid":                      {Mode: ModeFolder, Socket: "/s", Dest: "/d", Staging: StagingName("u"), Policy: "p", UID: &one},
+		"folder owner on a new claim": {Mode: ModeNewClaim, Socket: "/s", Dest: "/d", Volume: "pvcs/x", OwnerFromFolder: true},
+		"folder owner and uid":        {Mode: ModeFolder, Socket: "/s", Dest: "/d", Staging: StagingName("u"), Policy: "p", OwnerFromFolder: true, UID: &one, GID: &one},
+		"bad permissions":             {Mode: ModeFolder, Socket: "/s", Dest: "/d", Staging: StagingName("u"), Policy: "p", UID: &one, GID: &one, Permissions: "4777"},
+		"relative":                    {Mode: ModeFolder, Socket: "s", Dest: "/d", Staging: StagingName("u"), Policy: "p"},
+		"new claim, no vol":           {Mode: ModeNewClaim, Socket: "/s", Dest: "/d"},
+		"folder, no policy":           {Mode: ModeFolder, Socket: "/s", Dest: "/d", Staging: StagingName("u")},
+		"bad staging":                 {Mode: ModeFolder, Socket: "/s", Dest: "/d", Staging: "../x", Policy: "p"},
+		"measure":                     {Mode: ModeMeasure, Socket: "/s", Dest: "/d"},
 	} {
 		if err := s.validate(); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -392,5 +394,45 @@ func TestWriterIgnoresTheOwnerAndTheModeBitsTheReaderAsksFor(t *testing.T) {
 	}
 	if st, _ := os.Stat(filepath.Join(claim, ".restoring-u")); st.Mode().Perm() != 0o750 || st.Mode()&(os.ModeSetuid|os.ModeSticky) != 0 {
 		t.Errorf("root folder mode %v, want 0750", st.Mode())
+	}
+}
+
+func TestWriterMeasuresTheOwnerOfTheClaimFolderAndKeepsItForTheSession(t *testing.T) {
+	_, claim := claimDir(t)
+	sock, done := startWriter(t, WriterSpec{Mode: ModeFolder, Dest: claim, Staging: StagingName("u"), Policy: "p", OwnerFromFolder: true})
+	rd, err := DialWriter(context.Background(), sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, other := int64(0), int64(4242)
+	f, err := rd.Create([][]byte{[]byte("f")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.Finish(Meta{Mode: 0o644, UID: &root, GID: &other}); err != nil {
+		t.Fatalf("finish: %v: the reader's owner must not be used", err)
+	}
+	st, err := os.Stat(filepath.Join(claim, ".restoring-u", "f"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sys, ok := st.Sys().(*syscall.Stat_t); !ok || int(sys.Uid) != os.Getuid() || int(sys.Gid) != os.Getgid() {
+		t.Errorf("owner %+v, want the owner of the claim folder", st.Sys())
+	}
+	_ = rd.Close()
+	_ = waitWriter(t, done)
+}
+
+func TestServeWriterWithoutAnOwnerFromAnywhereIsRefused(t *testing.T) {
+	_, claim := claimDir(t)
+	real, err := NewFolderDestAt(claim, StagingName("u"), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = real.Close() }()
+	a, b := net.Pipe()
+	go func() { _, _ = ServeWriter(b, real, WriterPolicy{Mode: ModeFolder, Policy: "p"}) }()
+	if _, err := newRemoteDest(a); err == nil {
+		t.Fatal("opened without an owner")
 	}
 }
