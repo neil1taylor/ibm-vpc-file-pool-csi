@@ -24,6 +24,7 @@ const SOURCE = process.env.RECOVERY_SOURCE;
 const POOL = process.env.RECOVERY_POOL;
 const PVCS = (process.env.RECOVERY_PVCS || '').split(',').filter(Boolean);
 
+// PatternFly tables have the ARIA role grid, not table.
 const RECOVERY_ROUTE = '/vpc-file-pools/replication/~recovery';
 // Not anchored: the alert title starts with a hidden "Info alert:" for screen readers.
 const PLAN_READY = /Plan made from /;
@@ -58,11 +59,11 @@ async function openRecovery(page: Page, opts: { refresh: boolean }): Promise<voi
     await expect(refresh).toBeEnabled({ timeout: 300_000 });
     await expect(page.getByText(PLAN_READY)).toBeVisible();
   }
-  await expect(page.getByRole('table', { name: 'Running VMs found on the copy' })).toBeVisible();
+  await expect(page.getByRole('grid', { name: 'Running VMs found on the copy' })).toBeVisible();
 }
 
 async function openVM(page: Page): Promise<void> {
-  const table = page.getByRole('table', { name: 'Running VMs found on the copy' });
+  const table = page.getByRole('grid', { name: 'Running VMs found on the copy' });
   await table.getByRole('button', { name: VM as string, exact: true }).click();
   await expect(page.getByText(`Disks of ${VM}`)).toBeVisible();
 }
@@ -82,7 +83,7 @@ test.describe('Recovery page: fail over one VM', () => {
 
   test('Refresh makes a plan, and the table lists the VMs of the copy with their disks', async ({ page }) => {
     await openRecovery(page, { refresh: true });
-    const table = page.getByRole('table', { name: 'Running VMs found on the copy' });
+    const table = page.getByRole('grid', { name: 'Running VMs found on the copy' });
     for (const name of [VM as string, OTHER_VM as string]) {
       const row = table.getByRole('row').filter({ has: page.getByRole('button', { name, exact: true }) });
       await expect(row, `a row for ${name}`).toHaveCount(1);
@@ -96,7 +97,7 @@ test.describe('Recovery page: fail over one VM', () => {
   test('the detail view shows the disks of the VM and its moments, newest first', async ({ page }) => {
     await openRecovery(page, { refresh: false });
     await openVM(page);
-    const disks = page.getByRole('table', { name: 'Disks of the VM' });
+    const disks = page.getByRole('grid', { name: 'Disks of the VM' });
     await expect(disks.locator('tbody tr')).toHaveCount(2);
     await expect(disks.getByText(/Used in place\.|Copies the whole disk; takes minutes\./).first()).toBeVisible();
     const moments = page.getByRole('radio');
@@ -104,7 +105,7 @@ test.describe('Recovery page: fail over one VM', () => {
     await expect(moments.first(), 'the first moment is the newest and is chosen').toBeChecked();
     await expect(page.getByText(/- newest/)).toHaveCount(1);
     await page.getByRole('button', { name: 'Back to the VMs', exact: true }).click();
-    await expect(page.getByRole('table', { name: 'Running VMs found on the copy' })).toBeVisible();
+    await expect(page.getByRole('grid', { name: 'Running VMs found on the copy' })).toBeVisible();
   });
 
   test('an older moment says its disks are rewound; a wrong name keeps the button off; Cancel makes nothing', async ({ page }) => {
