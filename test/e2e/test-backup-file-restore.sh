@@ -312,7 +312,9 @@ grep -q "^p2000=2000:2000 700 2000:2000 600$" <<<"$OUT" && pass "a folder with m
 grep -q "^link=/etc$" <<<"$OUT" && pass "the link is a link" || fail "link: $OUT"
 if grep -q "restoring-" <<<"$(grep '^top=' <<<"$OUT")"; then fail "a staging folder is left: $OUT"; else pass "no staging folder is left in the claim"; fi
 
-restore "$PREFIX-ex2" work true "" "$EX_PATHS"
+# The same moment as the first restore: a backup that lands in between would give a new name.
+EX1_MOMENT=$(oc get backupfilerestore "$PREFIX-ex1" -o jsonpath='{.status.restoredMoment}')
+restore "$PREFIX-ex2" work true "$EX1_MOMENT" "$EX_PATHS"
 wait_ended "$PREFIX-ex2" 900
 [ "$(frphase "$PREFIX-ex2")" = Done ] || fail "second restore: $(frmsg "$PREFIX-ex2")"
 FOLDER2=$(oc get backupfilerestore "$PREFIX-ex2" -o jsonpath='{.status.folder}')
