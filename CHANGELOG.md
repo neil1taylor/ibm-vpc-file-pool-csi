@@ -19,6 +19,10 @@ To make a release:
 
 ## [Unreleased]
 
+## [v0.16.1] — 2026-10-29
+
+A fix release. Audit Events for backup browsing and file restore are now recorded, the gateway address is filled in on a first install, and the console shows a policy's last error as an error.
+
 ### Fixed
 
 - **Audit Events for backup browsing and file restore were refused by the API server.** The gateway and the controller wrote them on the `BackupBrowse` or `BackupFileRestore`, which have no namespace, and the API server accepts an Event for such an object only in `default`, where many people can read. The gateway logged the Event and then failed to store it. The Events are now on the ConfigMap `backup-gateway-info` in the driver namespace and name the session or restore in `related`. Found in the first lab run of release test stage 20.
