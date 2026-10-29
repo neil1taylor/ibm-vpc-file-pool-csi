@@ -303,8 +303,12 @@ jq -e '.items[0].spec | (.securityContext.runAsUser // 0) != 0 and .containers[0
     && pass "the COS helper runs as an ordinary user with every capability dropped" || fail "COS helper security context"
 jq -e '[.items[0].spec.containers[0].volumeMounts[] | select(.mountPath | startswith("/var/run/pool-csi")) | .readOnly] | all' <<<"$POD" >/dev/null \
     && pass "the keys are mounted read-only" || fail "a key mount is writable"
-if oc get secret -n "$BROWSE_NS" -o name | grep -qv '^secret/browse-'; then
-    fail "the browse namespace holds a Secret that is not a session Secret: $(oc get secret -n "$BROWSE_NS" -o name | tr '\n' ' ')"
+# Image pull secrets are allowed: the controller copies the driver's there, and
+# OpenShift adds one per service account. Anything else must be a session Secret.
+OTHER=$(oc get secret -n "$BROWSE_NS" -o json | jq -r '.items[] | select((.metadata.name | startswith("browse-")) | not)
+    | select(.type != "kubernetes.io/dockerconfigjson" and .type != "kubernetes.io/dockercfg") | .metadata.name')
+if [ -n "$OTHER" ]; then
+    fail "the browse namespace holds a Secret that is not a session Secret or a pull secret: $(tr '\n' ' ' <<<"$OTHER")"
 else
     pass "the browse namespace holds session Secrets only, never the COS or Key Protect keys"
 fi

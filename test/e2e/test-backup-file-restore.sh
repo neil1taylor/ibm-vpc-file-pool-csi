@@ -257,7 +257,7 @@ echo "private=$(stat -c "%u:%g %a" u2000/private0700) inner=$(stat -c "%u:%g %a"
 echo "linebreak=$([ -f "u2000/line${nl}break" ] && echo yes || echo no)"
 echo "link=$([ -L u2000/to-etc ] && readlink u2000/to-etc || echo notalink) $([ -L u1000/to-etc ] && echo ok || echo notalink)"
 echo "only=$(ls | tr "\n" " ")"
-echo "u2000=$(ls u2000 | wc -l)"')
+echo "u2000=$(find u2000 -mindepth 1 -maxdepth 1 -printf . | wc -c)"')
 echo "$OUT"
 grep -q "^docs=one v=second$" <<<"$OUT" && pass "the new claim holds the latest content" || fail "content: $OUT"
 grep -q "^sha=$BLOB_SHA$" <<<"$OUT" && pass "the 40 MiB file has the same checksum" || fail "checksum: $OUT"
