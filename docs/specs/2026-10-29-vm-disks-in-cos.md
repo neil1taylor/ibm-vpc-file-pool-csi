@@ -1,6 +1,6 @@
 # Spec: browse and restore files from VM disks in COS (issue #92, phase 6)
 
-Date: 2026-10-29. Status: draft for review. It fills in phase 6 of `2026-10-22-backup-file-restore.md` (the parent spec). Read section 3 ("VM disks") and section 4 ("Backups in COS") of the parent first. It builds on phase 4 (COS, plain volumes, merged) and phase 5 (VM disks in the snapshot pool, PRs #337, #338, #341 and #342, not merged and not yet run on the lab). Facts here come from `main` and the `vm-browse-c2` branch on 29 Oct 2026.
+Date: 2026-10-29. Status: speed bar agreed by the owner (29 Oct 2026); design ready for build. It fills in phase 6 of `2026-10-22-backup-file-restore.md` (the parent spec). Read section 3 ("VM disks") and section 4 ("Backups in COS") of the parent first. It builds on phase 4 (COS, plain volumes, merged) and phase 5 (VM disks in the snapshot pool, PRs #337, #338, #341 and #342, not merged and not yet run on the lab). Facts here come from `main` and the `vm-browse-c2` branch on 29 Oct 2026.
 
 ## Goal
 
@@ -12,11 +12,13 @@ When this is done:
 - It works in a second cluster that has the COS Secrets and no policy (`--from-cos`), for cluster administrators, as in phase 4.
 
 **Speed bar.** The goal is met if, for a 100 GiB disk with a 30 GiB XFS or NTFS file system, using the private COS endpoint in the same region:
-- the file system list shows within **5 minutes** of asking,
-- a folder of 1,000 entries lists within **30 seconds**,
-- a 1 GiB file downloads at **50 MiB/s or more** after its first byte.
+- the file systems and the top folder show within **30 seconds** of asking,
+- any other folder of up to 1,000 entries shows within **5 seconds**,
+- a download or a restore starts within **2 minutes**, and a 1 GiB file then downloads at **50 MiB/s or more**.
 
-These numbers are my estimate of what makes the feature usable. They are not measured yet. Phase 6a measures them. If they are missed by a wide margin, I will show you the real numbers before more is built.
+This holds for the newest moment of each export. An older moment inside an export (see section 1a) is listed from the disk itself and may take up to 5 minutes; the console says so before the user waits.
+
+The first version of this spec allowed 5 minutes for the first listing. The owner judged that too long for a user to wait, so the listing now comes from a file list saved at backup time (section 1a). The numbers are not measured yet. Phase 6a measures them. If they are missed by a wide margin, I will show you the real numbers before more is built.
 
 ## What exists today
 
@@ -48,6 +50,18 @@ Either way:
 - **Indexing the undo files.** Today the view reads every byte of each undo file once, to index and check it. Over COS that would fetch all the changed data of the export before the first listing. The COS source indexes by reading the record headers and skipping over the data, and checks a record's data when it is read. If the undo format has no way to check one record alone, the whole-file check stays, and phase 6a measures what it costs.
 - **Keep time.** A session or restore is refused if the export's snapshots reach the end of their keep time within the session's hard limit (2 hours) plus 1 hour. Kopia maintenance must not delete the data while it is being read. Phase 6a also checks Kopia's own safety margin for data that is no longer referenced.
 
+### 1a. A file list saved with each export
+
+Reading folders straight from a disk in COS is slow: every cold read fetches a whole chunk, and a file system list touches many scattered blocks. So the listing does not read the disk.
+
+- **When.** Each export to COS of a VM disk also saves a file list of the guest's file systems at the export's newest moment. It is made from the local copy in the snapshot pool, before or while the export runs, by the phase 5 guest helper (no Secrets, unprivileged, the hostile-disk rules of phase 5).
+- **What.** For each file system: its label and type, and for each entry the path, type, size, mode, owner, times and link target. No file contents. The list is compressed and stored in the same Kopia repository as the export, so it is encrypted with the same backup key and kept and deleted with the export.
+- **Trust.** The list comes from a hostile disk, so the reader treats it as untrusted: size limits on the list and on each name, names shown escaped as phase 3 does, and paths checked against traversal. A wrong list can only show wrong names. A download or restore reads the disk itself and refuses a path that is not there.
+- **Use.** The COS disk server reads the list (a few MiB to tens of MiB) when the session starts and answers folder requests from it. The appliance and the disk are opened only for a download or a restore.
+- **Older moments.** An export holds the undo files back to the previous export, so it covers several moments, but only the newest has a list. Making a list per moment would multiply the export's work. An older moment is listed from the disk, slowly, as the first version of this spec did. 6a measures how slow.
+- **No list.** Exports made before this feature, or whose list failed, are browsed from the disk, slowly, with the same notice. A failed list does not fail the export: the export is the backup and comes first. The policy's status says the list failed.
+- **Cost.** One guest file system scan per VM disk per export, measured in 6a. If it makes exports late, the list is made after the export, from the same local moment, and the session falls back to the slow path until it exists.
+
 ### 2. Keeping the key away from the hostile disk
 
 Two pods per session, as in phase 4 and #341:
@@ -69,7 +83,7 @@ The gateway already picks COS for a plain-volume moment that only COS holds (pha
 
 - A COS VM session counts as one session against the existing limits (5 in the cluster, 2 per namespace). It uses two pods: the guest helper (about 550 MiB, measured in phase 0) and the disk server (estimate 256 MiB plus Kopia's index cache, measured in 6a).
 - **COS cost.** Reads through the private or direct endpoint have no data transfer charge. The cost is the GET requests (class B) and, for the Standard class, nothing more. Phase 6a counts requests and bytes for the speed bar run and adds a cost line here. A browse never writes to the bucket.
-- The 5-minute start limit for COS sessions (`backupBrowse.cos.startTimeout`) is raised for VM disks to **10 minutes**, because the first listing may be slow. 6a sets the final value.
+- The 5-minute start limit for COS sessions (`backupBrowse.cos.startTimeout`) stays for a moment with a file list. A moment without one is allowed **10 minutes**. 6a sets the final values.
 
 ### 5. User stories
 
@@ -84,21 +98,22 @@ The gateway already picks COS for a plain-volume moment that only COS holds (pha
 - **Ranges:** a test reads small, unaligned and chunk-crossing ranges and counts the bytes fetched. A range read must not fetch the file from the start.
 - **Isolation:** the guest helper pod spec has no Secret volumes, no environment from Secrets and no API token. The disk server refuses NBD writes, a client without the session certificate, and any volume other than the session's (including traversal and crafted snapshot names, as in phase 4).
 - **Keep time:** a moment near the end of its keep time is refused with a clear message.
-- **Release test stage 20:** a new part that exports a VM disk, deletes the local restore points (or uses a moment older than all of them), browses a file inside it from COS, restores a folder, and compares checksums. It runs once in prod and once from the DR cluster with `--from-cos`. It records the three speed bar numbers in the report.
+- **File list:** a list made from a test disk matches the files the appliance sees. A crafted list (huge, names with `..`, newlines or control characters, entries outside the file system) is refused or shown escaped, and a download of a path that is only in the list is refused. A failed list leaves the export Done and says so in the policy status. A session on a moment with no list uses the slow path and says so.
+- **Release test stage 20:** a new part that exports a VM disk, deletes the local restore points (or uses a moment older than all of them), browses a file inside it from COS, restores a folder, and compares checksums. It runs once in prod and once from the DR cluster with `--from-cos`. It records the speed bar numbers, with and without the file list, in the report.
 
 ## Build plan: phases, one PR each
 
 Phase 6 needs phase 5 merged and passing on the lab first.
 
-- **6a. Spike on the lab (S, risk check).** Use a real export of a lab VM (stage 18 makes them). Try option A, then option B if A fails. Measure the speed bar, bytes fetched, COS requests, disk server memory, and the cost of indexing the undo files. Write the results and the choice into this spec, in a PR with no product code. **If neither option meets the speed bar within a factor of 2, I stop and show you the gap.**
-- **6b. COS disk server (M).** The source interface, the COS source, the cache, the keep-time check, the TLS NBD link, the disk server pod and its NetworkPolicy, and the guest helper over the network. Command line browse and download.
+- **6a. Spike on the lab (S, risk check).** Use a real export of a lab VM (stage 18 makes them). Try option A, then option B if A fails. Make a file list of the lab VM's disk and measure its time and size. Measure the speed bar (with the list, and the slow path without it), bytes fetched, COS requests, disk server memory, and the cost of indexing the undo files. Write the results and the choice into this spec, in a PR with no product code. **If neither option meets the speed bar within a factor of 2, I stop and show you the gap.**
+- **6b. COS disk server (M).** The file list at export (made, stored with the export, read and checked), the source interface, the COS source, the cache, the keep-time check, the TLS NBD link, the disk server pod and its NetworkPolicy, and the guest helper over the network. Command line browse and download.
 - **6c. Restore and console (M).** The file restore from COS through the #341 split, the console source switch, the help text, and stage 20's COS VM part.
 
 Total: about 1.5 to 2.5 weeks of agent work, plus the lab runs.
 
 ## Cost and risk
 
-- **Biggest risk: speed.** Each cold read fetches at least a 4 MiB chunk from COS. A file system list touches many small, scattered metadata blocks, so the first listing may fetch hundreds of MiB. The cache helps only after that. This is why 6a comes first.
+- **Biggest risk: speed.** Each cold read fetches at least a 4 MiB chunk from COS. A file system list touches many small, scattered metadata blocks, so a listing from the disk may fetch hundreds of MiB. The file list (section 1a) takes this off the normal path; it remains for older moments and for exports without a list. 6a comes first to measure both.
 - **Second risk: option A not working.** Option B then adds a large dependency. It is still inside the browse image only.
 - **Fall-back, which does not meet the goal:** download the export's `disk.img` and undo files to scratch space first, then browse as phase 5 does. This needs a scratch claim the size of the disk and a full download for every session. I would put it in front of you as a choice, not build it quietly.
 
@@ -106,7 +121,10 @@ Total: about 1.5 to 2.5 weeks of agent work, plus the lab runs.
 
 - Phase 6 starts only after phase 5 is merged and has passed on the lab.
 - A short spike (6a) comes before any product code, with a stop-and-show-you rule if speed misses the bar.
-- I set the speed bar myself: listing within 5 minutes, folders within 30 seconds, downloads at 50 MiB/s. Change it if your users expect more.
+- Speed bar: first listing within 30 seconds, other folders within 5 seconds, a download starts within 2 minutes and runs at 50 MiB/s. You judged 5 minutes for the first listing too long.
+- To meet it, each export also saves a file list of the VM disk, so folders are shown without reading the disk in COS.
+- Only the newest moment of each export gets a file list. Older moments in the export are listed slowly, up to 5 minutes, and the console says so first.
+- A failed file list never fails the export.
 - The Kopia program over WebDAV is tried first, so Kopia stays out of our Go code. The Kopia library is the second choice.
 - The pod that holds the backup key never parses the guest's file system. The disk is served over the network to the existing unprivileged guest helper.
 - The link between the two pods is encrypted and allows only the one session's client, even inside the cluster.
@@ -119,4 +137,4 @@ Total: about 1.5 to 2.5 weeks of agent work, plus the lab runs.
 ## Needs from you
 
 - Nothing blocks writing 6a. It needs a lab run, which waits for your go-ahead as usual.
-- Is the speed bar right? If you have a figure from Veeam's file-level restore that your users compare against, give it to me and I will use it instead.
+- Nothing else. The speed bar is agreed: first listing within 30 seconds.
