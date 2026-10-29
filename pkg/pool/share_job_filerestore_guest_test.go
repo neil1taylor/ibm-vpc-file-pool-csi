@@ -118,3 +118,19 @@ func TestRunFileRestore_GuestRefusesWhatItCannotCheck(t *testing.T) {
 		}
 	}
 }
+
+func TestRunFileRestore_GuestDeadlineIsCappedByWhatIsLeft(t *testing.T) {
+	for _, mode := range []string{filerestore.ModeMeasure, filerestore.ModeFolder} {
+		r, c := newApplyRunner()
+		r.SetBrowseGuest(testGuestImage, BrowseGuestConfig{})
+		req := guestFileRestoreRequest(mode)
+		req.MaxRun = 30 * time.Minute
+		if _, _, err := r.RunFileRestore(context.Background(), req); err != nil {
+			t.Fatal(err)
+		}
+		d := fileRestoreJob(t, c).Spec.ActiveDeadlineSeconds
+		if d == nil || *d != int64((30*time.Minute).Seconds()) {
+			t.Errorf("%s: deadline %v, want 30 minutes", mode, d)
+		}
+	}
+}

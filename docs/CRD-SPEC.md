@@ -1541,6 +1541,7 @@ type BackupFileRestoreStatus struct {
     Phase          string       `json:"phase,omitempty"`   // Pending, Measuring, Provisioning, Restoring, Done, Failed
     Message        string       `json:"message,omitempty"`
     TargetUID      types.UID    `json:"targetUID,omitempty"` // the claim this restore writes to; another UID is refused
+    GuestHoldStarted *metav1.Time `json:"guestHoldStarted,omitempty"` // when a guest restore first held its VM disk; never moved, the restore fails 2h45m after it
     SizeGB         int64        `json:"sizeGB,omitempty"`    // the size chosen for a new claim
     Folder         string       `json:"folder,omitempty"`    // the folder made in an existing claim
     RestoredMoment *metav1.Time `json:"restoredMoment,omitempty"`

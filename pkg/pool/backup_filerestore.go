@@ -97,6 +97,10 @@ type FileRestoreRequest struct {
 	// with. Nil and empty keep the backup's own.
 	UID, GID    *int64
 	Permissions string
+	// MaxRun, if set, caps how long a Job that reads a VM disk may run: what is
+	// left of the time the disk may be held. The Job's own limit is used if it is
+	// shorter.
+	MaxRun time.Duration
 }
 
 // FileRestoreGuest says a file restore reads a VM disk.
@@ -289,6 +293,7 @@ func (bc *BackupController) reconcileFileRestore(ctx context.Context, fr *v1alph
 		bc.setFileRestoreStatus(ctx, fr, restorePhasePending, fmt.Sprintf("get the backup policy: %v", err))
 		return
 	}
+	var maxRun time.Duration
 	var entry *v1alpha1.BackupVolumeStatus
 	for i := range policy.Status.Volumes {
 		v := &policy.Status.Volumes[i]
@@ -312,7 +317,25 @@ func (bc *BackupController) reconcileFileRestore(ctx context.Context, fr *v1alph
 		// The disk is held before anything else, and a copy that is running is
 		// waited for, but only while the restore has not started its Job.
 		wasActive := fileRestoreActive(fr.Status.Phase)
-		if msg := bc.holdForGuest(ctx, string(fr.UID), policy.Name, entry.SubVolumeName, !wasActive); msg != "" {
+		// The time of the first hold is kept in the status, before the hold is
+		// taken, so that a hold the sweep let go after its limit is never taken
+		// again with a new time.
+		now := bc.nowFunc()
+		if fr.Status.GuestHoldStarted == nil {
+			t := metav1.NewTime(now)
+			fr.Status.GuestHoldStarted = &t
+			if err := bc.saveFileRestoreStatus(ctx, fr); err != nil {
+				fr.Status.GuestHoldStarted = nil
+				return
+			}
+		}
+		started := fr.Status.GuestHoldStarted.Time
+		maxRun = guestHoldBudget - now.Sub(started)
+		if maxRun < guestMinRun {
+			bc.failFileRestore(ctx, fr, fmt.Sprintf("the disk of this VM was held for the most that is allowed (%s) before the restore ended; ask again", guestHoldBudget))
+			return
+		}
+		if msg := bc.holdForGuest(ctx, string(fr.UID), policy.Name, entry.SubVolumeName, started, !wasActive); msg != "" {
 			bc.setFileRestoreStatus(ctx, fr, restorePhasePending, msg)
 			return
 		}
@@ -331,7 +354,7 @@ func (bc *BackupController) reconcileFileRestore(ctx context.Context, fr *v1alph
 	req := FileRestoreRequest{
 		Key: fileRestoreKey(fr), Owner: fileRestoreOwner(fr),
 		Backup: shareMountOf(backupShare), LatestPath: policyBase + entry.SubPath,
-		Paths: sp.Paths, Policy: policy.Name, MaxBytes: bc.fileCfg.MaxBytes,
+		Paths: sp.Paths, Policy: policy.Name, MaxBytes: bc.fileCfg.MaxBytes, MaxRun: maxRun,
 	}
 	// A volume without moments has no moments folder, and a folder that is not
 	// there cannot be mounted read-only. A VM disk keeps its earlier moments as

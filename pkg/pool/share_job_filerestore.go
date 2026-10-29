@@ -87,6 +87,9 @@ func (r *ShareJobRunner) RunFileRestore(ctx context.Context, req FileRestoreRequ
 		// The driver image has no libguestfs: the guest image runs the Job with its
 		// own program, which has the same restore mode.
 		image, program, deadline = r.guestImage, "/usr/local/bin/browse", guestFileRestoreDeadline
+		if req.MaxRun > 0 && req.MaxRun < deadline {
+			deadline = req.MaxRun
+		}
 	}
 	shape := jobShape{
 		image: image,

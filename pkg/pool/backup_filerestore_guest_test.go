@@ -200,3 +200,65 @@ func TestFileRestoreGuest_TheConsistencyAndTheMomentGoToTheJob(t *testing.T) {
 		t.Errorf("request = %+v", req)
 	}
 }
+
+func TestFileRestoreGuest_TheHoldStartIsKeptInTheStatus(t *testing.T) {
+	e := newGuestRestoreEnv(t)
+	e.guestRestore("f1", nil)
+	e.jobs.answer[filerestore.ModeMeasure] = fakeJobAnswer{}
+	e.reconcile()
+	started := e.fr("f1").Status.GuestHoldStarted
+	if started == nil || !started.Time.Equal(e.now) {
+		t.Fatalf("GuestHoldStarted = %v, want %v", started, e.now)
+	}
+	e.now = e.now.Add(10 * time.Minute)
+	e.reconcile()
+	if got := e.fr("f1").Status.GuestHoldStarted; got == nil || !got.Time.Equal(started.Time) {
+		t.Fatalf("GuestHoldStarted moved to %v: the first time must stay", got)
+	}
+}
+
+func TestFileRestoreGuest_TheHoldCannotBeTakenAgainAfterTheLimit(t *testing.T) {
+	e := newGuestRestoreEnv(t)
+	e.guestRestore("f1", nil)
+	e.jobs.answer[filerestore.ModeMeasure] = fakeJobAnswer{}
+	e.reconcile()
+	e.now = e.now.Add(browseHoldLimit + time.Minute)
+	e.bc.sweepBrowseHolds(e.ctx) // the old hold is let go, as it is in production
+	if got := e.holdOf(); got != "" {
+		t.Fatalf("the sweep left the hold %q", got)
+	}
+	calls := len(e.jobs.calls)
+	e.reconcile()
+	fr := e.fr("f1")
+	if fr.Status.Phase != restorePhaseFailed || !strings.Contains(fr.Status.Message, "held") {
+		t.Fatalf("status = %+v: the restore must fail, not hold the disk again", fr.Status)
+	}
+	if got := e.holdOf(); got != "" {
+		t.Fatalf("hold = %q: no new hold after the limit", got)
+	}
+	if len(e.jobs.calls) != calls {
+		t.Error("a Job was asked for after the limit")
+	}
+}
+
+func TestFileRestoreGuest_TheJobDeadlineIsWhatIsLeftOfTheHoldBudget(t *testing.T) {
+	e := newGuestRestoreEnv(t)
+	e.guestRestore("f1", nil)
+	e.jobs.answer[filerestore.ModeMeasure] = fakeJobAnswer{}
+	e.reconcile()
+	if got := e.jobs.callsFor(filerestore.ModeMeasure)[0].MaxRun; got != guestHoldBudget {
+		t.Errorf("first Job may run %v, want the whole budget %v", got, guestHoldBudget)
+	}
+	e.now = e.now.Add(100 * time.Minute)
+	e.reconcile()
+	calls := e.jobs.callsFor(filerestore.ModeMeasure)
+	if got, want := calls[len(calls)-1].MaxRun, guestHoldBudget-100*time.Minute; got != want {
+		t.Errorf("later Job may run %v, want what is left: %v", got, want)
+	}
+}
+
+func TestGuestHoldBudgetEndsBeforeTheSweepLetsGo(t *testing.T) {
+	if guestHoldBudget >= browseHoldLimit {
+		t.Fatalf("budget %v must end before the sweep releases the hold at %v", guestHoldBudget, browseHoldLimit)
+	}
+}
