@@ -21,6 +21,7 @@ To make a release:
 
 ### Fixed
 
+- **Audit Events for backup browsing and file restore were refused by the API server.** The gateway and the controller wrote them in the driver namespace, but the objects they are about (`BackupBrowse`, `BackupFileRestore`) have no namespace, and the API server accepts an Event for such an object only in `default`. The gateway logged the Event and then failed to store it. Both now write to `default`, and the gateway's Role and RoleBinding for Events are in `default`. Found in the first lab run of release test stage 20.
 - **The policy's last error is shown as an error in the console (issue #46).** On the replication policy page, the Last Error line is now a red inline alert with an icon instead of plain text, and shows `-` when there is no error.
 - **The gateway address is filled in on a first install.** The ConfigMap `backup-gateway-info` had an empty address after the first install on OpenShift, because the Route did not exist yet, so `kubectl backup` needed `--gateway` until a second `helm upgrade`. The chart now uses the host the router will give the Route.
 

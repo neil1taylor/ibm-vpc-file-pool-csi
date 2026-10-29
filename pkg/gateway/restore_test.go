@@ -372,7 +372,7 @@ func TestRestoreAuditEvent(t *testing.T) {
 	if found.InvolvedObject.Kind != "BackupFileRestore" || found.InvolvedObject.Name != made.Name {
 		t.Errorf("involved %+v", found.InvolvedObject)
 	}
-	if found.Namespace != driverNS {
+	if found.Namespace != metav1.NamespaceDefault {
 		t.Errorf("namespace %q", found.Namespace)
 	}
 	// The stored paths are the canonical form too.

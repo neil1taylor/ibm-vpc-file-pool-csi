@@ -307,6 +307,33 @@ func TestFileRestore_FailedJobShowsTheReasonAndEnds(t *testing.T) {
 	}
 }
 
+// A BackupFileRestore has no namespace, so the API server accepts its Events
+// only in "default". An Event in any other namespace is refused, and the
+// restore's result would never be recorded.
+func TestFileRestore_EventsAreWrittenWhereTheAPIServerAcceptsThem(t *testing.T) {
+	e := newFileRestoreEnv(t)
+	e.existingClaim("work")
+	e.existing("f1", "work")
+	e.jobs.answer[filerestore.ModeFolder] = refused("not enough space")
+	e.reconcile()
+	evs := &corev1.EventList{}
+	if err := e.c.List(e.ctx, evs); err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, ev := range evs.Items {
+		if ev.Reason == "FileRestoreFailed" {
+			found = true
+			if ev.Namespace != metav1.NamespaceDefault {
+				t.Errorf("the Event is in namespace %q, want %q", ev.Namespace, metav1.NamespaceDefault)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no FileRestoreFailed Event")
+	}
+}
+
 func TestFileRestore_AJobThatFailedWithoutAReasonStillEnds(t *testing.T) {
 	e := newFileRestoreEnv(t)
 	e.existingClaim("work")

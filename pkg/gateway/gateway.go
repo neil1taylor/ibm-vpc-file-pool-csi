@@ -44,7 +44,9 @@ type Config struct {
 	// SessionNamespace is where the session Secrets live. It holds nothing else,
 	// so the gateway's right to read Secrets reaches nothing else.
 	SessionNamespace string
-	// EventNamespace is where the audit Events are written.
+	// EventNamespace is the driver namespace. The audit Events are not written
+	// there: the objects they are about have no namespace, and the API server
+	// accepts an Event for such an object only in "default".
 	EventNamespace string
 	// DriverNamespace is where the COS and Key Protect Secrets are. A person who
 	// names a bucket directly must be allowed to read the Secrets it names there.
@@ -689,7 +691,7 @@ func (g *Gateway) auditObject(ctx context.Context, kind, name string, uid types.
 	klog.InfoS("Backup audit", "kind", kind, "name", name, "reason", reason, "message", msg)
 	now := metav1.NewTime(time.Now())
 	ev := &corev1.Event{
-		ObjectMeta: metav1.ObjectMeta{GenerateName: "browse-audit-", Namespace: g.cfg.EventNamespace},
+		ObjectMeta: metav1.ObjectMeta{GenerateName: "browse-audit-", Namespace: metav1.NamespaceDefault},
 		InvolvedObject: corev1.ObjectReference{APIVersion: v1alpha1.GroupVersion.String(), Kind: kind,
 			Name: name, UID: uid},
 		Reason: reason, Message: msg, Type: corev1.EventTypeNormal,

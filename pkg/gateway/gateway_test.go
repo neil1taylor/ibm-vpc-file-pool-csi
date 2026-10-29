@@ -311,7 +311,7 @@ func (e *env) do(method, path, token string, body any) (*http.Response, []byte) 
 func (e *env) events() []corev1.Event {
 	e.t.Helper()
 	l := &corev1.EventList{}
-	if err := e.c.List(context.Background(), l, client.InNamespace(driverNS)); err != nil {
+	if err := e.c.List(context.Background(), l, client.InNamespace(metav1.NamespaceDefault)); err != nil {
 		e.t.Fatal(err)
 	}
 	return l.Items
