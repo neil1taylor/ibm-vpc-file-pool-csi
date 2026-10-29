@@ -2,8 +2,8 @@ apiVersion: v2
 name: ibm-vpc-file-pool-csi
 description: IBM VPC File Pool CSI Driver — pools multiple PVCs as subdirectories within shared VPC file shares
 type: application
-version: 0.16.1
-appVersion: "0.16.1"
+version: 0.16.2
+appVersion: "0.16.2"
 keywords:
   - ibm
   - vpc
