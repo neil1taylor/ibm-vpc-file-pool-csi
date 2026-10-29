@@ -264,7 +264,30 @@ metadata:
 data:
   {{- $route := lookup "route.openshift.io/v1" "Route" .Release.Namespace $name }}
   {{- $host := .Values.backupGateway.route.host }}
-  {{- if and (not $host) $route }}{{ $host = $route.spec.host }}{{ end }}
+  {{- /* Users send their token to this address, so publish a Route host only once the router admitted our Route for it. */}}
+  {{- if and (not $host) $route }}
+  {{- range ($route.status.ingress | default list) }}
+  {{- if eq .host $route.spec.host }}
+  {{- range (.conditions | default list) }}
+  {{- if and (eq .type "Admitted") (eq .status "True") }}{{ $host = $route.spec.host }}{{ end }}
+  {{- end }}
+  {{- end }}
+  {{- end }}
+  {{- end }}
+  {{- /* First install: the Route does not exist yet, so use the host the router will give it, unless another Route already claims that host. */}}
+  {{- if and (not $host) (not $route) $openshift .Values.backupGateway.route.enabled }}
+  {{- $ingress := lookup "config.openshift.io/v1" "Ingress" "" "cluster" }}
+  {{- $domain := "" }}
+  {{- if $ingress }}{{ $domain = $ingress.spec.appsDomain | default $ingress.spec.domain }}{{ end }}
+  {{- if $domain }}
+  {{- $want := printf "%s-%s.%s" $name .Release.Namespace $domain }}
+  {{- $claimed := false }}
+  {{- range ((lookup "route.openshift.io/v1" "Route" "" "").items | default list) }}
+  {{- if eq .spec.host $want }}{{ $claimed = true }}{{ end }}
+  {{- end }}
+  {{- if not $claimed }}{{ $host = $want }}{{ end }}
+  {{- end }}
+  {{- end }}
   {{- if .Values.backupGateway.url }}
   url: {{ .Values.backupGateway.url | quote }}
   {{- else if $host }}

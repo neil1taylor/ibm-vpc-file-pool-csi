@@ -19,6 +19,10 @@ To make a release:
 
 ## [Unreleased]
 
+### Fixed
+
+- **The gateway address is filled in on a first install.** The ConfigMap `backup-gateway-info` had an empty address after the first install on OpenShift, because the Route did not exist yet, so `kubectl backup` needed `--gateway` until a second `helm upgrade`. The chart now uses the host the router will give the Route.
+
 ## [v0.16.0] — 2026-10-28
 
 A feature release. **Failover from the console:** a new `Failover` resource plans and runs a failover on the destination cluster, for all VMs or for chosen VMs, and the console has a Recovery page for it. **Files from a backup:** browse, download and restore single files and folders from the backups of plain volumes, in the snapshot pool or in COS, from the command line and the console, through a new backup gateway. Two new CRDs (`Failover`, `BackupFileRestore`), new chart objects (the gateway, a browse namespace) and a new role. VM disks inside backups are not covered yet.
