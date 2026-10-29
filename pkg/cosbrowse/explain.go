@@ -21,7 +21,9 @@ func explain(stderr string) string {
 		return "the backup key does not open the repository in COS: the key is wrong, or the repository was made with another key"
 	case has("nosuchbucket", "specified bucket does not exist", "bucket does not exist"):
 		return "the bucket does not exist at this COS endpoint: check the bucket name and the endpoint"
-	case has("accessdenied", "access denied", "invalidaccesskeyid", "signaturedoesnotmatch", "status code: 403", "forbidden"):
+	// COS often gives only the message, without the error code.
+	case has("accessdenied", "access denied", "invalidaccesskeyid", "signaturedoesnotmatch", "status code: 403", "forbidden",
+		"access key id you provided does not exist", "signature we calculated does not match"):
 		return "COS refused the key: check the COS key Secret, that it may read this bucket, and the context-based restriction (CBR) rules"
 	case has("repository not initialized", "not initialized", "kopia.repository", "nosuchkey", "status code: 404"):
 		return "there is no backup repository at this bucket and prefix: check the prefix and the policy name"

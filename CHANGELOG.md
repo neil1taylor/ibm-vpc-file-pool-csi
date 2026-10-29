@@ -19,6 +19,10 @@ To make a release:
 
 ## [Unreleased]
 
+### Fixed
+
+- **A wrong COS key is now named as the cause when browsing or restoring from COS.** COS often answers a wrong key with only a message ("The AWS Access Key ID you provided does not exist in our records", or a signature mismatch) and no error code, so the user was told only that COS could not be read. Found in release test stage 20.
+
 ## [v0.16.1] — 2026-10-29
 
 A fix release. Audit Events for backup browsing and file restore are now recorded, the gateway address is filled in on a first install, and the console shows a policy's last error as an error.
