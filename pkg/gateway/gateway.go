@@ -39,14 +39,20 @@ type Authorizer interface {
 	Can(ctx context.Context, u User, a Access) (bool, error)
 }
 
+// AuditConfigMap is the namespaced object that audit Events are written on.
+const AuditConfigMap = "backup-gateway-info"
+
 // Config sets the gateway's limits.
 type Config struct {
 	// SessionNamespace is where the session Secrets live. It holds nothing else,
 	// so the gateway's right to read Secrets reaches nothing else.
 	SessionNamespace string
-	// EventNamespace is the driver namespace. The audit Events are not written
-	// there: the objects they are about have no namespace, and the API server
-	// accepts an Event for such an object only in "default".
+	// EventNamespace is where the audit Events are written. They name users and
+	// paths, so they stay in the driver namespace and not in "default", which
+	// many people can read. The objects they are about have no namespace, and
+	// the API server refuses an Event for such an object outside "default", so
+	// the Event is on the gateway's own ConfigMap and names the session or
+	// restore in Related.
 	EventNamespace string
 	// DriverNamespace is where the COS and Key Protect Secrets are. A person who
 	// names a bucket directly must be allowed to read the Secrets it names there.
@@ -691,9 +697,10 @@ func (g *Gateway) auditObject(ctx context.Context, kind, name string, uid types.
 	klog.InfoS("Backup audit", "kind", kind, "name", name, "reason", reason, "message", msg)
 	now := metav1.NewTime(time.Now())
 	ev := &corev1.Event{
-		ObjectMeta: metav1.ObjectMeta{GenerateName: "browse-audit-", Namespace: metav1.NamespaceDefault},
-		InvolvedObject: corev1.ObjectReference{APIVersion: v1alpha1.GroupVersion.String(), Kind: kind,
-			Name: name, UID: uid},
+		ObjectMeta: metav1.ObjectMeta{GenerateName: "browse-audit-", Namespace: g.cfg.EventNamespace},
+		InvolvedObject: corev1.ObjectReference{APIVersion: "v1", Kind: "ConfigMap",
+			Namespace: g.cfg.EventNamespace, Name: AuditConfigMap},
+		Related: &corev1.ObjectReference{APIVersion: v1alpha1.GroupVersion.String(), Kind: kind, Name: name, UID: uid},
 		Reason: reason, Message: msg, Type: corev1.EventTypeNormal,
 		Source:         corev1.EventSource{Component: "backup-gateway"},
 		FirstTimestamp: now, LastTimestamp: now, Count: 1,

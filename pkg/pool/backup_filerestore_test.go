@@ -307,10 +307,10 @@ func TestFileRestore_FailedJobShowsTheReasonAndEnds(t *testing.T) {
 	}
 }
 
-// A BackupFileRestore has no namespace, so the API server accepts its Events
-// only in "default". An Event in any other namespace is refused, and the
-// restore's result would never be recorded.
-func TestFileRestore_EventsAreWrittenWhereTheAPIServerAcceptsThem(t *testing.T) {
+// A BackupFileRestore has no namespace, and the API server refuses an Event for
+// such an object unless it is in "default". The Event goes on a namespaced
+// object in the driver namespace instead, and names the restore in Related.
+func TestFileRestore_EventsAreOnANamespacedObjectNotInDefault(t *testing.T) {
 	e := newFileRestoreEnv(t)
 	e.existingClaim("work")
 	e.existing("f1", "work")
@@ -322,11 +322,15 @@ func TestFileRestore_EventsAreWrittenWhereTheAPIServerAcceptsThem(t *testing.T) 
 	}
 	var found bool
 	for _, ev := range evs.Items {
-		if ev.Reason == "FileRestoreFailed" {
-			found = true
-			if ev.Namespace != metav1.NamespaceDefault {
-				t.Errorf("the Event is in namespace %q, want %q", ev.Namespace, metav1.NamespaceDefault)
-			}
+		if ev.Reason != "FileRestoreFailed" {
+			continue
+		}
+		found = true
+		if ev.Namespace == metav1.NamespaceDefault || ev.InvolvedObject.Namespace != ev.Namespace {
+			t.Errorf("Event in %q about an object in %q", ev.Namespace, ev.InvolvedObject.Namespace)
+		}
+		if ev.Related == nil || ev.Related.Kind != "BackupFileRestore" || ev.Related.Name != "f1" {
+			t.Errorf("related = %+v", ev.Related)
 		}
 	}
 	if !found {

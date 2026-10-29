@@ -59,12 +59,6 @@ else
     fail "the gateway has no Secrets Role in the browse namespace"
 fi
 check "the gateway writes audit Events" "$ON" 'resources: ["events"]'
-if awk -v RS='\n---\n' '/\nkind: Role\n/ && /name: test-ibm-vpc-file-pool-csi-gateway\n/ && /events/ && /namespace: default\n/' "$ON" | grep -q . \
-    && awk -v RS='\n---\n' '/\nkind: RoleBinding\n/ && /name: test-ibm-vpc-file-pool-csi-gateway\n/ && /namespace: default\n/' "$ON" | grep -q .; then
-    pass "the audit Events are allowed in default, the only namespace for Events of cluster-scoped objects"
-else
-    fail "the gateway may not write Events in default"
-fi
 check "backup-file-reader exists" "$ON" 'name: backup-file-reader'
 check "backup-file-restorer exists" "$ON" 'name: backup-file-restorer'
 check "the rights-only name" "$ON" 'resources: ["backupfiles"]'

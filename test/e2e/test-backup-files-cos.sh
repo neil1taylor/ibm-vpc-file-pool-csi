@@ -461,7 +461,7 @@ for f in p1 p2 p3 p4; do
 done
 cos_remove_dir "$K"
 pass "no COS key, API key or wrapped key is in the controller, gateway or helper logs, the Events or the statuses"
-EV=$(oc get events -n default -o json | jq -r '.items[] | select(.reason == "SessionStarted" or .reason == "FileRestoreRequested") | .message')
+EV=$(oc get events -n "$DRIVER_NS" -o json | jq -r '.items[] | select(.reason == "SessionStarted" or .reason == "FileRestoreRequested") | .message')
 grep -q "system:serviceaccount:$NS:alice" <<<"$EV" && grep -q "from COS" <<<"$EV" && pass "the audit Events name the user and say the backup was read from COS" || fail "audit events: $EV"
 
 # ---- 8. nothing is left ------------------------------------------------------------------------------------

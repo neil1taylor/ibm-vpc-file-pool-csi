@@ -443,7 +443,7 @@ else
     oc delete rolebinding mallory-reader -n "$NS" >/dev/null
     expect_denied "a user whose binding was removed" "may not read the backups" "$MALLORY" "${SRC_ARGS[@]}" --path /v.txt --to "$OTHER/denied-4"
 
-    EV=$(oc get events -n default -o json | jq -r '.items[] | select(.reason == "FileRestoreRequested") | .message')
+    EV=$(oc get events -n "$DRIVER_NS" -o json | jq -r '.items[] | select(.reason == "FileRestoreRequested") | .message')
     grep -q "system:serviceaccount:$NS:alice" <<<"$EV" && grep -q "/docs" <<<"$EV" && pass "the audit Events name the user and the paths" || fail "audit events: $EV"
     if grep -qF "$(cat "$WORK/alice.sa-token")" <<<"$EV" || grep -qF "$(cat "$WORK/mallory.sa-token")" <<<"$EV"; then fail "an audit Event holds a token"; else pass "the audit Events hold no token"; fi
 fi
@@ -459,7 +459,7 @@ gone_cm() { [ -z "$(oc get configmap -n "$DRIVER_NS" -o json | jq -r --arg u "$C
 wait_until 120 "the list of paths to go with its restore" gone_cm
 pass "deleting a restore removes its list of paths"
 
-EV=$(oc get events -n default -o json | jq -r '.items[] | select(.reason == "FileRestoreDone" or .reason == "FileRestoreFailed") | .message')
+EV=$(oc get events -n "$DRIVER_NS" -o json | jq -r '.items[] | select(.reason == "FileRestoreDone" or .reason == "FileRestoreFailed") | .message')
 grep -q "restored .* files" <<<"$EV" && pass "the controller writes an Event with the counts when a restore ends" || fail "no restore Event: $EV"
 if grep -q "u1000\|u2000\|secret0600\|/docs" <<<"$EV"; then fail "an Event names a path: $EV"; else pass "the Events name no path"; fi
 log "all checks passed"

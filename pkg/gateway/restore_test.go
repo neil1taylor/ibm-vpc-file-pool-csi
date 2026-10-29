@@ -369,10 +369,10 @@ func TestRestoreAuditEvent(t *testing.T) {
 	if strings.ContainsAny(m, "\n\t\x00") || strings.Contains(m, "alice-token") {
 		t.Errorf("message holds a control character or a token: %q", m)
 	}
-	if found.InvolvedObject.Kind != "BackupFileRestore" || found.InvolvedObject.Name != made.Name {
+	if found.Related == nil || found.Related.Kind != "BackupFileRestore" || found.Related.Name != made.Name {
 		t.Errorf("involved %+v", found.InvolvedObject)
 	}
-	if found.Namespace != metav1.NamespaceDefault {
+	if found.Namespace != driverNS {
 		t.Errorf("namespace %q", found.Namespace)
 	}
 	// The stored paths are the canonical form too.

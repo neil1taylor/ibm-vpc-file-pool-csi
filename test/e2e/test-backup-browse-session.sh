@@ -305,7 +305,7 @@ fi
 SESSION=$(bk "$ALICE" browse --policy "$POLICY" --pvc "$NS/data" | awk '{print $2}')
 [ -n "$SESSION" ] && pass "browse opens a session by hand ($SESSION)" || fail "browse printed no session"
 bk "$ALICE" browse --close "$SESSION" >/dev/null && pass "browse --close closes it" || fail "close"
-EV=$(oc get events -n default -o json | jq -r '.items[] | select(.reason == "FileDownloaded" or .reason == "FolderDownloaded" or .reason == "SessionStarted") | .message')
+EV=$(oc get events -n "$DRIVER_NS" -o json | jq -r '.items[] | select(.reason == "FileDownloaded" or .reason == "FolderDownloaded" or .reason == "SessionStarted") | .message')
 grep -q "system:serviceaccount:$NS:alice" <<<"$EV" && grep -q "/v.txt" <<<"$EV" && pass "the audit Events name the user and the path" || fail "audit events: $EV"
 if grep -qF "$(cat "$WORK/alice.sa-token")" <<<"$EV" || grep -q "second" <<<"$EV"; then fail "an audit Event holds a token or content"; else pass "the audit Events hold no token and no content"; fi
 log "all checks passed"
