@@ -26,6 +26,14 @@ const (
 	// ignores it, so a hold can never stop backups for good.
 	browseHoldLimit = 3 * time.Hour
 
+	// guestHoldBudget is the most time a file restore may keep a VM disk held,
+	// counted from the first hold. It ends 15 minutes before browseHoldLimit, so
+	// no Job of the restore can still be reading when the sweep lets the hold go.
+	guestHoldBudget = browseHoldLimit - 15*time.Minute
+
+	// guestMinRun is the least time left that is worth starting a Job for.
+	guestMinRun = time.Minute
+
 	// heldByBrowseMessage is the status of a volume that waits for a browse
 	// session to end. It is not an error.
 	heldByBrowseMessage = "held: waiting for a browse session"

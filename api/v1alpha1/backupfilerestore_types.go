@@ -129,6 +129,13 @@ type BackupFileRestoreStatus struct {
 	// +optional
 	TargetUID types.UID `json:"targetUID,omitempty"`
 
+	// GuestHoldStarted is when this restore first held the VM disk it reads. It is
+	// set once and never moved, so a hold that was let go after its limit cannot
+	// be taken again: the restore fails once the hold budget since this time has
+	// passed. Unset for a restore that does not read a VM disk.
+	// +optional
+	GuestHoldStarted *metav1.Time `json:"guestHoldStarted,omitempty"`
+
 	// SizeGB is the size chosen for a new claim.
 	// +optional
 	SizeGB int64 `json:"sizeGB,omitempty"`

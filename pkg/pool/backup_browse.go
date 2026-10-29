@@ -278,7 +278,7 @@ func (bc *BackupController) startBrowse(ctx context.Context, bb *v1alpha1.Backup
 	if req.Guest {
 		// The disk is held before anything else: from now on no new backup copy
 		// starts. A copy that is running is waited for.
-		if msg := bc.holdForGuest(ctx, string(bb.UID), bb.Spec.Policy, svName, true); msg != "" {
+		if msg := bc.holdForGuest(ctx, string(bb.UID), bb.Spec.Policy, svName, bc.nowFunc(), true); msg != "" {
 			bc.setBrowseStatus(ctx, bb, browsePhasePending, msg)
 			return
 		}
@@ -544,8 +544,9 @@ func equalSecretData(a, b map[string][]byte) bool {
 // once it is on the SubVolume, the replication controller starts no new copy of
 // the disk (or of any disk of the same running VM). Only then is a copy that is
 // already running waited for. The other order would leave a gap in which a copy
-// could start between the check and the hold.
-func (bc *BackupController) holdForGuest(ctx context.Context, session, policy, svName string, waitForCopy bool) string {
+// could start between the check and the hold. since is the time the hold is
+// stamped with when it is added; a hold that is there keeps its first time.
+func (bc *BackupController) holdForGuest(ctx context.Context, session, policy, svName string, since time.Time, waitForCopy bool) string {
 	sv := &v1alpha1.SubVolume{}
 	if err := bc.client.Get(ctx, types.NamespacedName{Name: svName}, sv); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -553,7 +554,7 @@ func (bc *BackupController) holdForGuest(ctx context.Context, session, policy, s
 		}
 		return fmt.Sprintf("waiting: cannot read the volume to hold it: %v", err)
 	}
-	if value := addBrowseHold(sv.Annotations[browseHoldAnnotation], session, bc.nowFunc()); value != sv.Annotations[browseHoldAnnotation] {
+	if value := addBrowseHold(sv.Annotations[browseHoldAnnotation], session, since); value != sv.Annotations[browseHoldAnnotation] {
 		patch := client.MergeFrom(sv.DeepCopy())
 		if sv.Annotations == nil {
 			sv.Annotations = map[string]string{}

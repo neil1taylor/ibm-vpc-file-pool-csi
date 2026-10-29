@@ -32,6 +32,9 @@ const (
 	// modeRestoreFiles runs a file restore Job that reads the file systems inside
 	// a VM disk. The driver image has no libguestfs, so this image runs it.
 	modeRestoreFiles = "restore-files"
+	// modeRestoreWriter runs the writer container of that Job: the only part that
+	// holds the target and the capabilities to write to it. It never reads the disk.
+	modeRestoreWriter = "restore-writer"
 )
 
 // openCOS opens a backup in COS. Tests replace it.
@@ -58,6 +61,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 	klog.InitFlags(fs)
 	mode := fs.String("mode", "", "what to run: "+modeServer+" or "+modeRestoreFiles)
 	restoreSpec := fs.String("restore-files-spec", "", "JSON of the file restore (restore-files mode)")
+	writerSpec := fs.String("restore-writer-spec", "", "JSON of the target and limits of the writer (restore-writer mode)")
 	restorePaths := fs.String("restore-files-paths", "", "file that lists the paths to restore, one per line in escaped form (restore-files mode)")
 	root := fs.String("root", "", "the folder that holds the backup, mounted read-only (not used with --cos-source)")
 	cosSource := fs.String("cos-source", "", "JSON that names a backup exported to COS to read instead of a folder; the keys are files at fixed places (no secret is in it)")
@@ -79,6 +83,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 	termLog := fs.String("termination-log", "/dev/termination-log", "file that gets the reason the session ended")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	if *mode == modeRestoreWriter {
+		return filerestore.MainWriter(*writerSpec)
 	}
 	if *mode == modeRestoreFiles {
 		return filerestore.Main(*restoreSpec, *restorePaths, *termLog)

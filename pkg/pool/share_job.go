@@ -218,6 +218,21 @@ type jobShape struct {
 	readiness *corev1.Probe
 	// pullSecrets are the image pull Secrets of the pod.
 	pullSecrets []string
+	// sidecars are more containers of the pod, run beside the main one.
+	sidecars []sideContainer
+}
+
+// sideContainer is a second container of the Job's pod. It has its own mounts
+// and capabilities, so that a part of the work that needs more rights than the
+// main container does not give them to it. It runs the Job's image.
+type sideContainer struct {
+	name    string
+	command []string
+	// folders are the folders of the Job's shares that this container mounts.
+	folders []folderMount
+	// mounts are the volumes of shape.volumes that it mounts.
+	mounts  []corev1.VolumeMount
+	addCaps []corev1.Capability
 }
 
 // folderMount mounts subPath of share number share at at.
@@ -443,11 +458,15 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 		})
 		mounts = append(mounts, corev1.VolumeMount{Name: volName, MountPath: "/" + volName, ReadOnly: shape.readOnly})
 	}
-	if shape.folders != nil {
-		mounts = nil
-		for _, f := range shape.folders {
-			mounts = append(mounts, corev1.VolumeMount{Name: fmt.Sprintf("share%d", f.share), MountPath: f.at, SubPath: f.subPath, ReadOnly: shape.readOnly || f.readOnly})
+	folderMounts := func(folders []folderMount) []corev1.VolumeMount {
+		var out []corev1.VolumeMount
+		for _, f := range folders {
+			out = append(out, corev1.VolumeMount{Name: fmt.Sprintf("share%d", f.share), MountPath: f.at, SubPath: f.subPath, ReadOnly: shape.readOnly || f.readOnly})
 		}
+		return out
+	}
+	if shape.folders != nil {
+		mounts = folderMounts(shape.folders)
 	}
 
 	mainMounts := append(slices.Clone(mounts), shape.mounts...)
@@ -494,6 +513,34 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}, Add: shape.addCaps},
 		}
 	}
+	containers := []corev1.Container{{
+		Name:            "share-data",
+		Image:           shape.image,
+		Command:         shape.command,
+		Env:             shape.env,
+		Resources:       mainResources,
+		VolumeMounts:    mainMounts,
+		SecurityContext: containerSecurity,
+		ReadinessProbe:  shape.readiness,
+	}}
+	for _, sc := range shape.sidecars {
+		security := containerSecurity
+		if shape.hardened {
+			security = &corev1.SecurityContext{
+				AllowPrivilegeEscalation: boolPtr(false),
+				ReadOnlyRootFilesystem:   boolPtr(true),
+				Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}, Add: sc.addCaps},
+			}
+		}
+		containers = append(containers, corev1.Container{
+			Name:            sc.name,
+			Image:           shape.image,
+			Command:         sc.command,
+			Resources:       resources,
+			VolumeMounts:    append(folderMounts(sc.folders), sc.mounts...),
+			SecurityContext: security,
+		})
+	}
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{Name: jobName, Namespace: r.namespace, Labels: labels, OwnerReferences: owners},
 		Spec: batchv1.JobSpec{
@@ -508,17 +555,8 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 					SecurityContext:              podSecurityContext(shape.runAsUser),
 					InitContainers:               initContainers,
 					ImagePullSecrets:             pullSecretRefs(shape.pullSecrets),
-					Containers: []corev1.Container{{
-						Name:            "share-data",
-						Image:           shape.image,
-						Command:         shape.command,
-						Env:             shape.env,
-						Resources:       mainResources,
-						VolumeMounts:    mainMounts,
-						SecurityContext: containerSecurity,
-						ReadinessProbe:  shape.readiness,
-					}},
-					Volumes: volumes,
+					Containers:                   containers,
+					Volumes:                      volumes,
 				},
 			},
 		},

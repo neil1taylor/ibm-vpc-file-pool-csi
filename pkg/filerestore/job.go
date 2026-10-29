@@ -49,6 +49,12 @@ type JobSpec struct {
 	// moments of a VM disk are undo files next to the disk; only a disk that was
 	// copied as plain files (a stopped VM) has a Moments folder.
 	Guest *GuestSource `json:"guest,omitempty"`
+	// Writer, if set, is the private socket of a separate writer container. The
+	// Job then only reads: every write goes to the writer, which holds the target
+	// and the capabilities (see ServeWriter). Dest, Volume, Staging and Policy
+	// are then the writer's, and are not set here. Used when the backup is a VM
+	// disk, whose file systems are parsed by this Job.
+	Writer string `json:"writer,omitempty"`
 	// Dest is the share that holds the claim.
 	Dest string `json:"dest,omitempty"`
 	// Volume is the new claim's folder below Dest, like pvcs/pvc-...
@@ -160,6 +166,15 @@ func (s JobSpec) validate() (time.Time, uint32, error) {
 	switch s.Mode {
 	case ModeMeasure:
 	case ModeNewClaim, ModeFolder:
+		if s.Writer != "" {
+			if !strings.HasPrefix(s.Writer, "/") {
+				return at, 0, errors.New("writer must be an absolute path")
+			}
+			if s.Dest != "" || s.Volume != "" || s.Staging != "" || s.Policy != "" {
+				return at, 0, errors.New("a Job that sends its writes to a writer names no target")
+			}
+			break
+		}
 		if s.Dest == "" {
 			return at, 0, errors.New("dest is required")
 		}
@@ -275,6 +290,16 @@ func runJob(ctx context.Context, spec JobSpec, pathsFile string, deps jobDeps) (
 	if err != nil {
 		return fail(err)
 	}
+	// The writer is dialled first: it waits only a few minutes for this Job, which
+	// may take longer to start the appliance, and a target that cannot be used
+	// (a claim that holds a VM disk) is then known before the disk is read.
+	var dst committer
+	if spec.Writer != "" && spec.Mode != ModeMeasure {
+		if dst, err = DialWriter(ctx, spec.Writer); err != nil {
+			return fail(err)
+		}
+		defer func() { _ = dst.Close() }()
+	}
 	tree, info, closeTree, err := openBackup(ctx, spec, at, deps)
 	if err != nil {
 		return fail(err)
@@ -298,17 +323,12 @@ func runJob(ctx context.Context, spec JobSpec, pathsFile string, deps jobDeps) (
 		return out, nil
 	}
 
-	var dst *DirDest
-	vol, _ := browse.SplitPath(spec.Volume)
-	if spec.Mode == ModeNewClaim {
-		dst, err = NewVolumeDest(spec.Dest, vol, spec.CapacityBytes)
-	} else {
-		dst, err = NewFolderDest(spec.Dest, vol, spec.Staging, spec.CapacityBytes)
+	if dst == nil {
+		if dst, err = openDest(spec); err != nil {
+			return fail(err)
+		}
+		defer func() { _ = dst.Close() }()
 	}
-	if err != nil {
-		return fail(err)
-	}
-	defer func() { _ = dst.Close() }()
 
 	res, err := Restore(ctx, tree, dst, chosen, Options{
 		Owner: Owner{UID: spec.UID, GID: spec.GID}, RootMode: rootMode, MaxBytes: spec.MaxBytes,
@@ -318,7 +338,7 @@ func runJob(ctx context.Context, spec JobSpec, pathsFile string, deps jobDeps) (
 		return fail(err)
 	}
 	if spec.Mode == ModeFolder {
-		name, err := dst.Commit(FolderName(spec.Policy, momentTime))
+		name, err := dst.CommitMoment(spec.Policy, momentTime)
 		if err != nil {
 			_ = dst.Abort()
 			return fail(err)
@@ -326,6 +346,36 @@ func runJob(ctx context.Context, spec JobSpec, pathsFile string, deps jobDeps) (
 		out.Folder = name
 	}
 	return out, nil
+}
+
+// committer is a Dest that can end a restore into a new folder by moving the
+// staging folder to its name.
+type committer interface {
+	Dest
+	CommitMoment(policy string, moment time.Time) (string, error)
+	Close() error
+}
+
+// localDest is a DirDest in this process.
+type localDest struct{ *DirDest }
+
+func (d localDest) CommitMoment(policy string, moment time.Time) (string, error) {
+	return d.Commit(FolderName(policy, moment))
+}
+
+func openDest(spec JobSpec) (committer, error) {
+	var dst *DirDest
+	var err error
+	vol, _ := browse.SplitPath(spec.Volume)
+	if spec.Mode == ModeNewClaim {
+		dst, err = NewVolumeDest(spec.Dest, vol, spec.CapacityBytes)
+	} else {
+		dst, err = NewFolderDest(spec.Dest, vol, spec.Staging, spec.CapacityBytes)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return localDest{dst}, nil
 }
 
 // openBackup opens the backup the spec names: a folder of the snapshot pool or

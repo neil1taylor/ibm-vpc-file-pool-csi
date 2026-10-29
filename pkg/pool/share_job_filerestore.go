@@ -13,6 +13,7 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/util"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -25,6 +26,11 @@ const (
 	// VM disk. The disk is held (its next backup copy waits) while the Job runs,
 	// and a hold is promised for 2 hours at most.
 	guestFileRestoreDeadline = 2 * time.Hour
+
+	// guestSocketDir is the folder, shared by the reader and the writer of a guest
+	// restore, where the writer listens.
+	guestSocketDir = "/run/restore"
+	guestSocketVol = "restore-sock"
 
 	fileRestorePathsMount = "/etc/filerestore"
 	fileRestorePathsFile  = fileRestorePathsMount + "/paths"
@@ -48,10 +54,6 @@ func (r *ShareJobRunner) RunFileRestore(ctx context.Context, req FileRestoreRequ
 	if err = r.ensurePathsConfigMap(ctx, req); err != nil {
 		return false, filerestore.Outcome{}, err
 	}
-	specJSON, err := json.Marshal(spec)
-	if err != nil {
-		return false, filerestore.Outcome{}, err
-	}
 	var shares []ShareMount
 	var folders []folderMount
 	var cosVolumes []corev1.Volume
@@ -69,8 +71,24 @@ func (r *ShareJobRunner) RunFileRestore(ctx context.Context, req FileRestoreRequ
 	}
 	hardened := true
 	var caps []corev1.Capability
+	var sidecars []sideContainer
+	var sockVolumes []corev1.Volume
+	var sockMounts []corev1.VolumeMount
 	runAs := int64(0)
-	if req.Mode != filerestore.ModeMeasure {
+	if req.Mode != filerestore.ModeMeasure && req.Guest != nil {
+		// The Job that parses the hostile disk only reads. Its writes go to a
+		// second container, which holds the target and the capabilities and never
+		// sees the disk.
+		w, werr := guestWriter(&spec, len(shares))
+		if werr != nil {
+			return false, filerestore.Outcome{}, werr
+		}
+		shares = append(shares, req.Dest)
+		sidecars = []sideContainer{w}
+		sockSize := resource.MustParse("1Mi")
+		sockVolumes = []corev1.Volume{{Name: guestSocketVol, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: &sockSize}}}}
+		sockMounts = []corev1.VolumeMount{{Name: guestSocketVol, MountPath: guestSocketDir}}
+	} else if req.Mode != filerestore.ModeMeasure {
 		// The whole share, because the claim's folder may not exist before the
 		// Job makes it, and a folder that does not exist cannot be mounted. The
 		// Job opens only the claim's folder below it, one name at a time.
@@ -87,6 +105,14 @@ func (r *ShareJobRunner) RunFileRestore(ctx context.Context, req FileRestoreRequ
 		// The driver image has no libguestfs: the guest image runs the Job with its
 		// own program, which has the same restore mode.
 		image, program, deadline = r.guestImage, "/usr/local/bin/browse", guestFileRestoreDeadline
+		if req.MaxRun > 0 && req.MaxRun < deadline {
+			deadline = req.MaxRun
+		}
+	}
+	// The Job's spec is made after guestWriter, which takes the target out of it.
+	specJSON, err := json.Marshal(spec)
+	if err != nil {
+		return false, filerestore.Outcome{}, err
 	}
 	shape := jobShape{
 		image: image,
@@ -95,11 +121,12 @@ func (r *ShareJobRunner) RunFileRestore(ctx context.Context, req FileRestoreRequ
 		runAsUser: runAs,
 		folders:   folders,
 		readOnly:  req.Mode == filerestore.ModeMeasure,
-		volumes: append([]corev1.Volume{{Name: "paths", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+		sidecars:  sidecars,
+		volumes: append(append([]corev1.Volume{{Name: "paths", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
 			LocalObjectReference: corev1.LocalObjectReference{Name: pathsConfigMapName(req.Key)},
 			Items:                []corev1.KeyToPath{{Key: "paths", Path: "paths"}},
-		}}}}, cosVolumes...),
-		mounts:         append([]corev1.VolumeMount{{Name: "paths", MountPath: fileRestorePathsMount, ReadOnly: true}}, cosMounts...),
+		}}}}, cosVolumes...), sockVolumes...),
+		mounts:         append(append([]corev1.VolumeMount{{Name: "paths", MountPath: fileRestorePathsMount, ReadOnly: true}}, cosMounts...), sockMounts...),
 		noToken:        req.COS != nil || req.Guest != nil, // a Job that parses a guest disk or holds keys never gets the API token
 		owner:          &owner,
 		hardened:       hardened,
@@ -120,6 +147,42 @@ func (r *ShareJobRunner) RunFileRestore(ctx context.Context, req FileRestoreRequ
 		return true, filerestore.Outcome{}, nil
 	}
 	return true, out, nil
+}
+
+// guestWriter takes the target out of the spec of the reader and makes the
+// writer that holds it. The writer mounts the claim's folder only (ModeFolder,
+// where the folder exists). A new claim has no folder yet, and a folder that
+// does not exist cannot be mounted, so its writer mounts the share and makes the
+// claim's folder itself; it still opens nothing else.
+func guestWriter(spec *filerestore.JobSpec, shareIndex int) (sideContainer, error) {
+	ws := filerestore.WriterSpec{
+		Mode: spec.Mode, Socket: guestSocketDir + "/writer.sock", Dest: spec.Dest,
+		Staging: spec.Staging, Policy: spec.Policy,
+		CapacityBytes: spec.CapacityBytes, MaxBytes: spec.MaxBytes, UID: spec.UID, GID: spec.GID,
+		Permissions: spec.Permissions,
+	}
+	if spec.UID == nil || spec.GID == nil {
+		return sideContainer{}, errors.New("the owner (uid and gid) of the target claim is not known; the writer of a restore from a VM disk will not guess one")
+	}
+	dst := folderMount{share: shareIndex, at: spec.Dest}
+	if spec.Mode == filerestore.ModeNewClaim {
+		ws.Volume = spec.Volume
+	} else {
+		dst.subPath = spec.Volume
+	}
+	b, err := json.Marshal(ws)
+	if err != nil {
+		return sideContainer{}, err
+	}
+	spec.Writer = ws.Socket
+	spec.Dest, spec.Volume, spec.Staging, spec.Policy, spec.CapacityBytes = "", "", "", "", 0
+	return sideContainer{
+		name:    "writer",
+		command: []string{"/usr/local/bin/browse", "--mode=restore-writer", "--restore-writer-spec=" + string(b)},
+		folders: []folderMount{dst},
+		mounts:  []corev1.VolumeMount{{Name: guestSocketVol, MountPath: guestSocketDir}},
+		addCaps: []corev1.Capability{"CHOWN", "FOWNER"},
+	}, nil
 }
 
 func pathsConfigMapName(key string) string { return shareJobName(key) + "-paths" }

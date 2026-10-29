@@ -12,6 +12,7 @@ var errNeedsUnix = errors.New("restoring files needs a Unix system")
 
 func NewVolumeDest(string, [][]byte, int64) (*DirDest, error)         { return nil, errNeedsUnix }
 func NewFolderDest(string, [][]byte, string, int64) (*DirDest, error) { return nil, errNeedsUnix }
+func NewFolderDestAt(string, string, int64) (*DirDest, error)         { return nil, errNeedsUnix }
 func (*DirDest) Commit(string) (string, error)                        { return "", errNeedsUnix }
 func (*DirDest) Close() error                                         { return nil }
 func (*DirDest) Mkdir([][]byte) error                                 { return errNeedsUnix }
