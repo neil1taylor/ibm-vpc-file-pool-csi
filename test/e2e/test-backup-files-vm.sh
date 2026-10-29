@@ -71,6 +71,10 @@ cleanup() {
         [ -n "$name" ] && oc delete backupbrowse "$name" --ignore-not-found --wait=false
     done < <(oc get backupbrowse -o json | jq -r --arg p "$POLICY" '.items[] | select(.spec.policy == $p) | .metadata.name') || true
     oc delete backupfilerestore -l "$PREFIX-test=yes" --ignore-not-found --wait=false || true
+    # The gateway makes restores without the test's label.
+    while read -r name; do
+        [ -n "$name" ] && oc delete backupfilerestore "$name" --ignore-not-found --wait=false
+    done < <(oc get backupfilerestore -o json | jq -r --arg p "$POLICY" '.items[] | select(.spec.policy == $p) | .metadata.name') || true
     oc delete backuppolicy "$POLICY" --ignore-not-found --wait=false || true
     oc delete ns "$NS" --ignore-not-found --wait=true --timeout=15m || true
     oc delete filesharepool "$SRC" "$SNAP" --ignore-not-found --wait=false || true
@@ -370,7 +374,7 @@ YAML
 OUT=$(inspect "$PREFIX-new" 'echo "hello=$(cat vg0-root/hello.txt)"; echo "a=$(cat vg0-root/docs/a.txt)"')
 grep -q "^hello=second$" <<<"$OUT" && grep -q "^a=one$" <<<"$OUT" \
     && pass "a restore from inside a VM disk keeps the file system name at the top of the new claim" || fail "restored content: $OUT"
-oc get backupfilerestore -o json | jq -e --arg n "$PREFIX-new" '.items[] | select(.spec.targetName == $n) | .spec.guest == true' >/dev/null \
+oc get backupfilerestore -o json | jq -e --arg p "$POLICY" --arg n "$PREFIX-new" '.items[] | select(.spec.policy == $p and .spec.targetName == $n) | .spec.guest == true' >/dev/null \
     && pass "the restore is a guest restore" || fail "the restore has no spec.guest"
 not_held_after_restore() { ! held; }
 wait_until 600 "the hold of the restore to end" not_held_after_restore
