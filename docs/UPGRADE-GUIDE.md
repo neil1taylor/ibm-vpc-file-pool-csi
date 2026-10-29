@@ -45,7 +45,7 @@ Before upgrading, complete every item:
 | v0.11.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.12.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.13.0–v0.13.2 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
-| v0.14.0–v0.15.3 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
+| v0.14.0–v0.16.2 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
 
 ---
 
@@ -124,6 +124,44 @@ kubectl get crd filesharepools.storage.ibmcloud.io -o json | \
 ---
 
 ## Version-Specific Upgrade Notes
+
+### Upgrading to v0.16.2 (from v0.16.1)
+
+**Changes:** a wrong COS key is named as the cause when browsing or restoring files from COS, instead of "COS could not be read".
+
+**CRD changes:** none.
+
+**Action required:** upgrade with Helm (set `image.tag` and `consolePlugin.image.tag` to `v0.16.2` if you pin them). To go back, run `helm rollback`.
+
+### Upgrading to v0.16.1 (from v0.16.0)
+
+**Changes:**
+- **Audit Events for backup browsing and file restore are recorded.** In v0.16.0 the API server refused them. They are now written on the ConfigMap `backup-gateway-info` in the driver namespace, so only people who can read Events there see them. Each Event names the session or restore it is about.
+- The gateway address in `backup-gateway-info` is filled in on a first install, so `kubectl backup` no longer needs `--gateway` until a second upgrade.
+- The replication policy page shows the last error as an error alert.
+
+**CRD changes:** none.
+
+**Action required:** upgrade with Helm (set `image.tag` and `consolePlugin.image.tag` to `v0.16.1` if you pin them). To go back, run `helm rollback`.
+
+### Upgrading to v0.16.0 (from v0.15.3)
+
+**Changes:**
+- **Failover from the console.** A new cluster-scoped resource `Failover` plans and runs a failover on the destination cluster (all VMs, or the VMs you name). The console has a Recovery page for it, and the replication policy page shows how each running VM can be recovered. Nothing is bound to the `<release>-failover-admin` role: bind it to the people who may fail over.
+- **Browse and restore files from a backup.** A new backup gateway (a Deployment, a Service and on OpenShift a Route) and `kubectl backup ls / get / browse / restore-files`. The console has a file browser, download and a restore dialog. A new resource `BackupFileRestore` runs the restore. Backups in COS can be browsed too (plain volumes only; VM disks inside backups are not covered yet).
+- A volume request that finds no room may create one share when `autoExpand` is on. The code did this before; the rule text now says so.
+- Fixes: failover works when the receiver's data claim is a claim the driver provisioned, and a failover Plan with no copies now fails with a clear message; the PoolBench backup event shows the copy speed; the console restore banner waits for the copy state.
+
+**CRD changes (additive):** two new CRDs, `Failover` and `BackupFileRestore`; new fields on `ReplicationPolicy` status (`vms`), and `source`/`fromCOS` on `BackupBrowse`. Apply them first: `kubectl apply --server-side --force-conflicts -f config/crd/`.
+
+**New objects from the chart:** a namespace `ibm-vpc-file-pool-csi-browse` (`backupBrowse.namespace`) for browse sessions, which allows root pods without capabilities; on OpenShift one SCC for it; the gateway Deployment, Service, Route and ConfigMap `backup-gateway-info`; ClusterRoles for the gateway, `failover-admin`, and a Role in the driver namespace that lets the controller create and delete the per-session Secrets for COS browsing. Both `backupBrowse.enabled` and `backupGateway.enabled` are on by default; turn them off to avoid these objects. A cluster that is not OpenShift needs `backupGateway.tls.secretName`.
+
+**Action required:**
+1. Apply the CRDs.
+2. Upgrade with Helm. Set `image.tag` if you pin it. The `browse` and console plugin images change too (`consolePlugin.image.tag`, and the browse tag follows the driver tag unless set).
+3. Bind `<release>-failover-admin` to the administrators who may fail over.
+
+To go back, run `helm rollback`. Unused new CRDs stay.
 
 ### Upgrading to v0.15.3 (from v0.15.2)
 

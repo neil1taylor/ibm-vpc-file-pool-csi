@@ -56,6 +56,10 @@ cleanup() {
     if $KEEP; then log "keeping test resources (--keep)"; return; fi
     log "cleaning up"
     oc delete backupfilerestore -l "$PREFIX-test=yes" --ignore-not-found --wait=false || true
+    # The gateway makes restores without the test's label.
+    while read -r name; do
+        [ -n "$name" ] && oc delete backupfilerestore "$name" --ignore-not-found --wait=false
+    done < <(oc get backupfilerestore -o json | jq -r --arg p "$POLICY" '.items[] | select(.spec.policy == $p) | .metadata.name') || true
     oc delete backuppolicy "$POLICY" --ignore-not-found --wait=false || true
     oc delete ns "$NS" "$NS-other" --ignore-not-found --wait=true --timeout=15m || true
     oc delete filesharepool "$SRC" "$SNAP" "$PLAIN" --ignore-not-found --wait=false || true
@@ -144,7 +148,7 @@ for u in 1000 2000; do
   echo inside > u$u/private0700/inner0600; chmod 600 u$u/private0700/inner0600
   chmod 700 u$u/private0700
   ln -sfn /etc u$u/to-etc
-  nl=$(printf "\n"); printf x > "u$u/line${nl}break"
+  nl=$(printf "\nx"); nl=${nl%x}; printf x > "u$u/line${nl}break"
   chown -R $u:$u u$u
 done
 '
@@ -249,7 +253,7 @@ pass "a restore into a new claim ends Done ($(frmsg "$PREFIX-new"))"
 [ "$(oc get pvc "$PREFIX-new" -n "$NS" -o jsonpath='{.spec.resources.requests.storage}')" = 1Gi ] || fail "the claim is not 1Gi"
 oc get pvc "$PREFIX-new" -n "$NS" -o json | jq -e --arg n "$PREFIX-new" '.metadata.annotations["storage.ibmcloud.io/backup-file-restore"] == $n' >/dev/null || fail "the new claim has no restore annotation"
 
-OUT=$(inspect "$PREFIX-new" 'nl=$(printf "\n")
+OUT=$(inspect "$PREFIX-new" 'nl=$(printf "\nx"); nl=${nl%x}
 echo "docs=$(cat docs/a.txt) v=$(cat v.txt)"
 echo "sha=$(sha256sum big/blob | cut -d" " -f1)"
 echo "secret=$(stat -c "%u:%g %a" u1000/secret0600) $(stat -c "%u:%g %a" u2000/secret0600)"
@@ -257,7 +261,7 @@ echo "private=$(stat -c "%u:%g %a" u2000/private0700) inner=$(stat -c "%u:%g %a"
 echo "linebreak=$([ -f "u2000/line${nl}break" ] && echo yes || echo no)"
 echo "link=$([ -L u2000/to-etc ] && readlink u2000/to-etc || echo notalink) $([ -L u1000/to-etc ] && echo ok || echo notalink)"
 echo "only=$(ls | tr "\n" " ")"
-echo "u2000=$(ls u2000 | wc -l)"')
+echo "u2000=$(find u2000 -mindepth 1 -maxdepth 1 -printf . | wc -c)"')
 echo "$OUT"
 grep -q "^docs=one v=second$" <<<"$OUT" && pass "the new claim holds the latest content" || fail "content: $OUT"
 grep -q "^sha=$BLOB_SHA$" <<<"$OUT" && pass "the 40 MiB file has the same checksum" || fail "checksum: $OUT"
@@ -312,7 +316,9 @@ grep -q "^p2000=2000:2000 700 2000:2000 600$" <<<"$OUT" && pass "a folder with m
 grep -q "^link=/etc$" <<<"$OUT" && pass "the link is a link" || fail "link: $OUT"
 if grep -q "restoring-" <<<"$(grep '^top=' <<<"$OUT")"; then fail "a staging folder is left: $OUT"; else pass "no staging folder is left in the claim"; fi
 
-restore "$PREFIX-ex2" work true "" "$EX_PATHS"
+# The same moment as the first restore: a backup that lands in between would give a new name.
+EX1_MOMENT=$(oc get backupfilerestore "$PREFIX-ex1" -o jsonpath='{.status.restoredMoment}')
+restore "$PREFIX-ex2" work true "$EX1_MOMENT" "$EX_PATHS"
 wait_ended "$PREFIX-ex2" 900
 [ "$(frphase "$PREFIX-ex2")" = Done ] || fail "second restore: $(frmsg "$PREFIX-ex2")"
 FOLDER2=$(oc get backupfilerestore "$PREFIX-ex2" -o jsonpath='{.status.folder}')
@@ -426,7 +432,7 @@ else
     expect_denied "a user with only the view role" "may not read the backups" "$VIEWER" "${SRC_ARGS[@]}" --path /docs --to "$NS/denied-1"
     expect_denied "an admin of another namespace" "may not read the backups" "$MALLORY" "${SRC_ARGS[@]}" --path /docs --to "$OTHER/denied-2"
     expect_denied "restoring into a namespace where the user cannot make claims" "claims in that namespace" "$ALICE" "${SRC_ARGS[@]}" --path /docs --to "$OTHER/denied-3"
-    [ -z "$(oc get backupfilerestore -o json | jq -r '.items[] | select(.spec.targetName | startswith("denied-")) | .metadata.name')" ] && pass "a refused request made no restore" || fail "a restore was made for a refused request"
+    [ -z "$(oc get backupfilerestore -o json | jq -r --arg p "$POLICY" '.items[] | select(.spec.policy == $p and (.spec.targetName | startswith("denied-"))) | .metadata.name')" ] && pass "a refused request made no restore" || fail "a restore was made for a refused request"
     [ -z "$(oc get pvc -A -o name | grep denied- || true)" ] && pass "a refused request made no claim" || fail "a claim was made for a refused request"
 
     oc create rolebinding mallory-reader -n "$NS" --clusterrole=backup-file-reader --serviceaccount="$OTHER:mallory" >/dev/null

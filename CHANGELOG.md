@@ -19,6 +19,28 @@ To make a release:
 
 ## [Unreleased]
 
+## [v0.16.2] — 2026-10-29
+
+A fix release: a wrong COS key is named as the cause when browsing or restoring from COS.
+
+### Fixed
+
+- **A wrong COS key is now named as the cause when browsing or restoring from COS.** COS often answers a wrong key with only a message ("The AWS Access Key ID you provided does not exist in our records", or a signature mismatch) and no error code, so the user was told only that COS could not be read. Found in release test stage 20.
+
+## [v0.16.1] — 2026-10-29
+
+A fix release. Audit Events for backup browsing and file restore are now recorded, the gateway address is filled in on a first install, and the console shows a policy's last error as an error.
+
+### Fixed
+
+- **Audit Events for backup browsing and file restore were refused by the API server.** The gateway and the controller wrote them on the `BackupBrowse` or `BackupFileRestore`, which have no namespace, and the API server accepts an Event for such an object only in `default`, where many people can read. The gateway logged the Event and then failed to store it. The Events are now on the ConfigMap `backup-gateway-info` in the driver namespace and name the session or restore in `related`. Found in the first lab run of release test stage 20.
+- **The policy's last error is shown as an error in the console (issue #46).** On the replication policy page, the Last Error line is now a red inline alert with an icon instead of plain text, and shows `-` when there is no error.
+- **The gateway address is filled in on a first install.** The ConfigMap `backup-gateway-info` had an empty address after the first install on OpenShift, because the Route did not exist yet, so `kubectl backup` needed `--gateway` until a second `helm upgrade`. The chart now uses the host the router will give the Route.
+
+## [v0.16.0] — 2026-10-28
+
+A feature release. **Failover from the console:** a new `Failover` resource plans and runs a failover on the destination cluster, for all VMs or for chosen VMs, and the console has a Recovery page for it. **Files from a backup:** browse, download and restore single files and folders from the backups of plain volumes, in the snapshot pool or in COS, from the command line and the console, through a new backup gateway. Two new CRDs (`Failover`, `BackupFileRestore`), new chart objects (the gateway, a browse namespace) and a new role. VM disks inside backups are not covered yet.
+
 ### Added
 
 - **VM disks in backups, part 1: the disk view, the disk server and the hold (issue #92, phase 5).** `replication.OpenDiskView` shows a backed-up VM disk as it was at any restore point, read-only, rebuilt on the fly from `disk.img` and the undo files (no copy, no scratch space); a property test checks every moment byte for byte against `RestoreDisk` over random histories, including growing and shrinking disks. The new package `pkg/nbd` serves a view to a client as a read-only network block device on a private socket, with the request and option parsers fuzzed. `BackupBrowse` has `spec.guest`: a session on a VM disk holds the disk's next backup copy (the SubVolume annotation `storage.ibmcloud.io/browse-hold`, one entry per session), waits for a copy that is already running, and the replication controller makes no new copy of a held volume (`held: waiting for a browse session`; all disks of a running VM are held together). A hold ends with its helper and is ignored after 3 hours. Nothing creates a guest session yet: the guest helper image and the commands come in the next changes. See [BACKUP-RECOVERY.md](docs/BACKUP-RECOVERY.md#files-inside-a-vm-disk-in-development).

@@ -76,6 +76,8 @@ absent "no CA bundle is injected (clients use the router certificate)" "$OS" 'in
 check "an own certificate Secret is used" "$OWN" 'secretName: my-cert'
 absent "no serving-cert annotation with an own certificate" "$OWN" 'service.beta.openshift.io/serving-cert-secret-name'
 check "the address can be set" "$OWN" 'url: "https://gw.example.com"'
+# Offline there is no ingress domain to look up, so the address stays empty.
+check "no address without a cluster to ask" "$ON" 'url: ""'
 absent "off: no gateway Deployment" "$OFF" 'mode=backup-gateway'
 absent "off: no backup-file-reader" "$OFF" 'backup-file-reader'
 absent "no browse, no gateway" "$NOBROWSE" 'mode=backup-gateway'
