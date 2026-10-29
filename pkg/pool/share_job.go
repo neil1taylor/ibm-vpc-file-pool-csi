@@ -365,27 +365,73 @@ func (r *ShareJobRunner) run(ctx context.Context, key string, shares []ShareMoun
 }
 
 // runMessage is run, and it also returns the termination message of the Job's
-// container when the Job has succeeded. It reads the message before the Job
-// and its pods are removed.
+// main container when the Job has succeeded. It reads the message before the
+// Job and its pods are removed.
 func (r *ShareJobRunner) runMessage(ctx context.Context, key string, shares []ShareMount, shape jobShape) (bool, string, error) {
+	done, msgs, err := r.runMessages(ctx, key, shares, shape)
+	return done, msgs.main(), err
+}
+
+const (
+	// mainContainerName is the container that runs the Job's program. For a file
+	// restore of a VM disk it is the reader, which parses the untrusted disk.
+	mainContainerName = "share-data"
+	// writerContainerName is the container of a guest file restore that holds
+	// the target.
+	writerContainerName = "writer"
+)
+
+// podMessages holds the termination messages of the containers of a Job's pod,
+// in the order of the pod's container statuses.
+type podMessages []containerMessage
+
+type containerMessage struct{ name, msg string }
+
+// of returns the message of the container with that name, or "".
+func (m podMessages) of(name string) string {
+	for _, c := range m {
+		if c.name == name {
+			return c.msg
+		}
+	}
+	return ""
+}
+
+// main returns the message of the Job's main container. A pod whose containers
+// have no names gives its first message.
+func (m podMessages) main() string {
+	if msg := m.of(mainContainerName); msg != "" {
+		return msg
+	}
+	for _, c := range m {
+		if c.name == "" {
+			return c.msg
+		}
+	}
+	return ""
+}
+
+// runMessages is runMessage with the message of every container, by name, so
+// the caller takes each fact from the container that may be trusted for it.
+func (r *ShareJobRunner) runMessages(ctx context.Context, key string, shares []ShareMount, shape jobShape) (bool, podMessages, error) {
 	jobName := shareJobName(key)
 	job := &batchv1.Job{}
 	err := r.client.Get(ctx, types.NamespacedName{Namespace: r.namespace, Name: jobName}, job)
 	switch {
 	case apierrors.IsNotFound(err):
-		return false, "", r.start(ctx, jobName, shares, shape)
+		return false, nil, r.start(ctx, jobName, shares, shape)
 	case err != nil:
-		return false, "", fmt.Errorf("get share Job %s: %w", jobName, err)
+		return false, nil, fmt.Errorf("get share Job %s: %w", jobName, err)
 	case job.Status.Succeeded > 0:
-		msg := r.terminationMessage(ctx, jobName)
+		msgs := r.terminationMessages(ctx, jobName)
 		r.cleanup(ctx, jobName, len(shares))
-		return true, msg, nil
+		return true, msgs, nil
 	case job.Status.Failed > shareJobBackoffLimit || jobHasFailed(job):
-		msg := r.terminationMessage(ctx, jobName)
+		msg := r.terminationMessages(ctx, jobName).main()
 		r.cleanup(ctx, jobName, len(shares))
-		return false, "", &shareJobFailure{job: jobName, msg: msg}
+		return false, nil, &shareJobFailure{job: jobName, msg: msg}
 	default:
-		return false, "", nil
+		return false, nil, nil
 	}
 }
 
@@ -401,22 +447,26 @@ func jobHasFailed(job *batchv1.Job) bool {
 	return false
 }
 
-// terminationMessage returns what the container of a Job's pod wrote to its
-// termination log, or "".
-func (r *ShareJobRunner) terminationMessage(ctx context.Context, jobName string) string {
+// terminationMessages returns what the containers of a Job's pod wrote to their
+// termination logs. A container with no message is left out.
+func (r *ShareJobRunner) terminationMessages(ctx context.Context, jobName string) podMessages {
 	pods := &corev1.PodList{}
 	if err := r.client.List(ctx, pods, client.InNamespace(r.namespace), client.MatchingLabels{shareJobLabel: jobName}); err != nil {
 		klog.V(4).InfoS("Could not list pods of a share data Job", "job", jobName, "err", err)
-		return ""
+		return nil
 	}
 	for _, p := range pods.Items {
+		var out podMessages
 		for _, cs := range p.Status.ContainerStatuses {
 			if cs.State.Terminated != nil && cs.State.Terminated.Message != "" {
-				return cs.State.Terminated.Message
+				out = append(out, containerMessage{cs.Name, cs.State.Terminated.Message})
 			}
 		}
+		if len(out) > 0 {
+			return out
+		}
 	}
-	return ""
+	return nil
 }
 
 // podSecurityContext runs a share data Job as uid. Root Jobs set no group, as
@@ -514,7 +564,7 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 		}
 	}
 	containers := []corev1.Container{{
-		Name:            "share-data",
+		Name:            mainContainerName,
 		Image:           shape.image,
 		Command:         shape.command,
 		Env:             shape.env,

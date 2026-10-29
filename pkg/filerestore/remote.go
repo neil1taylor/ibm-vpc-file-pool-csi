@@ -280,18 +280,18 @@ type WriterDest interface {
 // bytes are counted here, setuid and setgid are removed here, the owner of the
 // policy replaces the reader's, and the name of a committed folder is made here.
 // A session that ends without a commit leaves nothing: dest is aborted. It
-// returns the name of the committed folder, or "".
-func ServeWriter(conn io.ReadWriter, dest WriterDest, pol WriterPolicy) (string, error) {
+// returns what it wrote itself, and the name of the committed folder, if any.
+func ServeWriter(conn io.ReadWriter, dest WriterDest, pol WriterPolicy) (WriterOutcome, error) {
 	s := &writerSession{dest: dest, pol: pol, w: bufio.NewWriter(conn)}
 	r := bufio.NewReaderSize(conn, 64<<10)
 	if err := s.open(); err != nil {
 		_ = dest.Abort()
 		_ = s.reply(message{}, err)
-		return "", err
+		return WriterOutcome{}, err
 	}
 	if err := s.reply(message{}, nil); err != nil {
 		_ = dest.Abort()
-		return "", err
+		return WriterOutcome{}, err
 	}
 	for {
 		typ, payload, err := readFrame(r)
@@ -302,9 +302,9 @@ func ServeWriter(conn io.ReadWriter, dest WriterDest, pol WriterPolicy) (string,
 				_ = dest.Abort()
 			}
 			if errors.Is(err, io.EOF) {
-				return s.name, nil
+				return s.outcome(), nil
 			}
-			return s.name, err
+			return s.outcome(), err
 		}
 		if typ == opData {
 			s.data(payload)
@@ -314,14 +314,14 @@ func ServeWriter(conn io.ReadWriter, dest WriterDest, pol WriterPolicy) (string,
 		if len(payload) > 0 {
 			if err := json.Unmarshal(payload, &m); err != nil {
 				_ = dest.Abort()
-				return "", errors.New("a message of the reader cannot be read")
+				return WriterOutcome{}, errors.New("a message of the reader cannot be read")
 			}
 		}
 		if rerr := s.reply(s.handle(typ, m)); rerr != nil {
 			if !s.committed {
 				_ = dest.Abort()
 			}
-			return s.name, rerr
+			return s.outcome(), rerr
 		}
 	}
 }
@@ -336,6 +336,8 @@ type writerSession struct {
 	fileErr   error // first error of a Write, reported when the file ends
 	committed bool
 	name      string
+	res       Result // what the target accepted
+	fileBytes int64  // bytes of the file that is open
 }
 
 // open fixes the limits of the session before any content is accepted: the
@@ -397,6 +399,7 @@ func (s *writerSession) data(p []byte) {
 	}
 	n, err := s.file.Write(p)
 	s.written += int64(n)
+	s.fileBytes += int64(n)
 	if err != nil {
 		s.fileErr = err
 	}
@@ -441,7 +444,11 @@ func (s *writerSession) handle(typ byte, m message) (message, error) {
 		if err := checkMessagePath(m.Path, false); err != nil {
 			return message{}, err
 		}
-		return message{}, s.dest.Mkdir(m.Path)
+		if err := s.dest.Mkdir(m.Path); err != nil {
+			return message{}, err
+		}
+		s.res.Dirs++
+		return message{}, nil
 	case opFinishDir:
 		if err := checkMessagePath(m.Path, true); err != nil {
 			return message{}, err
@@ -458,7 +465,7 @@ func (s *writerSession) handle(typ byte, m message) (message, error) {
 		if err != nil {
 			return message{}, err
 		}
-		s.file, s.fileErr = f, nil
+		s.file, s.fileErr, s.fileBytes = f, nil, 0
 		return message{}, nil
 	case opFileFinish, opFileClose:
 		f, ferr := s.file, s.fileErr
@@ -473,12 +480,21 @@ func (s *writerSession) handle(typ byte, m message) (message, error) {
 		if typ == opFileClose {
 			return message{}, f.Close()
 		}
-		return message{}, f.Finish(s.meta(m.Meta))
+		if err := f.Finish(s.meta(m.Meta)); err != nil {
+			return message{}, err
+		}
+		s.res.Files++
+		s.res.Bytes += s.fileBytes
+		return message{}, nil
 	case opSymlink:
 		if err := checkMessagePath(m.Path, false); err != nil {
 			return message{}, err
 		}
-		return message{}, s.dest.Symlink(m.Path, m.Target, s.meta(m.Meta))
+		if err := s.dest.Symlink(m.Path, m.Target, s.meta(m.Meta)); err != nil {
+			return message{}, err
+		}
+		s.res.Links++
+		return message{}, nil
 	case opFree:
 		free, err := s.dest.Free()
 		return message{Free: free}, err
@@ -505,4 +521,20 @@ func (s *writerSession) handle(typ byte, m message) (message, error) {
 		return message{Name: name}, nil
 	}
 	return message{}, fmt.Errorf("unknown call %q", typ)
+}
+
+// WriterOutcome is what the writer itself did. The controller takes the counts
+// and the folder from here, never from the reader, whose messages come from a
+// process that parses an untrusted disk.
+type WriterOutcome struct {
+	Result
+	// Folder is the folder the writer committed, if any.
+	Folder string `json:"folder,omitempty"`
+}
+
+// outcome is what this session did: counts of what the target accepted, and
+// the folder it committed. Skipped and Unreadable stay zero: only the reader
+// sees what it left out.
+func (s *writerSession) outcome() WriterOutcome {
+	return WriterOutcome{Result: s.res, Folder: s.name}
 }

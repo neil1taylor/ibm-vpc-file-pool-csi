@@ -111,13 +111,13 @@ func (s WriterSpec) open() (WriterDest, error) {
 // RunWriter waits for the reader on ln and applies its calls to the target. It
 // returns once the reader has ended the session. Whatever the reader did not
 // commit is removed.
-func RunWriter(ctx context.Context, ln net.Listener, spec WriterSpec) error {
+func RunWriter(ctx context.Context, ln net.Listener, spec WriterSpec) (WriterOutcome, error) {
 	if err := spec.validate(); err != nil {
-		return err
+		return WriterOutcome{}, err
 	}
 	conn, err := acceptWithin(ctx, ln, acceptTimeout)
 	if err != nil {
-		return err
+		return WriterOutcome{}, err
 	}
 	defer func() { _ = conn.Close() }()
 	owner := Owner{UID: spec.UID, GID: spec.GID}
@@ -138,16 +138,15 @@ func RunWriter(ctx context.Context, ln net.Listener, spec WriterSpec) error {
 		// The reader gets the reason, in place of its first reply.
 		payload, _ := json.Marshal(message{Err: err.Error()})
 		_ = writeFrame(conn, replyErr, payload)
-		return err
+		return WriterOutcome{}, err
 	}
 	defer func() { _ = dest.Close() }()
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
 	rootMode, _ := rootModeOf(spec.Permissions)
-	_, err = ServeWriter(conn, dest, WriterPolicy{
+	return ServeWriter(conn, dest, WriterPolicy{
 		Mode: spec.Mode, Policy: spec.Policy, RootMode: rootMode, Owner: owner, MaxBytes: spec.MaxBytes,
 	})
-	return err
 }
 
 func acceptWithin(ctx context.Context, ln net.Listener, d time.Duration) (net.Conn, error) {
@@ -172,11 +171,12 @@ func acceptWithin(ctx context.Context, ln net.Listener, d time.Duration) (net.Co
 	}
 }
 
-// MainWriter runs the writer container. It returns the exit code: 0 when the
-// session ended (the reader reports the outcome; a writer that failed has
+// MainWriter runs the writer container. It writes what it wrote (WriterOutcome)
+// to the termination log. It returns the exit code: 0 when the
+// session ended (the reader reports the reason of a failure; a writer that failed has
 // nothing more to say that would help), 2 for a bad command line, 1 when it was
 // stopped or could not listen.
-func MainWriter(specJSON string) int {
+func MainWriter(specJSON, terminationLog string) int {
 	var spec WriterSpec
 	if err := json.Unmarshal([]byte(specJSON), &spec); err != nil || spec.validate() != nil {
 		klog.ErrorS(nil, "restore-writer needs --restore-writer-spec as JSON")
@@ -192,8 +192,13 @@ func MainWriter(specJSON string) int {
 		klog.ErrorS(err, "The writer cannot listen")
 		return 1
 	}
-	err = RunWriter(ctx, ln, spec)
+	out, err := RunWriter(ctx, ln, spec)
 	_ = ln.Close()
+	// The controller takes the counts and the folder from this message. The
+	// reader's message cannot be trusted for them: the reader parses the disk.
+	if b, merr := json.Marshal(out); merr == nil {
+		_ = os.WriteFile(terminationLog, b, 0o600) //nolint:gosec // the path is a fixed argument of the caller
+	}
 	switch {
 	case ctx.Err() != nil:
 		return 1
