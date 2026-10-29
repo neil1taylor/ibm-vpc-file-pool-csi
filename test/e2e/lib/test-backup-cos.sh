@@ -208,4 +208,65 @@ COS_BUCKET=bk
 n=$(cos_locked_note stage18/x-1)
 if echo "$n" | grep -qF "s3://bk/stage18/x-1/" && echo "$n" | grep -qF "cannot be deleted"; then pass "the note names the prefix and says objects stay"; else fail "the note names the prefix and says objects stay"; fi
 
+# --- the emergency key: unwrapped to a private file, never printed, deleted again ---
+SECRET_KEY="readable-backup-key-value"
+echo "{\"apikey\":\"$SECRET_API\"}" >"$WORK/conf/kp-apikey.json"
+printf 'apiVersion: v1\nkind: Secret\nstringData:\n  wrappedKey: "%s"\n' "$SECRET_WRAP" >"$WORK/conf/backup-key-secret.yaml"
+cat >"$WORK/bin/oc" <<'STUB'
+#!/usr/bin/env bash
+[ "$1 $2" = "create -f" ] && printf '{"stringData":{"wrappedKey":"%s"}}' "$STUB_WRAP"
+STUB
+cat >"$WORK/bin/curl" <<'STUB'
+#!/usr/bin/env bash
+for a in "$@"; do echo "$a" >>"$STUB_CURL_ARGS"; done
+url=""; hdr=""; body=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -H) case "$2" in @*) hdr="${2#@}" ;; esac; shift ;;
+        --data-binary) body="${2#@}"; shift ;;
+        http*) url="$1" ;;
+    esac
+    shift
+done
+case "$url" in
+    */identity/token) echo '{"access_token":"tok-secret"}' ;;
+    *action=unwrap)
+        grep -qF "Bearer tok-secret" "$hdr" && grep -qF "$STUB_WRAP" "$body" || exit 22
+        [ "${STUB_KP_DOWN:-}" = 1 ] && exit 22
+        printf '{"plaintext":"%s"}' "$(printf '%s' "$STUB_KEY" | base64)" ;;
+esac
+STUB
+chmod +x "$WORK/bin/oc" "$WORK/bin/curl"
+KP_INSTANCE_ID=inst KP_REGION=eu-de KP_ROOT_KEY_ID=root
+: >"$WORK/curl-args"
+out=$(PATH="$WORK/bin:$PATH" STUB_WRAP="$SECRET_WRAP" STUB_KEY="$SECRET_KEY" STUB_CURL_ARGS="$WORK/curl-args" cos_write_emergency_key "$WORK/emergency-key" 2>&1); rc=$?
+eq "the emergency key is written" "$rc" "0"
+eq "the key file holds the readable key" "$(cat "$WORK/emergency-key" 2>/dev/null)" "$SECRET_KEY"
+if [ "$(stat -c %a "$WORK/emergency-key" 2>/dev/null || stat -f %Lp "$WORK/emergency-key")" = 600 ]; then pass "the key file has mode 0600"; else fail "the key file has mode 0600"; fi
+for v in "$SECRET_KEY" "$SECRET_API" "$SECRET_WRAP" "tok-secret"; do
+    if grep -qF -- "$v" "$WORK/curl-args" || echo "$out" | grep -qF -- "$v"; then fail "a secret value is on a command line or in the output"; else pass "a secret value is not on a command line or in the output"; fi
+done
+no "an existing key file is never replaced" cos_write_emergency_key "$WORK/emergency-key"
+rm -f "$WORK/emergency-key"
+PATH="$WORK/bin:$PATH" STUB_WRAP="$SECRET_WRAP" STUB_KEY="$SECRET_KEY" STUB_CURL_ARGS="$WORK/curl-args" STUB_KP_DOWN=1 cos_write_emergency_key "$WORK/emergency-key" >/dev/null 2>&1; rc=$?
+eq "a failed unwrap fails" "$rc" "1"
+if [ -e "$WORK/emergency-key" ]; then fail "a failed unwrap leaves no key file"; else pass "a failed unwrap leaves no key file"; fi
+COS_EMERGENCY_KEY_FILE="$WORK/forget-key"; echo x >"$COS_EMERGENCY_KEY_FILE"; cos_forget_key
+if [ -e "$WORK/forget-key" ]; then fail "cos_forget_key deletes the key file"; else pass "cos_forget_key deletes the key file"; fi
+unset COS_EMERGENCY_KEY_FILE
+
+# --- the request of the emergency restore names no Key Protect ---
+cat >"$WORK/bin/oc" <<'STUB'
+#!/usr/bin/env bash
+cat "$STUB_BR"
+STUB
+echo '{"items":[{"spec":{"targetNamespace":"ns","targetName":"files-c3","fromCOS":{"emergencyKeyOnly":true,"emergencyKeySecret":"k"}}}]}' >"$WORK/br-good.json"
+echo '{"items":[{"spec":{"targetNamespace":"ns","targetName":"files-c3","fromCOS":{"emergencyKeyOnly":true,"keyProtect":{"region":"x"}}}}]}' >"$WORK/br-kp.json"
+echo '{"items":[{"spec":{"targetNamespace":"ns","targetName":"files-c3","fromCOS":{"keyProtect":{"region":"x"}}}}]}' >"$WORK/br-plain.json"
+echo '{"items":[]}' >"$WORK/br-none.json"
+ok "a request with the readable key alone passes" env PATH="$WORK/bin:$PATH" STUB_BR="$WORK/br-good.json" bash -c "source $HERE/backup-cos.sh; cos_restore_used_no_keyprotect ns/files-c3"
+no "a request with a Key Protect block fails" env PATH="$WORK/bin:$PATH" STUB_BR="$WORK/br-kp.json" bash -c "source $HERE/backup-cos.sh; cos_restore_used_no_keyprotect ns/files-c3"
+no "a request without emergencyKeyOnly fails" env PATH="$WORK/bin:$PATH" STUB_BR="$WORK/br-plain.json" bash -c "source $HERE/backup-cos.sh; cos_restore_used_no_keyprotect ns/files-c3"
+no "no request at all fails" env PATH="$WORK/bin:$PATH" STUB_BR="$WORK/br-none.json" bash -c "source $HERE/backup-cos.sh; cos_restore_used_no_keyprotect ns/files-c3"
+
 exit "$FAILED"

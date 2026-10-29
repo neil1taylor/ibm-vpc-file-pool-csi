@@ -85,6 +85,10 @@ cleanup() {
         [ -n "$name" ] && oc delete backupbrowse "$name" --ignore-not-found --wait=false
     done < <(oc get backupbrowse -o json | jq -r --arg p "$POLICY" '.items[] | select(.spec.policy == $p) | .metadata.name') || true
     oc delete backupfilerestore -l "$PREFIX-test=yes" --ignore-not-found --wait=false || true
+    # The gateway makes restores without the test's label.
+    while read -r name; do
+        [ -n "$name" ] && oc delete backupfilerestore "$name" --ignore-not-found --wait=false
+    done < <(oc get backupfilerestore -o json | jq -r --arg p "$POLICY" '.items[] | select(.spec.policy == $p) | .metadata.name') || true
     oc delete backuppolicy "$POLICY" --ignore-not-found --wait=false || true
     oc delete rolebinding "$PREFIX-cosadmin" -n "$DRIVER_NS" --ignore-not-found || true
     oc delete ns "$NS" "$OTHER" --ignore-not-found --wait=true --timeout=15m || true
@@ -172,7 +176,7 @@ mkdir -p u1000/private0700
 echo secret > u1000/secret0600; chmod 600 u1000/secret0600
 echo inside > u1000/private0700/inner0600; chmod 600 u1000/private0700/inner0600; chmod 700 u1000/private0700
 ln -sfn /etc u1000/to-etc
-nl=$(printf "\n"); printf x > "u1000/line${nl}break"
+nl=$(printf "\nx"); nl=${nl%x}; printf x > "u1000/line${nl}break"
 chown -R 1000:1000 u1000
 '
 BLOB_SHA=$(oc exec -n "$NS" writer -- sha256sum /data/big/blob | awk '{print $1}')
@@ -291,7 +295,7 @@ bk "$ALICE" get "${FROM_POLICY[@]}" /u1000/secret0600 --out - | grep -q secret \
 bk "$ALICE" ls "${FROM_POLICY[@]}" --moments | grep -q "^20" && pass "the moments in COS can be listed" || fail "no moments listed from COS"
 
 # ---- 2. the helper pod ------------------------------------------------------------------------
-BB=$(oc get backupbrowse -o json | jq -r '[.items[] | select(.spec.source == "cos")][0].metadata.name')
+BB=$(oc get backupbrowse -o json | jq -r --arg p "$POLICY" '[.items[] | select(.spec.policy == $p and .spec.source == "cos")][0].metadata.name')
 [ -n "$BB" ] && [ "$BB" != null ] || fail "no COS session was made"
 BUID=$(oc get backupbrowse "$BB" -o jsonpath='{.metadata.uid}')
 oc get backupbrowse "$BB" -o json | jq -e '.spec.source == "cos" and (.spec.fromCOS // null) == null' >/dev/null \
@@ -303,8 +307,12 @@ jq -e '.items[0].spec | (.securityContext.runAsUser // 0) != 0 and .containers[0
     && pass "the COS helper runs as an ordinary user with every capability dropped" || fail "COS helper security context"
 jq -e '[.items[0].spec.containers[0].volumeMounts[] | select(.mountPath | startswith("/var/run/pool-csi")) | .readOnly] | all' <<<"$POD" >/dev/null \
     && pass "the keys are mounted read-only" || fail "a key mount is writable"
-if oc get secret -n "$BROWSE_NS" -o name | grep -qv '^secret/browse-'; then
-    fail "the browse namespace holds a Secret that is not a session Secret: $(oc get secret -n "$BROWSE_NS" -o name | tr '\n' ' ')"
+# Image pull secrets are allowed: the controller copies the driver's there, and
+# OpenShift adds one per service account. Anything else must be a session Secret.
+OTHER=$(oc get secret -n "$BROWSE_NS" -o json | jq -r '.items[] | select((.metadata.name | startswith("browse-")) | not)
+    | select(.type != "kubernetes.io/dockerconfigjson" and .type != "kubernetes.io/dockercfg") | .metadata.name')
+if [ -n "$OTHER" ]; then
+    fail "the browse namespace holds a Secret that is not a session Secret or a pull secret: $(tr '\n' ' ' <<<"$OTHER")"
 else
     pass "the browse namespace holds session Secrets only, never the COS or Key Protect keys"
 fi
@@ -351,9 +359,9 @@ YAML
 
 bk "$ALICE" restore-files "${FROM_POLICY[@]}" --to "$NS/$PREFIX-new" --path /docs --path /v.txt --path /big --path /u1000 --wait --timeout 40m >/dev/null \
     || fail "restore-files --from-cos into a new claim failed"
-NEWFR=$(oc get backupfilerestore -o json | jq -r --arg n "$PREFIX-new" '.items[] | select(.spec.targetName == $n) | .metadata.name')
+NEWFR=$(oc get backupfilerestore -o json | jq -r --arg p "$POLICY" --arg n "$PREFIX-new" '.items[] | select(.spec.policy == $p and .spec.targetName == $n) | .metadata.name')
 [ "$(oc get backupfilerestore "$NEWFR" -o jsonpath='{.spec.source}')" = cos ] && pass "the restore read COS" || fail "the restore did not read COS"
-OUT=$(inspect "$PREFIX-new" 'nl=$(printf "\n")
+OUT=$(inspect "$PREFIX-new" 'nl=$(printf "\nx"); nl=${nl%x}
 echo "docs=$(cat docs/a.txt) v=$(cat v.txt)"
 echo "sha=$(sha256sum big/blob | cut -d" " -f1)"
 echo "secret=$(stat -c "%u:%g %a" u1000/secret0600)"
@@ -386,7 +394,7 @@ OUT=$(inspect work 'echo mine > mine.txt; echo ok')
 grep -q "^ok$" <<<"$OUT" || fail "could not write into the existing claim"
 bk "$ALICE" restore-files "${FROM_POLICY[@]}" --existing --to "$NS/work" --path /u1000 --path /docs --wait --timeout 40m >/dev/null \
     || fail "restore-files --from-cos into an existing claim failed"
-FOLDER=$(oc get backupfilerestore -o json | jq -r '.items[] | select(.spec.targetName == "work") | .status.folder')
+FOLDER=$(oc get backupfilerestore -o json | jq -r --arg p "$POLICY" --arg ns "$NS" '.items[] | select(.spec.policy == $p and .spec.targetNamespace == $ns and .spec.targetName == "work") | .status.folder')
 OUT=$(inspect work "echo \"mine=\$(cat mine.txt)\"; cd '$FOLDER'; echo \"s=\$(stat -c '%u:%g %a' u1000/secret0600)\"; echo \"link=\$(readlink u1000/to-etc)\"")
 grep -q "^mine=mine$" <<<"$OUT" && grep -q "^s=1000:1000 600$" <<<"$OUT" && grep -q "^link=/etc$" <<<"$OUT" \
     && pass "a restore from COS into an existing claim writes a new folder, keeps the backup's owners and leaves the claim's file" || fail "existing claim: $OUT"

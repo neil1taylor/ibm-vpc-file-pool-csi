@@ -230,7 +230,9 @@ func (bc *BackupController) failFileRestore(ctx context.Context, fr *v1alpha1.Ba
 
 // fileRestoreEvent writes an Event on the restore. It holds counts and reasons,
 // never paths or contents. The gateway writes the Event that names the user and
-// the paths.
+// the paths. A BackupFileRestore has no namespace and the API server refuses
+// its Events outside "default", so the Event is on the gateway's ConfigMap in
+// the driver namespace and names the restore in Related.
 func (bc *BackupController) fileRestoreEvent(ctx context.Context, fr *v1alpha1.BackupFileRestore, reason, msg, typ string) {
 	if len(msg) > 1000 {
 		msg = msg[:1000] + "..."
@@ -238,7 +240,9 @@ func (bc *BackupController) fileRestoreEvent(ctx context.Context, fr *v1alpha1.B
 	now := metav1.NewTime(bc.nowFunc())
 	ev := &corev1.Event{
 		ObjectMeta: metav1.ObjectMeta{GenerateName: "file-restore-", Namespace: bc.fileJobs.Namespace()},
-		InvolvedObject: corev1.ObjectReference{APIVersion: v1alpha1.GroupVersion.String(), Kind: "BackupFileRestore",
+		InvolvedObject: corev1.ObjectReference{APIVersion: "v1", Kind: "ConfigMap",
+			Namespace: bc.fileJobs.Namespace(), Name: "backup-gateway-info"},
+		Related: &corev1.ObjectReference{APIVersion: v1alpha1.GroupVersion.String(), Kind: "BackupFileRestore",
 			Name: fr.Name, UID: fr.UID},
 		Reason: reason, Message: msg, Type: typ,
 		Source:         corev1.EventSource{Component: "backup-controller"},

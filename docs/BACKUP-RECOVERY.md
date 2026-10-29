@@ -578,7 +578,7 @@ Without `--session`, each command reuses an open session of the same user, volum
 
 To let someone read another namespace's backups: `kubectl create rolebinding NAME -n N --clusterrole=backup-file-reader --user=alice`. A deleted claim's backup still belongs to its old namespace. A person without the right gets the same "forbidden" whether the volume exists or not. Removing the binding stops access on the next call; a session of that person cannot be used by anyone else.
 
-**Audit.** Each session start, file download, folder download and close writes a Kubernetes Event on the `BackupBrowse` (in the driver namespace): the user, the namespace, the volume, the moment and the **path**, never contents or tokens. People without rights in the driver namespace cannot read them.
+**Audit.** Each session start, file download, folder download and close writes a Kubernetes Event on the `BackupBrowse` (in the driver namespace, on the ConfigMap `backup-gateway-info`, with the session in `related`): the user, the namespace, the volume, the moment and the **path**, never contents or tokens. People without rights in the driver namespace cannot read them.
 
 **How the gateway is reached.** Through the reencrypt Route on OpenShift (the router answers with the cluster's ingress certificate and encrypts again to the gateway); elsewhere through the `…-gateway` Service and an ingress of your own. `kubectl backup` finds the address in the ConfigMap `backup-gateway-info` (readable by every signed-in user) or from `--gateway` or `KUBECTL_BACKUP_GATEWAY`. It trusts the system certificate roots; if your ingress certificate is from a private CA, `--gateway-ca-file` names that CA.
 
@@ -604,7 +604,7 @@ kubectl backup restore-files --status bfr-abc12
 | Into a new claim | also `create` on `persistentvolumeclaims` in the **target** namespace |
 | Into an existing claim | also `update` on `persistentvolumeclaims` and `create` on `pods` in the target namespace (writing files into a claim is the same power as mounting it) |
 
-So an admin of namespace B can restore a file from the backup of namespace A into a claim of B only if someone with rights in A gave them `backup-file-reader` there. Without it they get the same "forbidden" whether the volume exists or not. The gateway reads the existing claim only after both rights are known, and takes its UID, so a claim that is deleted and made again before the restore runs is refused. Each request writes an audit Event `FileRestoreRequested` on the restore (in the driver namespace): the user, the volume, the moment, the target and the **paths**, never contents or tokens. The controller writes `FileRestoreDone` or `FileRestoreFailed` with counts only.
+So an admin of namespace B can restore a file from the backup of namespace A into a claim of B only if someone with rights in A gave them `backup-file-reader` there. Without it they get the same "forbidden" whether the volume exists or not. The gateway reads the existing claim only after both rights are known, and takes its UID, so a claim that is deleted and made again before the restore runs is refused. Each request writes an audit Event `FileRestoreRequested` on the restore (in the driver namespace, on the ConfigMap `backup-gateway-info`, with the session in `related`): the user, the volume, the moment, the target and the **paths**, never contents or tokens. The controller writes `FileRestoreDone` or `FileRestoreFailed` with counts only.
 
 ```yaml
 apiVersion: storage.ibmcloud.io/v1alpha1
@@ -629,7 +629,7 @@ spec:
 | Target | What happens |
 |--------|--------------|
 | A new claim (`existing: false`) | The claim must not exist. The controller first runs a Job that only reads and adds up the size of the chosen files (skipped if you set `sizeGB`). The claim gets that size plus 20%, rounded up to a whole GiB, at least 1 GiB, and the class of the backed-up claim (or `storageClassName`). Pods are held back from the claim until the copy ends, as in a whole-volume restore. The tree under the volume's root is kept: `/var/www/html/index.php` becomes `/var/www/html/index.php` in the new claim |
-| An existing claim (`existing: true`) | The files go into a new folder at the top of the claim, named `restored-<policy>-<moment>` (`-latest` for the latest copy; `-2`, `-3` if the name exists). Nothing else of the claim changes. The claim keeps working for its pods |
+| An existing claim (`existing: true`) | The files go into a new folder at the top of the claim, named `restored-<policy>-<moment>` (the latest copy is named by its newest moment, or `-latest` before the first moment; `-2`, `-3` if the name exists). Nothing else of the claim changes. The claim keeps working for its pods |
 
 A restore never writes over a file that exists, and nothing is put back in place. Download a file with `kubectl backup get` instead, or copy from the restored folder.
 
