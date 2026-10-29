@@ -85,7 +85,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 		return 2
 	}
 	if *mode == modeRestoreWriter {
-		return filerestore.MainWriter(*writerSpec)
+		return filerestore.MainWriter(*writerSpec, *termLog)
 	}
 	if *mode == modeRestoreFiles {
 		return filerestore.Main(*restoreSpec, *restorePaths, *termLog)

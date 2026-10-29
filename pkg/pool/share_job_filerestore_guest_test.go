@@ -9,6 +9,8 @@ import (
 
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/filerestore"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func guestFileRestoreRequest(mode string) FileRestoreRequest {
@@ -274,5 +276,83 @@ func TestRunFileRestore_GuestIntoAnExistingClaimWithoutAnOwnerUsesTheOwnerOfItsF
 	}
 	if spec := jobSpecOf(t, job); spec.UID != nil || spec.GID != nil {
 		t.Errorf("the reader was given an owner: %+v", spec)
+	}
+}
+
+// addContainerMessages adds the Job's pod with one termination message per
+// container name.
+func addContainerMessages(t *testing.T, c client.Client, key string, msgs map[string]string) {
+	t.Helper()
+	job := getShareJob(t, c, key)
+	var statuses []corev1.ContainerStatus
+	for name, msg := range msgs {
+		statuses = append(statuses, corev1.ContainerStatus{Name: name,
+			State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Message: msg}}})
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: key + "-pod", Namespace: testDriverNS, Labels: job.Spec.Template.Labels},
+		Status:     corev1.PodStatus{ContainerStatuses: statuses},
+	}
+	if err := c.Create(context.Background(), pod); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func finishedGuestRestore(t *testing.T, mode string, msgs map[string]string) (bool, filerestore.Outcome, error) {
+	t.Helper()
+	r, c := newApplyRunner()
+	r.SetBrowseGuest(testGuestImage, BrowseGuestConfig{})
+	req := guestFileRestoreRequest(mode)
+	ctx := context.Background()
+	if _, _, err := r.RunFileRestore(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	setJobStatus(t, c, "filerestore-uid-1", 1, 0)
+	addContainerMessages(t, c, "filerestore-uid-1", msgs)
+	return r.RunFileRestore(ctx, req)
+}
+
+// The reader parses the untrusted disk. What lands in the restore status (the
+// counts and the folder) comes from the writer, which holds the target.
+func TestRunFileRestore_GuestCountsAndFolderComeFromTheWriterNotTheReader(t *testing.T) {
+	done, out, err := finishedGuestRestore(t, filerestore.ModeFolder, map[string]string{
+		"share-data": filerestore.EncodeOutcome(filerestore.Outcome{
+			Result: filerestore.Result{Files: 999999, Dirs: 5, Links: 7, Bytes: 1 << 40, Skipped: 2, Unreadable: 4},
+			Folder: "forged-folder", Moment: "2026-10-21T09:00:00Z", Latest: true}),
+		"writer": `{"files":3,"dirs":1,"links":1,"bytes":99,"folder":"restored-nightly-x"}`,
+	})
+	if err != nil || !done {
+		t.Fatalf("= %v %v", done, err)
+	}
+	if out.Files != 3 || out.Dirs != 1 || out.Links != 1 || out.Bytes != 99 || out.Folder != "restored-nightly-x" {
+		t.Errorf("outcome %+v: the counts and the folder must be the writer's", out)
+	}
+	if out.Skipped != 2 || out.Unreadable != 4 || out.Moment != "2026-10-21T09:00:00Z" || !out.Latest {
+		t.Errorf("outcome %+v: what the writer cannot know comes from the reader", out)
+	}
+}
+
+func TestRunFileRestore_GuestWithoutAWriterOutcomeIsAFailureNotTheReadersCounts(t *testing.T) {
+	_, out, err := finishedGuestRestore(t, filerestore.ModeFolder, map[string]string{
+		"share-data": filerestore.EncodeOutcome(filerestore.Outcome{Result: filerestore.Result{Files: 999999}, Folder: "forged-folder"}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Error == "" || out.Files != 0 || out.Folder != "" {
+		t.Errorf("outcome %+v: with no outcome from the writer nothing the reader says about the target may be used", out)
+	}
+}
+
+func TestRunFileRestore_GuestKeepsTheReadersReasonWhenItRefused(t *testing.T) {
+	_, out, err := finishedGuestRestore(t, filerestore.ModeFolder, map[string]string{
+		"share-data": filerestore.EncodeOutcome(filerestore.Outcome{Error: "no file system could be opened"}),
+		"writer":     `{}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Error != "no file system could be opened" || out.Files != 0 {
+		t.Errorf("outcome %+v", out)
 	}
 }

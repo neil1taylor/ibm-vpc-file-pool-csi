@@ -497,12 +497,13 @@ epoch_of() { jq -rn --arg t "$1" '$t | fromdateiso8601'; }
 
 policy_json() { oc get replicationpolicy "$POLICY" -o json; }
 
-# every_volume_copied — all five volumes have a copy moment and no VM copy is running.
+# every_volume_copied — all five volumes have a finished copy and no VM copy is running.
 every_volume_copied() {
     local st
     st=$(policy_json)
-    echo "$st" | jq -c '[.status.subVolumeStatuses[]? | {sv: .subVolumeName[0:12], phase: .vmCopy.phase, moment: .copyMoment, err: .lastError}]'
-    [ "$(echo "$st" | jq '[.status.subVolumeStatuses[]? | select(.copyMoment != null and .vmCopy == null)] | length')" = 5 ]
+    echo "$st" | jq -c '[.status.subVolumeStatuses[]? | {sv: .subVolumeName[0:12], phase: .vmCopy.phase, moment: .copyMoment, synced: .lastSyncTime, err: .lastError}]'
+    # A VM disk records the moment of its copy; a plain volume records only when its copy finished.
+    [ "$(echo "$st" | jq '[.status.subVolumeStatuses[]? | select(.vmCopy == null and (.copyMoment != null or (.lastSyncTime != null and (.lastError // "") == "")))] | length')" = 5 ]
 }
 
 # vm_disks_copied_again — each of the four VM disks has a newer copy moment than the one in FIRST_MOMENTS.

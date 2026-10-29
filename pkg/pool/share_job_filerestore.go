@@ -136,17 +136,44 @@ func (r *ShareJobRunner) RunFileRestore(ctx context.Context, req FileRestoreRequ
 	if req.Guest != nil {
 		r.shapeGuest(&shape)
 	}
-	done, msg, err := r.runMessage(ctx, req.Key, shares, shape)
+	done, msgs, err := r.runMessages(ctx, req.Key, shares, shape)
 	if err != nil || !done {
 		return false, filerestore.Outcome{}, err
 	}
 	var out filerestore.Outcome
-	if jerr := json.Unmarshal([]byte(msg), &out); jerr != nil {
-		// The Job succeeded but left no readable outcome (for example the
-		// message was lost). The files are written; the counts are not known.
-		return true, filerestore.Outcome{}, nil
+	if jerr := json.Unmarshal([]byte(msgs.main()), &out); jerr != nil {
+		out = filerestore.Outcome{}
+		if len(sidecars) == 0 {
+			// The Job succeeded but left no readable outcome (for example the
+			// message was lost). The files are written; the counts are not known.
+			return true, out, nil
+		}
+	}
+	if len(sidecars) > 0 {
+		out = guestOutcome(out, msgs.of(writerContainerName))
 	}
 	return true, out, nil
+}
+
+// guestOutcome makes the outcome of a restore from a VM disk. The reader parses
+// the untrusted disk, so what it says about the target is not used: the counts
+// and the folder are the writer's, which holds the target. The reader gives only
+// what the writer cannot know: the moment that was read, what was left out and
+// what could not be read, and the reason of a failure. A writer that left no
+// outcome makes the restore fail, so a forged reader message never reaches the
+// status.
+func guestOutcome(reader filerestore.Outcome, writerMsg string) filerestore.Outcome {
+	out := filerestore.Outcome{Moment: reader.Moment, Latest: reader.Latest, Error: reader.Error}
+	out.Skipped, out.Unreadable = reader.Skipped, reader.Unreadable
+	var w filerestore.WriterOutcome
+	if err := json.Unmarshal([]byte(writerMsg), &w); err != nil {
+		if out.Error == "" {
+			out.Error = "the writer of the restore left no outcome, so what was restored is not known"
+		}
+		return out
+	}
+	out.Files, out.Dirs, out.Links, out.Bytes, out.Folder = w.Files, w.Dirs, w.Links, w.Bytes, w.Folder
+	return out
 }
 
 // guestWriter takes the target out of the spec of the reader and makes the
@@ -183,7 +210,7 @@ func guestWriter(spec *filerestore.JobSpec, shareIndex int) (sideContainer, erro
 	spec.Writer = ws.Socket
 	spec.Dest, spec.Volume, spec.Staging, spec.Policy, spec.CapacityBytes = "", "", "", "", 0
 	return sideContainer{
-		name:    "writer",
+		name:    writerContainerName,
 		command: []string{"/usr/local/bin/browse", "--mode=restore-writer", "--restore-writer-spec=" + string(b)},
 		folders: []folderMount{dst},
 		mounts:  []corev1.VolumeMount{{Name: guestSocketVol, MountPath: guestSocketDir}},

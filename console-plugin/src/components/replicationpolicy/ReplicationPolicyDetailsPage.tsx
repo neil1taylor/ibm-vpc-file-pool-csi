@@ -351,7 +351,11 @@ const ReplicationPolicyDetailsPage: React.FC = () => {
           <DescriptionListGroup>
             <DescriptionListTerm>Last Error</DescriptionListTerm>
             <DescriptionListDescription>
-              {status?.lastError || '-'}
+              {status?.lastError ? (
+                <Alert variant="danger" isInline isPlain title={status.lastError} />
+              ) : (
+                '-'
+              )}
             </DescriptionListDescription>
           </DescriptionListGroup>
         </DescriptionList>

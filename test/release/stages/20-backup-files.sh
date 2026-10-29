@@ -141,7 +141,7 @@ run() {
 
     [ -f "$E2E_RESTORE" ] || skip "no end-to-end script at $E2E_RESTORE"
     rt_log "running $E2E_RESTORE"
-    env PREFIX="$RESTORE_PREFIX" bash "$E2E_RESTORE" >"$RESTORE_LOG" 2>&1
+    env PREFIX="$RESTORE_PREFIX" BACKUP_BIN="$BACKUP_BIN" bash "$E2E_RESTORE" >"$RESTORE_LOG" 2>&1
     rc=$?
     cat "$RESTORE_LOG"
     if fail_line=$(first_fail_line "$RESTORE_LOG"); then

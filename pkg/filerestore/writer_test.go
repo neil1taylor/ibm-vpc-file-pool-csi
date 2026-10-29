@@ -4,6 +4,7 @@ package filerestore
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
@@ -34,7 +35,7 @@ func startWriter(t *testing.T, spec WriterSpec) (string, chan error) {
 	}
 	spec.Socket = sock
 	done := make(chan error, 1)
-	go func() { done <- RunWriter(context.Background(), ln, spec) }()
+	go func() { _, err := RunWriter(context.Background(), ln, spec); done <- err }()
 	return sock, done
 }
 
@@ -151,7 +152,8 @@ func TestWriterGivesUpOnAReaderThatNeverComes(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		u, g := int64(1), int64(1)
-		done <- RunWriter(ctx, ln, WriterSpec{Mode: ModeFolder, Socket: "/x", Dest: claim, Staging: StagingName("u"), Policy: "p", UID: &u, GID: &g})
+		_, err := RunWriter(ctx, ln, WriterSpec{Mode: ModeFolder, Socket: "/x", Dest: claim, Staging: StagingName("u"), Policy: "p", UID: &u, GID: &g})
+		done <- err
 	}()
 	cancel()
 	if err := waitWriter(t, done); err == nil {
@@ -434,5 +436,136 @@ func TestServeWriterWithoutAnOwnerFromAnywhereIsRefused(t *testing.T) {
 	go func() { _, _ = ServeWriter(b, real, WriterPolicy{Mode: ModeFolder, Policy: "p"}) }()
 	if _, err := newRemoteDest(a); err == nil {
 		t.Fatal("opened without an owner")
+	}
+}
+
+func TestWriterReportsWhatItWroteAndTheFolderItCommitted(t *testing.T) {
+	u, g := int64(os.Getuid()), int64(os.Getgid())
+	_, claim := claimDir(t)
+	sock := sockPath(t)
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		out WriterOutcome
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		out, err := RunWriter(context.Background(), ln, WriterSpec{Mode: ModeFolder, Socket: sock, Dest: claim,
+			Staging: StagingName("u"), Policy: "p", UID: &u, GID: &g})
+		done <- result{out, err}
+	}()
+	rd, err := DialWriter(context.Background(), sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rd.Mkdir([][]byte{[]byte("d")}); err != nil {
+		t.Fatal(err)
+	}
+	f, err := rd.Create([][]byte{[]byte("d"), []byte("f")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write([]byte("hello")); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Finish(Meta{Mode: 0o644}); err != nil {
+		t.Fatal(err)
+	}
+	if err := rd.Symlink([][]byte{[]byte("l")}, []byte("d/f"), Meta{Mode: 0o777}); err != nil {
+		t.Fatal(err)
+	}
+	name, err := rd.CommitMoment("ignored", time.Date(2026, 10, 22, 9, 15, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = rd.Close()
+	r := <-done
+	if r.err != nil {
+		t.Fatal(r.err)
+	}
+	want := WriterOutcome{Result: Result{Files: 1, Dirs: 1, Links: 1, Bytes: 5}, Folder: name}
+	if r.out != want {
+		t.Fatalf("writer outcome = %+v, want %+v", r.out, want)
+	}
+}
+
+func TestWriterDoesNotCountAFileThatFailed(t *testing.T) {
+	u, g := int64(os.Getuid()), int64(os.Getgid())
+	_, claim := claimDir(t)
+	sock := sockPath(t)
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan WriterOutcome, 1)
+	go func() {
+		out, _ := RunWriter(context.Background(), ln, WriterSpec{Mode: ModeFolder, Socket: sock, Dest: claim,
+			Staging: StagingName("u"), Policy: "p", UID: &u, GID: &g, MaxBytes: 10})
+		done <- out
+	}()
+	rd, err := DialWriter(context.Background(), sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := rd.Create([][]byte{[]byte("big")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.Write([]byte(strings.Repeat("x", 11)))
+	if err := f.Finish(Meta{Mode: 0o644}); err == nil {
+		t.Fatal("11 bytes were accepted under a limit of 10")
+	}
+	_ = rd.Close()
+	if out := <-done; out != (WriterOutcome{}) {
+		t.Fatalf("outcome %+v: nothing was written", out)
+	}
+}
+
+func TestMainWriterWritesItsOutcomeToTheTerminationLog(t *testing.T) {
+	u, g := int64(os.Getuid()), int64(os.Getgid())
+	_, claim := claimDir(t)
+	sock := sockPath(t)
+	spec := WriterSpec{Mode: ModeFolder, Socket: sock, Dest: claim, Staging: StagingName("u"), Policy: "p", UID: &u, GID: &g}
+	b, _ := json.Marshal(spec)
+	termLog := filepath.Join(t.TempDir(), "term")
+	code := make(chan int, 1)
+	go func() { code <- MainWriter(string(b), termLog) }()
+	var rd *RemoteDest
+	var err error
+	for i := 0; i < 100; i++ {
+		if rd, err = DialWriter(context.Background(), sock); err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, _ := rd.Create([][]byte{[]byte("f")})
+	_, _ = f.Write([]byte("abc"))
+	if err := f.Finish(Meta{Mode: 0o644}); err != nil {
+		t.Fatal(err)
+	}
+	name, err := rd.CommitMoment("x", time.Date(2026, 10, 22, 9, 15, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = rd.Close()
+	if c := <-code; c != 0 {
+		t.Fatalf("exit code %d", c)
+	}
+	raw, err := os.ReadFile(termLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got WriterOutcome
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("%q: %v", raw, err)
+	}
+	if got.Files != 1 || got.Bytes != 3 || got.Folder != name {
+		t.Fatalf("termination log %q", raw)
 	}
 }
