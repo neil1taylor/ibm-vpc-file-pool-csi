@@ -225,3 +225,13 @@ func TestRunFileRestore_GuestDeadlineIsCappedByWhatIsLeft(t *testing.T) {
 		}
 	}
 }
+
+func TestRunFileRestore_GuestWriterNeedsAnOwner(t *testing.T) {
+	r, _ := newApplyRunner()
+	r.SetBrowseGuest(testGuestImage, BrowseGuestConfig{})
+	req := guestFileRestoreRequest(filerestore.ModeFolder)
+	req.UID, req.GID = nil, nil
+	if _, _, err := r.RunFileRestore(context.Background(), req); err == nil || !strings.Contains(err.Error(), "owner") {
+		t.Fatalf("err = %v: the writer must not guess an owner", err)
+	}
+}

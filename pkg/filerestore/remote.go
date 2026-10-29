@@ -260,8 +260,10 @@ func (f *remoteFile) Close() error {
 type WriterPolicy struct {
 	Mode   string
 	Policy string
-	// Owner, if set, replaces the owner the reader asks for.
+	// Owner replaces the owner the reader asks for. Both fields are required.
 	Owner Owner
+	// RootMode is the mode of the root folder (at most 0777); zero means 0755.
+	RootMode uint32
 	// MaxBytes limits the content the writer accepts; zero means the default.
 	MaxBytes int64
 }
@@ -281,11 +283,12 @@ type WriterDest interface {
 // returns the name of the committed folder, or "".
 func ServeWriter(conn io.ReadWriter, dest WriterDest, pol WriterPolicy) (string, error) {
 	s := &writerSession{dest: dest, pol: pol, w: bufio.NewWriter(conn)}
-	s.limit = pol.MaxBytes
-	if s.limit <= 0 {
-		s.limit = DefaultMaxBytes
-	}
 	r := bufio.NewReaderSize(conn, 64<<10)
+	if err := s.open(); err != nil {
+		_ = dest.Abort()
+		_ = s.reply(message{}, err)
+		return "", err
+	}
 	if err := s.reply(message{}, nil); err != nil {
 		_ = dest.Abort()
 		return "", err
@@ -335,6 +338,30 @@ type writerSession struct {
 	name      string
 }
 
+// open fixes the limits of the session before any content is accepted: the
+// owner must be set, and the content may not exceed the smaller of the limit
+// and the space the target has left.
+func (s *writerSession) open() error {
+	if s.pol.Owner.UID == nil || s.pol.Owner.GID == nil {
+		return errors.New("the writer has no owner to give the restored files")
+	}
+	if s.pol.RootMode&^0o777 != 0 {
+		return errors.New("the mode of the root folder may not have setuid, setgid or sticky bits")
+	}
+	s.limit = s.pol.MaxBytes
+	if s.limit <= 0 {
+		s.limit = DefaultMaxBytes
+	}
+	free, err := s.dest.Free()
+	if err != nil {
+		return fmt.Errorf("read the free space: %w", err)
+	}
+	if free < s.limit {
+		s.limit = free
+	}
+	return nil
+}
+
 func (s *writerSession) reply(m message, err error) error {
 	typ := replyOK
 	if err != nil {
@@ -375,18 +402,25 @@ func (s *writerSession) data(p []byte) {
 	}
 }
 
-// meta sets what the writer insists on.
+// meta sets what the writer insists on: the owner is the policy's, never the
+// reader's, and the mode keeps only the permission bits (no setuid, setgid or
+// sticky bit).
 func (s *writerSession) meta(m *Meta) Meta {
 	var out Meta
 	if m != nil {
 		out = *m
 	}
-	out.Mode &^= setuidSetgid
-	if s.pol.Owner.UID != nil {
-		out.UID = s.pol.Owner.UID
-	}
-	if s.pol.Owner.GID != nil {
-		out.GID = s.pol.Owner.GID
+	out.Mode &= 0o777
+	out.UID, out.GID = s.pol.Owner.UID, s.pol.Owner.GID
+	return out
+}
+
+// rootMeta is the meta of the root folder: the mode is the writer's own.
+func (s *writerSession) rootMeta(m *Meta) Meta {
+	out := s.meta(m)
+	out.Mode = s.pol.RootMode
+	if out.Mode == 0 {
+		out.Mode = defaultRootMode
 	}
 	return out
 }
@@ -411,6 +445,9 @@ func (s *writerSession) handle(typ byte, m message) (message, error) {
 	case opFinishDir:
 		if err := checkMessagePath(m.Path, true); err != nil {
 			return message{}, err
+		}
+		if len(m.Path) == 0 {
+			return message{}, s.dest.FinishDir(nil, s.rootMeta(m.Meta))
 		}
 		return message{}, s.dest.FinishDir(m.Path, s.meta(m.Meta))
 	case opCreate:

@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -32,15 +33,28 @@ type WriterSpec struct {
 	Staging string `json:"staging,omitempty"`
 	Policy  string `json:"policy,omitempty"`
 	// CapacityBytes is the size of the claim; MaxBytes limits one restore.
-	CapacityBytes int64  `json:"capacityBytes,omitempty"`
-	MaxBytes      int64  `json:"maxBytes,omitempty"`
-	UID           *int64 `json:"uid,omitempty"`
-	GID           *int64 `json:"gid,omitempty"`
+	CapacityBytes int64 `json:"capacityBytes,omitempty"`
+	MaxBytes      int64 `json:"maxBytes,omitempty"`
+	// UID and GID are the owner of everything restored. They are required: the
+	// reader never chooses an owner.
+	UID *int64 `json:"uid,omitempty"`
+	GID *int64 `json:"gid,omitempty"`
+	// Permissions is the mode of the root folder, like 0777; empty means 0755.
+	Permissions string `json:"permissions,omitempty"`
 }
 
 func (s WriterSpec) validate() error {
 	if !strings.HasPrefix(s.Socket, "/") || !strings.HasPrefix(s.Dest, "/") {
 		return errors.New("socket and dest must be absolute paths")
+	}
+	if s.UID == nil || s.GID == nil {
+		return errors.New("the writer needs the owner (uid and gid) of the restored files")
+	}
+	if s.Permissions != "" && !permissionsPattern.MatchString(s.Permissions) {
+		return errors.New("permissions must be octal, like 0777")
+	}
+	if _, err := rootModeOf(s.Permissions); err != nil {
+		return err
 	}
 	switch s.Mode {
 	case ModeNewClaim:
@@ -55,6 +69,17 @@ func (s WriterSpec) validate() error {
 		return fmt.Errorf("unknown mode %q", s.Mode)
 	}
 	return nil
+}
+
+func rootModeOf(p string) (uint32, error) {
+	if p == "" {
+		return 0, nil
+	}
+	v, err := strconv.ParseUint(p, 8, 32)
+	if err != nil || v&^0o777 != 0 {
+		return 0, errors.New("permissions must be 0777 or less: no setuid, setgid or sticky bit")
+	}
+	return uint32(v), nil
 }
 
 func (s WriterSpec) open() (WriterDest, error) {
@@ -97,8 +122,9 @@ func RunWriter(ctx context.Context, ln net.Listener, spec WriterSpec) error {
 	defer func() { _ = dest.Close() }()
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
+	rootMode, _ := rootModeOf(spec.Permissions)
 	_, err = ServeWriter(conn, dest, WriterPolicy{
-		Mode: spec.Mode, Policy: spec.Policy, Owner: Owner{UID: spec.UID, GID: spec.GID}, MaxBytes: spec.MaxBytes,
+		Mode: spec.Mode, Policy: spec.Policy, RootMode: rootMode, Owner: Owner{UID: spec.UID, GID: spec.GID}, MaxBytes: spec.MaxBytes,
 	})
 	return err
 }

@@ -159,6 +159,10 @@ func guestWriter(spec *filerestore.JobSpec, shareIndex int) (sideContainer, erro
 		Mode: spec.Mode, Socket: guestSocketDir + "/writer.sock", Dest: spec.Dest,
 		Staging: spec.Staging, Policy: spec.Policy,
 		CapacityBytes: spec.CapacityBytes, MaxBytes: spec.MaxBytes, UID: spec.UID, GID: spec.GID,
+		Permissions: spec.Permissions,
+	}
+	if spec.UID == nil || spec.GID == nil {
+		return sideContainer{}, errors.New("the owner (uid and gid) of the target claim is not known; the writer of a restore from a VM disk will not guess one")
 	}
 	dst := folderMount{share: shareIndex, at: spec.Dest}
 	if spec.Mode == filerestore.ModeNewClaim {
