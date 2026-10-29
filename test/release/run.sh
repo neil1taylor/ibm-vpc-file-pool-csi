@@ -94,8 +94,19 @@ sweep() {
     rt_log "deleting everything labelled $(rt_labels)"
     oc delete namespace -l "$(rt_labels)" --wait=true --timeout=600s >/dev/null 2>&1
     oc delete filesharepools -l "$(rt_labels)" --wait=true --timeout=600s >/dev/null 2>&1
+    # Browse sessions and file restores have no namespace, and the gateway makes them without the
+    # run's label, so they are found by the run's policy names (rt-<run>-...).
+    local backup_objs
+    backup_objs=$(oc get backupbrowse,backupfilerestore -o json 2>/dev/null |
+        jq -r --arg p "$(rt_name '')" '.items[] | select((.spec.policy // "") | startswith($p)) | "\(.kind | ascii_downcase)/\(.metadata.name)"')
+    if [ -n "$backup_objs" ]; then
+        rt_log "a stage left these behind, deleting: $(echo "$backup_objs" | tr '\n' ' ')"
+        echo "$backup_objs" | xargs oc delete --ignore-not-found --wait=true --timeout=300s >/dev/null 2>&1
+    fi
     local left
     left=$(oc get namespaces,filesharepools -l "$(rt_labels)" -o name 2>/dev/null)
+    left="$left$(oc get backupbrowse,backupfilerestore -o json 2>/dev/null |
+        jq -r --arg p "$(rt_name '')" '.items[] | select((.spec.policy // "") | startswith($p)) | " \(.kind)/\(.metadata.name)"')"
     if [ -n "$left" ]; then _record FAIL "left behind: $(echo "$left" | tr '\n' ' ')"
     else _record PASS "nothing left on the cluster"
     fi
