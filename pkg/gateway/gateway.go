@@ -701,7 +701,7 @@ func (g *Gateway) auditObject(ctx context.Context, kind, name string, uid types.
 		InvolvedObject: corev1.ObjectReference{APIVersion: "v1", Kind: "ConfigMap",
 			Namespace: g.cfg.EventNamespace, Name: AuditConfigMap},
 		Related: &corev1.ObjectReference{APIVersion: v1alpha1.GroupVersion.String(), Kind: kind, Name: name, UID: uid},
-		Reason: reason, Message: msg, Type: corev1.EventTypeNormal,
+		Reason:  reason, Message: msg, Type: corev1.EventTypeNormal,
 		Source:         corev1.EventSource{Component: "backup-gateway"},
 		FirstTimestamp: now, LastTimestamp: now, Count: 1,
 	}
