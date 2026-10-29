@@ -56,6 +56,10 @@ cleanup() {
     if $KEEP; then log "keeping test resources (--keep)"; return; fi
     log "cleaning up"
     oc delete backupfilerestore -l "$PREFIX-test=yes" --ignore-not-found --wait=false || true
+    # The gateway makes restores without the test's label.
+    while read -r name; do
+        [ -n "$name" ] && oc delete backupfilerestore "$name" --ignore-not-found --wait=false
+    done < <(oc get backupfilerestore -o json | jq -r --arg p "$POLICY" '.items[] | select(.spec.policy == $p) | .metadata.name') || true
     oc delete backuppolicy "$POLICY" --ignore-not-found --wait=false || true
     oc delete ns "$NS" "$NS-other" --ignore-not-found --wait=true --timeout=15m || true
     oc delete filesharepool "$SRC" "$SNAP" "$PLAIN" --ignore-not-found --wait=false || true
@@ -428,7 +432,7 @@ else
     expect_denied "a user with only the view role" "may not read the backups" "$VIEWER" "${SRC_ARGS[@]}" --path /docs --to "$NS/denied-1"
     expect_denied "an admin of another namespace" "may not read the backups" "$MALLORY" "${SRC_ARGS[@]}" --path /docs --to "$OTHER/denied-2"
     expect_denied "restoring into a namespace where the user cannot make claims" "claims in that namespace" "$ALICE" "${SRC_ARGS[@]}" --path /docs --to "$OTHER/denied-3"
-    [ -z "$(oc get backupfilerestore -o json | jq -r '.items[] | select(.spec.targetName | startswith("denied-")) | .metadata.name')" ] && pass "a refused request made no restore" || fail "a restore was made for a refused request"
+    [ -z "$(oc get backupfilerestore -o json | jq -r --arg p "$POLICY" '.items[] | select(.spec.policy == $p and (.spec.targetName | startswith("denied-"))) | .metadata.name')" ] && pass "a refused request made no restore" || fail "a restore was made for a refused request"
     [ -z "$(oc get pvc -A -o name | grep denied- || true)" ] && pass "a refused request made no claim" || fail "a claim was made for a refused request"
 
     oc create rolebinding mallory-reader -n "$NS" --clusterrole=backup-file-reader --serviceaccount="$OTHER:mallory" >/dev/null
