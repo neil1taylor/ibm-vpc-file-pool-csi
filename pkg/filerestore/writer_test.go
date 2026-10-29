@@ -381,8 +381,8 @@ func TestWriterIgnoresTheOwnerAndTheModeBitsTheReaderAsksFor(t *testing.T) {
 			t.Errorf("%s: owner %d:%d, want the policy's", name, sys.Uid, sys.Gid)
 		}
 	}
-	if err := rd.Mkdir([][]byte{[]byte("d")}); err != nil {
-		t.Fatal(err)
+	if merr := rd.Mkdir([][]byte{[]byte("d")}); merr != nil {
+		t.Fatal(merr)
 	}
 	if err := rd.FinishDir([][]byte{[]byte("d")}, Meta{Mode: 0o1777, UID: &root}); err != nil {
 		t.Fatal(err)
@@ -453,29 +453,29 @@ func TestWriterReportsWhatItWroteAndTheFolderItCommitted(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		out, err := RunWriter(context.Background(), ln, WriterSpec{Mode: ModeFolder, Socket: sock, Dest: claim,
+		out, rerr := RunWriter(context.Background(), ln, WriterSpec{Mode: ModeFolder, Socket: sock, Dest: claim,
 			Staging: StagingName("u"), Policy: "p", UID: &u, GID: &g})
-		done <- result{out, err}
+		done <- result{out, rerr}
 	}()
 	rd, err := DialWriter(context.Background(), sock)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := rd.Mkdir([][]byte{[]byte("d")}); err != nil {
-		t.Fatal(err)
+	if merr := rd.Mkdir([][]byte{[]byte("d")}); merr != nil {
+		t.Fatal(merr)
 	}
 	f, err := rd.Create([][]byte{[]byte("d"), []byte("f")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Write([]byte("hello")); err != nil {
-		t.Fatal(err)
+	if _, werr := f.Write([]byte("hello")); werr != nil {
+		t.Fatal(werr)
 	}
-	if err := f.Finish(Meta{Mode: 0o644}); err != nil {
-		t.Fatal(err)
+	if ferr := f.Finish(Meta{Mode: 0o644}); ferr != nil {
+		t.Fatal(ferr)
 	}
-	if err := rd.Symlink([][]byte{[]byte("l")}, []byte("d/f"), Meta{Mode: 0o777}); err != nil {
-		t.Fatal(err)
+	if lerr := rd.Symlink([][]byte{[]byte("l")}, []byte("d/f"), Meta{Mode: 0o777}); lerr != nil {
+		t.Fatal(lerr)
 	}
 	name, err := rd.CommitMoment("ignored", time.Date(2026, 10, 22, 9, 15, 0, 0, time.UTC))
 	if err != nil {
@@ -546,8 +546,8 @@ func TestMainWriterWritesItsOutcomeToTheTerminationLog(t *testing.T) {
 	}
 	f, _ := rd.Create([][]byte{[]byte("f")})
 	_, _ = f.Write([]byte("abc"))
-	if err := f.Finish(Meta{Mode: 0o644}); err != nil {
-		t.Fatal(err)
+	if ferr := f.Finish(Meta{Mode: 0o644}); ferr != nil {
+		t.Fatal(ferr)
 	}
 	name, err := rd.CommitMoment("x", time.Date(2026, 10, 22, 9, 15, 0, 0, time.UTC))
 	if err != nil {
