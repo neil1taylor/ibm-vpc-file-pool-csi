@@ -25,7 +25,8 @@ const POOL = process.env.RECOVERY_POOL;
 const PVCS = (process.env.RECOVERY_PVCS || '').split(',').filter(Boolean);
 
 const RECOVERY_ROUTE = '/vpc-file-pools/replication/~recovery';
-const PLAN_READY = /^Plan made from /;
+// Not anchored: the alert title starts with a hidden "Info alert:" for screen readers.
+const PLAN_READY = /Plan made from /;
 const PLAN_TOO_OLD = 'This plan is too old to fail over from. Click Refresh.';
 
 /**
