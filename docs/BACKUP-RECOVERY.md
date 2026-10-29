@@ -628,7 +628,7 @@ spec:
 | Target | What happens |
 |--------|--------------|
 | A new claim (`existing: false`) | The claim must not exist. The controller first runs a Job that only reads and adds up the size of the chosen files (skipped if you set `sizeGB`). The claim gets that size plus 20%, rounded up to a whole GiB, at least 1 GiB, and the class of the backed-up claim (or `storageClassName`). Pods are held back from the claim until the copy ends, as in a whole-volume restore. The tree under the volume's root is kept: `/var/www/html/index.php` becomes `/var/www/html/index.php` in the new claim |
-| An existing claim (`existing: true`) | The files go into a new folder at the top of the claim, named `restored-<policy>-<moment>` (`-latest` for the latest copy; `-2`, `-3` if the name exists). Nothing else of the claim changes. The claim keeps working for its pods |
+| An existing claim (`existing: true`) | The files go into a new folder at the top of the claim, named `restored-<policy>-<moment>` (the latest copy is named by its newest moment, or `-latest` before the first moment; `-2`, `-3` if the name exists). Nothing else of the claim changes. The claim keeps working for its pods |
 
 A restore never writes over a file that exists, and nothing is put back in place. Download a file with `kubectl backup get` instead, or copy from the restored folder.
 
