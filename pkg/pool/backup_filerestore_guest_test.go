@@ -280,3 +280,35 @@ func TestGuestHoldBudgetEndsBeforeTheSweepLetsGo(t *testing.T) {
 		t.Fatalf("budget %v must end before the sweep releases the hold at %v", guestHoldBudget, browseHoldLimit)
 	}
 }
+
+func TestFileRestoreGuest_ANewClaimWithoutAnOwnerGetsThePoolDefault(t *testing.T) {
+	e := newGuestRestoreEnv(t)
+	uid, gid := int64(2001), int64(2002)
+	e.create(&v1alpha1.FileSharePool{
+		ObjectMeta: metav1.ObjectMeta{Name: "owner-pool"},
+		Spec:       v1alpha1.FileSharePoolSpec{DefaultUID: &uid, DefaultGID: &gid},
+	})
+	one := int64(5)
+	cases := []struct {
+		name     string
+		sv       v1alpha1.SubVolumeSpec
+		wantUID  *int64
+		wantGID  *int64
+		wantNone bool
+	}{
+		{"both unset", v1alpha1.SubVolumeSpec{PoolName: "owner-pool"}, &uid, &gid, false},
+		{"gid unset", v1alpha1.SubVolumeSpec{PoolName: "owner-pool", UID: &one}, &one, &gid, false},
+		{"no pool", v1alpha1.SubVolumeSpec{PoolName: "no-such-pool"}, nil, nil, true},
+	}
+	for _, c := range cases {
+		sv := &v1alpha1.SubVolume{Spec: c.sv}
+		gotU, gotG := e.bc.ownerOfClaim(e.ctx, sv, true)
+		if c.wantNone != (gotU == nil && gotG == nil) || (!c.wantNone && (*gotU != *c.wantUID || *gotG != *c.wantGID)) {
+			t.Errorf("%s: owner %v:%v", c.name, gotU, gotG)
+		}
+	}
+	// An existing claim keeps what the SubVolume says, or nothing: the writer then reads the owner of the folder.
+	if u, g := e.bc.ownerOfClaim(e.ctx, &v1alpha1.SubVolume{Spec: v1alpha1.SubVolumeSpec{PoolName: "owner-pool"}}, false); u != nil || g != nil {
+		t.Errorf("existing claim: %v:%v, want the folder's owner to be used", u, g)
+	}
+}

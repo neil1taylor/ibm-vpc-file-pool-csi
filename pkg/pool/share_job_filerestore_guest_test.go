@@ -252,8 +252,27 @@ func TestRunFileRestore_GuestWriterNeedsAnOwner(t *testing.T) {
 	r, _ := newApplyRunner()
 	r.SetBrowseGuest(testGuestImage, BrowseGuestConfig{})
 	req := guestFileRestoreRequest(filerestore.ModeFolder)
+	req.Mode = filerestore.ModeNewClaim
 	req.UID, req.GID = nil, nil
-	if _, _, err := r.RunFileRestore(context.Background(), req); err == nil || !strings.Contains(err.Error(), "owner") {
+	if _, _, err := r.RunFileRestore(context.Background(), req); err == nil || !strings.Contains(err.Error(), "the owner of the target claim is not known") {
 		t.Fatalf("err = %v: the writer must not guess an owner", err)
+	}
+}
+
+func TestRunFileRestore_GuestIntoAnExistingClaimWithoutAnOwnerUsesTheOwnerOfItsFolder(t *testing.T) {
+	r, c := newApplyRunner()
+	r.SetBrowseGuest(testGuestImage, BrowseGuestConfig{})
+	req := guestFileRestoreRequest(filerestore.ModeFolder)
+	req.UID, req.GID = nil, nil
+	if _, _, err := r.RunFileRestore(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	job := fileRestoreJob(t, c)
+	ws := writerSpecOf(t, job.Spec.Template.Spec.Containers[1])
+	if !ws.OwnerFromFolder || ws.UID != nil || ws.GID != nil {
+		t.Errorf("writer spec %+v: the writer must measure the owner of the folder", ws)
+	}
+	if spec := jobSpecOf(t, job); spec.UID != nil || spec.GID != nil {
+		t.Errorf("the reader was given an owner: %+v", spec)
 	}
 }

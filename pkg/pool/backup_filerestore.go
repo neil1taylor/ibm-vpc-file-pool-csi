@@ -500,12 +500,36 @@ func (bc *BackupController) fileRestoreIntoClaim(ctx context.Context, fr *v1alph
 	req.Mode = filerestore.ModeFolder
 	req.Dest, req.Volume = subVolumeShareMount(sv), sv.Spec.SubPath
 	req.CapacityBytes = pvc.Spec.Resources.Requests.Storage().Value()
-	req.UID, req.GID, req.Permissions = sv.Spec.UID, sv.Spec.GID, sv.Spec.Permissions
+	req.UID, req.GID = bc.ownerOfClaim(ctx, sv, false)
+	req.Permissions = sv.Spec.Permissions
 	out, done := bc.runFileRestoreJob(ctx, fr, restorePhaseRestoring, "copying the files into a new folder of the claim", "", req)
 	if !done {
 		return
 	}
 	bc.finishFileRestore(ctx, fr, out)
+}
+
+// ownerOfClaim is the owner that a restore gives its files: what the SubVolume
+// says. If it says nothing and the claim is new, the defaults of its pool fill
+// the gaps. For an existing claim nothing more is looked up here: a restore of a
+// VM disk reads the owner of the claim's folder in its writer, and any other
+// restore keeps the owner of the backup.
+func (bc *BackupController) ownerOfClaim(ctx context.Context, sv *v1alpha1.SubVolume, newClaim bool) (uid, gid *int64) {
+	uid, gid = sv.Spec.UID, sv.Spec.GID
+	if !newClaim || (uid != nil && gid != nil) {
+		return uid, gid
+	}
+	pool := &v1alpha1.FileSharePool{}
+	if err := bc.client.Get(ctx, types.NamespacedName{Name: sv.Spec.PoolName}, pool); err != nil {
+		return uid, gid
+	}
+	if uid == nil {
+		uid = pool.Spec.DefaultUID
+	}
+	if gid == nil {
+		gid = pool.Spec.DefaultGID
+	}
+	return uid, gid
 }
 
 // fileRestoreSizeGB sizes a new claim: the chosen files plus the margin, rounded
@@ -578,7 +602,8 @@ func (bc *BackupController) fileRestoreIntoNewClaim(ctx context.Context, fr *v1a
 	req.Mode = filerestore.ModeNewClaim
 	req.Dest, req.Volume = subVolumeShareMount(sv), sv.Spec.SubPath
 	req.CapacityBytes = size << 30
-	req.UID, req.GID, req.Permissions = sv.Spec.UID, sv.Spec.GID, sv.Spec.Permissions
+	req.UID, req.GID = bc.ownerOfClaim(ctx, sv, true)
+	req.Permissions = sv.Spec.Permissions
 	held := fmt.Sprintf(". The new claim %s/%s is held back; delete it and ask again", sp.TargetNamespace, sp.TargetName)
 	out, done := bc.runFileRestoreJob(ctx, fr, restorePhaseRestoring, "copying the files into the new claim", held, req)
 	if !done {

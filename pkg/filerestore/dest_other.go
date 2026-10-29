@@ -21,3 +21,5 @@ func (*DirDest) Create([][]byte) (DestFile, error)                    { return n
 func (*DirDest) Symlink([][]byte, []byte, Meta) error                 { return errNeedsUnix }
 func (*DirDest) Free() (int64, error)                                 { return 0, errNeedsUnix }
 func (*DirDest) Abort() error                                         { return errNeedsUnix }
+
+func folderOwner(string) (int64, int64, error) { return 0, 0, errNeedsUnix }

@@ -35,10 +35,14 @@ type WriterSpec struct {
 	// CapacityBytes is the size of the claim; MaxBytes limits one restore.
 	CapacityBytes int64 `json:"capacityBytes,omitempty"`
 	MaxBytes      int64 `json:"maxBytes,omitempty"`
-	// UID and GID are the owner of everything restored. They are required: the
-	// reader never chooses an owner.
+	// UID and GID are the owner of everything restored. The reader never chooses
+	// an owner: it comes from here, or from OwnerFromFolder.
 	UID *int64 `json:"uid,omitempty"`
 	GID *int64 `json:"gid,omitempty"`
+	// OwnerFromFolder (ModeFolder, UID and GID unset) makes the writer use the
+	// owner that the claim's folder has when the session opens, before any data
+	// is accepted. It is fixed for the session.
+	OwnerFromFolder bool `json:"ownerFromFolder,omitempty"`
 	// Permissions is the mode of the root folder, like 0777; empty means 0755.
 	Permissions string `json:"permissions,omitempty"`
 }
@@ -47,7 +51,11 @@ func (s WriterSpec) validate() error {
 	if !strings.HasPrefix(s.Socket, "/") || !strings.HasPrefix(s.Dest, "/") {
 		return errors.New("socket and dest must be absolute paths")
 	}
-	if s.UID == nil || s.GID == nil {
+	if s.OwnerFromFolder {
+		if s.Mode != ModeFolder || s.UID != nil || s.GID != nil {
+			return errors.New("the owner of the folder is used only for a new folder, with no uid and gid")
+		}
+	} else if s.UID == nil || s.GID == nil {
 		return errors.New("the writer needs the owner (uid and gid) of the restored files")
 	}
 	if s.Permissions != "" && !permissionsPattern.MatchString(s.Permissions) {
@@ -112,7 +120,20 @@ func RunWriter(ctx context.Context, ln net.Listener, spec WriterSpec) error {
 		return err
 	}
 	defer func() { _ = conn.Close() }()
-	dest, err := spec.open()
+	owner := Owner{UID: spec.UID, GID: spec.GID}
+	var dest WriterDest
+	if spec.OwnerFromFolder {
+		// Measured now, before the staging folder is made and before any data.
+		uid, gid, oerr := folderOwner(spec.Dest)
+		if oerr != nil {
+			err = oerr
+		} else {
+			owner = Owner{UID: &uid, GID: &gid}
+		}
+	}
+	if err == nil {
+		dest, err = spec.open()
+	}
 	if err != nil {
 		// The reader gets the reason, in place of its first reply.
 		payload, _ := json.Marshal(message{Err: err.Error()})
@@ -124,7 +145,7 @@ func RunWriter(ctx context.Context, ln net.Listener, spec WriterSpec) error {
 	defer stop()
 	rootMode, _ := rootModeOf(spec.Permissions)
 	_, err = ServeWriter(conn, dest, WriterPolicy{
-		Mode: spec.Mode, Policy: spec.Policy, RootMode: rootMode, Owner: Owner{UID: spec.UID, GID: spec.GID}, MaxBytes: spec.MaxBytes,
+		Mode: spec.Mode, Policy: spec.Policy, RootMode: rootMode, Owner: owner, MaxBytes: spec.MaxBytes,
 	})
 	return err
 }
