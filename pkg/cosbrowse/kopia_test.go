@@ -129,6 +129,8 @@ func TestKopia_FailuresAreWordedForPeopleAndLeakNoRawText(t *testing.T) {
 	}{
 		{"ERROR unable to open repository: invalid repository password", "backup key does not open"},
 		{"operation error S3: AccessDenied, key AKIA77777", "COS refused the key"},
+		{`can't connect to storage: error retrieving storage config from bucket "b": The AWS Access Key ID you provided does not exist in our records.`, "COS refused the key"},
+		{"The request signature we calculated does not match the signature you provided.", "COS refused the key"},
 		{"NoSuchBucket: The specified bucket does not exist", "bucket does not exist"},
 		{"dial tcp 10.1.2.3:443: i/o timeout", "COS cannot be reached"},
 		{"repository not initialized in the provided storage", "no backup repository"},
