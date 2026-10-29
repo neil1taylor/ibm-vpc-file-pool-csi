@@ -279,6 +279,84 @@ cos_restore() {
         fail "the COS restore of $1 failed"
 }
 
+# --- The emergency key: the readable backup key, used with --backup-key-file when Key Protect
+# --- cannot be reached. cos-setup shows it once, to a person, in an interactive shell, so the
+# --- test cannot read that screen. It gets the same key by asking Key Protect to unwrap the
+# --- wrapped copy (the answer is the key cos-setup showed) and writes it to a file of mode 0600.
+# --- Only the restore that uses the file runs without Key Protect.
+
+cos_kp_url() { echo "${KP_URL:-https://$KP_REGION.kms.cloud.ibm.com}"; }
+cos_iam_url() { echo "${IAM_URL:-https://iam.cloud.ibm.com}"; }
+
+# cos_write_emergency_key OUTFILE — unwrap the wrapped backup key with Key Protect and write the
+# readable key to OUTFILE (mode 0600, never replaced). Every secret goes from file to file: no
+# variable, no command line, no output. On any failure OUTFILE is not left behind.
+cos_write_emergency_key() {
+    local out="$1" d rc=0
+    [ ! -e "$out" ] || { echo "$out exists; it is never replaced"; return 1; }
+    d=$(cos_private_dir) || return 1
+    (
+        umask 077
+        jq -j '.apikey // empty' "$(cos_kp_file)" >"$d/apikey" 2>/dev/null
+        oc create -f "$(cos_wrapped_file)" --dry-run=client -o json 2>/dev/null |
+            jq -j '.stringData.wrappedKey // (.data.wrappedKey // "" | @base64d)' >"$d/wrapped" 2>/dev/null
+        [ -s "$d/apikey" ] && [ -s "$d/wrapped" ] || { echo "cannot read the API key or the wrapped backup key"; exit 1; }
+        curl -sSf -X POST "$(cos_iam_url)/identity/token" -H 'Accept: application/json' \
+            --data-urlencode grant_type=urn:ibm:params:oauth:grant-type:apikey --data-urlencode "apikey@$d/apikey" \
+            2>/dev/null | jq -j '"Authorization: Bearer " + .access_token' >"$d/auth" 2>/dev/null
+        [ -s "$d/auth" ] || { echo "cannot get an IAM token with the Key Protect API key"; exit 1; }
+        jq -cR '{ciphertext: .}' "$d/wrapped" >"$d/body"
+        { printf 'Bluemix-Instance: %s\n' "$KP_INSTANCE_ID"; echo 'Content-Type: application/vnd.ibm.kms.key_action+json'; cat "$d/auth"; echo; } >"$d/headers"
+        curl -sSf -X POST "$(cos_kp_url)/api/v2/keys/$KP_ROOT_KEY_ID?action=unwrap" -H "@$d/headers" --data-binary "@$d/body" \
+            2>/dev/null | jq -j '.plaintext // empty' | base64 -d >"$d/key" 2>/dev/null
+        [ -s "$d/key" ] || { echo "Key Protect did not unwrap the backup key"; exit 1; }
+        cp "$d/key" "$out"
+    ) || rc=$?
+    cos_remove_dir "$d"
+    [ "$rc" -eq 0 ] || rm -f "$out"
+    return "$rc"
+}
+
+# cos_emergency_key_file — the path of the readable key file, made once per run. The stage sets
+# COS_EMERGENCY_KEY_FILE to a path in its private folder (it deletes that folder); on its own the
+# test makes a private folder, which cos_forget_key removes.
+cos_emergency_key_file() {
+    if [ -z "${COS_EMERGENCY_KEY_FILE:-}" ]; then
+        COS_KEY_TMP_DIR=$(cos_private_dir) || return 1
+        COS_EMERGENCY_KEY_FILE="$COS_KEY_TMP_DIR/emergency-key"
+    fi
+    if [ ! -s "$COS_EMERGENCY_KEY_FILE" ]; then
+        cos_write_emergency_key "$COS_EMERGENCY_KEY_FILE" || return 1
+    fi
+    echo "$COS_EMERGENCY_KEY_FILE"
+}
+
+# cos_forget_key — delete the readable key file and its private folder.
+cos_forget_key() {
+    [ -z "${COS_EMERGENCY_KEY_FILE:-}" ] || rm -f "$COS_EMERGENCY_KEY_FILE"
+    [ -z "${COS_KEY_TMP_DIR:-}" ] || cos_remove_dir "$COS_KEY_TMP_DIR"
+    return 0
+}
+
+# cos_restore_emergency PV TO SIZE_GB MOMENT — restore with the readable key file and no Key
+# Protect flag, so the command uses the readable key alone and never calls Key Protect.
+cos_restore_emergency() {
+    local keyfile
+    keyfile=$(cos_emergency_key_file) || fail "cannot make the emergency key file (see the message above)"
+    "$BACKUP_BIN" restore --from-cos --policy "$POLICY" --bucket "$COS_BUCKET" --endpoint "$COS_ENDPOINT" --prefix "$COS_PREFIX" \
+        --credentials-secret "$COS_CRED_SECRET" --driver-namespace "$DRIVER_NS" --backup-key-file "$keyfile" \
+        --volume "$1" --to "$2" --size-gb "$3" --storage-class "$COSR_POOL" --skip-marker-cleanup --moment "$4" --wait --timeout 1h ||
+        fail "the COS restore of $1 with the emergency key failed"
+}
+
+# cos_restore_used_no_keyprotect TO — did the restore request that made the claim TO (NAMESPACE/NAME)
+# ask for the readable key alone, with no Key Protect block and no wrapped-key Secret?
+cos_restore_used_no_keyprotect() {
+    oc get backuprestore -o json 2>/dev/null | jq -e --arg ns "${1%%/*}" --arg n "${1#*/}" \
+        '[.items[] | select(.spec.targetNamespace == $ns and .spec.targetName == $n) | .spec.fromCOS
+          | select(.emergencyKeyOnly == true and .keyProtect == null and (.backupKeySecret // "") == "")] | length == 1' >/dev/null
+}
+
 # cos_restore_phase LABEL — restore the three volumes from COS in the current cluster
 # (the cluster KUBECONFIG points at), boot the VM, check the checksums and the pod volume.
 cos_restore_phase() {
@@ -314,6 +392,12 @@ cos_restore_phase() {
     cos_restore "$COS_PV_FILES" "$NS/files-c2" 1
     check_files cos-check-2 files-c2 manifest-B.sha256 'test -e /data/b'
     log "PASS: COS restore, $label: the latest restore holds the changed content"
+
+    log "COS restore, $label: pod volume at $first_files with the emergency key (--backup-key-file, no Key Protect)"
+    cos_restore_emergency "$COS_PV_FILES" "$NS/files-c3" 1 "$first_files"
+    cos_restore_used_no_keyprotect "$NS/files-c3" || fail "the emergency-key restore ($label) still named Key Protect or a wrapped-key Secret in its request"
+    check_files cos-check-3 files-c3 manifest-A.sha256 'test ! -e /data/b'
+    log "PASS: COS restore, $label: the emergency key (--backup-key-file) restored the pod volume at $first_files without Key Protect and the checksums match"
 }
 
 # cos_phase — the whole second part: wait for the exports, list, restore here and, if
@@ -377,6 +461,7 @@ cos_cleanup_cluster() {
 }
 
 cos_cleanup() {
+    cos_forget_key
     $COS_ON || return 0
     cos_restore_home_kubeconfig
     cos_cleanup_cluster

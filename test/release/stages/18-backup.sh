@@ -19,7 +19,12 @@
 # for each run), checks exportedTime and exportedBytes, runs `kubectl backup
 # cos-list` (one export of each volume is enough: an export holds the earlier moments as undo files), and restores the three volumes from COS into a second namespace: the
 # VM boots with matching checksums and the pod volume holds the first and the
-# changed content. COS_DR_KUBECONFIG repeats the restore in the other cluster of
+# changed content. It also restores the pod volume at the first moment with the emergency key,
+# `--backup-key-file`, with no Key Protect flag (the restore request is checked to name no Key
+# Protect block), and compares checksums. cos-setup shows the readable key to a person once, so
+# the test gets the same key by having Key Protect unwrap the stored wrapped copy. It writes the
+# key to a mode 0600 file in the stage's private folder (never printed) and deletes it in cleanup.
+# COS_DR_KUBECONFIG repeats the restore in the other cluster of
 # the lab pair. Without settings these checks are reported as not checked.
 # Objects locked by Compliance cannot be deleted: they stay in the bucket.
 #
@@ -75,7 +80,7 @@ run() {
     rt_namespace "$PREFIX-test" || skip "cannot make the namespace $PREFIX-test"
 
     rt_log "running $E2E (60 to 90 minutes)"
-    env SSH_KEY="$KEY_DIR/key" BACKUP_BIN="$BACKUP_BIN" PREFIX="$PREFIX" bash "$E2E" >"$E2E_LOG" 2>&1
+    env SSH_KEY="$KEY_DIR/key" COS_EMERGENCY_KEY_FILE="$KEY_DIR/emergency-key" BACKUP_BIN="$BACKUP_BIN" PREFIX="$PREFIX" bash "$E2E" >"$E2E_LOG" 2>&1
     rc=$?
     cat "$E2E_LOG"
 
@@ -127,6 +132,8 @@ cos_restore_checks() {
         log_has_pass "$E2E_LOG" "COS restore, $1: the pod volume restored at"
     check "COS restore, $1: the pod volume restored at the latest moment holds the changed content" \
         log_has_pass "$E2E_LOG" "COS restore, $1: the latest restore"
+    check "COS restore, $1: with the emergency key (--backup-key-file) the pod volume is restored without Key Protect and the checksums match" \
+        log_has_pass "$E2E_LOG" "COS restore, $1: the emergency key"
 }
 
 # log_note_locked — say, in the stage report, that the locked objects stay.
