@@ -21,6 +21,7 @@ To make a release:
 
 ### Fixed
 
+- **The policy's last error is shown as an error in the console (issue #46).** On the replication policy page, the Last Error line is now a red inline alert with an icon instead of plain text, and shows `-` when there is no error.
 - **The gateway address is filled in on a first install.** The ConfigMap `backup-gateway-info` had an empty address after the first install on OpenShift, because the Route did not exist yet, so `kubectl backup` needed `--gateway` until a second `helm upgrade`. The chart now uses the host the router will give the Route.
 
 ## [v0.16.0] — 2026-10-28
