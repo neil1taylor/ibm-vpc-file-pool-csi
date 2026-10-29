@@ -164,8 +164,9 @@ backupGateway:
   replicas: 1
   # The address users reach the gateway at, put in the ConfigMap
   # backup-gateway-info that "kubectl backup" reads. Empty uses
-  # https://<route.host>, or the host of an existing Route; if neither is known
-  # users pass --gateway.
+  # https://<route.host>, the host of an existing Route, or on a first install
+  # on OpenShift the host the router will give the Route (from the cluster's
+  # ingress domain); if none is known users pass --gateway.
   url: ""
   tls:
     # Empty: on OpenShift the service CA makes the certificate. Elsewhere you

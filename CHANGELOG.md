@@ -19,6 +19,28 @@ To make a release:
 
 ## [Unreleased]
 
+## [v0.16.2] — 2026-10-29
+
+A fix release: a wrong COS key is named as the cause when browsing or restoring from COS.
+
+### Fixed
+
+- **A wrong COS key is now named as the cause when browsing or restoring from COS.** COS often answers a wrong key with only a message ("The AWS Access Key ID you provided does not exist in our records", or a signature mismatch) and no error code, so the user was told only that COS could not be read. Found in release test stage 20.
+
+## [v0.16.1] — 2026-10-29
+
+A fix release. Audit Events for backup browsing and file restore are now recorded, the gateway address is filled in on a first install, and the console shows a policy's last error as an error.
+
+### Fixed
+
+- **Audit Events for backup browsing and file restore were refused by the API server.** The gateway and the controller wrote them on the `BackupBrowse` or `BackupFileRestore`, which have no namespace, and the API server accepts an Event for such an object only in `default`, where many people can read. The gateway logged the Event and then failed to store it. The Events are now on the ConfigMap `backup-gateway-info` in the driver namespace and name the session or restore in `related`. Found in the first lab run of release test stage 20.
+- **The policy's last error is shown as an error in the console (issue #46).** On the replication policy page, the Last Error line is now a red inline alert with an icon instead of plain text, and shows `-` when there is no error.
+- **The gateway address is filled in on a first install.** The ConfigMap `backup-gateway-info` had an empty address after the first install on OpenShift, because the Route did not exist yet, so `kubectl backup` needed `--gateway` until a second `helm upgrade`. The chart now uses the host the router will give the Route.
+
+## [v0.16.0] — 2026-10-28
+
+A feature release. **Failover from the console:** a new `Failover` resource plans and runs a failover on the destination cluster, for all VMs or for chosen VMs, and the console has a Recovery page for it. **Files from a backup:** browse, download and restore single files and folders from the backups of plain volumes, in the snapshot pool or in COS, from the command line and the console, through a new backup gateway. Two new CRDs (`Failover`, `BackupFileRestore`), new chart objects (the gateway, a browse namespace) and a new role. VM disks inside backups are not covered yet.
+
 ### Added
 
 - **VM disks in backups, part 3: restore of files from inside a VM disk (issue #92, phase 5).** `BackupFileRestore` has `spec.guest`. The restore Job runs in the guest image with the new `browse --mode=restore-files` (the same restore code as the driver's, now in `filerestore.Main`), reads the file systems inside `disk.img` through the read-only appliance and writes to a new claim or a new folder of an existing claim; the first name of each path is the guest file system and is kept in the restored tree. The controller holds the disk (the same per-UID hold as a browse session) before the first Job, waits for a copy that is running, and releases the hold when the restore ends. The restore records when it first held the disk (`status.guestHoldStarted`) and fails after 2 hours 45 minutes, so a hold that was let go cannot be taken again; each Job runs for what is left of that time (2 hours at most). The pod has two containers: the reader parses the disk and has no write access to the target and no capability; the writer (`browse --mode=restore-writer`) holds only the target (the claim's folder, or the share for a new claim) and `CHOWN` and `FOWNER`, never sees the disk, and checks everything the reader sends. The webhook and the controller refuse a guest restore from COS, and the controller refuses a volume that is not a VM disk or an installation without the guest image, in words. Slow for many small files (an appliance start for each). The gateway, `kubectl backup` and the console come in the next change.

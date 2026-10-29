@@ -81,6 +81,7 @@ wait_until() { # wait_until <seconds> <description> <command...>
 }
 
 cleanup() {
+    cos_forget_key
     if $KEEP; then log "keeping test resources (--keep)"; return; fi
     log "cleaning up"
     oc get backuprestore -o json | jq -r --arg ns "$NS" '.items[] | select(.spec.targetNamespace == $ns) | .metadata.name' |
