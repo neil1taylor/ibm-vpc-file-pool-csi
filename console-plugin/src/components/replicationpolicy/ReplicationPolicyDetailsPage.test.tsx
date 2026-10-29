@@ -61,3 +61,24 @@ describe('ReplicationPolicyDetailsPage receiver status', () => {
     expect(screen.getByText(/token refused/)).toBeTruthy();
   });
 });
+
+describe('ReplicationPolicyDetailsPage last error', () => {
+  it('shows the last error as a danger alert', () => {
+    const dr = {
+      ...policy('dr', 'my-token', 'my-ca'),
+      status: { consecutiveFailures: 2, lastError: 'rsync failed: connection refused' },
+    };
+    watch(dr, [dr]);
+    const { container } = render(<ReplicationPolicyDetailsPage />);
+    expect(screen.getByText('rsync failed: connection refused')).toBeTruthy();
+    expect(container.querySelector('[class*="c-alert"][class*="pf-m-danger"]')).toBeTruthy();
+    expect(screen.getByText(/Danger alert/)).toBeTruthy();
+  });
+
+  it('shows no alert when there is no error', () => {
+    const dr = { ...policy('dr', 'my-token', 'my-ca'), status: { consecutiveFailures: 0 } };
+    watch(dr, [dr]);
+    const { container } = render(<ReplicationPolicyDetailsPage />);
+    expect(container.querySelector('[class*="c-alert"][class*="pf-m-danger"]')).toBeNull();
+  });
+});
