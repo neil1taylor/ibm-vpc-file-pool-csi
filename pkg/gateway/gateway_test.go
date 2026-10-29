@@ -403,7 +403,7 @@ func TestSessionCreation(t *testing.T) {
 		t.Errorf("labels = %v", bb.Labels)
 	}
 	evs := e.events()
-	if len(evs) != 1 || evs[0].Reason != "SessionStarted" || evs[0].InvolvedObject.Kind != "BackupBrowse" || evs[0].InvolvedObject.Name != bb.Name {
+	if len(evs) != 1 || evs[0].Reason != "SessionStarted" || evs[0].Related == nil || evs[0].Related.Kind != "BackupBrowse" || evs[0].Related.Name != bb.Name || evs[0].InvolvedObject.Namespace != evs[0].Namespace {
 		t.Fatalf("events = %+v", evs)
 	}
 	for _, want := range []string{"alice", "apps", "db"} {
@@ -707,7 +707,7 @@ func TestAuditEvents(t *testing.T) {
 		if strings.ContainsAny(ev.Message, "\n\x00") {
 			t.Errorf("event %s holds a raw control character: %q", ev.Reason, ev.Message)
 		}
-		if ev.InvolvedObject.Kind != "BackupBrowse" || ev.InvolvedObject.Name != "s1" {
+		if ev.Related == nil || ev.Related.Kind != "BackupBrowse" || ev.Related.Name != "s1" {
 			t.Errorf("event %s is about %+v", ev.Reason, ev.InvolvedObject)
 		}
 	}

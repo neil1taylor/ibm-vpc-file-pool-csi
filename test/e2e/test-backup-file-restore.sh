@@ -144,7 +144,7 @@ for u in 1000 2000; do
   echo inside > u$u/private0700/inner0600; chmod 600 u$u/private0700/inner0600
   chmod 700 u$u/private0700
   ln -sfn /etc u$u/to-etc
-  nl=$(printf "\n"); printf x > "u$u/line${nl}break"
+  nl=$(printf "\nx"); nl=${nl%x}; printf x > "u$u/line${nl}break"
   chown -R $u:$u u$u
 done
 '
@@ -249,7 +249,7 @@ pass "a restore into a new claim ends Done ($(frmsg "$PREFIX-new"))"
 [ "$(oc get pvc "$PREFIX-new" -n "$NS" -o jsonpath='{.spec.resources.requests.storage}')" = 1Gi ] || fail "the claim is not 1Gi"
 oc get pvc "$PREFIX-new" -n "$NS" -o json | jq -e --arg n "$PREFIX-new" '.metadata.annotations["storage.ibmcloud.io/backup-file-restore"] == $n' >/dev/null || fail "the new claim has no restore annotation"
 
-OUT=$(inspect "$PREFIX-new" 'nl=$(printf "\n")
+OUT=$(inspect "$PREFIX-new" 'nl=$(printf "\nx"); nl=${nl%x}
 echo "docs=$(cat docs/a.txt) v=$(cat v.txt)"
 echo "sha=$(sha256sum big/blob | cut -d" " -f1)"
 echo "secret=$(stat -c "%u:%g %a" u1000/secret0600) $(stat -c "%u:%g %a" u2000/secret0600)"

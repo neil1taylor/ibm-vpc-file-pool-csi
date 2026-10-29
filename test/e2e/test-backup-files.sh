@@ -100,7 +100,7 @@ writer() { # writer <uid>
       echo public > public0644
       mkdir -p private0700; chmod 700 private0700; echo inside > private0700/inner0600; chmod 600 private0700/inner0600
       ln -sfn /etc to-etc
-      nl=\$(printf '\\n'); printf x > "line\${nl}break"
+      nl=\$(printf '\\nx'); nl=\${nl%x}; printf x > "line\${nl}break"
     securityContext: {runAsUser: $1, runAsGroup: $1, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
     volumeMounts: [{name: d, mountPath: /data}]
 YAML

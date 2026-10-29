@@ -172,7 +172,7 @@ mkdir -p u1000/private0700
 echo secret > u1000/secret0600; chmod 600 u1000/secret0600
 echo inside > u1000/private0700/inner0600; chmod 600 u1000/private0700/inner0600; chmod 700 u1000/private0700
 ln -sfn /etc u1000/to-etc
-nl=$(printf "\n"); printf x > "u1000/line${nl}break"
+nl=$(printf "\nx"); nl=${nl%x}; printf x > "u1000/line${nl}break"
 chown -R 1000:1000 u1000
 '
 BLOB_SHA=$(oc exec -n "$NS" writer -- sha256sum /data/big/blob | awk '{print $1}')
@@ -353,7 +353,7 @@ bk "$ALICE" restore-files "${FROM_POLICY[@]}" --to "$NS/$PREFIX-new" --path /doc
     || fail "restore-files --from-cos into a new claim failed"
 NEWFR=$(oc get backupfilerestore -o json | jq -r --arg n "$PREFIX-new" '.items[] | select(.spec.targetName == $n) | .metadata.name')
 [ "$(oc get backupfilerestore "$NEWFR" -o jsonpath='{.spec.source}')" = cos ] && pass "the restore read COS" || fail "the restore did not read COS"
-OUT=$(inspect "$PREFIX-new" 'nl=$(printf "\n")
+OUT=$(inspect "$PREFIX-new" 'nl=$(printf "\nx"); nl=${nl%x}
 echo "docs=$(cat docs/a.txt) v=$(cat v.txt)"
 echo "sha=$(sha256sum big/blob | cut -d" " -f1)"
 echo "secret=$(stat -c "%u:%g %a" u1000/secret0600)"

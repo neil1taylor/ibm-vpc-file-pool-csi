@@ -307,6 +307,37 @@ func TestFileRestore_FailedJobShowsTheReasonAndEnds(t *testing.T) {
 	}
 }
 
+// A BackupFileRestore has no namespace, and the API server refuses an Event for
+// such an object unless it is in "default". The Event goes on a namespaced
+// object in the driver namespace instead, and names the restore in Related.
+func TestFileRestore_EventsAreOnANamespacedObjectNotInDefault(t *testing.T) {
+	e := newFileRestoreEnv(t)
+	e.existingClaim("work")
+	e.existing("f1", "work")
+	e.jobs.answer[filerestore.ModeFolder] = refused("not enough space")
+	e.reconcile()
+	evs := &corev1.EventList{}
+	if err := e.c.List(e.ctx, evs); err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, ev := range evs.Items {
+		if ev.Reason != "FileRestoreFailed" {
+			continue
+		}
+		found = true
+		if ev.Namespace == metav1.NamespaceDefault || ev.InvolvedObject.Namespace != ev.Namespace {
+			t.Errorf("Event in %q about an object in %q", ev.Namespace, ev.InvolvedObject.Namespace)
+		}
+		if ev.Related == nil || ev.Related.Kind != "BackupFileRestore" || ev.Related.Name != "f1" {
+			t.Errorf("related = %+v", ev.Related)
+		}
+	}
+	if !found {
+		t.Fatal("no FileRestoreFailed Event")
+	}
+}
+
 func TestFileRestore_AJobThatFailedWithoutAReasonStillEnds(t *testing.T) {
 	e := newFileRestoreEnv(t)
 	e.existingClaim("work")
