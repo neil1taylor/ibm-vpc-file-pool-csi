@@ -2147,3 +2147,131 @@ func TestReconcile_DrainRequests_RemovedShareReturnsToService(t *testing.T) {
 		t.Errorf("share state = %q, want stable once it is off the drain list and healthy", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Issue 366: a lost status save must not lead to a second provisioning pass
+// ---------------------------------------------------------------------------
+
+func TestReconcile_InitialProvisioning_RetriesLostStatusSave(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	pool := newTestPool("test-pool", "spread", 1000)
+	pool.Status.Phase = ""
+	pool.Spec.InitialShares = 2
+	k.addPool(pool)
+	k.UpdatePoolStatusConflicts = 1
+
+	r := newReconciler(k, vpc)
+	if _, err := reconcilePool(r, "test-pool"); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	updated := k.getPool("test-pool")
+	if len(updated.Status.Shares) != 2 {
+		t.Fatalf("expected 2 recorded shares after a conflict on save, got %d", len(updated.Status.Shares))
+	}
+	if vpc.CreateCalls != 2 {
+		t.Errorf("expected 2 CreateFileShare calls, got %d", vpc.CreateCalls)
+	}
+}
+
+func TestReconcile_InitialProvisioning_SavesEachShareWhenALaterOneFails(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	pool := newTestPool("test-pool", "spread", 1000)
+	pool.Status.Phase = ""
+	pool.Spec.InitialShares = 2
+	k.addPool(pool)
+	// The save after share 1 conflicts once, then the create of share 2 fails.
+	k.UpdatePoolStatusConflicts = 1
+	vpc.FailCreateAfter(1, fmt.Errorf("HTTP 500"))
+
+	r := newReconciler(k, vpc)
+	_, _ = reconcilePool(r, "test-pool")
+
+	updated := k.getPool("test-pool")
+	if len(updated.Status.Shares) != 1 {
+		t.Fatalf("share 1 was created in VPC and must be recorded, got %d recorded", len(updated.Status.Shares))
+	}
+}
+
+// A recorded share without a mount target recovers when the mount target
+// already exists under the expected name on another share of the same name.
+func TestReconcile_HealthCheck_AdoptsShareThatHoldsTheMountTarget(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	ctx := context.Background()
+
+	withMT, _ := vpc.CreateFileShare(ctx, ibmcloudInput("test-pool", 1000))
+	bare, _ := vpc.CreateFileShare(ctx, ibmcloudInput("test-pool", 1000))
+	vpc.ClearMountTargets(bare.ID)
+
+	pool := newTestPool("test-pool", "spread", 1000,
+		v1alpha1.PoolShareStatus{
+			ShareID: bare.ID, ShareName: bare.Name, TotalGB: 1000, State: "stable", Zone: "us-south-1",
+		},
+	)
+	pool.Spec.InitialShares = 1
+	k.addPool(pool)
+
+	r := newReconciler(k, vpc)
+	if _, err := reconcilePool(r, "test-pool"); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	share := k.getPool("test-pool").Status.Shares[0]
+	if share.ShareID != withMT.ID {
+		t.Errorf("expected the share holding the mount target (%s) to be recorded, got %s", withMT.ID, share.ShareID)
+	}
+	if share.MountTargetIP == "" {
+		t.Error("expected the adopted share's mount target IP to be recorded")
+	}
+	if vpc.CreateMountTargetCalls != 0 {
+		t.Errorf("expected no new mount target, got %d create calls", vpc.CreateMountTargetCalls)
+	}
+	if _, err := vpc.GetFileShare(ctx, bare.ID); err == nil {
+		t.Error("expected the bare duplicate share to be deleted")
+	}
+}
+
+// A share that matches only by name is not adopted when another pool records
+// it or it is in another resource group.
+func TestReconcile_HealthCheck_DoesNotAdoptForeignShare(t *testing.T) {
+	for _, tc := range []string{"recorded-by-other-pool", "other-resource-group"} {
+		t.Run(tc, func(t *testing.T) {
+			k := newFakeK8sClient()
+			vpc := fake.NewFakeVPCClient()
+			ctx := context.Background()
+
+			in := ibmcloudInput("test-pool", 1000)
+			in.ResourceGroupID = "rg-ours"
+			if tc == "other-resource-group" {
+				in.ResourceGroupID = "rg-other"
+			}
+			foreign, _ := vpc.CreateFileShare(ctx, in)
+			bareIn := ibmcloudInput("test-pool", 1000)
+			bareIn.ResourceGroupID = "rg-ours"
+			bare, _ := vpc.CreateFileShare(ctx, bareIn)
+			vpc.ClearMountTargets(bare.ID)
+
+			pool := newTestPool("test-pool", "spread", 1000,
+				v1alpha1.PoolShareStatus{ShareID: bare.ID, ShareName: bare.Name, TotalGB: 1000, State: "stable", Zone: "us-south-1"})
+			pool.Spec.InitialShares = 1
+			pool.Spec.ResourceGroup = "rg-ours"
+			k.addPool(pool)
+			if tc == "recorded-by-other-pool" {
+				other := newTestPool("other-pool", "spread", 1000,
+					v1alpha1.PoolShareStatus{ShareID: foreign.ID, ShareName: foreign.Name, TotalGB: 1000, State: "stable", Zone: "us-south-1", MountTargetIP: "10.0.0.1"})
+				k.addPool(other)
+			}
+
+			r := newReconciler(k, vpc)
+			if _, err := reconcilePool(r, "test-pool"); err != nil {
+				t.Fatalf("Reconcile failed: %v", err)
+			}
+			if got := k.getPool("test-pool").Status.Shares[0].ShareID; got == foreign.ID {
+				t.Errorf("adopted a share that is not ours: %s", got)
+			}
+		})
+	}
+}

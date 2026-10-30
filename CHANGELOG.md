@@ -19,6 +19,14 @@ To make a release:
 
 ## [Unreleased]
 
+## [v0.16.3] — 2026-10-30
+
+A fix release: a new pool can no longer end with a share that has no mount target (found by beta run 2).
+
+### Fixed
+
+- **A new pool no longer ends with a share that has no mount target (issue #366).** The pool status is now saved again after a resourceVersion conflict (also when provisioning stops half way), so shares already created in VPC are recorded and the next pass does not create them again. A recorded share with no mount target now switches to the share of the same name that holds the mount target and its network interface, and the bare duplicate is deleted when no volume lives on it. Adopting a share by name prefers the one that has a mount target. Cause: when a share create call failed while building its inline mount target ("Provided Name ... -mt-vni is not unique", HTTP 500), VPC could keep a bare share of that name next to the complete one, and the next pass adopted the bare one.
+
 ## [v0.16.2] — 2026-10-29
 
 A fix release: a wrong COS key is named as the cause when browsing or restoring from COS.
