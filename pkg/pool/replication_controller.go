@@ -749,11 +749,21 @@ func (rc *ReplicationController) holdReason(sv *v1alpha1.SubVolume) string {
 	return ""
 }
 
+// copyJobExists says whether the copy Job of a volume exists, or cannot be
+// told. A volume with a Job is not held yet: the Job is looked at, as for any
+// volume, until it has ended and been cleaned up. Holding it at once would
+// leave the Job unchecked, and the status would say "held" while the Job still
+// writes the copy that a browse session or an export must not read.
+func (rc *ReplicationController) copyJobExists(ctx context.Context, policyName, svName string) bool {
+	exists, err := rc.replicationJobExists(ctx, policyName, svName)
+	return exists || err != nil
+}
+
 // splitHeld separates the volumes that a COS export or a browse session holds
 // from the rest. With VM disk copies on, a hold on one disk of a running VM holds
 // every disk of that VM, because a VM copy takes all its disks in one step. A
-// volume whose VM copy runs is never held: the copy would lose its tracking and
-// stay in the VM.
+// volume whose VM copy runs, or whose copy Job exists, is never held: the copy
+// would lose its tracking and stay in the VM, and the Job would run unchecked.
 func (rc *ReplicationController) splitHeld(ctx context.Context, policy *v1alpha1.ReplicationPolicy, svs []v1alpha1.SubVolume) (free []v1alpha1.SubVolume, held []heldVolume) {
 	copying := map[string]bool{}
 	for _, st := range policy.Status.SubVolumeStatuses {
@@ -763,7 +773,7 @@ func (rc *ReplicationController) splitHeld(ctx context.Context, policy *v1alpha1
 	}
 	for i := range svs {
 		sv := svs[i]
-		if reason := rc.holdReason(&sv); reason != "" && !copying[sv.Name] {
+		if reason := rc.holdReason(&sv); reason != "" && !copying[sv.Name] && !rc.copyJobExists(ctx, policy.Name, sv.Name) {
 			held = append(held, heldVolume{sv: sv, reason: reason})
 		} else {
 			free = append(free, sv)

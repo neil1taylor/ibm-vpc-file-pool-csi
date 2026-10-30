@@ -1,8 +1,14 @@
 package pool
 
 import (
+	"context"
+	"encoding/json"
 	"strings"
 	"time"
+
+	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // A browse session on a VM disk holds the disk's next backup copy (issue #92,
@@ -105,4 +111,23 @@ func removeBrowseHold(value, session string) string {
 		}
 	}
 	return formatBrowseHolds(keep)
+}
+
+// patchAnnotation sets one annotation of a SubVolume, or removes it when value
+// is nil, with a merge patch that names only that key. A patch made from a
+// copy with client.MergeFrom says "annotations: null" when the copy has no
+// annotation left, and that wipes the holds another writer added since the
+// copy was read. With lock the patch also fails with a conflict if the
+// SubVolume changed since sv was read, for a value that several writers change
+// as a whole (the list of browse holds): the caller reads again and tries again.
+func patchAnnotation(ctx context.Context, c client.Client, sv *v1alpha1.SubVolume, key string, value *string, lock bool) error {
+	meta := map[string]any{"annotations": map[string]*string{key: value}}
+	if lock {
+		meta["resourceVersion"] = sv.ResourceVersion
+	}
+	body, err := json.Marshal(map[string]any{"metadata": meta})
+	if err != nil {
+		return err
+	}
+	return c.Patch(ctx, sv, client.RawPatch(types.MergePatchType, body))
 }

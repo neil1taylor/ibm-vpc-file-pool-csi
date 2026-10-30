@@ -25,7 +25,7 @@ func (fakeTools) Output(_ context.Context, args []string) ([]byte, error) {
 	case "virt-filesystems":
 		return []byte("Name,Type,VFS,Label,MBR,Size,Parent\n/dev/sda1,filesystem,xfs,root,,1000,\n/dev/sda2,filesystem,crypto_LUKS,,,2000,\n"), nil
 	case "virt-ls":
-		return []byte("f,0644,5,hello.txt\n"), nil
+		return []byte("d,0755,4096,/\n-,0644,5,/hello.txt\n"), nil
 	}
 	return nil, &guestfs.ExitError{}
 }

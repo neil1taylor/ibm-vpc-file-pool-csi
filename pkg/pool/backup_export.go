@@ -365,12 +365,8 @@ func (bc *BackupController) takeExportHold(ctx context.Context, policy, svName s
 	case !running && copying[svName]:
 		return holdWait
 	}
-	patch := client.MergeFrom(sv.DeepCopy())
-	if sv.Annotations == nil {
-		sv.Annotations = map[string]string{}
-	}
-	sv.Annotations[exportHoldAnnotation] = policy + "/" + now.UTC().Format(time.RFC3339)
-	if err := bc.client.Patch(ctx, sv, patch); err != nil {
+	value := policy + "/" + now.UTC().Format(time.RFC3339)
+	if err := patchAnnotation(ctx, bc.client, sv, exportHoldAnnotation, &value, false); err != nil {
 		klog.ErrorS(err, "Failed to hold a SubVolume for an export", "policy", policy, "volume", svName)
 		return holdWait
 	}
@@ -389,9 +385,7 @@ func (bc *BackupController) releaseExportHold(ctx context.Context, policy, svNam
 	if owner, _, held := parseExportHold(sv.Annotations[exportHoldAnnotation]); !held || owner != policy {
 		return
 	}
-	patch := client.MergeFrom(sv.DeepCopy())
-	delete(sv.Annotations, exportHoldAnnotation)
-	if err := bc.client.Patch(ctx, sv, patch); err != nil {
+	if err := patchAnnotation(ctx, bc.client, sv, exportHoldAnnotation, nil, false); err != nil {
 		klog.ErrorS(err, "Failed to release the export hold of a SubVolume", "policy", policy, "volume", svName)
 	}
 }

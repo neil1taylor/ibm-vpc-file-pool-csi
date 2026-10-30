@@ -10,6 +10,7 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,10 +36,13 @@ func newBackupEnv(t *testing.T) *backupEnv {
 	s := runtime.NewScheme()
 	_ = corev1.AddToScheme(s)
 	_ = v1alpha1.AddToScheme(s)
+	_ = batchv1.AddToScheme(s)
+	s.AddKnownTypeWithName(vmimGVK, &unstructured.Unstructured{})
+	s.AddKnownTypeWithName(vmimGVK.GroupVersion().WithKind("VirtualMachineInstanceMigrationList"), &unstructured.UnstructuredList{})
 	s.AddKnownTypeWithName(vmGVK, &unstructured.Unstructured{})
 	s.AddKnownTypeWithName(vmGVK.GroupVersion().WithKind("VirtualMachineList"), &unstructured.UnstructuredList{})
 	c := fakeclient.NewClientBuilder().WithScheme(s).
-		WithStatusSubresource(&v1alpha1.BackupPolicy{}, &v1alpha1.ReplicationPolicy{}, &v1alpha1.BackupRestore{}, &v1alpha1.BackupBrowse{}, &v1alpha1.BackupFileRestore{}).Build()
+		WithStatusSubresource(&v1alpha1.BackupPolicy{}, &v1alpha1.ReplicationPolicy{}, &v1alpha1.BackupRestore{}, &v1alpha1.BackupBrowse{}, &v1alpha1.BackupFileRestore{}, &batchv1.Job{}).Build()
 	e := &backupEnv{t: t, c: c, bc: NewBackupController(c), ctx: context.Background()}
 	e.addPool("backups", "10.240.9.9", "/export_backups")
 	e.addPool("data-a", "10.240.1.1", "/export_a")
