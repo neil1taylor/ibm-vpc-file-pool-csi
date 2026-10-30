@@ -348,8 +348,11 @@ close_all
 bk "$ALICE" get "${D3[@]}" "${T[@]}" --fs sda1 /hello.txt --out - | grep -q first \
     && pass "NTFS: a file is read (through virt-cat)" || fail "ntfs hello.txt"
 close_all
-OUT=$(bk "$ALICE" ls "${D1[@]}" "${T[@]}" --fs vg0-root /)
+# The ext4 disk holds the name with a newline (disk1 was made without it).
+OUT=$(bk "$ALICE" ls "${D2[@]}" "${T[@]}" --fs "$FS2" /)
 grep -qF 'line\x0abreak' <<<"$OUT" && pass "a name with a newline is listed escaped" || fail "newline name: $OUT"
+grep -q "docs/" <<<"$OUT" && grep -q "hello.txt" <<<"$OUT" && pass "a folder is listed with its files and subfolders" || fail "listing of /: $OUT"
+close_all
 
 # ---- 2. the hold ------------------------------------------------------------------------------
 SESSION=$(bk "$ALICE" browse "${D1[@]}" "${T[@]}" | awk '{print $2}')
