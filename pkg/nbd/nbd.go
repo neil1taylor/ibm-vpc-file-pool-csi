@@ -186,12 +186,18 @@ func handle(ctx context.Context, rw io.ReadWriter, exp Export, opts Options, tra
 	if size < 0 {
 		return errors.New("negative export size")
 	}
-	if err = negotiate(rw, opts, size, flags); err != nil {
+	if err = negotiate(rw, opts, sectorSize(size), flags); err != nil {
 		return err
 	}
 	transmission()
 	return transmit(ctx, rw, exp, opts)
 }
+
+// sectorSize is the size the export is offered with: rounded up to whole 512-byte
+// sectors, as QEMU does for a raw file. A client such as QEMU reads whole
+// sectors, and a refused read of the last one makes the guest retry for minutes.
+// The bytes after the real end read as zeros.
+func sectorSize(size int64) int64 { return (size + 511) / 512 * 512 }
 
 func greet(rw io.ReadWriter) (clientFlags uint32, err error) {
 	hello := append([]byte(initMagic+optMagic), 0, 0)
@@ -347,7 +353,7 @@ func writeReply(w io.Writer, code uint32, handle []byte, data []byte) error {
 // marked read-only, and a client that sends them anyway changes nothing.
 func transmit(ctx context.Context, rw io.ReadWriter, exp Export, opts Options) error {
 	size := exp.Size()
-	usize := uint64(size) //nolint:gosec // the caller checked that size is not negative
+	usize := uint64(sectorSize(size)) //nolint:gosec // the caller checked that size is not negative
 	maxRead := int64(opts.maxRead())
 	var buf []byte
 	for {
@@ -401,8 +407,19 @@ func transmit(ctx context.Context, rw io.ReadWriter, exp Export, opts Options) e
 			binary.BigEndian.PutUint32(out[0:], simpleReply)
 			binary.BigEndian.PutUint32(out[4:], 0)
 			copy(out[8:], handle)
-			n, err := exp.ReadAt(out[16:], int64(off)) // #nosec G115 -- checked against the size
-			if err != nil && (!errors.Is(err, io.EOF) || int64(n) != length) {
+			// Only the part before the real end is read; the rest is zeros.
+			data := out[16:]
+			want := length
+			if int64(off)+length > size { // #nosec G115 -- checked against the size
+				want = max(size-int64(off), 0) // #nosec G115 -- checked against the size
+				clear(data[want:])
+			}
+			var n int
+			var err error
+			if want > 0 {
+				n, err = exp.ReadAt(data[:want], int64(off)) // #nosec G115 -- checked against the size
+			}
+			if err != nil && (!errors.Is(err, io.EOF) || int64(n) != want) {
 				if werr := writeReply(rw, errIO, handle, nil); werr != nil {
 					return werr
 				}
