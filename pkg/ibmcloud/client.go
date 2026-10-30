@@ -23,6 +23,9 @@ type VPCFileClient interface {
 	ExpandFileShare(ctx context.Context, shareID string, newSizeGB int64) error
 	DeleteFileShare(ctx context.Context, shareID string) error
 	ListFileShares(ctx context.Context, resourceGroupID string, tags []string) ([]*ShareInfo, error)
+	// ListSharesByName returns every share with this exact name, with mount
+	// targets. VPC can hold more than one when a create call failed half way.
+	ListSharesByName(ctx context.Context, name string) ([]*ShareInfo, error)
 	CreateShareMountTarget(ctx context.Context, shareID string, input CreateMountTargetInput) (*MountTargetInfo, error)
 	GetSubnetZone(ctx context.Context, subnetID string) (string, error)
 	FindSecurityGroupID(ctx context.Context, vpcID, name string) (string, error)
@@ -46,15 +49,17 @@ type CreateShareInput struct {
 
 // ShareInfo contains metadata about a VPC file share.
 type ShareInfo struct {
-	ID             string
-	Name           string
-	LifecycleState string // "pending", "stable", "failed", etc.
-	SizeGB         int64
-	IOPS           int64
-	Profile        string
-	Zone           string
-	MountTargets   []MountTargetInfo
-	CreatedAt      time.Time
+	ID              string
+	Name            string
+	LifecycleState  string // "pending", "stable", "failed", etc.
+	SizeGB          int64
+	IOPS            int64
+	Profile         string
+	Zone            string
+	ResourceGroupID string
+	Tags            []string
+	MountTargets    []MountTargetInfo
+	CreatedAt       time.Time
 }
 
 // CreateMountTargetInput contains the parameters for creating a mount target on an existing share.

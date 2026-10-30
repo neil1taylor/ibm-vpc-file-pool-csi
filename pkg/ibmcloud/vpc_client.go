@@ -313,6 +313,38 @@ func (c *Client) CreateShareMountTarget(ctx context.Context, shareID string, inp
 	}
 }
 
+// ListSharesByName returns every share with this exact name, with mount
+// targets. A create call that failed while building the inline mount target
+// can leave a share without one next to the complete share of the same name.
+func (c *Client) ListSharesByName(ctx context.Context, name string) (_ []*ShareInfo, retErr error) {
+	start := time.Now()
+	defer func() { recordAPIMetrics("list_shares_by_name", start, retErr) }()
+
+	if err := c.withAuth(ctx, "ListSharesByName"); err != nil {
+		return nil, err
+	}
+	opts := c.vpcService.NewListSharesOptions()
+	opts.SetName(name)
+	opts.SetLimit(100)
+	result, response, err := c.vpcService.ListSharesWithContext(ctx, opts)
+	if err != nil {
+		statusCode := 0
+		if response != nil {
+			statusCode = response.StatusCode
+		}
+		return nil, mapHTTPError(statusCode, err)
+	}
+	var out []*ShareInfo
+	for _, s := range result.Shares {
+		info, err := c.GetFileShare(ctx, *s.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, info)
+	}
+	return out, nil
+}
+
 // GetFileShare retrieves a VPC file share by ID, including mount target IPs.
 func (c *Client) GetFileShare(ctx context.Context, shareID string) (_ *ShareInfo, retErr error) {
 	start := time.Now()
@@ -553,7 +585,7 @@ func (c *Client) getShareByName(ctx context.Context, name string) (*ShareInfo, e
 
 	opts := c.vpcService.NewListSharesOptions()
 	opts.SetName(name)
-	opts.SetLimit(1)
+	opts.SetLimit(100)
 
 	result, _, err := c.vpcService.ListSharesWithContext(ctx, opts)
 	if err != nil {
@@ -564,7 +596,17 @@ func (c *Client) getShareByName(ctx context.Context, name string) (*ShareInfo, e
 		return nil, fmt.Errorf("share %q not found after 'already exists' error", name)
 	}
 
-	shareID := *result.Shares[0].ID
+	// More than one share can carry the name when an earlier create failed
+	// while building the mount target. Adopt the one that has a mount target.
+	chosen := result.Shares[0]
+	for i := range result.Shares {
+		s := result.Shares[i]
+		if len(s.MountTargets) > 0 {
+			chosen = s
+			break
+		}
+	}
+	shareID := *chosen.ID
 
 	// Wait for the share to be stable (it may still be provisioning).
 	shareInfo, err := c.waitForShareStable(ctx, shareID, 5*time.Minute)
@@ -715,6 +757,10 @@ func shareToInfo(share *vpcv1.Share) *ShareInfo {
 	if share.Zone != nil && share.Zone.Name != nil {
 		info.Zone = *share.Zone.Name
 	}
+	if share.ResourceGroup != nil && share.ResourceGroup.ID != nil {
+		info.ResourceGroupID = *share.ResourceGroup.ID
+	}
+	info.Tags = share.UserTags
 	if share.CreatedAt != nil {
 		info.CreatedAt = time.Time(*share.CreatedAt)
 	}
