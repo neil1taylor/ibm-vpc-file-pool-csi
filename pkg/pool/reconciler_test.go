@@ -2233,3 +2233,45 @@ func TestReconcile_HealthCheck_AdoptsShareThatHoldsTheMountTarget(t *testing.T) 
 		t.Error("expected the bare duplicate share to be deleted")
 	}
 }
+
+// A share that matches only by name is not adopted when another pool records
+// it or it is in another resource group.
+func TestReconcile_HealthCheck_DoesNotAdoptForeignShare(t *testing.T) {
+	for _, tc := range []string{"recorded-by-other-pool", "other-resource-group"} {
+		t.Run(tc, func(t *testing.T) {
+			k := newFakeK8sClient()
+			vpc := fake.NewFakeVPCClient()
+			ctx := context.Background()
+
+			in := ibmcloudInput("test-pool", 1000)
+			in.ResourceGroupID = "rg-ours"
+			if tc == "other-resource-group" {
+				in.ResourceGroupID = "rg-other"
+			}
+			foreign, _ := vpc.CreateFileShare(ctx, in)
+			bareIn := ibmcloudInput("test-pool", 1000)
+			bareIn.ResourceGroupID = "rg-ours"
+			bare, _ := vpc.CreateFileShare(ctx, bareIn)
+			vpc.ClearMountTargets(bare.ID)
+
+			pool := newTestPool("test-pool", "spread", 1000,
+				v1alpha1.PoolShareStatus{ShareID: bare.ID, ShareName: bare.Name, TotalGB: 1000, State: "stable", Zone: "us-south-1"})
+			pool.Spec.InitialShares = 1
+			pool.Spec.ResourceGroup = "rg-ours"
+			k.addPool(pool)
+			if tc == "recorded-by-other-pool" {
+				other := newTestPool("other-pool", "spread", 1000,
+					v1alpha1.PoolShareStatus{ShareID: foreign.ID, ShareName: foreign.Name, TotalGB: 1000, State: "stable", Zone: "us-south-1", MountTargetIP: "10.0.0.1"})
+				k.addPool(other)
+			}
+
+			r := newReconciler(k, vpc)
+			if _, err := reconcilePool(r, "test-pool"); err != nil {
+				t.Fatalf("Reconcile failed: %v", err)
+			}
+			if got := k.getPool("test-pool").Status.Shares[0].ShareID; got == foreign.ID {
+				t.Errorf("adopted a share that is not ours: %s", got)
+			}
+		})
+	}
+}

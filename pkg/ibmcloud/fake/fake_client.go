@@ -74,13 +74,15 @@ func (f *FakeVPCClient) CreateFileShare(_ context.Context, input ibmcloud.Create
 	id := fmt.Sprintf("r006-fake-%04d", f.nextID)
 
 	info := &ibmcloud.ShareInfo{
-		ID:             id,
-		Name:           input.Name,
-		LifecycleState: "stable",
-		SizeGB:         input.SizeGB,
-		IOPS:           1000,
-		Profile:        input.Profile,
-		Zone:           input.Zone,
+		ID:              id,
+		Name:            input.Name,
+		LifecycleState:  "stable",
+		SizeGB:          input.SizeGB,
+		IOPS:            1000,
+		Profile:         input.Profile,
+		Zone:            input.Zone,
+		ResourceGroupID: input.ResourceGroupID,
+		Tags:            input.Tags,
 		MountTargets: []ibmcloud.MountTargetInfo{
 			{
 				ID:         id + "-mt",

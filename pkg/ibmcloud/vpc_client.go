@@ -757,6 +757,10 @@ func shareToInfo(share *vpcv1.Share) *ShareInfo {
 	if share.Zone != nil && share.Zone.Name != nil {
 		info.Zone = *share.Zone.Name
 	}
+	if share.ResourceGroup != nil && share.ResourceGroup.ID != nil {
+		info.ResourceGroupID = *share.ResourceGroup.ID
+	}
+	info.Tags = share.UserTags
 	if share.CreatedAt != nil {
 		info.CreatedAt = time.Time(*share.CreatedAt)
 	}

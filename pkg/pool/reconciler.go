@@ -482,8 +482,12 @@ func (r *FileSharePoolReconciler) adoptShareWithMountTarget(ctx context.Context,
 		return false
 	}
 	wantName := share.ShareName + "-mt"
+	claimed := r.claimedShareIDs(ctx)
+	if claimed == nil {
+		return false
+	}
 	for _, c := range candidates {
-		if c.ID == share.ShareID {
+		if c.ID == share.ShareID || !r.shareIsOurs(pool, c) || claimed[c.ID] {
 			continue
 		}
 		for _, mt := range c.MountTargets {
@@ -509,6 +513,45 @@ func (r *FileSharePoolReconciler) adoptShareWithMountTarget(ctx context.Context,
 		}
 	}
 	return false
+}
+
+// claimedShareIDs returns the IDs of every share any pool records, or nil if
+// the pools cannot be listed.
+func (r *FileSharePoolReconciler) claimedShareIDs(ctx context.Context) map[string]bool {
+	pools, err := r.k8sClient.ListFileSharePools(ctx)
+	if err != nil {
+		klog.ErrorS(err, "Could not list pools to check who owns a share")
+		return nil
+	}
+	ids := map[string]bool{}
+	for i := range pools {
+		for _, s := range pools[i].Status.Shares {
+			ids[s.ShareID] = true
+		}
+	}
+	return ids
+}
+
+// shareIsOurs reports whether a VPC share matches what this pool creates: its
+// zone, its resource group and all of its tags. A share that matches only by
+// name is never adopted. (The mount target's subnet pins the VPC.)
+func (r *FileSharePoolReconciler) shareIsOurs(pool *v1alpha1.FileSharePool, c *ibmcloud.ShareInfo) bool {
+	if c.Zone != pool.Spec.Zone {
+		return false
+	}
+	wantGroup := pool.Spec.ResourceGroup
+	if wantGroup == "" {
+		wantGroup = r.defaultResourceGroup
+	}
+	if wantGroup != "" && c.ResourceGroupID != wantGroup {
+		return false
+	}
+	for _, t := range pool.Spec.Tags {
+		if !slices.Contains(c.Tags, t) {
+			return false
+		}
+	}
+	return true
 }
 
 // createMountTarget creates a security group mount target for a share that has

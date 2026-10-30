@@ -49,15 +49,17 @@ type CreateShareInput struct {
 
 // ShareInfo contains metadata about a VPC file share.
 type ShareInfo struct {
-	ID             string
-	Name           string
-	LifecycleState string // "pending", "stable", "failed", etc.
-	SizeGB         int64
-	IOPS           int64
-	Profile        string
-	Zone           string
-	MountTargets   []MountTargetInfo
-	CreatedAt      time.Time
+	ID              string
+	Name            string
+	LifecycleState  string // "pending", "stable", "failed", etc.
+	SizeGB          int64
+	IOPS            int64
+	Profile         string
+	Zone            string
+	ResourceGroupID string
+	Tags            []string
+	MountTargets    []MountTargetInfo
+	CreatedAt       time.Time
 }
 
 // CreateMountTargetInput contains the parameters for creating a mount target on an existing share.
