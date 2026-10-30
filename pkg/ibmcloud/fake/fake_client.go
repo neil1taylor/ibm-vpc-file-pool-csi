@@ -25,6 +25,9 @@ type FakeVPCClient struct {
 	DeleteErr            error
 	CreateMountTargetErr error
 
+	failCreateAfter    int
+	failCreateAfterErr error
+
 	// Counters for assertions.
 	CreateCalls            int
 	GetCalls               int
@@ -59,6 +62,9 @@ func (f *FakeVPCClient) CreateFileShare(_ context.Context, input ibmcloud.Create
 
 	if f.CreateErr != nil {
 		return nil, f.CreateErr
+	}
+	if f.failCreateAfterErr != nil && f.CreateCalls > f.failCreateAfter {
+		return nil, f.failCreateAfterErr
 	}
 	if input.SubnetID == "" {
 		return nil, fmt.Errorf("create share %q: subnet ID is required for the mount target", input.Name)
@@ -252,4 +258,27 @@ func (f *FakeVPCClient) ClearMountTargets(id string) {
 	if info, ok := f.shares[id]; ok {
 		info.MountTargets = nil
 	}
+}
+
+// FailCreateAfter lets the first n CreateFileShare calls through and makes
+// every later call fail with err.
+func (f *FakeVPCClient) FailCreateAfter(n int, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failCreateAfter = n
+	f.failCreateAfterErr = err
+}
+
+// ListSharesByName returns every share with this exact name.
+func (f *FakeVPCClient) ListSharesByName(_ context.Context, name string) ([]*ibmcloud.ShareInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*ibmcloud.ShareInfo
+	for _, s := range f.shares {
+		if s.Name == name {
+			c := *s
+			out = append(out, &c)
+		}
+	}
+	return out, nil
 }

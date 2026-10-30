@@ -15,6 +15,7 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/k8s"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -143,7 +144,10 @@ func (r *FileSharePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			pool.Status.Phase = "Initializing"
 			r.setCondition(pool, "SharesReady", metav1.ConditionFalse, "ProvisioningFailed", err.Error())
 			pool.Status.LastReconcileTime = timeNow()
-			_ = r.k8sClient.UpdateFileSharePoolStatus(ctx, pool)
+			// Shares created before the failure are already in VPC; keep them.
+			if saveErr := r.updateStatusRetryingConflict(ctx, pool); saveErr != nil {
+				klog.ErrorS(saveErr, "Failed to persist partial provisioning status", "pool", pool.Name)
+			}
 			return reconcile.Result{RequeueAfter: 15 * time.Second}, nil
 		}
 
@@ -153,7 +157,7 @@ func (r *FileSharePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		// would try to create the same share name again and get HTTP 400.
 		pool.Status.Phase = "Expanding"
 		pool.Status.LastReconcileTime = timeNow()
-		if err = r.k8sClient.UpdateFileSharePoolStatus(ctx, pool); err != nil {
+		if err = r.updateStatusRetryingConflict(ctx, pool); err != nil {
 			klog.ErrorS(err, "Failed to persist post-provisioning status", "pool", pool.Name)
 			return reconcile.Result{}, err
 		}
@@ -205,6 +209,28 @@ func (r *FileSharePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	return reconcile.Result{RequeueAfter: ReconcileInterval}, nil
+}
+
+// updateStatusRetryingConflict saves pool.Status. On a resourceVersion
+// conflict it reads the pool again, puts this status on the fresh copy and
+// tries again. The status is computed from VPC, so it must not be dropped:
+// losing it after creating shares makes the next pass create them again.
+func (r *FileSharePoolReconciler) updateStatusRetryingConflict(ctx context.Context, pool *v1alpha1.FileSharePool) error {
+	const attempts = 5
+	var err error
+	for i := 0; i < attempts; i++ {
+		err = r.k8sClient.UpdateFileSharePoolStatus(ctx, pool)
+		if err == nil || !apierrors.IsConflict(err) {
+			return err
+		}
+		fresh, getErr := r.k8sClient.GetFileSharePool(ctx, pool.Name)
+		if getErr != nil {
+			return getErr
+		}
+		fresh.Status = pool.Status
+		*pool = *fresh
+	}
+	return err
 }
 
 // handleDeletion processes a pool that has a DeletionTimestamp set.
@@ -404,6 +430,9 @@ func (r *FileSharePoolReconciler) healthCheck(ctx context.Context, pool *v1alpha
 		// MountPath never populated. Create a mount target if none exist on the
 		// VPC side.
 		if share.State == "stable" && share.MountTargetIP == "" {
+			if len(info.MountTargets) == 0 && r.adoptShareWithMountTarget(ctx, pool, share) {
+				continue
+			}
 			if len(info.MountTargets) == 0 && r.network != nil {
 				klog.InfoS("Stable share has no mount targets — creating one",
 					"pool", pool.Name, "shareID", share.ShareID)
@@ -438,6 +467,48 @@ func (r *FileSharePoolReconciler) healthCheck(ctx context.Context, pool *v1alpha
 			}
 		}
 	}
+}
+
+// adoptShareWithMountTarget handles a recorded share that has no mount target
+// while another VPC share of the same name already holds the mount target
+// (and its network interface) under the expected name. A failed create call
+// can leave such a pair. The share with the mount target is recorded instead,
+// and the bare duplicate is deleted if no volume lives on it. Reports whether
+// the record was switched.
+func (r *FileSharePoolReconciler) adoptShareWithMountTarget(ctx context.Context, pool *v1alpha1.FileSharePool, share *v1alpha1.PoolShareStatus) bool {
+	candidates, err := r.vpcClient.ListSharesByName(ctx, share.ShareName)
+	if err != nil {
+		klog.ErrorS(err, "Could not look for a share that holds the mount target", "shareID", share.ShareID)
+		return false
+	}
+	wantName := share.ShareName + "-mt"
+	for _, c := range candidates {
+		if c.ID == share.ShareID {
+			continue
+		}
+		for _, mt := range c.MountTargets {
+			if mt.Name != wantName || mt.IPAddress == "" {
+				continue
+			}
+			klog.InfoS("Recorded share has no mount target; another share of the same name holds it — switching",
+				"pool", pool.Name, "recordedShareID", share.ShareID, "adoptedShareID", c.ID)
+			oldID := share.ShareID
+			share.ShareID = c.ID
+			share.MountTargetIP = mt.IPAddress
+			share.MountTargetID = mt.ID
+			share.ExportPath = mt.ExportPath
+			share.MountTargets = []v1alpha1.ZoneMountTarget{{
+				Zone: share.Zone, MountTargetID: mt.ID, MountTargetIP: mt.IPAddress, ExportPath: mt.ExportPath,
+			}}
+			if share.PVCCount == 0 {
+				if delErr := r.vpcClient.DeleteFileShare(ctx, oldID); delErr != nil {
+					klog.ErrorS(delErr, "Could not delete the bare duplicate share", "shareID", oldID)
+				}
+			}
+			return true
+		}
+	}
+	return false
 }
 
 // createMountTarget creates a security group mount target for a share that has

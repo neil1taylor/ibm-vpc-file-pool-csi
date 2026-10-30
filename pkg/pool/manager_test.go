@@ -192,13 +192,16 @@ type fakeK8sClient struct {
 
 	GetPoolErr          error
 	UpdatePoolStatusErr error
-	GetSubVolumeErr     error
-	CreateSubVolumeErr  error
-	UpdateSubVolumeErr  error
-	DeleteSubVolumeErr  error
-	GetSnapshotErr      error
-	CreateSnapshotErr   error
-	DeleteSnapshotErr   error
+	// UpdatePoolStatusConflicts makes the next N status updates fail with a
+	// resourceVersion conflict, the way a lost race with another writer does.
+	UpdatePoolStatusConflicts int
+	GetSubVolumeErr           error
+	CreateSubVolumeErr        error
+	UpdateSubVolumeErr        error
+	DeleteSubVolumeErr        error
+	GetSnapshotErr            error
+	CreateSnapshotErr         error
+	DeleteSnapshotErr         error
 	// UpdateSnapshotStatusErr makes UpdateSnapshotStatus fail.
 	UpdateSnapshotStatusErr error
 }
@@ -245,6 +248,11 @@ func (f *fakeK8sClient) UpdateFileSharePoolStatus(_ context.Context, pool *v1alp
 	defer f.mu.Unlock()
 	if f.UpdatePoolStatusErr != nil {
 		return f.UpdatePoolStatusErr
+	}
+	if f.UpdatePoolStatusConflicts > 0 {
+		f.UpdatePoolStatusConflicts--
+		return apierrors.NewConflict(v1alpha1.GroupVersion.WithResource("filesharepools").GroupResource(), pool.Name,
+			fmt.Errorf("the object has been modified"))
 	}
 	existing, ok := f.pools[pool.Name]
 	if !ok {
