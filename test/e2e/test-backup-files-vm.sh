@@ -193,10 +193,19 @@ spec:
       - {name: d2, persistentVolumeClaim: {claimName: disk2}}
       - {name: d3, persistentVolumeClaim: {claimName: disk3}}
 YAML
-    oc wait --for=condition=complete "job/$1" -n "$NS" --timeout=1800s >/dev/null 2>&1 || {
-        oc logs "job/$1" -n "$NS" >&2 || true
+    # Stop at once when the Job fails, not only at the time limit.
+    local end=$((SECONDS + 1800)) ok="" failed=""
+    while [ $SECONDS -lt $end ]; do
+        ok=$(oc get "job/$1" -n "$NS" -o jsonpath='{.status.succeeded}' 2>/dev/null)
+        failed=$(oc get "job/$1" -n "$NS" -o jsonpath='{.status.failed}' 2>/dev/null)
+        [ -n "$ok" ] || [ -n "$failed" ] && break
+        sleep 10
+    done
+    if [ -z "$ok" ]; then
+        oc logs "job/$1" -n "$NS" --tail=40 >&2 || true
+        oc get events -n "$NS" --field-selector involvedObject.kind=Pod --sort-by=.lastTimestamp 2>/dev/null | tail -5 >&2 || true
         fail "the disk Job $1 failed"
-    }
+    fi
 }
 run_disk_job make-disks '
 mkdir -p /tmp/t/docs
@@ -207,7 +216,7 @@ printf x > "/tmp/t/line
 break"
 sha256sum /tmp/t/big.bin | cut -d" " -f1 > /d1/big.sha
 # disk1: GPT, a partition that is an LVM physical volume, an XFS logical volume.
-guestfish --format=raw <<EOF
+guestfish <<EOF
 disk-create /d1/disk.img raw 1G
 add-drive /d1/disk.img format:raw
 run
@@ -225,8 +234,9 @@ EOF
 # disk2: one ext4 file system; disk3: an NTFS file system in an MBR partition.
 virt-make-fs --format=raw --type=ext4 /tmp/t /d2/disk.img
 virt-make-fs --format=raw --type=ntfs --partition=mbr /tmp/t /d3/disk.img
-chmod 660 /d1/disk.img /d2/disk.img /d3/disk.img
-chown 107:107 /d1/disk.img /d2/disk.img /d3/disk.img
+# NFS maps root to nobody, so the chown to QEMU (107) may be refused; the files stay readable.
+chmod 666 /d1/disk.img /d2/disk.img /d3/disk.img
+chown 107:107 /d1/disk.img /d2/disk.img /d3/disk.img 2>/dev/null || true
 '
 BIG_SHA=$(oc exec -n "$NS" "$(oc get pod -n "$NS" -l job-name=make-disks -o name | head -1)" -- cat /d1/big.sha 2>/dev/null || true)
 [ ${#BIG_SHA} -eq 64 ] || BIG_SHA=$(oc logs -n "$NS" job/make-disks | grep -Eo '^[0-9a-f]{64}$' | head -1 || true)
