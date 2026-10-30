@@ -28,9 +28,16 @@ To make a release:
 
 ### Fixed
 
-- **A new pool no longer ends with a share that has no mount target (issue #366).** The pool status is now saved again after a resourceVersion conflict (also when provisioning stops half way), so shares already created in VPC are recorded and the next pass does not create them again. A recorded share with no mount target now switches to the share of the same name that holds the mount target and its network interface, and the bare duplicate is deleted when no volume lives on it. Adopting a share by name prefers the one that has a mount target. Cause: when a share create call failed while building its inline mount target ("Provided Name ... -mt-vni is not unique", HTTP 500), VPC could keep a bare share of that name next to the complete one, and the next pass adopted the bare one.
 - **Listing a folder inside a VM disk works.** The first lab run showed that `virt-ls` 1.52 refuses `-l --csv` ('used a flag which can only be combined with -lR mode'). The reader now runs `virt-ls -lR --csv` and keeps the names directly in the folder. Regular files, which `virt-ls` marks with `-`, were shown as 'other'. A folder with a very deep tree is slow to list, because `-R` reads the whole tree.
 - **Holds on a SubVolume can no longer be wiped by another writer, and a copy that runs is waited for.** Removing the last annotation with a patch made from a copy said `annotations: null` and wiped the other holds, so releasing an export hold or sweeping a browse hold could drop a hold that another writer had added a moment before. Hold writes now name only their own key, and the browse hold list is written only if the SubVolume is as it was read. A volume with a copy Job is not held until the Job has ended and been cleaned up: before, its status said "held" at once, the Job was never looked at again, and a browse session could start while the copy still wrote.
+
+## [v0.16.3] — 2026-10-30
+
+A fix release: a new pool can no longer end with a share that has no mount target (found by beta run 2). Built from `v0.16.2` plus this fix only; the Unreleased items below are not in it.
+
+### Fixed
+
+- **A new pool no longer ends with a share that has no mount target (issue #366).** The pool status is now saved again after a resourceVersion conflict (also when provisioning stops half way), so shares already created in VPC are recorded and the next pass does not create them again. A recorded share with no mount target now switches to the share of the same name that holds the mount target and its network interface, and the bare duplicate is deleted when no volume lives on it. Adopting a share by name prefers the one that has a mount target. Cause: when a share create call failed while building its inline mount target ("Provided Name ... -mt-vni is not unique", HTTP 500), VPC could keep a bare share of that name next to the complete one, and the next pass adopted the bare one.
 
 ## [v0.16.2] — 2026-10-29
 
