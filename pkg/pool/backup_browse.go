@@ -15,6 +15,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -554,16 +555,31 @@ func (bc *BackupController) holdForGuest(ctx context.Context, bb *v1alpha1.Backu
 		return fmt.Sprintf("waiting: cannot read the volume to hold it: %v", err)
 	}
 	session := string(bb.UID)
-	if value := addBrowseHold(sv.Annotations[browseHoldAnnotation], session, bc.nowFunc()); value != sv.Annotations[browseHoldAnnotation] {
-		patch := client.MergeFrom(sv.DeepCopy())
-		if sv.Annotations == nil {
-			sv.Annotations = map[string]string{}
+	// The value lists every session that holds the disk, so it is written as a
+	// whole, and only if the SubVolume is as it was read.
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		if sv.ResourceVersion == "" {
+			if getErr := bc.client.Get(ctx, types.NamespacedName{Name: svName}, sv); getErr != nil {
+				return getErr
+			}
 		}
-		sv.Annotations[browseHoldAnnotation] = value
-		if err := bc.client.Patch(ctx, sv, patch); err != nil {
-			klog.ErrorS(err, "Failed to hold a SubVolume for a browse session", "session", bb.Name, "volume", svName)
-			return fmt.Sprintf("waiting: cannot hold the disk of the volume: %v", err)
+		current := sv.Annotations[browseHoldAnnotation]
+		value := addBrowseHold(current, session, bc.nowFunc())
+		if value == current {
+			return nil
 		}
+		patchErr := patchAnnotation(ctx, bc.client, sv, browseHoldAnnotation, &value, true)
+		if apierrors.IsConflict(patchErr) {
+			sv.ResourceVersion = "" // read it again
+		}
+		return patchErr
+	})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return "" // the volume is gone: nothing copies its disk any more
+		}
+		klog.ErrorS(err, "Failed to hold a SubVolume for a browse session", "session", bb.Name, "volume", svName)
+		return fmt.Sprintf("waiting: cannot hold the disk of the volume: %v", err)
 	}
 	busy, known := bc.volumesBeingCopied(ctx, bb.Spec.Policy)
 	if !known || busy[svName] {
@@ -606,13 +622,11 @@ func (bc *BackupController) sweepBrowseHolds(ctx context.Context, sessions []v1a
 		if newValue == value {
 			continue
 		}
-		patch := client.MergeFrom(sv.DeepCopy())
-		if newValue == "" {
-			delete(sv.Annotations, browseHoldAnnotation)
-		} else {
-			sv.Annotations[browseHoldAnnotation] = newValue
+		var set *string
+		if newValue != "" {
+			set = &newValue
 		}
-		if err := bc.client.Patch(ctx, sv, patch); err != nil {
+		if err := patchAnnotation(ctx, bc.client, sv, browseHoldAnnotation, set, true); err != nil {
 			klog.ErrorS(err, "Failed to release a browse hold", "volume", sv.Name)
 		}
 	}
