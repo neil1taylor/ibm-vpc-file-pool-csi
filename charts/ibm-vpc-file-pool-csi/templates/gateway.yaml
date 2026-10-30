@@ -282,10 +282,14 @@ data:
   {{- if $domain }}
   {{- $want := printf "%s-%s.%s" $name .Release.Namespace $domain }}
   {{- $claimed := false }}
+  {{- /* A host counts as claimed if any Route asks for it or the router gave it to one. */}}
   {{- range ((lookup "route.openshift.io/v1" "Route" "" "").items | default list) }}
-  {{- if eq .spec.host $want }}{{ $claimed = true }}{{ end }}
+  {{- if eq (.spec.host | default "") $want }}{{ $claimed = true }}{{ end }}
+  {{- range (.status.ingress | default list) }}
+  {{- if eq (.host | default "") $want }}{{ $claimed = true }}{{ end }}
   {{- end }}
-  {{- if not $claimed }}{{ $host = $want }}{{ end }}
+  {{- end }}
+  {{- if not $claimed }}{{ $host = $want }}{{ $_ := set $.Values.backupGateway.route "firstHost" $want }}{{ end }}
   {{- end }}
   {{- end }}
   {{- if .Values.backupGateway.url }}
@@ -342,7 +346,12 @@ metadata:
     {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
     app.kubernetes.io/component: backup-gateway
 spec:
-  {{- with .Values.backupGateway.route.host }}
+  {{- /* On a first install the Route asks for exactly the host published above, so the two cannot
+       differ; on an upgrade it keeps the host it has. */}}
+  {{- $existing := lookup "route.openshift.io/v1" "Route" .Release.Namespace $name }}
+  {{- $existingHost := "" }}
+  {{- if $existing }}{{ $existingHost = $existing.spec.host | default "" }}{{ end }}
+  {{- with (.Values.backupGateway.route.host | default .Values.backupGateway.route.firstHost | default $existingHost) }}
   host: {{ . }}
   {{- end }}
   to:
