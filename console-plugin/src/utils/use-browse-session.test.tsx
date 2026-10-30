@@ -48,6 +48,20 @@ describe('useBrowseSession', () => {
     expect(createSession).toHaveBeenCalledTimes(1);
   });
 
+  it('knows when the session reads a VM disk', async () => {
+    (createSession as jest.Mock).mockResolvedValue({ name: 'bb-1', phase: 'Pending', guest: true });
+    (getSession as jest.Mock).mockResolvedValue({ name: 'bb-1', phase: 'Ready', guest: true });
+    const { result } = renderHook(() => useBrowseSession(req));
+    await flush();
+    expect(result.current.guest).toBe(true);
+    await act(async () => {
+      jest.advanceTimersByTime(POLL_MS);
+    });
+    await flush();
+    expect(result.current.status).toBe('ready');
+    expect(result.current.guest).toBe(true);
+  });
+
   it('is ready at once when the session is already ready', async () => {
     (createSession as jest.Mock).mockResolvedValue({ name: 'bb-1', phase: 'Ready' });
     const { result } = renderHook(() => useBrowseSession(req));

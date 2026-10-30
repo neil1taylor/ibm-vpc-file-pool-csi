@@ -81,3 +81,36 @@ func TestRunRefusesBadArguments(t *testing.T) {
 		})
 	}
 }
+
+func TestRestoreFilesModeNeedsASpecAndAPathsFile(t *testing.T) {
+	for name, args := range map[string][]string{
+		"nothing":  {"--mode", "restore-files"},
+		"bad json": {"--mode", "restore-files", "--restore-files-spec", "{", "--restore-files-paths", "/tmp/p"},
+		"no paths": {"--mode", "restore-files", "--restore-files-spec", "{}"},
+	} {
+		var out, errb bytes.Buffer
+		if code := run(context.Background(), append(args, "--termination-log", filepath.Join(t.TempDir(), "t")), &out, &errb, nil); code != 2 {
+			t.Errorf("%s: exit %d", name, code)
+		}
+	}
+}
+
+func TestRestoreFilesModeWritesTheReasonItCannotStart(t *testing.T) {
+	termLog := filepath.Join(t.TempDir(), "term")
+	paths := filepath.Join(t.TempDir(), "paths")
+	if err := os.WriteFile(paths, []byte("/a\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	// A spec with an unknown mode is refused before anything is read; the Job
+	// exits 0 and leaves the reason for the controller.
+	code := run(context.Background(), []string{"--mode", "restore-files", "--restore-files-spec", `{"mode":"nope","latest":"/src"}`,
+		"--restore-files-paths", paths, "--termination-log", termLog}, &out, &errb, nil)
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	b, _ := os.ReadFile(termLog)
+	if !strings.Contains(string(b), "unknown mode") {
+		t.Errorf("termination log = %q", b)
+	}
+}

@@ -1,0 +1,59 @@
+# The VM disk helper: reads the file systems inside a backed-up VM disk without
+# starting the VM (issue #92, phase 5). It runs the browse binary in guest mode,
+# which shows the disk, read-only and at the chosen moment, to a small appliance
+# VM (libguestfs) that reads the partitions, LVM volumes and file systems of the
+# guest. See docs/specs/2026-10-22-backup-file-restore.md, section 3.
+#
+# The base is CentOS Stream 9, not UBI: UBI repositories have no qemu or
+# libguestfs packages. The image of OpenShift Virtualization's libguestfs is not
+# used either: it cannot read NTFS (no libguestfs-winsupport; phase 0).
+FROM docker.io/library/golang:1.26 AS builder
+
+WORKDIR /workspace
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY pkg/browse/ pkg/browse/
+COPY pkg/cosbrowse/ pkg/cosbrowse/
+COPY pkg/keyprotect/ pkg/keyprotect/
+COPY pkg/filerestore/ pkg/filerestore/
+COPY pkg/guestfs/ pkg/guestfs/
+COPY pkg/nbd/ pkg/nbd/
+COPY pkg/qcow2/ pkg/qcow2/
+COPY pkg/replication/ pkg/replication/
+COPY pkg/util/ pkg/util/
+COPY cmd/browse/ cmd/browse/
+ARG VERSION=dev
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.version=${VERSION}" -o /browse ./cmd/browse
+
+# CentOS Stream 9, pinned by digest (the multi-architecture index of
+# quay.io/centos/centos:stream9 on 28 October 2026). Move it on purpose, and
+# build and test the image on the lab when you do.
+FROM quay.io/centos/centos@sha256:6f8045fc4f552544d8a401d61848bafc8d06ca7c11897c5b54a2c37fc419a20a
+
+# guestfs-tools has virt-filesystems, virt-ls and virt-cat. libguestfs-xfs and
+# libguestfs-winsupport give the appliance XFS and NTFS. NTFS is read only
+# through the virt- tools, as the packaging intends.
+RUN dnf -y install --setopt=install_weak_deps=False \
+        libguestfs libguestfs-xfs libguestfs-winsupport guestfs-tools supermin && \
+    dnf clean all
+
+# Build the appliance now, so a pod does not build it on every start (the root
+# file system of the pod is read-only). This is what libguestfs-make-fixed-appliance
+# does.
+# libguestfs takes the folder for a fixed appliance only if README.fixed is in it.
+RUN supermin --build --verbose --if-newer --lock /tmp/supermin.lock --copy-kernel -f ext2 \
+        --host-cpu x86_64 /usr/lib64/guestfs/supermin.d -o /opt/guestfs-appliance && \
+    touch /opt/guestfs-appliance/README.fixed
+ENV LIBGUESTFS_PATH=/opt/guestfs-appliance
+# Start the appliance once, so an image whose appliance does not start fails here.
+RUN LIBGUESTFS_BACKEND=direct LIBGUESTFS_BACKEND_SETTINGS=force_tcg HOME=/tmp \
+        guestfish -N /tmp/check.img=fs:ext4:64M exit && rm -f /tmp/check.img
+
+COPY --from=builder /browse /usr/local/bin/browse
+
+# The pod runs this as root with every capability dropped (it needs root to read
+# backups made by other users). It needs a writable /tmp and /var/tmp, and may
+# ask for the KVM device. The chart sets all of that.
+USER 0
+ENTRYPOINT ["/usr/local/bin/browse"]

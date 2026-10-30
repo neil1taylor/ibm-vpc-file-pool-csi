@@ -32,6 +32,9 @@ type Options struct {
 	MaxLists int
 	// Info says which moment this session reads.
 	Info Info
+	// InfoFunc, if set, gives the Info at the time of each call (a guest session
+	// learns of notices while it works). It replaces Info.
+	InfoFunc func() Info
 	// Moments lists the moment folders of the volume. Nil means none.
 	Moments func() ([]string, error)
 }
@@ -43,6 +46,15 @@ type Info struct {
 	Moment string `json:"moment"`
 	// Latest is true if the moment is the newest.
 	Latest bool `json:"latest"`
+	// Guest is true when the session reads the file systems inside a VM disk:
+	// the top level folders are the file systems of the guest.
+	Guest bool `json:"guest,omitempty"`
+	// Consistency is the consistency of the newest copy of a VM disk
+	// (FileSystemConsistent or CrashConsistent); older copies have no record.
+	Consistency string `json:"consistency,omitempty"`
+	// Notices are sentences to show with the session, for example that a copy
+	// was taken while the VM was running.
+	Notices []string `json:"notices,omitempty"`
 }
 
 // Why a session ended.
@@ -276,7 +288,11 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	writeJSON(w, http.StatusOK, s.opts.Info)
+	info := s.opts.Info
+	if s.opts.InfoFunc != nil {
+		info = s.opts.InfoFunc()
+	}
+	writeJSON(w, http.StatusOK, info)
 }
 
 func (s *Server) handleMoments(w http.ResponseWriter, r *http.Request) {

@@ -2,6 +2,7 @@ BINARY_NAME := vpc-file-pool-csi
 IMAGE_NAME := de.icr.io/ibm-vpc-file-pool-csi/driver
 CONSOLE_PLUGIN_IMAGE := de.icr.io/ibm-vpc-file-pool-csi/console-plugin
 BROWSE_IMAGE := de.icr.io/ibm-vpc-file-pool-csi/browse
+BROWSE_GUEST_IMAGE := de.icr.io/ibm-vpc-file-pool-csi/browse-guest
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 GOLANGCI_LINT_VERSION := v2.1.6
 CONTROLLER_GEN_VERSION := v0.20.1
@@ -9,7 +10,7 @@ GOBIN := $(shell go env GOPATH)/bin
 GOLANGCI_LINT := $(GOBIN)/golangci-lint
 CONTROLLER_GEN := $(GOBIN)/controller-gen
 
-.PHONY: build build-migrate build-failover build-pool-snapshots build-backup build-browse test test-scripts test-integration test-e2e test-release test-vm test-coverage vet lint generate docker-build docker-build-browse \
+.PHONY: build build-migrate build-failover build-pool-snapshots build-backup build-browse test test-scripts test-integration test-e2e test-release test-vm test-coverage vet lint generate docker-build docker-build-browse docker-build-browse-guest \
         install-crds deploy helm-install helm-lint helm-template run-local tools clean \
         console-plugin-install console-plugin-build console-plugin-dev console-plugin-lint \
         console-plugin-test console-plugin-docker-build \
@@ -95,6 +96,9 @@ docker-build:
 
 docker-build-browse:
 	$(CONTAINER_ENGINE) build --platform linux/amd64 --build-arg VERSION=$(VERSION) -f Dockerfile.browse -t $(BROWSE_IMAGE):$(VERSION) .
+
+docker-build-browse-guest:
+	$(CONTAINER_ENGINE) build --platform linux/amd64 --build-arg VERSION=$(VERSION) -f Dockerfile.browse-guest -t $(BROWSE_GUEST_IMAGE):$(VERSION) .
 
 install-crds:
 	kubectl apply -f config/crd/

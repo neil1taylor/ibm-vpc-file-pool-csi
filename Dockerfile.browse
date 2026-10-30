@@ -6,7 +6,8 @@
 #   - a backup folder on the snapshot pool's share, mounted read-only;
 #   - a backup exported to COS, through the Kopia command-line program (a child
 #     process, never linked in). The keys are Secrets mounted as files.
-# The VM disk helper (libguestfs, CentOS) is a later image.
+# The binary also has the VM disk mode, which this image does not use: the VM
+# disk helper (libguestfs, CentOS) is Dockerfile.browse-guest.
 FROM docker.io/library/golang:1.26 AS builder
 
 WORKDIR /workspace
@@ -16,6 +17,12 @@ RUN go mod download
 COPY pkg/browse/ pkg/browse/
 COPY pkg/cosbrowse/ pkg/cosbrowse/
 COPY pkg/keyprotect/ pkg/keyprotect/
+COPY pkg/filerestore/ pkg/filerestore/
+COPY pkg/guestfs/ pkg/guestfs/
+COPY pkg/nbd/ pkg/nbd/
+COPY pkg/qcow2/ pkg/qcow2/
+COPY pkg/replication/ pkg/replication/
+COPY pkg/util/ pkg/util/
 COPY cmd/browse/ cmd/browse/
 ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.version=${VERSION}" -o /browse ./cmd/browse

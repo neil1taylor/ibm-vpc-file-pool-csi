@@ -76,6 +76,11 @@ type FileRestoreRequest struct {
 	// COS, if set, reads the backup from COS instead of the snapshot pool. Backup,
 	// LatestPath and MomentsPath are then not used.
 	COS *FileRestoreCOS
+	// Guest, if set, reads the file systems inside the VM disk in LatestPath
+	// (the backup folder holds disk.img). The Job then runs in the guest image,
+	// and the first name of every path is a file system of the guest. MomentsPath
+	// is not used. The disk is held for the length of the restore.
+	Guest *FileRestoreGuest
 	// Dest is the share that holds the target claim, and Volume the claim's
 	// folder on it, like /pvcs/pvc-.... Not used for ModeMeasure.
 	Dest   ShareMount
@@ -92,6 +97,17 @@ type FileRestoreRequest struct {
 	// with. Nil and empty keep the backup's own.
 	UID, GID    *int64
 	Permissions string
+	// MaxRun, if set, caps how long a Job that reads a VM disk may run: what is
+	// left of the time the disk may be held. The Job's own limit is used if it is
+	// shorter.
+	MaxRun time.Duration
+}
+
+// FileRestoreGuest says a file restore reads a VM disk.
+type FileRestoreGuest struct {
+	// Consistency is how the newest copy of the disk was taken
+	// (FileSystemConsistent or CrashConsistent); empty if not known.
+	Consistency string
 }
 
 // FileRestoreCOS says which backup in COS a file restore reads.
@@ -112,6 +128,9 @@ type FileRestoreJobs interface {
 	RunFileRestore(ctx context.Context, req FileRestoreRequest) (bool, filerestore.Outcome, error)
 	// Namespace is where the Jobs run.
 	Namespace() string
+	// GuestEnabled says whether a restore may read the file systems inside a VM
+	// disk, which needs the guest helper image.
+	GuestEnabled() bool
 }
 
 // SetFileRestore turns on file restores.
@@ -261,6 +280,10 @@ func fileRestoreOwner(fr *v1alpha1.BackupFileRestore) metav1.OwnerReference {
 
 func (bc *BackupController) reconcileFileRestore(ctx context.Context, fr *v1alpha1.BackupFileRestore) {
 	sp := fr.Spec
+	if sp.Guest && (sp.Source == v1alpha1.BackupSourceCOS || sp.FromCOS != nil) {
+		bc.failFileRestore(ctx, fr, "the files inside a VM disk can be restored only from a backup in the snapshot pool, not yet from COS")
+		return
+	}
 	if sp.Source == v1alpha1.BackupSourceCOS || sp.FromCOS != nil {
 		bc.reconcileFileRestoreFromCOS(ctx, fr)
 		return
@@ -274,6 +297,7 @@ func (bc *BackupController) reconcileFileRestore(ctx context.Context, fr *v1alph
 		bc.setFileRestoreStatus(ctx, fr, restorePhasePending, fmt.Sprintf("get the backup policy: %v", err))
 		return
 	}
+	var maxRun time.Duration
 	var entry *v1alpha1.BackupVolumeStatus
 	for i := range policy.Status.Volumes {
 		v := &policy.Status.Volumes[i]
@@ -284,6 +308,41 @@ func (bc *BackupController) reconcileFileRestore(ctx context.Context, fr *v1alph
 	if entry == nil || entry.SubPath == "" {
 		bc.failFileRestore(ctx, fr, fmt.Sprintf("policy %s has no backup of %s/%s", sp.Policy, sp.SourceNamespace, sp.SourceName))
 		return
+	}
+	if sp.Guest {
+		switch {
+		case entry.VMName == "":
+			bc.failFileRestore(ctx, fr, fmt.Sprintf("%s/%s is not a VM disk, so it has no guest file systems to restore from", sp.SourceNamespace, sp.SourceName))
+			return
+		case !bc.fileJobs.GuestEnabled():
+			bc.failFileRestore(ctx, fr, "restoring files from inside a VM disk is not turned on in this installation (backupBrowse.guest.image is not set)")
+			return
+		}
+		// The disk is held before anything else, and a copy that is running is
+		// waited for, but only while the restore has not started its Job.
+		wasActive := fileRestoreActive(fr.Status.Phase)
+		// The time of the first hold is kept in the status, before the hold is
+		// taken, so that a hold the sweep let go after its limit is never taken
+		// again with a new time.
+		now := bc.nowFunc()
+		if fr.Status.GuestHoldStarted == nil {
+			t := metav1.NewTime(now)
+			fr.Status.GuestHoldStarted = &t
+			if err := bc.saveFileRestoreStatus(ctx, fr); err != nil {
+				fr.Status.GuestHoldStarted = nil
+				return
+			}
+		}
+		started := fr.Status.GuestHoldStarted.Time
+		maxRun = guestHoldBudget - now.Sub(started)
+		if maxRun < guestMinRun {
+			bc.failFileRestore(ctx, fr, fmt.Sprintf("the disk of this VM was held for the most that is allowed (%s) before the restore ended; ask again", guestHoldBudget))
+			return
+		}
+		if msg := bc.holdForGuest(ctx, string(fr.UID), policy.Name, entry.SubVolumeName, started, !wasActive); msg != "" {
+			bc.setFileRestoreStatus(ctx, fr, restorePhasePending, msg)
+			return
+		}
 	}
 	svs := &v1alpha1.SubVolumeList{}
 	if err := bc.client.List(ctx, svs); err != nil {
@@ -299,11 +358,21 @@ func (bc *BackupController) reconcileFileRestore(ctx context.Context, fr *v1alph
 	req := FileRestoreRequest{
 		Key: fileRestoreKey(fr), Owner: fileRestoreOwner(fr),
 		Backup: shareMountOf(backupShare), LatestPath: policyBase + entry.SubPath,
-		Paths: sp.Paths, Policy: policy.Name, MaxBytes: bc.fileCfg.MaxBytes,
+		Paths: sp.Paths, Policy: policy.Name, MaxBytes: bc.fileCfg.MaxBytes, MaxRun: maxRun,
 	}
 	// A volume without moments has no moments folder, and a folder that is not
-	// there cannot be mounted read-only.
-	if entry.RestorePoints > 0 {
+	// there cannot be mounted read-only. A VM disk keeps its earlier moments as
+	// undo files next to the disk, and the Job rebuilds the old view from them.
+	switch {
+	case sp.Guest:
+		req.Guest = &FileRestoreGuest{}
+		if c := entry.Consistency; c == "FileSystemConsistent" || c == "CrashConsistent" {
+			req.Guest.Consistency = c
+		}
+		if guestFileCopy(entry) && entry.RestorePoints > 0 {
+			req.MomentsPath = policyBase + "/.moments" + entry.SubPath
+		}
+	case entry.RestorePoints > 0:
 		req.MomentsPath = policyBase + "/.moments" + entry.SubPath
 	}
 	if sp.Moment != nil {
@@ -435,12 +504,36 @@ func (bc *BackupController) fileRestoreIntoClaim(ctx context.Context, fr *v1alph
 	req.Mode = filerestore.ModeFolder
 	req.Dest, req.Volume = subVolumeShareMount(sv), sv.Spec.SubPath
 	req.CapacityBytes = pvc.Spec.Resources.Requests.Storage().Value()
-	req.UID, req.GID, req.Permissions = sv.Spec.UID, sv.Spec.GID, sv.Spec.Permissions
+	req.UID, req.GID = bc.ownerOfClaim(ctx, sv, false)
+	req.Permissions = sv.Spec.Permissions
 	out, done := bc.runFileRestoreJob(ctx, fr, restorePhaseRestoring, "copying the files into a new folder of the claim", "", req)
 	if !done {
 		return
 	}
 	bc.finishFileRestore(ctx, fr, out)
+}
+
+// ownerOfClaim is the owner that a restore gives its files: what the SubVolume
+// says. If it says nothing and the claim is new, the defaults of its pool fill
+// the gaps. For an existing claim nothing more is looked up here: a restore of a
+// VM disk reads the owner of the claim's folder in its writer, and any other
+// restore keeps the owner of the backup.
+func (bc *BackupController) ownerOfClaim(ctx context.Context, sv *v1alpha1.SubVolume, newClaim bool) (uid, gid *int64) {
+	uid, gid = sv.Spec.UID, sv.Spec.GID
+	if !newClaim || (uid != nil && gid != nil) {
+		return uid, gid
+	}
+	pool := &v1alpha1.FileSharePool{}
+	if err := bc.client.Get(ctx, types.NamespacedName{Name: sv.Spec.PoolName}, pool); err != nil {
+		return uid, gid
+	}
+	if uid == nil {
+		uid = pool.Spec.DefaultUID
+	}
+	if gid == nil {
+		gid = pool.Spec.DefaultGID
+	}
+	return uid, gid
 }
 
 // fileRestoreSizeGB sizes a new claim: the chosen files plus the margin, rounded
@@ -513,7 +606,8 @@ func (bc *BackupController) fileRestoreIntoNewClaim(ctx context.Context, fr *v1a
 	req.Mode = filerestore.ModeNewClaim
 	req.Dest, req.Volume = subVolumeShareMount(sv), sv.Spec.SubPath
 	req.CapacityBytes = size << 30
-	req.UID, req.GID, req.Permissions = sv.Spec.UID, sv.Spec.GID, sv.Spec.Permissions
+	req.UID, req.GID = bc.ownerOfClaim(ctx, sv, true)
+	req.Permissions = sv.Spec.Permissions
 	held := fmt.Sprintf(". The new claim %s/%s is held back; delete it and ask again", sp.TargetNamespace, sp.TargetName)
 	out, done := bc.runFileRestoreJob(ctx, fr, restorePhaseRestoring, "copying the files into the new claim", held, req)
 	if !done {

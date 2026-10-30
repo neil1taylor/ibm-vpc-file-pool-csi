@@ -14,6 +14,7 @@ import {
   getSession,
   listFolder,
   listMoments,
+  getInfo,
   momentLabel,
   momentToISO,
   parseBrowseQuery,
@@ -181,6 +182,14 @@ describe('gateway calls', () => {
   it('lists the moments', async () => {
     (consoleFetch as jest.Mock).mockResolvedValue(reply(200, { moments: ['20261022T091500Z'] }));
     await expect(listMoments('bb-1')).resolves.toEqual(['20261022T091500Z']);
+  });
+
+  it('reads what a session says about itself: a VM disk, its consistency and its notices', async () => {
+    (consoleFetch as jest.Mock).mockResolvedValue(reply(200, { guest: true, consistency: 'CrashConsistent', notices: ['n1'] }));
+    await expect(getInfo('bb-1')).resolves.toEqual({ guest: true, consistency: 'CrashConsistent', notices: ['n1'] });
+    const [url, opts] = (consoleFetch as jest.Mock).mock.calls[0];
+    expect(url).toMatch(/sessions\/bb-1\/info$/);
+    expect(opts.method).toBe('POST');
   });
 
   it('closes a session, and can keep the request alive when the page goes away', async () => {

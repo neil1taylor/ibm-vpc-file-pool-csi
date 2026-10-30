@@ -135,12 +135,15 @@ ls, get and browse flags (they use your own kubeconfig token, and need the right
   --extract         get only: unpack a folder into this folder. Links and special files are skipped
   --gateway, --gateway-ca-file   The gateway address and its CA, if not found in the cluster
   --driver-namespace   Where the driver runs (default kube-system)
-  --timeout         How long to wait for a session to be ready (default 5m)
+  --timeout         How long to wait for a session to be ready (default 5m; 20m for a VM disk, which waits for a running copy and starts a small reader)
+  --fs              VM disk only: the file system to look in, like sda1, rhel-root or /dev/rhel/root. ls without --fs lists the file systems of the disk. A volume that cannot be read (BitLocker, LUKS, ReFS, ZFS) is listed with the reason: restore the whole disk instead
+  A VM disk is read without starting the VM, and its next backup copy waits while a session is open (2 hours at most).
   A name that is not text is shown as \xNN, and you can type it the same way. Sessions end after 15 minutes without use.
 
 restore-files flags (your own token again; you need "get backupfiles" in the namespace of the backed-up claim, and the right to create claims in the namespace of the target; an existing claim also needs the right to update it):
   --policy, --pvc, --moment   As for ls: the backup to take the files from
   --path            A file or folder to restore, as ls prints it. Give it more than once. A folder comes with everything in it; / is the whole volume
+  --fs              VM disk only: put this file system in front of every --path, so --fs sda1 --path /etc/hosts restores /sda1/etc/hosts. The file system's name is kept in the restored tree
   --paths-file      A file with one path on each line, for many paths
   --to              The target claim, as NAMESPACE/NAME (required)
   --new-claim       Make the claim and fill it (the default). It must not exist. It is sized to the files plus 20%, at least 1 GiB

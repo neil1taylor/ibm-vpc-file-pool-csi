@@ -122,12 +122,29 @@ func NewFolderDest(shareRoot string, volume [][]byte, stagingName string, capaci
 	if len(volume) == 0 {
 		return nil, errors.New("the volume folder is required")
 	}
-	if stagingName == "" || stagingName == "." || stagingName == ".." || containsSlash(stagingName) {
-		return nil, errors.New("bad staging folder name")
-	}
 	pfd, err := openVolume(shareRoot, volume, false)
 	if err != nil {
 		return nil, err
+	}
+	return newFolderDest(pfd, stagingName, capacity)
+}
+
+// NewFolderDestAt is NewFolderDest for a mount that is the claim's folder
+// itself: the writer of a restore that reads a VM disk mounts only that folder,
+// and not the share around it.
+func NewFolderDestAt(volumeRoot, stagingName string, capacity int64) (*DirDest, error) {
+	pfd, err := openRootDir(volumeRoot)
+	if err != nil {
+		return nil, err
+	}
+	return newFolderDest(pfd, stagingName, capacity)
+}
+
+// newFolderDest takes over pfd, the open folder of the claim.
+func newFolderDest(pfd int, stagingName string, capacity int64) (*DirDest, error) {
+	if stagingName == "" || stagingName == "." || stagingName == ".." || containsSlash(stagingName) {
+		_ = unix.Close(pfd)
+		return nil, errors.New("bad staging folder name")
 	}
 	var st unix.Stat_t
 	if unix.Fstatat(pfd, "disk.img", &st, unix.AT_SYMLINK_NOFOLLOW) == nil {
@@ -135,11 +152,11 @@ func NewFolderDest(shareRoot string, volume [][]byte, stagingName string, capaci
 		return nil, ErrVMDiskClaim
 	}
 	// An earlier try of this restore may have left its staging folder.
-	if err = removeTree(pfd, stagingName); err != nil {
+	if err := removeTree(pfd, stagingName); err != nil {
 		_ = unix.Close(pfd)
 		return nil, fmt.Errorf("remove the staging folder of an earlier try: %w", err)
 	}
-	if err = retry(func() error { return unix.Mkdirat(pfd, stagingName, folderMod) }); err != nil {
+	if err := retry(func() error { return unix.Mkdirat(pfd, stagingName, folderMod) }); err != nil {
 		_ = unix.Close(pfd)
 		return nil, fmt.Errorf("make the staging folder: %w", err)
 	}
@@ -530,4 +547,13 @@ func removeTree(dirfd int, name string) error {
 		return err
 	}
 	return nil
+}
+
+// folderOwner is the owner of a folder, without following a link in its last name.
+func folderOwner(path string) (uid, gid int64, err error) {
+	var st unix.Stat_t
+	if err := retry(func() error { return unix.Stat(path, &st) }); err != nil {
+		return 0, 0, fmt.Errorf("read the owner of the claim folder: %w", err)
+	}
+	return int64(st.Uid), int64(st.Gid), nil
 }

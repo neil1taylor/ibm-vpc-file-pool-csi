@@ -42,29 +42,15 @@ func RestoreDisk(disk string, at time.Time, out string) (RestoreResult, error) {
 	if st.Modified {
 		return RestoreResult{}, errors.New("the backup disk changed after its last copy; its restore points no longer fit it")
 	}
-	// A disk with no restore point and no moment file (the first direct copy)
-	// is the only moment there is. Its time is not known.
-	if !st.MomentKnown || at.IsZero() || !at.Before(st.Moment) {
+	chosen, latest, err := chooseMoment(st, at)
+	if err != nil {
+		return RestoreResult{}, err
+	}
+	if latest {
 		if err := copySparse(disk, out); err != nil {
 			return RestoreResult{}, err
 		}
 		return RestoreResult{Moment: st.Moment, Latest: true}, nil // the zero time if not known
-	}
-	// The restore points are oldest first: the last one at or before at is the
-	// nearest.
-	var chosen time.Time
-	for _, p := range st.RestorePoints {
-		if !p.After(at) {
-			chosen = p
-		}
-	}
-	if chosen.IsZero() {
-		oldest := st.Moment
-		if len(st.RestorePoints) > 0 {
-			oldest = st.RestorePoints[0]
-		}
-		return RestoreResult{}, fmt.Errorf("no backup at or before %s: the oldest is %s",
-			at.UTC().Format(time.RFC3339), oldest.UTC().Format(time.RFC3339))
 	}
 	if err := Rewind(disk, chosen, out); err != nil {
 		return RestoreResult{}, err
@@ -128,4 +114,31 @@ func copySparse(disk, dst string) (err error) {
 		}
 	}
 	return f.Truncate(fi.Size())
+}
+
+// chooseMoment says which moment of a disk with state st to show for at. The
+// zero time asks for the latest. latest is true if the disk itself is the
+// answer: the moment is at or after the one the disk shows, or the disk has no
+// restore point and no moment file (the first direct copy), so its time is not
+// known. Otherwise chosen is the newest restore point at or before at.
+func chooseMoment(st DiskState, at time.Time) (chosen time.Time, latest bool, err error) {
+	if !st.MomentKnown || at.IsZero() || !at.Before(st.Moment) {
+		return time.Time{}, true, nil
+	}
+	// The restore points are oldest first: the last one at or before at is the
+	// nearest.
+	for _, p := range st.RestorePoints {
+		if !p.After(at) {
+			chosen = p
+		}
+	}
+	if chosen.IsZero() {
+		oldest := st.Moment
+		if len(st.RestorePoints) > 0 {
+			oldest = st.RestorePoints[0]
+		}
+		return time.Time{}, false, fmt.Errorf("no backup at or before %s: the oldest is %s",
+			at.UTC().Format(time.RFC3339), oldest.UTC().Format(time.RFC3339))
+	}
+	return chosen, false, nil
 }

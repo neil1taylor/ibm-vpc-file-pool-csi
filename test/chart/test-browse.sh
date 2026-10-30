@@ -72,6 +72,18 @@ check "the helper pulls with the chart's pull secrets" "$PULL" '--browse-image-p
 absent "no pull secrets, no flag" "$ON" '--browse-image-pull-secrets'
 find "$PULL" -delete
 absent "off: no browse image" "$OFF" '--browse-image'
+
+# The VM disk helper is off until its image exists.
+absent "guest: off by default" "$ON" '--browse-guest-image'
+GUEST="$(mktemp)"
+helm template test "$CHART" --namespace kube-system --set image.tag=v1.2.3 --set backupBrowse.guest.enabled=true \
+    --set backupBrowse.guest.kvmDevice=true --set backupBrowse.guest.memoryLimit=2Gi > "$GUEST"
+check "guest: the image, from the driver's tag" "$GUEST" '--browse-guest-image=de.icr.io/ibm-vpc-file-pool-csi/browse-guest:v1.2.3'
+check "guest: the KVM device is asked for when told" "$GUEST" '--browse-guest-kvm=true'
+check "guest: the memory limit can be set" "$GUEST" '--browse-guest-memory-limit=2Gi'
+check "guest: a start time limit" "$GUEST" '--browse-guest-start-timeout=20m'
+absent "guest: no CPU limit flag when none is set" "$GUEST" '--browse-guest-cpu-limit'
+find "$GUEST" -delete
 absent "off: no NetworkPolicy" "$OFF" 'kind: NetworkPolicy'
 absent "off: nothing in the browse namespace" "$OFF" 'namespace: ibm-vpc-file-pool-csi-browse'
 

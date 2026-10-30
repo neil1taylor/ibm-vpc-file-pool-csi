@@ -15,6 +15,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -42,6 +43,11 @@ const (
 	defaultBrowseMaxSessions     = 5
 	defaultBrowseMaxPerNamespace = 2
 	defaultBrowseClosedKeep      = 10 * time.Minute
+
+	// defaultBrowseGuestStartTimeout is how long a session on a VM disk may be
+	// Starting: a copy to wait for (5 minutes), the appliance (10 minutes at most)
+	// and the pull of the image.
+	defaultBrowseGuestStartTimeout = 20 * time.Minute
 )
 
 // BrowseConfig sets the limits of browse sessions.
@@ -60,6 +66,9 @@ type BrowseConfig struct {
 	// are. A session that reads a backup in COS runs its helper there, with a copy
 	// of the session Secret. Empty turns browsing of COS backups off.
 	COSNamespace string
+	// GuestStartTimeout is how long a session on a VM disk may wait for its
+	// helper to be ready. Zero means 20 minutes.
+	GuestStartTimeout time.Duration
 	// COSStartTimeout is how long a session that reads COS may wait for its
 	// helper to be ready. Zero means five minutes.
 	COSStartTimeout time.Duration
@@ -257,7 +266,7 @@ func (bc *BackupController) startBrowse(ctx context.Context, bb *v1alpha1.Backup
 		bc.setBrowseStatus(ctx, bb, browsePhasePending, fmt.Sprintf("waiting: %d sessions are open for namespace %s and the limit is %d", n, bb.Spec.PVCNamespace, bc.browse.MaxPerNamespace))
 		return
 	}
-	req, err := bc.browseRequest(ctx, bb)
+	req, svName, err := bc.browseRequest(ctx, bb)
 	if err != nil {
 		var f restoreFailure
 		if errors.As(err, &f) {
@@ -266,6 +275,14 @@ func (bc *BackupController) startBrowse(ctx context.Context, bb *v1alpha1.Backup
 		}
 		bc.setBrowseStatus(ctx, bb, browsePhasePending, err.Error())
 		return
+	}
+	if req.Guest {
+		// The disk is held before anything else: from now on no new backup copy
+		// starts. A copy that is running is waited for.
+		if msg := bc.holdForGuest(ctx, string(bb.UID), bb.Spec.Policy, svName, bc.nowFunc(), true); msg != "" {
+			bc.setBrowseStatus(ctx, bb, browsePhasePending, msg)
+			return
+		}
 	}
 	if err := bc.ensureBrowseSecret(ctx, bb); err != nil {
 		bc.setBrowseStatus(ctx, bb, browsePhasePending, fmt.Sprintf("make the session Secret: %v", err))
@@ -303,7 +320,7 @@ func (bc *BackupController) watchBrowse(ctx context.Context, bb *v1alpha1.Backup
 	case !st.Exists && bb.Status.Phase == browsePhaseReady:
 		bc.endBrowse(ctx, bb, counts, browsePhaseFailed, "", "the helper pod is gone")
 	case !st.Exists:
-		req, rerr := bc.browseRequest(ctx, bb)
+		req, _, rerr := bc.browseRequest(ctx, bb)
 		if rerr == nil {
 			rerr = bc.browseJobs.StartBrowse(ctx, req)
 		}
@@ -326,6 +343,11 @@ func (bc *BackupController) watchBrowse(ctx context.Context, bb *v1alpha1.Backup
 		}
 		bb.Status.PodIP, bb.Status.Port = st.PodIP, browsePort
 		bc.setBrowseStatus(ctx, bb, browsePhaseReady, "")
+	case bb.Status.Phase == browsePhaseStarting && bb.Spec.Guest && bb.Status.StartedTime != nil &&
+		bc.nowFunc().Sub(bb.Status.StartedTime.Time) >= bc.guestStartTimeout():
+		bc.endBrowse(ctx, bb, counts, browsePhaseFailed, "", fmt.Sprintf(
+			"the reader of the VM disk was not ready after %s. Check that the guest image can be pulled; without the KVM device the reader can be slow",
+			bc.guestStartTimeout()))
 	case bb.Status.Phase == browsePhaseStarting && browseIsCOS(&bb.Spec) && bb.Status.StartedTime != nil &&
 		bc.nowFunc().Sub(bb.Status.StartedTime.Time) >= bc.cosStartTimeout():
 		bc.endBrowse(ctx, bb, counts, browsePhaseFailed, "", fmt.Sprintf(
@@ -334,19 +356,27 @@ func (bc *BackupController) watchBrowse(ctx context.Context, bb *v1alpha1.Backup
 	}
 }
 
-// browseRequest works out what the helper needs. An error that is a
-// restoreFailure ends the session; any other error leaves it waiting.
-func (bc *BackupController) browseRequest(ctx context.Context, bb *v1alpha1.BackupBrowse) (BrowseJobRequest, error) {
+// browseRequest works out what the helper needs, and the SubVolume of the disk
+// when the session reads a VM disk. An error that is a restoreFailure ends the
+// session; any other error leaves it waiting.
+func (bc *BackupController) browseRequest(ctx context.Context, bb *v1alpha1.BackupBrowse) (BrowseJobRequest, string, error) {
 	sp := bb.Spec
+	if sp.Guest && browseIsCOS(&sp) {
+		return BrowseJobRequest{}, "", restoreFailure("the files inside a VM disk can be browsed only for a backup in the snapshot pool, not yet for a backup in COS")
+	}
+	if sp.Guest && !bc.browseJobs.GuestEnabled() {
+		return BrowseJobRequest{}, "", restoreFailure("browsing the files inside a VM disk is not turned on in this installation (backupBrowse.guest.image is not set)")
+	}
 	if browseIsCOS(&sp) {
-		return bc.browseCOSRequest(ctx, bb)
+		req, err := bc.browseCOSRequest(ctx, bb)
+		return req, "", err
 	}
 	policy := &v1alpha1.BackupPolicy{}
 	if err := bc.client.Get(ctx, types.NamespacedName{Name: sp.Policy}, policy); err != nil {
 		if apierrors.IsNotFound(err) {
-			return BrowseJobRequest{}, restoreFailure(fmt.Sprintf("the backup policy %q does not exist", sp.Policy))
+			return BrowseJobRequest{}, "", restoreFailure(fmt.Sprintf("the backup policy %q does not exist", sp.Policy))
 		}
-		return BrowseJobRequest{}, fmt.Errorf("get the backup policy: %w", err)
+		return BrowseJobRequest{}, "", fmt.Errorf("get the backup policy: %w", err)
 	}
 	var entry *v1alpha1.BackupVolumeStatus
 	for i := range policy.Status.Volumes {
@@ -356,15 +386,18 @@ func (bc *BackupController) browseRequest(ctx context.Context, bb *v1alpha1.Back
 		}
 	}
 	if entry == nil || entry.SubPath == "" {
-		return BrowseJobRequest{}, restoreFailure(fmt.Sprintf("policy %s has no backup of %s/%s", sp.Policy, sp.PVCNamespace, sp.PVCName))
+		return BrowseJobRequest{}, "", restoreFailure(fmt.Sprintf("policy %s has no backup of %s/%s", sp.Policy, sp.PVCNamespace, sp.PVCName))
+	}
+	if sp.Guest && entry.VMName == "" {
+		return BrowseJobRequest{}, "", restoreFailure(fmt.Sprintf("%s/%s is not a VM disk, so it has no guest file systems to browse", sp.PVCNamespace, sp.PVCName))
 	}
 	svs := &v1alpha1.SubVolumeList{}
 	if err := bc.client.List(ctx, svs); err != nil {
-		return BrowseJobRequest{}, fmt.Errorf("list SubVolumes: %w", err)
+		return BrowseJobRequest{}, "", fmt.Errorf("list SubVolumes: %w", err)
 	}
 	share, err := bc.backupShareOf(ctx, policy, svs.Items, entry)
 	if err != nil {
-		return BrowseJobRequest{}, err
+		return BrowseJobRequest{}, "", err
 	}
 	policyBase := backupBasePath + "/" + policy.Name
 	req := BrowseJobRequest{
@@ -376,13 +409,29 @@ func (bc *BackupController) browseRequest(ctx context.Context, bb *v1alpha1.Back
 		MaxLife:    bc.browse.MaxLife,
 		Owner:      browseOwner(bb),
 	}
-	if entry.RestorePoints > 0 {
+	switch {
+	case sp.Guest:
+		// A VM disk copied by the VM copy keeps its earlier moments as undo files
+		// next to the disk: the helper rebuilds the old view from them. One copied
+		// as plain files has a moments folder, like any volume.
+		req.Guest = true
+		if c := entry.Consistency; c == "FileSystemConsistent" || c == "CrashConsistent" {
+			req.Consistency = c
+		}
+		if sp.Moment != nil {
+			req.At = sp.Moment.Time
+		}
+		if guestFileCopy(entry) && entry.RestorePoints > 0 {
+			req.MomentsPath = policyBase + "/.moments" + entry.SubPath
+		}
+		return req, entry.SubVolumeName, nil
+	case entry.RestorePoints > 0:
 		req.MomentsPath = policyBase + "/.moments" + entry.SubPath
 		if sp.Moment != nil {
 			req.At = sp.Moment.Time
 		}
 	}
-	return req, nil
+	return req, "", nil
 }
 
 func browseOwner(bb *v1alpha1.BackupBrowse) metav1.OwnerReference {
@@ -486,4 +535,143 @@ func equalSecretData(a, b map[string][]byte) bool {
 		}
 	}
 	return true
+}
+
+// holdForGuest holds the disk for a session or a file restore that reads a VM
+// disk (session is the UID of either), and says why it must wait, or returns ""
+// if it may start. A restore whose Job already runs asks for the hold again
+// without waiting (waitForCopy false): a copy that began before the hold cannot
+// be waited out by a Job that is already reading. The hold comes first:
+// once it is on the SubVolume, the replication controller starts no new copy of
+// the disk (or of any disk of the same running VM). Only then is a copy that is
+// already running waited for. The other order would leave a gap in which a copy
+// could start between the check and the hold. since is the time the hold is
+// stamped with when it is added; a hold that is there keeps its first time.
+func (bc *BackupController) holdForGuest(ctx context.Context, session, policy, svName string, since time.Time, waitForCopy bool) string {
+	sv := &v1alpha1.SubVolume{}
+	if err := bc.client.Get(ctx, types.NamespacedName{Name: svName}, sv); err != nil {
+		if apierrors.IsNotFound(err) {
+			return "" // the volume is gone: nothing copies its disk any more
+		}
+		return fmt.Sprintf("waiting: cannot read the volume to hold it: %v", err)
+	}
+	// The value lists every session that holds the disk, so it is written as a
+	// whole, and only if the SubVolume is as it was read.
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		if sv.ResourceVersion == "" {
+			if getErr := bc.client.Get(ctx, types.NamespacedName{Name: svName}, sv); getErr != nil {
+				return getErr
+			}
+		}
+		current := sv.Annotations[browseHoldAnnotation]
+		value := addBrowseHold(current, session, since)
+		if value == current {
+			return nil
+		}
+		patchErr := patchAnnotation(ctx, bc.client, sv, browseHoldAnnotation, &value, true)
+		if apierrors.IsConflict(patchErr) {
+			sv.ResourceVersion = "" // read it again
+		}
+		return patchErr
+	})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return "" // the volume is gone: nothing copies its disk any more
+		}
+		klog.ErrorS(err, "Failed to hold a SubVolume for a browse session", "session", session, "volume", svName)
+		return fmt.Sprintf("waiting: cannot hold the disk of the volume: %v", err)
+	}
+	if !waitForCopy {
+		return ""
+	}
+	busy, known := bc.volumesBeingCopied(ctx, policy)
+	if !known || busy[svName] {
+		return "waiting: a backup copy of this disk is running; the session starts when it has ended"
+	}
+	return ""
+}
+
+// sweepBrowseHolds removes the holds that nothing needs: of a session or file
+// restore that no longer exists, of a session that has ended and has no helper
+// any more, of a restore that has ended, and any that are older than the limit.
+// A hold stays while a helper or a restore Job may still read the disk.
+func (bc *BackupController) sweepBrowseHolds(ctx context.Context) {
+	live := map[string]bool{}
+	helpers := map[string]bool{}
+	if bc.browseJobs != nil {
+		names, err := bc.browseJobs.BrowseSessions(ctx)
+		if err != nil {
+			klog.ErrorS(err, "Failed to list browse helper Jobs to release holds")
+			return
+		}
+		for _, n := range names {
+			helpers[n] = true
+		}
+	}
+	sessions := &v1alpha1.BackupBrowseList{}
+	if err := bc.client.List(ctx, sessions); err != nil {
+		klog.ErrorS(err, "Failed to list browse sessions to release holds")
+		return
+	}
+	for i := range sessions.Items {
+		ph := sessions.Items[i].Status.Phase
+		if ph != browsePhaseClosed && ph != browsePhaseFailed {
+			live[string(sessions.Items[i].UID)] = true
+		}
+	}
+	restores := &v1alpha1.BackupFileRestoreList{}
+	if err := bc.client.List(ctx, restores); err != nil {
+		klog.ErrorS(err, "Failed to list file restores to release holds")
+		return
+	}
+	for i := range restores.Items {
+		if !fileRestoreEnded(restores.Items[i].Status.Phase) {
+			live[string(restores.Items[i].UID)] = true
+		}
+	}
+	svs := &v1alpha1.SubVolumeList{}
+	if err := bc.client.List(ctx, svs); err != nil {
+		klog.ErrorS(err, "Failed to list SubVolumes to release browse holds")
+		return
+	}
+	now := bc.nowFunc()
+	for i := range svs.Items {
+		sv := &svs.Items[i]
+		value, found := sv.Annotations[browseHoldAnnotation]
+		if !found {
+			continue
+		}
+		var keep []browseHold
+		for _, h := range parseBrowseHolds(value) {
+			if (live[h.session] || helpers[h.session]) && now.Sub(h.since) < browseHoldLimit {
+				keep = append(keep, h)
+			}
+		}
+		newValue := formatBrowseHolds(keep)
+		if newValue == value {
+			continue
+		}
+		var set *string
+		if newValue != "" {
+			set = &newValue
+		}
+		if err := patchAnnotation(ctx, bc.client, sv, browseHoldAnnotation, set, true); err != nil {
+			klog.ErrorS(err, "Failed to release a browse hold", "volume", sv.Name)
+		}
+	}
+}
+
+// guestFileCopy says a VM disk was copied as plain files, not by the VM copy
+// that keeps undo files: that is how a VM that was stopped is backed up. Its
+// earlier moments are then folders in the moments folder, each with its own
+// disk.img, as for any other volume. The copy path says so in the consistency.
+func guestFileCopy(entry *v1alpha1.BackupVolumeStatus) bool {
+	return entry.Consistency == consistencyFileCopy
+}
+
+func (bc *BackupController) guestStartTimeout() time.Duration {
+	if bc.browse.GuestStartTimeout > 0 {
+		return bc.browse.GuestStartTimeout
+	}
+	return defaultBrowseGuestStartTimeout
 }

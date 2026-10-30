@@ -69,6 +69,13 @@ func chooseSource(p *v1alpha1.BackupPolicy, v *v1alpha1.BackupVolumeStatus, mome
 	return "", nil
 }
 
+// vmDiskInCOS is the refusal for a VM disk that would be read from COS: the
+// files inside a VM disk can be read from the snapshot pool only (phase 6 adds COS).
+func vmDiskInCOS() *sourceError {
+	return &sourceError{http.StatusConflict, "vm_disk_cos",
+		"the files inside a VM disk can be browsed and restored only from the snapshot pool, for the moments that are still there; a VM disk in COS can only be restored whole"}
+}
+
 // sourceName is the source as a session reports it.
 func sourceName(src string) string {
 	if src == v1alpha1.BackupSourceCOS {

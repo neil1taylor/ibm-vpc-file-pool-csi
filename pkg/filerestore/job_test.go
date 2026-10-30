@@ -245,3 +245,70 @@ func TestBadCOSJobSpecsAreRefused(t *testing.T) {
 		}
 	}
 }
+
+// A job that reads the file systems inside a VM disk gets its tree from the
+// guest reader, with the disk in the backup folder and the time the controller
+// chose.
+func TestRunJobReadsAVMDisk(t *testing.T) {
+	var gotDisk string
+	var gotAt time.Time
+	var gotGuest GuestSource
+	closed := false
+	deps := jobDeps{
+		choose: func(string, string, time.Time) (string, browse.Info, error) {
+			t.Error("a guest job looked for a moments folder")
+			return "", browse.Info{}, nil
+		},
+		open: func(string) (browse.Tree, func() error, error) {
+			t.Error("a guest job read the backup folder as files")
+			return nil, nil, nil
+		},
+		openGuest: func(_ context.Context, latest, moments string, g GuestSource, at time.Time) (browse.Tree, browse.Info, func() error, error) {
+			gotDisk, gotGuest, gotAt = latest+"|"+moments, g, at
+			return sampleTree(), browse.Info{Moment: "20261022T091500Z", Guest: true}, func() error { closed = true; return nil }, nil
+		},
+	}
+	spec := JobSpec{Mode: ModeMeasure, Latest: "/src", At: "2026-10-22T10:00:00Z",
+		Guest: &GuestSource{Socket: "/tmp/disk.sock", Appliance: "/opt/guestfs-appliance", Consistency: "CrashConsistent"}}
+	out, err := runJob(context.Background(), spec, writePaths(t, "/var/www/html"), deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Bytes != 25 || out.Files != 3 || out.Moment != "2026-10-22T09:15:00Z" {
+		t.Fatalf("outcome %+v", out)
+	}
+	if gotDisk != "/src|" || gotGuest.Consistency != "CrashConsistent" || gotGuest.Socket != "/tmp/disk.sock" ||
+		!gotAt.Equal(time.Date(2026, 10, 22, 10, 0, 0, 0, time.UTC)) || !closed {
+		t.Errorf("disk %q, guest %+v, at %v, closed %v", gotDisk, gotGuest, gotAt, closed)
+	}
+}
+
+func TestRunJobFromAVMDiskSaysWhyItCannotOpenTheDisk(t *testing.T) {
+	deps := jobDeps{openGuest: func(context.Context, string, string, GuestSource, time.Time) (browse.Tree, browse.Info, func() error, error) {
+		return nil, browse.Info{}, nil, errors.New("the reader could not list the file systems of the disk")
+	}}
+	out, err := runJob(context.Background(), JobSpec{Mode: ModeMeasure, Latest: "/src", Guest: &GuestSource{Socket: "/tmp/d.sock"}}, writePaths(t, "/a"), deps)
+	if err == nil || !strings.Contains(out.Error, "file systems") {
+		t.Fatalf("out %+v, err %v", out, err)
+	}
+}
+
+func TestBadGuestJobSpecsAreRefused(t *testing.T) {
+	deps := jobDeps{openGuest: func(context.Context, string, string, GuestSource, time.Time) (browse.Tree, browse.Info, func() error, error) {
+		t.Error("a bad spec reached the disk")
+		return nil, browse.Info{}, nil, errors.New("no")
+	}}
+	g := &GuestSource{Socket: "/tmp/d.sock"}
+	for name, spec := range map[string]JobSpec{
+		"with COS":             {Mode: ModeMeasure, Latest: "", COS: cosSource(), Guest: g},
+		"no folder":            {Mode: ModeMeasure, Guest: g},
+		"no socket":            {Mode: ModeMeasure, Latest: "/src", Guest: &GuestSource{}},
+		"relative socket":      {Mode: ModeMeasure, Latest: "/src", Guest: &GuestSource{Socket: "d.sock"}},
+		"bad consistency":      {Mode: ModeMeasure, Latest: "/src", Guest: &GuestSource{Socket: "/tmp/d.sock", Consistency: "Maybe"}},
+		"appliance not a path": {Mode: ModeMeasure, Latest: "/src", Guest: &GuestSource{Socket: "/tmp/d.sock", Appliance: "rel"}},
+	} {
+		if _, err := runJob(context.Background(), spec, writePaths(t, "/a"), deps); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}

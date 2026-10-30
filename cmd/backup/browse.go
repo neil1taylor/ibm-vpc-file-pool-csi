@@ -32,6 +32,73 @@ import (
 type gwClient struct {
 	base string
 	hc   *http.Client
+	// guest is true when the session that openSession last opened reads the file
+	// systems inside a VM disk.
+	guest bool
+}
+
+// errOut is where notices go, so that they do not mix with a listing or a file.
+var errOut io.Writer = os.Stderr
+
+const (
+	defaultSessionTimeout = 5 * time.Minute
+	// guestSessionTimeout is how long a session on a VM disk may take to open: it
+	// waits for a backup copy that is being written, and for the appliance to start
+	// (10 minutes at most without the KVM device).
+	guestSessionTimeout = 20 * time.Minute
+)
+
+// sessionWait gives a session on a VM disk more time than the default, unless the
+// user chose a time with --timeout.
+func sessionWait(guest bool, timeout time.Duration) time.Duration {
+	if guest && timeout == defaultSessionTimeout {
+		return guestSessionTimeout
+	}
+	return timeout
+}
+
+// fsName turns --fs into the name of the folder of that file system at the top of
+// a VM disk session: a device name like /dev/rhel/root becomes rhel-root, as the
+// listing shows it.
+func fsName(s string) (string, error) {
+	n := strings.TrimPrefix(s, "/dev/")
+	n = strings.TrimPrefix(n, "mapper/")
+	n = strings.ReplaceAll(n, "/", "-")
+	if n == "" || strings.Contains(n, "..") || n == "." || len(n) > 100 {
+		return "", fmt.Errorf("--fs %q is not the name of a file system; run ls without --fs to list them", s)
+	}
+	for _, r := range n {
+		plain := r == '.' || r == '_' || r == '+' || r == '-' || (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+		if !plain {
+			return "", fmt.Errorf("--fs %q is not the name of a file system; run ls without --fs to list them", s)
+		}
+	}
+	return n, nil
+}
+
+// withFS puts the file system of --fs in front of a path.
+func withFS(flags map[string]string, path [][]byte) ([][]byte, error) {
+	v, set := flags["fs"]
+	if !set {
+		return path, nil
+	}
+	n, err := fsName(v)
+	if err != nil {
+		return nil, err
+	}
+	return append([][]byte{[]byte(n)}, path...), nil
+}
+
+// showNotices prints what the session says about itself that a person should
+// know, such as that a VM disk copy was taken while the VM ran.
+func (g *gwClient) showNotices(ctx context.Context, base string) {
+	var info browse.Info
+	if err := g.doJSON(ctx, http.MethodPost, base+"/info", struct{}{}, &info); err != nil {
+		return
+	}
+	for _, n := range info.Notices {
+		_, _ = fmt.Fprintf(errOut, "note: %s\n", browse.Escape([]byte(n)))
+	}
 }
 
 // booleanFlags never take a value.
@@ -193,7 +260,8 @@ func (g *gwClient) openSession(ctx context.Context, t target, timeout time.Durat
 	if err := g.doJSON(ctx, http.MethodPost, "/v1/sessions", req, &s); err != nil {
 		return "", err
 	}
-	deadline := time.Now().Add(timeout)
+	g.guest = s.Guest
+	deadline := time.Now().Add(sessionWait(s.Guest, timeout))
 	for s.Phase != "Ready" {
 		switch s.Phase {
 		case "Failed", "Closed":
@@ -218,7 +286,7 @@ func sessionTimeout(flags map[string]string) (time.Duration, error) {
 	if v := flags["timeout"]; v != "" {
 		return time.ParseDuration(v)
 	}
-	return 5 * time.Minute, nil
+	return defaultSessionTimeout, nil
 }
 
 // pathOf reads the one optional path argument.
@@ -278,11 +346,17 @@ func runLs(ctx context.Context, gw *gwClient, out io.Writer, args []string) erro
 	if err != nil {
 		return err
 	}
+	if path, err = withFS(flags, path); err != nil {
+		return err
+	}
 	name, err := gw.openSession(ctx, t, timeout)
 	if err != nil {
 		return err
 	}
 	base := "/v1/sessions/" + url.PathEscape(name)
+	if gw.guest || flags["fs"] != "" {
+		gw.showNotices(ctx, base)
+	}
 	if flags["moments"] == "true" {
 		var got struct {
 			Moments []string `json:"moments"`
@@ -315,6 +389,9 @@ func runLs(ctx context.Context, gw *gwClient, out io.Writer, args []string) erro
 			}
 			if !e.Readable {
 				name += " (not readable)"
+			}
+			if e.Note != "" {
+				name += "  # " + browse.Escape([]byte(e.Note))
 			}
 			_, _ = fmt.Fprintf(w, "%s\t%d:%d\t%d\t%s\t%s\n", modeString(e), e.UID, e.GID, e.Size, e.MTime.UTC().Format("2006-01-02 15:04"), name)
 		}
@@ -368,11 +445,17 @@ func runGet(ctx context.Context, gw *gwClient, out io.Writer, args []string) err
 	if err != nil {
 		return err
 	}
+	if path, err = withFS(flags, path); err != nil {
+		return err
+	}
 	session, err := gw.openSession(ctx, t, timeout)
 	if err != nil {
 		return err
 	}
 	base := "/v1/sessions/" + url.PathEscape(session)
+	if gw.guest || flags["fs"] != "" {
+		gw.showNotices(ctx, base)
+	}
 	var entry browse.Entry
 	if err := gw.doJSON(ctx, http.MethodPost, base+"/stat", browse.PathRequest{Path: path}, &entry); err != nil {
 		return err

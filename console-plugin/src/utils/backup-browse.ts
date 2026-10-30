@@ -94,6 +94,8 @@ export interface BrowseEntry {
   /** base64 of the text of a symbolic link. It is shown and never followed. */
   link?: string;
   readable: boolean;
+  /** A sentence for the person: why a volume of a VM disk cannot be read, or what the reader had to do. */
+  note?: string;
 }
 
 export interface ListPage {
@@ -209,6 +211,17 @@ export interface Session {
   /** Pending, Starting, Ready, Closed or Failed. */
   phase: string;
   message?: string;
+  /** True when the session reads the file systems inside a VM disk. */
+  guest?: boolean;
+}
+
+export interface SessionInfo {
+  moment?: string;
+  latest?: boolean;
+  guest?: boolean;
+  consistency?: string;
+  /** Sentences to show with the session, for example that a copy was taken while the VM was running. */
+  notices?: string[];
 }
 
 /** consoleFetch throws on a failed reply and keeps the reply on the error; the gateway's error body is read from it. */
@@ -255,6 +268,8 @@ export const closeSession = (name: string, keepalive = false): Promise<Session> 
 
 export const listFolder = (session: string, path: string[], cursor?: string): Promise<ListPage> =>
   call<ListPage>('POST', `${sessionPath(session)}/list`, { path, ...(cursor ? { cursor } : {}), limit: PAGE_SIZE });
+
+export const getInfo = (session: string): Promise<SessionInfo> => call<SessionInfo>('POST', `${sessionPath(session)}/info`, {});
 
 export const listMoments = async (session: string): Promise<string[]> =>
   (await call<{ moments: string[] }>('POST', `${sessionPath(session)}/moments`, {})).moments || [];

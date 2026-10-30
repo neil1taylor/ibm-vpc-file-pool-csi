@@ -113,6 +113,8 @@ type ShareJobRunner struct {
 	driverImage   string
 	launcherImage string
 	browseImage   string
+	guestImage    string
+	guestCfg      BrowseGuestConfig
 	// browsePullSecrets are the pull Secrets of browse helper pods.
 	browsePullSecrets []string
 	// browseCOSCPU and browseCOSMemory are the limits of the helper pod that
@@ -216,6 +218,21 @@ type jobShape struct {
 	readiness *corev1.Probe
 	// pullSecrets are the image pull Secrets of the pod.
 	pullSecrets []string
+	// sidecars are more containers of the pod, run beside the main one.
+	sidecars []sideContainer
+}
+
+// sideContainer is a second container of the Job's pod. It has its own mounts
+// and capabilities, so that a part of the work that needs more rights than the
+// main container does not give them to it. It runs the Job's image.
+type sideContainer struct {
+	name    string
+	command []string
+	// folders are the folders of the Job's shares that this container mounts.
+	folders []folderMount
+	// mounts are the volumes of shape.volumes that it mounts.
+	mounts  []corev1.VolumeMount
+	addCaps []corev1.Capability
 }
 
 // folderMount mounts subPath of share number share at at.
@@ -348,27 +365,73 @@ func (r *ShareJobRunner) run(ctx context.Context, key string, shares []ShareMoun
 }
 
 // runMessage is run, and it also returns the termination message of the Job's
-// container when the Job has succeeded. It reads the message before the Job
-// and its pods are removed.
+// main container when the Job has succeeded. It reads the message before the
+// Job and its pods are removed.
 func (r *ShareJobRunner) runMessage(ctx context.Context, key string, shares []ShareMount, shape jobShape) (bool, string, error) {
+	done, msgs, err := r.runMessages(ctx, key, shares, shape)
+	return done, msgs.main(), err
+}
+
+const (
+	// mainContainerName is the container that runs the Job's program. For a file
+	// restore of a VM disk it is the reader, which parses the untrusted disk.
+	mainContainerName = "share-data"
+	// writerContainerName is the container of a guest file restore that holds
+	// the target.
+	writerContainerName = "writer"
+)
+
+// podMessages holds the termination messages of the containers of a Job's pod,
+// in the order of the pod's container statuses.
+type podMessages []containerMessage
+
+type containerMessage struct{ name, msg string }
+
+// of returns the message of the container with that name, or "".
+func (m podMessages) of(name string) string {
+	for _, c := range m {
+		if c.name == name {
+			return c.msg
+		}
+	}
+	return ""
+}
+
+// main returns the message of the Job's main container. A pod whose containers
+// have no names gives its first message.
+func (m podMessages) main() string {
+	if msg := m.of(mainContainerName); msg != "" {
+		return msg
+	}
+	for _, c := range m {
+		if c.name == "" {
+			return c.msg
+		}
+	}
+	return ""
+}
+
+// runMessages is runMessage with the message of every container, by name, so
+// the caller takes each fact from the container that may be trusted for it.
+func (r *ShareJobRunner) runMessages(ctx context.Context, key string, shares []ShareMount, shape jobShape) (bool, podMessages, error) {
 	jobName := shareJobName(key)
 	job := &batchv1.Job{}
 	err := r.client.Get(ctx, types.NamespacedName{Namespace: r.namespace, Name: jobName}, job)
 	switch {
 	case apierrors.IsNotFound(err):
-		return false, "", r.start(ctx, jobName, shares, shape)
+		return false, nil, r.start(ctx, jobName, shares, shape)
 	case err != nil:
-		return false, "", fmt.Errorf("get share Job %s: %w", jobName, err)
+		return false, nil, fmt.Errorf("get share Job %s: %w", jobName, err)
 	case job.Status.Succeeded > 0:
-		msg := r.terminationMessage(ctx, jobName)
+		msgs := r.terminationMessages(ctx, jobName)
 		r.cleanup(ctx, jobName, len(shares))
-		return true, msg, nil
+		return true, msgs, nil
 	case job.Status.Failed > shareJobBackoffLimit || jobHasFailed(job):
-		msg := r.terminationMessage(ctx, jobName)
+		msg := r.terminationMessages(ctx, jobName).main()
 		r.cleanup(ctx, jobName, len(shares))
-		return false, "", &shareJobFailure{job: jobName, msg: msg}
+		return false, nil, &shareJobFailure{job: jobName, msg: msg}
 	default:
-		return false, "", nil
+		return false, nil, nil
 	}
 }
 
@@ -384,22 +447,26 @@ func jobHasFailed(job *batchv1.Job) bool {
 	return false
 }
 
-// terminationMessage returns what the container of a Job's pod wrote to its
-// termination log, or "".
-func (r *ShareJobRunner) terminationMessage(ctx context.Context, jobName string) string {
+// terminationMessages returns what the containers of a Job's pod wrote to their
+// termination logs. A container with no message is left out.
+func (r *ShareJobRunner) terminationMessages(ctx context.Context, jobName string) podMessages {
 	pods := &corev1.PodList{}
 	if err := r.client.List(ctx, pods, client.InNamespace(r.namespace), client.MatchingLabels{shareJobLabel: jobName}); err != nil {
 		klog.V(4).InfoS("Could not list pods of a share data Job", "job", jobName, "err", err)
-		return ""
+		return nil
 	}
 	for _, p := range pods.Items {
+		var out podMessages
 		for _, cs := range p.Status.ContainerStatuses {
 			if cs.State.Terminated != nil && cs.State.Terminated.Message != "" {
-				return cs.State.Terminated.Message
+				out = append(out, containerMessage{cs.Name, cs.State.Terminated.Message})
 			}
 		}
+		if len(out) > 0 {
+			return out
+		}
 	}
-	return ""
+	return nil
 }
 
 // podSecurityContext runs a share data Job as uid. Root Jobs set no group, as
@@ -441,11 +508,15 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 		})
 		mounts = append(mounts, corev1.VolumeMount{Name: volName, MountPath: "/" + volName, ReadOnly: shape.readOnly})
 	}
-	if shape.folders != nil {
-		mounts = nil
-		for _, f := range shape.folders {
-			mounts = append(mounts, corev1.VolumeMount{Name: fmt.Sprintf("share%d", f.share), MountPath: f.at, SubPath: f.subPath, ReadOnly: shape.readOnly || f.readOnly})
+	folderMounts := func(folders []folderMount) []corev1.VolumeMount {
+		var out []corev1.VolumeMount
+		for _, f := range folders {
+			out = append(out, corev1.VolumeMount{Name: fmt.Sprintf("share%d", f.share), MountPath: f.at, SubPath: f.subPath, ReadOnly: shape.readOnly || f.readOnly})
 		}
+		return out
+	}
+	if shape.folders != nil {
+		mounts = folderMounts(shape.folders)
 	}
 
 	mainMounts := append(slices.Clone(mounts), shape.mounts...)
@@ -492,6 +563,34 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}, Add: shape.addCaps},
 		}
 	}
+	containers := []corev1.Container{{
+		Name:            mainContainerName,
+		Image:           shape.image,
+		Command:         shape.command,
+		Env:             shape.env,
+		Resources:       mainResources,
+		VolumeMounts:    mainMounts,
+		SecurityContext: containerSecurity,
+		ReadinessProbe:  shape.readiness,
+	}}
+	for _, sc := range shape.sidecars {
+		security := containerSecurity
+		if shape.hardened {
+			security = &corev1.SecurityContext{
+				AllowPrivilegeEscalation: boolPtr(false),
+				ReadOnlyRootFilesystem:   boolPtr(true),
+				Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}, Add: sc.addCaps},
+			}
+		}
+		containers = append(containers, corev1.Container{
+			Name:            sc.name,
+			Image:           shape.image,
+			Command:         sc.command,
+			Resources:       resources,
+			VolumeMounts:    append(folderMounts(sc.folders), sc.mounts...),
+			SecurityContext: security,
+		})
+	}
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{Name: jobName, Namespace: r.namespace, Labels: labels, OwnerReferences: owners},
 		Spec: batchv1.JobSpec{
@@ -506,17 +605,8 @@ func (r *ShareJobRunner) start(ctx context.Context, jobName string, shares []Sha
 					SecurityContext:              podSecurityContext(shape.runAsUser),
 					InitContainers:               initContainers,
 					ImagePullSecrets:             pullSecretRefs(shape.pullSecrets),
-					Containers: []corev1.Container{{
-						Name:            "share-data",
-						Image:           shape.image,
-						Command:         shape.command,
-						Env:             shape.env,
-						Resources:       mainResources,
-						VolumeMounts:    mainMounts,
-						SecurityContext: containerSecurity,
-						ReadinessProbe:  shape.readiness,
-					}},
-					Volumes: volumes,
+					Containers:                   containers,
+					Volumes:                      volumes,
 				},
 			},
 		},

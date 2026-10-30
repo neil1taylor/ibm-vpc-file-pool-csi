@@ -293,6 +293,9 @@ func claimText(spec *v1alpha1.BackupBrowseSpec) string {
 	if spec.FromCOS != nil {
 		return "volume " + spec.FromCOS.Volume
 	}
+	if spec.Guest {
+		return "VM disk " + spec.PVCNamespace + "/" + spec.PVCName
+	}
 	return spec.PVCNamespace + "/" + spec.PVCName
 }
 
@@ -338,6 +341,12 @@ func (g *Gateway) sessionSpec(ctx context.Context, u User, req *SessionRequest) 
 	if serr != nil {
 		return v1alpha1.BackupBrowseSpec{}, serr
 	}
+	if vol.VMName != "" {
+		if src == v1alpha1.BackupSourceCOS {
+			return v1alpha1.BackupBrowseSpec{}, vmDiskInCOS()
+		}
+		spec.Guest = true
+	}
 	spec.PVCNamespace, spec.PVCName, spec.Source = req.Namespace, req.PVC, src
 	return spec, nil
 }
@@ -354,7 +363,7 @@ func sessionOf(bb *v1alpha1.BackupBrowse) Session {
 	if phase == "" {
 		phase = "Pending"
 	}
-	return Session{Name: bb.Name, Phase: phase, Message: bb.Status.Message, Source: sourceName(bb.Spec.Source)}
+	return Session{Name: bb.Name, Phase: phase, Message: bb.Status.Message, Source: sourceName(bb.Spec.Source), Guest: bb.Spec.Guest}
 }
 
 func sameMoment(a *metav1.Time, b *time.Time) bool {
@@ -368,7 +377,7 @@ func sameMoment(a *metav1.Time, b *time.Time) bool {
 // the same policy, claim, moment and source.
 func sameBackup(a, b *v1alpha1.BackupBrowseSpec, moment *time.Time) bool {
 	if a.Policy != b.Policy || a.PVCNamespace != b.PVCNamespace || a.PVCName != b.PVCName ||
-		sourceName(a.Source) != sourceName(b.Source) || !sameMoment(a.Moment, moment) {
+		sourceName(a.Source) != sourceName(b.Source) || a.Guest != b.Guest || !sameMoment(a.Moment, moment) {
 		return false
 	}
 	switch {

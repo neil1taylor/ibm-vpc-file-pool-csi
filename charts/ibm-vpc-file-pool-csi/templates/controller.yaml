@@ -79,6 +79,17 @@ spec:
             - "--browse-max-life={{ .Values.backupBrowse.maxLife }}"
             - "--browse-max-sessions={{ .Values.backupBrowse.maxSessions }}"
             - "--browse-max-sessions-per-namespace={{ .Values.backupBrowse.maxSessionsPerNamespace }}"
+            {{- if .Values.backupBrowse.guest.enabled }}
+            - "--browse-guest-image={{ .Values.backupBrowse.guest.image.repository }}:{{ .Values.backupBrowse.guest.image.tag | default (include "ibm-vpc-file-pool-csi.imageTag" .) }}"
+            - "--browse-guest-kvm={{ .Values.backupBrowse.guest.kvmDevice }}"
+            {{- with .Values.backupBrowse.guest.cpuLimit }}
+            - "--browse-guest-cpu-limit={{ . }}"
+            {{- end }}
+            {{- with .Values.backupBrowse.guest.memoryLimit }}
+            - "--browse-guest-memory-limit={{ . }}"
+            {{- end }}
+            - "--browse-guest-start-timeout={{ .Values.backupBrowse.guest.startTimeout }}"
+            {{- end }}
             - "--browse-cos={{ .Values.backupBrowse.cos.enabled }}"
             {{- if .Values.backupBrowse.cos.enabled }}
             {{- with .Values.backupBrowse.cos.cpuLimit }}

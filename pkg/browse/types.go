@@ -40,6 +40,9 @@ type Entry struct {
 	MTime    time.Time `json:"mtime"`
 	Link     []byte    `json:"link,omitempty"` // the text of a symbolic link; never followed
 	Readable bool      `json:"readable"`       // false if this session's user may not read it
+	// Note is a sentence for the person, for example why a guest volume cannot
+	// be read, or that it was mounted without replaying its journal.
+	Note string `json:"note,omitempty"`
 }
 
 // ListPage is one page of a folder, in order of name (byte by byte).

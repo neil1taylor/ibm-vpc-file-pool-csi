@@ -13,6 +13,8 @@ export interface BrowseSessionState {
   /** What the helper says about its start, or why the session ended. */
   message?: string;
   error?: GatewayError;
+  /** True when the session reads the file systems inside a VM disk. */
+  guest?: boolean;
   /** Opens a new session, after one ended. */
   reopen: () => void;
 }
@@ -42,17 +44,18 @@ export function useBrowseSession(req: SessionRequest | undefined): BrowseSession
       (keepalive ? closeSession(name, true) : closeSession(name)).catch(() => undefined);
     };
 
-    const apply = (s: { name: string; phase: string; message?: string }): boolean => {
+    const apply = (s: { name: string; phase: string; message?: string; guest?: boolean }): boolean => {
+      const guest = !!s.guest;
       switch (s.phase) {
         case 'Ready':
-          setState({ status: 'ready', session: s.name });
+          setState({ status: 'ready', session: s.name, guest });
           return true;
         case 'Closed':
         case 'Failed':
-          setState({ status: 'ended', session: s.name, message: s.message });
+          setState({ status: 'ended', session: s.name, message: s.message, guest });
           return true;
         default:
-          setState({ status: 'starting', session: s.name, message: s.message });
+          setState({ status: 'starting', session: s.name, message: s.message, guest });
           return false;
       }
     };

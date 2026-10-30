@@ -60,6 +60,15 @@ type BackupFileRestoreSpec struct {
 	// +optional
 	FromCOS *BrowseFromCOS `json:"fromCOS,omitempty"`
 
+	// Guest restores files from inside a VM disk: the volume must be a VM disk
+	// (the policy status names its VM) in the snapshot pool. The first name of
+	// each path is then a file system of the guest (sda1, rhel-root), as `kubectl
+	// backup ls` shows at the top, and it is kept in the restored tree. The disk
+	// is held (its next backup copy waits) while the restore runs. The gateway
+	// sets it for every VM disk.
+	// +optional
+	Guest bool `json:"guest,omitempty"`
+
 	// Paths are the files and folders to restore, below the root of the
 	// backed-up volume, one path each in the escaped form that `kubectl backup`
 	// prints (a backslash is written \\ and a byte that is not text \xNN). A
@@ -119,6 +128,13 @@ type BackupFileRestoreStatus struct {
 	// first time the claim is seen, and the restore refuses a claim with another UID.
 	// +optional
 	TargetUID types.UID `json:"targetUID,omitempty"`
+
+	// GuestHoldStarted is when this restore first held the VM disk it reads. It is
+	// set once and never moved, so a hold that was let go after its limit cannot
+	// be taken again: the restore fails once the hold budget since this time has
+	// passed. Unset for a restore that does not read a VM disk.
+	// +optional
+	GuestHoldStarted *metav1.Time `json:"guestHoldStarted,omitempty"`
 
 	// SizeGB is the size chosen for a new claim.
 	// +optional

@@ -32,6 +32,11 @@ func (v *volume) moment() (t time.Time, ok bool, err error) {
 	if err != nil {
 		return t, false, err
 	}
+	return v.momentFrom(files)
+}
+
+// momentFrom is moment for the restore point undo files already listed.
+func (v *volume) momentFrom(files []undoFile) (t time.Time, ok bool, err error) {
 	if len(files) > 0 {
 		return files[len(files)-1].hdr.to, true, nil
 	}

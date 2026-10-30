@@ -463,7 +463,7 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 
 	// A volume whose backup is being sent to COS gets no new copy until the
 	// export has read it, or the export would hold a mix of two moments.
-	matched, heldByExport := rc.splitHeldByExport(ctx, policy, matched)
+	matched, held := rc.splitHeld(ctx, policy, matched)
 
 	// Disks of running VMs take the VM copy path, if it is on.
 	matched, vmRes := rc.processVMVolumes(ctx, policy, matched, true)
@@ -487,8 +487,8 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 		return st
 	}
 
-	for _, sv := range heldByExport {
-		svStatuses = append(svStatuses, carry(sv.Name, heldByExportMessage))
+	for _, h := range held {
+		svStatuses = append(svStatuses, carry(h.sv.Name, h.reason))
 	}
 
 	round := rc.cycleResults(policyName)
@@ -729,20 +729,52 @@ func (rc *ReplicationController) processPolicy(ctx context.Context, policy *v1al
 // It is not an error: the volume is copied again when the export ends.
 const heldByExportMessage = "held: export to COS running"
 
-// splitHeldByExport separates the volumes that a COS export holds from the rest.
-// With VM disk copies on, a hold on one disk of a running VM holds every disk
-// of that VM, because a VM copy takes all its disks in one step. A volume whose
-// VM copy runs is never held: the copy would lose its tracking and stay in the VM.
-func (rc *ReplicationController) splitHeldByExport(ctx context.Context, policy *v1alpha1.ReplicationPolicy, svs []v1alpha1.SubVolume) (free, held []v1alpha1.SubVolume) {
+// heldVolume is a volume that gets no new copy now, and why.
+type heldVolume struct {
+	sv     v1alpha1.SubVolume
+	reason string
+}
+
+// holdReason says why a volume is held, or "" if it is not. A COS export holds
+// the volume it reads (it must not read a disk that changes under it). A browse
+// session on a VM disk holds the disk (the view of an older moment is built from
+// the disk and its undo files, which a copy changes).
+func (rc *ReplicationController) holdReason(sv *v1alpha1.SubVolume) string {
+	if _, _, isHeld := parseExportHold(sv.Annotations[exportHoldAnnotation]); isHeld {
+		return heldByExportMessage
+	}
+	if browseHeld(sv.Annotations[browseHoldAnnotation], rc.nowFunc()) {
+		return heldByBrowseMessage
+	}
+	return ""
+}
+
+// copyJobExists says whether the copy Job of a volume exists, or cannot be
+// told. A volume with a Job is not held yet: the Job is looked at, as for any
+// volume, until it has ended and been cleaned up. Holding it at once would
+// leave the Job unchecked, and the status would say "held" while the Job still
+// writes the copy that a browse session or an export must not read.
+func (rc *ReplicationController) copyJobExists(ctx context.Context, policyName, svName string) bool {
+	exists, err := rc.replicationJobExists(ctx, policyName, svName)
+	return exists || err != nil
+}
+
+// splitHeld separates the volumes that a COS export or a browse session holds
+// from the rest. With VM disk copies on, a hold on one disk of a running VM holds
+// every disk of that VM, because a VM copy takes all its disks in one step. A
+// volume whose VM copy runs, or whose copy Job exists, is never held: the copy
+// would lose its tracking and stay in the VM, and the Job would run unchecked.
+func (rc *ReplicationController) splitHeld(ctx context.Context, policy *v1alpha1.ReplicationPolicy, svs []v1alpha1.SubVolume) (free []v1alpha1.SubVolume, held []heldVolume) {
 	copying := map[string]bool{}
 	for _, st := range policy.Status.SubVolumeStatuses {
 		if st.VMCopy != nil {
 			copying[st.SubVolumeName] = true
 		}
 	}
-	for _, sv := range svs {
-		if _, _, isHeld := parseExportHold(sv.Annotations[exportHoldAnnotation]); isHeld && !copying[sv.Name] {
-			held = append(held, sv)
+	for i := range svs {
+		sv := svs[i]
+		if reason := rc.holdReason(&sv); reason != "" && !copying[sv.Name] && !rc.copyJobExists(ctx, policy.Name, sv.Name) {
+			held = append(held, heldVolume{sv: sv, reason: reason})
 		} else {
 			free = append(free, sv)
 		}
@@ -750,23 +782,34 @@ func (rc *ReplicationController) splitHeldByExport(ctx context.Context, policy *
 	if len(held) == 0 || len(free) == 0 || rc.vmCopier == nil {
 		return free, held
 	}
-	heldPods := map[types.UID]bool{}
-	unknownNamespaces := map[string]bool{}
+	heldPods := map[types.UID]string{} // the reason of the hold on the VM
+	unknownNamespaces := map[string]string{}
 	for i := range held {
-		pod, _, err := rc.vmPodForClaim(ctx, held[i].Spec.PVCNamespace, held[i].Spec.PVCName)
+		pod, _, err := rc.vmPodForClaim(ctx, held[i].sv.Spec.PVCNamespace, held[i].sv.Spec.PVCName)
 		switch {
 		case err != nil:
-			unknownNamespaces[held[i].Spec.PVCNamespace] = true
+			unknownNamespaces[held[i].sv.Spec.PVCNamespace] = held[i].reason
 		case pod != nil:
-			heldPods[pod.UID] = true
+			heldPods[pod.UID] = held[i].reason
 		}
 	}
 	var stillFree []v1alpha1.SubVolume
 	for _, sv := range free {
 		pod, _, err := rc.vmPodForClaim(ctx, sv.Spec.PVCNamespace, sv.Spec.PVCName)
-		if !copying[sv.Name] && (err != nil || unknownNamespaces[sv.Spec.PVCNamespace] || (pod != nil && heldPods[pod.UID])) {
-			held = append(held, sv)
-			continue
+		if !copying[sv.Name] {
+			reason, byNamespace := unknownNamespaces[sv.Spec.PVCNamespace]
+			if pod != nil {
+				if r, byPod := heldPods[pod.UID]; byPod {
+					reason, byNamespace = r, true
+				}
+			}
+			if err != nil || byNamespace {
+				if reason == "" {
+					reason = heldByExportMessage
+				}
+				held = append(held, heldVolume{sv: sv, reason: reason})
+				continue
+			}
 		}
 		stillFree = append(stillFree, sv)
 	}
