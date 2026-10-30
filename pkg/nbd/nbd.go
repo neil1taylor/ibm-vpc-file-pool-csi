@@ -410,14 +410,15 @@ func transmit(ctx context.Context, rw io.ReadWriter, exp Export, opts Options) e
 			// Only the part before the real end is read; the rest is zeros.
 			data := out[16:]
 			want := length
-			if int64(off)+length > size { // #nosec G115 -- checked against the size
-				want = max(size-int64(off), 0) // #nosec G115 -- checked against the size
+			offset := int64(off) //nolint:gosec // off was checked against the size above, which is not negative
+			if offset+length > size {
+				want = max(size-offset, 0)
 				clear(data[want:])
 			}
 			var n int
 			var err error
 			if want > 0 {
-				n, err = exp.ReadAt(data[:want], int64(off)) // #nosec G115 -- checked against the size
+				n, err = exp.ReadAt(data[:want], offset)
 			}
 			if err != nil && (!errors.Is(err, io.EOF) || int64(n) != want) {
 				if werr := writeReply(rw, errIO, handle, nil); werr != nil {
