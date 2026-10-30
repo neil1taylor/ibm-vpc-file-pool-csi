@@ -123,6 +123,8 @@ wait_until 1500 "pools Ready" all_ready
 
 oc create ns "$NS"
 oc adm policy add-scc-to-user anyuid -z default -n "$NS" >/dev/null
+# The guest image is in the private registry: copy the driver's pull secret here.
+oc get secret all-icr-io -n "$DRIVER_NS" -o json | jq 'del(.metadata.namespace,.metadata.uid,.metadata.resourceVersion,.metadata.creationTimestamp,.metadata.ownerReferences)' | oc apply -n "$NS" -f - >/dev/null
 for d in disk1 disk2 disk3; do
     oc apply -n "$NS" -f - <<YAML
 apiVersion: v1
@@ -171,6 +173,7 @@ spec:
   template:
     spec:
       restartPolicy: Never
+      imagePullSecrets: [{name: all-icr-io}]
       containers:
       - name: j
         image: $GUEST_IMAGE
