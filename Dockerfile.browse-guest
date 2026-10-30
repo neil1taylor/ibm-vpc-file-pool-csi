@@ -39,9 +39,14 @@ RUN dnf -y install --setopt=install_weak_deps=False \
 # Build the appliance now, so a pod does not build it on every start (the root
 # file system of the pod is read-only). This is what libguestfs-make-fixed-appliance
 # does.
+# libguestfs takes the folder for a fixed appliance only if README.fixed is in it.
 RUN supermin --build --verbose --if-newer --lock /tmp/supermin.lock --copy-kernel -f ext2 \
-        --host-cpu x86_64 /usr/lib64/guestfs/supermin.d -o /opt/guestfs-appliance
+        --host-cpu x86_64 /usr/lib64/guestfs/supermin.d -o /opt/guestfs-appliance && \
+    touch /opt/guestfs-appliance/README.fixed
 ENV LIBGUESTFS_PATH=/opt/guestfs-appliance
+# Start the appliance once, so an image whose appliance does not start fails here.
+RUN LIBGUESTFS_BACKEND=direct LIBGUESTFS_BACKEND_SETTINGS=force_tcg HOME=/tmp \
+        guestfish -N /tmp/check.img=fs:ext4:64M exit && rm -f /tmp/check.img
 
 COPY --from=builder /browse /usr/local/bin/browse
 
