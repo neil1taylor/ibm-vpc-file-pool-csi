@@ -39,7 +39,8 @@ save() {
 O="release-test/out/$ID"
 while true; do
     # One call returns the new lines of the three files, split by markers.
-    if ! out=$(build "O=$O; tail -n +$((results + 1)) \$O/results.tsv 2>/dev/null; echo @@S; tail -n +$((stages + 1)) \$O/stages.tsv 2>/dev/null; echo @@L; tail -n +$((logl + 1)) \$O.log 2>/dev/null | grep -E ': start \\(limit [0-9]+s\\)' ; echo @@L2 \$(wc -l < \$O.log 2>/dev/null || echo $logl); test -f \$O/report.md && echo @@DONE; echo @@END"); then
+    # Stage starts come first, so a catch-up prints a start before that stage's results and end.
+    if ! out=$(build "O=$O; echo @@L; tail -n +$((logl + 1)) \$O.log 2>/dev/null | grep -E ': start \\(limit [0-9]+s\\)' ; echo @@L2 \$(wc -l < \$O.log 2>/dev/null || echo $logl); echo @@R; tail -n +$((results + 1)) \$O/results.tsv 2>/dev/null; echo @@S; tail -n +$((stages + 1)) \$O/stages.tsv 2>/dev/null; test -f \$O/report.md && echo @@DONE; echo @@END"); then
         now=$(date +%s)
         [ "$down_since" -eq 0 ] && down_since=$now
         if [ "$down_said" -eq 0 ] && [ $((now - down_since)) -ge 300 ]; then
@@ -52,9 +53,10 @@ while true; do
     down_since=0 down_said=0
     case "$out" in *@@END*) ;; *) sleep "$POLL"; continue ;; esac
 
-    part=results
+    part=none
     while IFS= read -r line; do
         case "$line" in
+            @@R) part=results; continue ;;
             @@S) part=stages; continue ;;
             @@L) part=log; continue ;;
             @@L2*) logl=${line#@@L2 }; continue ;;
