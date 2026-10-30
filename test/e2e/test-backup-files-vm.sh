@@ -317,13 +317,18 @@ close_all() {
 }
 
 # ---- 1. the file systems of each disk, and files in them --------------------------------------
+# Each disk has its own session, and a namespace may have 2 open (backupBrowse.maxSessionsPerNamespace):
+# the sessions of one disk are closed before the next disk is opened.
 OUT=$(bk "$ALICE" ls "${D1[@]}" "${T[@]}")
 grep -q "vg0-root/" <<<"$OUT" && pass "ls lists the file systems of an LVM disk (the logical volume, not the physical volume)" || fail "disk1 file systems: $OUT"
 ! grep -q "sda1/" <<<"$OUT" || fail "the LVM physical volume is listed as a file system: $OUT"
+close_all
 OUT=$(bk "$ALICE" ls "${D2[@]}" "${T[@]}")
 grep -q "/" <<<"$OUT" && pass "ls lists the file system of the ext4 disk" || fail "disk2 file systems: $OUT"
+close_all
 OUT=$(bk "$ALICE" ls "${D3[@]}" "${T[@]}")
 grep -q "sda1/" <<<"$OUT" && pass "ls lists the NTFS file system of the third disk" || fail "disk3 file systems: $OUT"
+close_all
 
 mkdir "$WORK/got" "$WORK/got1"
 bk "$ALICE" get "${D1[@]}" "${T[@]}" --fs vg0-root /hello.txt --out "$WORK/got" >/dev/null
@@ -334,12 +339,15 @@ bk "$ALICE" get "${D1[@]}" "${T[@]}" --fs vg0-root /big.bin --out "$WORK/got" >/
 if [ -n "$BIG_SHA" ]; then
     [ "$(sha256sum "$WORK/got/big.bin" | awk '{print $1}')" = "$BIG_SHA" ] && pass "a 4 MiB file from the XFS volume has the same checksum" || fail "big.bin checksum"
 fi
+close_all
 FS2=$(bk "$ALICE" ls "${D2[@]}" "${T[@]}" | awk '{for (i = 1; i <= NF; i++) if ($i ~ /\/$/) { sub(/\/$/, "", $i); print $i; exit }}')
 [ -n "$FS2" ] || fail "no file system name in the listing of the ext4 disk"
 bk "$ALICE" get "${D2[@]}" "${T[@]}" --fs "$FS2" /hello.txt --out - | grep -q first \
     && pass "ext4: a file is read" || fail "ext4 hello.txt"
+close_all
 bk "$ALICE" get "${D3[@]}" "${T[@]}" --fs sda1 /hello.txt --out - | grep -q first \
     && pass "NTFS: a file is read (through virt-cat)" || fail "ntfs hello.txt"
+close_all
 OUT=$(bk "$ALICE" ls "${D1[@]}" "${T[@]}" --fs vg0-root /)
 grep -qF 'line\x0abreak' <<<"$OUT" && pass "a name with a newline is listed escaped" || fail "newline name: $OUT"
 
