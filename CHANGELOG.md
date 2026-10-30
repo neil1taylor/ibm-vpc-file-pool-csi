@@ -23,6 +23,10 @@ To make a release:
 
 - **VM disks in backups, part 1: the disk view, the disk server and the hold (issue #92, phase 5).** `replication.OpenDiskView` shows a backed-up VM disk as it was at any restore point, read-only, rebuilt on the fly from `disk.img` and the undo files (no copy, no scratch space); a property test checks every moment byte for byte against `RestoreDisk` over random histories, including growing and shrinking disks. The new package `pkg/nbd` serves a view to a client as a read-only network block device on a private socket, with the request and option parsers fuzzed. `BackupBrowse` has `spec.guest`: a session on a VM disk holds the disk's next backup copy (the SubVolume annotation `storage.ibmcloud.io/browse-hold`, one entry per session), waits for a copy that is already running, and the replication controller makes no new copy of a held volume (`held: waiting for a browse session`; all disks of a running VM are held together). A hold ends with its helper and is ignored after 3 hours. Nothing creates a guest session yet: the guest helper image and the commands come in the next changes. See [BACKUP-RECOVERY.md](docs/BACKUP-RECOVERY.md#files-inside-a-vm-disk-in-development).
 
+### Fixed
+
+- **Holds on a SubVolume can no longer be wiped by another writer, and a copy that runs is waited for.** Removing the last annotation with a patch made from a copy said `annotations: null` and wiped the other holds, so releasing an export hold or sweeping a browse hold could drop a hold that another writer had added a moment before. Hold writes now name only their own key, and the browse hold list is written only if the SubVolume is as it was read. A volume with a copy Job is not held until the Job has ended and been cleaned up: before, its status said "held" at once, the Job was never looked at again, and a browse session could start while the copy still wrote.
+
 ## [v0.16.2] — 2026-10-29
 
 A fix release: a wrong COS key is named as the cause when browsing or restoring from COS.
