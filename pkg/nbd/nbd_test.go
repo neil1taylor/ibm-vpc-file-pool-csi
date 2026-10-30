@@ -493,3 +493,26 @@ func shortSock(t *testing.T) string {
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	return filepath.Join(dir, "s")
 }
+
+// A disk whose size is not a whole number of 512-byte sectors is offered rounded
+// up, with zeros after its end, as QEMU does for such a raw file. A client that
+// reads whole sectors then gets the tail instead of an error it would retry.
+func TestRead_UnalignedSizeIsRoundedUpWithZeros(t *testing.T) {
+	exp := &memExport{b: pattern(1000)}
+	c := start(t, exp, 3)
+	size, _ := c.goExport("disk")
+	if size != 1024 {
+		t.Fatalf("size %d, want 1024", size)
+	}
+	c.request(0, 21, 512, 512, nil)
+	code, data := c.response(21, 512)
+	want := append(append([]byte{}, exp.b[512:1000]...), make([]byte, 24)...)
+	if code != 0 || !bytes.Equal(data, want) {
+		t.Fatalf("read of the last sector: code %d, data differs", code)
+	}
+	// Past the rounded size is still refused.
+	c.request(0, 22, 1024, 512, nil)
+	if code, _ := c.response(22, 512); code == 0 {
+		t.Fatal("a read past the rounded size worked")
+	}
+}
