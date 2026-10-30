@@ -5,6 +5,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	batchv1 "k8s.io/api/batch/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // A browse session on a VM disk holds the disk's next backup copy. The
@@ -109,5 +112,49 @@ func TestBrowseHoldValue_AddAndRemoveBySession(t *testing.T) {
 	}
 	if v = removeBrowseHold(v, "u2"); v != "" {
 		t.Fatalf("value = %q, want empty", v)
+	}
+}
+
+// A copy that runs when the hold appears is not dropped: the volume keeps the
+// status "sync in progress" until the Job has ended and been cleaned, so the
+// session that waits for the copy waits for it to end. When the status said
+// "held" at once, the session started while the Job still wrote, and the Job
+// of a held volume was never looked at again.
+func TestReplicationController_HoldWaitsForACopyThatRuns(t *testing.T) {
+	k := newReplFakeK8sClient()
+	dc := newReplFakeDirectClient()
+	k.addSubVolume(newTestSubVolume(vmGuardSV1, "prod-pool", "share-1", 10))
+	k.addPolicy(newTestReplicationPolicy("prod-to-dr", "prod-pool", "1ms"))
+	rc := newReplController(k, dc, newFakeNFSOperations())
+	ctx := context.Background()
+
+	rc.processOnce(ctx)
+	if !replJobExists(t, dc, "prod-to-dr", vmGuardSV1) {
+		t.Fatal("the copy did not start")
+	}
+	k.mu.Lock()
+	k.subVolumes[vmGuardSV1].Annotations = map[string]string{browseHoldAnnotation: "uid-1/" + time.Now().UTC().Format(time.RFC3339)}
+	k.mu.Unlock()
+
+	rc.processOnce(ctx)
+	if lastErr, _ := svReplStatus(t, k, "prod-to-dr", vmGuardSV1); lastErr != "sync in progress" {
+		t.Errorf("status while the Job runs = %q, want sync in progress", lastErr)
+	}
+
+	job := &batchv1.Job{}
+	if err := dc.Get(ctx, types.NamespacedName{Namespace: replJobNamespace, Name: replJobName("prod-to-dr", vmGuardSV1)}, job); err != nil {
+		t.Fatal(err)
+	}
+	job.Status.Succeeded = 1
+	if err := dc.Status().Update(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	rc.processOnce(ctx)
+	rc.processOnce(ctx)
+	if replJobExists(t, dc, "prod-to-dr", vmGuardSV1) {
+		t.Error("the Job of the held volume was not cleaned up, or a new copy started")
+	}
+	if lastErr, _ := svReplStatus(t, k, "prod-to-dr", vmGuardSV1); !strings.HasPrefix(lastErr, "held: waiting for a browse session") {
+		t.Errorf("status after the copy = %q, want held", lastErr)
 	}
 }

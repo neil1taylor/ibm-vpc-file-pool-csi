@@ -1,6 +1,7 @@
 package guestfs
 
 import (
+	"bytes"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -11,17 +12,26 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/browse"
 )
 
-// ParseListing reads the output of virt-ls --long --csv for one folder: one
-// line for each name, with the type letter, the permissions in octal, the size,
-// the name, and for a link its text. A line that cannot be a name of a file
-// (empty, ".", "..", or one that holds "/") is left out, since a Linux or NTFS
-// file system never has such a name and a path built from it could leave the
-// folder.
-func ParseListing(out []byte) ([]browse.Entry, error) {
-	return parseListing(strings.NewReader(string(out)), browse.MaxDirEntries)
+// ParseListing reads the output of virt-ls -lR --csv -- FOLDER and returns the
+// names directly in the folder. virt-ls 1.52 allows --csv with -l only together
+// with -R, so the output holds the folder itself (the first line) and every name
+// below it, one line each: the type letter, the permissions in octal, the size,
+// the full path, and for a link its text. Only a line whose path has the folder
+// as its parent is kept, and its name is the last part of the path. The folder's
+// own line and the lines of deeper names are left out; the deeper names do not
+// count against the limit of names.
+//
+// Because -R walks the whole tree below the folder, listing a folder with a deep
+// tree is slow, and the output is as long as the tree. A line that cannot be a
+// name of a file (empty, ".", "..", or one that holds "/") is left out, since a
+// Linux or NTFS file system never has such a name and a path built from it could
+// leave the folder.
+func ParseListing(out []byte, folder string) ([]browse.Entry, error) {
+	return parseListing(strings.NewReader(string(out)), folder, browse.MaxDirEntries)
 }
 
-func parseListing(in io.Reader, limit int) ([]browse.Entry, error) {
+func parseListing(in io.Reader, folder string, limit int) ([]browse.Entry, error) {
+	prefix := strings.TrimRight(folder, "/") + "/"
 	r := csv.NewReader(in)
 	r.FieldsPerRecord = -1
 	r.LazyQuotes = true
@@ -34,11 +44,11 @@ func parseListing(in io.Reader, limit int) ([]browse.Entry, error) {
 		if err != nil {
 			return entries, nil // a broken quote ends the list; what was read stays
 		}
-		if len(rec) < 4 || rec[0] == "Type" {
+		if len(rec) < 4 || rec[0] == "Type" || !strings.HasPrefix(rec[3], prefix) {
 			continue
 		}
-		name := []byte(rec[3])
-		if browse.ValidatePath([][]byte{name}) != nil {
+		name := []byte(rec[3][len(prefix):])
+		if bytes.IndexByte(name, '/') >= 0 || browse.ValidatePath([][]byte{name}) != nil {
 			continue
 		}
 		if len(entries) >= limit {
@@ -58,13 +68,14 @@ func parseListing(in io.Reader, limit int) ([]browse.Entry, error) {
 	}
 }
 
-// typeOf maps the type letter of virt-ls: d folder, f file, l link; anything
-// else (a device, a pipe, a socket, unknown) is "other".
+// typeOf maps the type letter of virt-ls: d folder, - a regular file (r and f
+// are accepted too), l link; anything else (a device, a pipe, a socket, unknown)
+// is "other".
 func typeOf(letter string) string {
 	switch strings.TrimSpace(letter) {
 	case "d":
 		return browse.TypeDir
-	case "f", "r":
+	case "-", "f", "r":
 		return browse.TypeFile
 	case "l":
 		return browse.TypeSymlink
