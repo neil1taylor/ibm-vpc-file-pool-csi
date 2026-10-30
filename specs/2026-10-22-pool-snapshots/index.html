@@ -1,0 +1,2883 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A Kubernetes CSI driver that pools multiple PVCs as subdirectories within shared VPC file shares">
+      
+      
+      
+        <link rel="canonical" href="https://neil1taylor.github.io/ibm-vpc-file-pool-csi/specs/2026-10-22-pool-snapshots/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Spec: snapshots of a whole pool (share-level snapshots) - IBM VPC File Pool CSI Driver</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#spec-snapshots-of-a-whole-pool-share-level-snapshots" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="IBM VPC File Pool CSI Driver" class="md-header__button md-logo" aria-label="IBM VPC File Pool CSI Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            IBM VPC File Pool CSI Driver
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Spec: snapshots of a whole pool (share-level snapshots)
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/neil1taylor/ibm-vpc-file-pool-csi" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neil1taylor/ibm-vpc-file-pool-csi
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../INSTALL/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../DAY2-OPERATIONS/" class="md-tabs__link">
+          
+  
+  
+  Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../OVERVIEW/" class="md-tabs__link">
+          
+  
+  
+  Architecture
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../VOLUME-CLONING/" class="md-tabs__link">
+          
+  
+  
+  Design (Phase 4)
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../CONTRIBUTING/" class="md-tabs__link">
+          
+  
+  
+  Development
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../examples/" class="md-tabs__link">
+          
+  
+  
+  Examples
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="IBM VPC File Pool CSI Driver" class="md-nav__button md-logo" aria-label="IBM VPC File Pool CSI Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    IBM VPC File Pool CSI Driver
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/neil1taylor/ibm-vpc-file-pool-csi" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neil1taylor/ibm-vpc-file-pool-csi
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../INSTALL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../USER-GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-01-POOL-CREATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 1 - Pool Creation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-02-SNAPSHOTS-AND-CLONES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 2 - Snapshots and Clones
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 3 - Group Snapshots and Hooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-04-POOL-CONFIGURATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 4 - Pool Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-05-GOLDEN-IMAGES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 5 - Golden Images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-06-REPLICATION-AND-FAILOVER/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 6 - Replication and Failover
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-07-MONITORING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 7 - Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-08-MIGRATION-AND-CONSOLE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 8 - Migration and Console
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-09-COS-BACKUP-BUCKET/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 9 - COS Bucket for Backups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-10-BACKUP-AND-RESTORE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 10 - Backup and Restore
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-11-INSTANT-VM-SNAPSHOTS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 11 - Instant VM Snapshots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-12-REPLICATING-RUNNING-VMS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 12 - Replicating Running VMs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-13-FAILOVER-OF-RUNNING-VMS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 13 - Failover of Running VMs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-14-CONSOLE-RESTORE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 14 - Restore a Snapshot in the Console
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../DEPLOYMENT-NOTES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment Notes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../FEATURES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../UPGRADE-GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrade Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../FAQ/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../HELM-VALUES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Helm Values Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../DAY2-OPERATIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 Operations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../MONITORING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CAPACITY-PLANNING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Capacity Planning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../BACKUP-RECOVERY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backup and Recovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../GOLDEN-IMAGE-WORKFLOW/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Golden Image Workflow
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../SECURITY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TROUBLESHOOTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PERFORMANCE-TUNING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance Tuning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../KNOWN-LIMITATIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Known Limitations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../OVERVIEW/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTEXT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context (the words we use)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONSISTENCY-MODEL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Consistency Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VPC-NETWORKING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VPC Networking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VM-DISK-FORMATS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VM Disk Formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CRD-SPEC/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CRD Specification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CSI-INTERFACE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CSI Interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../IBM-VPC-API/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    IBM VPC API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../API-KEY-SETUP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Key Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design (Phase 4)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Design (Phase 4)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VOLUME-CLONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Volume Cloning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VOLUME-GROUP-SNAPSHOTS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Volume Group Snapshots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CROSS-REGION-DR/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cross-Region DR
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CODING-GUIDELINES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coding Guidelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TESTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Examples
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#goal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Goal
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-ibm-cloud-gives-us-facts-with-sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What IBM Cloud gives us (facts, with sources)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What IBM Cloud gives us (facts, with sources)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#to-verify-in-the-lab-phase-0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        To verify in the lab (phase 0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-exists-today-from-the-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What exists today (from the code)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-that-meets-the-goal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design that meets the goal
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Design that meets the goal">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-taking-a-pool-snapshot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Taking a pool snapshot
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-schedules-and-keep-time" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Schedules and keep time
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-recovering-one-volume-or-vm-disk-from-a-pool-snapshot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Recovering one volume or VM disk from a pool snapshot
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-recovering-the-whole-pool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Recovering the whole pool
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tenancy-and-access-rbac" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tenancy and access (RBAC)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-works-with-backups-and-replication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it works with backups and replication
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limits-and-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limits and rules
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#monitoring-and-alerts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Monitoring and alerts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#console-and-command-line" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Console and command line
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tests
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build-plan-phases-one-pr-each" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build plan: phases, one PR each
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#does-the-design-meet-the-goal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Does the design meet the goal?
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Does the design meet the goal?">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#options-considered" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Options considered
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cost-effort-and-risk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cost, effort and risk
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decisions-i-made-for-you" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decisions I made for you
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="spec-snapshots-of-a-whole-pool-share-level-snapshots">Spec: snapshots of a whole pool (share-level snapshots)<a class="headerlink" href="#spec-snapshots-of-a-whole-pool-share-level-snapshots" title="Permanent link">&para;</a></h1>
+<p>Date: 2026-10-22. Status: draft for review. It builds on <code>2026-10-21-backup-to-snapshot-pool.md</code>, <code>2026-10-21-backup-cos-export.md</code>, <code>2026-10-22-backup-file-restore.md</code> and <code>2026-10-21-instant-vm-snapshots.md</code>. Read the backup spec first. Facts about the driver come from the code on <code>main</code> on 22 Oct 2026. Facts about IBM Cloud come from the IBM docs and carry a link. Where the docs are unclear, this spec says "to verify in the lab" and puts the check in phase 0.</p>
+<h2 id="goal">Goal<a class="headerlink" href="#goal" title="Permanent link">&para;</a></h2>
+<p>The owner's question was: is there a use case for a snapshot of the pool or share?</p>
+<p>Yes. Today the driver uses no IBM share snapshot. It keeps snapshots per volume, as file copies or QEMU copies (see <code>docs/CONTEXT.md</code>). An earlier decision kept it that way because a share holds many tenants' volumes, and a share snapshot cannot give back one volume without touching the others (<code>docs/CONSISTENCY-MODEL.md</code>). That reason is still true for a restore <strong>in place</strong>. It does not stop us using share snapshots in other ways.</p>
+<p>The goal of this spec: <strong>an administrator can protect and recover a whole pool quickly, in minutes whatever its size. The administrator and the tenants can also recover single volumes or VM disks from the same pool-level moment, without touching other tenants.</strong></p>
+<p>Two real uses:
+1. <strong>Fast recovery of a whole pool</strong> after ransomware, a bad mass change, or a script that deleted many folders. One share snapshot covers every volume on the share, and it is ready in seconds.
+2. <strong>A steady, same-moment source</strong> for backups and replication. They read a frozen view of the share, not live files that change while they copy.</p>
+<h2 id="what-ibm-cloud-gives-us-facts-with-sources">What IBM Cloud gives us (facts, with sources)<a class="headerlink" href="#what-ibm-cloud-gives-us-facts-with-sources" title="Permanent link">&para;</a></h2>
+<p>All links are on cloud.ibm.com. "Gen 1" means the <code>dp2</code> profile that this driver uses.</p>
+<table>
+<thead>
+<tr>
+<th>Fact</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A snapshot is taken with the VPC API (<code>POST /shares/{id}/snapshots</code>), the CLI, the console or Terraform. It is stable "within seconds". Only one snapshot a minute.</td>
+<td>https://cloud.ibm.com/docs/vpc?topic=vpc-fs-snapshots-create</td>
+</tr>
+<tr>
+<td>The first snapshot copies all the share's contents. Later snapshots hold only the changes.</td>
+<td>https://cloud.ibm.com/docs/vpc?topic=vpc-fs-snapshots-about</td>
+</tr>
+<tr>
+<td>Up to 750 snapshots per <code>dp2</code> share. Together they cannot pass 100 TB per share.</td>
+<td>https://cloud.ibm.com/docs/vpc?topic=vpc-fs-snapshots-about and https://cloud.ibm.com/docs/vpc?topic=vpc-fs-snapshots-planning</td>
+</tr>
+<tr>
+<td><strong>Shares in access mode <code>vpc</code> cannot have snapshots. Shares in access mode <code>security_group</code> can.</strong> The driver makes only <code>security_group</code> shares (<code>pkg/ibmcloud/vpc_client.go</code>: <code>AccessControlMode = "security_group"</code>).</td>
+<td>https://cloud.ibm.com/docs/vpc?topic=vpc-fs-snapshots-about (Limitations)</td>
+</tr>
+<tr>
+<td>Snapshots live in the same zone and on the same share. They cannot be copied to another zone or region. <strong>When the share is deleted, its snapshots are deleted.</strong></td>
+<td>https://cloud.ibm.com/docs/vpc?topic=vpc-fs-snapshots-about</td>
+</tr>
+<tr>
+<td>You cannot take a snapshot of a share in a degraded state, or of a replica share.</td>
+<td>https://cloud.ibm.com/docs/vpc?topic=vpc-fs-snapshots-about</td>
+</tr>
+<tr>
+<td>A replica share (zonal replication) receives the source's snapshots at the next sync. Snapshots on a replica cannot be deleted by hand.</td>
+<td>https://cloud.ibm.com/docs/vpc?topic=vpc-fs-snapshots-create</td>
+</tr>
+<tr>
+<td><strong>Restore is "make a new share from the snapshot". There is no restore in place.</strong> The new share has the same profile, zone and encryption. It can be bigger, and you can choose its IOPS.</td>
+<td>https://cloud.ibm.com/docs/vpc?topic=vpc-fs-snapshots-restore</td>
+</tr>
+<tr>
+<td>The new share starts with pointers to the old data. It is in state <code>pending</code> while IBM copies the data. <strong>You can mount it and read and write at once while it is pending.</strong> In <code>pending</code> you cannot make a replica or a snapshot of it. You cannot delete the source snapshot until the copy ends.</td>
+<td>https://cloud.ibm.com/docs/vpc?topic=vpc-fs-snapshots-restore</td>
+</tr>
+<tr>
+<td>Single files: the share shows a hidden read-only folder <code>/.snapshot</code> at the top of the mount. It has one subfolder for each snapshot, named by the snapshot's fingerprint. You can read it with normal commands.</td>
+<td>https://cloud.ibm.com/docs/vpc?topic=vpc-fs-snapshots-restore ("Restoring files from a snapshot")</td>
+</tr>
+<tr>
+<td>Cost: you pay for the storage in GB-hours. A snapshot kept for part of a month is charged for those hours.</td>
+<td>https://cloud.ibm.com/docs/vpc?topic=vpc-fs-snapshots-about</td>
+</tr>
+<tr>
+<td>Schedules: IBM "Backup for VPC" runs a plan on shares that carry a matching user tag. Up to 10 policies per region, 4 plans per policy. Retention by days (1 to 1000) or by count. It needs a service-to-service authorization for file storage.</td>
+<td>https://cloud.ibm.com/docs/vpc?topic=vpc-backup-service-about</td>
+</tr>
+<tr>
+<td>The size of snapshots is reported within 15 minutes. Activity Tracker records create, delete and change of snapshots.</td>
+<td>https://cloud.ibm.com/docs/vpc?topic=vpc-fs-snapshots-about</td>
+</tr>
+<tr>
+<td>IBM says a backup or snapshot restore is a manual step that takes time and is not a disaster-recovery product.</td>
+<td>https://cloud.ibm.com/docs/vpc?topic=vpc-backup-service-about</td>
+</tr>
+<tr>
+<td>The Go SDK in <code>go.mod</code> (<code>vpc-go-sdk</code> v0.80.0) has <code>CreateShareSnapshot</code>, <code>GetShareSnapshot</code>, <code>ListShareSnapshots</code>, <code>UpdateShareSnapshot</code>, <code>DeleteShareSnapshot</code> and a pager. A share is made from a snapshot with the <code>source_snapshot</code> field of the share prototype. The driver's own client has none of these yet.</td>
+<td><code>vpcv1/vpc_v1.go</code> in the module cache; <code>pkg/ibmcloud/client.go</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="to-verify-in-the-lab-phase-0">To verify in the lab (phase 0)<a class="headerlink" href="#to-verify-in-the-lab-phase-0" title="Permanent link">&para;</a></h3>
+<p>The docs are silent or unclear on these. Each one decides part of the design below.</p>
+<ol>
+<li><strong>When is the moment captured?</strong> At the API call, or when the snapshot becomes <code>stable</code>? The API has a <code>captured_at</code> field. If the moment is the call time, snapshots of all shares can be called in parallel and fit within a second or two.</li>
+<li><strong>Does the one-a-minute limit apply per share or per account?</strong> The design assumes per share.</li>
+<li><strong>What does a snapshot of a share with open NFS writers contain?</strong> Expected: crash consistent (like a power loss). Prove it with a running VM.</li>
+<li><strong>Is <code>/.snapshot</code> visible on our mounts?</strong> Our mount is <code>sec=sys</code>, NFS version 4.x, through the share's mount target in <code>security_group</code> mode, and the node mounts the share root. Check that <code>ls /mnt/share/.snapshot/</code> works, that a read of a file in it is correct, and that it works from a Job pod and from a node mount.</li>
+<li><strong>How long does a new share from a snapshot take</strong> to be mountable, for 1 TB and 10 TB shares with a lot of data? And how fast is I/O during <code>pending</code>? IBM does not give figures. This is the number that decides "minutes, any size".</li>
+<li><strong>How long does <code>pending</code> last</strong>, and do we know when it ends? (Share state <code>stable</code>.) This sets how long a restored share is pinned (see "Limits").</li>
+<li><strong>Does a snapshot change the IOPS or latency of the share</strong> while it is taken, while it holds a lot of changes, and while a restore from it is pending?</li>
+<li><strong>Does a snapshot use the share's free space</strong> (the driver's capacity numbers) or is it billed and counted apart? Check <code>df</code> before and after. The price per GB-hour for <code>dp2</code> snapshots is not in the pages above; read it from the catalog (<code>ibmcloud-global-catalog-pricing</code>) before we promise a cost.</li>
+<li><strong>What IAM role does the driver's API key need</strong> to create, list, delete snapshots and to make a share from a snapshot? Check the key from <code>API-KEY-SETUP.md</code>.</li>
+<li><strong>Two pages disagree</strong> on what happens to a share backup when its share is deleted. One says the backups are deleted. Another says backups "remain available". Check with the share's own snapshots too. The design assumes the safe reading: <strong>they are deleted with the share.</strong></li>
+<li><strong>Does a share made from a snapshot keep our folder layout and file owners?</strong> Expected yes. Check that a KubeVirt disk file boots from it, and that the mount target we create (in <code>security_group</code> mode) works on it with <code>sec=sys</code>.</li>
+<li><strong>Does the VPC replication of a share carry its snapshots to a replica in another zone?</strong> (This is how a pool snapshot could survive the loss of a zone. The driver does not use VPC replication today. This check only sizes an option.)</li>
+</ol>
+<h2 id="what-exists-today-from-the-code">What exists today (from the code)<a class="headerlink" href="#what-exists-today-from-the-code" title="Permanent link">&para;</a></h2>
+<ul>
+<li>A pool is one or more <code>dp2</code> shares in one zone. A volume is a folder <code>/pvcs/pvc-&lt;uuid&gt;</code> on one share. The <code>SubVolume</code> records the share (<code>shareID</code>, <code>shareMountTargetIP</code>, <code>shareExportPath</code>), the folder and the claim.</li>
+<li>A PV carries the share's address in its <code>volumeAttributes</code> (<code>server</code>, <code>share</code>, <code>subDir</code>). <strong>A PV's attributes cannot be changed after it is made.</strong> The node plugin reads them in <code>NodeStageVolume</code>. It already reads the <code>SubVolume</code> for the clone gate.</li>
+<li>A pool cannot adopt a share that already exists. Shares are made by the pool manager only.</li>
+<li>The controller has no NFS access. Everything that touches files runs as a Job that mounts the share (<code>pkg/pool/share_job*.go</code>).</li>
+<li>Freezing a running VM's file systems through the guest agent already exists (<code>pkg/vmsnap</code>, <code>pkg/vmcopy</code>). The guest thaws by itself after 30 seconds at most.</li>
+<li>A backup of a plain volume is a hard-link folder made by rsync from the live folder. A backup of a running VM is a QEMU copy that sends only changed blocks.</li>
+<li><code>BackupRestore</code> and the browse and file-restore design already copy a backup into a new claim, with the access rules by the namespace of the claim.</li>
+<li>Metrics, alert rules, a console plugin and a release-test harness exist.</li>
+</ul>
+<h2 id="design-that-meets-the-goal">Design that meets the goal<a class="headerlink" href="#design-that-meets-the-goal" title="Permanent link">&para;</a></h2>
+<p>Four parts: a <strong>pool snapshot</strong> (one moment for all shares), <strong>pool snapshot policies</strong> (schedule and keep time), <strong>volume recovery</strong> from a pool snapshot (no effect on others), and <strong>pool recovery</strong> (new shares, then a controlled switch).</p>
+<h3 id="1-taking-a-pool-snapshot">1. Taking a pool snapshot<a class="headerlink" href="#1-taking-a-pool-snapshot" title="Permanent link">&para;</a></h3>
+<p>A new cluster resource, <code>PoolSnapshot</code>. It names a pool, and its status lists one VPC share snapshot per share of the pool. The controller makes it, on a schedule or on request.</p>
+<p>Steps, in order:</p>
+<ol>
+<li><strong>Write the manifest.</strong> A short Job on each share writes <code>/.pool-manifest.json</code> at the share root: the list of volumes on that share with their claim (namespace and name), size, folder, owner and mode, VM chain files, and clone state, and the pool's name. The snapshot then carries it. This is what lets us recover a volume whose <code>SubVolume</code> is gone, and tell the administrator what a restore will lose. (The <code>PoolSnapshot</code> status holds only the counts and a hash, so it stays small with thousands of volumes.)</li>
+<li><strong>Freeze (optional, on by default for VMs).</strong> For each running VM that has a disk on the pool, ask the guest agent to freeze, as the VM snapshot code does now. The freeze runs for one short window. The window is bounded: the controller thaws everything when all share snapshots have been <strong>called</strong>, or after a time limit (default 20 seconds, never above the guest's own 30), whichever comes first. The status records, for each VM, <code>FileSystemConsistent</code> or <code>CrashConsistent</code> and why. A VM with no guest agent is taken as crash consistent. A plain volume is a file copy, as today.</li>
+<li><strong>Call the snapshots in parallel</strong>, one per share, tagged <code>pool-csi:&lt;pool&gt;:&lt;snapshot name&gt;</code>. The calls go through the driver's client with its rate limit. With 10 shares this needs about two seconds.</li>
+<li><strong>Thaw.</strong></li>
+<li><strong>Wait for each snapshot to be <code>stable</code>.</strong> Record its fingerprint and its <code>captured_at</code> time.</li>
+</ol>
+<p><strong>Same moment across shares.</strong> One share snapshot is one moment for its share. Several shares are called within a second or two of each other, not at the same instant. IBM gives no way to snapshot several shares as one unit. The effect:
+- A volume is entirely on one share. For every volume, and every VM disk, the snapshot is one moment. This is the case that matters.
+- A VM with disks on two shares could see its disks about one or two seconds apart. With the freeze on, the guest wrote nothing between the two calls, so the disks agree. Without a freeze, the guest sees a crash between its disks, which a file system or database normally repairs.
+- The status records the spread (latest <code>captured_at</code> minus earliest) and the list of VMs that have disks on more than one share. A spread above a limit (default 10 seconds) makes the snapshot <code>Degraded</code>, and the policy takes another.
+- Phase 0 check 1 may show that the spread is zero. Then this section simplifies.</p>
+<p>A VM with a chain of instant snapshots is safe: the chain files are plain files on the share, so the snapshot has them all.</p>
+<p><strong>Failures.</strong> If one share cannot be snapshotted (degraded, rate limit, API error), the controller deletes the snapshots it made for this pool snapshot and retries, up to a limit. It never leaves a half pool snapshot marked ready. The pool snapshot states are <code>Pending</code>, <code>Ready</code>, <code>Degraded</code> (taken, but spread too large or a freeze failed) and <code>Failed</code>. Only <code>Ready</code> is offered for a pool recovery. <code>Degraded</code> is still usable for single volume recovery.</p>
+<p><strong>Share state.</strong> A share that is itself <code>pending</code> after a restore cannot be snapshotted (see "Limits"). The policy skips it and raises an alert.</p>
+<h3 id="2-schedules-and-keep-time">2. Schedules and keep time<a class="headerlink" href="#2-schedules-and-keep-time" title="Permanent link">&para;</a></h3>
+<p>A new cluster resource, <code>PoolSnapshotPolicy</code>: <code>pool</code>, <code>schedule</code> (an interval such as <code>1h</code>, minimum 15 minutes), <code>keepFor</code> (default <code>3d</code>) and <code>keepLast</code> (default 6, the minimum number to keep whatever their age), <code>freeze</code> (<code>VMs</code> by default, or <code>None</code>), and <code>suspend</code>.</p>
+<p><strong>The driver runs the schedule. We do not use IBM Backup for VPC for the pool snapshots.</strong> Reasons, in plain words:
+- IBM's plans run per share and know nothing of the others. They cannot give one moment across a pool, cannot freeze guests, and cannot write the manifest.
+- They need a service-to-service authorization and an account-level policy (10 per region). That is more setup, and a failure there is silent.
+- The driver still marks its snapshots with a user tag, so an administrator sees them in the IBM console.</p>
+<p>Removal of old snapshots: the controller deletes the share snapshots of a pool snapshot that is older than <code>keepFor</code>, keeping at least <code>keepLast</code>. It never deletes a pool snapshot that a restore uses. The limits that bound the plan: 750 snapshots per share and 100 TB of snapshot data per share, and one snapshot a minute. At an hourly schedule with 3 days kept, a share holds about 72. The webhook refuses a policy whose <code>keepFor / schedule</code> is above 500 (the margin leaves room for manual snapshots).</p>
+<p><strong>Space and cost.</strong> A snapshot holds only the changes since the one before it. A pool where VMs rewrite a lot (disk images change all the time) grows faster than a pool of documents. The first policy shows the snapshot size in its status (read from the VPC, which reports it within 15 minutes) so the administrator sees the growth. The price is per GB-hour, to verify (check 8).</p>
+<h3 id="3-recovering-one-volume-or-vm-disk-from-a-pool-snapshot">3. Recovering one volume or VM disk from a pool snapshot<a class="headerlink" href="#3-recovering-one-volume-or-vm-disk-from-a-pool-snapshot" title="Permanent link">&para;</a></h3>
+<p>This is the case that matters most, and it needs <strong>no new share and no wait</strong>.</p>
+<p>The pool snapshot shows each old moment of the share as a read-only folder: <code>/.snapshot/&lt;fingerprint&gt;/</code>. A volume's folder at that moment is <code>/.snapshot/&lt;fingerprint&gt;/pvcs/pvc-&lt;uuid&gt;</code>. The existing restore Job already copies a folder into a new claim. It gets one new source: this path. So:</p>
+<ul>
+<li><code>kubectl backup list --pool-snapshots</code> shows the moments of a claim. <code>kubectl backup restore --from-pool-snapshot &lt;name&gt; --pvc NS/NAME --to-pvc NEW</code> makes a <strong>new</strong> PVC with the contents at that moment. It never writes over an existing volume. The new PVC is held back from pods until the copy ends, like a restore today.</li>
+<li>For a VM, <code>--vm NS/NAME</code> restores all its disks at the one moment. It prints the disk names; the user attaches them to a VM. (Same as for backups.)</li>
+<li>The manifest tells us the claim's original size, owner and mode, and the chain files, so a <strong>deleted</strong> volume can be restored too. The new volume's <code>SubVolume</code> gets the chain list from the manifest.</li>
+<li>The copy time grows with the size of the volume. A 500 GB disk takes minutes, not seconds. Phase 0 measures it. A later phase may offer an instant variant (below).</li>
+<li><strong>Other tenants are not touched.</strong> The Job reads one folder, read-only, and writes only into the new volume. The tenants' live folders are never written.</li>
+</ul>
+<p><strong>Files in the browse feature.</strong> The browse and file-restore design (<code>2026-10-22-backup-file-restore.md</code>) works on a path. A pool snapshot is one more source for it: the same helper pod, with the read-only mount of one <code>/.snapshot/&lt;fingerprint&gt;/pvcs/&lt;volume&gt;</code> folder. File-level restore from a pool snapshot then comes at no new design cost. It is a later phase.</p>
+<p><strong>Instant variant (later, optional).</strong> Make a new share from the snapshot, and point a PV at the volume's folder on it. A VM boots at once while IBM copies the data. This is VMware's "instant recovery". It adds a tenant volume on a recovery share, and later needs a move into the live pool. It is not needed to meet the goal, so it comes last.</p>
+<h3 id="4-recovering-the-whole-pool">4. Recovering the whole pool<a class="headerlink" href="#4-recovering-the-whole-pool" title="Permanent link">&para;</a></h3>
+<p>IBM can only restore into <strong>new shares</strong>. So a pool recovery has two stages. The first is safe and changes nothing. The second is the switch, and the administrator approves it.</p>
+<p>A new cluster resource, <code>PoolRestore</code>: <code>pool</code>, <code>poolSnapshot</code>, and <code>mode</code>.</p>
+<p><strong>Stage 1: side by side (changes nothing).</strong>
+- For each share, make a new share from its snapshot: same profile, zone and encryption, the same size, the same IOPS, a mount target in the same subnet and security group as the original (the driver's own function makes it). The shares are made in parallel, so the time is that of one share (30 to 90 seconds for the API, plus the pointer setup; phase 0 check 5 gives the real figure). The size of the data does not matter, because the new share starts with pointers.
+- The status shows, for each share, the new share, its state, and whether IBM's copy has ended.
+- The manifests are read (by a Job on each new share) and compared with the live <code>SubVolume</code> list. The status reports three lists: <strong>volumes in both</strong> (will be back as they were), <strong>volumes created after the snapshot</strong> (their data is not in the snapshot; they will be lost by a switch), and <strong>folders in the snapshot with no volume now</strong> (deleted since; they can be restored one by one).
+- At this point the administrator can already recover single volumes from the new shares if they want, or stop and delete them.</p>
+<p><strong>Stage 2: the switch (the administrator approves it).</strong> A switch is a planned outage of the pool. It needs the administrator to say <code>approve: true</code> on the <code>PoolRestore</code>, after reading the three lists.
+1. <strong>Quiesce.</strong> The pool refuses new volumes (retriable error, as when a pool is expanding). The controller lists the pods that use claims of this pool. It does <strong>not</strong> stop other people's workloads. The administrator stops them, or sets <code>force: true</code>, which accepts that those pods lose their mount. The switch waits until none remain (or <code>force</code>).
+2. <strong>Switch each share.</strong> The pool's share list and every matching <code>SubVolume</code> get the address of the new share (<code>shareID</code>, mount target, export path). The old shares leave the pool and become <code>retired</code>. They are <strong>not deleted</strong>. Their snapshots stay too (the pool snapshot stays pinned, see "Limits").
+3. <strong>Mark the lost volumes.</strong> A <code>SubVolume</code> for a volume created after the snapshot has no folder on the new share. It is marked <code>LostByRestore</code>. The node plugin refuses to mount it (the same way the clone gate does, with a clear message). It must never give a pod a silent empty folder. The administrator decides: delete it, or restore it from a backup.
+4. <strong>Node plugin reads the address from the <code>SubVolume</code>.</strong> This is a change to <code>NodeStageVolume</code>: the PV's own attributes are old after a switch and cannot be edited, so the node plugin uses the <code>SubVolume</code>'s current share address when it differs. Without this change a switch would need every PV to be deleted and made again.
+5. <strong>Unquiesce.</strong> Pods can start. Their claims mount the new shares.
+6. <strong>Old shares.</strong> Kept for <code>retireFor</code> (default 7 days), then listed for deletion. Deletion is a separate confirmed command, never automatic. This is the rollback: before then, a second <code>PoolRestore</code> can switch back. (The old shares still hold the data from after the snapshot, including what the ransomware did. The administrator may need them for a forensic look.)</p>
+<p><strong>Other modes.</strong>
+- <code>mode: Copy</code>: leave the live pool as it is, and copy chosen volumes out of the new shares. This is the same as stage 1 plus single volume recovery. It does not need an outage, but it takes time in proportion to the data. It does <strong>not</strong> meet "minutes, any size" for a whole pool.
+- There is no restore in place. IBM does not offer it.</p>
+<p><strong>The honest gap: the first hours after a switch.</strong> While IBM copies the data into a restored share, that share is <code>pending</code>. We cannot snapshot it or replicate it, and the snapshot we restored from cannot be deleted. So <strong>for a period after a pool recovery there is no pool snapshot of the new shares.</strong> The length depends on the data and is unknown until check 6. During it, the driver's backups to the snapshot pool continue, and the administrator is told in the pool status and by an alert. If the lab shows this is many hours for a large pool, it is the main weakness of this design, and the answer is to keep the backups running and to not restore a pool to a share that is ransomware-affected twice in a row.</p>
+<h2 id="tenancy-and-access-rbac">Tenancy and access (RBAC)<a class="headerlink" href="#tenancy-and-access-rbac" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Pool snapshots are an administrator thing.</strong> <code>PoolSnapshot</code>, <code>PoolSnapshotPolicy</code> and <code>PoolRestore</code> are cluster resources. Only cluster administrators (the chart's admin ClusterRole) can see or change them. Tenants never see the pool, the shares, or other tenants' volumes.</li>
+<li><strong>A tenant can recover their own volumes</strong> with the same rule as backups: the right is by the <strong>namespace of the claim</strong> that owned the data. The gateway from the file-restore spec (or the plain <code>BackupRestore</code> path) checks it as the user. The rights-only name is <code>backupfiles</code>, as there. A new pair of verbs is not needed: reading a pool snapshot's copy of a volume of namespace A needs <code>get backupfiles</code> in A, and making the new PVC needs the usual rights in the target namespace. A person without the right gets "forbidden", and cannot tell whether the volume exists.</li>
+<li><strong>A deleted namespace.</strong> The manifest records the namespace of each volume. If the namespace is gone, only an administrator can restore it.</li>
+<li><strong>A pool snapshot never gives a tenant a view of the share.</strong> The restore Job mounts one volume's folder only, read-only, and the tenant sees the result only as a new PVC. The Job runs in the driver namespace with the same safety rules as the other jobs: paths checked against the folder pattern, no links followed, nothing written outside the new volume.</li>
+<li><strong>Ransomware thinking.</strong> An attacker with the cluster admin role, or with the VPC API key, can delete a share and its snapshots with it. Pool snapshots are not a lock. For that, use the COS export with a Compliance lock (step 9). Say so in the docs.</li>
+</ul>
+<h2 id="how-it-works-with-backups-and-replication">How it works with backups and replication<a class="headerlink" href="#how-it-works-with-backups-and-replication" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Backup from a share snapshot (the steady source).</strong> A backup of a plain volume reads from <code>/.snapshot/&lt;fingerprint&gt;/pvcs/&lt;volume&gt;</code> of the newest <code>Ready</code> pool snapshot, instead of the live folder. A read-only, frozen source gives a true same-moment copy of every plain volume of the pool, which the live rsync cannot. The backup's <code>consistency</code> for these volumes changes from <code>FileCopy</code> to <code>CrashConsistent</code> (the state of the share at one moment). The backup policy gets a <code>source</code> field: <code>Live</code> (today, the default) or <code>PoolSnapshot</code>. It needs a <code>PoolSnapshotPolicy</code> on the pool, and the backup waits for a snapshot that is newer than its last run, or asks for one.</li>
+<li><strong>VM disks keep the QEMU path.</strong> A running VM's backup is a QEMU copy that sends only changed blocks, and it is file-system consistent with the freeze. Reading a whole disk file from a snapshot every time would read all its blocks, because a file snapshot has no change list. So VM disks do <strong>not</strong> move to the snapshot source. A stopped VM's disk can use it.</li>
+<li><strong>Replication.</strong> A replication of a plain volume (rsync) can read from the snapshot too (<code>source: PoolSnapshot</code> on the policy), for the same reason. VM replication does not change.</li>
+<li><strong>A pool snapshot is not a backup.</strong> It is on the same share and zone. It dies with the share and the zone. The documents will say this in the first paragraph, and the console will show "same share" on it.</li>
+<li><strong>Snapshot of the backup pool.</strong> A <code>PoolSnapshotPolicy</code> can name a snapshot pool too. That protects backups from a mistaken delete of folders (not from a deleted share).</li>
+<li><strong>Zone loss.</strong> IBM copies snapshots to a zonal replica share. If phase 0 check 12 passes, a later phase may offer an option to make a replica of each share. This is a separate feature (cost: a second set of shares) and is not in the build plan.</li>
+</ul>
+<h2 id="limits-and-rules">Limits and rules<a class="headerlink" href="#limits-and-rules" title="Permanent link">&para;</a></h2>
+<ul>
+<li>750 snapshots per share, 100 TB per share, one a minute. The policy checks these and refuses a plan that cannot fit.</li>
+<li>A share in <code>pending</code> after a restore cannot be snapshotted, and the snapshot it came from cannot be deleted until the copy ends. The controller pins that pool snapshot and does not remove it.</li>
+<li>The first snapshot of a share copies all its contents. Phase 0 checks how long the first one takes and what it does to the IOPS of a busy share.</li>
+<li>A pool snapshot of a pool that is expanding or draining includes only the shares that exist and are <code>stable</code> at that moment. The status lists them. A share added later is not in it. A restore of that pool snapshot does not touch the later share.</li>
+<li>A share that is <code>failed</code> or <code>degraded</code> cannot be snapshotted. The pool snapshot becomes <code>Failed</code> and the policy retries.</li>
+<li>All share snapshots of one pool snapshot have the same keep time.</li>
+<li>A pool snapshot is useless once a share is deleted (its snapshots go with it). The controller refuses to remove a share from the pool or delete it while a <code>Ready</code> pool snapshot depends on it, unless the administrator uses <code>force</code>.</li>
+<li>No tiers special case: all shares in all tiers of a pool are in the pool snapshot.</li>
+</ul>
+<h2 id="monitoring-and-alerts">Monitoring and alerts<a class="headerlink" href="#monitoring-and-alerts" title="Permanent link">&para;</a></h2>
+<p>New metrics (listed in <code>MONITORING.md</code> when they are built):
+- <code>pool_snapshot_total</code> (by pool and result), <code>pool_snapshot_duration_seconds</code>, <code>pool_snapshot_spread_seconds</code>
+- <code>pool_snapshot_age_seconds</code> (newest <code>Ready</code> for each pool), <code>pool_snapshot_count</code> (by pool)
+- <code>pool_snapshot_share_bytes</code> (snapshot size, by pool and share)
+- <code>pool_snapshot_freeze_failures_total</code>
+- <code>pool_restore_phase</code> (by pool), <code>pool_restore_share_pending</code> (shares still copying)</p>
+<p>New alert rules, in the chart with rule tests:
+- no <code>Ready</code> pool snapshot within twice the schedule
+- a pool snapshot <code>Degraded</code> or <code>Failed</code> three times in a row
+- a share with more than 600 snapshots (limit 750)
+- snapshot data above 50 percent of the share size
+- a restored share <code>pending</code> for more than 24 hours
+- a pool with a policy but no snapshot after a restore (the gap above)</p>
+<h2 id="console-and-command-line">Console and command line<a class="headerlink" href="#console-and-command-line" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Command line: <code>kubectl pool-snapshots</code> already exists for VM flatten. Add <code>kubectl pool-snapshots take|list|delete</code>, and <code>kubectl pool-restore plan|start|approve|status|retire</code>. <code>kubectl backup restore --from-pool-snapshot</code> is for volumes (tenant-safe, goes through the access checks).</li>
+<li>Console (administrator): a Pool snapshots page for each pool: the list with state, time, spread and size; "Take now"; the policy form; a Restore wizard that shows the three lists and the quiesce list before the approve button. A tenant sees their volume's restore points, under the existing volume page, once the file-restore console work lands.</li>
+<li>Every dangerous step (approve a switch, <code>force</code>, delete retired shares) asks the user to type the pool name.</li>
+</ul>
+<h2 id="tests">Tests<a class="headerlink" href="#tests" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Unit (fakes).</strong> The fake VPC client gets share snapshots and share-from-snapshot. Tests: all-or-nothing creation (one share fails, the others are deleted); the spread rule; the freeze window ends at the time limit; the manifest has every volume; retention keeps <code>keepLast</code> and never removes a pinned snapshot; the policy limits; the webhook refusals; the three lists of a <code>PoolRestore</code>; a switch updates every <code>SubVolume</code> and marks the lost ones; the node plugin uses the <code>SubVolume</code> address and refuses <code>LostByRestore</code>; <code>from-pool-snapshot</code> path checks (no <code>..</code>, no links); access checks per namespace.</li>
+<li><strong>Chart tests.</strong> Roles, the new CRDs, the alert rules (with <code>promtool</code> rule tests), the new values.</li>
+<li><strong>Release test stage on the lab (rovslab).</strong> Make a pool of two shares with a plain volume and a two-disk VM (one disk on each share if possible). Write known files with checksums. Take a pool snapshot with the freeze. Then: (1) delete a volume, restore it from the snapshot, check the checksums; (2) restore the VM's disks at the one moment and boot the VM; (3) run <code>PoolRestore</code> stage 1 and check the three lists; (4) switch (with the VM stopped) and check that the pods mount the new shares, a volume created after the snapshot is refused with a clear message, and the old shares are <code>retired</code>; (5) switch back. Clean up all shares at the end.</li>
+<li><strong>Failure test.</strong> Make the snapshot of the second share fail. The first share's snapshot must be deleted and the pool snapshot must be <code>Failed</code>.</li>
+</ul>
+<h2 id="build-plan-phases-one-pr-each">Build plan: phases, one PR each<a class="headerlink" href="#build-plan-phases-one-pr-each" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>What</th>
+<th>Meets</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>Lab checks 1 to 12 of the IBM facts, with the numbers written into this spec. No product code.</td>
+<td>Decides the rest</td>
+</tr>
+<tr>
+<td>1</td>
+<td>VPC client: create, get, list, delete share snapshot and share-from-snapshot, in the real and fake clients. IAM check.</td>
+<td>Foundation</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>PoolSnapshot</code>, the manifest Job, parallel snapshots, all-or-nothing, the freeze window, metrics. On request only.</td>
+<td>Use 1 (protect)</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>PoolSnapshotPolicy</code>: schedule, keep time, limits, webhook, alerts, chart.</td>
+<td>Use 1 (protect)</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Volume and VM disk recovery from a pool snapshot: the <code>/.snapshot</code> source for the restore Job, <code>kubectl backup restore --from-pool-snapshot</code>, access checks.</td>
+<td>Single-volume goal</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>PoolRestore</code> stage 1 (side by side) and the three lists.</td>
+<td>Whole-pool goal (half)</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>PoolRestore</code> stage 2: quiesce, switch, <code>LostByRestore</code>, node plugin reads the <code>SubVolume</code>, retired shares, rollback.</td>
+<td>Whole-pool goal</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Backup and replication read from the snapshot (<code>source: PoolSnapshot</code>) for plain volumes.</td>
+<td>Use 2</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Console pages and the release test stage. (Release-test pieces for earlier phases are added in those phases.)</td>
+<td>Usability</td>
+</tr>
+<tr>
+<td>9 (optional)</td>
+<td>File-level browse from a pool snapshot; instant recovery volume.</td>
+<td>Extra</td>
+</tr>
+</tbody>
+</table>
+<p>Size, honestly: phases 1 to 4 are about the size of the backup step 8 (new CRDs, a controller, a Job, a command). Phase 6 is the largest and riskiest: it changes how the node plugin finds a volume and moves every <code>SubVolume</code> of a pool. Total: about 8 PRs, 2 to 3 of them large.</p>
+<h2 id="does-the-design-meet-the-goal">Does the design meet the goal?<a class="headerlink" href="#does-the-design-meet-the-goal" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Part of the goal</th>
+<th>Met?</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Protect a whole pool, any size, snapshot in seconds</td>
+<td>Yes, if checks 1, 3 and 7 pass</td>
+<td>One snapshot call per share, in parallel</td>
+</tr>
+<tr>
+<td>Same moment for every volume</td>
+<td>Yes for each volume (one share each). Within about 2 seconds for a VM with disks on two shares, closed by the freeze</td>
+<td>IBM has no cross-share snapshot</td>
+</tr>
+<tr>
+<td>Recover a whole pool in minutes, any size</td>
+<td><strong>Yes for the new shares and the switch, if checks 5 and 6 pass.</strong></td>
+<td>IBM makes the new share from pointers, usable while <code>pending</code></td>
+</tr>
+<tr>
+<td>Recover single volumes without affecting tenants</td>
+<td>Yes, by copy. The time grows with the volume</td>
+<td>The restore reads one read-only folder and writes a new PVC</td>
+</tr>
+<tr>
+<td>Whole-pool recovery in place</td>
+<td><strong>No</strong></td>
+<td>IBM has no restore in place. We use new shares and a switch</td>
+</tr>
+<tr>
+<td>Survive the loss of the share, zone or VPC</td>
+<td><strong>No</strong></td>
+<td>Snapshots live and die with the share. Use backups and COS for that</td>
+</tr>
+<tr>
+<td>Protect against an attacker who has the cloud API key</td>
+<td><strong>No</strong></td>
+<td>They can delete the share and its snapshots. Use a COS lock</td>
+</tr>
+<tr>
+<td>A pool snapshot of the new shares right after a restore</td>
+<td><strong>No, for a time</strong></td>
+<td>IBM forbids it while the share is <code>pending</code></td>
+</tr>
+<tr>
+<td>Zero outage for a whole-pool recovery</td>
+<td><strong>No</strong></td>
+<td>A switch needs the pods to stop. Mode <code>Copy</code> avoids the outage but is slow</td>
+</tr>
+</tbody>
+</table>
+<h3 id="options-considered">Options considered<a class="headerlink" href="#options-considered" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Recommended: the design above</strong> (driver-run pool snapshots, <code>/.snapshot</code> single-volume recovery, side-by-side restore then a switch). <strong>Meets the goal</strong> except the rows marked No, which IBM's platform rules out.</li>
+<li><strong>Only IBM Backup for VPC plans on the shares, no driver code.</strong> <strong>Does not meet the goal.</strong> No same moment across shares, no freeze, no manifest, no volume-level recovery, no switch. It is cheap and may do for an administrator who only wants a safety net. It can run next to the design above.</li>
+<li><strong>Only single-volume recovery (phase 4), no pool recovery.</strong> <strong>Does not meet the goal</strong> (a whole pool would be recovered volume by volume, at the speed of the data). Useful first step; it is phases 1 to 4.</li>
+<li><strong>Restore a pool by copying all volumes out.</strong> <strong>Does not meet "minutes, any size".</strong> It is mode <code>Copy</code>.</li>
+</ul>
+<h2 id="cost-effort-and-risk">Cost, effort and risk<a class="headerlink" href="#cost-effort-and-risk" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>IBM cost.</strong> Snapshot storage in GB-hours (price to verify, check 8). A restored share costs as a normal share for as long as it exists, so a stage 1 that nobody switches or deletes is a bill. The controller reports restored shares older than 7 days. A switch leaves the old shares billed until deleted (default 7 days).</li>
+<li><strong>Effort.</strong> About 8 PRs. The riskiest are phase 6 (the switch) and the first lab numbers (phase 0). If check 5 shows that a restored share is slow while <code>pending</code>, the "minutes" promise is weaker, and the spec must be changed before phase 5 starts.</li>
+<li><strong>Risk: the switch.</strong> It changes where every volume of a pool lives. Mitigations: nothing is deleted, the old shares are retired and can be switched back, the lost volumes are blocked not emptied, and the administrator must approve after seeing three lists.</li>
+<li><strong>Risk: freeze.</strong> A freeze of many VMs for 20 seconds can stall their I/O. It is off for <code>freeze: None</code>. The time limit is hard. A freeze failure makes a VM <code>CrashConsistent</code>, never blocks the snapshot.</li>
+<li><strong>Risk: false safety.</strong> A pool snapshot is not a backup. The documents, the console and the alert text say so.</li>
+<li><strong>Risk: IBM facts wrong.</strong> Twelve checks are listed in phase 0. Phases 2 and later do not start until the checks that they depend on are written into this spec.</li>
+<li><strong>Docs to update when built:</strong> <code>FEATURES.md</code>, <code>BACKUP-RECOVERY.md</code>, <code>CRD-SPEC.md</code> (new CRDs), <code>MONITORING.md</code>, <code>HELM-VALUES.md</code>, <code>CONSISTENCY-MODEL.md</code> (the line that says "this driver does not use share snapshots"), <code>KNOWN-LIMITATIONS.md</code>, <code>API-KEY-SETUP.md</code> (new IAM rights), <code>CHANGELOG.md</code>, a new tutorial.</li>
+</ul>
+<h2 id="decisions-i-made-for-you">Decisions I made for you<a class="headerlink" href="#decisions-i-made-for-you" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Pool snapshots are an extra tool. They do not replace per-volume snapshots or backups.</li>
+<li>The driver runs the schedule. We do not use IBM Backup for VPC plans for pool snapshots.</li>
+<li>A pool snapshot is one VPC share snapshot per share, called in parallel. It is <code>Ready</code> only if all of them worked, else all are removed.</li>
+<li>Running VMs are frozen for a short, bounded window by default. A failed freeze gives a crash-consistent copy and never stops the snapshot.</li>
+<li>A manifest of the volumes is written onto each share before the snapshot, so a deleted volume can be recovered and a restore can say what it loses.</li>
+<li>A single volume or VM disk is recovered by copying from the read-only <code>/.snapshot</code> folder into a <strong>new</strong> PVC. It never writes over a live volume.</li>
+<li>A whole-pool recovery uses new shares from the snapshots. It has two stages: side by side first, then a switch that the administrator approves.</li>
+<li>The switch needs the pool's pods to be stopped. The driver does not stop other people's workloads by itself. <code>force</code> is the administrator's choice.</li>
+<li>Volumes created after the snapshot are blocked from mounting after a switch, not given an empty folder.</li>
+<li>Old shares are retired, kept 7 days, and deleted only by a confirmed command. That is the rollback.</li>
+<li>The node plugin will read a volume's share address from the <code>SubVolume</code>, because a PV's own address cannot be changed.</li>
+<li>Default schedule floor is 15 minutes. Default keep time is 3 days and at least 6 snapshots.</li>
+<li>Backup and replication of plain volumes can read from a pool snapshot (opt in). VM disks keep the QEMU path, because it sends only changed blocks.</li>
+<li>Tenants may recover their own volumes using the same namespace rule as backups. Pool snapshots, shares and restores of a whole pool are administrator only.</li>
+<li>Pool snapshots are not protection against loss of the share, the zone, or the VPC API key. The documents say so plainly.</li>
+<li>Phase 0 (lab checks) comes first, and later phases wait for the numbers they depend on.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "navigation.instant", "search.suggest", "search.highlight", "content.code.copy", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+    
+  </body>
+</html>

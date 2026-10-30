@@ -1,0 +1,20 @@
+# WaitForFirstConsumer StorageClass for multi-zone clusters.
+# The driver automatically selects the pool matching the pod's scheduled zone.
+# Requires one FileSharePool per zone (see pool-south-1.yaml, pool-south-2.yaml).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ibm-vpc-file-pool-multizone
+provisioner: vpc-file-pool.csi.ibm.io
+parameters:
+  # Omit 'pool' — the driver selects based on pod topology.
+  # Or use a naming convention: the driver matches "general-<zone>" pools.
+  poolPrefix: general
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+mountOptions:
+  - nfsvers=4.1
+  - soft
+  - timeo=600
+  - retrans=3

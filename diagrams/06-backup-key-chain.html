@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Backup Key Chain</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#f4f6f8; --panel:#ffffff; --fg:#161d26; --muted:#5a6675; --line:#d5dce4; --share:#e9eef4;
+  --ok:#0e6b4f; --warn:#8a5300; --bad:#b3261e; --btn:#0f4fd6; --btn-fg:#ffffff;
+  --l0:#2b6f8f; --l1:#d9780f; --l2:#7a4fb0; --l3:#c43d63; --l4:#3a8a2b; --l5:#8d9124;
+  --font:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#10161d; --panel:#18212b; --fg:#e6ebf1; --muted:#9aa7b6; --line:#2b3745; --share:#1d2834;
+  --ok:#5fd0a6; --warn:#e0a24a; --bad:#ff8a80; --btn:#6c9bff; --btn-fg:#0b1220;
+  --l0:#5fb3d6; --l1:#f0a04b; --l2:#b595e6; --l3:#ee7f9b; --l4:#7fcb6a; --l5:#c4c76a; color-scheme:dark;}}
+:root[data-theme="dark"]{
+  --bg:#10161d; --panel:#18212b; --fg:#e6ebf1; --muted:#9aa7b6; --line:#2b3745; --share:#1d2834;
+  --ok:#5fd0a6; --warn:#e0a24a; --bad:#ff8a80; --btn:#6c9bff; --btn-fg:#0b1220;
+  --l0:#5fb3d6; --l1:#f0a04b; --l2:#b595e6; --l3:#ee7f9b; --l4:#7fcb6a; --l5:#c4c76a; color-scheme:dark;}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 var(--font);margin:0;
+  padding-block:24px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+main{max-width:860px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+nav.top{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:.85rem;color:var(--muted)}
+nav.top a{color:var(--btn);text-decoration:none}
+nav.top a:hover{text-decoration:underline}
+nav.top .off{opacity:.5}
+h1{font-size:1.5rem;line-height:1.2;margin:0;font-weight:600;text-wrap:balance}
+h2{font-size:.75rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0;font-weight:600}
+p{margin:0;max-width:65ch}
+.lead{color:var(--muted)}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button{font:inherit;font-weight:500;border:1px solid var(--line);background:var(--panel);color:var(--fg);padding:8px 14px;border-radius:6px;cursor:pointer}
+button.primary{background:var(--btn);color:var(--btn-fg);border-color:var(--btn)}
+button.on{outline:2px solid var(--btn);outline-offset:-2px;font-weight:600}
+button:disabled{opacity:.45;cursor:not-allowed}
+button:focus-visible{outline:2px solid var(--btn);outline-offset:2px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.share{background:var(--share);border:1px solid var(--line);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.mono{font-family:var(--mono);font-size:.85rem}
+.log{border-left:3px solid var(--btn);padding:6px 12px;min-height:3.4em;background:var(--panel)}
+.stats{display:flex;flex-wrap:wrap;gap:16px;color:var(--muted);font-size:.9rem}
+.stats b{color:var(--fg);font-variant-numeric:tabular-nums}
+.hint{font-size:.85rem;color:var(--muted)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:.82rem;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{display:inline-block;width:16px;height:16px;border-radius:4px;border:2px solid var(--c,var(--line));background:color-mix(in srgb,var(--c,transparent) 22%,var(--panel))}
+.sw.dash{border-style:dashed;background:transparent}
+.sw.out{box-shadow:0 0 0 2px var(--fg)}
+.blk{font-family:var(--mono);font-size:.82rem;text-align:center;padding:5px 8px;border-radius:4px;border:2px solid var(--c,var(--line));background:color-mix(in srgb,var(--c,transparent) 22%,var(--panel));min-width:0;white-space:nowrap}
+.blk.dash{border-style:dashed;background:transparent;color:var(--muted)}
+.blk.new{box-shadow:0 0 0 2px var(--fg)}
+.blk.bad{--c:var(--bad)}
+.chip{display:inline-block;font-size:.76rem;font-weight:600;padding:1px 8px;border-radius:10px;border:1px solid var(--line)}
+.chip.ok{color:var(--ok);border-color:var(--ok)}
+.chip.warn{color:var(--warn);border-color:var(--warn)}
+.chip.bad{color:var(--bad);border-color:var(--bad)}
+@media (prefers-reduced-motion:no-preference){.blk{transition:background .25s,border-color .25s}}
+[hidden]{display:none !important}
+.places{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}
+.place{border:1px solid var(--line);border-top:6px solid var(--pc,var(--line));background:var(--panel);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.place.dim{opacity:.55}
+.place .ph{display:flex;flex-direction:column}
+.place .ph b{font-weight:600}
+.place .ph span{font-size:.8rem;color:var(--muted)}
+.keys{display:flex;flex-direction:column;gap:4px}
+.keys .blk{text-align:left;white-space:normal}
+.keys .blk b{font-weight:600}
+.blk.gone{opacity:.45;text-decoration:line-through}
+.verdicts{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}
+.verdict{border:1px solid var(--line);border-left:6px solid var(--c);border-radius:8px;padding:10px;background:var(--panel);display:flex;flex-direction:column;gap:4px;min-width:0}
+.tbl{width:100%;border-collapse:collapse;font-size:.85rem}
+.tbl th{text-align:left;color:var(--muted);font-weight:600;padding:4px 6px;border-bottom:1px solid var(--line)}
+.tbl td{padding:6px;border-bottom:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}
+.tblwrap{overflow-x:auto}
+.toggles{display:flex;flex-wrap:wrap;gap:8px}
+</style>
+</head>
+<body>
+<main>
+<nav class="top" aria-label="Pages"><a href="index.html">All pages</a><a href="05-backup-to-cos.html">&larr; Previous page</a><a href="07-cloning-a-vm-disk.html">Next page &rarr;</a></nav>
+  <div>
+    <h1>The Backup Key Chain</h1>
+    <p class="lead">Backups sent to IBM Cloud Object Storage (COS) are locked with a <b>backup key</b>. That key is never stored as it is. Key Protect, an IBM Cloud service, locks it with its own <b>root key</b>. This page follows each key from setup to a backup and a restore, then asks what happens when one is lost. All key names here are made up. No page, log or status of the driver shows a real key.</p>
+  </div>
+
+  <div class="bar">
+    <button class="primary" id="b-next">Next step</button>
+    <button id="b-back" disabled>Step back</button>
+    <button id="b-reset">Start again</button>
+  </div>
+  <p class="hint" id="stephint"></p>
+
+  <section class="share" aria-label="Where each key is kept">
+    <h2>Where each key is kept <span id="stepname"></span></h2>
+    <div class="places" id="places"></div>
+    <div class="legend">
+      <span><i class="sw" style="--c:var(--l2)"></i>RK: the root key, never leaves Key Protect</span>
+      <span><i class="sw" style="--c:var(--l3)"></i>B: the readable backup key</span>
+      <span><i class="sw" style="--c:var(--l1)"></i>W: B locked by RK (wrapped)</span>
+      <span><i class="sw" style="--c:var(--l0)"></i>A: the Key Protect API key</span>
+      <span><i class="sw" style="--c:var(--l4)"></i>C: the key for the one bucket</span>
+      <span><i class="sw" style="--c:var(--l5)"></i>the backups</span>
+      <span><i class="sw out"></i>new in this step</span>
+    </div>
+  </section>
+
+  <div class="log" id="log" aria-live="polite"></div>
+
+  <section class="card" aria-label="What if">
+    <h2>What if something is lost?</h2>
+    <p class="hint">Press a button to break something. Press it again to repair it. The two boxes below say what still works.</p>
+    <div class="toggles" id="toggles"></div>
+    <div class="verdicts" id="verdicts" aria-live="polite"></div>
+  </section>
+
+  <section class="card" aria-label="Who can open what">
+    <h2>Who can open what</h2>
+    <div class="tblwrap"><table class="tbl">
+      <tr><th>Key</th><th>What it opens</th><th>If it is lost</th></tr>
+      <tr><td><b>RK</b> root key (Key Protect)</td><td>Locks and unlocks W. Nobody can read it, not even you.</td><td>If it is deleted, W can never be unlocked again. Only the emergency key file can read the backups. The Jobs get a refusal and stop.</td></tr>
+      <tr><td><b>W</b> wrapped key (bucket and a cluster Secret)</td><td>Nothing alone. It is B, locked.</td><td>One copy is enough, because the bucket and the cluster each hold one.</td></tr>
+      <tr><td><b>B</b> readable backup key</td><td>Opens every backup of the policy. Lives only in a Job's memory, and in your emergency copy.</td><td>Not stored by the driver, so it can always be made again from W while Key Protect works.</td></tr>
+      <tr><td><b>Emergency key file</b> (B, kept by you outside IBM Cloud)</td><td>Restore with <span class="mono">--backup-key-file</span>. Key Protect is not called.</td><td>Nothing happens while Key Protect and RK are fine. If they are lost as well, <b>nobody can read the backups</b>.</td></tr>
+      <tr><td><b>A</b> Key Protect API key (cluster Secret)</td><td>Lets the driver ask Key Protect to unlock W. It has the Reader role on RK only.</td><td>If its access is removed, exports and clean-up stop. Anyone who can read this Secret can ask Key Protect to unlock W, as the driver does, so guard it like the key.</td></tr>
+      <tr><td><b>C</b> bucket key (cluster Secret)</td><td>Writes to the one bucket. It cannot delete versions, skip a lock or change bucket settings.</td><td>Delete its HMAC key in IBM Cloud and run <span class="mono">kubectl backup cos-setup</span> again for a new one.</td></tr>
+    </table></div>
+    <p class="hint">Decided by the code: the emergency key is used only when Key Protect cannot be reached. If Key Protect answers with a refusal (a wrong root key or a bad API key), the Job fails. It never hides a setup mistake. The controller never reads these keys and never calls Key Protect: only the Jobs do.</p>
+    <p class="hint">What is proven: with a real Key Protect root key in the lab (eu-de), export and restore from COS worked, and the VM booted with matching checksums. Not yet proven: restore with the emergency key file, and a restore in the DR cluster. Do not treat the COS copy as your only backup until they pass.</p>
+  </section>
+
+</main>
+<script>
+(function(){
+  function el(i){return document.getElementById(i);}
+  var K={
+    RK:{c:2,t:"RK",d:"root key"},
+    B:{c:3,t:"B",d:"readable backup key"},
+    W:{c:1,t:"W",d:"B locked by RK (wrapped)"},
+    A:{c:0,t:"A",d:"Key Protect API key (Reader on RK)"},
+    C:{c:4,t:"C",d:"key for the one bucket"},
+    D:{c:5,t:"Backups",d:"locked, and encrypted with B"}
+  };
+  var STEPS=[
+    {name:"0. Before setup",hint:"You already have a Key Protect root key. The setup command does not make one.",
+     log:"<b>Before setup.</b> Key Protect holds your root key <b>RK</b>. Nothing else exists yet: no bucket key, no backup key, no backups.",
+     p:{kp:["RK"],bucket:[],cluster:[],mem:[],safe:[],lap:[]},nw:[]},
+    {name:"1. Make the backup key",hint:"Run: kubectl backup cos-setup",
+     log:"<b>Setup makes a backup key, B.</b> It is 32 random bytes. The command shows B to you <b>once</b> and waits until you type that you saved a copy <b>outside IBM Cloud</b>. That copy is your emergency key file. If you do not confirm, nothing is stored.",
+     p:{kp:["RK"],bucket:[],cluster:[],mem:[],safe:["B"],lap:["B"]},nw:["B"]},
+    {name:"2. Key Protect locks it",hint:"B is locked by RK. The result is W.",
+     log:"<b>Key Protect wraps B.</b> It locks B with RK and gives back W. RK never leaves Key Protect. The command stores <b>only W</b>: in the bucket (as <span class='mono'>_pool-csi-setup/backup-key.wrapped.json</span>) and in a Secret for the cluster. Then it forgets B. Your safe copy of B is now the only readable copy.",
+     p:{kp:["RK"],bucket:["W"],cluster:["W"],mem:[],safe:["B"],lap:[]},nw:["W"]},
+    {name:"3. Give the driver its keys",hint:"Two more keys go into Secrets in the cluster.",
+     log:"<b>The driver gets two more keys.</b> <b>C</b> is the key for the one bucket. The setup command writes it to a file for you. It can write and extend locks, but it cannot delete versions or shorten a lock. <b>A</b> is an API key with the Reader role on RK. You make that Secret yourself (the command prints how). It is what lets the driver ask Key Protect to unlock W.",
+     p:{kp:["RK"],bucket:["W"],cluster:["W","C","A"],mem:[],safe:["B"],lap:[]},nw:["C","A"]},
+    {name:"4. A backup runs",hint:"The Job unlocks B in memory and sends encrypted backups.",
+     log:"<b>A backup Job runs.</b> It reads W and A from the Secrets and asks Key Protect to unlock W. B appears <b>only in the Job's memory</b>, in a memory-backed file that is removed as soon as the backup tool has read it. B is never logged. The backup tool encrypts the data with B and sends it to the bucket. When the Job ends, B is gone.",
+     p:{kp:["RK"],bucket:["W","D"],cluster:["W","C","A"],mem:["B"],safe:["B"],lap:[]},nw:["B","D"]},
+    {name:"5. Restore in a new cluster",hint:"The old cluster is gone. The bucket, Key Protect and your files are not.",
+     log:"<b>Restore in a new cluster.</b> You recreate the Secrets for C and A from your files. W is taken from the copy in the bucket. A restore Job unlocks B the same way and reads the backups. <b>If Key Protect or RK is gone</b>, use your emergency key file instead (<span class='mono'>--backup-key-file</span>): the restore never calls Key Protect, and it still needs C.",
+     p:{kp:["RK"],bucket:["W","D"],cluster:["W","C","A"],mem:["B"],safe:["B"],lap:[]},nw:["W","C","A"],newCluster:true}
+  ];
+  var step=0;
+  var BAD={kpDown:false,rootGone:false,apiGone:false,wrappedLost:false,fileLost:false,emSecret:false};
+  var TOG=[
+    ["kpDown","Key Protect is down for a while"],
+    ["rootGone","The root key is deleted"],
+    ["apiGone","The API key loses its access"],
+    ["wrappedLost","Both copies of W are lost"],
+    ["fileLost","You lose the emergency key file"],
+    ["emSecret","Keep a readable copy in the cluster (optional setting)"]
+  ];
+  function blocks(list,newList,gone){
+    return list.map(function(k){
+      var o=K[k], isNew=newList.indexOf(k)>=0;
+      return '<span class="blk'+(isNew?' new':'')+(gone&&gone[k]?' gone':'')+'" style="--c:var(--l'+o.c+')"><b>'+o.t+'</b> '+(k==="D"?o.d:'· '+o.d)+'</span>';
+    }).join("");
+  }
+  function placeCard(title,sub,list,nw,pc,gone){
+    return '<div class="place'+(list.length?'':' dim')+'" style="--pc:'+pc+'"><div class="ph"><b>'+title+'</b><span>'+sub+'</span></div><div class="keys">'+(list.length?blocks(list,nw,gone):'<span class="blk dash">empty</span>')+'</div></div>';
+  }
+  function render(){
+    var s=STEPS[step];
+    var h="";
+    h+=placeCard("Key Protect","IBM Cloud service, one region",s.p.kp,s.nw,"var(--l2)");
+    h+=placeCard("The bucket","COS, object lock on",s.p.bucket,s.nw,"var(--l5)");
+    h+=placeCard(s.newCluster?"The new cluster":"The cluster","Secrets in the driver namespace",s.p.cluster,s.nw,"var(--l0)");
+    if(s.p.lap.length) h+=placeCard("Your laptop","while cos-setup runs",s.p.lap,s.nw,"var(--muted)");
+    if(s.p.mem.length) h+=placeCard("A Job's memory","only while the Job runs",s.p.mem,s.nw,"var(--l3)");
+    h+=placeCard("Your safe place","outside IBM Cloud: the emergency key file",s.p.safe,s.nw,"var(--l4)");
+    el("places").innerHTML=h;
+    el("stepname").textContent="· "+s.name;
+    el("stephint").textContent=s.hint;
+    el("log").innerHTML=s.log;
+    el("b-next").disabled=step>=STEPS.length-1;
+    el("b-back").disabled=step<=0;
+    renderToggles();
+  }
+  function verdict(){
+    var b=BAD, unwrap=!b.kpDown&&!b.rootGone&&!b.apiGone&&!b.wrappedLost;
+    var run,rest;
+    if(unwrap) run=["ok","Backups keep running.","A Job unlocks B in memory as usual."];
+    else if(b.wrappedLost) run=b.emSecret? ["warn","Backups run on the emergency key.","There is no W to unlock, so the Job uses the readable copy in the cluster and logs that it did."] : ["bad","Backups stop.","The Job has no wrapped key and no emergency key."];
+    else if(b.kpDown) run=b.emSecret? ["warn","Backups run on the emergency key.","Key Protect cannot be reached, so the Job uses the readable copy kept in the cluster. That copy weakens the protection if someone takes over the cluster."] : ["warn","Backups pause.","The Job says Key Protect is unreachable and tries again later. It starts again when Key Protect is back."];
+    else run=["bad","Backups stop.","Key Protect answers with a refusal (a deleted root key or an API key with no access). The Job fails. It does not fall back to the emergency key, so a setup mistake is never hidden."];
+    if(unwrap) rest=["ok","You can restore.","The restore Job unlocks B with Key Protect."];
+    else if(!b.fileLost) rest=["ok","You can restore with the emergency key file.","Use --backup-key-file. Key Protect is not called. You still need the bucket key C."];
+    else if(b.kpDown&&!b.rootGone&&!b.apiGone&&!b.wrappedLost) rest=["warn","You can restore when Key Protect is back.","You have no emergency key file, so you must wait."];
+    else if(b.kpDown&&b.emSecret&&!b.rootGone&&!b.apiGone) rest=["warn","Restore on the cluster copy.","The readable copy in the cluster can restore, if that cluster still exists."];
+    else rest=["bad","Nobody can read the backups.","Key Protect cannot unlock W and you have no emergency key. The backups are still in the bucket, locked, but unreadable."];
+    return [run,rest];
+  }
+  function renderToggles(){
+    var h="";
+    TOG.forEach(function(t){ h+='<button data-t="'+t[0]+'" class="'+(BAD[t[0]]?'on':'')+'">'+(BAD[t[0]]&&t[0]!=="emSecret"?"Repair: ":(t[0]==="emSecret"&&BAD[t[0]]?"On: ":""))+t[1]+'</button>'; });
+    el("toggles").innerHTML=h;
+    var v=verdict(), names=["Do backups keep running?","Can you restore?"], cols={ok:"var(--ok)",warn:"var(--warn)",bad:"var(--bad)"};
+    el("verdicts").innerHTML=v.map(function(x,i){
+      return '<div class="verdict" style="--c:'+cols[x[0]]+'"><span class="hint">'+names[i]+'</span><b><span class="chip '+x[0]+'">'+(x[0]==="ok"?"Yes":(x[0]==="warn"?"Partly":"No"))+'</span> '+x[1]+'</b><span>'+x[2]+'</span></div>';
+    }).join("");
+  }
+  el("toggles").addEventListener("click",function(e){ var b=e.target.closest("button"); if(!b) return; var k=b.getAttribute("data-t"); BAD[k]=!BAD[k]; renderToggles(); });
+  el("b-next").onclick=function(){ if(step<STEPS.length-1){step++; render();} };
+  el("b-back").onclick=function(){ if(step>0){step--; render();} };
+  el("b-reset").onclick=function(){ step=0; Object.keys(BAD).forEach(function(k){BAD[k]=false;}); render(); };
+  render();
+})();
+
+</script>
+</body>
+</html>

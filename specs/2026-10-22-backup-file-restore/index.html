@@ -1,0 +1,2906 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A Kubernetes CSI driver that pools multiple PVCs as subdirectories within shared VPC file shares">
+      
+      
+      
+        <link rel="canonical" href="https://neil1taylor.github.io/ibm-vpc-file-pool-csi/specs/2026-10-22-backup-file-restore/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Spec: browse a backup and restore single files (issue #92) - IBM VPC File Pool CSI Driver</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#spec-browse-a-backup-and-restore-single-files-issue-92" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="IBM VPC File Pool CSI Driver" class="md-header__button md-logo" aria-label="IBM VPC File Pool CSI Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            IBM VPC File Pool CSI Driver
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Spec: browse a backup and restore single files (issue #92)
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/neil1taylor/ibm-vpc-file-pool-csi" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neil1taylor/ibm-vpc-file-pool-csi
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../INSTALL/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../DAY2-OPERATIONS/" class="md-tabs__link">
+          
+  
+  
+  Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../OVERVIEW/" class="md-tabs__link">
+          
+  
+  
+  Architecture
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../VOLUME-CLONING/" class="md-tabs__link">
+          
+  
+  
+  Design (Phase 4)
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../CONTRIBUTING/" class="md-tabs__link">
+          
+  
+  
+  Development
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../examples/" class="md-tabs__link">
+          
+  
+  
+  Examples
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="IBM VPC File Pool CSI Driver" class="md-nav__button md-logo" aria-label="IBM VPC File Pool CSI Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    IBM VPC File Pool CSI Driver
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/neil1taylor/ibm-vpc-file-pool-csi" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neil1taylor/ibm-vpc-file-pool-csi
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../INSTALL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../USER-GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-01-POOL-CREATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 1 - Pool Creation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-02-SNAPSHOTS-AND-CLONES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 2 - Snapshots and Clones
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 3 - Group Snapshots and Hooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-04-POOL-CONFIGURATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 4 - Pool Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-05-GOLDEN-IMAGES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 5 - Golden Images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-06-REPLICATION-AND-FAILOVER/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 6 - Replication and Failover
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-07-MONITORING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 7 - Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-08-MIGRATION-AND-CONSOLE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 8 - Migration and Console
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-09-COS-BACKUP-BUCKET/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 9 - COS Bucket for Backups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-10-BACKUP-AND-RESTORE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 10 - Backup and Restore
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-11-INSTANT-VM-SNAPSHOTS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 11 - Instant VM Snapshots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-12-REPLICATING-RUNNING-VMS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 12 - Replicating Running VMs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-13-FAILOVER-OF-RUNNING-VMS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 13 - Failover of Running VMs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-14-CONSOLE-RESTORE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 14 - Restore a Snapshot in the Console
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../DEPLOYMENT-NOTES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment Notes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../FEATURES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../UPGRADE-GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrade Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../FAQ/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../HELM-VALUES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Helm Values Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../DAY2-OPERATIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 Operations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../MONITORING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CAPACITY-PLANNING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Capacity Planning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../BACKUP-RECOVERY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backup and Recovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../GOLDEN-IMAGE-WORKFLOW/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Golden Image Workflow
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../SECURITY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TROUBLESHOOTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PERFORMANCE-TUNING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance Tuning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../KNOWN-LIMITATIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Known Limitations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../OVERVIEW/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTEXT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context (the words we use)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONSISTENCY-MODEL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Consistency Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VPC-NETWORKING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VPC Networking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VM-DISK-FORMATS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VM Disk Formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CRD-SPEC/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CRD Specification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CSI-INTERFACE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CSI Interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../IBM-VPC-API/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    IBM VPC API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../API-KEY-SETUP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Key Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design (Phase 4)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Design (Phase 4)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VOLUME-CLONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Volume Cloning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VOLUME-GROUP-SNAPSHOTS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Volume Group Snapshots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CROSS-REGION-DR/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cross-Region DR
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CODING-GUIDELINES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coding Guidelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TESTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Examples
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#goal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Goal
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-is-not-reachable-on-this-platform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is not reachable on this platform
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-exists-today-from-the-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What exists today (from the code)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-that-meets-the-goal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design that meets the goal
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Design that meets the goal">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-the-browse-session" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. The browse session
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-plain-volumes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Plain volumes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-vm-disks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. VM disks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-backups-in-cos" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Backups in COS
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-where-restored-files-go" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Where restored files go
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-the-gateway-and-access-control" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. The gateway and access control
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Limits
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8-user-stories" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. User stories
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#openshift-rules-security-context-constraints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OpenShift rules (security context constraints)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tests
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build-plan-phases-one-pr-each" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build plan: phases, one PR each
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cost-and-risk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cost and risk
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-0-results-22-oct-2026-rovslab-dr-eude" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 0 results (22 Oct 2026, rovslab-dr-eude)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decisions-i-made-for-you" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decisions I made for you
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#needs-from-you" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Needs from you
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#changes-made-while-building-23-oct-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changes made while building (23 Oct 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#changes-made-while-building-phase-2-28-oct-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changes made while building phase 2 (28 Oct 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#changes-made-while-building-phase-4-28-oct-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changes made while building phase 4 (28 Oct 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="spec-browse-a-backup-and-restore-single-files-issue-92">Spec: browse a backup and restore single files (issue #92)<a class="headerlink" href="#spec-browse-a-backup-and-restore-single-files-issue-92" title="Permanent link">&para;</a></h1>
+<p>Date: 2026-10-22. Status: draft for review. It builds on <code>2026-10-21-backup-to-snapshot-pool.md</code> (step 8) and <code>2026-10-21-backup-cos-export.md</code> (step 9). Read both first. Facts here come from the code on <code>main</code> on 22 Oct 2026.</p>
+<h2 id="goal">Goal<a class="headerlink" href="#goal" title="Permanent link">&para;</a></h2>
+<p>The owner's goal is: <strong>like Veeam</strong>. Look inside a backup, pick one file or folder, and get it back, without restoring the whole volume.</p>
+<p>When this is done:
+- Plain volumes: a user lists folders and files of any backup moment, reads or downloads a file, and restores files or folders to a new or an existing claim. In the console and with <code>kubectl backup</code>.
+- VM disks: the same, for the files inside the guest's file systems (XFS, ext4, NTFS, and LVM volumes inside the guest). The VM is not started and does not need to exist.
+- Browsing is read-only. It never changes a backup, and it never writes to a VM disk.
+- It works for backups in the snapshot pool and for backups exported to IBM Cloud Object Storage (COS).
+- Who may browse follows Kubernetes access rules (RBAC).</p>
+<h2 id="what-is-not-reachable-on-this-platform">What is not reachable on this platform<a class="headerlink" href="#what-is-not-reachable-on-this-platform" title="Permanent link">&para;</a></h2>
+<p>Said first, so there is no surprise later. Size of each gap:</p>
+<table>
+<thead>
+<tr>
+<th>Part of the Veeam experience</th>
+<th>Can we meet it?</th>
+<th>Gap</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Plain volumes, local and COS</td>
+<td>Yes, fully</td>
+<td>None</td>
+</tr>
+<tr>
+<td>VM guest: ext4, XFS, btrfs, NTFS, LVM</td>
+<td>Yes, in a helper pod with no special rights, by running a tiny read-only appliance VM (see "VM disks"). Proven on the lab on 22 Oct 2026 (see "Phase 0 results")</td>
+<td>A disk opens and a file reads in about 1.5 seconds with KVM, and about 12 seconds without it</td>
+</tr>
+<tr>
+<td>Older moments of a VM disk, instantly</td>
+<td>Yes, with a small read-only disk server that rebuilds the old view on the fly</td>
+<td>New code, the riskiest part of this spec</td>
+</tr>
+<tr>
+<td>VM guest file systems that need a key: BitLocker, LUKS</td>
+<td><strong>No.</strong> Without the guest's key nobody can read them, Veeam included</td>
+<td>You can only restore the whole disk (works today)</td>
+</tr>
+<tr>
+<td>VM guest: ReFS, Storage Spaces, ZFS</td>
+<td><strong>No.</strong> Linux has no safe reader for them</td>
+<td>Same: whole disk only. Veeam reads ReFS through a Windows helper. We have none</td>
+</tr>
+<tr>
+<td>Put a file back into the guest's own disk, in place</td>
+<td><strong>No.</strong> A file system that a VM is using must not be written from outside, and writing into a stopped guest from a pod is not safe either</td>
+<td>The file goes to a claim or to a download. The user copies it into the VM</td>
+</tr>
+<tr>
+<td>A mounted Windows disk that was not shut down cleanly (hibernate, fast start)</td>
+<td>Partly. Read-only works. Recent writes may be missing</td>
+<td>Shown as a warning on the session</td>
+</tr>
+</tbody>
+</table>
+<h2 id="what-exists-today-from-the-code">What exists today (from the code)<a class="headerlink" href="#what-exists-today-from-the-code" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Layout of a backup on the snapshot pool.</strong> One folder per volume: <code>/backup/&lt;policy&gt;/pvcs/&lt;volume&gt;</code> holds the latest whole copy. Earlier moments are in <code>/backup/&lt;policy&gt;/.moments/pvcs/&lt;volume&gt;/</code>. For a plain volume a moment is a folder of hard links, named like <code>20261022T091500Z</code>. For a VM disk the latest copy is one raw file, <code>disk.img</code>, and earlier moments are "undo files" (the old contents of the blocks that changed). <code>replication.RestoreDisk</code> rebuilds an older disk by applying undo files to a copy of the latest. The status of each policy lists the volumes with their sub path, share and moment times (<code>BackupVolumeStatus</code>).</li>
+<li><strong>Restore today</strong> is a whole volume: <code>BackupRestore</code> (cluster scoped) makes a new claim, holds pods back, and a Job copies the volume in. Nothing lists files.</li>
+<li><strong>Helper pods</strong> are Kubernetes Jobs in the driver namespace (<code>kube-system</code> by default). They mount the NFS shares themselves, may mount them read-only (<code>jobShape.readOnly</code>), and run as root. The controller has no NFS access. On OpenShift, <code>kube-system</code> has no security rules applied, so these Jobs need no special SCC today (the chart comment says so, and the release tests prove it).</li>
+<li><strong>Path safety.</strong> <code>util.ValidateBackupPath</code> and <code>ValidateBackupMomentsPath</code> check the shape of every backup path. The disk code opens files through a folder handle that refuses symbolic links (<code>openVolume</code>).</li>
+<li><strong>COS export.</strong> A Job copies the backup folder and the moments folder of one volume into a Kopia repository in the bucket, encrypted with a backup key that the Job unlocks with Key Protect in memory. One policy has one area in the bucket. A restore from COS (<code>BackupRestore.spec.fromCOS</code>) runs a Job that restores one Kopia snapshot into a scratch folder and then reuses the normal restore Job.</li>
+<li><strong>Console.</strong> The console plugin is a static page set served by nginx. It has no page for backups at all today (no <code>BackupPolicy</code> model, no list). It has no server side to stream a file.</li>
+<li><strong>KubeVirt images.</strong> The controller already finds the virt-launcher image from virt-operator (<code>discoverLauncherImage</code>). The driver image has no <code>qemu-img</code> and no file system tools for guests.</li>
+</ul>
+<h2 id="design-that-meets-the-goal">Design that meets the goal<a class="headerlink" href="#design-that-meets-the-goal" title="Permanent link">&para;</a></h2>
+<p>Three parts: a <strong>browse session</strong> (a helper pod per open backup), a <strong>gateway</strong> (the one door that users talk to, which checks access), and a <strong>file restore</strong> (a Job that copies chosen paths out).</p>
+<h3 id="1-the-browse-session">1. The browse session<a class="headerlink" href="#1-the-browse-session" title="Permanent link">&para;</a></h3>
+<p>A new cluster-scoped resource, <code>BackupBrowse</code>, describes one open session: the policy, the volume (<code>namespace/name</code> of the claim), the moment (default: latest), whether it reads the snapshot pool or COS, and for a VM disk which guest file system (see below). <strong>Users never create or see this resource.</strong> The gateway makes it after the access check. The backup controller (the same leader that runs backups) reconciles it:</p>
+<ol>
+<li>It starts a <strong>helper pod</strong> (a Job with one pod, in the driver namespace) that mounts only this volume's folders, read-only, down to the NFS export. For COS it mounts nothing from NFS and gets the COS and Key Protect Secrets as read-only files, as the export Job does.</li>
+<li>The pod runs the browse binary (<code>cmd/browse</code>, mode <code>browse-server</code>). It serves a small API on a private port <strong>over TLS</strong>, with a random session token and a certificate made for this session alone (the controller makes a key and a self-signed certificate, keeps them with the token in a Secret that the <code>BackupBrowse</code> owns, and mounts it into the pod; the gateway trusts exactly that certificate, no other and no CA): list a folder (paged, 1000 entries), stat, read a byte range, stream a file, stream a folder as a tar. The API takes paths <strong>relative to the volume only</strong>. It cannot be asked for anything outside it.</li>
+<li>The controller writes <code>status.phase</code> (<code>Starting</code>, <code>Ready</code>, <code>Closed</code>, <code>Failed</code>), the pod address and a message. A session ends when it is idle for 15 minutes (default), when it has lived 2 hours (hard limit), or when the gateway closes it. Then the Job is deleted.</li>
+</ol>
+<p><strong>Path safety in the helper</strong> (the main risk for a plain volume, since a backup is attacker-supplied data):
+- Symbolic links are listed as links, with their text, and are <strong>never followed</strong>. A download of a link is refused. A restore copies it as a link.
+- Every open goes through a folder handle that refuses links and <code>..</code> (the same method as <code>openVolume</code>; Linux <code>openat2</code> with <code>RESOLVE_BENEATH</code>). A test uses a backup that holds a link to <code>/etc</code> and to <code>../../other-volume</code>.
+- File names are sent as raw bytes encoded in the API, shown escaped in the console, and never put into a shell command. The restore Job gets paths as a list in a file, not as arguments.
+- The pod has no service account token (<code>automountServiceAccountToken: false</code>), no host paths, no extra capabilities, a read-only root file system, and a NetworkPolicy that lets only the gateway reach its port, and traffic to it is encrypted with TLS (no plain HTTP in the cluster).</p>
+<p><strong>Files that the pod cannot read.</strong> NFS on VPC always squashes root to an ordinary user. A backup file with mode 0600 owned by another user may then be unreadable to the helper. This must be tested in Phase 1 on the lab before the design is called done. The list shows such files as "not readable" instead of failing. The same question applies to the existing restore Job, which copies as root; Phase 1 settles both.</p>
+<p><strong>Idle and cleanup.</strong> Every object of a session (the Job, its share volume and claim, the Secret) is named and labelled with the UID of the <code>BackupBrowse</code>, never its name, so a session deleted and made again with the same name cannot get the old session's Secret or pod. Pods carry a label and an owner reference to the <code>BackupBrowse</code>. The controller removes sessions past their limits, pods whose session is gone, and any session older than 2 hours after a restart. A limit on open sessions (default 5 in the cluster, 2 per namespace) makes extra requests wait with a clear message.</p>
+<h3 id="2-plain-volumes">2. Plain volumes<a class="headerlink" href="#2-plain-volumes" title="Permanent link">&para;</a></h3>
+<p>The helper reads the latest copy at <code>.../pvcs/&lt;volume&gt;</code> or a moment folder under <code>.moments</code>. A moment folder is already a normal folder of files, so listing is instant. The list of moments comes from the policy status plus the folder names. A moment that the keep time removes while someone browses it gives "this moment was removed by the keep time", not a crash. The latest copy is rewritten by the next backup, one file at a time and with a rename, so a file is whole or old, never half-written; the page says "the latest copy may change while you look".</p>
+<h3 id="3-vm-disks">3. VM disks<a class="headerlink" href="#3-vm-disks" title="Permanent link">&para;</a></h3>
+<p>A backup of a VM disk is one raw disk. The file systems are inside it, so something must understand partitions, LVM and the guest's file systems, without starting the VM and without root on the node.</p>
+<p><strong>Recommended: a small read-only appliance VM inside the helper pod (libguestfs).</strong> libguestfs is the library that KubeVirt's own <code>virtctl guestfs</code> and Red Hat's VM migration tool use. It starts a tiny VM with its own Linux kernel, attaches the disk read-only, and that kernel reads XFS, ext4, btrfs, NTFS (read-only) and LVM. The pod needs <strong>no extra rights</strong>: no privileged mode, no loop devices, no <code>CAP_SYS_ADMIN</code>, no FUSE, no host paths. It runs as root only inside its own pod, like today's Jobs, and works under the OpenShift rules if the driver namespace has them (see "OpenShift rules"). With the KVM device (<code>devices.kubevirt.io/kvm</code>, the device KubeVirt already uses) the appliance is fast. Without KVM (a ROKS cluster with virtual workers) it works with software emulation, slower. Both were tested in Phase 0 (see "Phase 0 results").</p>
+<p>How it is wired:
+1. <strong>A disk server (new code).</strong> The pod starts a read-only disk server in Go that shows the VM disk to the appliance as a network block device on a local socket. For the latest moment it reads <code>disk.img</code>. For an older moment it reads <code>disk.img</code> and the undo files newer than that moment, newest first, and returns the old contents of each changed block. This is the same rule as <code>Rewind</code>, but without writing a copy. No scratch space and no wait, however big the disk is. The server only answers reads; its export is marked read-only.
+2. <strong>The appliance</strong> gets that device as a read-only drive and mounts the guest file systems read-only. libguestfs gives the list: partitions, LVM volumes, type, size, and which looks like the system volume. The console shows them as a picker.
+3. <strong>The browse API</strong> in the pod asks the appliance for lists and file contents and relays them in the same API as a plain volume. So the console and the command line see one kind of session.</p>
+<p>Why not the cheaper routes:
+- <strong>Restore the whole disk to a scratch claim, then look inside</strong> (<code>RestoreDisk</code> plus a mount). <em>Does not meet the goal:</em> it restores the whole volume, which is what the owner asked to avoid. A 500 GB disk takes minutes to hours and needs 500 GB of scratch.
+- <strong>Mount the disk with a loop device in a privileged pod.</strong> <em>Meets the goal for ext4 and XFS only if the node allows it, but it is a security risk:</em> a privileged pod, with a guest kernel-parser bug running in the node's kernel. A hostile VM disk can then reach the node. We will not use it.
+- <strong>Pure Go readers (go-ext4, go-ntfs, go-xfs).</strong> <em>Partly meets the goal:</em> no appliance, faster start, but each file system needs a separate, immature reader, none does LVM, and we would own their bugs. It is a possible later fast path for ext4 only.</p>
+<p><strong>Safety of reading a guest file system.</strong> The disk is read-only at four layers: the NFS mount, the disk server, the appliance's drive flag, and the mount flag. The appliance is thrown away when the session ends. A broken or hostile file system can crash the appliance, not the node. The appliance has no network.</p>
+<p><strong>Dirty file systems.</strong> A backup of a running VM is a crash copy unless the freeze worked (the status says which: <code>FileSystemConsistent</code> or crash-consistent). A read-only mount of a crash copy may not be allowed to replay the journal. The helper then mounts with the "do not replay" option (<code>norecovery</code> for XFS, <code>noload</code> for ext4). The page shows a notice: "this copy was taken while the VM was running; the newest changes may be missing." Phase 0 showed that a read-only XFS mount with <code>norecovery</code> works in the appliance.</p>
+<p><strong>Not read: encrypted and unusual file systems.</strong> If the helper finds BitLocker, LUKS, ReFS, Storage Spaces or ZFS it lists the volume as "cannot be read here" with the reason. Nothing is skipped silently.</p>
+<p><strong>Backups and browsing of the same VM disk.</strong> The next backup copy writes into <code>disk.img</code> and adds undo files. A session on a VM disk holds a <strong>lease</strong> on that volume, so the backup controller waits for that volume's next copy while a session is open, for at most 2 hours (the hard limit of a session). The policy status shows "waiting for a browse session". Reason: a half-applied copy has the disk and the undo files out of step, and the disk server must see a steady state. Cost: a backup of that one volume can be late by up to 2 hours. Other volumes are not held back. (A later version could let the disk server follow a copy in progress, as <code>Recover</code> does, and remove the wait. It is not needed for the goal.)</p>
+<h3 id="4-backups-in-cos">4. Backups in COS<a class="headerlink" href="#4-backups-in-cos" title="Permanent link">&para;</a></h3>
+<p>COS backups are in a Kopia repository. The helper opens it <strong>read-only</strong> with the same Secrets the export Job uses: the backup key is unlocked by Key Protect in the helper's memory, as in step 9. The controller never holds it.</p>
+<ul>
+<li><strong>Plain volumes.</strong> Kopia lists a folder in a snapshot and fetches the chunks of one file, so listing and getting one file does not download the volume. <em>Meets the goal fully.</em></li>
+<li><strong>VM disks.</strong> The disk server reads <code>disk.img</code> and the undo files as objects in the repository, by byte range, with a read cache on an <code>emptyDir</code> (default 5 GiB). The rest of the path is the same as for the snapshot pool. <em>Meets the goal</em>, with slower reads than the pool (each read may go to COS); a guest start of several minutes is likely. To be measured in Phase 6.</li>
+<li><strong>Where Kopia comes from.</strong> The step 9 spec keeps Kopia out of the controller. This is kept: the helper is a <strong>separate binary</strong> (<code>cmd/browse</code>) in its own image, not the controller. For plain volumes it runs the pinned Kopia program as a child, as the export Job does. For VM disks, a range read needs Kopia as a Go library in that separate binary. This is the one new dependency, and it is limited to the browse image. If Phase 6 shows the library is not workable, the fall-back is to fetch <code>disk.img</code> and the undo files of the one moment into scratch space first. <em>That fall-back does not meet the goal for large disks</em>, and we would say so in the product.</li>
+<li><strong>Whole area of the bucket.</strong> The helper's credentials can read the whole policy area, which has other namespaces' volumes. The API accepts only the one volume's path, and a test tries to reach another volume with traversal and with crafted snapshot names. This is the weakest point of COS browsing and is tested hard (see "Tests").</li>
+<li><strong>A new cluster, no policy.</strong> <code>kubectl backup browse --from-cos</code> takes the same flags as <code>restore --from-cos</code> (bucket, endpoint, volume). It is for cluster administrators because it needs the Secrets in the driver namespace.</li>
+</ul>
+<h3 id="5-where-restored-files-go">5. Where restored files go<a class="headerlink" href="#5-where-restored-files-go" title="Permanent link">&para;</a></h3>
+<p>A new resource, <code>BackupFileRestore</code>, cluster scoped like <code>BackupRestore</code>, made by the gateway for the user. It holds a session reference or the volume and moment, a list of paths, and the target. Three targets:</p>
+<ol>
+<li><strong>New claim.</strong> The controller makes a new claim (same method as <code>BackupRestore</code>: size, class, held back from pods until the copy ends) and a Job copies the chosen paths into it. The tree under the volume's root is kept: restoring <code>/var/www/html/index.php</code> gives <code>/var/www/html/index.php</code> in the new claim. Size of the claim defaults to the total of the chosen files plus 20%, at least 1 GiB, and the user can raise it. For a VM guest the claim is a plain file-system claim; a VM disk is never the target.</li>
+<li><strong>Existing claim, as a new folder.</strong> Files go to a new folder in the claim, <code>restored-&lt;policy&gt;-&lt;moment&gt;/</code>, never over existing files. A name that exists gets a suffix. The Job mounts the claim's folder on the share, like the other share Jobs. It refuses if the claim is a VM disk claim (it holds <code>disk.img</code>), if the claim is being restored, or if the free space is not enough (checked before it copies). The files get the claim's configured owner (<code>defaultUID</code> and <code>defaultGID</code>, for example 107 on KubeVirt pools), as the existing restore does.</li>
+<li><strong>Download.</strong> From the console or <code>kubectl backup get</code>: one file as a stream; a folder or several files as one tar stream (a tar file; no zip). The stream passes through the gateway and the helper. Limits are in the next section.</li>
+</ol>
+<p><strong>Putting a file back where it was</strong> (in place, over the original) is not offered, for plain volumes either. A restore never writes over existing files. This matches step 8 ("it never writes over a volume that exists"). The user copies from the restored folder.</p>
+<p>For a VM guest, targets 1 and 2 give plain files in a claim. The user attaches that claim to the VM or a pod and copies in the guest. This is the gap in the table.</p>
+<h3 id="6-the-gateway-and-access-control">6. The gateway and access control<a class="headerlink" href="#6-the-gateway-and-access-control" title="Permanent link">&para;</a></h3>
+<p><strong>One door.</strong> A new small Deployment, <code>backup-gateway</code>, in the driver namespace. The console reaches it through the console plugin proxy (the OpenShift console forwards the signed-in user's token). <code>kubectl backup</code> reaches it through an OpenShift Route (or an Ingress on other clusters) with the user's token. Users never need rights in the driver namespace, and never see the helper pods, <code>BackupBrowse</code> or the Secrets.</p>
+<p><strong>Who may do what.</strong> The gateway checks every call with the Kubernetes API, as the user, by a token review and a <code>SubjectAccessReview</code>. The rule is by the <strong>namespace of the backed-up claim</strong>, because that is who owned the data:</p>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>Needs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>List backups and moments of volumes of namespace N</td>
+<td><code>get</code> on <code>backupfiles</code> (group <code>storage.ibmcloud.io</code>) in N</td>
+</tr>
+<tr>
+<td>Browse a backup, read and download files of N</td>
+<td><code>get</code> on <code>backupfiles</code> in N</td>
+</tr>
+<tr>
+<td>Restore files out of N's backup to a claim</td>
+<td><code>get</code> on <code>backupfiles</code> in N, plus <code>create</code> on <code>persistentvolumeclaims</code> in the target namespace T. For an existing claim, also <code>update</code> on <code>persistentvolumeclaims</code> in T</td>
+</tr>
+<tr>
+<td>Browse a COS backup without a policy (<code>--from-cos</code>)</td>
+<td>cluster administrator (it needs the driver's Secrets)</td>
+</tr>
+</tbody>
+</table>
+<p><code>backupfiles</code> is a <strong>rights-only name</strong>: no such object is ever stored. It exists so that RBAC can say "may read backups of this namespace". The chart ships two ClusterRoles, <code>backup-file-reader</code> (get) and <code>backup-file-restorer</code> (get), and aggregates the reader into the built-in <code>admin</code> role, so a namespace admin can read their own namespace's backups with no setup. Another namespace's backup needs a RoleBinding made by someone who has rights in that namespace. A deleted claim's backup still belongs to its old namespace. If the namespace itself is gone, only a cluster administrator can browse it.</p>
+<p>A person in namespace B who wants a file from the backup of namespace A, to put into B, needs <code>get backupfiles</code> in A and the PVC rights in B. Without the first, they get a plain "forbidden", the same as any other Kubernetes object. The gateway never shows the existence of volumes in a namespace to a person without rights there.</p>
+<p><strong>Audit.</strong> Each session start, download, and restore writes a Kubernetes Event on the <code>BackupBrowse</code> and a log line: user, namespace, volume, moment, and the <strong>paths</strong> (not the contents). A user cannot read the Events of the driver namespace; the cluster administrator can. A test checks that no API key, token or file content reaches logs or Events.</p>
+<h3 id="7-limits">7. Limits<a class="headerlink" href="#7-limits" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Limit</th>
+<th>Default</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Folder listing page</td>
+<td>1000 entries</td>
+<td>Large folders stay fast</td>
+</tr>
+<tr>
+<td>Session idle time</td>
+<td>15 min</td>
+<td>Frees the pod and the lease</td>
+</tr>
+<tr>
+<td>Session hard limit</td>
+<td>2 hours</td>
+<td>Stops a forgotten session from holding backups</td>
+</tr>
+<tr>
+<td>Open sessions</td>
+<td>5 in the cluster, 2 per namespace</td>
+<td>Each VM session used about 550 MiB in the lab (Phase 0)</td>
+</tr>
+<tr>
+<td>Helper pod</td>
+<td>plain: 200m CPU, 256 MiB; VM guest: 1 CPU, 1 GiB</td>
+<td>Appliance memory (lab peak 550 MiB)</td>
+</tr>
+<tr>
+<td>One file download</td>
+<td>50 GiB</td>
+<td>Stream, no temporary copy</td>
+</tr>
+<tr>
+<td>One restore</td>
+<td>200 GiB or the free space of the target, whichever is less</td>
+<td>The Job checks first</td>
+</tr>
+<tr>
+<td>Appliance start</td>
+<td>10 minutes, then the session fails with the reason</td>
+<td>Software emulation is slow</td>
+</tr>
+<tr>
+<td>Restore Job time</td>
+<td>4 hours</td>
+<td>A hard stop for a stuck copy</td>
+</tr>
+</tbody>
+</table>
+<p>All defaults are Helm values (<code>backupBrowse.*</code>) and are listed in <code>HELM-VALUES.md</code> with the phase that adds them.</p>
+<h3 id="8-user-stories">8. User stories<a class="headerlink" href="#8-user-stories" title="Permanent link">&para;</a></h3>
+<p>Console:
+1. As a namespace admin, I open <strong>Backups</strong>, pick a policy, see my volumes, pick a volume and a moment, and press <strong>Browse files</strong>. A plain volume opens at once. A VM disk shows "Starting the reader" for a few seconds and then a picker of the disk's file systems.
+2. I click into folders, search the current folder by name, tick files and folders, and press <strong>Download</strong> (one file, or a tar for several) or <strong>Restore to a claim</strong> (new claim, or a folder in an existing one).
+3. I see the status of the restore (copying, done, failed) and a link to the new claim.
+4. A VM backup shows the notice about a crash copy, and a lock icon on volumes that cannot be read, with the reason.</p>
+<p>Command line (<code>kubectl backup</code>, same plugin as today):
+- <code>kubectl backup ls --policy P --pvc NS/NAME [--moment TIME] [--disk N] [--fs /dev/sda2] [PATH]</code>, lists a folder. For a VM disk without <code>--fs</code> it lists the file systems it found.
+- <code>kubectl backup get --policy P --pvc NS/NAME [--moment TIME] [--fs ...] PATH [--out DIR]</code> downloads a file, or a folder as a tar or an unpacked folder.
+- <code>kubectl backup restore-files --policy P --pvc NS/NAME [--moment TIME] [--fs ...] --path A --path B --to NS/CLAIM [--new-claim --size-gb N | --existing] [--wait]</code>.
+- <code>kubectl backup browse ...</code> opens a session by hand and prints its name, so repeated <code>ls</code> and <code>get</code> calls reuse it. Without it each command reuses an open session of the same user, volume and moment, or opens one.
+- The same commands take <code>--from-cos --bucket B --endpoint HOST --volume pvc-...</code> for a cluster administrator.</p>
+<h2 id="openshift-rules-security-context-constraints">OpenShift rules (security context constraints)<a class="headerlink" href="#openshift-rules-security-context-constraints" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Plain volume helper:</strong> runs as root in its pod with all capabilities dropped, on a read-only NFS mount. No special rule. It is the same as today's share Jobs.</li>
+<li><strong>VM guest helper:</strong> also unprivileged. It asks for the KVM device through the KubeVirt device plugin (<code>devices.kubevirt.io/kvm: 1</code>) when the node has it. Without it, no request, and software emulation. It needs a writable <code>/tmp</code> and <code>/var/tmp</code> (an <code>emptyDir</code> with a size limit). It needs no SCC beyond what the driver namespace already allows.</li>
+<li><strong>If the driver is installed in a namespace where OpenShift does apply SCCs</strong> (not <code>kube-system</code>), the chart ships one SCC, <code>pool-csi-browse</code>, that allows running as root with no capabilities and no host access, and the controller gets <code>use</code> on it only. The release test checks that this SCC and the pod pass admission.</li>
+<li><strong>Image.</strong> The VM helper image is our own image, built from CentOS Stream 9 with the <code>libguestfs</code>, <code>libguestfs-winsupport</code> and <code>guestfs-tools</code> packages, pinned by digest, with our static Go binary copied in (<code>CGO_ENABLED=0</code>). Phase 0 ruled out the libguestfs image of OpenShift Virtualization: it has no NTFS support. It is not built from UBI: UBI repositories do not have the qemu and libguestfs packages (the same reason the converter pod uses the CentOS image).</li>
+<li><strong>NTFS rule.</strong> The RHEL and CentOS builds of libguestfs read NTFS only when one of the <code>virt-</code> tools runs it (for example <code>virt-ls</code> and <code>virt-cat</code>). A program that uses the library directly gets "unsupported filesystem type". So the helper reads Windows disks by running <code>virt-ls</code> and <code>virt-cat</code>, as the packaging intends. It must not pretend to be one of those tools.</li>
+<li><strong>Never:</strong> privileged pods, <code>hostPath</code>, loop devices, FUSE, or kernel mounts of a guest file system on the node.</li>
+</ul>
+<h2 id="tests">Tests<a class="headerlink" href="#tests" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Unit tests (every phase).</strong> The disk server against <code>Rewind</code>: for each moment, a read must equal <code>RestoreDisk</code> byte for byte (property test, random writes, several moments, an unfinished copy ignored). Path rules: links, <code>..</code>, very long names, names with newlines and invalid UTF-8, a link to the helper's own files. Gateway: every row of the access table, with a fake <code>SubjectAccessReview</code>, including "forbidden gives no hint that the volume exists". Controller: session start, idle timeout, hard limit, limits on open sessions, orphan cleanup after a restart, the lease on VM volumes. <code>BackupFileRestore</code>: all three targets, a name clash, a target that is a VM disk claim, not enough space.</li>
+<li><strong>COS.</strong> Kopia against a local repository and MinIO in CI: list, one file, one volume's path only, a hostile snapshot name, a range read of a large file, the cache size.</li>
+<li><strong>Chart tests (<code>make test-scripts</code>).</strong> The gateway and its NetworkPolicy render; the two ClusterRoles and the aggregation; the SCC only when asked for; the console proxy entry; Helm values documented.</li>
+<li><strong>Console tests.</strong> The new pages: list, breadcrumb, selection, the picker, disabled states, the warning texts; no file content is put into a URL.</li>
+<li><strong>Release test, new stage 20</strong> (stage 19 is the instant snapshots stage) in <code>test/e2e</code>, run on the lab pair:</li>
+<li>Plain pod volume with a known tree (links, a 0600 file owned by another user, a name with spaces and an accented letter). Two backup moments. Browse both, download a file and check its checksum, restore a folder to a new claim and to an existing one, and compare checksums. Check that the backup folder is byte-identical before and after (a recorded hash of the tree).</li>
+<li>Linux VM with an XFS root on LVM and an ext4 data disk, with a log of files and checksums (as stage 18). Browse the latest and the first moment without starting the VM; stop the VM first for one run. Restore a file; compare. Check the disk image is byte-identical after.</li>
+<li>A Windows or NTFS disk image (a small prepared image; the lab has no Windows licence, so the image is made with <code>ntfs-3g</code> tools and checked as a disk, not as a boot).</li>
+<li>COS: browse and restore the same plain volume and the VM disk from the bucket of stage 18, in the second cluster of the pair.</li>
+<li>Access: a test user with only a RoleBinding in the other namespace gets "forbidden", gets access after a binding, and loses it after the binding is removed.</li>
+<li>Cleanup: no helper pod, <code>BackupBrowse</code> or scratch left after the run, and a killed controller leaves none after a restart.</li>
+<li>A backup due during a VM session waits and then runs after it closes.</li>
+<li><strong>What the lab cannot test:</strong> a customer's own Windows disks, BitLocker/ReFS (checked only that they are reported as unreadable, using a small image header), and the speed of very large disks. The report says so.</li>
+</ul>
+<h2 id="build-plan-phases-one-pr-each">Build plan: phases, one PR each<a class="headerlink" href="#build-plan-phases-one-pr-each" title="Permanent link">&para;</a></h2>
+<p>Sizes: S is a day or less of work, M a few days, L a week or more. Each PR has its tests, updates <code>FEATURES.md</code>, <code>BACKUP-RECOVERY.md</code>, <code>HELM-VALUES.md</code>, <code>CRD-SPEC.md</code>, <code>MONITORING.md</code> and <code>CHANGELOG.md</code>, and extends stage 20 for its part.</p>
+<ol>
+<li><strong>Spike on the lab (S, risk check).</strong> Run the libguestfs image in a pod on ROVS with and without the KVM device. Measure: start time, listing, reading a file, memory. Try XFS, ext4, NTFS, LVM, a crash copy, a hibernated NTFS, and a disk served over a socket from a small test server. Decide the image and how to find it. Results are added to this spec in a PR that holds no product code. <strong>If it fails (for example the appliance cannot start in a pod under the cluster's rules), the VM part of the goal is re-stated with the real gap before more is built.</strong></li>
+<li><strong>Plain volumes, snapshot pool, command line (L).</strong> <code>BackupBrowse</code>, the helper in <code>cmd/browse</code> and its image, the controller part, the gateway, the access rules and ClusterRoles, <code>kubectl backup ls/get/browse</code>, limits, cleanup, audit Events. Settles the "squashed root cannot read 0600 files" question.</li>
+<li><strong>Restore of files (M).</strong> <code>BackupFileRestore</code>, the Job, the three targets, <code>kubectl backup restore-files</code>, the space check, ownership.</li>
+<li><strong>Console (L).</strong> The file browser, download, the file restore dialog, help texts and the plugin proxy entry. The Backups pages themselves (policies, volumes, moments) come from <code>2026-10-22-console-backup-ui.md</code>, which reserves a "Browse files" action on each volume row and moment for this phase. Build those pages first.</li>
+<li><strong>COS, plain volumes (M).</strong> Kopia read-only helper, <code>--from-cos</code> for ls/get/restore-files, the tests that block reaching another volume.</li>
+<li><strong>VM disks in the snapshot pool (L, the riskiest).</strong> The disk server with undo-file rebuild and its property tests; the lease and the backup wait; the appliance helper; the file system picker; <code>norecovery</code> handling; the console picker; the crash-copy notices; the unreadable-volume list.</li>
+<li><strong>VM disks in COS (M).</strong> Kopia library range reads and the cache; speed measurements; the fall-back decision if needed.</li>
+<li><strong>Release test stage 20 final and docs (S).</strong> The stage is extended per phase; this PR makes it one run for the lab pair, adds the two-cluster COS run and the cleanup checks, and writes the user tutorial.</li>
+</ol>
+<p>Total: about 4 to 6 weeks of agent work, with the lab as the slowest part (stage 20 runs about an hour). Phases 1 to 4 deliver the whole plain-volume goal and can be deployed and tested before phases 5 and 6 are done.</p>
+<h2 id="cost-and-risk">Cost and risk<a class="headerlink" href="#cost-and-risk" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Biggest technical risk:</strong> the VM path (phases 5 and 6). It has three new parts: the disk server, the appliance in a pod, and the COS range reads. Phase 0 removed the first doubt: the appliance runs in an ordinary pod on ROVS. If that ever changes, the fall-back is a helper that restores one volume to scratch space and then reads it. That does not meet the goal; the gap would be shown to you before we build it.</li>
+<li><strong>Security risk:</strong> reading hostile data (a backup of a compromised VM). The appliance is the main defence. For plain volumes the risk is path tricks, handled by handle-based opens and tests.</li>
+<li><strong>Backups held back:</strong> a VM session delays that volume's next backup by up to 2 hours. A noisy user could do it repeatedly; the per-namespace limit and the audit trail bound it.</li>
+<li><strong>Resources:</strong> each VM session takes about 2 CPU and 2 GiB on a worker for its life. The limit of 5 open sessions bounds it.</li>
+<li><strong>COS cost:</strong> reads from COS cost egress and requests. Browsing one file is cheap; browsing a VM disk reads only the blocks the file system asks for, but a first mount reads a lot of metadata. Measured in phase 6 and added here.</li>
+<li><strong>New dependencies:</strong> the libguestfs image (pinned, from Red Hat's own OpenShift Virtualization release) and, in phase 6 only, Kopia as a library in the browse binary. Nothing new in the controller.</li>
+<li><strong>Time to first value:</strong> the end of phase 2 gives command-line browse and restore of plain volumes.</li>
+</ul>
+<h2 id="phase-0-results-22-oct-2026-rovslab-dr-eude">Phase 0 results (22 Oct 2026, rovslab-dr-eude)<a class="headerlink" href="#phase-0-results-22-oct-2026-rovslab-dr-eude" title="Permanent link">&para;</a></h2>
+<p>The test ran in a new namespace, in a pod with no special rights: a random non-root user, all capabilities dropped, no privilege escalation, the default seccomp profile, and only <code>/tmp</code> and <code>/var/tmp</code> as <code>emptyDir</code> folders. The pod asked for the KVM device (<code>devices.kubevirt.io/kvm: 1</code>). The workers are bare-metal <code>bx2d.metal.96x384</code> nodes, each with the KVM device.</p>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The appliance starts in an ordinary pod</td>
+<td>Yes. No privileged mode, no host paths, no extra rights</td>
+</tr>
+<tr>
+<td>Open a disk, mount read-only and read one file, with KVM</td>
+<td>About 1.3 to 1.6 seconds for XFS, ext4 on LVM, and LVM listing</td>
+</tr>
+<tr>
+<td>The same without KVM (software only)</td>
+<td>About 12 seconds</td>
+</tr>
+<tr>
+<td>Memory</td>
+<td>The appliance used about 260 MiB; the whole container peaked at about 550 MiB</td>
+</tr>
+<tr>
+<td>XFS, ext4, LVM</td>
+<td>Read correctly with the OpenShift Virtualization image</td>
+</tr>
+<tr>
+<td>NTFS with the OpenShift Virtualization image</td>
+<td><strong>No.</strong> The image has no NTFS support: no <code>libguestfs-winsupport</code>, no <code>ntfs-3g</code>, and its kernel has no NTFS driver</td>
+</tr>
+<tr>
+<td>NTFS with CentOS Stream 9 packages (<code>libguestfs-winsupport</code>)</td>
+<td>Yes, through <code>virt-ls</code> and <code>virt-cat</code>. A direct library call is refused by design ("unsupported filesystem type")</td>
+</tr>
+<tr>
+<td><code>virt-copy-out</code> and <code>virt-tar-out</code> on an NTFS data disk with no operating system</td>
+<td>No: they need to find an operating system. Use <code>virt-ls</code> and <code>virt-cat</code> per file for data disks</td>
+</tr>
+<tr>
+<td>Read-only XFS mount with <code>norecovery</code></td>
+<td>Works</td>
+</tr>
+<tr>
+<td>Disk served over a local socket by <code>nbdkit -r</code></td>
+<td>Reads work. A write through it is refused</td>
+</tr>
+</tbody>
+</table>
+<p>What this changes in the spec: the VM path is proven to start quickly; the helper image is our own CentOS Stream 9 image; Windows disks go through the <code>virt-</code> tools; the VM helper needs 1 CPU and 1 GiB, not 2 and 2.</p>
+<p>Not yet tested: a real Windows disk with BitLocker or a hibernated system, btrfs, and very large disks. Phase 5 covers them.</p>
+<h2 id="decisions-i-made-for-you">Decisions I made for you<a class="headerlink" href="#decisions-i-made-for-you" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Users talk to one small gateway, never to helper pods or driver resources. The gateway checks Kubernetes access on every call.</li>
+<li>Access follows the namespace of the backed-up claim, through a rights-only name <code>backupfiles</code>. Namespace admins get read access to their own namespace by default; everything else needs a RoleBinding.</li>
+<li>Restoring a file out needs read rights on the source namespace and create rights on the target namespace. No new super-user role.</li>
+<li>Browsing from COS without a policy is for cluster administrators only.</li>
+<li>A VM disk is browsed through a small read-only appliance VM in an unprivileged pod, not through a privileged mount on the node. We do not use privileged pods for this.</li>
+<li>Older moments of a VM disk are shown by a read-only disk server that rebuilds the old view on the fly. We do not restore a scratch copy, because that would restore the whole volume.</li>
+<li>A VM session holds the next backup of that one volume for up to 2 hours. Other volumes are not held.</li>
+<li>Files are never put back in place, and nothing is ever written into a VM's own disk. Files go to a new claim, to a new folder in an existing claim, or to a download.</li>
+<li>A restore to an existing claim goes into a new folder and never over existing files; it refuses a VM disk claim.</li>
+<li>BitLocker, LUKS, ReFS, Storage Spaces and ZFS guests are listed as "cannot be read here". Their only route is the whole-disk restore that exists.</li>
+<li>Symbolic links in a backup are shown and copied as links and never followed.</li>
+<li>Defaults: 15 minutes idle, 2 hours hard limit, 5 sessions in the cluster and 2 per namespace, 50 GiB for one download, a listing page of 1000 entries.</li>
+<li>The browse helper is a separate binary and image. Kopia stays out of the controller. Kopia as a library is allowed in the browse image only.</li>
+<li>A short spike (phase 0) came before any VM work. It passed on 22 Oct 2026.</li>
+<li>The VM helper image is built by us from CentOS Stream 9, because the OpenShift Virtualization libguestfs image cannot read NTFS.</li>
+<li>Windows disks are read through the <code>virt-ls</code> and <code>virt-cat</code> tools, which is the use the packaging allows.</li>
+<li>The Backups pages in the console are built by the backup screens spec (<code>2026-10-22-console-backup-ui.md</code>). This work adds the file browser to them.</li>
+<li>Plain volumes are finished and usable (phases 1 to 4) before VM disks start.</li>
+<li>No restore of single mail items or database rows (Veeam's application-level explorers). Files and folders only.</li>
+</ul>
+<h2 id="needs-from-you">Needs from you<a class="headerlink" href="#needs-from-you" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Nothing blocks phases 1 to 4.</strong> Phase 0 is done.</li>
+<li>Whether phases 5 and 6 (VM disks) must be in the first deployment, or can follow it. I assumed they follow.</li>
+</ul>
+<h2 id="changes-made-while-building-23-oct-2026">Changes made while building (23 Oct 2026)<a class="headerlink" href="#changes-made-while-building-23-oct-2026" title="Permanent link">&para;</a></h2>
+<ul>
+<li>The helper API is served over TLS with a per-session self-signed certificate, pinned by the gateway. Decided by the coordinator after a security review: the stream carries other namespaces' file contents and the token, and pod traffic is not encrypted by default.</li>
+<li>Objects of a session are named by the UID of the <code>BackupBrowse</code>, not its name (security review: a reused name must never reuse an old Secret or pod).</li>
+<li>The release test stage is 20, not 19.</li>
+<li>The helper image is separate; the gateway runs in the driver image.</li>
+<li>Helper pods, their Secrets and the NetworkPolicy live in their own namespace, <code>ibm-vpc-file-pool-csi-browse</code> (chart value <code>backupBrowse.namespace</code>), which holds nothing else. Reason (security review of part 3): the gateway must read the session Secrets, and the driver namespace (<code>kube-system</code>) holds the cluster's IBM Cloud API key and other Secrets that a compromised gateway could then read. The gateway's Role for Secrets is in the browse namespace only; the controller has a Role there, and copies the image pull secrets into it. The helper needs root (to read backups made by other users), so the namespace is labelled Pod Security <code>baseline</code> (not <code>restricted</code>), and on OpenShift the chart adds one SCC (<code>runAsUser: RunAsAny</code>, all capabilities dropped, no privilege escalation, no host path, only PVC/secret/projected/emptyDir/configMap/downwardAPI volumes) for the namespace's default account. This replaces the earlier text that said the controller gets <code>use</code> on the SCC.</li>
+<li>The gateway reads the rights as <code>get backupfiles</code> on the claim's namespace and runs in the driver image (<code>--mode=backup-gateway</code>). Users reach it through a reencrypt Route on OpenShift (a passthrough Route would show the service certificate, which is for the service name and not for the Route host); <code>kubectl backup</code> finds the address in the ConfigMap <code>backup-gateway-info</code>.</li>
+<li>The audit Events are written in the driver namespace on the ConfigMap <code>backup-gateway-info</code>, with the <code>BackupBrowse</code> in <code>related</code> (the API server refuses Events of a cluster-scoped object outside <code>default</code>, which many people can read).</li>
+<li>A session belongs to the user who made it; another user, even with the same rights, sees "no such session".</li>
+<li>The helper has a <code>/v1/moments</code> call so that <code>kubectl backup ls --moments</code> can list the moment folders.</li>
+<li>The console file browser (phase 3, first half) downloads with a GET route on the gateway, <code>GET /v1/sessions/{name}/download?type=file|tar&amp;p=&lt;base64 name&gt;...</code>, because a browser can stream a large download to disk only from a GET. It takes the same steps as the POST calls. Every file and tar reply now carries <code>Content-Disposition: attachment</code>, <code>nosniff</code>, a sandbox Content-Security-Policy and <code>no-store</code>, since the console proxy serves it from the console's own origin. The console shows the action when the settings ConfigMap says <code>fileBrowse: "true"</code>.</li>
+</ul>
+<h2 id="changes-made-while-building-phase-2-28-oct-2026">Changes made while building phase 2 (28 Oct 2026)<a class="headerlink" href="#changes-made-while-building-phase-2-28-oct-2026" title="Permanent link">&para;</a></h2>
+<ul>
+<li>The restore Job is the driver program (<code>--mode=restore-files</code>, package <code>pkg/filerestore</code>), not a shell script with <code>cp -a</code>. It reads the backup through the browse helper's handle-based reader and writes the target the same way (<code>mkdirat</code>, <code>symlinkat</code>, <code>openat</code> with <code>O_EXCL</code> and <code>O_NOFOLLOW</code>, no link followed). Reason: an existing claim is open to its users, so the target is as untrusted as the backup.</li>
+<li>Paths are <code>spec.paths</code>, a list of escaped strings (the form <code>kubectl backup ls</code> prints), kept in a ConfigMap that the restore owns and mounted as a file. At most 1000 paths, 256 KiB together.</li>
+<li>The squashed-root question, write side: the order is times, then mode, then owner for a file, and a folder is finished only after everything in it is written (like <code>cp -a</code>, which the lab proved). The owner is the one the pool configures for the claim (<code>defaultUID</code>, <code>defaultGID</code>); without one, the backup's owner is kept. If an owner cannot be set, the restore fails and removes what it wrote. Stage 20 part 4 checks both cases on the lab (a pool with owner 107 and a pool with none, files of users 1000 and 2000).</li>
+<li>Into an existing claim the Job writes a hidden folder <code>.restoring-&lt;restore UID&gt;</code> and renames it to <code>restored-&lt;policy&gt;-&lt;moment&gt;</code> (a suffix if the name exists). NFS has no rename that refuses to replace; the name is checked just before.</li>
+<li>The Job mounts the whole share that holds the target claim (the claim's folder may not exist before the Job, and a folder that does not exist cannot be mounted), and opens only the claim's folder below it, one name at a time. An existing claim whose folder does not exist yet is refused.</li>
+<li>A new claim is sized by a read-only measure Job first (skipped when <code>sizeGB</code> is given), because the controller has no NFS access.</li>
+<li>The claim's UID is pinned (<code>spec.targetUID</code>, set by the gateway; otherwise the first UID the controller sees), so a claim deleted and made again is refused. The new claim made for a restore carries the restore's name and UID as annotations, and both must match.</li>
+<li>The Job keeps only the <code>CHOWN</code> and <code>FOWNER</code> capabilities. It has a 4 hour deadline.</li>
+<li>Limit of one restore: the least of 200 GiB (<code>backupBrowse.restoreMaxBytes</code>), the free space of the share, and, for an existing claim, its size less what it holds.</li>
+<li>The setuid and setgid bits are removed from everything restored.</li>
+<li>At most 5 file restores run at once in the cluster (<code>backupBrowse.restoreMaxRunning</code>); the others wait, oldest first. Without a limit, any user with the rights could start unlimited Jobs that mount shares.</li>
+<li>A refusal by the Job (no room, a VM disk claim, a missing path, an owner it cannot set) ends the Job with exit code 0 and the reason in its termination message. A Job that failed with a non-zero code is started again by Kubernetes in the same pod, which loses the message. The controller reads <code>error</code> in the outcome as a failed restore. Only a Job that was stopped, or ran out of its 4 hours, ends as a failed Job, and then the reason is "the copy Job failed or ran out of time".</li>
+<li>One rare repeat can happen: a Job's objects are removed when it succeeds, before the controller saves <code>Done</code>. If that save fails, the next pass runs the Job again, and an existing claim gets a second folder (<code>-2</code>). Nothing is lost or written over.</li>
+<li>The gateway call is <code>POST /v1/restores</code> (answer 202) and <code>GET /v1/restores/{name}</code>. It checks <code>get backupfiles</code> in the source namespace first, then <code>create</code> on claims in the target namespace (and, for an existing claim, <code>update</code> on claims and <code>create</code> on pods: writing into a claim is the same power as mounting it), and only then looks at the target claim and takes its UID. Paths are stored in one canonical escaped form. A restore is shown only to the user who asked. A user may have 10 restores that have not ended (<code>backupGateway.maxOpenRestores</code>).</li>
+<li><code>kubectl backup restore-files</code> defaults to a new claim; <code>--existing</code> chooses a new folder in an existing claim.</li>
+</ul>
+<h2 id="changes-made-while-building-phase-4-28-oct-2026">Changes made while building phase 4 (28 Oct 2026)<a class="headerlink" href="#changes-made-while-building-phase-4-28-oct-2026" title="Permanent link">&para;</a></h2>
+<ul>
+<li>The COS helper pod and the COS file restore Job run in the <strong>driver namespace</strong>, not in the browse namespace. The COS key, the wrapped backup key and the Key Protect API key are Secrets there, and a pod mounts only Secrets of its own namespace. Copying them to the browse namespace would let a compromised gateway (which may read Secrets there) decrypt every policy's area of the bucket. So the controller keeps a second copy of each session's token and certificate in the driver namespace, owned by the session, and a NetworkPolicy there lets only the gateway reach those pods. The chart gives the controller a Role in the driver namespace that can create and delete Secrets and nothing else. This replaces the earlier text "for COS it mounts nothing from NFS and gets the Secrets as the export Job does" only in where the pod runs.</li>
+<li>The reader is a Go package, <code>pkg/cosbrowse</code>, used by the helper and by the restore Job. It talks to the Kopia program through two calls (list the snapshots as JSON, show one object by ID). Folders are parsed from Kopia's JSON; the sed and awk of the restore script are not used for names a tenant wrote.</li>
+<li>The helper unwraps the backup key itself, in process (<code>pkg/keyprotect</code>), and gives it to the Kopia child in an explicit environment. The browse image carries the same pinned Kopia as the driver image; a test keeps the version and checksum equal, and checks that the Dockerfile copies every package the binary imports.</li>
+<li>A snapshot belongs to a volume only if its <code>volume</code> tag <strong>and</strong> its exact source path say so. The export Job's mount point is <code>/share0</code>.</li>
+<li>The source of a session is <code>local</code> or <code>cos</code>. The gateway chooses COS when the moment is older than the oldest local restore point or no local copy is left, and an export exists; <code>source: cos</code> asks for it. A bucket named directly is <code>fromCOS</code>, which needs the right to read every Secret the request names, in the driver namespace.</li>
+<li>A COS session that is not ready after five minutes ends in words (<code>backupBrowse.cos.startTimeout</code>).</li>
+<li>Not done in this phase: the source switch in the console file browser; it needs the console files that the restore dialog work is changing, and the gateway already chooses the source for a moment that only COS holds.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "navigation.instant", "search.suggest", "search.highlight", "content.code.copy", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+    
+  </body>
+</html>

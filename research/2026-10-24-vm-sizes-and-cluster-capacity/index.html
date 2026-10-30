@@ -1,0 +1,3258 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A Kubernetes CSI driver that pools multiple PVCs as subdirectories within shared VPC file shares">
+      
+      
+      
+        <link rel="canonical" href="https://neil1taylor.github.io/ibm-vpc-file-pool-csi/research/2026-10-24-vm-sizes-and-cluster-capacity/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Typical VM sizes, VM capacity of rovslab-dr-eude, and the shares needed - IBM VPC File Pool CSI Driver</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#typical-vm-sizes-vm-capacity-of-rovslab-dr-eude-and-the-shares-needed" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="IBM VPC File Pool CSI Driver" class="md-header__button md-logo" aria-label="IBM VPC File Pool CSI Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            IBM VPC File Pool CSI Driver
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Typical VM sizes, VM capacity of rovslab-dr-eude, and the shares needed
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/neil1taylor/ibm-vpc-file-pool-csi" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neil1taylor/ibm-vpc-file-pool-csi
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../INSTALL/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../DAY2-OPERATIONS/" class="md-tabs__link">
+          
+  
+  
+  Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../OVERVIEW/" class="md-tabs__link">
+          
+  
+  
+  Architecture
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../VOLUME-CLONING/" class="md-tabs__link">
+          
+  
+  
+  Design (Phase 4)
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../CONTRIBUTING/" class="md-tabs__link">
+          
+  
+  
+  Development
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../examples/" class="md-tabs__link">
+          
+  
+  
+  Examples
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="IBM VPC File Pool CSI Driver" class="md-nav__button md-logo" aria-label="IBM VPC File Pool CSI Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    IBM VPC File Pool CSI Driver
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/neil1taylor/ibm-vpc-file-pool-csi" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    neil1taylor/ibm-vpc-file-pool-csi
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../INSTALL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../USER-GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-01-POOL-CREATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 1 - Pool Creation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-02-SNAPSHOTS-AND-CLONES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 2 - Snapshots and Clones
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 3 - Group Snapshots and Hooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-04-POOL-CONFIGURATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 4 - Pool Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-05-GOLDEN-IMAGES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 5 - Golden Images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-06-REPLICATION-AND-FAILOVER/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 6 - Replication and Failover
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-07-MONITORING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 7 - Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-08-MIGRATION-AND-CONSOLE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 8 - Migration and Console
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-09-COS-BACKUP-BUCKET/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 9 - COS Bucket for Backups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-10-BACKUP-AND-RESTORE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 10 - Backup and Restore
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-11-INSTANT-VM-SNAPSHOTS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 11 - Instant VM Snapshots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-12-REPLICATING-RUNNING-VMS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 12 - Replicating Running VMs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-13-FAILOVER-OF-RUNNING-VMS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 13 - Failover of Running VMs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TUTORIAL-14-CONSOLE-RESTORE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial 14 - Restore a Snapshot in the Console
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../DEPLOYMENT-NOTES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment Notes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../FEATURES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../UPGRADE-GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrade Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../FAQ/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../HELM-VALUES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Helm Values Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../DAY2-OPERATIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 Operations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../MONITORING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CAPACITY-PLANNING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Capacity Planning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../BACKUP-RECOVERY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backup and Recovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../GOLDEN-IMAGE-WORKFLOW/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Golden Image Workflow
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../SECURITY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TROUBLESHOOTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PERFORMANCE-TUNING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance Tuning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../KNOWN-LIMITATIONS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Known Limitations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../OVERVIEW/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTEXT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context (the words we use)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONSISTENCY-MODEL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Consistency Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VPC-NETWORKING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VPC Networking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VM-DISK-FORMATS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VM Disk Formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CRD-SPEC/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CRD Specification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CSI-INTERFACE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CSI Interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../IBM-VPC-API/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    IBM VPC API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../API-KEY-SETUP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Key Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design (Phase 4)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Design (Phase 4)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VOLUME-CLONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Volume Cloning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VOLUME-GROUP-SNAPSHOTS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Volume Group Snapshots
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CROSS-REGION-DR/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cross-Region DR
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CODING-GUIDELINES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coding Guidelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TESTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Examples
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#conclusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conclusion
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-to-read-this-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How to read this file
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-typical-vm-sizes-what-the-sources-say" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Typical VM sizes: what the sources say
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Typical VM sizes: what the sources say">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11-vendor-minimums-these-are-floors-not-typical-sizes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.1 Vendor minimums (these are floors, not typical sizes)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12-platform-sizing-guides-these-show-sizes-people-plan-with" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.2 Platform sizing guides (these show sizes people plan with)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#13-real-estates-lower-confidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.3 Real estates (lower confidence)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#14-disk-iops-per-vm-lower-confidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.4 Disk IOPS per VM (lower confidence)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-table-of-typical-small-medium-and-large-vms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Table of typical small, medium and large VMs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-what-a-vm-costs-the-cluster" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. What a VM costs the cluster
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. What a VM costs the cluster">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-memory-overhead-of-the-virt-launcher-pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 Memory overhead of the virt-launcher pod
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-cpu-request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 CPU request
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-pod-count" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 Pod count
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-how-many-vms-fit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. How many VMs fit
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. How many VMs fit">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-free-room-from-your-measurements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Free room (from your measurements)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-no-memory-overcommit-the-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 No memory overcommit (the default)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-with-memory-overcommit-not-on-in-your-cluster-shown-for-comparison" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 With memory overcommit (not on in your cluster; shown for comparison)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-real-cpu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 Real CPU
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#45-same-sums-with-the-test-specs-smaller-vms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.5 Same sums with the test spec's smaller VMs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-disk-iops-and-throughput-of-the-maximum-vm-count" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Disk, IOPS and throughput of the maximum VM count
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Disk, IOPS and throughput of the maximum VM count">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-capacity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 Capacity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-iops-and-throughput" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 IOPS and throughput
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-proposed-dp2-shares" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Proposed dp2 shares
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-where-the-numbers-are-weak" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Where the numbers are weak
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-swap-in-the-performance-test-result" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Swap in the performance test result
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decisions-i-made" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decisions I made
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#claims-i-could-not-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Claims I could not source
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sources
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="typical-vm-sizes-vm-capacity-of-rovslab-dr-eude-and-the-shares-needed">Typical VM sizes, VM capacity of rovslab-dr-eude, and the shares needed<a class="headerlink" href="#typical-vm-sizes-vm-capacity-of-rovslab-dr-eude-and-the-shares-needed" title="Permanent link">&para;</a></h1>
+<p>Date: 2026-10-24</p>
+<p>Question answered: what does an everyday Linux or Windows Server VM look like, how many fit on the 3-node cluster <code>rovslab-dr-eude</code>, and how many dp2 shares do they need?</p>
+<h2 id="conclusion">Conclusion<a class="headerlink" href="#conclusion" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Recommended size for the sums: Linux 2 vCPU, 4 GiB, 50 GiB disk. Windows Server 2 vCPU, 8 GiB, 80 GiB disk. Disk sizes are my estimate (no source gives a typical disk).</li>
+<li><strong>Memory is the limit, not CPU or pod count.</strong> With no memory overcommit and a mix of 2/3 Linux and 1/3 Windows: 132 VMs on all 3 nodes, and 66 VMs if one node can fail.</li>
+<li>Those VMs need 7,920 GiB (3 nodes) or 3,960 GiB (N+1) of provisioned disk, and about 2,300 to 4,600 average guest IOPS (3,700 to 7,400 IBM operations, at 1.6 operations per I/O of the test's block mix). If every VM bursts to 300 IOPS together, the need is 31,680 (N+1) or 63,360 (3 nodes) IBM operations.</li>
+<li>Proposal at 80 percent fill: N+1 is 2 shares of 3,000 GB at 16,000 IOPS. All 3 nodes is 4 shares of 3,000 GB at 16,000 IOPS. These are estimates.</li>
+<li>The running performance test on DR (one share at 3,000, 10,000 and 20,000 IOPS, up to 90 VMs) measures the real VMs per share. Put its number into the formula in section 8 and it replaces my IOPS-based share count.</li>
+</ul>
+<h2 id="how-to-read-this-file">How to read this file<a class="headerlink" href="#how-to-read-this-file" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Every number has a source link beside it. "My estimate" means no source exists and I chose the number. "Lower confidence" means only a secondary source exists.</li>
+<li>Units: Red Hat and KubeVirt use MiB and GiB. IBM writes GB and KB. I treat IBM's GB as 10^9 bytes and its KB as 1,024 bytes where IBM does not say. The cluster's memory figures are converted from the bytes Kubernetes reports to GiB (388.9 GB allocatable per node is 362.15 GiB).</li>
+<li>Sections 1 to 3 are research. Sections 4 to 8 are calculations.</li>
+</ul>
+<h2 id="1-typical-vm-sizes-what-the-sources-say">1. Typical VM sizes: what the sources say<a class="headerlink" href="#1-typical-vm-sizes-what-the-sources-say" title="Permanent link">&para;</a></h2>
+<h3 id="11-vendor-minimums-these-are-floors-not-typical-sizes">1.1 Vendor minimums (these are floors, not typical sizes)<a class="headerlink" href="#11-vendor-minimums-these-are-floors-not-typical-sizes" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Value</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Windows Server 2022, RAM</td>
+<td>1 GB Server Core, 2 GB with Desktop Experience</td>
+<td>https://learn.microsoft.com/en-us/windows-server/get-started/hardware-requirements</td>
+</tr>
+<tr>
+<td>Windows Server 2025, RAM</td>
+<td>2 GB Server Core. 2 GB with Desktop Experience, 4 GB recommended</td>
+<td>same page</td>
+</tr>
+<tr>
+<td>Windows Server, CPU and disk</td>
+<td>1.4 GHz 64-bit processor. 32 GB system disk, "an absolute minimum"</td>
+<td>same page</td>
+</tr>
+<tr>
+<td>Windows Server, recommended size</td>
+<td>Microsoft says a recommended size "is unrealistic" to state, and tells you to test</td>
+<td>same page</td>
+</tr>
+<tr>
+<td>RHEL 9, RAM</td>
+<td>1.5 GiB minimum for install from local media or NFS. 3.5 GiB for network install on x86_64. No recommended figure on the page</td>
+<td>https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/interactively_installing_rhel_from_installation_media/system-requirements-and-supported-architectures_rhel-installer</td>
+</tr>
+<tr>
+<td>RHEL 9, disk</td>
+<td>10 GiB minimum</td>
+<td>same page</td>
+</tr>
+</tbody>
+</table>
+<p>Not found: the RHEL 10 page. I did not read it. Other websites quote "2 GB, 4 GB recommended" for RHEL 9. I could not trace that to a Red Hat page, so I do not use it.</p>
+<h3 id="12-platform-sizing-guides-these-show-sizes-people-plan-with">1.2 Platform sizing guides (these show sizes people plan with)<a class="headerlink" href="#12-platform-sizing-guides-these-show-sizes-people-plan-with" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>What it defines</th>
+<th>Link</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>KubeVirt common-instancetypes, u1 series</td>
+<td>"General purpose", 1:4 vCPU to memory ratio, burstable CPU. nano 1 vCPU 512Mi, micro 1/1Gi, small 1/2Gi, medium 1/4Gi, 2xmedium 2/4Gi, large 2/8Gi, xlarge 4/16Gi, 2xlarge 8/32Gi</td>
+<td>https://github.com/kubevirt/common-instancetypes/blob/main/README.md</td>
+</tr>
+<tr>
+<td>KubeVirt common-instancetypes, o1 series</td>
+<td>Same sizes as u1 (no 2xmedium). The only difference is that memory is overcommitted for higher density</td>
+<td>same page</td>
+</tr>
+<tr>
+<td>Red Hat OpenShift Virtualization Cluster Sizing Guide 3.1.0 (June 2026)</td>
+<td>"Reasonable starting points" when real data is missing: Micro 1 vCPU 1 GiB. X-small 1/4 GiB. Small 2/8 GiB. Medium 4/24 GiB. Large 8/48 GiB. X-large 16/64 GiB. XX-large 32/96 GiB. It says to use real utilisation data when you have it</td>
+<td>https://access.redhat.com/articles/7107457 (PDF attachment <code>openshift_virtualization_cluster_sizing_guide_v3.1.0.pdf</code>, link on that page: https://access.redhat.com/node/7107457/40/0/23834985)</td>
+</tr>
+<tr>
+<td>Our own performance test spec</td>
+<td>Linux 1 vCPU 2 GB. Windows Server 2022 2 vCPU 4 GB. 20 to 50 IOPS average, 300 IOPS bursts</td>
+<td><code>docs/specs/2026-10-24-performance-test-30-vms.md</code></td>
+</tr>
+</tbody>
+</table>
+<p>The Red Hat guide's sizes are for a large estate (its example is 1,700 VMs with an average of 4.7 vCPU and 22.4 GiB). They are bigger than "everyday small" VMs. The guide gives no disk size and no IOPS.</p>
+<h3 id="13-real-estates-lower-confidence">1.3 Real estates (lower confidence)<a class="headerlink" href="#13-real-estates-lower-confidence" title="Permanent link">&para;</a></h3>
+<p>I found no primary, published estate average from Dell Live Optics, Broadcom/VMware, AWS, Azure or Google. What I found:</p>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>What it gives</th>
+<th>Confidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Dell Live Optics help pages: https://www.dell.com/support/kbdoc/en-ie/000299118/live-optics-optical-prime-vtab and https://www.dell.com/support/kbdoc/en-ae/000299135/live-optics-optical-prime-vmware-guest-vm-performance</td>
+<td>How Live Optics works out per-VM averages of vCPU, memory and disk used. It publishes no global averages</td>
+<td>Method only, no numbers</td>
+</tr>
+<tr>
+<td>Microsoft Azure Migrate documentation: https://learn.microsoft.com/en-us/azure/migrate/</td>
+<td>Tool documentation. No estate averages found</td>
+<td>Method only, no numbers</td>
+</tr>
+<tr>
+<td>One consultant's analysis of one estate of 756 VMs: https://occasional-it.com/2020/04/19/smart-sizing-2-analysis/</td>
+<td>Average 3.5 vCPU (range 1 to 29), 9.2 GB vRAM (2 to 128), 72 GB disk used (1.3 to 1,698). Source of the data is not named. Dated April 2020</td>
+<td>Lower confidence. One estate, secondary</td>
+</tr>
+<tr>
+<td>Nutanix sizing lab answers: https://sizing-workshop.readthedocs.io/en/latest/datacollection/rvtools-lab1-answers/rvtools-lab1-answers.html</td>
+<td>Three example clusters, 4.0 to 5.3 vCPU per core. Totals only, no per-VM figure</td>
+<td>Lower confidence. Training example</td>
+</tr>
+</tbody>
+</table>
+<p>The 756-VM estate has a mean that is pulled up by a few big VMs (the maxima are 29 vCPU, 128 GB and 1.7 TB). The typical VM is smaller than the mean. This is my reading of the ranges, not a figure from the source.</p>
+<h3 id="14-disk-iops-per-vm-lower-confidence">1.4 Disk IOPS per VM (lower confidence)<a class="headerlink" href="#14-disk-iops-per-vm-lower-confidence" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>What it gives</th>
+<th>Confidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Cisco lab blog, Windows 7 desktops on an all-flash array: https://news-blogs.cisco.com/datacenter/vdi-the-missing-questions-9-how-many-storage-iops</td>
+<td>Steady state about 11 read plus 7 write IOPS per desktop (about 18). Boot storm about 260 read IOPS per desktop at peak, about 133 sustained for 5 to 6 minutes. The author says not to design from these numbers</td>
+<td>Lower confidence. Desktops, not servers. Lab test</td>
+</tr>
+<tr>
+<td>Our performance spec</td>
+<td>Server VMs at 20 to 50 average and 300 burst. These are the issue's defaults, not measured</td>
+<td>Assumption</td>
+</tr>
+</tbody>
+</table>
+<p>I found no primary source for the IOPS of an everyday server VM. The numbers in sections 5 to 7 use the spec's 35 average (the middle of 20 to 50) and 300 burst. The Cisco figures are the same order of size.</p>
+<h2 id="2-table-of-typical-small-medium-and-large-vms">2. Table of typical small, medium and large VMs<a class="headerlink" href="#2-table-of-typical-small-medium-and-large-vms" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Size</th>
+<th>Linux (vCPU / RAM / disk)</th>
+<th>Windows Server (vCPU / RAM / disk)</th>
+<th>Average IOPS</th>
+<th>Source of each number</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Small</td>
+<td>1 / 2 GiB / 20 GiB</td>
+<td>2 / 4 GiB / 60 GiB</td>
+<td>20</td>
+<td>Linux: u1.small (1.2); RHEL floor of 1.5 GiB and 10 GiB (1.1). Windows: 2025 "4 GB recommended" and 32 GB floor (1.1). Test spec sizes (1.2). Disk is my estimate</td>
+</tr>
+<tr>
+<td>Medium</td>
+<td>2 / 4 GiB / 50 GiB</td>
+<td>2 / 8 GiB / 80 GiB</td>
+<td>35</td>
+<td>Linux: u1.2xmedium (1.2). Windows: between Red Hat X-small and Small (1.2). Disk is my estimate. IOPS: spec middle</td>
+</tr>
+<tr>
+<td>Large</td>
+<td>4 / 16 GiB / 100 GiB</td>
+<td>4 / 16 GiB / 120 GiB</td>
+<td>50</td>
+<td>u1.xlarge (1.2). Close to the 3.5 vCPU, 9.2 GB mean of one estate (1.3). Disk is my estimate</td>
+</tr>
+</tbody>
+</table>
+<p>Where sources disagree: for RAM a medium VM runs from 4 GiB (u1.medium) to 8 GiB (Red Hat Small) to 9.2 GB (one estate's mean). For vCPU it runs from 1 to 4.</p>
+<p><strong>Recommended size for the calculations: medium.</strong> Linux 2 vCPU, 4 GiB, 50 GiB. Windows 2 vCPU, 8 GiB, 80 GiB. Reasons:
+- It sits above every vendor floor (1.1) and equals a named KubeVirt size for Linux (1.2).
+- It sits below the Red Hat example sizes, which are for big estates, and below the one-estate mean, which large VMs inflate.
+- The test spec uses smaller VMs (Linux 1/2, Windows 2/4). Section 4.5 repeats the sums with those sizes, so the test and the plan can be compared.</p>
+<h2 id="3-what-a-vm-costs-the-cluster">3. What a VM costs the cluster<a class="headerlink" href="#3-what-a-vm-costs-the-cluster" title="Permanent link">&para;</a></h2>
+<h3 id="31-memory-overhead-of-the-virt-launcher-pod">3.1 Memory overhead of the virt-launcher pod<a class="headerlink" href="#31-memory-overhead-of-the-virt-launcher-pod" title="Permanent link">&para;</a></h3>
+<p>Red Hat OpenShift Virtualization 4.20 gives this formula (https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/virtualization/installing, section "Virtual machine memory overhead"; I read the single-page version, https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html-single/virtualization/index):</p>
+<ul>
+<li>Overhead per VM is about 0.002 x requested memory, plus 218 MiB, plus 8 MiB per vCPU, plus 16 MiB per graphics device, plus extra overhead.</li>
+<li>Extra overhead: 1 GiB for each SR-IOV device or GPU, 256 MiB for SEV, 53 MiB for TPM.</li>
+<li>The Red Hat Cluster Sizing Guide uses the same formula (https://access.redhat.com/articles/7107457).</li>
+<li>Overhead is added on top of the guest memory. The pod requests guest memory plus overhead.</li>
+</ul>
+<p>The KubeVirt user guide says only that the default memory overhead is 32Mi for "additional system resources" and does not give this formula (https://kubevirt.io/user-guide/compute/resources_requests_and_limits/). I use the Red Hat formula because it covers the whole pod.</p>
+<p>I do not add graphics devices, SR-IOV, GPU, SEV or TPM. Windows Server 2022 needs no TPM. A vTPM would add 53 MiB per VM, which is under 1 percent.</p>
+<table>
+<thead>
+<tr>
+<th>VM</th>
+<th>Guest memory</th>
+<th>Overhead</th>
+<th>Memory request</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Linux 2 vCPU 4 GiB</td>
+<td>4,096 MiB</td>
+<td>8.2 + 218 + 16 = 242 MiB</td>
+<td>4,338 MiB = 4.237 GiB</td>
+</tr>
+<tr>
+<td>Windows 2 vCPU 8 GiB</td>
+<td>8,192 MiB</td>
+<td>16.4 + 218 + 16 = 250 MiB</td>
+<td>8,442 MiB = 8.245 GiB</td>
+</tr>
+</tbody>
+</table>
+<h3 id="32-cpu-request">3.2 CPU request<a class="headerlink" href="#32-cpu-request" title="Permanent link">&para;</a></h3>
+<p>KubeVirt asks for 1/cpuAllocationRatio core per vCPU. The ratio defaults to 10 (https://kubevirt.io/user-guide/compute/resources_requests_and_limits/; the Red Hat guide says the same, https://access.redhat.com/articles/7107457). Your cluster has 10, so each vCPU requests 0.1 core. A 2 vCPU VM requests 0.2 core.</p>
+<p>I did not add the small CPU requests of the other containers in the virt-launcher pod. I have no source for them. At 0.2 core per VM the CPU limit is far from binding (section 4), so a few extra millicores do not change the result.</p>
+<h3 id="33-pod-count">3.3 Pod count<a class="headerlink" href="#33-pod-count" title="Permanent link">&para;</a></h3>
+<p>Each VM is one virt-launcher pod, so one pod per VM. The limit is 250 pods per node (your measurement). I do not know how many pods the other workloads use. I show the pod limit with those pods ignored, which is the best case.</p>
+<h2 id="4-how-many-vms-fit">4. How many VMs fit<a class="headerlink" href="#4-how-many-vms-fit" title="Permanent link">&para;</a></h2>
+<h3 id="41-free-room-from-your-measurements">4.1 Free room (from your measurements)<a class="headerlink" href="#41-free-room-from-your-measurements" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Node</th>
+<th>Allocatable memory</th>
+<th>Requested</th>
+<th>Free memory</th>
+<th>Allocatable cores</th>
+<th>Requested</th>
+<th>Free cores</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>362.15</td>
+<td>124.97</td>
+<td>237.2</td>
+<td>95.68</td>
+<td>40.2</td>
+<td>55.48</td>
+</tr>
+<tr>
+<td>2</td>
+<td>362.15</td>
+<td>105.56</td>
+<td>256.6</td>
+<td>95.68</td>
+<td>48.5</td>
+<td>47.18</td>
+</tr>
+<tr>
+<td>3</td>
+<td>362.15</td>
+<td>115.79</td>
+<td>246.4</td>
+<td>95.68</td>
+<td>47.3</td>
+<td>48.38</td>
+</tr>
+<tr>
+<td>All 3</td>
+<td>1,086.45</td>
+<td>346.32</td>
+<td><strong>740.1</strong></td>
+<td>287.04</td>
+<td>136.0</td>
+<td><strong>151.04</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Memory is in GiB, converted from the bytes Kubernetes reports (for example, 388,858,399,457 bytes allocatable is 362.15 GiB). Cores are cores.</p>
+<p>For N+1, one node fails and its other workloads restart on the two that remain. So I take the capacity of two nodes and subtract all the existing requests:</p>
+<ul>
+<li>Memory: 2 x 362.15 = 724.3, minus 346.32 = <strong>378.0 GiB</strong> free.</li>
+<li>Cores: 2 x 95.68 = 191.36, minus 136.0 = <strong>55.36 cores</strong> free.</li>
+<li>Pods: 2 x 250 = 500, minus the pods of other workloads (not known).</li>
+</ul>
+<p>This treats memory as one pool. Real scheduling leaves small gaps on each node, so the true count is a little lower.</p>
+<h3 id="42-no-memory-overcommit-the-default">4.2 No memory overcommit (the default)<a class="headerlink" href="#42-no-memory-overcommit-the-default" title="Permanent link">&para;</a></h3>
+<p>Mix: 2/3 Linux, 1/3 Windows, so a group of 3 VMs is 2 Linux plus 1 Windows. One group requests 2 x 4.237 + 8.245 = <strong>16.72 GiB</strong> and 0.6 core.</p>
+<table>
+<thead>
+<tr>
+<th>Case</th>
+<th>By memory</th>
+<th>By CPU (0.2 core per VM)</th>
+<th>By pods (ignoring other pods)</th>
+<th>Binds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>All 3 nodes, Linux only</td>
+<td>740.1 / 4.237 = 174</td>
+<td>151.04 / 0.2 = 755</td>
+<td>750</td>
+<td>Memory</td>
+</tr>
+<tr>
+<td>All 3 nodes, Windows only</td>
+<td>740.1 / 8.245 = 89</td>
+<td>755</td>
+<td>750</td>
+<td>Memory</td>
+</tr>
+<tr>
+<td><strong>All 3 nodes, mix</strong></td>
+<td>740.1 / 16.72 = 44.3, so 44 groups = <strong>132 VMs</strong> (88 Linux, 44 Windows)</td>
+<td>755</td>
+<td>750</td>
+<td><strong>Memory</strong></td>
+</tr>
+<tr>
+<td>N+1, Linux only</td>
+<td>378.0 / 4.237 = 89</td>
+<td>55.36 / 0.2 = 276</td>
+<td>500 less other pods</td>
+<td>Memory</td>
+</tr>
+<tr>
+<td>N+1, Windows only</td>
+<td>378.0 / 8.245 = 45</td>
+<td>276</td>
+<td>500 less other pods</td>
+<td>Memory</td>
+</tr>
+<tr>
+<td><strong>N+1, mix</strong></td>
+<td>378.0 / 16.72 = 22.6, so 22 groups = <strong>66 VMs</strong> (44 Linux, 22 Windows)</td>
+<td>276</td>
+<td>500 less other pods</td>
+<td><strong>Memory</strong></td>
+</tr>
+</tbody>
+</table>
+<h3 id="43-with-memory-overcommit-not-on-in-your-cluster-shown-for-comparison">4.3 With memory overcommit (not on in your cluster; shown for comparison)<a class="headerlink" href="#43-with-memory-overcommit-not-on-in-your-cluster-shown-for-comparison" title="Permanent link">&para;</a></h3>
+<p>How it works (Red Hat docs, https://docs.redhat.com/ko/documentation/openshift_container_platform/4.21/html/virtualization/virt-configuring-higher-vm-workload-density, and the Cluster Sizing Guide, https://access.redhat.com/articles/7107457):
+- The HyperConverged setting is <code>memoryOvercommitPercentage</code>. The scheduler counts "assigned memory x (100 / percentage)" for each VM. 200 percent counts half of the guest memory. The docs allow 100 to 400 percent.
+- It needs swap on every worker, set up with a MachineConfig. The wasp-agent component is deployed when the percentage is above 100 at the time the HyperConverged CR is first created. Swap should be at least as large as the overcommitted RAM (OKD copy of the same procedure: https://docs.okd.io/4.21/virt/post_installation_configuration/virt-configuring-higher-vm-workload-density.html).
+- Only Burstable VM pods can swap. Without swap, Red Hat says overcommit is "strongly discouraged": the node's out-of-memory killer can end a running VM.
+- Red Hat says the path of the setting differs between versions. Check it against the version you run. I read the 4.21 page only through a search result summary and the OKD copy, not the full Red Hat page, because the page was too large for my fetch tool.</p>
+<p>I assume the overhead from section 3.1 is not reduced. I could not confirm that from the docs.</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Linux request</th>
+<th>Windows request</th>
+<th>Group of 3</th>
+<th>3 nodes (mix)</th>
+<th>N+1 (mix)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>100 percent (now)</td>
+<td>4.237 GiB</td>
+<td>8.245 GiB</td>
+<td>16.72 GiB</td>
+<td>132 VMs</td>
+<td>66 VMs</td>
+</tr>
+<tr>
+<td>200 percent</td>
+<td>2,048 + 242 = 2.237 GiB</td>
+<td>4,096 + 250 = 4.245 GiB</td>
+<td>8.72 GiB</td>
+<td>740.1 / 8.72 = 84 groups = <strong>252 VMs</strong></td>
+<td>378.0 / 8.72 = 43 groups = <strong>129 VMs</strong></td>
+</tr>
+</tbody>
+</table>
+<p>At 200 percent, CPU requests still allow 755 VMs (3 nodes) or 276 VMs (N+1), so memory still binds. The N+1 count of 129 VMs also uses 129 of the 500 pod places that remain.</p>
+<p>This is a count of what the scheduler allows. It is safe only if the VMs' real memory use is about half of their configured memory (Red Hat: the working set decides, https://access.redhat.com/articles/7107457). I do not assume it is on.</p>
+<h3 id="44-real-cpu">4.4 Real CPU<a class="headerlink" href="#44-real-cpu" title="Permanent link">&para;</a></h3>
+<p>CPU requests (0.1 core per vCPU) are bookkeeping, not use. A check against real demand:</p>
+<ul>
+<li>Red Hat plans CPU at 4:1 (4 vCPU per physical core) in its worked example. That turns a 4.7 vCPU average VM into about 1.2 cores (https://access.redhat.com/articles/7107457).</li>
+<li>VMware's design guide says 1:1 to 3:1 is "not typically an issue", 3:1 to 5:1 may show performance loss, and 6:1 or more often causes problems. It quotes these as rules of thumb, not measurements. Source: VMware vCloud Architecture Toolkit, section 5.8, https://download3.vmware.com/vcat/vmw-vcloud-architecture-toolkit-spv1-webworks/Core%20Platform/Architecting%20a%20vSphere%20Compute%20Platform/Architecting%20a%20vSphere%20Compute%20Platform.1.019.html. I read this only through a search result summary, not the page. Lower confidence.</li>
+<li>An old Dell/vKernel paper says physical servers averaged only 5 to 15 percent use (https://virtualizationreview.com/~/media/ECG/Tech%20Library%202013/04/DELL%20VKERNEL%20APRIL/Dell%20%20%20Best%20Practices%20for%20Oversubscription%20of%20CPU%20%20Memory%20and%20Storage%20in%20vSphere%20Virtual%20Environments_0.ashx). It is about 10 years old. I read it only through a search summary. Lower confidence.</li>
+</ul>
+<p>Sums with my sizes (every VM has 2 vCPU, so 2 vCPU each):</p>
+<table>
+<thead>
+<tr>
+<th>Case</th>
+<th>VMs</th>
+<th>vCPU</th>
+<th>At 4:1 (0.25 core per vCPU)</th>
+<th>At 15 percent of a vCPU</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>3 nodes</td>
+<td>132</td>
+<td>264</td>
+<td>66 cores</td>
+<td>40 cores</td>
+</tr>
+<tr>
+<td>N+1</td>
+<td>66</td>
+<td>132</td>
+<td>33 cores</td>
+<td>20 cores</td>
+</tr>
+</tbody>
+</table>
+<p>Compare with the free room in 4.1: the surviving two nodes have 191 allocatable cores. Real use of the other workloads is not known (I have only their requests), so I cannot say how much of that is idle. VM CPU is not the limit at these counts under either assumption.</p>
+<h3 id="45-same-sums-with-the-test-specs-smaller-vms">4.5 Same sums with the test spec's smaller VMs<a class="headerlink" href="#45-same-sums-with-the-test-specs-smaller-vms" title="Permanent link">&para;</a></h3>
+<p>Linux 1 vCPU 2 GiB: overhead 4.1 + 218 + 8 = 230 MiB, request 2.225 GiB. Windows 2 vCPU 4 GiB: 242 MiB overhead, request 4.237 GiB. A group of 3 requests 8.69 GiB.</p>
+<table>
+<thead>
+<tr>
+<th>Case</th>
+<th>Mix VMs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>3 nodes, no overcommit</td>
+<td>740.1 / 8.69 = 85 groups = 255 VMs</td>
+</tr>
+<tr>
+<td>N+1, no overcommit</td>
+<td>378.0 / 8.69 = 43 groups = 129 VMs</td>
+</tr>
+</tbody>
+</table>
+<p>So the 90-VM test fits in the N+1 case (129 VMs) with room to spare.</p>
+<h2 id="5-disk-iops-and-throughput-of-the-maximum-vm-count">5. Disk, IOPS and throughput of the maximum VM count<a class="headerlink" href="#5-disk-iops-and-throughput-of-the-maximum-vm-count" title="Permanent link">&para;</a></h2>
+<h3 id="51-capacity">5.1 Capacity<a class="headerlink" href="#51-capacity" title="Permanent link">&para;</a></h3>
+<p>My disk sizes: Linux 50 GiB, Windows 80 GiB (section 2).</p>
+<table>
+<thead>
+<tr>
+<th>Case</th>
+<th>Linux</th>
+<th>Windows</th>
+<th>Provisioned total</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>N+1 (66 VMs)</td>
+<td>44 x 50 = 2,200 GiB</td>
+<td>22 x 80 = 1,760 GiB</td>
+<td><strong>3,960 GiB</strong> (4,252 GB)</td>
+</tr>
+<tr>
+<td>3 nodes (132 VMs)</td>
+<td>88 x 50 = 4,400 GiB</td>
+<td>44 x 80 = 3,520 GiB</td>
+<td><strong>7,920 GiB</strong> (8,504 GB)</td>
+</tr>
+</tbody>
+</table>
+<p>Thin files: this driver's VM disks are raw files, and raw files on NFS can be sparse, so unwritten space uses nothing (<code>docs/VM-DISK-FORMATS.md</code>, "Sparse Files and Thin Provisioning"; its example is 100 GB logical, 12 GB used). The pool counts logical (requested) size, not used size, when it places a volume (same file). So the share must be sized for the provisioned total, even if real use is lower. One estate averaged 72 GB used per VM (1.3), which is above my disk sizes, so I do not assume large savings.</p>
+<p>Not confirmed: whether a cloned disk stays sparse. I searched <code>docs/VOLUME-CLONING.md</code> and <code>pkg/pool/clone*.go</code> for "sparse" and found nothing. A clone that copies the full size would use the full logical size. Treat clones as full size until tested.</p>
+<h3 id="52-iops-and-throughput">5.2 IOPS and throughput<a class="headerlink" href="#52-iops-and-throughput" title="Permanent link">&para;</a></h3>
+<p>IOPS per VM: average 35 (range 20 to 50) and burst 300 (section 1.4, spec).</p>
+<table>
+<thead>
+<tr>
+<th>Case</th>
+<th>Average (35 each)</th>
+<th>Range at 20 to 50</th>
+<th>Typical peak: 10 percent of VMs burst, rest at 35</th>
+<th>Worst case: all VMs burst at 300</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>N+1 (66)</td>
+<td>2,310</td>
+<td>1,320 to 3,300</td>
+<td>7 x 300 + 59 x 35 = 4,165</td>
+<td>19,800</td>
+</tr>
+<tr>
+<td>3 nodes (132)</td>
+<td>4,620</td>
+<td>2,640 to 6,600</td>
+<td>13 x 300 + 119 x 35 = 8,065</td>
+<td>39,600</td>
+</tr>
+</tbody>
+</table>
+<p>These are guest I/Os. IBM counts more (next list).</p>
+<p>The 10 percent burst share is my estimate. The worst case is the spec's patch window (all VMs at 300 for 10 minutes).</p>
+<p>How IBM counts operations (https://cloud.ibm.com/docs/vpc?topic=vpc-file-storage-profiles): "IOPS values are based on a 16 KB block size for all profiles, with a 50-50 random workload. Each 16 KB of data that is read or written counts as one read/write operation. A single write of less than 16 KB counts as a single write operation." (The repo's earlier research quotes the same text.) So:</p>
+<ul>
+<li>IBM operations = sum over I/Os of ceil(size / 16 KB). An I/O of 16 KB or less counts as 1. A 64 KB I/O counts as 4.</li>
+<li>My IOPS figures above are guest I/Os: what a VM does. The share's limit is in IBM operations. The two are not the same when an I/O is larger than 16 KB.</li>
+</ul>
+<p>The 1.6 factor. The performance test's block mix (<code>test/perf/profile.sh</code>, <code>PERF_BLOCK_MIX</code>) gives each I/O size a share of the I/Os. Each size counts as a number of IBM operations by the rule above:</p>
+<table>
+<thead>
+<tr>
+<th>I/O size</th>
+<th>Share of the I/Os</th>
+<th>IBM operations each</th>
+<th>Adds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>4 KiB</td>
+<td>50 percent</td>
+<td>1</td>
+<td>0.5</td>
+</tr>
+<tr>
+<td>16 KiB</td>
+<td>30 percent</td>
+<td>1</td>
+<td>0.3</td>
+</tr>
+<tr>
+<td>64 KiB</td>
+<td>20 percent</td>
+<td>4</td>
+<td>0.8</td>
+</tr>
+<tr>
+<td><strong>Average</strong></td>
+<td></td>
+<td></td>
+<td><strong>1.6</strong></td>
+</tr>
+</tbody>
+</table>
+<p>So one guest I/O of this mix counts as 1.6 IBM operations on average. A VM that does 300 I/Os a second uses 300 x 1.6 = 480 of the share's IOPS. The test computes the same factor (<code>perf_ibm_ops_per_io</code>) and reports <code>ibm_ops_demand</code> = guest IOPS x 1.6 beside the share's own count.</p>
+<p>With the factor:
+- Average: N+1 2,310 x 1.6 = 3,696 IBM operations a second. 3 nodes 4,620 x 1.6 = 7,392.
+- All VMs burst together: N+1 19,800 x 1.6 = 31,680. 3 nodes 39,600 x 1.6 = 63,360.
+- One share with 33 VMs all bursting: 33 x 300 = 9,900 guest I/Os, but 9,900 x 1.6 = 15,840 IBM operations. This is why section 6 proposes 16,000 IOPS per share, not 12,000.</p>
+<p>Limit of the factor: the mix is the test's model of an everyday VM, not a measurement of real VMs. Larger I/O (backup scans, boot, file copies) raises the factor. A mix of only 4 KiB and 16 KiB I/O gives 1.0; a 1 MiB I/O counts as 64. Replace 1.6 with the factor of the real workload when it is known.</p>
+<p>Throughput:
+- IBM sets the maximum bandwidth as IOPS x 256 KB. The dp2 maximum is 8,192 Mbps (same IBM page).
+- The mix's average I/O is 0.5 x 4 + 0.3 x 16 + 0.2 x 64 = 19.6 KiB. Average throughput is 35 x 19.6 KiB = 0.67 MiB/s per VM: about 44 MiB/s for N+1 and 88 MiB/s for 3 nodes.
+- Worst case (all burst): N+1 19,800 x 19.6 KiB = about 379 MiB/s, 3 nodes about 758 MiB/s, so about 190 MiB/s per share in either proposal. That is far under the 8,192 Mbps (about 1,000 MiB/s) dp2 limit of one share.</p>
+<h2 id="6-proposed-dp2-shares">6. Proposed dp2 shares<a class="headerlink" href="#6-proposed-dp2-shares" title="Permanent link">&para;</a></h2>
+<p>IBM rules used (https://cloud.ibm.com/docs/vpc?topic=vpc-file-storage-profiles, https://cloud.ibm.com/docs/vpc?topic=vpc-quotas, https://cloud.ibm.com/docs/vpc?topic=vpc-file-storage-vpc-about):
+- Size 10 to 32,000 GB. Allowed IOPS depend on size. The table is the one in <code>docs/specs/2026-10-24-performance-test-30-vms.md</code> and matches IBM's page: 2,000 to 3,999 GB allows 200 to 40,000 IOPS. 4,000 to 7,999 GB allows 300 to 40,000. 8,000 to 15,999 GB allows 500 to 64,000.
+- Up to 300 file shares per account per region. One mount target per share per VPC. 256 hosts per mount target.
+- A share used by one client is limited to 48,000 IOPS. The 96,000 maximum needs several clients (IBM profile note). Not a limit at these sizes.</p>
+<p>Headroom: fill each share to 80 percent at most. This is the default target utilisation in <code>docs/CAPACITY-PLANNING.md</code> (80 percent). Reasons: thin disks grow as VMs write (warning in <code>docs/VM-DISK-FORMATS.md</code>), snapshots use share space (a copy is charged the volume's size, an instant VM snapshot a tenth of it; <code>docs/CAPACITY-PLANNING.md</code>), and a share without room refuses a snapshot.</p>
+<p>Capacity needed at 80 percent fill:
+- N+1: 4,252 GB / 0.8 = <strong>5,315 GB</strong>.
+- 3 nodes: 8,504 GB / 0.8 = <strong>10,630 GB</strong>.</p>
+<p>Proposal (estimate until the test result replaces it):</p>
+<p><img alt="With one node failed, 66 VMs on two nodes keep their disks on a pool of two 3,000 GB shares" src="../../images/research-vm-capacity-n-plus-1.drawio.svg" /></p>
+<table>
+<thead>
+<tr>
+<th>Case</th>
+<th>Shares</th>
+<th>Size each</th>
+<th>IOPS each</th>
+<th>Total capacity</th>
+<th>Total IOPS</th>
+<th>Fill</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>N+1, 66 VMs</td>
+<td>2</td>
+<td>3,000 GB</td>
+<td>16,000</td>
+<td>6,000 GB</td>
+<td>32,000</td>
+<td>71 percent</td>
+</tr>
+<tr>
+<td>3 nodes, 132 VMs</td>
+<td>4</td>
+<td>3,000 GB</td>
+<td>16,000</td>
+<td>12,000 GB</td>
+<td>64,000</td>
+<td>71 percent</td>
+</tr>
+</tbody>
+</table>
+<p>Why 16,000 IOPS: each share carries 33 VMs in both cases. If all of them burst at 300, that is 9,900 guest I/Os, or 33 x 300 x 1.6 = 15,840 IBM operations a second. 16,000 covers that. This meets the worst case on paper. It assumes the test's block mix and an even spread of VMs across shares. If the burst I/O is larger, the IBM count is higher and this is too low. 16,000 is under the 48,000 limit for a share used by one client. The 3,000 GB size is in the 2,000 to 3,999 GB row, which allows up to 40,000 IOPS, so there is room to raise IOPS without resizing.</p>
+<p>Two shares in the N+1 case means a lost share takes half the VMs. Four shares limits that to a quarter. More, smaller shares spread the risk but each smaller share allows fewer IOPS (a 1,000 to 1,999 GB share allows up to 20,000). I did not choose on cost, because no budget was set. Cost of the IOPS is not calculated here.</p>
+<h2 id="7-where-the-numbers-are-weak">7. Where the numbers are weak<a class="headerlink" href="#7-where-the-numbers-are-weak" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Memory is the limit in every case. Anything that changes VM memory changes the count in direct proportion. A group at Red Hat's "Small" size (2/8 GiB) for all VMs would give fewer VMs than shown.</li>
+<li>Average and burst IOPS are assumptions. The performance test measures them.</li>
+<li>Disk sizes are my estimates. Used space could be much lower, but clones may not be sparse.</li>
+</ul>
+<h2 id="8-swap-in-the-performance-test-result">8. Swap in the performance test result<a class="headerlink" href="#8-swap-in-the-performance-test-result" title="Permanent link">&para;</a></h2>
+<p>A performance test is running on DR now: one share at 3,000, 10,000 and 20,000 IOPS, with up to 90 VMs. It finds how many VMs one share carries before latency rises. Its result replaces my IOPS-based share count (section 6). The formulas, so you can put the measured number in:</p>
+<ul>
+<li>VMs per share (measured) = the knee count x 0.8. The spec recommends 80 percent of the knee.</li>
+<li>Shares for the IOPS = ceil(VM count / VMs per share at the chosen IOPS tier).</li>
+<li>Shares for the capacity = ceil((provisioned GiB / 0.8) / share size in GB).</li>
+<li>Shares needed = the larger of the two.</li>
+<li>Check the result against the cluster limit: VM count = the smaller of the memory, CPU and pod counts in section 4.</li>
+</ul>
+<p>Example with a made-up number: if one 16,000 IOPS share carries 40 VMs at the safe point, then for 66 VMs: ceil(66 / 40) = 2 shares for IOPS, and ceil(5,315 / 3,000) = 2 for capacity. Shares needed = 2.</p>
+<p>The test's VMs are the smaller test sizes (Linux 1/2, Windows 2/4). The IOPS per VM does not depend on RAM, so the count carries over. Disk per VM is larger in my sizing, so re-check the capacity formula.</p>
+<h2 id="decisions-i-made">Decisions I made<a class="headerlink" href="#decisions-i-made" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Used medium VMs: Linux 2 vCPU 4 GiB 50 GiB, Windows 2 vCPU 8 GiB 80 GiB.</li>
+<li>Used the Red Hat 4.20 overhead formula (0.002 x memory + 218 MiB + 8 MiB per vCPU), not the KubeVirt 32Mi note.</li>
+<li>Converted the cluster's memory from bytes to GiB.</li>
+<li>For N+1, moved all existing workloads onto the two surviving nodes before counting free room.</li>
+<li>Pooled memory across nodes and ignored fragmentation.</li>
+<li>Ignored the other pods' count and the small CPU requests of the virt-launcher helper containers.</li>
+<li>Used 35 average and 300 burst IOPS from the spec because I found no primary source for server VMs.</li>
+<li>Used a 10 percent burst share for "typical peak" and all VMs for "worst case".</li>
+<li>Kept the pool count at logical (provisioned) disk size and 80 percent fill.</li>
+<li>Sized IOPS per share for the all-burst case at the test's block mix (1.6 IBM operations per I/O).</li>
+<li>Chose 3,000 GB shares so IOPS can rise to 40,000 without resizing.</li>
+<li>Did not assume memory overcommit is on.</li>
+</ul>
+<h2 id="claims-i-could-not-source">Claims I could not source<a class="headerlink" href="#claims-i-could-not-source" title="Permanent link">&para;</a></h2>
+<ul>
+<li>A typical disk size (provisioned or used) for small, medium and large VMs: no source. The only data point is one estate at 72 GB used.</li>
+<li>Published estate averages (vCPU, RAM, disk, IOPS) from Dell Live Optics, Broadcom, AWS, Azure or Google: not found. Their pages describe methods only.</li>
+<li>IOPS of an everyday server VM: no primary source. Only desktop lab figures (Cisco) and the spec's assumption.</li>
+<li>RHEL 10 system requirements: not read.</li>
+<li>A recommended RHEL 9 RAM figure on a Red Hat page: the page gives only minimums.</li>
+<li>Whether memory overcommit also shrinks the per-VM overhead: not confirmed.</li>
+<li>Whether VM clone copies stay sparse: not found in the repo docs or code.</li>
+<li>CPU requests of the other containers in the virt-launcher pod: no source.</li>
+<li>Pod count of the existing workloads on the cluster: not measured.</li>
+<li>The VMware vCAT section 5.8 and the Dell/vKernel paper were read through a search summary only.</li>
+</ul>
+<h2 id="sources">Sources<a class="headerlink" href="#sources" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Microsoft, Windows Server hardware requirements: https://learn.microsoft.com/en-us/windows-server/get-started/hardware-requirements</li>
+<li>Red Hat, RHEL 9 system requirements: https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/interactively_installing_rhel_from_installation_media/system-requirements-and-supported-architectures_rhel-installer</li>
+<li>Red Hat, OpenShift Virtualization 4.20 (memory overhead formula): https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html-single/virtualization/index and https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/virtualization/installing</li>
+<li>Red Hat, OpenShift Virtualization Cluster Sizing Guide 3.1.0: https://access.redhat.com/articles/7107457 and https://access.redhat.com/node/7107457/40/0/23834985</li>
+<li>Red Hat, higher VM workload density (4.21): https://docs.redhat.com/ko/documentation/openshift_container_platform/4.21/html/virtualization/virt-configuring-higher-vm-workload-density</li>
+<li>OKD, same procedure: https://docs.okd.io/4.21/virt/post_installation_configuration/virt-configuring-higher-vm-workload-density.html</li>
+<li>KubeVirt user guide, resource requests and limits: https://kubevirt.io/user-guide/compute/resources_requests_and_limits/</li>
+<li>KubeVirt common-instancetypes: https://github.com/kubevirt/common-instancetypes/blob/main/README.md</li>
+<li>IBM Cloud, File Storage for VPC profiles (dp2 table, 16 KB counting, bandwidth): https://cloud.ibm.com/docs/vpc?topic=vpc-file-storage-profiles</li>
+<li>IBM Cloud, VPC quotas (300 shares per account per region, mount targets): https://cloud.ibm.com/docs/vpc?topic=vpc-quotas</li>
+<li>IBM Cloud, File Storage for VPC about (32,000 GB, 256 hosts): https://cloud.ibm.com/docs/vpc?topic=vpc-file-storage-vpc-about</li>
+<li>Dell Live Optics help: https://www.dell.com/support/kbdoc/en-ie/000299118/live-optics-optical-prime-vtab and https://www.dell.com/support/kbdoc/en-ae/000299135/live-optics-optical-prime-vmware-guest-vm-performance</li>
+<li>Azure Migrate documentation: https://learn.microsoft.com/en-us/azure/migrate/</li>
+<li>One 756-VM estate analysis (lower confidence): https://occasional-it.com/2020/04/19/smart-sizing-2-analysis/</li>
+<li>Nutanix sizing workshop RVTools answers (lower confidence): https://sizing-workshop.readthedocs.io/en/latest/datacollection/rvtools-lab1-answers/rvtools-lab1-answers.html</li>
+<li>Cisco, VDI IOPS lab blog (lower confidence): https://news-blogs.cisco.com/datacenter/vdi-the-missing-questions-9-how-many-storage-iops</li>
+<li>VMware vCAT, vCPU-to-pCPU ratio (lower confidence, search summary): https://download3.vmware.com/vcat/vmw-vcloud-architecture-toolkit-spv1-webworks/Core%20Platform/Architecting%20a%20vSphere%20Compute%20Platform/Architecting%20a%20vSphere%20Compute%20Platform.1.019.html</li>
+<li>Dell/vKernel oversubscription paper (lower confidence, search summary): https://virtualizationreview.com/~/media/ECG/Tech%20Library%202013/04/DELL%20VKERNEL%20APRIL/Dell%20%20%20Best%20Practices%20for%20Oversubscription%20of%20CPU%20%20Memory%20and%20Storage%20in%20vSphere%20Virtual%20Environments_0.ashx</li>
+<li>This repo: <code>docs/specs/2026-10-24-performance-test-30-vms.md</code>, <code>docs/VM-DISK-FORMATS.md</code>, <code>docs/CAPACITY-PLANNING.md</code>, <code>docs/research/2026-10-24-storage-benchmark-tools.md</code></li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "navigation.instant", "search.suggest", "search.highlight", "content.code.copy", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+    
+  </body>
+</html>
