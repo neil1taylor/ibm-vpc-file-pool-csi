@@ -34,6 +34,18 @@ type listReport struct {
 // runBuildList returns the exit code: 0 when the list is written, 1 when it
 // could not be built. The reason goes to the termination log in words.
 func runBuildList(ctx context.Context, root, moments string, at time.Time, socket, appliance, consistency, out, termLog string, stderr io.Writer) int {
+	code := buildList(ctx, root, moments, at, socket, appliance, consistency, out, termLog, stderr)
+	if code != 0 {
+		// The Job's second container waits for the list or for this marker.
+		_ = os.WriteFile(out+failedSuffix, nil, 0o600) //nolint:gosec // the path is an operator flag, not user input
+	}
+	return code
+}
+
+// failedSuffix is added to the output path for the marker of a failed build.
+const failedSuffix = ".failed"
+
+func buildList(ctx context.Context, root, moments string, at time.Time, socket, appliance, consistency, out, termLog string, stderr io.Writer) int {
 	g, err := openGuestSession(ctx, root, moments, at, socket, appliance, consistency)
 	if err != nil {
 		failStart(stderr, termLog, err)

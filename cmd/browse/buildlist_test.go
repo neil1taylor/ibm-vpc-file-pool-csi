@@ -76,7 +76,7 @@ func TestBuildListModeWritesTheListAndReportsIt(t *testing.T) {
 	_ = browse.Info{}
 }
 
-func TestBuildListModeFailsInWordsAndLeavesNoFile(t *testing.T) {
+func TestBuildListModeFailsInWordsAndLeavesOnlyAMarker(t *testing.T) {
 	old := newToolRunner
 	newToolRunner = func(string, bool) guestfs.Runner { return failingTools{} }
 	defer func() { newToolRunner = old }()
@@ -92,8 +92,9 @@ func TestBuildListModeFailsInWordsAndLeavesNoFile(t *testing.T) {
 	if !strings.Contains(string(b), "file systems") {
 		t.Errorf("termination log = %q", b)
 	}
-	if entries, _ := os.ReadDir(outDir); len(entries) != 0 {
-		t.Errorf("left %d files after a failure", len(entries))
+	entries, _ := os.ReadDir(outDir)
+	if len(entries) != 1 || entries[0].Name() != "filelist.json.gz.failed" {
+		t.Errorf("after a failure only the marker may be left: %v", entries)
 	}
 }
 
