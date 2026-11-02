@@ -48,6 +48,7 @@ type OpenOptions struct {
 // Opened is a VM disk ready to browse.
 type Opened struct {
 	Tree *Guest
+	// View is the local disk; it is nil for a disk read from a disk server.
 	View *replication.DiskView
 	Info browse.Info
 	// Moments lists the moments of the disk, like the helper's /v1/moments.
@@ -62,7 +63,9 @@ type Opened struct {
 func (o *Opened) Close() {
 	o.cancel()
 	<-o.done
-	_ = o.View.Close()
+	if o.View != nil {
+		_ = o.View.Close()
+	}
 	_ = os.Remove(o.socket)
 }
 
