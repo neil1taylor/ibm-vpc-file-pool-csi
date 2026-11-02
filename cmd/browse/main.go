@@ -84,6 +84,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 	segmentMB := fs.Int("segment-mb", 4, "size of one fetch from COS, in MiB (cos-disk-server mode)")
 	readAhead := fs.Int("read-ahead", 8, "how many segments are fetched ahead of a read (cos-disk-server mode)")
 	listOut := fs.String("list-out", "", "file to write the file list to (build-list mode)")
+	guestDiskURL := fs.String("guest-disk-url", "", "read the VM disk from a disk server at this https address instead of --root (--guest)")
+	guestDiskCert := fs.String("guest-disk-cert-file", "", "the certificate of the disk server, which is the only one trusted (--guest-disk-url)")
+	guestDiskToken := fs.String("guest-disk-token-file", "", "file that holds the token for the disk server (--guest-disk-url)")
 	termLog := fs.String("termination-log", "/dev/termination-log", "file that gets the reason the session ended")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -158,7 +161,16 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 	case *guestConsistency != "" && *guestConsistency != consistencyFS && *guestConsistency != consistencyCrash:
 		_, _ = fmt.Fprintln(stderr, "--guest-consistency must be FileSystemConsistent or CrashConsistent")
 		return 2
-	case *cosSource == "" && *root == "":
+	case *guestDiskURL != "" && (!*guest || *root != "" || *moments != "" || *cosSource != ""):
+		_, _ = fmt.Fprintln(stderr, "--guest-disk-url needs --guest and cannot be used with --root, --moments or --cos-source")
+		return 2
+	case *guestDiskURL != "" && !strings.HasPrefix(*guestDiskURL, "https://"):
+		_, _ = fmt.Fprintln(stderr, "--guest-disk-url must be an https address")
+		return 2
+	case *guestDiskURL != "" && (*guestDiskCert == "" || *guestDiskToken == ""):
+		_, _ = fmt.Fprintln(stderr, "--guest-disk-cert-file and --guest-disk-token-file are required with --guest-disk-url")
+		return 2
+	case *cosSource == "" && *root == "" && *guestDiskURL == "":
 		_, _ = fmt.Fprintln(stderr, "--root is required")
 		return 2
 	case *tokenFile == "":
@@ -201,13 +213,22 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 		walk bool
 	)
 	if *guest {
-		g, gerr := openGuestSession(ctx, *root, *moments, atTime, *guestSocket, *guestAppliance, *guestConsistency)
+		var (
+			g    *guestSession
+			gerr error
+		)
+		if *guestDiskURL != "" {
+			g, gerr = openRemoteGuestSession(ctx, remoteGuestArgs{url: *guestDiskURL, certFile: *guestDiskCert, tokenFile: *guestDiskToken,
+				socket: *guestSocket, appliance: *guestAppliance, consistency: *guestConsistency})
+		} else {
+			g, gerr = openGuestSession(ctx, *root, *moments, atTime, *guestSocket, *guestAppliance, *guestConsistency)
+		}
 		if gerr != nil {
 			failStart(stderr, *termLog, gerr)
 			return 1
 		}
 		defer g.Close()
-		opts.InfoFunc, opts.Moments, tree = g.info, g.Moments, g.Tree
+		opts.InfoFunc, opts.Moments, tree = g.info, g.Moments, g.tree
 	} else if *cosSource != "" {
 		cosTree, info, moments, cerr := startCOS(ctx, *cosSource, atTime, *kopia, *kopiaState, stderr)
 		if cerr != nil {

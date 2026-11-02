@@ -20,6 +20,21 @@ const (
 type guestSession struct {
 	*guestfs.Opened
 	consistency string
+	// tree is what the session serves: the guest reader, or a saved file list
+	// that answers folders and hands everything else to the reader.
+	tree browse.Tree
+	// notices are sentences about how the disk is read, added to the reader's.
+	notices []string
+	// closeExtra releases what the session holds besides the reader.
+	closeExtra func()
+}
+
+// Close ends the reader and what it reads from.
+func (g *guestSession) Close() {
+	g.Opened.Close()
+	if g.closeExtra != nil {
+		g.closeExtra()
+	}
 }
 
 // openGuestSession shows the disk in root (disk.img) to the appliance and lists
@@ -38,7 +53,7 @@ func openGuestSession(ctx context.Context, root, moments string, at time.Time, s
 	if err != nil {
 		return nil, err
 	}
-	return &guestSession{Opened: opened, consistency: consistency}, nil
+	return &guestSession{Opened: opened, consistency: consistency, tree: opened.Tree}, nil
 }
 
 // info is what the session reports about itself, with the notices as they are
@@ -49,6 +64,7 @@ func (g *guestSession) info() browse.Info {
 	if g.consistency == consistencyCrash {
 		info.Notices = append(info.Notices, crashNotice)
 	}
+	info.Notices = append(info.Notices, g.notices...)
 	info.Notices = append(info.Notices, g.Tree.Notices()...)
 	return info
 }
