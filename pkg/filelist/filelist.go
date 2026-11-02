@@ -123,6 +123,13 @@ func NewListWithLimits(moment time.Time, lim Limits) *List {
 // EntryLimit is the most entries a list may hold.
 func (l Limits) EntryLimit() int { return l.entries() }
 
+// ByteLimit is the most the list may unpack to. The builder uses it as the
+// budget for what it holds in memory.
+func (l Limits) ByteLimit() int64 { return l.bytes() }
+
+// MaxLinkLen is the longest link target an entry may have.
+const MaxLinkLen = maxLinkLen
+
 // FilesystemLimit is the most file systems a list may hold.
 func (l Limits) FilesystemLimit() int { return l.filesystems() }
 

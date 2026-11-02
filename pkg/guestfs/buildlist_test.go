@@ -157,3 +157,52 @@ func TestBuildListCheckStopsIt(t *testing.T) {
 		t.Fatal("a failed check must stop the build")
 	}
 }
+
+func TestBuildListCutsALongLinkTargetInsteadOfRefusingTheList(t *testing.T) {
+	f := newFake()
+	f.streams[key(lsArgs("/dev/sda1", "/"))] = "d,0755,0,/\nl,0777,9,/ln," + strings.Repeat("a", 5000) + "\nf,0644,1,/ok\n"
+	g := newGuest(t, f, nil)
+	l, _, err := g.BuildList(context.Background(), moment, filelist.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := filelist.NewTree(roundTrip(t, l), nil)
+	e, err := tr.Stat([][]byte{[]byte("sda1"), []byte("ln")})
+	if err != nil || len(e.Link) != filelist.MaxLinkLen {
+		t.Fatalf("link = %d bytes, %v; want it cut to %d", len(e.Link), err, filelist.MaxLinkLen)
+	}
+}
+
+func TestBuildListMarksAFileSystemWithAnEndlessLine(t *testing.T) {
+	f := newFake()
+	f.streams[key(lsArgs("/dev/sda1", "/"))] = "d,0755,0,/\nf,0644,1,/" + strings.Repeat("x", maxLineLen+10) + "\n"
+	g := newGuest(t, f, nil)
+	l, notes, err := g.BuildList(context.Background(), moment, filelist.Limits{})
+	if err != nil {
+		t.Fatalf("a hostile line must not fail the whole list: %v", err)
+	}
+	tr := filelist.NewTree(roundTrip(t, l), nil)
+	page, _ := tr.List(nil, nil, 100)
+	for _, e := range page.Entries {
+		if string(e.Name) == "sda1" && e.Readable {
+			t.Errorf("sda1 should be unreadable: %+v", e)
+		}
+	}
+	if len(notes) == 0 {
+		t.Error("want a note")
+	}
+}
+
+func TestBuildListStopsAtTheByteBudget(t *testing.T) {
+	f := newFake()
+	var b strings.Builder
+	b.WriteString("d,0755,0,/\n")
+	for i := 0; i < 100; i++ {
+		b.WriteString("l,0777,1,/l" + strings.Repeat("n", i) + "," + strings.Repeat("t", 3000) + "\n")
+	}
+	f.streams[key(lsArgs("/dev/sda1", "/"))] = b.String()
+	g := newGuest(t, f, nil)
+	if _, _, err := g.BuildList(context.Background(), moment, filelist.Limits{MaxBytes: 100_000}); err == nil {
+		t.Fatal("want an error: the links alone are 300 KB and the budget is 100 KB")
+	}
+}

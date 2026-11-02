@@ -33,7 +33,7 @@ func (g *Guest) BuildList(ctx context.Context, moment time.Time, lim filelist.Li
 	}
 	l := filelist.NewListWithLimits(moment, lim)
 	var notes []string
-	left := lim.EntryLimit()
+	left, budget := lim.EntryLimit(), lim.ByteLimit()
 	for _, f := range fss {
 		if err := g.check(); err != nil {
 			return nil, nil, err
@@ -41,8 +41,8 @@ func (g *Guest) BuildList(ctx context.Context, moment time.Time, lim filelist.Li
 		fsys := filelist.Filesystem{ID: f.ID, VFS: f.VFS, Label: f.Label, Size: f.Size, Readable: f.Readable, Reason: f.Reason}
 		var folders map[string][]browse.Entry
 		if f.Readable {
-			var n int
-			folders, n, err = g.listAll(ctx, f.ID, left)
+			var n listed
+			folders, n, err = g.listAll(ctx, f.ID, left, budget)
 			switch {
 			case errors.Is(err, errTooMany):
 				return nil, nil, fmt.Errorf("the disk holds more than %d files and folders, more than the list allows", lim.EntryLimit())
@@ -55,7 +55,8 @@ func (g *Guest) BuildList(ctx context.Context, moment time.Time, lim filelist.Li
 				notes = append(notes, fmt.Sprintf("%s could not be listed, so its files cannot be browsed without the disk.", f.ID))
 				folders = nil
 			default:
-				left -= n
+				left -= n.entries
+				budget -= n.bytes
 			}
 		}
 		l.AddFilesystem(fsys)
@@ -72,34 +73,79 @@ func (g *Guest) BuildList(ctx context.Context, moment time.Time, lim filelist.Li
 
 var errTooMany = errors.New("too many entries")
 
+// listed is what listAll holds in memory: the number of names, and an estimate
+// of their bytes (the names, the link targets and a fixed cost for each).
+type listed struct {
+	entries int
+	bytes   int64
+}
+
+// entryOverhead is the estimated cost of one entry besides its name and link.
+const entryOverhead = 160
+
+// maxLineLen bounds one line of the listing, so that a hostile name cannot make
+// the reader hold a line of any length.
+const maxLineLen = 16 << 10
+
+// lineLimit passes bytes through and fails when a line is longer than max. A
+// quoted name that holds newlines counts line by line, and the whole stream is
+// bounded by total.
+type lineLimit struct {
+	r         io.Reader
+	max       int
+	run       int
+	remaining int64
+}
+
+var errLineTooLong = errors.New("a line of the listing is too long")
+
+func (l *lineLimit) Read(p []byte) (int, error) {
+	if l.remaining <= 0 {
+		return 0, errTooMany
+	}
+	if int64(len(p)) > l.remaining {
+		p = p[:l.remaining]
+	}
+	n, err := l.r.Read(p)
+	l.remaining -= int64(n)
+	for _, b := range p[:n] {
+		if b == '\n' {
+			l.run = 0
+		} else if l.run++; l.run > l.max {
+			return n, errLineTooLong
+		}
+	}
+	return n, err
+}
+
 // listAll reads the whole tree of one file system and returns it grouped by
 // folder. The key is the folder as a path from the top ("" is the top, "/a/b"
-// is below it). At most max names are read.
-func (g *Guest) listAll(ctx context.Context, id string, max int) (map[string][]browse.Entry, int, error) {
+// is below it). At most max names and about budget bytes are held.
+func (g *Guest) listAll(ctx context.Context, id string, max int, budget int64) (map[string][]browse.Entry, listed, error) {
 	f, err := g.readable([]byte(id))
 	if err != nil {
-		return nil, 0, err
+		return nil, listed{}, err
 	}
 	_, rc, release, err := g.run(ctx, f, func(mount string) []string {
 		return g.driveArgs("virt-ls", "-m", mount, "-lR", "--csv", "--", "/")
 	}, true)
 	if err != nil {
-		return nil, 0, err
+		return nil, listed{}, err
 	}
 	defer release()
 	defer rc.Close()
-	r := csv.NewReader(rc)
+	r := csv.NewReader(&lineLimit{r: rc, max: maxLineLen, remaining: 2 * budget})
 	r.FieldsPerRecord = -1
 	r.LazyQuotes = true
 	out := map[string][]browse.Entry{"": nil}
-	n := 0
+	var held listed
 	for {
 		rec, err := r.Read()
 		if errors.Is(err, io.EOF) {
-			return out, n, nil
+			return out, held, nil
 		}
 		if err != nil {
-			return nil, 0, err
+			return nil, listed{}, err
 		}
 		if len(rec) < 4 || rec[0] == "Type" || !strings.HasPrefix(rec[3], "/") || rec[3] == "/" {
 			continue
@@ -109,10 +155,15 @@ func (g *Guest) listAll(ctx context.Context, id string, max int) (map[string][]b
 		if browse.ValidatePath([][]byte{name}) != nil {
 			continue
 		}
-		if n++; n > max {
-			return nil, 0, errTooMany
-		}
 		e := entryOf(rec, name)
+		if len(e.Link) > filelist.MaxLinkLen {
+			e.Link = e.Link[:filelist.MaxLinkLen] // a longer target is cut, not refused
+		}
+		held.entries++
+		held.bytes += int64(entryOverhead + len(name) + len(e.Link))
+		if held.entries > max || held.bytes > budget {
+			return nil, listed{}, errTooMany
+		}
 		out[parent] = append(out[parent], e)
 		if e.Type == browse.TypeDir {
 			if _, ok := out[parent+"/"+string(name)]; !ok {
