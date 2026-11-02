@@ -292,8 +292,155 @@ func (l *limitedReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// token reads one JSON token and checks it is the delimiter want.
+func expectDelim(dec *json.Decoder, want json.Delim) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	if d, ok := tok.(json.Delim); !ok || d != want {
+		return fmt.Errorf("expected %q, found %v", rune(want), tok)
+	}
+	return nil
+}
+
+// readArray calls item for each element of the JSON array that comes next. A
+// null is an empty array. The elements are decoded one at a time, so a limit
+// that item enforces stops the read before the rest is unpacked.
+func readArray(dec *json.Decoder, item func() error) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	if tok == nil {
+		return nil
+	}
+	if d, ok := tok.(json.Delim); !ok || d != '[' {
+		return fmt.Errorf("expected a list, found %v", tok)
+	}
+	for dec.More() {
+		if err = item(); err != nil {
+			return err
+		}
+	}
+	return expectDelim(dec, ']')
+}
+
+// readObject calls field for each key of the JSON object that comes next. field
+// must read the value; it returns an error for a key it does not know.
+func readObject(dec *json.Decoder, field func(key string) error) error {
+	if err := expectDelim(dec, '{'); err != nil {
+		return err
+	}
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		key, ok := tok.(string)
+		if !ok {
+			return fmt.Errorf("expected a field name, found %v", tok)
+		}
+		if err = field(key); err != nil {
+			return err
+		}
+	}
+	return expectDelim(dec, '}')
+}
+
+// readHeader reads the header and adds its file systems one at a time.
+func (l *List) readHeader(dec *json.Decoder, lim Limits) error {
+	seenV := false
+	err := readObject(dec, func(key string) error {
+		switch key {
+		case "v":
+			var v int
+			if err := dec.Decode(&v); err != nil {
+				return err
+			}
+			if v != version {
+				return fmt.Errorf("version %d is not supported", v)
+			}
+			seenV = true
+		case "moment":
+			var m time.Time
+			if err := dec.Decode(&m); err != nil {
+				return err
+			}
+			l.moment = m.UTC()
+		case "fs":
+			return readArray(dec, func() error {
+				if len(l.fss) >= lim.filesystems() {
+					return fmt.Errorf("more than %d file systems", lim.filesystems())
+				}
+				var f Filesystem
+				if err := dec.Decode(&f); err != nil {
+					return err
+				}
+				return l.addFS(f)
+			})
+		default:
+			return fmt.Errorf("unknown field %q in the header", key)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("filelist: reading the header: %w", err)
+	}
+	if !seenV {
+		return errors.New("filelist: the header has no version")
+	}
+	return nil
+}
+
+// readFolder reads one folder line. The entries are checked and counted as they
+// are decoded, against the entries already read.
+func (l *List) readFolder(dec *json.Decoder) (fs string, path [][]byte, entries []browse.Entry, err error) {
+	limit := l.max
+	if limit <= 0 {
+		limit = defaultMaxEntries
+	}
+	err = readObject(dec, func(key string) error {
+		switch key {
+		case "fs":
+			return dec.Decode(&fs)
+		case "path":
+			return readArray(dec, func() error {
+				if len(path) >= browse.MaxPathDepth {
+					return fmt.Errorf("a path deeper than %d folders", browse.MaxPathDepth)
+				}
+				var n []byte
+				if err := dec.Decode(&n); err != nil {
+					return err
+				}
+				path = append(path, n)
+				return nil
+			})
+		case "entries":
+			return readArray(dec, func() error {
+				if l.entries+len(entries) >= limit {
+					return fmt.Errorf("more than %d entries", limit)
+				}
+				var e browse.Entry
+				if err := dec.Decode(&e); err != nil {
+					return err
+				}
+				if err := checkEntry(e); err != nil {
+					return err
+				}
+				entries = append(entries, e)
+				return nil
+			})
+		}
+		return fmt.Errorf("unknown field %q in a folder", key)
+	})
+	return fs, path, entries, err
+}
+
 // Read reads and checks a list. It never returns a list that Encode would
-// refuse.
+// refuse. The file systems and the entries are counted as they are read, so a
+// list that passes a limit is refused before the rest of it is unpacked; one
+// value (a name) can be as large as the unpacked size limit allows.
 func Read(r io.Reader, lim Limits) (*List, error) {
 	zr, err := gzip.NewReader(r)
 	if err != nil {
@@ -301,34 +448,25 @@ func Read(r io.Reader, lim Limits) (*List, error) {
 	}
 	defer zr.Close()
 	dec := json.NewDecoder(&limitedReader{r: zr, left: lim.bytes()})
-	dec.DisallowUnknownFields()
-	var h header
-	if err = dec.Decode(&h); err != nil {
-		return nil, fmt.Errorf("filelist: reading the header: %w", err)
-	}
-	if h.V != version {
-		return nil, fmt.Errorf("filelist: version %d is not supported", h.V)
-	}
-	if len(h.FS) > lim.filesystems() {
-		return nil, fmt.Errorf("filelist: more than %d file systems", lim.filesystems())
-	}
-	l := NewList(h.Moment)
+	l := NewList(time.Time{})
 	l.max = lim.entries()
-	for _, f := range h.FS {
-		if err = l.addFS(f); err != nil {
-			return nil, err
-		}
+	if err = l.readHeader(dec, lim); err != nil {
+		return nil, err
 	}
 	for {
-		var fl folderLine
-		if err = dec.Decode(&fl); errors.Is(err, io.EOF) {
+		if !dec.More() {
 			break
-		} else if err != nil {
-			return nil, fmt.Errorf("filelist: reading a folder: %w", err)
 		}
-		if err = l.AddFolder(fl.FS, fl.Path, fl.Entries); err != nil {
+		fs, path, entries, ferr := l.readFolder(dec)
+		if ferr != nil {
+			return nil, fmt.Errorf("filelist: reading a folder: %w", ferr)
+		}
+		if err = l.AddFolder(fs, path, entries); err != nil {
 			return nil, err
 		}
+	}
+	if _, terr := dec.Token(); !errors.Is(terr, io.EOF) {
+		return nil, fmt.Errorf("filelist: unexpected data after the last folder: %v", terr)
 	}
 	if err = l.check(); err != nil {
 		return nil, err

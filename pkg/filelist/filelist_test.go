@@ -342,3 +342,69 @@ func FuzzRead(f *testing.F) {
 		_, _ = NewTree(got, nil).List(nil, nil, 100)
 	})
 }
+
+// countReader counts the bytes taken from it.
+type countReader struct {
+	r io.Reader
+	n int
+}
+
+func (c *countReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += n
+	return n, err
+}
+
+func TestReadStopsEarlyWhenTheEntryLimitIsPassed(t *testing.T) {
+	l := NewList(t0)
+	l.AddFilesystem(Filesystem{ID: "sda1", VFS: "xfs", Readable: true})
+	var entries []browse.Entry
+	for i := 0; i < 200_000; i++ {
+		entries = append(entries, file(fmt.Sprintf("file-%07d", i), int64(i)))
+	}
+	if err := l.AddFolder("sda1", nil, entries); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := l.Encode(&buf); err != nil {
+		t.Fatal(err)
+	}
+	total := buf.Len()
+	cr := &countReader{r: &buf}
+	if _, err := Read(cr, Limits{MaxEntries: 100}); err == nil {
+		t.Fatal("want a refusal")
+	}
+	if cr.n > total/10 {
+		t.Fatalf("read %d of %d compressed bytes before refusing; the entry count must be enforced while reading, not after a whole folder is in memory", cr.n, total)
+	}
+}
+
+func TestReadStopsEarlyWhenTheFilesystemLimitIsPassed(t *testing.T) {
+	h := rawHeader{V: 1, Moment: t0}
+	for i := 0; i < 100_000; i++ {
+		h.FS = append(h.FS, struct {
+			ID       string `json:"id"`
+			VFS      string `json:"vfs"`
+			Readable bool   `json:"readable"`
+		}{ID: fmt.Sprintf("fs%d", i), VFS: "xfs", Readable: true})
+	}
+	data := gz(t, h)
+	cr := &countReader{r: bytes.NewReader(data)}
+	if _, err := Read(cr, Limits{MaxFilesystems: 5}); err == nil {
+		t.Fatal("want a refusal")
+	}
+	if cr.n > len(data)/10 {
+		t.Fatalf("read %d of %d bytes before refusing", cr.n, len(data))
+	}
+}
+
+func TestReadRefusesDataAfterTheLastFolder(t *testing.T) {
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	_ = json.NewEncoder(zw).Encode(hdr("sda1"))
+	_, _ = zw.Write([]byte("}\n"))
+	_ = zw.Close()
+	if _, err := Read(&buf, Limits{}); err == nil {
+		t.Fatal("want a refusal for a stray closing brace")
+	}
+}
