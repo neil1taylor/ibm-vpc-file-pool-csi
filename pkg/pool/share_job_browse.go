@@ -23,6 +23,14 @@ import (
 // the BackupBrowse.
 const browseLabel = "storage.ibmcloud.io/browse"
 
+// browseDiskLabel is on the pod of a disk server, and browseGuestLabel on the
+// pod of a guest reader that reads from one. The network policy that lets the
+// second reach the first selects on them.
+const (
+	browseDiskLabel  = "storage.ibmcloud.io/browse-disk"
+	browseGuestLabel = "storage.ibmcloud.io/browse-guest"
+)
+
 // BrowseJobRequest asks for the helper pod of one browse session.
 type BrowseJobRequest struct {
 	// ID is the UID of the BackupBrowse. It names every object of the session.
@@ -53,6 +61,22 @@ type BrowseJobRequest struct {
 	// Consistency is the consistency of the newest copy of the VM disk
 	// (FileSystemConsistent or CrashConsistent); empty if not known. Guest only.
 	Consistency string
+	// DiskSecretName is the Secret, in the driver namespace, with the token,
+	// certificate and key of the disk server of a VM disk in COS. Used by
+	// StartBrowseDisk.
+	DiskSecretName string
+	// Disk, if set, makes the guest helper read its VM disk from a disk server
+	// instead of a folder: the helper mounts no share and holds no key.
+	Disk *BrowseDisk
+}
+
+// BrowseDisk says where the disk server of a VM disk in COS is.
+type BrowseDisk struct {
+	// IP is the address of the disk server pod.
+	IP string
+	// SecretName is the Secret, in the browse namespace, with the token and the
+	// certificate (not the key) of the disk server.
+	SecretName string
 }
 
 // BrowseJobState says what the helper pod of a session is doing.
@@ -122,6 +146,9 @@ const browsePort = 8443
 
 func browseKey(name string) string { return "browse-" + name }
 
+// browseDiskKey names the Job of the disk server of a session on a VM disk in COS.
+func browseDiskKey(name string) string { return "browsedisk-" + name }
+
 // StartBrowse starts the helper pod of a session, or does nothing if it exists.
 // The pod mounts only the volume's backup folders, read-only, down to the NFS
 // export. It has no service account token, runs as root with every capability
@@ -136,6 +163,9 @@ func (r *ShareJobRunner) StartBrowse(ctx context.Context, req BrowseJobRequest) 
 	}
 	if req.Idle <= 0 || req.MaxLife <= 0 {
 		return errors.New("a browse session needs an idle limit and a hard limit")
+	}
+	if req.Disk != nil {
+		return r.startBrowseDiskReader(ctx, req)
 	}
 	if req.COS != nil {
 		return r.startBrowseCOS(ctx, req)
@@ -213,7 +243,15 @@ func (r *ShareJobRunner) StartBrowse(ctx context.Context, req BrowseJobRequest) 
 
 // BrowseState reports on the helper pod of a session.
 func (r *ShareJobRunner) BrowseState(ctx context.Context, name string) (BrowseJobState, error) {
-	jobName := shareJobName(browseKey(name))
+	return r.jobState(ctx, shareJobName(browseKey(name)))
+}
+
+// DiskState reports on the disk server of a session on a VM disk in COS.
+func (r *ShareJobRunner) DiskState(ctx context.Context, name string) (BrowseJobState, error) {
+	return r.jobState(ctx, shareJobName(browseDiskKey(name)))
+}
+
+func (r *ShareJobRunner) jobState(ctx context.Context, jobName string) (BrowseJobState, error) {
 	job := &batchv1.Job{}
 	if err := r.client.Get(ctx, types.NamespacedName{Namespace: r.namespace, Name: jobName}, job); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -253,7 +291,15 @@ func (r *ShareJobRunner) BrowseState(ctx context.Context, name string) (BrowseJo
 // StopBrowse ends a session's helper pod and removes its share objects. It
 // reports done once the pod is gone.
 func (r *ShareJobRunner) StopBrowse(ctx context.Context, name string) (bool, error) {
-	return r.Stop(ctx, browseKey(name))
+	done, err := r.Stop(ctx, browseKey(name))
+	if err != nil {
+		return false, err
+	}
+	diskDone, err := r.Stop(ctx, browseDiskKey(name))
+	if err != nil {
+		return false, err
+	}
+	return done && diskDone, nil
 }
 
 // BrowseSessions lists the sessions that have a helper Job.
@@ -262,9 +308,14 @@ func (r *ShareJobRunner) BrowseSessions(ctx context.Context) ([]string, error) {
 	if err := r.client.List(ctx, jobs, client.InNamespace(r.namespace), client.HasLabels{browseLabel}); err != nil {
 		return nil, fmt.Errorf("list browse Jobs: %w", err)
 	}
+	seen := map[string]bool{}
 	var names []string
 	for _, j := range jobs.Items {
-		names = append(names, j.Labels[browseLabel])
+		// A session on a VM disk in COS has two Jobs with the same label.
+		if n := j.Labels[browseLabel]; !seen[n] {
+			seen[n] = true
+			names = append(names, n)
+		}
 	}
 	sort.Strings(names)
 	return names, nil
