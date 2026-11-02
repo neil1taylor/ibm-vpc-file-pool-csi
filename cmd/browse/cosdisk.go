@@ -123,15 +123,21 @@ func runCOSDisk(ctx context.Context, a cosDiskArgs, stdout, stderr io.Writer, on
 	}
 	disk := cosdisk.New(httpSrc, cosdisk.Options{SegmentSize: a.segmentMB << 20, ReadAhead: a.readAhead, MaxBytes: int64(a.cacheMB) << 20})
 	defer func() { _ = disk.Close() }()
-	diskHandler, err := cosdisk.NewHandler(disk, token)
+	var lastUse atomic.Int64
+	lastUse.Store(time.Now().UnixNano())
+	moment := pick.Moment.UTC().Format(time.RFC3339)
+	diskHandler, err := cosdisk.NewHandler(disk, token,
+		cosdisk.WithFileList(func(ctx context.Context) (io.ReadCloser, int64, error) { return fetchFileList(ctx, dav.URL) }),
+		cosdisk.WithOnAuthed(func(w http.ResponseWriter, _ *http.Request) func() {
+			lastUse.Store(time.Now().UnixNano())
+			w.Header().Set(cosdisk.MomentHeader, moment)
+			return func() { lastUse.Store(time.Now().UnixNano()) }
+		}))
 	if err != nil {
 		failStart(stderr, a.termLog, err)
 		return 1
 	}
 
-	var lastUse atomic.Int64
-	lastUse.Store(time.Now().UnixNano())
-	moment := pick.Moment.UTC().Format(time.RFC3339)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -140,11 +146,7 @@ func runCOSDisk(ctx context.Context, a cosDiskArgs, stdout, stderr io.Writer, on
 		}
 		_, _ = io.WriteString(w, "ok")
 	})
-	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		lastUse.Store(time.Now().UnixNano())
-		w.Header().Set(cosdisk.MomentHeader, moment)
-		diskHandler.ServeHTTP(w, r)
-	}))
+	mux.Handle("/", diskHandler)
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	rawLn, err := net.Listen("tcp", a.listen)
 	if err != nil {
@@ -199,4 +201,26 @@ func minDuration(a, b time.Duration) time.Duration {
 		return time.Millisecond
 	}
 	return min(a, b)
+}
+
+// fileListName is the file next to disk.img that the export carries to COS.
+const fileListName = "/.filelist.json.gz"
+
+// fetchFileList opens the file list of the snapshot from the Kopia WebDAV
+// server. It does not read the list.
+func fetchFileList(ctx context.Context, diskURL string) (io.ReadCloser, int64, error) {
+	listURL := strings.TrimSuffix(diskURL, "/disk.img") + fileListName
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, listURL, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	resp, err := (&http.Client{Timeout: 5 * time.Minute}).Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	if resp.StatusCode != http.StatusOK || resp.ContentLength < 0 {
+		_ = resp.Body.Close()
+		return nil, 0, cosdisk.ErrNoFileList
+	}
+	return resp.Body, resp.ContentLength, nil
 }

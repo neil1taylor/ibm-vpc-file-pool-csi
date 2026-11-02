@@ -3,6 +3,7 @@ package cosdisk
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -135,5 +136,110 @@ func TestRemoteSourceRefusesPlainHTTPAndABadToken(t *testing.T) {
 	}
 	if _, err := NewRemoteSource(context.Background(), c, ts.URL+"/disk", "wrong-token-wrong-token-wrong-token"); err == nil {
 		t.Error("a wrong token was accepted")
+	}
+}
+
+func tlsDiskWithList(t *testing.T, list []byte, size int64) (*httptest.Server, *http.Client) {
+	t.Helper()
+	certPEM, keyPEM, err := browse.NewSessionCert(time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ := browse.ServerTLSConfig(certPEM, keyPEM)
+	d := New(&memSource{data: newData(100)}, Options{})
+	t.Cleanup(func() { _ = d.Close() })
+	h, err := NewHandler(d, testToken, WithFileList(func(context.Context) (io.ReadCloser, int64, error) {
+		if list == nil {
+			return nil, 0, ErrNoFileList
+		}
+		return io.NopCloser(bytes.NewReader(list)), size, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewUnstartedServer(h)
+	ts.TLS = cfg
+	ts.StartTLS()
+	t.Cleanup(ts.Close)
+	c, _ := browse.PinnedClient(certPEM)
+	return ts, c
+}
+
+func TestFileListIsServedWithTheToken(t *testing.T) {
+	list := []byte("not parsed here")
+	ts, c := tlsDiskWithList(t, list, int64(len(list)))
+	if got := do(t, c, http.MethodGet, ts.URL+FileListPath, "", "").StatusCode; got != http.StatusUnauthorized {
+		t.Errorf("no token: %d", got)
+	}
+	rc, err := FetchFileList(context.Background(), c, ts.URL+FileListPath, testToken, 1<<20)
+	if err != nil || rc == nil {
+		t.Fatalf("FetchFileList = %v, %v", rc, err)
+	}
+	defer rc.Close()
+	got, _ := io.ReadAll(rc)
+	if !bytes.Equal(got, list) {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestFileListIsMissingWhenThereIsNone(t *testing.T) {
+	ts, c := tlsDiskWithList(t, nil, 0)
+	rc, err := FetchFileList(context.Background(), c, ts.URL+FileListPath, testToken, 1<<20)
+	if err != nil || rc != nil {
+		t.Fatalf("FetchFileList = %v, %v; want nil, nil", rc, err)
+	}
+}
+
+func TestFileListThatIsTooBigIsNotServedOrRead(t *testing.T) {
+	big := make([]byte, 5000)
+	ts, c := tlsDiskWithList(t, big, int64(len(big)))
+	rc, err := FetchFileList(context.Background(), c, ts.URL+FileListPath, testToken, 1000)
+	if err == nil {
+		_ = rc.Close()
+		t.Fatal("a list over the client's limit must be refused")
+	}
+	// The server refuses a list over its own limit, whatever size it says.
+	ts2, c2 := tlsDiskWithList(t, big, MaxFileListBytes+1)
+	if got := do(t, c2, http.MethodGet, ts2.URL+FileListPath, testToken, "").StatusCode; got != http.StatusNotFound {
+		t.Errorf("an oversize list: status %d, want 404", got)
+	}
+}
+
+func TestHandlerWithoutAFileListHasNoSuchPath(t *testing.T) {
+	ts, c := tlsDisk(t, newData(100))
+	if got := do(t, c, http.MethodGet, ts.URL+FileListPath, testToken, "").StatusCode; got != http.StatusNotFound {
+		t.Errorf("status %d, want 404", got)
+	}
+}
+
+func TestOnAuthedRunsOnlyForTheRightToken(t *testing.T) {
+	certPEM, keyPEM, _ := browse.NewSessionCert(time.Hour)
+	cfg, _ := browse.ServerTLSConfig(certPEM, keyPEM)
+	d := New(&memSource{data: newData(100)}, Options{})
+	defer d.Close()
+	var starts, ends int
+	h, _ := NewHandler(d, testToken, WithOnAuthed(func(w http.ResponseWriter, _ *http.Request) func() {
+		starts++
+		w.Header().Set(MomentHeader, "2026-10-22T09:15:00Z")
+		return func() { ends++ }
+	}))
+	ts := httptest.NewUnstartedServer(h)
+	ts.TLS = cfg
+	ts.StartTLS()
+	defer ts.Close()
+	c, _ := browse.PinnedClient(certPEM)
+	bad := do(t, c, http.MethodGet, ts.URL+"/disk", "wrong", "bytes=0-9")
+	if starts != 0 || bad.Header.Get(MomentHeader) != "" {
+		t.Errorf("a request without the token reached the hook (%d) or got the header %q", starts, bad.Header.Get(MomentHeader))
+	}
+	good := do(t, c, http.MethodGet, ts.URL+"/disk", testToken, "bytes=0-9")
+	if good.Header.Get(MomentHeader) == "" {
+		t.Error("the header is missing for the right token")
+	}
+	_, _ = io.Copy(io.Discard, good.Body)
+	_ = good.Body.Close()
+	time.Sleep(50 * time.Millisecond)
+	if starts != 1 || ends != 1 {
+		t.Errorf("starts=%d ends=%d, want 1 and 1", starts, ends)
 	}
 }

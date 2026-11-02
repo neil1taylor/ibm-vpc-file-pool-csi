@@ -98,3 +98,39 @@ func (r *RemoteSource) ReadRange(ctx context.Context, p []byte, off int64) (int,
 	}
 	return io.ReadFull(resp.Body, p)
 }
+
+// FetchFileList fetches the file list from the disk server. It returns nil and
+// no error when the export has none. A list that says it is larger than max is
+// refused, and the reader stops at max. The caller closes the result.
+func FetchFileList(ctx context.Context, client *http.Client, rawURL, token string, max int64) (io.ReadCloser, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme != "https" || u.User != nil || u.Host == "" {
+		return nil, errors.New("cosdisk: the disk server must be on https")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("cosdisk: fetching the file list: %w", err)
+	}
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		_ = resp.Body.Close()
+		return nil, nil
+	case resp.StatusCode != http.StatusOK:
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("cosdisk: fetching the file list: %s", resp.Status)
+	case resp.ContentLength < 0 || resp.ContentLength > max:
+		_ = resp.Body.Close()
+		return nil, errors.New("cosdisk: the file list is larger than the limit")
+	}
+	return &limitedBody{Reader: io.LimitReader(resp.Body, max), Closer: resp.Body}, nil
+}
+
+type limitedBody struct {
+	io.Reader
+	io.Closer
+}
