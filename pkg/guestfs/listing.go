@@ -54,16 +54,7 @@ func parseListing(in io.Reader, folder string, limit int) ([]browse.Entry, error
 		if len(entries) >= limit {
 			return nil, &browse.Error{Code: browse.CodeInternal, Msg: fmt.Sprintf("the folder has more than %d names", limit)}
 		}
-		e := browse.Entry{Name: name, Type: typeOf(rec[0]), Readable: true}
-		if n, perr := strconv.ParseInt(strings.TrimSpace(rec[2]), 10, 64); perr == nil && n >= 0 {
-			e.Size = n
-		}
-		if m, perr := strconv.ParseUint(strings.TrimSpace(rec[1]), 8, 32); perr == nil {
-			e.Mode = uint32(m) & 0o7777 //nolint:gosec // ParseUint was limited to 32 bits
-		}
-		if e.Type == browse.TypeSymlink && len(rec) > 4 {
-			e.Link = []byte(rec[4])
-		}
+		e := entryOf(rec, name)
 		entries = append(entries, e)
 	}
 }
@@ -81,4 +72,19 @@ func typeOf(letter string) string {
 		return browse.TypeSymlink
 	}
 	return browse.TypeOther
+}
+
+// entryOf makes the entry of one virt-ls line (at least four fields) for name.
+func entryOf(rec []string, name []byte) browse.Entry {
+	e := browse.Entry{Name: name, Type: typeOf(rec[0]), Readable: true}
+	if n, err := strconv.ParseInt(strings.TrimSpace(rec[2]), 10, 64); err == nil && n >= 0 {
+		e.Size = n
+	}
+	if m, err := strconv.ParseUint(strings.TrimSpace(rec[1]), 8, 32); err == nil {
+		e.Mode = uint32(m) & 0o7777 //nolint:gosec // ParseUint was limited to 32 bits
+	}
+	if e.Type == browse.TypeSymlink && len(rec) > 4 {
+		e.Link = []byte(rec[4])
+	}
+	return e
 }

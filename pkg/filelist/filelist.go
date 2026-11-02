@@ -112,6 +112,20 @@ func NewList(moment time.Time) *List {
 	return &List{moment: moment.UTC(), byID: map[string]int{}, folders: map[string][]browse.Entry{}}
 }
 
+// NewListWithLimits is NewList with the entry limit of lim, so that a list that
+// is built holds no more than a list that is read.
+func NewListWithLimits(moment time.Time, lim Limits) *List {
+	l := NewList(moment)
+	l.max = lim.entries()
+	return l
+}
+
+// EntryLimit is the most entries a list may hold.
+func (l Limits) EntryLimit() int { return l.entries() }
+
+// FilesystemLimit is the most file systems a list may hold.
+func (l Limits) FilesystemLimit() int { return l.filesystems() }
+
 // Moment is the moment of the disk that the list describes.
 func (l *List) Moment() time.Time { return l.moment }
 

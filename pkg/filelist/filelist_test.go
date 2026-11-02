@@ -408,3 +408,19 @@ func TestReadRefusesDataAfterTheLastFolder(t *testing.T) {
 		t.Fatal("want a refusal for a stray closing brace")
 	}
 }
+
+func TestNewListWithLimitsRefusesPastTheEntryLimit(t *testing.T) {
+	l := NewListWithLimits(time.Unix(0, 0), Limits{MaxEntries: 2})
+	l.AddFilesystem(Filesystem{ID: "sda1", Readable: true})
+	es := []browse.Entry{
+		{Name: []byte("a"), Type: browse.TypeFile},
+		{Name: []byte("b"), Type: browse.TypeFile},
+		{Name: []byte("c"), Type: browse.TypeFile},
+	}
+	if err := l.AddFolder("sda1", nil, es); err == nil {
+		t.Fatal("want an error: 3 entries, limit 2")
+	}
+	if (Limits{}).EntryLimit() != 5_000_000 || (Limits{MaxEntries: 7}).EntryLimit() != 7 {
+		t.Fatal("EntryLimit does not follow the defaults")
+	}
+}
