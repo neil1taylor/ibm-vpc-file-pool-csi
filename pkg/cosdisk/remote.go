@@ -1,0 +1,89 @@
+package cosdisk
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strconv"
+	"time"
+)
+
+var zeroTime time.Time
+
+// RemoteSource reads a disk from a disk server over HTTPS. The client must pin
+// the session certificate (browse.PinnedClient); the token goes in every
+// request. The guest helper uses it to read the disk it cannot hold itself.
+type RemoteSource struct {
+	client *http.Client
+	url    string
+	token  string
+	size   int64
+}
+
+// NewRemoteSource finds the size of the disk with a HEAD request, which also
+// checks the token.
+func NewRemoteSource(ctx context.Context, client *http.Client, rawURL, token string) (*RemoteSource, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("cosdisk: bad URL: %w", err)
+	}
+	if u.Scheme != "https" || u.User != nil || u.Host == "" {
+		return nil, errors.New("cosdisk: the disk server must be on https")
+	}
+	r := &RemoteSource{client: client, url: rawURL, token: token}
+	req, err := r.request(ctx, http.MethodHead, "")
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("cosdisk: asking the disk server for the size: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("cosdisk: asking the disk server for the size: %s", resp.Status)
+	}
+	if resp.ContentLength <= 0 {
+		return nil, errors.New("cosdisk: the disk server did not give a size")
+	}
+	r.size = resp.ContentLength
+	return r, nil
+}
+
+func (r *RemoteSource) request(ctx context.Context, method, rng string) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, method, r.url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+r.token)
+	if rng != "" {
+		req.Header.Set("Range", rng)
+	}
+	return req, nil
+}
+
+// Size is the size of the disk.
+func (r *RemoteSource) Size() int64 { return r.size }
+
+// ReadRange fills p with the bytes at off. A reply that is not 206 is an error.
+func (r *RemoteSource) ReadRange(ctx context.Context, p []byte, off int64) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	req, err := r.request(ctx, http.MethodGet, "bytes="+strconv.FormatInt(off, 10)+"-"+strconv.FormatInt(off+int64(len(p))-1, 10))
+	if err != nil {
+		return 0, err
+	}
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusPartialContent {
+		return 0, fmt.Errorf("cosdisk: range read at %d: %s (want 206)", off, resp.Status)
+	}
+	return io.ReadFull(resp.Body, p)
+}
