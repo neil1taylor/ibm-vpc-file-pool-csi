@@ -602,3 +602,30 @@ func TestBrowse_SessionObjectsGoToTheBrowseNamespaceAndPullSecretsAreCopied(t *t
 		t.Errorf("the sweep removed the pull secret: %v", err)
 	}
 }
+
+func TestBrowse_AQuickPassStartsAWaitingSession(t *testing.T) {
+	e := newBrowseEnv(t)
+	e.open("bb1", nil)
+	e.bc.reconcileStartingBrowses(e.ctx)
+	if _, ok := e.jobs.started["uid-bb1"]; !ok {
+		t.Fatal("a new session waited for the slow pass")
+	}
+	e.jobs.state["uid-bb1"] = BrowseJobState{Exists: true, Ready: true, PodIP: "10.130.0.9"}
+	e.bc.reconcileStartingBrowses(e.ctx)
+	if bb := e.bb("bb1"); bb.Status.Phase != "Ready" {
+		t.Errorf("a session whose helper is ready stayed %q", bb.Status.Phase)
+	}
+}
+
+func TestBrowse_AQuickPassLeavesReadySessionsToTheSlowPass(t *testing.T) {
+	e := newBrowseEnv(t)
+	e.open("bb1", nil)
+	e.reconcile()
+	e.jobs.state["uid-bb1"] = BrowseJobState{Exists: true, Ready: true, PodIP: "10.130.0.9"}
+	e.reconcile()
+	delete(e.jobs.state, "uid-bb1")
+	e.bc.reconcileStartingBrowses(e.ctx)
+	if bb := e.bb("bb1"); bb.Status.Phase != "Ready" {
+		t.Errorf("the quick pass looked at a Ready session: %+v", bb.Status)
+	}
+}

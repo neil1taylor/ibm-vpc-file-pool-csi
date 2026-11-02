@@ -100,3 +100,14 @@ func TestBackupExportFileList_AListForAnotherMomentIsNotUsed(t *testing.T) {
 		t.Errorf("status = %v %d %q", v.ExportedTime, v.FileListEntries, v.FileListError)
 	}
 }
+
+func TestBackupExportFileList_TheListStatusSurvivesTheNextPass(t *testing.T) {
+	e, moment := vmEnv(t)
+	e.sd.export.list.entries = 28758
+	e.sd.export.list.momentOverride = &moment
+	e.reconcile()
+	e.reconcile()
+	if v := e.volume(e.a.Name); v.FileListEntries != 28758 {
+		t.Errorf("fileListEntries = %d after the next pass, want 28758", v.FileListEntries)
+	}
+}

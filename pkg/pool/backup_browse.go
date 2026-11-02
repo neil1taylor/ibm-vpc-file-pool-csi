@@ -114,7 +114,20 @@ func (c *browseCounts) release(ns string) { c.total--; c.perNS[ns]-- }
 
 func browseOpen(phase string) bool { return phase == browsePhaseStarting || phase == browsePhaseReady }
 
-func (bc *BackupController) reconcileBrowses(ctx context.Context) {
+func (bc *BackupController) reconcileBrowses(ctx context.Context) { bc.reconcileBrowseList(ctx, false) }
+
+// reconcileStartingBrowses is the quick pass: it looks only at sessions that
+// are waiting to start or starting, so that a session moves on within seconds
+// and not at the next slow pass. It does nothing when no session waits.
+func (bc *BackupController) reconcileStartingBrowses(ctx context.Context) {
+	bc.reconcileBrowseList(ctx, true)
+}
+
+func browseStarting(phase string) bool {
+	return phase == "" || phase == browsePhasePending || phase == browsePhaseStarting
+}
+
+func (bc *BackupController) reconcileBrowseList(ctx context.Context, quick bool) {
 	if bc.browseJobs == nil {
 		return
 	}
@@ -124,6 +137,15 @@ func (bc *BackupController) reconcileBrowses(ctx context.Context) {
 		return
 	}
 	items := list.Items
+	if quick {
+		waiting := false
+		for i := range items {
+			waiting = waiting || browseStarting(items[i].Status.Phase)
+		}
+		if !waiting {
+			return
+		}
+	}
 	sort.Slice(items, func(i, j int) bool {
 		a, b := items[i].CreationTimestamp, items[j].CreationTimestamp
 		if !a.Equal(&b) {
@@ -139,11 +161,16 @@ func (bc *BackupController) reconcileBrowses(ctx context.Context) {
 			counts.add(items[i].Spec.PVCNamespace)
 		}
 	}
-	bc.copyPullSecrets(ctx)
-	bc.sweepBrowseOrphans(ctx, known)
-	bc.sweepCOSSessionCopies(ctx, known)
+	if !quick {
+		bc.copyPullSecrets(ctx)
+		bc.sweepBrowseOrphans(ctx, known)
+		bc.sweepCOSSessionCopies(ctx, known)
+	}
 	for i := range items {
 		bb := &items[i]
+		if quick && !browseStarting(bb.Status.Phase) {
+			continue
+		}
 		if bb.Status.Phase == browsePhaseClosed || bb.Status.Phase == browsePhaseFailed {
 			bc.tidyEndedBrowse(ctx, bb)
 			continue
