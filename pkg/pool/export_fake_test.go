@@ -24,9 +24,60 @@ type fakeExport struct {
 	momentOverride *time.Time
 	lostMessage    bool
 
+	// list is what the file list Jobs do.
+	list fakeList
+
 	maintenances    []maintainCall
 	maintainRunning bool
 	maintainFail    string
+}
+
+// fakeList is what the fake share data does for the file list Jobs.
+type fakeList struct {
+	calls []listCall
+	// running makes the list Job report "not finished yet".
+	running bool
+	// err makes every call fail; notEnabled makes it say the guest image is not set.
+	err        error
+	notEnabled bool
+	// entries is what a finished list reports; momentOverride replaces the
+	// moment it reports (the default is the moment the backup is from).
+	entries        int
+	momentOverride *time.Time
+	// order records "list" and "export" in the order they were called.
+	order []string
+}
+
+type listCall struct {
+	key         string
+	backupPath  string
+	consistency string
+}
+
+func (f *fakeShareData) BuildFileList(_ context.Context, key string, _ ShareMount, backupPath, consistency string) (bool, FileListOutcome, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.export.list.calls = append(f.export.list.calls, listCall{key: key, backupPath: backupPath, consistency: consistency})
+	f.export.list.order = append(f.export.list.order, "list")
+	switch {
+	case f.export.list.notEnabled:
+		return false, FileListOutcome{}, errNoBrowseGuest
+	case f.export.list.err != nil:
+		return false, FileListOutcome{}, f.export.list.err
+	case f.export.list.running:
+		return false, FileListOutcome{}, nil
+	}
+	out := FileListOutcome{Entries: f.export.list.entries, Bytes: 1000}
+	if f.export.list.momentOverride != nil {
+		out.Moment = *f.export.list.momentOverride
+	}
+	return true, out, nil
+}
+
+func (f *fakeShareData) listCalls() []listCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]listCall(nil), f.export.list.calls...)
 }
 
 type exportCall struct {
@@ -46,6 +97,7 @@ type maintainCall struct {
 func (f *fakeShareData) ExportToCOS(_ context.Context, key string, share ShareMount, repo ExportRepo, backupPath, momentsPath string, moment time.Time) (bool, ExportOutcome, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.export.list.order = append(f.export.list.order, "export")
 	f.export.calls = append(f.export.calls, exportCall{key: key, repo: repo, backupPath: backupPath, momentsPath: momentsPath, moment: moment, srcIP: share.MountTargetIP})
 	if f.export.startErr != nil {
 		return false, ExportOutcome{}, f.export.startErr

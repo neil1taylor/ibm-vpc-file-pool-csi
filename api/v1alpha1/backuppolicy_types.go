@@ -188,6 +188,18 @@ type BackupVolumeStatus struct {
 	// again; the local backup is not affected.
 	// +optional
 	ExportError string `json:"exportError,omitempty"`
+
+	// FileListEntries is how many names the file list of the newest export
+	// holds. The list lets a session in COS show the folders of a VM disk
+	// without reading the disk. Zero means the newest export has no list.
+	// +optional
+	FileListEntries int64 `json:"fileListEntries,omitempty"`
+
+	// FileListError says why the newest export of a VM disk has no file list.
+	// A failed list never fails the export; folders are then listed from the
+	// disk in COS, which is slower.
+	// +optional
+	FileListError string `json:"fileListError,omitempty"`
 }
 
 // +kubebuilder:object:root=true
