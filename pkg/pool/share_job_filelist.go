@@ -27,6 +27,10 @@ const (
 	fileListOutFile  = fileListOutDir + "/filelist.json.gz"
 	publishContainer = "publish"
 
+	// fileListMaxBytes is the most the publisher copies (256 MiB, the size of the
+	// reader's output folder). The reader of a list applies its own limits too.
+	fileListMaxBytes = "268435456"
+
 	maxFileListNotes   = 8
 	maxFileListNoteLen = 300
 )
@@ -46,9 +50,10 @@ type FileListOutcome struct {
 // of an earlier moment when the build failed, so that a list is never taken for
 // the wrong moment. It only copies bytes: it never reads the list.
 const publishScript = `set -eu
-while [ ! -e ` + fileListOutFile + ` ] && [ ! -e ` + fileListOutFile + `.failed ]; do sleep 1; done
-if [ -e ` + fileListOutFile + ` ]; then
-  cp ` + fileListOutFile + ` /dest/` + fileListName + `.tmp
+f=` + fileListOutFile + `
+while [ ! -e "$f" ] && [ ! -L "$f" ] && [ ! -e "$f.failed" ]; do sleep 1; done
+if [ -f "$f" ] && [ ! -L "$f" ] && [ "$(stat -c %s "$f")" -le ` + fileListMaxBytes + ` ]; then
+  head -c ` + fileListMaxBytes + ` < "$f" > /dest/` + fileListName + `.tmp
   mv /dest/` + fileListName + `.tmp /dest/` + fileListName + `
 else
   rm -f /dest/` + fileListName + ` /dest/` + fileListName + `.tmp

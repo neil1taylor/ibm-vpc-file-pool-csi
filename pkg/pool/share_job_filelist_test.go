@@ -91,7 +91,7 @@ func TestBuildFileList_OnlyThePublisherWritesToTheShare(t *testing.T) {
 		t.Fatalf("publisher mounts = %+v", pub.VolumeMounts)
 	}
 	script := strings.Join(pub.Command, " ")
-	for _, want := range []string{"/out/filelist.json.gz", "/out/filelist.json.gz.failed", "/dest/.filelist.json.gz", "mv "} {
+	for _, want := range []string{"/out/filelist.json.gz", "/dest/.filelist.json.gz", "mv ", `[ ! -L "$f" ]`, "head -c 268435456", "stat -c %s", `"$f.failed"`} {
 		if !strings.Contains(script, want) {
 			t.Errorf("publisher script lacks %q: %s", want, script)
 		}
