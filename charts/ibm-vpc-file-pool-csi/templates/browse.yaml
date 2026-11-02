@@ -124,6 +124,9 @@ spec:
     matchExpressions:
       - key: storage.ibmcloud.io/browse
         operator: Exists
+      # The disk server of a VM disk is not reached by the gateway; see below.
+      - key: storage.ibmcloud.io/browse-disk
+        operator: DoesNotExist
   policyTypes: ["Ingress"]
   ingress:
     - from:
@@ -131,6 +134,34 @@ spec:
             matchLabels:
               app.kubernetes.io/name: {{ include "ibm-vpc-file-pool-csi.name" . }}
               app.kubernetes.io/component: backup-gateway
+      ports:
+        - protocol: TCP
+          port: 8443
+---
+# The disk server of a session on a VM disk in COS holds the COS and Key Protect
+# keys and serves the bytes of the disk. Only the guest reader pods of the browse
+# namespace may reach it, and only on its port. It also checks the session
+# certificate and token of its own session.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-browse-disk
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      storage.ibmcloud.io/browse-disk: "true"
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $ns }}
+          podSelector:
+            matchLabels:
+              storage.ibmcloud.io/browse-guest: "true"
       ports:
         - protocol: TCP
           port: 8443
