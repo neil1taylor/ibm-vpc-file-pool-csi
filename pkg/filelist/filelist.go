@@ -126,6 +126,9 @@ func (l Limits) EntryLimit() int { return l.entries() }
 // FilesystemLimit is the most file systems a list may hold.
 func (l Limits) FilesystemLimit() int { return l.filesystems() }
 
+// Entries is how many entries the list holds, in all folders.
+func (l *List) Entries() int { return l.entries }
+
 // Moment is the moment of the disk that the list describes.
 func (l *List) Moment() time.Time { return l.moment }
 

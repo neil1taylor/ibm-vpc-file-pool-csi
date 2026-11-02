@@ -59,7 +59,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 	fs := flag.NewFlagSet("browse", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	klog.InitFlags(fs)
-	mode := fs.String("mode", "", "what to run: "+modeServer+" or "+modeRestoreFiles)
+	mode := fs.String("mode", "", "what to run: "+modeServer+", "+modeRestoreFiles+" or "+modeBuildList)
 	restoreSpec := fs.String("restore-files-spec", "", "JSON of the file restore (restore-files mode)")
 	writerSpec := fs.String("restore-writer-spec", "", "JSON of the target and limits of the writer (restore-writer mode)")
 	restorePaths := fs.String("restore-files-paths", "", "file that lists the paths to restore, one per line in escaped form (restore-files mode)")
@@ -80,9 +80,36 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 	guestSocket := fs.String("guest-socket", "/tmp/disk.sock", "private socket where the disk is served to the appliance (--guest)")
 	guestAppliance := fs.String("guest-appliance", "", "folder with the prebuilt libguestfs appliance (--guest); empty uses the tools' default")
 	guestConsistency := fs.String("guest-consistency", "", "FileSystemConsistent or CrashConsistent: how the newest copy of the disk was taken (--guest)")
+	listOut := fs.String("list-out", "", "file to write the file list to (build-list mode)")
 	termLog := fs.String("termination-log", "/dev/termination-log", "file that gets the reason the session ended")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	if *mode == modeBuildList {
+		switch {
+		case *root == "":
+			_, _ = fmt.Fprintln(stderr, "--root is required")
+			return 2
+		case !validListOut(*listOut):
+			_, _ = fmt.Fprintln(stderr, "--list-out must be an absolute path to the file to write")
+			return 2
+		case !strings.HasPrefix(*guestSocket, "/"):
+			_, _ = fmt.Fprintln(stderr, "--guest-socket must be an absolute path")
+			return 2
+		case *guestConsistency != "" && *guestConsistency != consistencyFS && *guestConsistency != consistencyCrash:
+			_, _ = fmt.Fprintln(stderr, "--guest-consistency must be FileSystemConsistent or CrashConsistent")
+			return 2
+		}
+		var atTime time.Time
+		if *at != "" {
+			t, err := time.Parse(time.RFC3339, *at)
+			if err != nil {
+				_, _ = fmt.Fprintln(stderr, "--at must be an RFC 3339 time")
+				return 2
+			}
+			atTime = t
+		}
+		return runBuildList(ctx, *root, *moments, atTime, *guestSocket, *guestAppliance, *guestConsistency, *listOut, *termLog, stderr)
 	}
 	if *mode == modeRestoreWriter {
 		return filerestore.MainWriter(*writerSpec, *termLog)
