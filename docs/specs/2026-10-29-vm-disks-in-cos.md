@@ -1,6 +1,6 @@
 # Spec: browse and restore files from VM disks in COS (issue #92, phase 6)
 
-Date: 2026-10-29. Status: speed bar agreed by the owner (29 Oct 2026); design ready for build. It fills in phase 6 of `2026-10-22-backup-file-restore.md` (the parent spec). Read section 3 ("VM disks") and section 4 ("Backups in COS") of the parent first. It builds on phase 4 (COS, plain volumes, merged) and phase 5 (VM disks in the snapshot pool, PRs #337, #338, #341 and #342, not merged and not yet run on the lab). Facts here come from `main` and the `vm-browse-c2` branch on 29 Oct 2026.
+Date: 2026-10-29. Status: speed bar agreed by the owner (29 Oct 2026); design ready for build; phase 6a measured on the lab on 2 Nov 2026 (section "Phase 6a results"). It fills in phase 6 of `2026-10-22-backup-file-restore.md` (the parent spec). Read section 3 ("VM disks") and section 4 ("Backups in COS") of the parent first. It builds on phase 4 (COS, plain volumes, merged) and phase 5 (VM disks in the snapshot pool, PRs #337, #338, #341 and #342, not merged and not yet run on the lab). Facts here come from `main` and the `vm-browse-c2` branch on 29 Oct 2026.
 
 ## Goal
 
@@ -42,7 +42,7 @@ The disk view gets a small source interface: open a file by name for reads at an
 
 Two ways to read ranges. Phase 6a picks one on the lab.
 
-- **Option A: the Kopia program, over WebDAV (preferred).** `kopia mount --webdav` serves a snapshot as a WebDAV share on localhost, with no FUSE and no extra rights. A WebDAV GET with a Range header reads part of a file. The COS source then makes ranged HTTP reads to `127.0.0.1` inside the pod. This keeps Kopia out of our Go code, as phase 4 does, and adds no Go dependency. **Not proven:** that the pinned Kopia 0.23.1 serves WebDAV on Linux without trying an OS mount, and that it honours Range without reading from the start of the file. Phase 6a checks both.
+- **Option A: the Kopia program, over WebDAV (chosen; proven in 6a).** `kopia mount --webdav` serves a snapshot as a WebDAV share on localhost, with no FUSE and no extra rights. A WebDAV GET with a Range header reads part of a file. The COS source then makes ranged HTTP reads to `127.0.0.1` inside the pod. This keeps Kopia out of our Go code, as phase 4 does, and adds no Go dependency. Phase 6a proved both: the pinned Kopia 0.23.1 serves WebDAV on Linux in an ordinary pod (its OS mount fails with exit 32, which is harmless; the server stays up), and it honours Range without reading the file from the start.
 - **Option B: Kopia as a Go library.** Open the repository read-only in process and seek within the file object. The parent spec already allows this, in the browse binary only. Cost: a large new dependency in `go.mod` (the module is shared, but only `cmd/browse` links it), and its version must match the pinned program. Used only if option A fails.
 
 Either way:
@@ -101,11 +101,39 @@ The gateway already picks COS for a plain-volume moment that only COS holds (pha
 - **File list:** a list made from a test disk matches the files the appliance sees. A crafted list (huge, names with `..`, newlines or control characters, entries outside the file system) is refused or shown escaped, and a download of a path that is only in the list is refused. A failed list leaves the export Done and says so in the policy status. A session on a moment with no list uses the slow path and says so.
 - **Release test stage 20:** a new part that exports a VM disk, deletes the local restore points (or uses a moment older than all of them), browses a file inside it from COS, restores a folder, and compares checksums. It runs once in prod and once from the DR cluster with `--from-cos`. It records the speed bar numbers, with and without the file list, in the report.
 
+## Phase 6a results (2 Nov 2026, DR lab, no product code)
+
+Method. Real exports from release run 1102-1005 in the COS bucket (private endpoint, same region), read by a test pod on the DR cluster: the Kopia program over WebDAV, a 10 GiB VM disk (XFS, about 28,800 files), the newest moment. The pod used the driver image's Kopia and, for the guest tools, the phase 5 `browse-guest` image without KVM (the appliance runs under TCG). The scripts are not kept; the numbers are below.
+
+**Raw reads (option A).**
+
+| What | Result |
+|---|---|
+| Connect to the repository | 1.2 s |
+| Start of the WebDAV server | 0.5 s |
+| Cold read of 64 KiB at a random offset | median 38 ms, worst 220 ms |
+| One cold sequential stream | 38 to 42 MiB/s (a repeat from cache: 225 MiB/s) |
+| 4 or 8 cold parallel reads | 320 to 250 MiB/s |
+| Kopia cache after 1 GiB read | 1.1 GiB (the 5 GiB default is enough) |
+
+So the 50 MiB/s download bar is met only with parallel reads or read-ahead. One stream is just under it.
+
+**Listing from the disk (the slow path).**
+- The appliance reads in small pieces (about 4 KB). Without a read-ahead layer, `virt-filesystems` had made 14,296 requests and run for more than 9 minutes without finishing. **The COS disk server must read ahead and cache in large segments.** 4 MiB segments with 8 segments read ahead (a spike bridge between the WebDAV server and NBD) fixed it.
+- With that layer: file systems found in 22.6 s, top folder 34.9 s and `/etc` 19.7 s (each a separate tool run, so each started its own appliance, about 12 s under TCG), the whole tree of 28,758 entries in 32.6 s. It fetched 2.1 GiB from COS to do so (read-ahead reads more than is used) and kept 1.9 GiB in the cache. The spike cache had no limit; the real one must.
+- One appliance session that serves everything saves the repeated start, and KVM cuts the start from about 12 s to about 1.5 s. So the slow path alone is near the 30-second bar on this small disk and clearly under the 5-minute allowance for older moments. A 30 GiB disk with millions of files will take longer; 6c measures it.
+
+**File list.** Building the list is the same tree walk: 28,758 entries took about 20 s beyond the appliance start, and the list was 737 KB as text before compression. The first listing from a saved list reads one small object, so it does not depend on the disk size. Not measured: a list of a disk with millions of files, NTFS, and the cost on an export that is running.
+
+**Not measured in 6a.** The cost of indexing the undo files (the newest moment needs none), the COS request count and the cost line, disk server memory with a bounded cache, and an older moment.
+
+**Verdict.** Neither stop rule applies: the raw reads meet the bar, and the slow path is within a factor of 2 of the 30-second first listing even without the file list. Section 1 is confirmed as written, with one addition: the disk server reads ahead in 4 MiB segments and fetches several in parallel, behind a bounded cache.
+
 ## Build plan: phases, one PR each
 
 Phase 6 needs phase 5 merged and passing on the lab first.
 
-- **6a. Spike on the lab (S, risk check).** Use a real export of a lab VM (stage 18 makes them). Try option A, then option B if A fails. Make a file list of the lab VM's disk and measure its time and size. Measure the speed bar (with the list, and the slow path without it), bytes fetched, COS requests, disk server memory, and the cost of indexing the undo files. Write the results and the choice into this spec, in a PR with no product code. **If neither option meets the speed bar within a factor of 2, I stop and show you the gap.**
+- **6a. Spike on the lab (S, risk check). Done 2 Nov 2026; results above.** Use a real export of a lab VM (stage 18 makes them). Try option A, then option B if A fails. Make a file list of the lab VM's disk and measure its time and size. Measure the speed bar (with the list, and the slow path without it), bytes fetched, COS requests, disk server memory, and the cost of indexing the undo files. Write the results and the choice into this spec, in a PR with no product code. **If neither option meets the speed bar within a factor of 2, I stop and show you the gap.**
 - **6b. COS disk server (M).** The file list at export (made, stored with the export, read and checked), the source interface, the COS source, the cache, the keep-time check, the TLS NBD link, the disk server pod and its NetworkPolicy, and the guest helper over the network. Command line browse and download.
 - **6c. Restore and console (M).** The file restore from COS through the #341 split, the console source switch, the help text, and stage 20's COS VM part.
 
@@ -125,7 +153,8 @@ Total: about 1.5 to 2.5 weeks of agent work, plus the lab runs.
 - To meet it, each export also saves a file list of the VM disk, so folders are shown without reading the disk in COS.
 - Only the newest moment of each export gets a file list. Older moments in the export are listed slowly, up to 5 minutes, and the console says so first.
 - A failed file list never fails the export.
-- The Kopia program over WebDAV is tried first, so Kopia stays out of our Go code. The Kopia library is the second choice.
+- The Kopia program over WebDAV is used, so Kopia stays out of our Go code. The 6a spike proved it on the lab; the Kopia library is not needed.
+- The disk server reads ahead in large segments behind a bounded cache, because the appliance's small reads made listing take more than 9 minutes without it.
 - The pod that holds the backup key never parses the guest's file system. The disk is served over the network to the existing unprivileged guest helper.
 - The link between the two pods is encrypted and allows only the one session's client, even inside the cluster.
 - COS sessions need no hold on the next backup, because COS objects never change.
