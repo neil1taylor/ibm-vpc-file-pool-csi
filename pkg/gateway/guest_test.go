@@ -66,18 +66,20 @@ func TestSessionOnAPlainVolumeIsNotAGuestSession(t *testing.T) {
 	}
 }
 
-func TestAVMDiskInCOSIsRefusedInWords(t *testing.T) {
+func TestAVMDiskInCOSIsAGuestSessionOnCOS(t *testing.T) {
 	e := newEnv(t, Config{}, memTree{})
 	addVMDisk(e, true)
 	resp, body := e.do("POST", "/v1/sessions", "alice-token", SessionRequest{Policy: "nightly", Namespace: "apps", PVC: "web-root", Source: "cos"})
-	if resp.StatusCode != http.StatusConflict || !strings.Contains(string(body), "VM disk") {
+	var s Session
+	if resp.StatusCode != http.StatusAccepted || json.Unmarshal(body, &s) != nil {
 		t.Fatalf("%d %s", resp.StatusCode, body)
 	}
-	// With no source named, a moment that only COS holds is refused the same way.
-	old := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
-	resp, body = e.do("POST", "/v1/sessions", "alice-token", SessionRequest{Policy: "nightly", Namespace: "apps", PVC: "web-root", Moment: &old})
-	if resp.StatusCode == http.StatusAccepted && strings.Contains(string(body), `"source":"cos"`) {
-		t.Fatalf("a VM disk session was started on COS: %s", body)
+	if !s.Guest || s.Source != "cos" {
+		t.Errorf("session = %+v; want a guest session on COS", s)
+	}
+	got := e.sessions()
+	if len(got) != 1 || !got[0].Spec.Guest || got[0].Spec.Source != v1alpha1.BackupSourceCOS {
+		t.Fatalf("sessions = %+v", got)
 	}
 }
 
