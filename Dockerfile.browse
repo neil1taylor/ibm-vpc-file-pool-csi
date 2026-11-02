@@ -16,6 +16,7 @@ RUN go mod download
 
 COPY pkg/browse/ pkg/browse/
 COPY pkg/cosbrowse/ pkg/cosbrowse/
+COPY pkg/cosdisk/ pkg/cosdisk/
 COPY pkg/keyprotect/ pkg/keyprotect/
 COPY pkg/filelist/ pkg/filelist/
 COPY pkg/filerestore/ pkg/filerestore/

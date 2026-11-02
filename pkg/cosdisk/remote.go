@@ -21,7 +21,12 @@ type RemoteSource struct {
 	url    string
 	token  string
 	size   int64
+	moment time.Time
 }
+
+// MomentHeader is the response header with the moment of the disk (RFC 3339),
+// which the disk server adds to its answers.
+const MomentHeader = "X-Disk-Moment"
 
 // NewRemoteSource finds the size of the disk with a HEAD request, which also
 // checks the token.
@@ -50,6 +55,9 @@ func NewRemoteSource(ctx context.Context, client *http.Client, rawURL, token str
 		return nil, errors.New("cosdisk: the disk server did not give a size")
 	}
 	r.size = resp.ContentLength
+	if t, perr := time.Parse(time.RFC3339, resp.Header.Get(MomentHeader)); perr == nil {
+		r.moment = t
+	}
 	return r, nil
 }
 
@@ -64,6 +72,9 @@ func (r *RemoteSource) request(ctx context.Context, method, rng string) (*http.R
 	}
 	return req, nil
 }
+
+// Moment is the moment of the disk, or the zero time if the server did not say.
+func (r *RemoteSource) Moment() time.Time { return r.moment }
 
 // Size is the size of the disk.
 func (r *RemoteSource) Size() int64 { return r.size }

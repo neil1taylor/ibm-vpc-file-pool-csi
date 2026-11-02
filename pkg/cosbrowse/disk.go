@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -64,18 +63,16 @@ func OpenKopia(ctx context.Context, src Source, opts OpenOptions) (*KopiaRepo, e
 // WebDAV is a running `kopia mount` of one snapshot with its WebDAV server.
 type WebDAV struct {
 	// URL is where disk.img of the snapshot is served, on the loopback address.
-	URL string
-
-	cancel context.CancelFunc
-	cmd    *exec.Cmd
-	done   chan struct{}
+	URL  string
+	stop func()
 }
+
+// NewWebDAV makes a WebDAV from an address and the function that stops it.
+// StartWebDAV makes the real one; tests make their own.
+func NewWebDAV(url string, stop func()) *WebDAV { return &WebDAV{URL: url, stop: stop} }
 
 // Stop ends the Kopia child and waits for it.
-func (w *WebDAV) Stop() {
-	w.cancel()
-	<-w.done
-}
+func (w *WebDAV) Stop() { w.stop() }
 
 // StartWebDAV runs `kopia mount SNAPSHOT '*' --webdav --no-browse`. The mount
 // point '*' means that nothing is mounted in the operating system; only the
@@ -96,10 +93,11 @@ func (k *KopiaRepo) StartWebDAV(ctx context.Context, snapshotID string, find fun
 		cancel()
 		return nil, k.failure("mount", err, "")
 	}
-	w := &WebDAV{cancel: cancel, cmd: cmd, done: make(chan struct{})}
+	done := make(chan struct{})
+	w := &WebDAV{stop: func() { cancel(); <-done }}
 	go func() {
 		_ = cmd.Wait()
-		close(w.done)
+		close(done)
 	}()
 	deadline := time.Now().Add(wait)
 	for {
@@ -108,7 +106,7 @@ func (k *KopiaRepo) StartWebDAV(ctx context.Context, snapshotID string, find fun
 			return w, nil
 		}
 		select {
-		case <-w.done:
+		case <-done:
 			return nil, k.failure("mount", fmt.Errorf("the reader of the backup ended at once"), stderr.String())
 		case <-ctx.Done():
 			w.Stop()

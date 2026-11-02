@@ -59,7 +59,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 	fs := flag.NewFlagSet("browse", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	klog.InitFlags(fs)
-	mode := fs.String("mode", "", "what to run: "+modeServer+", "+modeRestoreFiles+" or "+modeBuildList)
+	mode := fs.String("mode", "", "what to run: "+modeServer+", "+modeRestoreFiles+", "+modeBuildList+" or "+modeCOSDisk)
 	restoreSpec := fs.String("restore-files-spec", "", "JSON of the file restore (restore-files mode)")
 	writerSpec := fs.String("restore-writer-spec", "", "JSON of the target and limits of the writer (restore-writer mode)")
 	restorePaths := fs.String("restore-files-paths", "", "file that lists the paths to restore, one per line in escaped form (restore-files mode)")
@@ -80,10 +80,35 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 	guestSocket := fs.String("guest-socket", "/tmp/disk.sock", "private socket where the disk is served to the appliance (--guest)")
 	guestAppliance := fs.String("guest-appliance", "", "folder with the prebuilt libguestfs appliance (--guest); empty uses the tools' default")
 	guestConsistency := fs.String("guest-consistency", "", "FileSystemConsistent or CrashConsistent: how the newest copy of the disk was taken (--guest)")
+	cacheMB := fs.Int("cache-mb", 64, "memory for the disk cache, in MiB (cos-disk-server mode)")
+	segmentMB := fs.Int("segment-mb", 4, "size of one fetch from COS, in MiB (cos-disk-server mode)")
+	readAhead := fs.Int("read-ahead", 8, "how many segments are fetched ahead of a read (cos-disk-server mode)")
 	listOut := fs.String("list-out", "", "file to write the file list to (build-list mode)")
 	termLog := fs.String("termination-log", "/dev/termination-log", "file that gets the reason the session ended")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	if *mode == modeCOSDisk {
+		if *root != "" || *moments != "" || *guest {
+			_, _ = fmt.Fprintln(stderr, "--mode "+modeCOSDisk+" cannot be used with --root, --moments or --guest")
+			return 2
+		}
+		a := cosDiskArgs{source: *cosSource, kopia: *kopia, stateDir: *kopiaState, listen: *listen,
+			tokenFile: *tokenFile, certFile: *tlsCert, keyFile: *tlsKey, termLog: *termLog,
+			idle: *idle, maxLife: *maxLife, cacheMB: *cacheMB, segmentMB: *segmentMB, readAhead: *readAhead}
+		if err := a.validate(); err != nil {
+			_, _ = fmt.Fprintln(stderr, err)
+			return 2
+		}
+		if *at != "" {
+			t, err := time.Parse(time.RFC3339, *at)
+			if err != nil {
+				_, _ = fmt.Fprintln(stderr, "--at must be an RFC 3339 time")
+				return 2
+			}
+			a.at = t
+		}
+		return runCOSDisk(ctx, a, stdout, stderr, onListen)
 	}
 	if *mode == modeBuildList {
 		switch {
