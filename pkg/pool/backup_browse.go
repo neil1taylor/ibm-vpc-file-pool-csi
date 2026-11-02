@@ -217,6 +217,7 @@ func (bc *BackupController) tidyEndedBrowse(ctx context.Context, bb *v1alpha1.Ba
 	}
 	bc.deleteBrowseSecret(ctx, browseSecretName(string(bb.UID)))
 	bc.deleteCOSSessionCopy(ctx, browseSecretName(string(bb.UID)))
+	bc.deleteDiskSecrets(ctx, string(bb.UID))
 	if bb.Status.EndedTime != nil && bc.nowFunc().Sub(bb.Status.EndedTime.Time) >= bc.browse.ClosedKeep {
 		if err := bc.client.Delete(ctx, bb); err != nil && !apierrors.IsNotFound(err) {
 			klog.ErrorS(err, "Failed to delete an ended BackupBrowse", "session", bb.Name)
@@ -276,7 +277,7 @@ func (bc *BackupController) startBrowse(ctx context.Context, bb *v1alpha1.Backup
 		bc.setBrowseStatus(ctx, bb, browsePhasePending, err.Error())
 		return
 	}
-	if req.Guest {
+	if req.Guest && req.COS == nil {
 		// The disk is held before anything else: from now on no new backup copy
 		// starts. A copy that is running is waited for.
 		if msg := bc.holdForGuest(ctx, string(bb.UID), bb.Spec.Policy, svName, bc.nowFunc(), true); msg != "" {
@@ -288,13 +289,19 @@ func (bc *BackupController) startBrowse(ctx context.Context, bb *v1alpha1.Backup
 		bc.setBrowseStatus(ctx, bb, browsePhasePending, fmt.Sprintf("make the session Secret: %v", err))
 		return
 	}
-	if req.COS != nil && bc.browse.COSNamespace != bc.browse.Namespace {
+	if req.COS != nil && !req.Guest && bc.browse.COSNamespace != bc.browse.Namespace {
 		if err := bc.ensureCOSSessionCopy(ctx, bb); err != nil {
 			bc.setBrowseStatus(ctx, bb, browsePhasePending, fmt.Sprintf("make the session Secret for the helper: %v", err))
 			return
 		}
 	}
-	if err := bc.browseJobs.StartBrowse(ctx, req); err != nil {
+	var startErr error
+	if req.Guest && req.COS != nil {
+		startErr = bc.startGuestCOS(ctx, bb, req)
+	} else {
+		startErr = bc.browseJobs.StartBrowse(ctx, req)
+	}
+	if err := startErr; err != nil {
 		if errors.Is(err, errNoBrowseCOS) {
 			bc.endBrowse(ctx, bb, counts, browsePhaseFailed, "", "browsing a backup in COS is not turned on in this installation")
 			return
@@ -306,7 +313,11 @@ func (bc *BackupController) startBrowse(ctx context.Context, bb *v1alpha1.Backup
 	now := metav1.NewTime(bc.nowFunc())
 	bb.Status.StartedTime = &now
 	counts.add(bb.Spec.PVCNamespace)
-	bc.setBrowseStatus(ctx, bb, browsePhaseStarting, "starting the helper pod")
+	msg := "starting the helper pod"
+	if req.Guest && req.COS != nil {
+		msg = "starting the disk server"
+	}
+	bc.setBrowseStatus(ctx, bb, browsePhaseStarting, msg)
 }
 
 // watchBrowse follows the helper pod of a session that has started.
@@ -314,6 +325,9 @@ func (bc *BackupController) watchBrowse(ctx context.Context, bb *v1alpha1.Backup
 	st, err := bc.browseJobs.BrowseState(ctx, string(bb.UID))
 	if err != nil {
 		klog.ErrorS(err, "Failed to read the state of a browse helper", "session", bb.Name)
+		return
+	}
+	if isGuestCOS(bb) && bc.watchGuestCOS(ctx, bb, counts, st) {
 		return
 	}
 	switch {
@@ -361,9 +375,6 @@ func (bc *BackupController) watchBrowse(ctx context.Context, bb *v1alpha1.Backup
 // session; any other error leaves it waiting.
 func (bc *BackupController) browseRequest(ctx context.Context, bb *v1alpha1.BackupBrowse) (BrowseJobRequest, string, error) {
 	sp := bb.Spec
-	if sp.Guest && browseIsCOS(&sp) {
-		return BrowseJobRequest{}, "", restoreFailure("the files inside a VM disk can be browsed only for a backup in the snapshot pool, not yet for a backup in COS")
-	}
 	if sp.Guest && !bc.browseJobs.GuestEnabled() {
 		return BrowseJobRequest{}, "", restoreFailure("browsing the files inside a VM disk is not turned on in this installation (backupBrowse.guest.image is not set)")
 	}

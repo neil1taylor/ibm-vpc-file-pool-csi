@@ -135,6 +135,9 @@ func (bc *BackupController) browseCOSRequest(ctx context.Context, bb *v1alpha1.B
 	if sp.Moment != nil {
 		req.At = sp.Moment.Time
 	}
+	if sp.Guest {
+		return bc.guestCOSRequest(req, loc)
+	}
 	return req, nil
 }
 
