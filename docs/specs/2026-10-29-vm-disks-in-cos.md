@@ -156,10 +156,14 @@ Total: about 1.5 to 2.5 weeks of agent work, plus the lab runs.
 - The Kopia program over WebDAV is used, so Kopia stays out of our Go code. The 6a spike proved it on the lab; the Kopia library is not needed.
 - The disk server reads ahead in large segments behind a bounded cache, because the appliance's small reads made listing take more than 9 minutes without it.
 - The pod that holds the backup key never parses the guest's file system. The disk is served over the network to the existing unprivileged guest helper.
-- The link between the two pods is encrypted and allows only the one session's client, even inside the cluster.
+- The link between the two pods is HTTPS with range reads, behind the session's own certificate and token, and a network policy lets only the guest reader pods reach the disk server. I changed this from NBD with TLS: the libguestfs tools cannot be given the session certificate for an NBD link, and the reader already bridges a disk to its appliance over a local socket (built in 6b).
 - COS sessions need no hold on the next backup, because COS objects never change.
-- A moment whose keep time ends within 3 hours cannot be browsed.
-- The cache is 5 GiB on the node's disk per session, and can be changed in the chart.
+- An export that will be deleted within the session limit plus an hour (3 hours with the defaults) cannot be browsed.
+- The disk server's cache is 64 MiB in memory (4 MiB segments, 8 read ahead), set by flags. The spike showed that a bounded memory cache is enough, and Kopia keeps its own cache on its scratch folder.
+- The file list is saved as `.filelist.json.gz` in the volume's backup folder, next to `disk.img`, so the existing export snapshot carries it and the existing delete and measure steps cover it. A second container copies it there (a plain file of at most 256 MiB); the reader that parses the disk never writes to the share.
+- A file list counts as being for the disk if its moment is within 30 minutes of the disk's. The lab run has to confirm that number.
+- In 6b only the newest moment of an export can be browsed in COS. Older moments need the undo files served too, and come later if you want them.
+- A VM disk named directly by bucket (`--bucket`) is browsed as plain files, because nothing there says it is a VM disk. Browse it through its policy.
 - The console gets a local or COS switch for every volume type, not only VM disks.
 - VM disks from COS follow the same session limits as everything else. There is no separate limit.
 
