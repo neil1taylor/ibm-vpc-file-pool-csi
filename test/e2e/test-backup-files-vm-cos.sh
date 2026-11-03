@@ -14,7 +14,7 @@
 # newest moment of each disk is in COS with its file list. Then, as a real user
 # through the gateway with --from-cos:
 # - the file systems and folders of each disk are listed; hello.txt reads "second";
-#   a 32 MiB file has the checksum it was made with;
+#   a 256 MiB file has the checksum it was made with;
 # - the speed bar is measured and logged as "MEASURE:" lines: first listing,
 #   another folder in the open session, the first bytes of a file, the whole file;
 # - an older moment of a disk in COS is refused in words;
@@ -216,7 +216,7 @@ run_disk_job make-disks '
 mkdir -p /tmp/t/docs
 printf first > /tmp/t/hello.txt
 printf one > /tmp/t/docs/a.txt
-head -c 33554432 /dev/urandom > /tmp/t/big.bin
+head -c 268435456 /dev/urandom > /tmp/t/big.bin
 printf x > "/tmp/t/line
 break"
 sha256sum /tmp/t/big.bin | cut -d" " -f1 > /d1/big.sha
@@ -228,15 +228,15 @@ part-init /dev/sda gpt
 part-add /dev/sda p 2048 -2048
 pvcreate /dev/sda1
 vgcreate vg0 /dev/sda1
-lvcreate root vg0 800
+lvcreate root vg0 900
 mkfs xfs /dev/vg0/root
 mount /dev/vg0/root /
 copy-in /tmp/t/hello.txt /
 copy-in /tmp/t/docs /
 copy-in /tmp/t/big.bin /
 EOF
-virt-make-fs --format=raw --size=+128M --type=ext4 /tmp/t /d2/disk.img
-virt-make-fs --format=raw --size=+128M --type=ntfs --partition=mbr /tmp/t /d3/disk.img
+virt-make-fs --format=raw --size=+400M --type=ext4 /tmp/t /d2/disk.img
+virt-make-fs --format=raw --size=+400M --type=ntfs --partition=mbr /tmp/t /d3/disk.img
 chmod 666 /d1/disk.img /d2/disk.img /d3/disk.img
 chown 107:107 /d1/disk.img /d2/disk.img /d3/disk.img 2>/dev/null || true
 '
@@ -351,8 +351,19 @@ bk get "${D1[@]}" "${T[@]}" --fs vg0-root /hello.txt --out "$WORK/got" >/dev/nul
 [ "$(cat "$WORK/got/hello.txt")" = second ] && pass "XFS on LVM in COS: the latest copy reads 'second'" || fail "hello.txt: $(cat "$WORK/got/hello.txt")"
 S=$(now)
 bk get "${D1[@]}" "${T[@]}" --fs vg0-root /big.bin --out "$WORK/got" >/dev/null
-measure "downloading a 32 MiB file (bar: start within 2 minutes, then 50 MiB/s)" "$S"
-[ "$(shasum -a 256 "$WORK/got/big.bin" | awk '{print $1}')" = "$BIG_SHA" ] && pass "a 32 MiB file from COS has the same checksum" || fail "big.bin checksum"
+measure "downloading a 256 MiB file (bar: start within 2 minutes, then 50 MiB/s)" "$S"
+log "MEASURE: that is $(perl -e "printf '%.1f', 256 / ($(now) - $S)") MiB/s including the start"
+[ "$(shasum -a 256 "$WORK/got/big.bin" | awk '{print $1}')" = "$BIG_SHA" ] && pass "a 256 MiB file from COS has the same checksum" || fail "big.bin checksum"
+# The rate through the gateway depends on the network of whoever runs this script (from a laptop over a
+# VPN it is far below the bar). The rate of the helper itself is read from inside its pod.
+UID1=$(oc get backupbrowse -o json | jq -r --arg p "$POLICY" '[.items[] | select(.spec.policy == $p and .status.phase == "Ready")][0].metadata.uid')
+HELPER=$(oc get pod -n "$BROWSE_NS" -l "storage.ibmcloud.io/browse=$UID1,storage.ibmcloud.io/browse-guest=true" -o name | head -1)
+if [ -n "$HELPER" ]; then
+    for i in 1 2; do
+        RATE=$(oc exec -n "$BROWSE_NS" "$HELPER" -- sh -c 'curl -sk -X POST -H "Authorization: Bearer $(cat /etc/browse/token)" -H "Content-Type: application/json" -d "{\"path\":[\"dmcwLXJvb3Q=\",\"YmlnLmJpbg==\"]}" -o /dev/null -w "%{size_download} %{time_starttransfer} %{time_total}" https://localhost:8443/v1/file' 2>/dev/null || true)
+        log "MEASURE: inside the helper pod, download $i of the 256 MiB file (bytes, first byte, total): $RATE ; the rate after the first byte is $(awk '{ if ($3 > $2) printf "%.1f", $1 / 1048576 / ($3 - $2); else print "n/a" }' <<<"$RATE") MiB/s (bar 50)"
+    done
+fi
 close_all
 
 # ---- 2. the other file systems ------------------------------------------------------------------
@@ -385,9 +396,9 @@ close_all
 SESSION=$(bk browse "${D1[@]}" "${T[@]}" | awk '{print $2}')
 [ -n "$SESSION" ] || fail "browse printed no session"
 BUID=$(oc get backupbrowse "$SESSION" -o jsonpath='{.metadata.uid}')
-DISKPOD=$(oc get pod -n "$BROWSE_NS" -l "storage.ibmcloud.io/browse-disk=$BUID" -o json)
-GUESTPOD=$(oc get pod -n "$BROWSE_NS" -l "storage.ibmcloud.io/browse-guest=$BUID" -o json)
-log "pods in the browse namespace: $(oc get pod -n "$BROWSE_NS" -l "storage.ibmcloud.io/browse=$BUID" -o name | tr '\n' ' ')"
+DISKPOD=$(oc get pod -n "$DRIVER_NS" -l "storage.ibmcloud.io/browse=$BUID,storage.ibmcloud.io/browse-disk=true" -o json)
+GUESTPOD=$(oc get pod -n "$BROWSE_NS" -l "storage.ibmcloud.io/browse=$BUID,storage.ibmcloud.io/browse-guest=true" -o json)
+log "pods of the session: $(oc get pod -n "$DRIVER_NS" -l "storage.ibmcloud.io/browse=$BUID" -o name | tr '\n' ' ') $(oc get pod -n "$BROWSE_NS" -l "storage.ibmcloud.io/browse=$BUID" -o name | tr '\n' ' ')"
 jq -e '.items | length == 1' <<<"$DISKPOD" >/dev/null && pass "one disk server pod runs for the session" || fail "disk server pods: $(jq '.items | length' <<<"$DISKPOD")"
 jq -e '.items[0].spec | .automountServiceAccountToken == false and (.hostNetwork // false) == false and ([.volumes[] | select(.hostPath)] | length) == 0' <<<"$DISKPOD" >/dev/null \
     && pass "the disk server has no service account token and no host path" || fail "disk server pod spec"
