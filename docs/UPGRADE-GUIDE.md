@@ -45,7 +45,7 @@ Before upgrading, complete every item:
 | v0.11.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.12.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.13.0–v0.13.2 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
-| v0.14.0–v0.16.3 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
+| v0.14.0–v0.17.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
 
 ---
 
@@ -124,6 +124,23 @@ kubectl get crd filesharepools.storage.ibmcloud.io -o json | \
 ---
 
 ## Version-Specific Upgrade Notes
+
+### Upgrading to v0.17.0 (from v0.16.3)
+
+**Changes:**
+- **Browse and restore files inside a VM disk** in the snapshot pool and in COS (`kubectl backup ls/get/browse/restore-files`, with `--fs` to pick a file system, and `--from-cos`). The console file browser has a Source switch (snapshot pool or COS). Restoring from COS is for the newest moment of an export only.
+- Files listed inside a VM disk show dates and owners, and big folders list quickly.
+- A share of the same name that is not ours is no longer adopted when a share is created.
+
+**CRD changes (additive):** `spec.guest` and related fields on `BackupBrowse` and `BackupFileRestore`, and new fields on `BackupPolicy` status (file list). Apply them first: `kubectl apply --server-side --force-conflicts -f config/crd/`.
+
+**Chart changes:** new values `backupBrowse.guest.*` (off by default; needs the new `browse-guest` image). A new `NetworkPolicy` `<release>-browse-disk` is created.
+
+**Action required:**
+1. Apply the CRDs.
+2. Upgrade with Helm. Set `image.tag` and `consolePlugin.image.tag` to `v0.17.0` if you pin them. To use VM-disk browsing, also set `backupBrowse.guest.enabled=true` (and `backupBrowse.guest.kvmDevice=true` on nodes that have the KVM device). Restoring from a VM disk in COS also needs `backupBrowse.cos`. The export must stay in COS for 3 more hours.
+
+To go back, run `helm rollback`. Unused new fields stay.
 
 ### Upgrading to v0.16.3 (from v0.16.2)
 
