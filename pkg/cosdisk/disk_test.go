@@ -87,7 +87,7 @@ func TestSmallReadsInOneSegmentFetchOnce(t *testing.T) {
 func TestReadAheadFetchesTheNextSegments(t *testing.T) {
 	src := &memSource{data: newData(16 * 1024)}
 	d := New(src, Options{SegmentSize: 1024, ReadAhead: 3, MaxBytes: 16 * 1024})
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 	if _, err := d.ReadAt(make([]byte, 10), 0); err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestReadAheadFetchesTheNextSegments(t *testing.T) {
 func TestCacheIsBounded(t *testing.T) {
 	src := &memSource{data: newData(64 * 1024)}
 	d := New(src, Options{SegmentSize: 1024, ReadAhead: 2, MaxBytes: 8 * 1024})
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 	buf := make([]byte, 1024)
 	for i := 0; i < 64; i++ {
 		if _, err := d.ReadAt(buf, int64(i*1024)); err != nil {
@@ -127,7 +127,7 @@ func TestCacheIsBounded(t *testing.T) {
 func TestEvictedSegmentIsFetchedAgainAndStillCorrect(t *testing.T) {
 	src := &memSource{data: newData(32 * 1024)}
 	d := New(src, Options{SegmentSize: 1024, ReadAhead: 0, MaxBytes: 2 * 1024})
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 	buf := make([]byte, 100)
 	for _, seg := range []int{0, 5, 9, 0} {
 		if _, err := d.ReadAt(buf, int64(seg*1024)); err != nil {
@@ -145,7 +145,7 @@ func TestEvictedSegmentIsFetchedAgainAndStillCorrect(t *testing.T) {
 func TestAFailedFetchIsNotKept(t *testing.T) {
 	src := &memSource{data: newData(4 * 1024)}
 	d := New(src, Options{SegmentSize: 1024, MaxBytes: 4096})
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 	src.fail.Store(1)
 	if _, err := d.ReadAt(make([]byte, 10), 0); err == nil {
 		t.Fatal("want an error from the failed fetch")
@@ -162,7 +162,7 @@ func TestAFailedFetchIsNotKept(t *testing.T) {
 func TestConcurrentReadsAreSafeAndCorrect(t *testing.T) {
 	src := &memSource{data: newData(256 * 1024)}
 	d := New(src, Options{SegmentSize: 4096, ReadAhead: 4, MaxBytes: 64 * 1024})
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 	var wg sync.WaitGroup
 	for g := 0; g < 8; g++ {
 		wg.Add(1)
@@ -189,7 +189,7 @@ func TestConcurrentReadsAreSafeAndCorrect(t *testing.T) {
 
 func TestSizeComesFromTheSource(t *testing.T) {
 	d := New(&memSource{data: newData(77)}, Options{SegmentSize: 16, MaxBytes: 64})
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 	if d.Size() != 77 {
 		t.Fatalf("Size = %d", d.Size())
 	}
