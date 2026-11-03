@@ -3,12 +3,13 @@ package guestfs
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/browse"
 )
 
 func TestParseListing(t *testing.T) {
-	in := "d,0755,4096,/\nd,0755,4096,/etc\n-,0600,5,\"/a,b\"\nl,0777,3,/ln,target\np,0644,0,/pipe\nb,0660,0,/disk\n?,0000,0,/odd\n-,0644,notanumber,/badsize\n"
+	in := "d,0755,4096,0,0,0,1700000000,0,/\nd,0755,4096,0,0,0,1700000000,0,/etc\n-,0600,5,0,0,0,1700000000,0,\"/a,b\"\nl,0777,3,0,0,0,1700000000,0,/ln,target\np,0644,0,0,0,0,1700000000,0,/pipe\nb,0660,0,0,0,0,1700000000,0,/disk\n?,0000,0,0,0,0,1700000000,0,/odd\n-,0644,notanumber,0,0,0,1700000000,0,/badsize\n"
 	es, err := ParseListing([]byte(in), "/")
 	if err != nil {
 		t.Fatal(err)
@@ -37,7 +38,7 @@ func TestParseListing(t *testing.T) {
 }
 
 func TestParseListing_HeaderAndOddLines(t *testing.T) {
-	in := "Type,Permissions,Size,Path\nd,0755,0,/ok\n\nonly,two\n,0755,0,/notype\nd,0755,0,/\nd,0755,0,/..\nd,0755,0,/.\nd,0755,0,x\nd,0755,0,\n"
+	in := "Type,Permissions,Size,Path\nd,0755,0,0,0,0,1700000000,0,/ok\n\nonly,two\n,0755,0,0,0,0,1700000000,0,/notype\nd,0755,0,0,0,0,1700000000,0,/\nd,0755,0,0,0,0,1700000000,0,/..\nd,0755,0,0,0,0,1700000000,0,/.\nd,0755,0,0,0,0,1700000000,0,x\nd,0755,0,0,0,0,1700000000,0,\n"
 	es, err := ParseListing([]byte(in), "/")
 	if err != nil {
 		t.Fatal(err)
@@ -48,7 +49,7 @@ func TestParseListing_HeaderAndOddLines(t *testing.T) {
 }
 
 func TestParseListing_SpecialNames(t *testing.T) {
-	in := "-,0644,1,\"/line\nbreak\"\n-,0644,1,/\xff\xfe\n"
+	in := "-,0644,1,0,0,0,1700000000,0,\"/line\nbreak\"\n-,0644,1,0,0,0,1700000000,0,/\xff\xfe\n"
 	es, err := ParseListing([]byte(in), "/")
 	if err != nil || len(es) != 2 {
 		t.Fatalf("%v %+v", err, es)
@@ -59,14 +60,14 @@ func TestParseListing_SpecialNames(t *testing.T) {
 }
 
 func TestParseListing_TooManyNames(t *testing.T) {
-	if _, err := parseListing(strings.NewReader(strings.Repeat("-,0644,1,/x\n", 20)), "/", 10); err == nil {
+	if _, err := parseListing(strings.NewReader(strings.Repeat("-,0644,1,0,0,0,1700000000,0,/x\n", 20)), "/", 10); err == nil {
 		t.Fatal("a folder over the limit must be refused")
 	}
 }
 
 func FuzzParseListing(f *testing.F) {
 	f.Add([]byte(rootListing))
-	f.Add([]byte("-,0644,1,\"/\x00\"\n"))
+	f.Add([]byte("-,0644,1,0,0,0,1700000000,0,\"/\x00\"\n"))
 	f.Fuzz(func(t *testing.T, in []byte) {
 		es, _ := ParseListing(in, "/")
 		for _, e := range es {
@@ -77,10 +78,10 @@ func FuzzParseListing(f *testing.F) {
 	})
 }
 
-// Real output of virt-ls 1.52.2 -lR --csv on an NTFS disk of the lab: the
+// Output of virt-ls 1.52.2 with lsFlags on an NTFS disk of the lab: the
 // folder is the first line, every name has its full path, a name may hold a
 // line break, and there is no header.
-const labRootListing = "d,0777,4096,/\n-,0777,4194304,/big.bin\nd,0777,0,/docs\n-,0777,3,/docs/a.txt\n-,0777,5,/hello.txt\n-,0777,1,\"/line\nbreak\"\n"
+const labRootListing = "d,0777,4096,0,0,0,1700000000,0,/\n-,0777,4194304,0,0,0,1700000000,0,/big.bin\nd,0777,0,0,0,0,1700000000,0,/docs\n-,0777,3,0,0,0,1700000000,0,/docs/a.txt\n-,0777,5,0,0,0,1700000000,0,/hello.txt\n-,0777,1,0,0,0,1700000000,0,\"/line\nbreak\"\n"
 
 func TestParseListing_RealOutputOfTheRoot(t *testing.T) {
 	es, err := ParseListing([]byte(labRootListing), "/")
@@ -110,7 +111,7 @@ func TestParseListing_RealOutputOfTheRoot(t *testing.T) {
 }
 
 func TestParseListing_RealOutputOfASubfolder(t *testing.T) {
-	es, err := ParseListing([]byte("d,0777,0,/docs\n-,0777,3,/docs/a.txt\n"), "/docs")
+	es, err := ParseListing([]byte("d,0777,0,0,0,0,1700000000,0,/docs\n-,0777,3,0,0,0,1700000000,0,/docs/a.txt\n"), "/docs")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +121,7 @@ func TestParseListing_RealOutputOfASubfolder(t *testing.T) {
 }
 
 func TestParseListing_OnlyDirectChildrenCount(t *testing.T) {
-	in := "d,0755,0,/d\n-,0644,1,/d/one\nd,0755,0,/d/sub\n-,0644,1,/d/sub/deep\n-,0644,1,/d/sub/deeper\n-,0644,1,/dx/other\n"
+	in := "d,0755,0,0,0,0,1700000000,0,/d\n-,0644,1,0,0,0,1700000000,0,/d/one\nd,0755,0,0,0,0,1700000000,0,/d/sub\n-,0644,1,0,0,0,1700000000,0,/d/sub/deep\n-,0644,1,0,0,0,1700000000,0,/d/sub/deeper\n-,0644,1,0,0,0,1700000000,0,/dx/other\n"
 	es, err := ParseListing([]byte(in), "/d")
 	if err != nil {
 		t.Fatal(err)
@@ -129,7 +130,7 @@ func TestParseListing_OnlyDirectChildrenCount(t *testing.T) {
 		t.Fatalf("entries = %+v", es)
 	}
 	// Names below the first level do not count against the limit.
-	deep := "d,0755,0,/d\n-,0644,1,/d/one\n" + strings.Repeat("-,0644,1,/d/one/x\n", 50)
+	deep := "d,0755,0,0,0,0,1700000000,0,/d\n-,0644,1,0,0,0,1700000000,0,/d/one\n" + strings.Repeat("-,0644,1,0,0,0,1700000000,0,/d/one/x\n", 50)
 	if es, err = parseListing(strings.NewReader(deep), "/d", 3); err != nil || len(es) != 1 {
 		t.Fatalf("%v %+v", err, es)
 	}
@@ -140,5 +141,28 @@ func TestTypeOf_RegularFileLetterOfVirtLs(t *testing.T) {
 		if got := typeOf(letter); got != want {
 			t.Errorf("typeOf(%q) = %s, want %s", letter, got, want)
 		}
+	}
+}
+
+// Real output of virt-ls 1.52.2 with lsFlags on an ext4 disk made for the test:
+// the user and group numbers are padded with spaces, a.txt was last changed on
+// 2024-03-05 10:11:12 UTC, and a link has its text after the path.
+func TestParseListing_ReadsDatesAndOwners(t *testing.T) {
+	in := "d,0755,1024,   0,   0,1793689350,1793689333,1793689351,/\n" +
+		"-,0644,3,  42,  43,1793689351,1709633472,1793689351,/a.txt\n" +
+		"l,0777,5,   0,   0,1793689351,1793689333,1793689351,/lnk,a.txt\n"
+	es, err := ParseListing([]byte(in), "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(es) != 2 {
+		t.Fatalf("entries = %+v", es)
+	}
+	a := es[0]
+	if want := time.Date(2024, 3, 5, 10, 11, 12, 0, time.UTC); !a.MTime.Equal(want) || a.UID != 42 || a.GID != 43 {
+		t.Errorf("a.txt = %+v, want modified %s, owner 42:43", a, want)
+	}
+	if string(es[1].Link) != "a.txt" || es[1].Type != browse.TypeSymlink {
+		t.Errorf("lnk = %+v", es[1])
 	}
 }

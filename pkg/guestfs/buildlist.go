@@ -127,7 +127,7 @@ func (g *Guest) listAll(ctx context.Context, id string, max int, budget int64) (
 		return nil, listed{}, err
 	}
 	_, rc, release, err := g.run(ctx, f, func(mount string) []string {
-		return g.driveArgs("virt-ls", "-m", mount, "-lR", "--csv", "--", "/")
+		return g.lsArgs(mount, "/")
 	}, true)
 	if err != nil {
 		return nil, listed{}, err
@@ -147,11 +147,11 @@ func (g *Guest) listAll(ctx context.Context, id string, max int, budget int64) (
 		if err != nil {
 			return nil, listed{}, err
 		}
-		if len(rec) < 4 || rec[0] == "Type" || !strings.HasPrefix(rec[3], "/") || rec[3] == "/" {
+		if len(rec) < minFields || rec[fieldType] == "Type" || !strings.HasPrefix(rec[fieldPath], "/") || rec[fieldPath] == "/" {
 			continue
 		}
-		i := strings.LastIndexByte(rec[3], '/')
-		parent, name := rec[3][:i], []byte(rec[3][i+1:])
+		i := strings.LastIndexByte(rec[fieldPath], '/')
+		parent, name := rec[fieldPath][:i], []byte(rec[fieldPath][i+1:])
 		if browse.ValidatePath([][]byte{name}) != nil {
 			continue
 		}
