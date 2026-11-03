@@ -48,9 +48,11 @@ type exportState struct {
 	// failedAt is when the last export of each SubVolume failed.
 	failedAt map[string]time.Time
 	// listed holds the SubVolumes whose file list step has ended for the export
-	// that is under way (it worked, failed, or is not set up). The list is
-	// built again for every export attempt, so that it matches the moment.
-	listed map[string]bool
+	// that is under way (it worked, failed, or is not set up), with the moment
+	// of the backup that the list was built for. The list is built again for
+	// every export attempt, and when a newer backup lands before the export
+	// starts: that copy replaces the folder, and the list with it.
+	listed map[string]time.Time
 	// maintDone and maintFailed are the end of the last maintenance Job and the
 	// time of its last failure.
 	maintDone, maintFailed time.Time
@@ -59,7 +61,7 @@ type exportState struct {
 func (bc *BackupController) exportStateOf(policy string) *exportState {
 	s := bc.exports[policy]
 	if s == nil {
-		s = &exportState{failedAt: map[string]time.Time{}, listed: map[string]bool{}}
+		s = &exportState{failedAt: map[string]time.Time{}, listed: map[string]time.Time{}}
 		bc.exports[policy] = s
 	}
 	return s
@@ -205,7 +207,7 @@ export:
 			continue
 		}
 		base := backupBasePath + "/" + bp.Name
-		if v.VMName != "" && !state.listed[v.SubVolumeName] {
+		if v.VMName != "" && bc.fileListDue(state, v) {
 			if bc.buildFileList(ctx, bp.Name, v, sh, base+v.SubPath, state) {
 				state.active = v.SubVolumeName
 				break export
@@ -279,8 +281,27 @@ func (bc *BackupController) buildFileList(ctx context.Context, policy string, v 
 			klog.V(2).InfoS("Note from the file list of a VM disk", "policy", policy, "volume", v.SubVolumeName, "note", n)
 		}
 	}
-	state.listed[v.SubVolumeName] = true
+	if v.LastBackupTime != nil {
+		state.listed[v.SubVolumeName] = v.LastBackupTime.Time
+	} else {
+		state.listed[v.SubVolumeName] = time.Time{}
+	}
 	return false
+}
+
+// fileListDue says whether the file list of a VM disk must be built (or its Job
+// watched) before the export. It must when none was built for this export, and
+// when a newer backup landed since, unless the export Job of this disk is
+// already running: the hold keeps new copies out while it runs.
+func (bc *BackupController) fileListDue(state *exportState, v *v1alpha1.BackupVolumeStatus) bool {
+	at, built := state.listed[v.SubVolumeName]
+	if !built {
+		return true
+	}
+	if state.active == v.SubVolumeName || v.LastBackupTime == nil {
+		return false
+	}
+	return !at.Equal(v.LastBackupTime.Time)
 }
 
 func withinSlack(a, b time.Time, slack time.Duration) bool {

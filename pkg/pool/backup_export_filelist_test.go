@@ -111,3 +111,27 @@ func TestBackupExportFileList_TheListStatusSurvivesTheNextPass(t *testing.T) {
 		t.Errorf("fileListEntries = %d after the next pass, want 28758", v.FileListEntries)
 	}
 }
+
+func TestBackupExportFileList_IsBuiltAgainWhenANewerBackupLanded(t *testing.T) {
+	e, moment := vmEnv(t)
+	// A list was built for the moment before this one, and the export has not started:
+	// the backup copy that made this moment replaced the folder, and the list with it.
+	e.bc.exportStateOf("nightly").listed[e.a.Name] = moment.Add(-time.Minute)
+	e.sd.export.list.momentOverride = &moment
+	e.reconcile()
+	if n := len(e.sd.listCalls()); n != 1 {
+		t.Fatalf("list calls = %d, want a new list for the new moment", n)
+	}
+	if got := strings.Join(e.sd.export.list.order, ","); got != "list,export" {
+		t.Errorf("order = %s; the new list must come before the export", got)
+	}
+}
+
+func TestBackupExportFileList_IsNotBuiltAgainForTheSameMoment(t *testing.T) {
+	e, moment := vmEnv(t)
+	e.bc.exportStateOf("nightly").listed[e.a.Name] = moment
+	e.reconcile()
+	if n := len(e.sd.listCalls()); n != 0 {
+		t.Fatalf("list calls = %d, want none for a list of this moment", n)
+	}
+}
