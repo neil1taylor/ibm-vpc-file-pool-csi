@@ -37,7 +37,7 @@ FROM quay.io/centos/centos@sha256:6f8045fc4f552544d8a401d61848bafc8d06ca7c11897c
 # libguestfs-winsupport give the appliance XFS and NTFS. NTFS is read only
 # through the virt- tools, as the packaging intends.
 RUN dnf -y install --setopt=install_weak_deps=False \
-        libguestfs libguestfs-xfs libguestfs-winsupport guestfs-tools supermin && \
+        libguestfs libguestfs-xfs libguestfs-winsupport guestfs-tools supermin python3-libguestfs && \
     dnf clean all
 
 # Build the appliance now, so a pod does not build it on every start (the root
@@ -48,9 +48,15 @@ RUN supermin --build --verbose --if-newer --lock /tmp/supermin.lock --copy-kerne
         --host-cpu x86_64 /usr/lib64/guestfs/supermin.d -o /opt/guestfs-appliance && \
     touch /opt/guestfs-appliance/README.fixed
 ENV LIBGUESTFS_PATH=/opt/guestfs-appliance
-# Start the appliance once, so an image whose appliance does not start fails here.
+# guestls lists one folder level with dates (virt-ls gives dates only for a whole
+# tree). It needs the Python binding of libguestfs.
+COPY --chmod=0755 pkg/guestfs/guestls.py /usr/local/bin/guestls
+# Start the appliance once, and list a folder with guestls, so an image whose
+# appliance or binding does not work fails here.
 RUN LIBGUESTFS_BACKEND=direct LIBGUESTFS_BACKEND_SETTINGS=force_tcg HOME=/tmp \
-        guestfish -N /tmp/check.img=fs:ext4:64M exit && rm -f /tmp/check.img
+        guestfish -N /tmp/check.img=fs:ext4:64M exit && \
+    LIBGUESTFS_BACKEND=direct LIBGUESTFS_BACKEND_SETTINGS=force_tcg HOME=/tmp \
+        guestls --format=raw -a /tmp/check.img -m /dev/sda -- / && rm -f /tmp/check.img
 
 COPY --from=builder /browse /usr/local/bin/browse
 

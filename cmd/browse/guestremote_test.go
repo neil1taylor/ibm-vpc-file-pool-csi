@@ -25,7 +25,7 @@ import (
 type otherTools struct{ fakeTools }
 
 func (otherTools) Output(ctx context.Context, args []string) ([]byte, error) {
-	if args[0] == "virt-ls" {
+	if args[0] == "guestls" {
 		return []byte("d,0755,4096,0,0,0,1700000000,0,/\n-,0644,5,0,0,0,1700000000,0,/from-disk.txt\n"), nil
 	}
 	return fakeTools{}.Output(ctx, args)

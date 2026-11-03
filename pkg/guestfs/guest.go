@@ -256,9 +256,9 @@ func (g *Guest) readable(id []byte) (*fsState, error) {
 }
 
 // dir returns the entries of a folder inside a file system, in order of name.
-// virt-ls prints a long listing in CSV only together with -R, so the whole tree
-// below the folder is read and only the direct names are kept: a folder with a
-// deep tree is slow to list.
+// guestls lists one level, in the layout of virt-ls with lsFlags, so a folder
+// with a deep tree is as quick as any other. (virt-ls prints times only together
+// with -R, which reads the whole tree below the folder.)
 func (g *Guest) dir(ctx context.Context, f *fsState, names [][]byte) ([]browse.Entry, error) {
 	key := f.ID + "\x00" + guestPath(names)
 	g.mu.Lock()
@@ -269,7 +269,7 @@ func (g *Guest) dir(ctx context.Context, f *fsState, names [][]byte) ([]browse.E
 	g.mu.Unlock()
 	path := guestPath(names)
 	out, _, release, err := g.run(ctx, f, func(mount string) []string {
-		return g.lsArgs(mount, path)
+		return g.driveArgs("guestls", "-m", mount, "--", path)
 	}, false)
 	if err != nil {
 		return nil, toBrowseError(err)

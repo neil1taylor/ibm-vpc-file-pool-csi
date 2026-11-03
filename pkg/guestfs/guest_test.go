@@ -68,6 +68,11 @@ func (f *fakeRunner) count(tool string) int {
 	return n
 }
 
+// dirArgs is the command that lists one folder (one level, with dates).
+func dirArgs(device, path string) []string {
+	return []string{"guestls", "--format=raw", "-a", drive, "-m", device, "--", path}
+}
+
 func lsArgs(device, path string) []string {
 	return []string{"virt-ls", "--format=raw", "-a", drive, "-m", device, "-lR", "--csv", "--time-t", "--uids", "--", path}
 }
@@ -141,7 +146,7 @@ func sortedBytes(s []string) bool {
 
 func TestListAFolderInAFileSystem(t *testing.T) {
 	f := newFake()
-	f.outputs[key(lsArgs("/dev/sda1", "/"))] = []byte(rootListing)
+	f.outputs[key(dirArgs("/dev/sda1", "/"))] = []byte(rootListing)
 	g := newGuest(t, f, nil)
 	page, err := g.List([][]byte{[]byte("sda1")}, nil, 100)
 	if err != nil {
@@ -167,14 +172,14 @@ func TestListAFolderInAFileSystem(t *testing.T) {
 	if _, err = g.List([][]byte{[]byte("sda1")}, nil, 100); err != nil {
 		t.Fatal(err)
 	}
-	if n := f.count("virt-ls"); n != 1 {
-		t.Errorf("virt-ls ran %d times", n)
+	if n := f.count("guestls"); n != 1 {
+		t.Errorf("guestls ran %d times", n)
 	}
 }
 
 func TestListPages(t *testing.T) {
 	f := newFake()
-	f.outputs[key(lsArgs("/dev/sda1", "/"))] = []byte(rootListing)
+	f.outputs[key(dirArgs("/dev/sda1", "/"))] = []byte(rootListing)
 	g := newGuest(t, f, nil)
 	root := [][]byte{[]byte("sda1")}
 	p1, err := g.List(root, nil, 3)
@@ -191,8 +196,8 @@ func TestNamesGoToTheToolAsOneArgumentEach(t *testing.T) {
 	f := newFake()
 	hostile := "-rf\n$(touch x); `id` ;|\"'"
 	quoted := strings.ReplaceAll(hostile, `"`, `""`)
-	f.outputs[key(lsArgs("/dev/sda1", "/"))] = []byte("d,0755,4096,0,0,0,1700000000,0,/\nd,0755,4096,0,0,0,1700000000,0,\"/" + quoted + "\"\n")
-	f.outputs[key(lsArgs("/dev/sda1", "/"+hostile))] = []byte("d,0755,0,0,0,0,1700000000,0,\"/" + quoted + "\"\n-,0644,1,0,0,0,1700000000,0,\"/" + quoted + "/x\"\n")
+	f.outputs[key(dirArgs("/dev/sda1", "/"))] = []byte("d,0755,4096,0,0,0,1700000000,0,/\nd,0755,4096,0,0,0,1700000000,0,\"/" + quoted + "\"\n")
+	f.outputs[key(dirArgs("/dev/sda1", "/"+hostile))] = []byte("d,0755,0,0,0,0,1700000000,0,\"/" + quoted + "\"\n-,0644,1,0,0,0,1700000000,0,\"/" + quoted + "/x\"\n")
 	g := newGuest(t, f, nil)
 	if _, err := g.List([][]byte{[]byte("sda1"), []byte(hostile)}, nil, 10); err != nil {
 		t.Fatal(err)
@@ -234,7 +239,7 @@ func TestUnknownFileSystem(t *testing.T) {
 
 func TestStat(t *testing.T) {
 	f := newFake()
-	f.outputs[key(lsArgs("/dev/sda1", "/"))] = []byte(rootListing)
+	f.outputs[key(dirArgs("/dev/sda1", "/"))] = []byte(rootListing)
 	g := newGuest(t, f, nil)
 	if e, err := g.Stat(nil); err != nil || e.Type != browse.TypeDir {
 		t.Fatalf("root: %+v %v", e, err)
@@ -257,7 +262,7 @@ func TestStat(t *testing.T) {
 
 func TestOpenAndRead(t *testing.T) {
 	f := newFake()
-	f.outputs[key(lsArgs("/dev/sda1", "/"))] = []byte("d,0755,0,0,0,0,1700000000,0,/\n-,0644,12,0,0,0,1700000000,0,/hello.txt\nd,0755,0,0,0,0,1700000000,0,/etc\nl,0777,3,0,0,0,1700000000,0,/ln,x\n")
+	f.outputs[key(dirArgs("/dev/sda1", "/"))] = []byte("d,0755,0,0,0,0,1700000000,0,/\n-,0644,12,0,0,0,1700000000,0,/hello.txt\nd,0755,0,0,0,0,1700000000,0,/etc\nl,0777,3,0,0,0,1700000000,0,/ln,x\n")
 	f.streams[key(catArgs("/dev/sda1", "/hello.txt"))] = "hello world!"
 	g := newGuest(t, f, nil)
 	file, err := g.Open([][]byte{[]byte("sda1"), []byte("hello.txt")})
@@ -295,8 +300,8 @@ func TestOpenAndRead(t *testing.T) {
 
 func TestTarOfAFolder(t *testing.T) {
 	f := newFake()
-	f.outputs[key(lsArgs("/dev/sda1", "/"))] = []byte("d,0755,0,0,0,0,1700000000,0,/\nd,0755,0,0,0,0,1700000000,0,/dir\n")
-	f.outputs[key(lsArgs("/dev/sda1", "/dir"))] = []byte("d,0755,0,0,0,0,1700000000,0,/dir\n-,0644,3,0,0,0,1700000000,0,/dir/a\nl,0777,1,0,0,0,1700000000,0,/dir/ln,a\n")
+	f.outputs[key(dirArgs("/dev/sda1", "/"))] = []byte("d,0755,0,0,0,0,1700000000,0,/\nd,0755,0,0,0,0,1700000000,0,/dir\n")
+	f.outputs[key(dirArgs("/dev/sda1", "/dir"))] = []byte("d,0755,0,0,0,0,1700000000,0,/dir\n-,0644,3,0,0,0,1700000000,0,/dir/a\nl,0777,1,0,0,0,1700000000,0,/dir/ln,a\n")
 	f.streams[key(catArgs("/dev/sda1", "/dir/a"))] = "abc"
 	g := newGuest(t, f, nil)
 	var buf bytes.Buffer
@@ -311,9 +316,9 @@ func TestTarOfAFolder(t *testing.T) {
 
 func TestMountFailureRetriesWithoutReplayingTheJournal(t *testing.T) {
 	f := newFake()
-	k := key(lsArgs("/dev/sda1", "/"))
+	k := key(dirArgs("/dev/sda1", "/"))
 	f.errs[k] = []error{&ExitError{Stderr: "libguestfs: error: mount_options: mount(2) system call failed: Structure needs cleaning"}}
-	f.outputs[key([]string{"virt-ls", "--format=raw", "-a", drive, "-m", "/dev/sda1:/:norecovery", "-lR", "--csv", "--time-t", "--uids", "--", "/"})] = []byte(rootListing)
+	f.outputs[key([]string{"guestls", "--format=raw", "-a", drive, "-m", "/dev/sda1:/:norecovery", "--", "/"})] = []byte(rootListing)
 	g := newGuest(t, f, nil)
 	page, err := g.List([][]byte{[]byte("sda1")}, nil, 10)
 	if err != nil || len(page.Entries) != 4 {
@@ -333,12 +338,12 @@ func TestMountFailureRetriesWithoutReplayingTheJournal(t *testing.T) {
 		t.Errorf("notices = %v", g.Notices())
 	}
 	// Later calls go straight to the working options.
-	f.outputs[key([]string{"virt-ls", "--format=raw", "-a", drive, "-m", "/dev/sda1:/:norecovery", "-lR", "--csv", "--time-t", "--uids", "--", "/etc"})] = []byte("d,0755,0,0,0,0,1700000000,0,/etc\n-,0644,1,0,0,0,1700000000,0,/etc/x\n")
-	before := f.count("virt-ls")
+	f.outputs[key([]string{"guestls", "--format=raw", "-a", drive, "-m", "/dev/sda1:/:norecovery", "--", "/etc"})] = []byte("d,0755,0,0,0,0,1700000000,0,/etc\n-,0644,1,0,0,0,1700000000,0,/etc/x\n")
+	before := f.count("guestls")
 	if _, err = g.List([][]byte{[]byte("sda1"), []byte("etc")}, nil, 10); err != nil {
 		t.Fatal(err)
 	}
-	if f.count("virt-ls") != before+1 {
+	if f.count("guestls") != before+1 {
 		t.Error("a second failing call was made")
 	}
 }
@@ -346,8 +351,8 @@ func TestMountFailureRetriesWithoutReplayingTheJournal(t *testing.T) {
 func TestMountFailureOfExt4UsesNoload(t *testing.T) {
 	f := newFake()
 	f.outputs[key(fsArgs())] = []byte("Name,Type,VFS,Label,MBR,Size,Parent\n/dev/sdb1,filesystem,ext4,,,1,\n")
-	f.errs[key(lsArgs("/dev/sdb1", "/"))] = []error{&ExitError{Stderr: "mount: recovery required on readonly filesystem"}}
-	f.outputs[key([]string{"virt-ls", "--format=raw", "-a", drive, "-m", "/dev/sdb1:/:noload", "-lR", "--csv", "--time-t", "--uids", "--", "/"})] = []byte("d,0755,0,0,0,0,1700000000,0,/\n-,0644,1,0,0,0,1700000000,0,/x\n")
+	f.errs[key(dirArgs("/dev/sdb1", "/"))] = []error{&ExitError{Stderr: "mount: recovery required on readonly filesystem"}}
+	f.outputs[key([]string{"guestls", "--format=raw", "-a", drive, "-m", "/dev/sdb1:/:noload", "--", "/"})] = []byte("d,0755,0,0,0,0,1700000000,0,/\n-,0644,1,0,0,0,1700000000,0,/x\n")
 	g := New(context.Background(), Options{Drive: drive, Runner: f})
 	if _, err := g.Filesystems(context.Background()); err != nil {
 		t.Fatal(err)
@@ -359,26 +364,26 @@ func TestMountFailureOfExt4UsesNoload(t *testing.T) {
 
 func TestNTFSIsNotRetried(t *testing.T) {
 	f := newFake()
-	k := key(lsArgs("/dev/sdb1", "/"))
+	k := key(dirArgs("/dev/sdb1", "/"))
 	f.errs[k] = []error{&ExitError{Stderr: "mount: unsupported"}}
 	g := newGuest(t, f, nil)
 	if _, err := g.List([][]byte{[]byte("sdb1")}, nil, 10); err == nil {
 		t.Fatal("expected an error")
 	}
-	if n := f.count("virt-ls"); n != 1 {
+	if n := f.count("guestls"); n != 1 {
 		t.Errorf("virt-ls ran %d times", n)
 	}
 }
 
 func TestCrashCopyStartsWithoutTheJournal(t *testing.T) {
 	f := newFake()
-	f.outputs[key([]string{"virt-ls", "--format=raw", "-a", drive, "-m", "/dev/sda1:/:norecovery", "-lR", "--csv", "--time-t", "--uids", "--", "/"})] = []byte(rootListing)
+	f.outputs[key([]string{"guestls", "--format=raw", "-a", drive, "-m", "/dev/sda1:/:norecovery", "--", "/"})] = []byte(rootListing)
 	g := newGuest(t, f, func(o *Options) { o.Crash = true })
 	if _, err := g.List([][]byte{[]byte("sda1")}, nil, 10); err != nil {
 		t.Fatal(err)
 	}
-	if n := f.count("virt-ls"); n != 1 {
-		t.Errorf("virt-ls ran %d times", n)
+	if n := f.count("guestls"); n != 1 {
+		t.Errorf("guestls ran %d times", n)
 	}
 }
 
@@ -397,7 +402,7 @@ func TestACheckThatFailsStopsEveryCall(t *testing.T) {
 
 func TestToolFailureIsInternalAndLeaksNothing(t *testing.T) {
 	f := newFake()
-	f.errs[key(lsArgs("/dev/sda1", "/"))] = []error{&ExitError{Stderr: "secret path /var/lib/x"}}
+	f.errs[key(dirArgs("/dev/sda1", "/"))] = []error{&ExitError{Stderr: "secret path /var/lib/x"}}
 	g := newGuest(t, f, nil)
 	_, err := g.List([][]byte{[]byte("sda1")}, nil, 10)
 	var be *browse.Error
