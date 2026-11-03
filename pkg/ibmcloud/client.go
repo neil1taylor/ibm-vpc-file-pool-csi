@@ -45,6 +45,9 @@ type CreateShareInput struct {
 	EncryptInTransit bool
 	SubnetID         string
 	SecurityGroupIDs []string
+	// ClaimedShareIDs are the shares some pool already records. A share with
+	// the same name is adopted only if it is not among them.
+	ClaimedShareIDs map[string]bool
 }
 
 // ShareInfo contains metadata about a VPC file share.

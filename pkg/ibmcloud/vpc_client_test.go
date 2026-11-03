@@ -1256,6 +1256,82 @@ func TestCreateFileShare_AlreadyExists(t *testing.T) {
 	}
 }
 
+func TestCreateFileShare_AlreadyExists_RefusesAForeignShare(t *testing.T) {
+	// A share with the same name that is not provably ours is never adopted.
+	cases := []struct {
+		name    string
+		share   func() map[string]interface{}
+		input   CreateShareInput
+		claimed map[string]bool
+	}{
+		{
+			name: "other zone",
+			share: func() map[string]interface{} {
+				return shareJSON("share-x", "dup", "stable", "dp2", "us-south-2", 500, 3000)
+			},
+			input: CreateShareInput{Name: "dup", Zone: "us-south-1"},
+		},
+		{
+			name: "other resource group",
+			share: func() map[string]interface{} {
+				m := shareJSON("share-x", "dup", "stable", "dp2", "us-south-1", 500, 3000)
+				m["resource_group"] = map[string]interface{}{"id": "rg-other"}
+				return m
+			},
+			input: CreateShareInput{Name: "dup", Zone: "us-south-1", ResourceGroupID: "rg-ours"},
+		},
+		{
+			name: "missing tag",
+			share: func() map[string]interface{} {
+				m := shareJSON("share-x", "dup", "stable", "dp2", "us-south-1", 500, 3000)
+				m["user_tags"] = []string{"other"}
+				return m
+			},
+			input: CreateShareInput{Name: "dup", Zone: "us-south-1", Tags: []string{"ours"}},
+		},
+		{
+			name: "another pool records it",
+			share: func() map[string]interface{} {
+				return shareJSON("share-x", "dup", "stable", "dp2", "us-south-1", 500, 3000)
+			},
+			input:   CreateShareInput{Name: "dup", Zone: "us-south-1"},
+			claimed: map[string]bool{"share-x": true},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/shares", func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPost {
+					writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+						"errors": []map[string]interface{}{{"code": "already_exists", "message": "share name already exists"}},
+					})
+					return
+				}
+				writeJSON(w, http.StatusOK, map[string]interface{}{
+					"shares": []map[string]interface{}{tc.share()}, "total_count": 1,
+				})
+			})
+			mux.HandleFunc("/shares/share-x", func(w http.ResponseWriter, r *http.Request) {
+				writeJSON(w, http.StatusOK, tc.share())
+			})
+			server := httptest.NewServer(mux)
+			defer server.Close()
+			client := newTestClient(t, newTestVPCService(t, server.URL))
+
+			in := tc.input
+			in.SubnetID = "subnet-123"
+			in.Profile = "dp2"
+			in.SizeGB = 500
+			in.ClaimedShareIDs = tc.claimed
+			info, err := client.CreateFileShare(context.Background(), in)
+			if err == nil {
+				t.Fatalf("adopted a foreign share: %+v", info)
+			}
+		})
+	}
+}
+
 func TestCreateFileShare_APIError(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/shares", func(w http.ResponseWriter, r *http.Request) {

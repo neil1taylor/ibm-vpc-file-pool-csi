@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -232,7 +233,7 @@ func (c *Client) CreateFileShare(ctx context.Context, input CreateShareInput) (i
 		// didn't persist the result (e.g., status update conflict).
 		if response != nil && response.StatusCode == 400 && strings.Contains(err.Error(), "already exists") {
 			klog.V(2).InfoS("Share already exists, adopting", "name", input.Name)
-			return c.getShareByName(ctx, input.Name)
+			return c.getShareByName(ctx, input)
 		}
 		statusCode := 0
 		if response != nil {
@@ -575,10 +576,13 @@ func (c *Client) getMountTarget(ctx context.Context, shareID, mtID string) (*Mou
 	return info, nil
 }
 
-// getShareByName looks up a VPC file share by name and returns its full info
-// (including waiting for stable and populating mount target IPs).
-// Used by CreateFileShare for idempotent retry when a share already exists.
-func (c *Client) getShareByName(ctx context.Context, name string) (*ShareInfo, error) {
+// getShareByName looks up the VPC file share this create call collided with
+// and returns its full info (including waiting for stable and populating mount
+// target IPs). Used by CreateFileShare for idempotent retry. A share that
+// matches only by name is refused: its zone, resource group and tags must
+// match the request, and no pool may already record it.
+func (c *Client) getShareByName(ctx context.Context, input CreateShareInput) (*ShareInfo, error) {
+	name := input.Name
 	if err := c.withAuth(ctx, "getShareByName"); err != nil {
 		return nil, err
 	}
@@ -598,11 +602,19 @@ func (c *Client) getShareByName(ctx context.Context, name string) (*ShareInfo, e
 
 	// More than one share can carry the name when an earlier create failed
 	// while building the mount target. Adopt the one that has a mount target.
-	chosen := result.Shares[0]
+	var ours []vpcv1.Share
 	for i := range result.Shares {
-		s := result.Shares[i]
-		if len(s.MountTargets) > 0 {
-			chosen = s
+		if shareMatchesRequest(&result.Shares[i], input) {
+			ours = append(ours, result.Shares[i])
+		}
+	}
+	if len(ours) == 0 {
+		return nil, fmt.Errorf("a share named %q exists but is not this pool's (zone, resource group, tags or owner differ); not adopting it", name)
+	}
+	chosen := ours[0]
+	for i := range ours {
+		if len(ours[i].MountTargets) > 0 {
+			chosen = ours[i]
 			break
 		}
 	}
@@ -621,6 +633,27 @@ func (c *Client) getShareByName(ctx context.Context, name string) (*ShareInfo, e
 	klog.V(2).InfoS("Adopted existing share", "name", name, "id", shareID,
 		"state", shareInfo.LifecycleState)
 	return shareInfo, nil
+}
+
+// shareMatchesRequest reports whether a VPC share is provably the one a create
+// request would have made: same zone, same resource group (when one is asked
+// for), carrying all requested tags, and not recorded by any pool.
+func shareMatchesRequest(s *vpcv1.Share, input CreateShareInput) bool {
+	if s.ID == nil || input.ClaimedShareIDs[*s.ID] {
+		return false
+	}
+	if s.Zone == nil || s.Zone.Name == nil || *s.Zone.Name != input.Zone {
+		return false
+	}
+	if input.ResourceGroupID != "" && (s.ResourceGroup == nil || s.ResourceGroup.ID == nil || *s.ResourceGroup.ID != input.ResourceGroupID) {
+		return false
+	}
+	for _, t := range input.Tags {
+		if !slices.Contains(s.UserTags, t) {
+			return false
+		}
+	}
+	return true
 }
 
 // waitForMountPath polls the share's first mount target until its mount path
