@@ -92,6 +92,11 @@ VMC_PREFIX=$(rt_name fvc)
 VMC_LOG="$RT_OUT/backup-files-vm-cos-e2e.log"
 BACKUP_BIN="${RT_BACKUP_BIN:-$(dirname "$RT_LIB")/bin/kubectl-backup}"
 
+# The first moment is refused when no export holds it, and read when one does.
+vmc_older_moment() {
+    log_has_pass "$VMC_LOG" "an older moment of a VM disk in COS is refused" || log_has_pass "$VMC_LOG" "was itself exported"
+}
+
 run() {
     local tool rc fail_line
     for tool in oc jq curl tar base64; do
@@ -328,7 +333,7 @@ run() {
         check "a VM disk in COS: a 256 MiB file has the same checksum" log_has_pass "$VMC_LOG" "a 256 MiB file from COS has the same checksum"
         check "a VM disk in COS: the ext4 disk is read" log_has_pass "$VMC_LOG" "ext4 in COS: a file is read"
         check "a VM disk in COS: the NTFS disk is read" log_has_pass "$VMC_LOG" "NTFS in COS: a file is read"
-        check "a VM disk in COS: an older moment is refused in words" log_has_pass "$VMC_LOG" "an older moment of a VM disk in COS is refused"
+        check "a VM disk in COS: an older moment is refused in words, or read when an export holds it" vmc_older_moment
         check "a VM disk in COS: a small file is restored" log_has_pass "$VMC_LOG" "restored from the XFS disk in COS has its content"
         check "a VM disk in COS: the 256 MiB file is restored with the same checksum" log_has_pass "$VMC_LOG" "the 256 MiB file restored from COS has the same checksum"
         check "a VM disk in COS: a file is restored from the NTFS disk" log_has_pass "$VMC_LOG" "restored from the NTFS disk in COS has its content"

@@ -17,7 +17,7 @@
 #   a 256 MiB file has the checksum it was made with;
 # - the speed bar is measured and logged as "MEASURE:" lines: first listing,
 #   another folder in the open session, the first bytes of a file, the whole file;
-# - an older moment of a disk in COS is refused in words;
+# - an older moment that no export holds is refused in words (a moment that an export holds is read);
 # - files are restored from a VM disk in COS into a new claim (phase 6c): a small
 #   file from the XFS disk and from the NTFS disk, and the 256 MiB file, with the
 #   same checksum; the disk server of each restore is gone when it ends;
@@ -380,11 +380,18 @@ bk get "${D3[@]}" "${T[@]}" --fs sda1 /hello.txt --out - | grep -q first && pass
 close_all
 
 # ---- 3. what is refused ---------------------------------------------------------------------------
+# The first moment is refused if only a later export holds it (the undo files are not
+# served in 6b/6c). If the export of the first moment was made before the second backup
+# landed, that export holds it, and then it is a moment of an export and is read.
 if out=$(bk ls "${D1[@]}" "${T[@]}" --moment "$FIRST" 2>&1); then
-    fail "an older moment of a VM disk in COS was browsed: $out"
+    bk get "${D1[@]}" "${T[@]}" --moment "$FIRST" --fs vg0-root /hello.txt --out - | grep -q first \
+        && pass "the first moment was itself exported, so it is read, and reads 'first'" \
+        || fail "an older moment of a VM disk in COS was browsed and reads the wrong content: $out"
+    FIRST_EXPORTED=true
 else
     log "  | $out"
     pass "an older moment of a VM disk in COS is refused"
+    FIRST_EXPORTED=false
 fi
 close_all
 
@@ -436,8 +443,11 @@ wait_until 600 "the disk servers of the restores to go" restore_gone
 pass "no disk server of a restore is left"
 # A refused case in words: an older moment of the disk.
 if out=$(bk restore-files "${D1[@]}" --moment "$FIRST" --fs vg0-root --path /hello.txt --to "$NS/$PREFIX-new4" --wait --timeout 10m 2>&1); then
-    fail "files were restored from an older moment of a VM disk in COS: $out"
+    [ "$FIRST_EXPORTED" = true ] || fail "files were restored from an older moment of a VM disk in COS that no export holds: $out"
+    OUT=$(inspect "$PREFIX-new4" 'echo "hello=$(cat vg0-root/hello.txt)"')
+    grep -q "^hello=first$" <<<"$OUT" && pass "the first moment, which was itself exported, restores with its own content" || fail "restored first moment: $OUT"
 else
+    [ "$FIRST_EXPORTED" = false ] || fail "the first moment can be browsed but not restored: $out"
     log "  | $out"
     pass "an older moment of a VM disk in COS is refused for a restore, too"
 fi
