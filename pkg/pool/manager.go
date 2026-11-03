@@ -560,6 +560,9 @@ func (m *Manager) tryAutoExpand(ctx context.Context, pool *v1alpha1.FileSharePoo
 	if err != nil {
 		return nil, err
 	}
+	if input.ClaimedShareIDs, err = recordedShareIDs(ctx, m.k8sClient); err != nil {
+		return nil, err
+	}
 
 	shareInfo, err := m.vpcClient.CreateFileShare(ctx, input)
 	if err != nil {

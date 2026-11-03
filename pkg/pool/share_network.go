@@ -8,6 +8,7 @@ import (
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/ibmcloud"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/k8s"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -121,6 +122,22 @@ func newShareInput(ctx context.Context, vpc ibmcloud.VPCFileClient, network *Sha
 		SubnetID:         subnetID,
 		SecurityGroupIDs: sgIDs,
 	}, nil
+}
+
+// recordedShareIDs returns the IDs of every share any pool records. A create
+// call uses it to refuse adopting a same-named share that belongs to another pool.
+func recordedShareIDs(ctx context.Context, c k8s.Client) (map[string]bool, error) {
+	pools, err := c.ListFileSharePools(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list pools to check who owns a share: %w", err)
+	}
+	ids := map[string]bool{}
+	for i := range pools {
+		for _, s := range pools[i].Status.Shares {
+			ids[s.ShareID] = true
+		}
+	}
+	return ids, nil
 }
 
 // nextShareName returns the name for the next share in the pool, including the

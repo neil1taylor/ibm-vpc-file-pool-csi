@@ -518,16 +518,10 @@ func (r *FileSharePoolReconciler) adoptShareWithMountTarget(ctx context.Context,
 // claimedShareIDs returns the IDs of every share any pool records, or nil if
 // the pools cannot be listed.
 func (r *FileSharePoolReconciler) claimedShareIDs(ctx context.Context) map[string]bool {
-	pools, err := r.k8sClient.ListFileSharePools(ctx)
+	ids, err := recordedShareIDs(ctx, r.k8sClient)
 	if err != nil {
 		klog.ErrorS(err, "Could not list pools to check who owns a share")
 		return nil
-	}
-	ids := map[string]bool{}
-	for i := range pools {
-		for _, s := range pools[i].Status.Shares {
-			ids[s.ShareID] = true
-		}
 	}
 	return ids
 }
@@ -901,6 +895,9 @@ func (r *FileSharePoolReconciler) proactiveExpansion(ctx context.Context, pool *
 func (r *FileSharePoolReconciler) createPoolShare(ctx context.Context, pool *v1alpha1.FileSharePool, tier string) error {
 	input, err := newShareInput(ctx, r.vpcClient, r.network, pool, tier, r.defaultResourceGroup)
 	if err != nil {
+		return err
+	}
+	if input.ClaimedShareIDs, err = recordedShareIDs(ctx, r.k8sClient); err != nil {
 		return err
 	}
 

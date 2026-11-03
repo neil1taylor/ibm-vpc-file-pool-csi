@@ -205,3 +205,22 @@ func TestAllocate_NoAutoExpandWhileShareLacksMountTarget(t *testing.T) {
 		t.Errorf("CreateFileShare calls = %d, want 0", vpc.CreateCalls)
 	}
 }
+
+func TestReconcile_NewShareTellsTheClientWhichSharesOtherPoolsRecord(t *testing.T) {
+	k := newFakeK8sClient()
+	vpc := fake.NewFakeVPCClient()
+	other := newTestPool("other", "spread", 1000)
+	other.Status.Shares = []v1alpha1.PoolShareStatus{shareWithoutMountTarget("share-of-other", 1000)}
+	k.addPool(other)
+	pool := newTestPool("p", "spread", 1000)
+	pool.Status.Phase = ""
+	k.addPool(pool)
+
+	if _, err := reconcilePool(newReconciler(k, vpc), "p"); err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	if !vpc.LastCreateInput.ClaimedShareIDs["share-of-other"] {
+		t.Errorf("ClaimedShareIDs = %v, want it to include share-of-other", vpc.LastCreateInput.ClaimedShareIDs)
+	}
+}
