@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { GatewayError, SessionRequest, closeSession, createSession, getSession } from './backup-browse';
+import { BrowseSource, GatewayError, SessionRequest, closeSession, createSession, getSession } from './backup-browse';
 
 /** The time between two checks of a starting session. Every request is short; none waits for the helper. */
 export const POLL_MS = 2000;
@@ -15,6 +15,8 @@ export interface BrowseSessionState {
   error?: GatewayError;
   /** True when the session reads the file systems inside a VM disk. */
   guest?: boolean;
+  /** Where the session reads, as the gateway reports it. */
+  source?: BrowseSource;
   /** Opens a new session, after one ended. */
   reopen: () => void;
 }
@@ -28,7 +30,7 @@ export function useBrowseSession(req: SessionRequest | undefined): BrowseSession
   const [state, setState] = useState<Omit<BrowseSessionState, 'reopen'>>({ status: 'starting' });
   const [attempt, setAttempt] = useState(0);
   const reopen = useCallback(() => setAttempt((n) => n + 1), []);
-  const { policy, namespace, pvc, moment } = req || { policy: '', namespace: '', pvc: '', moment: undefined };
+  const { policy, namespace, pvc, moment, source } = req || { policy: '', namespace: '', pvc: '', moment: undefined, source: undefined };
   const ready = !!req;
 
   useEffect(() => {
@@ -44,18 +46,19 @@ export function useBrowseSession(req: SessionRequest | undefined): BrowseSession
       (keepalive ? closeSession(name, true) : closeSession(name)).catch(() => undefined);
     };
 
-    const apply = (s: { name: string; phase: string; message?: string; guest?: boolean }): boolean => {
+    const apply = (s: { name: string; phase: string; message?: string; guest?: boolean; source?: BrowseSource }): boolean => {
       const guest = !!s.guest;
+      const where = s.source;
       switch (s.phase) {
         case 'Ready':
-          setState({ status: 'ready', session: s.name, guest });
+          setState({ status: 'ready', session: s.name, guest, source: where });
           return true;
         case 'Closed':
         case 'Failed':
-          setState({ status: 'ended', session: s.name, message: s.message, guest });
+          setState({ status: 'ended', session: s.name, message: s.message, guest, source: where });
           return true;
         default:
-          setState({ status: 'starting', session: s.name, message: s.message, guest });
+          setState({ status: 'starting', session: s.name, message: s.message, guest, source: where });
           return false;
       }
     };
@@ -80,7 +83,7 @@ export function useBrowseSession(req: SessionRequest | undefined): BrowseSession
     const start = async () => {
       setState({ status: 'starting' });
       try {
-        const s = await createSession({ policy, namespace, pvc, ...(moment ? { moment } : {}) });
+        const s = await createSession({ policy, namespace, pvc, ...(moment ? { moment } : {}), ...(source ? { source } : {}) });
         name = s.name;
         if (cancelled) {
           close();
@@ -102,7 +105,7 @@ export function useBrowseSession(req: SessionRequest | undefined): BrowseSession
       window.removeEventListener('pagehide', onPageHide);
       close();
     };
-  }, [ready, policy, namespace, pvc, moment, attempt]);
+  }, [ready, policy, namespace, pvc, moment, source, attempt]);
 
   return { ...state, reopen };
 }

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk';
 import { Link, useHistory, useLocation, useParams } from 'react-router-dom';
 import {
   Alert,
@@ -17,6 +18,8 @@ import {
   Split,
   SplitItem,
   Title,
+  ToggleGroup,
+  ToggleGroupItem,
   Toolbar,
   ToolbarContent,
   ToolbarGroup,
@@ -24,11 +27,16 @@ import {
 } from '@patternfly/react-core';
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import { ROUTES } from '../../constants';
+import { BackupPolicyModel } from '../../models';
+import { BackupPolicy } from '../../types';
 import {
   BrowseEntry,
+  BrowseSource,
+  COS_NOTICE,
   GatewayError,
   browsePath,
   canDownload,
+  cosSourceState,
   downloadUrl,
   entryKind,
   entryText,
@@ -71,10 +79,24 @@ const BackupBrowsePage: React.FC = () => {
   const { name } = useParams<{ name: string }>();
   const history = useHistory();
   const location = useLocation();
-  const { namespace, pvc, moment } = useMemo(() => parseBrowseQuery(location.search), [location.search]);
+  const query = useMemo(() => parseBrowseQuery(location.search), [location.search]);
+  const { namespace, pvc, source: askedSource } = query;
   const claim = `${namespace}/${pvc}`;
 
-  const session = useBrowseSession(namespace ? { policy: name, namespace, pvc, ...(moment ? { moment } : {}) } : undefined);
+  const [policy] = useK8sWatchResource<BackupPolicy>({
+    groupVersionKind: { group: BackupPolicyModel.apiGroup, version: BackupPolicyModel.apiVersion, kind: BackupPolicyModel.kind },
+    name,
+  });
+  const cosState = cosSourceState(policy, namespace, pvc);
+
+  // Only the newest copy in COS can be browsed, so a moment of the link is not used there.
+  const moment = askedSource === 'cos' ? '' : query.moment;
+  const session = useBrowseSession(
+    namespace ? { policy: name, namespace, pvc, ...(moment ? { moment } : {}), ...(askedSource ? { source: askedSource } : {}) } : undefined,
+  );
+  // What the page shows: the choice in the link, or where the gateway chose to read.
+  const source: BrowseSource = askedSource || session.source || 'local';
+  const fromCOS = source === 'cos';
   const sessionName = session.status === 'ready' ? session.session : undefined;
   const guest = !!session.guest;
 
@@ -169,11 +191,12 @@ const BackupBrowsePage: React.FC = () => {
   }, [sessionName, guest]);
 
   const momentOptions = useMemo(() => {
+    if (fromCOS) return [];
     const isos = moments.map(momentToISO).filter((m): m is string => !!m);
     isos.sort().reverse();
     if (moment && !isos.includes(moment)) isos.unshift(moment);
     return isos;
-  }, [moments, moment]);
+  }, [moments, moment, fromCOS]);
 
   const back = (
     <Link to={ROUTES.BACKUP_DETAIL.replace(':name', encodeURIComponent(name))}>Back to the backup policy {name}</Link>
@@ -372,6 +395,35 @@ const BackupBrowsePage: React.FC = () => {
         </SplitItem>
       </Split>
       <div style={{ marginBottom: 16 }}>{back}</div>
+      {namespace && cosState.offered && (
+        <Card style={{ marginBottom: 16 }}>
+          <CardBody>
+            <Split hasGutter>
+              <SplitItem>
+                <span id="browse-source-label">Read the files from</span>
+              </SplitItem>
+              <SplitItem>
+                <ToggleGroup aria-label="Source">
+                  <ToggleGroupItem
+                    text="Snapshot pool"
+                    buttonId="browse-source-local"
+                    isSelected={!fromCOS}
+                    onChange={() => !(source === 'local') && history.replace(browsePath(name, claim, undefined, 'local'))}
+                  />
+                  <ToggleGroupItem
+                    text="COS"
+                    buttonId="browse-source-cos"
+                    isSelected={fromCOS}
+                    isDisabled={!cosState.enabled && !fromCOS}
+                    onChange={() => !fromCOS && history.replace(browsePath(name, claim, undefined, 'cos'))}
+                  />
+                </ToggleGroup>
+              </SplitItem>
+              {!cosState.enabled && !fromCOS && <SplitItem>{cosState.reason}</SplitItem>}
+            </Split>
+          </CardBody>
+        </Card>
+      )}
       {namespace && session.status !== 'error' && (
         <Card style={{ marginBottom: 16 }}>
           <CardHelpTitle helpKey="backupBrowseMoment" />
@@ -380,15 +432,16 @@ const BackupBrowsePage: React.FC = () => {
               id="browse-moment"
               aria-label="Moment"
               value={moment}
-              onChange={(_e, v) => history.replace(browsePath(name, claim, v || undefined))}
+              onChange={(_e, v) => history.replace(browsePath(name, claim, v || undefined, askedSource || undefined))}
+              isDisabled={fromCOS}
               style={{ maxWidth: 360 }}
             >
-              <FormSelectOption value="" label="Latest copy" />
+              <FormSelectOption value="" label={fromCOS ? 'Newest copy in COS' : 'Latest copy'} />
               {momentOptions.map((m) => (
                 <FormSelectOption key={m} value={m} label={momentLabel(m)} />
               ))}
             </FormSelect>
-            {guest ? (
+            {fromCOS ? null : guest ? (
               <Alert variant="info" isInline isPlain title="The next backup of this disk waits while you look" style={{ marginTop: 8 }}>
                 A VM disk is shown as it was at the moment you choose, without starting the VM. While this page is open the next backup copy of
                 the disk is held back, for 2 hours at most. Close the page when you are done.
@@ -405,7 +458,12 @@ const BackupBrowsePage: React.FC = () => {
       )}
       <Card>
         <CardHelpTitle helpKey="backupBrowseFiles" />
-        <CardBody>{body}</CardBody>
+        <CardBody>
+          {fromCOS && session.status === 'ready' && (
+            <Alert variant="info" isInline title={COS_NOTICE} style={{ marginBottom: 16 }} />
+          )}
+          {body}
+        </CardBody>
       </Card>
       {restoring && (
         <RestoreFilesDialog
@@ -413,6 +471,7 @@ const BackupBrowsePage: React.FC = () => {
           namespace={namespace}
           pvc={pvc}
           moment={moment}
+          source={session.status === 'ready' ? source : askedSource || undefined}
           guest={guest}
           selected={selected}
           onClose={() => setRestoring(false)}

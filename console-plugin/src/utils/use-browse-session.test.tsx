@@ -62,6 +62,36 @@ describe('useBrowseSession', () => {
     expect(result.current.guest).toBe(true);
   });
 
+  it('sends the source and reports where the session reads', async () => {
+    (createSession as jest.Mock).mockResolvedValue({ name: 'bb-1', phase: 'Ready', source: 'cos' });
+    const { result } = renderHook(() => useBrowseSession({ ...req, source: 'cos' }));
+    await flush();
+    expect(createSession).toHaveBeenCalledWith({ ...req, source: 'cos' });
+    expect(result.current.source).toBe('cos');
+  });
+
+  it('leaves the source out when none is asked, and reads what the gateway chose', async () => {
+    (createSession as jest.Mock).mockResolvedValue({ name: 'bb-1', phase: 'Ready', source: 'local' });
+    const { result } = renderHook(() => useBrowseSession(req));
+    await flush();
+    expect(createSession).toHaveBeenCalledWith(req);
+    expect(result.current.source).toBe('local');
+  });
+
+  it('closes the session and opens a new one when the source changes', async () => {
+    (createSession as jest.Mock)
+      .mockResolvedValueOnce({ name: 'bb-1', phase: 'Ready', source: 'local' })
+      .mockResolvedValueOnce({ name: 'bb-2', phase: 'Ready', source: 'cos' });
+    (closeSession as jest.Mock).mockResolvedValue({});
+    const { result, rerender } = renderHook(({ r }) => useBrowseSession(r), { initialProps: { r: { ...req, source: 'local' as const } } });
+    await flush();
+    rerender({ r: { ...req, source: 'cos' as never } });
+    await flush();
+    expect(closeSession).toHaveBeenCalledWith('bb-1');
+    expect(createSession).toHaveBeenLastCalledWith({ ...req, source: 'cos' });
+    expect(result.current.session).toBe('bb-2');
+  });
+
   it('is ready at once when the session is already ready', async () => {
     (createSession as jest.Mock).mockResolvedValue({ name: 'bb-1', phase: 'Ready' });
     const { result } = renderHook(() => useBrowseSession(req));

@@ -1,5 +1,6 @@
 import { consoleFetch } from '@openshift-console/dynamic-plugin-sdk';
 import { PLUGIN_NAME, ROUTES } from '../constants';
+import { BackupPolicy } from '../types';
 
 /**
  * The file browser of the Backups pages talks to the backup gateway through the console's plugin proxy
@@ -159,21 +160,48 @@ export function momentLabel(iso: string): string {
 // ── Links ──
 
 /** The file browser page of a claim ("namespace/name") in a policy, at a moment (RFC 3339) or the latest copy. */
-export function browsePath(policy: string, claim: string, moment?: string): string {
+export function browsePath(policy: string, claim: string, moment?: string, source?: BrowseSource): string {
   const query = new URLSearchParams();
   query.set('claim', claim);
   if (moment) query.set('moment', moment);
+  if (source) query.set('source', source);
   return `${ROUTES.BACKUP_BROWSE.replace(':name', encodeURIComponent(policy))}?${query.toString()}`;
 }
 
-export function parseBrowseQuery(search: string): { namespace: string; pvc: string; moment: string } {
+export function parseBrowseQuery(search: string): { namespace: string; pvc: string; moment: string; source: BrowseSource | '' } {
   const q = new URLSearchParams(search);
   const claim = q.get('claim') || '';
   const i = claim.indexOf('/');
-  const none = { namespace: '', pvc: '', moment: '' };
+  const none = { namespace: '', pvc: '', moment: '', source: '' as const };
   if (i <= 0 || i === claim.length - 1) return none;
-  return { namespace: claim.slice(0, i), pvc: claim.slice(i + 1), moment: q.get('moment') || '' };
+  const asked = q.get('source');
+  const source = asked === 'local' || asked === 'cos' ? asked : '';
+  return { namespace: claim.slice(0, i), pvc: claim.slice(i + 1), moment: q.get('moment') || '', source };
 }
+
+/** Where the files of a backup are read from: the snapshot pool, or the bucket of the policy's export block. */
+export type BrowseSource = 'local' | 'cos';
+
+export interface CosSourceState {
+  /** The policy sends its backups to COS, so the switch is shown. */
+  offered: boolean;
+  /** The volume has a copy in COS, so COS can be chosen. */
+  enabled: boolean;
+  /** Why COS cannot be chosen, when it is offered and not enabled. */
+  reason: string;
+}
+
+/** Whether the file browser can read one volume from COS. A policy with no export block has no COS to read. */
+export function cosSourceState(policy: BackupPolicy | undefined, namespace: string, pvc: string): CosSourceState {
+  if (!policy?.spec?.export) return { offered: false, enabled: false, reason: '' };
+  const volume = (policy.status?.volumes || []).find((v) => v.pvcNamespace === namespace && v.pvcName === pvc);
+  if (volume?.exportedTime) return { offered: true, enabled: true, reason: '' };
+  return { offered: true, enabled: false, reason: 'This volume has no copy in COS yet.' };
+}
+
+/** Said above the files of a session that reads from COS. */
+export const COS_NOTICE =
+  'These files are read from the copy in COS. The first listing can take up to 30 seconds. Older copies in COS cannot be browsed yet; only the newest.';
 
 /**
  * The link that downloads one file ("file") or one folder as a tar ("tar"). The browser follows it with its
@@ -204,6 +232,8 @@ export interface SessionRequest {
   pvc: string;
   /** RFC 3339. Left out for the latest copy. */
   moment?: string;
+  /** Left out, the gateway reads COS only when the backup is only there. */
+  source?: BrowseSource;
 }
 
 export interface Session {
@@ -213,9 +243,12 @@ export interface Session {
   message?: string;
   /** True when the session reads the file systems inside a VM disk. */
   guest?: boolean;
+  /** Where the session reads: the snapshot pool or COS. */
+  source?: BrowseSource;
 }
 
 export interface SessionInfo {
+  source?: BrowseSource;
   moment?: string;
   latest?: boolean;
   guest?: boolean;

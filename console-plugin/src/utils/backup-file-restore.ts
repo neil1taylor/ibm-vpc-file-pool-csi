@@ -112,6 +112,8 @@ export interface RestoreRequest {
   namespace: string;
   pvc: string;
   moment?: string;
+  /** Where the files are read: the snapshot pool or COS. Left out, the gateway chooses. */
+  source?: 'local' | 'cos';
   paths: string[];
   targetNamespace: string;
   targetName: string;
@@ -126,6 +128,7 @@ export interface RestoreInput {
   pvc: string;
   /** RFC 3339, or empty for the latest copy. */
   moment: string;
+  source?: 'local' | 'cos';
   selected: SelectionMap;
   targetNamespace: string;
   targetName: string;
@@ -142,6 +145,7 @@ export function buildRestoreRequest(i: RestoreInput): RestoreRequest {
     namespace: i.namespace,
     pvc: i.pvc,
     ...(i.moment ? { moment: i.moment } : {}),
+    ...(i.source ? { source: i.source } : {}),
     paths,
     targetNamespace: i.targetNamespace,
     targetName: i.targetName,
@@ -223,7 +227,11 @@ export interface RestoreTarget {
 }
 
 /** Plain words for a refused request. */
+/** Refusals about where the files are read from. The gateway's own sentence is shown. */
+const SOURCE_REFUSALS = ['no_export', 'not_exported', 'vm_disk_cos'];
+
 export function restoreErrorText(err: GatewayError, t: RestoreTarget): string {
+  if (SOURCE_REFUSALS.includes(err.code) && err.message) return err.message;
   switch (err.status) {
     case 0:
       return 'The console cannot reach the backup gateway. Check that the driver was installed with the gateway on, and try again.';

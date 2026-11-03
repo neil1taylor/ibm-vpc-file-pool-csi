@@ -1,3 +1,4 @@
+import { BackupPolicy } from '../types';
 import { consoleFetch } from '@openshift-console/dynamic-plugin-sdk';
 import {
   GatewayError,
@@ -18,6 +19,7 @@ import {
   momentLabel,
   momentToISO,
   parseBrowseQuery,
+  cosSourceState,
   toB64,
   BrowseEntry,
 } from './backup-browse';
@@ -80,9 +82,55 @@ describe('browse links', () => {
       namespace: 'apps',
       pvc: 'db',
       moment: '2026-10-22T09:15:00Z',
+      source: '',
     });
-    expect(parseBrowseQuery('')).toEqual({ namespace: '', pvc: '', moment: '' });
-    expect(parseBrowseQuery('?claim=nonsense')).toEqual({ namespace: '', pvc: '', moment: '' });
+    expect(parseBrowseQuery('')).toEqual({ namespace: '', pvc: '', moment: '', source: '' });
+    expect(parseBrowseQuery('?claim=nonsense')).toEqual({ namespace: '', pvc: '', moment: '', source: '' });
+  });
+  it('keeps the source in the link and reads it back', () => {
+    expect(browsePath('nightly', 'apps/db', undefined, 'cos')).toBe('/vpc-file-pools/backups/nightly/browse?claim=apps%2Fdb&source=cos');
+    expect(browsePath('nightly', 'apps/db', '2026-10-22T09:15:00Z', 'local')).toBe(
+      '/vpc-file-pools/backups/nightly/browse?claim=apps%2Fdb&moment=2026-10-22T09%3A15%3A00Z&source=local',
+    );
+    expect(parseBrowseQuery('?claim=apps%2Fdb&source=cos').source).toBe('cos');
+    expect(parseBrowseQuery('?claim=apps%2Fdb&source=local').source).toBe('local');
+    expect(parseBrowseQuery('?claim=apps%2Fdb&source=tape').source).toBe('');
+  });
+});
+
+describe('cosSourceState', () => {
+  const vol = (over: Record<string, unknown> = {}) => ({ pvcNamespace: 'apps', pvcName: 'db', subVolumeName: 'sv', ...over });
+  const policy = (exp: boolean, volumes: unknown[]) =>
+    ({ spec: exp ? { export: { bucket: 'b' } } : {}, status: { volumes } }) as unknown as BackupPolicy;
+  it('offers nothing when the policy has no export block', () => {
+    expect(cosSourceState(policy(false, [vol()]), 'apps', 'db')).toEqual({ offered: false, enabled: false, reason: '' });
+    expect(cosSourceState(undefined, 'apps', 'db').offered).toBe(false);
+    expect(cosSourceState([] as unknown as BackupPolicy, 'apps', 'db').offered).toBe(false);
+  });
+  it('offers it but disabled, with a reason, when the volume has no copy in COS yet', () => {
+    const s = cosSourceState(policy(true, [vol()]), 'apps', 'db');
+    expect(s.offered).toBe(true);
+    expect(s.enabled).toBe(false);
+    expect(s.reason).toMatch(/no copy in COS yet/);
+  });
+  it('is enabled once the volume has been sent', () => {
+    expect(cosSourceState(policy(true, [vol({ exportedTime: '2026-10-22T09:15:00Z' })]), 'apps', 'db')).toEqual({
+      offered: true,
+      enabled: true,
+      reason: '',
+    });
+  });
+  it('is disabled for a volume the policy does not list', () => {
+    expect(cosSourceState(policy(true, [vol({ pvcName: 'other', exportedTime: 'x' })]), 'apps', 'db').enabled).toBe(false);
+  });
+});
+
+describe('source gateway errors', () => {
+  it('shows the gateway message for no_export and not_exported', () => {
+    expect(gatewayErrorText(new GatewayError(409, 'no_export', 'that policy does not send its backups to COS'))).toBe(
+      'that policy does not send its backups to COS',
+    );
+    expect(gatewayErrorText(new GatewayError(409, 'not_exported', 'that volume has no copy in COS yet'))).toBe('that volume has no copy in COS yet');
   });
 });
 

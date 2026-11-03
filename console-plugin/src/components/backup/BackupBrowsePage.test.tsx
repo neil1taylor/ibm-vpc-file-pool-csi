@@ -2,6 +2,7 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import BackupBrowsePage from './BackupBrowsePage';
 import { BrowseEntry, GatewayError, getInfo, listFolder, listMoments, toB64 } from '../../utils/backup-browse';
+import { useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk';
 import { useBrowseSession } from '../../utils/use-browse-session';
 
 let mockSearch = '?claim=apps%2Fdb';
@@ -15,9 +16,9 @@ jest.mock('react-router-dom', () => ({
 
 jest.mock('./RestoreFilesDialog', () => ({
   __esModule: true,
-  default: (p: { policy: string; namespace: string; pvc: string; moment: string; guest?: boolean; selected: Map<string, unknown>; onClose: () => void }) => (
+  default: (p: { policy: string; namespace: string; pvc: string; moment: string; source?: string; guest?: boolean; selected: Map<string, unknown>; onClose: () => void }) => (
     <div data-testid="restore-dialog">
-      {`${p.policy} ${p.namespace}/${p.pvc} moment=${p.moment} count=${p.selected.size}${p.guest ? ' guest' : ''}`}
+      {`${p.policy} ${p.namespace}/${p.pvc} moment=${p.moment} count=${p.selected.size}${p.source ? ` source=${p.source}` : ''}${p.guest ? ' guest' : ''}`}
       <button onClick={p.onClose}>close-dialog</button>
     </div>
   ),
@@ -50,6 +51,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockSearch = '?claim=apps%2Fdb';
   (useBrowseSession as jest.Mock).mockReturnValue(ready);
+  (useK8sWatchResource as jest.Mock).mockReturnValue([[], true, undefined]);
   (listMoments as jest.Mock).mockResolvedValue(['20261021T091500Z', '20261022T091500Z']);
   (listFolder as jest.Mock).mockResolvedValue({ entries: [] });
   (getInfo as jest.Mock).mockResolvedValue({ moment: '', latest: true });
@@ -439,5 +441,107 @@ describe('BackupBrowsePage VM disks', () => {
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Choose rhel-root' }));
     fireEvent.click(screen.getByRole('button', { name: 'Restore selected' }));
     expect(screen.getByTestId('restore-dialog').textContent).toContain('guest');
+  });
+});
+
+describe('BackupBrowsePage source switch', () => {
+  const policyWith = (exported: boolean, exportBlock = true) => [
+    {
+      spec: exportBlock ? { export: { bucket: 'b' } } : {},
+      status: { volumes: [{ pvcNamespace: 'apps', pvcName: 'db', subVolumeName: 'sv', ...(exported ? { exportedTime: '2026-10-22T09:15:00Z' } : {}) }] },
+    },
+    true,
+    undefined,
+  ];
+
+  it('does not show the switch when the policy has no export block', async () => {
+    (useK8sWatchResource as jest.Mock).mockReturnValue(policyWith(false, false));
+    render(<BackupBrowsePage />);
+    await screen.findByTestId('file-actions');
+    expect(screen.queryByRole('button', { name: 'COS' })).toBeNull();
+    expect(screen.queryByText(/read from the copy in COS/)).toBeNull();
+  });
+
+  it('shows the switch with the snapshot pool chosen, and asks the gateway to choose', async () => {
+    (useK8sWatchResource as jest.Mock).mockReturnValue(policyWith(true));
+    (useBrowseSession as jest.Mock).mockReturnValue({ ...ready, source: 'local' });
+    render(<BackupBrowsePage />);
+    const pool = await screen.findByRole('button', { name: 'Snapshot pool' });
+    expect(pool.getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'COS' }).getAttribute('aria-pressed')).toBe('false');
+    expect(useBrowseSession).toHaveBeenLastCalledWith({ policy: 'nightly', namespace: 'apps', pvc: 'db' });
+  });
+
+  it('puts the chosen source in the link and drops the moment', async () => {
+    (useK8sWatchResource as jest.Mock).mockReturnValue(policyWith(true));
+    mockSearch = '?claim=apps%2Fdb&moment=2026-10-21T09%3A15%3A00Z';
+    render(<BackupBrowsePage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'COS' }));
+    expect(mockReplace).toHaveBeenCalledWith('/vpc-file-pools/backups/nightly/browse?claim=apps%2Fdb&source=cos');
+  });
+
+  it('goes back to the snapshot pool with source=local in the link', async () => {
+    (useK8sWatchResource as jest.Mock).mockReturnValue(policyWith(true));
+    mockSearch = '?claim=apps%2Fdb&source=cos';
+    (useBrowseSession as jest.Mock).mockReturnValue({ ...ready, source: 'cos' });
+    render(<BackupBrowsePage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Snapshot pool' }));
+    expect(mockReplace).toHaveBeenCalledWith('/vpc-file-pools/backups/nightly/browse?claim=apps%2Fdb&source=local');
+  });
+
+  it('disables COS with the reason when the volume has no copy there yet', async () => {
+    (useK8sWatchResource as jest.Mock).mockReturnValue(policyWith(false));
+    render(<BackupBrowsePage />);
+    const cos = await screen.findByRole('button', { name: 'COS' });
+    expect((cos as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/no copy in COS yet/)).toBeTruthy();
+    fireEvent.click(cos);
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it('sends the source from the link to the session', async () => {
+    (useK8sWatchResource as jest.Mock).mockReturnValue(policyWith(true));
+    mockSearch = '?claim=apps%2Fdb&source=cos';
+    render(<BackupBrowsePage />);
+    await screen.findByTestId('file-actions');
+    expect(useBrowseSession).toHaveBeenLastCalledWith({ policy: 'nightly', namespace: 'apps', pvc: 'db', source: 'cos' });
+  });
+
+  it('shows the notice, offers only the newest copy and gives the source to the restore dialog for COS', async () => {
+    (useK8sWatchResource as jest.Mock).mockReturnValue(policyWith(true));
+    mockSearch = '?claim=apps%2Fdb&source=cos';
+    (useBrowseSession as jest.Mock).mockReturnValue({ ...ready, source: 'cos' });
+    (listFolder as jest.Mock).mockResolvedValue({ entries: [entry('a.txt')] });
+    render(<BackupBrowsePage />);
+    expect(await screen.findByText(/These files are read from the copy in COS/)).toBeTruthy();
+    expect(screen.getByText(/up to 30 seconds/)).toBeTruthy();
+    expect(screen.getByText(/only the newest/)).toBeTruthy();
+    const select = screen.getByLabelText('Moment') as HTMLSelectElement;
+    await waitFor(() => expect(listMoments).toHaveBeenCalled());
+    expect(within(select).getAllByRole('option').length).toBe(1);
+    expect(select.disabled).toBe(true);
+    expect(screen.queryByText(/latest copy may change/i)).toBeNull();
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Choose a.txt' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restore selected' }));
+    expect(screen.getByTestId('restore-dialog').textContent).toContain('source=cos');
+  });
+
+  it('shows no COS notice for the snapshot pool', async () => {
+    (useK8sWatchResource as jest.Mock).mockReturnValue(policyWith(true));
+    (useBrowseSession as jest.Mock).mockReturnValue({ ...ready, source: 'local' });
+    render(<BackupBrowsePage />);
+    await screen.findByTestId('file-actions');
+    expect(screen.queryByText(/read from the copy in COS/)).toBeNull();
+  });
+
+  it('shows the gateway message when the session is refused', () => {
+    (useBrowseSession as jest.Mock).mockReturnValue({
+      status: 'error',
+      error: new GatewayError(409, 'not_exported', 'that volume has no copy in COS yet'),
+      reopen,
+    });
+    mockSearch = '?claim=apps%2Fdb&source=cos';
+    render(<BackupBrowsePage />);
+    expect(screen.getByText(/that volume has no copy in COS yet/)).toBeTruthy();
   });
 });

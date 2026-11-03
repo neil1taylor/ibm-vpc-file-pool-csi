@@ -50,6 +50,26 @@ beforeEach(() => {
   rights();
 });
 
+describe('RestoreFilesDialog source', () => {
+  it('sends the source the browser page uses', async () => {
+    (createRestore as jest.Mock).mockResolvedValue({ name: 'bfr-1', phase: 'Pending', files: 0, dirs: 0, links: 0, bytes: 0, targetNamespace: 'apps', targetName: 'db-restored' });
+    render(<RestoreFilesDialog policy="nightly" namespace="apps" pvc="db" moment="" source="cos" selected={selected()} onClose={onClose} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    await waitFor(() => expect(createRestore).toHaveBeenCalled());
+    expect((createRestore as jest.Mock).mock.calls[0][0].source).toBe('cos');
+  });
+  it('says the files come from COS', () => {
+    render(<RestoreFilesDialog policy="nightly" namespace="apps" pvc="db" moment="" source="cos" selected={selected()} onClose={onClose} />);
+    expect(screen.getByText(/the copy in COS/)).toBeTruthy();
+  });
+  it('shows the gateway message when COS is refused', async () => {
+    (createRestore as jest.Mock).mockRejectedValue(new GatewayError(409, 'not_exported', 'that volume has no copy in COS yet'));
+    render(<RestoreFilesDialog policy="nightly" namespace="apps" pvc="db" moment="" source="cos" selected={selected()} onClose={onClose} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    expect(await screen.findByText(/that volume has no copy in COS yet/)).toBeTruthy();
+  });
+});
+
 describe('RestoreFilesDialog form', () => {
   it('shows what will be written, the moment and that nothing is overwritten', () => {
     renderDialog(selected());
