@@ -1,6 +1,6 @@
 # Spec: browse and restore files from VM disks in COS (issue #92, phase 6)
 
-Date: 2026-10-29. Status: speed bar agreed by the owner (29 Oct 2026); design ready for build; phase 6a measured on the lab on 2 Nov 2026 (section "Phase 6a results"). It fills in phase 6 of `2026-10-22-backup-file-restore.md` (the parent spec). Read section 3 ("VM disks") and section 4 ("Backups in COS") of the parent first. It builds on phase 4 (COS, plain volumes, merged) and phase 5 (VM disks in the snapshot pool, PRs #337, #338, #341 and #342, not merged and not yet run on the lab). Facts here come from `main` and the `vm-browse-c2` branch on 29 Oct 2026.
+Date: 2026-10-29. Status: speed bar agreed by the owner (29 Oct 2026); design ready for build; phase 6a measured on the lab on 2 Nov 2026 (section "Phase 6a results"); phase 6b built and run on the lab on 3 Nov 2026 (section "Phase 6b results"). It fills in phase 6 of `2026-10-22-backup-file-restore.md` (the parent spec). Read section 3 ("VM disks") and section 4 ("Backups in COS") of the parent first. It builds on phase 4 (COS, plain volumes, merged) and phase 5 (VM disks in the snapshot pool, PRs #337, #338, #341 and #342, not merged and not yet run on the lab). Facts here come from `main` and the `vm-browse-c2` branch on 29 Oct 2026.
 
 ## Goal
 
@@ -129,6 +129,27 @@ So the 50 MiB/s download bar is met only with parallel reads or read-ahead. One 
 
 **Verdict.** Neither stop rule applies: the raw reads meet the bar, and the slow path is within a factor of 2 of the 30-second first listing even without the file list. Section 1 is confirmed as written, with one addition: the disk server reads ahead in 4 MiB segments and fetches several in parallel, behind a bounded cache.
 
+## Phase 6b results (3 Nov 2026, DR lab, driver built from the branch)
+
+Run with `test/e2e/test-backup-files-vm-cos.sh`: three small VM disks (XFS on LVM, ext4, NTFS; one holds a 256 MiB file) backed up twice to the snapshot pool and exported to COS with the file list; then read as a namespace admin through the gateway with `--from-cos`. The last run passed every check.
+
+| Bar | Result |
+|---|---|
+| First listing, 30 s | 21 to 26 s (with the KVM device on; 44 to 46 s without it) |
+| Another folder in the open session, 5 s | 0.4 s |
+| A download starts within 2 min | The first byte after about 11 s (with KVM) |
+| 50 MiB/s after the start | 41 to 54 MiB/s measured inside the reader pod over six downloads of 256 MiB; the rate through the gateway to a laptop over the VPN was 5 to 8 MiB/s, which is the laptop's network, not the product |
+
+Also checked: file systems of all three kinds read from COS; a 256 MiB file has the same checksum; an older moment and a file restore from a VM disk in COS are refused in words; the disk server has no API token, mounts no share and has no capability; the browse namespace holds no COS or Key Protect key and the copy of the disk server Secret there has no private key; closing the session leaves no pod, Job or Secret.
+
+**What the lab found, and what changed because of it**
+
+- Sessions advanced only on the controller's 30-second pass, and a session on a VM disk in COS needs two steps (disk server, then reader), so the first listing took 96 s. A quick 2-second pass now looks only at sessions that are starting. First listing: 46 s.
+- The file list status was dropped at the next pass; it is now kept.
+- A download that starts the reader waits longer than the 30-second default of the OpenShift router, and the load balancer in front of it ends a silent connection after 50 s. The gateway Route now allows 5 minutes. The first byte still has to arrive within 50 s: it needs the KVM device (reader start 1.5 s instead of 12 s). **On nodes without the KVM device, `backupBrowse.guest.kvmDevice` stays off and the first download of a session can fail on a slow disk.**
+- A newer backup could land after the list was built and before the export began; its copy replaced the folder, and the list with it, so the session fell back to the slow path. The list is now built again when the moment changed.
+- The 30-minute rule for the moment of a list was not tested at its edge: the lists were for the same moment to the second. The publisher could write into the backup folder as it is (no permission change needed).
+
 ## Build plan: phases, one PR each
 
 Phase 6 needs phase 5 merged and passing on the lab first.
@@ -161,13 +182,17 @@ Total: about 1.5 to 2.5 weeks of agent work, plus the lab runs.
 - An export that will be deleted within the session limit plus an hour (3 hours with the defaults) cannot be browsed.
 - The disk server's cache is 64 MiB in memory (4 MiB segments, 8 read ahead), set by flags. The spike showed that a bounded memory cache is enough, and Kopia keeps its own cache on its scratch folder.
 - The file list is saved as `.filelist.json.gz` in the volume's backup folder, next to `disk.img`, so the existing export snapshot carries it and the existing delete and measure steps cover it. A second container copies it there (a plain file of at most 256 MiB); the reader that parses the disk never writes to the share.
-- A file list counts as being for the disk if its moment is within 30 minutes of the disk's. The lab run has to confirm that number.
+- A file list counts as being for the disk if its moment is within 30 minutes of the disk's. The 3 Nov 2026 lab run built each list for the same moment as the disk (to the second), so it shows the rule works but did not test the edge of 30 minutes.
 - In 6b only the newest moment of an export can be browsed in COS. Older moments need the undo files served too, and come later if you want them.
 - A VM disk named directly by bucket (`--bucket`) is browsed as plain files, because nothing there says it is a VM disk. Browse it through its policy.
 - The console gets a local or COS switch for every volume type, not only VM disks.
 - VM disks from COS follow the same session limits as everything else. There is no separate limit.
+- The speed bar was met on the DR lab with the KVM device on (first listing 21 to 26 s, other folders 0.4 s, a download starts after 11 s). Without the KVM device the first listing is 44 to 46 s, above the bar, so I recommend it wherever nodes have it.
+- Browse sessions that are starting get a 2-second pass of their own, because the usual 30-second pass made two-step sessions slow.
+- The gateway address allows 5 minutes for a first byte (the default is 30 seconds), because a first read starts the reader.
+- The download rate to a person depends on their network. The test records the rate inside the reader pod, which is what the product controls.
 
 ## Needs from you
 
-- Nothing blocks writing 6a. It needs a lab run, which waits for your go-ahead as usual.
+- Nothing blocks 6c. It needs a lab run, which waits for your go-ahead as usual.
 - Nothing else. The speed bar is agreed: first listing within 30 seconds.

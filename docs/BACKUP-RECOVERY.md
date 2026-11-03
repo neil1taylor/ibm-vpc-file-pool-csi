@@ -547,8 +547,8 @@ The goal (issue #92) is to look inside a backup and get back one file or folder 
 - **The console file browser (phase 3, first half).** A **Browse files** action on each volume of a policy opens a page that lists folders and files, with a moment picker and downloads. See "Browse and download files in the console" below.
 - **Backups in COS (phase 4).** The same commands read a plain volume's backup from the policy's COS bucket. See "Files from a backup in COS" below.
 - **The console restore dialog (phase 3, second half).** See "Restore files in the console" below.
-- **VM disks (phase 5, in development).** The files inside a VM disk, without starting the VM. See "Files inside a VM disk" below.
-- **Not built yet:** VM disks in COS (phase 6), and in the console a switch to read from COS by hand.
+- **VM disks (phase 5).** The files inside a VM disk, without starting the VM. See "Files inside a VM disk" below.
+- **Not built yet:** older moments of a VM disk in COS and restoring files from one (phase 6c), and in the console a switch to read from COS by hand. The newest moment of a VM disk in COS is built and lab-tested (phase 6b, below).
 
 ### Browse from the command line
 
@@ -741,11 +741,12 @@ The backup of a VM disk is one raw disk, `disk.img`, plus an undo file for each 
 - **Using it.** The gateway makes a guest session or a guest restore for every volume that the policy status shows as a disk of a VM (`vmName`), so the same commands and the same console page work for it, with the same access rule (`get backupfiles` in the namespace of the claim). A VM disk in COS can be browsed too (phase 6b, below); restoring files from one is phase 6c. See "VM disks in the commands and the console" below.
 - **Two ways a VM disk is stored.** A running VM is copied by QEMU and keeps one undo file for each earlier moment. A VM that was stopped when it was backed up is copied as plain files, and each earlier moment is a folder with its own `disk.img`. The controller tells them apart by the consistency in the policy status (`FileCopy` is the plain copy), and the reader uses the moments folder for the second kind.
 
-#### VM disks in COS (phase 6b, in development)
+#### VM disks in COS (phase 6b)
 
 `kubectl backup ls --from-cos` and the console open the file systems inside a VM disk that was exported to COS, for the newest moment of an export. Two pods serve a session: a **disk server** in the driver namespace, which holds the COS and Key Protect keys and hands out the bytes of the disk over HTTPS to its own session only, and a **guest reader** in the browse namespace, which holds no key. Neither pod keeps anything after the session.
 
 - **The file list.** Each export of a VM disk first builds a list of the files inside it and saves it next to `disk.img`; the export carries it to COS. Folders are then shown from the list at once; a download reads the disk. If the list is missing, or is for another moment, folders are read from the disk, which is slow, and the session says so. `kubectl get backuppolicy -o yaml` shows `fileListEntries` and `fileListError` for each VM disk. A failed list never fails the export.
+- **Speed (lab, DR cluster, 3 Nov 2026).** First listing 21 to 26 s, another folder 0.4 s, the first byte of a download after about 11 s, then 41 to 54 MiB/s inside the cluster. Turn on `backupBrowse.guest.kvmDevice` where the nodes have the KVM device: without it the reader starts in about 12 s more, the first listing took 44 to 46 s, and the first download of a session can take longer than the 50 seconds a load balancer waits for a first byte. The gateway Route allows 5 minutes.
 - **Older moments.** Only the newest moment of an export can be browsed in COS. Ask for an older one and the session says so.
 - **Keep time.** A session is refused if the export would be deleted from COS within the session limit (2 hours by default) plus an hour.
 - **Network.** `<release>-browse-disk` allows only the guest reader pods of the browse namespace to reach the disk server, on its port.
