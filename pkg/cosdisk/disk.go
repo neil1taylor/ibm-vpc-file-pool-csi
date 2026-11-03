@@ -202,7 +202,7 @@ func (d *Disk) get(idx int64) (*segment, error) {
 func (d *Disk) evict() {
 	for d.cached > d.max && d.lru.Len() > 1 {
 		el := d.lru.Back()
-		s := el.Value.(*segment)
+		s, _ := el.Value.(*segment)
 		d.lru.Remove(el)
 		delete(d.segs, s.idx)
 		d.cached -= int64(len(s.data))

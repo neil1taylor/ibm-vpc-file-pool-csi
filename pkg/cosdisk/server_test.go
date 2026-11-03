@@ -107,7 +107,7 @@ func TestServerAnswersRangesWithTheRightBytes(t *testing.T) {
 
 func TestNewHandlerRefusesAShortToken(t *testing.T) {
 	d := New(&memSource{data: newData(10)}, Options{})
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 	if _, err := NewHandler(d, "short"); err == nil {
 		t.Fatal("want an error for a short token")
 	}
@@ -175,7 +175,7 @@ func TestFileListIsServedWithTheToken(t *testing.T) {
 	if err != nil || rc == nil {
 		t.Fatalf("FetchFileList = %v, %v", rc, err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 	got, _ := io.ReadAll(rc)
 	if !bytes.Equal(got, list) {
 		t.Errorf("got %q", got)
@@ -216,7 +216,7 @@ func TestOnAuthedRunsOnlyForTheRightToken(t *testing.T) {
 	certPEM, keyPEM, _ := browse.NewSessionCert(time.Hour)
 	cfg, _ := browse.ServerTLSConfig(certPEM, keyPEM)
 	d := New(&memSource{data: newData(100)}, Options{})
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 	var starts, ends int
 	h, _ := NewHandler(d, testToken, WithOnAuthed(func(w http.ResponseWriter, _ *http.Request) func() {
 		starts++

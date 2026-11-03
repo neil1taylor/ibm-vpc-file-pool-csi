@@ -762,6 +762,11 @@ func (s *nfsShareData) ApplyVMDisk(context.Context, string, pool.ShareMount, str
 	return true, nil
 }
 
+// BuildFileList is not used: the integration tests have no VM disks to list.
+func (s *nfsShareData) BuildFileList(context.Context, string, pool.ShareMount, string, string) (bool, pool.FileListOutcome, error) {
+	return true, pool.FileListOutcome{}, nil
+}
+
 func newTestHarness(t *testing.T) *testHarness {
 	t.Helper()
 

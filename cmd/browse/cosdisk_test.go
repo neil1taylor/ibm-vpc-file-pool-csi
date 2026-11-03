@@ -96,8 +96,8 @@ func TestCOSDiskModeServesTheDiskOverTLSWithTheToken(t *testing.T) {
 		t.Fatalf("size=%d moment=%s", src.Size(), src.Moment())
 	}
 	got := make([]byte, 3000)
-	if n, err := src.ReadRange(context.Background(), got, 5000); err != nil || n != 3000 || !bytes.Equal(got, data[5000:8000]) {
-		t.Fatalf("ReadRange = %d, %v", n, err)
+	if n, rerr := src.ReadRange(context.Background(), got, 5000); rerr != nil || n != 3000 || !bytes.Equal(got, data[5000:8000]) {
+		t.Fatalf("ReadRange = %d, %v", n, rerr)
 	}
 	if len(f.started) != 1 || f.started[0] != "k1234" {
 		t.Errorf("mounted %v", f.started)
