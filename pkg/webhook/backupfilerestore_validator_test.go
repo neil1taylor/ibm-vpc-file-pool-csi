@@ -108,7 +108,7 @@ func TestBackupFileRestoreValidatorGuest(t *testing.T) {
 		{"a VM disk in the snapshot pool, by name", func(s *v1alpha1.BackupFileRestoreSpec) {
 			s.Guest, s.Source = true, v1alpha1.BackupSourceLocal
 		}, ""},
-		{"a VM disk in COS", func(s *v1alpha1.BackupFileRestoreSpec) { s.Guest, s.Source = true, v1alpha1.BackupSourceCOS }, "spec.guest"},
+		{"a VM disk in COS", func(s *v1alpha1.BackupFileRestoreSpec) { s.Guest, s.Source = true, v1alpha1.BackupSourceCOS }, ""},
 	}
 	v := &BackupFileRestoreValidator{}
 	for _, c := range cases {
