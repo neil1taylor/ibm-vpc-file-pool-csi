@@ -1,6 +1,6 @@
 # Spec: browse and restore files from VM disks in COS (issue #92, phase 6)
 
-Date: 2026-10-29. Status: speed bar agreed by the owner (29 Oct 2026); design ready for build; phase 6a measured on the lab on 2 Nov 2026 (section "Phase 6a results"); phase 6b built and run on the lab on 3 Nov 2026 (section "Phase 6b results"). It fills in phase 6 of `2026-10-22-backup-file-restore.md` (the parent spec). Read section 3 ("VM disks") and section 4 ("Backups in COS") of the parent first. It builds on phase 4 (COS, plain volumes, merged) and phase 5 (VM disks in the snapshot pool, PRs #337, #338, #341 and #342, not merged and not yet run on the lab). Facts here come from `main` and the `vm-browse-c2` branch on 29 Oct 2026.
+Date: 2026-10-29. Status: speed bar agreed by the owner (29 Oct 2026); design ready for build; phase 6a measured on the lab on 2 Nov 2026 (section "Phase 6a results"); phase 6b built and run on the lab on 3 Nov 2026 (section "Phase 6b results"); phase 6c built and run on the lab on 3 Nov 2026 (section "Phase 6c results"). It fills in phase 6 of `2026-10-22-backup-file-restore.md` (the parent spec). Read section 3 ("VM disks") and section 4 ("Backups in COS") of the parent first. It builds on phase 4 (COS, plain volumes, merged) and phase 5 (VM disks in the snapshot pool, PRs #337, #338, #341 and #342, not merged and not yet run on the lab). Facts here come from `main` and the `vm-browse-c2` branch on 29 Oct 2026.
 
 ## Goal
 
@@ -150,13 +150,25 @@ Also checked: file systems of all three kinds read from COS; a 256 MiB file has 
 - A newer backup could land after the list was built and before the export began; its copy replaced the folder, and the list with it, so the session fell back to the slow path. The list is now built again when the moment changed.
 - The 30-minute rule for the moment of a list was not tested at its edge: the lists were for the same moment to the second. The publisher could write into the backup folder as it is (no permission change needed).
 
+## Phase 6c results (3 Nov 2026, DR lab)
+
+Run with `test/e2e/test-backup-files-vm-cos.sh` (now also restores): the last run passed all 25 checks. Speed was as in 6b: first listing 21.6 to 25.6 s over four runs, another folder 0.4 s, in-pod download 42 to 50 MiB/s. A restore of a small file and the 256 MiB file from the XFS disk took 155 s including the start of the disk server; the restored 256 MiB file has the same checksum. A file from the NTFS disk and the first moment (when an export holds it) restore with the right content. The disk server of a restore, its Secret and the restore pod are gone when it ends; the browse namespace holds no COS or Key Protect key.
+
+**What the lab found, and what changed because of it**
+
+- The new one-level folder helper (`guestls`, phase #365) could not open the reader's disk socket (it takes a file name, not the tools' address). It now parses `nbd+unix:///?socket=PATH`.
+- NTFS cannot be mounted by a program that is not named `virt-*` (the NTFS package allows only the libguestfs tools). The helper now names itself `virt-guestls`.
+- The image build now lists a folder with `guestls` once, so a broken helper fails the build. (The first version of that check used the wrong device; the build caught it.)
+- Two refusals were still in the code: the admission webhook refused `spec.guest` with COS, and the controller's own wiring gave the restore runner no browse image, so its disk server Job had no image. Both fixed.
+- The older-moment test had to change: if the export of the first moment was made before the second backup landed, that export holds the first moment, and it can be read. The test now accepts a refusal or a correct read of that moment.
+
 ## Build plan: phases, one PR each
 
 Phase 6 needs phase 5 merged and passing on the lab first.
 
 - **6a. Spike on the lab (S, risk check). Done 2 Nov 2026; results above.** Use a real export of a lab VM (stage 18 makes them). Try option A, then option B if A fails. Make a file list of the lab VM's disk and measure its time and size. Measure the speed bar (with the list, and the slow path without it), bytes fetched, COS requests, disk server memory, and the cost of indexing the undo files. Write the results and the choice into this spec, in a PR with no product code. **If neither option meets the speed bar within a factor of 2, I stop and show you the gap.**
 - **6b. COS disk server (M).** The file list at export (made, stored with the export, read and checked), the source interface, the COS source, the cache, the keep-time check, the TLS NBD link, the disk server pod and its NetworkPolicy, and the guest helper over the network. Command line browse and download.
-- **6c. Restore and console (M).** The file restore from COS through the #341 split, the console source switch, the help text, and stage 20's COS VM part.
+- **6c. Restore and console (M). Done 3 Nov 2026; results above.** The file restore from COS through the #341 split, the console source switch (PR #379), the help text, and stage 20's COS VM part (part 8).
 
 Total: about 1.5 to 2.5 weeks of agent work, plus the lab runs.
 
@@ -188,11 +200,13 @@ Total: about 1.5 to 2.5 weeks of agent work, plus the lab runs.
 - The console gets a local or COS switch for every volume type, not only VM disks.
 - VM disks from COS follow the same session limits as everything else. There is no separate limit.
 - The speed bar was met on the DR lab with the KVM device on (first listing 21 to 26 s, other folders 0.4 s, a download starts after 11 s). Without the KVM device the first listing is 44 to 46 s, above the bar, so I recommend it wherever nodes have it.
+- A restore of files from a VM disk in COS starts its own disk server (the same pod as a browse session, with its own Secret and a restore label so the browse sweeps leave it alone), and stops it when the restore ends. The restore Job's reader holds no key.
+- A restore needs the export to stay in COS for at least 3 more hours (the restore limit of 2 hours plus an hour), and the browse COS setting on.
 - Browse sessions that are starting get a 2-second pass of their own, because the usual 30-second pass made two-step sessions slow.
 - The gateway address allows 5 minutes for a first byte (the default is 30 seconds), because a first read starts the reader.
 - The download rate to a person depends on their network. The test records the rate inside the reader pod, which is what the product controls.
 
 ## Needs from you
 
-- Nothing blocks 6c. It needs a lab run, which waits for your go-ahead as usual.
+- Nothing. Phase 6c is done. Older moments of a VM disk in COS are still not built.
 - Nothing else. The speed bar is agreed: first listing within 30 seconds.
