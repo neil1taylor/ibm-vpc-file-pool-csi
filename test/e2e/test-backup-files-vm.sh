@@ -214,7 +214,7 @@ printf one > /tmp/t/docs/a.txt
 head -c 4194304 /dev/urandom > /tmp/t/big.bin
 printf x > "/tmp/t/line
 break"
-sha256sum /tmp/t/big.bin | cut -d" " -f1 > /d1/big.sha
+sha256sum /tmp/t/big.bin | cut -d" " -f1 | tee /d1/big.sha
 # disk1: GPT, a partition that is an LVM physical volume, an XFS logical volume.
 guestfish <<EOF
 disk-create /d1/disk.img raw 1G
