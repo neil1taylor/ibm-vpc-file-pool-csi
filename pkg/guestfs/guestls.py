@@ -3,6 +3,8 @@
 
     guestls --format=raw -a DISK -m DEVICE[:MOUNTPOINT[:OPTIONS]] -- FOLDER
 
+DISK is a file or an address like nbd+unix:///?socket=PATH.
+
 It writes what `virt-ls -lR --csv --time-t --uids -- FOLDER` writes, but only
 for the folder and the names directly in it: type letter, permissions in octal,
 size, user number, group number, access time, content-change time, status time,
@@ -17,10 +19,12 @@ import os
 import stat
 import sys
 import tempfile
+import urllib.parse
 
 import guestfs
 
 BATCH = 1000
+PROGRAM = "virt-guestls"
 
 
 def usage():
@@ -51,6 +55,25 @@ def parse(argv):
     return drive, mount, folder
 
 
+def add_drive(g, drive):
+    """Adds the disk. The tools take a URI such as nbd+unix:///?socket=PATH, which the
+    API does not; the reader serves its disk over such a socket."""
+    if drive.startswith("nbd+unix:"):
+        socket = urllib.parse.parse_qs(urllib.parse.urlparse(drive).query).get("socket", [""])[0]
+        if not socket.startswith("/"):
+            raise RuntimeError("the nbd address has no socket path")
+        g.add_drive_opts("", format="raw", readonly=1, protocol="nbd", server=["unix:" + socket])
+    else:
+        g.add_drive_opts(drive, format="raw", readonly=1)
+
+
+def start(g, drive):
+    """Names the program as the libguestfs tools do: the NTFS support of
+    libguestfs-winsupport works only for a program whose name starts with virt-."""
+    g.set_program(PROGRAM)
+    add_drive(g, drive)
+
+
 def row(typ, mode, size, uid, gid, atime, mtime, ctime, path, link=None):
     r = [typ, "%04o" % mode, str(size), "%4d" % uid, "%4d" % gid, str(atime), str(mtime), str(ctime), path]
     if link is not None:
@@ -76,7 +99,7 @@ def main():
     dev, _, rest = mount.partition(":")
     mountpoint, _, opts = rest.partition(":")
     g = guestfs.GuestFS(python_return_dict=True)
-    g.add_drive_opts(drive, format="raw", readonly=1)
+    start(g, drive)
     g.launch()
     g.mount_options(opts, dev, mountpoint or "/")
 

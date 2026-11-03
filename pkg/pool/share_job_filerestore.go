@@ -58,11 +58,21 @@ func (r *ShareJobRunner) RunFileRestore(ctx context.Context, req FileRestoreRequ
 	var folders []folderMount
 	var cosVolumes []corev1.Volume
 	var cosMounts []corev1.VolumeMount
-	if req.COS != nil {
+	switch {
+	case req.COS != nil && req.Guest != nil:
+		// A VM disk in COS: the disk server holds the keys and this Job reads the
+		// disk from it. The Job gets the token and the certificate of the disk
+		// server (not its private key) and nothing else.
+		cosVolumes = []corev1.Volume{{Name: "disk", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
+			SecretName: req.Guest.Disk.SecretName,
+			Items:      []corev1.KeyToPath{{Key: "token", Path: "token"}, {Key: "tls.crt", Path: "tls.crt"}},
+		}}}}
+		cosMounts = []corev1.VolumeMount{{Name: "disk", MountPath: diskReadMountDir, ReadOnly: true}}
+	case req.COS != nil:
 		// The backup is read from COS: there is no share to mount for it, and the
 		// Job holds the keys, so it gets no service account token.
 		cosVolumes, cosMounts = cosSecretVolumes(req.COS.Repo)
-	} else {
+	default:
 		shares = []ShareMount{req.Backup}
 		folders = []folderMount{{share: 0, subPath: strings.TrimPrefix(req.LatestPath, "/"), at: spec.Latest, readOnly: true}}
 		if req.MomentsPath != "" {
@@ -95,7 +105,7 @@ func (r *ShareJobRunner) RunFileRestore(ctx context.Context, req FileRestoreRequ
 		folders = append(folders, folderMount{share: len(shares), at: spec.Dest})
 		shares = append(shares, req.Dest)
 		caps = []corev1.Capability{"CHOWN", "FOWNER"}
-	} else if req.COS != nil {
+	} else if req.COS != nil && req.Guest == nil {
 		// Measuring a backup in COS writes nothing and reads no share.
 		runAs = cosHelperUser
 	}
@@ -129,6 +139,7 @@ func (r *ShareJobRunner) RunFileRestore(ctx context.Context, req FileRestoreRequ
 		mounts:         append(append([]corev1.VolumeMount{{Name: "paths", MountPath: fileRestorePathsMount, ReadOnly: true}}, cosMounts...), sockMounts...),
 		noToken:        req.COS != nil || req.Guest != nil, // a Job that parses a guest disk or holds keys never gets the API token
 		owner:          &owner,
+		labels:         restoreLabels(req),
 		hardened:       hardened,
 		addCaps:        caps,
 		activeDeadline: int64(deadline.Seconds()),
@@ -242,8 +253,19 @@ func (r *ShareJobRunner) fileRestoreSpec(req FileRestoreRequest) (filerestore.Jo
 		if r.guestImage == "" {
 			return spec, errors.New("restoring files from inside a VM disk needs the guest image, which is not set")
 		}
-		if req.COS != nil {
-			return spec, errors.New("a VM disk is read from its backup folder only, not from COS")
+		if req.COS != nil && req.Guest.Disk == nil {
+			return spec, errors.New("a VM disk in COS is read through a disk server, which is not set")
+		}
+		if req.COS == nil && req.Guest.Disk != nil {
+			return spec, errors.New("a disk server holds a VM disk in COS; this backup is in the snapshot pool")
+		}
+		if req.Guest.Disk != nil {
+			if err := req.Guest.Disk.check(); err != nil {
+				return spec, err
+			}
+			if req.LatestPath != "" || req.MomentsPath != "" {
+				return spec, errors.New("a restore from COS names no backup folder")
+			}
 		}
 		if req.MomentsPath != "" {
 			if err := checkBackupFolders(req.LatestPath, req.MomentsPath); err != nil {
@@ -253,7 +275,7 @@ func (r *ShareJobRunner) fileRestoreSpec(req FileRestoreRequest) (filerestore.Jo
 		if c := req.Guest.Consistency; c != "" && c != "FileSystemConsistent" && c != "CrashConsistent" {
 			return spec, errors.New("the consistency of the copy is not one that the Job knows")
 		}
-		if req.MomentsPath == "" {
+		if req.MomentsPath == "" && req.Guest.Disk == nil {
 			if err := util.ValidateBackupPath(req.LatestPath); err != nil {
 				return spec, err
 			}
@@ -278,13 +300,21 @@ func (r *ShareJobRunner) fileRestoreSpec(req FileRestoreRequest) (filerestore.Jo
 		Mode: req.Mode, MaxBytes: req.MaxBytes,
 		UID: req.UID, GID: req.GID, Permissions: req.Permissions, CapacityBytes: req.CapacityBytes,
 	}
-	if req.COS != nil {
+	switch {
+	case req.COS != nil && req.Guest != nil:
+		// The disk server holds the keys. This Job names only where the disk is
+		// and which files hold its certificate and token.
+		spec.Guest = &filerestore.GuestSource{
+			Socket: "/tmp/disk.sock", Appliance: "/opt/guestfs-appliance", Consistency: req.Guest.Consistency,
+			Disk: &filerestore.RemoteDisk{URL: req.Guest.Disk.url(), CertFile: diskReadMountDir + "/tls.crt", TokenFile: diskReadMountDir + "/token"},
+		}
+	case req.COS != nil:
 		src, err := checkCOSSource(req.COS.Repo, req.COS.Policy, req.COS.Volume)
 		if err != nil {
 			return spec, err
 		}
 		spec.COS = &src
-	} else {
+	default:
 		spec.Latest = "/src"
 		if req.MomentsPath != "" {
 			spec.Moments = "/moments"
@@ -337,6 +367,15 @@ func (r *ShareJobRunner) ensurePathsConfigMap(ctx context.Context, req FileResto
 	}
 	if err := r.client.Create(ctx, cm); err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("make the ConfigMap of paths: %w", err)
+	}
+	return nil
+}
+
+// restoreLabels are the pod labels that let a restore reach its disk server: the
+// network policy of the disk server admits only pods that carry the label.
+func restoreLabels(req FileRestoreRequest) map[string]string {
+	if req.COS != nil && req.Guest != nil {
+		return map[string]string{restoreGuestLabel: "true"}
 	}
 	return nil
 }

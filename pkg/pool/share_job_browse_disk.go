@@ -74,7 +74,7 @@ func (r *ShareJobRunner) StartBrowseDisk(ctx context.Context, req BrowseJobReque
 			Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m"), corev1.ResourceMemory: resource.MustParse("256Mi")},
 			Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(cpu), corev1.ResourceMemory: resource.MustParse(mem)},
 		},
-		labels:         map[string]string{browseLabel: req.ID, browseDiskLabel: "true"},
+		labels:         map[string]string{diskOwnerLabel(req): req.ID, browseDiskLabel: "true"},
 		owner:          &owner,
 		hardened:       true,
 		noToken:        true,
@@ -98,6 +98,30 @@ func (r *ShareJobRunner) StartBrowseDisk(ctx context.Context, req BrowseJobReque
 	return r.start(ctx, name, nil, shape)
 }
 
+// check says whether the address and the Secret are usable in a Job.
+func (d *BrowseDisk) check() error {
+	ip := net.ParseIP(d.IP)
+	if ip == nil || ip.To4() == nil || ip.String() != d.IP {
+		return errors.New("the address of the disk server is not an IPv4 address")
+	}
+	if d.SecretName == "" {
+		return errors.New("the guest reader needs the Secret of the disk server")
+	}
+	return nil
+}
+
+// url is where the disk is served.
+func (d *BrowseDisk) url() string { return fmt.Sprintf("https://%s:%d/disk", d.IP, diskServerPort) }
+
+// diskOwnerLabel is the label that ties a disk server to what it serves: a
+// browse session or a file restore.
+func diskOwnerLabel(req BrowseJobRequest) string {
+	if req.Restore {
+		return restoreDiskLabel
+	}
+	return browseLabel
+}
+
 // startBrowseDiskReader starts the guest reader of a session whose disk is in a
 // disk server. It mounts no share and no key.
 func (r *ShareJobRunner) startBrowseDiskReader(ctx context.Context, req BrowseJobRequest) error {
@@ -107,12 +131,8 @@ func (r *ShareJobRunner) startBrowseDiskReader(ctx context.Context, req BrowseJo
 	if r.guestImage == "" {
 		return errNoBrowseGuest
 	}
-	ip := net.ParseIP(req.Disk.IP)
-	if ip == nil || ip.To4() == nil || ip.String() != req.Disk.IP {
-		return errors.New("the address of the disk server is not an IPv4 address")
-	}
-	if req.Disk.SecretName == "" {
-		return errors.New("the guest reader needs the Secret of the disk server")
+	if err := req.Disk.check(); err != nil {
+		return err
 	}
 	if req.Consistency != "" && req.Consistency != "FileSystemConsistent" && req.Consistency != "CrashConsistent" {
 		return errors.New("the consistency of the copy is not one that the helper knows")
@@ -121,7 +141,7 @@ func (r *ShareJobRunner) startBrowseDiskReader(ctx context.Context, req BrowseJo
 		"--token-file=/etc/browse/token", "--tls-cert-file=/etc/browse/tls.crt", "--tls-key-file=/etc/browse/tls.key",
 		"--idle=" + req.Idle.String(), "--max-life=" + req.MaxLife.String(),
 		"--guest", "--guest-socket=/tmp/disk.sock", "--guest-appliance=/opt/guestfs-appliance",
-		fmt.Sprintf("--guest-disk-url=https://%s:%d/disk", req.Disk.IP, diskServerPort),
+		"--guest-disk-url=" + req.Disk.url(),
 		"--guest-disk-cert-file=" + diskReadMountDir + "/tls.crt", "--guest-disk-token-file=" + diskReadMountDir + "/token"}
 	if req.Consistency != "" {
 		args = append(args, "--guest-consistency="+req.Consistency)

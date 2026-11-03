@@ -17,8 +17,10 @@
 #   a 256 MiB file has the checksum it was made with;
 # - the speed bar is measured and logged as "MEASURE:" lines: first listing,
 #   another folder in the open session, the first bytes of a file, the whole file;
-# - an older moment of a disk in COS is refused in words;
-# - restoring files from a VM disk in COS is refused in words (phase 6c);
+# - an older moment that no export holds is refused in words (a moment that an export holds is read);
+# - files are restored from a VM disk in COS into a new claim (phase 6c): a small
+#   file from the XFS disk and from the NTFS disk, and the 256 MiB file, with the
+#   same checksum; the disk server of each restore is gone when it ends;
 # - the disk server pod and the browse Secrets are locked down;
 # - closing the session leaves no pod, Job or Secret behind.
 #
@@ -378,17 +380,76 @@ bk get "${D3[@]}" "${T[@]}" --fs sda1 /hello.txt --out - | grep -q first && pass
 close_all
 
 # ---- 3. what is refused ---------------------------------------------------------------------------
+# The first moment is refused if only a later export holds it (the undo files are not
+# served in 6b/6c). If the export of the first moment was made before the second backup
+# landed, that export holds it, and then it is a moment of an export and is read.
 if out=$(bk ls "${D1[@]}" "${T[@]}" --moment "$FIRST" 2>&1); then
-    fail "an older moment of a VM disk in COS was browsed: $out"
+    bk get "${D1[@]}" "${T[@]}" --moment "$FIRST" --fs vg0-root /hello.txt --out - | grep -q first \
+        && pass "the first moment was itself exported, so it is read, and reads 'first'" \
+        || fail "an older moment of a VM disk in COS was browsed and reads the wrong content: $out"
+    FIRST_EXPORTED=true
 else
     log "  | $out"
     pass "an older moment of a VM disk in COS is refused"
+    FIRST_EXPORTED=false
 fi
-if out=$(bk restore-files "${D1[@]}" --fs vg0-root --path /hello.txt --to "$NS/$PREFIX-new" --wait --timeout 5m 2>&1); then
-    fail "files were restored from a VM disk in COS (phase 6c): $out"
+close_all
+
+# ---- 3b. restore files from a VM disk in COS (phase 6c) ----------------------------------------------
+inspect() { # inspect <claim> <script>
+    local pod="$PREFIX-insp-$RANDOM$RANDOM" script
+    script=$(printf '%s' "cd /claim && { $2 ; }" | base64 | tr -d '\n')
+    oc apply -n "$NS" -f - <<YAML >/dev/null
+apiVersion: v1
+kind: Pod
+metadata: {name: $pod}
+spec:
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 1
+  containers:
+  - name: i
+    image: $IMG
+    command: ["sh","-c"]
+    args: ["echo $script | base64 -d | sh"]
+    volumeMounts: [{name: c, mountPath: /claim}]
+  volumes: [{name: c, persistentVolumeClaim: {claimName: $1}}]
+YAML
+    local end=$((SECONDS + 600))
+    until [ "$(oc get pod "$pod" -n "$NS" -o jsonpath='{.status.phase}')" = Succeeded ]; do
+        [ "$(oc get pod "$pod" -n "$NS" -o jsonpath='{.status.phase}')" = Failed ] && { oc logs "$pod" -n "$NS" >&2 || true; fail "inspection of $1 failed"; }
+        [ $SECONDS -ge $end ] && fail "inspection of $1 did not finish"
+        sleep 3
+    done
+    oc logs "$pod" -n "$NS"
+    oc delete pod "$pod" -n "$NS" --wait=false >/dev/null
+}
+S=$(now)
+bk restore-files "${D1[@]}" --fs vg0-root --path /hello.txt --path /big.bin --to "$NS/$PREFIX-new" --wait --timeout 30m >/dev/null \
+    || fail "restore-files from a VM disk in COS failed"
+measure "restore of a small file and the 256 MiB file from the XFS disk in COS (disk server start included)" "$S"
+OUT=$(inspect "$PREFIX-new" 'echo "hello=$(cat vg0-root/hello.txt)"; echo "sum=$(sha256sum vg0-root/big.bin | cut -d" " -f1)"')
+grep -q "^hello=second$" <<<"$OUT" && pass "a small file restored from the XFS disk in COS has its content" || fail "restored hello.txt: $OUT"
+grep -q "^sum=$BIG_SHA$" <<<"$OUT" && pass "the 256 MiB file restored from COS has the same checksum" || fail "restored big.bin: $OUT"
+bk restore-files "${D3[@]}" --fs sda1 --path /hello.txt --to "$NS/$PREFIX-new3" --wait --timeout 30m >/dev/null \
+    || fail "restore-files from the NTFS disk in COS failed"
+OUT=$(inspect "$PREFIX-new3" 'echo "hello=$(cat sda1/hello.txt)"')
+grep -q "^hello=first$" <<<"$OUT" && pass "a file restored from the NTFS disk in COS has its content" || fail "restored ntfs hello.txt: $OUT"
+# A restore keeps no disk server: its Job, pod and Secret go with it.
+restore_gone() {
+    [ -z "$(oc get job,pod -n "$DRIVER_NS" -l "storage.ibmcloud.io/restore-disk" -o name 2>/dev/null)" ] &&
+        [ -z "$(oc get secret -n "$DRIVER_NS" -o name 2>/dev/null | grep -E 'restoredisk-' || true)" ]
+}
+wait_until 600 "the disk servers of the restores to go" restore_gone
+pass "no disk server of a restore is left"
+# A refused case in words: an older moment of the disk.
+if out=$(bk restore-files "${D1[@]}" --moment "$FIRST" --fs vg0-root --path /hello.txt --to "$NS/$PREFIX-new4" --wait --timeout 10m 2>&1); then
+    [ "$FIRST_EXPORTED" = true ] || fail "files were restored from an older moment of a VM disk in COS that no export holds: $out"
+    OUT=$(inspect "$PREFIX-new4" 'echo "hello=$(cat vg0-root/hello.txt)"')
+    grep -q "^hello=first$" <<<"$OUT" && pass "the first moment, which was itself exported, restores with its own content" || fail "restored first moment: $OUT"
 else
+    [ "$FIRST_EXPORTED" = false ] || fail "the first moment can be browsed but not restored: $out"
     log "  | $out"
-    pass "restoring files from a VM disk in COS is refused in words"
+    pass "an older moment of a VM disk in COS is refused for a restore, too"
 fi
 close_all
 

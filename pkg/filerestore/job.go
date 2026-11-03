@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -85,6 +86,29 @@ type GuestSource struct {
 	// Consistency is how the newest copy was taken (FileSystemConsistent or
 	// CrashConsistent); empty if not known.
 	Consistency string `json:"consistency,omitempty"`
+	// Disk, if set, says the disk is held by a disk server (a VM disk in COS)
+	// and is read over HTTPS. Latest and Moments are then empty, and the Job
+	// holds no key: only the token and the certificate of the disk server.
+	Disk *RemoteDisk `json:"disk,omitempty"`
+}
+
+// RemoteDisk is a disk server: its address and the files, mounted from a Secret,
+// that hold its certificate (the only one trusted) and its token.
+type RemoteDisk struct {
+	URL       string `json:"url"`
+	CertFile  string `json:"certFile"`
+	TokenFile string `json:"tokenFile"`
+}
+
+func (d *RemoteDisk) validate() error {
+	u, err := url.Parse(d.URL)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return errors.New("guest.disk.url must be an https address")
+	}
+	if !strings.HasPrefix(d.CertFile, "/") || !strings.HasPrefix(d.TokenFile, "/") {
+		return errors.New("guest.disk.certFile and tokenFile must be absolute paths")
+	}
+	return nil
 }
 
 func (g *GuestSource) validate() error {
@@ -98,6 +122,9 @@ func (g *GuestSource) validate() error {
 	case "", "FileSystemConsistent", "CrashConsistent":
 	default:
 		return errors.New("guest.consistency is not one that the Job knows")
+	}
+	if g.Disk != nil {
+		return g.Disk.validate()
 	}
 	return nil
 }
@@ -193,6 +220,13 @@ func (s JobSpec) validate() (time.Time, uint32, error) {
 		return at, 0, fmt.Errorf("unknown mode %q", s.Mode)
 	}
 	switch {
+	case s.Guest != nil && s.Guest.Disk != nil:
+		if s.COS != nil || s.Latest != "" || s.Moments != "" {
+			return at, 0, errors.New("a VM disk held by a disk server has no latest or moments folder and no COS block")
+		}
+		if err := s.Guest.validate(); err != nil {
+			return at, 0, err
+		}
 	case s.Guest != nil:
 		if s.COS != nil || s.Latest == "" {
 			return at, 0, errors.New("a VM disk is read from its backup folder (latest), not from COS")
@@ -248,6 +282,9 @@ func realDeps() jobDeps {
 			return o.Tree, o.Info, o.Close, nil
 		},
 		openGuest: func(ctx context.Context, latest, moments string, g GuestSource, at time.Time) (browse.Tree, browse.Info, func() error, error) {
+			if g.Disk != nil {
+				return openRemoteGuest(ctx, g)
+			}
 			o, err := guestfs.Open(ctx, guestfs.OpenOptions{
 				Disk: strings.TrimSuffix(latest, "/") + "/disk.img", Moments: moments, At: at, Socket: g.Socket, Crash: g.Consistency == "CrashConsistent",
 				Runner: &guestfs.ExecRunner{Env: guestfs.Environment(g.Appliance, guestfs.HasKVM())},

@@ -56,7 +56,7 @@ COPY --chmod=0755 pkg/guestfs/guestls.py /usr/local/bin/guestls
 RUN LIBGUESTFS_BACKEND=direct LIBGUESTFS_BACKEND_SETTINGS=force_tcg HOME=/tmp \
         guestfish -N /tmp/check.img=fs:ext4:64M exit && \
     LIBGUESTFS_BACKEND=direct LIBGUESTFS_BACKEND_SETTINGS=force_tcg HOME=/tmp \
-        guestls --format=raw -a /tmp/check.img -m /dev/sda -- / && rm -f /tmp/check.img
+        guestls --format=raw -a /tmp/check.img -m /dev/sda1 -- / && rm -f /tmp/check.img
 
 COPY --from=builder /browse /usr/local/bin/browse
 

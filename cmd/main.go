@@ -665,10 +665,18 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metric
 			browseRunner.SetBrowseGuest(browse.guestImage, guestCfg)
 			// File restores from a VM disk run in the driver namespace, with the same image.
 			shareRunner.SetBrowseGuest(browse.guestImage, guestCfg)
+			if browse.cosEnabled {
+				// A restore from a VM disk in COS starts a disk server too (the browse
+				// image, which holds Kopia), in the driver namespace where the keys are.
+				shareRunner.SetBrowseImage(browse.image)
+			}
 		}
 		if browse.pullSecrets != "" {
 			names := strings.Split(browse.pullSecrets, ",")
 			browseRunner.SetBrowsePullSecrets(names)
+			if browse.guestImage != "" && browse.cosEnabled {
+				shareRunner.SetBrowsePullSecrets(names)
+			}
 			browse.cfg.PullSecrets, browse.cfg.PullSecretNamespace = names, driverNamespace
 		}
 		var browseJobs pool.BrowseJobs = browseRunner
@@ -685,6 +693,12 @@ func runController(endpoint, nodeID, region, vpcID, subnetID, kubeletDir, metric
 			if err := cosRunner.SetBrowseCOSResources(browse.cosCPU, browse.cosMemory); err != nil {
 				klog.ErrorS(err, "Bad limits for the helper that reads COS")
 				os.Exit(1)
+			}
+			if browse.guestImage != "" {
+				if err := shareRunner.SetBrowseCOSResources(browse.cosCPU, browse.cosMemory); err != nil {
+					klog.ErrorS(err, "Bad limits for the disk server of a restore")
+					os.Exit(1)
+				}
 			}
 			browseJobs = &pool.BrowseRouter{Folder: browseRunner, COS: cosRunner}
 			browse.cfg.COSNamespace = driverNamespace

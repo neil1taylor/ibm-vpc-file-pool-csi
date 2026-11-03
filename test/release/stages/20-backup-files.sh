@@ -58,6 +58,15 @@
 # and is "not checked" without it. The undo-file path of a running VM is covered by
 # unit tests and by the backups of stage 18, not by this script.
 
+# Part 8, VM disks in COS: test/e2e/test-backup-files-vm-cos.sh exports three small
+# VM disks to COS with their file lists, reads them with `--from-cos` as a real
+# user (the first listing within 30 seconds, another folder within 5 seconds, a
+# 256 MiB file with the same checksum, the rate inside the helper pod), restores
+# files from them into a new claim, and checks that an older moment is refused,
+# that the disk server and the reader are locked down, and that nothing is left.
+# It needs the guest image and the COS configuration of stage 18, and is "not
+# checked" without either. It records the speed numbers as MEASURE lines in its log.
+
 # A pool takes 5 to 15 minutes to become ready; the rest is under 5 minutes.
 # The COS part adds up to an hour (the export of two moments, then the restores).
 RT_STAGE_TIMEOUT=14400
@@ -78,7 +87,15 @@ COSF_LOG="$RT_OUT/backup-files-cos-e2e.log"
 E2E_VM="$HERE_STAGE/../../e2e/test-backup-files-vm.sh"
 VMF_PREFIX=$(rt_name fvm)
 VMF_LOG="$RT_OUT/backup-files-vm-e2e.log"
+E2E_VMCOS="$HERE_STAGE/../../e2e/test-backup-files-vm-cos.sh"
+VMC_PREFIX=$(rt_name fvc)
+VMC_LOG="$RT_OUT/backup-files-vm-cos-e2e.log"
 BACKUP_BIN="${RT_BACKUP_BIN:-$(dirname "$RT_LIB")/bin/kubectl-backup}"
+
+# The first moment is refused when no export holds it, and read when one does.
+vmc_older_moment() {
+    log_has_pass "$VMC_LOG" "an older moment of a VM disk in COS is refused" || log_has_pass "$VMC_LOG" "was itself exported"
+}
 
 run() {
     local tool rc fail_line
@@ -290,6 +307,41 @@ run() {
         check "no helper pod or Job of a session is left" log_has_pass "$VMF_LOG" "no helper pod or Job of a session is left"
         check "no Job or pod of a restore is left" log_has_pass "$VMF_LOG" "no Job or pod of a restore is left"
     fi
+
+    [ -f "$E2E_VMCOS" ] || skip "no end-to-end script at $E2E_VMCOS"
+    rt_log "running $E2E_VMCOS"
+    env PREFIX="$VMC_PREFIX" BACKUP_BIN="$BACKUP_BIN" GUEST_IMAGE="${RT_GUEST_IMAGE:-}" \
+        DRIVER_NS="$RT_DRIVER_NS" bash "$E2E_VMCOS" >"$VMC_LOG" 2>&1
+    rc=$?
+    cat "$VMC_LOG"
+    if fail_line=$(first_fail_line "$VMC_LOG"); then
+        check "the VM disk in COS script reported: $fail_line" false
+    elif [ "$rc" -ne 0 ]; then
+        check "the VM disk in COS script exited with $rc and no FAIL line (see backup-files-vm-cos-e2e.log)" false
+    else
+        check "the VM disk in COS script ended without a FAIL line" true
+    fi
+    if grep -qF "NOT CHECKED: no guest image" "$VMC_LOG"; then
+        not_checked "browsing and restoring files inside a VM disk in COS" "no guest image (RT_GUEST_IMAGE)"
+    elif grep -qF "NOT CHECKED: no COS bucket" "$VMC_LOG"; then
+        not_checked "browsing and restoring files inside a VM disk in COS" "no COS bucket is configured (COS_BUCKET)"
+    elif grep -qF "NOT CHECKED: the backup gateway is not installed" "$VMC_LOG"; then
+        not_checked "browsing and restoring files inside a VM disk in COS" "the backup gateway is not installed"
+    else
+        check "a VM disk in COS: the file systems of an LVM disk are listed" log_has_pass "$VMC_LOG" "ls lists the file systems of an LVM disk in COS"
+        check "a VM disk in COS: a file reads the changed content" log_has_pass "$VMC_LOG" "the latest copy reads 'second'"
+        check "a VM disk in COS: a 256 MiB file has the same checksum" log_has_pass "$VMC_LOG" "a 256 MiB file from COS has the same checksum"
+        check "a VM disk in COS: the ext4 disk is read" log_has_pass "$VMC_LOG" "ext4 in COS: a file is read"
+        check "a VM disk in COS: the NTFS disk is read" log_has_pass "$VMC_LOG" "NTFS in COS: a file is read"
+        check "a VM disk in COS: an older moment is refused in words, or read when an export holds it" vmc_older_moment
+        check "a VM disk in COS: a small file is restored" log_has_pass "$VMC_LOG" "restored from the XFS disk in COS has its content"
+        check "a VM disk in COS: the 256 MiB file is restored with the same checksum" log_has_pass "$VMC_LOG" "the 256 MiB file restored from COS has the same checksum"
+        check "a VM disk in COS: a file is restored from the NTFS disk" log_has_pass "$VMC_LOG" "restored from the NTFS disk in COS has its content"
+        check "a VM disk in COS: the disk server of a restore is gone when it ends" log_has_pass "$VMC_LOG" "no disk server of a restore is left"
+        check "a VM disk in COS: the disk server has no token, no share and no capability" log_has_pass "$VMC_LOG" "no capability and cannot gain privilege"
+        check "a VM disk in COS: the browse namespace holds no COS or Key Protect key" log_has_pass "$VMC_LOG" "never holds the COS or Key Protect keys"
+        check "a VM disk in COS: no pod, Job or Secret of the session is left" log_has_pass "$VMC_LOG" "no pod, Job or Secret of the session is left"
+    fi
 }
 
 cleanup() {
@@ -313,6 +365,10 @@ cleanup() {
     oc delete backuppolicy "$VMF_PREFIX-policy" --ignore-not-found --wait=false
     oc delete namespace "$VMF_PREFIX-test" --ignore-not-found --wait=true --timeout=900s
     oc delete filesharepool "$VMF_PREFIX-src" "$VMF_PREFIX-snap" --ignore-not-found --wait=false
+    oc delete backuppolicy "$VMC_PREFIX-policy" --ignore-not-found --wait=false
+    oc delete namespace "$VMC_PREFIX-test" --ignore-not-found --wait=true --timeout=900s
+    oc delete filesharepool "$VMC_PREFIX-src" "$VMC_PREFIX-snap" --ignore-not-found --wait=false
+    oc delete secret "$VMC_PREFIX-cos-credentials" "$VMC_PREFIX-cos-backup-key" "$VMC_PREFIX-kp-apikey" -n "$RT_DRIVER_NS" --ignore-not-found
     oc delete rolebinding "$COSF_PREFIX-cosadmin" -n "$RT_DRIVER_NS" --ignore-not-found
     oc delete secret "$COSF_PREFIX-cos-credentials" "$COSF_PREFIX-cos-backup-key" "$COSF_PREFIX-kp-apikey" "$COSF_PREFIX-cos-bad" -n "$RT_DRIVER_NS" --ignore-not-found
 }

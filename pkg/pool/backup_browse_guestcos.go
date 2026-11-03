@@ -39,15 +39,20 @@ const guestKeepMargin = time.Hour
 // checkGuestKeep refuses a session on an export that the maintenance Job will
 // delete before the session can end.
 func (bc *BackupController) checkGuestKeep(loc cosLocation) error {
+	return bc.checkKeepFor(loc, bc.browse.MaxLife, "a session may last", "Browse a newer backup")
+}
+
+// checkKeepFor refuses a backup that will be deleted from COS before the work
+// (lasting at most life) can end, with a margin of an hour.
+func (bc *BackupController) checkKeepFor(loc cosLocation, life time.Duration, what, advice string) error {
 	if loc.entry == nil || loc.entry.ExportedTime == nil || loc.repo.KeepFor <= 0 {
 		return nil
 	}
 	remaining := loc.entry.ExportedTime.Add(loc.repo.KeepFor).Sub(bc.nowFunc())
-	need := bc.browse.MaxLife + guestKeepMargin
-	if remaining < need {
+	if remaining < life+guestKeepMargin {
 		return restoreFailure(fmt.Sprintf(
-			"this backup will be deleted from COS in %s, which is less than a session may last (%s) plus an hour. Browse a newer backup",
-			remaining.Round(time.Minute), bc.browse.MaxLife))
+			"this backup will be deleted from COS in %s, which is less than %s (%s) plus an hour. %s",
+			remaining.Round(time.Minute), what, life, advice))
 	}
 	return nil
 }

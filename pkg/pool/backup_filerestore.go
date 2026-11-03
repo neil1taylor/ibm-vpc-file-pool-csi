@@ -108,6 +108,9 @@ type FileRestoreGuest struct {
 	// Consistency is how the newest copy of the disk was taken
 	// (FileSystemConsistent or CrashConsistent); empty if not known.
 	Consistency string
+	// Disk, if set, is the disk server that holds the VM disk, which is in COS.
+	// The Job then reads the disk from it, and mounts no backup and no key.
+	Disk *BrowseDisk
 }
 
 // FileRestoreCOS says which backup in COS a file restore reads.
@@ -240,6 +243,7 @@ func (bc *BackupController) setFileRestoreStatus(ctx context.Context, fr *v1alph
 
 func (bc *BackupController) failFileRestore(ctx context.Context, fr *v1alpha1.BackupFileRestore, msg string) {
 	klog.ErrorS(nil, "File restore failed", "restore", fr.Name, "reason", msg)
+	bc.stopRestoreDisk(ctx, fr)
 	now := metav1.NewTime(bc.nowFunc())
 	fr.Status.Phase, fr.Status.Message, fr.Status.EndedTime = restorePhaseFailed, msg, &now
 	if bc.saveFileRestoreStatus(ctx, fr) == nil {
@@ -280,10 +284,6 @@ func fileRestoreOwner(fr *v1alpha1.BackupFileRestore) metav1.OwnerReference {
 
 func (bc *BackupController) reconcileFileRestore(ctx context.Context, fr *v1alpha1.BackupFileRestore) {
 	sp := fr.Spec
-	if sp.Guest && (sp.Source == v1alpha1.BackupSourceCOS || sp.FromCOS != nil) {
-		bc.failFileRestore(ctx, fr, "the files inside a VM disk can be restored only from a backup in the snapshot pool, not yet from COS")
-		return
-	}
 	if sp.Source == v1alpha1.BackupSourceCOS || sp.FromCOS != nil {
 		bc.reconcileFileRestoreFromCOS(ctx, fr)
 		return
@@ -426,6 +426,7 @@ func (bc *BackupController) runFileRestoreJob(ctx context.Context, fr *v1alpha1.
 
 // finishFileRestore records the result of a copy that worked.
 func (bc *BackupController) finishFileRestore(ctx context.Context, fr *v1alpha1.BackupFileRestore, out filerestore.Outcome) bool {
+	bc.stopRestoreDisk(ctx, fr)
 	now := metav1.NewTime(bc.nowFunc())
 	st := &fr.Status
 	st.Phase, st.Message, st.EndedTime = restorePhaseDone, fileRestoreSummary(out), &now

@@ -306,9 +306,37 @@ func TestBadGuestJobSpecsAreRefused(t *testing.T) {
 		"relative socket":      {Mode: ModeMeasure, Latest: "/src", Guest: &GuestSource{Socket: "d.sock"}},
 		"bad consistency":      {Mode: ModeMeasure, Latest: "/src", Guest: &GuestSource{Socket: "/tmp/d.sock", Consistency: "Maybe"}},
 		"appliance not a path": {Mode: ModeMeasure, Latest: "/src", Guest: &GuestSource{Socket: "/tmp/d.sock", Appliance: "rel"}},
+		"disk and folder":      {Mode: ModeMeasure, Latest: "/src", Guest: &GuestSource{Socket: "/tmp/d.sock", Disk: remoteDisk()}},
+		"disk and COS":         {Mode: ModeMeasure, COS: cosSource(), Guest: &GuestSource{Socket: "/tmp/d.sock", Disk: remoteDisk()}},
+		"disk not https":       {Mode: ModeMeasure, Guest: &GuestSource{Socket: "/tmp/d.sock", Disk: &RemoteDisk{URL: "http://10.1.2.3:8443/disk", CertFile: "/etc/disk/tls.crt", TokenFile: "/etc/disk/token"}}},
+		"disk no address":      {Mode: ModeMeasure, Guest: &GuestSource{Socket: "/tmp/d.sock", Disk: &RemoteDisk{URL: "https:///disk", CertFile: "/etc/disk/tls.crt", TokenFile: "/etc/disk/token"}}},
+		"disk relative cert":   {Mode: ModeMeasure, Guest: &GuestSource{Socket: "/tmp/d.sock", Disk: &RemoteDisk{URL: "https://10.1.2.3:8443/disk", CertFile: "tls.crt", TokenFile: "/etc/disk/token"}}},
+		"disk no token":        {Mode: ModeMeasure, Guest: &GuestSource{Socket: "/tmp/d.sock", Disk: &RemoteDisk{URL: "https://10.1.2.3:8443/disk", CertFile: "/etc/disk/tls.crt"}}},
 	} {
 		if _, err := runJob(context.Background(), spec, writePaths(t, "/a"), deps); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+func remoteDisk() *RemoteDisk {
+	return &RemoteDisk{URL: "https://10.1.2.3:8443/disk", CertFile: "/etc/disk/tls.crt", TokenFile: "/etc/disk/token"}
+}
+
+func TestAGuestJobReadsADiskFromADiskServer(t *testing.T) {
+	var got GuestSource
+	var gotLatest string
+	deps := jobDeps{
+		openGuest: func(_ context.Context, latest, _ string, g GuestSource, _ time.Time) (browse.Tree, browse.Info, func() error, error) {
+			got, gotLatest = g, latest
+			return sampleTree(), browse.Info{Moment: "20261022T091500Z", Guest: true}, func() error { return nil }, nil
+		},
+	}
+	spec := JobSpec{Mode: ModeMeasure, Guest: &GuestSource{Socket: "/tmp/d.sock", Disk: remoteDisk()}}
+	if _, err := runJob(context.Background(), spec, writePaths(t, "/var/www/html"), deps); err != nil {
+		t.Fatal(err)
+	}
+	if gotLatest != "" || got.Disk == nil || got.Disk.URL != "https://10.1.2.3:8443/disk" {
+		t.Errorf("latest %q, guest %+v", gotLatest, got)
 	}
 }

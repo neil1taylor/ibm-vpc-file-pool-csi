@@ -29,6 +29,14 @@ const browseLabel = "storage.ibmcloud.io/browse"
 const (
 	browseDiskLabel  = "storage.ibmcloud.io/browse-disk"
 	browseGuestLabel = "storage.ibmcloud.io/browse-guest"
+
+	// restoreGuestLabel is on the pod of a file restore that reads a VM disk from
+	// a disk server; the disk server lets only these pods and the guest readers
+	// of a browse session in. restoreDiskLabel is on the objects of the disk
+	// server of such a restore (its value is the UID of the restore); the browse
+	// sweeps do not look at it.
+	restoreGuestLabel = "storage.ibmcloud.io/restore-guest"
+	restoreDiskLabel  = "storage.ibmcloud.io/restore-disk"
 )
 
 // BrowseJobRequest asks for the helper pod of one browse session.
@@ -68,6 +76,10 @@ type BrowseJobRequest struct {
 	// Disk, if set, makes the guest helper read its VM disk from a disk server
 	// instead of a folder: the helper mounts no share and holds no key.
 	Disk *BrowseDisk
+	// Restore says the disk server is for a file restore, not a browse session:
+	// ID is then the UID of the BackupFileRestore, and the objects carry
+	// restoreDiskLabel instead of browseLabel.
+	Restore bool
 }
 
 // BrowseDisk says where the disk server of a VM disk in COS is.
@@ -247,6 +259,11 @@ func (r *ShareJobRunner) BrowseState(ctx context.Context, name string) (BrowseJo
 }
 
 // DiskState reports on the disk server of a session on a VM disk in COS.
+// StopDisk ends the disk server of a file restore.
+func (r *ShareJobRunner) StopDisk(ctx context.Context, id string) (bool, error) {
+	return r.Stop(ctx, browseDiskKey(id))
+}
+
 func (r *ShareJobRunner) DiskState(ctx context.Context, name string) (BrowseJobState, error) {
 	return r.jobState(ctx, shareJobName(browseDiskKey(name)))
 }
