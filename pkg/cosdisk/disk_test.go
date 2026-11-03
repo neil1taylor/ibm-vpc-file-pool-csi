@@ -41,7 +41,7 @@ func newData(n int) []byte {
 func TestReadAtMatchesTheFileAcrossSegments(t *testing.T) {
 	src := &memSource{data: newData(10*1024 + 123)}
 	d := New(src, Options{SegmentSize: 1024, ReadAhead: 2, MaxBytes: 4096})
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 	cases := []struct{ off, n int }{{0, 10}, {1000, 100}, {1024, 1024}, {500, 5000}, {10 * 1024, 123}, {0, 10*1024 + 123}}
 	for _, c := range cases {
 		got := make([]byte, c.n)
@@ -58,7 +58,7 @@ func TestReadAtMatchesTheFileAcrossSegments(t *testing.T) {
 func TestReadAtPastTheEndShortensAndReturnsEOF(t *testing.T) {
 	src := &memSource{data: newData(2500)}
 	d := New(src, Options{SegmentSize: 1024, MaxBytes: 4096})
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 	got := make([]byte, 100)
 	n, err := d.ReadAt(got, 2450)
 	if n != 50 || !errors.Is(err, io.EOF) {
@@ -72,7 +72,7 @@ func TestReadAtPastTheEndShortensAndReturnsEOF(t *testing.T) {
 func TestSmallReadsInOneSegmentFetchOnce(t *testing.T) {
 	src := &memSource{data: newData(8 * 1024)}
 	d := New(src, Options{SegmentSize: 1024, ReadAhead: 0, MaxBytes: 8192})
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 	buf := make([]byte, 16)
 	for i := 0; i < 50; i++ {
 		if _, err := d.ReadAt(buf, int64(i*16)); err != nil {

@@ -35,8 +35,8 @@ func (g *Guest) BuildList(ctx context.Context, moment time.Time, lim filelist.Li
 	var notes []string
 	left, budget := lim.EntryLimit(), lim.ByteLimit()
 	for _, f := range fss {
-		if err := g.check(); err != nil {
-			return nil, nil, err
+		if cerr := g.check(); cerr != nil {
+			return nil, nil, cerr
 		}
 		fsys := filelist.Filesystem{ID: f.ID, VFS: f.VFS, Label: f.Label, Size: f.Size, Readable: f.Readable, Reason: f.Reason}
 		var folders map[string][]browse.Entry
@@ -133,7 +133,7 @@ func (g *Guest) listAll(ctx context.Context, id string, max int, budget int64) (
 		return nil, listed{}, err
 	}
 	defer release()
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 	r := csv.NewReader(&lineLimit{r: rc, max: maxLineLen, remaining: 2 * budget})
 	r.FieldsPerRecord = -1
 	r.LazyQuotes = true

@@ -434,8 +434,8 @@ func (l *List) readFolder(dec *json.Decoder) (fs string, path [][]byte, entries 
 					return fmt.Errorf("a path deeper than %d folders", browse.MaxPathDepth)
 				}
 				var n []byte
-				if err := dec.Decode(&n); err != nil {
-					return err
+				if derr := dec.Decode(&n); derr != nil {
+					return derr
 				}
 				path = append(path, n)
 				return nil
@@ -446,11 +446,11 @@ func (l *List) readFolder(dec *json.Decoder) (fs string, path [][]byte, entries 
 					return fmt.Errorf("more than %d entries", limit)
 				}
 				var e browse.Entry
-				if err := dec.Decode(&e); err != nil {
-					return err
+				if derr := dec.Decode(&e); derr != nil {
+					return derr
 				}
-				if err := checkEntry(e); err != nil {
-					return err
+				if cerr := checkEntry(e); cerr != nil {
+					return cerr
 				}
 				entries = append(entries, e)
 				return nil
@@ -470,17 +470,14 @@ func Read(r io.Reader, lim Limits) (*List, error) {
 	if err != nil {
 		return nil, fmt.Errorf("filelist: not a gzip stream: %w", err)
 	}
-	defer zr.Close()
+	defer func() { _ = zr.Close() }()
 	dec := json.NewDecoder(&limitedReader{r: zr, left: lim.bytes()})
 	l := NewList(time.Time{})
 	l.max = lim.entries()
 	if err = l.readHeader(dec, lim); err != nil {
 		return nil, err
 	}
-	for {
-		if !dec.More() {
-			break
-		}
+	for dec.More() {
 		fs, path, entries, ferr := l.readFolder(dec)
 		if ferr != nil {
 			return nil, fmt.Errorf("filelist: reading a folder: %w", ferr)

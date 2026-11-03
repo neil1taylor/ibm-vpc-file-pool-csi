@@ -54,7 +54,7 @@ func TestBuildListModeWritesTheListAndReportsIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	l, err := filelist.Read(f, filelist.Limits{})
 	if err != nil {
 		t.Fatal(err)

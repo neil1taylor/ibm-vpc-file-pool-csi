@@ -47,7 +47,7 @@ func NewRemoteSource(ctx context.Context, client *http.Client, rawURL, token str
 	if err != nil {
 		return nil, fmt.Errorf("cosdisk: asking the disk server for the size: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("cosdisk: asking the disk server for the size: %s", resp.Status)
 	}

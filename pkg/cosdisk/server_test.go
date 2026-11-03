@@ -175,7 +175,7 @@ func TestFileListIsServedWithTheToken(t *testing.T) {
 	if err != nil || rc == nil {
 		t.Fatalf("FetchFileList = %v, %v", rc, err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 	got, _ := io.ReadAll(rc)
 	if !bytes.Equal(got, list) {
 		t.Errorf("got %q", got)

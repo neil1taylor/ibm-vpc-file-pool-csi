@@ -120,7 +120,7 @@ func serveFileList(w http.ResponseWriter, r *http.Request, fetch func(ctx contex
 		http.NotFound(w, r)
 		return
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 	w.Header().Set("Content-Type", "application/gzip")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
