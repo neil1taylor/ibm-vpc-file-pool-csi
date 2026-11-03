@@ -23,6 +23,9 @@ class FakeGuest:
     def add_drive_opts(self, *args, **kwargs):
         self.calls.append((args, kwargs))
 
+    def set_program(self, name):
+        self.program = name
+
 
 class AddDriveTest(unittest.TestCase):
     def test_a_file_is_added_by_name(self):
@@ -42,6 +45,14 @@ class AddDriveTest(unittest.TestCase):
     def test_a_relative_socket_is_refused(self):
         with self.assertRaises(RuntimeError):
             guestls.add_drive(FakeGuest(), "nbd+unix:///?socket=disk.sock")
+
+
+class StartTest(unittest.TestCase):
+    def test_the_program_is_named_like_a_libguestfs_tool(self):
+        g = FakeGuest()
+        guestls.start(g, "/tmp/disk.img")
+        self.assertTrue(g.program.startswith("virt-"), "NTFS is readable only for a program named virt-*")
+        self.assertEqual(len(g.calls), 1)
 
 
 class ParseTest(unittest.TestCase):

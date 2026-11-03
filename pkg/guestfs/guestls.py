@@ -24,6 +24,7 @@ import urllib.parse
 import guestfs
 
 BATCH = 1000
+PROGRAM = "virt-guestls"
 
 
 def usage():
@@ -66,6 +67,13 @@ def add_drive(g, drive):
         g.add_drive_opts(drive, format="raw", readonly=1)
 
 
+def start(g, drive):
+    """Names the program as the libguestfs tools do: the NTFS support of
+    libguestfs-winsupport works only for a program whose name starts with virt-."""
+    g.set_program(PROGRAM)
+    add_drive(g, drive)
+
+
 def row(typ, mode, size, uid, gid, atime, mtime, ctime, path, link=None):
     r = [typ, "%04o" % mode, str(size), "%4d" % uid, "%4d" % gid, str(atime), str(mtime), str(ctime), path]
     if link is not None:
@@ -91,7 +99,7 @@ def main():
     dev, _, rest = mount.partition(":")
     mountpoint, _, opts = rest.partition(":")
     g = guestfs.GuestFS(python_return_dict=True)
-    add_drive(g, drive)
+    start(g, drive)
     g.launch()
     g.mount_options(opts, dev, mountpoint or "/")
 
