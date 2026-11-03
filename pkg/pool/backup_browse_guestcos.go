@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
@@ -145,7 +146,11 @@ func (bc *BackupController) startGuestCOS(ctx context.Context, bb *v1alpha1.Back
 	if err := bc.ensureDiskSecrets(ctx, bb); err != nil {
 		return fmt.Errorf("make the Secret of the disk server: %w", err)
 	}
-	return bc.browseJobs.(BrowseDiskJobs).StartBrowseDisk(ctx, req)
+	jobs, ok := bc.browseJobs.(BrowseDiskJobs)
+	if !ok {
+		return errors.New("the browse job runner cannot start a disk server")
+	}
+	return jobs.StartBrowseDisk(ctx, req)
 }
 
 // watchGuestCOS moves a session on a VM disk in COS along: it restarts a disk

@@ -37,7 +37,7 @@ func NewHTTPSource(ctx context.Context, client *http.Client, rawURL string) (*HT
 	if err != nil {
 		return nil, fmt.Errorf("cosdisk: asking for the size: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("cosdisk: asking for the size: %s", resp.Status)
 	}
@@ -65,7 +65,7 @@ func (h *HTTPSource) ReadRange(ctx context.Context, p []byte, off int64) (int, e
 	if err != nil {
 		return 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusPartialContent {
 		return 0, fmt.Errorf("cosdisk: range read at %d: %s (want 206)", off, resp.Status)
 	}

@@ -179,7 +179,7 @@ func TestOpenRemote_ServesTheRemoteDiskAndListsTheFileSystems(t *testing.T) {
 	uri := "nbd+unix:///?socket=" + sock
 	f.outputs[key([]string{"virt-filesystems", "--format=raw", "-a", uri, "--filesystems", "--extra", "--long", "--csv"})] = []byte(filesystemsCSV)
 	disk := cosdisk.New(bytesSource(make([]byte, 1<<20)), cosdisk.Options{ReadAhead: 2})
-	defer disk.Close()
+	defer func() { _ = disk.Close() }()
 	moment := time.Date(2026, 10, 22, 9, 15, 0, 0, time.UTC)
 	o, err := OpenRemote(context.Background(), RemoteOptions{Disk: disk, Moment: moment, Socket: sock, Runner: f})
 	if err != nil {
@@ -212,7 +212,7 @@ func TestOpenRemote_CheckStopsTheTree(t *testing.T) {
 	uri := "nbd+unix:///?socket=" + sock
 	f.outputs[key([]string{"virt-filesystems", "--format=raw", "-a", uri, "--filesystems", "--extra", "--long", "--csv"})] = []byte(filesystemsCSV)
 	disk := cosdisk.New(bytesSource(make([]byte, 1<<20)), cosdisk.Options{})
-	defer disk.Close()
+	defer func() { _ = disk.Close() }()
 	fail := false
 	o, err := OpenRemote(context.Background(), RemoteOptions{Disk: disk, Socket: sock, Runner: f,
 		Check: func() error {
@@ -233,7 +233,7 @@ func TestOpenRemote_CheckStopsTheTree(t *testing.T) {
 
 func TestOpenRemote_FailsInWordsAndNeedsAPlainSocket(t *testing.T) {
 	disk := cosdisk.New(bytesSource(make([]byte, 10)), cosdisk.Options{})
-	defer disk.Close()
+	defer func() { _ = disk.Close() }()
 	if _, err := OpenRemote(context.Background(), RemoteOptions{Disk: disk, Socket: "relative", Runner: newFake()}); err == nil {
 		t.Error("a relative socket was accepted")
 	}

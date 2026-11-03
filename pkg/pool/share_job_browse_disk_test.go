@@ -159,8 +159,8 @@ func TestDiskState_FollowsTheDiskServerJob(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "d-pod", Namespace: testDriverNS, Labels: job.Spec.Template.Labels},
 		Status:     corev1.PodStatus{PodIP: "10.9.9.9", Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}},
 	}
-	if err := c.Create(ctx, pod); err != nil {
-		t.Fatal(err)
+	if cerr := c.Create(ctx, pod); cerr != nil {
+		t.Fatal(cerr)
 	}
 	if st, err = r.DiskState(ctx, "bb-9"); err != nil || !st.Ready || st.PodIP != "10.9.9.9" {
 		t.Fatalf("ready: %+v, %v", st, err)
