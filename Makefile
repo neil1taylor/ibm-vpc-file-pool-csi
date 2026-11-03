@@ -38,6 +38,7 @@ test:
 	go test ./... -v -race -count=1
 
 test-scripts:
+	python3 -I test/guestls/test_guestls.py
 	bash test/chart/test-webhook-certs.sh
 	bash test/chart/test-servicemonitor.sh
 	bash test/chart/test-receiver.sh
