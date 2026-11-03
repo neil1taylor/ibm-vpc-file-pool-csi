@@ -342,9 +342,6 @@ func (g *Gateway) sessionSpec(ctx context.Context, u User, req *SessionRequest) 
 		return v1alpha1.BackupBrowseSpec{}, serr
 	}
 	if vol.VMName != "" {
-		if src == v1alpha1.BackupSourceCOS {
-			return v1alpha1.BackupBrowseSpec{}, vmDiskInCOS()
-		}
 		spec.Guest = true
 	}
 	spec.PVCNamespace, spec.PVCName, spec.Source = req.Namespace, req.PVC, src

@@ -316,6 +316,19 @@ spec:
                         policy has an export block.
                       format: date-time
                       type: string
+                    fileListEntries:
+                      description: |-
+                        FileListEntries is how many names the file list of the newest export
+                        holds. The list lets a session in COS show the folders of a VM disk
+                        without reading the disk. Zero means the newest export has no list.
+                      format: int64
+                      type: integer
+                    fileListError:
+                      description: |-
+                        FileListError says why the newest export of a VM disk has no file list.
+                        A failed list never fails the export; folders are then listed from the
+                        disk in COS, which is slower.
+                      type: string
                     lastBackupTime:
                       description: LastBackupTime is the moment of the newest backup.
                       format: date-time

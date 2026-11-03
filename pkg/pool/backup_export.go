@@ -47,6 +47,12 @@ type exportState struct {
 	active string
 	// failedAt is when the last export of each SubVolume failed.
 	failedAt map[string]time.Time
+	// listed holds the SubVolumes whose file list step has ended for the export
+	// that is under way (it worked, failed, or is not set up), with the moment
+	// of the backup that the list was built for. The list is built again for
+	// every export attempt, and when a newer backup lands before the export
+	// starts: that copy replaces the folder, and the list with it.
+	listed map[string]time.Time
 	// maintDone and maintFailed are the end of the last maintenance Job and the
 	// time of its last failure.
 	maintDone, maintFailed time.Time
@@ -55,7 +61,7 @@ type exportState struct {
 func (bc *BackupController) exportStateOf(policy string) *exportState {
 	s := bc.exports[policy]
 	if s == nil {
-		s = &exportState{failedAt: map[string]time.Time{}}
+		s = &exportState{failedAt: map[string]time.Time{}, listed: map[string]time.Time{}}
 		bc.exports[policy] = s
 	}
 	return s
@@ -95,6 +101,7 @@ func exportRepoOf(bp *v1alpha1.BackupPolicy) (ExportRepo, time.Duration, error) 
 func clearExportStatus(st *v1alpha1.BackupPolicyStatus) {
 	for i := range st.Volumes {
 		st.Volumes[i].ExportedTime, st.Volumes[i].ExportedBytes, st.Volumes[i].ExportError = nil, 0, ""
+		st.Volumes[i].FileListEntries, st.Volumes[i].FileListError = 0, ""
 	}
 }
 
@@ -194,11 +201,18 @@ export:
 			}
 			bc.releaseExportHold(ctx, bp.Name, v.SubVolumeName)
 			v.ExportError = fmt.Sprintf("the export took longer than %d hours, so it was stopped; it is tried again", int(exportHoldLimit.Hours()))
+			delete(state.listed, v.SubVolumeName)
 			state.failedAt[v.SubVolumeName] = now
 			state.active = ""
 			continue
 		}
 		base := backupBasePath + "/" + bp.Name
+		if v.VMName != "" && bc.fileListDue(state, v) {
+			if bc.buildFileList(ctx, bp.Name, v, sh, base+v.SubPath, state) {
+				state.active = v.SubVolumeName
+				break export
+			}
+		}
 		done, out, jobErr := bc.shareData.ExportToCOS(ctx, exportKeyPrefix+bp.Name+"-"+v.SubVolumeName, shareMountOf(sh), repo,
 			base+v.SubPath, base+"/.moments"+v.SubPath, v.LastBackupTime.Time)
 		if jobErr == nil && done && out.Moment.IsZero() {
@@ -214,6 +228,7 @@ export:
 			klog.ErrorS(jobErr, "Export of a backup to COS failed", "policy", bp.Name, "volume", v.SubVolumeName)
 			state.failedAt[v.SubVolumeName] = now
 			state.active = ""
+			delete(state.listed, v.SubVolumeName)
 			bc.releaseExportHold(ctx, bp.Name, v.SubVolumeName)
 		case !done:
 			state.active = v.SubVolumeName
@@ -222,6 +237,7 @@ export:
 			m := metav1.NewTime(out.Moment)
 			v.ExportedTime, v.ExportedBytes, v.ExportError = &m, out.Bytes, ""
 			delete(state.failedAt, v.SubVolumeName)
+			delete(state.listed, v.SubVolumeName)
 			state.active = ""
 			bc.releaseExportHold(ctx, bp.Name, v.SubVolumeName)
 			klog.V(2).InfoS("Exported a backup to COS", "policy", bp.Name, "volume", v.SubVolumeName, "moment", out.Moment, "bytes", out.Bytes)
@@ -229,6 +245,68 @@ export:
 	}
 	bc.releaseStaleExportHolds(ctx, bp.Name, state.active)
 	bc.maintainExport(ctx, bp, st, repo, keep, state, now)
+}
+
+// fileListMomentSlack is how far the moment in a file list may be from the
+// moment of the backup it was built from. The list says the moment of the disk
+// it read; the backup says when its copy finished.
+const fileListMomentSlack = 30 * time.Minute
+
+// buildFileList makes the file list of a VM disk, which the export that follows
+// carries to COS. It reports true while the Job still runs. A list that fails
+// never fails the export: the volume's status says why it has none, and a
+// session in COS reads the disk instead, which is slower.
+func (bc *BackupController) buildFileList(ctx context.Context, policy string, v *v1alpha1.BackupVolumeStatus,
+	sh v1alpha1.PoolShareStatus, backupPath string, state *exportState) bool {
+	consistency := v.Consistency
+	if consistency != "FileSystemConsistent" && consistency != "CrashConsistent" {
+		consistency = ""
+	}
+	done, out, err := bc.shareData.BuildFileList(ctx, "exportlist-"+policy+"-"+v.SubVolumeName, shareMountOf(sh), backupPath, consistency)
+	switch {
+	case errors.Is(err, errNoBrowseGuest):
+		v.FileListEntries, v.FileListError = 0, ""
+	case err != nil:
+		klog.ErrorS(err, "The file list of a VM disk could not be built; the export goes on without it", "policy", policy, "volume", v.SubVolumeName)
+		v.FileListEntries = 0
+		v.FileListError = fmt.Sprintf("the file list could not be built (%v); folders of this disk are listed from COS, which is slower", err)
+	case !done:
+		return true
+	case v.LastBackupTime != nil && !withinSlack(out.Moment, v.LastBackupTime.Time, fileListMomentSlack):
+		v.FileListEntries = 0
+		v.FileListError = "the file list is for another moment than this backup, so it is not used; folders of this disk are listed from COS, which is slower"
+	default:
+		v.FileListEntries, v.FileListError = int64(out.Entries), ""
+		for _, n := range out.Notes {
+			klog.V(2).InfoS("Note from the file list of a VM disk", "policy", policy, "volume", v.SubVolumeName, "note", n)
+		}
+	}
+	if v.LastBackupTime != nil {
+		state.listed[v.SubVolumeName] = v.LastBackupTime.Time
+	} else {
+		state.listed[v.SubVolumeName] = time.Time{}
+	}
+	return false
+}
+
+// fileListDue says whether the file list of a VM disk must be built (or its Job
+// watched) before the export. It must when none was built for this export, and
+// when a newer backup landed since, unless the export Job of this disk is
+// already running: the hold keeps new copies out while it runs.
+func (bc *BackupController) fileListDue(state *exportState, v *v1alpha1.BackupVolumeStatus) bool {
+	at, built := state.listed[v.SubVolumeName]
+	if !built {
+		return true
+	}
+	if state.active == v.SubVolumeName || v.LastBackupTime == nil {
+		return false
+	}
+	return !at.Equal(v.LastBackupTime.Time)
+}
+
+func withinSlack(a, b time.Time, slack time.Duration) bool {
+	d := a.Sub(b)
+	return d >= -slack && d <= slack
 }
 
 // maintainExport runs Kopia's maintenance on the repository of a policy once

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/cosdisk"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/qcow2"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/replication"
 )
@@ -162,4 +163,82 @@ func (e *emptyCopySource) Walk(fn func(qcow2.Extent) error) error {
 }
 func (e *emptyCopySource) DataReader(qcow2.Extent) io.Reader {
 	return bytes.NewReader(bytes.Repeat([]byte{0xaa}, 4096))
+}
+
+// bytesSource is a remote disk held in memory.
+type bytesSource []byte
+
+func (b bytesSource) Size() int64 { return int64(len(b)) }
+func (b bytesSource) ReadRange(_ context.Context, p []byte, off int64) (int, error) {
+	return copy(p, b[off:]), nil
+}
+
+func TestOpenRemote_ServesTheRemoteDiskAndListsTheFileSystems(t *testing.T) {
+	sock := filepath.Join(shortDir(t), "nbd.sock")
+	f := newFake()
+	uri := "nbd+unix:///?socket=" + sock
+	f.outputs[key([]string{"virt-filesystems", "--format=raw", "-a", uri, "--filesystems", "--extra", "--long", "--csv"})] = []byte(filesystemsCSV)
+	disk := cosdisk.New(bytesSource(make([]byte, 1<<20)), cosdisk.Options{ReadAhead: 2})
+	defer disk.Close()
+	moment := time.Date(2026, 10, 22, 9, 15, 0, 0, time.UTC)
+	o, err := OpenRemote(context.Background(), RemoteOptions{Disk: disk, Moment: moment, Socket: sock, Runner: f})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer o.Close()
+	conn, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	b := make([]byte, 8)
+	if _, err = conn.Read(b); err != nil || string(b) != "NBDMAGIC" {
+		t.Fatalf("the socket does not speak NBD: %q %v", b, err)
+	}
+	if !o.Info.Guest || o.Info.Moment != "20261022T091500Z" {
+		t.Errorf("info = %+v", o.Info)
+	}
+	if ms, err := o.Moments(); err != nil || len(ms) != 1 || ms[0] != "20261022T091500Z" {
+		t.Errorf("moments = %v, %v", ms, err)
+	}
+	if page, err := o.Tree.List(nil, nil, 10); err != nil || len(page.Entries) == 0 {
+		t.Fatalf("%v %+v", err, page)
+	}
+}
+
+func TestOpenRemote_CheckStopsTheTree(t *testing.T) {
+	sock := filepath.Join(shortDir(t), "nbd.sock")
+	f := newFake()
+	uri := "nbd+unix:///?socket=" + sock
+	f.outputs[key([]string{"virt-filesystems", "--format=raw", "-a", uri, "--filesystems", "--extra", "--long", "--csv"})] = []byte(filesystemsCSV)
+	disk := cosdisk.New(bytesSource(make([]byte, 1<<20)), cosdisk.Options{})
+	defer disk.Close()
+	fail := false
+	o, err := OpenRemote(context.Background(), RemoteOptions{Disk: disk, Socket: sock, Runner: f,
+		Check: func() error {
+			if fail {
+				return errors.New("the disk server has gone")
+			}
+			return nil
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer o.Close()
+	fail = true
+	if _, err = o.Tree.List(nil, nil, 10); err == nil {
+		t.Fatal("a failed check must stop the call")
+	}
+}
+
+func TestOpenRemote_FailsInWordsAndNeedsAPlainSocket(t *testing.T) {
+	disk := cosdisk.New(bytesSource(make([]byte, 10)), cosdisk.Options{})
+	defer disk.Close()
+	if _, err := OpenRemote(context.Background(), RemoteOptions{Disk: disk, Socket: "relative", Runner: newFake()}); err == nil {
+		t.Error("a relative socket was accepted")
+	}
+	sock := filepath.Join(shortDir(t), "nbd.sock")
+	if _, err := OpenRemote(context.Background(), RemoteOptions{Disk: disk, Socket: sock, Runner: newFake()}); err == nil {
+		t.Error("want an error when the appliance part fails")
+	}
 }

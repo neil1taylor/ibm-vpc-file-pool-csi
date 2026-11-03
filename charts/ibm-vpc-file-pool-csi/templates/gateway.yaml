@@ -345,6 +345,10 @@ metadata:
   labels:
     {{- include "ibm-vpc-file-pool-csi.labels" . | nindent 4 }}
     app.kubernetes.io/component: backup-gateway
+  annotations:
+    {{- /* The first read of a VM disk in COS starts the disk reader and takes longer than the
+         router's default of 30 seconds to send its first byte. */}}
+    haproxy.router.openshift.io/timeout: 5m
 spec:
   {{- /* On a first install the Route asks for exactly the host published above, so the two cannot
        differ; on an upgrade it keeps the host it has. */}}

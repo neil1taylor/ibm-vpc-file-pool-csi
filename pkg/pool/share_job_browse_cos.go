@@ -261,3 +261,23 @@ func (b *BrowseRouter) Namespace() string { return b.Folder.Namespace() }
 // GuestEnabled says whether sessions on the file systems inside VM disks may
 // start. They run with the folder runner, in the browse namespace.
 func (b *BrowseRouter) GuestEnabled() bool { return b.Folder.GuestEnabled() }
+
+// StartBrowseDisk starts the disk server of a session on a VM disk in COS.
+func (b *BrowseRouter) StartBrowseDisk(ctx context.Context, req BrowseJobRequest) error {
+	d, ok := b.COS.(BrowseDiskJobs)
+	if !ok || b.COS == nil {
+		return errNoBrowseCOS
+	}
+	return d.StartBrowseDisk(ctx, req)
+}
+
+// DiskState reports on the disk server of a session.
+func (b *BrowseRouter) DiskState(ctx context.Context, name string) (BrowseJobState, error) {
+	d, ok := b.COS.(BrowseDiskJobs)
+	if !ok || b.COS == nil {
+		return BrowseJobState{}, nil
+	}
+	return d.DiskState(ctx, name)
+}
+
+var _ BrowseDiskJobs = (*BrowseRouter)(nil)

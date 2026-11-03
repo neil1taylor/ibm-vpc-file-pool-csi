@@ -44,6 +44,11 @@ const (
 	// DefaultBackupInterval is how often the controller looks at all policies.
 	DefaultBackupInterval = 30 * time.Second
 
+	// browseQuickInterval is how often sessions that are starting are looked at
+	// between the slow passes. Without it a session on a VM disk in COS, which
+	// starts two Jobs one after the other, waits for 3 slow passes.
+	browseQuickInterval = 2 * time.Second
+
 	backupMaxRetries       = 3
 	backupMaxParallelSyncs = 2
 
@@ -106,13 +111,22 @@ func (bc *BackupController) Kick() {
 func (bc *BackupController) Run(ctx context.Context) {
 	t := time.NewTicker(bc.interval)
 	defer t.Stop()
+	quick := time.NewTicker(browseQuickInterval)
+	defer quick.Stop()
 	for {
 		bc.ReconcileAll(ctx)
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-		case <-bc.kick:
+	wait:
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				break wait
+			case <-bc.kick:
+				break wait
+			case <-quick.C:
+				bc.reconcileStartingBrowses(ctx)
+			}
 		}
 	}
 }
@@ -688,6 +702,7 @@ func (bc *BackupController) buildStatus(ctx context.Context, bp *v1alpha1.Backup
 			for _, old := range bp.Status.Volumes {
 				if old.SubVolumeName == t.sv.Name {
 					v.ExportedTime, v.ExportedBytes, v.ExportError = old.ExportedTime, old.ExportedBytes, old.ExportError
+					v.FileListEntries, v.FileListError = old.FileListEntries, old.FileListError
 				}
 			}
 		}

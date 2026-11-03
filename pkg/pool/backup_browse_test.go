@@ -23,6 +23,24 @@ type fakeBrowseJobs struct {
 	stopDone bool
 	orphans  []string
 	guest    bool
+	// disks and diskState are the disk servers of sessions on VM disks in COS.
+	disks     map[string]BrowseJobRequest
+	diskState map[string]BrowseJobState
+}
+
+func (f *fakeBrowseJobs) StartBrowseDisk(_ context.Context, req BrowseJobRequest) error {
+	if f.disks == nil {
+		f.disks, f.diskState = map[string]BrowseJobRequest{}, map[string]BrowseJobState{}
+	}
+	f.disks[req.ID] = req
+	if _, ok := f.diskState[req.ID]; !ok {
+		f.diskState[req.ID] = BrowseJobState{Exists: true}
+	}
+	return nil
+}
+
+func (f *fakeBrowseJobs) DiskState(_ context.Context, name string) (BrowseJobState, error) {
+	return f.diskState[name], nil
 }
 
 func newFakeBrowseJobs() *fakeBrowseJobs {
@@ -43,6 +61,7 @@ func (f *fakeBrowseJobs) StopBrowse(_ context.Context, name string) (bool, error
 	f.stopped[name]++
 	if f.stopDone {
 		delete(f.state, name)
+		delete(f.diskState, name)
 	}
 	return f.stopDone, nil
 }
@@ -581,5 +600,32 @@ func TestBrowse_SessionObjectsGoToTheBrowseNamespaceAndPullSecretsAreCopied(t *t
 	}
 	if err := e.c.Get(e.ctx, types.NamespacedName{Namespace: "browse-ns", Name: "all-icr-io"}, cp); err != nil {
 		t.Errorf("the sweep removed the pull secret: %v", err)
+	}
+}
+
+func TestBrowse_AQuickPassStartsAWaitingSession(t *testing.T) {
+	e := newBrowseEnv(t)
+	e.open("bb1", nil)
+	e.bc.reconcileStartingBrowses(e.ctx)
+	if _, ok := e.jobs.started["uid-bb1"]; !ok {
+		t.Fatal("a new session waited for the slow pass")
+	}
+	e.jobs.state["uid-bb1"] = BrowseJobState{Exists: true, Ready: true, PodIP: "10.130.0.9"}
+	e.bc.reconcileStartingBrowses(e.ctx)
+	if bb := e.bb("bb1"); bb.Status.Phase != "Ready" {
+		t.Errorf("a session whose helper is ready stayed %q", bb.Status.Phase)
+	}
+}
+
+func TestBrowse_AQuickPassLeavesReadySessionsToTheSlowPass(t *testing.T) {
+	e := newBrowseEnv(t)
+	e.open("bb1", nil)
+	e.reconcile()
+	e.jobs.state["uid-bb1"] = BrowseJobState{Exists: true, Ready: true, PodIP: "10.130.0.9"}
+	e.reconcile()
+	delete(e.jobs.state, "uid-bb1")
+	e.bc.reconcileStartingBrowses(e.ctx)
+	if bb := e.bb("bb1"); bb.Status.Phase != "Ready" {
+		t.Errorf("the quick pass looked at a Ready session: %+v", bb.Status)
 	}
 }

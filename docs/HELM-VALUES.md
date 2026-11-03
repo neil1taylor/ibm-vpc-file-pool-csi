@@ -137,7 +137,7 @@ The one door to browse sessions (issue #92). Users talk to it with their own Kub
 | `backupGateway.tls.secretName` | string | `""` | Empty: on OpenShift the service CA makes the serving certificate. Elsewhere you must name a Secret (`tls.crt`, `tls.key`) in the release namespace, or the gateway pod cannot start |
 | `backupGateway.route.enabled` | bool | `true` | A reencrypt Route, made only where the OpenShift Route API exists. The router answers with the cluster's ingress certificate for the host, then encrypts again to the gateway (the service CA certificate, which the router trusts). Traffic is encrypted on both legs |
 | `backupGateway.route.host` | string | `""` | Empty lets OpenShift choose the host |
-| `backupGateway.sessionWait` | string | `20s` | How long a request that asks to wait (`?wait=true`) holds for the helper pod to be ready. Keep it under your proxy's timeout (the OpenShift router cuts a request after 30 seconds). `kubectl backup` does not ask to wait: it polls |
+| `backupGateway.sessionWait` | string | `20s` | How long a request that asks to wait (`?wait=true`) holds for the helper pod to be ready. Keep it under your proxy's timeout (the chart sets `haproxy.router.openshift.io/timeout: 5m` on the gateway Route; the router default is 30 seconds). `kubectl backup` does not ask to wait: it polls |
 | `backupGateway.maxDownloadBytes` | int | `53687091200` | The largest single file or tar a user may download (50 GiB) |
 | `backupGateway.maxOpenRestores` | int | `10` | File restores one user may have that have not ended. A request over the limit is refused (HTTP 429) |
 | `backupGateway.resources` | object | small | Requests and limits |

@@ -59,7 +59,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 	fs := flag.NewFlagSet("browse", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	klog.InitFlags(fs)
-	mode := fs.String("mode", "", "what to run: "+modeServer+" or "+modeRestoreFiles)
+	mode := fs.String("mode", "", "what to run: "+modeServer+", "+modeRestoreFiles+", "+modeBuildList+" or "+modeCOSDisk)
 	restoreSpec := fs.String("restore-files-spec", "", "JSON of the file restore (restore-files mode)")
 	writerSpec := fs.String("restore-writer-spec", "", "JSON of the target and limits of the writer (restore-writer mode)")
 	restorePaths := fs.String("restore-files-paths", "", "file that lists the paths to restore, one per line in escaped form (restore-files mode)")
@@ -80,9 +80,64 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 	guestSocket := fs.String("guest-socket", "/tmp/disk.sock", "private socket where the disk is served to the appliance (--guest)")
 	guestAppliance := fs.String("guest-appliance", "", "folder with the prebuilt libguestfs appliance (--guest); empty uses the tools' default")
 	guestConsistency := fs.String("guest-consistency", "", "FileSystemConsistent or CrashConsistent: how the newest copy of the disk was taken (--guest)")
+	cacheMB := fs.Int("cache-mb", 64, "memory for the disk cache, in MiB (cos-disk-server mode)")
+	segmentMB := fs.Int("segment-mb", 4, "size of one fetch from COS, in MiB (cos-disk-server mode)")
+	readAhead := fs.Int("read-ahead", 8, "how many segments are fetched ahead of a read (cos-disk-server mode)")
+	listOut := fs.String("list-out", "", "file to write the file list to (build-list mode)")
+	guestDiskURL := fs.String("guest-disk-url", "", "read the VM disk from a disk server at this https address instead of --root (--guest)")
+	guestDiskCert := fs.String("guest-disk-cert-file", "", "the certificate of the disk server, which is the only one trusted (--guest-disk-url)")
+	guestDiskToken := fs.String("guest-disk-token-file", "", "file that holds the token for the disk server (--guest-disk-url)")
 	termLog := fs.String("termination-log", "/dev/termination-log", "file that gets the reason the session ended")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	if *mode == modeCOSDisk {
+		if *root != "" || *moments != "" || *guest {
+			_, _ = fmt.Fprintln(stderr, "--mode "+modeCOSDisk+" cannot be used with --root, --moments or --guest")
+			return 2
+		}
+		a := cosDiskArgs{source: *cosSource, kopia: *kopia, stateDir: *kopiaState, listen: *listen,
+			tokenFile: *tokenFile, certFile: *tlsCert, keyFile: *tlsKey, termLog: *termLog,
+			idle: *idle, maxLife: *maxLife, cacheMB: *cacheMB, segmentMB: *segmentMB, readAhead: *readAhead}
+		if err := a.validate(); err != nil {
+			_, _ = fmt.Fprintln(stderr, err)
+			return 2
+		}
+		if *at != "" {
+			t, err := time.Parse(time.RFC3339, *at)
+			if err != nil {
+				_, _ = fmt.Fprintln(stderr, "--at must be an RFC 3339 time")
+				return 2
+			}
+			a.at = t
+		}
+		return runCOSDisk(ctx, a, stdout, stderr, onListen)
+	}
+	if *mode == modeBuildList {
+		switch {
+		case *root == "":
+			_, _ = fmt.Fprintln(stderr, "--root is required")
+			return 2
+		case !validListOut(*listOut):
+			_, _ = fmt.Fprintln(stderr, "--list-out must be an absolute path to the file to write")
+			return 2
+		case !strings.HasPrefix(*guestSocket, "/"):
+			_, _ = fmt.Fprintln(stderr, "--guest-socket must be an absolute path")
+			return 2
+		case *guestConsistency != "" && *guestConsistency != consistencyFS && *guestConsistency != consistencyCrash:
+			_, _ = fmt.Fprintln(stderr, "--guest-consistency must be FileSystemConsistent or CrashConsistent")
+			return 2
+		}
+		var atTime time.Time
+		if *at != "" {
+			t, err := time.Parse(time.RFC3339, *at)
+			if err != nil {
+				_, _ = fmt.Fprintln(stderr, "--at must be an RFC 3339 time")
+				return 2
+			}
+			atTime = t
+		}
+		return runBuildList(ctx, *root, *moments, atTime, *guestSocket, *guestAppliance, *guestConsistency, *listOut, *termLog, stderr)
 	}
 	if *mode == modeRestoreWriter {
 		return filerestore.MainWriter(*writerSpec, *termLog)
@@ -106,7 +161,16 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 	case *guestConsistency != "" && *guestConsistency != consistencyFS && *guestConsistency != consistencyCrash:
 		_, _ = fmt.Fprintln(stderr, "--guest-consistency must be FileSystemConsistent or CrashConsistent")
 		return 2
-	case *cosSource == "" && *root == "":
+	case *guestDiskURL != "" && (!*guest || *root != "" || *moments != "" || *cosSource != ""):
+		_, _ = fmt.Fprintln(stderr, "--guest-disk-url needs --guest and cannot be used with --root, --moments or --cos-source")
+		return 2
+	case *guestDiskURL != "" && !strings.HasPrefix(*guestDiskURL, "https://"):
+		_, _ = fmt.Fprintln(stderr, "--guest-disk-url must be an https address")
+		return 2
+	case *guestDiskURL != "" && (*guestDiskCert == "" || *guestDiskToken == ""):
+		_, _ = fmt.Fprintln(stderr, "--guest-disk-cert-file and --guest-disk-token-file are required with --guest-disk-url")
+		return 2
+	case *cosSource == "" && *root == "" && *guestDiskURL == "":
 		_, _ = fmt.Fprintln(stderr, "--root is required")
 		return 2
 	case *tokenFile == "":
@@ -149,13 +213,22 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 		walk bool
 	)
 	if *guest {
-		g, gerr := openGuestSession(ctx, *root, *moments, atTime, *guestSocket, *guestAppliance, *guestConsistency)
+		var (
+			g    *guestSession
+			gerr error
+		)
+		if *guestDiskURL != "" {
+			g, gerr = openRemoteGuestSession(ctx, remoteGuestArgs{url: *guestDiskURL, certFile: *guestDiskCert, tokenFile: *guestDiskToken,
+				socket: *guestSocket, appliance: *guestAppliance, consistency: *guestConsistency})
+		} else {
+			g, gerr = openGuestSession(ctx, *root, *moments, atTime, *guestSocket, *guestAppliance, *guestConsistency)
+		}
 		if gerr != nil {
 			failStart(stderr, *termLog, gerr)
 			return 1
 		}
 		defer g.Close()
-		opts.InfoFunc, opts.Moments, tree = g.info, g.Moments, g.Tree
+		opts.InfoFunc, opts.Moments, tree = g.info, g.Moments, g.tree
 	} else if *cosSource != "" {
 		cosTree, info, moments, cerr := startCOS(ctx, *cosSource, atTime, *kopia, *kopiaState, stderr)
 		if cerr != nil {

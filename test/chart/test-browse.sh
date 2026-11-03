@@ -124,6 +124,10 @@ check "cos: the controller may make and delete Secrets in the release namespace,
 absent "cos off: no Role for session Secrets in the release namespace" "$COSOFF" 'verbs: ["create", "delete"]'
 check "cos: a NetworkPolicy guards the helper pods in the release namespace" "$ON" 'name: test-ibm-vpc-file-pool-csi-browse-cos'
 absent "cos off: that NetworkPolicy is not rendered" "$COSOFF" 'name: test-ibm-vpc-file-pool-csi-browse-cos'
+check "cos: a NetworkPolicy lets only the guest readers reach a disk server" "$ON" 'name: test-ibm-vpc-file-pool-csi-browse-disk'
+check "cos: the guest readers are chosen by label" "$ON" 'storage.ibmcloud.io/browse-guest: "true"'
+check "cos: the gateway policy leaves the disk server out" "$ON" 'operator: DoesNotExist'
+absent "cos off: no disk server policy" "$COSOFF" 'name: test-ibm-vpc-file-pool-csi-browse-disk'
 # The Role and its binding belong to the controller; the gateway is not a subject.
 COSDOCS="$(mktemp)"
 awk -v RS='\n---\n' '/name: test-ibm-vpc-file-pool-csi-browse-cos\n/ && /kind: (Role|RoleBinding)\n/' "$ON" > "$COSDOCS"

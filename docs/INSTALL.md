@@ -477,7 +477,7 @@ kubectl apply -f config/deploy/node.yaml
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--mode` | (required) | `browse-server` |
+| `--mode` | (required) | `browse-server`, `build-list` (makes the file list of a VM disk) or `cos-disk-server` (serves a VM disk from COS to the reader) |
 | `--root` | (required unless `--cos-source`) | The latest copy of the backup, mounted read-only |
 | `--moments` | `""` | The folder of earlier moments (`20261022T091500Z`, ...). Needed for `--at` |
 | `--at` | `""` | Read the newest moment at or before this time (RFC 3339) instead of the latest copy |
@@ -485,6 +485,9 @@ kubectl apply -f config/deploy/node.yaml
 | `--token-file` | (required) | File that holds the session token (at least 16 characters) |
 | `--cos-source` | `""` | JSON that names a backup exported to COS (endpoint, bucket, prefix, policy, volume, Key Protect root key; no secret in it). Replaces `--root` and `--moments`. The keys are Secrets mounted as files at fixed places; the helper unwraps the backup key in memory and runs Kopia read-only as a child |
 | `--kopia`, `--kopia-state-dir` | `kopia`, `/tmp/kopia` | The Kopia program and a writable folder for its settings and cache (with `--cos-source`) |
+| `--list-out` | `""` | `build-list`: where to write the file list (`filelist.json.gz`) |
+| `--guest-disk-url`, `--guest-disk-cert-file`, `--guest-disk-token-file` | `""` | `browse-server --guest`: read the VM disk from a disk server (URL, its certificate to trust, the token for it) instead of a mounted backup |
+| `--cache-mb`, `--segment-mb`, `--read-ahead` | `64`, `4`, `8` | `cos-disk-server`: size of the cache, size of one read from COS, and how many segments are read ahead |
 | `--listen` | `:8080` | Address to listen on |
 | `--idle` | `15m` | End the session after this long without use |
 | `--max-life` | `2h` | End the session after this long, even if in use |

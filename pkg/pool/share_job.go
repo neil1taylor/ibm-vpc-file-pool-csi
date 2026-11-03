@@ -96,6 +96,10 @@ type ShareData interface {
 	// to the Kopia repository in COS. It reports the moment it exported and how
 	// many bytes it sent. The controller passes only the names of Secrets.
 	ExportToCOS(ctx context.Context, key string, share ShareMount, repo ExportRepo, backupPath, momentsPath string, moment time.Time) (bool, ExportOutcome, error)
+	// BuildFileList reads the file systems of the VM disk in backupPath and saves
+	// a file list next to the disk, which the export then carries to COS. It
+	// returns errNoBrowseGuest when files inside VM disks cannot be read here.
+	BuildFileList(ctx context.Context, key string, share ShareMount, backupPath, consistency string) (bool, FileListOutcome, error)
 	// MaintainCOSRepo runs Kopia's maintenance on the repository in COS, and
 	// deletes the snapshots older than repo.ExpireBefore.
 	MaintainCOSRepo(ctx context.Context, key string, repo ExportRepo) (bool, error)
