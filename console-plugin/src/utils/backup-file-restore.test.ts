@@ -141,6 +141,11 @@ describe('buildRestoreRequest', () => {
   it('leaves out the moment for the latest copy', () => {
     expect(buildRestoreRequest({ ...base, moment: '' }).moment).toBeUndefined();
   });
+  it('sends the source only when one is given', () => {
+    expect(buildRestoreRequest(base).source).toBeUndefined();
+    expect(buildRestoreRequest({ ...base, source: 'cos' }).source).toBe('cos');
+    expect(buildRestoreRequest({ ...base, source: 'local' }).source).toBe('local');
+  });
   it('sends size and class only for a new claim', () => {
     const r = buildRestoreRequest({ ...base, sizeGB: '20', storageClassName: 'fast' });
     expect(r.sizeGB).toBe(20);
@@ -199,6 +204,15 @@ describe('phases', () => {
     expect(isEnded('Done')).toBe(true);
     expect(isEnded('Failed')).toBe(true);
     expect(isEnded('Restoring')).toBe(false);
+  });
+});
+
+describe('restoreErrorText for the source', () => {
+  const t = { namespace: 'apps', targetNamespace: 'apps', existing: false };
+  it('shows the gateway message for a refused source, not the name clash text', () => {
+    expect(restoreErrorText(new GatewayError(409, 'no_export', 'that policy does not send its backups to COS'), t)).toBe('that policy does not send its backups to COS');
+    expect(restoreErrorText(new GatewayError(409, 'not_exported', 'that volume has no copy in COS yet'), t)).toBe('that volume has no copy in COS yet');
+    expect(restoreErrorText(new GatewayError(409, 'vm_disk_cos', 'files inside a VM disk can be restored only from the snapshot pool'), t)).toMatch(/snapshot pool/);
   });
 });
 

@@ -58,6 +58,8 @@ interface Props {
   pvc: string;
   /** RFC 3339, or empty for the latest copy. */
   moment: string;
+  /** Where the files are read. Left out, the gateway chooses as it does for the browser. */
+  source?: 'local' | 'cos';
   /** True when the files are inside a VM disk: the paths begin with a file system of the guest. */
   guest?: boolean;
   selected: SelectionMap;
@@ -82,7 +84,7 @@ export function resultText(r: Restore): string {
  * claim, through the backup gateway. It never writes over anything. After the person confirms, it follows the
  * restore by short requests until the restore is Done or Failed. Names are only ever shown as text.
  */
-const RestoreFilesDialog: React.FC<Props> = ({ policy, namespace, pvc, moment, guest, selected, onClose }) => {
+const RestoreFilesDialog: React.FC<Props> = ({ policy, namespace, pvc, moment, source, guest, selected, onClose }) => {
   const [targetNamespace, setTargetNamespace] = useState(namespace);
   const [targetName, setTargetName] = useState(defaultClaimName(pvc));
   const [existing, setExisting] = useState(false);
@@ -119,7 +121,7 @@ const RestoreFilesDialog: React.FC<Props> = ({ policy, namespace, pvc, moment, g
   const confirm = () => {
     setBusy(true);
     setRefusal(undefined);
-    createRestore(buildRestoreRequest({ policy, namespace, pvc, moment, selected, targetNamespace, targetName, existing: useExisting, sizeGB, storageClassName }))
+    createRestore(buildRestoreRequest({ policy, namespace, pvc, moment, source, selected, targetNamespace, targetName, existing: useExisting, sizeGB, storageClassName }))
       .then((r) => setRestore(r))
       .catch((e: GatewayError) => setRefusal(e))
       .finally(() => setBusy(false));
@@ -180,7 +182,7 @@ const RestoreFilesDialog: React.FC<Props> = ({ policy, namespace, pvc, moment, g
           ]
             .filter(Boolean)
             .join(', ')}{' '}
-          from the backup of {namespace}/{pvc}, {moment ? momentLabel(moment) : 'Latest copy'}, into {where}. A folder is restored with everything in
+          from the backup of {namespace}/{pvc}, {source === 'cos' ? 'the copy in COS' : moment ? momentLabel(moment) : 'Latest copy'}, into {where}. A folder is restored with everything in
           it. A link is restored as a link and is not followed. The folders above each file are kept: /var/www/index.php is written as
           /var/www/index.php.
         </p>
