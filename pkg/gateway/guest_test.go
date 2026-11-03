@@ -118,17 +118,18 @@ func TestRestoreFromAPlainVolumeIsNotAGuestRestore(t *testing.T) {
 	}
 }
 
-func TestRestoreFromAVMDiskInCOSIsRefused(t *testing.T) {
+func TestRestoreFromAVMDiskInCOSIsAGuestRestoreFromCOS(t *testing.T) {
 	e := newRestoreEnv(t)
 	addVMDisk(e, true)
 	req := newReq()
 	req["pvc"] = "web-root"
 	req["source"] = "cos"
 	resp, body := e.do("POST", "/v1/restores", "alice-token", req)
-	if resp.StatusCode != http.StatusConflict || !strings.Contains(string(body), "VM disk") {
+	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("%d %s", resp.StatusCode, body)
 	}
-	if len(e.restores()) != 0 {
-		t.Error("a restore was made")
+	rs := e.restores()
+	if len(rs) != 1 || !rs[0].Spec.Guest || rs[0].Spec.Source != "cos" {
+		t.Fatalf("restores = %+v: a VM disk in COS is restored as a guest, from COS", rs)
 	}
 }

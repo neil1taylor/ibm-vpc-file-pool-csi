@@ -24,6 +24,10 @@ type fakeFileRestoreJobs struct {
 	// answer is what the Job does for a mode.
 	answer map[string]fakeJobAnswer
 	guest  bool
+	// The disk server of a restore from a VM disk in COS.
+	diskStarts  []BrowseJobRequest
+	diskState   BrowseJobState
+	diskStopped []string
 }
 
 type fakeJobAnswer struct {
@@ -36,6 +40,17 @@ func (f *fakeFileRestoreJobs) RunFileRestore(_ context.Context, req FileRestoreR
 	f.calls = append(f.calls, req)
 	a := f.answer[req.Mode]
 	return a.done, a.out, a.err
+}
+func (f *fakeFileRestoreJobs) StartBrowseDisk(_ context.Context, req BrowseJobRequest) error {
+	f.diskStarts = append(f.diskStarts, req)
+	return nil
+}
+func (f *fakeFileRestoreJobs) DiskState(context.Context, string) (BrowseJobState, error) {
+	return f.diskState, nil
+}
+func (f *fakeFileRestoreJobs) StopDisk(_ context.Context, id string) (bool, error) {
+	f.diskStopped = append(f.diskStopped, id)
+	return true, nil
 }
 func (f *fakeFileRestoreJobs) Namespace() string  { return testDriverNS }
 func (f *fakeFileRestoreJobs) GuestEnabled() bool { return f.guest }

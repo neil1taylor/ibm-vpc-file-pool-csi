@@ -169,11 +169,6 @@ func (g *Gateway) handleRestoreCreate(w http.ResponseWriter, r *http.Request, u 
 			return
 		}
 		if vol.VMName != "" {
-			if src == v1alpha1.BackupSourceCOS {
-				e := vmDiskInCOS()
-				writeError(w, e.status, e.code, e.msg)
-				return
-			}
 			spec.Guest = true
 		}
 		spec.Source = src

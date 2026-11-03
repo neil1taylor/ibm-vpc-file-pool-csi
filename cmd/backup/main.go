@@ -138,6 +138,7 @@ ls, get and browse flags (they use your own kubeconfig token, and need the right
   --timeout         How long to wait for a session to be ready (default 5m; 20m for a VM disk, which waits for a running copy and starts a small reader)
   --fs              VM disk only: the file system to look in, like sda1, rhel-root or /dev/rhel/root. ls without --fs lists the file systems of the disk. A volume that cannot be read (BitLocker, LUKS, ReFS, ZFS) is listed with the reason: restore the whole disk instead
   A VM disk is read without starting the VM, and its next backup copy waits while a session is open (2 hours at most).
+  With --from-cos a VM disk is read from COS instead: nothing waits, the first listing can take up to 30 seconds, only the newest copy of an export is read, and a restore first starts a disk server.
   A name that is not text is shown as \xNN, and you can type it the same way. Sessions end after 15 minutes without use.
 
 restore-files flags (your own token again; you need "get backupfiles" in the namespace of the backed-up claim, and the right to create claims in the namespace of the target; an existing claim also needs the right to update it):

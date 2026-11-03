@@ -172,16 +172,6 @@ func TestFileRestoreGuest_NotTurnedOnFailsInWords(t *testing.T) {
 	}
 }
 
-func TestFileRestoreGuest_COSIsNotYetSupported(t *testing.T) {
-	e := newGuestRestoreEnv(t)
-	e.guestRestore("f1", func(fr *v1alpha1.BackupFileRestore) { fr.Spec.Source = v1alpha1.BackupSourceCOS })
-	e.reconcile()
-	fr := e.fr("f1")
-	if fr.Status.Phase != restorePhaseFailed || !strings.Contains(fr.Status.Message, "COS") {
-		t.Fatalf("status = %+v", fr.Status)
-	}
-}
-
 func TestFileRestoreGuest_TheConsistencyAndTheMomentGoToTheJob(t *testing.T) {
 	e := newGuestRestoreEnv(t)
 	bp := e.bp("nightly")

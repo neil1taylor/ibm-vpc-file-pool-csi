@@ -205,3 +205,24 @@ func TestBrowseSessions_ListsADiskServerOnce(t *testing.T) {
 		t.Errorf("sessions = %v, %v; want bb-9 once", names, err)
 	}
 }
+
+func TestStartBrowseDisk_ARestoreDiskServerIsNotASession(t *testing.T) {
+	r, c := newBrowseRunner()
+	req := diskRequest()
+	req.ID, req.Restore, req.DiskSecretName = "uid-f1", true, "restoredisk-uid-f1"
+	if err := r.StartBrowseDisk(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	job := getShareJob(t, c, "browsedisk-uid-f1")
+	for _, labels := range []map[string]string{job.Labels, job.Spec.Template.Labels} {
+		if labels[restoreDiskLabel] != "uid-f1" || labels[browseDiskLabel] != "true" {
+			t.Errorf("labels = %v", labels)
+		}
+		if _, ok := labels[browseLabel]; ok {
+			t.Errorf("labels = %v: the browse sweep would delete a disk server that has no BackupBrowse", labels)
+		}
+	}
+	if st, err := r.StopDisk(context.Background(), "uid-f1"); err != nil || st {
+		t.Errorf("StopDisk = %v, %v: the first call starts the deletion", st, err)
+	}
+}

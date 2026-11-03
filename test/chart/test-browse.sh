@@ -126,6 +126,8 @@ check "cos: a NetworkPolicy guards the helper pods in the release namespace" "$O
 absent "cos off: that NetworkPolicy is not rendered" "$COSOFF" 'name: test-ibm-vpc-file-pool-csi-browse-cos'
 check "cos: a NetworkPolicy lets only the guest readers reach a disk server" "$ON" 'name: test-ibm-vpc-file-pool-csi-browse-disk'
 check "cos: the guest readers are chosen by label" "$ON" 'storage.ibmcloud.io/browse-guest: "true"'
+check "cos: the pods of a file restore from a VM disk may reach a disk server too" "$ON" 'storage.ibmcloud.io/restore-guest: "true"'
+absent "cos off: no restore label in the policies" "$COSOFF" 'storage.ibmcloud.io/restore-guest'
 check "cos: the gateway policy leaves the disk server out" "$ON" 'operator: DoesNotExist'
 absent "cos off: no disk server policy" "$COSOFF" 'name: test-ibm-vpc-file-pool-csi-browse-disk'
 # The Role and its binding belong to the controller; the gateway is not a subject.
