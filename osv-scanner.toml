@@ -68,6 +68,11 @@ id = "GHSA-mx8g-39q3-5c79"
 ignoreUntil = 2026-12-31
 reason = "webpack-dev-server: fix needs a new major version; development server only"
 
+[[IgnoredVulns]]
+id = "GHSA-g3hv-75wg-m249"
+ignoreUntil = 2026-12-31
+reason = "minimatch: fix only in v11, but eslint, jest and the console SDK build need v3 and v9; used by build and test tools only"
+
 # Console plugin, runs in the browser. The console SDK pins react-router 6; the fix is only in version 7.
 [[IgnoredVulns]]
 id = "GHSA-337j-9hxr-rhxg"
