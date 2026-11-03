@@ -277,6 +277,11 @@ EOF
 '
 two_moments() { [ "$(vol disk1 '.restorePoints // 0')" -ge 1 ] && [ "$(vol disk1 '.lastBackupTime')" != "$FIRST" ]; }
 wait_until 1800 "a second backup of disk1" two_moments
+# A backup already running when the file changed can end after the change and still hold the old
+# content, so wait for one more backup, which started after the change.
+SECOND=$(vol disk1 '.lastBackupTime')
+later_moment() { [ "$(vol disk1 '.lastBackupTime')" != "$SECOND" ]; }
+wait_until 1800 "a backup of disk1 that started after the change" later_moment
 # The test schedule is 1 minute, which makes a newer moment before an export ends, so no
 # export is ever of the newest moment. After the second moment the schedule is stretched.
 oc patch backuppolicy "$POLICY" --type merge -p '{"spec":{"schedule":"24h"}}' >/dev/null
