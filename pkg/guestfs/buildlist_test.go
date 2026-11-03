@@ -109,7 +109,7 @@ func TestBuildListMarksAFileSystemThatCannotBeListed(t *testing.T) {
 func TestBuildListDropsAFolderWhoseParentIsMissing(t *testing.T) {
 	f := newFake()
 	// /a/b is listed but /a is not: the list must still be valid
-	f.streams[key(lsArgs("/dev/sda1", "/"))] = "d,0755,0,/\nf,0644,1,/x\nd,0755,0,/a/b\nf,0644,1,/a/b/y\n"
+	f.streams[key(lsArgs("/dev/sda1", "/"))] = "d,0755,0,0,0,0,1700000000,0,/\nf,0644,1,0,0,0,1700000000,0,/x\nd,0755,0,0,0,0,1700000000,0,/a/b\nf,0644,1,0,0,0,1700000000,0,/a/b/y\n"
 	g := newGuest(t, f, nil)
 	l, _, err := g.BuildList(context.Background(), moment, filelist.Limits{})
 	if err != nil {
@@ -123,7 +123,7 @@ func TestBuildListDropsAFolderWhoseParentIsMissing(t *testing.T) {
 
 func TestBuildListSkipsUnsafeNames(t *testing.T) {
 	f := newFake()
-	f.streams[key(lsArgs("/dev/sda1", "/"))] = "d,0755,0,/\nd,0755,0,/.\nf,0644,1,/ok\nf,0644,1,/../x\n"
+	f.streams[key(lsArgs("/dev/sda1", "/"))] = "d,0755,0,0,0,0,1700000000,0,/\nd,0755,0,0,0,0,1700000000,0,/.\nf,0644,1,0,0,0,1700000000,0,/ok\nf,0644,1,0,0,0,1700000000,0,/../x\n"
 	g := newGuest(t, f, nil)
 	l, _, err := g.BuildList(context.Background(), moment, filelist.Limits{})
 	if err != nil {
@@ -138,9 +138,9 @@ func TestBuildListSkipsUnsafeNames(t *testing.T) {
 func TestBuildListStopsAtTheEntryLimit(t *testing.T) {
 	f := newFake()
 	var b strings.Builder
-	b.WriteString("d,0755,0,/\n")
+	b.WriteString("d,0755,0,0,0,0,1700000000,0,/\n")
 	for i := 0; i < 50; i++ {
-		b.WriteString("f,0644,1,/f" + strings.Repeat("x", i) + "\n")
+		b.WriteString("f,0644,1,0,0,0,1700000000,0,/f" + strings.Repeat("x", i) + "\n")
 	}
 	f.streams[key(lsArgs("/dev/sda1", "/"))] = b.String()
 	g := newGuest(t, f, nil)
@@ -160,7 +160,7 @@ func TestBuildListCheckStopsIt(t *testing.T) {
 
 func TestBuildListCutsALongLinkTargetInsteadOfRefusingTheList(t *testing.T) {
 	f := newFake()
-	f.streams[key(lsArgs("/dev/sda1", "/"))] = "d,0755,0,/\nl,0777,9,/ln," + strings.Repeat("a", 5000) + "\nf,0644,1,/ok\n"
+	f.streams[key(lsArgs("/dev/sda1", "/"))] = "d,0755,0,0,0,0,1700000000,0,/\nl,0777,9,0,0,0,1700000000,0,/ln," + strings.Repeat("a", 5000) + "\nf,0644,1,0,0,0,1700000000,0,/ok\n"
 	g := newGuest(t, f, nil)
 	l, _, err := g.BuildList(context.Background(), moment, filelist.Limits{})
 	if err != nil {
@@ -175,7 +175,7 @@ func TestBuildListCutsALongLinkTargetInsteadOfRefusingTheList(t *testing.T) {
 
 func TestBuildListMarksAFileSystemWithAnEndlessLine(t *testing.T) {
 	f := newFake()
-	f.streams[key(lsArgs("/dev/sda1", "/"))] = "d,0755,0,/\nf,0644,1,/" + strings.Repeat("x", maxLineLen+10) + "\n"
+	f.streams[key(lsArgs("/dev/sda1", "/"))] = "d,0755,0,0,0,0,1700000000,0,/\nf,0644,1,0,0,0,1700000000,0,/" + strings.Repeat("x", maxLineLen+10) + "\n"
 	g := newGuest(t, f, nil)
 	l, notes, err := g.BuildList(context.Background(), moment, filelist.Limits{})
 	if err != nil {
@@ -196,9 +196,9 @@ func TestBuildListMarksAFileSystemWithAnEndlessLine(t *testing.T) {
 func TestBuildListStopsAtTheByteBudget(t *testing.T) {
 	f := newFake()
 	var b strings.Builder
-	b.WriteString("d,0755,0,/\n")
+	b.WriteString("d,0755,0,0,0,0,1700000000,0,/\n")
 	for i := 0; i < 100; i++ {
-		b.WriteString("l,0777,1,/l" + strings.Repeat("n", i) + "," + strings.Repeat("t", 3000) + "\n")
+		b.WriteString("l,0777,1,0,0,0,1700000000,0,/l" + strings.Repeat("n", i) + "," + strings.Repeat("t", 3000) + "\n")
 	}
 	f.streams[key(lsArgs("/dev/sda1", "/"))] = b.String()
 	g := newGuest(t, f, nil)

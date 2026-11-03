@@ -269,7 +269,7 @@ func (g *Guest) dir(ctx context.Context, f *fsState, names [][]byte) ([]browse.E
 	g.mu.Unlock()
 	path := guestPath(names)
 	out, _, release, err := g.run(ctx, f, func(mount string) []string {
-		return g.driveArgs("virt-ls", "-m", mount, "-lR", "--csv", "--", path)
+		return g.lsArgs(mount, path)
 	}, false)
 	if err != nil {
 		return nil, toBrowseError(err)

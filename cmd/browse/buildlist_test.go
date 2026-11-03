@@ -27,7 +27,7 @@ func (listTools) Output(_ context.Context, args []string) ([]byte, error) {
 
 func (listTools) Stream(_ context.Context, args []string) (io.ReadCloser, error) {
 	if args[0] == "virt-ls" {
-		return io.NopCloser(strings.NewReader("d,0755,4096,/\nd,0755,4096,/etc\nf,0644,3,/etc/hosts\n-,0644,5,/hello.txt\n")), nil
+		return io.NopCloser(strings.NewReader("d,0755,4096,0,0,0,1700000000,0,/\nd,0755,4096,0,0,0,1700000000,0,/etc\nf,0644,3,0,0,0,1700000000,0,/etc/hosts\n-,0644,5,0,0,0,1700000000,0,/hello.txt\n")), nil
 	}
 	return nil, &guestfs.ExitError{}
 }
