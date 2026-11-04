@@ -19,6 +19,10 @@ To make a release:
 
 ## [Unreleased]
 
+## [v0.17.1] — 2026-11-04
+
+Fixes for browsing backups, found while running the file-restore tutorial on the lab, and the tutorials corrected after those runs. No new settings except the gateway flag below, which the chart sets.
+
 ### Fixed
 
 - **Browsing a third moment in one namespace no longer waits 5 minutes and fails.** A namespace may have 2 open browse sessions (`backupBrowse.maxSessionsPerNamespace`). When you ask for another moment and your own sessions fill the namespace, the gateway closes your oldest one to make room. When other users' sessions hold every place, the request is refused at once with 429 and a clear message. The gateway takes the limit from a new flag, `--gateway-max-sessions-per-namespace`, which the chart sets to the same value.

@@ -45,7 +45,7 @@ Before upgrading, complete every item:
 | v0.11.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.12.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.13.0–v0.13.2 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
-| v0.14.0–v0.17.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
+| v0.14.0–v0.17.1 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
 
 ---
 
@@ -124,6 +124,20 @@ kubectl get crd filesharepools.storage.ibmcloud.io -o json | \
 ---
 
 ## Version-Specific Upgrade Notes
+
+### Upgrading to v0.17.1 (from v0.17.0)
+
+**Changes:**
+- A user who asks for another moment while their own browse sessions fill the namespace gets their oldest session closed, instead of waiting 5 minutes and failing. When other users' sessions hold every place, the request is refused at once (429).
+- A browse session ends when its backup policy or snapshot pool is deleted, so the pool delete no longer leaves stuck pods and claims.
+
+**CRD changes:** none.
+
+**Chart changes:** the gateway gets the flag `--gateway-max-sessions-per-namespace`, set from `backupBrowse.maxSessionsPerNamespace`. No new values.
+
+**Action required:** upgrade with Helm. Set `image.tag` and `consolePlugin.image.tag` to `v0.17.1` if you pin them. If you set `backupBrowse.image.tag` or `backupBrowse.guest.image.tag`, the browse images did not change in this release; v0.17.0 images work.
+
+To go back, run `helm rollback`.
 
 ### Upgrading to v0.17.0 (from v0.16.3)
 
