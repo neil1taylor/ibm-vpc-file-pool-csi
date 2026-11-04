@@ -26,12 +26,13 @@ Hands-on tutorials covering every major capability of the pool CSI driver. Each 
 | 14 | [Restore a Snapshot in the Console](TUTORIAL-14-CONSOLE-RESTORE.md) | Make a snapshot and restore it to a new PVC in the OpenShift console |
 | 15 | [Make a VM from the Catalog on a Pool](TUTORIAL-15-VM-FROM-THE-CATALOG.md) | Pick a catalog image and an instance type, choose the pool's StorageClass for the boot disk, and let CDI copy the image |
 | 16 | [Backups, Clones and Replication Setup in the Console](TUTORIAL-16-CONSOLE-BACKUPS-CLONES-RECEIVER.md) | Schedule and restore backups, clone a volume, and set up a replication receiver in the console |
+| 17 | [Get Back One File from a Backup](TUTORIAL-17-RESTORE-FILES-FROM-A-BACKUP.md) | Browse a backup, download a file, restore chosen files into a new or existing PVC, in the console and inside a VM disk |
 
 ---
 
 ## Reading Order
 
-![Part 1 comes first; Parts 2 to 16 follow from it, with Part 3 after Part 2, Part 5 after Part 4 and Part 13 after Part 12](images/tutorial-reading-order.drawio.svg)
+![Part 1 comes first; Parts 2 to 17 follow from it, with Part 3 after Part 2, Part 5 after Part 4 and Part 13 after Part 12](images/tutorial-reading-order.drawio.svg)
 
 Parts 2-16 are independent of each other, except that Part 13 follows Part 12. Pick whichever is relevant to your use case.
 
@@ -70,6 +71,7 @@ Each tutorial uses a unique namespace to avoid conflicts:
 | 12 | `vms` (your own VM) |
 | 13 | `vms` (your own VM) |
 | 14 | `pool-tutorial-console` |
+| 17 | `pool-tutorial-backup` (continues Part 10) |
 
 Tutorials can be run concurrently on the same cluster without interference.
 

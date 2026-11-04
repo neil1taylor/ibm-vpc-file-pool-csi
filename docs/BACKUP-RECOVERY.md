@@ -327,7 +327,7 @@ A `BackupPolicy` backs up the PVCs and VMs you select into a pool that holds onl
 
 ### What a backup looks like
 
-A backup is a set of files on a share of the snapshot pool. You cannot browse backups from the cluster or the console yet (issue #92). `kubectl backup list` shows what exists. The folders are below `/backup/<policy>/` on the share. Each volume has a folder named after its PersistentVolume (`pvc-<uuid>`), not after its claim.
+A backup is a set of files on a share of the snapshot pool. `kubectl backup list` shows what exists. To look inside a backup and get back single files, see [Part 17 of the tutorial](TUTORIAL-17-RESTORE-FILES-FROM-A-BACKUP.md) and "Browse a backup and restore files" below. The folders are below `/backup/<policy>/` on the share. Each volume has a folder named after its PersistentVolume (`pvc-<uuid>`), not after its claim.
 
 - **A plain volume is a folder of files.** `/backup/<policy>/pvcs/pvc-<uuid>/` holds the files as they were at the latest backup. Each earlier moment is a folder of hard links, named by its UTC time (for example `20261021T093000Z`), in `/backup/<policy>/.moments/pvcs/pvc-<uuid>/`. A file that did not change takes no extra space.
 - **A VM disk is one file, `disk.img`.** The folder `/backup/<policy>/pvcs/pvc-<uuid>/` holds the latest backup as a whole raw disk. Earlier moments are not separate disks. They are undo files in the folder `.repl-undo` next to the disk. Each undo file holds the old contents of the blocks that the next backup changed. A restore of an earlier moment applies the undo files, newest first.
