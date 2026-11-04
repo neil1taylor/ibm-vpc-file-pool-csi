@@ -32,7 +32,7 @@ Hands-on tutorials covering every major capability of the pool CSI driver. Each 
 
 ## Reading Order
 
-![Part 1 comes first; Parts 2 to 17 follow from it, with Part 3 after Part 2, Part 5 after Part 4 and Part 13 after Part 12](images/tutorial-reading-order.drawio.svg)
+![Part 1 comes first; Parts 2 to 17 follow from it, with Part 3 after Part 2, Part 5 after Part 4, Part 13 after Part 12 and Part 17 after Part 10](images/tutorial-reading-order.drawio.svg)
 
 Parts 2-16 are independent of each other, except that Part 13 follows Part 12. Pick whichever is relevant to your use case.
 
