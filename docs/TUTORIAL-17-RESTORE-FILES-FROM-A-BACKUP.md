@@ -21,24 +21,49 @@ oc get configmap backup-gateway-info -n kube-system
 ```
 
 - The `kubectl-backup` plugin is on your path, as in Part 10.
+- **Your kubeconfig sends a bearer token.** The commands that look inside a backup (`ls`, `get`, `restore-files`) send your token to the gateway. A kubeconfig that logs in with a client certificate (the usual cluster-admin file) fails with `send your Kubernetes token as a bearer token`. Log in with a token (for example `oc login --token=...` from the console's **Copy login command**), or use a ServiceAccount, which the next step makes.
 - You are an admin of the namespace `pool-tutorial-backup`. The built-in `admin` role may browse and restore files with no setup. A user with only `view` or `edit` may not.
 
 ---
 
 ## Step 1: Set variables and list the moments
 
+If you have no token login, make a ServiceAccount that is admin of the tutorial namespace only, and a kubeconfig for it:
+
 ```bash
 export NS=pool-tutorial-backup
 export POLICY=tut-nightly
 
+oc create serviceaccount tut-admin -n ${NS}
+oc create rolebinding tut-admin -n ${NS} --clusterrole=admin --serviceaccount=${NS}:tut-admin
+TOK=$(oc create token tut-admin -n ${NS} --duration=3h)
+kubectl config view --raw --minify > /tmp/tut17-kubeconfig
+KUBECONFIG=/tmp/tut17-kubeconfig kubectl config set-credentials tut-admin --token="${TOK}"
+KUBECONFIG=/tmp/tut17-kubeconfig kubectl config set-context --current --user=tut-admin
+export KUBECONFIG=/tmp/tut17-kubeconfig
+```
+
+The built-in `admin` role of the namespace is all the rights the gateway needs. Then list the moments:
+
+```bash
 kubectl backup ls --policy ${POLICY} --pvc ${NS}/files --moments
 ```
 
-**Expected:** a list of moments, newest first. The oldest is the one in `FIRST` in Part 10. If you start a new shell, read it again:
+**Expected:** the moments, **oldest first**, one a line:
+
+```
+2026-11-04T18:11:43Z
+2026-11-04T18:17:04Z
+```
+
+The first call opens a session and took about 18 seconds in the lab. Take the first line as the first moment:
 
 ```bash
-export FIRST=$(oc get backuppolicy ${POLICY} -o jsonpath='{.status.volumes[0].lastBackupTime}')
+export FIRST=$(kubectl backup ls --policy ${POLICY} --pvc ${NS}/files --moments | head -1)
+echo ${FIRST}
 ```
+
+Do not read `lastBackupTime` from the policy for this: it is the latest backup, not the first.
 
 ---
 
@@ -51,7 +76,16 @@ kubectl backup ls --policy ${POLICY} --pvc ${NS}/files
 kubectl backup ls --policy ${POLICY} --pvc ${NS}/files /a
 ```
 
-**Expected:** the first command shows `a`, `b` and `written`. The file `keep` is not there, because Part 10 deleted it before the second backup. The second command shows `1`.
+**Expected:**
+
+```
+-rw-r--r--  99:99  944   2026-11-04 18:17  .subvolume-metadata.json
+drwxr-xr-x  99:99  4096  2026-11-04 18:11  a/
+-rw-r--r--  99:99  4     2026-11-04 18:11  b
+-rw-r--r--  99:99  0     2026-11-04 18:11  written
+```
+
+The file `keep` is not there, because Part 10 deleted it before the second backup. `.subvolume-metadata.json` is the driver's own note about the volume. The owner is `99:99`, which is how the backup share shows files; the restored files get the pool's owner. The second command shows `1`. Later calls take about a second.
 
 Now look at the oldest moment:
 
@@ -59,7 +93,7 @@ Now look at the oldest moment:
 kubectl backup ls --policy ${POLICY} --pvc ${NS}/files --moment ${FIRST}
 ```
 
-**Expected:** `a`, `keep` and `written`. The file `b` is not there yet. This is the volume as it was at the first moment.
+**Expected:** `a`, `keep` and `written` (and `.subvolume-metadata.json`). The file `b` is not there yet. This is the volume as it was at the first moment. Use the moment exactly as `--moments` prints it. Each different moment text can open its own session, and a namespace may have 2 open at once (see Clean up).
 
 ---
 
@@ -92,7 +126,18 @@ kubectl backup restore-files --policy ${POLICY} --pvc ${NS}/files --moment ${FIR
   --path /keep --path /a --to ${NS}/files-back --wait
 ```
 
-**Expected:** the command follows the restore and ends with `Done` and the counts: 2 files and 1 folder. The tree is kept, so the files are at `/keep` and `/a/1` in the new PVC.
+**Expected:**
+
+```
+Restore bfr-f78b61bed75c1689-0 asked: 2 paths from pool-tutorial-backup/files (policy tut-nightly, the backup at or before 2026-11-04T18:11:43Z) into a new claim pool-tutorial-backup/files-back
+  Pending
+  Measuring measuring the chosen files to size the new claim
+  Provisioning waiting for the driver to bind the new claim
+  Restoring copying the files into the new claim
+  Done restored 2 files, 1 folders and 0 links (12 bytes)
+```
+
+It took about 70 seconds. The tree is kept, so the files are at `/keep` and `/a/1` in the new PVC. The name of the restore (`bfr-...`) is yours to note: `kubectl backup restore-files --status NAME` shows it later.
 
 Read them with a pod:
 
@@ -135,14 +180,15 @@ kubectl backup restore-files --policy ${POLICY} --pvc ${NS}/files --moment ${FIR
   --path /keep --to ${NS}/files --existing --wait
 ```
 
-**Expected:** `Done`. The folder is named `restored-<policy>-<moment>` and is at the top of the claim. The command prints its name. Check it in the running pod:
+**Expected:** `Done`, and a line such as `The files are in the folder restored-tut-nightly-20261104T181143Z of the claim pool-tutorial-backup/files.` The folder name holds the policy and the moment that was restored, with the time written without dashes and colons. Check it in the running pod:
 
 ```bash
-oc exec -n ${NS} files-writer -- ls /data
-oc exec -n ${NS} files-writer -- cat /data/restored-${POLICY}-${FIRST}/keep
+D=$(oc exec -n ${NS} files-writer -- ls /data | grep '^restored-')
+echo ${D}
+oc exec -n ${NS} files-writer -- cat /data/${D}/keep
 ```
 
-**Expected:** the listing has the new folder next to `a`, `b` and `written`, and `cat` shows `first`. If the folder name differs, copy it from the `ls` output.
+**Expected:** the folder name, then `first`. The listing of `/data` has the new folder next to `a`, `b` and `written`.
 
 Your own `/data/a/1` and `/data/b` did not change. To put a file back in its old place, copy it from the restored folder yourself. The driver never does that for you.
 
@@ -229,12 +275,14 @@ A restore into a new claim also needs `create` on `persistentvolumeclaims` in th
 ## Clean up
 
 ```bash
+unset KUBECONFIG
 oc delete pod -n ${NS} files-back-check --ignore-not-found --force --grace-period=0
 oc delete pvc -n ${NS} files-back files-console --ignore-not-found
-rm -rf /tmp/restored
+oc delete backupfilerestore --all
+oc delete backupbrowse --all
 ```
 
-Then clean up Part 10. A browse session ends by itself after 15 minutes without use.
+`unset KUBECONFIG` comes first, because the ServiceAccount may not delete cluster-wide objects. Remove the folder `/tmp/restored` and the file `/tmp/tut17-kubeconfig` too. `BackupFileRestore` and `BackupBrowse` are cluster-wide, not in the namespace, so deleting the namespace does not remove them, and a browse pod that still runs blocks the delete of the pool. The ServiceAccount goes with the namespace. A browse session also ends by itself after 15 minutes without use. Then clean up Part 10.
 
 ---
 

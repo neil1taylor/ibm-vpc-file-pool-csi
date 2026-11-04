@@ -165,7 +165,7 @@ Check the policy:
 oc get backuppolicy ${POLICY}
 ```
 
-**Expected:** `PHASE` is `Active`. If it is `Error`, run `oc get backuppolicy ${POLICY} -o jsonpath='{.status.message}'`. The usual cause is a snapshot pool that is not `Ready` yet.
+**Expected:** `PHASE` is `Active`. It can be empty for a few seconds after the apply; run the command again. If it is `Error`, run `oc get backuppolicy ${POLICY} -o jsonpath='{.status.message}'`. The usual cause is a snapshot pool that is not `Ready` yet.
 
 The controller makes a `ReplicationPolicy` named `backup-${POLICY}-...` for each source pool. Do not edit it. The backup controller sets it back.
 
@@ -177,16 +177,16 @@ The controller makes a `ReplicationPolicy` named `backup-${POLICY}-...` for each
 kubectl backup list --policy ${POLICY}
 ```
 
-Repeat until the row for `${NS}/files` shows a time under `LAST BACKUP`. This takes as long as the first copy. The row shows `sync in progress` in the `ERROR` column until the first copy ends, and shows the time within seconds after that.
+Repeat until the row for `${NS}/files` shows a time under `LAST BACKUP`. This takes as long as the first copy: about 25 seconds for this small volume in the lab. The row can show `sync in progress` in the `ERROR` column until the first copy ends.
 
 **Expected:**
 
 ```
 POLICY     VOLUME                    VM  LAST BACKUP           OLDEST                POINTS  CONSISTENCY  STATE   ERROR
-tut-nightly  pool-tutorial-backup/files  -   2026-10-22T10:05:12Z  2026-10-22T10:05:12Z  0       FileCopy     active
+tut-nightly  pool-tutorial-backup/files  -   2026-10-22T10:05:12Z  -                     0       FileCopy     active
 ```
 
-`FileCopy` means the volume is a plain volume. The files were copied one by one, so the backup is only as consistent as the files. See [CONTEXT.md](CONTEXT.md#file-copy). `POINTS` counts the earlier moments you can restore. It is `0` after the first backup.
+`FileCopy` means the volume is a plain volume. The files were copied one by one, so the backup is only as consistent as the files. See [CONTEXT.md](CONTEXT.md#file-copy). `POINTS` counts the earlier moments you can restore. It is `0` after the first backup, and `OLDEST` is `-` until there is an earlier moment.
 
 Write down the time under `LAST BACKUP`. This is the first moment.
 
@@ -209,7 +209,7 @@ Wait for `POINTS` to reach `1`:
 kubectl backup list --policy ${POLICY}
 ```
 
-**Expected:** `POINTS` is `1`, and `OLDEST` is the first moment. The volume now has two moments. A new moment is made every 5 minutes whether or not the files change, so `POINTS` is higher if you waited longer. Restore a moment from before the change: `FIRST`, or `OLDEST`.
+**Expected:** `POINTS` is `1`, and `OLDEST` is the first moment, a few seconds before `FIRST` (the time of the first copy is a little earlier than the time the policy reports). It took about 5 minutes in the lab. A new moment is made every 5 minutes whether or not the files change, so `POINTS` is higher if you waited longer. Restore a moment from before the change: `FIRST`, or `OLDEST`. A restore uses the newest moment at or before the time you give.
 
 ---
 
@@ -222,7 +222,7 @@ kubectl backup restore --policy ${POLICY} --pvc ${NS}/files --to ${NS}/files-fir
   --moment ${FIRST} --wait
 ```
 
-**Expected:** the command prints the phases `Pending`, `Provisioning`, `Restoring`, then `Done: pool-tutorial-backup/files-first holds the backup of <time>`. The new PVC uses the StorageClass of the backed-up claim, unless you pass `--storage-class`. Without `--moment`, the restore uses the latest backup.
+**Expected:** the command prints the phases (`Provisioning`, `Restoring`; `Pending` shows if the restore has to wait), then `Done: pool-tutorial-backup/files-first holds the backup of <time>`, where `<time>` is the moment at or before `FIRST`. It took about a minute in the lab. The new PVC uses the StorageClass of the backed-up claim, unless you pass `--storage-class`. Without `--moment`, the restore uses the latest backup.
 
 Mount the new PVC and look at it:
 
@@ -270,7 +270,9 @@ oc get backuprestore
 
 ## Step 9: Delete the backups of a volume
 
-First stop the policy from backing up the volume. Remove the label, then wait for one backup cycle (5 minutes). `kubectl backup list` then shows the volume as `retained`.
+**If you do Part 17, do it before this step:** this step deletes the backups that Part 17 reads.
+
+First stop the policy from backing up the volume. Remove the label, then wait for the next list to show the volume as `retained` (it took about 20 seconds in the lab; the controller notices at its next pass).
 
 ```bash
 oc label pvc -n ${NS} files backup-
@@ -283,7 +285,7 @@ Delete the backups. The command measures them, shows the paths and the size, and
 kubectl backup delete --policy ${POLICY} --pvc ${NS}/files
 ```
 
-Use `--yes` instead of the typed answer in a script. Without a terminal, the command refuses to continue unless you pass `--yes`. The controller never deletes backups by itself before the keep time. The command refuses while the policy still backs up the volume, and while a restore of the volume runs.
+Use `--yes` instead of the typed answer in a script. Without a terminal, the command refuses to continue unless you pass `--yes` (`Error: this is not an interactive shell ... add --yes to confirm`). The command ends with `Removed the backups of pool-tutorial-backup/files (60.0 KiB).` The list can show the volume as `retained` for a while after that. The controller never deletes backups by itself before the keep time. The command refuses while the policy still backs up the volume, and while a restore of the volume runs.
 
 ---
 
@@ -292,12 +294,14 @@ Use `--yes` instead of the typed answer in a script. Without a terminal, the com
 ```bash
 oc delete pod -n ${NS} files-writer files-check --ignore-not-found --force --grace-period=0
 oc delete backuprestore --all
+oc delete backupfilerestore --all
+oc delete backupbrowse --all
 oc delete backuppolicy ${POLICY}
 oc delete namespace ${NS} --timeout=120s
 oc delete filesharepool ${DATA_POOL} ${SNAP_POOL}
 ```
 
-Deleting a policy keeps its backups on the share. Deleting a pool deletes its VPC shares and everything on them, including backups. The driver blocks the pool delete while volumes or snapshots remain on it, so wait for the namespace to go first.
+Deleting a policy keeps its backups on the share. Deleting a pool deletes its VPC shares and everything on them, including backups. The driver blocks the pool delete while volumes or snapshots remain on it, so wait for the namespace to go first. `BackupRestore`, `BackupFileRestore` and `BackupBrowse` are not in the namespace, so delete them yourself, as above, before the pools. A browse pod that still runs holds a claim on the share and blocks the pool delete.
 
 ---
 
