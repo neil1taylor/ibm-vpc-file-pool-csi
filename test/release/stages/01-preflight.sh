@@ -80,6 +80,15 @@ cdi_copy_limit_ok() {
     [ -n "$got" ] && [ "$(to_mib "$got")" -ge "$(to_mib "$want")" ]
 }
 
+# Stage 20 browses VM disks only when the install has the guest image on
+# (backupBrowse.guest.enabled). Given a guest image, the controller must have it.
+guest_image_on() {
+    local args
+    args=$(oc get deploy -n "$RT_DRIVER_NS" ibm-vpc-file-pool-csi-controller -o jsonpath='{.spec.template.spec.containers[*].args}')
+    echo "controller has --browse-guest-image: $(grep -c -- '--browse-guest-image=' <<<"$args")"
+    grep -q -- '--browse-guest-image=[^"]' <<<"$args"
+}
+
 run() {
     check "controller is ready" controller_ready
     check "every node agent is ready" node_agents_ready
@@ -89,6 +98,9 @@ run() {
     check "no objects left from an earlier run" no_earlier_leftovers
     if oc get crd cdis.cdi.kubevirt.io >/dev/null 2>&1; then
         check "CDI copy pods may use enough memory for NFS" cdi_copy_limit_ok
+    fi
+    if [ -n "${RT_GUEST_IMAGE:-}" ]; then
+        check "the install has VM-disk browsing on (backupBrowse.guest.enabled)" guest_image_on
     fi
     if vpc_available; then
         check "VPC API can be read" vpc_get /shares?limit=1
