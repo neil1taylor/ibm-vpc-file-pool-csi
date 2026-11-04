@@ -629,3 +629,25 @@ func TestBrowse_AQuickPassLeavesReadySessionsToTheSlowPass(t *testing.T) {
 		t.Errorf("the quick pass looked at a Ready session: %+v", bb.Status)
 	}
 }
+
+func TestBrowse_ARunningSessionEndsWhenItsPolicyIsDeleted(t *testing.T) {
+	e := newBrowseEnv(t)
+	e.open("bb1", nil)
+	e.reconcile()
+	e.jobs.state["uid-bb1"] = BrowseJobState{Exists: true, PodIP: "10.130.0.9", Ready: true}
+	e.reconcile()
+	if bb := e.bb("bb1"); bb.Status.Phase != "Ready" {
+		t.Fatalf("status = %+v", bb.Status)
+	}
+	if err := e.c.Delete(e.ctx, e.bp("nightly")); err != nil {
+		t.Fatal(err)
+	}
+	e.reconcile()
+	got := e.bb("bb1")
+	if got.Status.Phase != "Closed" || got.Status.EndReason != "policy-deleted" {
+		t.Errorf("status = %+v", got.Status)
+	}
+	if e.jobs.stopped["uid-bb1"] == 0 {
+		t.Error("the helper pod was not removed, so it still holds the claim on the share")
+	}
+}

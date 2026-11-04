@@ -281,8 +281,40 @@ func (bc *BackupController) reconcileBrowse(ctx context.Context, bb *v1alpha1.Ba
 	case "", browsePhasePending:
 		bc.startBrowse(ctx, bb, counts)
 	default:
+		if bc.browseSourceGone(ctx, bb) {
+			// The helper pod holds a claim on the snapshot pool's share, which
+			// keeps the share from being deleted with its pool.
+			done, err := bc.browseJobs.StopBrowse(ctx, string(bb.UID))
+			if err != nil || !done {
+				bc.setBrowseStatus(ctx, bb, bb.Status.Phase, "closing the session: its backup policy or snapshot pool is gone")
+				return
+			}
+			bc.endBrowse(ctx, bb, counts, browsePhaseClosed, "policy-deleted", "")
+			return
+		}
 		bc.watchBrowse(ctx, bb, counts)
 	}
+}
+
+// browseSourceGone says that a session on the snapshot pool has lost what it
+// reads: its backup policy was deleted, or the policy's snapshot pool is gone
+// or being deleted. A read error counts as not gone.
+func (bc *BackupController) browseSourceGone(ctx context.Context, bb *v1alpha1.BackupBrowse) bool {
+	if browseIsCOS(&bb.Spec) {
+		return false
+	}
+	policy := &v1alpha1.BackupPolicy{}
+	if err := bc.client.Get(ctx, types.NamespacedName{Name: bb.Spec.Policy}, policy); err != nil {
+		return apierrors.IsNotFound(err)
+	}
+	if policy.DeletionTimestamp != nil {
+		return true
+	}
+	pool := &v1alpha1.FileSharePool{}
+	if err := bc.client.Get(ctx, types.NamespacedName{Name: policy.Spec.SnapshotPool}, pool); err != nil {
+		return apierrors.IsNotFound(err)
+	}
+	return pool.DeletionTimestamp != nil
 }
 
 func (bc *BackupController) startBrowse(ctx context.Context, bb *v1alpha1.BackupBrowse, counts *browseCounts) {

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -70,6 +71,10 @@ type Config struct {
 	// Each restore takes one of that many numbered slots (bfr-<user>-<n>), so
 	// the limit holds for parallel requests and several replicas. Zero means 10.
 	MaxOpenRestores int
+	// MaxSessionsPerNamespace is the limit of open browse sessions for the claims of
+	// one namespace (the controller makes a session over the limit wait). Zero turns
+	// the check in the gateway off. Set it to the controller's value.
+	MaxSessionsPerNamespace int
 }
 
 const (
@@ -269,6 +274,11 @@ func (g *Gateway) handleCreate(w http.ResponseWriter, r *http.Request, u User) {
 		return
 	}
 	bb, created, err := g.findOrCreate(r.Context(), u, spec, req.Moment)
+	var full *namespaceFullError
+	if errors.As(err, &full) {
+		writeError(w, http.StatusTooManyRequests, "too_many", full.Error())
+		return
+	}
 	if err != nil {
 		klog.ErrorS(err, "Make a browse session failed")
 		writeError(w, http.StatusInternalServerError, "internal", "cannot make the session")
@@ -403,6 +413,9 @@ func (g *Gateway) findOrCreate(ctx context.Context, u User, want v1alpha1.Backup
 			return b, false, nil
 		}
 	}
+	if err := g.makeRoom(ctx, u, want.PVCNamespace); err != nil {
+		return nil, false, err
+	}
 	bb := &v1alpha1.BackupBrowse{
 		ObjectMeta: metav1.ObjectMeta{GenerateName: "bb-", Labels: map[string]string{userLabel: userHash(u.Name)}},
 		Spec:       want,
@@ -415,6 +428,70 @@ func (g *Gateway) findOrCreate(ctx context.Context, u User, want v1alpha1.Backup
 		return nil, false, err
 	}
 	return bb, true, nil
+}
+
+// namespaceFullError says that other users' open sessions hold every place a
+// namespace has, so a new session would wait until one of them ends.
+type namespaceFullError struct {
+	namespace string
+	open, max int
+}
+
+func (e *namespaceFullError) Error() string {
+	return fmt.Sprintf("%d browse sessions are open for the claims of namespace %s and the limit is %d; they belong to other users. Try again when one has ended (a session ends after 15 minutes without use)",
+		e.open, e.namespace, e.max)
+}
+
+// makeRoom makes a place for a new session of u in the namespace. The controller
+// lets only MaxSessionsPerNamespace sessions run for one namespace and makes
+// the others wait, so a request over the limit would wait for minutes and then
+// fail. A user who fills the namespace with their own sessions (one for each
+// moment they looked at) gets their oldest ones closed instead: a session is
+// cheap to open again. Sessions of other users are never touched; if they hold
+// the places, the request is refused at once.
+func (g *Gateway) makeRoom(ctx context.Context, u User, namespace string) error {
+	limit := g.cfg.MaxSessionsPerNamespace
+	if limit <= 0 {
+		return nil
+	}
+	list := &v1alpha1.BackupBrowseList{}
+	if err := g.c.List(ctx, list); err != nil {
+		return err
+	}
+	var open, own []*v1alpha1.BackupBrowse
+	for i := range list.Items {
+		b := &list.Items[i]
+		if b.Spec.PVCNamespace != namespace || b.Spec.Close || b.Status.Phase == "Closed" || b.Status.Phase == "Failed" {
+			continue
+		}
+		open = append(open, b)
+		if b.Spec.RequestedBy == u.Name {
+			own = append(own, b)
+		}
+	}
+	free := len(open) - limit + 1
+	if free <= 0 {
+		return nil
+	}
+	if len(own) < free {
+		return &namespaceFullError{namespace: namespace, open: len(open), max: limit}
+	}
+	sort.Slice(own, func(i, j int) bool {
+		a, b := own[i], own[j]
+		if !a.CreationTimestamp.Equal(&b.CreationTimestamp) {
+			return a.CreationTimestamp.Before(&b.CreationTimestamp)
+		}
+		return a.Name < b.Name
+	})
+	for _, b := range own[:free] {
+		b.Spec.Close = true
+		if err := g.c.Update(ctx, b); err != nil {
+			return err
+		}
+		g.audit(ctx, b, "SessionClosed", fmt.Sprintf("user %s's browse session on %s of policy %s was closed to make room for a new one in the namespace",
+			u.Name, claimText(&b.Spec), b.Spec.Policy))
+	}
+	return nil
 }
 
 // waitReady polls until the session is Ready, ended, or the wait is over.

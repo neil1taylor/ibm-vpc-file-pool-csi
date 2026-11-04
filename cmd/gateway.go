@@ -27,7 +27,9 @@ type gatewayOptions struct {
 	maxDownload int64
 	// maxOpenRestores limits the file restores one user has that have not ended.
 	maxOpenRestores int
-	authCache       time.Duration
+	// maxSessionsPerNamespace is the controller's limit of open browse sessions for one namespace.
+	maxSessionsPerNamespace int
+	authCache               time.Duration
 	// browseNamespace holds the session Secrets and helper pods.
 	browseNamespace string
 }
@@ -64,13 +66,14 @@ func runGateway(o gatewayOptions) {
 	}
 	auth := gateway.NewKubeAuth(cs)
 	g := gateway.New(c, auth, auth, gateway.Config{
-		SessionNamespace: o.browseNamespace,
-		EventNamespace:   driverNamespace,
-		DriverNamespace:  driverNamespace,
-		SessionWait:      o.sessionWait,
-		MaxDownloadBytes: o.maxDownload,
-		MaxOpenRestores:  o.maxOpenRestores,
-		AuthCacheTTL:     o.authCache,
+		SessionNamespace:        o.browseNamespace,
+		EventNamespace:          driverNamespace,
+		DriverNamespace:         driverNamespace,
+		SessionWait:             o.sessionWait,
+		MaxDownloadBytes:        o.maxDownload,
+		MaxOpenRestores:         o.maxOpenRestores,
+		MaxSessionsPerNamespace: o.maxSessionsPerNamespace,
+		AuthCacheTTL:            o.authCache,
 	})
 	srv := &http.Server{
 		Addr:              o.listen,
