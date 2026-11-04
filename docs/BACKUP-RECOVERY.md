@@ -723,7 +723,7 @@ A restore never writes over a file or a claim that exists, and never puts a file
 | 403 | Which right is missing: `get backupfiles` in the source namespace, `create` (and `update`) on `persistentvolumeclaims` in the target namespace, or `create` on `pods` for an existing claim |
 | 404 | There is no backup of this volume any more, or the chosen existing claim does not exist |
 | 409 | A claim with that name already exists; a button fills in another name (`name-2`, `name-3`) |
-| 429 | You have too many open restores (10 by default, `backupGateway.maxOpenRestores`); wait for one to end |
+| 429 | You have too many open restores (10 by default, `backupGateway.maxOpenRestores`); wait for one to end. For a new browse session: other users' sessions hold every place of the namespace (`backupBrowse.maxSessionsPerNamespace`, 2 by default); try again when one has ended |
 
 A restore takes at most 1000 chosen entries; choose a folder that holds them instead. Names are shown as text only, in the same escaped form as `kubectl backup ls`, and the console sends them to the gateway in that form. The browser holds only your own token; no file content is ever in a request.
 

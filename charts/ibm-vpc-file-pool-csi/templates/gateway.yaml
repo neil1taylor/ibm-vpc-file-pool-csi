@@ -223,6 +223,7 @@ spec:
             - --gateway-session-wait={{ .Values.backupGateway.sessionWait }}
             - --gateway-max-download-bytes={{ int64 .Values.backupGateway.maxDownloadBytes }}
             - --gateway-max-open-restores={{ .Values.backupGateway.maxOpenRestores }}
+            - --gateway-max-sessions-per-namespace={{ .Values.backupBrowse.maxSessionsPerNamespace }}
             - -v={{ .Values.logLevel }}
           ports:
             - name: https

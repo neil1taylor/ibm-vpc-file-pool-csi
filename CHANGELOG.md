@@ -19,6 +19,11 @@ To make a release:
 
 ## [Unreleased]
 
+### Fixed
+
+- **Browsing a third moment in one namespace no longer waits 5 minutes and fails.** A namespace may have 2 open browse sessions (`backupBrowse.maxSessionsPerNamespace`). When you ask for another moment and your own sessions fill the namespace, the gateway closes your oldest one to make room. When other users' sessions hold every place, the request is refused at once with 429 and a clear message. The gateway takes the limit from a new flag, `--gateway-max-sessions-per-namespace`, which the chart sets to the same value.
+- **A browse session ends when its backup policy or snapshot pool is deleted.** Before, the helper pod stayed and held a claim on the share, so the pool delete left stuck pods and claims behind.
+
 ## [v0.17.0] — 2026-11-03
 
 Files inside VM disks can be browsed and restored, from the snapshot pool and from COS. Set `backupBrowse.guest.kvmDevice` where nodes have the KVM device (first listing 21 to 26 s with it, 44 to 46 s without). Restoring from a VM disk in COS needs `backupBrowse.cos` and the guest image turned on, and the export must stay in COS for 3 more hours.

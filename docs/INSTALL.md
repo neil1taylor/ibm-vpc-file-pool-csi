@@ -449,6 +449,7 @@ kubectl apply -f config/deploy/node.yaml
 | `--gateway-session-wait` | `20s` | How long a request that asks to wait holds for the session to be ready; keep it under the proxy timeout |
 | `--gateway-max-download-bytes` | `53687091200` | Largest single file or tar |
 | `--gateway-max-open-restores` | `10` | File restores one user may have that have not ended. More are refused |
+| `--gateway-max-sessions-per-namespace` | `2` | Open browse sessions for the claims of one namespace (the chart passes `backupBrowse.maxSessionsPerNamespace`, the same value as the controller). A user over it has their oldest session closed to make room; a request that other users' sessions block gets 429 at once. `0` turns the check off |
 | `--gateway-auth-cache` | `10s` | How long a token review is kept; `0` checks every call. The right on the namespace is checked on every call regardless |
 
 **Browse session flags of the controller** (set by the `backupBrowse.*` chart values):
