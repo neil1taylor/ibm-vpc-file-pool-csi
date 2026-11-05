@@ -300,9 +300,17 @@ A restore into a new claim also needs `create` on `persistentvolumeclaims` in th
 unset KUBECONFIG
 oc delete pod -n ${NS} files-back-check --ignore-not-found --force --grace-period=0
 oc delete pvc -n ${NS} files-back files-console --ignore-not-found
-oc delete backupfilerestore --all
-oc delete backupbrowse --all
+oc get backupfilerestore,backupbrowse
 ```
+
+That last command lists every restore and browse session in the cluster, including those of other people. Delete only the ones you made, by name:
+
+```bash
+oc delete backupfilerestore <name> [<name> ...]
+oc delete backupbrowse <name> [<name> ...]
+```
+
+Never use `--all` on a shared cluster.
 
 `unset KUBECONFIG` comes first, because the ServiceAccount may not delete cluster-wide objects. Remove the folder `/tmp/restored` and the file `/tmp/tut17-kubeconfig` too. `BackupFileRestore` and `BackupBrowse` are cluster-wide, not in the namespace, so deleting the namespace does not remove them, and a browse pod that still runs blocks the delete of the pool. The ServiceAccount goes with the namespace. A browse session also ends by itself after 15 minutes without use. Then clean up Part 10.
 
