@@ -362,7 +362,7 @@ func momentText(m *time.Time) string {
 	if m == nil {
 		return "latest copy"
 	}
-	return "moment " + m.UTC().Format(time.RFC3339)
+	return "restore point " + m.UTC().Format(time.RFC3339)
 }
 
 func sessionOf(bb *v1alpha1.BackupBrowse) Session {
@@ -422,7 +422,7 @@ func (g *Gateway) findOrCreate(ctx context.Context, u User, want v1alpha1.Backup
 	}
 	if moment != nil {
 		m := metav1.NewTime(*moment)
-		bb.Spec.Moment = &m
+		bb.Spec.RestorePoint = &m
 	}
 	if err := g.c.Create(ctx, bb); err != nil {
 		return nil, false, err
@@ -745,7 +745,7 @@ func momentTextOf(bb *v1alpha1.BackupBrowse) string {
 	if rp == nil {
 		return "latest copy"
 	}
-	return "moment " + rp.UTC().Format(time.RFC3339)
+	return "restore point " + rp.UTC().Format(time.RFC3339)
 }
 
 // limitWriter fails once more than left bytes were written.

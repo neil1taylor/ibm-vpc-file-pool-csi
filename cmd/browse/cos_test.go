@@ -159,7 +159,7 @@ func TestCOSModeRefusesBadArguments(t *testing.T) {
 		msg  string
 	}{
 		"with a root":        {[]string{"--cos-source", cosSourceJSON, "--root", "/x"}, "cannot be used with"},
-		"with moments":       {[]string{"--cos-source", cosSourceJSON, "--moments", "/x"}, "cannot be used with"},
+		"with moments":       {[]string{"--cos-source", cosSourceJSON, "--restore-points", "/x"}, "cannot be used with"},
 		"not json":           {[]string{"--cos-source", "nope"}, "--cos-source is not valid"},
 		"an unknown field":   {[]string{"--cos-source", `{"endpoint":"s3.x","extra":1}`}, "--cos-source is not valid"},
 		"a bad volume":       {[]string{"--cos-source", strings.Replace(cosSourceJSON, testVolume, "../x", 1)}, "volume"},

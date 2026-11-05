@@ -92,7 +92,7 @@ func runRF(t *testing.T, gw *gwClient, args []string) (string, error) {
 
 func TestRestoreFiles_AsksForANewClaimByDefault(t *testing.T) {
 	s, gw := newRestoreStub(t)
-	out, err := runRF(t, gw, restoreArgs("--moment", "2026-10-21T09:30:00Z", "--size-gb", "5", "--storage-class", "gold"))
+	out, err := runRF(t, gw, restoreArgs("--restore-point", "2026-10-21T09:30:00Z", "--size-gb", "5", "--storage-class", "gold"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestRestoreFiles_BadArguments(t *testing.T) {
 		"a target without a namespace": {"--policy", "nightly", "--pvc", "apps/db", "--path", "/a", "--to", "x"},
 		"no policy":                    {"--pvc", "apps/db", "--path", "/a", "--to", "apps/x"},
 		"no pvc":                       {"--policy", "nightly", "--path", "/a", "--to", "apps/x"},
-		"a bad moment":                 {"--policy", "nightly", "--pvc", "apps/db", "--path", "/a", "--to", "apps/x", "--moment", "yesterday"},
+		"a bad moment":                 {"--policy", "nightly", "--pvc", "apps/db", "--path", "/a", "--to", "apps/x", "--restore-point", "yesterday"},
 		"both targets":                 {"--policy", "nightly", "--pvc", "apps/db", "--path", "/a", "--to", "apps/x", "--new-claim", "--existing"},
 		"a size for an existing claim": {"--policy", "nightly", "--pvc", "apps/db", "--path", "/a", "--to", "apps/x", "--existing", "--size-gb", "3"},
 		"a bad size":                   {"--policy", "nightly", "--pvc", "apps/db", "--path", "/a", "--to", "apps/x", "--size-gb", "lots"},

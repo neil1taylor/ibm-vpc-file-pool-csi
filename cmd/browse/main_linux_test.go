@@ -135,7 +135,7 @@ func serveMoments(t *testing.T, extra ...string) (info browse.Info, listed []str
 	addrc := make(chan net.Addr, 1)
 	exit := make(chan int, 1)
 	var errb bytes.Buffer
-	args := append([]string{"--mode", "browse-server", "--root", latest, "--moments", moments, "--token-file", writeToken(t, token),
+	args := append([]string{"--mode", "browse-server", "--root", latest, "--restore-points", moments, "--token-file", writeToken(t, token),
 		"--listen", "127.0.0.1:0", "--termination-log", filepath.Join(t.TempDir(), "log"), "--tls-cert-file", crt, "--tls-key-file", key}, extra...)
 	go func() { exit <- run(ctx, args, &bytes.Buffer{}, &errb, func(a net.Addr) { addrc <- a }) }()
 	var addr net.Addr

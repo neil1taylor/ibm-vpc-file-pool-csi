@@ -199,7 +199,7 @@ func TestRestoreFromCOS_RefusesBadFlags(t *testing.T) {
 		"no size":           func(f map[string]string) { delete(f, "size-gb") },
 		"size not a number": func(f map[string]string) { f["size-gb"] = "big" },
 		"no key protect":    func(f map[string]string) { delete(f, "kp-root-key") },
-		"bad moment":        func(f map[string]string) { f["moment"] = "yesterday" },
+		"bad moment":        func(f map[string]string) { f["restore-point"] = "yesterday" },
 	}
 	for name, mutate := range cases {
 		f := cosFlags()
@@ -401,6 +401,9 @@ func TestCOSList_PrintsVolumesAndMoments(t *testing.T) {
 	}
 	if l.repo.Prefix != "team-a/nightly/" || l.repo.Bucket != "pool-backups" {
 		t.Errorf("repo = %+v", l.repo)
+	}
+	if !strings.Contains(out.String(), "VOLUME") || !strings.Contains(out.String(), "RESTORE POINT") || strings.Contains(out.String(), "MOMENT") {
+		t.Errorf("heading is not RESTORE POINT:\n%s", out.String())
 	}
 }
 

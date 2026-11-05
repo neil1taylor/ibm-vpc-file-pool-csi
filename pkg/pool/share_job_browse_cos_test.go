@@ -59,7 +59,7 @@ func TestStartBrowseCOS_ShapeAndHardening(t *testing.T) {
 			t.Errorf("command lacks %q: %s", want, args)
 		}
 	}
-	if strings.Contains(args, "--root") || strings.Contains(args, "--moments") {
+	if strings.Contains(args, "--root") || strings.Contains(args, "--restore-points") {
 		t.Errorf("a COS session must not name a folder: %s", args)
 	}
 	var src cosbrowse.Source

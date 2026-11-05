@@ -25,6 +25,7 @@ const modeBuildList = "build-list"
 // the person should be told. The names in notes are file system ids that the
 // helper made, never names from inside the guest.
 type listReport struct {
+	// The key keeps the name "moment": the controller of an earlier version reads it.
 	Moment  string   `json:"moment,omitempty"`
 	Entries int      `json:"entries"`
 	Bytes   int64    `json:"bytes"`

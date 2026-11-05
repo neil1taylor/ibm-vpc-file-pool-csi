@@ -60,8 +60,8 @@ func TestRunRefusesBadArguments(t *testing.T) {
 		{"token too short", append([]string{"--mode", "browse-server", "--root", root, "--token-file", short}, tlsArgs...), 1, "token"},
 		{"no tls files", []string{"--mode", "browse-server", "--root", root, "--token-file", tok}, 2, "--tls"},
 		{"tls files missing", []string{"--mode", "browse-server", "--root", root, "--token-file", tok, "--tls-cert-file", "/nonexistent/c", "--tls-key-file", "/nonexistent/k"}, 1, "certificate"},
-		{"at without moments", append([]string{"--mode", "browse-server", "--root", root, "--token-file", tok, "--at", "2026-10-22T10:00:00Z"}, tlsArgs...), 2, "--moments"},
-		{"bad at", append([]string{"--mode", "browse-server", "--root", root, "--token-file", tok, "--moments", root, "--at", "yesterday"}, tlsArgs...), 2, "--at"},
+		{"at without restore points", append([]string{"--mode", "browse-server", "--root", root, "--token-file", tok, "--at", "2026-10-22T10:00:00Z"}, tlsArgs...), 2, "--restore-points"},
+		{"bad at", append([]string{"--mode", "browse-server", "--root", root, "--token-file", tok, "--restore-points", root, "--at", "yesterday"}, tlsArgs...), 2, "--at"},
 		{"unknown flag", []string{"--mode", "browse-server", "--nope"}, 2, "nope"},
 		{"root is a file", append([]string{"--mode", "browse-server", "--root", tok, "--token-file", tok}, tlsArgs...), 1, "root"},
 	}
@@ -112,5 +112,37 @@ func TestRestoreFilesModeWritesTheReasonItCannotStart(t *testing.T) {
 	b, _ := os.ReadFile(termLog)
 	if !strings.Contains(string(b), "unknown mode") {
 		t.Errorf("termination log = %q", b)
+	}
+}
+
+func TestOldMomentsFlagStillWorksAndWarns(t *testing.T) {
+	root := t.TempDir()
+	tok := writeToken(t, strings.Repeat("t", 32))
+	var out, errb bytes.Buffer
+	// With the old name, the run gets as far as the check that --at needs the folder.
+	crt, key, _ := writeCert(t)
+	args := []string{"--mode", "browse-server", "--root", root, "--token-file", tok, "--tls-cert-file", crt, "--tls-key-file", key, "--moments", root, "--at", "yesterday"}
+	got := run(context.Background(), args, &out, &errb, nil)
+	if got != 2 || !strings.Contains(errb.String(), "--at") {
+		t.Errorf("exit %d, stderr %q; want 2 and a complaint about --at (so --moments was accepted)", got, errb.String())
+	}
+	if !strings.Contains(errb.String(), "--moments is deprecated; use --restore-points\n") {
+		t.Errorf("no deprecation line:\n%s", errb.String())
+	}
+}
+
+func TestOldAndNewMomentsFlagsThatDifferAreRefused(t *testing.T) {
+	var out, errb bytes.Buffer
+	got := run(context.Background(), []string{"--moments", "/a", "--restore-points", "/b"}, &out, &errb, nil)
+	if got != 2 || !strings.Contains(errb.String(), "--moments") || !strings.Contains(errb.String(), "--restore-points") {
+		t.Errorf("exit %d, stderr %q; want 2 naming both flags", got, errb.String())
+	}
+}
+
+func TestHelpDoesNotListTheOldMomentsFlag(t *testing.T) {
+	var out, errb bytes.Buffer
+	run(context.Background(), []string{"--help"}, &out, &errb, nil)
+	if strings.Contains(errb.String(), "-moments") || !strings.Contains(errb.String(), "-restore-points") {
+		t.Errorf("usage text:\n%s", errb.String())
 	}
 }

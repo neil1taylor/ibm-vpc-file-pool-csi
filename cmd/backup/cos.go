@@ -189,10 +189,10 @@ func runRestoreFromCOS(ctx context.Context, c client.Client, out io.Writer, admi
 		return err
 	}
 	var moment *metav1.Time
-	if m := flags["moment"]; m != "" {
+	if m := flags["restore-point"]; m != "" {
 		t, perr := time.Parse(time.RFC3339, m)
 		if perr != nil {
-			return fmt.Errorf("--moment must be an RFC 3339 time such as 2026-10-20T09:00:00Z: %w", perr)
+			return fmt.Errorf("--restore-point must be an RFC 3339 time such as 2026-10-20T09:00:00Z: %w", perr)
 		}
 		mt := metav1.NewTime(t)
 		moment = &mt
@@ -252,7 +252,7 @@ func runRestoreFromCOS(ctx context.Context, c client.Client, out io.Writer, admi
 	br := &v1alpha1.BackupRestore{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 		Spec: v1alpha1.BackupRestoreSpec{
-			Policy: flags["policy"], Moment: moment, TargetNamespace: dstNS, TargetName: dstName,
+			Policy: flags["policy"], RestorePoint: moment, TargetNamespace: dstNS, TargetName: dstName,
 			StorageClassName: flags["storage-class"], FromCOS: block,
 		},
 	}
@@ -305,7 +305,7 @@ func findDriverImage(ctx context.Context, c client.Client, ns string) (string, e
 	return "", fmt.Errorf("no driver controller found in namespace %s; pass --driver-image and --driver-namespace", ns)
 }
 
-// runCOSList lists the volumes and the export moments in the bucket of a
+// runCOSList lists the volumes and the export restore points in the bucket of a
 // policy. It runs a read-only Job in the driver's namespace; the Job opens the
 // repository, so the cluster must be able to reach the bucket.
 func runCOSList(ctx context.Context, c client.Client, out io.Writer, admin cosAdmin, newLister func(image string) cosLister, flags map[string]string) error {
@@ -365,7 +365,7 @@ func runCOSList(ctx context.Context, c client.Client, out io.Writer, admin cosAd
 		return nil
 	}
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(w, "VOLUME\tMOMENT")
+	_, _ = fmt.Fprintln(w, "VOLUME\tRESTORE POINT")
 	for _, v := range listing.Volumes {
 		for _, m := range v.Moments {
 			_, _ = fmt.Fprintf(w, "%s\t%s\n", v.Name, m.UTC().Format(time.RFC3339))
@@ -378,7 +378,7 @@ func runCOSList(ctx context.Context, c client.Client, out io.Writer, admin cosAd
 		return err
 	}
 	if listing.Truncated {
-		_, _ = fmt.Fprintln(out, "The list is cut: there are more moments. Add --volume pvc-... to see the moments of one volume.")
+		_, _ = fmt.Fprintln(out, "The list is cut: there are more restore points. Add --volume pvc-... to see the restore points of one volume.")
 	}
 	return nil
 }

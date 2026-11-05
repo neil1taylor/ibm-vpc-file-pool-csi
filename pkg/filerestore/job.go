@@ -222,7 +222,7 @@ func (s JobSpec) validate() (time.Time, uint32, error) {
 	switch {
 	case s.Guest != nil && s.Guest.Disk != nil:
 		if s.COS != nil || s.Latest != "" || s.Moments != "" {
-			return at, 0, errors.New("a VM disk held by a disk server has no latest or moments folder and no COS block")
+			return at, 0, errors.New("a VM disk held by a disk server has no latest or restore points folder and no COS block")
 		}
 		if err := s.Guest.validate(); err != nil {
 			return at, 0, err
@@ -236,7 +236,7 @@ func (s JobSpec) validate() (time.Time, uint32, error) {
 		}
 	case s.COS != nil:
 		if s.Latest != "" || s.Moments != "" {
-			return at, 0, errors.New("a backup in COS has no latest or moments folder")
+			return at, 0, errors.New("a backup in COS has no latest or restore points folder")
 		}
 		if err := s.COS.Validate(); err != nil {
 			return at, 0, err
@@ -436,7 +436,7 @@ func openBackup(ctx context.Context, spec JobSpec, at time.Time, deps jobDeps) (
 	}
 	root, info, err := deps.choose(spec.Latest, spec.Moments, at)
 	if err != nil {
-		return nil, browse.Info{}, nil, fmt.Errorf("choose the moment: %w", err)
+		return nil, browse.Info{}, nil, fmt.Errorf("choose the restore point: %w", err)
 	}
 	tree, closeTree, err := deps.open(root)
 	if err != nil {

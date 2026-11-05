@@ -82,7 +82,7 @@ func TestRestore_MakesTheRequest(t *testing.T) {
 	var out bytes.Buffer
 	now := func() time.Time { return time.Date(2026, 10, 21, 10, 0, 0, 0, time.UTC) }
 	err := run(context.Background(), c, &out, []string{"restore", "--policy", "nightly", "--pvc", "vms/web-root",
-		"--to", "vms/web-root-restored", "--moment", "2026-10-20T12:00:00Z", "--storage-class", "fast"}, now)
+		"--to", "vms/web-root-restored", "--restore-point", "2026-10-20T12:00:00Z", "--storage-class", "fast"}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestRestore_MakesTheRequest(t *testing.T) {
 	sp := l.Items[0].Spec
 	if sp.Policy != "nightly" || sp.SourceNamespace != "vms" || sp.SourceName != "web-root" ||
 		sp.TargetNamespace != "vms" || sp.TargetName != "web-root-restored" || sp.StorageClassName != "fast" ||
-		sp.Moment == nil || !sp.Moment.Equal(&metav1.Time{Time: time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)}) {
+		sp.RestorePoint == nil || sp.Moment != nil || !sp.RestorePoint.Equal(&metav1.Time{Time: time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)}) {
 		t.Errorf("spec = %+v", sp)
 	}
 	if !strings.HasPrefix(l.Items[0].Name, "restore-web-root-") {
@@ -111,7 +111,7 @@ func TestRestore_RefusesBadRequestsBeforeMakingAnything(t *testing.T) {
 		"no target":         {"restore", "--policy", "nightly", "--pvc", "vms/web-root"},
 		"pvc without ns":    {"restore", "--policy", "nightly", "--pvc", "web-root", "--to", "vms/x"},
 		"target without ns": {"restore", "--policy", "nightly", "--pvc", "vms/web-root", "--to", "x"},
-		"bad moment":        {"restore", "--policy", "nightly", "--pvc", "vms/web-root", "--to", "vms/x", "--moment", "yesterday"},
+		"bad moment":        {"restore", "--policy", "nightly", "--pvc", "vms/web-root", "--to", "vms/x", "--restore-point", "yesterday"},
 		"unknown policy":    {"restore", "--policy", "other", "--pvc", "vms/web-root", "--to", "vms/x"},
 		"no backup of pvc":  {"restore", "--policy", "nightly", "--pvc", "vms/none", "--to", "vms/x"},
 	}
@@ -230,5 +230,93 @@ func TestNewScheme_ListsDeploymentsForFindDriverImage(t *testing.T) {
 	c := fakeclient.NewClientBuilder().WithScheme(newScheme()).Build()
 	if _, err := findDriverImage(context.Background(), c, "ns"); err == nil || strings.Contains(err.Error(), "no kind is registered") {
 		t.Fatalf("the real scheme cannot list Deployments: %v", err)
+	}
+}
+
+func captureErrOut(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	old := errOut
+	var b bytes.Buffer
+	errOut = &b
+	t.Cleanup(func() { errOut = old })
+	return &b
+}
+
+func TestRestore_OldMomentFlagStillWorksAndWarns(t *testing.T) {
+	errb := captureErrOut(t)
+	c := newClient(testPolicy())
+	err := run(context.Background(), c, &bytes.Buffer{}, []string{"restore", "--policy", "nightly", "--pvc", "vms/web-root",
+		"--to", "vms/x", "--moment=2026-10-20T12:00:00Z"}, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := errb.String(), "--moment is deprecated; use --restore-point\n"; got != want {
+		t.Errorf("stderr = %q, want %q", got, want)
+	}
+	l := &v1alpha1.BackupRestoreList{}
+	if err := c.List(context.Background(), l); err != nil || len(l.Items) != 1 {
+		t.Fatalf("restores = %v, %v", l.Items, err)
+	}
+	// The writer fills the new field only.
+	if sp := l.Items[0].Spec; sp.RestorePoint == nil || sp.Moment != nil {
+		t.Errorf("spec = %+v, want restorePoint set and moment empty", sp)
+	}
+}
+
+func TestRestore_OldAndNewFlagsThatDifferAreRefused(t *testing.T) {
+	captureErrOut(t)
+	c := newClient(testPolicy())
+	err := run(context.Background(), c, &bytes.Buffer{}, []string{"restore", "--policy", "nightly", "--pvc", "vms/web-root",
+		"--to", "vms/x", "--moment", "2026-10-20T12:00:00Z", "--restore-point", "2026-10-20T13:00:00Z"}, time.Now)
+	if err == nil || !strings.Contains(err.Error(), "--moment") || !strings.Contains(err.Error(), "--restore-point") {
+		t.Fatalf("err = %v, want one that names both flags", err)
+	}
+	l := &v1alpha1.BackupRestoreList{}
+	_ = c.List(context.Background(), l)
+	if len(l.Items) != 0 {
+		t.Error("a request was made for a bad command")
+	}
+}
+
+func TestRestore_WaitReportsTheNewStatusField(t *testing.T) {
+	c := newClient(testPolicy())
+	var out bytes.Buffer
+	go func() {
+		for i := 0; i < 200; i++ {
+			l := &v1alpha1.BackupRestoreList{}
+			if err := c.List(context.Background(), l); err == nil && len(l.Items) == 1 {
+				br := l.Items[0].DeepCopy()
+				m := metav1.NewTime(time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC))
+				br.Status.Phase = "Done"
+				br.Status.RestoredRestorePoint = &m
+				_ = c.Status().Update(context.Background(), br)
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+	args := []string{"restore", "--policy", "nightly", "--pvc", "vms/web-root", "--to", "vms/x", "--wait", "--poll", "10ms", "--timeout", "10s"}
+	if err := run(context.Background(), c, &out, args, time.Now); err != nil {
+		t.Fatalf("err = %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "2026-10-20T09:00:00Z") {
+		t.Errorf("output lacks the restore point:\n%s", out.String())
+	}
+}
+
+func TestRenameOldFlags_RestorePointsIsABooleanFlag(t *testing.T) {
+	errb := captureErrOut(t)
+	got, err := renameOldFlags([]string{"--moments", "--policy", "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, " ") != "--restore-points --policy p" {
+		t.Errorf("args = %v", got)
+	}
+	if errb.String() != "--moments is deprecated; use --restore-points\n" {
+		t.Errorf("stderr = %q", errb.String())
+	}
+	if flags := parseFlags(got); flags["restore-points"] != "true" || flags["policy"] != "p" {
+		t.Errorf("flags = %v", flags)
 	}
 }

@@ -4,7 +4,7 @@
 // Usage:
 //
 //	kubectl backup list    [--policy NAME]
-//	kubectl backup restore --policy NAME --pvc NAMESPACE/NAME --to NAMESPACE/NAME [--moment TIME] [--storage-class CLASS] [--wait]
+//	kubectl backup restore --policy NAME --pvc NAMESPACE/NAME --to NAMESPACE/NAME [--restore-point TIME] [--storage-class CLASS] [--wait]
 //	kubectl backup delete  --policy NAME --pvc NAMESPACE/NAME [--yes]
 //	kubectl backup cos-setup --region R --resource-group G --bucket B --root-key CRN ... [--dry-run]
 //	kubectl backup restore --from-cos --policy NAME --volume pvc-... --to NAMESPACE/NAME --bucket B --endpoint HOST --storage-class CLASS --size-gb N ...
@@ -29,6 +29,7 @@ import (
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/pool"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/util"
 
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
@@ -79,7 +80,12 @@ func main() {
 		printUsage(os.Stderr)
 		os.Exit(1)
 	}
-	flags := parseFlags(os.Args[2:])
+	args, err := renameOldFlags(os.Args[2:])
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	flags := parseFlags(args)
 	c, err := buildClient(flags["kubeconfig"])
 	switch {
 	case err != nil:
@@ -113,7 +119,7 @@ func printUsage(w io.Writer) {
 	_, _ = fmt.Fprint(w, `kubectl-backup — backups of volumes and VMs
 
 Usage:
-  kubectl backup list    [--policy NAME]            List the backed-up volumes and their moments
+  kubectl backup list    [--policy NAME]            List the backed-up volumes and their restore points
   kubectl backup ls  [flags] [PATH]                 List a folder inside a backup (your own rights; see below)
   kubectl backup get [flags] PATH                   Download a file, or a folder as a tar, from a backup
   kubectl backup browse [flags]                     Open a browse session by hand, or --close NAME
@@ -121,15 +127,15 @@ Usage:
   kubectl backup restore [flags]                    Make a new PVC from a backup
   kubectl backup delete  [flags]                    Remove all backups of one volume, for good
   kubectl backup cos-setup [flags]                  Make the COS bucket, keys and lock for the export (your own IBM Cloud login)
-  kubectl backup cos-list [flags]                   List the volumes and moments in the COS bucket of a policy
+  kubectl backup cos-list [flags]                   List the volumes and restore points in the COS bucket of a policy
   kubectl backup restore --from-cos [flags]         Make a new PVC from a backup in COS, in any cluster that runs the driver
   kubectl backup version                            Print version
 
 ls, get and browse flags (they use your own kubeconfig token, and need the right "get backupfiles" in the namespace of the claim):
   --policy          The BackupPolicy that holds the backup
   --pvc             The backed-up claim, as NAMESPACE/NAME
-  --moment          A time like 2026-10-21T09:30:00Z: the newest backup at or before it. Default: the latest copy
-  --moments         ls only: list the moments that can be browsed
+  --restore-point   A time like 2026-10-21T09:30:00Z: the newest backup at or before it. Default: the latest copy
+  --restore-points  ls only: list the restore points that can be browsed
   --session         Use an open session by name (from browse) instead of --policy and --pvc
   --out             get only: a folder or file name, or - for standard output. A file is never replaced
   --extract         get only: unpack a folder into this folder. Links and special files are skipped
@@ -142,14 +148,14 @@ ls, get and browse flags (they use your own kubeconfig token, and need the right
   A name that is not text is shown as \xNN, and you can type it the same way. Sessions end after 15 minutes without use.
 
 restore-files flags (your own token again; you need "get backupfiles" in the namespace of the backed-up claim, and the right to create claims in the namespace of the target; an existing claim also needs the right to update it):
-  --policy, --pvc, --moment   As for ls: the backup to take the files from
+  --policy, --pvc, --restore-point   As for ls: the backup to take the files from
   --path            A file or folder to restore, as ls prints it. Give it more than once. A folder comes with everything in it; / is the whole volume
   --fs              VM disk only: put this file system in front of every --path, so --fs sda1 --path /etc/hosts restores /sda1/etc/hosts. The file system's name is kept in the restored tree
   --paths-file      A file with one path on each line, for many paths
   --to              The target claim, as NAMESPACE/NAME (required)
   --new-claim       Make the claim and fill it (the default). It must not exist. It is sized to the files plus 20%, at least 1 GiB
   --size-gb, --storage-class   New claim only: the size, and the class (default: the class of the backed-up claim)
-  --existing        Write a new folder, restored-<policy>-<moment>, into the claim, which must exist. Nothing in it changes and nothing is written over
+  --existing        Write a new folder, restored-<policy>-<restore point>, into the claim, which must exist. Nothing in it changes and nothing is written over
   --wait            Wait until the restore is done and say where the files are. --timeout sets how long (default 30m)
   --status NAME     Show a restore you asked for earlier
   A claim that holds a VM disk is never a target, and a file is never put back in place. Files go to a new claim or a new folder.
@@ -164,7 +170,7 @@ Delete flags:
   --timeout         How long each Job may take (default 2h)
   The policy must no longer back up the volume (remove the label first), and no
   restore of the volume may be running. It removes the volume's backup folder and
-  its earlier moments from the snapshot pool's share, after showing how much.
+  its earlier restore points from the snapshot pool's share, after showing how much.
 
 cos-setup flags (run on your machine; it needs no cluster; it deletes only the instance-wide policy that IBM Cloud adds for the new HMAC key):
   --region, --resource-group, --bucket   Where to make the bucket (required)
@@ -187,9 +193,9 @@ Restore flags:
   --policy         The BackupPolicy that holds the backup (required)
   --pvc             The backed-up claim, as NAMESPACE/NAME (required). It may be gone
   --to              The new PVC, as NAMESPACE/NAME (required). It must not exist
-  --moment          Restore the newest backup at or before this time (RFC 3339). Default: the latest
+  --restore-point   Restore the newest backup at or before this time (RFC 3339). Default: the latest
   --storage-class   Class of the new PVC. Default: the class of the backed-up claim
-  --wait            Wait until the restore is done, and report the moment that was restored
+  --wait            Wait until the restore is done, and report the restore point that was restored
   --timeout         How long --wait waits (default 2h)
 
 Restore from COS (restore --from-cos). It needs no BackupPolicy and no snapshot pool in this cluster:
@@ -198,7 +204,7 @@ Restore from COS (restore --from-cos). It needs no BackupPolicy and no snapshot 
   --volume          The backed-up volume, pvc-<uuid>, as cos-list shows it (required). COS does not keep claim names
   --to              The new PVC, as NAMESPACE/NAME (required). It must not exist
   --storage-class, --size-gb   Class and size of the new PVC (required): COS does not keep them
-  --moment          Restore the newest backup at or before this time (RFC 3339). Default: the latest
+  --restore-point   Restore the newest backup at or before this time (RFC 3339). Default: the latest
   --credentials-secret   Secret with the COS key in the driver namespace (default cos-credentials)
   --backup-key-secret    Secret with the wrapped backup key (default cos-backup-key). Made from the bucket if missing
   --kp-instance, --kp-region, --kp-root-key   The Key Protect root key that wraps the backup key (required)
@@ -211,7 +217,7 @@ Restore from COS (restore --from-cos). It needs no BackupPolicy and no snapshot 
   cos-list takes the same source flags and --volume (optional) and --driver-image (default: the controller's image).
   It runs a read-only Job in the cluster, so the cluster must be able to reach the bucket
 
-Backups in COS (ls, get, browse and restore-files). By itself the gateway reads COS when a moment is only there:
+Backups in COS (ls, get, browse and restore-files). By itself the gateway reads COS when a restore point is only there:
   --from-cos        Read the backup from the COS bucket that the policy's export block names
   --from-cos --policy AREA --bucket B --endpoint HOST --volume pvc-<uuid> [--prefix P]   Name a bucket directly, for a backup that
                     no policy of this cluster describes. No --pvc. You must be allowed to read the Secrets it names in the driver namespace.
@@ -221,6 +227,29 @@ Backups in COS (ls, get, browse and restore-files). By itself the gateway reads 
 All commands:
   --kubeconfig      Path to kubeconfig (default: ~/.kube/config)
 `)
+}
+
+// restorePointAliases are the old names of the restore-point flags. They still
+// work for one release, hidden from the usage text.
+var restorePointAliases = []util.FlagAlias{
+	{Old: "moment", New: "restore-point"},
+	{Old: "moments", New: "restore-points", Bool: true},
+}
+
+// renameOldFlags turns the deprecated flag names into the new ones and prints
+// one line on stderr for each old name used. Both names set to different values
+// is an error.
+func renameOldFlags(args []string) ([]string, error) {
+	return util.RewriteAliasedArgs(args, restorePointAliases, errOut)
+}
+
+// restoredRestorePoint is the restore point a BackupRestore restored: the new
+// status field, or the old one when a controller of an earlier version wrote it.
+func restoredRestorePoint(br *v1alpha1.BackupRestore) *metav1.Time {
+	if br.Status.RestoredRestorePoint != nil {
+		return br.Status.RestoredRestorePoint
+	}
+	return br.Status.RestoredMoment
 }
 
 // parseFlags handles --key=value and --key value; --wait takes no value.
@@ -236,7 +265,7 @@ func parseFlags(args []string) map[string]string {
 			flags[arg[:idx]] = arg[idx+1:]
 			continue
 		}
-		if arg == "wait" || arg == "yes" || arg == "dry-run" || arg == "existing-bucket" || arg == "from-cos" || arg == "skip-marker-cleanup" || arg == "moments" || arg == "emergency-key-only" {
+		if arg == "wait" || arg == "yes" || arg == "dry-run" || arg == "existing-bucket" || arg == "from-cos" || arg == "skip-marker-cleanup" || arg == "restore-points" || arg == "emergency-key-only" {
 			flags[arg] = "true"
 			continue
 		}
@@ -273,7 +302,11 @@ func newScheme() *runtime.Scheme {
 
 // run does one command. args[0] is the subcommand.
 func run(ctx context.Context, c client.Client, out io.Writer, args []string, now func() time.Time) error {
-	flags := parseFlags(args[1:])
+	rest, err := renameOldFlags(args[1:])
+	if err != nil {
+		return err
+	}
+	flags := parseFlags(rest)
 	switch args[0] {
 	case "list":
 		return runList(ctx, c, out, flags["policy"])
@@ -360,10 +393,10 @@ func runRestore(ctx context.Context, c client.Client, out io.Writer, flags map[s
 		return err
 	}
 	var moment *metav1.Time
-	if m := flags["moment"]; m != "" {
+	if m := flags["restore-point"]; m != "" {
 		t, perr := time.Parse(time.RFC3339, m)
 		if perr != nil {
-			return fmt.Errorf("--moment must be an RFC 3339 time such as 2026-10-20T09:00:00Z: %w", perr)
+			return fmt.Errorf("--restore-point must be an RFC 3339 time such as 2026-10-20T09:00:00Z: %w", perr)
 		}
 		mt := metav1.NewTime(t)
 		moment = &mt
@@ -399,7 +432,7 @@ func runRestore(ctx context.Context, c client.Client, out io.Writer, flags map[s
 	br := &v1alpha1.BackupRestore{
 		ObjectMeta: metav1.ObjectMeta{Name: restoreName(srcName, now())},
 		Spec: v1alpha1.BackupRestoreSpec{
-			Policy: policy, SourceNamespace: srcNS, SourceName: srcName, Moment: moment,
+			Policy: policy, SourceNamespace: srcNS, SourceName: srcName, RestorePoint: moment,
 			TargetNamespace: dstNS, TargetName: dstName, StorageClassName: flags["storage-class"],
 		},
 	}
@@ -437,9 +470,9 @@ func waitRestore(ctx context.Context, c client.Client, out io.Writer, name strin
 		}
 		switch br.Status.Phase {
 		case "Done":
-			moment := "an unknown moment (the first backup)"
-			if br.Status.RestoredMoment != nil {
-				moment = formatTime(br.Status.RestoredMoment)
+			moment := "an unknown restore point (the first backup)"
+			if rp := restoredRestorePoint(br); rp != nil {
+				moment = formatTime(rp)
 			}
 			_, _ = fmt.Fprintf(out, "Done: %s/%s holds the backup of %s\n", br.Spec.TargetNamespace, br.Spec.TargetName, moment)
 			return nil

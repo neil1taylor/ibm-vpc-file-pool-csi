@@ -7,7 +7,7 @@
 //
 // Usage:
 //
-//	kubectl failover plan     --nfs-mount-path /repl/dst/10.245.3.8 [--list-moments] [--rewind-to TIME] [--vms ns/name,...]
+//	kubectl failover plan     --nfs-mount-path /repl/dst/10.245.3.8 [--list-restore-points] [--rewind-to TIME] [--vms ns/name,...]
 //	kubectl failover execute  --nfs-mount-path /repl/dst/10.245.3.8 --dr-pool dr-production --dr-share-ip 10.245.3.8 [--dry-run] [--rewind-to TIME] [--force]
 //	kubectl failover status
 package main
@@ -25,6 +25,7 @@ import (
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/failover"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/pool"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/util"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -79,8 +80,8 @@ Usage:
 
 Plan flags:
   --nfs-mount-path     Local mount path of the destination NFS share (required)
-  --list-moments       For each running VM, list the moments all its disks can show, and exit
-  --rewind-to          Use the newest moment at or before this time (RFC 3339) for running VMs
+  --list-restore-points       For each running VM, list the restore points all its disks can show, and exit
+  --rewind-to          Use the newest restore point at or before this time (RFC 3339) for running VMs
   --vms                Only these VMs, as namespace/name separated by commas. Volumes that are not VM disks are left out
   --force              Go on although a copy may still be applied to a disk
 
@@ -90,7 +91,7 @@ Execute flags:
   --dr-share-ip        DR share mount target IP (required)
   --dr-export-path     NFS export path for VPC access mode (optional)
   --namespace, -n      Override PVC namespace (optional)
-  --rewind-to          Use the newest moment at or before this time (RFC 3339) for running VMs
+  --rewind-to          Use the newest restore point at or before this time (RFC 3339) for running VMs
   --vms                Only these VMs, as namespace/name separated by commas. Volumes that are not VM disks are left out
   --force              Go on although a copy may still be applied to a disk. An unfinished copy is rolled back first
   --prepare-only       Only roll back and rewind running VM disks, then stop. Needs no cluster and no --dr-pool or --dr-share-ip
@@ -100,6 +101,23 @@ Execute flags:
 Status flags:
   --kubeconfig         Path to kubeconfig for the DR cluster (default: ~/.kube/config)
 `)
+}
+
+// restorePointAliases are the old names of the restore-point flags. They still
+// work for one release, hidden from the usage text.
+var restorePointAliases = []util.FlagAlias{{Old: "list-moments", New: "list-restore-points", Bool: true}}
+
+// stderr is where the deprecation lines go. Tests replace it.
+var stderr io.Writer = os.Stderr
+
+// parseRenamedFlags renames the deprecated flags (one line on stderr for each),
+// then parses.
+func parseRenamedFlags(args []string) (map[string]string, error) {
+	args, err := util.RewriteAliasedArgs(args, restorePointAliases, stderr)
+	if err != nil {
+		return nil, err
+	}
+	return parseFlags(args), nil
 }
 
 // parseFlags is a simple flag parser that handles --key=value and --key value forms.
@@ -118,7 +136,7 @@ func parseFlags(args []string) map[string]string {
 		}
 
 		// Handle boolean flags.
-		if arg == "dry-run" || arg == "list-moments" || arg == "force" || arg == "prepare-only" {
+		if arg == "dry-run" || arg == "list-restore-points" || arg == "force" || arg == "prepare-only" {
 			flags[arg] = "true"
 			continue
 		}
@@ -159,15 +177,18 @@ func buildClient(kubeconfig string) (client.Client, error) {
 }
 
 func runPlan(args []string) error {
-	flags := parseFlags(args)
+	flags, err := parseRenamedFlags(args)
+	if err != nil {
+		return err
+	}
 	nfsMountPath := flags["nfs-mount-path"]
 
 	if nfsMountPath == "" {
 		return fmt.Errorf("--nfs-mount-path is required")
 	}
 
-	if flags["list-moments"] == "true" {
-		return runListMoments(flags)
+	if flags["list-restore-points"] == "true" {
+		return runListRestorePoints(flags)
 	}
 
 	plan, _, err := planFromFlags(pool.NewRealNFSOperations(), flags, time.Now())
@@ -203,9 +224,9 @@ func runPlan(args []string) error {
 	return nil
 }
 
-// runListMoments lists the moments each running VM can show. It does not
+// runListRestorePoints lists the restore points each running VM can show. It does not
 // choose one, so it works even where choosing would be refused.
-func runListMoments(flags map[string]string) error {
+func runListRestorePoints(flags map[string]string) error {
 	nfsMountPath := flags["nfs-mount-path"]
 	plan, err := failover.NewPlanner(pool.NewRealNFSOperations()).Plan(nfsMountPath)
 	if err != nil {
@@ -228,7 +249,10 @@ func runListMoments(flags map[string]string) error {
 }
 
 func runExecute(args []string) error {
-	flags := parseFlags(args)
+	flags, err := parseRenamedFlags(args)
+	if err != nil {
+		return err
+	}
 	nfsMountPath := flags["nfs-mount-path"]
 	drPool := flags["dr-pool"]
 	drShareIP := flags["dr-share-ip"]
@@ -315,7 +339,7 @@ func runExecute(args []string) error {
 
 // planFromFlags builds the plan for the share named by --nfs-mount-path. It
 // calls the same function as the driver's failover Job, so the two cannot
-// differ. It returns the options it used, for listing moments.
+// differ. It returns the options it used, for listing restore points.
 func planFromFlags(nfsOps pool.NFSOperations, flags map[string]string, now time.Time) (*failover.FailoverPlan, failover.VMOptions, error) {
 	vmOpts, err := vmOptionsFromFlags(flags, now)
 	if err != nil {
@@ -325,7 +349,7 @@ func planFromFlags(nfsOps pool.NFSOperations, flags map[string]string, now time.
 	return plan, vmOpts, err
 }
 
-// vmOptionsFromFlags reads the flags that choose the moment of running VM disks.
+// vmOptionsFromFlags reads the flags that choose the restore point of running VM disks.
 func vmOptionsFromFlags(flags map[string]string, now time.Time) (failover.VMOptions, error) {
 	o := failover.VMOptions{Force: flags["force"] == "true", Now: now}
 	if v := flags["rewind-to"]; v != "" {
@@ -343,7 +367,7 @@ func vmOptionsFromFlags(flags map[string]string, now time.Time) (failover.VMOpti
 	return o, nil
 }
 
-// printVMPlan lists, for each running VM, the moment its disks will show and
+// printVMPlan lists, for each running VM, the restore point its disks will show and
 // which disks must be rewound to reach it. Volumes that are not VM disks are
 // left out.
 func printVMPlan(out io.Writer, plan *failover.FailoverPlan) {
@@ -363,7 +387,7 @@ func printVMPlan(out io.Writer, plan *failover.FailoverPlan) {
 	sort.Strings(names)
 	_, _ = fmt.Fprintf(out, "\nRunning VM disks\n")
 	for _, g := range names {
-		_, _ = fmt.Fprintf(out, "  VM %s shows the moment %s\n", g, groups[g][0].VMMoment.UTC().Format(time.RFC3339))
+		_, _ = fmt.Fprintf(out, "  VM %s shows the restore point %s\n", g, groups[g][0].VMMoment.UTC().Format(time.RFC3339))
 		for _, sv := range groups[g] {
 			how := "in place"
 			if sv.Rewind {
@@ -374,7 +398,7 @@ func printVMPlan(out io.Writer, plan *failover.FailoverPlan) {
 	}
 }
 
-// printMoments lists the moments each VM's disks can all show, newest first.
+// printMoments lists the restore points each VM's disks can all show, newest first.
 func printMoments(out io.Writer, moments map[string][]time.Time) {
 	if len(moments) == 0 {
 		_, _ = fmt.Fprintln(out, "No running VM disks found.")
@@ -394,7 +418,10 @@ func printMoments(out io.Writer, moments map[string][]time.Time) {
 }
 
 func runStatus(args []string) error {
-	flags := parseFlags(args)
+	flags, err := parseRenamedFlags(args)
+	if err != nil {
+		return err
+	}
 	kubeconfig := flags["kubeconfig"]
 
 	c, err := buildClient(kubeconfig)

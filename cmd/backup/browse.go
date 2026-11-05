@@ -103,7 +103,7 @@ func (g *gwClient) showNotices(ctx context.Context, base string) {
 
 // booleanFlags never take a value.
 var booleanFlags = map[string]bool{"wait": true, "yes": true, "dry-run": true, "existing-bucket": true, "from-cos": true,
-	"skip-marker-cleanup": true, "moments": true, "existing": true, "new-claim": true, "emergency-key-only": true}
+	"skip-marker-cleanup": true, "restore-points": true, "existing": true, "new-claim": true, "emergency-key-only": true}
 
 // positional returns the arguments that are not flags and not flag values.
 func positional(args []string) []string {
@@ -234,10 +234,10 @@ func parseTarget(flags map[string]string) (target, error) {
 		}
 		t.namespace, t.pvc = ns, name
 	}
-	if m := flags["moment"]; m != "" {
+	if m := flags["restore-point"]; m != "" {
 		v, err := time.Parse(time.RFC3339, m)
 		if err != nil {
-			return t, fmt.Errorf("--moment must be a time like 2026-10-21T09:30:00Z: %w", err)
+			return t, fmt.Errorf("--restore-point must be a time like 2026-10-21T09:30:00Z: %w", err)
 		}
 		t.moment = &v
 	}
@@ -357,7 +357,7 @@ func runLs(ctx context.Context, gw *gwClient, out io.Writer, args []string) erro
 	if gw.guest || flags["fs"] != "" {
 		gw.showNotices(ctx, base)
 	}
-	if flags["moments"] == "true" {
+	if flags["restore-points"] == "true" {
 		var got struct {
 			Moments []string `json:"moments"`
 		}

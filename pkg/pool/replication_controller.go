@@ -1300,7 +1300,7 @@ func momentsScript(destBasePath, subPath string, keepHours *int32) string {
 	if keepHours == nil || *keepHours <= 0 {
 		return ""
 	}
-	return fmt.Sprintf(`echo "Keeping a moment..."
+	return fmt.Sprintf(`echo "Keeping a restore point..."
 moments=%[1]s
 mkdir -p "$moments"
 stamp=$(date -u +%%Y%%m%%dT%%H%%M%%SZ)

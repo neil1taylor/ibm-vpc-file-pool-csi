@@ -101,7 +101,7 @@ func (p *FailoverPlan) analyzeVMs(opts VMOptions) (map[string]*vmGroupAnalysis, 
 	for key, g := range groups {
 		for _, d := range g.disks {
 			if !d.state.MomentKnown && (len(g.disks) > 1 || opts.RewindTo != nil) {
-				return nil, fmt.Errorf("the moment of %s (VM %s) is not known, so it cannot be matched with the VM's other disks or an earlier moment", d.name, key)
+				return nil, fmt.Errorf("the restore point of %s (VM %s) is not known, so it cannot be matched with the VM's other disks or an earlier restore point", d.name, key)
 			}
 		}
 		if len(g.disks) == 1 && !g.disks[0].state.MomentKnown {
@@ -177,7 +177,7 @@ func noCommonMoment(key string, g *vmGroupAnalysis, opts VMOptions) error {
 	if opts.RewindTo != nil {
 		limit = " at or before " + opts.RewindTo.UTC().Format(time.RFC3339)
 	}
-	return fmt.Errorf("the disks of VM %s share no moment%s; moments by disk: %s", key, limit, strings.Join(parts, "; "))
+	return fmt.Errorf("the disks of VM %s share no restore point%s; restore points by disk: %s", key, limit, strings.Join(parts, "; "))
 }
 
 // CommonMoments returns, for each VM, the moments all its disks can show,

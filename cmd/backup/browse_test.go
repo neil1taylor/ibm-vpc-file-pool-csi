@@ -203,13 +203,13 @@ func TestLs_MomentIsSent(t *testing.T) {
 	s, gw := newStub(t)
 	s.pages[""] = browse.ListPage{}
 	var out bytes.Buffer
-	if err := runLs(context.Background(), gw, &out, args("--moment", "2026-10-21T09:30:00Z")); err != nil {
+	if err := runLs(context.Background(), gw, &out, args("--restore-point", "2026-10-21T09:30:00Z")); err != nil {
 		t.Fatal(err)
 	}
 	if len(s.sessions) != 1 || s.sessions[0].Moment == nil || s.sessions[0].Moment.UTC().Format("2006-01-02T15:04:05Z") != "2026-10-21T09:30:00Z" {
 		t.Errorf("session request = %+v", s.sessions)
 	}
-	if err := runLs(context.Background(), gw, &out, args("--moment", "yesterday")); err == nil {
+	if err := runLs(context.Background(), gw, &out, args("--restore-point", "yesterday")); err == nil {
 		t.Error("a bad moment must be refused before any call")
 	}
 }
@@ -217,7 +217,7 @@ func TestLs_MomentIsSent(t *testing.T) {
 func TestLs_ListsTheMoments(t *testing.T) {
 	_, gw := newStub(t)
 	var out bytes.Buffer
-	if err := runLs(context.Background(), gw, &out, args("--moments")); err != nil {
+	if err := runLs(context.Background(), gw, &out, args("--restore-points")); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "2026-10-22T09:00:00Z") || !strings.Contains(out.String(), "2026-10-22T10:00:00Z") {
@@ -452,5 +452,37 @@ func TestLs_ASlowSessionIsPolledNotWaitedFor(t *testing.T) {
 	}
 	if s.asks < 2 {
 		t.Errorf("the session was asked about %d times; it must be polled until ready", s.asks)
+	}
+}
+
+func TestLs_OldMomentFlagsStillWork(t *testing.T) {
+	errb := captureErrOut(t)
+	s, gw := newStub(t)
+	s.pages[""] = browse.ListPage{}
+	old, err := renameOldFlags(args("--moment", "2026-10-21T09:30:00Z"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err = runLs(context.Background(), gw, &out, old); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.sessions) != 1 || s.sessions[0].Moment == nil || s.sessions[0].Moment.UTC().Format("2006-01-02T15:04:05Z") != "2026-10-21T09:30:00Z" {
+		t.Errorf("session request = %+v", s.sessions)
+	}
+	if errb.String() != "--moment is deprecated; use --restore-point\n" {
+		t.Errorf("stderr = %q", errb.String())
+	}
+
+	out.Reset()
+	old, err = renameOldFlags(args("--moments"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = runLs(context.Background(), gw, &out, old); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "2026-10-22T09:00:00Z") {
+		t.Errorf("restore points output:\n%s", out.String())
 	}
 }

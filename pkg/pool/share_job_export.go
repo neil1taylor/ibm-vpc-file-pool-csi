@@ -252,6 +252,7 @@ func exportScript(p exportParams) string {
 	fmt.Fprintf(&b, "kopia repository connect %s $ident 2>/dev/null || kopia repository create %s $ident%s\n", backend, backend, p.retentionWords())
 	// Kopia drops snapshots by count. Keep them all: maintenance deletes by age.
 	b.WriteString(keepAllSnapshotsPolicy + "\n")
+	// The tag keeps the name "moment": backups already in COS carry it.
 	tags := "--tags=" + util.ShellQuote("moment:"+p.moment.UTC().Format(time.RFC3339)) + " --tags=" + util.ShellQuote("volume:"+p.volume)
 	fmt.Fprintf(&b, `blob_total() { kopia blob stats --raw | sed -n 's/^Total: //p'; }
 before=$(blob_total)

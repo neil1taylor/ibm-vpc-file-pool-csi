@@ -520,11 +520,11 @@ func (rc *ReplicationController) advanceVMCopy(ctx context.Context, policy *v1al
 				if len(failures) > 0 {
 					why = " (" + failures[0] + ")"
 				}
-				s.LastError = fmt.Sprintf("apply Job failed for %s%s; the destination disks of this VM may now show different moments",
+				s.LastError = fmt.Sprintf("apply Job failed for %s%s; the destination disks of this VM may now show different restore points",
 					strings.Join(failedNames, ", "), why)
 			}
 			if len(wrongBase) > 0 {
-				s.LastError = fmt.Sprintf("the far-site disk is not at the moment of the last copy (%s); the next copy is a full copy",
+				s.LastError = fmt.Sprintf("the far-site disk is not at the restore point of the last copy (%s); the next copy is a full copy",
 					strings.Join(wrongBase, ", "))
 			}
 			if !slices.Contains(failedNames, sv.Name) {

@@ -54,7 +54,7 @@ func TestStartBrowse_GuestPod(t *testing.T) {
 			t.Errorf("command lacks %q: %s", want, args)
 		}
 	}
-	if strings.Contains(args, "--moments") {
+	if strings.Contains(args, "--restore-points") {
 		t.Errorf("a VM disk has no moments folder: %s", args)
 	}
 	mounts := map[string]corev1.VolumeMount{}
@@ -158,7 +158,7 @@ func TestStartBrowse_GuestOfAFileCopyMountsTheMomentsFolder(t *testing.T) {
 	}
 	ctr := browseJob(t, c, "bb-1").Spec.Template.Spec.Containers[0]
 	args := strings.Join(ctr.Command, " ")
-	for _, want := range []string{"--guest", "--moments=/moments", "--at=2026-10-22T10:30:00Z"} {
+	for _, want := range []string{"--guest", "--restore-points=/moments", "--at=2026-10-22T10:30:00Z"} {
 		if !strings.Contains(args, want) {
 			t.Errorf("command lacks %q: %s", want, args)
 		}
