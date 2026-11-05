@@ -160,14 +160,6 @@ func (d *davServer) propfind(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, b.String())
 }
 
-func (d *davServer) fetched() int64 {
-	var n int64
-	for _, c := range d.served {
-		n += c.Load()
-	}
-	return n
-}
-
 func openCOSView(t *testing.T, d *davServer, latest, at time.Time) (*replication.DiskView, func(), error) {
 	t.Helper()
 	v, err := OpenUndoView(context.Background(), d.Client(), d.URL+"/disk.img", latest, at, Options{})

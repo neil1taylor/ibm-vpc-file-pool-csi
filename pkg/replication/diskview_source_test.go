@@ -20,7 +20,6 @@ type dirUndoSource struct {
 	extra    []string // names to add to the listing
 	opened   []string
 	read     [3]atomic.Int64
-	openedBy map[string]UndoUse
 }
 
 func (s *dirUndoSource) Names() ([]string, error) {
@@ -41,7 +40,7 @@ type countedFile struct {
 }
 
 func (c countedFile) Size() int64 {
-	fi, _ := c.File.Stat()
+	fi, _ := c.Stat()
 	return fi.Size()
 }
 
