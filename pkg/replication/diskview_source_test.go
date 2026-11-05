@@ -16,10 +16,10 @@ import (
 // dirUndoSource serves the undo folder of a backup disk through UndoSource, and
 // counts the bytes that were read from the undo files by use.
 type dirUndoSource struct {
-	dir      string
-	extra    []string // names to add to the listing
-	opened   []string
-	read     [3]atomic.Int64
+	dir    string
+	extra  []string // names to add to the listing
+	opened []string
+	read   [3]atomic.Int64
 }
 
 func (s *dirUndoSource) Names() ([]string, error) {
