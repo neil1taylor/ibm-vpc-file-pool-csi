@@ -8,7 +8,7 @@ An administrator opens the OpenShift console and, without a terminal, can:
 
 - set up a performance test of a file pool share with VMs, with every setting the command-line test has;
 - start it, watch it live, and control it while it runs (pause, hold, skip a step, stop);
-- see at every moment how many VMs are running, what the share does, and how the VMs feel;
+- see at every restore point how many VMs are running, what the share does, and how the VMs feel;
 - get a final result in the style of VMware HCIBench: one row per VM count, the knee, and the recommended VM count for that share;
 - keep, compare and download the results of earlier runs.
 

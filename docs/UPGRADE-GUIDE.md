@@ -141,7 +141,7 @@ To go back, run `helm rollback`.
 ### Upgrading to v0.17.1 (from v0.17.0)
 
 **Changes:**
-- A user who asks for another moment while their own browse sessions fill the namespace gets their oldest session closed, instead of waiting 5 minutes and failing. When other users' sessions hold every place, the request is refused at once (429).
+- A user who asks for another restore point while their own browse sessions fill the namespace gets their oldest session closed, instead of waiting 5 minutes and failing. When other users' sessions hold every place, the request is refused at once (429).
 - A browse session ends when its backup policy or snapshot pool is deleted, so the pool delete no longer leaves stuck pods and claims.
 
 **CRD changes:** none.
@@ -155,7 +155,7 @@ To go back, run `helm rollback`.
 ### Upgrading to v0.17.0 (from v0.16.3)
 
 **Changes:**
-- **Browse and restore files inside a VM disk** in the snapshot pool and in COS (`kubectl backup ls/get/browse/restore-files`, with `--fs` to pick a file system, and `--from-cos`). The console file browser has a Source switch (snapshot pool or COS). Restoring from COS is for the newest moment of an export only.
+- **Browse and restore files inside a VM disk** in the snapshot pool and in COS (`kubectl backup ls/get/browse/restore-files`, with `--fs` to pick a file system, and `--from-cos`). The console file browser has a Source switch (snapshot pool or COS). Restoring from COS is for the newest restore point of an export only.
 - Files listed inside a VM disk show dates and owners, and big folders list quickly.
 - A share of the same name that is not ours is no longer adopted when a share is created.
 
@@ -306,7 +306,7 @@ To go back, run `helm rollback`. The older driver works with the new CRDs.
 
 **Changes:** shares use security group access mode; VM snapshots and replication use a QEMU copy of running VMs; golden images are imported by CDI; new console pages. See `CHANGELOG.md` for the full list.
 
-**CRD changes (additive):** `FileSharePool.spec.securityGroupIDs`, new status fields on `Snapshot` (`consistency`, `copyMoment`) and `ReplicationPolicy` (restore points, copy moments), and `ReplicationPolicy.spec.vmCopySpeedLimitMBps`.
+**CRD changes (additive):** `FileSharePool.spec.securityGroupIDs`, new status fields on `Snapshot` (`consistency`, `copyRestorePoint`) and `ReplicationPolicy` (restore points, copy restore points), and `ReplicationPolicy.spec.vmCopySpeedLimitMBps`.
 
 **Action required:**
 1. Apply updated CRDs: `kubectl apply -f config/crd/`

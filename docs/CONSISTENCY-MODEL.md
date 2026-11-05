@@ -6,7 +6,7 @@ Definitive reference for understanding what this driver can and cannot guarantee
 
 **Bottom line:** For plain volumes, this driver provides **file-level consistency** only. If your workload requires cross-file transactional consistency, crash consistency, or intra-file point-in-time consistency, the file-copy features (snapshot, clone, replication and backup of a plain volume) are not safe for your data. Read on to understand exactly why.
 
-**The exception is a running VM.** The driver copies all disks of a running VM with QEMU at one moment. The copy is file-system consistent when the guest could be frozen, and crash consistent when it could not. The status says which. See [CONTEXT.md](CONTEXT.md#how-good-a-copy-is) for the words.
+**The exception is a running VM.** The driver copies all disks of a running VM with QEMU at one point in time. The copy is file-system consistent when the guest could be frozen, and crash consistent when it could not. The status says which. See [CONTEXT.md](CONTEXT.md#how-good-a-copy-is) for the words.
 
 ---
 
@@ -62,7 +62,7 @@ This section defines four levels of consistency, from weakest to strongest. Unde
 
 ### File-Level Consistency (What We Guarantee)
 
-Each individual file is internally consistent at the moment it was read. If a 50 MB file was being written when the copy started, the copy sees either the old complete version or the new complete version -- never a half-written file.
+Each individual file is internally consistent at the restore point it was read. If a 50 MB file was being written when the copy started, the copy sees either the old complete version or the new complete version -- never a half-written file.
 
 **Mechanism:** NFS close-to-open semantics. When a client closes a file, all data is flushed to the NFS server. When another client (or the same client on a different file descriptor) opens the file, it sees all data that was flushed at the previous close. `cp -a` opens, reads, and closes each file individually, so it reads a consistent version of each file.
 
@@ -182,7 +182,7 @@ A VM disk image is a single large file (e.g., `disk.img`, 40 GB raw). But **inte
 
 ### Why This Is Worse Than a Crash
 
-A crash captures the state at a **single** point in time. The filesystem journal, fsck, and recovery tools are designed to handle this: replay the journal forward from the crash point, or discard uncommitted transactions. The state is consistent "as of" the crash moment.
+A crash captures the state at a **single** point in time. The filesystem journal, fsck, and recovery tools are designed to handle this: replay the journal forward from the crash point, or discard uncommitted transactions. The state is consistent "as of" the crash restore point.
 
 Our copy has **no single point in time**. The journal entries at the start of the file were written at T=0, but the data blocks they reference at offset 30 GB were captured at T=6. The journal says "I wrote block X with data Y at time T=2" but block X in the copy contains data from T=0 (before the write) or T=6 (after a different write). Journal replay produces nonsense.
 

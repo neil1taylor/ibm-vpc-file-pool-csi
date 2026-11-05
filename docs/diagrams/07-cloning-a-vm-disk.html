@@ -147,7 +147,7 @@ table.glance th{background:var(--share);font-weight:600}
   <section class="card" aria-label="Why it takes time">
     <h2>Why it takes time</h2>
     <p>A file share keeps no shortcut for copying a file. The copy Job reads every byte from the source and writes it to the clone, so the time grows with the size of the disk. A clone on another share is slower, because the data crosses the network twice. The driver prefers the source's share when it has room.</p>
-    <p>Stop the source VM before you clone it. If the VM writes while the file is copied, the clone mixes different moments of the disk and may not boot.</p>
+    <p>Stop the source VM before you clone it. If the VM writes while the file is copied, the clone mixes different restore points of the disk and may not boot.</p>
   </section>
 </main>
 <script>
@@ -221,7 +221,7 @@ table.glance th{background:var(--share);font-weight:600}
   };
   b.vm.onclick=function(){
     s.tries++; s.lastCopied=[];
-    if(s.status==="Complete"){ s.pod="running"; say("<b>The VM starts.</b> The clone is complete, so the node plugin bind-mounts the folder into the pod. The VM boots from the copy."+(s.writes>0?" <span class='tag bad'>But the source VM wrote "+s.writes+" times during the copy, so the clone mixes moments (red pieces). It may not boot.</span>":"")); }
+    if(s.status==="Complete"){ s.pod="running"; say("<b>The VM starts.</b> The clone is complete, so the node plugin bind-mounts the folder into the pod. The VM boots from the copy."+(s.writes>0?" <span class='tag bad'>But the source VM wrote "+s.writes+" times during the copy, so the clone mixes restore points (red pieces). It may not boot.</span>":"")); }
     else if(s.status==="Failed"){ s.pod="error"; say("<b>The VM cannot start.</b> The clone failed. The node plugin answers Internal with the error, and the pod does not start."); }
     else { s.pod="waiting"; say("<b>The VM has to wait.</b> The clone gate blocks the mount while cloneStatus is "+s.status+". Without the gate, the VM would mount an empty folder and find no disk to boot from. The kubelet tries again by itself."); }
   };

@@ -2,9 +2,9 @@
 
 > **Tutorial Series:** [Index](TUTORIAL.md) | [Part 10: Backup and Restore](TUTORIAL-10-BACKUP-AND-RESTORE.md) | **Part 17**
 
-Look inside a backup, read one file, and get back a file that you deleted. You do this without restoring the whole volume. At the end, do the same inside the disk of a VM, without starting the VM. The words moment, restore point and snapshot pool are defined in [CONTEXT.md](CONTEXT.md).
+Look inside a backup, read one file, and get back a file that you deleted. You do this without restoring the whole volume. At the end, do the same inside the disk of a VM, without starting the VM. The words restore point, restore point and snapshot pool are defined in [CONTEXT.md](CONTEXT.md).
 
-**Time:** about 20 minutes, after Part 10 has two moments. The VM part adds about 15 minutes.
+**Time:** about 20 minutes, after Part 10 has two restore points. The VM part adds about 15 minutes.
 **Status:** file restore is Experimental. See [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md#browse-a-backup-and-restore-files-in-development) for the full reference.
 
 ![A browse session reads one backup, and a file restore copies chosen files into a new PVC or a new folder of a PVC](images/tutorial-17-restore-files.drawio.svg)
@@ -13,7 +13,7 @@ Look inside a backup, read one file, and get back a file that you deleted. You d
 
 ## Prerequisites
 
-- You finished Steps 1 to 6 of [Part 10](TUTORIAL-10-BACKUP-AND-RESTORE.md). The policy has backed up the volume `files` twice, so it has two moments, and the pod `files-writer` still runs. Do not do the clean up of Part 10 yet.
+- You finished Steps 1 to 6 of [Part 10](TUTORIAL-10-BACKUP-AND-RESTORE.md). The policy has backed up the volume `files` twice, so it has two restore points, and the pod `files-writer` still runs. Do not do the clean up of Part 10 yet.
 - The backup gateway is on (the chart default: `backupGateway.enabled` and `backupBrowse.enabled`). Check it:
 
 ```bash
@@ -26,7 +26,7 @@ oc get configmap backup-gateway-info -n kube-system
 
 ---
 
-## Step 1: Set variables and list the moments
+## Step 1: Set variables and list the restore points
 
 If you have no token login, make a ServiceAccount that is admin of the tutorial namespace only, and a kubeconfig for it:
 
@@ -43,23 +43,23 @@ KUBECONFIG=/tmp/tut17-kubeconfig kubectl config set-context --current --user=tut
 export KUBECONFIG=/tmp/tut17-kubeconfig
 ```
 
-The built-in `admin` role of the namespace is all the rights the gateway needs. Then list the moments:
+The built-in `admin` role of the namespace is all the rights the gateway needs. Then list the restore points:
 
 ```bash
-kubectl backup ls --policy ${POLICY} --pvc ${NS}/files --moments
+kubectl backup ls --policy ${POLICY} --pvc ${NS}/files --restore-points
 ```
 
-**Expected:** the moments, **oldest first**, one a line:
+**Expected:** the restore points, **oldest first**, one a line:
 
 ```
 2026-11-04T18:11:43Z
 2026-11-04T18:17:04Z
 ```
 
-The first call opens a session and took about 18 seconds in the lab. Take the first line as the first moment:
+The first call opens a session and took about 18 seconds in the lab. Take the first line as the first restore point:
 
 ```bash
-export FIRST=$(kubectl backup ls --policy ${POLICY} --pvc ${NS}/files --moments | head -1)
+export FIRST=$(kubectl backup ls --policy ${POLICY} --pvc ${NS}/files --restore-points | head -1)
 echo ${FIRST}
 ```
 
@@ -87,13 +87,13 @@ drwxr-xr-x  99:99  4096  2026-11-04 18:11  a/
 
 The file `keep` is not there, because Part 10 deleted it before the second backup. `.subvolume-metadata.json` is the driver's own note about the volume. The owner is `99:99`, which is how the backup share shows files; the restored files get the pool's owner. The second command shows `1`. Later calls take about a second.
 
-Now look at the oldest moment:
+Now look at the oldest restore point:
 
 ```bash
-kubectl backup ls --policy ${POLICY} --pvc ${NS}/files --moment ${FIRST}
+kubectl backup ls --policy ${POLICY} --pvc ${NS}/files --restore-point ${FIRST}
 ```
 
-**Expected:** `a`, `keep` and `written` (and `.subvolume-metadata.json`). The file `b` is not there yet. This is the volume as it was at the first moment. Use the moment exactly as `--moments` prints it. Each different moment text can open its own session, and a namespace may have 2 open at once (see Clean up).
+**Expected:** `a`, `keep` and `written` (and `.subvolume-metadata.json`). The file `b` is not there yet. This is the volume as it was at the first restore point. Use the restore point exactly as `--restore-points` prints it. Each different restore point text can open its own session, and a namespace may have 2 open at once (see Clean up).
 
 ---
 
@@ -101,7 +101,7 @@ kubectl backup ls --policy ${POLICY} --pvc ${NS}/files --moment ${FIRST}
 
 ```bash
 mkdir -p /tmp/restored
-kubectl backup get --policy ${POLICY} --pvc ${NS}/files --moment ${FIRST} /keep --out /tmp/restored/
+kubectl backup get --policy ${POLICY} --pvc ${NS}/files --restore-point ${FIRST} /keep --out /tmp/restored/
 cat /tmp/restored/keep
 ```
 
@@ -113,7 +113,7 @@ To read a file on the screen, use `--out -`:
 kubectl backup get --policy ${POLICY} --pvc ${NS}/files /a/1 --out -
 ```
 
-**Expected:** `second`. With no `--moment`, you read the latest copy. A folder is saved as a `.tar` file, or unpacked with `--extract DIRECTORY`.
+**Expected:** `second`. With no `--restore-point`, you read the latest copy. A folder is saved as a `.tar` file, or unpacked with `--extract DIRECTORY`.
 
 ---
 
@@ -122,7 +122,7 @@ kubectl backup get --policy ${POLICY} --pvc ${NS}/files /a/1 --out -
 Download is for a person. To give the files back to a pod, restore them into a PVC. The driver makes a new PVC, sized to the files plus 20%, and copies the files in with a Job.
 
 ```bash
-kubectl backup restore-files --policy ${POLICY} --pvc ${NS}/files --moment ${FIRST} \
+kubectl backup restore-files --policy ${POLICY} --pvc ${NS}/files --restore-point ${FIRST} \
   --path /keep --path /a --to ${NS}/files-back --wait
 ```
 
@@ -176,11 +176,11 @@ A restore never writes over a file that exists. A claim name that exists is refu
 Use `--existing` to put the files into a new folder of a PVC that you already use. Nothing else in that PVC changes.
 
 ```bash
-kubectl backup restore-files --policy ${POLICY} --pvc ${NS}/files --moment ${FIRST} \
+kubectl backup restore-files --policy ${POLICY} --pvc ${NS}/files --restore-point ${FIRST} \
   --path /keep --to ${NS}/files --existing --wait
 ```
 
-**Expected:** `Done`, and a line such as `The files are in the folder restored-tut-nightly-20261104T181143Z of the claim pool-tutorial-backup/files.` The folder name holds the policy and the moment that was restored, with the time written without dashes and colons. Check it in the running pod:
+**Expected:** `Done`, and a line such as `The files are in the folder restored-tut-nightly-20261104T181143Z of the claim pool-tutorial-backup/files.` The folder name holds the policy and the restore point that was restored, with the time written without dashes and colons. Check it in the running pod:
 
 ```bash
 D=$(oc exec -n ${NS} files-writer -- ls /data | grep '^restored-')
@@ -198,7 +198,7 @@ Your own `/data/a/1` and `/data/b` did not change. To put a file back in its old
 
 1. Open **Storage**, then **IBM VPC File Pools**, then the **Backups** tab.
 2. Open the policy `tut-nightly`. In the menu of the volume `files`, choose **Browse files**.
-3. The page shows "Starting the reader", then the folders. The picker above the table offers **Latest copy** and every moment. Choose the first moment.
+3. The page shows "Starting the reader", then the folders. The picker above the table offers **Latest copy** and every restore point. Choose the first restore point.
 4. Open `a`. Tick `1` and press **Download**, or tick files and folders and press **Restore selected**.
 5. In the dialog, choose **A new claim**, type the name `files-console`, and confirm. The dialog shows the phase (Measuring, Copying the files) and then Done, with a link to the claim.
 
@@ -271,7 +271,7 @@ Things to know:
 - **The next backup of that disk waits** while a session is open, for at most 2 hours. A VM backup copies all its disks together, so they wait together. Close the session with `kubectl backup browse --close NAME` when you finish.
 - **A running VM is backed up as a crash copy** unless the freeze worked. The command prints `note: ...` on standard error when a file system was read without its journal. The newest changes may be missing.
 - **Speed.** Each folder you open and each file you read starts the appliance (about 1.5 seconds with KVM, about 12 without). Restore the files you need. To get back thousands of small files, restore the whole disk (Part 10).
-- **From COS.** Add `--from-cos` to the same commands. Only the newest moment of an export can be read, and the export must stay in COS for at least 3 more hours.
+- **From COS.** Add `--from-cos` to the same commands. Only the newest restore point of an export can be read, and the export must stay in COS for at least 3 more hours.
 
 ---
 
@@ -318,7 +318,7 @@ Never use `--all` on a shared cluster.
 
 ## What you learned
 
-- `kubectl backup ls` and `get` read one file from any moment, without a restore of the volume.
+- `kubectl backup ls` and `get` read one file from any restore point, without a restore of the volume.
 - `kubectl backup restore-files` copies chosen files into a new PVC, or into a new folder of a PVC that exists. It never writes over a file.
 - The console does the same with **Browse files** and **Restore selected**.
 - The disk of a VM is browsed and restored by file system, and the next backup of that disk waits while a session is open.

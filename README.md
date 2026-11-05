@@ -37,7 +37,7 @@ This reduces VPC API calls, speeds up PVC provisioning (mkdir vs. 30-90s share c
 | Take a share out of service (drain) | Included, GA | v0.4.0 | From the command line or the console. |
 | VMs from the OpenShift catalog on a pool | Included, Beta | v0.14.0 | The driver raises the memory limit of OpenShift's disk copy pods, which otherwise run out of memory on NFS. |
 | Snapshot and restore one volume | Included, Beta | v0.4.0 | A full copy on the same share. |
-| Snapshot of a running VM, all disks at one moment | Included, Beta | v0.14.0 | A short guest freeze. Red Hat does not support the method. |
+| Snapshot of a running VM, all disks at one point in time | Included, Beta | v0.14.0 | A short guest freeze. Red Hat does not support the method. |
 | Instant VM snapshots (no copy) | Included, Experimental | v0.14.0 | Needs a KubeVirt setting that Red Hat does not support. |
 | Clone a volume | Included, Beta | v0.4.0 |  |
 | Move volumes from another storage class into a pool | Included, Beta | v0.4.0 | Works for a user with only the edit role since this release (issue #196). |
@@ -52,7 +52,7 @@ This reduces VPC API calls, speeds up PVC provisioning (mkdir vs. 30-90s share c
 | Snapshot of a whole pool | Agreed, not built |  | Spec: [pool-snapshots](docs/specs/2026-10-22-pool-snapshots.md). |
 | Metrics and alerts | Included, GA | v0.2.0 | On OpenShift, user workload monitoring must be on ([MONITORING.md](docs/MONITORING.md)). |
 | OpenShift console pages | Included, Beta | v0.12.0 | Pools, volumes, snapshots, replication, backups, monitoring, with help on each card and column. |
-| Group snapshots (`VolumeGroupSnapshot`) | Not active |  | The code exists; nothing acts on it. A VM snapshot already gives one moment for all its disks. |
+| Group snapshots (`VolumeGroupSnapshot`) | Not active |  | The code exists; nothing acts on it. A VM snapshot already gives one restore point for all its disks. |
 | Golden image syncer | Hidden |  | Use the standard OpenShift catalog instead. |
 
 ## Architecture
@@ -85,7 +85,7 @@ This reduces VPC API calls, speeds up PVC provisioning (mkdir vs. 30-90s share c
 - **BackupRestore** (cluster-scoped) — one request to restore a backup into a new PVC
 - **VolumeGroupSnapshot** (cluster-scoped) — not active; nothing acts on it
 
-The words used here (pool, share, moment, snapshot pool and others) are defined once in [CONTEXT.md](docs/CONTEXT.md).
+The words used here (pool, share, restore point, snapshot pool and others) are defined once in [CONTEXT.md](docs/CONTEXT.md).
 
 ## Glossary
 

@@ -7,7 +7,7 @@ Date: 2026-10-22. Status: draft for review. It builds on `2026-10-21-backup-to-s
 The owner's goal is: **like Veeam**. Look inside a backup, pick one file or folder, and get it back, without restoring the whole volume.
 
 When this is done:
-- Plain volumes: a user lists folders and files of any backup moment, reads or downloads a file, and restores files or folders to a new or an existing claim. In the console and with `kubectl backup`.
+- Plain volumes: a user lists folders and files of any backup restore point, reads or downloads a file, and restores files or folders to a new or an existing claim. In the console and with `kubectl backup`.
 - VM disks: the same, for the files inside the guest's file systems (XFS, ext4, NTFS, and LVM volumes inside the guest). The VM is not started and does not need to exist.
 - Browsing is read-only. It never changes a backup, and it never writes to a VM disk.
 - It works for backups in the snapshot pool and for backups exported to IBM Cloud Object Storage (COS).
@@ -21,7 +21,7 @@ Said first, so there is no surprise later. Size of each gap:
 |---|---|---|
 | Plain volumes, local and COS | Yes, fully | None |
 | VM guest: ext4, XFS, btrfs, NTFS, LVM | Yes, in a helper pod with no special rights, by running a tiny read-only appliance VM (see "VM disks"). Proven on the lab on 22 Oct 2026 (see "Phase 0 results") | A disk opens and a file reads in about 1.5 seconds with KVM, and about 12 seconds without it |
-| Older moments of a VM disk, instantly | Yes, with a small read-only disk server that rebuilds the old view on the fly | New code, the riskiest part of this spec |
+| Older restore points of a VM disk, instantly | Yes, with a small read-only disk server that rebuilds the old view on the fly | New code, the riskiest part of this spec |
 | VM guest file systems that need a key: BitLocker, LUKS | **No.** Without the guest's key nobody can read them, Veeam included | You can only restore the whole disk (works today) |
 | VM guest: ReFS, Storage Spaces, ZFS | **No.** Linux has no safe reader for them | Same: whole disk only. Veeam reads ReFS through a Windows helper. We have none |
 | Put a file back into the guest's own disk, in place | **No.** A file system that a VM is using must not be written from outside, and writing into a stopped guest from a pod is not safe either | The file goes to a claim or to a download. The user copies it into the VM |
@@ -29,11 +29,11 @@ Said first, so there is no surprise later. Size of each gap:
 
 ## What exists today (from the code)
 
-- **Layout of a backup on the snapshot pool.** One folder per volume: `/backup/<policy>/pvcs/<volume>` holds the latest whole copy. Earlier moments are in `/backup/<policy>/.moments/pvcs/<volume>/`. For a plain volume a moment is a folder of hard links, named like `20261022T091500Z`. For a VM disk the latest copy is one raw file, `disk.img`, and earlier moments are "undo files" (the old contents of the blocks that changed). `replication.RestoreDisk` rebuilds an older disk by applying undo files to a copy of the latest. The status of each policy lists the volumes with their sub path, share and moment times (`BackupVolumeStatus`).
+- **Layout of a backup on the snapshot pool.** One folder per volume: `/backup/<policy>/pvcs/<volume>` holds the latest whole copy. Earlier restore points are in `/backup/<policy>/.moments/pvcs/<volume>/`. For a plain volume a restore point is a folder of hard links, named like `20261022T091500Z`. For a VM disk the latest copy is one raw file, `disk.img`, and earlier restore points are "undo files" (the old contents of the blocks that changed). `replication.RestoreDisk` rebuilds an older disk by applying undo files to a copy of the latest. The status of each policy lists the volumes with their sub path, share and restore point times (`BackupVolumeStatus`).
 - **Restore today** is a whole volume: `BackupRestore` (cluster scoped) makes a new claim, holds pods back, and a Job copies the volume in. Nothing lists files.
 - **Helper pods** are Kubernetes Jobs in the driver namespace (`kube-system` by default). They mount the NFS shares themselves, may mount them read-only (`jobShape.readOnly`), and run as root. The controller has no NFS access. On OpenShift, `kube-system` has no security rules applied, so these Jobs need no special SCC today (the chart comment says so, and the release tests prove it).
 - **Path safety.** `util.ValidateBackupPath` and `ValidateBackupMomentsPath` check the shape of every backup path. The disk code opens files through a folder handle that refuses symbolic links (`openVolume`).
-- **COS export.** A Job copies the backup folder and the moments folder of one volume into a Kopia repository in the bucket, encrypted with a backup key that the Job unlocks with Key Protect in memory. One policy has one area in the bucket. A restore from COS (`BackupRestore.spec.fromCOS`) runs a Job that restores one Kopia snapshot into a scratch folder and then reuses the normal restore Job.
+- **COS export.** A Job copies the backup folder and the restore points folder of one volume into a Kopia repository in the bucket, encrypted with a backup key that the Job unlocks with Key Protect in memory. One policy has one area in the bucket. A restore from COS (`BackupRestore.spec.fromCOS`) runs a Job that restores one Kopia snapshot into a scratch folder and then reuses the normal restore Job.
 - **Console.** The console plugin is a static page set served by nginx. It has no page for backups at all today (no `BackupPolicy` model, no list). It has no server side to stream a file.
 - **KubeVirt images.** The controller already finds the virt-launcher image from virt-operator (`discoverLauncherImage`). The driver image has no `qemu-img` and no file system tools for guests.
 
@@ -43,7 +43,7 @@ Three parts: a **browse session** (a helper pod per open backup), a **gateway** 
 
 ### 1. The browse session
 
-A new cluster-scoped resource, `BackupBrowse`, describes one open session: the policy, the volume (`namespace/name` of the claim), the moment (default: latest), whether it reads the snapshot pool or COS, and for a VM disk which guest file system (see below). **Users never create or see this resource.** The gateway makes it after the access check. The backup controller (the same leader that runs backups) reconciles it:
+A new cluster-scoped resource, `BackupBrowse`, describes one open session: the policy, the volume (`namespace/name` of the claim), the restore point (default: latest), whether it reads the snapshot pool or COS, and for a VM disk which guest file system (see below). **Users never create or see this resource.** The gateway makes it after the access check. The backup controller (the same leader that runs backups) reconciles it:
 
 1. It starts a **helper pod** (a Job with one pod, in the driver namespace) that mounts only this volume's folders, read-only, down to the NFS export. For COS it mounts nothing from NFS and gets the COS and Key Protect Secrets as read-only files, as the export Job does.
 2. The pod runs the browse binary (`cmd/browse`, mode `browse-server`). It serves a small API on a private port **over TLS**, with a random session token and a certificate made for this session alone (the controller makes a key and a self-signed certificate, keeps them with the token in a Secret that the `BackupBrowse` owns, and mounts it into the pod; the gateway trusts exactly that certificate, no other and no CA): list a folder (paged, 1000 entries), stat, read a byte range, stream a file, stream a folder as a tar. The API takes paths **relative to the volume only**. It cannot be asked for anything outside it.
@@ -61,7 +61,7 @@ A new cluster-scoped resource, `BackupBrowse`, describes one open session: the p
 
 ### 2. Plain volumes
 
-The helper reads the latest copy at `.../pvcs/<volume>` or a moment folder under `.moments`. A moment folder is already a normal folder of files, so listing is instant. The list of moments comes from the policy status plus the folder names. A moment that the keep time removes while someone browses it gives "this moment was removed by the keep time", not a crash. The latest copy is rewritten by the next backup, one file at a time and with a rename, so a file is whole or old, never half-written; the page says "the latest copy may change while you look".
+The helper reads the latest copy at `.../pvcs/<volume>` or a restore point folder under `.moments`. A restore point folder is already a normal folder of files, so listing is instant. The list of restore points comes from the policy status plus the folder names. A restore point that the keep time removes while someone browses it gives "this restore point was removed by the keep time", not a crash. The latest copy is rewritten by the next backup, one file at a time and with a rename, so a file is whole or old, never half-written; the page says "the latest copy may change while you look".
 
 ### 3. VM disks
 
@@ -70,7 +70,7 @@ A backup of a VM disk is one raw disk. The file systems are inside it, so someth
 **Recommended: a small read-only appliance VM inside the helper pod (libguestfs).** libguestfs is the library that KubeVirt's own `virtctl guestfs` and Red Hat's VM migration tool use. It starts a tiny VM with its own Linux kernel, attaches the disk read-only, and that kernel reads XFS, ext4, btrfs, NTFS (read-only) and LVM. The pod needs **no extra rights**: no privileged mode, no loop devices, no `CAP_SYS_ADMIN`, no FUSE, no host paths. It runs as root only inside its own pod, like today's Jobs, and works under the OpenShift rules if the driver namespace has them (see "OpenShift rules"). With the KVM device (`devices.kubevirt.io/kvm`, the device KubeVirt already uses) the appliance is fast. Without KVM (a ROKS cluster with virtual workers) it works with software emulation, slower. Both were tested in Phase 0 (see "Phase 0 results").
 
 How it is wired:
-1. **A disk server (new code).** The pod starts a read-only disk server in Go that shows the VM disk to the appliance as a network block device on a local socket. For the latest moment it reads `disk.img`. For an older moment it reads `disk.img` and the undo files newer than that moment, newest first, and returns the old contents of each changed block. This is the same rule as `Rewind`, but without writing a copy. No scratch space and no wait, however big the disk is. The server only answers reads; its export is marked read-only.
+1. **A disk server (new code).** The pod starts a read-only disk server in Go that shows the VM disk to the appliance as a network block device on a local socket. For the latest restore point it reads `disk.img`. For an older restore point it reads `disk.img` and the undo files newer than that restore point, newest first, and returns the old contents of each changed block. This is the same rule as `Rewind`, but without writing a copy. No scratch space and no wait, however big the disk is. The server only answers reads; its export is marked read-only.
 2. **The appliance** gets that device as a read-only drive and mounts the guest file systems read-only. libguestfs gives the list: partitions, LVM volumes, type, size, and which looks like the system volume. The console shows them as a picker.
 3. **The browse API** in the pod asks the appliance for lists and file contents and relays them in the same API as a plain volume. So the console and the command line see one kind of session.
 
@@ -93,16 +93,16 @@ COS backups are in a Kopia repository. The helper opens it **read-only** with th
 
 - **Plain volumes.** Kopia lists a folder in a snapshot and fetches the chunks of one file, so listing and getting one file does not download the volume. *Meets the goal fully.*
 - **VM disks.** The disk server reads `disk.img` and the undo files as objects in the repository, by byte range, with a read cache on an `emptyDir` (default 5 GiB). The rest of the path is the same as for the snapshot pool. *Meets the goal*, with slower reads than the pool (each read may go to COS); a guest start of several minutes is likely. To be measured in Phase 6.
-- **Where Kopia comes from.** The step 9 spec keeps Kopia out of the controller. This is kept: the helper is a **separate binary** (`cmd/browse`) in its own image, not the controller. For plain volumes it runs the pinned Kopia program as a child, as the export Job does. For VM disks, a range read needs Kopia as a Go library in that separate binary. This is the one new dependency, and it is limited to the browse image. If Phase 6 shows the library is not workable, the fall-back is to fetch `disk.img` and the undo files of the one moment into scratch space first. *That fall-back does not meet the goal for large disks*, and we would say so in the product.
+- **Where Kopia comes from.** The step 9 spec keeps Kopia out of the controller. This is kept: the helper is a **separate binary** (`cmd/browse`) in its own image, not the controller. For plain volumes it runs the pinned Kopia program as a child, as the export Job does. For VM disks, a range read needs Kopia as a Go library in that separate binary. This is the one new dependency, and it is limited to the browse image. If Phase 6 shows the library is not workable, the fall-back is to fetch `disk.img` and the undo files of the one restore point into scratch space first. *That fall-back does not meet the goal for large disks*, and we would say so in the product.
 - **Whole area of the bucket.** The helper's credentials can read the whole policy area, which has other namespaces' volumes. The API accepts only the one volume's path, and a test tries to reach another volume with traversal and with crafted snapshot names. This is the weakest point of COS browsing and is tested hard (see "Tests").
 - **A new cluster, no policy.** `kubectl backup browse --from-cos` takes the same flags as `restore --from-cos` (bucket, endpoint, volume). It is for cluster administrators because it needs the Secrets in the driver namespace.
 
 ### 5. Where restored files go
 
-A new resource, `BackupFileRestore`, cluster scoped like `BackupRestore`, made by the gateway for the user. It holds a session reference or the volume and moment, a list of paths, and the target. Three targets:
+A new resource, `BackupFileRestore`, cluster scoped like `BackupRestore`, made by the gateway for the user. It holds a session reference or the volume and restore point, a list of paths, and the target. Three targets:
 
 1. **New claim.** The controller makes a new claim (same method as `BackupRestore`: size, class, held back from pods until the copy ends) and a Job copies the chosen paths into it. The tree under the volume's root is kept: restoring `/var/www/html/index.php` gives `/var/www/html/index.php` in the new claim. Size of the claim defaults to the total of the chosen files plus 20%, at least 1 GiB, and the user can raise it. For a VM guest the claim is a plain file-system claim; a VM disk is never the target.
-2. **Existing claim, as a new folder.** Files go to a new folder in the claim, `restored-<policy>-<moment>/`, never over existing files. A name that exists gets a suffix. The Job mounts the claim's folder on the share, like the other share Jobs. It refuses if the claim is a VM disk claim (it holds `disk.img`), if the claim is being restored, or if the free space is not enough (checked before it copies). The files get the claim's configured owner (`defaultUID` and `defaultGID`, for example 107 on KubeVirt pools), as the existing restore does.
+2. **Existing claim, as a new folder.** Files go to a new folder in the claim, `restored-<policy>-<restore point>/`, never over existing files. A name that exists gets a suffix. The Job mounts the claim's folder on the share, like the other share Jobs. It refuses if the claim is a VM disk claim (it holds `disk.img`), if the claim is being restored, or if the free space is not enough (checked before it copies). The files get the claim's configured owner (`defaultUID` and `defaultGID`, for example 107 on KubeVirt pools), as the existing restore does.
 3. **Download.** From the console or `kubectl backup get`: one file as a stream; a folder or several files as one tar stream (a tar file; no zip). The stream passes through the gateway and the helper. Limits are in the next section.
 
 **Putting a file back where it was** (in place, over the original) is not offered, for plain volumes either. A restore never writes over existing files. This matches step 8 ("it never writes over a volume that exists"). The user copies from the restored folder.
@@ -117,7 +117,7 @@ For a VM guest, targets 1 and 2 give plain files in a claim. The user attaches t
 
 | Action | Needs |
 |---|---|
-| List backups and moments of volumes of namespace N | `get` on `backupfiles` (group `storage.ibmcloud.io`) in N |
+| List backups and restore points of volumes of namespace N | `get` on `backupfiles` (group `storage.ibmcloud.io`) in N |
 | Browse a backup, read and download files of N | `get` on `backupfiles` in N |
 | Restore files out of N's backup to a claim | `get` on `backupfiles` in N, plus `create` on `persistentvolumeclaims` in the target namespace T. For an existing claim, also `update` on `persistentvolumeclaims` in T |
 | Browse a COS backup without a policy (`--from-cos`) | cluster administrator (it needs the driver's Secrets) |
@@ -126,7 +126,7 @@ For a VM guest, targets 1 and 2 give plain files in a claim. The user attaches t
 
 A person in namespace B who wants a file from the backup of namespace A, to put into B, needs `get backupfiles` in A and the PVC rights in B. Without the first, they get a plain "forbidden", the same as any other Kubernetes object. The gateway never shows the existence of volumes in a namespace to a person without rights there.
 
-**Audit.** Each session start, download, and restore writes a Kubernetes Event on the `BackupBrowse` and a log line: user, namespace, volume, moment, and the **paths** (not the contents). A user cannot read the Events of the driver namespace; the cluster administrator can. A test checks that no API key, token or file content reaches logs or Events.
+**Audit.** Each session start, download, and restore writes a Kubernetes Event on the `BackupBrowse` and a log line: user, namespace, volume, restore point, and the **paths** (not the contents). A user cannot read the Events of the driver namespace; the cluster administrator can. A test checks that no API key, token or file content reaches logs or Events.
 
 ### 7. Limits
 
@@ -147,16 +147,16 @@ All defaults are Helm values (`backupBrowse.*`) and are listed in `HELM-VALUES.m
 ### 8. User stories
 
 Console:
-1. As a namespace admin, I open **Backups**, pick a policy, see my volumes, pick a volume and a moment, and press **Browse files**. A plain volume opens at once. A VM disk shows "Starting the reader" for a few seconds and then a picker of the disk's file systems.
+1. As a namespace admin, I open **Backups**, pick a policy, see my volumes, pick a volume and a restore point, and press **Browse files**. A plain volume opens at once. A VM disk shows "Starting the reader" for a few seconds and then a picker of the disk's file systems.
 2. I click into folders, search the current folder by name, tick files and folders, and press **Download** (one file, or a tar for several) or **Restore to a claim** (new claim, or a folder in an existing one).
 3. I see the status of the restore (copying, done, failed) and a link to the new claim.
 4. A VM backup shows the notice about a crash copy, and a lock icon on volumes that cannot be read, with the reason.
 
 Command line (`kubectl backup`, same plugin as today):
-- `kubectl backup ls --policy P --pvc NS/NAME [--moment TIME] [--disk N] [--fs /dev/sda2] [PATH]`, lists a folder. For a VM disk without `--fs` it lists the file systems it found.
-- `kubectl backup get --policy P --pvc NS/NAME [--moment TIME] [--fs ...] PATH [--out DIR]` downloads a file, or a folder as a tar or an unpacked folder.
-- `kubectl backup restore-files --policy P --pvc NS/NAME [--moment TIME] [--fs ...] --path A --path B --to NS/CLAIM [--new-claim --size-gb N | --existing] [--wait]`.
-- `kubectl backup browse ...` opens a session by hand and prints its name, so repeated `ls` and `get` calls reuse it. Without it each command reuses an open session of the same user, volume and moment, or opens one.
+- `kubectl backup ls --policy P --pvc NS/NAME [--restore-point TIME] [--disk N] [--fs /dev/sda2] [PATH]`, lists a folder. For a VM disk without `--fs` it lists the file systems it found.
+- `kubectl backup get --policy P --pvc NS/NAME [--restore-point TIME] [--fs ...] PATH [--out DIR]` downloads a file, or a folder as a tar or an unpacked folder.
+- `kubectl backup restore-files --policy P --pvc NS/NAME [--restore-point TIME] [--fs ...] --path A --path B --to NS/CLAIM [--new-claim --size-gb N | --existing] [--wait]`.
+- `kubectl backup browse ...` opens a session by hand and prints its name, so repeated `ls` and `get` calls reuse it. Without it each command reuses an open session of the same user, volume and restore point, or opens one.
 - The same commands take `--from-cos --bucket B --endpoint HOST --volume pvc-...` for a cluster administrator.
 
 ## OpenShift rules (security context constraints)
@@ -170,13 +170,13 @@ Command line (`kubectl backup`, same plugin as today):
 
 ## Tests
 
-- **Unit tests (every phase).** The disk server against `Rewind`: for each moment, a read must equal `RestoreDisk` byte for byte (property test, random writes, several moments, an unfinished copy ignored). Path rules: links, `..`, very long names, names with newlines and invalid UTF-8, a link to the helper's own files. Gateway: every row of the access table, with a fake `SubjectAccessReview`, including "forbidden gives no hint that the volume exists". Controller: session start, idle timeout, hard limit, limits on open sessions, orphan cleanup after a restart, the lease on VM volumes. `BackupFileRestore`: all three targets, a name clash, a target that is a VM disk claim, not enough space.
+- **Unit tests (every phase).** The disk server against `Rewind`: for each restore point, a read must equal `RestoreDisk` byte for byte (property test, random writes, several restore points, an unfinished copy ignored). Path rules: links, `..`, very long names, names with newlines and invalid UTF-8, a link to the helper's own files. Gateway: every row of the access table, with a fake `SubjectAccessReview`, including "forbidden gives no hint that the volume exists". Controller: session start, idle timeout, hard limit, limits on open sessions, orphan cleanup after a restart, the lease on VM volumes. `BackupFileRestore`: all three targets, a name clash, a target that is a VM disk claim, not enough space.
 - **COS.** Kopia against a local repository and MinIO in CI: list, one file, one volume's path only, a hostile snapshot name, a range read of a large file, the cache size.
 - **Chart tests (`make test-scripts`).** The gateway and its NetworkPolicy render; the two ClusterRoles and the aggregation; the SCC only when asked for; the console proxy entry; Helm values documented.
 - **Console tests.** The new pages: list, breadcrumb, selection, the picker, disabled states, the warning texts; no file content is put into a URL.
 - **Release test, new stage 20** (stage 19 is the instant snapshots stage) in `test/e2e`, run on the lab pair:
-  1. Plain pod volume with a known tree (links, a 0600 file owned by another user, a name with spaces and an accented letter). Two backup moments. Browse both, download a file and check its checksum, restore a folder to a new claim and to an existing one, and compare checksums. Check that the backup folder is byte-identical before and after (a recorded hash of the tree).
-  2. Linux VM with an XFS root on LVM and an ext4 data disk, with a log of files and checksums (as stage 18). Browse the latest and the first moment without starting the VM; stop the VM first for one run. Restore a file; compare. Check the disk image is byte-identical after.
+  1. Plain pod volume with a known tree (links, a 0600 file owned by another user, a name with spaces and an accented letter). Two backup restore points. Browse both, download a file and check its checksum, restore a folder to a new claim and to an existing one, and compare checksums. Check that the backup folder is byte-identical before and after (a recorded hash of the tree).
+  2. Linux VM with an XFS root on LVM and an ext4 data disk, with a log of files and checksums (as stage 18). Browse the latest and the first restore point without starting the VM; stop the VM first for one run. Restore a file; compare. Check the disk image is byte-identical after.
   3. A Windows or NTFS disk image (a small prepared image; the lab has no Windows licence, so the image is made with `ntfs-3g` tools and checked as a disk, not as a boot).
   4. COS: browse and restore the same plain volume and the VM disk from the bucket of stage 18, in the second cluster of the pair.
   5. Access: a test user with only a RoleBinding in the other namespace gets "forbidden", gets access after a binding, and loses it after the binding is removed.
@@ -191,7 +191,7 @@ Sizes: S is a day or less of work, M a few days, L a week or more. Each PR has i
 0. **Spike on the lab (S, risk check).** Run the libguestfs image in a pod on ROVS with and without the KVM device. Measure: start time, listing, reading a file, memory. Try XFS, ext4, NTFS, LVM, a crash copy, a hibernated NTFS, and a disk served over a socket from a small test server. Decide the image and how to find it. Results are added to this spec in a PR that holds no product code. **If it fails (for example the appliance cannot start in a pod under the cluster's rules), the VM part of the goal is re-stated with the real gap before more is built.**
 1. **Plain volumes, snapshot pool, command line (L).** `BackupBrowse`, the helper in `cmd/browse` and its image, the controller part, the gateway, the access rules and ClusterRoles, `kubectl backup ls/get/browse`, limits, cleanup, audit Events. Settles the "squashed root cannot read 0600 files" question.
 2. **Restore of files (M).** `BackupFileRestore`, the Job, the three targets, `kubectl backup restore-files`, the space check, ownership.
-3. **Console (L).** The file browser, download, the file restore dialog, help texts and the plugin proxy entry. The Backups pages themselves (policies, volumes, moments) come from `2026-10-22-console-backup-ui.md`, which reserves a "Browse files" action on each volume row and moment for this phase. Build those pages first.
+3. **Console (L).** The file browser, download, the file restore dialog, help texts and the plugin proxy entry. The Backups pages themselves (policies, volumes, restore points) come from `2026-10-22-console-backup-ui.md`, which reserves a "Browse files" action on each volume row and restore point for this phase. Build those pages first.
 4. **COS, plain volumes (M).** Kopia read-only helper, `--from-cos` for ls/get/restore-files, the tests that block reaching another volume.
 5. **VM disks in the snapshot pool (L, the riskiest).** The disk server with undo-file rebuild and its property tests; the lease and the backup wait; the appliance helper; the file system picker; `norecovery` handling; the console picker; the crash-copy notices; the unreadable-volume list.
 6. **VM disks in COS (M).** Kopia library range reads and the cache; speed measurements; the fall-back decision if needed.
@@ -237,7 +237,7 @@ Not yet tested: a real Windows disk with BitLocker or a hibernated system, btrfs
 - Restoring a file out needs read rights on the source namespace and create rights on the target namespace. No new super-user role.
 - Browsing from COS without a policy is for cluster administrators only.
 - A VM disk is browsed through a small read-only appliance VM in an unprivileged pod, not through a privileged mount on the node. We do not use privileged pods for this.
-- Older moments of a VM disk are shown by a read-only disk server that rebuilds the old view on the fly. We do not restore a scratch copy, because that would restore the whole volume.
+- Older restore points of a VM disk are shown by a read-only disk server that rebuilds the old view on the fly. We do not restore a scratch copy, because that would restore the whole volume.
 - A VM session holds the next backup of that one volume for up to 2 hours. Other volumes are not held.
 - Files are never put back in place, and nothing is ever written into a VM's own disk. Files go to a new claim, to a new folder in an existing claim, or to a download.
 - A restore to an existing claim goes into a new folder and never over existing files; it refuses a VM disk claim.
@@ -267,7 +267,7 @@ Not yet tested: a real Windows disk with BitLocker or a hibernated system, btrfs
 - The gateway reads the rights as `get backupfiles` on the claim's namespace and runs in the driver image (`--mode=backup-gateway`). Users reach it through a reencrypt Route on OpenShift (a passthrough Route would show the service certificate, which is for the service name and not for the Route host); `kubectl backup` finds the address in the ConfigMap `backup-gateway-info`.
 - The audit Events are written in the driver namespace on the ConfigMap `backup-gateway-info`, with the `BackupBrowse` in `related` (the API server refuses Events of a cluster-scoped object outside `default`, which many people can read).
 - A session belongs to the user who made it; another user, even with the same rights, sees "no such session".
-- The helper has a `/v1/moments` call so that `kubectl backup ls --moments` can list the moment folders.
+- The helper has a `/v1/moments` call so that `kubectl backup ls --restore-points` can list the restore point folders.
 - The console file browser (phase 3, first half) downloads with a GET route on the gateway, `GET /v1/sessions/{name}/download?type=file|tar&p=<base64 name>...`, because a browser can stream a large download to disk only from a GET. It takes the same steps as the POST calls. Every file and tar reply now carries `Content-Disposition: attachment`, `nosniff`, a sandbox Content-Security-Policy and `no-store`, since the console proxy serves it from the console's own origin. The console shows the action when the settings ConfigMap says `fileBrowse: "true"`.
 
 ## Changes made while building phase 2 (28 Oct 2026)
@@ -275,7 +275,7 @@ Not yet tested: a real Windows disk with BitLocker or a hibernated system, btrfs
 - The restore Job is the driver program (`--mode=restore-files`, package `pkg/filerestore`), not a shell script with `cp -a`. It reads the backup through the browse helper's handle-based reader and writes the target the same way (`mkdirat`, `symlinkat`, `openat` with `O_EXCL` and `O_NOFOLLOW`, no link followed). Reason: an existing claim is open to its users, so the target is as untrusted as the backup.
 - Paths are `spec.paths`, a list of escaped strings (the form `kubectl backup ls` prints), kept in a ConfigMap that the restore owns and mounted as a file. At most 1000 paths, 256 KiB together.
 - The squashed-root question, write side: the order is times, then mode, then owner for a file, and a folder is finished only after everything in it is written (like `cp -a`, which the lab proved). The owner is the one the pool configures for the claim (`defaultUID`, `defaultGID`); without one, the backup's owner is kept. If an owner cannot be set, the restore fails and removes what it wrote. Stage 20 part 4 checks both cases on the lab (a pool with owner 107 and a pool with none, files of users 1000 and 2000).
-- Into an existing claim the Job writes a hidden folder `.restoring-<restore UID>` and renames it to `restored-<policy>-<moment>` (a suffix if the name exists). NFS has no rename that refuses to replace; the name is checked just before.
+- Into an existing claim the Job writes a hidden folder `.restoring-<restore UID>` and renames it to `restored-<policy>-<restore point>` (a suffix if the name exists). NFS has no rename that refuses to replace; the name is checked just before.
 - The Job mounts the whole share that holds the target claim (the claim's folder may not exist before the Job, and a folder that does not exist cannot be mounted), and opens only the claim's folder below it, one name at a time. An existing claim whose folder does not exist yet is refused.
 - A new claim is sized by a read-only measure Job first (skipped when `sizeGB` is given), because the controller has no NFS access.
 - The claim's UID is pinned (`spec.targetUID`, set by the gateway; otherwise the first UID the controller sees), so a claim deleted and made again is refused. The new claim made for a restore carries the restore's name and UID as annotations, and both must match.
@@ -295,6 +295,6 @@ Not yet tested: a real Windows disk with BitLocker or a hibernated system, btrfs
 - The reader is a Go package, `pkg/cosbrowse`, used by the helper and by the restore Job. It talks to the Kopia program through two calls (list the snapshots as JSON, show one object by ID). Folders are parsed from Kopia's JSON; the sed and awk of the restore script are not used for names a tenant wrote.
 - The helper unwraps the backup key itself, in process (`pkg/keyprotect`), and gives it to the Kopia child in an explicit environment. The browse image carries the same pinned Kopia as the driver image; a test keeps the version and checksum equal, and checks that the Dockerfile copies every package the binary imports.
 - A snapshot belongs to a volume only if its `volume` tag **and** its exact source path say so. The export Job's mount point is `/share0`.
-- The source of a session is `local` or `cos`. The gateway chooses COS when the moment is older than the oldest local restore point or no local copy is left, and an export exists; `source: cos` asks for it. A bucket named directly is `fromCOS`, which needs the right to read every Secret the request names, in the driver namespace.
+- The source of a session is `local` or `cos`. The gateway chooses COS when the restore point is older than the oldest local restore point or no local copy is left, and an export exists; `source: cos` asks for it. A bucket named directly is `fromCOS`, which needs the right to read every Secret the request names, in the driver namespace.
 - A COS session that is not ready after five minutes ends in words (`backupBrowse.cos.startTimeout`).
 - Not done in this phase: the source switch in the console file browser; it needs the console files that the restore dialog work is changing, and the gateway already chooses the source for a moment that only COS holds.

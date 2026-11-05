@@ -12,7 +12,7 @@ Today the copy runs at a fixed limit, 20 MB/s for each disk (`vmCopySpeedLimitMB
 
 - The copy is a QEMU `blockdev-backup` job for each disk. It starts with a `speed` in bytes per second, set once in `pkg/vmcopy/vmcopy.go` (`Start`). The same copier makes the VM snapshots by copy (`pkg/pool/snapshot_vm.go`) and the backups (`pkg/pool/replication_vmcopy.go`).
 - QEMU can change the speed of a job that is running (`block-job-set-speed`). The driver does not use it yet. **Lab check 1** proves it works on these VMs before anything else is built.
-- The replication controller wakes every 30 s and asks QEMU about each running copy (`Progress`). That is the natural moment to change the speed.
+- The replication controller wakes every 30 s and asks QEMU about each running copy (`Progress`). That is the natural restore point to change the speed.
 - Each node agent already counts the reads and writes of each share and the seconds they took (the metrics `vpc_file_pool_share_nfs_operations_total` and `vpc_file_pool_share_nfs_execute_seconds_total`). PoolBench reads them to find the average latency of a share (`pkg/poolbench/shares.go`).
 - The VM's disk lives on the source share, and the copy reads from it. So the latency of the source share is the signal that says "the VM is being slowed".
 

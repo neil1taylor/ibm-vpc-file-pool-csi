@@ -2,12 +2,12 @@
 
 > **Tutorial Series:** [Index](TUTORIAL.md) | [Part 1: Pool Creation](TUTORIAL-01-POOL-CREATION.md) | **Part 10**
 
-Back up a volume on a schedule into a pool that holds only backups. Change the volume, wait for a second backup, and restore the volume as it was at the first moment. Then delete the backups. The words moment, restore point and snapshot pool are defined in [CONTEXT.md](CONTEXT.md).
+Back up a volume on a schedule into a pool that holds only backups. Change the volume, wait for a second backup, and restore the volume as it was at the first restore point. Then delete the backups. The words restore point, restore point and snapshot pool are defined in [CONTEXT.md](CONTEXT.md).
 
 **Time:** about 30 minutes, most of it waiting for backups.
 **Status:** backups are Experimental. See [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md) for the full reference.
 
-![A BackupPolicy copies the volume into the snapshot pool, and kubectl backup restore makes a new PVC from a chosen moment](images/tutorial-10-backup-restore.drawio.svg)
+![A BackupPolicy copies the volume into the snapshot pool, and kubectl backup restore makes a new PVC from a chosen restore point](images/tutorial-10-backup-restore.drawio.svg)
 
 ---
 
@@ -186,9 +186,9 @@ POLICY     VOLUME                    VM  LAST BACKUP           OLDEST           
 tut-nightly  pool-tutorial-backup/files  -   2026-10-22T10:05:12Z  -                     0       FileCopy     active
 ```
 
-`FileCopy` means the volume is a plain volume. The files were copied one by one, so the backup is only as consistent as the files. See [CONTEXT.md](CONTEXT.md#file-copy). `POINTS` counts the earlier moments you can restore. It is `0` after the first backup, and `OLDEST` is `-` until there is an earlier moment.
+`FileCopy` means the volume is a plain volume. The files were copied one by one, so the backup is only as consistent as the files. See [CONTEXT.md](CONTEXT.md#file-copy). `POINTS` counts the earlier restore points you can restore. It is `0` after the first backup, and `OLDEST` is `-` until there is an earlier restore point.
 
-Write down the time under `LAST BACKUP`. This is the first moment.
+Write down the time under `LAST BACKUP`. This is the first restore point.
 
 ```bash
 export FIRST=$(oc get backuppolicy ${POLICY} -o jsonpath='{.status.volumes[0].lastBackupTime}')
@@ -209,20 +209,20 @@ Wait for `POINTS` to reach `1`:
 kubectl backup list --policy ${POLICY}
 ```
 
-**Expected:** `POINTS` is `1`, and `OLDEST` is the first moment, a few seconds before `FIRST` (the time of the first copy is a little earlier than the time the policy reports). It took about 5 minutes in the lab. A new moment is made every 5 minutes whether or not the files change, so `POINTS` is higher if you waited longer. Restore a moment from before the change: `FIRST`, or `OLDEST`. A restore uses the newest moment at or before the time you give.
+**Expected:** `POINTS` is `1`, and `OLDEST` is the first restore point, a few seconds before `FIRST` (the time of the first copy is a little earlier than the time the policy reports). It took about 5 minutes in the lab. A new restore point is made every 5 minutes whether or not the files change, so `POINTS` is higher if you waited longer. Restore a restore point from before the change: `FIRST`, or `OLDEST`. A restore uses the newest restore point at or before the time you give.
 
 ---
 
-## Step 7: Restore the first moment to a new PVC
+## Step 7: Restore the first restore point to a new PVC
 
 A restore makes a new PVC. It never writes over a volume that exists. The command waits until the copy ends.
 
 ```bash
 kubectl backup restore --policy ${POLICY} --pvc ${NS}/files --to ${NS}/files-first \
-  --moment ${FIRST} --wait
+  --restore-point ${FIRST} --wait
 ```
 
-**Expected:** the command prints the phases (`Provisioning`, `Restoring`; `Pending` shows if the restore has to wait), then `Done: pool-tutorial-backup/files-first holds the backup of <time>`, where `<time>` is the moment at or before `FIRST`. It took about a minute in the lab. The new PVC uses the StorageClass of the backed-up claim, unless you pass `--storage-class`. Without `--moment`, the restore uses the latest backup.
+**Expected:** the command prints the phases (`Provisioning`, `Restoring`; `Pending` shows if the restore has to wait), then `Done: pool-tutorial-backup/files-first holds the backup of <time>`, where `<time>` is the restore point at or before `FIRST`. It took about a minute in the lab. The new PVC uses the StorageClass of the backed-up claim, unless you pass `--storage-class`. Without `--restore-point`, the restore uses the latest backup.
 
 Mount the new PVC and look at it:
 
@@ -252,7 +252,7 @@ oc wait -n ${NS} --for=jsonpath='{.status.phase}'=Succeeded pod/files-check --ti
 oc logs -n ${NS} files-check
 ```
 
-**Expected:** the output is `first`, then a listing with `a`, `keep` and `written`, and no `b`. The restored volume holds the files as they were at the first moment.
+**Expected:** the output is `first`, then a listing with `a`, `keep` and `written`, and no `b`. The restored volume holds the files as they were at the first restore point.
 
 The pod waits while the copy runs. A pod that mounts the new PVC does not start until the restore ends.
 
@@ -307,15 +307,15 @@ Deleting a policy keeps its backups on the share. Deleting a pool deletes its VP
 
 ## VMs
 
-A `BackupPolicy` backs up a VM through its disks. If any disk of a VM has the label, all its disks are backed up together at one moment. The status shows `FileSystemConsistent` or `CrashConsistent`. Restore each disk at the same `--moment` and make a VM from the new PVCs. See [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md#backups-to-a-snapshot-pool).
+A `BackupPolicy` backs up a VM through its disks. If any disk of a VM has the label, all its disks are backed up together at one point in time. The status shows `FileSystemConsistent` or `CrashConsistent`. Restore each disk at the same `--restore-point` and make a VM from the new PVCs. See [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md#backups-to-a-snapshot-pool).
 
 ---
 
 ## What you learned
 
 - A backup policy copies selected volumes into a snapshot pool on a schedule.
-- `kubectl backup list` shows each volume, its moments and its consistency.
-- `kubectl backup restore` makes a new PVC at any kept moment.
+- `kubectl backup list` shows each volume, its restore points and its consistency.
+- `kubectl backup restore` makes a new PVC at any kept restore point.
 - `kubectl backup delete` removes backups on purpose.
 
 ## Next

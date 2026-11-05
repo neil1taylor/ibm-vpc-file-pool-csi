@@ -1,6 +1,6 @@
 # Architecture Reference
 
-For the meaning of project words such as pool, share, SubVolume and moment, see [CONTEXT.md](CONTEXT.md).
+For the meaning of project words such as pool, share, SubVolume and restore point, see [CONTEXT.md](CONTEXT.md).
 
 ## System Overview
 

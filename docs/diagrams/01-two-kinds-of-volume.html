@@ -142,8 +142,8 @@ table.glance th{background:var(--share);font-weight:600}
     <h2>At a glance</h2>
     <table class="glance">
       <tr><th></th><th>Plain volume</th><th>VM volume</th></tr>
-      <tr><th>Snapshot (same share)</th><td>A Job copies the folder (<span class="mono">cp -a</span>). It takes longer for more data. Only as consistent as the files.</td><td>Running VM: QEMU copies all the VM's disks at one moment. Instant snapshots copy nothing, but are Experimental and need the KubeVirt <span class="mono">Sidecar</span> gate.</td></tr>
-      <tr><th>Backup (backup pool)</th><td>Files are copied. Each earlier moment is a folder of hard links. Reported as <span class="mono">FileCopy</span>.</td><td>One whole <span class="mono">disk.img</span>, plus undo files for earlier moments. All disks of the VM show one moment. <span class="mono">FileSystemConsistent</span> if the guest was frozen, else <span class="mono">CrashConsistent</span>.</td></tr>
+      <tr><th>Snapshot (same share)</th><td>A Job copies the folder (<span class="mono">cp -a</span>). It takes longer for more data. Only as consistent as the files.</td><td>Running VM: QEMU copies all the VM's disks at one point in time. Instant snapshots copy nothing, but are Experimental and need the KubeVirt <span class="mono">Sidecar</span> gate.</td></tr>
+      <tr><th>Backup (backup pool)</th><td>Files are copied. Each earlier restore point is a folder of hard links. Reported as <span class="mono">FileCopy</span>.</td><td>One whole <span class="mono">disk.img</span>, plus undo files for earlier restore points. All disks of the VM show one restore point. <span class="mono">FileSystemConsistent</span> if the guest was frozen, else <span class="mono">CrashConsistent</span>.</td></tr>
       <tr><th>Replication (another cluster)</th><td>Files are copied. By default only the latest copy is kept.</td><td>QEMU copy: whole disk the first time, then only changed blocks. Restore points are kept 24 hours by default.</td></tr>
     </table>
     <p class="hint">A VM that is switched off is copied as a folder, like a plain volume.</p>
@@ -184,18 +184,18 @@ table.glance th{background:var(--share);font-weight:600}
   function render(){
     var h='';
     h+=row("The volume","what pods use now",pgrid(src.p,hlTarget==="src"?hlP:[]));
-    h+=row("Snapshot","same share",snap.p?pgrid(snap.p,hl("snap",hlP))+'<span class="tag warn">File snapshot: a Job copied the whole folder. Not one moment: files may change while it copies.</span>':none("No snapshot yet"));
+    h+=row("Snapshot","same share",snap.p?pgrid(snap.p,hl("snap",hlP))+'<span class="tag warn">File snapshot: a Job copied the whole folder. Not one restore point: files may change while it copies.</span>':none("No snapshot yet"));
     h+=row("Backup","backup pool share",bak.p?pgrid(bak.p,hl("back",hlP))+'<span class="tag warn">Consistency: FileCopy (only as good as the files)</span>':none("No backup yet"));
-    bak.pm.forEach(function(m,i){ h+=row("Moment "+(i+1),"folder of links",mapGrid(m,"p")+'<span class="tag">Shown: old contents of files that changed. Dashed &quot;same&quot; = a link, no extra space.</span>'); });
+    bak.pm.forEach(function(m,i){ h+=row("Restore point "+(i+1),"folder of links",mapGrid(m,"p")+'<span class="tag">Shown: old contents of files that changed. Dashed &quot;same&quot; = a link, no extra space.</span>'); });
     h+=row("Replica","other cluster",rep.p?pgrid(rep.p,hl("rep",hlP))+'<span class="tag">Latest copy only (the default).</span>':none("No replica yet"));
     document.getElementById("plain").innerHTML='<div style="display:flex;flex-direction:column;gap:12px">'+h+'</div>';
 
     h='';
     h+=row("The disk","what the VM uses now",vgrid(src.v,hlTarget==="src"?hlV:[])+(snap.chain?'<span class="tag good">Writes now go to the newest snap-'+snap.chain+'.qcow2 file.</span>':''));
-    h+=row("Snapshot","same share",snap.v?vgrid(snap.v.vals,hl("snap",hlV))+'<span class="tag '+(snap.v.instant?'good':'warn')+'">'+(snap.v.instant?'Instant: nothing copied. disk.img is frozen.':'QEMU copy of the whole disk at one moment.')+'</span>':none("No snapshot yet"));
+    h+=row("Snapshot","same share",snap.v?vgrid(snap.v.vals,hl("snap",hlV))+'<span class="tag '+(snap.v.instant?'good':'warn')+'">'+(snap.v.instant?'Instant: nothing copied. disk.img is frozen.':'QEMU copy of the whole disk at one point in time.')+'</span>':none("No snapshot yet"));
     h+=row("Backup","backup pool share",bak.v?vgrid(bak.v,hl("back",hlV))+'<span class="tag good">Consistency: FileSystemConsistent (guest frozen for an instant)</span>':none("No backup yet"));
-    bak.vu.forEach(function(m,i){ h+=row("Undo file "+(i+1),"old blocks",mapGrid(m,"v")+'<span class="tag">Old contents of blocks that the next backup changed. This is how an earlier moment is rebuilt.</span>'); });
-    h+=row("Replica","other cluster",rep.v?vgrid(rep.v,hl("rep",hlV))+'<span class="tag good">Whole disk at the latest moment.</span>':none("No replica yet"));
+    bak.vu.forEach(function(m,i){ h+=row("Undo file "+(i+1),"old blocks",mapGrid(m,"v")+'<span class="tag">Old contents of blocks that the next backup changed. This is how an earlier restore point is rebuilt.</span>'); });
+    h+=row("Replica","other cluster",rep.v?vgrid(rep.v,hl("rep",hlV))+'<span class="tag good">Whole disk at the latest restore point.</span>':none("No replica yet"));
     rep.vu.forEach(function(m,i){ h+=row("Restore point "+(i+1),"undo file",mapGrid(m,"v")+'<span class="tag">Old blocks, kept 24 hours by default.</span>'); });
     document.getElementById("vm").innerHTML='<div style="display:flex;flex-direction:column;gap:12px">'+h+'</div>';
   }
@@ -214,13 +214,13 @@ table.glance th{background:var(--share);font-weight:600}
     snap.p=src.p.slice(); snap.v={vals:src.v.slice(),instant:inst};
     if(inst) snap.chain++;
     nSnap++; hlTarget="snap"; hlP=[]; hlV=[];
-    say("<b>Snapshot taken, on the same share.</b> Plain volume: a Job copied all "+src.p.length+" files. VM disk: "+(inst?"<b>nothing was copied</b>. disk.img is frozen and new writes go to a new snap-"+snap.chain+".qcow2 file. It takes seconds for any disk size.":"QEMU copied all "+src.v.length+" blocks. All disks of one VM show the same moment.")+" A snapshot does not protect you if the share is lost.", src.p.length+(inst?0:src.v.length));
+    say("<b>Snapshot taken, on the same share.</b> Plain volume: a Job copied all "+src.p.length+" files. VM disk: "+(inst?"<b>nothing was copied</b>. disk.img is frozen and new writes go to a new snap-"+snap.chain+".qcow2 file. It takes seconds for any disk size.":"QEMU copied all "+src.v.length+" blocks. All disks of one VM show the same restore point.")+" A snapshot does not protect you if the share is lost.", src.p.length+(inst?0:src.v.length));
   };
   document.getElementById("b-back").onclick=function(){
     var sp=diff(bak.p,src.p), sv=diff(bak.v,src.v), first=!bak.p;
     if(!first){ bak.pm.push(oldOf(bak.p,sp)); bak.vu.push(oldOf(bak.v,sv)); }
     bak.p=src.p.slice(); bak.v=src.v.slice(); nBack++; hlTarget="back"; hlP=sp; hlV=sv;
-    say("<b>Backup made, on a different share (the backup pool).</b> "+(first?"First time: everything is sent ("+sp.length+" files, "+sv.length+" blocks).":"Only changes are sent: "+sp.length+" files and "+sv.length+" blocks. The old contents are kept, so you can go back to the earlier moment: as a folder of links for the plain volume, as an undo file for the VM disk."),sp.length+sv.length);
+    say("<b>Backup made, on a different share (the backup pool).</b> "+(first?"First time: everything is sent ("+sp.length+" files, "+sv.length+" blocks).":"Only changes are sent: "+sp.length+" files and "+sv.length+" blocks. The old contents are kept, so you can go back to the earlier restore point: as a folder of links for the plain volume, as an undo file for the VM disk."),sp.length+sv.length);
   };
   document.getElementById("b-rep").onclick=function(){
     var sp=diff(rep.p,src.p), sv=diff(rep.v,src.v), first=!rep.p;

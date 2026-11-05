@@ -84,7 +84,7 @@ button:focus-visible{outline:2px solid var(--btn);outline-offset:2px}
 <nav class="top" aria-label="Pages"><a href="index.html">All pages</a><a href="03-replication.html">&larr; Previous page</a><a href="05-backup-to-cos.html">Next page &rarr;</a></nav>
   <div>
     <h1>Failover and Failback</h1>
-    <p class="lead">Replication keeps copies of a VM's disks at a second site, the <b>DR site</b>. If the <b>main site</b> is lost, a person runs <span class="mono">kubectl failover</span> and the VM starts at the DR site from the newest moment that <b>all</b> its disks can show. <b>Failback</b> is going home again later. Nothing here is automatic: a person decides.</p>
+    <p class="lead">Replication keeps copies of a VM's disks at a second site, the <b>DR site</b>. If the <b>main site</b> is lost, a person runs <span class="mono">kubectl failover</span> and the VM starts at the DR site from the newest restore point that <b>all</b> its disks can show. <b>Failback</b> is going home again later. Nothing here is automatic: a person decides.</p>
   </div>
 
   <div class="bar">
@@ -101,7 +101,7 @@ button:focus-visible{outline:2px solid var(--btn);outline-offset:2px}
     <button id="l-b" disabled>While a copy is half applied to one disk</button>
     <button id="l-c" disabled>After one disk got the newest copy and the other did not</button>
   </div>
-  <p class="hint">Copies arrive every 15 minutes in this example (the real schedule is yours to set). Each copy holds all of the VM's disks at <b>one moment</b>. The times are made up.</p>
+  <p class="hint">Copies arrive every 15 minutes in this example (the real schedule is yours to set). Each copy holds all of the VM's disks at <b>one restore point</b>. The times are made up.</p>
 
   <div class="sites">
     <section class="site" id="main-site" aria-label="Main site"></section>
@@ -112,7 +112,7 @@ button:focus-visible{outline:2px solid var(--btn);outline-offset:2px}
     <h2>The plan · <span class="mono">kubectl failover plan</span></h2>
     <div class="plan" id="plan"></div>
     <div id="pick-wrap">
-      <p class="hint">By default the VM starts from the newest moment all its disks can show. To start earlier, choose a restore point (<span class="mono">--rewind-to</span>). Restore points reach back as far as the policy keeps them: 24 hours by default.</p>
+      <p class="hint">By default the VM starts from the newest restore point all its disks can show. To start earlier, choose a restore point (<span class="mono">--rewind-to</span>). Restore points reach back as far as the policy keeps them: 24 hours by default.</p>
       <div class="bar" id="picks"></div>
     </div>
   </section>
@@ -128,11 +128,11 @@ button:focus-visible{outline:2px solid var(--btn);outline-offset:2px}
   </section>
 
   <div class="legend">
-    <span><i class="sw" style="--c:var(--l0)"></i>the moment a disk shows now</span>
-    <span><i class="sw" style="--c:var(--l0);background:transparent"></i>a restore point: an earlier moment the disk can go back to</span>
+    <span><i class="sw" style="--c:var(--l0)"></i>the restore point a disk shows now</span>
+    <span><i class="sw" style="--c:var(--l0);background:transparent"></i>a restore point: an earlier restore point the disk can go back to</span>
     <span><i class="sw" style="--c:var(--warn);background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--warn) 30%,var(--panel)) 0 4px,var(--panel) 4px 8px)"></i>a copy that is only half applied</span>
     <span><i class="sw dash"></i>no copy yet</span>
-    <span><i class="sw out"></i>the moment the VM will start from</span>
+    <span><i class="sw out"></i>the restore point the VM will start from</span>
     <span><i class="sw" style="--c:var(--l1)"></i>system disk</span>
     <span><i class="sw" style="--c:var(--l0)"></i>data disk</span>
   </div>
@@ -149,7 +149,7 @@ button:focus-visible{outline:2px solid var(--btn);outline-offset:2px}
 (function(){
   var T=["10:00","10:15","10:30","10:45","11:00"], MAXK=5;
   var phase, k, lossKind, lossMin, disks, chosen, actions, vmRunning, newKey;
-  // disks: shows = moment index (1-based) now; part = index of half-applied copy or 0; folder = "" or "rewind"
+  // disks: shows = restore point index (1-based) now; part = index of half-applied copy or 0; folder = "" or "rewind"
   function el(i){return document.getElementById(i);}
   function say(h){ el("log").innerHTML=h; render(); }
   function mins(t){var p=t.split(":");return (+p[0])*60+(+p[1]);}
@@ -160,7 +160,7 @@ button:focus-visible{outline:2px solid var(--btn);outline-offset:2px}
   }
   function copyArrives(){
     k++; disks.sys.shows=k; disks.data.shows=k; newKey="copy";
-    say("<b>Copy "+k+" arrives</b> and shows the moment <b>"+T[k-1]+"</b>."+(k>1?" The DR site first saves the old contents of every block it changes. These saved blocks are the <b>restore points</b>: they let a disk go back to an earlier moment.":" This one is a whole copy, so it takes the longest.")+(k>=2?" You can now lose the main site.":""));
+    say("<b>Copy "+k+" arrives</b> and shows the restore point <b>"+T[k-1]+"</b>."+(k>1?" The DR site first saves the old contents of every block it changes. These saved blocks are the <b>restore points</b>: they let a disk go back to an earlier restore point.":" This one is a whole copy, so it takes the longest.")+(k>=2?" You can now lose the main site.":""));
   }
   function lose(kind){
     lossKind=kind; phase="lost"; newKey="lost";
@@ -170,13 +170,13 @@ button:focus-visible{outline:2px solid var(--btn);outline-offset:2px}
     var msg="<b>The main site is lost.</b> ";
     if(kind==="a") msg+="No copy was running. Both DR disks show <b>"+T[k-1]+"</b>.";
     if(kind==="b") msg+="Copy "+(k+1)+" was being applied to the data disk and stopped half way. That disk is part new, part old. The DR site keeps an undo file for it, so it can be rolled back.";
-    if(kind==="c") msg+="Copy "+(k+1)+" reached the data disk (<b>"+T[k]+"</b>) but not the system disk (<b>"+T[k-1]+"</b>). The two disks show different moments, and a VM must not start like that.";
+    if(kind==="c") msg+="Copy "+(k+1)+" reached the data disk (<b>"+T[k]+"</b>) but not the system disk (<b>"+T[k-1]+"</b>). The two disks show different restore points, and a VM must not start like that.";
     say(msg+" Next: plan the failover.");
   }
   function common(){return k;}
   function plan(){
     chosen=common(); phase="planned"; newKey="plan"; computeActions();
-    say("<b>Plan.</b> The tool read the copies on the DR share. It chose the newest moment <b>all</b> the VM's disks can show: <b>"+T[chosen-1]+"</b>. It never mixes moments. It changed nothing yet. You may choose an earlier restore point below.");
+    say("<b>Plan.</b> The tool read the copies on the DR share. It chose the newest restore point <b>all</b> the VM's disks can show: <b>"+T[chosen-1]+"</b>. It never mixes restore points. It changed nothing yet. You may choose an earlier restore point below.");
   }
   function computeActions(){
     actions={};
@@ -188,7 +188,7 @@ button:focus-visible{outline:2px solid var(--btn);outline-offset:2px}
       actions[n]=a;
     });
   }
-  function pickMoment(i){ chosen=i; computeActions(); newKey="plan"; say("You chose the restore point <b>"+T[i-1]+"</b> (<span class='mono'>--rewind-to</span>). "+(i<common()?"Both disks are ahead of it, so both are rewound into new folders. A rewind copies the whole disk, so it can take minutes for a big disk.":"This is the newest common moment.")); }
+  function pickMoment(i){ chosen=i; computeActions(); newKey="plan"; say("You chose the restore point <b>"+T[i-1]+"</b> (<span class='mono'>--rewind-to</span>). "+(i<common()?"Both disks are ahead of it, so both are rewound into new folders. A rewind copies the whole disk, so it can take minutes for a big disk.":"This is the newest common restore point.")); }
   function exec(){
     phase="executed"; newKey="exec";
     var rew=["sys","data"].filter(function(n){return actions[n].how==="rewind";});
@@ -203,7 +203,7 @@ button:focus-visible{outline:2px solid var(--btn);outline-offset:2px}
   }
   function startVM(){
     phase="running"; vmRunning=true; newKey="vm";
-    say("<b>You apply the VM definition and start the VM</b> at the DR site. It boots from the "+T[chosen-1]+" disks. The VM now writes to them, so they no longer match their restore points. From now on <span class='mono'>failover</span> <b>refuses to rewind</b> these disks (\"has changed since its last copy\"). If you want another moment, rewind <b>before</b> you start the VM.");
+    say("<b>You apply the VM definition and start the VM</b> at the DR site. It boots from the "+T[chosen-1]+" disks. The VM now writes to them, so they no longer match their restore points. From now on <span class='mono'>failover</span> <b>refuses to rewind</b> these disks (\"has changed since its last copy\"). If you want another restore point, rewind <b>before</b> you start the VM.");
   }
   function back(){
     phase="back"; newKey="back";
@@ -247,7 +247,7 @@ button:focus-visible{outline:2px solid var(--btn);outline-offset:2px}
       (k? mrow("System disk","var(--l1)",disks.sys)+mrow("Data disk","var(--l0)",disks.data) : '<span class="blk dash">no copies yet</span>');
     el("plan-card").hidden=!(phase==="planned"||phase==="executed"||phase==="running"||phase==="back");
     if(actions&&!el("plan-card").hidden){
-      var p="VM vms/my-vm shows the moment "+T[chosen-1]+"\n";
+      var p="VM vms/my-vm shows the restore point "+T[chosen-1]+"\n";
       p+="  system disk: "+actions.sys.how+(actions.sys.how==="rewind"?" (copies the whole disk into a new folder)":"")+"\n  data disk:   "+actions.data.how+(actions.data.how==="rewind"?" (copies the whole disk into a new folder)":"");
       el("plan").innerHTML=p.replace(/\n/g,"<br>").replace(/ /g,"&nbsp;");
       var pk="";

@@ -8,11 +8,11 @@ The owner's question was: is there a use case for a snapshot of the pool or shar
 
 Yes. Today the driver uses no IBM share snapshot. It keeps snapshots per volume, as file copies or QEMU copies (see `docs/CONTEXT.md`). An earlier decision kept it that way because a share holds many tenants' volumes, and a share snapshot cannot give back one volume without touching the others (`docs/CONSISTENCY-MODEL.md`). That reason is still true for a restore **in place**. It does not stop us using share snapshots in other ways.
 
-The goal of this spec: **an administrator can protect and recover a whole pool quickly, in minutes whatever its size. The administrator and the tenants can also recover single volumes or VM disks from the same pool-level moment, without touching other tenants.**
+The goal of this spec: **an administrator can protect and recover a whole pool quickly, in minutes whatever its size. The administrator and the tenants can also recover single volumes or VM disks from the same pool-level restore point, without touching other tenants.**
 
 Two real uses:
 1. **Fast recovery of a whole pool** after ransomware, a bad mass change, or a script that deleted many folders. One share snapshot covers every volume on the share, and it is ready in seconds.
-2. **A steady, same-moment source** for backups and replication. They read a frozen view of the share, not live files that change while they copy.
+2. **A steady, same-point-in-time source** for backups and replication. They read a frozen view of the share, not live files that change while they copy.
 
 ## What IBM Cloud gives us (facts, with sources)
 
@@ -40,7 +40,7 @@ All links are on cloud.ibm.com. "Gen 1" means the `dp2` profile that this driver
 
 The docs are silent or unclear on these. Each one decides part of the design below.
 
-1. **When is the moment captured?** At the API call, or when the snapshot becomes `stable`? The API has a `captured_at` field. If the moment is the call time, snapshots of all shares can be called in parallel and fit within a second or two.
+1. **When is the restore point captured?** At the API call, or when the snapshot becomes `stable`? The API has a `captured_at` field. If the restore point is the call time, snapshots of all shares can be called in parallel and fit within a second or two.
 2. **Does the one-a-minute limit apply per share or per account?** The design assumes per share.
 3. **What does a snapshot of a share with open NFS writers contain?** Expected: crash consistent (like a power loss). Prove it with a running VM.
 4. **Is `/.snapshot` visible on our mounts?** Our mount is `sec=sys`, NFS version 4.x, through the share's mount target in `security_group` mode, and the node mounts the share root. Check that `ls /mnt/share/.snapshot/` works, that a read of a file in it is correct, and that it works from a Job pod and from a node mount.
@@ -66,7 +66,7 @@ The docs are silent or unclear on these. Each one decides part of the design bel
 
 ## Design that meets the goal
 
-Four parts: a **pool snapshot** (one moment for all shares), **pool snapshot policies** (schedule and keep time), **volume recovery** from a pool snapshot (no effect on others), and **pool recovery** (new shares, then a controlled switch).
+Four parts: a **pool snapshot** (one restore point for all shares), **pool snapshot policies** (schedule and keep time), **volume recovery** from a pool snapshot (no effect on others), and **pool recovery** (new shares, then a controlled switch).
 
 ### 1. Taking a pool snapshot
 
@@ -80,8 +80,8 @@ Steps, in order:
 4. **Thaw.**
 5. **Wait for each snapshot to be `stable`.** Record its fingerprint and its `captured_at` time.
 
-**Same moment across shares.** One share snapshot is one moment for its share. Several shares are called within a second or two of each other, not at the same instant. IBM gives no way to snapshot several shares as one unit. The effect:
-- A volume is entirely on one share. For every volume, and every VM disk, the snapshot is one moment. This is the case that matters.
+**Same restore point across shares.** One share snapshot is one restore point for its share. Several shares are called within a second or two of each other, not at the same instant. IBM gives no way to snapshot several shares as one unit. The effect:
+- A volume is entirely on one share. For every volume, and every VM disk, the snapshot is one restore point. This is the case that matters.
 - A VM with disks on two shares could see its disks about one or two seconds apart. With the freeze on, the guest wrote nothing between the two calls, so the disks agree. Without a freeze, the guest sees a crash between its disks, which a file system or database normally repairs.
 - The status records the spread (latest `captured_at` minus earliest) and the list of VMs that have disks on more than one share. A spread above a limit (default 10 seconds) makes the snapshot `Degraded`, and the policy takes another.
 - Phase 0 check 1 may show that the spread is zero. Then this section simplifies.
@@ -97,7 +97,7 @@ A VM with a chain of instant snapshots is safe: the chain files are plain files 
 A new cluster resource, `PoolSnapshotPolicy`: `pool`, `schedule` (an interval such as `1h`, minimum 15 minutes), `keepFor` (default `3d`) and `keepLast` (default 6, the minimum number to keep whatever their age), `freeze` (`VMs` by default, or `None`), and `suspend`.
 
 **The driver runs the schedule. We do not use IBM Backup for VPC for the pool snapshots.** Reasons, in plain words:
-- IBM's plans run per share and know nothing of the others. They cannot give one moment across a pool, cannot freeze guests, and cannot write the manifest.
+- IBM's plans run per share and know nothing of the others. They cannot give one restore point across a pool, cannot freeze guests, and cannot write the manifest.
 - They need a service-to-service authorization and an account-level policy (10 per region). That is more setup, and a failure there is silent.
 - The driver still marks its snapshots with a user tag, so an administrator sees them in the IBM console.
 
@@ -109,10 +109,10 @@ Removal of old snapshots: the controller deletes the share snapshots of a pool s
 
 This is the case that matters most, and it needs **no new share and no wait**.
 
-The pool snapshot shows each old moment of the share as a read-only folder: `/.snapshot/<fingerprint>/`. A volume's folder at that moment is `/.snapshot/<fingerprint>/pvcs/pvc-<uuid>`. The existing restore Job already copies a folder into a new claim. It gets one new source: this path. So:
+The pool snapshot shows each old restore point of the share as a read-only folder: `/.snapshot/<fingerprint>/`. A volume's folder at that point in time is `/.snapshot/<fingerprint>/pvcs/pvc-<uuid>`. The existing restore Job already copies a folder into a new claim. It gets one new source: this path. So:
 
-- `kubectl backup list --pool-snapshots` shows the moments of a claim. `kubectl backup restore --from-pool-snapshot <name> --pvc NS/NAME --to-pvc NEW` makes a **new** PVC with the contents at that moment. It never writes over an existing volume. The new PVC is held back from pods until the copy ends, like a restore today.
-- For a VM, `--vm NS/NAME` restores all its disks at the one moment. It prints the disk names; the user attaches them to a VM. (Same as for backups.)
+- `kubectl backup list --pool-snapshots` shows the restore points of a claim. `kubectl backup restore --from-pool-snapshot <name> --pvc NS/NAME --to-pvc NEW` makes a **new** PVC with the contents at that point in time. It never writes over an existing volume. The new PVC is held back from pods until the copy ends, like a restore today.
+- For a VM, `--vm NS/NAME` restores all its disks at the one restore point. It prints the disk names; the user attaches them to a VM. (Same as for backups.)
 - The manifest tells us the claim's original size, owner and mode, and the chain files, so a **deleted** volume can be restored too. The new volume's `SubVolume` gets the chain list from the manifest.
 - The copy time grows with the size of the volume. A 500 GB disk takes minutes, not seconds. Phase 0 measures it. A later phase may offer an instant variant (below).
 - **Other tenants are not touched.** The Job reads one folder, read-only, and writes only into the new volume. The tenants' live folders are never written.
@@ -157,7 +157,7 @@ A new cluster resource, `PoolRestore`: `pool`, `poolSnapshot`, and `mode`.
 
 ## How it works with backups and replication
 
-- **Backup from a share snapshot (the steady source).** A backup of a plain volume reads from `/.snapshot/<fingerprint>/pvcs/<volume>` of the newest `Ready` pool snapshot, instead of the live folder. A read-only, frozen source gives a true same-moment copy of every plain volume of the pool, which the live rsync cannot. The backup's `consistency` for these volumes changes from `FileCopy` to `CrashConsistent` (the state of the share at one moment). The backup policy gets a `source` field: `Live` (today, the default) or `PoolSnapshot`. It needs a `PoolSnapshotPolicy` on the pool, and the backup waits for a snapshot that is newer than its last run, or asks for one.
+- **Backup from a share snapshot (the steady source).** A backup of a plain volume reads from `/.snapshot/<fingerprint>/pvcs/<volume>` of the newest `Ready` pool snapshot, instead of the live folder. A read-only, frozen source gives a true same-point-in-time copy of every plain volume of the pool, which the live rsync cannot. The backup's `consistency` for these volumes changes from `FileCopy` to `CrashConsistent` (the state of the share at one point in time). The backup policy gets a `source` field: `Live` (today, the default) or `PoolSnapshot`. It needs a `PoolSnapshotPolicy` on the pool, and the backup waits for a snapshot that is newer than its last run, or asks for one.
 - **VM disks keep the QEMU path.** A running VM's backup is a QEMU copy that sends only changed blocks, and it is file-system consistent with the freeze. Reading a whole disk file from a snapshot every time would read all its blocks, because a file snapshot has no change list. So VM disks do **not** move to the snapshot source. A stopped VM's disk can use it.
 - **Replication.** A replication of a plain volume (rsync) can read from the snapshot too (`source: PoolSnapshot` on the policy), for the same reason. VM replication does not change.
 - **A pool snapshot is not a backup.** It is on the same share and zone. It dies with the share and the zone. The documents will say this in the first paragraph, and the console will show "same share" on it.
@@ -169,7 +169,7 @@ A new cluster resource, `PoolRestore`: `pool`, `poolSnapshot`, and `mode`.
 - 750 snapshots per share, 100 TB per share, one a minute. The policy checks these and refuses a plan that cannot fit.
 - A share in `pending` after a restore cannot be snapshotted, and the snapshot it came from cannot be deleted until the copy ends. The controller pins that pool snapshot and does not remove it.
 - The first snapshot of a share copies all its contents. Phase 0 checks how long the first one takes and what it does to the IOPS of a busy share.
-- A pool snapshot of a pool that is expanding or draining includes only the shares that exist and are `stable` at that moment. The status lists them. A share added later is not in it. A restore of that pool snapshot does not touch the later share.
+- A pool snapshot of a pool that is expanding or draining includes only the shares that exist and are `stable` at that point in time. The status lists them. A share added later is not in it. A restore of that pool snapshot does not touch the later share.
 - A share that is `failed` or `degraded` cannot be snapshotted. The pool snapshot becomes `Failed` and the policy retries.
 - All share snapshots of one pool snapshot have the same keep time.
 - A pool snapshot is useless once a share is deleted (its snapshots go with it). The controller refuses to remove a share from the pool or delete it while a `Ready` pool snapshot depends on it, unless the administrator uses `force`.
@@ -202,7 +202,7 @@ New alert rules, in the chart with rule tests:
 
 - **Unit (fakes).** The fake VPC client gets share snapshots and share-from-snapshot. Tests: all-or-nothing creation (one share fails, the others are deleted); the spread rule; the freeze window ends at the time limit; the manifest has every volume; retention keeps `keepLast` and never removes a pinned snapshot; the policy limits; the webhook refusals; the three lists of a `PoolRestore`; a switch updates every `SubVolume` and marks the lost ones; the node plugin uses the `SubVolume` address and refuses `LostByRestore`; `from-pool-snapshot` path checks (no `..`, no links); access checks per namespace.
 - **Chart tests.** Roles, the new CRDs, the alert rules (with `promtool` rule tests), the new values.
-- **Release test stage on the lab (rovslab).** Make a pool of two shares with a plain volume and a two-disk VM (one disk on each share if possible). Write known files with checksums. Take a pool snapshot with the freeze. Then: (1) delete a volume, restore it from the snapshot, check the checksums; (2) restore the VM's disks at the one moment and boot the VM; (3) run `PoolRestore` stage 1 and check the three lists; (4) switch (with the VM stopped) and check that the pods mount the new shares, a volume created after the snapshot is refused with a clear message, and the old shares are `retired`; (5) switch back. Clean up all shares at the end.
+- **Release test stage on the lab (rovslab).** Make a pool of two shares with a plain volume and a two-disk VM (one disk on each share if possible). Write known files with checksums. Take a pool snapshot with the freeze. Then: (1) delete a volume, restore it from the snapshot, check the checksums; (2) restore the VM's disks at the one restore point and boot the VM; (3) run `PoolRestore` stage 1 and check the three lists; (4) switch (with the VM stopped) and check that the pods mount the new shares, a volume created after the snapshot is refused with a clear message, and the old shares are `retired`; (5) switch back. Clean up all shares at the end.
 - **Failure test.** Make the snapshot of the second share fail. The first share's snapshot must be deleted and the pool snapshot must be `Failed`.
 
 ## Build plan: phases, one PR each
@@ -227,7 +227,7 @@ Size, honestly: phases 1 to 4 are about the size of the backup step 8 (new CRDs,
 | Part of the goal | Met? | Why |
 |---|---|---|
 | Protect a whole pool, any size, snapshot in seconds | Yes, if checks 1, 3 and 7 pass | One snapshot call per share, in parallel |
-| Same moment for every volume | Yes for each volume (one share each). Within about 2 seconds for a VM with disks on two shares, closed by the freeze | IBM has no cross-share snapshot |
+| Same restore point for every volume | Yes for each volume (one share each). Within about 2 seconds for a VM with disks on two shares, closed by the freeze | IBM has no cross-share snapshot |
 | Recover a whole pool in minutes, any size | **Yes for the new shares and the switch, if checks 5 and 6 pass.** | IBM makes the new share from pointers, usable while `pending` |
 | Recover single volumes without affecting tenants | Yes, by copy. The time grows with the volume | The restore reads one read-only folder and writes a new PVC |
 | Whole-pool recovery in place | **No** | IBM has no restore in place. We use new shares and a switch |
@@ -239,7 +239,7 @@ Size, honestly: phases 1 to 4 are about the size of the backup step 8 (new CRDs,
 ### Options considered
 
 - **Recommended: the design above** (driver-run pool snapshots, `/.snapshot` single-volume recovery, side-by-side restore then a switch). **Meets the goal** except the rows marked No, which IBM's platform rules out.
-- **Only IBM Backup for VPC plans on the shares, no driver code.** **Does not meet the goal.** No same moment across shares, no freeze, no manifest, no volume-level recovery, no switch. It is cheap and may do for an administrator who only wants a safety net. It can run next to the design above.
+- **Only IBM Backup for VPC plans on the shares, no driver code.** **Does not meet the goal.** No same restore point across shares, no freeze, no manifest, no volume-level recovery, no switch. It is cheap and may do for an administrator who only wants a safety net. It can run next to the design above.
 - **Only single-volume recovery (phase 4), no pool recovery.** **Does not meet the goal** (a whole pool would be recovered volume by volume, at the speed of the data). Useful first step; it is phases 1 to 4.
 - **Restore a pool by copying all volumes out.** **Does not meet "minutes, any size".** It is mode `Copy`.
 

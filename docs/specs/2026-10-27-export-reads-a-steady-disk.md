@@ -4,11 +4,11 @@ Date: 2026-10-27. Status: draft for review. It fixes issue #310. It builds on `2
 
 ## Goal
 
-A restore from COS gives the disk exactly as it was at the moment the export says. For a VM with two disks, both disks come back from the same moment.
+A restore from COS gives the disk exactly as it was at the restore point the export says. For a VM with two disks, both disks come back from the same restore point.
 
 ## What goes wrong today
 
-The export Job reads the live backup folder of a volume, then tags the result with the moment the volume had when the Job started. A local backup can be applied to the same folder while the Job reads it. The export then holds a mix of two moments under one tag. The undo files (the moments folder) are read after the disk, so the disk and its undo files can disagree.
+The export Job reads the live backup folder of a volume, then tags the result with the restore point the volume had when the Job started. A local backup can be applied to the same folder while the Job reads it. The export then holds a mix of two restore points under one tag. The undo files (the restore points folder) are read after the disk, so the disk and its undo files can disagree.
 
 Evidence is in the issue: in release test run 1027-1558 the root disk export took 15 minutes. The next local backup of that disk landed in the middle. The restored VM had a data disk with 556 of the 729 files that the root disk had. The check failed. The earlier full run passed only because its exports ended before the next backup.
 
@@ -47,7 +47,7 @@ Red first, in this order:
 5. The status shows the hold as a message, not as an error, and a held volume does not fail the policy.
 6. The metric for the age of the last backup keeps growing during a hold.
 
-Then the lab proof: release test stage 18, full length, with the other cluster restore (`COS_DR_CLUSTER`). Both disks must come back from the same moment. A second run with an export made slower than the schedule on purpose (a short schedule) must also pass.
+Then the lab proof: release test stage 18, full length, with the other cluster restore (`COS_DR_CLUSTER`). Both disks must come back from the same restore point. A second run with an export made slower than the schedule on purpose (a short schedule) must also pass.
 
 ## Documents to update
 

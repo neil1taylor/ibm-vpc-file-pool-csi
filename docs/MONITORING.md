@@ -258,8 +258,8 @@ sum by (pool, share, op) (rate(vpc_file_pool_share_nfs_execute_seconds_total{op=
 | `vpc_file_pool_backup_volumes` | Gauge | `policy` | Number of volumes a backup policy backs up. |
 | `vpc_file_pool_backup_stalest_age_seconds` | Gauge | `policy` | Age of the newest backup of the volume that was backed up longest ago. A volume that was never backed up counts from the time the policy was made. This is the RPO indicator of a backup policy. |
 | `vpc_file_pool_backup_oldest_age_seconds` | Gauge | `policy` | Age of the oldest backup the policy keeps. It should stay near `keepFor`. |
-| `vpc_file_pool_backup_export_oldest_unexported_age_seconds` | Gauge | `policy` | Age of the oldest backup moment that is in the snapshot pool and not yet in COS. 0 when everything is exported. Only for policies with `spec.export`. |
-| `vpc_file_pool_backup_export_newest_age_seconds` | Gauge | `policy` | Age of the newest export to COS (the moment it sent). Before the first export, it counts from the time the policy was made, once a backup exists. Only for policies with `spec.export`. This is the RPO indicator of the COS copy. |
+| `vpc_file_pool_backup_export_oldest_unexported_age_seconds` | Gauge | `policy` | Age of the oldest backup restore point that is in the snapshot pool and not yet in COS. 0 when everything is exported. Only for policies with `spec.export`. |
+| `vpc_file_pool_backup_export_newest_age_seconds` | Gauge | `policy` | Age of the newest export to COS (the restore point it sent). Before the first export, it counts from the time the policy was made, once a backup exists. Only for policies with `spec.export`. This is the RPO indicator of the COS copy. |
 | `vpc_file_pool_backup_snapshot_pool_used_percent` | Gauge | `pool`, `share` | Percent of a share of the snapshot pool that is used, read by a Job about every 10 minutes (`df`). The controller cannot see this from custom resources: a pool counts only claims, not backups. Above 85%, the policies stop new backups to that share. |
 
 Copy results of backups are in the replication metrics: the policies the controller makes are named `backup-<policy>-<source pool>`.
@@ -274,7 +274,7 @@ Alert when a backup is late, using twice the schedule as the limit (here 12 hour
     summary: "Backup policy {{ $labels.policy }} has a volume with no backup for over 12 hours"
 ```
 
-Alert when the copy in COS is late, using twice the export schedule as the limit (here 12 hours for a `spec.export.schedule` of `6h`; with no export schedule, use twice the backup schedule). The first alert is the age of the newest export; the second is a moment that waits too long to go out:
+Alert when the copy in COS is late, using twice the export schedule as the limit (here 12 hours for a `spec.export.schedule` of `6h`; with no export schedule, use twice the backup schedule). The first alert is the age of the newest export; the second is a restore point that waits too long to go out:
 
 ```yaml
 - alert: ExportLate
@@ -287,7 +287,7 @@ Alert when the copy in COS is late, using twice the export schedule as the limit
   expr: vpc_file_pool_backup_export_oldest_unexported_age_seconds > 12 * 3600
   for: 15m
   annotations:
-    summary: "Backup policy {{ $labels.policy }} has a backup moment that has waited over 12 hours to go to COS"
+    summary: "Backup policy {{ $labels.policy }} has a backup restore point that has waited over 12 hours to go to COS"
 ```
 
 An export problem never stops the backups to the snapshot pool. `status.volumes[].exportError` says what failed.

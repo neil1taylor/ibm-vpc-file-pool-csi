@@ -5,14 +5,14 @@ Date: 2026-10-21. Status: draft for review. This is step 7 of `2026-10-20-vm-saf
 ## Goal
 
 When this step is done:
-- A snapshot of a PVC that a running VM uses shows one moment, and the guest file system is consistent. A VM restored from it boots.
+- A snapshot of a PVC that a running VM uses shows one restore point, and the guest file system is consistent. A VM restored from it boots.
 - The snapshot does not stop the VM for more than a fraction of a second.
 - Snapshots of everything else (stopped VMs, pods, databases) work as they do today.
 - You see in the Snapshot's status whether it is file-system consistent or crash consistent.
 
 ## What exists today
 
-- `CreateSnapshot` makes a Snapshot resource and starts a Job that copies the volume's folder to `/pvcs/.snapshots/snap-<name>` on the same share. For a running VM this is an unsafe copy: the Job reads the disk file while the VM writes to it, so the snapshot mixes moments. This is the same defect that step 2 removed from replication.
+- `CreateSnapshot` makes a Snapshot resource and starts a Job that copies the volume's folder to `/pvcs/.snapshots/snap-<name>` on the same share. For a running VM this is an unsafe copy: the Job reads the disk file while the VM writes to it, so the snapshot mixes restore points. This is the same defect that step 2 removed from replication.
 - Replication already has the safe copy (`pkg/vmcopy`): freeze the guest, start a QEMU copy of the disk, thaw, wait, then an `apply-vm-disk` Job turns the staged file into a raw `disk.img`. Lab results are in the main spec. Linux and Windows both passed on 21 Oct.
 - Restore (`RestoreSnapshot`) copies the snapshot folder into a new volume. It does not care how the folder was made.
 
@@ -29,7 +29,7 @@ When this step is done:
 1. The Snapshot gets `status.vmCopy`, a small record of the copy: the VM pod, the staging file, the copy id and the phase. It has the same shape as replication's `vmCopy` state.
 2. The controller freezes the guest, tells QEMU to copy this one disk, and thaws. The copy goes to a staging file in the volume's own folder.
 3. When QEMU has finished, the controller starts an `apply-vm-disk` Job. It writes a raw `disk.img` into the snapshot folder on the same share. It has no undo file and no change list, because a snapshot is always a full copy. The Job deletes the staging file.
-4. The Snapshot becomes ready. Its status shows the copy moment and `consistency`: `FileSystemConsistent`, or `CrashConsistent` if the guest could not freeze.
+4. The Snapshot becomes ready. Its status shows the copy restore point and `consistency`: `FileSystemConsistent`, or `CrashConsistent` if the guest could not freeze.
 
 A background loop in the controller moves the copy forward every 10 seconds. Snapshots do not depend on the snapshotter calling `CreateSnapshot` again, because a copy takes minutes.
 

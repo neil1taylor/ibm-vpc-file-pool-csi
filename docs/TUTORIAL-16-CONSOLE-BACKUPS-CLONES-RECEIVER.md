@@ -2,7 +2,7 @@
 
 > **Tutorial Series:** [Index](TUTORIAL.md) | [Part 6: Replication & Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md) | [Part 10: Backup and Restore](TUTORIAL-10-BACKUP-AND-RESTORE.md) | [Part 14: Restore a Snapshot in the Console](TUTORIAL-14-CONSOLE-RESTORE.md) | **Part 16**
 
-Do three jobs in the OpenShift console, with no YAML. First, back up a volume on a schedule, restore it, and delete its backups. Second, clone a volume to a new PVC. Third, set up a replication receiver: paste its token and certificate, let the console make the Secrets, and check the connection. The words backup, moment, restore point and snapshot pool are defined in [CONTEXT.md](CONTEXT.md).
+Do three jobs in the OpenShift console, with no YAML. First, back up a volume on a schedule, restore it, and delete its backups. Second, clone a volume to a new PVC. Third, set up a replication receiver: paste its token and certificate, let the console make the Secrets, and check the connection. The words backup, restore point, restore point and snapshot pool are defined in [CONTEXT.md](CONTEXT.md).
 
 ![A backup policy selects a volume, copies it into the snapshot pool, and a restore makes a new volume](images/tutorial-16-backup-and-restore.drawio.svg)
 
@@ -116,7 +116,7 @@ Open the policy. The **Overview** tab shows the settings (**Snapshot Pool**, **S
 | **Claim** | `namespace/name` of the PVC. A volume that the policy no longer backs up says `No longer backed up, kept until <date>`. |
 | **VM** | The VM that uses the disk, or `-`. |
 | **Last Backup**, **Oldest Backup** | How long ago. A restore can go back as far as the oldest. |
-| **Restore Points** | How many older moments, besides the newest, a restore can go back to. |
+| **Restore Points** | How many older restore points, besides the newest, a restore can go back to. |
 | **Size** | What the newest backup wrote, for a VM disk. A plain volume shows `-`: its file copy does not count bytes. |
 | **Consistency** | `File copy` for a plain volume. `File-system consistent` or `Crash consistent` for a VM disk. A crash consistent copy has an orange label. |
 | **Error** | The last error, or `-`. |
@@ -163,7 +163,7 @@ The page is called **Restore from a backup**. The fields:
 | Field | Default and notes |
 |-------|-------------------|
 | **Volume** | The volume you chose. A volume that is gone is listed too, with `(no longer backed up)`, until its backups pass the keep time. A line below shows the newest backup (`The newest backup is from <time>Z.`), or, with two or more backups, the oldest and the newest (`Backups from <time>Z to <time>Z.`). The times are in UTC. |
-| **Latest backup** / **At a moment** | **Latest backup** is on. With **At a moment**, a **Moment** field appears, with the format `dd/mm/yyyy, hh:mm`. Choose a time in your time zone. The restore uses the newest backup at or before it. The page refuses a time before the oldest backup. |
+| **Latest backup** / **At a restore point** | **Latest backup** is on. With **At a restore point**, a **Restore point** field appears, with the format `dd/mm/yyyy, hh:mm`. Choose a time in your time zone. The restore uses the newest backup at or before it. The page refuses a time before the oldest backup. |
 | **Namespace** | The namespace of the backed-up claim. |
 | **New claim name** | `files-restored`. The page refuses a name that exists. |
 | **Storage class** | **Same as the backed-up claim**, with the class name. Only classes of this driver are offered. |
@@ -242,9 +242,9 @@ keep
 written
 ```
 
-To restore an earlier moment, repeat Step 5 and choose **At a moment**. The line under **Volume** shows the oldest and the newest backup. Enter a time in your own time zone. The **Moment** box stays red until you enter a time, and the **New claim name** box turns red when the claim exists already (`files-restored` does, so choose another name).
+To restore an earlier restore point, repeat Step 5 and choose **At a restore point**. The line under **Volume** shows the oldest and the newest backup. Enter a time in your own time zone. The **Restore point** box stays red until you enter a time, and the **New claim name** box turns red when the claim exists already (`files-restored` does, so choose another name).
 
-![At a moment, with the Moment box empty and the name already used](images/tutorial-16-restore-at-a-moment.png)
+![At a restore point, with the Restore point box empty and the name already used](images/tutorial-16-restore-at-a-moment.png)
 
 ---
 
@@ -273,7 +273,7 @@ oc label pvc -n ${NS} files backup-
 ![The row says No longer backed up](images/tutorial-16-no-longer-backed-up.png)
 
 2. Open **Delete backups** on the row again. The console starts a short Job in `kube-system` that only measures the backups. The box says `Measuring the backups on the snapshot pool...`. It took about 20 seconds.
-3. When the measure ends, a red box says `This removes all backups of pool-tutorial-backup/files from policy tut-console, for good`. It shows the two folders, the size and the number of moments (here `36.0 KiB, 2 moments`).
+3. When the measure ends, a red box says `This removes all backups of pool-tutorial-backup/files from policy tut-console, for good`. It shows the two folders, the size and the number of restore points (here `36.0 KiB, 2 restore points`).
 
 ![The box after the measure](images/tutorial-16-delete-confirm.png)
 
@@ -307,7 +307,7 @@ The tab shows:
   - **Step 2. Make the Secrets.** Paste the two Secret files and the Key Protect API key, then choose **Make the Secrets**. The console makes the Secrets in `kube-system`. It sends each once, never reads a Secret back, and leaves a Secret that exists already as it is.
   - **Step 3. Save the export to the policy.** Paste the `spec.export` block that the command printed, then choose **Save the export to the policy**.
   - **Step 4. Check that it works.** A line says whether volumes have reached COS.
-- **What is in the bucket.** The button **List COS contents** runs a read-only Job and shows the volumes and their moments. It is off while the policy has no export.
+- **What is in the bucket.** The button **List COS contents** runs a read-only Job and shows the volumes and their restore points. It is off while the policy has no export.
 - **Restore from COS.** A link, also on the **Backups** list. It makes a restore from the bucket, and works in a cluster that has no policy.
 
 For a policy with an export, the tab also shows **Export settings** and **Export state of each volume**.

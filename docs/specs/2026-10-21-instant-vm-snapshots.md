@@ -6,7 +6,7 @@ Date: 2026-10-21. Status: approved ("spec agreed continue"); updated with the la
 
 When this is done:
 - A snapshot of a running VM's disk takes a few seconds, whatever the disk size. No disk data is copied.
-- An OpenShift VM snapshot (`VirtualMachineSnapshot`) of a VM with several disks gives disks from one moment: the moment OpenShift froze the guest. The snapshot reports that moment truthfully.
+- An OpenShift VM snapshot (`VirtualMachineSnapshot`) of a VM with several disks gives disks from one restore point: the time OpenShift froze the guest. The snapshot reports that time truthfully.
 - Deleting a snapshot merges its file away while the VM runs. The merge copies only the data that changed.
 - A VM with snapshots restarts and live-migrates without losing data.
 - If anything that this method needs is missing, the VM refuses to start rather than start on the wrong data.
@@ -18,7 +18,7 @@ Gap against the goal (VMware-like): in VMware, "revert to snapshot" is instant. 
 ## What exists today
 
 - A snapshot of a running VM disk is a full QEMU copy at 20 MB/s by default, then a second full copy by a Job. A 500 GB disk takes about 7 hours.
-- The copy starts after `CreateSnapshot` has returned, so the reported moment is wrong. On the lab cluster, OpenShift froze the guest for 1 second, then our driver froze it again 3 seconds later, for one disk only (21 Oct, `VM-INSTANT-SNAPSHOTS.md`). Disks of one VM come from different moments. This is the root cause of issue #14.
+- The copy starts after `CreateSnapshot` has returned, so the reported restore point is wrong. On the lab cluster, OpenShift froze the guest for 1 second, then our driver froze it again 3 seconds later, for one disk only (21 Oct, `VM-INSTANT-SNAPSHOTS.md`). Disks of one VM come from different restore points. This is the root cause of issue #14.
 - The driver can already run commands in a VM's `virt-launcher` pod (`pkg/vmcopy`, using `pods/exec`).
 
 ## Design
@@ -68,7 +68,7 @@ For a running VM, inside `CreateSnapshot`:
 
 For a stopped VM: a Job runs `qemu-img create -f qcow2 -b <top> -F <format> snap-<n>.qcow2`, then steps 3 to 6. The next start uses the new file through the hook.
 
-A snapshot request that is not from OpenShift (a plain `VolumeSnapshot`) for one disk of a multi-disk VM covers only that disk. To cover all disks at one moment, use an OpenShift VM snapshot. It freezes the guest first, and each disk's snapshot lands inside that freeze. On the lab cluster, the freeze lasted 1 second and each instant snapshot took about 2 seconds, so the freeze timeout matters. The default KubeVirt timeout is longer than this, but this needs a lab check (see below).
+A snapshot request that is not from OpenShift (a plain `VolumeSnapshot`) for one disk of a multi-disk VM covers only that disk. To cover all disks at one point in time, use an OpenShift VM snapshot. It freezes the guest first, and each disk's snapshot lands inside that freeze. On the lab cluster, the freeze lasted 1 second and each instant snapshot took about 2 seconds, so the freeze timeout matters. The default KubeVirt timeout is longer than this, but this needs a lab check (see below).
 
 ### Deleting a snapshot (merge)
 
@@ -108,7 +108,7 @@ When a claim is deleted and its disk still has snapshots, the driver keeps the f
 - **Restore of a backup into a disk (`restore-vm-disk`, PR #68):** refuses a disk that has a chain. The user deletes or flattens snapshots first.
 - **Clone of a VM disk:** a clone flattens the chain (`qemu-img convert`), the same as a restore.
 - **Golden images:** not affected; they are plain raw files.
-- **Group snapshots:** unchanged by this spec. An OpenShift VM snapshot gives one moment for all disks without them.
+- **Group snapshots:** unchanged by this spec. An OpenShift VM snapshot gives one restore point for all disks without them.
 
 ### Code and docs that change
 
@@ -159,13 +159,13 @@ A restored disk could be a new overlay file in the new folder, on top of the sna
 - The webhook adds the hook only to VMs that have snapshots, and only while the gate is on. It does not block VM starts if it is down. Safety comes from the read-only rule.
 - Chain state lives in the SubVolume status. After each change the driver reads the real chain from QEMU, and the real chain wins.
 - At most 16 snapshot files per disk. More are refused with a clear message, because long chains slow reads.
-- A plain `VolumeSnapshot` covers one disk. All disks at one moment comes from an OpenShift VM snapshot. No new group snapshot work.
+- A plain `VolumeSnapshot` covers one disk. All disks at one point in time comes from an OpenShift VM snapshot. No new group snapshot work.
 - Deleting a snapshot is a merge into its own file, so other snapshots never move.
 - A restore is a full, sparse copy. Instant restore is part 2.
 - A claim with snapshots keeps its folder until the last snapshot goes.
 - Each snapshot is charged 10 % of the disk size; real use is measured and shown.
 - Turning the gate off never deletes data. VMs with chains refuse to start until you run `flatten`.
-- The wrong-moment bug in the copy method and the other snapshot bugs found on 21 Oct are fixed in separate issues, not in this build. The exception is the restore size check (#98), which the restore path needed.
+- The wrong-point-in-time bug in the copy method and the other snapshot bugs found on 21 Oct are fixed in separate issues, not in this build. The exception is the restore size check (#98), which the restore path needed.
 - Changed while building: replication makes a full copy after each snapshot instead of moving its change list to the new file. Moving it safely would need the change list and the snapshot in one QEMU step, which libvirt does not offer; a full copy is always correct.
 - Changed while building: a clone of a disk with snapshots is refused instead of flattened. Restoring a snapshot does the same job.
 - Changed while building: new files name their backing file by file name only, and the stopped-VM and restore Jobs run in KubeVirt's virt-launcher image (it has `qemu-img`), mount only the folders they need, and check the chain before they open it.

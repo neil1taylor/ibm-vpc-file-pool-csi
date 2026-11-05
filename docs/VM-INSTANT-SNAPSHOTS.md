@@ -119,7 +119,7 @@ All tests were by hand, with `virsh` in the VM's pod and the hook from a ConfigM
 | Restore 2 frozen disks to a new VM | booted; counters on both disks matched (106 and 106); copy of a 30 GB disk with 2 GB used: 165 s | not tested |
 
 Also seen:
-- An OpenShift VM snapshot with today's driver: OpenShift froze the guest for 1 second, then the driver froze it again 3 seconds later for one disk only. That is the wrong-moment defect this design removes.
+- An OpenShift VM snapshot with today's driver: OpenShift froze the guest for 1 second, then the driver froze it again 3 seconds later for one disk only. That is the wrong-point-in-time defect this design removes.
 - libvirt writes absolute paths for the chain (`/var/run/kubevirt-private/vmi-disks/<volume>/...`). That path is the same in every VM pod. Driver Jobs that work on a chain mount the volume at the same path.
 - libvirt does not delete files after a merge. The driver must.
 

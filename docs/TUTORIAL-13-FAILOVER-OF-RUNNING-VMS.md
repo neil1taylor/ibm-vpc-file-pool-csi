@@ -2,7 +2,7 @@
 
 > **Tutorial Series:** [Index](TUTORIAL.md) | [Part 12: Replicating Running VMs](TUTORIAL-12-REPLICATING-RUNNING-VMS.md) | **Part 13**
 
-Start a replicated VM on the destination (DR) cluster. Choose the moment it starts from: the newest one, or an earlier restore point. The words failover, rewind, moment and restore point are defined in [CONTEXT.md](CONTEXT.md).
+Start a replicated VM on the destination (DR) cluster. Choose the restore point it starts from: the newest one, or an earlier restore point. The words failover, rewind and restore point are defined in [CONTEXT.md](CONTEXT.md).
 
 **Time:** about 30 minutes, plus the time to copy a disk if you rewind.
 **Before you start:** finish [Part 12](TUTORIAL-12-REPLICATING-RUNNING-VMS.md), so the destination holds copies of a VM with at least one good copy of every disk.
@@ -10,12 +10,12 @@ Start a replicated VM on the destination (DR) cluster. Choose the moment it star
 What the failover tool does and does not do:
 
 - It reads the metadata that replication left on the destination share. It creates a SubVolume, a PersistentVolume and a PVC for each volume on the DR cluster.
-- For a running VM, it picks the newest moment that all disks of the VM can show, so the disks fit each other. It rolls back a copy that stopped half way.
+- For a running VM, it picks the newest restore point that all disks of the VM can show, so the disks fit each other. It rolls back a copy that stopped half way.
 - It does **not** make the VM, start the workload or change DNS. You apply the VM definition yourself.
 
 ![The failover tool reads the replicated folders on the destination share and makes a SubVolume, PV and PVC for each volume; you apply the VM](images/tutorial-13-failover.drawio.svg)
 
-> **Rewind before you start the VM.** A VM that runs on the latest disk writes to it. After that, the disk no longer matches its restore points, and the tool refuses to rewind it. If you may want an earlier moment, rewind first.
+> **Rewind before you start the VM.** A VM that runs on the latest disk writes to it. After that, the disk no longer matches its restore points, and the tool refuses to rewind it. If you may want an earlier restore point, rewind first.
 
 ---
 
@@ -144,7 +144,7 @@ export FAILOVER_PATH=/mnt/dr${RECV_SUB}/repl
 failover plan --nfs-mount-path ${FAILOVER_PATH}
 ```
 
-**Expected:** a table with one row for each volume. The columns are SubVolume, PVC, namespace, size, age of the last copy and policy. Then the RPO (the age of the oldest last copy) and a list of the VMs with the moment each will show:
+**Expected:** a table with one row for each volume. The columns are SubVolume, PVC, namespace, size, age of the last copy and policy. Then the RPO (the age of the oldest last copy) and a list of the VMs with the restore point each will show:
 
 ```
 Failover Plan
@@ -158,7 +158,7 @@ pvc-7361d4f2-3a72-4eb3-911e-1afe41ce8708  my-vm-rootdisk  tutf-vms   20         
 pvc-becf191e-0669-45da-b29f-c08d8708ad8b  my-vm-datadisk  tutf-vms   2           21m11s ago  tutf-vm-to-dr
 
 Running VM disks
-  VM tutf-vms/my-vm shows the moment 2026-11-05T11:21:45Z
+  VM tutf-vms/my-vm shows the restore point 2026-11-05T11:21:45Z
     pvc-7361d4f2-3a72-4eb3-911e-1afe41ce8708: in place
     pvc-becf191e-0669-45da-b29f-c08d8708ad8b: in place
 
@@ -166,12 +166,12 @@ To execute failover, run:
   kubectl failover execute --nfs-mount-path /data/repl --dr-pool <POOL> --dr-share-ip <IP>
 ```
 
-`in place` means the disk already shows that moment, so it is used as it is. The tool refuses with "a copy is still being applied" if a copy is in progress. Wait for it to end, or add `--force`, which rolls the unfinished copy back first.
+`in place` means the disk already shows that restore point, so it is used as it is. The tool refuses with "a copy is still being applied" if a copy is in progress. Wait for it to end, or add `--force`, which rolls the unfinished copy back first.
 
-To use an earlier moment, list the moments that all disks of each VM can show (newest first):
+To use an earlier restore point, list the restore points that all disks of each VM can show (newest first):
 
 ```bash
-failover plan --nfs-mount-path ${FAILOVER_PATH} --list-moments
+failover plan --nfs-mount-path ${FAILOVER_PATH} --list-restore-points
 ```
 
 **Expected:**
@@ -185,11 +185,11 @@ VM tutf-vms/my-vm
 The list reaches back as far as `restorePointKeepHours` of the policy (24 hours by default). Choose one:
 
 ```bash
-export MOMENT=2026-11-05T11:06:15Z
-failover plan --nfs-mount-path ${FAILOVER_PATH} --rewind-to ${MOMENT}
+export RESTORE_POINT=2026-11-05T11:06:15Z
+failover plan --nfs-mount-path ${FAILOVER_PATH} --rewind-to ${RESTORE_POINT}
 ```
 
-**Expected:** the plan now says `VM tutf-vms/my-vm shows the moment 2026-11-05T11:06:15Z` and, for each disk, `rewind (copies the whole disk into a new folder)`. The RPO grows to the age of that moment. The tool uses the newest moment at or before `--rewind-to`.
+**Expected:** the plan now says `VM tutf-vms/my-vm shows the restore point 2026-11-05T11:06:15Z` and, for each disk, `rewind (copies the whole disk into a new folder)`. The RPO grows to the age of that restore point. The tool uses the newest restore point at or before `--rewind-to`.
 
 ### Or use the Failover resource and the console
 
@@ -208,7 +208,7 @@ YAML
 dr get failover plan-1 -o yaml
 ```
 
-**Expected:** `phase: Planned` after about 5 seconds, with the VMs and the moments in the status:
+**Expected:** `phase: Planned` after about 5 seconds, with the VMs and the restore points in the status:
 
 ```
 status:
@@ -221,15 +221,15 @@ status:
       subVolume: pvc-65968d12-062b-4b51-9590-269905b09e51
     - rewind: false
       subVolume: pvc-fbe4c104-cd1e-48a7-b465-0a77466d979b
-    moment: "2026-11-05T08:32:15Z"
-    moments:
+    restorePoint: "2026-11-05T08:32:15Z"
+    restorePoints:
     - "2026-11-05T08:32:15Z"
     - "2026-11-05T08:17:15Z"
     name: tutf-vms/my-vm
   volumes: [one entry for each disk, with its PVC name, namespace, size and subPath]
 ```
 
-To plan an earlier moment, add `rewindTo: "2026-11-05T08:17:15Z"` to the spec. The plan then says `rewind: true` for each disk and `rpo: 17m4s`.
+To plan an earlier restore point, add `rewindTo: "2026-11-05T08:17:15Z"` to the spec. The plan then says `rewind: true` for each disk and `rpo: 17m4s`.
 
 To run the failover, make the namespace of the VM on the DR cluster, then apply an Execute with the same `basePath` and `rewindTo` and with the pool:
 
@@ -250,7 +250,7 @@ dr get failover exec-1 -o jsonpath='{.status.phase}{"\n"}'
 dr get pvc -n vms
 ```
 
-Replace `${DR_POOL}` with the pool name (the heredoc is quoted, so the shell does not do it). **Expected:** `Done` after 5 minutes for a rewind of a 20 GiB and a 2 GiB disk (without `rewindTo` it is much faster), and the PVCs `Bound` with PVs named `dr-pvc-<uuid>`. In the lab, the VM definition from Step 6 then started on the rewound disks in 20 seconds, the guest agent connected, the file written after the chosen moment was not there, and the kernel log held no file-system errors.
+Replace `${DR_POOL}` with the pool name (the heredoc is quoted, so the shell does not do it). **Expected:** `Done` after 5 minutes for a rewind of a 20 GiB and a 2 GiB disk (without `rewindTo` it is much faster), and the PVCs `Bound` with PVs named `dr-pvc-<uuid>`. In the lab, the VM definition from Step 6 then started on the rewound disks in 20 seconds, the guest agent connected, the file written after the chosen restore point was not there, and the kernel log held no file-system errors.
 
 If `basePath` is wrong, the Plan fails and says which folder it looked for; if it finds copies in another folder it names the `basePath` to use. An Execute needs a Plan with the same `basePath` and a `drPool`. The Recovery page does not set `basePath`: with a `destinationBasePath` other than `/`, make the Plan and the Execute with `kubectl` as above, or use `destinationBasePath: /` for the policy.
 
@@ -258,10 +258,10 @@ If `basePath` is wrong, the Plan fails and says which folder it looked for; if i
 
 ## Step 4: Rewind the disks (optional)
 
-Skip this step if the plan says `in place` for every disk and you want the newest moment.
+Skip this step if the plan says `in place` for every disk and you want the newest restore point.
 
 ```bash
-failover execute --nfs-mount-path ${FAILOVER_PATH} --prepare-only --rewind-to ${MOMENT}
+failover execute --nfs-mount-path ${FAILOVER_PATH} --prepare-only --rewind-to ${RESTORE_POINT}
 ```
 
 `--prepare-only` rolls back unfinished copies and rewinds the disks, then stops. It needs no cluster and no pool name. Each rewound disk goes into a new folder next to the original, named `<volume>.rewind-<epoch>`. The latest disk is not changed. A rewind copies the whole disk, so it can take minutes (about 6 minutes for a 20 GiB and a 2 GiB disk in the lab).
@@ -290,7 +290,7 @@ The tool makes each PVC in the namespace it had on the source cluster, so make t
 dr create namespace vms --dry-run=client -o yaml | dr apply -f -
 ```
 
-### The newest moment
+### The newest restore point
 
 ```bash
 failover execute --nfs-mount-path ${FAILOVER_PATH} \
@@ -319,18 +319,18 @@ pvc-becf191e-0669-45da-b29f-c08d8708ad8b  my-vm-datadisk  tutf-vms   Bound      
 
 The PVs carry the pool's NFS mount options, including `sec=sys`, and the PVCs name no StorageClass, so the cluster default class does not apply. Check: `dr get pv dr-pvc-<uuid> -o jsonpath='{.spec.mountOptions}'`. **Expected:** `["nfsvers=4.1","soft","timeo=600","retrans=3","sec=sys"]`.
 
-### An earlier moment (after Step 4)
+### An earlier restore point (after Step 4)
 
-Add `--rewind-to ${MOMENT}`. A dry run shows the rewound folder (`...pvc-<uuid>.rewind-<epoch>`) in each PV path and checks it the same way as a real run:
+Add `--rewind-to ${RESTORE_POINT}`. A dry run shows the rewound folder (`...pvc-<uuid>.rewind-<epoch>`) in each PV path and checks it the same way as a real run:
 
 ```bash
 failover execute --nfs-mount-path ${FAILOVER_PATH} \
   --dr-pool ${DR_POOL} --dr-share-ip ${DR_IP} --dr-export-path "${DR_EXPORT_PATH}" \
-  --rewind-to ${MOMENT} --dry-run
+  --rewind-to ${RESTORE_POINT} --dry-run
 
 failover execute --nfs-mount-path ${FAILOVER_PATH} \
   --dr-pool ${DR_POOL} --dr-share-ip ${DR_IP} --dr-export-path "${DR_EXPORT_PATH}" \
-  --rewind-to ${MOMENT}
+  --rewind-to ${RESTORE_POINT}
 ```
 
 Apply the current SubVolume CRD (`config/crd`) first: older ones refuse the `.rewind-<epoch>` folder.
@@ -349,9 +349,9 @@ dr get vmi -n vms -w
 
 **Expected:** `VM my-vm was scheduled to start`. In the lab the VM was `Running` with the guest agent connected 17 seconds later. The guest agent connects. The kernel log shows no file-system errors if the copy was `FileSystemConsistent`.
 
-Check your data. For a VM that logs files, count the files and compare their checksums to the log. In a lab test with a VM that wrote a file and logged its checksum every 2 seconds, a VM started from the rewound disk had exactly the files up to the chosen moment (and not the file written later), and a VM started from the newest moment had all the files up to the last copy. All checksums matched. Both VMs started in under a minute. In a second lab test, the VM started from the newest moment had the 50 MB file `/var/tmp/big` that was written before the last copy and the kernel log held no file-system errors.
+Check your data. For a VM that logs files, count the files and compare their checksums to the log. In a lab test with a VM that wrote a file and logged its checksum every 2 seconds, a VM started from the rewound disk had exactly the files up to the chosen restore point (and not the file written later), and a VM started from the newest restore point had all the files up to the last copy. All checksums matched. Both VMs started in under a minute. In a second lab test, the VM started from the newest restore point had the 50 MB file `/var/tmp/big` that was written before the last copy and the kernel log held no file-system errors.
 
-> **After the VM runs, the disk no longer fits its restore points.** `failover execute --prepare-only --rewind-to ...` and `failover execute --rewind-to ...` now refuse with `Error: pvc-... has changed since its last copy (a VM has probably run on it), so its restore points no longer fit it and it cannot be rewound`. To try another moment, fail over again from copies that no VM has used.
+> **After the VM runs, the disk no longer fits its restore points.** `failover execute --prepare-only --rewind-to ...` and `failover execute --rewind-to ...` now refuse with `Error: pvc-... has changed since its last copy (a VM has probably run on it), so its restore points no longer fit it and it cannot be rewound`. To try another restore point, fail over again from copies that no VM has used.
 
 ---
 
@@ -369,8 +369,8 @@ The PVs that failover made have names that start with `dr-`. Their SubVolumes ha
 
 ## What you learned
 
-- `kubectl failover plan` shows the RPO and the moment each VM will show.
-- `--list-moments` and `--rewind-to` choose an earlier restore point.
+- `kubectl failover plan` shows the RPO and the restore point each VM will show.
+- `--list-restore-points` and `--rewind-to` choose an earlier restore point.
 - `--prepare-only` rewinds the disks before any VM runs on them.
 - `execute` makes the PVCs. You apply the VM definition and start the VM.
 
