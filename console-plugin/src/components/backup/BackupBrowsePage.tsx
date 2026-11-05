@@ -71,7 +71,7 @@ const timeText = (iso: string): string => (iso.length >= 19 ? `${iso.slice(0, 10
 const isEnded = (e: GatewayError): boolean => e.status === 410 || (e.status === 404 && e.message === 'no such session');
 
 /**
- * Looks inside one backup of a volume: folders, files, links and the moment to look at, with downloads of a
+ * Looks inside one backup of a volume: folders, files, links and the restore point to look at, with downloads of a
  * file or a folder (as a tar). It only reads. Every call goes to the backup gateway with the person's own
  * token, and the gateway checks the person's right to read the backups of the claim's namespace each time.
  */
@@ -89,7 +89,7 @@ const BackupBrowsePage: React.FC = () => {
   });
   const cosState = cosSourceState(policy, namespace, pvc);
 
-  // Only the newest copy in COS can be browsed, so a moment of the link is not used there.
+  // Only the newest copy in COS can be browsed, so a restore point of the link is not used there.
   const moment = askedSource === 'cos' ? '' : query.moment;
   const session = useBrowseSession(
     namespace ? { policy: name, namespace, pvc, ...(moment ? { moment } : {}), ...(askedSource ? { source: askedSource } : {}) } : undefined,
@@ -120,8 +120,8 @@ const BackupBrowsePage: React.FC = () => {
     setPath((p) => (p.length ? [] : p));
   }, [sessionName]);
 
-  // The choice belongs to one claim at one moment. It survives a folder change and an ended session
-  // (the restore does not use the session), and it is dropped when the claim or the moment changes.
+  // The choice belongs to one claim at one restore point. It survives a folder change and an ended session
+  // (the restore does not use the session), and it is dropped when the claim or the restore point changes.
   const choiceOf = `${claim}|${moment}`;
   useEffect(() => {
     setSelected((old) => (old.size ? new Map() : old));
@@ -430,7 +430,7 @@ const BackupBrowsePage: React.FC = () => {
           <CardBody>
             <FormSelect
               id="browse-moment"
-              aria-label="Moment"
+              aria-label="Restore point"
               value={moment}
               onChange={(_e, v) => history.replace(browsePath(name, claim, v || undefined, askedSource || undefined))}
               isDisabled={fromCOS}
@@ -443,13 +443,13 @@ const BackupBrowsePage: React.FC = () => {
             </FormSelect>
             {fromCOS ? null : guest ? (
               <Alert variant="info" isInline isPlain title="The next backup of this disk waits while you look" style={{ marginTop: 8 }}>
-                A VM disk is shown as it was at the moment you choose, without starting the VM. While this page is open the next backup copy of
+                A VM disk is shown as it was at the restore point you choose, without starting the VM. While this page is open the next backup copy of
                 the disk is held back, for 2 hours at most. Close the page when you are done.
               </Alert>
             ) : (
               !moment && (
                 <Alert variant="info" isInline isPlain title="The latest copy may change while you look" style={{ marginTop: 8 }}>
-                  The next backup replaces files in it one at a time. Choose a moment to look at a copy that stays as it is.
+                  The next backup replaces files in it one at a time. Choose a restore point to look at a copy that stays as it is.
                 </Alert>
               )
             )}

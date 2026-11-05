@@ -13,7 +13,7 @@ const ForceOption: React.FC<Props> = ({ onPlanWithForce, isBusy }) => {
     <Alert variant="warning" isInline title="You can go on anyway, but a copy that is not finished is lost">
       <p>
         Waiting is safer: the copy ends by itself, and then you can plan again. If you go on now, the copy that is
-        still being applied is rolled back first, and the disk shows the moment before it.
+        still being applied is rolled back first, and the disk shows the restore point before it.
       </p>
       <Checkbox
         id="failover-force-ack"

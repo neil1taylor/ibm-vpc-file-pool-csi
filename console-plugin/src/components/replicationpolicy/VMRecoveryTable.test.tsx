@@ -28,7 +28,7 @@ describe('VMRecoveryTable', () => {
     );
     expect(screen.getByText('default/web')).toBeTruthy();
     expect(screen.getByText('File-system consistent')).toBeTruthy();
-    expect(screen.getByText('2 moments: 1h, 2h')).toBeTruthy();
+    expect(screen.getByText('2 restore points: 1h, 2h')).toBeTruthy();
     expect(screen.queryByText(/older than twice/)).toBeNull();
   });
 
@@ -58,6 +58,6 @@ describe('VMRecoveryTable', () => {
         vms={[{ name: 'default/db', subVolumes: ['a', 'b'], copyMoment: '2026-10-20T11:30:00Z', commonMoments: [] }]}
       />,
     );
-    expect(screen.getByText(/disks share no moment/)).toBeTruthy();
+    expect(screen.getByText(/disks share no restore point/)).toBeTruthy();
   });
 });

@@ -261,7 +261,7 @@ export interface ReplicationPolicyStatus {
   lastSyncTime?: string;
   lastSyncDuration?: string;
   subVolumeStatuses?: SubVolumeReplicationStatus[];
-  /** One entry for each running VM: the moments all its disks share. */
+  /** One entry for each running VM: the restore points all its disks share. */
   vms?: VMReplicationStatus[];
   consecutiveFailures: number;
   lastError?: string;
@@ -269,13 +269,17 @@ export interface ReplicationPolicyStatus {
   conditions?: Condition[];
 }
 
-/** A running VM in a policy. commonMoments are the moments ALL its disks can show, newest first. */
+/** A running VM in a policy. commonMoments are the restore points ALL its disks can show, newest first. */
 export interface VMReplicationStatus {
   /** namespace/name */
   name: string;
   subVolumes: string[];
+  copyRestorePoint?: string;
+  /** Written for one release next to copyRestorePoint; read only when the new field is missing. */
   copyMoment?: string;
   consistency?: 'FileSystemConsistent' | 'CrashConsistent';
+  commonRestorePoints?: string[];
+  /** Written for one release next to commonRestorePoints; read only when the new field is missing. */
   commonMoments?: string[];
 }
 
@@ -284,16 +288,20 @@ export interface SubVolumeReplicationStatus {
   lastSyncTime?: string;
   bytesSynced?: number;
   lastError?: string;
-  /** Running VM disks only: the moment the last good copy shows. */
+  /** Running VM disks only: the restore point the last good copy shows. */
+  copyRestorePoint?: string;
+  /** Written for one release next to copyRestorePoint; read only when the new field is missing. */
   copyMoment?: string;
   consistency?: 'FileSystemConsistent' | 'CrashConsistent';
   /** Why a copy is only crash consistent. */
   consistencyReason?: string;
   /** Empty means the next copy is a full copy. */
   vmChangeList?: string;
-  /** How many earlier copies the destination keeps, and the moment of the oldest. */
+  /** How many earlier copies the destination keeps, and the restore point of the oldest. */
   restorePoints?: number;
   oldestRestorePoint?: string;
+  restorePointTimes?: string[];
+  /** Written for one release next to restorePointTimes. */
   restorePointMoments?: string[];
   /** namespace/name of the VM that owns the disk. */
   vmName?: string;
@@ -438,6 +446,8 @@ export interface BackupRestoreSpec {
   policy: string;
   sourceNamespace?: string;
   sourceName?: string;
+  restorePoint?: string;
+  /** Old name of restorePoint. The console writes restorePoint; this is for objects made before. */
   moment?: string;
   targetNamespace: string;
   targetName: string;
@@ -461,6 +471,8 @@ export interface RestoreFromCOS {
 export interface BackupRestoreStatus {
   phase?: 'Pending' | 'Provisioning' | 'Restoring' | 'Done' | 'Failed';
   message?: string;
+  restoredRestorePoint?: string;
+  /** Written for one release next to restoredRestorePoint. */
   restoredMoment?: string;
   latest?: boolean;
   fetched?: boolean;
@@ -593,7 +605,7 @@ export interface FailoverSpec {
   /** The destination claim to read. Empty means the claim the Helm chart names for the receiver. */
   source?: string;
   action: 'Plan' | 'Execute';
-  /** Limits the moment of each VM to the newest one at or before it. */
+  /** Limits the restore point of each VM to the newest one at or before it. */
   rewindTo?: string;
   /** Only these VMs ("namespace/name"). Empty means every VM on the copy. */
   vms?: string[];
@@ -615,6 +627,8 @@ export interface FailoverStatus {
   rpo?: string;
   vms?: FailoverVM[];
   volumes?: FailoverVolume[];
+  restorePointsTruncated?: boolean;
+  /** Written for one release next to restorePointsTruncated. */
   momentsTruncated?: boolean;
   createdPVCs?: FailoverPVC[];
 }
@@ -622,16 +636,20 @@ export interface FailoverStatus {
 export interface FailoverVM {
   /** namespace/name */
   name: string;
-  /** The moment the failed-over disks will show. */
-  moment: string;
-  /** The moments all disks of the VM can show, newest first. */
+  /** The restore point the failed-over disks will show. */
+  restorePoint?: string;
+  /** The restore points all disks of the VM can show, newest first. */
+  restorePoints?: string[];
+  /** Written for one release next to restorePoint; read only when the new field is missing. */
+  moment?: string;
+  /** Written for one release next to restorePoints; read only when the new field is missing. */
   moments?: string[];
   disks: FailoverDisk[];
 }
 
 export interface FailoverDisk {
   subVolume: string;
-  /** True if the disk is rewound to the VM's moment (it copies the whole disk). */
+  /** True if the disk is rewound to the VM's restore point (it copies the whole disk). */
   rewind: boolean;
 }
 

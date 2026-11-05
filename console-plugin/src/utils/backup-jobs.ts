@@ -123,7 +123,7 @@ const MOMENTS_PATH = new RegExp(`^/backup/${POLICY_DIR}/\\.moments/pvcs/pvc-[a-f
 const POLICY_NAME = new RegExp(`^${POLICY_DIR}$`);
 const VOLUME_SUBPATH = /^\/pvcs\/pvc-[a-f0-9-]{36}$/;
 
-/** The backup folder and the moments folder of one volume of a policy; subPath is /pvcs/pvc-... from the status. */
+/** The backup folder and the restore points folder of one volume of a policy; subPath is /pvcs/pvc-... from the status. */
 export function backupFolders(policy: string, subPath: string): { backup: string; moments: string } {
   if (!POLICY_NAME.test(policy)) throw new Error(`"${policy}" is not a policy name`);
   if (!VOLUME_SUBPATH.test(subPath)) throw new Error(`"${subPath}" is not a volume folder`);
@@ -218,7 +218,7 @@ function shareJobObjects(input: ShareJobInput, script: string): ShareJobObjects 
 /** The objects of the Job that reports how many bytes the backup of one volume uses. It changes nothing. */
 export function buildMeasureBackupObjects(input: ShareJobInput): ShareJobObjects {
   checkBackupFolders(input.backupPath, input.momentsPath);
-  // One du run over both folders: each moment of a plain volume is a folder of hard links to the backup
+  // One du run over both folders: each restore point of a plain volume is a folder of hard links to the backup
   // folder's files, and a single run counts each file once.
   const script = `set -eu
 set --
@@ -238,7 +238,7 @@ echo "$total" > /dev/termination-log
   return shareJobObjects(input, script);
 }
 
-/** The objects of the Job that removes the backup folder and the moments folder of one volume, for good. */
+/** The objects of the Job that removes the backup folder and the restore points folder of one volume, for good. */
 export function buildRemoveBackupObjects(input: ShareJobInput): ShareJobObjects {
   checkBackupFolders(input.backupPath, input.momentsPath);
   const script = `set -eu\nrm -r -f -- "/share0${input.backupPath}"\nrm -r -f -- "/share0${input.momentsPath}"\n`;
@@ -357,7 +357,7 @@ const secretFileVolume = (name: string, secret: string, key: string) => ({
 });
 
 /**
- * The read-only Job that lists the volumes and the export moments in a policy's area of the bucket. It runs the
+ * The read-only Job that lists the volumes and the export restore points in a policy's area of the bucket. It runs the
  * driver image, which holds Kopia. The Job holds only references to Secrets; the keys are never in its spec.
  * volume, if set, limits the list to one volume.
  */

@@ -200,7 +200,7 @@ const DeleteBackupsDialog: React.FC<Props> = ({ policy, volume, onClose }) => {
               <code>{folders.moments}</code>
             </div>
             <div>
-              {humanizeBytes(size)}, {moments} {moments === 1 ? 'moment' : 'moments'}, on the share of pool {policy.spec.snapshotPool}.
+              {humanizeBytes(size)}, {moments} {moments === 1 ? 'restore point' : 'restore points'}, on the share of pool {policy.spec.snapshotPool}.
               The backups cannot be recovered. The volume itself is not touched.
             </div>
           </Alert>

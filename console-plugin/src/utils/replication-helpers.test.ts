@@ -127,6 +127,13 @@ describe('describeVolumeStatus', () => {
     expect(d.restorePoints).toBe('-');
   });
 
+  it('a VM disk reads copyRestorePoint, as well as the old copyMoment', () => {
+    const d = describeVolumeStatus({ ...base, copyRestorePoint: '2026-10-20T10:00:00Z', consistency: 'FileSystemConsistent' });
+    expect(d.isVMDisk).toBe(true);
+    expect(d.copyMoment).not.toBe('-');
+    expect(d.nextCopy).toBe('full');
+  });
+
   it('a VM disk shows its copy moment, consistency and restore points, with times as ages like the rest of the page', () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-10-20T12:00:00Z'));
     const d = describeVolumeStatus({
@@ -269,6 +276,23 @@ describe('describeVMRecovery', () => {
     expect(none.stale).toBe(true);
     const odd = describeVMRecovery([{ name: 'x', subVolumes: ['a'], copyMoment: '2020-01-01T00:00:00Z' }], 'weekly', now)[0];
     expect(odd.stale).toBe(false);
+  });
+
+  it('reads the new status names, and the old ones from a status written before the change', () => {
+    const fresh = describeVMRecovery(
+      [{ name: 'a/b', subVolumes: ['x'], copyRestorePoint: '2026-10-20T11:00:00Z', commonRestorePoints: ['2026-10-20T11:00:00Z', '2026-10-20T10:00:00Z'] }],
+      '1h',
+      now,
+    )[0];
+    expect(fresh.copyMoment).toBe('1h');
+    expect(fresh.momentCount).toBe(2);
+    const old = describeVMRecovery(
+      [{ name: 'a/b', subVolumes: ['x'], copyMoment: '2026-10-20T11:00:00Z', commonMoments: ['2026-10-20T11:00:00Z'] }],
+      '1h',
+      now,
+    )[0];
+    expect(old.copyMoment).toBe('1h');
+    expect(old.momentCount).toBe(1);
   });
 
   it('flags a crash consistent copy and caps the list of moments', () => {

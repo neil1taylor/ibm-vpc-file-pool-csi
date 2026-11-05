@@ -146,7 +146,7 @@ describe('COSContents', () => {
     render(<COSContents repo={repo} onPick={onPick} />);
     fireEvent.click(listButton());
     await screen.findByText(VOL);
-    fireEvent.click(screen.getAllByRole('button', { name: 'Restore this moment' })[1]);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Restore from this point' })[1]);
     expect(onPick).toHaveBeenCalledWith(VOL, '2026-10-21T09:00:00Z');
   });
 

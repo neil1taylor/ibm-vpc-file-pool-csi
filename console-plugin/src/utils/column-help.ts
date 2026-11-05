@@ -47,8 +47,8 @@ export const COLUMN_HELP = {
     text: 'Syncs in a row that failed; normal is 0. When it reaches the retry limit of the policy (3 by default), the policy pauses and stops syncing until it is resumed.',
   },
   syncCopyMoment: {
-    title: 'Last Sync / Copy Moment',
-    text: 'For a running VM disk, the moment its last good copy shows; all disks of the VM show the same moment. For other volumes, how long ago the last sync finished.',
+    title: 'Last Sync / Copy Restore Point',
+    text: 'For a running VM disk, the restore point its last good copy shows; all disks of the VM show the same restore point. For other volumes, how long ago the last sync finished.',
   },
   syncConsistency: {
     title: 'Consistency',
@@ -56,23 +56,23 @@ export const COLUMN_HELP = {
   },
   syncRestorePoints: {
     title: 'Restore Points',
-    text: 'How many earlier copies of a running VM disk the destination keeps, so a failover can go back to an earlier moment.',
+    text: 'How many earlier copies of a running VM disk the destination keeps, so a failover can go back to an earlier restore point.',
   },
   recoveryCopyMoment: {
-    title: 'Copy Moment',
-    text: 'How long ago the newest copy of the VM was made. All disks of the VM show this moment. A warning means the copy is older than twice the schedule: check that replication is running.',
+    title: 'Copy Restore Point',
+    text: 'How long ago the newest copy of the VM was made. All disks of the VM show this restore point. A warning means the copy is older than twice the schedule: check that replication is running.',
   },
   recoveryMoments: {
-    title: 'Moments to Recover To',
-    text: 'The moments that every disk of the VM can show: the copy moment and the restore points all disks have. A recovery must use one of these, or the disks would show different times. Newest first, as ages; the list can be a few minutes old.',
+    title: 'Restore Points to Recover To',
+    text: 'The restore points that every disk of the VM can show: the copy restore point and the restore points all disks have. A recovery must use one of these, or the disks would show different times. Newest first, as ages; the list can be a few minutes old.',
   },
   recoveryPlanMoment: {
     title: 'Will Show',
-    text: 'The moment the VM shows after a failover, and how long ago that was. It is the newest moment all disks of the VM share, unless you choose an earlier one.',
+    text: 'The restore point the VM shows after a failover, and how long ago that was. It is the newest restore point all disks of the VM share, unless you choose an earlier one.',
   },
   recoveryRewindDisks: {
     title: 'Disks to Rewind',
-    text: 'A disk that does not show the moment of the VM must be rewound to it. A rewind copies the whole disk and takes minutes; the other disks are used in place.',
+    text: 'A disk that does not show the restore point of the VM must be rewound to it. A rewind copies the whole disk and takes minutes; the other disks are used in place.',
   },
   syncNextCopy: {
     title: 'Next Copy',
@@ -108,7 +108,7 @@ export const COLUMN_HELP = {
   },
   backupLast: {
     title: 'Last Backup',
-    text: 'How long ago the newest backup of this volume was made. For a running VM, all disks of the VM show the same moment.',
+    text: 'How long ago the newest backup of this volume was made. For a running VM, all disks of the VM show the same restore point.',
   },
   backupOldest: {
     title: 'Oldest Backup',
@@ -116,7 +116,7 @@ export const COLUMN_HELP = {
   },
   backupRestorePoints: {
     title: 'Restore Points',
-    text: 'How many older moments, besides the newest, a restore can go back to. Backups older than the keep time of the policy are removed.',
+    text: 'How many older restore points, besides the newest, a restore can go back to. Backups older than the keep time of the policy are removed.',
   },
   backupConsistency: {
     title: 'Consistency',
@@ -236,7 +236,7 @@ export const COLUMN_HELP = {
   },
   poolbenchAllBurst: {
     title: 'If all burst at once',
-    text: 'The IBM operations if every VM burst at the same moment. It is a worst case, and it may be over the limit.',
+    text: 'The IBM operations if every VM burst at the same time. It is a worst case, and it may be over the limit.',
   },
 } satisfies Record<string, ColumnHelp>;
 

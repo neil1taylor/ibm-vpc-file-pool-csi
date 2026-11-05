@@ -153,7 +153,7 @@ export function buildBackupRestore(input: BackupRestoreInput, nowMs: number): Ba
     targetNamespace: input.targetNamespace,
     targetName: input.targetName,
   };
-  if (input.moment) spec.moment = input.moment.replace(/\.\d+Z$/, 'Z');
+  if (input.moment) spec.restorePoint = input.moment.replace(/\.\d+Z$/, 'Z');
   if (input.storageClass) spec.storageClassName = input.storageClass;
   return {
     apiVersion: API_GROUP_VERSION,
@@ -209,11 +209,11 @@ export function localInputToISO(local: string): string {
   return !local || Number.isNaN(d.getTime()) ? '' : d.toISOString();
 }
 
-/** The link to the restore page of a policy. The claim ("namespace/name") and the moment are query values, so other pages can link to it. */
+/** The link to the restore page of a policy. The claim ("namespace/name") and the restore point are query values, so other pages can link to it. */
 export function restorePath(policy: string, claim?: string, moment?: string): string {
   const query = new URLSearchParams();
   if (claim) query.set('claim', claim);
-  if (moment) query.set('moment', moment);
+  if (moment) query.set('restorePoint', moment);
   const q = query.toString();
   return `${ROUTES.BACKUP_RESTORE.replace(':name', policy)}${q ? `?${q}` : ''}`;
 }
@@ -221,7 +221,8 @@ export function restorePath(policy: string, claim?: string, moment?: string): st
 /** The query values of the restore page. */
 export function parseRestoreQuery(search: string): { claim: string; moment: string } {
   const q = new URLSearchParams(search);
-  return { claim: q.get('claim') || '', moment: q.get('moment') || '' };
+  // A link saved before the rename has `moment`.
+  return { claim: q.get('claim') || '', moment: q.get('restorePoint') || q.get('moment') || '' };
 }
 
 export interface BackupRestoreView {
@@ -241,11 +242,12 @@ export function backupRestoreProgress(br: BackupRestore | undefined): BackupRest
     case 'Failed':
       return { state: 'failed', title: 'The restore failed', text: status.message || 'The restore failed.' };
     case 'Done': {
-      let what = 'The moment of the backup that was restored is not known.';
-      if (status.restoredMoment) {
+      let what = 'The restore point of the backup that was restored is not known.';
+      const restored = status.restoredRestorePoint ?? status.restoredMoment;
+      if (restored) {
         what = status.latest
-          ? `Restored the latest backup, from ${status.restoredMoment}.`
-          : `Restored the backup from ${status.restoredMoment}.`;
+          ? `Restored the latest backup, from ${restored}.`
+          : `Restored the backup from ${restored}.`;
       } else if (status.latest) {
         what = 'Restored the latest backup.';
       }

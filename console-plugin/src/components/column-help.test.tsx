@@ -59,7 +59,7 @@ describe('status column help', () => {
 
   it('explains the per-volume replication status columns', () => {
     render(<VolumeStatusTable statuses={[{ subVolumeName: 'pvc-1' } as never]} />);
-    expectColumnHelp('Last Sync / Copy Moment', 'Consistency', 'Restore Points', 'Next Copy', 'Status');
+    expectColumnHelp('Last Sync / Copy Restore Point', 'Consistency', 'Restore Points', 'Next Copy', 'Status');
   });
 
   it('opens the text when the button is clicked', () => {

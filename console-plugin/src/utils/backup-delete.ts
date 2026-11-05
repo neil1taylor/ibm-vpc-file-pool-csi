@@ -81,7 +81,7 @@ export function jobOutcome(job: JobLike | undefined, pods: PodLike[]): JobOutcom
   return { state: 'running' };
 }
 
-/** How many moments the delete would remove: the older restore points and the newest backup. */
+/** How many restore points the delete would remove: the older restore points and the newest backup. */
 export function momentsCount(volume: BackupVolumeStatus): number {
   return (volume.restorePoints || 0) + (volume.lastBackupTime ? 1 : 0);
 }

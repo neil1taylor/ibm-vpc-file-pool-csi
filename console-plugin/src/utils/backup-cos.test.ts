@@ -251,7 +251,8 @@ describe('buildCOSRestore', () => {
       form({ moment: '2026-10-20T09:00:00.000Z', emergencyKeySecret: 'cos-emergency', prefix: '' }),
       1761000000000,
     );
-    expect(br.spec.moment).toBe('2026-10-20T09:00:00Z');
+    expect(br.spec.restorePoint).toBe('2026-10-20T09:00:00Z');
+    expect(br.spec.moment).toBeUndefined();
     expect(br.spec.fromCOS).toMatchObject({ emergencyKeySecret: 'cos-emergency' });
     expect(br.spec.fromCOS).not.toHaveProperty('prefix');
   });
@@ -261,7 +262,7 @@ describe('cosRestorePath and parseCOSRestoreQuery', () => {
   it('builds the link to the restore-from-COS page with the policy, the volume and the moment as query values', () => {
     expect(cosRestorePath({})).toBe('/vpc-file-pools/backups/~cos-restore');
     expect(cosRestorePath({ policy: 'nightly', volume: 'pvc-1', moment: '2026-10-20T09:00:00Z' })).toBe(
-      '/vpc-file-pools/backups/~cos-restore?policy=nightly&volume=pvc-1&moment=2026-10-20T09%3A00%3A00Z',
+      '/vpc-file-pools/backups/~cos-restore?policy=nightly&volume=pvc-1&restorePoint=2026-10-20T09%3A00%3A00Z',
     );
   });
 
@@ -272,5 +273,6 @@ describe('cosRestorePath and parseCOSRestoreQuery', () => {
       moment: '2026-10-20T09:00:00Z',
     });
     expect(parseCOSRestoreQuery('')).toEqual({ policy: '', volume: '', moment: '' });
+    expect(parseCOSRestoreQuery('?policy=nightly&volume=pvc-1&restorePoint=2026-10-22T09%3A00%3A00Z').moment).toBe('2026-10-22T09:00:00Z');
   });
 });

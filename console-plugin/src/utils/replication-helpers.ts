@@ -85,9 +85,9 @@ export function vmCopySettingsText(spec: ReplicationPolicySpec): { speed: string
 const WAITING_MESSAGE_PREFIXES = ['skipped: in use by running VM', 'copy waits:', 'copy lost:'];
 
 export interface VolumeStatusView {
-  /** True for the disk of a running VM (it has a copy moment or a copy in progress). */
+  /** True for the disk of a running VM (it has a copy restore point or a copy in progress). */
   isVMDisk: boolean;
-  /** The moment the last good copy shows, or '-'. */
+  /** The restore point the last good copy shows, or '-'. */
   copyMoment: string;
   consistency: string;
   /** True when the copy is only crash consistent. */
@@ -103,7 +103,8 @@ export interface VolumeStatusView {
 
 /** What the replication page shows for one volume of a policy. */
 export function describeVolumeStatus(s: SubVolumeReplicationStatus): VolumeStatusView {
-  const isVMDisk = !!(s.copyMoment || s.vmCopy);
+  const copyPoint = s.copyRestorePoint ?? s.copyMoment;
+  const isVMDisk = !!(copyPoint || s.vmCopy);
   const message = s.lastError || '';
   let severity: VolumeStatusView['severity'] = 'ok';
   if (message) {
@@ -121,13 +122,13 @@ export function describeVolumeStatus(s: SubVolumeReplicationStatus): VolumeStatu
   }
   return {
     isVMDisk,
-    copyMoment: formatAge(s.copyMoment),
+    copyMoment: formatAge(copyPoint),
     consistency,
     consistencyWarning: s.consistency === 'CrashConsistent',
     consistencyReason: s.consistencyReason || '',
     restorePoints,
     copyPhase: s.vmCopy?.phase || '',
-    nextCopy: isVMDisk && s.copyMoment ? (s.vmChangeList ? 'changes only' : 'full') : '',
+    nextCopy: isVMDisk && copyPoint ? (s.vmChangeList ? 'changes only' : 'full') : '',
     severity,
     message,
   };
@@ -160,11 +161,11 @@ export interface VMRecoveryView {
   consistency: string;
   /** True when the copy is only crash consistent. */
   consistencyWarning: boolean;
-  /** How many moments all disks of the VM share. */
+  /** How many restore points all disks of the VM share. */
   momentCount: number;
-  /** The newest of those moments, as ages. */
+  /** The newest of those restore points, as ages. */
   moments: string[];
-  /** True when the disks share no moment, so the VM cannot be recovered to a matching state. */
+  /** True when the disks share no restore point, so the VM cannot be recovered to a matching state. */
   noCommonMoment: boolean;
   /** True when the newest copy is older than twice the schedule. */
   stale: boolean;
@@ -174,7 +175,7 @@ export interface VMRecoveryView {
 const MAX_MOMENTS_SHOWN = 5;
 
 /**
- * What the policy page shows for each running VM: the copy moment, whether it is consistent, the moments a
+ * What the policy page shows for each running VM: the copy restore point, whether it is consistent, the restore points a
  * recovery can use, and a warning if the data is stale. Stale means the newest copy is older than twice the
  * schedule, or there is no copy. A schedule that is not a duration never makes a copy stale.
  */
@@ -184,8 +185,9 @@ export function describeVMRecovery(
   now: Date = new Date(),
 ): VMRecoveryView[] {
   return (vms || []).map((vm) => {
-    const moments = vm.commonMoments || [];
-    const staleness = copyStaleness(vm.copyMoment, schedule, now.getTime());
+    const moments = vm.commonRestorePoints ?? vm.commonMoments ?? [];
+    const copyPoint = vm.copyRestorePoint ?? vm.copyMoment;
+    const staleness = copyStaleness(copyPoint, schedule, now.getTime());
     const stale = staleness.stale;
     const staleText = staleness.stale ? staleness.text : '';
     let consistency = '-';
@@ -194,7 +196,7 @@ export function describeVMRecovery(
     return {
       name: vm.name,
       disks: vm.subVolumes.length,
-      copyMoment: formatAge(vm.copyMoment),
+      copyMoment: formatAge(copyPoint),
       consistency,
       consistencyWarning: vm.consistency === 'CrashConsistent',
       momentCount: moments.length,

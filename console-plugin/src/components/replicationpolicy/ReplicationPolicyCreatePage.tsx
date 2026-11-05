@@ -484,7 +484,7 @@ const ReplicationPolicyCreatePage: React.FC = () => {
           <FieldPopover
             fieldId="rp-vm-keep"
             label="Restore Point Keep Time (hours)"
-            description="How long the destination keeps earlier copies of a running VM's disks, so you can recover to an earlier moment. Longer needs more space at the destination. Default 24."
+            description="How long the destination keeps earlier copies of a running VM's disks, so you can recover to an earlier restore point. Longer needs more space at the destination. Default 24."
           >
             <NumberInput
               id="rp-vm-keep"

@@ -114,11 +114,11 @@ describe('BackupRestorePage', () => {
   });
 
   it('takes the claim and the moment from the link', () => {
-    mockSearch = '?claim=apps%2Fdisk-1&moment=2026-10-20T09%3A00%3A00Z';
+    mockSearch = '?claim=apps%2Fdisk-1&restorePoint=2026-10-20T09%3A00%3A00Z';
     render(<BackupRestorePage />);
     expect((screen.getByLabelText(/^Volume/) as HTMLSelectElement).value).toBe('apps/disk-1');
-    expect((screen.getByLabelText('At a moment') as HTMLInputElement).checked).toBe(true);
-    expect((screen.getByLabelText(/^Moment/) as HTMLInputElement).value).not.toBe('');
+    expect((screen.getByLabelText('At a restore point') as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText(/^Restore point/) as HTMLInputElement).value).not.toBe('');
     expect((screen.getByLabelText(/^New claim name/) as HTMLInputElement).value).toBe('disk-1-restored');
   });
 
@@ -197,14 +197,14 @@ describe('BackupRestorePage', () => {
   });
 
   it('sends the moment and a chosen storage class', async () => {
-    mockSearch = '?claim=apps%2Fdata&moment=2026-10-20T09%3A00%3A00Z';
+    mockSearch = '?claim=apps%2Fdata&restorePoint=2026-10-20T09%3A00%3A00Z';
     render(<BackupRestorePage />);
     fireEvent.change(screen.getByLabelText(/^Storage class/), { target: { value: 'pool-b' } });
     fireEvent.click(restoreButton());
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Restore' }));
     await waitFor(() => expect(k8sCreate).toHaveBeenCalled());
     const { data } = (k8sCreate as jest.Mock).mock.calls[0][0];
-    expect(data.spec.moment).toBe('2026-10-20T09:00:00Z');
+    expect(data.spec.restorePoint).toBe('2026-10-20T09:00:00Z');
     expect(data.spec.storageClassName).toBe('pool-b');
   });
 

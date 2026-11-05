@@ -243,7 +243,8 @@ describe('buildBackupRestore', () => {
       { ...input, moment: '2026-10-20T09:00:00.000Z', storageClass: 'fast' },
       1761000000000,
     );
-    expect(br.spec.moment).toBe('2026-10-20T09:00:00Z');
+    expect(br.spec.restorePoint).toBe('2026-10-20T09:00:00Z');
+    expect(br.spec.moment).toBeUndefined();
     expect(br.spec.storageClassName).toBe('fast');
   });
 });
@@ -297,7 +298,7 @@ describe('restorePath and parseRestoreQuery', () => {
   it('builds the restore link with the claim and the moment as query values', () => {
     expect(restorePath('nightly', 'apps/data')).toBe('/vpc-file-pools/backups/nightly/restore?claim=apps%2Fdata');
     expect(restorePath('nightly', 'apps/data', '2026-10-20T09:00:00Z')).toBe(
-      '/vpc-file-pools/backups/nightly/restore?claim=apps%2Fdata&moment=2026-10-20T09%3A00%3A00Z',
+      '/vpc-file-pools/backups/nightly/restore?claim=apps%2Fdata&restorePoint=2026-10-20T09%3A00%3A00Z',
     );
     expect(restorePath('nightly')).toBe('/vpc-file-pools/backups/nightly/restore');
   });
@@ -308,6 +309,11 @@ describe('restorePath and parseRestoreQuery', () => {
       moment: '2026-10-20T09:00:00Z',
     });
     expect(parseRestoreQuery('')).toEqual({ claim: '', moment: '' });
+  });
+
+  it('reads the new restorePoint parameter, and the old moment parameter of a saved link', () => {
+    expect(parseRestoreQuery('?claim=apps%2Fdata&restorePoint=2026-10-22T09%3A00%3A00Z').moment).toBe('2026-10-22T09:00:00Z');
+    expect(parseRestoreQuery('?claim=apps%2Fdata&moment=2026-10-21T09%3A00%3A00Z&restorePoint=2026-10-22T09%3A00%3A00Z').moment).toBe('2026-10-22T09:00:00Z');
   });
 });
 
@@ -340,6 +346,14 @@ describe('backupRestoreProgress', () => {
       status: { phase: 'Done', latest: true, restoredMoment: '2026-10-21T09:00:00Z' },
     });
     expect(latest.text).toContain('latest');
+  });
+
+  it('reads the new status field, and the old one from a restore made before the change', () => {
+    const at = (status: object) =>
+      backupRestoreProgress({ metadata: { name: 'r' }, spec: {} as never, status: { phase: 'Done', ...status } });
+    expect(at({ restoredRestorePoint: '2026-10-22T09:00:00Z' }).text).toContain('2026-10-22T09:00:00Z');
+    expect(at({ restoredMoment: '2026-10-21T09:00:00Z' }).text).toContain('2026-10-21T09:00:00Z');
+    expect(at({ restoredRestorePoint: '2026-10-22T09:00:00Z', restoredMoment: '2026-10-21T09:00:00Z' }).text).toContain('2026-10-22T09:00:00Z');
   });
 
   it('says so when the moment is not known', () => {

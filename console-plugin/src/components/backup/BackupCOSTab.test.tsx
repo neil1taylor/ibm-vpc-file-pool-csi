@@ -83,7 +83,7 @@ describe('BackupCOSTab', () => {
     render(<BackupCOSTab policy={policy()} />);
     mockProps.onPick!('pvc-1', '2026-10-20T09:00:00Z');
     expect(mockPush).toHaveBeenCalledWith(
-      '/vpc-file-pools/backups/~cos-restore?policy=nightly&volume=pvc-1&moment=2026-10-20T09%3A00%3A00Z',
+      '/vpc-file-pools/backups/~cos-restore?policy=nightly&volume=pvc-1&restorePoint=2026-10-20T09%3A00%3A00Z',
     );
   });
 

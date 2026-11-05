@@ -212,7 +212,7 @@ const RestoreSnapshotPage: React.FC = () => {
           <StackItem>
             <Alert variant="warning" title="A VM uses the source claim" isInline>
               This snapshot is of a claim that a VM uses. If it was taken while a VM was running, the driver froze the
-              guest and copied the disk at one moment. If the guest could not freeze, the copy is crash consistent: like
+              guest and copied the disk at one point in time. If the guest could not freeze, the copy is crash consistent: like
               a sudden power cut, so the guest may need to repair its file system when it starts. The snapshot&apos;s
               status says which.
             </Alert>
