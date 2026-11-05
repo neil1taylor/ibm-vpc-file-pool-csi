@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 )
 
 // minTokenLen is the shortest session token the disk server accepts.
@@ -19,6 +21,14 @@ const DiskPath = "/disk"
 // FileListPath is where the disk server hands out the file list of the export,
 // if it has one.
 const FileListPath = "/filelist"
+
+// RestorePointsPath is where the disk server lists the restore points that its
+// export holds: the undo files' restore points and the disk's own.
+const RestorePointsPath = "/restorepoints"
+
+// maxRestorePoints is the most restore points the disk server lists or a reader
+// accepts.
+const maxRestorePoints = 100000
 
 // MaxFileListBytes is the largest file list the disk server hands out.
 const MaxFileListBytes = 256 << 20
@@ -32,6 +42,13 @@ type HandlerOption func(*handlerConfig)
 type handlerConfig struct {
 	fileList func(ctx context.Context) (io.ReadCloser, int64, error)
 	onAuthed func(w http.ResponseWriter, r *http.Request) func()
+	points   func(ctx context.Context) ([]time.Time, error)
+}
+
+// WithRestorePoints serves the list of restore points at RestorePointsPath as
+// JSON. fetch is called for each request; it should remember its answer.
+func WithRestorePoints(fetch func(ctx context.Context) ([]time.Time, error)) HandlerOption {
+	return func(c *handlerConfig) { c.points = fetch }
 }
 
 // WithOnAuthed calls fn for every request that carries the right token, before
@@ -89,6 +106,10 @@ func NewHandler(d DiskReader, token string, opts ...HandlerOption) (http.Handler
 			serveFileList(w, r, cfg.fileList)
 			return
 		}
+		if r.URL.Path == RestorePointsPath && cfg.points != nil {
+			serveRestorePoints(w, r, cfg.points)
+			return
+		}
 		if r.URL.Path != DiskPath {
 			http.NotFound(w, r)
 			return
@@ -132,4 +153,28 @@ func serveFileList(w http.ResponseWriter, r *http.Request, fetch func(ctx contex
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 	_, _ = io.Copy(w, io.LimitReader(rc, size))
+}
+
+// restorePointList is the JSON the disk server answers at RestorePointsPath.
+type restorePointList struct {
+	RestorePoints []time.Time `json:"restorePoints"`
+}
+
+func serveRestorePoints(w http.ResponseWriter, r *http.Request, fetch func(ctx context.Context) ([]time.Time, error)) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	pts, err := fetch(r.Context())
+	if err != nil {
+		http.Error(w, "the restore points could not be listed", http.StatusBadGateway)
+		return
+	}
+	if len(pts) > maxRestorePoints {
+		pts = pts[len(pts)-maxRestorePoints:]
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(restorePointList{RestorePoints: pts})
 }

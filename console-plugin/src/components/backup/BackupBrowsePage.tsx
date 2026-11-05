@@ -89,8 +89,8 @@ const BackupBrowsePage: React.FC = () => {
   });
   const cosState = cosSourceState(policy, namespace, pvc);
 
-  // Only the newest copy in COS can be browsed, so a restore point of the link is not used there.
-  const moment = askedSource === 'cos' ? '' : query.moment;
+  // The restore point of the link is used for COS too: an older restore point of a VM disk is read from the disk.
+  const moment = query.moment;
   const session = useBrowseSession(
     namespace ? { policy: name, namespace, pvc, ...(moment ? { moment } : {}), ...(askedSource ? { source: askedSource } : {}) } : undefined,
   );
@@ -191,12 +191,13 @@ const BackupBrowsePage: React.FC = () => {
   }, [sessionName, guest]);
 
   const momentOptions = useMemo(() => {
-    if (fromCOS) return [];
+    // A plain volume in COS offers only its newest copy; a VM disk lists its restore points (from the undo files).
+    if (fromCOS && !guest) return [];
     const isos = moments.map(momentToISO).filter((m): m is string => !!m);
     isos.sort().reverse();
     if (moment && !isos.includes(moment)) isos.unshift(moment);
     return isos;
-  }, [moments, moment, fromCOS]);
+  }, [moments, moment, fromCOS, guest]);
 
   const back = (
     <Link to={ROUTES.BACKUP_DETAIL.replace(':name', encodeURIComponent(name))}>Back to the backup policy {name}</Link>
@@ -433,7 +434,7 @@ const BackupBrowsePage: React.FC = () => {
               aria-label="Restore point"
               value={moment}
               onChange={(_e, v) => history.replace(browsePath(name, claim, v || undefined, askedSource || undefined))}
-              isDisabled={fromCOS}
+              isDisabled={fromCOS && !guest}
               style={{ maxWidth: 360 }}
             >
               <FormSelectOption value="" label={fromCOS ? 'Newest copy in COS' : 'Latest copy'} />
@@ -459,7 +460,7 @@ const BackupBrowsePage: React.FC = () => {
       <Card>
         <CardHelpTitle helpKey="backupBrowseFiles" />
         <CardBody>
-          {fromCOS && session.status === 'ready' && (
+          {fromCOS && (session.status === 'ready' || !!moment) && (
             <Alert variant="info" isInline title={COS_NOTICE} style={{ marginBottom: 16 }} />
           )}
           {body}

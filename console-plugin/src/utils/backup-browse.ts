@@ -201,7 +201,7 @@ export function cosSourceState(policy: BackupPolicy | undefined, namespace: stri
 
 /** Said above the files of a session that reads from COS. */
 export const COS_NOTICE =
-  'These files are read from the copy in COS. The first listing can take up to 30 seconds. Older copies in COS cannot be browsed yet; only the newest.';
+  'These files are read from the copy in COS. The first listing can take up to 30 seconds. An older restore point of a VM disk is listed from the disk, and its first listing can take up to 5 minutes.';
 
 /**
  * The link that downloads one file ("file") or one folder as a tar ("tar"). The browser follows it with its

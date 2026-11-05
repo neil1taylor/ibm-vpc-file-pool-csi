@@ -176,3 +176,30 @@ func TestFileRestoreGuestCOS_RefusesInWordsWhatItCannotDo(t *testing.T) {
 		})
 	}
 }
+
+func TestFileRestoreGuestCOS_ChecksTheKeepTimeFromTheRestorePoint(t *testing.T) {
+	e := newGuestCOSRestoreEnv(t) // the newest export is an hour old
+	at := metav1.NewTime(e.now.Add(-29*24*time.Hour - 23*time.Hour))
+	e.guestCOSRestore("f1", func(fr *v1alpha1.BackupFileRestore) { fr.Spec.RestorePoint = &at })
+	e.reconcile()
+	st := e.fr("f1").Status
+	if st.Phase != restorePhaseFailed || !strings.Contains(st.Message, "deleted from COS") {
+		t.Errorf("status = %+v", st)
+	}
+	if len(e.jobs.diskStarts) != 0 {
+		t.Error("a disk server was started for a restore point that is about to be deleted")
+	}
+}
+
+func TestFileRestoreGuestCOS_AnOlderRestorePointReachesTheDiskServer(t *testing.T) {
+	e := newGuestCOSRestoreEnv(t)
+	at := metav1.NewTime(e.now.Add(-10 * 24 * time.Hour))
+	e.guestCOSRestore("f1", func(fr *v1alpha1.BackupFileRestore) { fr.Spec.RestorePoint = &at })
+	e.reconcile()
+	if len(e.jobs.diskStarts) == 0 {
+		t.Fatalf("the disk server was not started: %+v", e.fr("f1").Status)
+	}
+	if got := e.jobs.diskStarts[0].At; !got.Equal(at.Time) {
+		t.Errorf("disk server At = %s, want %s", got, at.Time)
+	}
+}

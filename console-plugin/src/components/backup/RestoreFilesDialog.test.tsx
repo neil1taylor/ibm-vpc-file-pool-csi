@@ -51,6 +51,15 @@ beforeEach(() => {
 });
 
 describe('RestoreFilesDialog source', () => {
+  it('names the restore point of a copy in COS and sends it', async () => {
+    (createRestore as jest.Mock).mockResolvedValue({ name: 'bfr-1', phase: 'Pending', files: 0, dirs: 0, links: 0, bytes: 0, targetNamespace: 'apps', targetName: 'db-restored' });
+    render(<RestoreFilesDialog policy="nightly" namespace="apps" pvc="db" moment="2026-10-21T09:15:00Z" source="cos" guest selected={selected()} onClose={onClose} />);
+    expect(screen.getByText(/the copy in COS, 2026-10-21 09:15:00 UTC/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    await waitFor(() => expect(createRestore).toHaveBeenCalled());
+    expect((createRestore as jest.Mock).mock.calls[0][0].moment).toBe('2026-10-21T09:15:00Z');
+  });
+
   it('sends the source the browser page uses', async () => {
     (createRestore as jest.Mock).mockResolvedValue({ name: 'bfr-1', phase: 'Pending', files: 0, dirs: 0, links: 0, bytes: 0, targetNamespace: 'apps', targetName: 'db-restored' });
     render(<RestoreFilesDialog policy="nightly" namespace="apps" pvc="db" moment="" source="cos" selected={selected()} onClose={onClose} />);

@@ -195,7 +195,7 @@ Total: about 1.5 to 2.5 weeks of agent work, plus the lab runs.
 - The disk server's cache is 64 MiB in memory (4 MiB segments, 8 read ahead), set by flags. The spike showed that a bounded memory cache is enough, and Kopia keeps its own cache on its scratch folder.
 - The file list is saved as `.filelist.json.gz` in the volume's backup folder, next to `disk.img`, so the existing export snapshot carries it and the existing delete and measure steps cover it. A second container copies it there (a plain file of at most 256 MiB); the reader that parses the disk never writes to the share.
 - A file list counts as being for the disk if its restore point is within 30 minutes of the disk's. The 3 Nov 2026 lab run built each list for the same restore point as the disk (to the second), so it shows the rule works but did not test the edge of 30 minutes.
-- In 6b only the newest restore point of an export can be browsed in COS. Older restore points need the undo files served too, and come later if you want them.
+- In 6b and 6c only the newest restore point of an export can be browsed in COS. Phase 6d (below) serves the undo files too, so an older restore point of a VM disk can be browsed and restored from.
 - A VM disk named directly by bucket (`--bucket`) is browsed as plain files, because nothing there says it is a VM disk. Browse it through its policy.
 - The console gets a local or COS switch for every volume type, not only VM disks.
 - VM disks from COS follow the same session limits as everything else. There is no separate limit.
@@ -208,12 +208,22 @@ Total: about 1.5 to 2.5 weeks of agent work, plus the lab runs.
 
 ## Needs from you
 
-- Nothing. Phase 6c is done. Older restore points of a VM disk in COS are still not built.
-- Nothing else. The speed bar is agreed: first listing within 30 seconds.
+- Nothing to decide. Phase 6c is done. Phase 6d (older restore points) is built; what remains is the lab run, to measure the speed of an older restore point and write the numbers here. The speed bar for the newest restore point is agreed: first listing within 30 seconds.
 
 ## Phase 6d: older restore points of a VM disk in COS (issue #409)
 
-Date: 5 Nov 2026. Status: draft, building.
+Date: 5 Nov 2026. Status: built, not yet run on the lab.
+
+### Phase 6d status: built, not yet run on the lab
+
+Built (PR #422 and the wiring PR): the disk server serves a VM disk at an older restore point from the export's `.repl-undo` files and refuses a restore point older than every undo file; the keep-time check counts from the restore point; an older restore point gets a longer start limit; `ls --restore-points` lists the restore points of the undo files; the console and the commands pass the restore point on for COS; the release test (stage 20) reads and restores from a restore point that no export holds as its own newest. **Not done:** the lab run, and the speed numbers of an older restore point (first listing, a download), which are to be written here. Whether the undo files are in the export (see "What the code shows") is also confirmed on the lab only.
+
+What the build does that the design above did not say:
+
+- **Which restore points are listed.** The disk server answers a list of the restore points of the export it serves: the headers of its undo files, plus the export's own. The reader passes it on as the session's list. A session without `--restore-point` lists those of the newest export; to see those of an older export, ask for a restore point inside it. Reading the headers costs a few bytes of each undo file.
+- **Restore point names have whole seconds; restore points do not.** The disk server asks the view for the end of the named second, as the local path does, so the restore point a person copies from the list is the one they get.
+- **Keep time.** The policy records only the time of the newest export. For an older restore point the controller counts the keep time from the restore point itself, which is never later than the covering export, so it can refuse a restore point a little early and never allows one whose export is about to be deleted.
+- **Start limit.** The disk server of a VM disk session now has a start limit (it had none before the reader started): 5 minutes (`backupBrowse.cos.startTimeout`) for the newest restore point, and twice that, 10 minutes by default, for a restore point older than the newest export.
 
 ### Goal
 
@@ -251,3 +261,5 @@ Done when: the refusal is gone for restore points that the export's undo files c
 - The 5 minute allowance for the first listing of an older restore point stays; the console says so first.
 - An older restore point is refused in words when no undo file in the export covers it.
 - If the undo files are not in the export, I change the export to include them. Exports made before then cover only their newest restore point.
+- The start limit of the disk server is 5 minutes for the newest restore point and twice the COS start time (10 minutes by default) for an older one. No new setting.
+- `ls --restore-points` lists the restore points of one export (the one that covers `--restore-point`, the newest by default), because reading the undo files of every export would mean mounting each of them.

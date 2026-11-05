@@ -108,12 +108,18 @@ func serveAt(t *testing.T, at time.Time) (client *http.Client, base, token strin
 
 func undoBackup(t *testing.T) (dir string, moments []time.Time) {
 	t.Helper()
+	return undoBackupFrom(t, time.Date(2026, 10, 22, 7, 15, 0, 0, time.UTC))
+}
+
+// undoBackupFrom is undoBackup with the first restore point at start.
+func undoBackupFrom(t *testing.T, start time.Time) (dir string, moments []time.Time) {
+	t.Helper()
 	dir = t.TempDir()
 	cur := bytes.Repeat([]byte{1}, 3<<16)
 	if err := os.WriteFile(filepath.Join(dir, "disk.img"), cur, 0o660); err != nil {
 		t.Fatal(err)
 	}
-	moments = []time.Time{time.Date(2026, 10, 22, 7, 15, 0, 0, time.UTC)}
+	moments = []time.Time{start}
 	for i := 2; i <= 4; i++ {
 		next := bytes.Repeat([]byte{byte(i)}, (3+i%2)<<16)
 		from := moments[len(moments)-1]
@@ -209,4 +215,48 @@ func withFakeDiskRepoAny(t *testing.T, f diskRepo) {
 	old := openDiskRepo
 	openDiskRepo = func(context.Context, cosbrowse.Source, string, string, io.Writer) (diskRepo, error) { return f, nil }
 	t.Cleanup(func() { openDiskRepo = old })
+}
+
+func TestCOSDiskModeListsTheRestorePointsOfTheExport(t *testing.T) {
+	dir, moments := undoBackup(t)
+	stopped := false
+	withFakeDiskRepoAny(t, &undoRepo{dir: dir, moment: moments[len(moments)-1], stopped: &stopped})
+	client, base, token, exit, cancel, _, errb := serveAt(t, time.Time{})
+	if base == "" {
+		t.Fatalf("exited with %d: %s", <-exit, errb.String())
+	}
+	defer func() { cancel(); <-exit }()
+	got, err := cosdisk.FetchRestorePoints(context.Background(), client, base+cosdisk.RestorePointsPath, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(moments) {
+		t.Fatalf("restore points = %v, want %v", got, moments)
+	}
+	for i := range moments {
+		if !got[i].Equal(moments[i]) {
+			t.Errorf("restore point %d = %v, want %v", i, got[i], moments[i])
+		}
+	}
+}
+
+// Restore points keep nanoseconds, but a person names one in whole seconds, as
+// the listing prints it. Asking for that second must give that restore point.
+func TestCOSDiskModeServesARestorePointNamedInWholeSeconds(t *testing.T) {
+	dir, moments := undoBackupFrom(t, time.Date(2026, 10, 22, 7, 15, 0, 500_000_000, time.UTC))
+	stopped := false
+	withFakeDiskRepoAny(t, &undoRepo{dir: dir, moment: moments[len(moments)-1], stopped: &stopped})
+	named := moments[1].Truncate(time.Second) // what the listing prints
+	client, base, token, exit, cancel, _, errb := serveAt(t, named)
+	if base == "" {
+		t.Fatalf("exited with %d: %s", <-exit, errb.String())
+	}
+	defer func() { cancel(); <-exit }()
+	src, err := cosdisk.NewRemoteSource(context.Background(), client, base+"/disk", token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := src.Moment().Truncate(time.Second); !got.Equal(named) {
+		t.Errorf("served restore point %v, want %v", src.Moment(), named)
+	}
 }
