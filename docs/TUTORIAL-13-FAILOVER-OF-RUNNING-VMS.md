@@ -182,7 +182,51 @@ YAML
 dr get failover plan-1 -o yaml
 ```
 
-**Expected:** `phase: Planned`, with the VMs and the moments in the status. If `basePath` is wrong, the Plan fails and says which folder it looked for; if it finds copies in another folder it names the `basePath` to use. An Execute needs a Plan with the same `basePath` and a `drPool`. The Recovery page does not set `basePath`: with a `destinationBasePath` other than `/`, make the Plan and the Execute with `kubectl` as above, or use `destinationBasePath: /` for the policy.
+**Expected:** `phase: Planned` after about 5 seconds, with the VMs and the moments in the status:
+
+```
+status:
+  phase: Planned
+  rpo: 1m14s
+  source: repl-destination-data
+  vms:
+  - disks:
+    - rewind: false
+      subVolume: pvc-65968d12-062b-4b51-9590-269905b09e51
+    - rewind: false
+      subVolume: pvc-fbe4c104-cd1e-48a7-b465-0a77466d979b
+    moment: "2026-11-05T08:32:15Z"
+    moments:
+    - "2026-11-05T08:32:15Z"
+    - "2026-11-05T08:17:15Z"
+    name: tutf-vms/my-vm
+  volumes: [one entry for each disk, with its PVC name, namespace, size and subPath]
+```
+
+To plan an earlier moment, add `rewindTo: "2026-11-05T08:17:15Z"` to the spec. The plan then says `rewind: true` for each disk and `rpo: 17m4s`.
+
+To run the failover, make the namespace of the VM on the DR cluster, then apply an Execute with the same `basePath` and `rewindTo` and with the pool:
+
+```bash
+dr create namespace vms --dry-run=client -o yaml | dr apply -f -
+dr apply -f - <<'YAML'
+apiVersion: storage.ibmcloud.io/v1alpha1
+kind: Failover
+metadata:
+  name: exec-1
+spec:
+  action: Execute
+  basePath: /repl
+  drPool: ${DR_POOL}
+  rewindTo: "2026-11-05T08:17:15Z"
+YAML
+dr get failover exec-1 -o jsonpath='{.status.phase}{"\n"}'
+dr get pvc -n vms
+```
+
+Replace `${DR_POOL}` with the pool name (the heredoc is quoted, so the shell does not do it). **Expected:** `Done` after 5 minutes for a rewind of a 20 GiB and a 2 GiB disk (without `rewindTo` it is much faster), and the PVCs `Bound` with PVs named `dr-pvc-<uuid>`. In the lab, the VM definition from Step 6 then started on the rewound disks in 20 seconds, the guest agent connected, the file written after the chosen moment was not there, and the kernel log held no file-system errors.
+
+If `basePath` is wrong, the Plan fails and says which folder it looked for; if it finds copies in another folder it names the `basePath` to use. An Execute needs a Plan with the same `basePath` and a `drPool`. The Recovery page does not set `basePath`: with a `destinationBasePath` other than `/`, make the Plan and the Execute with `kubectl` as above, or use `destinationBasePath: /` for the policy.
 
 ---
 
