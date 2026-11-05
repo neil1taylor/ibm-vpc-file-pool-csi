@@ -19,6 +19,10 @@ To make a release:
 
 ## [Unreleased]
 
+## [v0.19.0] — 2026-11-05
+
+You can now browse and restore older restore points of a VM disk that is in COS, not only the newest one. This release also replaces v0.18.0, which was tagged but never put on a cluster, so it carries the restore point rename too. Read the v0.18.0 entry below for the steps that rename needs.
+
 ### Added
 
 - **Older restore points of a VM disk in COS can be browsed and restored from (issue #409, phase 6d).** `kubectl backup ls`, `get`, `browse` and `restore-files` with `--from-cos --restore-point TIME`, and the console file browser, now work for a VM disk at a restore point older than the newest backup in COS. The disk server rebuilds the disk from the undo files in the export; a restore point older than every undo file is refused in words. Folders of an older restore point are read from the disk, so the first listing can take up to 5 minutes. `kubectl backup ls --from-cos --restore-points` lists the restore points of a VM disk in COS. Built and tested in code; not yet run on the lab.
@@ -30,6 +34,8 @@ To make a release:
 - The console passes the restore point of the link to the session when the source is COS, and the restore dialog names it.
 
 ## [v0.18.0] — 2026-11-05
+
+v0.18.0 was tagged but never put on a cluster; v0.19.0 replaces it.
 
 One word changes: "restore point" replaces "moment" in everything you read or type. The old flags and fields still work for this release. Apply the CRDs before or with the Helm upgrade, and keep the controller and the Job image on the same version. Rename the alert in your routes and silences.
 

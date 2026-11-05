@@ -45,7 +45,7 @@ Before upgrading, complete every item:
 | v0.11.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.12.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.13.0–v0.13.2 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
-| v0.14.0–v0.18.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
+| v0.14.0–v0.19.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
 
 ---
 
@@ -124,6 +124,23 @@ kubectl get crd filesharepools.storage.ibmcloud.io -o json | \
 ---
 
 ## Version-Specific Upgrade Notes
+
+### Upgrading to v0.19.0 (from v0.17.x or v0.18.0)
+
+**v0.18.0 was never deployed anywhere. Upgrade from v0.17.x straight to v0.19.0.** v0.19.0 includes everything in v0.18.0, so the steps for v0.18.0 below apply in full: apply the CRDs first, keep the controller and the Job image on the same version, and rename the alert `VPCFilePoolExportMomentWaiting` to `VPCFilePoolExportRestorePointWaiting` in your routes and silences.
+
+**Changes:**
+- Older restore points of a VM disk in COS can be browsed and restored from, with `--from-cos --restore-point TIME` and in the console file browser. `kubectl backup ls --from-cos --restore-points` lists them.
+- A session or restore on a VM disk in COS checks the keep time from the restore point asked for, not from the newest backup.
+- The disk server of a session on a VM disk in COS has a start limit of 5 minutes (`backupBrowse.cos.startTimeout`), or twice that for an older restore point.
+
+**CRD changes:** the same as v0.18.0.
+
+**Chart changes:** nothing to configure. The start limit has a default.
+
+**Action required:** the same as v0.18.0. Set `image.tag` and `consolePlugin.image.tag` to `v0.19.0` if you pin them, and move any pinned Job image to `v0.19.0` too.
+
+To go back, run `helm rollback`. The older driver ignores the new fields. Do not remove them from the CRDs.
 
 ### Upgrading to v0.18.0 (from v0.17.2)
 
