@@ -37,6 +37,12 @@ Check the gate first:
 oc get kubevirt -A -o jsonpath='{.items[0].spec.configuration.developerConfiguration.featureGates}{"\n"}'
 ```
 
+**Expected:** a list of feature gates, for example:
+
+```
+["CPUManager","Snapshot","ExpandDisks","HostDevices","VMExport","KubevirtSeccompProfile","WithHostModelCPU","HypervStrictCheck","VideoConfig","HotplugVolumes","Sidecar"]
+```
+
 If the list contains `"Sidecar"`, go to step 2. Otherwise turn it on. Choose one way.
 
 **With the chart.** Upgrade the release with `vmSnapshots.enableSidecarGate=true`. A Job turns the gate on after each install and upgrade. It adds one entry to the `kubevirt.kubevirt.io/jsonpatch` annotation of `HyperConverged` and keeps the other entries.
@@ -71,7 +77,13 @@ echo "claim ${CLAIM}, volume ${PV}"
 oc get subvolume ${PV} -o jsonpath='{.status.diskChain}{"\n"}'
 ```
 
-**Expected:** an empty line. `status.diskChain` is empty for a volume with no snapshots. If your VM boots from a `dataVolume` volume, use `.dataVolume.name` in place of `.persistentVolumeClaim.claimName`.
+**Expected:** the claim and volume names, then an empty line:
+
+```
+claim my-vm-rootdisk, volume pvc-afcb739e-c370-4bc5-a99a-4d3f0a0b6f55
+```
+
+`status.diskChain` is empty for a volume with no snapshots. If your VM boots from a `dataVolume` volume, use `.dataVolume.name` in place of `.persistentVolumeClaim.claimName`.
 
 ---
 
@@ -96,7 +108,7 @@ EOF
 oc wait -n ${NS} vmsnapshot/${VM}-snap1 --for=jsonpath='{.status.phase}'=Succeeded --timeout=300s
 ```
 
-**Expected:** the snapshot is `Succeeded` within a few seconds. The VM keeps running.
+**Expected:** `virtualmachinesnapshot.snapshot.kubevirt.io/my-vm-snap1 condition met`. In the lab it took 3 seconds for a 20 GiB disk. The VM keeps running.
 
 Look at the disk now:
 
@@ -104,7 +116,7 @@ Look at the disk now:
 oc get subvolume ${PV} -o jsonpath='{.status.diskChain}{"\n"}'
 ```
 
-**Expected:** a list with two files, for example `["snap-a1b2c3.qcow2","disk.img"]`. The newest file is first. The VM now writes to `snap-a1b2c3.qcow2`. `disk.img` is the snapshot and is read-only. Nothing was copied.
+**Expected:** a list with two files, for example `["snap-6d00c53ed10caf34.qcow2","disk.img"]`. The newest file is first. The VM now writes to `snap-6d00c53ed10caf34.qcow2`. `disk.img` is the snapshot and is read-only. Nothing was copied.
 
 To see how each disk snapshot was made, find the `Snapshot` resource of the first disk:
 
@@ -144,9 +156,9 @@ oc wait -n ${NS} vmsnapshot/${VM}-snap2 --for=jsonpath='{.status.phase}'=Succeed
 oc get subvolume ${PV} -o jsonpath='{.status.diskChain}{"\n"}'
 ```
 
-Change the user name in `virtctl ssh` to the user of your guest image. `virtctl ssh` needs an SSH key in the guest. A VM that has only a password (like the one in Part 1) cannot use it: log in on the console and make the file there.
+Change the user name in `virtctl ssh` to the user of your guest image. `virtctl ssh` needs an SSH key in the guest. If it does not find your key, add `-i <key>`. A VM that has only a password (like the one in Part 1) cannot use it: log in on the console and make the file there.
 
-**Expected:** a chain of three files. A disk may have at most 16 snapshots.
+**Expected:** a chain of three files, for example `["snap-50edf7f051e750e9.qcow2","snap-6d00c53ed10caf34.qcow2","disk.img"]`. A disk may have at most 16 snapshots.
 
 ![After two snapshots the disk is a chain of three files: the VM writes to the newest, and each file is backed by the one before](images/tutorial-11-snapshot-chain.drawio.svg)
 
@@ -161,9 +173,16 @@ oc delete vmsnapshot -n ${NS} ${VM}-snap1
 oc get subvolume ${PV} -o jsonpath='{.status.diskChain}{" "}{.status.chainOperation}{"\n"}'
 ```
 
-While the merge runs, `status.chainOperation` names it. No other snapshot or merge of the disk starts then. A merge takes about as long as copying the changed parts, not the whole disk. Repeat the command until `chainOperation` is empty.
+While the merge runs, `status.chainOperation` names it (`chain-live-rm-snapshot-<id>`). No other snapshot or merge of the disk starts then. A merge takes about as long as copying the changed parts, not the whole disk. Repeat the command until `chainOperation` is empty.
 
-**Expected:** the chain has two files, and the VM was never stopped.
+**Expected:** first the chain with the operation, then the chain with two files and no operation. In the lab the merge of a nearly empty disk took under a minute.
+
+```
+["snap-50edf7f051e750e9.qcow2","snap-6d00c53ed10caf34.qcow2","disk.img"] chain-live-rm-snapshot-fb58fadd-dac8-4b4c-b328-1653813b6f9b
+["snap-50edf7f051e750e9.qcow2","disk.img"]
+```
+
+The VM was never stopped.
 
 ---
 
@@ -193,7 +212,7 @@ virtctl start ${VM}-copy -n ${NS}
 
 The `patches` line removes the MAC address, so the copy does not clash with the original. Remove that line if your VM has no network interface with a fixed MAC address.
 
-**Expected:** the new VM starts and has the file `/var/tmp/marker-two`.
+**Expected:** `virtualmachinerestore.snapshot.kubevirt.io/my-vm-restore condition met` after 2.5 minutes for a 20 GiB disk, then `VM my-vm-copy was scheduled to start`. The new VM starts and has the file `/var/tmp/marker-two`.
 
 A snapshot of a VM disk cannot be cloned. Restore the snapshot instead.
 
@@ -207,7 +226,17 @@ To go back to plain disks, delete all snapshots of the VM. The `flatten` command
 kubectl pool-snapshots flatten ${VM} -n ${NS}
 ```
 
-**Expected:** the command lists the snapshots and asks you to type the VM name. Then it deletes them and prints `Done: every disk of vms/my-vm is a plain disk.img.` Use `--yes` to skip the question.
+**Expected:** the command lists the snapshots and asks you to type the VM name. Then it deletes them and prints the last line below. Use `--yes` to skip the question.
+
+```
+VM vms/my-vm: disks with instant snapshots: rootdisk
+These snapshots will be deleted. Their data is merged into the disks and cannot be restored:
+  VirtualMachineSnapshot my-vm-snap2
+Type the VM name (my-vm) to go on: Deleted. Waiting for the merges...
+Done: every disk of vms/my-vm is a plain disk.img.
+```
+
+The command is built with `make build-pool-snapshots` (the file is `bin/kubectl-pool_snapshots`; put it on your `PATH`).
 
 A VM with snapshots does not start while the Sidecar gate is off. Flatten first, then remove the `Sidecar` entry from the `kubevirt.kubevirt.io/jsonpatch` annotation, or run `hack/sidecar-gate.sh off`.
 
@@ -219,7 +248,10 @@ A VM with snapshots does not start while the Sidecar gate is off. Flatten first,
 oc delete vm -n ${NS} ${VM}-copy --ignore-not-found
 oc delete vmrestore -n ${NS} ${VM}-restore --ignore-not-found
 oc delete vmsnapshot -n ${NS} ${VM}-snap1 ${VM}-snap2 --ignore-not-found
+oc delete pvc -n ${NS} -l restore.kubevirt.io/source-vm-name=${VM}
 ```
+
+The last command removes the disk that the restore made. Deleting the copy VM does not remove it.
 
 ---
 
