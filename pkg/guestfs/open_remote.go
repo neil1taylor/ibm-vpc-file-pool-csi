@@ -28,6 +28,9 @@ type RemoteOptions struct {
 	Crash bool
 	// Check, if set, runs before every call of the tree (see Options.Check).
 	Check func() error
+	// Moments, if set, lists the moments of the disk instead of the one the disk
+	// shows. A disk server that holds older restore points lists them here.
+	Moments func() ([]string, error)
 	// StartTimeout limits how long the appliance may take to list the file
 	// systems; zero means 10 minutes.
 	StartTimeout time.Duration
@@ -61,6 +64,9 @@ func OpenRemote(ctx context.Context, o RemoteOptions) (*Opened, error) {
 		name := o.Moment.UTC().Format(browse.MomentLayout)
 		op.Info.Moment = name
 		op.Moments = func() ([]string, error) { return []string{name}, nil }
+	}
+	if o.Moments != nil {
+		op.Moments = o.Moments
 	}
 	lctx, lcancel := context.WithTimeout(sctx, orDuration(o.StartTimeout, 10*time.Minute))
 	defer lcancel()

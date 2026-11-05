@@ -133,3 +133,40 @@ func TestRestoreFromAVMDiskInCOSIsAGuestRestoreFromCOS(t *testing.T) {
 		t.Fatalf("restores = %+v: a VM disk in COS is restored as a guest, from COS", rs)
 	}
 }
+
+func TestAnOlderRestorePointOfAVMDiskInCOSIsNotRefused(t *testing.T) {
+	e := newEnv(t, Config{}, memTree{})
+	addVMDisk(e, true)
+	at := time.Date(2026, 10, 20, 9, 30, 0, 0, time.UTC)
+	resp, body := e.do("POST", "/v1/sessions", "alice-token", SessionRequest{Policy: "nightly", Namespace: "apps", PVC: "web-root", Source: "cos", Moment: &at})
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("%d %s", resp.StatusCode, body)
+	}
+	got := e.sessions()
+	if len(got) != 1 || !got[0].Spec.Guest || got[0].Spec.Source != v1alpha1.BackupSourceCOS {
+		t.Fatalf("sessions = %+v", got)
+	}
+	if rp := got[0].Spec.EffectiveRestorePoint(); rp == nil || !rp.Time.Equal(at) {
+		t.Errorf("restore point = %v, want %s", rp, at)
+	}
+}
+
+func TestRestoreAnOlderRestorePointOfAVMDiskInCOS(t *testing.T) {
+	e := newRestoreEnv(t)
+	addVMDisk(e, true)
+	req := newReq()
+	req["pvc"] = "web-root"
+	req["source"] = "cos"
+	req["moment"] = "2026-10-20T09:30:00Z"
+	resp, body := e.do("POST", "/v1/restores", "alice-token", req)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("%d %s", resp.StatusCode, body)
+	}
+	rs := e.restores()
+	if len(rs) != 1 || !rs[0].Spec.Guest || rs[0].Spec.Source != "cos" {
+		t.Fatalf("restores = %+v", rs)
+	}
+	if rp := rs[0].Spec.EffectiveRestorePoint(); rp == nil || rp.UTC().Format(time.RFC3339) != "2026-10-20T09:30:00Z" {
+		t.Errorf("restore point = %v", rp)
+	}
+}

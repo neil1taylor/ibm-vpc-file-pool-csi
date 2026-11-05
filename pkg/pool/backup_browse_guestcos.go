@@ -38,17 +38,32 @@ const guestKeepMargin = time.Hour
 
 // checkGuestKeep refuses a session on an export that the maintenance Job will
 // delete before the session can end.
-func (bc *BackupController) checkGuestKeep(loc cosLocation) error {
-	return bc.checkKeepFor(loc, bc.browse.MaxLife, "a session may last", "Browse a newer backup")
+func (bc *BackupController) checkGuestKeep(loc cosLocation, at time.Time) error {
+	return bc.checkKeepFor(loc, at, bc.browse.MaxLife, "a session may last", "Browse a newer backup")
+}
+
+// keepStart is the time from which the keep time of the export that covers the
+// restore point at is counted. That export is the oldest one made at or after
+// at. The policy records only the time of the newest export, so for an older
+// restore point the count starts at the restore point itself: the covering
+// export is no older than that, and so is deleted no sooner. The check can
+// refuse a restore point whose export is a little newer than the restore point;
+// it never allows one whose export will be deleted too soon.
+func keepStart(exported, at time.Time) time.Time {
+	if !at.IsZero() && at.Before(exported) {
+		return at
+	}
+	return exported
 }
 
 // checkKeepFor refuses a backup that will be deleted from COS before the work
-// (lasting at most life) can end, with a margin of an hour.
-func (bc *BackupController) checkKeepFor(loc cosLocation, life time.Duration, what, advice string) error {
+// (lasting at most life) can end, with a margin of an hour. at is the restore
+// point asked for; the zero time means the newest.
+func (bc *BackupController) checkKeepFor(loc cosLocation, at time.Time, life time.Duration, what, advice string) error {
 	if loc.entry == nil || loc.entry.ExportedTime == nil || loc.repo.KeepFor <= 0 {
 		return nil
 	}
-	remaining := loc.entry.ExportedTime.Add(loc.repo.KeepFor).Sub(bc.nowFunc())
+	remaining := keepStart(loc.entry.ExportedTime.Time, at).Add(loc.repo.KeepFor).Sub(bc.nowFunc())
 	if remaining < life+guestKeepMargin {
 		return restoreFailure(fmt.Sprintf(
 			"this backup will be deleted from COS in %s, which is less than %s (%s) plus an hour. %s",
@@ -65,7 +80,7 @@ func (bc *BackupController) guestCOSRequest(req BrowseJobRequest, loc cosLocatio
 	if loc.entry != nil && loc.entry.VMName == "" {
 		return BrowseJobRequest{}, restoreFailure(fmt.Sprintf("%s/%s is not a VM disk, so it has no guest file systems to browse", loc.entry.PVCNamespace, loc.entry.PVCName))
 	}
-	if err := bc.checkGuestKeep(loc); err != nil {
+	if err := bc.checkGuestKeep(loc, req.At); err != nil {
 		return BrowseJobRequest{}, err
 	}
 	req.Guest = true
@@ -198,6 +213,13 @@ func (bc *BackupController) watchGuestCOS(ctx context.Context, bb *v1alpha1.Back
 		return true
 	case reader.Exists:
 		return false // the reader is up: the usual watch goes on
+	case (!ds.Ready || ds.PodIP == "") && bb.Status.Phase == browsePhaseStarting && bb.Status.StartedTime != nil &&
+		bc.nowFunc().Sub(bb.Status.StartedTime.Time) >= bc.diskStartTimeout(ctx, bb):
+		limit := bc.diskStartTimeout(ctx, bb)
+		bc.endBrowse(ctx, bb, counts, browsePhaseFailed, "", fmt.Sprintf(
+			"the disk server was not ready after %s. Check that the Secrets named by the export block exist in namespace %s and hold the keys access_key_id, secret_access_key, wrappedKey and apikey, and that the image can be pulled. An older restore point is read from the undo files in the backup, which takes longer",
+			limit, bc.browse.COSNamespace))
+		return true
 	case !ds.Ready || ds.PodIP == "":
 		bc.setBrowseStatus(ctx, bb, browsePhaseStarting, "starting the disk server")
 		return true
@@ -214,6 +236,22 @@ func (bc *BackupController) watchGuestCOS(ctx context.Context, bb *v1alpha1.Back
 	}
 	bc.setBrowseStatus(ctx, bb, browsePhaseStarting, "starting the reader of the VM disk")
 	return true
+}
+
+// diskStartTimeout is how long the disk server of a session may take to be
+// ready. A restore point older than the newest export is read from the undo
+// files and gets twice the start time of a COS session (10 minutes by default).
+// When the policy cannot say, an asked-for restore point is counted as older.
+func (bc *BackupController) diskStartTimeout(ctx context.Context, bb *v1alpha1.BackupBrowse) time.Duration {
+	rp := bb.Spec.EffectiveRestorePoint()
+	if rp == nil || rp.IsZero() {
+		return bc.cosStartTimeout()
+	}
+	loc, err := bc.cosLocationOf(ctx, bb.Spec.Policy, bb.Spec.PVCNamespace, bb.Spec.PVCName, bb.Spec.FromCOS)
+	if err == nil && loc.entry != nil && loc.entry.ExportedTime != nil && !rp.Time.Before(loc.entry.ExportedTime.Time) {
+		return bc.cosStartTimeout()
+	}
+	return 2 * bc.cosStartTimeout()
 }
 
 func helperFailureText(reason string) string {

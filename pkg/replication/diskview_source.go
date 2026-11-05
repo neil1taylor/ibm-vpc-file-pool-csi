@@ -95,39 +95,14 @@ func OpenDiskViewFrom(disk io.ReaderAt, diskSize int64, latest time.Time, src Un
 			dv = nil
 		}
 	}()
-	names, err := src.Names()
+	files, err := headersFrom(src)
 	if err != nil {
 		return nil, err
 	}
-	var files []sourceUndo
-	for _, n := range names {
-		if !ValidUndoName(n) {
-			continue
-		}
-		seq, aerr := strconv.Atoi(strings.TrimSuffix(n, undoApplied))
-		if aerr != nil {
-			continue
-		}
-		files = append(files, sourceUndo{seq: seq, name: n})
-	}
-	if len(files) > maxUndoFiles {
-		return nil, fmt.Errorf("the backup has more than %d undo files", maxUndoFiles)
-	}
-	sort.Slice(files, func(i, j int) bool { return files[i].seq < files[j].seq })
-	// The chosen restore point decides which files are needed, so the headers
-	// come first: a few bytes of each file, and not its records.
 	st := DiskState{Moment: latest, MomentKnown: true}
-	for i := range files {
-		h, herr := readHeaderOf(src, files[i].name)
-		if herr != nil {
-			return nil, herr
-		}
-		if i > 0 && h.from.Before(files[i-1].hdr.from) {
-			return nil, fmt.Errorf("%s: %w", files[i].name, ErrUndoOrder)
-		}
-		files[i].hdr = h
-		if h.from.Unix() > 0 {
-			st.RestorePoints = append(st.RestorePoints, h.from)
+	for _, f := range files {
+		if f.hdr.from.Unix() > 0 {
+			st.RestorePoints = append(st.RestorePoints, f.hdr.from)
 		}
 	}
 	if at.IsZero() || !at.Before(latest) {
@@ -166,6 +141,59 @@ func OpenDiskViewFrom(disk io.ReaderAt, diskSize int64, latest time.Time, src Un
 	}
 	d.size = d.layers[0].oldSize
 	return d, nil
+}
+
+// headersFrom lists the undo files of src, oldest first, with their headers.
+// The chosen restore point decides which files are needed, so only the headers
+// are read here: a few bytes of each file, and not its records.
+func headersFrom(src UndoSource) ([]sourceUndo, error) {
+	names, err := src.Names()
+	if err != nil {
+		return nil, err
+	}
+	var files []sourceUndo
+	for _, n := range names {
+		if !ValidUndoName(n) {
+			continue
+		}
+		seq, aerr := strconv.Atoi(strings.TrimSuffix(n, undoApplied))
+		if aerr != nil {
+			continue
+		}
+		files = append(files, sourceUndo{seq: seq, name: n})
+	}
+	if len(files) > maxUndoFiles {
+		return nil, fmt.Errorf("the backup has more than %d undo files", maxUndoFiles)
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].seq < files[j].seq })
+	for i := range files {
+		h, herr := readHeaderOf(src, files[i].name)
+		if herr != nil {
+			return nil, herr
+		}
+		if i > 0 && h.from.Before(files[i-1].hdr.from) {
+			return nil, fmt.Errorf("%s: %w", files[i].name, ErrUndoOrder)
+		}
+		files[i].hdr = h
+	}
+	return files, nil
+}
+
+// RestorePointsFrom lists the restore points that the undo files of src reach
+// back to, oldest first, from their headers only. The disk itself is one more
+// restore point, which the caller knows.
+func RestorePointsFrom(src UndoSource) ([]time.Time, error) {
+	files, err := headersFrom(src)
+	if err != nil {
+		return nil, err
+	}
+	var out []time.Time
+	for _, f := range files {
+		if f.hdr.from.Unix() > 0 {
+			out = append(out, f.hdr.from)
+		}
+	}
+	return out, nil
 }
 
 func oldestOf(st DiskState) time.Time {

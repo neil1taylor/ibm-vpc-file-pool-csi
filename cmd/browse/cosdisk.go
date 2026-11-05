@@ -10,13 +10,16 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/browse"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/cosbrowse"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/cosdisk"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/guestfs"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/replication"
 	"k8s.io/klog/v2"
 )
@@ -117,14 +120,17 @@ func runCOSDisk(ctx context.Context, a cosDiskArgs, stdout, stderr io.Writer, on
 	defer dav.Stop()
 	// A time before the export's own restore point is rebuilt from the undo
 	// files that the export holds. The export's own restore point is the disk.
-	older := !a.at.IsZero() && a.at.Before(pick.Moment)
+	// A restore point is named in whole seconds (as the listing prints it) but
+	// keeps its nanoseconds, so the view is asked for the end of that second.
+	viewAt := guestfs.AtEndOfSecond(a.at)
+	older := !viewAt.IsZero() && viewAt.Before(pick.Moment)
 	var (
 		reader   cosdisk.DiskReader
 		served   = pick.Moment
 		closeAll func()
 	)
 	if older {
-		uv, uerr := cosdisk.OpenUndoView(ctx, &http.Client{Timeout: 5 * time.Minute}, dav.URL, pick.Moment, a.at,
+		uv, uerr := cosdisk.OpenUndoView(ctx, &http.Client{Timeout: 5 * time.Minute}, dav.URL, pick.Moment, viewAt,
 			cosdisk.Options{SegmentSize: a.segmentMB << 20, ReadAhead: a.readAhead, MaxBytes: int64(a.cacheMB) << 20})
 		if uerr != nil {
 			failStart(stderr, a.termLog, olderRefusal(uerr, a.at))
@@ -158,6 +164,7 @@ func runCOSDisk(ctx context.Context, a cosDiskArgs, stdout, stderr io.Writer, on
 		// older one the folders are read from the disk.
 		opts = append(opts, cosdisk.WithFileList(func(ctx context.Context) (io.ReadCloser, int64, error) { return fetchFileList(ctx, dav.URL) }))
 	}
+	opts = append(opts, cosdisk.WithRestorePoints(restorePointsOf(dav.URL, pick.Moment)))
 	diskHandler, err := cosdisk.NewHandler(reader, token, opts...)
 	if err != nil {
 		failStart(stderr, a.termLog, err)
@@ -257,4 +264,34 @@ func olderRefusal(err error, at time.Time) error {
 		return fmt.Errorf("this VM disk has no restore point in COS at or before %s (%w)", at.UTC().Format(time.RFC3339), err)
 	}
 	return fmt.Errorf("the restore point of the VM disk could not be opened: %w", err)
+}
+
+// restorePointsOf lists the restore points that the export holds: those of its
+// undo files and the disk's own. It reads a few bytes at each end of each undo
+// file, once; a failed listing is tried again at the next request.
+func restorePointsOf(diskURL string, own time.Time) func(context.Context) ([]time.Time, error) {
+	var (
+		mu   sync.Mutex
+		done []time.Time
+	)
+	return func(ctx context.Context) ([]time.Time, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if done != nil {
+			return done, nil
+		}
+		undo, err := cosdisk.RestorePointsOf(ctx, &http.Client{Timeout: 5 * time.Minute}, diskURL)
+		if err != nil {
+			return nil, err
+		}
+		all := append(undo, own)
+		sort.Slice(all, func(i, j int) bool { return all[i].Before(all[j]) })
+		done = all[:0:0]
+		for _, t := range all {
+			if len(done) == 0 || !t.Equal(done[len(done)-1]) {
+				done = append(done, t)
+			}
+		}
+		return done, nil
+	}
 }

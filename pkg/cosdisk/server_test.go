@@ -243,3 +243,42 @@ func TestOnAuthedRunsOnlyForTheRightToken(t *testing.T) {
 		t.Errorf("starts=%d ends=%d, want 1 and 1", starts, ends)
 	}
 }
+
+func TestRestorePointsAreServedBehindTheToken(t *testing.T) {
+	points := []time.Time{time.Date(2026, 11, 1, 10, 0, 0, 500, time.UTC), time.Date(2026, 11, 2, 10, 0, 0, 0, time.UTC)}
+	certPEM, keyPEM, err := browse.NewSessionCert(time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ := browse.ServerTLSConfig(certPEM, keyPEM)
+	d := New(&memSource{data: make([]byte, 4096)}, Options{SegmentSize: 1024, MaxBytes: 8192})
+	t.Cleanup(func() { _ = d.Close() })
+	h, err := NewHandler(d, testToken, WithRestorePoints(func(context.Context) ([]time.Time, error) { return points, nil }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewUnstartedServer(h)
+	ts.TLS = cfg
+	ts.StartTLS()
+	t.Cleanup(ts.Close)
+	c, _ := browse.PinnedClient(certPEM)
+
+	if resp := do(t, c, http.MethodGet, ts.URL+RestorePointsPath, "", ""); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("without the token: %d", resp.StatusCode)
+	}
+	if resp := do(t, c, http.MethodPost, ts.URL+RestorePointsPath, testToken, ""); resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("POST: %d", resp.StatusCode)
+	}
+	got, err := FetchRestorePoints(context.Background(), c, ts.URL+RestorePointsPath, testToken)
+	if err != nil || len(got) != 2 || !got[0].Equal(points[0]) || !got[1].Equal(points[1]) {
+		t.Fatalf("FetchRestorePoints = %v, %v", got, err)
+	}
+}
+
+func TestRestorePointsFromAServerThatDoesNotListThemAreNone(t *testing.T) {
+	ts, c := tlsDisk(t, make([]byte, 4096))
+	got, err := FetchRestorePoints(context.Background(), c, ts.URL+RestorePointsPath, testToken)
+	if err != nil || got != nil {
+		t.Fatalf("got %v, %v; an older disk server has no list, and that is not an error", got, err)
+	}
+}

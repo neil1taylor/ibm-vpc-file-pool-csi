@@ -507,7 +507,7 @@ describe('BackupBrowsePage source switch', () => {
     expect(useBrowseSession).toHaveBeenLastCalledWith({ policy: 'nightly', namespace: 'apps', pvc: 'db', source: 'cos' });
   });
 
-  it('shows the notice, offers only the newest copy and gives the source to the restore dialog for COS', async () => {
+  it('shows the notice, offers only the newest copy for a plain volume and gives the source to the restore dialog for COS', async () => {
     (useK8sWatchResource as jest.Mock).mockReturnValue(policyWith(true));
     mockSearch = '?claim=apps%2Fdb&source=cos';
     (useBrowseSession as jest.Mock).mockReturnValue({ ...ready, source: 'cos' });
@@ -515,7 +515,8 @@ describe('BackupBrowsePage source switch', () => {
     render(<BackupBrowsePage />);
     expect(await screen.findByText(/These files are read from the copy in COS/)).toBeTruthy();
     expect(screen.getByText(/up to 30 seconds/)).toBeTruthy();
-    expect(screen.getByText(/only the newest/)).toBeTruthy();
+    expect(screen.getByText(/older restore point of a VM disk is listed from the disk/)).toBeTruthy();
+    expect(screen.getByText(/up to 5 minutes/)).toBeTruthy();
     const select = screen.getByLabelText('Restore point') as HTMLSelectElement;
     await waitFor(() => expect(listMoments).toHaveBeenCalled());
     expect(within(select).getAllByRole('option').length).toBe(1);
@@ -523,6 +524,41 @@ describe('BackupBrowsePage source switch', () => {
     expect(screen.queryByText(/latest copy may change/i)).toBeNull();
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Choose a.txt' }));
     fireEvent.click(screen.getByRole('button', { name: 'Restore selected' }));
+    expect(screen.getByTestId('restore-dialog').textContent).toContain('source=cos');
+  });
+
+  it('sends the restore point of the link to the session when the source is COS', async () => {
+    (useK8sWatchResource as jest.Mock).mockReturnValue(policyWith(true));
+    mockSearch = '?claim=apps%2Fdb&source=cos&restorePoint=2026-10-22T09%3A15%3A00Z';
+    render(<BackupBrowsePage />);
+    await screen.findByTestId('file-actions');
+    expect(useBrowseSession).toHaveBeenLastCalledWith({
+      policy: 'nightly', namespace: 'apps', pvc: 'db', moment: '2026-10-22T09:15:00Z', source: 'cos',
+    });
+  });
+
+  it('warns about the wait before the session is ready when an older restore point is asked for in COS', () => {
+    (useK8sWatchResource as jest.Mock).mockReturnValue(policyWith(true));
+    mockSearch = '?claim=apps%2Fdb&source=cos&restorePoint=2026-10-22T09%3A15%3A00Z';
+    (useBrowseSession as jest.Mock).mockReturnValue({ status: 'starting', message: 'starting the disk server', reopen });
+    render(<BackupBrowsePage />);
+    expect(screen.getByText(/older restore point of a VM disk is listed from the disk/)).toBeTruthy();
+    expect(screen.getByText(/up to 5 minutes/)).toBeTruthy();
+  });
+
+  it('offers the restore points of a VM disk in COS and gives the chosen one to the restore dialog', async () => {
+    (useK8sWatchResource as jest.Mock).mockReturnValue(policyWith(true));
+    mockSearch = '?claim=apps%2Fdb&source=cos&restorePoint=2026-10-21T09%3A15%3A00Z';
+    (useBrowseSession as jest.Mock).mockReturnValue({ ...ready, source: 'cos', guest: true });
+    (listFolder as jest.Mock).mockResolvedValue({ entries: [entry('a.txt')] });
+    render(<BackupBrowsePage />);
+    const select = screen.getByLabelText('Restore point') as HTMLSelectElement;
+    await waitFor(() => expect(within(select).getAllByRole('option').length).toBe(3));
+    expect(select.disabled).toBe(false);
+    expect(select.value).toBe('2026-10-21T09:15:00Z');
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Choose a.txt' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restore selected' }));
+    expect(screen.getByTestId('restore-dialog').textContent).toContain('moment=2026-10-21T09:15:00Z');
     expect(screen.getByTestId('restore-dialog').textContent).toContain('source=cos');
   });
 

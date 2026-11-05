@@ -56,6 +56,18 @@ func listBytes(t *testing.T, moment time.Time) []byte {
 // the certificate file for the client and the token file.
 func diskServer(t *testing.T, list []byte, momentHeader string) (url, certFile, tokenFile string) {
 	t.Helper()
+	var extra []cosdisk.HandlerOption
+	if list != nil {
+		extra = append(extra, cosdisk.WithFileList(func(context.Context) (io.ReadCloser, int64, error) {
+			return io.NopCloser(bytes.NewReader(list)), int64(len(list)), nil
+		}))
+	}
+	return diskServerWith(t, momentHeader, extra...)
+}
+
+// diskServerWith is diskServer with more handler options.
+func diskServerWith(t *testing.T, momentHeader string, extra ...cosdisk.HandlerOption) (url, certFile, tokenFile string) {
+	t.Helper()
 	certPEM, keyPEM, err := browse.NewSessionCert(time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -68,11 +80,7 @@ func diskServer(t *testing.T, list []byte, momentHeader string) (url, certFile, 
 		w.Header().Set(cosdisk.MomentHeader, momentHeader)
 		return func() {}
 	})}
-	if list != nil {
-		opts = append(opts, cosdisk.WithFileList(func(context.Context) (io.ReadCloser, int64, error) {
-			return io.NopCloser(bytes.NewReader(list)), int64(len(list)), nil
-		}))
-	}
+	opts = append(opts, extra...)
 	h, _ := cosdisk.NewHandler(d, token, opts...)
 	ts := httptest.NewUnstartedServer(h)
 	ts.TLS = cfg
@@ -233,5 +241,45 @@ func TestRemoteGuestRefusesBadArguments(t *testing.T) {
 		if code := run(context.Background(), c, &out, &errb, nil); code != 2 {
 			t.Errorf("%s: exit %d (%s)", name, code, errb.String())
 		}
+	}
+}
+
+func TestRemoteGuestListsTheRestorePointsTheDiskServerHolds(t *testing.T) {
+	old := newToolRunner
+	newToolRunner = func(string, bool) guestfs.Runner { return otherTools{} }
+	defer func() { newToolRunner = old }()
+	points := []time.Time{
+		time.Date(2026, 10, 20, 9, 0, 0, 7, time.UTC),
+		time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 10, 22, 9, 15, 0, 0, time.UTC),
+	}
+	url, cert, tok := diskServerWith(t, points[2].Format(time.RFC3339),
+		cosdisk.WithRestorePoints(func(context.Context) ([]time.Time, error) { return points, nil }))
+	post, stop := runRemoteGuest(t, url, cert, tok)
+	defer stop()
+	var got struct {
+		Moments []string `json:"moments"`
+	}
+	if err := json.Unmarshal(post("/v1/moments", `{}`), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"20261020T090000Z", "20261021T090000Z", "20261022T091500Z"}
+	if strings.Join(got.Moments, ",") != strings.Join(want, ",") {
+		t.Errorf("restore points = %v, want %v", got.Moments, want)
+	}
+}
+
+func TestRemoteGuestListsOnlyTheServedRestorePointFromAServerWithoutAList(t *testing.T) {
+	old := newToolRunner
+	newToolRunner = func(string, bool) guestfs.Runner { return otherTools{} }
+	defer func() { newToolRunner = old }()
+	url, cert, tok := diskServer(t, nil, "2026-10-22T09:15:00Z")
+	post, stop := runRemoteGuest(t, url, cert, tok)
+	defer stop()
+	var got struct {
+		Moments []string `json:"moments"`
+	}
+	if err := json.Unmarshal(post("/v1/moments", `{}`), &got); err != nil || len(got.Moments) != 1 || got.Moments[0] != "20261022T091500Z" {
+		t.Errorf("restore points = %v, %v", got.Moments, err)
 	}
 }

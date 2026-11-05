@@ -60,7 +60,7 @@ func openRemoteGuestSession(ctx context.Context, a remoteGuestArgs) (*guestSessi
 	}
 	disk := cosdisk.New(src, cosdisk.Options{ReadAhead: remoteReadAhead, MaxBytes: remoteCacheBytes})
 	opened, err := guestfs.OpenRemote(ctx, guestfs.RemoteOptions{
-		Disk: disk, Moment: src.Moment(), Socket: a.socket,
+		Disk: disk, Moment: src.Moment(), Socket: a.socket, Moments: remoteMoments(client, a.url, token, src.Moment()),
 		Runner: newToolRunner(a.appliance, guestfs.HasKVM()), Crash: a.consistency == consistencyCrash,
 	})
 	if err != nil {
@@ -106,4 +106,30 @@ func fetchSavedList(ctx context.Context, client *http.Client, diskURL, token str
 		return nil
 	}
 	return list
+}
+
+// remoteMoments lists the restore points the disk server holds, as names of
+// whole seconds, oldest first. A disk server with no list (an older one) gives
+// the restore point it serves, as before.
+func remoteMoments(client *http.Client, diskURL, token string, served time.Time) func() ([]string, error) {
+	listURL := strings.TrimSuffix(diskURL, cosdisk.DiskPath) + cosdisk.RestorePointsPath
+	return func() ([]string, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		points, err := cosdisk.FetchRestorePoints(ctx, client, listURL, token)
+		if err != nil {
+			return nil, err
+		}
+		if len(points) == 0 && !served.IsZero() {
+			points = []time.Time{served}
+		}
+		var out []string
+		for _, p := range points {
+			name := p.UTC().Format(browse.MomentLayout)
+			if len(out) == 0 || out[len(out)-1] != name {
+				out = append(out, name)
+			}
+		}
+		return out, nil
+	}
 }

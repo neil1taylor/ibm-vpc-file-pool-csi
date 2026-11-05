@@ -182,7 +182,7 @@ const RestoreFilesDialog: React.FC<Props> = ({ policy, namespace, pvc, moment, s
           ]
             .filter(Boolean)
             .join(', ')}{' '}
-          from the backup of {namespace}/{pvc}, {source === 'cos' ? 'the copy in COS' : moment ? momentLabel(moment) : 'Latest copy'}, into {where}. A folder is restored with everything in
+          from the backup of {namespace}/{pvc}, {source === 'cos' ? (moment ? `the copy in COS, ${momentLabel(moment)}` : 'the copy in COS') : moment ? momentLabel(moment) : 'Latest copy'}, into {where}. A folder is restored with everything in
           it. A link is restored as a link and is not followed. The folders above each file are kept: /var/www/index.php is written as
           /var/www/index.php.
         </p>

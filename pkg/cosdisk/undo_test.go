@@ -316,3 +316,45 @@ func TestUndoView_CacheStaysWithinTheBudgetAcrossManyLayers(t *testing.T) {
 		t.Errorf("the undo cache is over the total budget")
 	}
 }
+
+func TestRestorePointsOf_ListsWhatTheUndoFilesReachFromTheirHeadersOnly(t *testing.T) {
+	dir, moments := backupHistory(t, 3, 4)
+	d := newDAV(t, dir, "notes.txt", "../x.undo", "7.undo.bak")
+	got, err := RestorePointsOf(context.Background(), d.Client(), d.URL+"/disk.img")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := moments[:len(moments)-1] // the last moment is the disk itself
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if !got[i].Equal(want[i]) {
+			t.Errorf("restore point %d = %v, want %v", i, got[i], want[i])
+		}
+	}
+	// Only a few bytes at each end of each undo file are read.
+	for p, n := range d.served {
+		if strings.HasPrefix(p, "/.repl-undo/") && n.Load() > 1024 {
+			t.Errorf("%s: %d bytes were fetched to list the restore points", p, n.Load())
+		}
+	}
+}
+
+func TestRestorePointsOf_NoUndoFolderMeansNoOlderRestorePoints(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "disk.img"), []byte("x"), 0o660); err != nil {
+		t.Fatal(err)
+	}
+	d := newDAV(t, dir)
+	got, err := RestorePointsOf(context.Background(), d.Client(), d.URL+"/disk.img")
+	if err != nil || len(got) != 0 {
+		t.Fatalf("got %v, %v", got, err)
+	}
+}
+
+func TestRestorePointsOf_OnlyAThisHostUndoServerIsUsed(t *testing.T) {
+	if _, err := RestorePointsOf(context.Background(), http.DefaultClient, "http://example.com/disk.img"); err == nil {
+		t.Fatal("a disk URL on another host must be refused")
+	}
+}

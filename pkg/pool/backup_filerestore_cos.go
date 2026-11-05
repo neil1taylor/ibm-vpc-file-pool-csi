@@ -25,7 +25,11 @@ func (bc *BackupController) reconcileFileRestoreFromCOS(ctx context.Context, fr 
 	sp := fr.Spec
 	loc, err := bc.cosLocationOf(ctx, sp.Policy, sp.SourceNamespace, sp.SourceName, sp.FromCOS)
 	if err == nil && sp.Guest {
-		err = bc.checkGuestCOSRestore(loc)
+		var at time.Time
+		if rp := sp.EffectiveRestorePoint(); rp != nil {
+			at = rp.Time
+		}
+		err = bc.checkGuestCOSRestore(loc, at)
 	}
 	if err == nil {
 		err = bc.checkCOSSecrets(ctx, loc.repo, bc.fileJobs.Namespace())
@@ -88,7 +92,7 @@ func restoreDiskSecretName(id string) string { return "restoredisk-" + id }
 
 // checkGuestCOSRestore refuses, in words, what cannot be restored from a VM
 // disk in COS, before anything is started.
-func (bc *BackupController) checkGuestCOSRestore(loc cosLocation) error {
+func (bc *BackupController) checkGuestCOSRestore(loc cosLocation, at time.Time) error {
 	switch {
 	case !bc.fileJobs.GuestEnabled():
 		return restoreFailure("restoring files from inside a VM disk is not turned on in this installation (backupBrowse.guest.image is not set)")
@@ -100,7 +104,7 @@ func (bc *BackupController) checkGuestCOSRestore(loc cosLocation) error {
 	if _, ok := bc.fileJobs.(FileRestoreDiskJobs); !ok {
 		return restoreFailure("restoring files from a VM disk in COS is not set up in this installation")
 	}
-	return bc.checkKeepFor(loc, guestFileRestoreDeadline, "a restore may last", "Restore from a newer backup")
+	return bc.checkKeepFor(loc, at, guestFileRestoreDeadline, "a restore may last", "Restore from a newer backup")
 }
 
 // guestCOSDisk makes sure the disk server of the restore runs, and returns where

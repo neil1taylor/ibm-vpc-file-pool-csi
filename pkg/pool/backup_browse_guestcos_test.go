@@ -203,3 +203,88 @@ func TestBrowseGuestCOS_EndingTheSessionRemovesBothSecrets(t *testing.T) {
 		t.Error("the session's Jobs were not stopped")
 	}
 }
+
+func (e *browseCOSEnv) openGuestCOSAt(name string, at time.Time) {
+	e.openCOS(name, func(b *v1alpha1.BackupBrowse) {
+		b.Spec.Guest = true
+		m := metav1.NewTime(at)
+		b.Spec.RestorePoint = &m
+	})
+}
+
+// The export that covers an older restore point is the oldest export at or after
+// it, so it is no newer than the restore point's own time allows. The controller
+// knows only the time of the newest export, so it counts from the restore point.
+func TestBrowseGuestCOS_ChecksTheKeepTimeFromTheRestorePointNotTheNewestExport(t *testing.T) {
+	e := newVMCOSEnv(t)
+	// The newest export is a day old (29 days left), but the restore point is
+	// 29 days and 22 hours old: the export that holds it has 2 hours left.
+	e.openGuestCOSAt("bb1", e.now.Add(-29*24*time.Hour-22*time.Hour))
+	e.reconcile()
+	bb := e.bb("bb1")
+	if bb.Status.Phase != "Failed" || !strings.Contains(bb.Status.Message, "deleted from COS") {
+		t.Errorf("status = %+v", bb.Status)
+	}
+	if len(e.jobs.disks) != 0 {
+		t.Error("a disk server was started for a restore point that is about to be deleted")
+	}
+}
+
+func TestBrowseGuestCOS_AnOlderRestorePointWithTimeLeftReachesTheDiskServer(t *testing.T) {
+	e := newVMCOSEnv(t)
+	at := e.now.Add(-10 * 24 * time.Hour)
+	e.openGuestCOSAt("bb1", at)
+	e.reconcile()
+	if bb := e.bb("bb1"); bb.Status.Phase != "Starting" {
+		t.Fatalf("status = %+v", bb.Status)
+	}
+	req, ok := e.jobs.disks["uid-bb1"]
+	if !ok || !req.At.Equal(at) {
+		t.Fatalf("disk server request = %+v, want At %s", req, at)
+	}
+}
+
+func TestBrowseGuestCOS_ARestorePointAfterTheNewestExportKeepsTheNewestExportsKeepTime(t *testing.T) {
+	e := newVMCOSEnv(t)
+	e.setExported(e.now.Add(-29*24*time.Hour - 22*time.Hour)) // 2 hours left
+	e.openGuestCOSAt("bb1", e.now.Add(-time.Hour))            // newer than every export
+	e.reconcile()
+	if bb := e.bb("bb1"); bb.Status.Phase != "Failed" || !strings.Contains(bb.Status.Message, "deleted from COS") {
+		t.Errorf("status = %+v", bb.Status)
+	}
+}
+
+func TestBrowseGuestCOS_TheDiskServerHasFiveMinutesToStart(t *testing.T) {
+	e := newVMCOSEnv(t)
+	e.openGuestCOS("bb1")
+	e.reconcile()
+	e.now = e.now.Add(defaultBrowseCOSStartTimeout - time.Minute)
+	e.reconcile()
+	if bb := e.bb("bb1"); bb.Status.Phase != "Starting" {
+		t.Fatalf("ended too early: %+v", bb.Status)
+	}
+	e.now = e.now.Add(2 * time.Minute)
+	e.reconcile()
+	bb := e.bb("bb1")
+	if bb.Status.Phase != "Failed" || !strings.Contains(bb.Status.Message, "disk server was not ready after 5m0s") {
+		t.Errorf("status = %+v", bb.Status)
+	}
+}
+
+func TestBrowseGuestCOS_AnOlderRestorePointGetsTenMinutesToStart(t *testing.T) {
+	e := newVMCOSEnv(t)
+	e.setExported(e.now.Add(-time.Hour))
+	e.openGuestCOSAt("bb1", e.now.Add(-5*time.Hour)) // before the newest export: read from the disk
+	e.reconcile()
+	e.now = e.now.Add(defaultBrowseCOSStartTimeout + time.Minute)
+	e.reconcile()
+	if bb := e.bb("bb1"); bb.Status.Phase != "Starting" {
+		t.Fatalf("an older restore point ended after the 5 minute limit: %+v", bb.Status)
+	}
+	e.now = e.now.Add(5 * time.Minute)
+	e.reconcile()
+	bb := e.bb("bb1")
+	if bb.Status.Phase != "Failed" || !strings.Contains(bb.Status.Message, "disk server was not ready after 10m0s") {
+		t.Errorf("status = %+v", bb.Status)
+	}
+}

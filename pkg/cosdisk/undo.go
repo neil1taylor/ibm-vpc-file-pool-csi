@@ -168,6 +168,17 @@ func (r rangeReader) ReadAt(p []byte, off int64) (int, error) {
 	return n, err
 }
 
+// RestorePointsOf lists the restore points that the undo files next to the
+// disk.img at diskURL reach back to, oldest first. It reads a few bytes at each
+// end of each undo file, and no records. A backup without the folder has none.
+func RestorePointsOf(ctx context.Context, client *http.Client, diskURL string) ([]time.Time, error) {
+	us, err := NewUndoHTTP(ctx, client, diskURL)
+	if err != nil {
+		return nil, err
+	}
+	return replication.RestorePointsFrom(us)
+}
+
 // UndoView is a VM disk in COS at one restore point.
 type UndoView struct {
 	undo *UndoHTTP

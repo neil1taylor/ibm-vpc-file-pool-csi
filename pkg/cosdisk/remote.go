@@ -2,6 +2,7 @@ package cosdisk
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -133,4 +134,38 @@ func FetchFileList(ctx context.Context, client *http.Client, rawURL, token strin
 type limitedBody struct {
 	io.Reader
 	io.Closer
+}
+
+// FetchRestorePoints asks the disk server for the restore points of its export,
+// oldest first. rawURL is the address of RestorePointsPath. A server that has no
+// list (an older one) gives nil and no error.
+func FetchRestorePoints(ctx context.Context, client *http.Client, rawURL, token string) ([]time.Time, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme != "https" || u.User != nil || u.Host == "" {
+		return nil, errors.New("cosdisk: the disk server must be on https")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("cosdisk: asking the disk server for the restore points: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		return nil, nil
+	case resp.StatusCode != http.StatusOK:
+		return nil, fmt.Errorf("cosdisk: asking the disk server for the restore points: %s", resp.Status)
+	}
+	var got restorePointList
+	if err = json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(&got); err != nil {
+		return nil, fmt.Errorf("cosdisk: the list of restore points is not valid: %w", err)
+	}
+	if len(got.RestorePoints) > maxRestorePoints {
+		return nil, errors.New("cosdisk: the list of restore points is too long")
+	}
+	return got.RestorePoints, nil
 }
