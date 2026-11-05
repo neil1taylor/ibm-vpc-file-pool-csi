@@ -75,7 +75,10 @@ EOF
 dr wait --for=condition=Ready pod/failover-tool -n kube-system
 dr exec -i -n kube-system failover-tool -- sh -c 'cat > /tmp/kubectl-failover && chmod +x /tmp/kubectl-failover' < bin/kubectl-failover
 failover() { dr exec -n kube-system failover-tool -- /tmp/kubectl-failover "$@"; }
+failover version
 ```
+
+**Expected:** `pod/failover-tool condition met`, then a version line such as `kubectl-failover v0.17.1-6-g9a7d5d49`. Making the ClusterRole and the binding needs a cluster admin.
 
 Below, `failover <args>` is the pod way. On a host, read `kubectl failover <args>` instead, and add `--kubeconfig ${DR_KUBECONFIG}` to `execute` and `status`. Delete the pod, the ClusterRole and the binding when the failover is done.
 
@@ -113,6 +116,8 @@ export RECV_SUB=$(dr get subvolume ${RECV_PV} -o jsonpath='{.spec.subPath}')
 echo "${DR_IP} export='${DR_EXPORT}' receiver folder=${RECV_SUB}"
 ```
 
+**Expected** from the first `echo` above, for example: `10.251.0.18 export='/87ed0356_0c3e_4d81_bf77_fa644b6a49d5' receiver folder=/pvcs/pvc-44f85e63-d860-4157-9edf-65268a2a5f2d`.
+
 **In the failover pod,** the receiver volume is mounted at `/data`, so the replicated folders are in `/data/repl/pvcs`:
 
 ```bash
@@ -129,7 +134,7 @@ ls /mnt/dr${RECV_SUB}/repl/pvcs
 export FAILOVER_PATH=/mnt/dr${RECV_SUB}/repl
 ```
 
-**Expected:** one folder `pvc-<uuid>` for each replicated volume. In Part 12 the policy used `destinationBasePath: /repl`, so the failover path is the receiver folder plus `/repl`.
+**Expected:** one folder `pvc-<uuid>` for each replicated volume (two in the lab). In Part 12 the policy used `destinationBasePath: /repl`, so the failover path is the receiver folder plus `/repl`.
 
 ---
 
@@ -142,10 +147,23 @@ failover plan --nfs-mount-path ${FAILOVER_PATH}
 **Expected:** a table with one row for each volume. The columns are SubVolume, PVC, namespace, size, age of the last copy and policy. Then the RPO (the age of the oldest last copy) and a list of the VMs with the moment each will show:
 
 ```
+Failover Plan
+=============
+NFS Mount Path:  /data/repl
+SubVolumes:      2
+RPO (max age):   21m11s
+
+SUBVOLUME                                 PVC             NAMESPACE  SIZE (GiB)  LAST SYNC   POLICY
+pvc-7361d4f2-3a72-4eb3-911e-1afe41ce8708  my-vm-rootdisk  tutf-vms   20          21m11s ago  tutf-vm-to-dr
+pvc-becf191e-0669-45da-b29f-c08d8708ad8b  my-vm-datadisk  tutf-vms   2           21m11s ago  tutf-vm-to-dr
+
 Running VM disks
-  VM vms/my-vm shows the moment 2026-10-22T11:15:00Z
-    pvc-aaa...: in place
-    pvc-bbb...: in place
+  VM tutf-vms/my-vm shows the moment 2026-11-05T11:21:45Z
+    pvc-7361d4f2-3a72-4eb3-911e-1afe41ce8708: in place
+    pvc-becf191e-0669-45da-b29f-c08d8708ad8b: in place
+
+To execute failover, run:
+  kubectl failover execute --nfs-mount-path /data/repl --dr-pool <POOL> --dr-share-ip <IP>
 ```
 
 `in place` means the disk already shows that moment, so it is used as it is. The tool refuses with "a copy is still being applied" if a copy is in progress. Wait for it to end, or add `--force`, which rolls the unfinished copy back first.
@@ -156,14 +174,22 @@ To use an earlier moment, list the moments that all disks of each VM can show (n
 failover plan --nfs-mount-path ${FAILOVER_PATH} --list-moments
 ```
 
+**Expected:**
+
+```
+VM tutf-vms/my-vm
+  2026-11-05T11:21:45Z
+  2026-11-05T11:06:15Z
+```
+
 The list reaches back as far as `restorePointKeepHours` of the policy (24 hours by default). Choose one:
 
 ```bash
-export MOMENT=2026-10-22T10:45:00Z
+export MOMENT=2026-11-05T11:06:15Z
 failover plan --nfs-mount-path ${FAILOVER_PATH} --rewind-to ${MOMENT}
 ```
 
-**Expected:** the plan now says `rewind (copies the whole disk into a new folder)` for the disks that are ahead of the moment. The tool uses the newest moment at or before `--rewind-to`.
+**Expected:** the plan now says `VM tutf-vms/my-vm shows the moment 2026-11-05T11:06:15Z` and, for each disk, `rewind (copies the whole disk into a new folder)`. The RPO grows to the age of that moment. The tool uses the newest moment at or before `--rewind-to`.
 
 ### Or use the Failover resource and the console
 
@@ -238,9 +264,15 @@ Skip this step if the plan says `in place` for every disk and you want the newes
 failover execute --nfs-mount-path ${FAILOVER_PATH} --prepare-only --rewind-to ${MOMENT}
 ```
 
-`--prepare-only` rolls back unfinished copies and rewinds the disks, then stops. It needs no cluster and no pool name. Each rewound disk goes into a new folder next to the original, named `<volume>.rewind-<epoch>`. The latest disk is not changed. A rewind copies the whole disk, so it can take minutes (about 2.5 minutes for 14 GiB in a lab test).
+`--prepare-only` rolls back unfinished copies and rewinds the disks, then stops. It needs no cluster and no pool name. Each rewound disk goes into a new folder next to the original, named `<volume>.rewind-<epoch>`. The latest disk is not changed. A rewind copies the whole disk, so it can take minutes (about 6 minutes for a 20 GiB and a 2 GiB disk in the lab).
 
-**Expected:** one line for each rewound disk: `pvc-... rewound into /pvcs/pvc-....rewind-<epoch>`. The tool prints `Warning: skipping ...rewind-...: metadata file not found` for these folders in later commands. This is harmless.
+**Expected:** the plan, then one line for each rewound disk. The tool prints `Warning: skipping ...rewind-...: metadata file not found` for these folders in later commands. This is harmless.
+
+```
+Preparing running VM disks (rolling back unfinished copies, rewinding where needed)...
+  pvc-7361d4f2-3a72-4eb3-911e-1afe41ce8708 rewound into /pvcs/pvc-7361d4f2-3a72-4eb3-911e-1afe41ce8708.rewind-1793876775
+  pvc-becf191e-0669-45da-b29f-c08d8708ad8b rewound into /pvcs/pvc-becf191e-0669-45da-b29f-c08d8708ad8b.rewind-1793876775
+```
 
 ---
 
@@ -271,7 +303,21 @@ failover status
 
 **Expected:** `Created SubVolume`, `Created PV` and `Created PVC` for each volume (the dry run shows three lines for each volume and makes nothing). The PV path ends in `.../repl/pvcs/pvc-<uuid>`. The status table shows each PVC as `Bound` after a few seconds. The PVs have the prefix `dr-`. The PVCs keep the namespace and name they had on the source cluster. Running `execute` again skips what exists.
 
-The PVs carry the pool's NFS mount options, including `sec=sys`, and the PVCs name no StorageClass, so the cluster default class does not apply. Check: `dr get pv dr-pvc-<uuid> -o jsonpath='{.spec.mountOptions}'`.
+```
+[dry-run] Would create SubVolume pvc-7361d4f2-3a72-4eb3-911e-1afe41ce8708
+[dry-run] Would create PV dr-pvc-7361d4f2-3a72-4eb3-911e-1afe41ce8708 (nfs://10.251.0.18/87ed0356_.../repl/pvcs/pvc-7361d4f2-3a72-4eb3-911e-1afe41ce8708, mount options nfsvers=4.1,soft,timeo=600,retrans=3,sec=sys)
+[dry-run] Would create PVC tutf-vms/my-vm-rootdisk (bound to dr-pvc-7361d4f2-3a72-4eb3-911e-1afe41ce8708)
+...
+Created SubVolume pvc-7361d4f2-3a72-4eb3-911e-1afe41ce8708
+Created PV dr-pvc-7361d4f2-3a72-4eb3-911e-1afe41ce8708
+Created PVC tutf-vms/my-vm-rootdisk
+...
+SUBVOLUME                                 PVC             NAMESPACE  PVC PHASE  POLICY
+pvc-7361d4f2-3a72-4eb3-911e-1afe41ce8708  my-vm-rootdisk  tutf-vms   Bound      tutf-vm-to-dr
+pvc-becf191e-0669-45da-b29f-c08d8708ad8b  my-vm-datadisk  tutf-vms   Bound      tutf-vm-to-dr
+```
+
+The PVs carry the pool's NFS mount options, including `sec=sys`, and the PVCs name no StorageClass, so the cluster default class does not apply. Check: `dr get pv dr-pvc-<uuid> -o jsonpath='{.spec.mountOptions}'`. **Expected:** `["nfsvers=4.1","soft","timeo=600","retrans=3","sec=sys"]`.
 
 ### An earlier moment (after Step 4)
 
@@ -301,11 +347,11 @@ virtctl start my-vm -n vms --kubeconfig ${DR_KUBECONFIG}
 dr get vmi -n vms -w
 ```
 
-**Expected:** the VM boots. The guest agent connects. The kernel log shows no file-system errors if the copy was `FileSystemConsistent`.
+**Expected:** `VM my-vm was scheduled to start`. In the lab the VM was `Running` with the guest agent connected 17 seconds later. The guest agent connects. The kernel log shows no file-system errors if the copy was `FileSystemConsistent`.
 
-Check your data. For a VM that logs files, count the files and compare their checksums to the log. In a lab test with a VM that wrote a file and logged its checksum every 2 seconds, a VM started from the rewound disk had exactly the files up to the chosen moment (and not the file written later), and a VM started from the newest moment had all the files up to the last copy. All checksums matched. Both VMs started in under a minute.
+Check your data. For a VM that logs files, count the files and compare their checksums to the log. In a lab test with a VM that wrote a file and logged its checksum every 2 seconds, a VM started from the rewound disk had exactly the files up to the chosen moment (and not the file written later), and a VM started from the newest moment had all the files up to the last copy. All checksums matched. Both VMs started in under a minute. In a second lab test, the VM started from the newest moment had the 50 MB file `/var/tmp/big` that was written before the last copy and the kernel log held no file-system errors.
 
-> **After the VM runs, the disk no longer fits its restore points.** `failover execute --prepare-only --rewind-to ...` now refuses with "has changed since its last copy". To try another moment, fail over again from copies that no VM has used.
+> **After the VM runs, the disk no longer fits its restore points.** `failover execute --prepare-only --rewind-to ...` and `failover execute --rewind-to ...` now refuse with `Error: pvc-... has changed since its last copy (a VM has probably run on it), so its restore points no longer fit it and it cannot be rewound`. To try another moment, fail over again from copies that no VM has used.
 
 ---
 
