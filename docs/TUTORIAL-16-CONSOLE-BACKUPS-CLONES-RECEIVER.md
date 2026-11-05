@@ -425,7 +425,9 @@ oc get secret ibm-vpc-file-pool-csi-receiver-certs -n kube-system \
   -o jsonpath='{.data.ca\.crt}' | base64 -d
 ```
 
-**Expected:** a long token, an `https://` address, and for Option A a block that starts with `-----BEGIN CERTIFICATE-----`.
+**Expected:** a long token, an `https://` address, and for Option A a block of 23 lines that starts with `-----BEGIN CERTIFICATE-----` and ends with `-----END CERTIFICATE-----`.
+
+The token is a secret. Do not paste it into a chat or a ticket. On a Mac, copy it without printing it, with `... | base64 -d | pbcopy`, and paste it into the form in Step 12.
 
 ---
 
@@ -436,7 +438,7 @@ On the source cluster, open **Storage**, **IBM VPC File Pools**, the **Replicati
 | Field | What to enter |
 |-------|---------------|
 | **Name** | `dr-console`. The console names the Secrets and the check Job after it. Enter the name first. |
-| **Source Pool Name** | `tut-data`. |
+| **Source Pool Name** | `tut-data`. The list shows the pools of this cluster with their number of PVCs, for example `tut-data (3 PVCs)`. |
 | **Replication Mode** | **Driver-to-Driver (cross-region)**. |
 | **Receiver Endpoint** | The `https://` address. The form refuses `http://`. |
 | **Token and certificate** | **Make new Secrets from what I paste**. The other choice, **Use Secrets that already exist**, asks for the names of Secrets in `kube-system` (**Auth Secret Name** with the key `token`, **CA Cert Secret Name (optional)** with the key `ca.crt`). |
@@ -456,7 +458,9 @@ Choose **Check connection**. The console does three things:
 2. It starts a short Job in `kube-system`, with the driver image. The Job tests, in order, that the receiver answers, that its certificate is trusted, and that it accepts the token.
 3. It shows the result.
 
-**Expected:** an information box, **Checking the receiver**, then a green box, **The receiver is ready**: `The receiver answered, its certificate is trusted, and the token is accepted.`
+**Expected:** an information box, **Checking the receiver**, then a green box, **The receiver is ready**: `The receiver answered, its certificate is trusted, and the token is accepted.` On the lab (receiver on another cluster in the same region) the green box was there 10 seconds after the click.
+
+![The form after Check connection: a green box says The receiver is ready](images/tutorial-16-receiver-check-ready.jpg)
 
 If the check fails, a red box, **The check failed**, gives one reason: `cannot connect`, `certificate not trusted`, `token refused`, `receiver storage not reachable`, or `receiver has no auth-check call; update it`. Fix the cause and choose **Check connection** again. Changing any field turns the check off, and you must run it again.
 
@@ -468,7 +472,7 @@ Check the Secrets from a terminal. The check Job removes itself after ten minute
 oc get secret -n kube-system dr-console-receiver-token dr-console-receiver-ca
 ```
 
-**Expected:** both Secrets exist. With no certificate pasted, only the token Secret exists.
+**Expected:** both Secrets exist, each with 1 data item and the type `Opaque`. With no certificate pasted, only the token Secret exists.
 
 ---
 
@@ -484,7 +488,9 @@ Open the **Replication** tab. The list has a **Receiver** column with the same s
 oc get replicationpolicy dr-console -o jsonpath='{.status.conditions}{"\n"}'
 ```
 
-**Expected:** a condition of type `ReceiverReachable` with status `True`.
+**Expected:** a condition of type `ReceiverReachable`, reason `Reachable`, status `True`, with the message `The receiver answers and accepts the token.` On the lab it turned `True` less than a minute after **Create**; the page showed **Phase** `Active` and **Receiver Status** `Reachable`.
+
+![The policy page of dr-console: Phase Active, Receiver Status Reachable](images/tutorial-16-receiver-policy-reachable.jpg)
 
 ---
 
@@ -494,13 +500,17 @@ oc get replicationpolicy dr-console -o jsonpath='{.status.conditions}{"\n"}'
 2. The box asks **Delete ReplicationPolicy?** It has a tick box that is off: **Also delete the Secrets the receiver setup made (dr-console-receiver-token, dr-console-receiver-ca)**. The box appears only for Secrets named `<policy name>-receiver-token` and `<policy name>-receiver-ca` that this policy uses and no other policy uses.
 3. Tick the box and choose **Delete**.
 
+![The box Delete ReplicationPolicy? with the tick box for the Secrets](images/tutorial-16-receiver-delete-box.jpg)
+
 The console deletes a Secret only after it proves that the Secret carries the label that the setup put on it. A Secret that you made yourself with the same name is left alone, and a message names it.
 
 ```bash
 oc get secret -n kube-system dr-console-receiver-token dr-console-receiver-ca
 ```
 
-**Expected:** both Secrets are not found.
+**Expected:** both Secrets are not found (`Error from server (NotFound): secrets "dr-console-receiver-token" not found`, and the same for `dr-console-receiver-ca`). The policy is gone too: `oc get replicationpolicy dr-console` says `not found`.
+
+**If the Replication tab shows "Something wrong happened" and `Cannot access 'r' before initialization`,** the plugin is v0.17.1. Upgrade to v0.17.2 or later.
 
 ---
 
