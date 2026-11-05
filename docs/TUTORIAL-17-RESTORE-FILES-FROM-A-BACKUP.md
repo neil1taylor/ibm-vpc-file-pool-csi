@@ -231,18 +231,40 @@ export DISK=my-vm-rootdisk
 kubectl backup ls --policy ${POLICY} --pvc ${VMNS}/${DISK}
 ```
 
-**Expected:** a few folders such as `sda1` or `rhel-root`, each with its type and label. A volume that cannot be read (BitLocker, LUKS, swap) is listed with the reason and cannot be opened.
+**Expected:** one folder for each partition of the guest, with its type and label. The first listing took 20 seconds in the lab. Here is the list for a CentOS Stream 9 disk. A volume that cannot be read (BitLocker, LUKS, swap) is listed with the reason and cannot be opened.
+
+```
+dr-xr-xr-x  0:0  1048576      0001-01-01 00:00  sda1/ (not readable)  # No file system that the reader knows was found on this volume.
+dr-xr-xr-x  0:0  209489920    0001-01-01 00:00  sda2/  # vfat ESP
+dr-xr-xr-x  0:0  1006632960   0001-01-01 00:00  sda3/  # xfs boot
+dr-xr-xr-x  0:0  20122152960  0001-01-01 00:00  sda4/  # xfs root
+```
+
+The folder name is the one to give to `--fs` below. Use the name from your list: a disk with other partitions has other names.
 
 Open a folder inside one file system, download a file, and restore a folder. `--fs` puts the file system name in front of the path:
 
 ```bash
-kubectl backup ls  --policy ${POLICY} --pvc ${VMNS}/${DISK} --fs rhel-root /etc
-kubectl backup get --policy ${POLICY} --pvc ${VMNS}/${DISK} --fs rhel-root /etc/hosts --out /tmp/restored/
-kubectl backup restore-files --policy ${POLICY} --pvc ${VMNS}/${DISK} --fs rhel-root \
+kubectl backup ls  --policy ${POLICY} --pvc ${VMNS}/${DISK} --fs sda4 /etc
+kubectl backup get --policy ${POLICY} --pvc ${VMNS}/${DISK} --fs sda4 /etc/hosts --out /tmp/restored/
+kubectl backup restore-files --policy ${POLICY} --pvc ${VMNS}/${DISK} --fs sda4 \
   --path /etc/hosts --to ${VMNS}/vm-files --wait
 ```
 
-**Expected:** the folder list, then the file `/tmp/restored/hosts`, then `Done`. In the new claim the file is at `/rhel-root/etc/hosts`: the name of the file system is kept at the top.
+**Expected:** the folder list (one line each, as in `ls -l`), then the file `/tmp/restored/hosts`, then the restore progress:
+
+```
+Restore bfr-8c79aeb7900de297-0 asked: 1 paths from tutf-vms/my-vm-rootdisk (policy tutf-nightly, the latest copy) into a new claim tutf-vms/vm-files
+  Pending 
+  Measuring measuring the chosen files to size the new claim
+  Provisioning waiting for the driver to bind the new claim
+  Restoring copying the files into the new claim
+  Done restored 1 files, 2 folders and 0 links (158 bytes)
+Restore bfr-8c79aeb7900de297-0: Done - restored 1 files, 2 folders and 0 links (158 bytes)
+The new claim tutf-vms/vm-files holds the files.
+```
+
+In the new claim the file is at `/sda4/etc/hosts`: the name of the file system is kept at the top.
 
 Things to know:
 
