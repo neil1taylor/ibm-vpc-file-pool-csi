@@ -8,9 +8,9 @@
 # checks:
 #   - the policy lists all three volumes, the VM disks as FileSystemConsistent
 #     and the pod volume as FileCopy
-#   - the VM disks restored at the first backup moment boot with no XFS errors,
+#   - the VM disks restored at the first backup restore point boot with no XFS errors,
 #     and every file in the writer's log is on the data disk with its checksum
-#   - the pod volume restored at the first moment holds the first content, and
+#   - the pod volume restored at the first restore point holds the first content, and
 #     restored at the latest it holds the changed content
 #   - the pod volume can be restored after the claim is deleted
 #
@@ -330,13 +330,13 @@ wait_until "$FIRST_FILES_TIMEOUT" "the first backup of the pod volume" files_bac
 
 # Change the pod volume after its first backup. The second backup holds this.
 oc exec -n "$NS" files-writer -- bash -ec 'head -c 100000 /dev/urandom > /data/a/1; head -c 50000 /dev/urandom > /data/b; cd /data && find . -type f ! -name "manifest-*" | sort | xargs sha256sum > manifest-B.sha256'
-log "changed the pod volume; waiting for two moments of every volume"
+log "changed the pod volume; waiting for two restore points of every volume"
 two_moments() {
     for c in root data files; do
         [ "$(vol_field $c '.restorePoints // 0')" -ge 1 ] || return 1
     done
 }
-# restorePoints counts the moments before the newest, for VM disks and pod volumes alike.
+# restorePoints counts the restore points before the newest, for VM disks and pod volumes alike.
 wait_until "$BACKUP_TIMEOUT" "a second backup of every volume" two_moments
 
 status=$(oc get backuppolicy "$POLICY" -o json)
@@ -345,7 +345,7 @@ echo "$status" | jq -c '.status.volumes[] | {pvc: .pvcName, vm: .vmName, last: .
 [ "$(vol_field root .consistency)" = FileSystemConsistent ] || fail "the root disk backup is not FileSystemConsistent"
 [ "$(vol_field data .consistency)" = FileSystemConsistent ] || fail "the data disk backup is not FileSystemConsistent"
 [ "$(vol_field files .consistency)" = FileCopy ] || fail "the pod volume backup is not FileCopy"
-log "PASS: three volumes backed up, two moments each"
+log "PASS: three volumes backed up, two restore points each"
 # The volume names are how COS keeps backups. Save them before the claim "files" is deleted.
 export COS_PV_ROOT COS_PV_DATA COS_PV_FILES
 COS_PV_ROOT=$(oc get pvc -n "$NS" root -o jsonpath='{.spec.volumeName}')
@@ -354,7 +354,7 @@ COS_PV_FILES=$(oc get pvc -n "$NS" files -o jsonpath='{.spec.volumeName}')
 
 first_vm=$(vol_field root .oldestBackupTime)
 first_files=$(vol_field files .oldestBackupTime)
-log "oldest moments: VM disks $first_vm, pod volume $first_files"
+log "oldest restore points: VM disks $first_vm, pod volume $first_files"
 
 # check_files <pod> <claim> <manifest> <must be absent file or empty>: restore check on the pod volume.
 check_files() {
@@ -364,10 +364,10 @@ check_files() {
     pod_succeeded "$1" || fail "the restored pod volume $2 does not match $3"
 }
 if ! $QUICK; then
-restore() { # restore <pvc> <to> [moment]
+restore() { # restore <pvc> <to> [restore point]
 
     local moment=()
-    [ -z "${3:-}" ] || moment=(--moment "$3")
+    [ -z "${3:-}" ] || moment=(--restore-point "$3")
     "$BACKUP_BIN" restore --policy "$POLICY" --pvc "$NS/$1" --to "$NS/$2" ${moment[@]+"${moment[@]}"} --wait --timeout 1h
 }
 
@@ -390,7 +390,7 @@ restore files files-r1 "$first_files"
 check_files check-r1 files-r1 manifest-A.sha256 'test ! -e /data/b'
 log "PASS: the pod volume restored at $first_files holds the first content"
 
-log "restoring the pod volume at the latest moment (the changed content)"
+log "restoring the pod volume at the latest restore point (the changed content)"
 restore files files-r2
 check_files check-r2 files-r2 manifest-B.sha256 'test -e /data/b'
 log "PASS: the latest restore holds the changed content"

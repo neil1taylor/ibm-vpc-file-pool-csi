@@ -130,7 +130,7 @@ backupBrowse:
     # because a Secret named by the export block is missing.
     startTimeout: 5m
   # Browsing the files inside a VM disk without starting the VM (issue #92, phase
-  # 5). The helper shows the disk, read-only and at the chosen moment, to a small
+  # 5). The helper shows the disk, read-only and at the chosen restore point, to a small
   # appliance VM (libguestfs) in an ordinary pod with no extra rights. It needs its
   # own image (Dockerfile.browse-guest, built from CentOS Stream 9), so it is off
   # until you have built and pushed that image. While a session is open, the next
@@ -370,7 +370,7 @@ metrics:
     replicationFailures: 3
     # Backups: a volume with no backup for this long (twice the schedule is a good value)
     backupLateSeconds: 43200
-    # Copy in COS: the newest export, or a moment waiting, this old
+    # Copy in COS: the newest export, or a restore point waiting, this old
     exportLateSeconds: 43200
     # Snapshot pool share use, in percent. New backups stop at 85.
     snapshotPoolWarning: 75

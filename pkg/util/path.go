@@ -95,7 +95,7 @@ func ValidateBackupPath(p string) error {
 // ValidateBackupMomentsPath ensures a path to the earlier moments of one
 // volume's backup is safe: /backup/<policy>/.moments/pvcs/<volume>.
 func ValidateBackupMomentsPath(p string) error {
-	return validateBackup(p, validBackupMomentsPattern, "backup moments path")
+	return validateBackup(p, validBackupMomentsPattern, "backup restore points path")
 }
 
 func validateBackup(p string, re *regexp.Regexp, what string) error {

@@ -11,7 +11,7 @@
 #   that owner and its own mode, the folder with mode 0700 is whole, the link is
 #   a link, the checksum of the big file is the same, the claim is sized by the
 #   Job that measures (1 GiB), and pods can use the claim afterwards;
-# - at the first moment, the first content comes back;
+# - at the first restore point, the first content comes back;
 # - into an existing claim of a pool that configures no owner: a new folder
 #   holds the tree with the backup's owners (1000, 2000) and modes, the claim's
 #   own file is untouched, a second restore gets the next free name, and no
@@ -174,7 +174,7 @@ log "first backup at $FIRST"
 oc exec -n "$NS" writer -- sh -c 'echo second > /data/v.txt && echo two > /data/docs/b.txt'
 two_moments() { [ "$(vol '.restorePoints // 0')" -ge 1 ] && [ "$(vol '.lastBackupTime')" != "$FIRST" ]; }
 wait_until 1500 "a second backup" two_moments
-pass "two backup moments exist (first $FIRST)"
+pass "two backup restore points exist (first $FIRST)"
 
 # ---- helpers ------------------------------------------------------------------------------------
 frphase() { oc get backupfilerestore "$1" -o jsonpath='{.status.phase}' 2>/dev/null; }
@@ -183,9 +183,9 @@ ended() { case "$(frphase "$1")" in Done|Failed) return 0 ;; esac; return 1; }
 wait_ended() { # wait_ended <name> <seconds>
     wait_until "$2" "restore $1 to end" ended "$1"
 }
-restore() { # restore <name> <target claim> <existing true|false> <moment or ""> <paths yaml lines> [sizeGB]
+restore() { # restore <name> <target claim> <existing true|false> <restore point or ""> <paths yaml lines> [sizeGB]
     local moment=""
-    [ -n "$4" ] && moment="  moment: \"$4\""
+    [ -n "$4" ] && moment="  restorePoint: \"$4\""
     local size=""
     [ -n "${6:-}" ] && size="  sizeGB: $6"
     oc apply -f - <<YAML
@@ -273,14 +273,14 @@ grep -q "^only=big docs u1000 u2000 v.txt $" <<<"$OUT" && pass "only the chosen 
 grep -q "^u2000=4$" <<<"$OUT" && pass "the chosen files of u2000 are there and no others (4 entries)" || fail "u2000 count: $OUT"
 [ "$(oc get subvolume -l storage.ibmcloud.io/restore-pending=true -o name | wc -l | tr -d ' ')" = 0 ] && pass "no claim is held back after the restores" || fail "a claim is still held back"
 
-# ---- 2. a new claim at the first moment ---------------------------------------------------------
+# ---- 2. a new claim at the first restore point ---------------------------------------------------------
 restore "$PREFIX-first" "$PREFIX-first" false "$FIRST" '    - /v.txt
     - /docs' 3
 wait_ended "$PREFIX-first" 1800
-[ "$(frphase "$PREFIX-first")" = Done ] || fail "restore at the first moment: $(frmsg "$PREFIX-first")"
+[ "$(frphase "$PREFIX-first")" = Done ] || fail "restore at the first restore point: $(frmsg "$PREFIX-first")"
 [ "$(oc get pvc "$PREFIX-first" -n "$NS" -o jsonpath='{.spec.resources.requests.storage}')" = 3Gi ] && pass "sizeGB sets the size of a new claim" || fail "claim size is not 3Gi"
 OUT=$(inspect "$PREFIX-first" 'echo "v=$(cat v.txt)"; echo "b=$([ -e docs/b.txt ] && echo yes || echo no)"')
-grep -q "^v=first$" <<<"$OUT" && grep -q "^b=no$" <<<"$OUT" && pass "a restore at the first moment brings back the first content, without files made later" || fail "first moment: $OUT"
+grep -q "^v=first$" <<<"$OUT" && grep -q "^b=no$" <<<"$OUT" && pass "a restore at the first restore point brings back the first content, without files made later" || fail "first restore point: $OUT"
 
 # ---- 3. an existing claim of a pool with no configured owner -------------------------------------
 oc apply -n "$NS" -f - <<YAML
@@ -316,8 +316,8 @@ grep -q "^p2000=2000:2000 700 2000:2000 600$" <<<"$OUT" && pass "a folder with m
 grep -q "^link=/etc$" <<<"$OUT" && pass "the link is a link" || fail "link: $OUT"
 if grep -q "restoring-" <<<"$(grep '^top=' <<<"$OUT")"; then fail "a staging folder is left: $OUT"; else pass "no staging folder is left in the claim"; fi
 
-# The same moment as the first restore: a backup that lands in between would give a new name.
-EX1_MOMENT=$(oc get backupfilerestore "$PREFIX-ex1" -o jsonpath='{.status.restoredMoment}')
+# The same restore point as the first restore: a backup that lands in between would give a new name.
+EX1_MOMENT=$(oc get backupfilerestore "$PREFIX-ex1" -o jsonpath='{.status.restoredRestorePoint}')
 restore "$PREFIX-ex2" work true "$EX1_MOMENT" "$EX_PATHS"
 wait_ended "$PREFIX-ex2" 900
 [ "$(frphase "$PREFIX-ex2")" = Done ] || fail "second restore: $(frmsg "$PREFIX-ex2")"

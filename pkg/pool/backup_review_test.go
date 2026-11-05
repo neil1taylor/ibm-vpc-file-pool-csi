@@ -229,7 +229,7 @@ func TestRestoreScript_RunsInBashAndSurvivesARetry(t *testing.T) {
 	if strings.Contains(script, "| tail") {
 		t.Errorf("no pipes under set -e:\n%s", script)
 	}
-	if !strings.Contains(script, `pick="$src"`) || !strings.Contains(script, "no moment folder yet") {
-		t.Errorf("a restore at a time needs the latest copy when no moment folder exists:\n%s", script)
+	if !strings.Contains(script, `pick="$src"`) || !strings.Contains(script, "no restore point folder yet") {
+		t.Errorf("a restore at a time needs the latest copy when no restore point folder exists:\n%s", script)
 	}
 }

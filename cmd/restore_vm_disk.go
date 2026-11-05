@@ -62,7 +62,7 @@ func runRestoreVMDisk(backupDisk, outDisk, moment string) {
 		klog.ErrorS(err, "Failed to restore the VM disk", "backup", backupDisk, "out", outDisk)
 		os.Exit(1)
 	}
-	klog.InfoS("Restored the VM disk", "out", outDisk, "moment", res.Moment, "latest", res.Latest)
+	klog.InfoS("Restored the VM disk", "out", outDisk, "restorePoint", res.Moment, "latest", res.Latest)
 	// The restore controller reads the result from the termination log.
 	_ = os.WriteFile("/dev/termination-log", []byte(restoreVMDiskMessage(res)), 0o600)
 }

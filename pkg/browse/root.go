@@ -41,7 +41,7 @@ func MomentNames(dir string) ([]string, error) {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil // no moments yet
 		}
-		return nil, fmt.Errorf("open the moments folder: %w", err)
+		return nil, fmt.Errorf("open the restore points folder: %w", err)
 	}
 	defer func() { _ = tree.Close() }()
 	var names []string
@@ -49,7 +49,7 @@ func MomentNames(dir string) ([]string, error) {
 	for {
 		page, err := tree.List(nil, cursor, 1000)
 		if err != nil {
-			return nil, fmt.Errorf("list the moments folder: %w", err)
+			return nil, fmt.Errorf("list the restore points folder: %w", err)
 		}
 		for _, e := range page.Entries {
 			if e.Type == TypeDir {

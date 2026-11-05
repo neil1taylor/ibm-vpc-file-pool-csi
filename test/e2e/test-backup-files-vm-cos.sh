@@ -11,13 +11,13 @@
 # What it does: makes three small VM disks (XFS on LVM, ext4, NTFS) as raw files on
 # three claims of a stopped VM, backs them up to a snapshot pool with the export
 # block on, changes hello.txt on disk1 and backs up again, and waits until the
-# newest moment of each disk is in COS with its file list. Then, as a real user
+# newest restore point of each disk is in COS with its file list. Then, as a real user
 # through the gateway with --from-cos:
 # - the file systems and folders of each disk are listed; hello.txt reads "second";
 #   a 256 MiB file has the checksum it was made with;
 # - the speed bar is measured and logged as "MEASURE:" lines: first listing,
 #   another folder in the open session, the first bytes of a file, the whole file;
-# - an older moment that no export holds is refused in words (a moment that an export holds is read);
+# - an older restore point that no export holds is refused in words (a restore point that an export holds is read);
 # - files are restored from a VM disk in COS into a new claim (phase 6c): a small
 #   file from the XFS disk and from the NTFS disk, and the 256 MiB file, with the
 #   same checksum; the disk server of each restore is gone when it ends;
@@ -282,16 +282,16 @@ wait_until 1800 "a second backup of disk1" two_moments
 SECOND=$(vol disk1 '.lastBackupTime')
 later_moment() { [ "$(vol disk1 '.lastBackupTime')" != "$SECOND" ]; }
 wait_until 1800 "a backup of disk1 that started after the change" later_moment
-# The test schedule is 1 minute, which makes a newer moment before an export ends, so no
-# export is ever of the newest moment. After the second moment the schedule is stretched.
+# The test schedule is 1 minute, which makes a newer restore point before an export ends, so no
+# export is ever of the newest restore point. After the second restore point the schedule is stretched.
 oc patch backuppolicy "$POLICY" --type merge -p '{"spec":{"schedule":"24h"}}' >/dev/null
 exported() { # exported <claim>
     [ -n "$(vol "$1" '.exportedTime // empty')" ] && [ "$(vol "$1" '.exportedTime')" = "$(vol "$1" '.lastBackupTime')" ] && [ -z "$(vol "$1" '.exportError // empty')" ]
 }
 all_exported() { exported disk1 && exported disk2 && exported disk3; }
 EXPORT_START=$(now)
-wait_until 3000 "the newest moment of the three disks to be exported to COS" all_exported
-pass "two moments of disk1 are in the snapshot pool (first $FIRST) and the newest of each disk is in COS"
+wait_until 3000 "the newest restore point of the three disks to be exported to COS" all_exported
+pass "two restore points of disk1 are in the snapshot pool (first $FIRST) and the newest of each disk is in COS"
 for d in disk1 disk2 disk3; do
     n=$(vol "$d" '.fileListEntries // 0')
     [ "$n" -gt 0 ] && pass "$d: a file list of $n names was saved with the export" || log "NOTE: $d has no file list (fileListError: $(vol "$d" '.fileListError // "none"'))"
@@ -385,17 +385,17 @@ bk get "${D3[@]}" "${T[@]}" --fs sda1 /hello.txt --out - | grep -q first && pass
 close_all
 
 # ---- 3. what is refused ---------------------------------------------------------------------------
-# The first moment is refused if only a later export holds it (the undo files are not
-# served in 6b/6c). If the export of the first moment was made before the second backup
-# landed, that export holds it, and then it is a moment of an export and is read.
-if out=$(bk ls "${D1[@]}" "${T[@]}" --moment "$FIRST" 2>&1); then
-    bk get "${D1[@]}" "${T[@]}" --moment "$FIRST" --fs vg0-root /hello.txt --out - | grep -q first \
-        && pass "the first moment was itself exported, so it is read, and reads 'first'" \
-        || fail "an older moment of a VM disk in COS was browsed and reads the wrong content: $out"
+# The first restore point is refused if only a later export holds it (the undo files are not
+# served in 6b/6c). If the export of the first restore point was made before the second backup
+# landed, that export holds it, and then it is a restore point of an export and is read.
+if out=$(bk ls "${D1[@]}" "${T[@]}" --restore-point "$FIRST" 2>&1); then
+    bk get "${D1[@]}" "${T[@]}" --restore-point "$FIRST" --fs vg0-root /hello.txt --out - | grep -q first \
+        && pass "the first restore point was itself exported, so it is read, and reads 'first'" \
+        || fail "an older restore point of a VM disk in COS was browsed and reads the wrong content: $out"
     FIRST_EXPORTED=true
 else
     log "  | $out"
-    pass "an older moment of a VM disk in COS is refused"
+    pass "an older restore point of a VM disk in COS is refused"
     FIRST_EXPORTED=false
 fi
 close_all
@@ -446,15 +446,15 @@ restore_gone() {
 }
 wait_until 600 "the disk servers of the restores to go" restore_gone
 pass "no disk server of a restore is left"
-# A refused case in words: an older moment of the disk.
-if out=$(bk restore-files "${D1[@]}" --moment "$FIRST" --fs vg0-root --path /hello.txt --to "$NS/$PREFIX-new4" --wait --timeout 10m 2>&1); then
-    [ "$FIRST_EXPORTED" = true ] || fail "files were restored from an older moment of a VM disk in COS that no export holds: $out"
+# A refused case in words: an older restore point of the disk.
+if out=$(bk restore-files "${D1[@]}" --restore-point "$FIRST" --fs vg0-root --path /hello.txt --to "$NS/$PREFIX-new4" --wait --timeout 10m 2>&1); then
+    [ "$FIRST_EXPORTED" = true ] || fail "files were restored from an older restore point of a VM disk in COS that no export holds: $out"
     OUT=$(inspect "$PREFIX-new4" 'echo "hello=$(cat vg0-root/hello.txt)"')
-    grep -q "^hello=first$" <<<"$OUT" && pass "the first moment, which was itself exported, restores with its own content" || fail "restored first moment: $OUT"
+    grep -q "^hello=first$" <<<"$OUT" && pass "the first restore point, which was itself exported, restores with its own content" || fail "restored first restore point: $OUT"
 else
-    [ "$FIRST_EXPORTED" = false ] || fail "the first moment can be browsed but not restored: $out"
+    [ "$FIRST_EXPORTED" = false ] || fail "the first restore point can be browsed but not restored: $out"
     log "  | $out"
-    pass "an older moment of a VM disk in COS is refused for a restore, too"
+    pass "an older restore point of a VM disk in COS is refused for a restore, too"
 fi
 close_all
 

@@ -170,7 +170,7 @@ func (t *Tree) folderOID(name string) (string, error) {
 	}
 	e, ok := m.find([]byte(name))
 	if !ok || e.typ != "d" || e.badOID {
-		return "", &browse.Error{Code: browse.CodeNotFound, Msg: "no such moment in this backup"}
+		return "", &browse.Error{Code: browse.CodeNotFound, Msg: "no such restore point in this backup"}
 	}
 	return e.obj, nil
 }

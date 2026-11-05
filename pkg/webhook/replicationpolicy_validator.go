@@ -105,7 +105,7 @@ func validateReplicationPolicySpec(spec *v1alpha1.ReplicationPolicySpec) error {
 		for _, opt := range spec.RsyncOptions {
 			for _, inPlace := range []string{"--inplace", "--append", "--append-verify"} {
 				if opt == inPlace {
-					return fmt.Errorf("spec.rsyncOptions contains %q, which changes files in place and would change older moments", opt)
+					return fmt.Errorf("spec.rsyncOptions contains %q, which changes files in place and would change older restore points", opt)
 				}
 			}
 		}

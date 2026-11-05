@@ -15,18 +15,18 @@
 #   1. A Plan for all VMs lists both VMs and the plain volume.
 #   2. A Plan with vms [vm-a] lists vm-a and its two disks only.
 #   3. An Execute for vm-b is refused: only a Plan for [vm-a] exists. Nothing is made.
-#   4. A Plan for vm-a with rewindTo an older moment shows that moment and two disks to rewind.
+#   4. A Plan for vm-a with rewindTo an older restore point shows that restore point and two disks to rewind.
 #   5. The Execute for vm-a is Done. It makes only vm-a's PVCs, PVs and SubVolumes; only its
 #      two disks are rewound on the share.
 #   6. vm-a boots on the DR cluster from the rewound disks: no XFS errors, every logged file
-#      has its checksum, and no file is newer than the chosen moment.
+#      has its checksum, and no file is newer than the chosen restore point.
 #   7. A second Execute for vm-a is refused as already failed over.
 #   8. A Plan with vms [vm-b] lists vm-b only.
 #   9. vm-b is failed over in the console's Recovery page (a Playwright test in a local
 #      console with a token for failovers, see console-plugin/integration-tests/tests/recovery.spec.ts):
 #      the VM table, the detail view, the typed VM name, and the progress to Done. Without
 #      podman (or the console plugin) the Execute is made by the API instead.
-#  10. vm-b boots on the DR cluster at its newest moment, with the same file checks.
+#  10. vm-b boots on the DR cluster at its newest restore point, with the same file checks.
 #
 # What the stage needs:
 #   - RT_DR_KUBECONFIG: admin kubeconfig of a second cluster with this driver (v0.15 or newer:
@@ -367,9 +367,9 @@ guest_answers() { vssh "$1" true >/dev/null 2>&1; }
 writer_logged() { vssh "$1" 'test -s /var/log/writer.log' >/dev/null 2>&1; }
 
 # guest_check VM MOMENT — on the DR cluster: the VM that started from failed-over disks shows no XFS
-# errors, every file of the writer's log is on the data disk with its checksum, files of the moment are
+# errors, every file of the writer's log is on the data disk with its checksum, files of the restore point are
 # present, and no file was written between MOMENT and the time the VM booted. The writer restarts at
-# boot and writes again, so only the time between the moment and the boot says which disk the VM used.
+# boot and writes again, so only the time between the restore point and the boot says which disk the VM used.
 guest_check() {
     local vm=$1 at=$2 script out
     script=$(cat <<'GUEST'
@@ -386,8 +386,8 @@ GUEST
     out=$(dr vssh "$vm" "echo $(printf 'AT=%q\n%s\n' "$at" "$script" | base64 | tr -d '\n') | base64 -d | sudo bash")
     echo "$out"
     echo "$out" | grep -qx 'XFS=0' || { echo "$vm: XFS errors in the kernel log"; return 1; }
-    echo "$out" | grep -q '^UPTO=[1-9]' || { echo "$vm: the log has no file up to the moment $at"; return 1; }
-    echo "$out" | grep -qx 'GAP=0' || { echo "$vm: files were written after the moment $at and before the boot: the VM did not start from that moment"; return 1; }
+    echo "$out" | grep -q '^UPTO=[1-9]' || { echo "$vm: the log has no file up to the restore point $at"; return 1; }
+    echo "$out" | grep -qx 'GAP=0' || { echo "$vm: files were written after the restore point $at and before the boot: the VM did not start from that restore point"; return 1; }
     echo "$out" | grep -qx 'CHECKSUMS_OK' || { echo "$vm: a logged file is missing from the data disk or its checksum differs"; return 1; }
 }
 
@@ -501,18 +501,18 @@ policy_json() { oc get replicationpolicy "$POLICY" -o json; }
 every_volume_copied() {
     local st
     st=$(policy_json)
-    echo "$st" | jq -c '[.status.subVolumeStatuses[]? | {sv: .subVolumeName[0:12], phase: .vmCopy.phase, moment: .copyMoment, synced: .lastSyncTime, err: .lastError}]'
-    # A VM disk records the moment of its copy; a plain volume records only when its copy finished.
-    [ "$(echo "$st" | jq '[.status.subVolumeStatuses[]? | select(.vmCopy == null and (.copyMoment != null or (.lastSyncTime != null and (.lastError // "") == "")))] | length')" = 5 ]
+    echo "$st" | jq -c '[.status.subVolumeStatuses[]? | {sv: .subVolumeName[0:12], phase: .vmCopy.phase, restorePoint: .copyRestorePoint, synced: .lastSyncTime, err: .lastError}]'
+    # A VM disk records the restore point of its copy; a plain volume records only when its copy finished.
+    [ "$(echo "$st" | jq '[.status.subVolumeStatuses[]? | select(.vmCopy == null and (.copyRestorePoint != null or (.lastSyncTime != null and (.lastError // "") == "")))] | length')" = 5 ]
 }
 
-# vm_disks_copied_again — each of the four VM disks has a newer copy moment than the one in FIRST_MOMENTS.
+# vm_disks_copied_again — each of the four VM disks has a newer copy restore point than the one in FIRST_MOMENTS.
 FIRST_MOMENTS=""
 VM_DISK_SVS=""
 vm_disks_copied_again() {
     policy_json | jq -e --argjson first "$FIRST_MOMENTS" --argjson disks "$VM_DISK_SVS" '
         [.status.subVolumeStatuses[]? | select(.vmCopy == null and (.subVolumeName as $s | $disks | index($s)) != null)
-            | select(.copyMoment != $first[.subVolumeName])] | length == 4' >/dev/null
+            | select(.copyRestorePoint != $first[.subVolumeName])] | length == 4' >/dev/null
 }
 no_copy_running() { [ "$(policy_json | jq '[.status.subVolumeStatuses[]? | select(.vmCopy != null)] | length')" = 0 ]; }
 
@@ -524,8 +524,8 @@ plan_pvc_names() { dr oc get failover "$1" -o json | jq -r '[.status.volumes[]?.
 plan_svs_of() { # plan_svs_of PLAN VM — volume names of one VM's disks, sorted, one line
     dr oc get failover "$1" -o json | jq -r --arg vm "$2" '[.status.vms[]? | select(.name == $vm) | .disks[].subVolume] | sort | join(",")'
 }
-plan_moment_of() { dr oc get failover "$1" -o json | jq -r --arg vm "$2" '.status.vms[]? | select(.name == $vm) | .moment'; }
-plan_moment_n() { dr oc get failover "$1" -o json | jq -r --arg vm "$2" --argjson n "$3" '.status.vms[]? | select(.name == $vm) | .moments[$n] // empty'; }
+plan_moment_of() { dr oc get failover "$1" -o json | jq -r --arg vm "$2" '.status.vms[]? | select(.name == $vm) | .restorePoint'; }
+plan_moment_n() { dr oc get failover "$1" -o json | jq -r --arg vm "$2" --argjson n "$3" '.status.vms[]? | select(.name == $vm) | .restorePoints[$n] // empty'; }
 plan_rewinds_of() { dr oc get failover "$1" -o json | jq -r --arg vm "$2" '[.status.vms[]? | select(.name == $vm) | .disks[].rewind] | map(tostring) | join(",")'; }
 
 expect_eq() { # expect_eq WHAT WANT GOT
@@ -774,7 +774,7 @@ spec:
 YAML
     check "every volume has a first copy (up to $((COPY_TIMEOUT / 60)) minutes)" wait_until "$COPY_TIMEOUT" 20 every_volume_copied
     every_volume_copied >/dev/null || stop "the first copy did not finish: $(policy_json | jq -c '[.status.subVolumeStatuses[]? | {sv: .subVolumeName[0:12], err: .lastError}]')"
-    FIRST_MOMENTS=$(policy_json | jq -c '[.status.subVolumeStatuses[] | {key: .subVolumeName, value: .copyMoment}] | from_entries')
+    FIRST_MOMENTS=$(policy_json | jq -c '[.status.subVolumeStatuses[] | {key: .subVolumeName, value: .copyRestorePoint}] | from_entries')
     VM_DISK_SVS=$(printf '%s\n' "$(sv_of_claim a-root)" "$(sv_of_claim a-data)" "$(sv_of_claim b-root)" "$(sv_of_claim b-data)" | jq -Rsc 'split("\n") | map(select(. != ""))')
     check "the receiver holds the copy at the root of its claim (the failover Job reads <claim>/pvcs)" \
         dr oc exec -n "$RT_DRIVER_NS" "deploy/$RECV" -- test -d /data/pvcs
@@ -798,8 +798,8 @@ YAML
         expect_eq "claims in the Plan" "a-data,a-root,b-data,b-root,$PLAIN" "$(plan_pvc_names "$plan_all")"
     m_new=$(plan_moment_of "$plan_all" "$NS/$VM_A")
     m_old=$(plan_moment_n "$plan_all" "$NS/$VM_A" 1)
-    echo "vm-a: newest moment $m_new, the one before it $m_old"
-    [ -n "$m_old" ] || stop "$NS/$VM_A has only one moment to choose from, so there is no older moment to rewind to (moments: $(dr oc get failover "$plan_all" -o jsonpath='{.status.vms[0].moments}'))"
+    echo "vm-a: newest restore point $m_new, the one before it $m_old"
+    [ -n "$m_old" ] || stop "$NS/$VM_A has only one restore point to choose from, so there is no older restore point to rewind to (restore points: $(dr oc get failover "$plan_all" -o jsonpath='{.status.vms[0].restorePoints}'))"
 
     # --- 2. Plan for vm-a only -----------------------------------------------
     plan_until_ok "$(fo_name pa)" "vms: [\"$NS/$VM_A\"]" || stop "a Plan for $VM_A does not finish: $(fo_field "$PLAN_NAME" .status.message)"
@@ -818,8 +818,8 @@ YAML
     plan_until_ok "$(fo_name pr)" "vms: [\"$NS/$VM_A\"]" "rewindTo: \"$m_old\"" || stop "a Plan for $VM_A with rewindTo $m_old does not finish: $(fo_field "$PLAN_NAME" .status.message)"
     plan_a=$PLAN_NAME
     rewind_epoch=$(epoch_of "$m_old")
-    check "a Plan with rewindTo shows the older moment for $VM_A" \
-        expect_eq "moment of $VM_A (seconds since 1970)" "$rewind_epoch" "$(epoch_of "$(plan_moment_of "$plan_a" "$NS/$VM_A")")"
+    check "a Plan with rewindTo shows the older restore point for $VM_A" \
+        expect_eq "restore point of $VM_A (seconds since 1970)" "$rewind_epoch" "$(epoch_of "$(plan_moment_of "$plan_a" "$NS/$VM_A")")"
     check "a Plan with rewindTo says both disks of $VM_A are rewound" expect_eq "rewind flags" "true,true" "$(plan_rewinds_of "$plan_a" "$NS/$VM_A")"
 
     # --- 5. Execute for vm-a ---------------------------------------------------
@@ -839,7 +839,7 @@ YAML
     vm_yaml "$VM_A" a-root a-data no | dr oc apply -f - >/dev/null
     check "$VM_A runs on the DR cluster and its guest agent connects" wait_until 1200 10 dr agent_connected "$VM_A"
     check "$VM_A answers on ssh" wait_until 600 10 dr guest_answers "$VM_A"
-    check "$VM_A on the DR cluster started from the moment $m_old: no XFS errors, all logged files with their checksums, no file after the moment" \
+    check "$VM_A on the DR cluster started from the restore point $m_old: no XFS errors, all logged files with their checksums, no file after the restore point" \
         guest_check "$VM_A" "$m_old"
 
     # --- 7. A second Execute for vm-a is refused -----------------------------
@@ -868,14 +868,14 @@ YAML
     esac
     check "the claims of $VM_B exist on the DR cluster next to those of $VM_A, and nothing else" \
         expect_eq "claims of $NS on DR" "a-data,a-root,b-data,b-root" "$(dr_pvcs_in_ns)"
-    check "no disk of $VM_B was rewound (it is used at its newest moment)" expect_eq "rewound folders" "$rewound_a" "$(rewound_folders)"
+    check "no disk of $VM_B was rewound (it is used at its newest restore point)" expect_eq "rewound folders" "$rewound_a" "$(rewound_folders)"
 
-    # --- 10. vm-b boots at its newest moment -----------------------------------
+    # --- 10. vm-b boots at its newest restore point -----------------------------------
     check "the claims of $VM_B become Bound" wait_until 300 5 dr dr_pvcs_bound
     vm_yaml "$VM_B" b-root b-data no | dr oc apply -f - >/dev/null
     check "$VM_B runs on the DR cluster and its guest agent connects" wait_until 1200 10 dr agent_connected "$VM_B"
     check "$VM_B answers on ssh" wait_until 600 10 dr guest_answers "$VM_B"
-    check "$VM_B on the DR cluster started from its newest moment $m_new: no XFS errors, all logged files with their checksums, no file after the moment" \
+    check "$VM_B on the DR cluster started from its newest restore point $m_new: no XFS errors, all logged files with their checksums, no file after the restore point" \
         guest_check "$VM_B" "$m_new"
 }
 

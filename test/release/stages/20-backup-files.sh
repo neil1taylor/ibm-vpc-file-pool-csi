@@ -10,7 +10,7 @@
 # Part 2, browse sessions: test/e2e/test-backup-browse-session.sh backs up a pod
 # volume twice, opens BackupBrowse sessions by hand (as the gateway will), and
 # checks TLS with the pinned certificate, the token, the latest copy and the
-# first moment, the locked-down helper pod, the NetworkPolicy, and that closing
+# first restore point, the locked-down helper pod, the NetworkPolicy, and that closing
 # or deleting a session leaves nothing behind.
 # Part 3, the gateway: the same script goes on with real users. A namespace admin
 # lists and downloads through `kubectl backup ls/get/browse` with no setup; a user
@@ -22,7 +22,7 @@
 # BackupFileRestore objects by hand (as the gateway will) on a volume with files
 # of three owners, a 0600 file and a 0700 folder owned by other users, a link, a
 # name with a newline and a 40 MiB file with a checksum. It restores into a new
-# claim (sized by the Job that measures), at the first moment, and into an
+# claim (sized by the Job that measures), at the first restore point, and into an
 # existing claim of a pool with no configured owner, and checks owners, modes,
 # links and the checksum; refusals (a claim with disk.img, no room, a missing
 # path, a path with ".."); and that nothing is left behind.
@@ -35,10 +35,10 @@
 # user who asked; the audit Event names the user and the paths and holds no token.
 
 # Part 6, backups in COS: test/e2e/test-backup-files-cos.sh backs up a pod volume
-# with the policy's export block on, waits until the moments are in the bucket, and
+# with the policy's export block on, waits until the restore points are in the bucket, and
 # reads them with `kubectl backup ls/get/restore-files --from-cos` as real users:
-# the latest copy and the first moment, a link as a link, a file of another owner,
-# the checksum, a restore into a new claim, at the first moment and into a new
+# the latest copy and the first restore point, a link as a link, a file of another owner,
+# the checksum, a restore into a new claim, at the first restore point and into a new
 # folder of an existing claim. The helper pod has no service account token, runs as
 # an ordinary user and mounts no share; the COS and Key Protect Secrets are not in
 # the browse namespace; another pod cannot reach it. The wrong people are forbidden,
@@ -46,12 +46,12 @@
 # missing Secret and a wrong COS key are said in words, no key reaches a log, an
 # Event or a status, and nothing is left behind. It needs the COS configuration of
 # stage 18 (see test/e2e/lib/backup-cos.sh) and is "not checked" without it. It
-# cannot test a moment that the local keep time has removed: that takes too long.
+# cannot test a restore point that the local keep time has removed: that takes too long.
 
 # Part 7, VM disks: test/e2e/test-backup-files-vm.sh makes three small VM disks
 # (XFS on LVM, ext4, NTFS) with libguestfs in the guest image, backs them up
 # twice, and reads them with `kubectl backup ls/get/browse/restore-files --fs` as
-# real users, without starting the VM: the latest copy and the first moment, a
+# real users, without starting the VM: the latest copy and the first restore point, a
 # checksum, a restore with the file system name kept, the hold on the disk while a
 # session is open, the locked-down helper pod, the wrong people, and that nothing
 # is left. It needs the guest image (RT_GUEST_IMAGE, with backupBrowse.guest on)
@@ -62,13 +62,13 @@
 # VM disks to COS with their file lists, reads them with `--from-cos` as a real
 # user (the first listing within 30 seconds, another folder within 5 seconds, a
 # 256 MiB file with the same checksum, the rate inside the helper pod), restores
-# files from them into a new claim, and checks that an older moment is refused,
+# files from them into a new claim, and checks that an older restore point is refused,
 # that the disk server and the reader are locked down, and that nothing is left.
 # It needs the guest image and the COS configuration of stage 18, and is "not
 # checked" without either. It records the speed numbers as MEASURE lines in its log.
 
 # A pool takes 5 to 15 minutes to become ready; the rest is under 5 minutes.
-# The COS part adds up to an hour (the export of two moments, then the restores).
+# The COS part adds up to an hour (the export of two restore points, then the restores).
 RT_STAGE_TIMEOUT=14400
 
 HERE_STAGE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -92,9 +92,9 @@ VMC_PREFIX=$(rt_name fvc)
 VMC_LOG="$RT_OUT/backup-files-vm-cos-e2e.log"
 BACKUP_BIN="${RT_BACKUP_BIN:-$(dirname "$RT_LIB")/bin/kubectl-backup}"
 
-# The first moment is refused when no export holds it, and read when one does.
+# The first restore point is refused when no export holds it, and read when one does.
 vmc_older_moment() {
-    log_has_pass "$VMC_LOG" "an older moment of a VM disk in COS is refused" || log_has_pass "$VMC_LOG" "was itself exported"
+    log_has_pass "$VMC_LOG" "an older restore point of a VM disk in COS is refused" || log_has_pass "$VMC_LOG" "was itself exported"
 }
 
 run() {
@@ -137,7 +137,7 @@ run() {
     fi
     check "a session starts and answers over TLS" log_has_pass "$SESSION_LOG" "both sessions are Ready"
     check "the latest session reads the changed file" log_has_pass "$SESSION_LOG" "reads the changed file"
-    check "a session at the first moment reads the first content" log_has_pass "$SESSION_LOG" "reads the first content"
+    check "a session at the first restore point reads the first content" log_has_pass "$SESSION_LOG" "reads the first content"
     check "a wrong token and another session's certificate are refused" log_has_pass "$SESSION_LOG" "certificate of another session"
     check "the helper pod is locked down and mounts the backup read-only" log_has_pass "$SESSION_LOG" "read-only"
     check "another pod cannot reach the helper" log_has_pass "$SESSION_LOG" "NetworkPolicy"
@@ -148,7 +148,7 @@ run() {
         not_checked "browsing through the gateway with real users" "the backup gateway is not installed"
     else
         check "a namespace admin lists a backup through kubectl backup with no setup" log_has_pass "$SESSION_LOG" "a namespace admin lists the backup"
-        check "kubectl backup get downloads a file, at the latest copy and at a moment" log_has_pass "$SESSION_LOG" "downloads the older content"
+        check "kubectl backup get downloads a file, at the latest copy and at a restore point" log_has_pass "$SESSION_LOG" "downloads the older content"
         check "a user with only the view role is forbidden" log_has_pass "$SESSION_LOG" "a user with only the view role: forbidden"
         check "an admin of another namespace is forbidden" log_has_pass "$SESSION_LOG" "an admin of another namespace: forbidden"
         check "a removed binding stops access at once" log_has_pass "$SESSION_LOG" "a user whose binding was removed: forbidden"
@@ -177,7 +177,7 @@ run() {
     check "a name with a newline is restored" log_has_pass "$RESTORE_LOG" "a name with a newline is restored"
     check "a link is restored as a link and not followed" log_has_pass "$RESTORE_LOG" "restored as a link, not followed"
     check "only the chosen paths are restored" log_has_pass "$RESTORE_LOG" "only the chosen paths"
-    check "a restore at the first moment brings back the first content" log_has_pass "$RESTORE_LOG" "brings back the first content"
+    check "a restore at the first restore point brings back the first content" log_has_pass "$RESTORE_LOG" "brings back the first content"
     check "a new folder in an existing claim, with the backup's owners kept" log_has_pass "$RESTORE_LOG" "keep the backup's owners"
     check "a folder with mode 0700 owned by another user is restored whole in an existing claim" log_has_pass "$RESTORE_LOG" "owned by another user is restored whole"
     check "the claim's own file is untouched" log_has_pass "$RESTORE_LOG" "the claim's own file is untouched"
@@ -226,13 +226,13 @@ run() {
     else
         check "a namespace admin lists a backup in COS with no setup" log_has_pass "$COSF_LOG" "lists the backup in COS with no setup"
         check "the latest copy is read from COS" log_has_pass "$COSF_LOG" "the latest copy is read from COS"
-        check "the first moment is read from COS" log_has_pass "$COSF_LOG" "the first moment is read from COS"
-        check "a file made after the first moment is not in it" log_has_pass "$COSF_LOG" "a file made after the first moment is not in it"
+        check "the first restore point is read from COS" log_has_pass "$COSF_LOG" "the first restore point is read from COS"
+        check "a file made after the first restore point is not in it" log_has_pass "$COSF_LOG" "a file made after the first restore point is not in it"
         check "a file from COS has the same checksum" log_has_pass "$COSF_LOG" "a file from COS has the same checksum"
         check "a link is listed as a link and is not followed" log_has_pass "$COSF_LOG" "a path through a link is refused"
         check "a name with a newline is listed escaped" log_has_pass "$COSF_LOG" "a name with a newline is listed escaped"
         check "a file with mode 0600 of another owner is read" log_has_pass "$COSF_LOG" "a file with mode 0600 of another owner is read"
-        check "the moments in COS can be listed" log_has_pass "$COSF_LOG" "the moments in COS can be listed"
+        check "the restore points in COS can be listed" log_has_pass "$COSF_LOG" "the restore points in COS can be listed"
         check "the session reads the policy's bucket and names none" log_has_pass "$COSF_LOG" "names none"
         check "the COS helper has no service account token and mounts no share" log_has_pass "$COSF_LOG" "no service account token, no host path and mounts no share"
         check "the COS helper runs as an ordinary user with no capability" log_has_pass "$COSF_LOG" "an ordinary user with every capability dropped"
@@ -244,7 +244,7 @@ run() {
         check "the restored file has the same checksum" log_has_pass "$COSF_LOG" "the restored file has the same checksum"
         check "restored files get the pool's owner and keep their mode" log_has_pass "$COSF_LOG" "keep their mode"
         check "a newline name and a link are restored" log_has_pass "$COSF_LOG" "a name with a newline is restored, and a link is restored as a link"
-        check "a restore from COS at the first moment brings back the first content" log_has_pass "$COSF_LOG" "brings back the first content"
+        check "a restore from COS at the first restore point brings back the first content" log_has_pass "$COSF_LOG" "brings back the first content"
         check "a restore from COS into an existing claim writes a new folder" log_has_pass "$COSF_LOG" "into an existing claim writes a new folder"
         check "a user with only the view role is forbidden" log_has_pass "$COSF_LOG" "a user with only the view role: forbidden"
         check "an admin of another namespace is forbidden" log_has_pass "$COSF_LOG" "an admin of another namespace: forbidden"
@@ -252,7 +252,7 @@ run() {
         check "naming a bucket needs the right to read its Secrets" log_has_pass "$COSF_LOG" "forbidden to a namespace admin who cannot read its Secrets"
         check "someone who may read the Secrets reads a bucket named directly" log_has_pass "$COSF_LOG" "reads a bucket named directly"
         check "a file from a bucket named directly has the same checksum" log_has_pass "$COSF_LOG" "a file from a bucket named directly has the same checksum"
-        check "a bucket named directly serves the first moment" log_has_pass "$COSF_LOG" "a bucket named directly serves the first moment"
+        check "a bucket named directly serves the first restore point" log_has_pass "$COSF_LOG" "a bucket named directly serves the first restore point"
         check "files are restored from a bucket named directly" log_has_pass "$COSF_LOG" "restored from a bucket named directly are in the new claim"
         check "a wrong Key Protect root key is said in words" log_has_pass "$COSF_LOG" "a wrong Key Protect root key:"
         check "a Secret that does not exist is said in words" log_has_pass "$COSF_LOG" "a Secret that does not exist:"
@@ -290,7 +290,7 @@ run() {
         check "ls lists the file system of the ext4 disk" log_has_pass "$VMF_LOG" "file system of the ext4 disk"
         check "ls lists the NTFS file system" log_has_pass "$VMF_LOG" "NTFS file system"
         check "XFS on LVM: the latest copy reads the changed content" log_has_pass "$VMF_LOG" "latest copy reads 'second'"
-        check "XFS on LVM: the first moment reads the first content without starting the VM" log_has_pass "$VMF_LOG" "first moment reads 'first'"
+        check "XFS on LVM: the first restore point reads the first content without starting the VM" log_has_pass "$VMF_LOG" "first restore point reads 'first'"
         check "a file from the XFS volume has the same checksum" log_has_pass "$VMF_LOG" "same checksum"
         check "ext4: a file is read" log_has_pass "$VMF_LOG" "ext4: a file is read"
         check "NTFS: a file is read" log_has_pass "$VMF_LOG" "NTFS: a file is read"
@@ -333,7 +333,7 @@ run() {
         check "a VM disk in COS: a 256 MiB file has the same checksum" log_has_pass "$VMC_LOG" "a 256 MiB file from COS has the same checksum"
         check "a VM disk in COS: the ext4 disk is read" log_has_pass "$VMC_LOG" "ext4 in COS: a file is read"
         check "a VM disk in COS: the NTFS disk is read" log_has_pass "$VMC_LOG" "NTFS in COS: a file is read"
-        check "a VM disk in COS: an older moment is refused in words, or read when an export holds it" vmc_older_moment
+        check "a VM disk in COS: an older restore point is refused in words, or read when an export holds it" vmc_older_moment
         check "a VM disk in COS: a small file is restored" log_has_pass "$VMC_LOG" "restored from the XFS disk in COS has its content"
         check "a VM disk in COS: the 256 MiB file is restored with the same checksum" log_has_pass "$VMC_LOG" "the 256 MiB file restored from COS has the same checksum"
         check "a VM disk in COS: a file is restored from the NTFS disk" log_has_pass "$VMC_LOG" "restored from the NTFS disk in COS has its content"

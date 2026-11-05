@@ -6,7 +6,7 @@
 # disk while it runs. The snapshot must be made with the QEMU copy, not a file
 # copy. Then it restores the snapshot to a new claim, boots a second VM from it
 # and checks:
-#   - the Snapshot says FileSystemConsistent and names the copy moment
+#   - the Snapshot says FileSystemConsistent and names the copy restore point
 #   - the restored VM boots and its guest agent connects
 #   - the kernel log has no XFS errors
 #   - every file in the writer's log is on the disk with the logged checksum
@@ -394,12 +394,12 @@ content=$(oc get volumesnapshot -n "$NS" snap -o jsonpath='{.status.boundVolumeS
 handle=$(oc get volumesnapshotcontent "$content" -o jsonpath='{.status.snapshotHandle}')
 snapcr=${handle##*/}
 st=$(oc get snapshots.storage.ibmcloud.io "$snapcr" -o json)
-echo "$st" | jq -c '{method: .metadata.annotations["storage.ibmcloud.io/snapshot-method"], consistency: .status.consistency, reason: .status.consistencyReason, moment: .status.copyMoment, attempts: .status.vmCopyAttempts}'
+echo "$st" | jq -c '{method: .metadata.annotations["storage.ibmcloud.io/snapshot-method"], consistency: .status.consistency, reason: .status.consistencyReason, restorePoint: .status.copyRestorePoint, attempts: .status.vmCopyAttempts}'
 [ "$(echo "$st" | jq -r '.metadata.annotations["storage.ibmcloud.io/snapshot-method"]')" = vm ] || fail "the snapshot was not made with the QEMU copy"
-[ "$(echo "$st" | jq -r '.status.copyMoment')" != null ] || fail "the snapshot names no copy moment"
+[ "$(echo "$st" | jq -r '.status.copyRestorePoint')" != null ] || fail "the snapshot names no copy restore point"
 consistency=$(echo "$st" | jq -r '.status.consistency')
 [ "$consistency" = FileSystemConsistent ] || log "WARNING: the snapshot is $consistency: $(echo "$st" | jq -r '.status.consistencyReason')"
-moment=$(echo "$st" | jq -r '.status.copyMoment')
+moment=$(echo "$st" | jq -r '.status.copyRestorePoint')
 
 after=$(logged_files src)
 log "the source VM wrote $((after - before)) files while the snapshot ran"
@@ -444,7 +444,7 @@ if ($badfiles -eq 0 -and $bad.Count -eq 0) { "CHECKSUMS_OK" }
 ')
     echo "$result"
     echo "$result" | grep -q CHECKSUMS_OK || fail "the restored Windows VM has file system errors or files that do not match the log"
-    log "PASS: restored Windows VM booted; $(echo "$result" | grep -o 'LOGGED=.*') (moment $moment), all checksums match"
+    log "PASS: restored Windows VM booted; $(echo "$result" | grep -o 'LOGGED=.*') (restore point $moment), all checksums match"
     exit 0
 fi
 

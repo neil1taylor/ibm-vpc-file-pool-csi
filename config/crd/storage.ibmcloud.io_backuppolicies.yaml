@@ -312,7 +312,7 @@ spec:
                       type: integer
                     exportedTime:
                       description: |-
-                        ExportedTime is the moment of the newest copy in COS. Set only when the
+                        ExportedTime is the time of the newest copy in COS. Set only when the
                         policy has an export block.
                       format: date-time
                       type: string
@@ -330,14 +330,14 @@ spec:
                         disk in COS, which is slower.
                       type: string
                     lastBackupTime:
-                      description: LastBackupTime is the moment of the newest backup.
+                      description: LastBackupTime is the time of the newest backup.
                       format: date-time
                       type: string
                     lastError:
                       description: LastError is the last error of the volume's backup.
                       type: string
                     oldestBackupTime:
-                      description: OldestBackupTime is the moment of the oldest restore
+                      description: OldestBackupTime is the time of the oldest restore
                         point that is kept.
                       format: date-time
                       type: string
@@ -353,8 +353,8 @@ spec:
                       format: int64
                       type: integer
                     restorePoints:
-                      description: RestorePoints counts the older moments that can
-                        be restored.
+                      description: RestorePoints counts the older restore points that
+                        can be restored.
                       format: int32
                       type: integer
                     retained:

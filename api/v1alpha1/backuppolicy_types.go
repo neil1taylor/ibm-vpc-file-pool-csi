@@ -150,15 +150,15 @@ type BackupVolumeStatus struct {
 	// +optional
 	Retained bool `json:"retained,omitempty"`
 
-	// LastBackupTime is the moment of the newest backup.
+	// LastBackupTime is the time of the newest backup.
 	// +optional
 	LastBackupTime *metav1.Time `json:"lastBackupTime,omitempty"`
 
-	// OldestBackupTime is the moment of the oldest restore point that is kept.
+	// OldestBackupTime is the time of the oldest restore point that is kept.
 	// +optional
 	OldestBackupTime *metav1.Time `json:"oldestBackupTime,omitempty"`
 
-	// RestorePoints counts the older moments that can be restored.
+	// RestorePoints counts the older restore points that can be restored.
 	// +optional
 	RestorePoints int32 `json:"restorePoints,omitempty"`
 
@@ -175,7 +175,7 @@ type BackupVolumeStatus struct {
 	// +optional
 	LastError string `json:"lastError,omitempty"`
 
-	// ExportedTime is the moment of the newest copy in COS. Set only when the
+	// ExportedTime is the time of the newest copy in COS. Set only when the
 	// policy has an export block.
 	// +optional
 	ExportedTime *metav1.Time `json:"exportedTime,omitempty"`

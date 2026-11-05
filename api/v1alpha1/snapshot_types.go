@@ -124,7 +124,7 @@ type SnapshotStatus struct {
 	ConsistencyReason string `json:"consistencyReason,omitempty"`
 
 	// CopyID names the QEMU copy that made this snapshot. Snapshots of the
-	// disks of one VM that show the same moment have the same CopyID.
+	// disks of one VM that show the same restore point have the same CopyID.
 	// +optional
 	CopyID string `json:"copyID,omitempty"`
 

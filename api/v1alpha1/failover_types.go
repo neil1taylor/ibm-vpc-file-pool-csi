@@ -55,8 +55,8 @@ type FailoverSpec struct {
 	// +kubebuilder:validation:Required
 	Action string `json:"action"`
 
-	// RewindTo limits the moment of each running VM to the newest one at or
-	// before it. Unset means the newest moment all disks of a VM share.
+	// RewindTo limits the restore point of each running VM to the newest one at or
+	// before it. Unset means the newest restore point all disks of a VM share.
 	// +optional
 	RewindTo *metav1.Time `json:"rewindTo,omitempty"`
 
@@ -121,11 +121,11 @@ type FailoverStatus struct {
 	// +optional
 	FinishedAt *metav1.Time `json:"finishedAt,omitempty"`
 
-	// RPO is the age of the oldest moment that will be shown.
+	// RPO is the age of the oldest restore point that will be shown.
 	// +optional
 	RPO *metav1.Duration `json:"rpo,omitempty"`
 
-	// VMs lists each running VM found, with the moment it will show.
+	// VMs lists each running VM found, with the restore point it will show.
 	// +optional
 	VMs []FailoverVM `json:"vms,omitempty"`
 
@@ -174,7 +174,7 @@ type FailoverVM struct {
 type FailoverDisk struct {
 	// SubVolume names the volume.
 	SubVolume string `json:"subVolume"`
-	// Rewind is true if the disk must be rewound to the VM's moment (it
+	// Rewind is true if the disk must be rewound to the VM's restore point (it
 	// copies the whole disk); false if it is used in place.
 	Rewind bool `json:"rewind"`
 }
@@ -193,7 +193,7 @@ type FailoverVolume struct {
 	Permissions string `json:"permissions,omitempty"`
 	// Policy is the ReplicationPolicy that wrote the copy.
 	Policy string `json:"policy,omitempty"`
-	// LastSync is the moment the volume shows.
+	// LastSync is the restore point the volume shows.
 	LastSync metav1.Time `json:"lastSync"`
 }
 

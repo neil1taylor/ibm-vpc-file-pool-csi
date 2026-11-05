@@ -16,10 +16,10 @@
 #   disk3  one NTFS file system, MBR partition               (virt-make-fs)
 # Each holds hello.txt ("first"), a folder, a name with a newline and a 4 MiB file
 # with a checksum. A policy backs them up; the content of hello.txt on disk1 is
-# changed ("second") and the policy backs up again, so there are two moments.
+# changed ("second") and the policy backs up again, so there are two restore points.
 # Then, as real users through the gateway:
 # - `kubectl backup ls` with no --fs lists the file systems of each disk; --fs
-#   reads inside one; the latest copy says "second" and the first moment "first",
+#   reads inside one; the latest copy says "second" and the first restore point "first",
 #   for XFS on LVM, ext4 and NTFS; the checksum matches;
 # - `restore-files --fs` restores a file and a folder into a new claim, and the file
 #   system name is kept at the top of the restored tree;
@@ -273,7 +273,7 @@ wait_until 1800 "a second backup of disk1" two_moments
 SECOND=$(vol disk1 '.lastBackupTime')
 later_moment() { [ "$(vol disk1 '.lastBackupTime')" != "$SECOND" ]; }
 wait_until 1800 "a backup of disk1 that started after the change" later_moment
-pass "two moments of disk1 are in the snapshot pool (first $FIRST)"
+pass "two restore points of disk1 are in the snapshot pool (first $FIRST)"
 
 
 # ---- users --------------------------------------------------------------------------------------
@@ -338,8 +338,8 @@ close_all
 mkdir "$WORK/got" "$WORK/got1"
 bk "$ALICE" get "${D1[@]}" "${T[@]}" --fs vg0-root /hello.txt --out "$WORK/got" >/dev/null
 [ "$(cat "$WORK/got/hello.txt")" = second ] && pass "XFS on LVM: the latest copy reads 'second'" || fail "hello.txt latest: $(cat "$WORK/got/hello.txt")"
-bk "$ALICE" get "${D1[@]}" "${T[@]}" --moment "$FIRST" --fs vg0-root /hello.txt --out "$WORK/got1" >/dev/null
-[ "$(cat "$WORK/got1/hello.txt")" = first ] && pass "XFS on LVM: the first moment reads 'first', without starting the VM" || fail "hello.txt first: $(cat "$WORK/got1/hello.txt")"
+bk "$ALICE" get "${D1[@]}" "${T[@]}" --restore-point "$FIRST" --fs vg0-root /hello.txt --out "$WORK/got1" >/dev/null
+[ "$(cat "$WORK/got1/hello.txt")" = first ] && pass "XFS on LVM: the first restore point reads 'first', without starting the VM" || fail "hello.txt first: $(cat "$WORK/got1/hello.txt")"
 bk "$ALICE" get "${D1[@]}" "${T[@]}" --fs vg0-root /big.bin --out "$WORK/got" >/dev/null
 if [ -n "$BIG_SHA" ]; then
     [ "$(sha256sum "$WORK/got/big.bin" | awk '{print $1}')" = "$BIG_SHA" ] && pass "a 4 MiB file from the XFS volume has the same checksum" || fail "big.bin checksum"

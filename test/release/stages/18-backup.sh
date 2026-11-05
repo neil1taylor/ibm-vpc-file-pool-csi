@@ -2,9 +2,9 @@
 # 18-backup — A BackupPolicy backs up a running VM (two disks) and a pod volume
 # to a separate snapshot pool. The policy lists all three volumes, the VM disks
 # as FileSystemConsistent and the pod volume as FileCopy. Restoring the VM
-# disks at the first moment gives a VM that boots with no XFS errors and every
+# disks at the first restore point gives a VM that boots with no XFS errors and every
 # logged file present with its checksum. The pod volume restored at the first
-# moment holds the first content, at the latest moment the changed content, and
+# restore point holds the first content, at the latest restore point the changed content, and
 # it can be restored after the claim is deleted.
 # test/e2e/test-backup.sh does the work and logs a "PASS:" line for each of
 # those outcomes, or one "FAIL:" line and exit 1. This stage runs it and checks
@@ -17,9 +17,9 @@
 # and the wrapped backup key manifest, read from ~/.config/pool-csi), the same
 # script also exports the policy to COS (Compliance lock, 25 hours, a prefix new
 # for each run), checks exportedTime and exportedBytes, runs `kubectl backup
-# cos-list` (one export of each volume is enough: an export holds the earlier moments as undo files), and restores the three volumes from COS into a second namespace: the
+# cos-list` (one export of each volume is enough: an export holds the earlier restore points as undo files), and restores the three volumes from COS into a second namespace: the
 # VM boots with matching checksums and the pod volume holds the first and the
-# changed content. It also restores the pod volume at the first moment with the emergency key,
+# changed content. It also restores the pod volume at the first restore point with the emergency key,
 # `--backup-key-file`, with no Key Protect flag (the restore request is checked to name no Key
 # Protect block), and compares checksums. cos-setup shows the readable key to a person once, so
 # the test gets the same key by having Key Protect unwrap the stored wrapped copy. It writes the
@@ -92,16 +92,16 @@ run() {
         check "the backup script ended without a FAIL line" true
     fi
 
-    check "the policy backs up three volumes: two VM disks FileSystemConsistent, the pod volume FileCopy, two moments each" \
+    check "the policy backs up three volumes: two VM disks FileSystemConsistent, the pod volume FileCopy, two restore points each" \
         log_has_pass "$E2E_LOG" "three volumes backed up"
     if [ "${COS_QUICK:-0}" = 1 ]; then
         not_checked "the local restores (VM disks, pod volume, deleted claim)" "COS_QUICK=1 is the fast run"
     else
-        check "the VM restored at the first moment boots with no XFS errors and every logged file has its checksum" \
+        check "the VM restored at the first restore point boots with no XFS errors and every logged file has its checksum" \
             log_has_pass "$E2E_LOG" "the VM restored at"
-        check "the pod volume restored at the first moment holds the first content" \
+        check "the pod volume restored at the first restore point holds the first content" \
             log_has_pass "$E2E_LOG" "holds the first content"
-        check "the pod volume restored at the latest moment holds the changed content" \
+        check "the pod volume restored at the latest restore point holds the changed content" \
             log_has_pass "$E2E_LOG" "the latest restore holds the changed content"
         check "a pod volume whose claim was deleted can be restored from its backup" \
             log_has_pass "$E2E_LOG" "a volume that was deleted can be restored"
@@ -110,7 +110,7 @@ run() {
     if cos_wanted; then
         check "COS export: all three volumes have exportedTime and exportedBytes above 0" \
             log_has_pass "$E2E_LOG" "COS export: all three volumes"
-        check "COS export: kubectl backup cos-list shows an export of each volume (an export holds the earlier moments as undo files)" \
+        check "COS export: kubectl backup cos-list shows an export of each volume (an export holds the earlier restore points as undo files)" \
             log_has_pass "$E2E_LOG" "COS export: kubectl backup cos-list"
         cos_restore_checks "local cluster"
         if [ -n "${COS_DR_KUBECONFIG:-}" ]; then
@@ -128,9 +128,9 @@ run() {
 cos_restore_checks() {
     check "COS restore, $1: the VM restored from COS boots with no XFS errors and every logged file has its checksum" \
         log_has_pass "$E2E_LOG" "COS restore, $1: the VM restored at"
-    check "COS restore, $1: the pod volume restored at the first moment holds the first content" \
+    check "COS restore, $1: the pod volume restored at the first restore point holds the first content" \
         log_has_pass "$E2E_LOG" "COS restore, $1: the pod volume restored at"
-    check "COS restore, $1: the pod volume restored at the latest moment holds the changed content" \
+    check "COS restore, $1: the pod volume restored at the latest restore point holds the changed content" \
         log_has_pass "$E2E_LOG" "COS restore, $1: the latest restore"
     check "COS restore, $1: with the emergency key (--backup-key-file) the pod volume is restored without Key Protect and the checksums match" \
         log_has_pass "$E2E_LOG" "COS restore, $1: the emergency key"

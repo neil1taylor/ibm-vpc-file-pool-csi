@@ -85,7 +85,7 @@ if [ -n "$at" ]; then
     if [[ ! "$(basename "$d")" > "$want" ]]; then pick="$d"; fi
   done
   if [ -z "$newest" ]; then
-    # no moment folder yet: the only copy is the latest one
+    # no restore point folder yet: the only copy is the latest one
     echo "no restore point folder yet; using the latest copy" >&2
     pick="$src"
     stamp=""

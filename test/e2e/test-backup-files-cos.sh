@@ -10,11 +10,11 @@
 #
 # What it does: backs up a pod volume (files of three owners, a link, a name with
 # a newline, a 0600 file, a checksummed file) to a snapshot pool twice, with the
-# policy's export block on, and waits until both moments are in the bucket. Then:
+# policy's export block on, and waits until both restore points are in the bucket. Then:
 # - through the gateway, as real users, `kubectl backup ls/get/restore-files
 #   --from-cos` read the bucket of the policy's export block: the latest copy and
-#   the first moment, a link as a link, a file of another owner, the checksum;
-#   restore into a new claim, at the first moment, and into a new folder of an
+#   the first restore point, a link as a link, a file of another owner, the checksum;
+#   restore into a new claim, at the first restore point, and into a new folder of an
 #   existing claim;
 # - the helper pod that reads COS has no service account token, runs as an
 #   ordinary user, mounts no share, and the COS and Key Protect Secrets are not in
@@ -26,8 +26,8 @@
 # - no key reaches a log, an Event or a status; closing or deleting a session
 #   leaves no pod, Job or Secret in either namespace.
 #
-# It cannot test a moment that the local keep time has removed (that takes longer
-# than the stage); the gateway's choice of COS for such a moment is covered by unit
+# It cannot test a restore point that the local keep time has removed (that takes longer
+# than the stage); the gateway's choice of COS for such a restore point is covered by unit
 # tests, and --from-cos asks for COS by hand.
 #
 # Usage: KUBECONFIG=... [BACKUP_BIN=bin/kubectl-backup] COS_BUCKET=... test/e2e/test-backup-files-cos.sh [--keep]
@@ -202,9 +202,9 @@ oc exec -n "$NS" writer -- sh -c 'echo second > /data/v.txt && echo two > /data/
 two_moments() { [ "$(vol '.restorePoints // 0')" -ge 1 ] && [ "$(vol '.lastBackupTime')" != "$FIRST" ]; }
 wait_until 1500 "a second backup" two_moments
 exported() { [ -n "$(vol '.exportedTime // empty')" ] && [ "$(vol '.exportedTime')" = "$(vol '.lastBackupTime')" ] && [ -z "$(vol '.exportError // empty')" ]; }
-wait_until 2400 "the newest moment to be exported to COS" exported
+wait_until 2400 "the newest restore point to be exported to COS" exported
 VOLNAME=$(vol '.subPath' | sed 's#.*/##')
-pass "two moments are in the snapshot pool and the newest is in COS (first $FIRST, volume $VOLNAME)"
+pass "two restore points are in the snapshot pool and the newest is in COS (first $FIRST, volume $VOLNAME)"
 
 # ---- users ------------------------------------------------------------------------------------
 GW_DEPLOY=$(oc get deploy -n "$DRIVER_NS" -l app.kubernetes.io/component=backup-gateway -o name 2>/dev/null | head -1)
@@ -273,12 +273,12 @@ mkdir "$WORK/got"
 bk "$ALICE" get "${FROM_POLICY[@]}" /v.txt --out "$WORK/got" >/dev/null
 [ "$(cat "$WORK/got/v.txt")" = second ] && pass "the latest copy is read from COS" || fail "v.txt from COS is not 'second'"
 mkdir "$WORK/got1"
-bk "$ALICE" get "${FROM_POLICY[@]}" --moment "$FIRST" /v.txt --out "$WORK/got1" >/dev/null
-[ "$(cat "$WORK/got1/v.txt")" = first ] && pass "the first moment is read from COS" || fail "v.txt at the first moment from COS is not 'first'"
-if bk "$ALICE" get "${FROM_POLICY[@]}" --moment "$FIRST" /docs/b.txt --out "$WORK/got1" >/dev/null 2>&1; then
-    fail "a file made after the first moment is in it"
+bk "$ALICE" get "${FROM_POLICY[@]}" --restore-point "$FIRST" /v.txt --out "$WORK/got1" >/dev/null
+[ "$(cat "$WORK/got1/v.txt")" = first ] && pass "the first restore point is read from COS" || fail "v.txt at the first restore point from COS is not 'first'"
+if bk "$ALICE" get "${FROM_POLICY[@]}" --restore-point "$FIRST" /docs/b.txt --out "$WORK/got1" >/dev/null 2>&1; then
+    fail "a file made after the first restore point is in it"
 else
-    pass "a file made after the first moment is not in it"
+    pass "a file made after the first restore point is not in it"
 fi
 bk "$ALICE" get "${FROM_POLICY[@]}" /big/blob --out "$WORK/got" >/dev/null
 [ "$(sha256sum "$WORK/got/blob" | awk '{print $1}')" = "$BLOB_SHA" ] && pass "a file from COS has the same checksum" || fail "blob checksum differs"
@@ -292,7 +292,7 @@ else
 fi
 bk "$ALICE" get "${FROM_POLICY[@]}" /u1000/secret0600 --out - | grep -q secret \
     && pass "a file with mode 0600 of another owner is read" || fail "u1000/secret0600"
-bk "$ALICE" ls "${FROM_POLICY[@]}" --moments | grep -q "^20" && pass "the moments in COS can be listed" || fail "no moments listed from COS"
+bk "$ALICE" ls "${FROM_POLICY[@]}" --restore-points | grep -q "^20" && pass "the restore points in COS can be listed" || fail "no restore points listed from COS"
 
 # ---- 2. the helper pod ------------------------------------------------------------------------
 BB=$(oc get backupbrowse -o json | jq -r --arg p "$POLICY" '[.items[] | select(.spec.policy == $p and .spec.source == "cos")][0].metadata.name')
@@ -376,10 +376,10 @@ grep -q "^secret=107:107 600$" <<<"$OUT" && grep -q "^private=107:107 700 inner=
 grep -q "^linebreak=yes$" <<<"$OUT" && grep -q "^link=/etc$" <<<"$OUT" \
     && pass "a name with a newline is restored, and a link is restored as a link" || fail "names and links: $OUT"
 
-bk "$ALICE" restore-files "${FROM_POLICY[@]}" --moment "$FIRST" --to "$NS/$PREFIX-first" --path /v.txt --path /docs --size-gb 3 --wait --timeout 40m >/dev/null \
-    || fail "restore-files --from-cos at the first moment failed"
+bk "$ALICE" restore-files "${FROM_POLICY[@]}" --restore-point "$FIRST" --to "$NS/$PREFIX-first" --path /v.txt --path /docs --size-gb 3 --wait --timeout 40m >/dev/null \
+    || fail "restore-files --from-cos at the first restore point failed"
 OUT=$(inspect "$PREFIX-first" 'echo "v=$(cat v.txt)"; echo "b=$([ -e docs/b.txt ] && echo yes || echo no)"')
-grep -q "^v=first$" <<<"$OUT" && grep -q "^b=no$" <<<"$OUT" && pass "a restore from COS at the first moment brings back the first content" || fail "first moment: $OUT"
+grep -q "^v=first$" <<<"$OUT" && grep -q "^b=no$" <<<"$OUT" && pass "a restore from COS at the first restore point brings back the first content" || fail "first restore point: $OUT"
 
 oc apply -n "$NS" -f - <<YAML
 apiVersion: v1
@@ -427,7 +427,7 @@ grep -q "v.txt" <<<"$OUT" && pass "someone who may read the Secrets reads a buck
 mkdir "$WORK/named"
 bk "$COSADMIN" get "${BUCKET_FLAGS[@]}" /big/blob --out "$WORK/named" >/dev/null
 [ "$(sha256sum "$WORK/named/blob" | awk '{print $1}')" = "$BLOB_SHA" ] && pass "a file from a bucket named directly has the same checksum" || fail "named bucket checksum"
-bk "$COSADMIN" get "${BUCKET_FLAGS[@]}" --moment "$FIRST" /v.txt --out - | grep -q first && pass "a bucket named directly serves the first moment" || fail "named bucket first moment"
+bk "$COSADMIN" get "${BUCKET_FLAGS[@]}" --restore-point "$FIRST" /v.txt --out - | grep -q first && pass "a bucket named directly serves the first restore point" || fail "named bucket first restore point"
 bk "$COSADMIN" restore-files "${BUCKET_FLAGS[@]}" --to "$NS/$PREFIX-named" --storage-class "$SRC" --path /docs --wait --timeout 40m >/dev/null \
     || fail "restore-files from a bucket named directly failed"
 OUT=$(inspect "$PREFIX-named" 'echo "docs=$(cat docs/a.txt)"')
@@ -487,7 +487,7 @@ closed() { [ "$(oc get backupbrowse "$S1" -o jsonpath='{.status.phase}')" = Clos
 wait_until 240 "the COS session to close" closed
 wait_until 240 "the closed COS session's objects to go" gone "$UID1"
 pass "closing a COS session removes its pod, Job and both copies of its Secret"
-S2=$(session_of "${BUCKET_FLAGS[@]}" --moment "$FIRST")
+S2=$(session_of "${BUCKET_FLAGS[@]}" --restore-point "$FIRST")
 [ -n "$S2" ] || fail "browse printed no second session"
 UID2=$(oc get backupbrowse "$S2" -o jsonpath='{.metadata.uid}')
 oc delete backupbrowse "$S2" --wait=true >/dev/null

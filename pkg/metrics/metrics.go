@@ -265,7 +265,7 @@ var (
 	BackupExportOldestUnexportedAgeSeconds = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "vpc_file_pool_backup_export_oldest_unexported_age_seconds",
-			Help: "Age in seconds of the oldest backup moment of a policy that is not yet exported to COS",
+			Help: "Age in seconds of the oldest backup restore point of a policy that is not yet exported to COS",
 		},
 		[]string{"policy"},
 	)

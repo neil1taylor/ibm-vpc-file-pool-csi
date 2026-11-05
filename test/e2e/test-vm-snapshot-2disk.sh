@@ -16,7 +16,7 @@
 # The mount point gets the SELinux label mnt_t: with the default label the guest
 # agent cannot open it, the freeze fails ("failed to open /mnt/data: Permission
 # denied") and KubeVirt makes no VolumeSnapshot at all.
-# The test prints the gap between the two copy moments.
+# The test prints the gap between the two copy restore points.
 # KubeVirt gives up on a VirtualMachineSnapshot after 5 minutes by default
 # ("snapshot deadline exceeded"). KubeVirt does not wait for the copies, so the
 # deadline is not reached; the test still sets failureDeadline to 1h to be safe.
@@ -271,20 +271,20 @@ disk_snapshots_ready() {
 wait_until "$SNAPSHOT_TIMEOUT" "both disk snapshots ready" disk_snapshots_ready
 log "both disk snapshots were ready $((SECONDS - start)) s after the request"
 
-# One Snapshot resource of the driver per disk: check the method and the moment.
+# One Snapshot resource of the driver per disk: check the method and the restore point.
 moments=()
 for vs in $disk_snapshots; do
     content=$(oc get volumesnapshot -n "$NS" "$vs" -o jsonpath='{.status.boundVolumeSnapshotContentName}')
     handle=$(oc get volumesnapshotcontent "$content" -o jsonpath='{.status.snapshotHandle}')
     st=$(oc get snapshots.storage.ibmcloud.io "${handle##*/}" -o json)
-    echo "$vs: $(echo "$st" | jq -c '{method: .metadata.annotations["storage.ibmcloud.io/snapshot-method"], consistency: .status.consistency, moment: .status.copyMoment}')"
+    echo "$vs: $(echo "$st" | jq -c '{method: .metadata.annotations["storage.ibmcloud.io/snapshot-method"], consistency: .status.consistency, restorePoint: .status.copyRestorePoint}')"
     [ "$(echo "$st" | jq -r '.metadata.annotations["storage.ibmcloud.io/snapshot-method"]')" = vm ] || fail "$vs was not made with the QEMU copy"
-    moments+=("$(echo "$st" | jq -r '.status.copyMoment')")
+    moments+=("$(echo "$st" | jq -r '.status.copyRestorePoint')")
 done
 [ "${#moments[@]}" = 2 ] || fail "expected 2 disk snapshots, found ${#moments[@]}"
 to_epoch() { perl -MTime::Piece -e 'print Time::Piece->strptime(shift, "%Y-%m-%dT%H:%M:%SZ")->epoch' "$1"; }
 gap=$(( $(to_epoch "${moments[1]}") - $(to_epoch "${moments[0]}") ))
-log "the two copy moments are ${gap#-} s apart (${moments[0]} and ${moments[1]})"
+log "the two copy restore points are ${gap#-} s apart (${moments[0]} and ${moments[1]})"
 
 after=$(vssh src 'wc -l < /var/log/writer.log' | tr -dc '0-9')
 log "the source VM wrote $((after - before)) files while the snapshot ran"
@@ -323,5 +323,5 @@ done < /var/log/writer.log
 echo "LOGGED=$total MISSING=$missing WRONG=$wrong"')
 echo "$result"
 echo "$result" | grep -q 'MISSING=0 WRONG=0' ||
-    fail "the two disks of the restored VM do not fit each other (copy moments ${gap#-} s apart): $result"
-log "PASS: restored 2-disk VM booted; $result; copy moments ${gap#-} s apart"
+    fail "the two disks of the restored VM do not fit each other (copy restore points ${gap#-} s apart): $result"
+log "PASS: restored 2-disk VM booted; $result; copy restore points ${gap#-} s apart"

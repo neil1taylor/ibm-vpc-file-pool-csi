@@ -61,7 +61,7 @@ type WrongBaseError struct {
 }
 
 func (e *WrongBaseError) Error() string {
-	return fmt.Sprintf("the far-site disk is not at the expected moment (it shows %s): %s", e.DiskMoment, e.Message)
+	return fmt.Sprintf("the far-site disk is not at the expected restore point (it shows %s): %s", e.DiskMoment, e.Message)
 }
 
 // vmCopyID turns any copy name into an ID the receiver accepts.
@@ -122,7 +122,7 @@ func (c *SyncClient) SendVMDisk(ctx context.Context, a VMSendArgs) (VMSendResult
 		default:
 			t, perr := time.Parse(time.RFC3339Nano, header)
 			if perr != nil {
-				return res, fmt.Errorf("the receiver sent a bad disk moment %q", header)
+				return res, fmt.Errorf("the receiver sent a bad disk restore point %q", header)
 			}
 			from = &t
 		}
