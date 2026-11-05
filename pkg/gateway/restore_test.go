@@ -71,7 +71,7 @@ func TestRestoreIntoANewClaim(t *testing.T) {
 	sp := rs[0].Spec
 	if rs[0].Name != got.Name || sp.Policy != "nightly" || sp.SourceNamespace != "apps" || sp.SourceName != "db" ||
 		sp.TargetNamespace != "apps" || sp.TargetName != "db-files" || sp.Existing || sp.SizeGB != 5 || sp.StorageClassName != "gold" ||
-		sp.Moment == nil || !sp.Moment.Equal(&metav1.Time{Time: moment}) || sp.RequestedBy != "alice" || sp.TargetUID != "" {
+		sp.RestorePoint == nil || sp.Moment != nil || !sp.RestorePoint.Equal(&metav1.Time{Time: moment}) || sp.RequestedBy != "alice" || sp.TargetUID != "" {
 		t.Errorf("spec %+v", sp)
 	}
 	if len(sp.Paths) != 2 || sp.Paths[0] != "/var/www/index.php" || sp.Paths[1] != `/etc/my\x0aname` {

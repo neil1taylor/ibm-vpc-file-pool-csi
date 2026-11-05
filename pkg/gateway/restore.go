@@ -175,7 +175,7 @@ func (g *Gateway) handleRestoreCreate(w http.ResponseWriter, r *http.Request, u 
 	}
 	if req.Moment != nil {
 		m := metav1.NewTime(*req.Moment)
-		spec.Moment = &m
+		spec.RestorePoint = &m
 	}
 	target := &corev1.PersistentVolumeClaim{}
 	err = g.c.Get(ctx, types.NamespacedName{Namespace: req.TargetNamespace, Name: req.TargetName}, target)

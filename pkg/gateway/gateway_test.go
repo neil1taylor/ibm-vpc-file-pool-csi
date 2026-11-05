@@ -396,7 +396,7 @@ func TestSessionCreation(t *testing.T) {
 	}
 	bb := got[0]
 	if bb.Spec.Policy != "nightly" || bb.Spec.PVCNamespace != "apps" || bb.Spec.PVCName != "db" || bb.Spec.RequestedBy != "alice" ||
-		bb.Spec.Moment == nil || !bb.Spec.Moment.Time.Equal(moment) {
+		bb.Spec.RestorePoint == nil || bb.Spec.Moment != nil || !bb.Spec.RestorePoint.Time.Equal(moment) {
 		t.Errorf("spec = %+v", bb.Spec)
 	}
 	if bb.Labels[userLabel] != userHash("alice") || strings.Contains(bb.Labels[userLabel], "alice") {

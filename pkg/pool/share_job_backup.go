@@ -24,8 +24,9 @@ func checkBackupFolders(backupPath, momentsPath string) error {
 		return err
 	}
 	policyDir, volume, _ := strings.Cut(strings.TrimPrefix(backupPath, backupBasePath+"/"), "/pvcs/")
+	// The folder keeps the name ".moments": backups made before the rename are in it.
 	if want := backupBasePath + "/" + policyDir + "/.moments/pvcs/" + volume; momentsPath != want {
-		return fmt.Errorf("moments folder %q is not the one of backup folder %q", momentsPath, backupPath)
+		return fmt.Errorf("restore points folder %q is not the one of backup folder %q", momentsPath, backupPath)
 	}
 	return nil
 }

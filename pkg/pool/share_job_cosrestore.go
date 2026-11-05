@@ -107,6 +107,7 @@ type cosRestoreParams struct {
 // snapshotLines turns the Kopia snapshot list into lines of
 // "<id> <path> <moment> <volume>". Snapshots that the export did not make (no
 // moment and volume tags) are left out.
+// The tag keeps the name "moment": backups already in COS carry it.
 const snapshotLines = `kopia snapshot list --all --json | sed -n 's/^ *{"id":"\([^"]*\)".*"path":"\([^"]*\)".*"tag:moment":"\([^"]*\)","tag:volume":"\([^"]*\)".*/\1 \2 \3 \4/p'`
 
 // pickAwk chooses the export to restore. Its input is snapshotLines. Of the

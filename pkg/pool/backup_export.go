@@ -216,7 +216,7 @@ export:
 		done, out, jobErr := bc.shareData.ExportToCOS(ctx, exportKeyPrefix+bp.Name+"-"+v.SubVolumeName, shareMountOf(sh), repo,
 			base+v.SubPath, base+"/.moments"+v.SubPath, v.LastBackupTime.Time)
 		if jobErr == nil && done && out.Moment.IsZero() {
-			jobErr = errors.New("the export Job finished but did not report which moment it sent")
+			jobErr = errors.New("the export Job finished but did not report which restore point it sent")
 		}
 		switch {
 		case jobErr != nil:
@@ -274,7 +274,7 @@ func (bc *BackupController) buildFileList(ctx context.Context, policy string, v 
 		return true
 	case v.LastBackupTime != nil && !withinSlack(out.Moment, v.LastBackupTime.Time, fileListMomentSlack):
 		v.FileListEntries = 0
-		v.FileListError = "the file list is for another moment than this backup, so it is not used; folders of this disk are listed from COS, which is slower"
+		v.FileListError = "the file list is for another restore point than this backup, so it is not used; folders of this disk are listed from COS, which is slower"
 	default:
 		v.FileListEntries, v.FileListError = int64(out.Entries), ""
 		for _, n := range out.Notes {

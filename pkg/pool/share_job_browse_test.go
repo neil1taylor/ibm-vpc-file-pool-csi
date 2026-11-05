@@ -49,7 +49,7 @@ func TestStartBrowse_ArgumentsAndHardening(t *testing.T) {
 		t.Errorf("image = %q", ctr.Image)
 	}
 	args := strings.Join(ctr.Command, " ")
-	for _, want := range []string{"/usr/local/bin/browse", "--mode=browse-server", "--root=/latest", "--moments=/moments",
+	for _, want := range []string{"/usr/local/bin/browse", "--mode=browse-server", "--root=/latest", "--restore-points=/moments",
 		"--at=2026-10-22T10:30:00Z", "--listen=:8443", "--token-file=/etc/browse/token",
 		"--tls-cert-file=/etc/browse/tls.crt", "--tls-key-file=/etc/browse/tls.key", "--idle=15m0s", "--max-life=2h0m0s"} {
 		if !strings.Contains(args, want) {
@@ -139,7 +139,7 @@ func TestStartBrowse_LatestOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := strings.Join(browseJob(t, c, "bb-1").Spec.Template.Spec.Containers[0].Command, " ")
-	if strings.Contains(args, "--moments") || strings.Contains(args, "--at") {
+	if strings.Contains(args, "--restore-points") || strings.Contains(args, "--at") {
 		t.Errorf("no moments folder, yet: %s", args)
 	}
 }

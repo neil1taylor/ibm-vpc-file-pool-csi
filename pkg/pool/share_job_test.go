@@ -518,7 +518,7 @@ func TestShareJobRunner_RestoreBackup_FirstCallStartsJob(t *testing.T) {
 		"--mode=restore-vm-disk",
 		`--backup-disk="$src/disk.img"`,
 		`--out-disk="$dst/disk.img"`,
-		"--restore-moment=2026-10-21T09:30:00Z",
+		"--restore-to-restore-point=2026-10-21T09:30:00Z",
 		`cp -a "$pick/." "$dst/"`,
 		"chown -R 107:107",
 		"chmod 0777",
@@ -537,7 +537,7 @@ func TestShareJobRunner_RestoreBackup_LatestHasNoMomentFlag(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := jobScript(getShareJob(t, c, "restore-a"))
-	if strings.Contains(script, "--restore-moment") {
+	if strings.Contains(script, "--restore-to-restore-point") {
 		t.Errorf("a restore of the latest backup must not name a moment:\n%s", script)
 	}
 	if strings.Contains(script, "chown") {

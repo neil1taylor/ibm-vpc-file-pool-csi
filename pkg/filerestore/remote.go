@@ -508,7 +508,7 @@ func (s *writerSession) handle(typ byte, m message) (message, error) {
 		if m.Moment != "" {
 			t, err := time.Parse(time.RFC3339, m.Moment)
 			if err != nil {
-				return message{}, errors.New("the moment is not a time")
+				return message{}, errors.New("the restore point is not a time")
 			}
 			moment = t
 		}

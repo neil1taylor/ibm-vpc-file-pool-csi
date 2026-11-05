@@ -44,7 +44,7 @@ func (r *ShareJobRunner) RestoreBackup(ctx context.Context, key string, backup S
 	at, momentFlag := "", ""
 	if !moment.IsZero() {
 		at = moment.UTC().Format(time.RFC3339)
-		momentFlag = " --restore-moment=" + at
+		momentFlag = " --restore-to-restore-point=" + at
 	}
 	// A restore from COS reads its scratch copy from the share it writes to.
 	shares, dstRoot := []ShareMount{backup, dst}, "/share1"
@@ -86,7 +86,7 @@ if [ -n "$at" ]; then
   done
   if [ -z "$newest" ]; then
     # no moment folder yet: the only copy is the latest one
-    echo "no moment folder yet; using the latest copy" >&2
+    echo "no restore point folder yet; using the latest copy" >&2
     pick="$src"
     stamp=""
   else
@@ -98,7 +98,7 @@ else
   stamp="$newest"
 fi
 if [ -L "$pick" ]; then
-  echo "refusing a moment folder that is a symlink" >&2
+  echo "refusing a restore point folder that is a symlink" >&2
   exit 1
 fi
 rm -r -f -- "$dst"

@@ -19,8 +19,8 @@ import (
 )
 
 func TestParseFlags_BooleanFlagsNeedNoValue(t *testing.T) {
-	f := parseFlags([]string{"--list-moments", "--nfs-mount-path", "/mnt", "--force", "--dry-run", "--rewind-to=2026-10-20T10:00:00Z"})
-	for _, k := range []string{"list-moments", "force", "dry-run"} {
+	f := parseFlags([]string{"--list-restore-points", "--nfs-mount-path", "/mnt", "--force", "--dry-run", "--rewind-to=2026-10-20T10:00:00Z"})
+	for _, k := range []string{"list-restore-points", "force", "dry-run"} {
 		if f[k] != "true" {
 			t.Errorf("flag %s = %q, want true", k, f[k])
 		}
@@ -227,5 +227,33 @@ func TestVMOptionsFromFlags_VMs(t *testing.T) {
 	}
 	if _, err = vmOptionsFromFlags(map[string]string{"vms": "justaname"}, now); err == nil || !strings.Contains(err.Error(), "--vms") {
 		t.Errorf("err = %v, want one that names --vms", err)
+	}
+}
+
+func TestParseRenamedFlags_ListMomentsStillWorksAndWarns(t *testing.T) {
+	var errb bytes.Buffer
+	old := stderr
+	stderr = &errb
+	t.Cleanup(func() { stderr = old })
+	f, err := parseRenamedFlags([]string{"--list-moments", "--nfs-mount-path", "/mnt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f["list-restore-points"] != "true" || f["nfs-mount-path"] != "/mnt" {
+		t.Errorf("flags = %v", f)
+	}
+	if got, want := errb.String(), "--list-moments is deprecated; use --list-restore-points\n"; got != want {
+		t.Errorf("stderr = %q, want %q", got, want)
+	}
+}
+
+func TestParseRenamedFlags_NewNameNeedsNoWarning(t *testing.T) {
+	var errb bytes.Buffer
+	old := stderr
+	stderr = &errb
+	t.Cleanup(func() { stderr = old })
+	f, err := parseRenamedFlags([]string{"--list-restore-points", "--list-moments", "--nfs-mount-path", "/mnt"})
+	if err != nil || f["list-restore-points"] != "true" {
+		t.Fatalf("flags = %v, err = %v", f, err)
 	}
 }

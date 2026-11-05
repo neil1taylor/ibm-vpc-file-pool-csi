@@ -11,7 +11,7 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// parseRestoreMoment reads the --restore-moment flag: an RFC 3339 time, or
+// parseRestoreMoment reads the --restore-to-restore-point flag: an RFC 3339 time, or
 // empty for the latest backup.
 func parseRestoreMoment(s string) (time.Time, error) {
 	if s == "" {
@@ -19,7 +19,7 @@ func parseRestoreMoment(s string) (time.Time, error) {
 	}
 	t, err := time.Parse(time.RFC3339Nano, s)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("--restore-moment: %w", err)
+		return time.Time{}, fmt.Errorf("--restore-to-restore-point: %w", err)
 	}
 	return t, nil
 }
@@ -27,6 +27,7 @@ func parseRestoreMoment(s string) (time.Time, error) {
 // restoreVMDiskMessage is the termination message of a restore-vm-disk Job.
 func restoreVMDiskMessage(res replication.RestoreResult) string {
 	msg := struct {
+		// The key keeps the name "moment": the controller of an earlier version reads it.
 		Moment string `json:"moment,omitempty"`
 		Latest bool   `json:"latest"`
 	}{Latest: res.Latest}
@@ -37,7 +38,7 @@ func restoreVMDiskMessage(res replication.RestoreResult) string {
 	return string(b)
 }
 
-// runRestoreVMDisk writes a backed-up VM disk, as it was at a moment, into a
+// runRestoreVMDisk writes a backed-up VM disk, as it was at a restore point, into a
 // new volume. A restore-backup Job runs it.
 func runRestoreVMDisk(backupDisk, outDisk, moment string) {
 	if backupDisk == "" || outDisk == "" {

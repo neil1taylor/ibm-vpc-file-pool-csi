@@ -407,11 +407,11 @@ kubectl apply -f config/deploy/node.yaml
 | `--metadata-json` | `""` | Serialized SubVolume metadata (sync-client mode). Set by the replication controller |
 | `--staging-path` | `""` | VM disk copy staging file (apply-vm-disk mode). Set by the replication controller |
 | `--disk-path` | `""` | Disk image to replace (apply-vm-disk mode). Set by the replication controller |
-| `--from`, `--to` | `""` | Moments the destination disk and the copy show, RFC 3339 (apply-vm-disk mode). Set by the replication controller |
+| `--from`, `--to` | `""` | Restore points the destination disk and the copy show, RFC 3339 (apply-vm-disk mode). Set by the replication controller |
 | `--full` | `false` | The copy holds the whole disk (apply-vm-disk mode). Set by the replication controller |
 | `--keep` | `24h` | How long restore points are kept (apply-vm-disk and send-vm-disk modes). Set by the replication controller |
 | `--backup-disk`, `--out-disk` | `""` | The backed-up VM disk to read and the new disk to write (restore-vm-disk mode). Set by the backup restore Job |
-| `--restore-moment` | `""` | Moment to restore, RFC 3339; empty for the latest (restore-vm-disk mode). Set by the backup restore Job |
+| `--restore-to-restore-point` | `""` | Restore point to restore, RFC 3339; empty for the latest (restore-vm-disk mode). Set by the backup restore Job. The old name `--restore-moment` still works for one release |
 | `--restore-files-spec` | `""` | JSON of the file restore: mode (`measure`, `new-claim` or `folder`), where the backup and the claim are mounted, owner, limits (restore-files mode). Set by the file restore Job |
 | `--restore-files-paths` | `""` | The file that lists the paths to restore, one per line in escaped form. Paths are never arguments (restore-files mode). Set by the file restore Job |
 | `--vm-group` | `""` | `namespace/name` of the VM that owns the disk (send-vm-disk mode). Set by the replication controller |
@@ -480,11 +480,11 @@ kubectl apply -f config/deploy/node.yaml
 |------|---------|-------------|
 | `--mode` | (required) | `browse-server`, `build-list` (makes the file list of a VM disk) or `cos-disk-server` (serves a VM disk from COS to the reader) |
 | `--root` | (required unless `--cos-source`) | The latest copy of the backup, mounted read-only |
-| `--moments` | `""` | The folder of earlier moments (`20261022T091500Z`, ...). Needed for `--at` |
-| `--at` | `""` | Read the newest moment at or before this time (RFC 3339) instead of the latest copy |
+| `--restore-points` | `""` | The folder of earlier restore points (`20261022T091500Z`, ...). Needed for `--at`. The old name `--moments` still works for one release |
+| `--at` | `""` | Read the newest restore point at or before this time (RFC 3339) instead of the latest copy |
 | `--tls-cert-file`, `--tls-key-file` | (required) | The session certificate and key. The API is never served in plain HTTP |
 | `--token-file` | (required) | File that holds the session token (at least 16 characters) |
-| `--cos-source` | `""` | JSON that names a backup exported to COS (endpoint, bucket, prefix, policy, volume, Key Protect root key; no secret in it). Replaces `--root` and `--moments`. The keys are Secrets mounted as files at fixed places; the helper unwraps the backup key in memory and runs Kopia read-only as a child |
+| `--cos-source` | `""` | JSON that names a backup exported to COS (endpoint, bucket, prefix, policy, volume, Key Protect root key; no secret in it). Replaces `--root` and `--restore-points`. The keys are Secrets mounted as files at fixed places; the helper unwraps the backup key in memory and runs Kopia read-only as a child |
 | `--kopia`, `--kopia-state-dir` | `kopia`, `/tmp/kopia` | The Kopia program and a writable folder for its settings and cache (with `--cos-source`) |
 | `--list-out` | `""` | `build-list`: where to write the file list (`filelist.json.gz`) |
 | `--guest-disk-url`, `--guest-disk-cert-file`, `--guest-disk-token-file` | `""` | `browse-server --guest`: read the VM disk from a disk server (URL, its certificate to trust, the token for it) instead of a mounted backup |

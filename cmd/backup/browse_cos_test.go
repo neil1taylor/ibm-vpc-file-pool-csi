@@ -17,7 +17,7 @@ func bucketArgs(extra ...string) map[string]string {
 }
 
 func TestFromCOSAloneReadsTheBucketOfThePolicy(t *testing.T) {
-	flags := parseBrowseArgs([]string{"--from-cos", "--policy", "nightly", "--pvc", "apps/db", "--moment", "2026-10-01T09:00:00Z"})
+	flags := parseBrowseArgs([]string{"--from-cos", "--policy", "nightly", "--pvc", "apps/db", "--restore-point", "2026-10-01T09:00:00Z"})
 	tg, err := parseTarget(flags)
 	if err != nil {
 		t.Fatal(err)

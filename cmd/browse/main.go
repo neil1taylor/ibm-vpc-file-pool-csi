@@ -22,10 +22,15 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/cosbrowse"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/filerestore"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/guestfs"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/util"
 	"k8s.io/klog/v2"
 )
 
 var version = "dev"
+
+// flagAliases are flags that were renamed. The old name still works for one
+// release, is not in --help, and prints one line on stderr.
+var flagAliases = []util.FlagAlias{{Old: "moments", New: "restore-points"}}
 
 const (
 	modeServer = "browse-server"
@@ -56,6 +61,11 @@ func main() {
 // run returns the exit code: 0 when the session ended as planned, 2 for a bad
 // command line, 1 for anything else. onListen, if set, is told the address.
 func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen func(net.Addr)) int {
+	args, aerr := util.RewriteAliasedArgs(args, flagAliases, stderr)
+	if aerr != nil {
+		_, _ = fmt.Fprintln(stderr, aerr)
+		return 2
+	}
 	fs := flag.NewFlagSet("browse", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	klog.InitFlags(fs)
@@ -72,8 +82,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 	idle := fs.Duration("idle", 15*time.Minute, "end the session after this long without use")
 	maxLife := fs.Duration("max-life", 2*time.Hour, "end the session after this long, even if it is in use")
 	streams := fs.Int("max-streams", 8, "how many downloads may run at once")
-	moments := fs.String("moments", "", "folder of earlier moments (20261022T091500Z, ...); needed for --at")
-	at := fs.String("at", "", "read the newest moment at or before this time (RFC 3339); needs --moments")
+	moments := fs.String("restore-points", "", "folder of earlier restore points (20261022T091500Z, ...); needed for --at")
+	at := fs.String("at", "", "read the newest restore point at or before this time (RFC 3339); needs --restore-points")
 	tlsCert := fs.String("tls-cert-file", "", "the session certificate (PEM)")
 	tlsKey := fs.String("tls-key-file", "", "the session key (PEM)")
 	guest := fs.Bool("guest", false, "read the file systems inside the VM disk in --root (disk.img) through a read-only appliance, instead of the files of --root")
@@ -93,7 +103,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 	}
 	if *mode == modeCOSDisk {
 		if *root != "" || *moments != "" || *guest {
-			_, _ = fmt.Fprintln(stderr, "--mode "+modeCOSDisk+" cannot be used with --root, --moments or --guest")
+			_, _ = fmt.Fprintln(stderr, "--mode "+modeCOSDisk+" cannot be used with --root, --restore-points or --guest")
 			return 2
 		}
 		a := cosDiskArgs{source: *cosSource, kopia: *kopia, stateDir: *kopiaState, listen: *listen,
@@ -150,7 +160,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 		_, _ = fmt.Fprintf(stderr, "--mode must be %s or %s\n", modeServer, modeRestoreFiles)
 		return 2
 	case *cosSource != "" && (*root != "" || *moments != ""):
-		_, _ = fmt.Fprintln(stderr, "--cos-source cannot be used with --root or --moments")
+		_, _ = fmt.Fprintln(stderr, "--cos-source cannot be used with --root or --restore-points")
 		return 2
 	case *guest && *cosSource != "":
 		_, _ = fmt.Fprintln(stderr, "--guest cannot be used with --cos-source")
@@ -162,7 +172,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 		_, _ = fmt.Fprintln(stderr, "--guest-consistency must be FileSystemConsistent or CrashConsistent")
 		return 2
 	case *guestDiskURL != "" && (!*guest || *root != "" || *moments != "" || *cosSource != ""):
-		_, _ = fmt.Fprintln(stderr, "--guest-disk-url needs --guest and cannot be used with --root, --moments or --cos-source")
+		_, _ = fmt.Fprintln(stderr, "--guest-disk-url needs --guest and cannot be used with --root, --restore-points or --cos-source")
 		return 2
 	case *guestDiskURL != "" && !strings.HasPrefix(*guestDiskURL, "https://"):
 		_, _ = fmt.Fprintln(stderr, "--guest-disk-url must be an https address")
@@ -180,7 +190,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, onListen 
 		_, _ = fmt.Fprintln(stderr, "--tls-cert-file and --tls-key-file are required: the API is never served in plain HTTP")
 		return 2
 	case *at != "" && *moments == "" && *cosSource == "":
-		_, _ = fmt.Fprintln(stderr, "--at needs --moments")
+		_, _ = fmt.Fprintln(stderr, "--at needs --restore-points")
 		return 2
 	}
 	var atTime time.Time

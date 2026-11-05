@@ -13,7 +13,7 @@ import (
 //
 //   - With --policy and --pvc it reads the bucket that the policy's export block
 //     names. It needs the same rights as the other browse commands. Without the
-//     flag the gateway picks COS by itself when a moment is only there.
+//     flag the gateway picks COS by itself when a restore point is only there.
 //   - With --bucket and --endpoint it names a bucket directly, for a backup that
 //     no policy of this cluster describes. It takes the flags of
 //     `restore --from-cos`. Only someone who may read the named Secrets in the

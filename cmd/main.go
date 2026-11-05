@@ -215,15 +215,15 @@ func main() {
 	// Apply-vm-disk flags.
 	flag.StringVar(&stagingPath, "staging-path", "", "VM disk copy staging file for apply-vm-disk mode")
 	flag.StringVar(&diskPath, "disk-path", "", "Disk image to replace in apply-vm-disk mode")
-	flag.StringVar(&vmCopy.from, "from", "", "Moment the far-site disk shows now, RFC 3339 (apply-vm-disk mode; empty for a first copy)")
-	flag.StringVar(&vmCopy.to, "to", "", "Moment the copy shows, RFC 3339 (apply-vm-disk mode)")
+	flag.StringVar(&vmCopy.from, "from", "", "Restore point the far-site disk shows now, RFC 3339 (apply-vm-disk mode; empty for a first copy)")
+	flag.StringVar(&vmCopy.to, "to", "", "Restore point the copy shows, RFC 3339 (apply-vm-disk mode)")
 	flag.BoolVar(&vmCopy.full, "full", false, "The copy holds the whole disk (apply-vm-disk mode)")
 	flag.DurationVar(&vmCopy.keep, "keep", 24*time.Hour, "How long restore points are kept (apply-vm-disk mode)")
 
 	// Failover flags.
 	flag.StringVar(&nfsMountPath, "nfs-mount-path", "", "Mount path of the destination share (failover mode)")
 	flag.StringVar(&failoverAction, "failover-action", "", "Plan or Execute (failover mode)")
-	flag.StringVar(&failoverRewind, "rewind-to", "", "Use the newest moment at or before this time, RFC 3339 (failover mode)")
+	flag.StringVar(&failoverRewind, "rewind-to", "", "Use the newest restore point at or before this time, RFC 3339 (failover mode)")
 	flag.StringVar(&failoverVMs, "vms", "", "Comma-separated VMs (namespace/name) to fail over; empty means all (failover mode)")
 	flag.BoolVar(&failoverForce, "force", false, "Go on although a copy may still be applied to a disk (failover mode)")
 	flag.StringVar(&failoverExpect, "failover-expect", "", "JSON of the confirmed plan; an Execute refuses if the share no longer matches it (failover mode)")
@@ -232,7 +232,7 @@ func main() {
 	// Restore-vm-disk flags.
 	flag.StringVar(&backupDisk, "backup-disk", "", "Backed-up VM disk image to restore from (restore-vm-disk mode)")
 	flag.StringVar(&outDisk, "out-disk", "", "New disk image to write; it must not exist (restore-vm-disk mode)")
-	flag.StringVar(&restoreMoment, "restore-moment", "", "Moment to restore, RFC 3339; empty for the latest backup (restore-vm-disk mode)")
+	flag.StringVar(&restoreMoment, "restore-to-restore-point", "", "Restore point to restore, RFC 3339; empty for the latest backup (restore-vm-disk mode)")
 
 	// Restore-files flags.
 	flag.StringVar(&restoreFiles.spec, "restore-files-spec", "", "JSON of the file restore: mode, where the backup and the target are mounted, owner (restore-files mode)")
@@ -265,7 +265,10 @@ func main() {
 	flag.StringVar(&copyID, "copy-id", "", "Name of this copy attempt; a repeat with the same name resumes (send-vm-disk mode)")
 
 	klog.InitFlags(nil)
-	flag.Parse()
+	if err := parseCommandLine(os.Args[1:], os.Stderr); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(2)
+	}
 
 	klog.InfoS("Starting IBM VPC File Pool CSI Driver", "version", version, "mode", mode)
 
@@ -1240,7 +1243,7 @@ func runSendVMDisk(endpoint, authTokenFile, caCertFile, stagingPath, destBasePat
 	res, err := replication.SendVMDiskFile(ctx, client, stagingPath, args)
 	var wrongBase *replication.WrongBaseError
 	if errors.As(err, &wrongBase) {
-		klog.ErrorS(err, "The far-site disk is not at the moment this copy starts from; the next copy will be a full copy", "subVolume", svName)
+		klog.ErrorS(err, "The far-site disk is not at the restore point this copy starts from; the next copy will be a full copy", "subVolume", svName)
 		_ = os.WriteFile("/dev/termination-log", []byte(sendVMDiskMessage(res, wrongBase)), 0o600)
 		return
 	}

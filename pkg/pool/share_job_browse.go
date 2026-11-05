@@ -207,7 +207,7 @@ func (r *ShareJobRunner) StartBrowse(ctx context.Context, req BrowseJobRequest) 
 		}
 	}
 	if req.MomentsPath != "" {
-		args = append(args, "--moments=/moments")
+		args = append(args, "--restore-points=/moments")
 		folders = append(folders, folderMount{share: 0, subPath: strings.TrimPrefix(req.MomentsPath, "/"), at: "/moments"})
 	}
 	if !req.At.IsZero() && (req.Guest || req.MomentsPath != "") {
