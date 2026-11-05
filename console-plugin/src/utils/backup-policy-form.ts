@@ -1,10 +1,9 @@
 import { API_GROUP_VERSION } from '../constants';
 import { BackupPolicy, FileSharePool, SubVolume } from '../types';
 import { PersistentVolumeClaim, VirtualMachineLike, isValidK8sName } from './k8s-objects';
+import { HOUR_MS, MIN_MS, parseGoDuration } from './go-duration';
 import { DEFAULT_VM_COPY_SPEED_MBPS } from './replication-helpers';
 
-const MIN_MS = 60 * 1000;
-const HOUR_MS = 60 * MIN_MS;
 const DAY_MS = 24 * HOUR_MS;
 
 export interface LabelPair {
@@ -36,18 +35,6 @@ export const EMPTY_BACKUP_FORM: BackupPolicyForm = {
   vmCopySpeed: DEFAULT_VM_COPY_SPEED_MBPS,
   suspend: false,
 };
-
-const UNITS_MS: Record<string, number> = { h: HOUR_MS, m: MIN_MS, s: 1000, ms: 1 };
-
-/** A Go duration such as "6h", "1h30m" or "1.5h", in milliseconds. Undefined if it is not one. */
-export function parseGoDuration(value: string): number | undefined {
-  if (!/^(\d+(\.\d+)?(h|ms|m|s))+$/.test(value)) return undefined;
-  let total = 0;
-  for (const [, amount, unit] of value.matchAll(/(\d+(?:\.\d+)?)(h|ms|m|s)/g)) {
-    total += parseFloat(amount) * UNITS_MS[unit];
-  }
-  return Math.round(total);
-}
 
 export function parseNamespaces(text: string): string[] {
   return text.split(/[,\s]+/).filter(Boolean);
