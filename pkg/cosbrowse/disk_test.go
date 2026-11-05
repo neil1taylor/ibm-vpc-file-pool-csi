@@ -27,14 +27,22 @@ func TestChooseBackup_NewestExportByDefault(t *testing.T) {
 	}
 }
 
-func TestChooseBackup_AnOlderMomentIsRefusedInWords(t *testing.T) {
+// Phase 6d: a time before the export's restore point is no longer refused here.
+// The export that covers the time (the oldest one at or after it) is chosen, and
+// the undo files in it decide whether the restore point exists.
+func TestChooseBackup_AnOlderRestorePointPicksTheCoveringExport(t *testing.T) {
 	f := newFakeRepo()
 	addExport(f, "pol", volA, at(20, 9))
 	addExport(f, "pol", volA, at(21, 9), at(20, 9), at(21, 9))
 	snaps, _ := f.Snapshots(context.Background())
-	_, err := ChooseBackup(snaps, Params{Policy: "pol", Volume: volA, At: at(20, 12)})
-	if err == nil || !strings.Contains(err.Error(), "older") {
-		t.Fatalf("err = %v; want a sentence about older moments", err)
+	got, err := ChooseBackup(snaps, Params{Policy: "pol", Volume: volA, At: at(20, 12)})
+	if err != nil || !got.Moment.Equal(at(21, 9)) || !got.Newest {
+		t.Fatalf("got %+v, %v; want the export of 21 Oct", got, err)
+	}
+	// Before every export: the oldest export covers it, and the undo files say.
+	got, err = ChooseBackup(snaps, Params{Policy: "pol", Volume: volA, At: at(19, 0)})
+	if err != nil || !got.Moment.Equal(at(20, 9)) || got.Newest {
+		t.Errorf("got %+v, %v; want the export of 20 Oct", got, err)
 	}
 	// A time after the newest export reads the newest.
 	if got, err := ChooseBackup(snaps, Params{Policy: "pol", Volume: volA, At: at(25, 0)}); err != nil || !got.Moment.Equal(at(21, 9)) {
