@@ -153,6 +153,9 @@ func TestBackupRestore_RunsFromRequestToDone(t *testing.T) {
 		!br.Status.RestoredMoment.Equal(&metav1.Time{Time: time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC)}) || br.Status.Latest {
 		t.Errorf("status = %+v, want Done at 09:00, not the latest", br.Status)
 	}
+	if br.Status.RestoredRestorePoint == nil || !br.Status.RestoredRestorePoint.Equal(br.Status.RestoredMoment) {
+		t.Errorf("restoredRestorePoint = %v, want the same as restoredMoment %v", br.Status.RestoredRestorePoint, br.Status.RestoredMoment)
+	}
 	if got := e.sv(target.Name).Labels[RestorePendingLabel]; got != "" {
 		t.Errorf("restore-pending label = %q after the copy, want it removed", got)
 	}

@@ -37,7 +37,7 @@ A comment next to each unchanged stored or wire name says why it keeps "moment".
 | `spec.momentKeepHours` | `spec.volumeRestorePointKeepHours` |
 | `spec.moment` (BackupRestore, BackupFileRestore, BackupBrowse) | `spec.restorePoint` |
 | `status.copyMoment` | `status.copyRestorePoint` |
-| `status.restorePointMoments` | `status.restorePoints` |
+| `status.restorePointMoments` | `status.restorePointTimes` (`restorePoints` already means the count in that struct) |
 | `status.commonMoments` | `status.commonRestorePoints` |
 | `status.moment` | `status.restorePoint` |
 | `status.moments`, `status.momentsTruncated` | `status.restorePoints`, `status.restorePointsTruncated` |

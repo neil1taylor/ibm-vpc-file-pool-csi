@@ -989,7 +989,12 @@ type SnapshotStatus struct {
     // +optional
     VMCopyRetryAfter *metav1.Time `json:"vmCopyRetryAfter,omitempty"`
 
-    // CopyMoment is the moment the snapshot shows.
+    // CopyRestorePoint is the restore point the snapshot shows.
+    // +optional
+    CopyRestorePoint *metav1.Time `json:"copyRestorePoint,omitempty"`
+
+    // CopyMoment is the old name of CopyRestorePoint, written too.
+    // Deprecated: use CopyRestorePoint. Removed in the release after next.
     // +optional
     CopyMoment *metav1.Time `json:"copyMoment,omitempty"`
 
@@ -1447,7 +1452,8 @@ type BackupRestoreSpec struct {
     Policy          string        `json:"policy"`
     SourceNamespace string        `json:"sourceNamespace,omitempty"` // the claim that was backed up; it may be gone. Required unless fromCOS is set
     SourceName      string        `json:"sourceName,omitempty"`
-    Moment          *metav1.Time  `json:"moment,omitempty"` // the newest backup at or before it; unset: the latest
+    RestorePoint    *metav1.Time  `json:"restorePoint,omitempty"` // the newest backup at or before it; unset: the latest
+    Moment          *metav1.Time  `json:"moment,omitempty"` // Deprecated: old name of restorePoint; if both are set they must be equal
     TargetNamespace string        `json:"targetNamespace"`  // the new PVC; it must not exist
     TargetName      string        `json:"targetName"`
     StorageClassName string       `json:"storageClassName,omitempty"` // default: the class of the backed-up claim; required with fromCOS
@@ -1484,7 +1490,8 @@ type BackupBrowseSpec struct {
     Policy       string       `json:"policy"`
     PVCNamespace string       `json:"pvcNamespace"`           // the claim that was backed up; it may be gone
     PVCName      string       `json:"pvcName"`
-    Moment       *metav1.Time `json:"moment,omitempty"`       // the newest backup at or before it; unset: the latest copy
+    RestorePoint *metav1.Time `json:"restorePoint,omitempty"` // the newest backup at or before it; unset: the latest copy
+    Moment       *metav1.Time `json:"moment,omitempty"`       // Deprecated: old name of restorePoint; if both are set they must be equal
     RequestedBy  string       `json:"requestedBy,omitempty"`  // the user, for the audit trail; decides nothing
     Source       string       `json:"source,omitempty"`       // local (the snapshot pool, the default) or cos (the policy's export bucket)
     FromCOS      *BrowseFromCOS `json:"fromCOS,omitempty"`    // a bucket named directly (a cluster administrator); source must be cos
@@ -1523,7 +1530,8 @@ type BackupFileRestoreSpec struct {
     Policy           string       `json:"policy"`
     SourceNamespace  string       `json:"sourceNamespace"`           // the claim that was backed up; it may be gone
     SourceName       string       `json:"sourceName"`
-    Moment           *metav1.Time `json:"moment,omitempty"`          // the newest backup at or before it; unset: the latest copy
+    RestorePoint     *metav1.Time `json:"restorePoint,omitempty"`    // the newest backup at or before it; unset: the latest copy
+    Moment           *metav1.Time `json:"moment,omitempty"`          // Deprecated: old name of restorePoint; if both are set they must be equal
     Source           string       `json:"source,omitempty"`          // local (the default) or cos
     FromCOS          *BrowseFromCOS `json:"fromCOS,omitempty"`       // a bucket named directly (a cluster administrator); sourceNamespace holds "-", sourceName the volume, storageClassName is required for a new claim
     Guest            bool         `json:"guest,omitempty"`           // restore files from inside a VM disk; the first name of each path is a file system of the guest
@@ -1544,7 +1552,8 @@ type BackupFileRestoreStatus struct {
     GuestHoldStarted *metav1.Time `json:"guestHoldStarted,omitempty"` // when a guest restore first held its VM disk; never moved, the restore fails 2h45m after it
     SizeGB         int64        `json:"sizeGB,omitempty"`    // the size chosen for a new claim
     Folder         string       `json:"folder,omitempty"`    // the folder made in an existing claim
-    RestoredMoment *metav1.Time `json:"restoredMoment,omitempty"`
+    RestoredRestorePoint *metav1.Time `json:"restoredRestorePoint,omitempty"` // the restore point that was read or written
+    RestoredMoment *metav1.Time `json:"restoredMoment,omitempty"` // Deprecated: old name of restoredRestorePoint, written too
     Latest         bool         `json:"latest,omitempty"`
     Files          int          `json:"files,omitempty"`      // what was written
     Dirs           int          `json:"dirs,omitempty"`
@@ -1747,11 +1756,20 @@ type ReplicationPolicySpec struct {
     // +optional
     RestorePointKeepHours *int32 `json:"restorePointKeepHours,omitempty"`
 
-    // MomentKeepHours keeps earlier moments of volumes that are not VM disks,
-    // as folders of hard links (in .moments next to the destination). A file that
-    // did not change takes no extra space. A moment older than this many hours
-    // is removed after each sync. Unset or 0 keeps none. Needs rsync, even when
-    // IncrementalSync is false. BackupPolicy sets this.
+    // VolumeRestorePointKeepHours keeps earlier restore points of volumes that
+    // are not VM disks, as folders of hard links (in .moments next to the
+    // destination). A file that did not change takes no extra space. A restore
+    // point older than this many hours is removed after each sync. Unset or 0
+    // keeps none. Needs rsync, even when IncrementalSync is false.
+    // BackupPolicy sets this.
+    // +kubebuilder:validation:Minimum=0
+    // +optional
+    VolumeRestorePointKeepHours *int32 `json:"volumeRestorePointKeepHours,omitempty"`
+
+    // MomentKeepHours is the old name of VolumeRestorePointKeepHours.
+    // Deprecated: removed in the release after next. If both are set they
+    // must be equal; the webhook refuses them otherwise and warns when only
+    // this one is set.
     // +kubebuilder:validation:Minimum=0
     // +optional
     MomentKeepHours *int32 `json:"momentKeepHours,omitempty"`
@@ -1801,10 +1819,12 @@ type ReplicationPolicyStatus struct {
     // +optional
     SubVolumeStatuses []SubVolumeReplicationStatus `json:"subVolumeStatuses,omitempty"`
 
-    // VMs lists each running VM: its disks, the copy moment and consistency
-    // (the oldest copy among the disks), and CommonMoments, the moments ALL
-    // its disks can show (the copy moment and the restore points every disk
-    // has), newest first. Rewinding disks to different moments would give the
+    // VMs lists each running VM: its disks, the copy restore point
+    // (copyRestorePoint) and consistency (the oldest copy among the disks),
+    // and commonRestorePoints, the restore points ALL its disks can show (the
+    // copy and the restore points every disk has), newest first. The old
+    // names copyMoment and commonMoments are written too (deprecated).
+    // Rewinding disks to different restore points would give the
     // guest a mix of two times, so a recovery must use one of these. This is
     // the source cluster's view of the destination and can be a few minutes
     // old; a Failover plan is the exact view.
@@ -1841,8 +1861,13 @@ type SubVolumeReplicationStatus struct {
     // +optional
     LastError string `json:"lastError,omitempty"`
 
-    // CopyMoment is the moment the last good copy of a running VM's disk shows.
-    // All disks of the VM in this policy show the same moment.
+    // CopyRestorePoint is the restore point the last good copy of a running
+    // VM's disk shows. All disks of the VM in this policy show the same one.
+    // +optional
+    CopyRestorePoint *metav1.Time `json:"copyRestorePoint,omitempty"`
+
+    // CopyMoment is the old name of CopyRestorePoint, written too.
+    // Deprecated: use CopyRestorePoint. Removed in the release after next.
     // +optional
     CopyMoment *metav1.Time `json:"copyMoment,omitempty"`
 
@@ -1868,7 +1893,13 @@ type SubVolumeReplicationStatus struct {
     // +optional
     OldestRestorePoint *metav1.Time `json:"oldestRestorePoint,omitempty"`
 
-    // RestorePointMoments lists those restore points, oldest first.
+    // RestorePointTimes lists the times of those restore points, oldest
+    // first. (Not "restorePoints": that field is the count above.)
+    // +optional
+    RestorePointTimes []metav1.Time `json:"restorePointTimes,omitempty"`
+
+    // RestorePointMoments is the old name of RestorePointTimes, written too.
+    // Deprecated: use RestorePointTimes. Removed in the release after next.
     // +optional
     RestorePointMoments []metav1.Time `json:"restorePointMoments,omitempty"`
 
@@ -1920,7 +1951,12 @@ type VMCopyState struct {
     // StagingFile is the staging file name in the volume's root directory.
     StagingFile string `json:"stagingFile"`
 
-    // Moment is the moment the copy shows.
+    // RestorePoint is the restore point the copy shows.
+    // +optional
+    RestorePoint metav1.Time `json:"restorePoint,omitempty"`
+
+    // Moment is the old name of RestorePoint, written too.
+    // Deprecated: use RestorePoint. Removed in the release after next.
     Moment metav1.Time `json:"moment"`
 
     // FileSystemConsistent is true if the guest was frozen for the copy.
@@ -2098,9 +2134,9 @@ A Plan fails (it is not an empty `Planned`) if the claim has no `<basePath>/pvcs
 | `source` | The claim that was read |
 | `startedAt`, `finishedAt` | Bounds of the run |
 | `rpo` | Age of the oldest moment that will be shown |
-| `vms[]` | Each running VM: `name` (`namespace/name`), `moment` it will show, `moments` (all moments its disks can show, newest first) and `disks[]` (`subVolume`, `rewind`: false is "in place", true copies the whole disk) |
+| `vms[]` | Each running VM: `name` (`namespace/name`), `restorePoint` it will show, `restorePoints` (all restore points its disks can show, newest first; the deprecated `moment` and `moments` hold the same values) and `disks[]` (`subVolume`, `rewind`: false is "in place", true copies the whole disk) |
 | `volumes[]` | Every volume that is failed over, with its claim, size, folder (`subPath`, the new folder for a rewound disk), owner and policy |
-| `momentsTruncated` | The lists of moments were cut to fit the termination message (newest kept) |
+| `restorePointsTruncated` | The lists of restore points were cut to fit the termination message (newest kept). The deprecated `momentsTruncated` holds the same value |
 | `createdPVCs[]` | The PVCs an Execute made |
 
 ### Example

@@ -1336,7 +1336,8 @@ func (rc *ReplicationController) ensureReplicationJob(ctx context.Context, polic
 
 	// Build rsync options. Moments are hard links, so the copy must write a
 	// changed file as a new file: rsync does, cp does not.
-	keepMoments := policy.Spec.MomentKeepHours != nil && *policy.Spec.MomentKeepHours > 0
+	keepHours := policy.Spec.EffectiveVolumeRestorePointKeepHours()
+	keepMoments := keepHours != nil && *keepHours > 0
 	useIncremental := policy.Spec.IncrementalSync == nil || *policy.Spec.IncrementalSync || keepMoments
 
 	bwlimit := ""
@@ -1378,7 +1379,7 @@ echo "Replication complete."
 			destDir,
 			bwlimit, extraArgs, util.ShellQuote("/source"+subPath+"/"), destSync,
 			metadataScript(destBasePath, subPath, string(metaJSON), keepMoments),
-			momentsScript(destBasePath, subPath, policy.Spec.MomentKeepHours))
+			momentsScript(destBasePath, subPath, keepHours))
 	} else {
 		script = fmt.Sprintf(`set -euo pipefail
 echo %s

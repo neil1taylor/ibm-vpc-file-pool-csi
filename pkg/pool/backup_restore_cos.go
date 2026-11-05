@@ -107,8 +107,8 @@ func (bc *BackupController) reconcileRestoreFromCOS(ctx context.Context, br *v1a
 	targetVolume := path.Base(sv.Spec.SubPath)
 	scratch := COSScratchName(br.Name)
 	var at time.Time
-	if sp.Moment != nil {
-		at = sp.Moment.Time
+	if rp := sp.EffectiveRestorePoint(); rp != nil {
+		at = rp.Time
 	}
 	held := fmt.Sprintf("The new PVC %s/%s is held back; delete it and ask again", sp.TargetNamespace, sp.TargetName)
 
@@ -153,7 +153,7 @@ func (bc *BackupController) reconcileRestoreFromCOS(ctx context.Context, br *v1a
 		br.Status.Copied, br.Status.Latest = true, outcome.Latest
 		if !outcome.Moment.IsZero() {
 			m := metav1.NewTime(outcome.Moment)
-			br.Status.RestoredMoment = &m
+			br.Status.SetRestoredRestorePoint(&m)
 		}
 		if bc.saveRestoreProgress(ctx, br, restorePhaseRestoring, "removing the scratch copy") != nil {
 			return

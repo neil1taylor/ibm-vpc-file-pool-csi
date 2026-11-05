@@ -132,8 +132,8 @@ func (bc *BackupController) browseCOSRequest(ctx context.Context, bb *v1alpha1.B
 		Owner:      browseOwner(bb),
 		COS:        &BrowseCOSRequest{Repo: loc.repo, Policy: loc.policy, Volume: loc.volume},
 	}
-	if sp.Moment != nil {
-		req.At = sp.Moment.Time
+	if rp := sp.EffectiveRestorePoint(); rp != nil {
+		req.At = rp.Time
 	}
 	if sp.Guest {
 		return bc.guestCOSRequest(req, loc)

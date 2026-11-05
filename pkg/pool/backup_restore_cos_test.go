@@ -188,6 +188,9 @@ func TestBackupRestoreFromCOS_RunsWithoutAPolicyFromRequestToDone(t *testing.T) 
 	if got.Phase != "Done" || got.RestoredMoment == nil || !got.RestoredMoment.Equal(&moment) {
 		t.Errorf("status = %+v, want Done at %s", got, moment.Time)
 	}
+	if got.RestoredRestorePoint == nil || !got.RestoredRestorePoint.Equal(&moment) {
+		t.Errorf("restoredRestorePoint = %v, want %s", got.RestoredRestorePoint, moment.Time)
+	}
 	if _, held := e.sv(target.Name).Labels[RestorePendingLabel]; held {
 		t.Error("the volume is still held back after Done")
 	}

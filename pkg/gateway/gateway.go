@@ -384,7 +384,7 @@ func sameMoment(a *metav1.Time, b *time.Time) bool {
 // the same policy, claim, moment and source.
 func sameBackup(a, b *v1alpha1.BackupBrowseSpec, moment *time.Time) bool {
 	if a.Policy != b.Policy || a.PVCNamespace != b.PVCNamespace || a.PVCName != b.PVCName ||
-		sourceName(a.Source) != sourceName(b.Source) || a.Guest != b.Guest || !sameMoment(a.Moment, moment) {
+		sourceName(a.Source) != sourceName(b.Source) || a.Guest != b.Guest || !sameMoment(a.EffectiveRestorePoint(), moment) {
 		return false
 	}
 	switch {
@@ -741,10 +741,11 @@ func (g *Gateway) relay(w http.ResponseWriter, r *http.Request, u User, bb *v1al
 }
 
 func momentTextOf(bb *v1alpha1.BackupBrowse) string {
-	if bb.Spec.Moment == nil {
+	rp := bb.Spec.EffectiveRestorePoint()
+	if rp == nil {
 		return "latest copy"
 	}
-	return "moment " + bb.Spec.Moment.UTC().Format(time.RFC3339)
+	return "moment " + rp.UTC().Format(time.RFC3339)
 }
 
 // limitWriter fails once more than left bytes were written.

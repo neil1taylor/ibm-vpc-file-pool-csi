@@ -212,6 +212,9 @@ func TestAdvanceVMSnapshots_FullRunToReady(t *testing.T) {
 	if s.Status.Consistency != consistencyFileSystem || s.Status.CopyMoment == nil || !s.Status.CopyMoment.Time.Equal(vc.Moment.Time) {
 		t.Errorf("consistency %q, moment %v", s.Status.Consistency, s.Status.CopyMoment)
 	}
+	if s.Status.CopyRestorePoint == nil || !s.Status.CopyRestorePoint.Time.Equal(vc.Moment.Time) {
+		t.Errorf("copyRestorePoint %v, want %v", s.Status.CopyRestorePoint, vc.Moment.Time)
+	}
 	if last := e.cop.finishes[len(e.cop.finishes)-1]; !last {
 		t.Error("the last Finish must drop the change list and staging file")
 	}

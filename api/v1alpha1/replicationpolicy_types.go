@@ -140,11 +140,19 @@ type ReplicationPolicySpec struct {
 	// +optional
 	RestorePointKeepHours *int32 `json:"restorePointKeepHours,omitempty"`
 
-	// MomentKeepHours keeps earlier moments of volumes that are not VM disks, as
-	// folders of hard links next to the destination (in .moments). A file that
-	// did not change takes no extra space. A moment older than this many hours is
-	// removed after each sync. Unset or 0 keeps none. Needs rsync: it is used
-	// even when IncrementalSync is false. BackupPolicy sets this.
+	// VolumeRestorePointKeepHours keeps earlier restore points of volumes that
+	// are not VM disks, as folders of hard links next to the destination (in
+	// .moments). A file that did not change takes no extra space. A restore
+	// point older than this many hours is removed after each sync. Unset or 0
+	// keeps none. Needs rsync: it is used even when IncrementalSync is false.
+	// BackupPolicy sets this.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	VolumeRestorePointKeepHours *int32 `json:"volumeRestorePointKeepHours,omitempty"`
+
+	// MomentKeepHours is the old name of VolumeRestorePointKeepHours.
+	// Deprecated: use VolumeRestorePointKeepHours. Removed in the release after
+	// next. If both are set they must be equal.
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	MomentKeepHours *int32 `json:"momentKeepHours,omitempty"`
@@ -215,8 +223,13 @@ type SubVolumeReplicationStatus struct {
 	// +optional
 	LastError string `json:"lastError,omitempty"`
 
-	// CopyMoment is the moment the last good copy of a running VM's disk
-	// shows. All disks of the VM in this policy show the same moment.
+	// CopyRestorePoint is the restore point the last good copy of a running
+	// VM's disk shows. All disks of the VM in this policy show the same one.
+	// +optional
+	CopyRestorePoint *metav1.Time `json:"copyRestorePoint,omitempty"`
+
+	// CopyMoment is the old name of CopyRestorePoint, written too.
+	// Deprecated: use CopyRestorePoint.
 	// +optional
 	CopyMoment *metav1.Time `json:"copyMoment,omitempty"`
 
@@ -244,8 +257,14 @@ type SubVolumeReplicationStatus struct {
 	// +optional
 	OldestRestorePoint *metav1.Time `json:"oldestRestorePoint,omitempty"`
 
-	// RestorePointMoments lists the moments of those restore points, oldest
+	// RestorePointTimes lists the times of those restore points, oldest
 	// first. It is what the destination reported after the last good copy.
+	// (It is not called restorePoints: that field is the count above.)
+	// +optional
+	RestorePointTimes []metav1.Time `json:"restorePointTimes,omitempty"`
+
+	// RestorePointMoments is the old name of RestorePointTimes, written too.
+	// Deprecated: use RestorePointTimes.
 	// +optional
 	RestorePointMoments []metav1.Time `json:"restorePointMoments,omitempty"`
 
@@ -268,17 +287,27 @@ type VMReplicationStatus struct {
 	// SubVolumes are the VM's disks in this policy.
 	SubVolumes []string `json:"subVolumes"`
 
-	// CopyMoment is the moment of the newest copy, and Consistency says how
-	// consistent it is. They are the oldest copy moment among the disks.
+	// CopyRestorePoint is the restore point of the newest copy, and
+	// Consistency says how consistent it is. They are the oldest copy among
+	// the disks.
+	// +optional
+	CopyRestorePoint *metav1.Time `json:"copyRestorePoint,omitempty"`
+	// CopyMoment is the old name of CopyRestorePoint, written too.
+	// Deprecated: use CopyRestorePoint.
 	// +optional
 	CopyMoment *metav1.Time `json:"copyMoment,omitempty"`
 	// +kubebuilder:validation:Enum=FileSystemConsistent;CrashConsistent
 	// +optional
 	Consistency string `json:"consistency,omitempty"`
 
-	// CommonMoments are the moments that ALL disks of the VM can show: the
-	// copy moment and the restore points every disk has. Newest first. A
+	// CommonRestorePoints are the restore points that ALL disks of the VM can
+	// show: the copy and the restore points every disk has. Newest first. A
 	// recovery must use one of these, or the disks would not match.
+	// +optional
+	CommonRestorePoints []metav1.Time `json:"commonRestorePoints,omitempty"`
+
+	// CommonMoments is the old name of CommonRestorePoints, written too.
+	// Deprecated: use CommonRestorePoints.
 	// +optional
 	CommonMoments []metav1.Time `json:"commonMoments,omitempty"`
 }
@@ -319,7 +348,12 @@ type VMCopyState struct {
 	// +optional
 	SpeedMBps int32 `json:"speedMBps,omitempty"`
 
-	// Moment is the moment the copy shows.
+	// RestorePoint is the restore point the copy shows.
+	// +optional
+	RestorePoint metav1.Time `json:"restorePoint,omitempty"`
+
+	// Moment is the old name of RestorePoint, written too.
+	// Deprecated: use RestorePoint.
 	Moment metav1.Time `json:"moment"`
 
 	// FileSystemConsistent is true if the guest was frozen for the copy.

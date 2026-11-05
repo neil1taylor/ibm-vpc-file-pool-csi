@@ -126,11 +126,9 @@ spec:
                 type: integer
               momentKeepHours:
                 description: |-
-                  MomentKeepHours keeps earlier moments of volumes that are not VM disks, as
-                  folders of hard links next to the destination (in .moments). A file that
-                  did not change takes no extra space. A moment older than this many hours is
-                  removed after each sync. Unset or 0 keeps none. Needs rsync: it is used
-                  even when IncrementalSync is false. BackupPolicy sets this.
+                  MomentKeepHours is the old name of VolumeRestorePointKeepHours.
+                  Deprecated: use VolumeRestorePointKeepHours. Removed in the release after
+                  next. If both are set they must be equal.
                 format: int32
                 minimum: 0
                 type: integer
@@ -427,6 +425,17 @@ spec:
                 format: int32
                 minimum: 0
                 type: integer
+              volumeRestorePointKeepHours:
+                description: |-
+                  VolumeRestorePointKeepHours keeps earlier restore points of volumes that
+                  are not VM disks, as folders of hard links next to the destination (in
+                  .moments). A file that did not change takes no extra space. A restore
+                  point older than this many hours is removed after each sync. Unset or 0
+                  keeps none. Needs rsync: it is used even when IncrementalSync is false.
+                  BackupPolicy sets this.
+                format: int32
+                minimum: 0
+                type: integer
             required:
             - destinationBasePath
             - maxRetries
@@ -548,8 +557,14 @@ spec:
                       type: string
                     copyMoment:
                       description: |-
-                        CopyMoment is the moment the last good copy of a running VM's disk
-                        shows. All disks of the VM in this policy show the same moment.
+                        CopyMoment is the old name of CopyRestorePoint, written too.
+                        Deprecated: use CopyRestorePoint.
+                      format: date-time
+                      type: string
+                    copyRestorePoint:
+                      description: |-
+                        CopyRestorePoint is the restore point the last good copy of a running
+                        VM's disk shows. All disks of the VM in this policy show the same one.
                       format: date-time
                       type: string
                     lastError:
@@ -565,8 +580,17 @@ spec:
                       type: string
                     restorePointMoments:
                       description: |-
-                        RestorePointMoments lists the moments of those restore points, oldest
+                        RestorePointMoments is the old name of RestorePointTimes, written too.
+                        Deprecated: use RestorePointTimes.
+                      items:
+                        format: date-time
+                        type: string
+                      type: array
+                    restorePointTimes:
+                      description: |-
+                        RestorePointTimes lists the times of those restore points, oldest
                         first. It is what the destination reported after the last good copy.
+                        (It is not called restorePoints: that field is the count above.)
                       items:
                         format: date-time
                         type: string
@@ -622,7 +646,9 @@ spec:
                             on the owner. Only a snapshot copy sets it.
                           type: string
                         moment:
-                          description: Moment is the moment the copy shows.
+                          description: |-
+                            Moment is the old name of RestorePoint, written too.
+                            Deprecated: use RestorePoint.
                           format: date-time
                           type: string
                         phase:
@@ -644,6 +670,11 @@ spec:
                             the copy can be watched and cancelled without its source volume.
                           type: string
                         podUID:
+                          type: string
+                        restorePoint:
+                          description: RestorePoint is the restore point the copy
+                            shows.
+                          format: date-time
                           type: string
                         setDisks:
                           description: |-
@@ -717,8 +748,16 @@ spec:
                   properties:
                     commonMoments:
                       description: |-
-                        CommonMoments are the moments that ALL disks of the VM can show: the
-                        copy moment and the restore points every disk has. Newest first. A
+                        CommonMoments is the old name of CommonRestorePoints, written too.
+                        Deprecated: use CommonRestorePoints.
+                      items:
+                        format: date-time
+                        type: string
+                      type: array
+                    commonRestorePoints:
+                      description: |-
+                        CommonRestorePoints are the restore points that ALL disks of the VM can
+                        show: the copy and the restore points every disk has. Newest first. A
                         recovery must use one of these, or the disks would not match.
                       items:
                         format: date-time
@@ -731,8 +770,15 @@ spec:
                       type: string
                     copyMoment:
                       description: |-
-                        CopyMoment is the moment of the newest copy, and Consistency says how
-                        consistent it is. They are the oldest copy moment among the disks.
+                        CopyMoment is the old name of CopyRestorePoint, written too.
+                        Deprecated: use CopyRestorePoint.
+                      format: date-time
+                      type: string
+                    copyRestorePoint:
+                      description: |-
+                        CopyRestorePoint is the restore point of the newest copy, and
+                        Consistency says how consistent it is. They are the oldest copy among
+                        the disks.
                       format: date-time
                       type: string
                     name:

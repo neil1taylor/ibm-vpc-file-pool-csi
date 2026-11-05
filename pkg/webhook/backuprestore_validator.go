@@ -20,7 +20,11 @@ var _ admission.Validator[*v1alpha1.BackupRestore] = &BackupRestoreValidator{}
 
 func (v *BackupRestoreValidator) ValidateCreate(_ context.Context, br *v1alpha1.BackupRestore) (admission.Warnings, error) {
 	klog.V(4).InfoS("Validating BackupRestore create", "name", br.Name)
-	return nil, validateBackupRestoreSpec(&br.Spec)
+	warning, err := br.Spec.CheckRestorePointFields()
+	if err != nil {
+		return nil, err
+	}
+	return restorePointWarnings(warning), validateBackupRestoreSpec(&br.Spec)
 }
 
 // ValidateUpdate refuses a change to the spec: the restore may have made a PVC

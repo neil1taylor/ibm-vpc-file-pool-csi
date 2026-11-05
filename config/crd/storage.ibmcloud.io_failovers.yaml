@@ -156,8 +156,8 @@ spec:
                 type: string
               momentsTruncated:
                 description: |-
-                  MomentsTruncated is true if the list of moments of a VM was cut to fit
-                  the Job's termination message.
+                  MomentsTruncated is the old name of RestorePointsTruncated, written too.
+                  Deprecated: use RestorePointsTruncated.
                 type: boolean
               phase:
                 description: Phase is Planning, Planned, Executing, Done or Failed.
@@ -168,6 +168,11 @@ spec:
                 - Done
                 - Failed
                 type: string
+              restorePointsTruncated:
+                description: |-
+                  RestorePointsTruncated is true if the list of restore points of a VM was
+                  cut to fit the Job's termination message.
+                type: boolean
               rpo:
                 description: RPO is the age of the oldest moment that will be shown.
                 type: string
@@ -204,13 +209,15 @@ spec:
                         type: object
                       type: array
                     moment:
-                      description: Moment is the moment the failed-over disks will
-                        show.
+                      description: |-
+                        Moment is the old name of RestorePoint, written too.
+                        Deprecated: use RestorePoint.
                       format: date-time
                       type: string
                     moments:
-                      description: Moments are the moments all disks of the VM can
-                        show, newest first.
+                      description: |-
+                        Moments is the old name of RestorePoints, written too.
+                        Deprecated: use RestorePoints.
                       items:
                         format: date-time
                         type: string
@@ -218,6 +225,19 @@ spec:
                     name:
                       description: Name is "namespace/name" of the VM.
                       type: string
+                    restorePoint:
+                      description: RestorePoint is the restore point the failed-over
+                        disks will show.
+                      format: date-time
+                      type: string
+                    restorePoints:
+                      description: |-
+                        RestorePoints are the restore points all disks of the VM can show,
+                        newest first.
+                      items:
+                        format: date-time
+                        type: string
+                      type: array
                   required:
                   - disks
                   - moment

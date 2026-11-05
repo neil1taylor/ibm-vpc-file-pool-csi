@@ -20,12 +20,21 @@ var _ admission.Validator[*v1alpha1.ReplicationPolicy] = &ReplicationPolicyValid
 
 func (v *ReplicationPolicyValidator) ValidateCreate(_ context.Context, rp *v1alpha1.ReplicationPolicy) (admission.Warnings, error) {
 	klog.V(4).InfoS("Validating ReplicationPolicy create", "name", rp.Name)
-	return nil, validateReplicationPolicySpec(&rp.Spec)
+	return validateReplicationPolicy(rp)
 }
 
 func (v *ReplicationPolicyValidator) ValidateUpdate(_ context.Context, _, rp *v1alpha1.ReplicationPolicy) (admission.Warnings, error) {
 	klog.V(4).InfoS("Validating ReplicationPolicy update", "name", rp.Name)
-	return nil, validateReplicationPolicySpec(&rp.Spec)
+	return validateReplicationPolicy(rp)
+}
+
+// validateReplicationPolicy checks the spec and warns about deprecated fields.
+func validateReplicationPolicy(rp *v1alpha1.ReplicationPolicy) (admission.Warnings, error) {
+	warning, err := rp.Spec.CheckKeepHoursFields()
+	if err != nil {
+		return nil, err
+	}
+	return restorePointWarnings(warning), validateReplicationPolicySpec(&rp.Spec)
 }
 
 func (v *ReplicationPolicyValidator) ValidateDelete(_ context.Context, _ *v1alpha1.ReplicationPolicy) (admission.Warnings, error) {
@@ -83,12 +92,16 @@ func validateReplicationPolicySpec(spec *v1alpha1.ReplicationPolicySpec) error {
 	if spec.MaxParallelSyncs < 0 {
 		return fmt.Errorf("spec.maxParallelSyncs must be >= 0, got %d", spec.MaxParallelSyncs)
 	}
+	keepHours := spec.EffectiveVolumeRestorePointKeepHours()
+	if spec.VolumeRestorePointKeepHours != nil && *spec.VolumeRestorePointKeepHours < 0 {
+		return fmt.Errorf("spec.volumeRestorePointKeepHours must be >= 0, got %d", *spec.VolumeRestorePointKeepHours)
+	}
 	if spec.MomentKeepHours != nil && *spec.MomentKeepHours < 0 {
 		return fmt.Errorf("spec.momentKeepHours must be >= 0, got %d", *spec.MomentKeepHours)
 	}
 	// Moments are folders of hard links. A flag that changes a file in place
 	// would also change the same file in every older moment.
-	if spec.MomentKeepHours != nil && *spec.MomentKeepHours > 0 {
+	if keepHours != nil && *keepHours > 0 {
 		for _, opt := range spec.RsyncOptions {
 			for _, inPlace := range []string{"--inplace", "--append", "--append-verify"} {
 				if opt == inPlace {

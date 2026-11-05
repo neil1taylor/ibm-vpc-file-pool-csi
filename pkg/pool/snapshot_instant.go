@@ -402,7 +402,7 @@ func (m *Manager) markInstantReady(ctx context.Context, snap *v1alpha1.Snapshot,
 		snap.Status.CreationTime = &t
 	}
 	moment := *snap.Status.CreationTime
-	snap.Status.CopyMoment = &moment
+	snap.Status.SetCopyRestorePoint(&moment)
 	snap.Status.Consistency, snap.Status.ConsistencyReason = consistencyFileSystem, ""
 	if !res.FileSystemConsistent {
 		snap.Status.Consistency, snap.Status.ConsistencyReason = consistencyCrash, res.FreezeError

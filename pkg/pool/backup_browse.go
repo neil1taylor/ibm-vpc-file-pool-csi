@@ -488,8 +488,8 @@ func (bc *BackupController) browseRequest(ctx context.Context, bb *v1alpha1.Back
 		if c := entry.Consistency; c == "FileSystemConsistent" || c == "CrashConsistent" {
 			req.Consistency = c
 		}
-		if sp.Moment != nil {
-			req.At = sp.Moment.Time
+		if rp := sp.EffectiveRestorePoint(); rp != nil {
+			req.At = rp.Time
 		}
 		if guestFileCopy(entry) && entry.RestorePoints > 0 {
 			req.MomentsPath = policyBase + "/.moments" + entry.SubPath
@@ -497,8 +497,8 @@ func (bc *BackupController) browseRequest(ctx context.Context, bb *v1alpha1.Back
 		return req, entry.SubVolumeName, nil
 	case entry.RestorePoints > 0:
 		req.MomentsPath = policyBase + "/.moments" + entry.SubPath
-		if sp.Moment != nil {
-			req.At = sp.Moment.Time
+		if rp := sp.EffectiveRestorePoint(); rp != nil {
+			req.At = rp.Time
 		}
 	}
 	return req, "", nil

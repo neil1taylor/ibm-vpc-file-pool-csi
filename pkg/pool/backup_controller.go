@@ -550,19 +550,20 @@ func desiredReplicationSpec(bp *v1alpha1.BackupPolicy, pool string, share v1alph
 		export = "/"
 	}
 	return v1alpha1.ReplicationPolicySpec{
-		SourcePoolName:        pool,
-		DestinationNFSServer:  share.MountTargetIP,
-		DestinationExportPath: export,
-		DestinationBasePath:   backupBasePath + "/" + bp.Name,
-		Schedule:              bp.Spec.Schedule,
-		SubVolumeSelector:     &metav1.LabelSelector{MatchLabels: map[string]string{backupPolicyLabel: bp.Name, backupShareLabel: share.ShareID}},
-		MaxRetries:            backupMaxRetries,
-		MaxParallelSyncs:      backupMaxParallelSyncs,
-		VMCopySpeedLimitMBps:  bp.Spec.VMCopySpeedLimitMBps,
-		VMCopyAdaptive:        bp.Spec.VMCopyAdaptive,
-		VMCopyMaxLatencyMs:    bp.Spec.VMCopyMaxLatencyMs,
-		RestorePointKeepHours: &keep,
-		MomentKeepHours:       &keep,
+		SourcePoolName:              pool,
+		DestinationNFSServer:        share.MountTargetIP,
+		DestinationExportPath:       export,
+		DestinationBasePath:         backupBasePath + "/" + bp.Name,
+		Schedule:                    bp.Spec.Schedule,
+		SubVolumeSelector:           &metav1.LabelSelector{MatchLabels: map[string]string{backupPolicyLabel: bp.Name, backupShareLabel: share.ShareID}},
+		MaxRetries:                  backupMaxRetries,
+		MaxParallelSyncs:            backupMaxParallelSyncs,
+		VMCopySpeedLimitMBps:        bp.Spec.VMCopySpeedLimitMBps,
+		VMCopyAdaptive:              bp.Spec.VMCopyAdaptive,
+		VMCopyMaxLatencyMs:          bp.Spec.VMCopyMaxLatencyMs,
+		RestorePointKeepHours:       &keep,
+		MomentKeepHours:             &keep,
+		VolumeRestorePointKeepHours: &keep,
 	}
 }
 
@@ -572,7 +573,7 @@ func sameReplicationSpec(a, b v1alpha1.ReplicationPolicySpec) bool {
 		a.Schedule == b.Schedule && a.MaxRetries == b.MaxRetries && a.MaxParallelSyncs == b.MaxParallelSyncs &&
 		ptrEq(a.VMCopySpeedLimitMBps, b.VMCopySpeedLimitMBps) && ptrEq(a.VMCopyMaxLatencyMs, b.VMCopyMaxLatencyMs) &&
 		boolPtrEq(a.VMCopyAdaptive, b.VMCopyAdaptive) && ptrEq(a.RestorePointKeepHours, b.RestorePointKeepHours) &&
-		ptrEq(a.MomentKeepHours, b.MomentKeepHours) &&
+		ptrEq(a.MomentKeepHours, b.MomentKeepHours) && ptrEq(a.VolumeRestorePointKeepHours, b.VolumeRestorePointKeepHours) &&
 		equality.Semantic.DeepEqual(a.SubVolumeSelector, b.SubVolumeSelector)
 }
 
@@ -620,7 +621,7 @@ func (bc *BackupController) ensureReplicationPolicy(ctx context.Context, bp *v1a
 	rp.Spec.MaxRetries, rp.Spec.MaxParallelSyncs = want.MaxRetries, want.MaxParallelSyncs
 	rp.Spec.VMCopySpeedLimitMBps, rp.Spec.RestorePointKeepHours = want.VMCopySpeedLimitMBps, want.RestorePointKeepHours
 	rp.Spec.VMCopyAdaptive, rp.Spec.VMCopyMaxLatencyMs = want.VMCopyAdaptive, want.VMCopyMaxLatencyMs
-	rp.Spec.MomentKeepHours = want.MomentKeepHours
+	rp.Spec.MomentKeepHours, rp.Spec.VolumeRestorePointKeepHours = want.MomentKeepHours, want.VolumeRestorePointKeepHours
 	setPaused(rp, paused)
 	return bc.client.Update(ctx, rp)
 }

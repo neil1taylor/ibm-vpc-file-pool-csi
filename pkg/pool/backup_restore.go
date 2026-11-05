@@ -150,8 +150,8 @@ func (bc *BackupController) reconcileRestore(ctx context.Context, br *v1alpha1.B
 	}
 
 	var at time.Time
-	if sp.Moment != nil {
-		at = sp.Moment.Time
+	if rp := sp.EffectiveRestorePoint(); rp != nil {
+		at = rp.Time
 	}
 	policyBase := backupBasePath + "/" + policy.Name
 	owner := &Ownership{UID: sv.Spec.UID, GID: sv.Spec.GID, Permissions: sv.Spec.Permissions, Recursive: true}
@@ -177,7 +177,7 @@ func (bc *BackupController) reconcileRestore(ctx context.Context, br *v1alpha1.B
 	br.Status.Latest = outcome.Latest
 	if !outcome.Moment.IsZero() {
 		m := metav1.NewTime(outcome.Moment)
-		br.Status.RestoredMoment = &m
+		br.Status.SetRestoredRestorePoint(&m)
 	}
 	if err := bc.saveRestoreStatus(ctx, br, restorePhaseDone, ""); err != nil {
 		return

@@ -25,7 +25,11 @@ var _ admission.Validator[*v1alpha1.BackupFileRestore] = &BackupFileRestoreValid
 
 func (v *BackupFileRestoreValidator) ValidateCreate(_ context.Context, br *v1alpha1.BackupFileRestore) (admission.Warnings, error) {
 	klog.V(4).InfoS("Validating BackupFileRestore create", "name", br.Name)
-	return nil, validateBackupFileRestoreSpec(&br.Spec)
+	warning, err := br.Spec.CheckRestorePointFields()
+	if err != nil {
+		return nil, err
+	}
+	return restorePointWarnings(warning), validateBackupFileRestoreSpec(&br.Spec)
 }
 
 // ValidateUpdate refuses a change to the spec: the restore may have made a
