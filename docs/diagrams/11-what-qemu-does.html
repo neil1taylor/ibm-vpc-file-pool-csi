@@ -93,7 +93,7 @@ ul.plain li{margin:2px 0}
   <section class="card" aria-label="What the driver asks QEMU to do">
     <h2>What the driver asks QEMU to do</h2>
     <ul class="plain">
-      <li><b>Copy all the disks of a VM at one moment.</b> Replication, backup to COS and snapshots of a running VM use this copy.</li>
+      <li><b>Copy all the disks of a VM at one point in time.</b> Replication, backup to COS and snapshots of a running VM use this copy.</li>
       <li><b>Keep a change list.</b> A change list records which blocks the guest wrote after a copy started. The next copy then holds only those blocks.</li>
       <li><b>Start a new file for an instant snapshot</b>, and merge files when you delete a snapshot. The <a href="vm-snapshot-chain.html">snapshot chain page</a> shows this.</li>
     </ul>
@@ -125,7 +125,7 @@ ul.plain li{margin:2px 0}
     <span>Copy: <b id="st-copy">none</b></span>
     <span>Blocks left to copy: <b id="st-left">0</b></span>
     <span>Old blocks saved before a write: <b id="st-saved">0</b></span>
-    <span>Copy shows the moment it started: <b id="st-match">no copy</b></span>
+    <span>Copy shows the disk as it was when it started: <b id="st-match">no copy</b></span>
   </div>
   <div class="log" id="log" aria-live="polite"></div>
 
@@ -134,7 +134,7 @@ ul.plain li{margin:2px 0}
     <ul class="plain">
       <li>When a copy starts, the guest is frozen for about 0.15 seconds. The freeze makes the guest write its pending data to disk. It needs the guest agent in the VM. Without the guest agent, the copy is only crash consistent: the same as the disk after a power cut.</li>
       <li>QEMU writes the copy to a <b>staging file</b>: a file next to <span class="mono">disk.img</span> on the same share. Its name starts with <span class="mono">.repl-staging-</span>.</li>
-      <li>If the guest writes a block that QEMU has not copied yet, QEMU first copies the old block. So the copy always shows the moment it started, even while the guest writes.</li>
+      <li>If the guest writes a block that QEMU has not copied yet, QEMU first copies the old block. So the copy always shows the disk as it was when the copy started, even while the guest writes.</li>
       <li>QEMU copies slowly on purpose, 20 MB/s for each disk by default, so the VM keeps its speed. You can change the limit.</li>
       <li>The speed limit also counts the empty parts of a disk. So a large disk takes time even when it holds little data.</li>
       <li>The change list is only in QEMU's memory. If the VM moves to another node or restarts, a new QEMU starts with no change list. The next copy is then a full copy.</li>
@@ -198,7 +198,7 @@ ul.plain li{margin:2px 0}
     var msg="";
     if(copy && copy.want.indexOf(k)>=0 && !(k in copy.got)){
       copy.got[k]=disk[k]; copy.saved++;
-      msg=" QEMU had not copied block "+k+" yet, so it <b>first copied the old version "+disk[k]+"</b> to the staging file. The copy still shows its moment.";
+      msg=" QEMU had not copied block "+k+" yet, so it <b>first copied the old version "+disk[k]+"</b> to the staging file. The copy still shows its restore point.";
     }
     disk[k]++;
     if(cl){ cl[k]=true; msg+=" QEMU marked block "+k+" in the change list."; }
@@ -218,7 +218,7 @@ ul.plain li{margin:2px 0}
   };
   function finish(){
     last=copy; copy=null; hasBase=true;
-    say("<b>The copy is done.</b> It shows the disk at the moment the copy started. For replication or a backup, a Job now sends it on. The change list since that moment stays in QEMU, so the next copy can be a change copy.");
+    say("<b>The copy is done.</b> It shows the disk as it was when the copy started. For replication or a backup, a Job now sends it on. The change list since then stays in QEMU, so the next copy can be a change copy.");
   }
   el("b-step").onclick=function(){
     var n=0; touched=0;

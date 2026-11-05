@@ -34,7 +34,7 @@ Two parts of the goal need care, and this spec says so plainly:
 
 All facts in this section come from the code and the docs in this repository.
 
-- Replication of a running VM is a QEMU copy of all disks at one moment, on a schedule (5 minutes is the practical floor). The controller sends QMP commands (QEMU's control commands) through `virsh` in the VM pod (`pkg/vmcopy`). Red Hat does not support this. The owner accepted that on 20 Oct.
+- Replication of a running VM is a QEMU copy of all disks at one point in time, on a schedule (5 minutes is the practical floor). The controller sends QMP commands (QEMU's control commands) through `virsh` in the VM pod (`pkg/vmcopy`). Red Hat does not support this. The owner accepted that on 20 Oct.
 - Between copies QEMU keeps a change list (a dirty bitmap) in memory. The next copy sends only the changed blocks. A live migration or a restart erases the list (lab, 20 Oct). The next copy is then a full compare pass.
 - The copy goes to the destination through the receiver: an HTTPS service with a bearer token (`pkg/replication/receiver*.go`). The call model is one session per copy: upload a staging file, compare, commit.
 - At the destination, `ApplyCopy` first writes the old contents of every block it will change into an undo file, then writes the new blocks. The disk always holds the newest copy. Undo files give restore points for 24 hours by default (`restorePointKeepHours`). `Rewind` builds an older disk by copying the newest one and applying undo files backward. `kubectl failover plan|execute --rewind-to` uses it. A disk that a VM has run on cannot be rewound.
@@ -150,7 +150,7 @@ The default is `memory`. A site loss loses at most the unsent tail either way, b
 
 The DR cluster runs the receiver, extended with a journal service. For each disk:
 
-1. **Receive.** A batch is written to a staging journal on the DR share and flushed. The receiver then tells the relay "durable up to sequence N". **This is the moment that counts for the RPO.**
+1. **Receive.** A batch is written to a staging journal on the DR share and flushed. The receiver then tells the relay "durable up to sequence N". **This is the restore point that counts for the RPO.**
 2. **Apply.** An apply worker reads the staging batches in order. For each batch it reads the old contents of the blocks, appends them to the **undo journal** and flushes it, and writes the new blocks to `disk.img`. It then records "applied up to sequence N". The staging batch can be deleted after that. If the receiver stops in the middle, recovery knows the batch from the staging journal and the undo journal. It can finish the batch or roll it back.
 3. **Result.** `disk.img` holds the newest second. The undo journal holds how to go back.
 
@@ -178,7 +178,7 @@ The merge keeps the oldest block contents of each 5 minute span. A rewind to a s
 
 ### Several disks of one VM
 
-One relay orders the writes of all disks on the node. Every batch end is the same second on all disks. Failover picks one second and applies it to every disk of the VM. The existing planner already refuses to mix moments across disks of a VM.
+One relay orders the writes of all disks on the node. Every batch end is the same second on all disks. Failover picks one second and applies it to every disk of the VM. The existing planner already refuses to mix restore points across disks of a VM.
 
 ### Several VMs (protection groups)
 
@@ -199,14 +199,14 @@ The relay never lets the network slow the VM, unless the policy says so.
 
 ### Starting a journal
 
-At the start, and after every hole, the DR disk must match the source disk at some moment, and the journal must have no gap after it.
+At the start, and after every hole, the DR disk must match the source disk at some restore point, and the journal must have no gap after it.
 
 1. Start the change list in the same QEMU step as today's copy (it already does `block-dirty-bitmap-add` in a transaction).
 2. Send the copy as today, as the baseline. Or send a catch-up copy of only the changed blocks.
-3. Start the mirror (`sync=none`, `write-blocking`) after the baseline starts. Writes between the baseline moment and the mirror start are in the change list. A catch-up copy sends them.
+3. Start the mirror (`sync=none`, `write-blocking`) after the baseline starts. Writes between the baseline restore point and the mirror start are in the change list. A catch-up copy sends them.
 4. Replaying the journal on top of a baseline and a catch-up gives a correct disk from the end of the catch-up onward. Blocks that were written in both windows end up right because the journal replays in order.
 
-So the recovery range of a new journal starts at the end of the catch-up, not at the baseline moment. Before that, the periodic restore points apply.
+So the recovery range of a new journal starts at the end of the catch-up, not at the baseline restore point. Before that, the periodic restore points apply.
 
 Bench for this step: write a pattern into a VM during a start, then compare checksums of the DR disk. This is a phase 1 test.
 

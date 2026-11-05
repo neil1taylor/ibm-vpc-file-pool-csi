@@ -1131,10 +1131,10 @@ oc config use-context source-cluster
 
 ## Running VMs
 
-A VM that is running is not copied with rsync. The controller freezes the guest for a moment, copies all of its disks at that one moment, and keeps restore points at the destination. At failover, rewind **before** you start the VM:
+A VM that is running is not copied with rsync. The controller freezes the guest for a moment, copies all of its disks at that one point in time, and keeps restore points at the destination. At failover, rewind **before** you start the VM:
 
 ```bash
-kubectl failover plan --nfs-mount-path /data --list-moments
+kubectl failover plan --nfs-mount-path /data --list-restore-points
 kubectl failover execute --nfs-mount-path /data --prepare-only --rewind-to 2026-10-20T10:30:00Z
 ```
 
@@ -1258,7 +1258,7 @@ ibmcloud is shares --all-resource-groups
 | Failover dry-run | `kubectl failover execute --nfs-mount-path <path> --dr-pool <pool> --dr-share-ip <ip> --dr-export-path <path> --dry-run` |
 | Failover execute | `kubectl failover execute --nfs-mount-path <path> --dr-pool <pool> --dr-share-ip <ip> --dr-export-path <path>` |
 | Failover status | `kubectl failover status` |
-| List VM moments | `kubectl failover plan --nfs-mount-path <path> --list-moments` |
+| List VM restore points | `kubectl failover plan --nfs-mount-path <path> --list-restore-points` |
 | Controller logs | `oc logs -n kube-system -l app.kubernetes.io/component=controller -c csi-controller --tail=50` |
 
 ---

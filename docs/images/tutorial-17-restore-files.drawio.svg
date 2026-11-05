@@ -13,7 +13,7 @@
     <path d="M140,85 H190"/><path d="M330,75 L380,38"/><path d="M330,95 L380,135"/><path d="M530,35 H590"/><path d="M530,135 H590"/>
   </g>
   <g fill="#161616" text-anchor="middle">
-    <text x="75" y="82">Backup</text><text x="75" y="100">(a moment)</text>
+    <text x="75" y="82">Backup</text><text x="75" y="100">(a restore point)</text>
     <text x="260" y="82">Browse session</text><text x="260" y="100">(read-only)</text>
     <text x="455" y="40">kubectl backup get</text>
     <text x="455" y="140">restore-files</text>

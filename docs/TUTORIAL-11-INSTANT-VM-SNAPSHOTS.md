@@ -89,7 +89,7 @@ claim my-vm-rootdisk, volume pvc-afcb739e-c370-4bc5-a99a-4d3f0a0b6f55
 
 ## Step 3: Take a snapshot of the running VM
 
-A `VirtualMachineSnapshot` snapshots all disks of the VM at the same moment. OpenShift freezes the guest for that moment. You can also use the VM Snapshots tab in the console.
+A `VirtualMachineSnapshot` snapshots all disks of the VM at the same point in time. OpenShift freezes the guest for that restore point. You can also use the VM Snapshots tab in the console.
 
 ```bash
 cat <<EOF | oc apply -n ${NS} -f -

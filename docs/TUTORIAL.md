@@ -19,9 +19,9 @@ Hands-on tutorials covering every major capability of the pool CSI driver. Each 
 | 7 | [Monitoring](TUTORIAL-07-MONITORING.md) | Prometheus metrics (37 metrics), ServiceMonitor, alerting rules, Grafana dashboard |
 | 8 | [Migration and Console Plugin](TUTORIAL-08-MIGRATION-AND-CONSOLE.md) | PVC migration from stock driver, OpenShift console plugin walkthrough |
 | 9 | [COS Bucket for Backups](TUTORIAL-09-COS-BACKUP-BUCKET.md) | Locked COS bucket, a key that cannot delete or unlock, a CBR rule that limits it to the cluster |
-| 10 | [Backup and Restore](TUTORIAL-10-BACKUP-AND-RESTORE.md) | Back up a volume on a schedule to a snapshot pool, list the moments, restore one, delete backups |
+| 10 | [Backup and Restore](TUTORIAL-10-BACKUP-AND-RESTORE.md) | Back up a volume on a schedule to a snapshot pool, list the restore points, restore one, delete backups |
 | 11 | [Instant VM Snapshots](TUTORIAL-11-INSTANT-VM-SNAPSHOTS.md) | Turn on the Sidecar gate, snapshot a running VM in seconds, merge, restore, flatten |
-| 12 | [Replicating Running VMs](TUTORIAL-12-REPLICATING-RUNNING-VMS.md) | Copy a running VM with all disks at one moment to a second cluster through a receiver |
+| 12 | [Replicating Running VMs](TUTORIAL-12-REPLICATING-RUNNING-VMS.md) | Copy a running VM with all disks at one point in time to a second cluster through a receiver |
 | 13 | [Failover of Running VMs](TUTORIAL-13-FAILOVER-OF-RUNNING-VMS.md) | Plan, rewind and fail over replicated VMs with `kubectl failover` |
 | 14 | [Restore a Snapshot in the Console](TUTORIAL-14-CONSOLE-RESTORE.md) | Make a snapshot and restore it to a new PVC in the OpenShift console |
 | 15 | [Make a VM from the Catalog on a Pool](TUTORIAL-15-VM-FROM-THE-CATALOG.md) | Pick a catalog image and an instance type, choose the pool's StorageClass for the boot disk, and let CDI copy the image |

@@ -10,7 +10,7 @@ For pictures you can click through, see the [interactive diagrams](diagrams/inde
 
 - [Storage](#storage): pool, share, mount target, SubVolume, volume, plain volume, VM disk, allocation strategy, auto-expand, tier, drain, StorageClass, staging, reclaim policy
 - [Copies in the same pool](#copies-in-the-same-pool): snapshot, file snapshot, QEMU copy, instant snapshot, chain, overlay file, VM hook, Sidecar gate, flatten, clone
-- [How good a copy is](#how-good-a-copy-is): moment, file-system consistent, crash consistent, file copy, guest freeze
+- [How good a copy is](#how-good-a-copy-is): file-system consistent, crash consistent, file copy, guest freeze
 - [Backup](#backup): backup, BackupPolicy, snapshot pool, keep time, restore, BackupRestore, file restore, restore point, change list, COS export, lock, backup key, browse session, backup gateway, backupfiles, browse helper
 - [Replication and failover](#replication-and-failover): replication, ReplicationPolicy, destination, receiver, rewind, failover
 - [Other words](#other-words): golden image, lifecycle hook, group snapshot, adaptive copy speed, PoolBench, knee, user workload monitoring, command-line plugins
@@ -59,7 +59,7 @@ Example: the volume of a web server that stores uploaded images.
 
 ### VM disk
 
-A **VM disk** is a volume that a KubeVirt `VirtualMachine` uses as a disk. It is one raw file, `disk.img`, in the volume's folder. A snapshot, backup or replication of a disk of a running VM is a QEMU copy of all the VM's disks at one moment. A disk of a stopped VM is copied as a folder, like a plain volume.
+A **VM disk** is a volume that a KubeVirt `VirtualMachine` uses as a disk. It is one raw file, `disk.img`, in the volume's folder. A snapshot, backup or replication of a disk of a running VM is a QEMU copy of all the VM's disks at one point in time. A disk of a stopped VM is copied as a folder, like a plain volume.
 
 Example: the PVC `web-root` is the boot disk of the VM `web`. Its folder holds `disk.img`.
 
@@ -125,9 +125,9 @@ Example: a 100 GB volume takes minutes to snapshot this way.
 
 ### QEMU copy
 
-A **QEMU copy** is a copy of the disks of a running VM that QEMU (the program that runs the VM) writes. All disks of the VM show the same moment. It copies the whole disk the first time, and then only the blocks that changed. A snapshot of a running VM's disk is a QEMU copy when instant snapshots are off. Backup and replication of a running VM also use it.
+A **QEMU copy** is a copy of the disks of a running VM that QEMU (the program that runs the VM) writes. All disks of the VM show the same restore point. It copies the whole disk the first time, and then only the blocks that changed. A snapshot of a running VM's disk is a QEMU copy when instant snapshots are off. Backup and replication of a running VM also use it.
 
-Example: a snapshot of a running VM with two disks gives two snapshots that show the same moment.
+Example: a snapshot of a running VM with two disks gives two snapshots that show the same restore point.
 
 ### Instant snapshot
 
@@ -177,12 +177,6 @@ Example: a PVC with `dataSource: {kind: PersistentVolumeClaim, name: db-data}` i
 
 ## How good a copy is
 
-### Moment
-
-A **moment** is the point in time that a copy, snapshot or backup shows. Moments are stored as UTC times in RFC 3339 form. All the disks of one VM in one copy show the same moment.
-
-Example: `2026-10-21T09:30:00Z`.
-
 ### File-system consistent
 
 A copy of a VM disk is **file-system consistent** when the driver froze the guest's file systems for the instant of the copy. The guest wrote its pending data first. A VM that starts from the copy needs no repair. The status field `consistency` says `FileSystemConsistent`.
@@ -197,7 +191,7 @@ Example: the copy of a VM that has no guest agent.
 
 ### File copy
 
-**File copy** is the consistency of a copy of a plain volume. The driver copies files one by one while they may still change, so the copy is not one moment. The status field `consistency` says `FileCopy`. For a database, stop it or use a [lifecycle hook](#lifecycle-hook) first.
+**File copy** is the consistency of a copy of a plain volume. The driver copies files one by one while they may still change, so the copy is not one restore point. The status field `consistency` says `FileCopy`. For a database, stop it or use a [lifecycle hook](#lifecycle-hook) first.
 
 Example: a backup of a volume that holds a log folder.
 
@@ -213,7 +207,7 @@ Example: a freeze of 0.15 seconds was measured in a lab test.
 
 ### Backup
 
-A **backup** is a copy of a volume or VM, made on a schedule. The driver keeps it on a different share, in a [snapshot pool](#snapshot-pool). It keeps many moments. A backup survives the loss of the data share. It does not survive the loss of the whole VPC unless you also [export it to COS](#cos-export).
+A **backup** is a copy of a volume or VM, made on a schedule. The driver keeps it on a different share, in a [snapshot pool](#snapshot-pool). It keeps many restore points. A backup survives the loss of the data share. It does not survive the loss of the whole VPC unless you also [export it to COS](#cos-export).
 
 Example: a backup every 6 hours, kept for 14 days.
 
@@ -249,9 +243,11 @@ Example: `kubectl get backuprestore` shows `restore-web-root-lq3x9a  Done`.
 
 ### Restore point
 
-A **restore point** is an earlier moment of a volume that you can still go back to. For a VM disk, the latest copy is whole. Each earlier moment is an undo file. It holds the old contents of the blocks that the next copy changed. For a plain volume, each earlier moment is a folder of hard links, so a file that did not change takes no extra space. Restore points older than the keep time are removed.
+A **restore point** is the point in time that a copy, snapshot or backup shows, and an earlier one that you can still go back to. Restore points are stored as UTC times in RFC 3339 form. All the disks of one VM in one copy show the same restore point. For a VM disk, the latest copy is whole. Each earlier restore point is an undo file. It holds the old contents of the blocks that the next copy changed. For a plain volume, each earlier restore point is a folder of hard links, so a file that did not change takes no extra space. Restore points older than the keep time are removed.
 
-Example: with a copy every 6 hours and a keep time of 24 hours, a disk has about 4 restore points.
+Some stored and internal names keep the old word "moment" on purpose, so that backups made before the rename are still found. They are the kopia tag `moment`, the folder `.moments`, the file `.repl-moment`, the key `moment` in saved file lists, the headers `X-Disk-Moment` and `Repl-Disk-Moment`, and the browse path `/v1/moments`. You do not type them.
+
+Example: `2026-10-21T09:30:00Z`. With a copy every 6 hours and a keep time of 24 hours, a disk has about 4 restore points.
 
 ### Change list
 
@@ -313,7 +309,7 @@ Example: restore `/etc/app` and `/var/www/html/index.php` from last night's back
 
 ### Replication
 
-**Replication** copies volumes to a destination on a schedule. The destination is another pool or another cluster. If the source site is lost, you can start the workload there. By default it keeps only the latest copy of a plain volume (a backup keeps more moments). A plain volume is copied in one of two ways. In direct NFS mode (no `destinationEndpoint`), rsync copies it and only the files that changed cross the network (`incrementalSync`, on by default). In receiver mode (`destinationEndpoint` set, the mode for another cluster), the driver packs the whole folder into one tar stream and uploads all of it each cycle (`pkg/replication/syncclient.go`); `incrementalSync` does not reduce what is sent. A running VM is copied with a QEMU copy, all disks at one moment. The destination keeps restore points of VM disks for `restorePointKeepHours` (default 24).
+**Replication** copies volumes to a destination on a schedule. The destination is another pool or another cluster. If the source site is lost, you can start the workload there. By default it keeps only the latest copy of a plain volume (a backup keeps more restore points). A plain volume is copied in one of two ways. In direct NFS mode (no `destinationEndpoint`), rsync copies it and only the files that changed cross the network (`incrementalSync`, on by default). In receiver mode (`destinationEndpoint` set, the mode for another cluster), the driver packs the whole folder into one tar stream and uploads all of it each cycle (`pkg/replication/syncclient.go`); `incrementalSync` does not reduce what is sent. A running VM is copied with a QEMU copy, all disks at one point in time. The destination keeps restore points of VM disks for `restorePointKeepHours` (default 24).
 
 Example: replicate the pool `production` in Frankfurt to a pool in London every 15 minutes.
 
@@ -343,7 +339,7 @@ Example: `--rewind-to 2026-10-21T09:00:00Z` starts the VM as it was at 09:00.
 
 ### Failover
 
-**Failover** is making the replicated volumes usable on the destination cluster, so you can start the workload there. `kubectl failover execute` reads the metadata that replication left on the destination share, and creates the SubVolume, PersistentVolume and PVC for each volume. For a running VM it picks the newest moment that all the VM's disks can show. It does not start the workload, and it does not change DNS.
+**Failover** is making the replicated volumes usable on the destination cluster, so you can start the workload there. `kubectl failover execute` reads the metadata that replication left on the destination share, and creates the SubVolume, PersistentVolume and PVC for each volume. For a running VM it picks the newest restore point that all the VM's disks can show. It does not start the workload, and it does not change DNS.
 
 Example: `kubectl failover plan` shows an RPO of 14 minutes, so you run `execute`.
 
@@ -365,7 +361,7 @@ Example: an `http` hook that asks an application to flush its data before a sync
 
 ### Group snapshot
 
-A **group snapshot** (`VolumeGroupSnapshot`) was meant to snapshot several volumes together. It is **not active**. Nothing acts on the resource. A snapshot of a running VM already covers all its disks at one moment. See [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md#volume-group-snapshots).
+A **group snapshot** (`VolumeGroupSnapshot`) was meant to snapshot several volumes together. It is **not active**. Nothing acts on the resource. A snapshot of a running VM already covers all its disks at one point in time. See [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md#volume-group-snapshots).
 
 Example: do not create one; use a VM snapshot instead.
 
