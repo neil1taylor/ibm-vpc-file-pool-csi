@@ -47,3 +47,7 @@ test/release/out/
 .env.*
 !.env.example
 test/perf/out/
+
+# Python test caches and unpacked console plugin build output
+__pycache__/
+console-plugin/dist-extracted/
