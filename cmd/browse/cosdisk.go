@@ -17,6 +17,7 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/browse"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/cosbrowse"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/cosdisk"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/replication"
 	"k8s.io/klog/v2"
 )
 
@@ -114,25 +115,50 @@ func runCOSDisk(ctx context.Context, a cosDiskArgs, stdout, stderr io.Writer, on
 		return 1
 	}
 	defer dav.Stop()
-	hctx, cancel := context.WithTimeout(ctx, time.Minute)
-	httpSrc, err := cosdisk.NewHTTPSource(hctx, &http.Client{Timeout: 5 * time.Minute}, dav.URL)
-	cancel()
-	if err != nil {
-		failStart(stderr, a.termLog, fmt.Errorf("the backup has no readable disk: %w", err))
-		return 1
+	// A time before the export's own restore point is rebuilt from the undo
+	// files that the export holds. The export's own restore point is the disk.
+	older := !a.at.IsZero() && a.at.Before(pick.Moment)
+	var (
+		reader   cosdisk.DiskReader
+		served   = pick.Moment
+		closeAll func()
+	)
+	if older {
+		uv, uerr := cosdisk.OpenUndoView(ctx, &http.Client{Timeout: 5 * time.Minute}, dav.URL, pick.Moment, a.at,
+			cosdisk.Options{SegmentSize: a.segmentMB << 20, ReadAhead: a.readAhead, MaxBytes: int64(a.cacheMB) << 20})
+		if uerr != nil {
+			failStart(stderr, a.termLog, olderRefusal(uerr, a.at))
+			return 1
+		}
+		reader, served, closeAll = uv.View, uv.View.Moment(), func() { _ = uv.Close() }
+	} else {
+		hctx, cancel := context.WithTimeout(ctx, time.Minute)
+		httpSrc, herr := cosdisk.NewHTTPSource(hctx, &http.Client{Timeout: 5 * time.Minute}, dav.URL)
+		cancel()
+		if herr != nil {
+			failStart(stderr, a.termLog, fmt.Errorf("the backup has no readable disk: %w", herr))
+			return 1
+		}
+		disk := cosdisk.New(httpSrc, cosdisk.Options{SegmentSize: a.segmentMB << 20, ReadAhead: a.readAhead, MaxBytes: int64(a.cacheMB) << 20})
+		reader, closeAll = disk, func() { _ = disk.Close() }
 	}
-	disk := cosdisk.New(httpSrc, cosdisk.Options{SegmentSize: a.segmentMB << 20, ReadAhead: a.readAhead, MaxBytes: int64(a.cacheMB) << 20})
-	defer func() { _ = disk.Close() }()
+	defer closeAll()
 	var lastUse atomic.Int64
 	lastUse.Store(time.Now().UnixNano())
-	moment := pick.Moment.UTC().Format(time.RFC3339)
-	diskHandler, err := cosdisk.NewHandler(disk, token,
-		cosdisk.WithFileList(func(ctx context.Context) (io.ReadCloser, int64, error) { return fetchFileList(ctx, dav.URL) }),
+	moment := served.UTC().Format(time.RFC3339)
+	opts := []cosdisk.HandlerOption{
 		cosdisk.WithOnAuthed(func(w http.ResponseWriter, _ *http.Request) func() {
 			lastUse.Store(time.Now().UnixNano())
 			w.Header().Set(cosdisk.MomentHeader, moment)
 			return func() { lastUse.Store(time.Now().UnixNano()) }
-		}))
+		}),
+	}
+	if !older {
+		// The saved file list belongs to the export's own restore point. For an
+		// older one the folders are read from the disk.
+		opts = append(opts, cosdisk.WithFileList(func(ctx context.Context) (io.ReadCloser, int64, error) { return fetchFileList(ctx, dav.URL) }))
+	}
+	diskHandler, err := cosdisk.NewHandler(reader, token, opts...)
 	if err != nil {
 		failStart(stderr, a.termLog, err)
 		return 1
@@ -223,4 +249,12 @@ func fetchFileList(ctx context.Context, diskURL string) (io.ReadCloser, int64, e
 		return nil, 0, cosdisk.ErrNoFileList
 	}
 	return resp.Body, resp.ContentLength, nil
+}
+
+// olderRefusal says in words why an older restore point cannot be served.
+func olderRefusal(err error, at time.Time) error {
+	if errors.Is(err, replication.ErrNoRestorePoint) {
+		return fmt.Errorf("this VM disk has no restore point in COS at or before %s (%w)", at.UTC().Format(time.RFC3339), err)
+	}
+	return fmt.Errorf("the restore point of the VM disk could not be opened: %w", err)
 }

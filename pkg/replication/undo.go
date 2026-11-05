@@ -39,6 +39,8 @@ const (
 	undoApplied   = ".undo"
 	compareChunk  = 64 << 10
 	gapReadLength = 1 << 20
+	// maxDiskBytes is the largest disk size an undo file may claim: 1 PiB.
+	maxDiskBytes = 1 << 50
 )
 
 // CopySource is a staged disk copy. *qcow2.Image is one.
@@ -439,27 +441,37 @@ type undoHeader struct {
 // readUndo checks an undo file and calls fn for each record, if fn is not nil.
 // pos is where the record's data starts in the undo file.
 func readUndo(v *volume, path string, fn func(off int64, data []byte, pos int64) error) (undoHeader, error) {
-	var h undoHeader
 	f, err := v.root.Open(path)
 	if err != nil {
-		return h, err
+		return undoHeader{}, err
 	}
 	defer func() { _ = f.Close() }()
 	fi, err := f.Stat()
 	if err != nil {
-		return h, err
+		return undoHeader{}, err
 	}
-	r := bufio.NewReaderSize(f, 1<<20)
+	return readUndoFrom(f, fi.Size(), path, fn)
+}
+
+// readUndoFrom is readUndo for an undo file of size bytes that r reads. It reads
+// the file once, front to back.
+func readUndoFrom(f io.ReaderAt, size int64, path string, fn func(off int64, data []byte, pos int64) error) (undoHeader, error) {
+	var h undoHeader
+	var err error
+	r := bufio.NewReaderSize(io.NewSectionReader(f, 0, size), 1<<20)
 	hdr := make([]byte, 40)
 	if _, err = io.ReadFull(r, hdr); err != nil || string(hdr[:8]) != undoMagic {
 		return h, fmt.Errorf("undo file %s has no valid header", path)
 	}
 	be := binary.BigEndian
-	h.from = time.Unix(0, int64(be.Uint64(hdr[8:])))           // #nosec G115 -- a time, stored bit for bit
-	h.to = time.Unix(0, int64(be.Uint64(hdr[16:])))            // #nosec G115 -- a time, stored bit for bit
-	h.oldSize = int64(be.Uint64(hdr[24:]))                     // #nosec G115 -- written from a file size
-	h.newSize = int64(be.Uint64(hdr[32:]))                     // #nosec G115 -- written from a file size
-	remaining := fi.Size() - 40 - int64(len(undoEndMagic)) - 8 // bytes of records
+	h.from = time.Unix(0, int64(be.Uint64(hdr[8:]))) // #nosec G115 -- a time, stored bit for bit
+	h.to = time.Unix(0, int64(be.Uint64(hdr[16:])))  // #nosec G115 -- a time, stored bit for bit
+	h.oldSize = int64(be.Uint64(hdr[24:]))           // #nosec G115 -- written from a file size
+	h.newSize = int64(be.Uint64(hdr[32:]))           // #nosec G115 -- written from a file size
+	if h.oldSize < 0 || h.newSize < 0 || h.oldSize > maxDiskBytes || h.newSize > maxDiskBytes {
+		return h, fmt.Errorf("undo file %s has a bad header", path)
+	}
+	remaining := size - 40 - int64(len(undoEndMagic)) - 8 // bytes of records
 	buf := make([]byte, compareChunk)
 	var records uint64
 	pos := int64(40) // where the next record starts
@@ -469,7 +481,7 @@ func readUndo(v *volume, path string, fn func(off int64, data []byte, pos int64)
 			return h, fmt.Errorf("undo file %s is cut short: %w", path, err)
 		}
 		off, n := int64(be.Uint64(rec[0:])), int64(be.Uint64(rec[8:])) // #nosec G115 -- written from offsets and lengths
-		if off < 0 || n <= 0 || n > compareChunk || off+n > h.oldSize {
+		if off < 0 || n <= 0 || n > compareChunk || off > h.oldSize-n {
 			return h, fmt.Errorf("undo file %s has a bad record at offset %d", path, off)
 		}
 		if _, err = io.ReadFull(r, buf[:n]); err != nil {

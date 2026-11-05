@@ -25,10 +25,12 @@ type BackupPick struct {
 	Newest bool
 }
 
-// ChooseBackup picks the backup snapshot of the volume to serve as a disk. The
-// disk of an export is at the export's moment; earlier moments of a VM disk are
-// undo files that are not served yet, so a time before the chosen export is
-// refused in words.
+// ChooseBackup picks the backup snapshot of the volume to serve as a disk: the
+// export that covers the time, which is the oldest export at or after it (the
+// newest if there is none), as a restore from COS does. The disk of an export is
+// at the export's moment; an older restore point of the disk is rebuilt from the
+// undo files in the same snapshot, and it is the disk server that refuses a time
+// that no undo file reaches back to.
 func ChooseBackup(snaps []Snapshot, p Params) (BackupPick, error) {
 	exports := exportsOf(snaps, p)
 	if len(exports) == 0 {
@@ -36,9 +38,6 @@ func ChooseBackup(snaps []Snapshot, p Params) (BackupPick, error) {
 	}
 	idx := exportFor(exports, p.At)
 	e := exports[idx]
-	if !p.At.IsZero() && p.At.Before(e.moment) {
-		return BackupPick{}, &ReadError{Msg: "the files inside a VM disk can be browsed in COS only at the restore point of an export, not at an older restore point in it"}
-	}
 	if !ValidOID(e.backup.ID) {
 		return BackupPick{}, &ReadError{Msg: "the backup holds a damaged entry"}
 	}

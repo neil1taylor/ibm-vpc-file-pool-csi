@@ -43,7 +43,8 @@ type viewRec struct {
 }
 
 type viewLayer struct {
-	f       *os.File
+	f       io.ReaderAt
+	closer  io.Closer
 	recs    []viewRec // in order of offset, never overlapping
 	oldSize int64     // the size of the disk before this undo file's copy
 }
@@ -51,8 +52,8 @@ type viewLayer struct {
 // DiskView is a read-only view of a backup disk at one moment. It is safe to
 // read from many goroutines.
 type DiskView struct {
-	root     *os.Root
-	disk     *os.File
+	root     *os.Root // nil for a view on an UndoSource: nothing there to watch
+	disk     io.ReaderAt
 	diskSize int64
 	diskInfo os.FileInfo
 	// layers are the undo files from the chosen restore point up to the newest.
@@ -112,10 +113,12 @@ func OpenDiskView(disk string, at time.Time) (dv *DiskView, err error) {
 	} else {
 		d.moment, d.momentKnown = chosen, true
 	}
-	if d.disk, err = v.openDisk(os.O_RDONLY); err != nil {
+	df, err := v.openDisk(os.O_RDONLY)
+	if err != nil {
 		return nil, err
 	}
-	if d.diskInfo, err = d.disk.Stat(); err != nil {
+	d.disk = df
+	if d.diskInfo, err = df.Stat(); err != nil {
 		return nil, err
 	}
 	d.diskSize, d.size = d.diskInfo.Size(), d.diskInfo.Size()
@@ -176,26 +179,34 @@ func undoHeaders(v *volume) ([]undoFile, error) {
 // readUndoHeader reads the header of an undo file and checks that it ends with
 // the end marker.
 func readUndoHeader(v *volume, path string) (undoHeader, error) {
-	var h undoHeader
 	f, err := v.root.Open(path)
 	if err != nil {
-		return h, err
+		return undoHeader{}, err
 	}
 	defer func() { _ = f.Close() }()
 	fi, err := f.Stat()
 	if err != nil {
-		return h, err
+		return undoHeader{}, err
 	}
+	if !fi.Mode().IsRegular() {
+		return undoHeader{}, fmt.Errorf("undo file %s is not complete", path)
+	}
+	return readUndoHeaderFrom(f, fi.Size(), path)
+}
+
+// readUndoHeaderFrom is readUndoHeader for an undo file of size bytes.
+func readUndoHeaderFrom(f io.ReaderAt, size int64, path string) (undoHeader, error) {
+	var h undoHeader
 	trailer := int64(len(undoEndMagic)) + 8
-	if !fi.Mode().IsRegular() || fi.Size() < 40+trailer {
+	if size < 40+trailer {
 		return h, fmt.Errorf("undo file %s is not complete", path)
 	}
 	hdr := make([]byte, 40)
-	if _, err = f.ReadAt(hdr, 0); err != nil || string(hdr[:8]) != undoMagic {
+	if _, err := f.ReadAt(hdr, 0); err != nil || string(hdr[:8]) != undoMagic {
 		return h, fmt.Errorf("undo file %s has no valid header", path)
 	}
 	end := make([]byte, trailer)
-	if _, err = f.ReadAt(end, fi.Size()-trailer); err != nil || string(end[:len(undoEndMagic)]) != undoEndMagic {
+	if _, err := f.ReadAt(end, size-trailer); err != nil || string(end[:len(undoEndMagic)]) != undoEndMagic {
 		return h, fmt.Errorf("undo file %s is not complete", path)
 	}
 	be := binary.BigEndian
@@ -203,7 +214,7 @@ func readUndoHeader(v *volume, path string) (undoHeader, error) {
 	h.to = time.Unix(0, int64(be.Uint64(hdr[16:])))  // #nosec G115 -- a time, stored bit for bit
 	h.oldSize = int64(be.Uint64(hdr[24:]))           // #nosec G115 -- written from a file size
 	h.newSize = int64(be.Uint64(hdr[32:]))           // #nosec G115 -- written from a file size
-	if h.oldSize < 0 || h.newSize < 0 {
+	if h.oldSize < 0 || h.newSize < 0 || h.oldSize > maxDiskBytes || h.newSize > maxDiskBytes {
 		return h, fmt.Errorf("undo file %s has a bad header", path)
 	}
 	return h, nil
@@ -226,9 +237,11 @@ func indexUndo(v *volume, path string) (viewLayer, error) {
 		return l, err
 	}
 	l.oldSize = h.oldSize
-	if l.f, err = v.root.Open(path); err != nil {
+	f, err := v.root.Open(path)
+	if err != nil {
 		return l, err
 	}
+	l.f, l.closer = f, f
 	return l, nil
 }
 
@@ -267,12 +280,12 @@ func (d *DiskView) Close() error {
 			first = err
 		}
 	}
-	if d.disk != nil {
-		keep(d.disk.Close())
+	if c, ok := d.disk.(io.Closer); ok && d.root != nil {
+		keep(c.Close())
 	}
 	for _, l := range d.layers {
-		if l.f != nil {
-			keep(l.f.Close())
+		if l.closer != nil {
+			keep(l.closer.Close())
 		}
 	}
 	if d.root != nil {
@@ -284,6 +297,9 @@ func (d *DiskView) Close() error {
 // check looks, at most every checkEvery, for a change of the backup disk or of
 // the undo folder. Any change ends the view for good.
 func (d *DiskView) check() error {
+	if d.root == nil {
+		return nil // a view on an UndoSource: its files never change
+	}
 	if d.changed.Load() {
 		return ErrDiskChanged
 	}

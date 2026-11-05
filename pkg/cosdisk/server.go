@@ -50,6 +50,13 @@ func WithFileList(fetch func(ctx context.Context) (io.ReadCloser, int64, error))
 	return func(c *handlerConfig) { c.fileList = fetch }
 }
 
+// DiskReader is what the handler serves: a Disk, or a view of a disk at an older
+// restore point.
+type DiskReader interface {
+	io.ReaderAt
+	Size() int64
+}
+
 // NewHandler serves a disk read-only over HTTP, for the guest helper to read
 // with range requests. Run it behind TLS with the session certificate: the
 // handler checks the session token, answers only GET and HEAD on DiskPath, and
@@ -59,7 +66,7 @@ func WithFileList(fetch func(ctx context.Context) (io.ReadCloser, int64, error))
 // Why HTTP and not NBD with TLS: the libguestfs tools cannot be given the
 // session certificate for an NBD link, and the guest helper already bridges a
 // disk to its appliance over a local socket. See docs/specs/2026-10-29-vm-disks-in-cos.md.
-func NewHandler(d *Disk, token string, opts ...HandlerOption) (http.Handler, error) {
+func NewHandler(d DiskReader, token string, opts ...HandlerOption) (http.Handler, error) {
 	if len(token) < minTokenLen {
 		return nil, errors.New("cosdisk: the session token is too short")
 	}
