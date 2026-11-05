@@ -1,6 +1,6 @@
 import { API_GROUP_VERSION } from '../constants';
 import { Failover, FailoverSpec, FailoverVM, ReplicationPolicy } from '../types';
-import { parseGoDuration } from './backup-policy-form';
+import { parseGoDuration } from './go-duration';
 import { LABEL_MADE_BY_CONSOLE } from './receiver-objects';
 
 /** How long the driver accepts a finished Plan for an Execute (pkg/failover PlanMaxAge). */

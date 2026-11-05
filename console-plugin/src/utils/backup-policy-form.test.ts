@@ -3,13 +3,13 @@ import { PersistentVolumeClaim, VirtualMachineLike } from './k8s-objects';
 import {
   BackupPolicyForm,
   buildBackupPolicy,
-  parseGoDuration,
   parseNamespaces,
   policyToForm,
   selectionPreview,
   snapshotPoolChoices,
   validateBackupPolicyForm,
 } from './backup-policy-form';
+import { parseGoDuration } from './go-duration';
 
 const MIN = 60 * 1000;
 const HOUR = 60 * MIN;

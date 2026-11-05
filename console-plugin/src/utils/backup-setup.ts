@@ -1,6 +1,7 @@
 import { DRIVER_NAMESPACE } from '../constants';
 import { BackupExport, BackupPolicy } from '../types';
-import { keepForMs, parseGoDuration } from './backup-policy-form';
+import { keepForMs } from './backup-policy-form';
+import { parseGoDuration } from './go-duration';
 import { LABEL_MADE_BY_CONSOLE } from './receiver-objects';
 import { exportStateText } from './backup-helpers';
 
