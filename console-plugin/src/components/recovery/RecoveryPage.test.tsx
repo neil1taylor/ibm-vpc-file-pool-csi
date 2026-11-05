@@ -254,7 +254,7 @@ describe('RecoveryPage VM detail', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Fail over this VM' }));
     await waitFor(() => expect(k8sCreate).toHaveBeenCalledTimes(1));
     finishVMPlan({ rewindTo: '2026-10-28T11:00:00Z' }); // it shows 11:30, not 11:00
-    await waitFor(() => expect(screen.getByText(/does not show the moment you chose/i)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/does not show the restore point you chose/i)).toBeTruthy());
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 

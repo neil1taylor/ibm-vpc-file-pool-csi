@@ -34,7 +34,9 @@ import {
   isBusyMessage,
   needsNewPlan,
   planRemainingMs,
+  planRestorePoint,
   receiverClaims,
+  restorePointsCut,
   scheduleOfVM,
   scopeOfPlan,
 } from '../../utils/failover-helpers';
@@ -75,7 +77,7 @@ interface Choice {
 
 /**
  * Recovery on the destination (DR) cluster. The page makes a Failover with action Plan, shows the VMs it found
- * and the moments each can show, and after a confirm step makes a Failover with action Execute. The Plan and the
+ * and the restore points each can show, and after a confirm step makes a Failover with action Execute. The Plan and the
  * Execute run as a Job on this cluster (the same code as `kubectl failover`). The page uses the rights of the
  * signed-in user, and the Failover resource is cluster scoped, so it is for cluster administrators.
  */
@@ -201,7 +203,7 @@ const RecoveryPage: React.FC = () => {
 
   const staleness: Record<string, Staleness> = {};
   for (const vm of plan?.status?.vms || []) {
-    staleness[vm.name] = copyStaleness(vm.moment, scheduleOfVM(plan!, vm, policyList || []), now);
+    staleness[vm.name] = copyStaleness(planRestorePoint(vm), scheduleOfVM(plan!, vm, policyList || []), now);
   }
 
   const detail = plan && selectedVM ? describeVMDetail(plan, selectedVM, now) : undefined;
@@ -375,8 +377,8 @@ const RecoveryPage: React.FC = () => {
 
         {choice && choicePlanReady && choiceMismatch && (
           <StackItem>
-            <Alert variant="danger" isInline title="The plan does not show the moment you chose">
-              The copy changed since the page listed its moments. Choose a moment again.
+            <Alert variant="danger" isInline title="The plan does not show the restore point you chose">
+              The copy changed since the page listed its restore points. Choose a restore point again.
             </Alert>
           </StackItem>
         )}
@@ -426,8 +428,8 @@ const RecoveryPage: React.FC = () => {
               }
             >
               {plan.status?.rpo && <p>{`The oldest VM data is ${formatDuration(plan.status.rpo)} old.`}</p>}
-              {plan.status?.momentsTruncated && (
-                <p>The list of moments was cut to fit. The newest moments are shown.</p>
+              {restorePointsCut(plan.status) && (
+                <p>The list of restore points was cut to fit. The newest restore points are shown.</p>
               )}
               {forcedPlan && <Label color="orange">Planned with force</Label>}
             </Alert>

@@ -144,6 +144,7 @@ export function buildRestoreRequest(i: RestoreInput): RestoreRequest {
     policy: i.policy,
     namespace: i.namespace,
     pvc: i.pvc,
+    // Wire name: the gateway request key stays `moment` (pkg/gateway/api.go).
     ...(i.moment ? { moment: i.moment } : {}),
     ...(i.source ? { source: i.source } : {}),
     paths,
@@ -187,6 +188,7 @@ export interface Restore {
   existing?: boolean;
   folder?: string;
   sizeGB?: number;
+  /** Wire name: the gateway reply key stays `restoredMoment` (pkg/gateway/api.go). */
   restoredMoment?: string;
   latest?: boolean;
   files: number;

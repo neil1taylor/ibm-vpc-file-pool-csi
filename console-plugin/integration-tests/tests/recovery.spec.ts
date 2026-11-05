@@ -14,7 +14,7 @@ import { navigateTo, checkSessionValid } from '../support/pages';
  * RECOVERY_POOL      the FileSharePool of the DR cluster for the new volumes
  * RECOVERY_PVCS      the claims the failover makes, as namespace/name, comma separated
  *
- * The VM has two disks and at least two moments to choose from. The tests run in order. The last one makes
+ * The VM has two disks and at least two restore points to choose from. The tests run in order. The last one makes
  * one Execute; the others change nothing. A second try would find the claims of the first and be refused,
  * so there are no retries.
  */
@@ -94,21 +94,21 @@ test.describe('Recovery page: fail over one VM', () => {
     await expect(page.getByText('The failover is done')).toHaveCount(0);
   });
 
-  test('the detail view shows the disks of the VM and its moments, newest first', async ({ page }) => {
+  test('the detail view shows the disks of the VM and its restore points, newest first', async ({ page }) => {
     await openRecovery(page, { refresh: false });
     await openVM(page);
     const disks = page.getByRole('grid', { name: 'Disks of the VM' });
     await expect(disks.locator('tbody tr')).toHaveCount(2);
     await expect(disks.getByText(/Used in place\.|Copies the whole disk; takes minutes\./).first()).toBeVisible();
     const moments = page.getByRole('radio');
-    expect(await moments.count(), 'the VM should have at least two moments to choose from').toBeGreaterThanOrEqual(2);
-    await expect(moments.first(), 'the first moment is the newest and is chosen').toBeChecked();
+    expect(await moments.count(), 'the VM should have at least two restore points to choose from').toBeGreaterThanOrEqual(2);
+    await expect(moments.first(), 'the first restore point is the newest and is chosen').toBeChecked();
     await expect(page.getByText(/- newest/)).toHaveCount(1);
     await page.getByRole('button', { name: 'Back to the VMs', exact: true }).click();
     await expect(page.getByRole('grid', { name: 'Running VMs found on the copy' })).toBeVisible();
   });
 
-  test('an older moment says its disks are rewound; a wrong name keeps the button off; Cancel makes nothing', async ({ page }) => {
+  test('an older restore point says its disks are rewound; a wrong name keeps the button off; Cancel makes nothing', async ({ page }) => {
     await openRecovery(page, { refresh: false });
     await openVM(page);
     await page.getByRole('radio').last().check();
@@ -131,7 +131,7 @@ test.describe('Recovery page: fail over one VM', () => {
   test('typing the VM name confirms; the failover runs to Done and links the claims it made', async ({ page }) => {
     await openRecovery(page, { refresh: false });
     await openVM(page);
-    // The newest moment is chosen: no disk is rewound, so this failover is quick.
+    // The newest restore point is chosen: no disk is rewound, so this failover is quick.
     await expect(page.getByRole('radio').first()).toBeChecked();
     const dialog = await openConfirm(page);
 

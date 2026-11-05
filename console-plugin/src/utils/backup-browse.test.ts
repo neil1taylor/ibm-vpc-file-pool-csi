@@ -74,8 +74,13 @@ describe('browse links', () => {
   it('names the page of a policy, claim and moment', () => {
     expect(browsePath('nightly', 'apps/db')).toBe('/vpc-file-pools/backups/nightly/browse?claim=apps%2Fdb');
     expect(browsePath('nightly', 'apps/db', '2026-10-22T09:15:00Z')).toBe(
-      '/vpc-file-pools/backups/nightly/browse?claim=apps%2Fdb&moment=2026-10-22T09%3A15%3A00Z',
+      '/vpc-file-pools/backups/nightly/browse?claim=apps%2Fdb&restorePoint=2026-10-22T09%3A15%3A00Z',
     );
+  });
+  it('still reads the old moment parameter of a saved link, and the new one wins', () => {
+    expect(parseBrowseQuery('?claim=apps%2Fdb&restorePoint=2026-10-22T09%3A15%3A00Z').moment).toBe('2026-10-22T09:15:00Z');
+    expect(parseBrowseQuery('?claim=apps%2Fdb&moment=2026-10-21T09%3A15%3A00Z').moment).toBe('2026-10-21T09:15:00Z');
+    expect(parseBrowseQuery('?claim=apps%2Fdb&moment=2026-10-21T09%3A15%3A00Z&restorePoint=2026-10-22T09%3A15%3A00Z').moment).toBe('2026-10-22T09:15:00Z');
   });
   it('reads the query back', () => {
     expect(parseBrowseQuery('?claim=apps%2Fdb&moment=2026-10-22T09%3A15%3A00Z')).toEqual({
@@ -90,7 +95,7 @@ describe('browse links', () => {
   it('keeps the source in the link and reads it back', () => {
     expect(browsePath('nightly', 'apps/db', undefined, 'cos')).toBe('/vpc-file-pools/backups/nightly/browse?claim=apps%2Fdb&source=cos');
     expect(browsePath('nightly', 'apps/db', '2026-10-22T09:15:00Z', 'local')).toBe(
-      '/vpc-file-pools/backups/nightly/browse?claim=apps%2Fdb&moment=2026-10-22T09%3A15%3A00Z&source=local',
+      '/vpc-file-pools/backups/nightly/browse?claim=apps%2Fdb&restorePoint=2026-10-22T09%3A15%3A00Z&source=local',
     );
     expect(parseBrowseQuery('?claim=apps%2Fdb&source=cos').source).toBe('cos');
     expect(parseBrowseQuery('?claim=apps%2Fdb&source=local').source).toBe('local');

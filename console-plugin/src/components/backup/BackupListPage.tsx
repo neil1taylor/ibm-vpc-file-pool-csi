@@ -117,7 +117,7 @@ const BackupListPage: React.FC = () => {
       </ListPageHeader>
       <p style={{ padding: '0 24px', color: 'var(--pf-t--global--color--subtle)', margin: '0 0 8px 0' }}>
         A backup policy copies the volumes it selects into a snapshot pool on a schedule, and keeps the copies for a set time.
-        Open a policy to see each volume and the moments you can restore to.
+        Open a policy to see each volume and the restore points you can restore to.
       </p>
       <ListPageBody>
         {(policies || []).map((p) => (

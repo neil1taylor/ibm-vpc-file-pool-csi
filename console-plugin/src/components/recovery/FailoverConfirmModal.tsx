@@ -31,7 +31,7 @@ interface Props {
 }
 
 /**
- * The last step before a failover. It says what will happen: the VM and its moment, the disks that are
+ * The last step before a failover. It says what will happen: the VM and its restore point, the disks that are
  * rewound, and the PVCs that are made. The plan is for the chosen VM only, or for every VM on the copy (then
  * every VM is listed). The operator types the VM name, or the source name for every VM, to confirm.
  */
@@ -72,7 +72,7 @@ const FailoverConfirmModal: React.FC<Props> = ({ plan, vmName, pools, creating, 
                     : `This fails over all ${summary.vms.length} VMs on the copy, and every volume that is not a VM disk`
                 }
               >
-                Each VM shows the newest moment it has. To fail over one VM, go back and choose it.
+                Each VM shows the newest restore point it has. To fail over one VM, go back and choose it.
                 <ul>
                   {summary.vms.map((v) => (
                     <li key={v.name}>{`${v.name}: ${v.moment}, ${disks(v.rewindDisks)}`}</li>

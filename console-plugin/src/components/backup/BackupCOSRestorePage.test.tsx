@@ -100,7 +100,7 @@ describe('BackupCOSRestorePage', () => {
     expect(field(/^Endpoint( \*)?$/).value).toBe('s3.eu-de.cloud-object-storage.appdomain.cloud');
     expect(field(/^Folder/).value).toBe('lab');
     expect(field(/^Volume( \*)?$/).value).toBe(VOL);
-    expect(field(/^Moment/).value).not.toBe('');
+    expect(field(/^Restore point/).value).not.toBe('');
   });
 
   it('fills the settings from a policy chosen in the list', () => {
@@ -130,7 +130,7 @@ describe('BackupCOSRestorePage', () => {
     fireEvent.change(screen.getByLabelText('Fill from a policy of this cluster'), { target: { value: 'nightly' } });
     act(() => cosProps.onPick!(VOL, '2026-10-20T09:00:00Z'));
     expect(field(/^Volume( \*)?$/).value).toBe(VOL);
-    expect(field(/^Moment/).value).not.toBe('');
+    expect(field(/^Restore point/).value).not.toBe('');
   });
 
   it('keeps Restore off until COS settings, a volume, a size and a storage class are given', () => {

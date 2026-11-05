@@ -20,7 +20,7 @@ const RecoveryVMTable: React.FC<Props> = ({ rows, staleness, onSelect }) => (
         <Th>Disks</Th>
         <Th info={columnInfo('recoveryRewindDisks')}>Disks to Rewind</Th>
         <Th info={columnInfo('recoveryPlanMoment')}>Will Show</Th>
-        <Th info={columnInfo('recoveryMoments')}>Moments to Choose From</Th>
+        <Th info={columnInfo('recoveryMoments')}>Restore Points to Choose From</Th>
       </Tr>
     </Thead>
     <Tbody>
@@ -48,7 +48,7 @@ const RecoveryVMTable: React.FC<Props> = ({ rows, staleness, onSelect }) => (
                 <div style={{ color: 'var(--pf-t--global--color--subtle)' }}>{stale.text}</div>
               )}
             </Td>
-            <Td dataLabel="Moments to Choose From">{row.momentCount}</Td>
+            <Td dataLabel="Restore Points to Choose From">{row.momentCount}</Td>
           </Tr>
         );
       })}

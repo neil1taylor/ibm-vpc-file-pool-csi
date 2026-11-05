@@ -13,6 +13,7 @@ import {
   needsNewPlan,
   planRemainingMs,
   receiverClaims,
+  restorePointsCut,
   scheduleOfVM,
   scopeOfPlan,
 } from './failover-helpers';
@@ -162,6 +163,39 @@ describe('findPlan', () => {
   it('matches a Plan that used the default source when no source is chosen', () => {
     const p = plan({ spec: { action: 'Plan' } });
     expect(findPlan([p], '')?.metadata?.name).toBe('p1');
+  });
+});
+
+describe('restore point names in a plan', () => {
+  const renamed = (): Failover => {
+    const p = plan();
+    p.status!.vms = [
+      {
+        name: 'apps/web',
+        restorePoint: '2026-10-28T11:30:00Z',
+        restorePoints: ['2026-10-28T11:30:00Z', '2026-10-28T11:00:00Z'],
+        disks: [{ subVolume: 'pvc-a', rewind: false }],
+      },
+    ];
+    return p;
+  };
+  it('reads restorePoint and restorePoints, and the old moment and moments from an old plan', () => {
+    const rows = describePlanRows(renamed(), NOW);
+    expect(rows[0]).toMatchObject({ name: 'apps/web', moment: '2026-10-28T11:30:00Z', age: '30m', momentCount: 2 });
+    expect(describePlanRows(plan(), NOW)[0]).toMatchObject({ moment: '2026-10-28T11:30:00Z', momentCount: 3 });
+  });
+  it('uses the new names for the detail, the check for a new plan and the summary', () => {
+    const p = renamed();
+    expect(describeVMDetail(p, 'apps/web', NOW)!.moments[0]).toMatchObject({ isCurrent: true, age: '30m' });
+    expect(needsNewPlan(p, 'apps/web', '2026-10-28T11:30:00Z')).toBe(false);
+    expect(needsNewPlan(p, 'apps/web', '2026-10-28T11:00:00Z')).toBe(true);
+    expect(executeSummary(p, 'apps/web').vms[0].moment).toBe('2026-10-28T11:30:00Z');
+  });
+  it('tells if the list was cut, from either name', () => {
+    expect(restorePointsCut({ restorePointsTruncated: true })).toBe(true);
+    expect(restorePointsCut({ momentsTruncated: true })).toBe(true);
+    expect(restorePointsCut({})).toBe(false);
+    expect(restorePointsCut(undefined)).toBe(false);
   });
 });
 

@@ -255,7 +255,7 @@ const BackupCOSRestorePage: React.FC = () => {
         <StackItem>
           <FieldPopover
             fieldId="cos-moment"
-            label="Moment (optional)"
+            label="Restore point (optional)"
             description="Your time zone. The restore uses the oldest export made at or after this time, or the newest one. Empty means the newest."
           >
             <TextInput

@@ -148,7 +148,7 @@ describe('RestoreSnapshotPage', () => {
       ],
     });
     render(<RestoreSnapshotPage />);
-    expect(screen.getByText(/froze the guest and copied the disk at one moment/i)).toBeTruthy();
+    expect(screen.getByText(/froze the guest and copied the disk at one point in time/i)).toBeTruthy();
     expect(screen.getByText(/crash consistent/i)).toBeTruthy();
     expect(screen.queryByText(/step 7/i)).toBeNull();
     expect(screen.queryByText(/may not boot/i)).toBeNull();

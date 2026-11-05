@@ -15,7 +15,7 @@ interface Props {
   targetName: string;
 }
 
-/** Follows a BackupRestore: its phase, the moment that was restored, and the message when it fails. */
+/** Follows a BackupRestore: its phase, the restore point that was restored, and the message when it fails. */
 const BackupRestoreBanner: React.FC<Props> = ({ restoreName, targetNamespace, targetName }) => {
   const [restore] = useK8sWatchResource<BackupRestore>({
     groupVersionKind: {

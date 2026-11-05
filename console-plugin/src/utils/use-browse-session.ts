@@ -23,7 +23,7 @@ export interface BrowseSessionState {
 
 /**
  * Opens a browse session for a backup, waits for it by polling, and closes it when the page is left, the
- * backup or the moment changes, or the browser tab is closed. A session holds a helper pod, so it is never
+ * backup or the restore point changes, or the browser tab is closed. A session holds a helper pod, so it is never
  * left open on purpose; the driver also closes an idle one.
  */
 export function useBrowseSession(req: SessionRequest | undefined): BrowseSessionState {

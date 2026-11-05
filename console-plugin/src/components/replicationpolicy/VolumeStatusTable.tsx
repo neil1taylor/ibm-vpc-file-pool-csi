@@ -15,7 +15,7 @@ const SEVERITY_COLOR = { warning: 'orange', danger: 'red' } as const;
 
 /**
  * One row for each volume of a policy. A running VM's disk also shows the
- * moment its last copy shows, whether the copy is consistent, and its restore
+ * restore point its last copy shows, whether the copy is consistent, and its restore
  * points. A message that only says a volume is waiting is a warning, not an error.
  */
 const VolumeStatusTable: React.FC<Props> = ({ statuses }) => {
@@ -38,7 +38,7 @@ const VolumeStatusTable: React.FC<Props> = ({ statuses }) => {
           <Thead>
             <Tr>
               <Th>SubVolume Name</Th>
-              <Th info={columnInfo('syncCopyMoment')}>Last Sync / Copy Moment</Th>
+              <Th info={columnInfo('syncCopyMoment')}>Last Sync / Copy Restore Point</Th>
               <Th info={columnInfo('syncConsistency')}>Consistency</Th>
               <Th info={columnInfo('syncRestorePoints')}>Restore Points</Th>
               <Th info={columnInfo('syncNextCopy')}>Next Copy</Th>

@@ -11,8 +11,8 @@ interface Props {
 }
 
 /**
- * One row for each running VM of a policy: the moment its copy shows, whether the copy is consistent, and the
- * moments a recovery can use (the moments all of the VM's disks share). Read-only. It is the source cluster's
+ * One row for each running VM of a policy: the restore point its copy shows, whether the copy is consistent, and the
+ * restore points a recovery can use (the restore points all of the VM's disks share). Read-only. It is the source cluster's
  * view of the destination and can be a few minutes old.
  */
 const VMRecoveryTable: React.FC<Props> = ({ vms, schedule }) => {
@@ -23,14 +23,14 @@ const VMRecoveryTable: React.FC<Props> = ({ vms, schedule }) => {
     <Card style={{ marginTop: 16 }}>
       <CardTitle>Recovery</CardTitle>
       <CardBody>
-        <Table aria-label="Running VMs and the moments they can be recovered to" variant="compact">
+        <Table aria-label="Running VMs and the restore points they can be recovered to" variant="compact">
           <Thead>
             <Tr>
               <Th>VM</Th>
               <Th>Disks</Th>
-              <Th info={columnInfo('recoveryCopyMoment')}>Copy Moment</Th>
+              <Th info={columnInfo('recoveryCopyMoment')}>Copy Restore Point</Th>
               <Th info={columnInfo('syncConsistency')}>Consistency</Th>
-              <Th info={columnInfo('recoveryMoments')}>Moments to Recover To</Th>
+              <Th info={columnInfo('recoveryMoments')}>Restore Points to Recover To</Th>
             </Tr>
           </Thead>
           <Tbody>
@@ -59,10 +59,10 @@ const VMRecoveryTable: React.FC<Props> = ({ vms, schedule }) => {
                 </Td>
                 <Td>
                   {v.momentCount > 0 ? (
-                    `${v.momentCount} ${v.momentCount === 1 ? 'moment' : 'moments'}: ${v.moments.join(', ')}`
+                    `${v.momentCount} ${v.momentCount === 1 ? 'restore point' : 'restore points'}: ${v.moments.join(', ')}`
                   ) : (
                     <Label color="orange" isCompact>
-                      {v.disks > 1 ? 'The disks share no moment' : 'No moment yet'}
+                      {v.disks > 1 ? 'The disks share no restore point' : 'No restore point yet'}
                     </Label>
                   )}
                 </Td>

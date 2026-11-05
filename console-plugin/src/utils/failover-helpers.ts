@@ -143,6 +143,14 @@ export function findPlan(all: Failover[], source: string): Failover | undefined 
   )[0];
 }
 
+/** The restore point a plan chose for a VM. A plan made before the rename has it as `moment`. */
+export const planRestorePoint = (vm: FailoverVM): string => vm.restorePoint ?? vm.moment ?? '';
+
+/** True when the plan cut its list of restore points to fit. A plan made before the rename says `momentsTruncated`. */
+export function restorePointsCut(status: { restorePointsTruncated?: boolean; momentsTruncated?: boolean } | undefined): boolean {
+  return !!(status?.restorePointsTruncated ?? status?.momentsTruncated);
+}
+
 export interface PlanRow {
   name: string;
   disks: number;
@@ -158,16 +166,16 @@ export function describePlanRows(plan: Failover | undefined, now: number): PlanR
     name: vm.name,
     disks: vm.disks.length,
     rewindDisks: vm.disks.filter((d) => d.rewind).length,
-    moment: vm.moment,
-    age: ageText(vm.moment, now),
+    moment: planRestorePoint(vm),
+    age: ageText(planRestorePoint(vm), now),
     momentCount: momentsOf(vm).length,
   }));
 }
 
-/** The moments a VM can show, newest first. The moment the plan chose is always in the list. */
+/** The restore points a VM can show, newest first. The restore point the plan chose is always in the list. */
 function momentsOf(vm: FailoverVM): string[] {
   const all = new Map<number, string>();
-  for (const m of [...(vm.moments || []), vm.moment]) {
+  for (const m of [...(vm.restorePoints ?? vm.moments ?? []), planRestorePoint(vm)]) {
     if (m) all.set(Math.floor(ms(m) / 1000), m);
   }
   return [...all.entries()].sort((a, b) => b[0] - a[0]).map(([, m]) => m);
@@ -219,7 +227,7 @@ export interface DiskView {
 export interface MomentView {
   iso: string;
   age: string;
-  /** True for the moment the plan chose for the VM. */
+  /** True for the restore point the plan chose for the VM. */
   isCurrent: boolean;
 }
 
@@ -232,7 +240,7 @@ export interface VMDetailView {
 export const REWIND_NOTE = 'Copies the whole disk; takes minutes.';
 export const IN_PLACE_NOTE = 'Used in place.';
 
-/** The detail of one VM of a plan: its disks, and the moments it can show, newest first. */
+/** The detail of one VM of a plan: its disks, and the restore points it can show, newest first. */
 export function describeVMDetail(plan: Failover, vmName: string, now: number): VMDetailView | undefined {
   const vm = plan.status?.vms?.find((v) => v.name === vmName);
   if (!vm) return undefined;
@@ -247,17 +255,17 @@ export function describeVMDetail(plan: Failover, vmName: string, now: number): V
         note: d.rewind ? REWIND_NOTE : IN_PLACE_NOTE,
       };
     }),
-    moments: momentsOf(vm).map((iso) => ({ iso, age: ageText(iso, now), isCurrent: sameSecond(iso, vm.moment) })),
+    moments: momentsOf(vm).map((iso) => ({ iso, age: ageText(iso, now), isCurrent: sameSecond(iso, planRestorePoint(vm)) })),
   };
 }
 
 /**
- * True when the plan on screen does not show this moment for the VM. The driver accepts an Execute only for a
- * Plan with the same rewindTo, so another moment needs a new Plan first.
+ * True when the plan on screen does not show this restore point for the VM. The driver accepts an Execute only for a
+ * Plan with the same rewindTo, so another restore point needs a new Plan first.
  */
 export function needsNewPlan(plan: Failover, vmName: string, moment: string): boolean {
   const vm = plan.status?.vms?.find((v) => v.name === vmName);
-  return !vm || !sameSecond(vm.moment, moment);
+  return !vm || !sameSecond(planRestorePoint(vm), moment);
 }
 
 export interface PVCToCreate {
@@ -280,7 +288,7 @@ export interface ExecuteSummary {
 export function executeSummary(plan: Failover, chosenVM: string): ExecuteSummary {
   const vms = (plan.status?.vms || []).map((vm) => ({
     name: vm.name,
-    moment: vm.moment,
+    moment: planRestorePoint(vm),
     disks: vm.disks.length,
     rewindDisks: vm.disks.filter((d) => d.rewind).length,
   }));

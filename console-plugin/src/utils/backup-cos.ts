@@ -49,13 +49,14 @@ export function describeExport(ex: BackupExport): ExportRow[] {
 
 export interface COSListing {
   volumes: Array<{ name: string; moments: string[] }>;
-  /** True when there were more moments than the Job could report. Ask for one volume to see all of its moments. */
+  /** True when there were more restore points than the Job could report. Ask for one volume to see all of its restore points. */
   truncated: boolean;
 }
 
 /** The termination message of the list Job. Undefined if it is not a listing. */
 export function parseCOSListing(message: string): COSListing | undefined {
   try {
+    // The Job's report keeps the stored key `moments` (see backup-jobs.ts).
     const m = JSON.parse(message) as { volumes?: Array<{ volume: string; moments?: string[] }>; truncated?: boolean };
     if (!Array.isArray(m.volumes)) return undefined;
     return {
@@ -210,7 +211,7 @@ export function buildCOSRestore(form: COSRestoreForm, nowMs: number): BackupRest
     storageClassName: form.storageClass,
     fromCOS,
   };
-  if (form.moment) spec.moment = form.moment.replace(/\.\d+Z$/, 'Z');
+  if (form.moment) spec.restorePoint = form.moment.replace(/\.\d+Z$/, 'Z');
   return {
     apiVersion: API_GROUP_VERSION,
     kind: 'BackupRestore',
@@ -219,17 +220,17 @@ export function buildCOSRestore(form: COSRestoreForm, nowMs: number): BackupRest
   };
 }
 
-/** The link to the restore-from-COS page. The policy, the volume and the moment are query values, so other pages can link to it. */
+/** The link to the restore-from-COS page. The policy, the volume and the restore point are query values, so other pages can link to it. */
 export function cosRestorePath(input: { policy?: string; volume?: string; moment?: string }): string {
   const query = new URLSearchParams();
   if (input.policy) query.set('policy', input.policy);
   if (input.volume) query.set('volume', input.volume);
-  if (input.moment) query.set('moment', input.moment);
+  if (input.moment) query.set('restorePoint', input.moment);
   const q = query.toString();
   return `${ROUTES.BACKUP_COS_RESTORE}${q ? `?${q}` : ''}`;
 }
 
 export function parseCOSRestoreQuery(search: string): { policy: string; volume: string; moment: string } {
   const q = new URLSearchParams(search);
-  return { policy: q.get('policy') || '', volume: q.get('volume') || '', moment: q.get('moment') || '' };
+  return { policy: q.get('policy') || '', volume: q.get('volume') || '', moment: q.get('restorePoint') || q.get('moment') || '' };
 }

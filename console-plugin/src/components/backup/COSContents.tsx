@@ -27,7 +27,7 @@ interface Props {
   repo: COSRepo | undefined;
   /** Why there are no settings, said in the box. */
   unavailable?: string;
-  /** If given, each moment has a button that calls it with the volume and the moment. */
+  /** If given, each restore point has a button that calls it with the volume and the restore point. */
   onPick?: (volume: string, moment: string) => void;
 }
 
@@ -36,7 +36,7 @@ type Step = 'idle' | 'starting' | 'running' | 'done' | 'error';
 const COS_VOLUME = /^pvc-[a-f0-9-]{36}$/;
 
 /**
- * Lists the volumes and the export moments in a bucket with a read-only Job in the driver namespace, as
+ * Lists the volumes and the export restore points in a bucket with a read-only Job in the driver namespace, as
  * `kubectl backup cos-list` does. The Job reads the keys from Secrets; the console never sees them.
  */
 const COSContents: React.FC<Props> = ({ repo, unavailable, onPick }) => {
@@ -132,7 +132,7 @@ const COSContents: React.FC<Props> = ({ repo, unavailable, onPick }) => {
         <FormHelperText>
           <HelperText>
             <HelperTextItem variant={volumeError ? 'error' : 'default'}>
-              {volumeError || 'With one volume, the list shows all of its moments. Without, a long list is cut.'}
+              {volumeError || 'With one volume, the list shows all of its restore points. Without, a long list is cut.'}
             </HelperTextItem>
           </HelperText>
         </FormHelperText>
@@ -175,7 +175,7 @@ const COSContents: React.FC<Props> = ({ repo, unavailable, onPick }) => {
             <Thead>
               <Tr>
                 <Th>Volume</Th>
-                <Th>Moment</Th>
+                <Th>Restore point</Th>
                 {onPick && <Th></Th>}
               </Tr>
             </Thead>
@@ -185,18 +185,18 @@ const COSContents: React.FC<Props> = ({ repo, unavailable, onPick }) => {
                   ? [
                       <Tr key={v.name}>
                         <Td dataLabel="Volume">{v.name}</Td>
-                        <Td dataLabel="Moment">-</Td>
+                        <Td dataLabel="Restore point">-</Td>
                         {onPick && <Td></Td>}
                       </Tr>,
                     ]
                   : v.moments.map((m, i) => (
                       <Tr key={`${v.name}/${m}`}>
                         <Td dataLabel="Volume">{i === 0 ? v.name : ''}</Td>
-                        <Td dataLabel="Moment">{m}</Td>
+                        <Td dataLabel="Restore point">{m}</Td>
                         {onPick && (
                           <Td>
                             <Button variant="link" isInline onClick={() => onPick(v.name, m)}>
-                              Restore this moment
+                              Restore from this point
                             </Button>
                           </Td>
                         )}
@@ -207,7 +207,7 @@ const COSContents: React.FC<Props> = ({ repo, unavailable, onPick }) => {
           </Table>
           {listing.truncated && (
             <Alert variant="warning" isInline title="The list is cut" style={{ marginTop: 16 }}>
-              There are more moments than the Job can report. Enter a volume name above and list again to see all of its moments.
+              There are more restore points than the Job can report. Enter a volume name above and list again to see all of its restore points.
             </Alert>
           )}
         </StackItem>

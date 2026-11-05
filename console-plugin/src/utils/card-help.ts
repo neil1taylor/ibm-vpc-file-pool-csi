@@ -70,7 +70,7 @@ export const CARD_HELP = {
   },
   groupSnapshots: {
     title: 'Group Snapshots',
-    text: 'Group snapshots are not active yet, so this stays at 0. An OpenShift VM snapshot already covers all the disks of a VM at one moment.',
+    text: 'Group snapshots are not active yet, so this stays at 0. An OpenShift VM snapshot already covers all the disks of a VM at one point in time.',
   },
   poolCapacityOverview: {
     title: 'Pool Capacity Overview',
@@ -138,11 +138,11 @@ export const CARD_HELP = {
   },
   backupBrowseFiles: {
     title: 'Files in this backup',
-    text: 'The folders and files of one backup at the moment you chose. You only look: nothing in the backup can change. A link is shown with the place it points to and is never followed, and a file marked Not readable is kept for another user, so the reader cannot open it.',
+    text: 'The folders and files of one backup at the restore point you chose. You only look: nothing in the backup can change. A link is shown with the place it points to and is never followed, and a file marked Not readable is kept for another user, so the reader cannot open it.',
   },
   backupBrowseMoment: {
-    title: 'Moment',
-    text: 'Which copy of the volume you look at. The latest copy is the newest backup, and the next backup replaces files in it one at a time, so it can change while you look. An older moment never changes until the keep time removes it.',
+    title: 'Restore point',
+    text: 'Which copy of the volume you look at. The latest copy is the newest backup, and the next backup replaces files in it one at a time, so it can change while you look. An older restore point never changes until the keep time removes it.',
   },
   pbWhatToRun: {
     title: 'What to run',

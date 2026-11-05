@@ -224,13 +224,13 @@ describe('BackupBrowsePage downloads', () => {
 describe('BackupBrowsePage moments', () => {
   it('offers the latest copy and each moment, and moves to the chosen one', async () => {
     render(<BackupBrowsePage />);
-    const select = (await screen.findByLabelText('Moment')) as HTMLSelectElement;
+    const select = (await screen.findByLabelText('Restore point')) as HTMLSelectElement;
     await waitFor(() => expect(within(select).getAllByRole('option').length).toBe(3));
     const options = within(select).getAllByRole('option').map((o) => o.textContent);
     expect(options[0]).toMatch(/Latest copy/);
     expect(options[1]).toBe('2026-10-22 09:15:00 UTC');
     fireEvent.change(select, { target: { value: '2026-10-21T09:15:00Z' } });
-    expect(mockReplace).toHaveBeenCalledWith('/vpc-file-pools/backups/nightly/browse?claim=apps%2Fdb&moment=2026-10-21T09%3A15%3A00Z');
+    expect(mockReplace).toHaveBeenCalledWith('/vpc-file-pools/backups/nightly/browse?claim=apps%2Fdb&restorePoint=2026-10-21T09%3A15%3A00Z');
   });
 
   it('warns that the latest copy may change while you look', async () => {
@@ -516,7 +516,7 @@ describe('BackupBrowsePage source switch', () => {
     expect(await screen.findByText(/These files are read from the copy in COS/)).toBeTruthy();
     expect(screen.getByText(/up to 30 seconds/)).toBeTruthy();
     expect(screen.getByText(/only the newest/)).toBeTruthy();
-    const select = screen.getByLabelText('Moment') as HTMLSelectElement;
+    const select = screen.getByLabelText('Restore point') as HTMLSelectElement;
     await waitFor(() => expect(listMoments).toHaveBeenCalled());
     expect(within(select).getAllByRole('option').length).toBe(1);
     expect(select.disabled).toBe(true);

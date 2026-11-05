@@ -6,13 +6,13 @@ import { VMDetailView } from '../../utils/failover-helpers';
 interface Props {
   detail: VMDetailView;
   onBack: () => void;
-  /** Called with the moment the operator chose. */
+  /** Called with the restore point the operator chose. */
   onFailOver: (moment: string) => void;
   isDisabled: boolean;
   disabledReason?: string;
 }
 
-/** One VM: its disks, and the moments it can show, newest first. The operator chooses a moment and fails over this VM only. */
+/** One VM: its disks, and the restore points it can show, newest first. The operator chooses a restore point and fails over this VM only. */
 const RecoveryVMDetail: React.FC<Props> = ({ detail, onBack, onFailOver, isDisabled, disabledReason }) => {
   const current = detail.moments.find((m) => m.isCurrent) || detail.moments[0];
   const [moment, setMoment] = useState(current?.iso || '');
@@ -59,10 +59,10 @@ const RecoveryVMDetail: React.FC<Props> = ({ detail, onBack, onFailOver, isDisab
       </StackItem>
       <StackItem>
         <Card>
-          <CardTitle>Moments to fail over to</CardTitle>
+          <CardTitle>Restore points to fail over to</CardTitle>
           <CardBody>
             <p>
-              Choose the moment the VM will show. Every disk of the VM can show these moments. Newest first. The moment marked &quot;in the plan&quot; is the one the plan on screen shows.
+              Choose the restore point the VM will show. Every disk of the VM can show these restore points. Newest first. The restore point marked &quot;in the plan&quot; is the one the plan on screen shows.
             </p>
             {detail.moments.map((m) => (
               <Radio

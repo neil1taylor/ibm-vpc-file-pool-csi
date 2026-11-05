@@ -206,7 +206,7 @@ const RestoreFilesDialog: React.FC<Props> = ({ policy, namespace, pvc, moment, s
       )}
       {!moment && !guest && (
         <Alert variant="warning" isInline title="You chose the Latest copy">
-          The next backup replaces files in it one at a time, so a file can change while it is copied. Go back and choose a moment to restore a copy
+          The next backup replaces files in it one at a time, so a file can change while it is copied. Go back and choose a restore point to restore a copy
           that stays as it is.
         </Alert>
       )}
@@ -349,7 +349,7 @@ const RestoreFilesDialog: React.FC<Props> = ({ policy, namespace, pvc, moment, s
               </DescriptionListGroup>
             )}
             <DescriptionListGroup>
-              <DescriptionListTerm>Moment</DescriptionListTerm>
+              <DescriptionListTerm>Restore point</DescriptionListTerm>
               <DescriptionListDescription>
                 {r.latest || !r.restoredMoment ? 'Latest copy' : momentLabel(r.restoredMoment)}
               </DescriptionListDescription>

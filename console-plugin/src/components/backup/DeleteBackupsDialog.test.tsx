@@ -137,7 +137,7 @@ describe('DeleteBackupsDialog measure step', () => {
 
   it('shows the size and the number of moments, and cleans up the measure Job', async () => {
     show();
-    expect(await screen.findByText(/12\.0 GiB, 9 moments/)).toBeTruthy();
+    expect(await screen.findByText(/12\.0 GiB, 9 restore points/)).toBeTruthy();
     await waitFor(() => expect(k8sDelete).toHaveBeenCalledTimes(3));
     expect((k8sDelete as jest.Mock).mock.calls.map((c) => c[0].model.kind)).toEqual(['Job', 'PersistentVolumeClaim', 'PersistentVolume']);
   });
@@ -173,7 +173,7 @@ describe('DeleteBackupsDialog measure step', () => {
 describe('DeleteBackupsDialog delete step', () => {
   const reachConfirm = async () => {
     show();
-    await screen.findByText(/12\.0 GiB, 9 moments/);
+    await screen.findByText(/12\.0 GiB, 9 restore points/);
     (k8sCreate as jest.Mock).mockClear();
   };
   const dialog = () => screen.getByRole('dialog');

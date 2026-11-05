@@ -259,7 +259,7 @@ const BackupRestorePage: React.FC = () => {
           <Radio
             id="restore-at-moment"
             name="restore-when"
-            label="At a moment"
+            label="At a restore point"
             isChecked={useMoment}
             isDisabled={locked}
             onChange={() => setUseMoment(true)}
@@ -270,7 +270,7 @@ const BackupRestorePage: React.FC = () => {
           <StackItem>
             <FieldPopover
               fieldId="restore-moment"
-              label="Moment"
+              label="Restore point"
               description="Your time zone. The restore uses the newest backup at or before this time, and the page tells you which one it used."
               isRequired
             >

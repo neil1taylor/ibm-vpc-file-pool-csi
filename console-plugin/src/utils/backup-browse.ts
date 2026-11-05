@@ -141,9 +141,9 @@ export function formatSize(bytes: number): string {
 export const entryText = (e: BrowseEntry): string => escapeName(fromB64(e.name));
 export const linkText = (e: BrowseEntry): string => (e.link ? escapeName(fromB64(e.link)) : '');
 
-// ── Moments ──
+// ── Restore points ──
 
-/** A moment folder is named like 20261022T091500Z. Returns the time as RFC 3339, or undefined if it is not a moment. */
+/** A restore point folder is named like 20261022T091500Z. Returns the time as RFC 3339, or undefined if it is not a restore point. */
 export function momentToISO(folder: string): string | undefined {
   const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(folder);
   if (!m) return undefined;
@@ -159,11 +159,11 @@ export function momentLabel(iso: string): string {
 
 // ── Links ──
 
-/** The file browser page of a claim ("namespace/name") in a policy, at a moment (RFC 3339) or the latest copy. */
+/** The file browser page of a claim ("namespace/name") in a policy, at a restore point (RFC 3339) or the latest copy. */
 export function browsePath(policy: string, claim: string, moment?: string, source?: BrowseSource): string {
   const query = new URLSearchParams();
   query.set('claim', claim);
-  if (moment) query.set('moment', moment);
+  if (moment) query.set('restorePoint', moment);
   if (source) query.set('source', source);
   return `${ROUTES.BACKUP_BROWSE.replace(':name', encodeURIComponent(policy))}?${query.toString()}`;
 }
@@ -176,7 +176,7 @@ export function parseBrowseQuery(search: string): { namespace: string; pvc: stri
   if (i <= 0 || i === claim.length - 1) return none;
   const asked = q.get('source');
   const source = asked === 'local' || asked === 'cos' ? asked : '';
-  return { namespace: claim.slice(0, i), pvc: claim.slice(i + 1), moment: q.get('moment') || '', source };
+  return { namespace: claim.slice(0, i), pvc: claim.slice(i + 1), moment: q.get('restorePoint') || q.get('moment') || '', source };
 }
 
 /** Where the files of a backup are read from: the snapshot pool, or the bucket of the policy's export block. */
@@ -230,7 +230,7 @@ export interface SessionRequest {
   policy: string;
   namespace: string;
   pvc: string;
-  /** RFC 3339. Left out for the latest copy. */
+  /** RFC 3339. Left out for the latest copy. Wire name: the gateway request key stays `moment` (pkg/gateway/api.go). */
   moment?: string;
   /** Left out, the gateway reads COS only when the backup is only there. */
   source?: BrowseSource;
@@ -249,6 +249,7 @@ export interface Session {
 
 export interface SessionInfo {
   source?: BrowseSource;
+  /** Wire name: the gateway reply key stays `moment`. */
   moment?: string;
   latest?: boolean;
   guest?: boolean;
@@ -304,6 +305,7 @@ export const listFolder = (session: string, path: string[], cursor?: string): Pr
 
 export const getInfo = (session: string): Promise<SessionInfo> => call<SessionInfo>('POST', `${sessionPath(session)}/info`, {});
 
+// Wire name: the gateway path and reply key stay `moments` (pkg/gateway), so versions can talk during an upgrade.
 export const listMoments = async (session: string): Promise<string[]> =>
   (await call<{ moments: string[] }>('POST', `${sessionPath(session)}/moments`, {})).moments || [];
 
