@@ -283,7 +283,7 @@ Alert when the copy in COS is late, using twice the export schedule as the limit
   annotations:
     summary: "Backup policy {{ $labels.policy }} has not exported to COS for over 12 hours"
 
-- alert: ExportMomentWaiting
+- alert: ExportRestorePointWaiting
   expr: vpc_file_pool_backup_export_oldest_unexported_age_seconds > 12 * 3600
   for: 15m
   annotations:
@@ -352,7 +352,7 @@ The chart ships these alerts as a `PrometheusRule` (on by default; it is made on
 | `VPCFilePoolSnapshotFailures` | warning | Snapshot operations fail |
 | `VPCFilePoolReplicationLagHigh` / `ReplicationFailing` | warning / critical | Lag over 2 h, or more than 3 failures in a row |
 | `VPCFilePoolBackupLate` | warning | A volume has no backup for over 12 h |
-| `VPCFilePoolExportLate` / `ExportMomentWaiting` | warning | The COS copy is over 12 h late |
+| `VPCFilePoolExportLate` / `ExportRestorePointWaiting` | warning | The COS copy is over 12 h late |
 | `VPCFilePoolSnapshotPoolNearlyFull` / `Full` | warning / critical | A snapshot pool share is above 75% / 85% |
 
 **Per-share NFS latency and IOPS** come from the node agents, which read the NFS client counters of each staged share (the `vpc_file_pool_share_nfs_*` metrics). The two alerts for them judge only a share that has real traffic.
