@@ -17,6 +17,10 @@ Make a snapshot of a volume in the OpenShift console, change the volume, and res
 - The console plugin is on. In the chart it is `consolePlugin.enabled` (the default). In the console, the menu **Storage** shows **IBM VPC File Pools**. See [Part 8](TUTORIAL-08-MIGRATION-AND-CONSOLE.md) if it does not.
 
 ![The Storage menu lists IBM VPC File Pools](images/tutorial-14-storage-menu.png)
+
+The page opens on the **Overview** tab. The other tabs are **Pools**, **SubVolumes**, **Snapshots**, **Replication**, **Backups**, **Monitoring** and **PoolBench**.
+
+![The IBM VPC File Pools page, Overview tab](images/tutorial-14-pools-overview.png)
 - A pool and a StorageClass, and a VolumeSnapshotClass for the driver (the chart makes `ibm-vpc-file-pool`). See [Part 1](TUTORIAL-01-POOL-CREATION.md).
 - `oc`, to write and read files. You can do those steps in the console terminal instead.
 
