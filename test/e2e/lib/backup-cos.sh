@@ -106,7 +106,7 @@ cos_volumes_exported() {
         '[.status.volumes[]? | select((.exportedTime // "") != "" and (.exportedBytes // 0) > 0 and (.exportError // "") == "")] | length == $n' >/dev/null
 }
 
-# cos_moment_count LISTING VOLUME — how many moments `kubectl backup cos-list` printed for VOLUME.
+# cos_moment_count LISTING VOLUME — how many restore points `kubectl backup cos-list` printed for VOLUME.
 cos_moment_count() {
     echo "$1" | awk -v v="$2" '$1 == v && $2 ~ /^[0-9]{4}-[0-9]{2}-[0-9]{2}T/ {n++} END {print n + 0}'
 }
@@ -223,8 +223,8 @@ cos_exports_ready() {
 }
 
 # cos_exports_listed — does `kubectl backup cos-list --volume V` show at least one export of each of
-# the three volumes? One export is enough for "two moments": an export holds the newest copy and the
-# earlier moments as undo files, and cos-list prints one line for each export. A pod volume that
+# the three volumes? One export is enough for "two restore points": an export holds the newest copy and the
+# earlier restore points as undo files, and cos-list prints one line for each export. A pod volume that
 # does not change after its first backup is exported once. The output and exit status of each
 # listing go to COS_LIST_REPORT, so a failure can be read without a rerun.
 cos_exports_listed() {
@@ -272,7 +272,7 @@ cos_source_flags() {
 # cos_restore PV TO SIZE_GB [MOMENT]
 cos_restore() {
     local moment=()
-    [ -z "${4:-}" ] || moment=(--moment "$4")
+    [ -z "${4:-}" ] || moment=(--restore-point "$4")
     # The caller may run under `|| rc=$?`, where set -e is off: stop here, not three steps later.
     "$BACKUP_BIN" restore --from-cos "${COS_SOURCE_FLAGS[@]}" --volume "$1" --to "$2" --size-gb "$3" \
         --storage-class "$COSR_POOL" --skip-marker-cleanup ${moment[@]+"${moment[@]}"} --wait --timeout 1h ||
@@ -345,7 +345,7 @@ cos_restore_emergency() {
     keyfile=$(cos_emergency_key_file) || fail "cannot make the emergency key file (see the message above)"
     "$BACKUP_BIN" restore --from-cos --policy "$POLICY" --bucket "$COS_BUCKET" --endpoint "$COS_ENDPOINT" --prefix "$COS_PREFIX" \
         --credentials-secret "$COS_CRED_SECRET" --driver-namespace "$DRIVER_NS" --backup-key-file "$keyfile" \
-        --volume "$1" --to "$2" --size-gb "$3" --storage-class "$COSR_POOL" --skip-marker-cleanup --moment "$4" --wait --timeout 1h ||
+        --volume "$1" --to "$2" --size-gb "$3" --storage-class "$COSR_POOL" --skip-marker-cleanup --restore-point "$4" --wait --timeout 1h ||
         fail "the COS restore of $1 with the emergency key failed"
 }
 
@@ -388,7 +388,7 @@ cos_restore_phase() {
     check_files cos-check-1 files-c1 manifest-A.sha256 'test ! -e /data/b'
     log "PASS: COS restore, $label: the pod volume restored at $first_files holds the first content"
 
-    log "COS restore, $label: pod volume at the latest moment (the changed content)"
+    log "COS restore, $label: pod volume at the latest restore point (the changed content)"
     cos_restore "$COS_PV_FILES" "$NS/files-c2" 1
     check_files cos-check-2 files-c2 manifest-B.sha256 'test -e /data/b'
     log "PASS: COS restore, $label: the latest restore holds the changed content"
@@ -415,11 +415,11 @@ cos_phase() {
     log "PASS: COS export: all three volumes have exportedTime and exportedBytes above 0"
 
     # VM disks export every ~5 minutes, so 30 minutes is plenty. If this check fails, say why and go on:
-    # the restores below pick the newest export when no export is at or after the moment.
+    # the restores below pick the newest export when no export is at or after the restore point.
     log "waiting for an export of every volume in the bucket (kubectl backup cos-list)"
     if cos_wait_listed "${COS_LIST_TIMEOUT:-1800}"; then
         echo "$COS_LIST_REPORT"
-        log "PASS: COS export: kubectl backup cos-list shows an export of each of the three volumes (each export holds the earlier moments as undo files)"
+        log "PASS: COS export: kubectl backup cos-list shows an export of each of the three volumes (each export holds the earlier restore points as undo files)"
     else
         cos_list_diagnose
         log "FAIL: COS export: kubectl backup cos-list does not show an export of each volume; going on with the restore checks"

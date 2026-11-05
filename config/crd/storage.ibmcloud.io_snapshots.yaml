@@ -115,7 +115,7 @@ spec:
               copyID:
                 description: |-
                   CopyID names the QEMU copy that made this snapshot. Snapshots of the
-                  disks of one VM that show the same moment have the same CopyID.
+                  disks of one VM that show the same restore point have the same CopyID.
                 type: string
               copyMoment:
                 description: |-

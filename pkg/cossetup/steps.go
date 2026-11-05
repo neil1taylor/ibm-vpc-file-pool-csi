@@ -638,13 +638,13 @@ func (r *run) hmac(ctx context.Context) error {
 	case hmacExists && !r.hmacKnown && statErr != nil:
 		return fmt.Errorf("the HMAC key %s exists, but IBM Cloud shows its secret only when the key is made, and it cannot be shown again. This command did not make another. To get a new one, delete the HMAC key (ibmcloud resource service-key-delete %s) and run this command again", r.hmacName(), r.hmacName())
 	case !hmacExists && statErr == nil:
-		return fmt.Errorf("the key file %s exists, but the HMAC key %s does not. A new HMAC key needs a new file, because the secret must be saved the moment it is made and a file is never replaced: move %s away, then run this command again", r.o.KeyFile, r.hmacName(), r.o.KeyFile)
+		return fmt.Errorf("the key file %s exists, but the HMAC key %s does not. A new HMAC key needs a new file, because the secret must be saved as soon as it is made and a file is never replaced: move %s away, then run this command again", r.o.KeyFile, r.hmacName(), r.o.KeyFile)
 	}
 	var before map[string]bool
 	body := map[string]any{"name": r.hmacName(), "source": r.instGUID, "role": "Writer",
 		"parameters": map[string]any{"HMAC": true, "serviceid_crn": r.sidCRN}}
 	made := false
-	err := r.step("HMAC key "+r.hmacName()+" (the secret goes to the key file the moment the key is made, never to the screen; IBM Cloud also adds an instance-wide policy for the key, and this command removes that one policy)", hmacExists, pretty(body), func() error {
+	err := r.step("HMAC key "+r.hmacName()+" (the secret goes to the key file as soon as the key is made, never to the screen; IBM Cloud also adds an instance-wide policy for the key, and this command removes that one policy)", hmacExists, pretty(body), func() error {
 		pols, err := r.subjectPolicies(ctx)
 		if err != nil {
 			return err

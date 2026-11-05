@@ -462,7 +462,7 @@ func (m *Manager) takeInstant(ctx context.Context, snap *v1alpha1.Snapshot, sv *
 		return err
 	}
 	klog.V(2).InfoS("Took an instant snapshot", "snapshot", snap.Name, "vm", klog.KRef(pod.Namespace, vmi),
-		"volume", plan.volume, "file", newFile, "moment", snap.Status.CreationTime.Time, "consistency", snap.Status.Consistency)
+		"volume", plan.volume, "file", newFile, "restorePoint", snap.Status.CreationTime.Time, "consistency", snap.Status.Consistency)
 	return nil
 }
 

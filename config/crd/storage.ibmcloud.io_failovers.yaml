@@ -99,8 +99,8 @@ spec:
                 type: string
               rewindTo:
                 description: |-
-                  RewindTo limits the moment of each running VM to the newest one at or
-                  before it. Unset means the newest moment all disks of a VM share.
+                  RewindTo limits the restore point of each running VM to the newest one at or
+                  before it. Unset means the newest restore point all disks of a VM share.
                 format: date-time
                 type: string
               source:
@@ -174,7 +174,8 @@ spec:
                   cut to fit the Job's termination message.
                 type: boolean
               rpo:
-                description: RPO is the age of the oldest moment that will be shown.
+                description: RPO is the age of the oldest restore point that will
+                  be shown.
                 type: string
               source:
                 description: Source is the claim that was read (spec.source, or the
@@ -185,8 +186,8 @@ spec:
                 format: date-time
                 type: string
               vms:
-                description: VMs lists each running VM found, with the moment it will
-                  show.
+                description: VMs lists each running VM found, with the restore point
+                  it will show.
                 items:
                   description: FailoverVM is one running VM found on the copy.
                   properties:
@@ -197,7 +198,7 @@ spec:
                         properties:
                           rewind:
                             description: |-
-                              Rewind is true if the disk must be rewound to the VM's moment (it
+                              Rewind is true if the disk must be rewound to the VM's restore point (it
                               copies the whole disk); false if it is used in place.
                             type: boolean
                           subVolume:
@@ -254,7 +255,7 @@ spec:
                       format: int64
                       type: integer
                     lastSync:
-                      description: LastSync is the moment the volume shows.
+                      description: LastSync is the restore point the volume shows.
                       format: date-time
                       type: string
                     permissions:

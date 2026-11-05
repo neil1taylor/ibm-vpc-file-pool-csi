@@ -113,7 +113,7 @@ if [ -f "$OUT/01.cleanup" ]; then fail "no stage runs on the wrong cluster"; els
 # Helpers that read the log of an end-to-end script (used by stage 18).
 source "$HERE/lib.sh"
 E2ELOG="$WORK/e2e.log"
-printf '[10:00:01] making pools\n[10:05:00] PASS: three volumes backed up, two moments each\n[10:09:00] FAIL: the root disk backup is not FileSystemConsistent\n[10:09:01] FAIL: a later one\n' >"$E2ELOG"
+printf '[10:00:01] making pools\n[10:05:00] PASS: three volumes backed up, two restore points each\n[10:09:00] FAIL: the root disk backup is not FileSystemConsistent\n[10:09:01] FAIL: a later one\n' >"$E2ELOG"
 if [ "$(first_fail_line "$E2ELOG")" = "FAIL: the root disk backup is not FileSystemConsistent" ]; then
     pass "first_fail_line prints the first FAIL line without the time"
 else

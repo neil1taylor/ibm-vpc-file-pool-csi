@@ -240,7 +240,7 @@ export:
 			delete(state.listed, v.SubVolumeName)
 			state.active = ""
 			bc.releaseExportHold(ctx, bp.Name, v.SubVolumeName)
-			klog.V(2).InfoS("Exported a backup to COS", "policy", bp.Name, "volume", v.SubVolumeName, "moment", out.Moment, "bytes", out.Bytes)
+			klog.V(2).InfoS("Exported a backup to COS", "policy", bp.Name, "volume", v.SubVolumeName, "restorePoint", out.Moment, "bytes", out.Bytes)
 		}
 	}
 	bc.releaseStaleExportHolds(ctx, bp.Name, state.active)

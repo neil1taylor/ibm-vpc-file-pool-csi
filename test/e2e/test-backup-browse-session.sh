@@ -5,7 +5,7 @@
 # the two), then makes BackupBrowse objects by hand, as the gateway will, and
 # checks: the helper starts and answers over TLS with the session token and the
 # pinned certificate; the latest session reads the changed content and a session
-# at the first moment reads the first content; the helper pod has no privileges,
+# at the first restore point reads the first content; the helper pod has no privileges,
 # mounts read-only, and is closed to other pods by the NetworkPolicy; closing a
 # session, and deleting one, leaves no Job, pod, claim, volume or Secret.
 #
@@ -134,11 +134,11 @@ log "first backup at $FIRST"
 oc exec -n "$NS" writer -- sh -c 'echo second > /data/v.txt && echo two > /data/docs/b.txt'
 two_moments() { [ "$(vol '.restorePoints // 0')" -ge 1 ] && [ "$(vol '.lastBackupTime')" != "$FIRST" ]; }
 wait_until 1500 "a second backup" two_moments
-pass "two backup moments exist (first $FIRST)"
+pass "two backup restore points exist (first $FIRST)"
 
-open() { # open <name> [moment]
+open() { # open <name> [restore point]
     local moment=""
-    [ -n "${2:-}" ] && moment=", moment: $2"
+    [ -n "${2:-}" ] && moment=", restorePoint: $2"
     oc apply -f - <<YAML
 apiVersion: storage.ibmcloud.io/v1alpha1
 kind: BackupBrowse
@@ -152,7 +152,7 @@ is_ready() { [ "$(phase "$1")" = Ready ]; }
 open "$PREFIX-latest"
 open "$PREFIX-first" "$FIRST"
 wait_until 300 "the latest session" is_ready "$PREFIX-latest"
-wait_until 300 "the first-moment session" is_ready "$PREFIX-first"
+wait_until 300 "the first-restore-point session" is_ready "$PREFIX-first"
 pass "both sessions are Ready"
 
 uid_of() { oc get backupbrowse "$1" -o jsonpath='{.metadata.uid}'; }
@@ -179,11 +179,11 @@ read_file() { # read_file <session> <port> <name...>
     talk "$s" "$p" /v1/file "{\"path\":[$(for n in "$@"; do printf '"%s",' "$(b64 "$n")"; done | sed 's/,$//')],\"length\":-1}"
 }
 [ "$(read_file "$PREFIX-latest" 18443 v.txt)" = second ] && pass "the latest session reads the changed file" || fail "latest v.txt is not 'second'"
-[ "$(read_file "$PREFIX-first" 18444 v.txt)" = first ] && pass "the first-moment session reads the first content" || fail "first-moment v.txt is not 'first'"
-[ "$(read_file "$PREFIX-first" 18444 docs b.txt | jq -r .code 2>/dev/null)" = not_found ] && pass "a file made after the moment is not in it" || fail "b.txt is in the first moment"
+[ "$(read_file "$PREFIX-first" 18444 v.txt)" = first ] && pass "the first-restore-point session reads the first content" || fail "first-restore-point v.txt is not 'first'"
+[ "$(read_file "$PREFIX-first" 18444 docs b.txt | jq -r .code 2>/dev/null)" = not_found ] && pass "a file made after the restore point is not in it" || fail "b.txt is in the first restore point"
 [ "$(read_file "$PREFIX-latest" 18443 docs b.txt)" = two ] && pass "the latest session reads a new file" || fail "latest docs/b.txt missing"
 talk "$PREFIX-latest" 18443 /v1/info '{}' | jq -e '.latest == true' >/dev/null && pass "info says latest" || fail "info of the latest session"
-talk "$PREFIX-first" 18444 /v1/info '{}' | jq -e '.latest == false and (.moment | length) > 0' >/dev/null && pass "info names the older moment" || fail "info of the first-moment session"
+talk "$PREFIX-first" 18444 /v1/info '{}' | jq -e '.latest == false and (.moment | length) > 0' >/dev/null && pass "info names the older restore point" || fail "info of the first-restore-point session"
 curl -s --cacert "$WORK/$PREFIX-latest.crt" --resolve "browse-session:18443:127.0.0.1" -H "Authorization: Bearer wrong-wrong-wrong-wrong-wrong-12345" \
     -X POST https://browse-session:18443/v1/list -d '{"path":[]}' | jq -e '.code == "unauthorized"' >/dev/null && pass "a wrong token is refused" || fail "a wrong token was accepted"
 if curl -s --cacert "$WORK/$PREFIX-first.crt" --resolve "browse-session:18443:127.0.0.1" -X POST https://browse-session:18443/v1/list -d '{}' >/dev/null 2>&1; then
@@ -278,11 +278,11 @@ mkdir "$WORK/got"
 bk "$ALICE" get --policy "$POLICY" --pvc "$NS/data" /v.txt --out "$WORK/got" >/dev/null
 [ "$(cat "$WORK/got/v.txt")" = second ] && pass "kubectl backup get downloads the latest file" || fail "got v.txt is not 'second'"
 mkdir "$WORK/got1"
-bk "$ALICE" get --policy "$POLICY" --pvc "$NS/data" --moment "$FIRST" /v.txt --out "$WORK/got1" >/dev/null
-[ "$(cat "$WORK/got1/v.txt")" = first ] && pass "kubectl backup get --moment downloads the older content" || fail "moment v.txt is not 'first'"
+bk "$ALICE" get --policy "$POLICY" --pvc "$NS/data" --restore-point "$FIRST" /v.txt --out "$WORK/got1" >/dev/null
+[ "$(cat "$WORK/got1/v.txt")" = first ] && pass "kubectl backup get --restore-point downloads the older content" || fail "restore point v.txt is not 'first'"
 bk "$ALICE" get --policy "$POLICY" --pvc "$NS/data" /docs --extract "$WORK/tree" >/dev/null
 [ "$(cat "$WORK/tree/docs/a.txt")" = one ] && pass "a folder is downloaded and unpacked" || fail "docs/a.txt missing"
-bk "$ALICE" ls --policy "$POLICY" --pvc "$NS/data" --moments | grep -q "^20" && pass "the moments can be listed" || fail "no moments listed"
+bk "$ALICE" ls --policy "$POLICY" --pvc "$NS/data" --restore-points | grep -q "^20" && pass "the restore points can be listed" || fail "no restore points listed"
 
 expect_forbidden() { # expect_forbidden <description> <kubeconfig>
     local out

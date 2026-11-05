@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 06-vm-snapshots — A snapshot of a running VM that writes nonstop is made with
 # a QEMU copy (not a file copy), says FileSystemConsistent, and names its
-# moment. A claim restored from it boots a VM with no file system errors, and
+# restore point. A claim restored from it boots a VM with no file system errors, and
 # every file the writer logged is on the disk with the logged checksum.
 # test/e2e/test-vm-snapshot.sh does the work and checks all of that.
 # A second check takes a KubeVirt VirtualMachineSnapshot of a running VM with two

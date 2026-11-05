@@ -233,15 +233,15 @@ spec:
             summary: "The copy of backups in COS is late"
             description: >-
               Backup policy {{`{{ $labels.policy }}`}} has not exported to COS for {{`{{ $value | humanizeDuration }}`}}.
-        - alert: VPCFilePoolExportMomentWaiting
+        - alert: VPCFilePoolExportRestorePointWaiting
           expr: vpc_file_pool_backup_export_oldest_unexported_age_seconds > {{ $a.exportLateSeconds }}
           for: 15m
           labels:
             severity: warning
           annotations:
-            summary: "A backup moment waits to go to COS"
+            summary: "A backup restore point waits to go to COS"
             description: >-
-              Backup policy {{`{{ $labels.policy }}`}} has a backup moment that has waited {{`{{ $value | humanizeDuration }}`}}.
+              Backup policy {{`{{ $labels.policy }}`}} has a backup restore point that has waited {{`{{ $value | humanizeDuration }}`}}.
         - alert: VPCFilePoolSnapshotPoolNearlyFull
           expr: |
             vpc_file_pool_backup_snapshot_pool_used_percent > {{ $a.snapshotPoolWarning }}

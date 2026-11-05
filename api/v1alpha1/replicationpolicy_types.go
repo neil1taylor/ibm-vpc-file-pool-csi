@@ -184,7 +184,7 @@ type ReplicationPolicyStatus struct {
 	// +optional
 	SubVolumeStatuses []SubVolumeReplicationStatus `json:"subVolumeStatuses,omitempty"`
 
-	// VMs lists, for each running VM in the policy, the moments the whole VM
+	// VMs lists, for each running VM in the policy, the restore points the whole VM
 	// can be recovered to. It is the source cluster's view of the destination
 	// and can be a few minutes old; a Failover plan is the exact view.
 	// +optional
@@ -251,7 +251,7 @@ type SubVolumeReplicationStatus struct {
 	VMChangeList string `json:"vmChangeList,omitempty"`
 
 	// RestorePoints is how many earlier copies of a running VM's disk the
-	// destination keeps, and OldestRestorePoint the moment of the oldest.
+	// destination keeps, and OldestRestorePoint the time of the oldest.
 	// +optional
 	RestorePoints int32 `json:"restorePoints,omitempty"`
 	// +optional

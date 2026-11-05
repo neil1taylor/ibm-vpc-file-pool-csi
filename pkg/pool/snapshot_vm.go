@@ -948,7 +948,7 @@ func (m *Manager) watchVMSnapshotApply(ctx context.Context, vm *vmSnapshots, sna
 	snap.Status.VMCopyRetryAfter = nil
 	snap.Status.Message = ""
 	m.saveSnapshotStatus(ctx, snap)
-	klog.V(2).InfoS("VM snapshot ready", "snapshot", snap.Name, "moment", moment.Time, "consistency", snap.Status.Consistency)
+	klog.V(2).InfoS("VM snapshot ready", "snapshot", snap.Name, "restorePoint", moment.Time, "consistency", snap.Status.Consistency)
 }
 
 // releaseVMSnapshotCopy drops what QEMU holds for the copy and deletes the

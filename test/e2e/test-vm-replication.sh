@@ -8,8 +8,8 @@
 #   - the copy VM boots and its guest agent connects
 #   - the kernel log has no XFS errors
 #   - every file in the writer's log (root disk) is on the data disk with the
-#     logged checksum, so both disks show the same moment
-#   - the policy status names the copy moment and its consistency
+#     logged checksum, so both disks show the same restore point
+#   - the policy status names the copy restore point and its consistency
 #   - the next scheduled copy changes far less than the disk size, and both
 #     disks then have a restore point at the destination
 #
@@ -570,8 +570,8 @@ fi
 copies_done() {
     local st
     st=$(oc get replicationpolicy "$POLICY" -o json)
-    echo "$st" | jq -c '[.status.subVolumeStatuses[]? | {sv: .subVolumeName[0:12], phase: .vmCopy.phase, moment: .copyMoment, err: .lastError}]'
-    [ "$(echo "$st" | jq '[.status.subVolumeStatuses[]? | select(.copyMoment != null and .vmCopy == null)] | length')" = 2 ]
+    echo "$st" | jq -c '[.status.subVolumeStatuses[]? | {sv: .subVolumeName[0:12], phase: .vmCopy.phase, restorePoint: .copyRestorePoint, err: .lastError}]'
+    [ "$(echo "$st" | jq '[.status.subVolumeStatuses[]? | select(.copyRestorePoint != null and .vmCopy == null)] | length')" = 2 ]
 }
 log "waiting for both disks to have a good copy"
 start=$SECONDS
@@ -580,10 +580,10 @@ log "copy took $((SECONDS - start))s"
 
 # The next scheduled copy holds only changed blocks, and the destination
 # keeps the first copy as a restore point.
-first=$(oc get replicationpolicy "$POLICY" -o jsonpath='{.status.subVolumeStatuses[0].copyMoment}')
+first=$(oc get replicationpolicy "$POLICY" -o jsonpath='{.status.subVolumeStatuses[0].copyRestorePoint}')
 second_done() {
     copies_done >/dev/null &&
-        [ "$(oc get replicationpolicy "$POLICY" -o json | jq --arg f "$first" '[.status.subVolumeStatuses[] | select(.copyMoment != $f)] | length')" = 2 ]
+        [ "$(oc get replicationpolicy "$POLICY" -o json | jq --arg f "$first" '[.status.subVolumeStatuses[] | select(.copyRestorePoint != $f)] | length')" = 2 ]
 }
 log "waiting for the change copy (schedule $SCHEDULE)"
 start=$SECONDS
@@ -599,11 +599,11 @@ root_bytes=$(echo "$status" | jq --arg sv "$root_pv" '.status.subVolumeStatuses[
 log "change copy changed $root_bytes bytes on the root disk; both disks have a restore point"
 
 status=$(oc get replicationpolicy "$POLICY" -o json)
-moments=$(echo "$status" | jq -r '[.status.subVolumeStatuses[].copyMoment] | unique | length')
-[ "$moments" = 1 ] || fail "the two disks show different moments"
-moment=$(echo "$status" | jq -r '.status.subVolumeStatuses[0].copyMoment')
+moments=$(echo "$status" | jq -r '[.status.subVolumeStatuses[].copyRestorePoint] | unique | length')
+[ "$moments" = 1 ] || fail "the two disks show different restore points"
+moment=$(echo "$status" | jq -r '.status.subVolumeStatuses[0].copyRestorePoint')
 consistency=$(echo "$status" | jq -r '.status.subVolumeStatuses[0].consistency')
-log "copy moment $moment, $consistency"
+log "copy restore point $moment, $consistency"
 [ "$consistency" = FileSystemConsistent ] || log "WARNING: copy is $consistency: $(echo "$status" | jq -r '.status.subVolumeStatuses[0].consistencyReason')"
 
 log "making far-site volumes"
@@ -633,7 +633,7 @@ spec:
 YAML
 done
 
-# check_copy_windows <vm> <moment>: no NTFS errors since boot, and every file in
+# check_copy_windows <vm> <restore point>: no NTFS errors since boot, and every file in
 # the writer's log on C: is on D: with the logged checksum.
 check_copy_windows() {
     local vm=$1 at=$2 epoch result
@@ -662,10 +662,10 @@ if ($badfiles -eq 0 -and $bad.Count -eq 0) { "CHECKSUMS_OK" }
 ')
     echo "$result"
     echo "$result" | grep -q CHECKSUMS_OK || fail "the Windows copy $vm has file system errors or files that do not match the log"
-    log "PASS: $vm booted; $(echo "$result" | grep -o 'LOGGED=.*') (moment $at), all checksums match"
+    log "PASS: $vm booted; $(echo "$result" | grep -o 'LOGGED=.*') (restore point $at), all checksums match"
 }
 
-# check_copy <vmi> <moment>: the VM booted from far-site disks shows no file
+# check_copy <vmi> <restore point>: the VM booted from far-site disks shows no file
 # system errors, and every file in the writer's log on the root disk is on the
 # data disk with the logged checksum.
 check_copy() {
@@ -685,17 +685,17 @@ check_copy() {
 # failover_check rewinds both disks to the first copy with the failover tool,
 # run in the receiver pod where the share is mounted, and boots from them.
 failover_check() {
-    local bin epoch pod=deploy/$RECV d pv sub moments
+    local bin epoch pod=deploy/$RECV d pv sub restore points
     bin=$(mktemp)
     log "building kubectl-failover and putting it in the receiver pod"
     (cd "$(dirname "$0")/../.." && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o "$bin" ./cmd/failover/)
     onfar oc exec -i -n kube-system "$pod" -- sh -c 'cat > /tmp/kubectl-failover && chmod +x /tmp/kubectl-failover' < "$bin"
 
-    log "failover: moments both disks can show"
-    moments=$(onfar oc exec -n kube-system "$pod" -- /tmp/kubectl-failover plan --nfs-mount-path /data/repl --list-moments)
+    log "failover: restore points both disks can show"
+    moments=$(onfar oc exec -n kube-system "$pod" -- /tmp/kubectl-failover plan --nfs-mount-path /data/repl --list-restore-points)
     echo "$moments"
-    echo "$moments" | grep -q "$moment" || fail "the latest moment $moment is not listed"
-    echo "$moments" | grep -q "$first" || fail "the first copy moment $first is not listed"
+    echo "$moments" | grep -q "$moment" || fail "the latest restore point $moment is not listed"
+    echo "$moments" | grep -q "$first" || fail "the first copy restore point $first is not listed"
 
     log "failover: rewinding both disks to $first"
     onfar oc exec -n kube-system "$pod" -- /tmp/kubectl-failover execute --nfs-mount-path /data/repl --prepare-only --rewind-to "$first"

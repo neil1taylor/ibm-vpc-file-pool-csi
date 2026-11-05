@@ -37,7 +37,7 @@ func ChooseBackup(snaps []Snapshot, p Params) (BackupPick, error) {
 	idx := exportFor(exports, p.At)
 	e := exports[idx]
 	if !p.At.IsZero() && p.At.Before(e.moment) {
-		return BackupPick{}, &ReadError{Msg: "the files inside a VM disk can be browsed in COS only at the moment of an export, not at an older moment in it"}
+		return BackupPick{}, &ReadError{Msg: "the files inside a VM disk can be browsed in COS only at the restore point of an export, not at an older restore point in it"}
 	}
 	if !ValidOID(e.backup.ID) {
 		return BackupPick{}, &ReadError{Msg: "the backup holds a damaged entry"}

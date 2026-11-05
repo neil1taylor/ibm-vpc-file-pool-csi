@@ -102,7 +102,7 @@ func fetchSavedList(ctx context.Context, client *http.Client, diskURL, token str
 		return nil
 	}
 	if d := list.Moment().Sub(moment); d < -listMomentSlack || d > listMomentSlack {
-		klog.V(2).InfoS("The saved file list is for another moment; the disk is read", "list", list.Moment(), "disk", moment)
+		klog.V(2).InfoS("The saved file list is for another restore point; the disk is read", "list", list.Moment(), "disk", moment)
 		return nil
 	}
 	return list
