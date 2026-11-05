@@ -214,7 +214,7 @@ func readUndoHeaderFrom(f io.ReaderAt, size int64, path string) (undoHeader, err
 	h.to = time.Unix(0, int64(be.Uint64(hdr[16:])))  // #nosec G115 -- a time, stored bit for bit
 	h.oldSize = int64(be.Uint64(hdr[24:]))           // #nosec G115 -- written from a file size
 	h.newSize = int64(be.Uint64(hdr[32:]))           // #nosec G115 -- written from a file size
-	if h.oldSize < 0 || h.newSize < 0 {
+	if h.oldSize < 0 || h.newSize < 0 || h.oldSize > maxDiskBytes || h.newSize > maxDiskBytes {
 		return h, fmt.Errorf("undo file %s has a bad header", path)
 	}
 	return h, nil

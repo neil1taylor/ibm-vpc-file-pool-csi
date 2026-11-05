@@ -294,3 +294,25 @@ func TestUndoView_OnlyAThisHostUndoServerIsUsed(t *testing.T) {
 		t.Fatal("a server that is not 127.0.0.1 must be refused")
 	}
 }
+
+// Many undo layers must not multiply the cache: each layer holds at most one
+// small segment, and a view opens only a limited number of layers.
+func TestUndoView_CacheStaysWithinTheBudgetAcrossManyLayers(t *testing.T) {
+	dir, moments := backupHistory(t, 21, 40)
+	d := newDAV(t, dir)
+	v, err := OpenUndoView(context.Background(), d.Client(), d.URL+"/disk.img", moments[len(moments)-1], moments[0], Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = v.Close() }()
+	got := make([]byte, v.View.Size())
+	if _, err = v.View.ReadAt(got, 0); err != nil && !errors.Is(err, io.EOF) {
+		t.Fatal(err)
+	}
+	if layers, cached := v.undoLayers(), v.UndoCachedBytes(); cached > int64(layers)*undoReadSegment {
+		t.Errorf("%d layers cache %d bytes; the budget is %d each", layers, cached, undoReadSegment)
+	}
+	if v.UndoCachedBytes() > int64(replication.MaxViewLayers())*undoReadSegment {
+		t.Errorf("the undo cache is over the total budget")
+	}
+}

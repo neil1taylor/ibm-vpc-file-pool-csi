@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/replication"
@@ -30,7 +31,10 @@ const (
 	maxListEntries = 200000
 
 	scanCacheBytes = 16 << 20 // for the one pass that indexes a file
-	readCacheBytes = 8 << 20  // for the reads of a file in use
+	// undoReadSegment is the fetch size, and the whole cache, of an undo file in
+	// use: a record is at most 64 KiB, and a view opens at most
+	// replication.MaxViewLayers() files, so the total is bounded.
+	undoReadSegment = 64 << 10
 )
 
 // UndoHTTP is the undo folder of a backup on the Kopia WebDAV server, as a
@@ -39,6 +43,9 @@ type UndoHTTP struct {
 	ctx    context.Context
 	client *http.Client
 	base   string // http://127.0.0.1:PORT
+
+	mu    sync.Mutex
+	reads []*Disk // the caches of the files opened for reads
 }
 
 // NewUndoHTTP makes the source from the URL of disk.img on the server.
@@ -119,7 +126,10 @@ func (h *UndoHTTP) Open(name string, use replication.UndoUse) (replication.UndoF
 		d := New(src, Options{ReadAhead: 4, MaxBytes: scanCacheBytes})
 		return &undoRemote{size: src.Size(), r: d, close: d.Close}, nil
 	default:
-		d := New(src, Options{MaxBytes: readCacheBytes})
+		d := New(src, Options{SegmentSize: undoReadSegment, MaxBytes: undoReadSegment})
+		h.mu.Lock()
+		h.reads = append(h.reads, d)
+		h.mu.Unlock()
 		return &undoRemote{size: src.Size(), r: d, close: d.Close}, nil
 	}
 }
@@ -160,6 +170,7 @@ func (r rangeReader) ReadAt(p []byte, off int64) (int, error) {
 
 // UndoView is a VM disk in COS at one restore point.
 type UndoView struct {
+	undo *UndoHTTP
 	// View reads the disk as it was at the restore point.
 	View *replication.DiskView
 	disk *Disk
@@ -187,7 +198,7 @@ func OpenUndoView(ctx context.Context, client *http.Client, diskURL string, late
 		_ = disk.Close()
 		return nil, err
 	}
-	return &UndoView{View: v, disk: disk}, nil
+	return &UndoView{View: v, disk: disk, undo: us}, nil
 }
 
 // Close closes the view and the disk.
@@ -197,4 +208,22 @@ func (u *UndoView) Close() error {
 		err = cerr
 	}
 	return err
+}
+
+// undoLayers is how many undo files the view reads records from.
+func (u *UndoView) undoLayers() int {
+	u.undo.mu.Lock()
+	defer u.undo.mu.Unlock()
+	return len(u.undo.reads)
+}
+
+// UndoCachedBytes is what the caches of the undo files hold now.
+func (u *UndoView) UndoCachedBytes() int64 {
+	u.undo.mu.Lock()
+	defer u.undo.mu.Unlock()
+	var n int64
+	for _, d := range u.undo.reads {
+		n += d.CachedBytes()
+	}
+	return n
 }

@@ -39,6 +39,8 @@ const (
 	undoApplied   = ".undo"
 	compareChunk  = 64 << 10
 	gapReadLength = 1 << 20
+	// maxDiskBytes is the largest disk size an undo file may claim: 1 PiB.
+	maxDiskBytes = 1 << 50
 )
 
 // CopySource is a staged disk copy. *qcow2.Image is one.
@@ -462,10 +464,13 @@ func readUndoFrom(f io.ReaderAt, size int64, path string, fn func(off int64, dat
 		return h, fmt.Errorf("undo file %s has no valid header", path)
 	}
 	be := binary.BigEndian
-	h.from = time.Unix(0, int64(be.Uint64(hdr[8:])))      // #nosec G115 -- a time, stored bit for bit
-	h.to = time.Unix(0, int64(be.Uint64(hdr[16:])))       // #nosec G115 -- a time, stored bit for bit
-	h.oldSize = int64(be.Uint64(hdr[24:]))                // #nosec G115 -- written from a file size
-	h.newSize = int64(be.Uint64(hdr[32:]))                // #nosec G115 -- written from a file size
+	h.from = time.Unix(0, int64(be.Uint64(hdr[8:]))) // #nosec G115 -- a time, stored bit for bit
+	h.to = time.Unix(0, int64(be.Uint64(hdr[16:])))  // #nosec G115 -- a time, stored bit for bit
+	h.oldSize = int64(be.Uint64(hdr[24:]))           // #nosec G115 -- written from a file size
+	h.newSize = int64(be.Uint64(hdr[32:]))           // #nosec G115 -- written from a file size
+	if h.oldSize < 0 || h.newSize < 0 || h.oldSize > maxDiskBytes || h.newSize > maxDiskBytes {
+		return h, fmt.Errorf("undo file %s has a bad header", path)
+	}
 	remaining := size - 40 - int64(len(undoEndMagic)) - 8 // bytes of records
 	buf := make([]byte, compareChunk)
 	var records uint64
@@ -476,7 +481,7 @@ func readUndoFrom(f io.ReaderAt, size int64, path string, fn func(off int64, dat
 			return h, fmt.Errorf("undo file %s is cut short: %w", path, err)
 		}
 		off, n := int64(be.Uint64(rec[0:])), int64(be.Uint64(rec[8:])) // #nosec G115 -- written from offsets and lengths
-		if off < 0 || n <= 0 || n > compareChunk || off+n > h.oldSize {
+		if off < 0 || n <= 0 || n > compareChunk || off > h.oldSize-n {
 			return h, fmt.Errorf("undo file %s has a bad record at offset %d", path, off)
 		}
 		if _, err = io.ReadFull(r, buf[:n]); err != nil {

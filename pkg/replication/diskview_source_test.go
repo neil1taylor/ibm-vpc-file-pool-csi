@@ -2,6 +2,7 @@ package replication
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -248,5 +249,72 @@ func TestDiskViewFrom_NeverReadsPastTheEnd(t *testing.T) {
 	defer func() { _ = dv.Close() }()
 	if n, err := dv.ReadAt(make([]byte, 10), dv.Size()); n != 0 || !errors.Is(err, io.EOF) {
 		t.Errorf("ReadAt at the end = %d, %v", n, err)
+	}
+}
+
+// rawUndoFile writes an undo file whose records are given as raw (offset,
+// length) words with no data after them, so any word can be hostile.
+func rawUndoFile(t *testing.T, path string, h undoHeader, off, n uint64, data int) {
+	t.Helper()
+	var b bytes.Buffer
+	b.WriteString(undoMagic)
+	for _, v := range []uint64{uint64(h.from.UnixNano()), uint64(h.to.UnixNano()), uint64(h.oldSize), uint64(h.newSize)} {
+		b.Write(binary.BigEndian.AppendUint64(nil, v))
+	}
+	b.Write(binary.BigEndian.AppendUint64(nil, off))
+	b.Write(binary.BigEndian.AppendUint64(nil, n))
+	b.Write(make([]byte, data))
+	b.WriteString(undoEndMagic)
+	b.Write(binary.BigEndian.AppendUint64(nil, 1))
+	if err := os.WriteFile(path, b.Bytes(), 0o660); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDiskViewFrom_HostileHeaderAndRecordNumbers(t *testing.T) {
+	const max = uint64(1<<63 - 1)
+	cases := []struct {
+		name      string
+		old, new_ int64
+		off, n    uint64
+		dataLen   int
+	}{
+		{"offset so large that offset plus length wraps", 1 << 40, 1 << 40, max - 10, 100, 100},
+		{"negative offset", 1 << 40, 1 << 40, ^uint64(4), 100, 100},
+		{"huge length", 1 << 40, 1 << 40, 0, max, 0},
+		{"negative length", 1 << 40, 1 << 40, 0, ^uint64(4), 0},
+		{"offset at the old size", 1000, 1000, 1000, 1, 1},
+		{"negative old size", -1, 1000, 0, 1, 1},
+		{"negative new size", 1000, -1, 0, 1, 1},
+		{"old size beyond any disk", 1<<63 - 1, 1000, 0, 1, 1},
+		{"new size beyond any disk", 1000, 1<<63 - 1, 0, 1, 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			src, disk, latest := hostileSource(t)
+			h := hdr(1, c.old)
+			h.newSize = c.new_
+			rawUndoFile(t, filepath.Join(src.dir, "0000000001.undo"), h, c.off, c.n, c.dataLen)
+			if _, err := openSourceView(t, disk, latest, src, t0.Add(time.Hour)); err == nil {
+				t.Fatal("hostile numbers must be refused")
+			}
+		})
+	}
+}
+
+func TestDiskViewFrom_TooManyLayersAreRefused(t *testing.T) {
+	saved := maxViewLayers
+	defer func() { maxViewLayers = saved }()
+	maxViewLayers = 2
+	var files []hostileFile
+	for i := 1; i <= 3; i++ {
+		files = append(files, hostileFile{fmt.Sprintf("%010d.undo", i), hdr(i, 4*chunk), [][2]int64{{0, 10}}})
+	}
+	src, disk, latest := hostileSource(t, files...)
+	if _, err := openSourceView(t, disk, latest, src, t0.Add(time.Hour)); err == nil {
+		t.Fatal("a view over more undo files than the limit must be refused")
+	}
+	if _, err := openSourceView(t, disk, latest, src, t0.Add(3*time.Hour)); err != nil {
+		t.Fatalf("a view over %d undo files is within the limit: %v", maxViewLayers, err)
 	}
 }

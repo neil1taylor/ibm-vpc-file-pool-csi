@@ -26,6 +26,13 @@ var ErrNoRestorePoint = errors.New("no restore point of the disk is at or before
 // the memory of the helper.
 var maxViewRecords = 1 << 23
 
+// maxViewLayers is the most undo files one view reads records from, so the
+// caches and open requests of a view have a fixed total.
+var maxViewLayers = 1024
+
+// MaxViewLayers is the most undo files one view reads records from.
+func MaxViewLayers() int { return maxViewLayers }
+
 // maxUndoFiles is the most undo files one view uses.
 const maxUndoFiles = 100000
 
@@ -145,6 +152,9 @@ func OpenDiskViewFrom(disk io.ReaderAt, diskSize int64, latest time.Time, src Un
 	}
 	if start < 0 {
 		return nil, fmt.Errorf("no restore point at %s", chosen.UTC().Format(time.RFC3339Nano))
+	}
+	if len(files)-start > maxViewLayers {
+		return nil, fmt.Errorf("the restore point is %d undo files back; a view reaches back at most %d", len(files)-start, maxViewLayers)
 	}
 	budget := maxViewRecords
 	for _, u := range files[start:] {
