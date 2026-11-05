@@ -19,6 +19,14 @@ To make a release:
 
 ## [Unreleased]
 
+## [v0.17.2] — 2026-11-05
+
+One fix for the console, and the tutorials corrected after runs on the lab. No new settings.
+
+### Fixed
+
+- **The Replication tab in the console opens again.** In v0.17.1 it showed "Something wrong happened: Cannot access 'r' before initialization", because three helper files of the console plugin imported each other. A test now fails if such a loop comes back.
+
 ## [v0.17.1] — 2026-11-04
 
 Fixes for browsing backups, found while running the file-restore tutorial on the lab, and the tutorials corrected after those runs. No new settings except the gateway flag below, which the chart sets.

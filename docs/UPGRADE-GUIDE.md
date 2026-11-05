@@ -45,7 +45,7 @@ Before upgrading, complete every item:
 | v0.11.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.12.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.13.0–v0.13.2 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
-| v0.14.0–v0.17.1 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
+| v0.14.0–v0.17.2 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
 
 ---
 
@@ -124,6 +124,19 @@ kubectl get crd filesharepools.storage.ibmcloud.io -o json | \
 ---
 
 ## Version-Specific Upgrade Notes
+
+### Upgrading to v0.17.2 (from v0.17.1)
+
+**Changes:**
+- The Replication tab in the console opens again. In v0.17.1 it failed with "Cannot access 'r' before initialization".
+
+**CRD changes:** none.
+
+**Chart changes:** none. No new values.
+
+**Action required:** upgrade with Helm. Set `image.tag` and `consolePlugin.image.tag` to `v0.17.2` if you pin them. The browse images did not change in this release; if you set `backupBrowse.image.tag` or `backupBrowse.guest.image.tag`, v0.17.0 or v0.17.1 images work.
+
+To go back, run `helm rollback`.
 
 ### Upgrading to v0.17.1 (from v0.17.0)
 
