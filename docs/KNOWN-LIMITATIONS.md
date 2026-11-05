@@ -18,8 +18,8 @@ Explicit list of what the IBM VPC File Pool CSI Driver does not support, why, an
 
 **Limitations:**
 - Snapshots and clones are not instantaneous — they are full data copies proportional to the source volume size.
-- A snapshot of a volume that is being written is not one point in time: files can change while the copy runs. Stop or freeze the workload before the snapshot if you need a consistent copy. The exception is a disk that a running KubeVirt VM uses: that snapshot is a QEMU copy at one moment, with the guest frozen for a moment (see below).
-- A snapshot of a running VM is made for each disk (each claim) as KubeVirt asks for it, but the driver copies all the pool disks of the VM at one moment, so the snapshots of the disks fit each other. A snapshot of one disk of a multi-disk VM therefore also copies the other disks to temporary files; the files of a disk that no snapshot claims within 10 minutes are deleted, and each share needs room for them. A disk that is not on a pool is not part of the moment. The copy starts at 15 MB/s and adapts to the load on the share, so the time a disk takes depends on that load; set `vmCopySpeedLimitMBps` on the VolumeSnapshotClass for the highest speed, or `vmCopyAdaptive: "false"` for a fixed speed (default 20 MB/s). Red Hat does not support the QEMU commands this uses.
+- A snapshot of a volume that is being written is not one point in time: files can change while the copy runs. Stop or freeze the workload before the snapshot if you need a consistent copy. The exception is a disk that a running KubeVirt VM uses: that snapshot is a QEMU copy at one point in time, with the guest frozen for a moment (see below).
+- A snapshot of a running VM is made for each disk (each claim) as KubeVirt asks for it, but the driver copies all the pool disks of the VM at one point in time, so the snapshots of the disks fit each other. A snapshot of one disk of a multi-disk VM therefore also copies the other disks to temporary files; the files of a disk that no snapshot claims within 10 minutes are deleted, and each share needs room for them. A disk that is not on a pool is not part of the restore point. The copy starts at 15 MB/s and adapts to the load on the share, so the time a disk takes depends on that load; set `vmCopySpeedLimitMBps` on the VolumeSnapshotClass for the highest speed, or `vmCopyAdaptive: "false"` for a fixed speed (default 20 MB/s). Red Hat does not support the QEMU commands this uses.
 - Cross-share clones require the async path (no same-share optimization).
 - Per-PVC quota enforcement limitations (see above) also apply to cloned volumes.
 - No incremental or COW snapshots — each snapshot is a full copy.
@@ -34,7 +34,7 @@ Where the KubeVirt `Sidecar` feature gate is on, a VM disk snapshot is instant i
 - **Support:** the `Sidecar` feature gate is not supported by Red Hat, and on OpenShift it is set through a `jsonpatch` annotation on `HyperConverged`, which marks the cluster `TaintedConfiguration`. On ROVS, IBM's add-on manages that resource.
 - **Gate off:** a VM whose disks have instant snapshots does not start while the gate is off; the webhook says so. Turn the gate on, or run `kubectl pool-snapshots flatten <vm>`, which deletes the VM's snapshots.
 - **Restore is a copy.** OpenShift restores a snapshot into new PVCs; the driver writes each with one sparse `qemu-img convert`. Instant restore is not built.
-- **One disk per plain VolumeSnapshot.** All disks of a VM at one moment come from an OpenShift VM snapshot, which freezes the guest first.
+- **One disk per plain VolumeSnapshot.** All disks of a VM at one point in time come from an OpenShift VM snapshot, which freezes the guest first.
 - **Replication and backups** of a VM disk make a full copy after each snapshot, because QEMU's list of changed blocks stays with the frozen file. A stopped VM's disk with snapshots is not copied at all (its status says so): a copy of its folder would give the far site an old `disk.img`. It is copied again while the VM runs, or after `kubectl pool-snapshots flatten`.
 - **No clone** of a disk with instant snapshots: restore one of its snapshots instead. A copy of the folder would not be a clone.
 - **The disk file must be owned by UID 107** (the QEMU user). Only the owner can make the frozen file read-only. For another owner, the snapshot fails before anything changes, and the message names the owner and the fix (`chown 107:107`).
@@ -45,7 +45,7 @@ Where the KubeVirt `Sidecar` feature gate is on, a VM disk snapshot is instant i
 
 **What:** Volume group snapshots (`VolumeGroupSnapshot`) are **not active**. The code and the record type exist, but nothing watches a `VolumeGroupSnapshot`, the hooks never run, and the CSI group snapshot service is not registered, so Kubernetes' group snapshot API cannot reach the driver. There is no plan to turn it on (issue #100). The console does not show them.
 
-**Not needed for VMs:** a snapshot of a running VM with several disks already shows one moment (see the VM snapshot section above). KubeVirt does not use group snapshots.
+**Not needed for VMs:** a snapshot of a running VM with several disks already shows one restore point (see the VM snapshot section above). KubeVirt does not use group snapshots.
 
 The notes below describe the design, not a working feature.
 
@@ -78,7 +78,7 @@ The notes below describe the design, not a working feature.
 
 **Limitations:**
 - **File-level consistency only** (without hooks). Each individual file is consistent (NFS close-to-open semantics), but cross-file consistency is NOT guaranteed unless pre/post-sync hooks are configured to quiesce application writes. See `CROSS-REGION-DR.md` for detailed consistency analysis.
-- **Plain file replication is not suitable for databases or for running VM disks.** Actively written disk images and databases with WALs will produce corrupted replicas. The controller copies the disks of a running KubeVirt VM with QEMU at one moment instead (Experimental, see [FEATURES.md](FEATURES.md)). Use IBM VPC block storage replication or application-level replication for these workloads.
+- **Plain file replication is not suitable for databases or for running VM disks.** Actively written disk images and databases with WALs will produce corrupted replicas. The controller copies the disks of a running KubeVirt VM with QEMU at one point in time instead (Experimental, see [FEATURES.md](FEATURES.md)). Use IBM VPC block storage replication or application-level replication for these workloads.
 - **Requires pre-configured cross-region network connectivity** (Transit Gateway or VPN) and a pre-existing destination FileSharePool.
 - **Failover is manual.** Automated failover is explicitly out of scope due to limited consistency guarantees.
 

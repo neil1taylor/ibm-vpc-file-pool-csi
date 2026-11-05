@@ -2,14 +2,14 @@
 
 > **Tutorial Series:** [Index](TUTORIAL.md) | [Part 6: Replication and Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md) | **Part 12** | [Part 13: Failover of Running VMs](TUTORIAL-13-FAILOVER-OF-RUNNING-VMS.md)
 
-Copy a running VM with all its disks to a second cluster, while the VM keeps running. Check that every copy shows one moment for all disks, and see which copies are file-system consistent. The words moment, restore point, change list and receiver are defined in [CONTEXT.md](CONTEXT.md).
+Copy a running VM with all its disks to a second cluster, while the VM keeps running. Check that every copy shows one restore point for all disks, and see which copies are file-system consistent. The words restore point, restore point, change list and receiver are defined in [CONTEXT.md](CONTEXT.md).
 
 **Time:** about 1 hour, most of it waiting for the first copy.
 **Status:** Experimental. Read [CROSS-REGION-DR.md](CROSS-REGION-DR.md), "Running VM disks", for the design and the lab results.
 
 How it works, in short:
 
-1. The controller freezes the guest file systems for a moment. QEMU (the program that runs the VM) starts a copy of every disk of the VM at that one moment. The guest thaws.
+1. The controller freezes the guest file systems for a moment. QEMU (the program that runs the VM) starts a copy of every disk of the VM at that one point in time. The guest thaws.
 2. QEMU writes the copy slowly, 20 MB/s for each disk by default, so the VM keeps its speed.
 3. A Job sends the copy to the receiver on the destination cluster. The receiver applies it.
 4. QEMU keeps a change list. The next copy holds only the blocks that changed.
@@ -204,7 +204,7 @@ EOF
 The fields that matter for a VM:
 
 - `vmCopyAdaptive` (default `true`) makes the copy of each disk start at 15 MB/s, speed up while the share the VM reads is quiet, and slow down when the share's average latency passes `vmCopyMaxLatencyMs` (default 15 ms). `vmCopySpeedLimitMBps` sets the highest speed; by default there is none. With `vmCopyAdaptive: false` it is the fixed speed instead (default 20; `0` means no limit). At 20 MB/s a VM kept 93% of its write speed in a lab test. The copy counts empty space too, so a first copy of a large disk takes long.
-- `restorePointKeepHours` is how long the destination keeps earlier moments. It is `24` by default. The disk uses more space the more the VM writes.
+- `restorePointKeepHours` is how long the destination keeps earlier restore points. It is `24` by default. The disk uses more space the more the VM writes.
 - `schedule` is how often a new copy starts.
 
 ---
@@ -213,7 +213,7 @@ The fields that matter for a VM:
 
 ```bash
 src get replicationpolicy vm-to-dr
-src get replicationpolicy vm-to-dr -o json | jq -c '.status.subVolumeStatuses[] | {sv: .subVolumeName[0:16], phase: .vmCopy.phase, moment: .copyMoment, consistency, err: .lastError}'
+src get replicationpolicy vm-to-dr -o json | jq -c '.status.subVolumeStatuses[] | {sv: .subVolumeName[0:16], phase: .vmCopy.phase, restorePoint: .copyRestorePoint, consistency, err: .lastError}'
 ```
 
 **Expected a minute after the apply:** the policy is `Active` and both disks are `Copying`. The `DEST` column stays empty for a receiver policy.
@@ -221,17 +221,17 @@ src get replicationpolicy vm-to-dr -o json | jq -c '.status.subVolumeStatuses[] 
 ```
 NAME            SOURCE          DEST   SCHEDULE   PHASE    LAST SYNC
 tutf-vm-to-dr   tutf-src-pool          15m        Active   53s
-{"sv":"pvc-65968d12-062","phase":"Copying","moment":null,"consistency":null,"err":null}
-{"sv":"pvc-fbe4c104-cd1","phase":"Copying","moment":null,"consistency":null,"err":null}
+{"sv":"pvc-65968d12-062","phase":"Copying","restorePoint":null,"consistency":null,"err":null}
+{"sv":"pvc-fbe4c104-cd1","phase":"Copying","restorePoint":null,"consistency":null,"err":null}
 ```
 
 The phase of a copy is `Copying` while QEMU writes the staging file, and `Sending` while a Job applies it at the destination. The first copy is a full copy. At 20 MB/s, a 20 GB disk needs about 17 minutes, and a 100 GB disk about 1.5 hours.
 
-**Expected after the first copy:** every disk of the VM has the same `copyMoment`, `consistency` is `FileSystemConsistent`, and `vmCopy` is empty (`null` in the output).
+**Expected after the first copy:** every disk of the VM has the same `copyRestorePoint`, `consistency` is `FileSystemConsistent`, and `vmCopy` is empty (`null` in the output).
 
 ```
-{"sv":"pvc-65968d12-062","phase":null,"moment":"2026-11-05T08:17:15Z","consistency":"FileSystemConsistent","err":null}
-{"sv":"pvc-fbe4c104-cd1","phase":null,"moment":"2026-11-05T08:17:15Z","consistency":"FileSystemConsistent","err":null}
+{"sv":"pvc-65968d12-062","phase":null,"restorePoint":"2026-11-05T08:17:15Z","consistency":"FileSystemConsistent","err":null}
+{"sv":"pvc-fbe4c104-cd1","phase":null,"restorePoint":"2026-11-05T08:17:15Z","consistency":"FileSystemConsistent","err":null}
 ```
 
 In the lab a 20 GiB root disk and a 2 GiB data disk (about 2 GB used) took 11 minutes in all.
@@ -250,16 +250,16 @@ Write something in the guest, and wait for the next cycle (15 minutes):
 
 ```bash
 KUBECONFIG=${SRC_KUBECONFIG} virtctl ssh -n ${NS} cloud-user@vmi/${VM} -i <key> -c 'head -c 50000000 /dev/urandom | sudo tee /var/tmp/big >/dev/null; sync'
-src get replicationpolicy vm-to-dr -o json | jq -c '.status.subVolumeStatuses[] | {sv: .subVolumeName[0:16], moment: .copyMoment, bytes: .bytesSynced, points: .restorePoints, oldest: .oldestRestorePoint}'
+src get replicationpolicy vm-to-dr -o json | jq -c '.status.subVolumeStatuses[] | {sv: .subVolumeName[0:16], restorePoint: .copyRestorePoint, bytes: .bytesSynced, points: .restorePoints, oldest: .oldestRestorePoint}'
 ```
 
 Change `cloud-user` to the user of your guest image. Set the cluster with the `KUBECONFIG` variable, as above. With `virtctl ssh --kubeconfig ...` the connection helper reads the default kubeconfig instead, and the command fails with `virtualmachineinstance ... "my-vm" not found`. If `ssh` says `Too many authentication failures`, add `-i <key> -t "-o IdentitiesOnly=yes"`.
 
-**Expected:** the second copy starts 15 minutes after the first and takes under a minute. It sends far less than the disk size: `bytesSynced` of the root disk is 52690944, about the 50 MB you wrote. `restorePoints` is now `1`, and `oldestRestorePoint` is the first moment. Each further copy adds a restore point, until `restorePointKeepHours` passes.
+**Expected:** the second copy starts 15 minutes after the first and takes under a minute. It sends far less than the disk size: `bytesSynced` of the root disk is 52690944, about the 50 MB you wrote. `restorePoints` is now `1`, and `oldestRestorePoint` is the first restore point. Each further copy adds a restore point, until `restorePointKeepHours` passes.
 
 ```
-{"sv":"pvc-65968d12-062","moment":"2026-11-05T08:32:15Z","bytes":null,"points":1,"oldest":"2026-11-05T08:17:15Z"}
-{"sv":"pvc-fbe4c104-cd1","moment":"2026-11-05T08:32:15Z","bytes":52690944,"points":1,"oldest":"2026-11-05T08:17:15Z"}
+{"sv":"pvc-65968d12-062","restorePoint":"2026-11-05T08:32:15Z","bytes":null,"points":1,"oldest":"2026-11-05T08:17:15Z"}
+{"sv":"pvc-fbe4c104-cd1","restorePoint":"2026-11-05T08:32:15Z","bytes":52690944,"points":1,"oldest":"2026-11-05T08:17:15Z"}
 ```
 
 `bytesSynced` is empty for a disk that did not change (here the data disk).
@@ -277,7 +277,7 @@ Change `cloud-user` to the user of your guest image. Set the cluster with the `K
 
 ## See it in the console
 
-Open the replication policy page. For each disk, it shows the moment of the last copy and whether it is file-system or crash consistent. It also shows the restore points and the phase of a copy in progress. See [Part 8](TUTORIAL-08-MIGRATION-AND-CONSOLE.md).
+Open the replication policy page. For each disk, it shows the restore point of the last copy and whether it is file-system or crash consistent. It also shows the restore points and the phase of a copy in progress. See [Part 8](TUTORIAL-08-MIGRATION-AND-CONSOLE.md).
 
 ---
 
@@ -310,9 +310,9 @@ dr delete filesharepool ${DR_POOL}
 
 ## What you learned
 
-- A policy copies a running VM at one moment for all disks, and sends only changed blocks after the first copy.
-- The status says which moment a copy shows and how consistent it is.
-- The destination keeps restore points so you can start the VM from an earlier moment.
+- A policy copies a running VM at one point in time for all disks, and sends only changed blocks after the first copy.
+- The status says which restore point a copy shows and how consistent it is.
+- The destination keeps restore points so you can start the VM from an earlier restore point.
 
 ## Next
 

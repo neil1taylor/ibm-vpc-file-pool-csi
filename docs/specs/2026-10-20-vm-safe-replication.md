@@ -4,20 +4,20 @@ Date: 2026-10-20. Status: draft for review.
 
 ## Goal
 
-Replication copies the disks of running VMs to the other region, and each copy is safe to boot. Safe means: every disk of a VM shows the same single moment. A copy never mixes data from before and after that moment.
+Replication copies the disks of running VMs to the other region, and each copy is safe to boot. Safe means: every disk of a VM shows the same single restore point. A copy never mixes data from before and after that restore point.
 
 "Done" means:
 - A running VM's disks replicate on the policy's schedule, and the VM keeps running.
 - After failover, the copy boots and its file systems mount without errors.
 - If the VM has a guest agent, the copy is file-system consistent. If it does not, the copy is crash consistent, the same as a power cut. The status says which.
-- A VM with several disks gets all its disks from the same moment.
+- A VM with several disks gets all its disks from the same restore point.
 - Only changed blocks cross between regions in normal operation.
 - The driver never copies a running VM disk with rsync again.
 - Optional backup: on a schedule, the driver keeps local snapshots in a separate snapshot pool, and can also export them to IBM Cloud Object Storage (COS). Both use the same safe copy as replication.
 
 ## What exists today
 
-Replication copies files with rsync, on a schedule. For VM disks this is unsafe. rsync reads `disk.img` while the VM writes to it, so the copy mixes blocks from different moments. `CROSS-REGION-DR.md` already says VM disks are not supported, but the controller copies them anyway, without a warning.
+Replication copies files with rsync, on a schedule. For VM disks this is unsafe. rsync reads `disk.img` while the VM writes to it, so the copy mixes blocks from different restore points. `CROSS-REGION-DR.md` already says VM disks are not supported, but the controller copies them anyway, without a warning.
 
 OpenShift Virtualization will get a supported backup feature with change tracking (KubeVirt v1.8; Veeam says it is a Tech Preview in OpenShift 4.22). rovslab runs 4.21 (KubeVirt v1.7.4), so we cannot use it yet.
 
@@ -50,7 +50,7 @@ On each cycle, the controller checks every volume in the policy. A volume takes 
 - **Stopped VM, or no VM:** rsync is safe, because nothing writes to the disk. The controller checks that the VM is still stopped after the copy. If the VM started during the copy, the controller discards the result and tries again on the next cycle.
 - **Running VM, but the QEMU path fails:** the controller skips the volume and reports an error. It never falls back to rsync.
 
-### Take a copy at one moment
+### Take a copy at one point in time
 
 The controller runs commands in the VM pod. On OpenShift, a user may run commands in a pod only if it could also create that pod. VM pods run under the `kubevirt-controller` security policy (SCC), so the controller's account gets `use` on that one SCC. Kasten and IBM Backup and Recovery have the same permission for the same reason. This gives the account no new power to start pods. It cannot create pods directly. A pod can run as this account only in `kube-system`, where OpenShift applies no SCC at all, so the Jobs the controller already creates there are unrestricted. Found in the end-to-end test on 20 Oct: without it, every copy failed with "exec operation is not allowed because the pod's security context exceeds your permissions".
 
@@ -59,7 +59,7 @@ The controller runs commands in the VM pod. On OpenShift, a user may run command
    - If there is no guest agent, skip this step.
    - If the freeze fails, thaw and go on without it. Example: on a Linux guest with SELinux, one file system with a missing label makes the whole freeze fail.
    - In both cases the copy is marked "crash consistent", and the status shows the guest's error.
-2. In one QEMU step, for all disks of the VM: start a new change list, and start a copy of each disk as it is at this moment.
+2. In one QEMU step, for all disks of the VM: start a new change list, and start a copy of each disk as it is at this point in time.
 3. Thaw the guest. The guest is paused for about 0.2 s.
 4. QEMU writes the copy to a staging file in the VM's own volume, at a speed limit.
 5. A copy Job sends the staging file to the other region (below), then deletes it. The Job runs as the same user as QEMU, because only that user can delete the file.
@@ -78,7 +78,7 @@ The limit counts empty disk space too. A full copy of a 20 GB disk with 2 GB of 
 
 ### Send only changed blocks
 
-- **Change list.** QEMU keeps a change list (a dirty bitmap) for each disk, in memory. Each copy starts a new list at its moment. The list of the last copy that reached the other region stays until the next copy has reached it too. So if a copy fails, the next one still includes every block that changed since the last good copy.
+- **Change list.** QEMU keeps a change list (a dirty bitmap) for each disk, in memory. Each copy starts a new list at its restore point. The list of the last copy that reached the other region stays until the next copy has reached it too. So if a copy fails, the next one still includes every block that changed since the last good copy.
 - **Normal cycle:** QEMU writes only the blocks in that list to the staging file.
 - **First copy, or after the change list is lost:** a live migration or a VM restart erases the lists. The controller sees that the list is gone and asks QEMU for a full copy. The staging file of a full copy holds only the data the disk really uses.
 - **Compare pass.** When a full copy reaches a far-site disk that already exists, only the blocks that differ are written, and only those go into the undo file (below). In direct NFS mode the Job compares the blocks itself, so it reads the far-site data once over the network; that costs about as much as sending it. Receiver mode will compare at the far site, from checksums, so only the blocks that differ cross the network.
@@ -90,9 +90,9 @@ The far-site disk must never be left half updated, and a rewind must be possible
 
 1. Before it changes any block, the Job reads the far-site disk's current contents of every block it will change, and writes them to an undo file next to the disk. Then it marks the undo file complete.
 2. It writes the new blocks into the disk.
-3. It marks the undo file applied. The undo file is now a restore point: it can take the disk back to the moment before this copy.
+3. It marks the undo file applied. The undo file is now a restore point: it can take the disk back to the restore point before this copy.
 
-If the Job stops during step 2, the disk is half updated, but the complete undo file is at the far site. The next Job, or failover, first rolls the disk back from that undo file to the previous good moment. This needs nothing from the source region, so it also works after the source region is lost. An undo file that is not complete is deleted; the disk was not touched yet.
+If the Job stops during step 2, the disk is half updated, but the complete undo file is at the far site. The next Job, or failover, first rolls the disk back from that undo file to the previous good restore point. This needs nothing from the source region, so it also works after the source region is lost. An undo file that is not complete is deleted; the disk was not touched yet.
 
 In direct NFS mode each changed block crosses the network about three times: the old block is read and written to the undo file, and the new block is written. Receiver mode will do steps 1 to 3 at the far site, so each block crosses once.
 
@@ -104,9 +104,9 @@ Failover rolls back any applied-but-not-marked copy first. It refuses to use a d
 
 The far site keeps the copies of the last 24 hours, so you can rewind if bad data reached the VM, for example ransomware or a broken update. Each policy has a keep time, 24 hours by default.
 
-- Each copy's undo files form one restore point. A restore point covers all disks of a VM at the same moment.
+- Each copy's undo files form one restore point. A restore point covers all disks of a VM at the same point in time.
 - The disk itself always holds the latest copy. So a failover to the latest copy is as fast as today.
-- To rewind, failover makes a new disk from the latest one, then applies the undo files from newest to oldest, back to the chosen moment. The latest disk is not changed, so you can rewind again to a different moment.
+- To rewind, failover makes a new disk from the latest one, then applies the undo files from newest to oldest, back to the chosen restore point. The latest disk is not changed, so you can rewind again to a different restore point.
 - When an undo file is older than the keep time, the next Job deletes it. Undo files are deleted oldest first, so the remaining ones always form a complete chain back from the latest copy.
 - After a compare pass, the undo file holds only the blocks that differed. So a VM move does not cost a full disk of storage.
 - The policy status lists the restore points.
@@ -114,7 +114,7 @@ The far site keeps the copies of the last 24 hours, so you can rewind if bad dat
 ### What the status shows
 
 For each VM volume, the policy status shows:
-- the moment the last good copy shows
+- the restore point the last good copy shows
 - "file-system consistent" or "crash consistent"
 - whether the last cycle was a change-only cycle or a compare pass, and the bytes sent
 - the oldest and newest restore points in the other region
@@ -125,7 +125,7 @@ New metrics: copy type, guest pause time, and how long the VM was slowed by a co
 
 A new `BackupPolicy` resource turns backup on. It has a schedule, a snapshot pool, how long to keep local snapshots, and optional COS settings. Backup is off unless you create a policy.
 
-A policy selects VMs by label, and covers all disks of each VM, taken at one moment. It can also select normal PVCs by label. One VM belongs to at most one backup policy. If two policies match a VM, the webhook refuses the second one.
+A policy selects VMs by label, and covers all disks of each VM, taken at one point in time. It can also select normal PVCs by label. One VM belongs to at most one backup policy. If two policies match a VM, the webhook refuses the second one.
 
 **Local snapshots in their own pool.** A snapshot pool is a normal pool that holds only snapshots. It uses its own VPC file shares, so a lost or full data share does not take the snapshots with it.
 
@@ -193,7 +193,7 @@ The part that takes the copy is one replaceable piece. When the clusters run the
 
 1. **Lab test (done, 20 Oct).** Results:
    - Reading the disk over the network: cannot work, see above. The plan uses the staging method.
-   - Two disks: one QEMU step copies both at the same moment. The far-site disks booted, and both showed the same last write.
+   - Two disks: one QEMU step copies both at the same point in time. The far-site disks booted, and both showed the same last write.
    - Speed limit: at 20 MB/s per disk, the VM kept 93% of its write speed.
    - Sparse staging files: 5.1 GB for a 40 GB disk with 5 GB of data.
    - A full copy plus two change copies, applied at the far site, booted with all files intact.
@@ -201,12 +201,12 @@ The part that takes the copy is one replaceable piece. When the clusters run the
    - Windows freeze: tested in step 6 (21 Oct). The freeze goes through VSS and the copy is file-system consistent; see step 6.
    - COS and Kopia: see "Immutable backups" below.
 2. **Stop unsafe copies.** The controller detects running VMs and skips their volumes with a clear error. This ships first and by itself, because today's behaviour makes copies that cannot boot.
-3. **Copy at one moment.** Freeze, take the view, thaw, read the full disk, and send it. Cancel the copy when the VM must move. Lab test of the parts, 20 Oct:
+3. **Copy at one point in time.** Freeze, take the view, thaw, read the full disk, and send it. Cancel the copy when the VM must move. Lab test of the parts, 20 Oct:
    - KubeVirt's freeze tool is in the VM pod. Freeze took 0.11 s, thaw 0.03 s, and the automatic thaw worked.
    - A live migration during a copy fails, and the VM keeps running where it was. After the copy is cancelled, the migration took 8 s.
    - The speed limit counts empty disk space (above).
    - The staging file is owned by the QEMU user, and only that user can delete it.
-   - End-to-end test, 20 Oct (`test/e2e/test-vm-replication.sh`, direct NFS mode, two pools on the driver): a CentOS VM with a 20 GB root disk and a 10 GB data disk wrote a file every 0.1 s. Both disks showed the same moment and were file-system consistent. The far-site copy booted with no XFS errors, and all 1,579 files written before the freeze matched their checksums; the last one was written at the moment of the freeze. Data sent: 1.98 GB and 118 MB. The test pool's shares had 100 IOPS at first, and the copy ran at about 3 MB/s per disk; at 3000 IOPS it ran at the speed limit. So the copy time depends on the share's IOPS as well as the speed limit.
+   - End-to-end test, 20 Oct (`test/e2e/test-vm-replication.sh`, direct NFS mode, two pools on the driver): a CentOS VM with a 20 GB root disk and a 10 GB data disk wrote a file every 0.1 s. Both disks showed the same restore point and were file-system consistent. The far-site copy booted with no XFS errors, and all 1,579 files written before the freeze matched their checksums; the last one was written at the restore point of the freeze. Data sent: 1.98 GB and 118 MB. The test pool's shares had 100 IOPS at first, and the copy ran at about 3 MB/s per disk; at 3000 IOPS it ran at the speed limit. So the copy time depends on the share's IOPS as well as the speed limit.
 4. **Change-only cycles, safe apply with undo files, and restore points, in direct NFS mode.** Parts: change lists in the copy piece; the undo-file apply and roll-back; the controller and a keep time per policy. This took over the safe-apply part of step 5, because direct NFS mode has no far-site receiver to do it.
 5. **Receiver mode for VM disks, and failover changes.** The receiver does the same apply at the far site, and compares checksums for the compare pass. Failover rolls back an unfinished copy and can rewind to any restore point.
 6. **Test across two regions,** with a failover and a boot of a Linux VM and a Windows VM. This includes the first test of Windows freeze and thaw. Then update `CROSS-REGION-DR.md`, `FEATURES.md` and the tutorial. **Done 21 Oct** on two clusters in Frankfurt (no second region exists in the lab): Linux and Windows Server 2022 both passed. A new Windows VM can take about 40 minutes before its guest agent runs commands.
@@ -265,7 +265,7 @@ The run needs one COS bucket for the backup stage. I will ask you to create it w
 - Each policy has its own area in the bucket, so storage is slightly higher than one shared area.
 - Snapshots of running VMs are fixed to use the safe copy, as part of this work.
 - Backup is built after replication, because it reuses the safe copy and the change list.
-- Multi-disk VMs are copied at one moment as part of this work. Group snapshots (issue #14) stay a separate issue.
+- Multi-disk VMs are copied at one point in time as part of this work. Group snapshots (issue #14) stay a separate issue.
 - The far site keeps restore points for 24 hours by default, set per policy. You chose 24 hours on 20 Oct.
 - Safe apply and restore points use one method: undo files written at the far site before the disk changes. It works in direct NFS mode, which has nothing of ours at the far site. The cost there is about three network crossings per changed block; receiver mode will need one.
 - Direct NFS mode has no checksum compare pass. After a VM move, the Job reads the far-site data once to compare, which costs about as much as sending it.

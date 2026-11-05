@@ -108,7 +108,7 @@ Browse a backup and restore single files (issue #92). Added in phase 1 of `docs/
 | `backupBrowse.idle` | string | `15m` | A session ends after this long without use |
 | `backupBrowse.maxLife` | string | `2h` | A session ends after this long, even if in use |
 | `backupBrowse.maxSessions` | int | `5` | Open sessions in the cluster. More wait |
-| `backupBrowse.maxSessionsPerNamespace` | int | `2` | Open sessions for the claims of one namespace. The gateway closes the oldest session of a user who asks for another moment over the limit, and refuses at once (429) when other users' sessions hold every place; the controller makes any other session over the limit wait |
+| `backupBrowse.maxSessionsPerNamespace` | int | `2` | Open sessions for the claims of one namespace. The gateway closes the oldest session of a user who asks for another restore point over the limit, and refuses at once (429) when other users' sessions hold every place; the controller makes any other session over the limit wait |
 | `backupBrowse.restoreMaxBytes` | int | `214748364800` | The most one file restore (`BackupFileRestore`) writes, 200 GiB. A restore of more is refused before it copies. It is a controller setting and works even when `backupBrowse.enabled` is `false` |
 | `backupBrowse.restoreMaxRunning` | int | `5` | File restores that run at once in the cluster. More wait, oldest first. Each running restore holds a Job and two share mounts. Works even when `backupBrowse.enabled` is `false` |
 | `backupBrowse.cos.enabled` | bool | `true` | Browse and restore files from backups that a policy exported to COS (`spec.export`). The helper pods that read COS run in the release namespace, next to the COS and Key Protect Secrets (a pod mounts only Secrets of its own namespace), so those keys are never copied to the browse namespace where the gateway may read Secrets. The chart adds a Role there (the controller may create and delete Secrets, for the copy of each session's token and certificate) and a NetworkPolicy that lets only the gateway reach those pods. Off: no such pods, no Role, no NetworkPolicy, and a session or restore from COS fails with "not turned on" |
@@ -263,7 +263,7 @@ Prometheus metrics and alerting configuration.
 | `metrics.alerts.replicationLagSeconds` | int | `7200` | Replication lag in seconds that triggers a warning |
 | `metrics.alerts.replicationFailures` | int | `3` | Replication failures in a row that trigger a critical alert |
 | `metrics.alerts.backupLateSeconds` | int | `43200` | A volume with no backup for this long triggers a warning (use twice the schedule) |
-| `metrics.alerts.exportLateSeconds` | int | `43200` | An export to COS, or a moment waiting, this old triggers a warning |
+| `metrics.alerts.exportLateSeconds` | int | `43200` | An export to COS, or a restore point waiting, this old triggers a warning |
 | `metrics.alerts.snapshotPoolWarning` | int | `75` | Snapshot pool share use (percent) that triggers a warning |
 | `metrics.alerts.snapshotPoolCritical` | int | `85` | Snapshot pool share use (percent) that triggers a critical alert; new backups stop at 85 |
 | `metrics.alerts.shareUtilizationWarning` | int | `90` | Percent of one share's size allocated to PVCs that triggers a warning |

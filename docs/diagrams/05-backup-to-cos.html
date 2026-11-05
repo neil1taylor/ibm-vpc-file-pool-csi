@@ -100,7 +100,7 @@ table.glance th{background:var(--share);font-weight:600}
 <main>
   <div>
     <h1>Backup to COS</h1>
-    <p class="lead">A backup keeps many <b>moments</b> of a volume. It lives on a separate share in your own VPC. That does not help if the whole VPC is lost. So the driver can also send each backup to an <b>IBM Cloud Object Storage (COS)</b> bucket, locked so that nobody can delete it early. This feature is Experimental. Press <b>Next step</b>, then try the extra buttons.</p>
+    <p class="lead">A backup keeps many <b>restore points</b> of a volume. It lives on a separate share in your own VPC. That does not help if the whole VPC is lost. So the driver can also send each backup to an <b>IBM Cloud Object Storage (COS)</b> bucket, locked so that nobody can delete it early. This feature is Experimental. Press <b>Next step</b>, then try the extra buttons.</p>
   </div>
 
   <ol class="steps" id="steps" aria-label="Steps"></ol>
@@ -115,7 +115,7 @@ table.glance th{background:var(--share);font-weight:600}
   <div class="bar">
     <label class="opt">Lock: <select id="lock"><option value="Compliance">Compliance (nobody can delete early)</option><option value="None">None</option></select></label>
     <label class="opt"><input type="checkbox" id="noagent"> The VM has no guest agent</label>
-    <label class="opt">Restore moment: <select id="rmoment" disabled></select></label>
+    <label class="opt">Restore point: <select id="rmoment" disabled></select></label>
   </div>
 
   <div class="legend" aria-label="Legend">
@@ -159,7 +159,7 @@ table.glance th{background:var(--share);font-weight:600}
 
   <div class="stats" aria-live="polite">
     <span>Day: <b id="s-day">0</b></span>
-    <span>Backup moments kept locally: <b id="s-mom">0</b></span>
+    <span>Backup restore points kept locally: <b id="s-mom">0</b></span>
     <span>Chunks in COS: <b id="s-ch">0</b></span>
     <span>Locked: <b id="s-lock">0</b></span>
     <span>Sent in the last export: <b id="s-sent">0</b></span>
@@ -198,9 +198,9 @@ table.glance th{background:var(--share);font-weight:600}
     document.getElementById("policy").innerHTML = s.policy ? box("var(--btn)",'<b>BackupPolicy</b><span class="mono">selector: backup=yes &middot; schedule: 6h &middot; snapshotPool: backups</span><span class="mono">export: bucket, endpoint, keyProtect, keepFor: 30d, lock: '+s.lock+'</span>') : none("No BackupPolicy yet");
     document.getElementById("l-p").innerHTML = s.lp?pg(s.lp,s.hl.lp):none("No backup yet");
     document.getElementById("l-v").innerHTML = s.lv?vg(s.lv,s.hl.lv):none("No backup yet");
-    document.getElementById("c-p").innerHTML = s.lp?'<span class="tag warn">Consistency: FileCopy. The files were copied one by one, so it is not one moment.</span>':'';
+    document.getElementById("c-p").innerHTML = s.lp?'<span class="tag warn">Consistency: FileCopy. The files were copied one by one, so it is not one restore point.</span>':'';
     document.getElementById("c-v").innerHTML = s.lv?(agentEl.checked?'<span class="tag bad">Consistency: CrashConsistent. No guest agent, so the disk is as after a power loss and may need a file-system check.</span>':'<span class="tag good">Consistency: FileSystemConsistent. The guest was frozen for an instant.</span>'):'';
-    document.getElementById("moments").innerHTML = s.moms.length?'Earlier moments kept (folders of links for files, undo files for the disk): '+s.moms.map(function(m,i){ return '<span class="pill">moment '+(i+1)+', day '+m.day+'</span>'; }).join(' '):'No moments yet.';
+    document.getElementById("moments").innerHTML = s.moms.length?'Earlier restore points kept (folders of links for files, undo files for the disk): '+s.moms.map(function(m,i){ return '<span class="pill">restore point '+(i+1)+', day '+m.day+'</span>'; }).join(' '):'No restore points yet.';
     var ch='';
     if(!s.chunks.length) ch=none("Nothing exported yet");
     else ch='<div class="blocks" style="--n:6">'+s.chunks.map(function(c){
@@ -221,13 +221,13 @@ table.glance th{background:var(--share);font-weight:600}
     document.getElementById("s-ch").textContent=s.chunks.length;
     document.getElementById("s-lock").textContent=lockedN;
     document.getElementById("s-sent").textContent=s.sent;
-    var NEXT=["Make the bucket and keys","Make the BackupPolicy","A backup moment is due","Export to COS"];
+    var NEXT=["Make the bucket and keys","Make the BackupPolicy","A backup restore point is due","Export to COS"];
     nextB.textContent=s.step<4?"Next step: "+NEXT[s.step]:"Next step: done (use the extra buttons)";
     nextB.disabled=s.step>=4;
     var ready=s.step>=4;
     moreB.disabled=!ready; delB.disabled=!ready||!s.chunks.length; skipB.disabled=!ready; resB.disabled=!ready;
     momEl.disabled=!ready;
-    momEl.innerHTML=s.moms.map(function(m,i){ return '<option value="'+i+'">moment '+(i+1)+' (day '+m.day+')</option>'; }).join('');
+    momEl.innerHTML=s.moms.map(function(m,i){ return '<option value="'+i+'">restore point '+(i+1)+' (day '+m.day+')</option>'; }).join('');
     if(s.restoreSel!==undefined&&s.restoreSel<s.moms.length) momEl.value=String(s.restoreSel);
     lockEl.disabled=s.policy;
   }
@@ -257,7 +257,7 @@ table.glance th{background:var(--share);font-weight:600}
     if(s.step===1){ s.step=2; s.policy=true; s.lock=lockEl.value;
       say("<b>Step 2.</b> A BackupPolicy picks the volumes by label, sets a schedule (every 6 hours here) and has an <span class='mono'>export</span> block. Lock is <b>"+s.lock+"</b>"+(s.lock==="Compliance"?": every exported object is held for 30 days and nobody can shorten that.":": nothing is locked, so someone with enough rights can delete for good.")); return; }
     if(s.step===2){ s.step=3; localBackup();
-      say("<b>Step 3. A backup moment is due.</b> The plain volume is copied file by file. The VM is frozen for an instant and QEMU copies the disk at one moment"+(agentEl.checked?", but with no guest agent the freeze fails, so the copy is only crash consistent":"")+". Both go to the backup pool share, not to COS yet."); return; }
+      say("<b>Step 3. A backup restore point is due.</b> The plain volume is copied file by file. The VM is frozen for an instant and QEMU copies the disk at one point in time"+(agentEl.checked?", but with no guest agent the freeze fails, so the copy is only crash consistent":"")+". Both go to the backup pool share, not to COS yet."); return; }
     if(s.step===3){ s.step=4; var n=exportNow();
       say("<b>Step 4. Export.</b> A Job reads the backup share read-only, so the running VM is never slowed. It splits the data into chunks, encrypts them before they leave the cluster, and sends them. "+n+" chunks went to COS"+(s.lock==="Compliance"?", each locked for 30 days.":", with no lock.")); return; }
   };
@@ -266,7 +266,7 @@ table.glance th{background:var(--share);font-weight:600}
     s.hl.p=pick(1,4); s.hl.v=pick(2,6);
     s.hl.p.forEach(function(i){ s.vol.p[i]++; }); s.hl.v.forEach(function(i){ s.vol.v[i]++; });
     s.day+=1; localBackup(); var n=exportNow();
-    say("<b>Day "+s.day+": another moment.</b> 1 file and 2 disk pieces changed. The local backup keeps the old contents as an earlier moment. The export sent only the <b>"+n+" new chunks</b>; chunks COS already had were not sent again.");
+    say("<b>Day "+s.day+": another restore point.</b> 1 file and 2 disk pieces changed. The local backup keeps the old contents as an earlier restore point. The export sent only the <b>"+n+" new chunks</b>; chunks COS already had were not sent again.");
   };
   delB.onclick=function(){
     s.newIds=[]; s.hl={p:[],v:[],lp:[],lv:[]};
@@ -289,7 +289,7 @@ table.glance th{background:var(--share);font-weight:600}
     s.chunks=keep;
     var oldM=s.moms.filter(function(m){ return s.day-m.day>KEEP; }).length;
     s.moms=s.moms.filter(function(m){ return s.day-m.day<=KEEP; });
-    say("<b>31 days later.</b> A maintenance Job runs. It <b>extends the lock</b> on "+ext+" chunks that the newest backup still needs, and removes "+gone+" chunks (and "+oldM+" moments) that are older than the 30-day keep time and no longer needed.");
+    say("<b>31 days later.</b> A maintenance Job runs. It <b>extends the lock</b> on "+ext+" chunks that the newest backup still needs, and removes "+gone+" chunks (and "+oldM+" restore points) that are older than the 30-day keep time and no longer needed.");
   };
   resB.onclick=function(){
     if(!s.moms.length){ return; }
@@ -297,15 +297,15 @@ table.glance th{background:var(--share);font-weight:600}
     var hidden=s.chunks.filter(function(c){return c.hidden;}).length; s.chunks.forEach(function(c){ c.hidden=false; });
     document.getElementById("restore-card").hidden=false;
     document.getElementById("restore-steps").innerHTML=
-      '<li><span class="mono">kubectl backup cos-list</span> reads the bucket and lists volumes and moments. COS keeps no claim name, class or size.</li>'+
+      '<li><span class="mono">kubectl backup cos-list</span> reads the bucket and lists volumes and restore points. COS keeps no claim name, class or size.</li>'+
       '<li>Key Protect unwraps the backup key. If Key Protect is gone, use the readable copy you saved: <span class="mono">--backup-key-file</span>.</li>'+
       '<li>With your own IBM Cloud login the command removes delete markers'+(hidden?' ('+hidden+' here)':' (none here)')+'. It never removes real data.</li>'+
-      '<li>A Job copies the chosen export into a scratch folder on the new volume\'s share. A restore Job then copies it into the new volume (the VM disk is rewound to the moment). The scratch folder is removed.</li>'+
+      '<li>A Job copies the chosen export into a scratch folder on the new volume\'s share. A restore Job then copies it into the new volume (the VM disk is rewound to the restore point). The scratch folder is removed.</li>'+
       '<li>The new PVC is held back from pods until the copy ends. It never writes over a volume that exists.</li>';
     document.getElementById("restored").innerHTML=
-      '<div><div class="tag"><b style="color:var(--plain)">New plain volume at moment '+(sel+1)+'</b></div>'+pg(m.p,[])+'</div>'+
-      '<div><div class="tag"><b style="color:var(--vm)">New VM disk at moment '+(sel+1)+'</b></div>'+vg(m.v,[])+'</div>';
-    say("<b>Restore from COS into a new cluster.</b> It needs no policy and no backup pool there, only the bucket, the keys and a pool to restore into. The new volumes show the values of moment "+(sel+1)+".");
+      '<div><div class="tag"><b style="color:var(--plain)">New plain volume at restore point '+(sel+1)+'</b></div>'+pg(m.p,[])+'</div>'+
+      '<div><div class="tag"><b style="color:var(--vm)">New VM disk at restore point '+(sel+1)+'</b></div>'+vg(m.v,[])+'</div>';
+    say("<b>Restore from COS into a new cluster.</b> It needs no policy and no backup pool there, only the bucket, the keys and a pool to restore into. The new volumes show the values of restore point "+(sel+1)+".");
   };
   document.getElementById("b-reset").onclick=function(){ document.getElementById("restore-card").hidden=true; s={}; s.restoreSel=undefined; reset(); };
   reset();

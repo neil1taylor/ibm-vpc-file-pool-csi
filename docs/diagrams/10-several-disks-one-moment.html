@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Several Disks, One Moment</title>
+<title>Several Disks, One Restore point</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
@@ -85,13 +85,13 @@ ul.plain li{margin:2px 0}
 <main>
 <nav class="top" aria-label="Pages"><a href="index.html">All pages</a><a href="09-pool-filling-up.html">&larr; Previous page</a><a href="11-what-qemu-does.html">Next page &rarr;</a></nav>
   <div>
-    <h1>Several Disks, One Moment</h1>
+    <h1>Several Disks, One Restore point</h1>
     <p class="lead">A VM can have more than one disk. Here the VM has a <b>system disk</b> and a <b>data disk</b>. A program in the VM writes file n on the data disk, then writes a log line about it on the system disk. This page takes a snapshot two ways and restores a new VM from each. The log must never name a file that is missing.</p>
   </div>
 
   <div class="bar" role="group" aria-label="Method">
     <span class="hint">Method:</span>
-    <button id="m-one" class="on">One moment (what the driver does)</button>
+    <button id="m-one" class="on">One restore point (what the driver does)</button>
     <button id="m-sep">Two separate snapshots</button>
   </div>
   <div class="bar">
@@ -126,11 +126,11 @@ ul.plain li{margin:2px 0}
     <h2>How the driver does this today</h2>
     <ul class="plain">
       <li>KubeVirt asks for one snapshot <b>per disk</b>. It does not ask for a group of disks.</li>
-      <li>The driver copies <b>all the pool disks of the VM at one moment</b>, when the first disk's request arrives. The requests for the other disks join that copy.</li>
+      <li>The driver copies <b>all the pool disks of the VM at one point in time</b>, when the first disk's request arrives. The requests for the other disks join that copy.</li>
       <li>The guest is frozen once, so its pending writes reach the disks first. If the guest cannot freeze, the snapshot is marked crash consistent (as after a power cut) and it says so in its status.</li>
       <li>With <b>instant snapshots</b> (Experimental, off by default), OpenShift freezes the guest once and the driver starts a new file on every disk inside that freeze.</li>
       <li>One cost: a snapshot of one disk of a VM with several disks also copies the other disks to temporary files. They are deleted after 10 minutes if no snapshot claims them. Each share needs room for them.</li>
-      <li>A disk that is not on a pool is not part of the moment.</li>
+      <li>A disk that is not on a pool is not part of the restore point.</li>
       <li>A group snapshot record (<span class="mono">VolumeGroupSnapshot</span>) exists, but it is switched off. A VM does not need it.</li>
     </ul>
     <p class="hint">Lab result, 21 October 2026, before this was fixed: the two disks were copied 80 seconds apart, and 725 of 1,154 logged files were missing from the data disk of the restored VM. Each disk was sound on its own. They did not fit each other.</p>
@@ -144,8 +144,8 @@ ul.plain li{margin:2px 0}
   function el(i){return document.getElementById(i);}
   function reset(){
     tick=0; snap=null; restored=null;
-    say(mode==="sep"? "Method: <b>two separate snapshots</b>. Each disk is copied on its own turn, so each shows a different moment. Let the VM work, then take the snapshot."
-                    : "Method: <b>one moment</b>. Both disks are copied at the same moment. Let the VM work, then take the snapshot.");
+    say(mode==="sep"? "Method: <b>two separate snapshots</b>. Each disk is copied on its own turn, so each shows a different restore point. Let the VM work, then take the snapshot."
+                    : "Method: <b>one restore point</b>. Both disks are copied at the same point in time. Let the VM work, then take the snapshot.");
   }
   function say(h){ el("log").innerHTML=h; render(); }
   function cells(count,color,opts){
@@ -166,8 +166,8 @@ ul.plain li{margin:2px 0}
       row("System disk, now","log line 1 to "+tick+(tick?"":" (none yet)"),cells(tick,S))+'</div>';
     if(snap){
       v+='<div class="group">'+
-        row("Snapshot of the data disk","shows moment "+snap.d,cells(snap.d,D,{cut:snap.d}))+
-        row("Snapshot of the system disk","shows moment "+snap.s,cells(snap.s,S,{cut:snap.s}))+'</div>';
+        row("Snapshot of the data disk","shows restore point "+snap.d,cells(snap.d,D,{cut:snap.d}))+
+        row("Snapshot of the system disk","shows restore point "+snap.s,cells(snap.s,S,{cut:snap.s}))+'</div>';
     }
     if(restored){
       v+='<div class="group">'+
@@ -176,8 +176,8 @@ ul.plain li{margin:2px 0}
     }
     el("views").innerHTML='<div style="display:flex;flex-direction:column;gap:12px">'+v+'</div>';
     el("st-tick").textContent="tick "+tick;
-    el("st-d").textContent=snap?"moment "+snap.d:"none";
-    el("st-s").textContent=snap?"moment "+snap.s:"none";
+    el("st-d").textContent=snap?"restore point "+snap.d:"none";
+    el("st-s").textContent=snap?"restore point "+snap.s:"none";
     var miss=restored?Math.max(0,snap.s-snap.d):null;
     el("st-miss").textContent=restored?String(miss):"not restored";
     el("m-one").className=mode==="one"?"on":""; el("m-sep").className=mode==="sep"?"on":"";
@@ -192,16 +192,16 @@ ul.plain li{margin:2px 0}
   el("b-snap").onclick=function(){
     if(mode==="one"){
       snap={d:tick,s:tick};
-      say("<b>Snapshot taken at one moment.</b> The guest was frozen once, so its pending writes reached both disks. Then both disks were copied as they were at <b>tick "+tick+"</b>. The VM went on working.");
+      say("<b>Snapshot taken at one point in time.</b> The guest was frozen once, so its pending writes reached both disks. Then both disks were copied as they were at <b>tick "+tick+"</b>. The VM went on working.");
     } else {
       var d=tick; tick=Math.min(N,tick+DELAY); snap={d:d,s:tick};
-      say("<b>Two snapshots, one after the other.</b> The data disk was copied at <b>tick "+d+"</b>. The copy of the data disk took a while, and the VM kept working. The system disk was copied only at <b>tick "+tick+"</b>. The two snapshots show different moments.");
+      say("<b>Two snapshots, one after the other.</b> The data disk was copied at <b>tick "+d+"</b>. The copy of the data disk took a while, and the VM kept working. The system disk was copied only at <b>tick "+tick+"</b>. The two snapshots show different restore points.");
     }
   };
   el("b-rest").onclick=function(){
     restored=true;
     var miss=Math.max(0,snap.s-snap.d);
-    if(miss===0) say("<b>Restored.</b> The new VM has files 1 to "+snap.d+" and log lines 1 to "+snap.s+". Every log line names a file that is there. The VM starts from one moment, so the disks fit each other.");
+    if(miss===0) say("<b>Restored.</b> The new VM has files 1 to "+snap.d+" and log lines 1 to "+snap.s+". Every log line names a file that is there. The VM starts from one restore point, so the disks fit each other.");
     else say("<b>Restored, but the disks do not fit.</b> The system disk has log lines up to "+snap.s+", but the data disk has files only up to "+snap.d+". <b>"+miss+" log line"+(miss>1?"s name":" names")+" a file that is missing</b> (red). Each disk is sound alone. Together they are wrong.");
   };
   el("m-one").onclick=function(){mode="one"; reset();};

@@ -142,7 +142,7 @@ table.glance th{background:var(--share);font-weight:600}
   <section class="card" aria-label="Two ways to send">
     <h2>Plain files and VM disks travel differently</h2>
     <p><b>Plain volume:</b> a Job tars the folder and uploads it over HTTPS. With a receiver, the whole folder is sent each cycle. (With a direct NFS link and no receiver, <span class="mono">rsync</span> sends only changed files.) The destination keeps the latest copy.</p>
-    <p><b>VM disk:</b> the guest is frozen for an instant and QEMU copies all the VM's disks at one moment. The first time, everything is checked against the receiver, and only pieces that differ cross the network (the check uses a hash of each 64 KiB chunk). Later copies hold only the changed blocks. Before the receiver writes, it saves the old blocks in an undo file. Those undo files are the restore points.</p>
+    <p><b>VM disk:</b> the guest is frozen for an instant and QEMU copies all the VM's disks at one point in time. The first time, everything is checked against the receiver, and only pieces that differ cross the network (the check uses a hash of each 64 KiB chunk). Later copies hold only the changed blocks. Before the receiver writes, it saves the old blocks in an undo file. Those undo files are the restore points.</p>
   </section>
 </main>
 <script>
@@ -224,7 +224,7 @@ table.glance th{background:var(--share);font-weight:600}
       s.step=6; var first=!s.dst.v, sv=diff(s.dst.v,s.src.v);
       if(!first){ var old={}; sv.forEach(function(i){ old[i]=s.dst.v[i]; }); s.dst.rp.push({old:old}); }
       s.dst.v=s.src.v.slice(); s.hlV=sv; s.hlWhere="dst"; s.sent+=sv.length;
-      say("<b>Step 6. VM disk.</b> The guest is frozen for an instant and QEMU copies the VM's disks at one moment, slowly on purpose (20 MB/s by default) so the VM stays fast. The Job and the receiver compare the disk piece by piece, and only the "+sv.length+" differing "+(first?"pieces (all of them, as the copy is new)":"pieces")+" cross the network. "+(first?"":"Before it writes, the receiver saves the old blocks as a <b>restore point</b>.")); return; }
+      say("<b>Step 6. VM disk.</b> The guest is frozen for an instant and QEMU copies the VM's disks at one point in time, slowly on purpose (20 MB/s by default) so the VM stays fast. The Job and the receiver compare the disk piece by piece, and only the "+sv.length+" differing "+(first?"pieces (all of them, as the copy is new)":"pieces")+" cross the network. "+(first?"":"Before it writes, the receiver saves the old blocks as a <b>restore point</b>.")); return; }
     if(s.step===6){ s.step=7; s.cycle++; s.fails=0;
       say("<b>Step 7. Cycle done.</b> The policy records the time of the copy, how much was sent and how long it took. "+(s.cycle===1?"Press <b>Change data in the source</b>, then run the next cycle: the VM disk will send only the changed blocks.":"The VM disk sent only changed blocks. The old blocks are now a restore point.")); return; }
   };

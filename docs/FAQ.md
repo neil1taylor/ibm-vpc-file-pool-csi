@@ -1,6 +1,6 @@
 # Frequently Asked Questions — IBM VPC File Pool CSI Driver
 
-Quick answers with links to authoritative documentation for deeper reading. For the meaning of project words such as pool, share, moment and snapshot pool, see [CONTEXT.md](CONTEXT.md).
+Quick answers with links to authoritative documentation for deeper reading. For the meaning of project words such as pool, share, restore point and snapshot pool, see [CONTEXT.md](CONTEXT.md).
 
 ---
 
@@ -100,7 +100,7 @@ A snapshot of a plain volume is a full directory copy (`cp -a`). Speed is propor
 
 ### What's the best backup strategy?
 
-It depends on your workload. For application data, use scheduled snapshots + cross-region replication. For databases, use application-level backup (pg_dump, etc.) with pool snapshots as a secondary layer. For VMs, use a snapshot of the running VM (all its disks show one moment) or a `BackupPolicy`. You do not need to stop the VM. See [BACKUP-RECOVERY.md — Strategy Recommendations](BACKUP-RECOVERY.md#strategy-recommendations-by-workload-type).
+It depends on your workload. For application data, use scheduled snapshots + cross-region replication. For databases, use application-level backup (pg_dump, etc.) with pool snapshots as a secondary layer. For VMs, use a snapshot of the running VM (all its disks show one restore point) or a `BackupPolicy`. You do not need to stop the VM. See [BACKUP-RECOVERY.md — Strategy Recommendations](BACKUP-RECOVERY.md#strategy-recommendations-by-workload-type).
 
 ---
 

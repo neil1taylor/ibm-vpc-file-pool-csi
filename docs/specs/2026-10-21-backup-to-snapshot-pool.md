@@ -7,15 +7,15 @@ Date: 2026-10-21. Status: draft for review. This is step 8 of `2026-10-20-vm-saf
 When this step is done:
 - You create one `BackupPolicy`. On its schedule, the driver backs up the VMs and PVCs you selected, into a pool that holds only backups.
 - A lost or full data share does not take the backups with it, because the backup pool uses its own VPC file shares.
-- You can restore any backup moment of a volume to a new PVC, in the same cluster, with one command.
-- A VM with several disks is backed up at one moment, and a restored VM boots.
+- You can restore any restore point of a volume to a new PVC, in the same cluster, with one command.
+- A VM with several disks is backed up at one point in time, and a restored VM boots.
 - Backups older than the keep time go away by themselves.
 
 ## A change from the main spec
 
 The main spec said: keep a VM disk as a chain, one full copy and then one change file per backup, and merge the oldest into the next one.
 
-This spec keeps the **latest** backup as a whole disk, and keeps **older** moments as undo files. This is what replication already does at the far site (step 4). Reasons:
+This spec keeps the **latest** backup as a whole disk, and keeps **older** restore points as undo files. This is what replication already does at the far site (step 4). Reasons:
 - Restoring the latest backup, the most common case, is a plain copy. In a chain, it must apply every change file.
 - Dropping an old backup is deleting its undo file. In a chain, it is a merge that rewrites data.
 - The code exists and is tested on two clusters: `ApplyCopy`, `Rewind`, and the prune of old undo files. A chain would be new code.
@@ -24,8 +24,8 @@ So a VM backup is a replication to a pool in the same cluster, with a longer kee
 
 ## What exists today
 
-- A `ReplicationPolicy` can send a pool's volumes to a destination pool by NFS (direct mode). It copies running VMs safely, at one moment for all disks of a VM, and sends only changed blocks after the first copy.
-- The destination keeps restore points (undo files) for `restorePointKeepHours`, and `kubectl failover execute --rewind-to` makes a disk as it was at a moment.
+- A `ReplicationPolicy` can send a pool's volumes to a destination pool by NFS (direct mode). It copies running VMs safely, at one point in time for all disks of a VM, and sends only changed blocks after the first copy.
+- The destination keeps restore points (undo files) for `restorePointKeepHours`, and `kubectl failover execute --rewind-to` makes a disk as it was at a restore point.
 - Replication selects volumes with a label selector, and skips nothing silently.
 - Snapshots (steps 1 to 7) live on the same share as the volume.
 
@@ -41,31 +41,31 @@ Cluster-scoped. Fields:
 - `vmCopySpeedLimitMBps`: the same limit as for replication. Default 20.
 - `suspend`: stops new backups. Existing backups stay.
 
-The status lists each backed-up volume with its last backup moment, its oldest backup moment, the bytes written, the consistency, and the last error.
+The status lists each backed-up volume with its last backup restore point, its oldest backup restore point, the bytes written, the consistency, and the last error.
 
 One volume belongs to at most one backup policy. The webhook refuses a second policy that selects the same labels in an overlapping namespace. (A volume can be both backed up and replicated; these are different policies.)
 
 ### How a backup runs
 
-The controller makes and owns a `ReplicationPolicy` for each `BackupPolicy`. It points at the snapshot pool, uses the same schedule and selector, and sets `restorePointKeepHours` from `keepFor`. Replication does the copy: QEMU for running VM disks, at one moment for all disks of a VM, and changed blocks only after the first copy. The `BackupPolicy` status is read from the owned policy.
+The controller makes and owns a `ReplicationPolicy` for each `BackupPolicy`. It points at the snapshot pool, uses the same schedule and selector, and sets `restorePointKeepHours` from `keepFor`. Replication does the copy: QEMU for running VM disks, at one point in time for all disks of a VM, and changed blocks only after the first copy. The `BackupPolicy` status is read from the owned policy.
 
 The owned policy is marked as owned. The webhook refuses edits by hand, and deleting the `BackupPolicy` deletes it. Deleting the policy does not delete the backups; a separate command does that (below).
 
 ### Volumes that are not VM disks
 
-Replication keeps only the latest files of such a volume. Backups of them need old moments too. For these volumes the backup uses hard links:
-- Each backup moment is a folder in the snapshot pool. A backup copies from the previous moment's folder with `rsync --link-dest`. A file that did not change takes no extra space.
+Replication keeps only the latest files of such a volume. Backups of them need old restore points too. For these volumes the backup uses hard links:
+- Each backup restore point is a folder in the snapshot pool. A backup copies from the previous restore point's folder with `rsync --link-dest`. A file that did not change takes no extra space.
 - A backup folder is consistent only as much as the files are: it is a file copy of a live volume, as snapshots of pods are today. The policy status says `FileCopy`, not `FileSystemConsistent`. For a database, use a hook (the hooks of replication work on backup policies too).
 - Folders older than `keepFor` are removed, oldest first.
 
 ### Restore
 
 A new command, `kubectl backup`:
-- `kubectl backup list --policy NAME` shows each volume and its backup moments.
-- `kubectl backup restore --policy NAME --pvc NS/NAME --moment TIME --to-pvc NAME [--namespace NS]` makes a new PVC in the cluster's data pool with the contents at that moment. `--moment` takes the nearest earlier backup. Without it, the latest backup is used.
-- For a VM, `--vm NS/NAME` restores all disks of the VM at one moment, to new PVCs with a suffix. The command prints the VM's disk names. It does not create the VM.
+- `kubectl backup list --policy NAME` shows each volume and its backup restore points.
+- `kubectl backup restore --policy NAME --pvc NS/NAME --restore-point TIME --to-pvc NAME [--namespace NS]` makes a new PVC in the cluster's data pool with the contents at that point in time. `--restore-point` takes the nearest earlier backup. Without it, the latest backup is used.
+- For a VM, `--vm NS/NAME` restores all disks of the VM at one point in time, to new PVCs with a suffix. The command prints the VM's disk names. It does not create the VM.
 
-A restore copies the backup (after a rewind if the moment is not the latest) into a new volume with a Job, as restore from a snapshot does today. The new PVC stays Pending until the copy has finished.
+A restore copies the backup (after a rewind if the restore point is not the latest) into a new volume with a Job, as restore from a snapshot does today. The new PVC stays Pending until the copy has finished.
 
 ### Keep time and clean-up
 
@@ -102,8 +102,8 @@ A snapshot pool may have several shares. Each volume is backed up to one share, 
 
 ## Tests
 
-- Unit tests with fakes: the owned policy is made from the backup policy and follows its changes; the webhook refuses overlap and a pool with claims; hard-link folders and their clean-up; the 85% rule; `restore` picks the nearest earlier moment.
-- Release test stage 18: back up a running VM with two disks and a pod volume. Make a second backup. Restore the VM disks at the first moment and the pod volume at the second. The restored VM boots, every logged file matches its checksum, and the restored pod volume matches its checksums. Delete the data share's volume and restore it from the backup.
+- Unit tests with fakes: the owned policy is made from the backup policy and follows its changes; the webhook refuses overlap and a pool with claims; hard-link folders and their clean-up; the 85% rule; `restore` picks the nearest earlier restore point.
+- Release test stage 18: back up a running VM with two disks and a pod volume. Make a second backup. Restore the VM disks at the first restore point and the pod volume at the second. The restored VM boots, every logged file matches its checksum, and the restored pod volume matches its checksums. Delete the data share's volume and restore it from the backup.
 
 ## Cost and risk
 
@@ -115,7 +115,7 @@ A snapshot pool may have several shares. Each volume is backed up to one share, 
 
 ## Decisions I made for you
 
-- Backups keep the latest copy whole and older moments as undo files, the same as replication. This replaces the "chain of change files" in the main spec.
+- Backups keep the latest copy whole and older restore points as undo files, the same as replication. This replaces the "chain of change files" in the main spec.
 - A `BackupPolicy` is a thin layer: it makes and owns a `ReplicationPolicy` to the snapshot pool.
 - Default keep time is 7 days. Default speed limit is 20 MB/s.
 - A VM is backed up whole if any of its disks matches the selector.

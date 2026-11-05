@@ -15,9 +15,9 @@
 | You want | Use |
 |----------|-----|
 | One snapshot of one volume | A `VolumeSnapshot`. See [Part 2](TUTORIAL-02-SNAPSHOTS-AND-CLONES.md). |
-| One moment for all disks of a running VM | An OpenShift VM snapshot. It freezes the guest first, and the driver copies all pool disks of the VM at one moment. See [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md#snapshots-and-clones). |
+| One restore point for all disks of a running VM | An OpenShift VM snapshot. It freezes the guest first, and the driver copies all pool disks of the VM at one point in time. See [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md#snapshots-and-clones). |
 | Instant VM disk snapshots | The KubeVirt `Sidecar` feature gate. See [VM-INSTANT-SNAPSHOTS.md](VM-INSTANT-SNAPSHOTS.md). |
-| Several plain volumes at one moment | Stop or freeze the application, then snapshot each volume. A snapshot of a volume that is being written is not one point in time. |
+| Several plain volumes at one point in time | Stop or freeze the application, then snapshot each volume. A snapshot of a volume that is being written is not one point in time. |
 
 A snapshot of a running VM does not need group snapshots. KubeVirt does not use them. The design notes are in [VOLUME-GROUP-SNAPSHOTS.md](VOLUME-GROUP-SNAPSHOTS.md) and [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md#volume-group-snapshots).
 

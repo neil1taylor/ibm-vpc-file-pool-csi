@@ -6,7 +6,7 @@ Design document for coordinated multi-PVC snapshots within the IBM VPC File Pool
 **Depends on:** Phase 4a (Volume Snapshots) -- must be complete
 **Kubernetes:** 1.27+ (VolumeGroupSnapshot API, alpha)
 
-> **Not active (issue #100).** The driver does not act on `VolumeGroupSnapshot` records: nothing watches them, the hooks below never run, and the CSI group snapshot service is not registered, so Kubernetes' own group snapshot API cannot reach the driver. There is no plan to turn it on. A running VM with several disks does not need it: its snapshots show one moment already (see [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md)). This page describes the design, not a working feature.
+> **Not active (issue #100).** The driver does not act on `VolumeGroupSnapshot` records: nothing watches them, the hooks below never run, and the CSI group snapshot service is not registered, so Kubernetes' own group snapshot API cannot reach the driver. There is no plan to turn it on. A running VM with several disks does not need it: its snapshots show one restore point already (see [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md)). This page describes the design, not a working feature.
 
 > **Design note (not in effect):** Quiesce hooks (`PreSnapshotHooks`/`PostSnapshotHooks`) are defined in the VolumeGroupSnapshot CRD and implemented in Phase 5. Hooks support both `exec` (pod command execution via Kubernetes exec API) and `http` (webhook callback) types, with configurable `OnError` policies (`Abort` or `Continue`). Hook execution results are recorded in `status.hookResults`. Without hooks configured, the driver provides best-effort coordinated snapshots (sequential copy without application quiesce).
 

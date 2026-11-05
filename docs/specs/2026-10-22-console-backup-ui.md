@@ -4,9 +4,9 @@ Date: 2026-10-22. Status: draft for review.
 
 ## Goal
 
-An operator can do everything the backup tools and resources can do from the console, with no YAML and no `kubectl`: see what is backed up and how fresh it is, make and change a backup policy, restore a volume or a VM disk to a new PVC at a chosen moment, remove the backups of one volume, set up the COS export as far as a browser can, and list and restore from COS. "Done" means each row of the table below has a console route, and a release-test browser stage proves restore and delete.
+An operator can do everything the backup tools and resources can do from the console, with no YAML and no `kubectl`: see what is backed up and how fresh it is, make and change a backup policy, restore a volume or a VM disk to a new PVC at a chosen restore point, remove the backups of one volume, set up the COS export as far as a browser can, and list and restore from COS. "Done" means each row of the table below has a console route, and a release-test browser stage proves restore and delete.
 
-Out of scope here, and kept as a clear seam: **browsing a backup and restoring single files** is in `docs/specs/2026-10-22-backup-file-restore.md` (issue #92). This spec only reserves a "Browse files" action on each backup moment and each volume row, which that spec fills in. Until it is built the action is not shown.
+Out of scope here, and kept as a clear seam: **browsing a backup and restoring single files** is in `docs/specs/2026-10-22-backup-file-restore.md` (issue #92). This spec only reserves a "Browse files" action on each backup restore point and each volume row, which that spec fills in. Until it is built the action is not shown.
 
 ## What exists today
 
@@ -14,13 +14,13 @@ The console has no backup page. The driver has these (all in `cmd/backup` and th
 
 | Task | Today | Console route in this spec |
 |---|---|---|
-| See backups: volumes, newest and oldest moment, restore points, bytes, consistency, errors | `kubectl backup list`, `BackupPolicy.status.volumes` | Backups page, policy details page |
+| See backups: volumes, newest and oldest restore point, restore points, bytes, consistency, errors | `kubectl backup list`, `BackupPolicy.status.volumes` | Backups page, policy details page |
 | See that new backups stopped because the snapshot pool is over 85% | `status.phase=Error` and `message` | Banner on both pages, with link to the pool |
 | Make, change, suspend, delete a policy | YAML | Create/edit form, Suspend/Resume, Delete |
-| Restore to a new PVC, newest or at a moment | `kubectl backup restore`, `BackupRestore` | Restore page |
+| Restore to a new PVC, newest or at a restore point | `kubectl backup restore`, `BackupRestore` | Restore page |
 | Remove all backups of one volume | `kubectl backup delete` (measure Job, typed confirmation, delete Job) | Delete backups action |
 | Export to COS: set up bucket, keys, lock | `kubectl backup cos-setup` (needs the person's IBM Cloud login) | Guide only; see below |
-| List volumes and moments in COS | `kubectl backup cos-list` (read-only Job) | COS tab |
+| List volumes and restore points in COS | `kubectl backup cos-list` (read-only Job) | COS tab |
 | Restore from COS, even in another cluster | `restore --from-cos` | Restore page, source "COS" |
 | Export status per volume (`exportedTime`, `exportedBytes`, `exportError`) | `status.volumes` | Same table |
 | Backup metrics and alerts | Prometheus | Panels on Monitoring; alerts already show on the dashboard's Firing Alerts card |
@@ -32,9 +32,9 @@ The console has no backup page. The driver has these (all in `cmd/backup` and th
 1. **Backups list.** One row per BackupPolicy: snapshot pool, schedule, keep time, phase, number of volumes, stalest volume age, export on or off. A phase of `Error` shows the message in plain words. Help buttons on the status columns like the other lists (`column-help.ts`).
 2. **Policy details.** Overview card (the spec, in plain words), a volumes table (claim, VM, last backup, oldest backup, restore points, size, consistency, error, export state; a `retained` volume is marked "no longer backed up, kept until <date>"), and per-row actions: **Restore**, **Delete backups**, and the reserved **Browse files** (hidden until #92 is built). Crash-consistent copies carry a warning label, as on the replication page. Card help like `card-help.ts`.
 3. **Create and edit form.** Snapshot pool (only pools of the snapshot kind), schedule, keep time, label selector and namespaces (with a live count of the PVCs that match, so a wrong selector shows at once), VM copy speed limit (same explanation as the replication form), suspend. The form explains the 85% stop. The console shows the admission webhook's message instead of copying its rules.
-4. **Restore page.** Source: this cluster (policy and claim, or a volume that is gone) or COS. Moment: "latest" or a picker listing the real moments (from the status for the snapshot pool, from the COS list Job for COS). Target namespace and name (must not exist; checked live), storage class (default: the class of the backed-up claim; for COS also the size, which COS does not keep). A confirm dialog says: a new PVC is made, nothing is overwritten, the copy takes time. Progress reuses the snapshot-restore banner: `BackupRestore.status.phase`, the restored moment, and the message on failure.
-5. **Delete backups.** Same steps as the CLI, as a dialog: the console starts the measure Job, shows how much would go ("12 GiB, 9 moments"), and asks the operator to type the claim name before it starts the delete Job. It refuses while the policy still backs the volume up (the label is still there) or a restore of that volume is running, with the CLI's wording. It is the only destructive action.
-6. **COS tab.** Shows the policy's export settings and the per-volume export state. **List COS contents** runs the read-only list Job and shows volumes and moments. COS credentials are never shown.
+4. **Restore page.** Source: this cluster (policy and claim, or a volume that is gone) or COS. Restore point: "latest" or a picker listing the real restore points (from the status for the snapshot pool, from the COS list Job for COS). Target namespace and name (must not exist; checked live), storage class (default: the class of the backed-up claim; for COS also the size, which COS does not keep). A confirm dialog says: a new PVC is made, nothing is overwritten, the copy takes time. Progress reuses the snapshot-restore banner: `BackupRestore.status.phase`, the restored restore point, and the message on failure.
+5. **Delete backups.** Same steps as the CLI, as a dialog: the console starts the measure Job, shows how much would go ("12 GiB, 9 restore points"), and asks the operator to type the claim name before it starts the delete Job. It refuses while the policy still backs the volume up (the label is still there) or a restore of that volume is running, with the CLI's wording. It is the only destructive action.
+6. **COS tab.** Shows the policy's export settings and the per-volume export state. **List COS contents** runs the read-only list Job and shows volumes and restore points. COS credentials are never shown.
 
 ### Where the work runs
 
@@ -50,8 +50,8 @@ Each action asks the cluster, by access review, whether the person may do it (cr
 
 ### The seam to the file-restore spec
 
-- Each volume row and each moment gets a **Browse files** action, shown only when the file-restore feature is present (the console reads a flag from the place it reads other driver settings).
-- The Restore page takes a `?moment=` query value and the Delete dialog takes `?claim=`, so #92 can link to them.
+- Each volume row and each restore point gets a **Browse files** action, shown only when the file-restore feature is present (the console reads a flag from the place it reads other driver settings).
+- The Restore page takes a `?restore point=` query value and the Delete dialog takes `?claim=`, so #92 can link to them.
 - This spec does not say how files are listed, previewed or restored. If #92 needs a field on `BackupRestore` (a list of paths), it is added there, and the Restore page shows it.
 
 ## Plan (about 7 small PRs, in this order; each has jest tests, help text, `FEATURES.md` and `CHANGELOG.md` lines)
