@@ -210,3 +210,44 @@ Total: about 1.5 to 2.5 weeks of agent work, plus the lab runs.
 
 - Nothing. Phase 6c is done. Older restore points of a VM disk in COS are still not built.
 - Nothing else. The speed bar is agreed: first listing within 30 seconds.
+
+## Phase 6d: older restore points of a VM disk in COS (issue #409)
+
+Date: 5 Nov 2026. Status: draft, building.
+
+### Goal
+
+A user can pick an older restore point of a VM disk that only COS holds, in `kubectl backup` and in the console, browse it and restore files from it. Today the disk server refuses: `ChooseBackup` in `pkg/cosbrowse/disk.go` returns "can be browsed in COS only at the restore point of an export".
+
+Done when: the refusal is gone for restore points that the export's undo files cover; a restore point that no undo file covers is still refused in words; the speed numbers for an older restore point are measured on the lab and written here; the release test reads one older restore point from COS and compares a checksum; this spec, `docs/FEATURES.md` and `docs/BACKUP-RECOVERY.md` say so.
+
+### What the code shows (5 Nov 2026)
+
+- The undo files of a VM disk are in `.repl-undo/` next to `disk.img`, in the backup folder. The export snapshots that whole folder, so each export should already hold the undo files back to the previous export. The earlier text in this spec said they are in the restore points folder; that is true for plain volumes only. **The first step of the build checks this on a real export on the lab.** If the undo files are not in the export, the export script gets a change to include them and only exports made after the change cover older restore points.
+- The disk view (`pkg/replication/diskview.go`) opens the disk and undo files by path on a share. Nothing in the COS path uses it. The spec's "small source interface" was never built.
+- An undo file has a 40-byte header, records of an offset, a length (at most 64 KiB) and the old data, and a trailer with a record count. There is no checksum per record.
+
+### Design
+
+1. **Source interface under the disk view.** The disk view reads the disk and each undo file through an interface: a name list, and for each file a size and read-at-offset. The share version is today's code. The COS version reads through the Kopia WebDAV mount that already serves `disk.img`.
+2. **Indexing.** The COS version reads the 40-byte header and the trailer of each undo file to find the restore points, then reads the undo files from the chosen restore point to the newest in large ranges (4 MiB, through the same read-ahead cache), not one tiny read per record. Limits as for any hostile input: record count, offset plus length inside the old size, names ending `.undo`.
+3. **Which restore points exist.** Those the undo headers list, plus the export's own. A restore point between two headers is rounded to the newest one at or before it, as the share version does. One older than every undo file in the export is refused in words.
+4. **Disk server.** `runCOSDisk` passes the requested time on instead of failing. The header `X-Disk-Moment` (a wire name, unchanged) carries the restore point actually served, so the saved file list, which belongs to the export's newest restore point, is ignored for an older one and the listing is read from the disk.
+5. **Keep time.** The check uses the export that covers the requested time, not the newest.
+6. **Gateway, controller, CLI, console.** The gateway already routes an older time to COS. The older restore point gets the 10 minute start limit. `ls --restore-points` for a VM disk in COS lists the undo restore points. The console stops dropping the restore point when the source is COS, and warns before the wait that an older restore point is listed from the disk and can take up to 5 minutes. Help text and notices that say "cannot be browsed yet" change.
+7. **Same bytes as a restore.** For every restore point, the COS view returns byte for byte what a whole-disk restore writes.
+
+### Tests
+
+- Property test: the COS view equals the share view for every restore point, and it counts the bytes fetched (not the whole undo chain's data for a small read).
+- Hostile undo files: out of order, records past the old size, huge counts, bad names.
+- A restore point older than every undo file is refused in words; a restore point between two is rounded.
+- The lab script `test-backup-files-vm-cos.sh` makes a restore point that no export holds as its own newest (it delays the export) and reads a file from it; today it only accepts a refusal. Release test stage 20 gets a named check for it.
+- Speed on the lab: first listing of an older restore point, and a download, written into this spec.
+
+### Decisions I made for you
+
+- Older restore points come from the undo files already in the export. No new file list per restore point, as decided before: they are listed from the disk, slowly.
+- The 5 minute allowance for the first listing of an older restore point stays; the console says so first.
+- An older restore point is refused in words when no undo file in the export covers it.
+- If the undo files are not in the export, I change the export to include them. Exports made before then cover only their newest restore point.
