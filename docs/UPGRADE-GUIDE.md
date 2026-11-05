@@ -45,7 +45,7 @@ Before upgrading, complete every item:
 | v0.11.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.12.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.13.0–v0.13.2 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
-| v0.14.0–v0.17.2 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
+| v0.14.0–v0.18.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
 
 ---
 
@@ -124,6 +124,27 @@ kubectl get crd filesharepools.storage.ibmcloud.io -o json | \
 ---
 
 ## Version-Specific Upgrade Notes
+
+### Upgrading to v0.18.0 (from v0.17.2)
+
+**Changes:**
+- "Restore point" replaces "moment" in the docs, console, `kubectl backup`, `kubectl failover` and `kubectl browse` output, events and error messages. New flags: `--restore-point`, `--restore-points`, `--list-restore-points` and `--restore-to-restore-point`.
+- The old flags and fields (the ones with "moment" in the name) still work for this release. They print a deprecation note or warning, and they are removed in the release after next.
+- **The Prometheus alert `VPCFilePoolExportMomentWaiting` is now `VPCFilePoolExportRestorePointWaiting`.** It has no old name. Change any alert route or silence that uses the old name.
+
+**CRD changes (additive):** new fields `spec.restorePoint` (BackupRestore, BackupFileRestore, BackupBrowse), `spec.volumeRestorePointKeepHours` (BackupPolicy), and the status fields `copyRestorePoint`, `restorePointTimes`, `commonRestorePoints`, `restorePoint`, `restorePoints`, `restorePointsTruncated` and `restoredRestorePoint`. The controller writes the old status fields as well as the new ones until the old ones are removed.
+
+**Chart changes:** none. No new values.
+
+**Action required:**
+1. Apply the CRDs: `kubectl apply --server-side -f config/crd/`. Do this before or with the Helm upgrade, because the controller writes the new fields.
+2. Upgrade with Helm. Set `image.tag` and `consolePlugin.image.tag` to `v0.18.0` if you pin them.
+3. **The controller and the Job image must be the same version.** The controller starts Jobs with the new flag names. A controller at v0.18.0 with an older driver image in the Jobs prints deprecation lines or fails. If you pin a Job image, move it to `v0.18.0` too.
+4. Rename `VPCFilePoolExportMomentWaiting` in your alert routes and silences.
+
+Names stored in data and sent between pods keep the old word on purpose, so existing backups are still found and pods of different versions still talk during the upgrade.
+
+To go back, run `helm rollback`. The older driver ignores the new fields. Do not remove them from the CRDs.
 
 ### Upgrading to v0.17.2 (from v0.17.1)
 

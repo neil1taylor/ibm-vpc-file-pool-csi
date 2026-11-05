@@ -19,6 +19,10 @@ To make a release:
 
 ## [Unreleased]
 
+## [v0.18.0] — 2026-11-05
+
+One word changes: "restore point" replaces "moment" in everything you read or type. The old flags and fields still work for this release. Apply the CRDs before or with the Helm upgrade, and keep the controller and the Job image on the same version. Rename the alert in your routes and silences.
+
 ### Changed
 
 - **"Restore point" replaces "moment" everywhere a person reads or types it (issue #412).** The docs, tutorials, console, `kubectl backup`, `kubectl failover` and `kubectl browse` output, events and error messages now say restore point. New flags: `--restore-point`, `--restore-points`, `--list-restore-points` and `--restore-to-restore-point`. New API fields: `spec.restorePoint` (BackupRestore, BackupFileRestore, BackupBrowse), `spec.volumeRestorePointKeepHours` (BackupPolicy), and the status fields `copyRestorePoint`, `restorePointTimes`, `commonRestorePoints`, `restorePoint`, `restorePoints`, `restorePointsTruncated` and `restoredRestorePoint`. The old flags and fields still work for this release, print a deprecation note or warning, and are removed in the release after next. The controller writes the old status fields as well as the new ones until then. Names stored in data and sent between pods keep the old word on purpose, so existing backups are still found and pods of different versions still talk during an upgrade: the kopia tag `moment`, the folder `.moments`, the file `.repl-moment`, the key `moment` in saved file lists, the headers `X-Disk-Moment` and `Repl-Disk-Moment`, and the browse path `/v1/moments`. **One name has no old alias: the Prometheus alert `VPCFilePoolExportMomentWaiting` is now `VPCFilePoolExportRestorePointWaiting`.** Change any alert route or silence that uses the old name. The entries for earlier releases below keep the old word.
