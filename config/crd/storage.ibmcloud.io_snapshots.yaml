@@ -118,8 +118,15 @@ spec:
                   disks of one VM that show the same moment have the same CopyID.
                 type: string
               copyMoment:
-                description: CopyMoment is the moment a snapshot of a running VM's
-                  disk shows.
+                description: |-
+                  CopyMoment is the old name of CopyRestorePoint, written too.
+                  Deprecated: use CopyRestorePoint.
+                format: date-time
+                type: string
+              copyRestorePoint:
+                description: |-
+                  CopyRestorePoint is the restore point a snapshot of a running VM's disk
+                  shows.
                 format: date-time
                 type: string
               creationTime:
@@ -190,7 +197,9 @@ spec:
                       on the owner. Only a snapshot copy sets it.
                     type: string
                   moment:
-                    description: Moment is the moment the copy shows.
+                    description: |-
+                      Moment is the old name of RestorePoint, written too.
+                      Deprecated: use RestorePoint.
                     format: date-time
                     type: string
                   phase:
@@ -212,6 +221,10 @@ spec:
                       the copy can be watched and cancelled without its source volume.
                     type: string
                   podUID:
+                    type: string
+                  restorePoint:
+                    description: RestorePoint is the restore point the copy shows.
+                    format: date-time
                     type: string
                   setDisks:
                     description: |-
@@ -325,7 +338,9 @@ spec:
                     format: date-time
                     type: string
                   moment:
-                    description: Moment is the moment the copy shows.
+                    description: |-
+                      Moment is the old name of RestorePoint, written too.
+                      Deprecated: use RestorePoint.
                     format: date-time
                     type: string
                   podName:
@@ -335,6 +350,10 @@ spec:
                       pod that made the copy.
                     type: string
                   podUID:
+                    type: string
+                  restorePoint:
+                    description: RestorePoint is the restore point the copy shows.
+                    format: date-time
                     type: string
                   vmiName:
                     description: VMIName is the VirtualMachineInstance name.

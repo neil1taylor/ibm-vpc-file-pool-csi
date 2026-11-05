@@ -50,8 +50,8 @@ func (bc *BackupController) reconcileFileRestoreFromCOS(ctx context.Context, fr 
 		COS:   &FileRestoreCOS{Repo: loc.repo, Policy: loc.policy, Volume: loc.volume},
 		Paths: sp.Paths, Policy: loc.policy, MaxBytes: bc.fileCfg.MaxBytes,
 	}
-	if sp.Moment != nil {
-		req.At = sp.Moment.Time
+	if rp := sp.EffectiveRestorePoint(); rp != nil {
+		req.At = rp.Time
 	}
 	if sp.Guest {
 		// A VM disk in COS is read through a disk server, which holds the keys.

@@ -341,6 +341,7 @@ func (rc *ReplicationController) startVMCopy(ctx context.Context, policy *v1alph
 			StagingFile:          cp.Disks[i].StagingFile,
 			SpeedMBps:            int32(speed >> 20), // #nosec G115 -- a speed in MB/s fits an int32
 			Moment:               metav1.NewTime(cp.Moment),
+			RestorePoint:         metav1.NewTime(cp.Moment),
 			FileSystemConsistent: cp.FileSystemConsistent,
 			FreezeError:          cp.FreezeError,
 			Bitmap:               cp.Bitmap,
@@ -529,7 +530,7 @@ func (rc *ReplicationController) advanceVMCopy(ctx context.Context, policy *v1al
 			if !slices.Contains(failedNames, sv.Name) {
 				moment := st.Moment
 				s.LastSyncTime = &moment
-				s.CopyMoment = &moment
+				s.SetCopyRestorePoint(&moment)
 				s.Consistency, s.ConsistencyReason = consistencyFileSystem, ""
 				if !st.FileSystemConsistent {
 					s.Consistency, s.ConsistencyReason = consistencyCrash, st.FreezeError
@@ -542,10 +543,11 @@ func (rc *ReplicationController) advanceVMCopy(ctx context.Context, policy *v1al
 					t := metav1.NewTime(*o)
 					s.OldestRestorePoint = &t
 				}
-				s.RestorePointMoments = nil
+				var times []metav1.Time
 				for _, m := range results[i].RestorePointMoments {
-					s.RestorePointMoments = append(s.RestorePointMoments, metav1.NewTime(m))
+					times = append(times, metav1.NewTime(m))
 				}
+				s.SetRestorePointTimes(times)
 				s.VMName = ns + "/" + st.VMIName
 				rc.recordSubVolumeSyncTime(policy.Name, sv.Name)
 			}
@@ -929,7 +931,7 @@ func vmReplicationStatuses(statuses []v1alpha1.SubVolumeReplicationStatus) []v1a
 			}
 			if vm.CopyMoment == nil || d.CopyMoment.Before(vm.CopyMoment) {
 				m := *d.CopyMoment
-				vm.CopyMoment = &m
+				vm.SetCopyRestorePoint(&m)
 			}
 			set := map[time.Time]bool{d.CopyMoment.UTC(): true}
 			for _, rp := range d.RestorePointMoments {
@@ -950,9 +952,11 @@ func vmReplicationStatuses(statuses []v1alpha1.SubVolumeReplicationStatus) []v1a
 			moments = append(moments, m)
 		}
 		sort.Slice(moments, func(i, j int) bool { return moments[i].After(moments[j]) })
+		var commonTimes []metav1.Time
 		for _, m := range moments {
-			vm.CommonMoments = append(vm.CommonMoments, metav1.NewTime(m))
+			commonTimes = append(commonTimes, metav1.NewTime(m))
 		}
+		vm.SetCommonRestorePoints(commonTimes)
 		out = append(out, vm)
 	}
 	return out

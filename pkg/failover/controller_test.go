@@ -380,3 +380,22 @@ func TestController_ALostJobIsStartedAgain(t *testing.T) {
 		t.Error("the Job should be started again")
 	}
 }
+
+func TestController_AFinishedPlanWritesTheRestorePointFieldsToo(t *testing.T) {
+	ctl, c := newTestController(t, append(receiverClaim(), newFailover("rp1", v1alpha1.FailoverActionPlan))...)
+	ctx := context.Background()
+	if err := ctl.processOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	finishJob(t, c, jobFor(t, c, "rp1"), true, planMessage(t))
+	if err := ctl.processOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	vm := getFailover(t, c, "rp1").Status.VMs[0]
+	if !vm.RestorePoint.Time.Equal(m2) || !vm.Moment.Time.Equal(m2) {
+		t.Errorf("restorePoint %v, moment %v, want both %v", vm.RestorePoint, vm.Moment, m2)
+	}
+	if len(vm.RestorePoints) != 2 || len(vm.Moments) != 2 || !vm.RestorePoints[1].Time.Equal(m1) {
+		t.Errorf("restorePoints %v, moments %v", vm.RestorePoints, vm.Moments)
+	}
+}

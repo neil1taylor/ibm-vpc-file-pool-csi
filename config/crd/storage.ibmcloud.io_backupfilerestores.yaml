@@ -161,8 +161,8 @@ spec:
                 type: boolean
               moment:
                 description: |-
-                  Moment is the time to restore from. The newest backup at or before it is
-                  used. Unset means the latest copy.
+                  Moment is the old name of RestorePoint.
+                  Deprecated: use RestorePoint. If both are set they must be equal.
                 format: date-time
                 type: string
               paths:
@@ -184,6 +184,12 @@ spec:
                 description: |-
                   RequestedBy is the user who asked, for the audit trail. The gateway sets
                   it from the user's token; it is not used to decide anything.
+                type: string
+              restorePoint:
+                description: |-
+                  RestorePoint is the time to restore from. The newest backup at or before
+                  it is used. Unset means the latest copy.
+                format: date-time
                 type: string
               sizeGB:
                 description: |-
@@ -284,8 +290,14 @@ spec:
                 type: string
               restoredMoment:
                 description: |-
-                  RestoredMoment is the moment of the backup that was read. Unset if it is
-                  not known (the first copy of a volume).
+                  RestoredMoment is the old name of RestoredRestorePoint, written too.
+                  Deprecated: use RestoredRestorePoint.
+                format: date-time
+                type: string
+              restoredRestorePoint:
+                description: |-
+                  RestoredRestorePoint is the restore point of the backup that was read.
+                  Unset if it is not known (the first copy of a volume).
                 format: date-time
                 type: string
               sizeGB:

@@ -38,8 +38,13 @@ type BackupBrowseSpec struct {
 	// +kubebuilder:validation:Required
 	PVCName string `json:"pvcName"`
 
-	// Moment is the time to open. The newest backup at or before it is read.
-	// Unset means the latest copy.
+	// RestorePoint is the time to open. The newest backup at or before it is
+	// read. Unset means the latest copy.
+	// +optional
+	RestorePoint *metav1.Time `json:"restorePoint,omitempty"`
+
+	// Moment is the old name of RestorePoint.
+	// Deprecated: use RestorePoint. If both are set they must be equal.
 	// +optional
 	Moment *metav1.Time `json:"moment,omitempty"`
 

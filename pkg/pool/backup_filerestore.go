@@ -375,8 +375,8 @@ func (bc *BackupController) reconcileFileRestore(ctx context.Context, fr *v1alph
 	case entry.RestorePoints > 0:
 		req.MomentsPath = policyBase + "/.moments" + entry.SubPath
 	}
-	if sp.Moment != nil {
-		req.At = sp.Moment.Time
+	if rp := sp.EffectiveRestorePoint(); rp != nil {
+		req.At = rp.Time
 	}
 	if sp.Existing {
 		bc.fileRestoreIntoClaim(ctx, fr, req)
@@ -432,10 +432,10 @@ func (bc *BackupController) finishFileRestore(ctx context.Context, fr *v1alpha1.
 	st.Phase, st.Message, st.EndedTime = restorePhaseDone, fileRestoreSummary(out), &now
 	st.Folder, st.Latest = out.Folder, out.Latest
 	st.Files, st.Dirs, st.Links, st.Skipped, st.Unreadable, st.Bytes = out.Files, out.Dirs, out.Links, out.Skipped, out.Unreadable, out.Bytes
-	st.RestoredMoment = nil
+	st.SetRestoredRestorePoint(nil)
 	if t, err := time.Parse(time.RFC3339, out.Moment); err == nil {
 		m := metav1.NewTime(t)
-		st.RestoredMoment = &m
+		st.SetRestoredRestorePoint(&m)
 	}
 	if err := bc.saveFileRestoreStatus(ctx, fr); err != nil {
 		return false

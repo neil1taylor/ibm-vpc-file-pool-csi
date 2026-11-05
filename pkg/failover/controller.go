@@ -383,9 +383,14 @@ func (c *Controller) finish(ctx context.Context, f *v1alpha1.Failover, jobName s
 		return c.fail(ctx, f, "the failover Job left no result")
 	}
 	res := out.Result
+	// The Job reports the old names; the status carries both.
+	for i := range res.VMs {
+		res.VMs[i].SetRestorePoint(res.VMs[i].Moment)
+		res.VMs[i].SetRestorePoints(res.VMs[i].Moments)
+	}
 	f.Status.VMs = res.VMs
 	f.Status.Volumes = res.Volumes
-	f.Status.MomentsTruncated = res.MomentsTruncated
+	f.Status.SetRestorePointsTruncated(res.MomentsTruncated)
 	f.Status.RPO = &metav1.Duration{Duration: time.Duration(res.RPOSeconds) * time.Second}
 	f.Status.Message = ""
 

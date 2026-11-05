@@ -322,6 +322,9 @@ func TestInstantSnapshot_RunningVMIsReadyAtOnce(t *testing.T) {
 		s.Status.Phase != "Ready" || s.Status.Consistency != consistencyFileSystem || s.Status.CopyMoment == nil {
 		t.Errorf("Snapshot = %+v %+v", s.Annotations, s.Status)
 	}
+	if s.Status.CopyRestorePoint == nil || !s.Status.CopyRestorePoint.Equal(s.Status.CopyMoment) {
+		t.Errorf("copyRestorePoint %v, want the same as copyMoment %v", s.Status.CopyRestorePoint, s.Status.CopyMoment)
+	}
 	if got := fmt.Sprint(e.sv().Status.DiskChain); got != fmt.Sprint([]string{newFile, vmsnap.BaseFile}) {
 		t.Errorf("DiskChain = %s", got)
 	}

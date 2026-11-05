@@ -133,8 +133,13 @@ type FailoverStatus struct {
 	// +optional
 	Volumes []FailoverVolume `json:"volumes,omitempty"`
 
-	// MomentsTruncated is true if the list of moments of a VM was cut to fit
-	// the Job's termination message.
+	// RestorePointsTruncated is true if the list of restore points of a VM was
+	// cut to fit the Job's termination message.
+	// +optional
+	RestorePointsTruncated bool `json:"restorePointsTruncated,omitempty"`
+
+	// MomentsTruncated is the old name of RestorePointsTruncated, written too.
+	// Deprecated: use RestorePointsTruncated.
 	// +optional
 	MomentsTruncated bool `json:"momentsTruncated,omitempty"`
 
@@ -147,9 +152,18 @@ type FailoverStatus struct {
 type FailoverVM struct {
 	// Name is "namespace/name" of the VM.
 	Name string `json:"name"`
-	// Moment is the moment the failed-over disks will show.
+	// RestorePoint is the restore point the failed-over disks will show.
+	// +optional
+	RestorePoint metav1.Time `json:"restorePoint,omitempty"`
+	// RestorePoints are the restore points all disks of the VM can show,
+	// newest first.
+	// +optional
+	RestorePoints []metav1.Time `json:"restorePoints,omitempty"`
+	// Moment is the old name of RestorePoint, written too.
+	// Deprecated: use RestorePoint.
 	Moment metav1.Time `json:"moment"`
-	// Moments are the moments all disks of the VM can show, newest first.
+	// Moments is the old name of RestorePoints, written too.
+	// Deprecated: use RestorePoints.
 	// +optional
 	Moments []metav1.Time `json:"moments,omitempty"`
 	// Disks are the VM's disks.

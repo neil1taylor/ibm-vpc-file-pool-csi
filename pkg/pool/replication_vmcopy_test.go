@@ -1206,6 +1206,19 @@ func TestVMCopy_CommonMomentsAreThoseAllDisksShare(t *testing.T) {
 	if vm.CopyMoment == nil || vm.Consistency != "FileSystemConsistent" {
 		t.Errorf("copy moment/consistency = %v/%q", vm.CopyMoment, vm.Consistency)
 	}
+	if vm.CopyRestorePoint == nil || !vm.CopyRestorePoint.Equal(vm.CopyMoment) {
+		t.Errorf("copyRestorePoint = %v, want %v", vm.CopyRestorePoint, vm.CopyMoment)
+	}
+	if got := strings.Join(momentsOf(vm.CommonRestorePoints), ","); got != "12:00,11:00,10:00" {
+		t.Errorf("common restore points = %s", got)
+	}
+	d := e.status(t, vmGuardSV1)
+	if d.CopyRestorePoint == nil || !d.CopyRestorePoint.Equal(d.CopyMoment) {
+		t.Errorf("disk copyRestorePoint = %v, want %v", d.CopyRestorePoint, d.CopyMoment)
+	}
+	if got := momentsOf(d.RestorePointTimes); strings.Join(got, ",") != "09:00,10:00,11:00" {
+		t.Errorf("disk restorePointTimes = %v", got)
+	}
 }
 
 func TestVMCopy_DisksAtDifferentMomentsShareOnlyRestorePoints(t *testing.T) {
@@ -1216,6 +1229,9 @@ func TestVMCopy_DisksAtDifferentMomentsShareOnlyRestorePoints(t *testing.T) {
 	vms := vmReplicationStatuses(prev)
 	if got := strings.Join(momentsOf(vms[0].CommonMoments), ","); got != "11:00,10:00" {
 		t.Errorf("common = %s", got)
+	}
+	if got := strings.Join(momentsOf(vms[0].CommonRestorePoints), ","); got != "11:00,10:00" {
+		t.Errorf("common restore points = %s", got)
 	}
 	// A disk with no known copy leaves no common moment at all.
 	prev[1].CopyMoment = nil

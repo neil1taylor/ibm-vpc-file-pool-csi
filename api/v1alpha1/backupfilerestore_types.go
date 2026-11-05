@@ -40,8 +40,13 @@ type BackupFileRestoreSpec struct {
 	// +kubebuilder:validation:Required
 	SourceName string `json:"sourceName"`
 
-	// Moment is the time to restore from. The newest backup at or before it is
-	// used. Unset means the latest copy.
+	// RestorePoint is the time to restore from. The newest backup at or before
+	// it is used. Unset means the latest copy.
+	// +optional
+	RestorePoint *metav1.Time `json:"restorePoint,omitempty"`
+
+	// Moment is the old name of RestorePoint.
+	// Deprecated: use RestorePoint. If both are set they must be equal.
 	// +optional
 	Moment *metav1.Time `json:"moment,omitempty"`
 
@@ -144,8 +149,13 @@ type BackupFileRestoreStatus struct {
 	// +optional
 	Folder string `json:"folder,omitempty"`
 
-	// RestoredMoment is the moment of the backup that was read. Unset if it is
-	// not known (the first copy of a volume).
+	// RestoredRestorePoint is the restore point of the backup that was read.
+	// Unset if it is not known (the first copy of a volume).
+	// +optional
+	RestoredRestorePoint *metav1.Time `json:"restoredRestorePoint,omitempty"`
+
+	// RestoredMoment is the old name of RestoredRestorePoint, written too.
+	// Deprecated: use RestoredRestorePoint.
 	// +optional
 	RestoredMoment *metav1.Time `json:"restoredMoment,omitempty"`
 

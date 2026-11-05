@@ -102,7 +102,13 @@ type SnapshotStatus struct {
 	// +optional
 	VMCopyRetryAfter *metav1.Time `json:"vmCopyRetryAfter,omitempty"`
 
-	// CopyMoment is the moment a snapshot of a running VM's disk shows.
+	// CopyRestorePoint is the restore point a snapshot of a running VM's disk
+	// shows.
+	// +optional
+	CopyRestorePoint *metav1.Time `json:"copyRestorePoint,omitempty"`
+
+	// CopyMoment is the old name of CopyRestorePoint, written too.
+	// Deprecated: use CopyRestorePoint.
 	// +optional
 	CopyMoment *metav1.Time `json:"copyMoment,omitempty"`
 
@@ -147,7 +153,12 @@ type VMCopySet struct {
 	// VMIName is the VirtualMachineInstance name.
 	VMIName string `json:"vmiName"`
 
-	// Moment is the moment the copy shows.
+	// RestorePoint is the restore point the copy shows.
+	// +optional
+	RestorePoint metav1.Time `json:"restorePoint,omitempty"`
+
+	// Moment is the old name of RestorePoint, written too.
+	// Deprecated: use RestorePoint.
 	Moment metav1.Time `json:"moment"`
 
 	// FileSystemConsistent is true if the guest was frozen for the copy.

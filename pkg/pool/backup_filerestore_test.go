@@ -202,6 +202,9 @@ func TestFileRestore_IntoAnExistingClaimRunsToDone(t *testing.T) {
 	if st.RestoredMoment == nil || !st.RestoredMoment.Equal(&moment) {
 		t.Errorf("restored moment %v", st.RestoredMoment)
 	}
+	if st.RestoredRestorePoint == nil || !st.RestoredRestorePoint.Equal(&moment) {
+		t.Errorf("restoredRestorePoint %v", st.RestoredRestorePoint)
+	}
 	if st.EndedTime == nil || !st.EndedTime.Time.Equal(e.now) {
 		t.Errorf("ended %v", st.EndedTime)
 	}

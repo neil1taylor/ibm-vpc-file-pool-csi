@@ -158,8 +158,8 @@ spec:
                 type: boolean
               moment:
                 description: |-
-                  Moment is the time to open. The newest backup at or before it is read.
-                  Unset means the latest copy.
+                  Moment is the old name of RestorePoint.
+                  Deprecated: use RestorePoint. If both are set they must be equal.
                 format: date-time
                 type: string
               policy:
@@ -176,6 +176,12 @@ spec:
                 description: |-
                   RequestedBy is the user who asked, for the audit trail. The gateway sets
                   it from the user's token; it is not used to decide anything.
+                type: string
+              restorePoint:
+                description: |-
+                  RestorePoint is the time to open. The newest backup at or before it is
+                  read. Unset means the latest copy.
+                format: date-time
                 type: string
               source:
                 description: |-

@@ -39,8 +39,13 @@ type BackupRestoreSpec struct {
 	// +optional
 	SourceName string `json:"sourceName,omitempty"`
 
-	// Moment is the time to restore. The newest backup at or before it is
-	// used. Unset means the latest backup.
+	// RestorePoint is the time to restore. The newest backup at or before it
+	// is used. Unset means the latest backup.
+	// +optional
+	RestorePoint *metav1.Time `json:"restorePoint,omitempty"`
+
+	// Moment is the old name of RestorePoint.
+	// Deprecated: use RestorePoint. If both are set they must be equal.
 	// +optional
 	Moment *metav1.Time `json:"moment,omitempty"`
 
@@ -73,8 +78,13 @@ type BackupRestoreStatus struct {
 	// +optional
 	Message string `json:"message,omitempty"`
 
-	// RestoredMoment is the moment of the backup that was written. Unset if
-	// it is not known (the first copy of a volume).
+	// RestoredRestorePoint is the restore point of the backup that was
+	// written. Unset if it is not known (the first copy of a volume).
+	// +optional
+	RestoredRestorePoint *metav1.Time `json:"restoredRestorePoint,omitempty"`
+
+	// RestoredMoment is the old name of RestoredRestorePoint, written too.
+	// Deprecated: use RestoredRestorePoint.
 	// +optional
 	RestoredMoment *metav1.Time `json:"restoredMoment,omitempty"`
 

@@ -151,14 +151,20 @@ spec:
                 type: object
               moment:
                 description: |-
-                  Moment is the time to restore. The newest backup at or before it is
-                  used. Unset means the latest backup.
+                  Moment is the old name of RestorePoint.
+                  Deprecated: use RestorePoint. If both are set they must be equal.
                 format: date-time
                 type: string
               policy:
                 description: |-
                   Policy is the BackupPolicy that holds the backup. With fromCOS it need not
                   exist: it only names the policy's area in the bucket.
+                type: string
+              restorePoint:
+                description: |-
+                  RestorePoint is the time to restore. The newest backup at or before it
+                  is used. Unset means the latest backup.
+                format: date-time
                 type: string
               sourceName:
                 type: string
@@ -215,8 +221,14 @@ spec:
                 type: string
               restoredMoment:
                 description: |-
-                  RestoredMoment is the moment of the backup that was written. Unset if
-                  it is not known (the first copy of a volume).
+                  RestoredMoment is the old name of RestoredRestorePoint, written too.
+                  Deprecated: use RestoredRestorePoint.
+                format: date-time
+                type: string
+              restoredRestorePoint:
+                description: |-
+                  RestoredRestorePoint is the restore point of the backup that was
+                  written. Unset if it is not known (the first copy of a volume).
                 format: date-time
                 type: string
             type: object

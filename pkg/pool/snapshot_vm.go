@@ -522,6 +522,7 @@ func (m *Manager) startVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, snap
 		SetDisks:             setDisks,
 		SpeedMBps:            int32(speedMBps), // #nosec G115 -- a speed in MB/s fits an int32
 	}
+	snap.Status.VMCopy.SetRestorePoint(moment)
 	snap.Status.CopyID = id
 	snap.Status.VMCopySet = nil
 	if len(disks) > 1 {
@@ -535,6 +536,7 @@ func (m *Manager) startVMSnapshotCopy(ctx context.Context, vm *vmSnapshots, snap
 			FileSystemConsistent: cp.FileSystemConsistent,
 			FreezeError:          cp.FreezeError,
 			Bitmap:               cp.Bitmap,
+			RestorePoint:         moment,
 			JoinUntil:            metav1.NewTime(now.Add(vmCopyJoinWindow)),
 			Disks:                disks,
 		}
@@ -647,6 +649,7 @@ func (m *Manager) joinVMCopySet(ctx context.Context, snap, leader *v1alpha1.Snap
 		DiskIndex:            int32(idx), // #nosec G115 -- a VM has far fewer than 2^31 disks
 		StagingFile:          set.Disks[idx].StagingFile,
 		Moment:               set.Moment,
+		RestorePoint:         set.Moment,
 		FileSystemConsistent: set.FileSystemConsistent,
 		FreezeError:          set.FreezeError,
 		Bitmap:               set.Bitmap,
@@ -935,7 +938,7 @@ func (m *Manager) watchVMSnapshotApply(ctx context.Context, vm *vmSnapshots, sna
 	moment := st.Moment
 	snap.Status.Phase = "Ready"
 	snap.Status.ReadyToUse = true
-	snap.Status.CopyMoment = &moment
+	snap.Status.SetCopyRestorePoint(&moment)
 	snap.Status.Consistency, snap.Status.ConsistencyReason = consistencyFileSystem, ""
 	if !st.FileSystemConsistent {
 		snap.Status.Consistency, snap.Status.ConsistencyReason = consistencyCrash, st.FreezeError
