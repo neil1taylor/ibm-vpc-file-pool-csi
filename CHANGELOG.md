@@ -19,7 +19,20 @@ To make a release:
 
 ## [Unreleased]
 
+## [v0.19.1] — 2026-11-06
+
+This release replaces v0.18.0 and v0.19.0, which were tagged but never put on a cluster. It is v0.19.0 plus fixes from a review of the undo file reader and `kubectl backup`. Read the v0.18.0 and v0.19.0 entries below for the steps they need.
+
+### Fixed
+
+- **The reader of undo files in COS refuses a broken or gapped chain (issues #409, #412).** Each undo file must start where the one before it ended. A gap or a repeated start is now an error, not a guess.
+- **Only the undo file names the writer makes are accepted.** Names such as `1.undo` or `01.undo` are refused, so two files can no longer share a sequence number.
+- **The memory limit for reading undo files is smaller.** The reader stops at 2 million records over all layers, so the disk server pod stays well inside its memory limit. A restore point that is too large to browse now says so.
+- **`kubectl backup` prints the deprecation line for old flag names once,** not once per use.
+
 ## [v0.19.0] — 2026-11-05
+
+v0.19.0 was tagged but never put on a cluster; v0.19.1 replaces it.
 
 You can now browse and restore older restore points of a VM disk that is in COS, not only the newest one. This release also replaces v0.18.0, which was tagged but never put on a cluster, so it carries the restore point rename too. Read the v0.18.0 entry below for the steps that rename needs.
 
