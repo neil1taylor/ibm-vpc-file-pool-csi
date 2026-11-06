@@ -29,7 +29,7 @@ func TestChooseBackup_NewestExportByDefault(t *testing.T) {
 
 // Phase 6d: a time before the export's restore point is no longer refused here.
 // The export that covers the time (the oldest one at or after it) is chosen, and
-// the undo files in it decide whether the restore point exists.
+// the folders of its moments snapshot decide whether the restore point exists.
 func TestChooseBackup_AnOlderRestorePointPicksTheCoveringExport(t *testing.T) {
 	f := newFakeRepo()
 	addExport(f, "pol", volA, at(20, 9))
@@ -39,7 +39,7 @@ func TestChooseBackup_AnOlderRestorePointPicksTheCoveringExport(t *testing.T) {
 	if err != nil || !got.Moment.Equal(at(21, 9)) || !got.Newest {
 		t.Fatalf("got %+v, %v; want the export of 21 Oct", got, err)
 	}
-	// Before every export: the oldest export covers it, and the undo files say.
+	// Before every export: the oldest export covers it, and its folders say.
 	got, err = ChooseBackup(snaps, Params{Policy: "pol", Volume: volA, At: at(19, 0)})
 	if err != nil || !got.Moment.Equal(at(20, 9)) || got.Newest {
 		t.Errorf("got %+v, %v; want the export of 20 Oct", got, err)
@@ -47,6 +47,25 @@ func TestChooseBackup_AnOlderRestorePointPicksTheCoveringExport(t *testing.T) {
 	// A time after the newest export reads the newest.
 	if got, err := ChooseBackup(snaps, Params{Policy: "pol", Volume: volA, At: at(25, 0)}); err != nil || !got.Moment.Equal(at(21, 9)) {
 		t.Errorf("got %+v, %v", got, err)
+	}
+}
+
+func TestChooseBackup_CarriesTheMomentsSnapshotOfTheExport(t *testing.T) {
+	f := newFakeRepo()
+	addExport(f, "pol", volA, at(20, 9))
+	addExport(f, "pol", volA, at(21, 9), at(20, 9), at(21, 9))
+	snaps, _ := f.Snapshots(context.Background())
+	got, err := ChooseBackup(snaps, Params{Policy: "pol", Volume: volA})
+	if err != nil || got.Moments == nil {
+		t.Fatalf("got %+v, %v; want the moments snapshot of the newest export", got, err)
+	}
+	if got.Moments.SourcePath != momentsPath("pol", volA) || !ValidOID(got.Moments.ID) {
+		t.Errorf("moments snapshot = %+v", got.Moments)
+	}
+	// An export without a moments snapshot has none, and that is not an error.
+	got, err = ChooseBackup(snaps, Params{Policy: "pol", Volume: volA, At: at(19, 0)})
+	if err != nil || got.Moments != nil {
+		t.Errorf("got %+v, %v; want no moments snapshot", got, err)
 	}
 }
 

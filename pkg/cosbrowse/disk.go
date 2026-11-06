@@ -23,14 +23,18 @@ type BackupPick struct {
 	Moment time.Time
 	// Newest says that no later export exists.
 	Newest bool
+	// Moments is the export's snapshot of the volume's restore point folders:
+	// one folder, with a full disk.img, for each restore point the backup keeps.
+	// It is nil if the export made none.
+	Moments *Snapshot
 }
 
 // ChooseBackup picks the backup snapshot of the volume to serve as a disk: the
 // export that covers the time, which is the oldest export at or after it (the
-// newest if there is none), as a restore from COS does. The disk of an export is
-// at the export's moment; an older restore point of the disk is rebuilt from the
-// undo files in the same snapshot, and it is the disk server that refuses a time
-// that no undo file reaches back to.
+// newest if there is none), as a restore from COS does. The disk of the backup
+// snapshot is at the export's moment. An older restore point of the disk is a
+// full copy in the export's moments snapshot (BackupPick.Moments), and it is the
+// disk server that refuses a time that no folder there reaches back to.
 func ChooseBackup(snaps []Snapshot, p Params) (BackupPick, error) {
 	exports := exportsOf(snaps, p)
 	if len(exports) == 0 {
@@ -41,7 +45,10 @@ func ChooseBackup(snaps []Snapshot, p Params) (BackupPick, error) {
 	if !ValidOID(e.backup.ID) {
 		return BackupPick{}, &ReadError{Msg: "the backup holds a damaged entry"}
 	}
-	return BackupPick{Snapshot: e.backup, Moment: e.moment, Newest: idx == len(exports)-1}, nil
+	if e.moments != nil && !ValidOID(e.moments.ID) {
+		return BackupPick{}, &ReadError{Msg: "the backup holds a damaged entry"}
+	}
+	return BackupPick{Snapshot: e.backup, Moment: e.moment, Newest: idx == len(exports)-1, Moments: e.moments}, nil
 }
 
 // OpenKopia reads the keys and connects to the repository of the source, like
@@ -62,6 +69,8 @@ func OpenKopia(ctx context.Context, src Source, opts OpenOptions) (*KopiaRepo, e
 // WebDAV is a running `kopia mount` of one snapshot with its WebDAV server.
 type WebDAV struct {
 	// URL is where disk.img of the snapshot is served, on the loopback address.
+	// For a snapshot without a disk.img at its root the server root is the URL
+	// without its last element.
 	URL  string
 	stop func()
 }

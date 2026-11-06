@@ -224,7 +224,7 @@ func (bc *BackupController) watchGuestCOS(ctx context.Context, bb *v1alpha1.Back
 	case (!ds.Ready || ds.PodIP == "") && bb.Status.Phase == browsePhaseStarting && bb.Status.StartedTime != nil &&
 		bc.nowFunc().Sub(bb.Status.StartedTime.Time) >= limit(): // asked once: the limit reads the policy
 		bc.endBrowse(ctx, bb, counts, browsePhaseFailed, "", fmt.Sprintf(
-			"the disk server was not ready after %s. Check that the Secrets named by the export block exist in namespace %s and hold the keys access_key_id, secret_access_key, wrappedKey and apikey, and that the image can be pulled. An older restore point is read from the undo files in the backup, which takes longer",
+			"the disk server was not ready after %s. Check that the Secrets named by the export block exist in namespace %s and hold the keys access_key_id, secret_access_key, wrappedKey and apikey, and that the image can be pulled. An older restore point is read from a full copy of the disk in the backup, which can take longer",
 			limit(), bc.browse.COSNamespace))
 		return true
 	case !ds.Ready || ds.PodIP == "":
@@ -246,8 +246,9 @@ func (bc *BackupController) watchGuestCOS(ctx context.Context, bb *v1alpha1.Back
 }
 
 // diskStartTimeout is how long the disk server of a session may take to be
-// ready. A restore point older than the newest export is read from the undo
-// files and gets twice the start time of a COS session (10 minutes by default).
+// ready. A restore point older than the newest export is read from a full copy
+// in the export's restore point folder and gets twice the start time of a COS
+// session (10 minutes by default).
 // When the policy cannot say, an asked-for restore point is counted as older.
 func (bc *BackupController) diskStartTimeout(ctx context.Context, bb *v1alpha1.BackupBrowse) time.Duration {
 	rp := bb.Spec.EffectiveRestorePoint()

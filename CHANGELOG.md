@@ -19,6 +19,10 @@ To make a release:
 
 ## [Unreleased]
 
+### Fixed
+
+- **Older restore points of a VM disk in COS now come from the export's restore point folder (issue #409, phase 6d).** The first build looked for undo files in the backup folder of the export, but a backup keeps a full copy of the disk for each restore point in its restore point folder, and no undo files. The disk server now mounts the export's restore point snapshot, serves the newest folder at or before the time you ask for, and lists the restore points from the folder names. A restore point with no folder is refused in words. The reader of undo files in COS is removed. Found on the lab (v0.19.1); the cold-read speed of an older restore point is still to be measured.
+
 ## [v0.19.1] — 2026-11-06
 
 This release replaces v0.18.0 and v0.19.0, which were tagged but never put on a cluster. It is v0.19.0 plus fixes from a review of the undo file reader and `kubectl backup`. Read the v0.18.0 and v0.19.0 entries below for the steps they need.

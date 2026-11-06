@@ -20,7 +20,6 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/cosbrowse"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/cosdisk"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/guestfs"
-	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/replication"
 	"k8s.io/klog/v2"
 )
 
@@ -97,6 +96,7 @@ func runCOSDisk(ctx context.Context, a cosDiskArgs, stdout, stderr io.Writer, on
 		failStart(stderr, a.termLog, err)
 		return 1
 	}
+	var fileListURL string
 	repo, err := openDiskRepo(ctx, src, a.kopia, a.stateDir, stderr)
 	if err != nil {
 		failStart(stderr, a.termLog, err)
@@ -112,44 +112,47 @@ func runCOSDisk(ctx context.Context, a cosDiskArgs, stdout, stderr io.Writer, on
 		failStart(stderr, a.termLog, err)
 		return 1
 	}
-	dav, err := repo.StartWebDAV(ctx, pick.Snapshot.ID, nil, time.Minute)
-	if err != nil {
-		failStart(stderr, a.termLog, err)
-		return 1
-	}
-	defer dav.Stop()
-	// A time before the export's own restore point is rebuilt from the undo
-	// files that the export holds. The export's own restore point is the disk.
+	davClient := &http.Client{Timeout: 5 * time.Minute}
 	// A restore point is named in whole seconds (as the listing prints it) but
 	// keeps its nanoseconds, so the view is asked for the end of that second.
 	viewAt := guestfs.AtEndOfSecond(a.at)
 	older := !viewAt.IsZero() && viewAt.Before(pick.Moment)
-	davClient := &http.Client{Timeout: 5 * time.Minute}
-	var (
-		reader   cosdisk.DiskReader
-		served   = pick.Moment
-		closeAll func()
-	)
+	mv := &momentsView{ctx: ctx, repo: repo, snap: pick.Moments, client: davClient}
+	defer mv.stop()
+	diskURL, served := "", pick.Moment
 	if older {
-		uv, uerr := cosdisk.OpenUndoView(ctx, davClient, dav.URL, pick.Moment, viewAt,
-			cosdisk.Options{SegmentSize: a.segmentMB << 20, ReadAhead: a.readAhead, MaxBytes: int64(a.cacheMB) << 20})
-		if uerr != nil {
-			failStart(stderr, a.termLog, olderRefusal(uerr, a.at))
+		// An older restore point is a full copy in a folder of the export's
+		// moments snapshot. The newest folder at or before the time is served.
+		folders, lerr := mv.list(ctx)
+		if lerr != nil {
+			failStart(stderr, a.termLog, olderRefusal(lerr, a.at))
 			return 1
 		}
-		reader, served, closeAll = uv.View, uv.View.Moment(), func() { _ = uv.Close() }
+		f, perr := cosdisk.PickRestorePointFolder(folders, viewAt)
+		if perr != nil {
+			failStart(stderr, a.termLog, olderRefusal(perr, a.at))
+			return 1
+		}
+		diskURL, served = mv.base+"/"+f.Name+"/disk.img", f.Moment
 	} else {
-		hctx, cancel := context.WithTimeout(ctx, time.Minute)
-		httpSrc, herr := cosdisk.NewHTTPSource(hctx, davClient, dav.URL)
-		cancel()
-		if herr != nil {
-			failStart(stderr, a.termLog, fmt.Errorf("the backup has no readable disk: %w", herr))
+		dav, derr := repo.StartWebDAV(ctx, pick.Snapshot.ID, nil, time.Minute)
+		if derr != nil {
+			failStart(stderr, a.termLog, derr)
 			return 1
 		}
-		disk := cosdisk.New(httpSrc, cosdisk.Options{SegmentSize: a.segmentMB << 20, ReadAhead: a.readAhead, MaxBytes: int64(a.cacheMB) << 20})
-		reader, closeAll = disk, func() { _ = disk.Close() }
+		defer dav.Stop()
+		diskURL = dav.URL
+		fileListURL = dav.URL
 	}
-	defer closeAll()
+	hctx, cancel := context.WithTimeout(ctx, time.Minute)
+	httpSrc, herr := cosdisk.NewHTTPSource(hctx, davClient, diskURL)
+	cancel()
+	if herr != nil {
+		failStart(stderr, a.termLog, fmt.Errorf("the backup has no readable disk: %w", herr))
+		return 1
+	}
+	disk := cosdisk.New(httpSrc, cosdisk.Options{SegmentSize: a.segmentMB << 20, ReadAhead: a.readAhead, MaxBytes: int64(a.cacheMB) << 20})
+	defer func() { _ = disk.Close() }()
 	var lastUse atomic.Int64
 	lastUse.Store(time.Now().UnixNano())
 	moment := served.UTC().Format(time.RFC3339)
@@ -163,10 +166,10 @@ func runCOSDisk(ctx context.Context, a cosDiskArgs, stdout, stderr io.Writer, on
 	if !older {
 		// The saved file list belongs to the export's own restore point. For an
 		// older one the folders are read from the disk.
-		opts = append(opts, cosdisk.WithFileList(func(ctx context.Context) (io.ReadCloser, int64, error) { return fetchFileList(ctx, dav.URL) }))
+		opts = append(opts, cosdisk.WithFileList(func(ctx context.Context) (io.ReadCloser, int64, error) { return fetchFileList(ctx, fileListURL) }))
 	}
-	opts = append(opts, cosdisk.WithRestorePoints(restorePointsOf(davClient, dav.URL, pick.Moment)))
-	diskHandler, err := cosdisk.NewHandler(reader, token, opts...)
+	opts = append(opts, cosdisk.WithRestorePoints(restorePointsOf(mv, pick.Moment)))
+	diskHandler, err := cosdisk.NewHandler(disk, token, opts...)
 	if err != nil {
 		failStart(stderr, a.termLog, err)
 		return 1
@@ -261,38 +264,87 @@ func fetchFileList(ctx context.Context, diskURL string) (io.ReadCloser, int64, e
 
 // olderRefusal says in words why an older restore point cannot be served.
 func olderRefusal(err error, at time.Time) error {
-	if errors.Is(err, replication.ErrNoRestorePoint) {
+	if errors.Is(err, cosdisk.ErrNoRestorePoint) {
 		return fmt.Errorf("this VM disk has no restore point in COS at or before %s (%w)", at.UTC().Format(time.RFC3339), err)
 	}
 	return fmt.Errorf("the restore point of the VM disk could not be opened: %w", err)
 }
 
-// restorePointsOf lists the restore points that the export holds: those of its
-// undo files and the disk's own. It reads a few bytes at each end of each undo
-// file, once; a failed listing is tried again at the next request.
-func restorePointsOf(client *http.Client, diskURL string, own time.Time) func(context.Context) ([]time.Time, error) {
-	var (
-		mu   sync.Mutex
-		done []time.Time
-	)
-	return func(ctx context.Context) ([]time.Time, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		if done != nil {
-			return done, nil
-		}
-		undo, err := cosdisk.RestorePointsOf(ctx, client, diskURL)
+// momentsView is the export's moments snapshot, mounted on first use. Its root
+// lists the restore point folders, each with a full copy of the disk. The mount
+// belongs to the life of the disk server, so it is started with the server's
+// context and not with the context of the request that asks for it.
+type momentsView struct {
+	ctx    context.Context
+	repo   diskRepo
+	snap   *cosbrowse.Snapshot
+	client *http.Client
+
+	mu      sync.Mutex
+	dav     *cosbrowse.WebDAV
+	base    string
+	folders []cosdisk.RestorePointFolder
+	listed  bool
+}
+
+// list mounts the snapshot (once) and lists its folders (once, when it works).
+// An export with no moments snapshot, or one that Kopia cannot list, has none; a
+// failure of the mount or the listing is returned, and tried again next time.
+func (m *momentsView) list(ctx context.Context) ([]cosdisk.RestorePointFolder, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.listed || m.snap == nil {
+		return m.folders, nil
+	}
+	if m.dav == nil {
+		dav, err := m.repo.StartWebDAV(m.ctx, m.snap.ID, nil, time.Minute)
 		if err != nil {
 			return nil, err
 		}
-		all := append(undo, own)
-		sort.Slice(all, func(i, j int) bool { return all[i].Before(all[j]) })
-		done = all[:0:0]
-		for _, t := range all {
-			if len(done) == 0 || !t.Equal(done[len(done)-1]) {
-				done = append(done, t)
-			}
+		m.dav, m.base = dav, strings.TrimSuffix(dav.URL, "/disk.img")
+	}
+	folders, err := cosdisk.ListRestorePointFolders(ctx, m.client, m.base)
+	if err != nil {
+		return nil, err
+	}
+	m.folders, m.listed = folders, true
+	return folders, nil
+}
+
+func (m *momentsView) stop() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.dav != nil {
+		m.dav.Stop()
+		m.dav = nil
+	}
+}
+
+// restorePointsOf lists the restore points of the export: the folders of its
+// moments snapshot and the export's own. The snapshot is mounted at the first
+// request, and a failed listing is tried again at the next one.
+func restorePointsOf(m *momentsView, own time.Time) func(context.Context) ([]time.Time, error) {
+	return func(ctx context.Context) ([]time.Time, error) {
+		folders, err := m.list(ctx)
+		if err != nil {
+			return nil, err
 		}
-		return done, nil
+		all := make([]time.Time, 0, len(folders)+1)
+		for _, f := range folders {
+			all = append(all, f.Moment)
+		}
+		all = append(all, own)
+		sort.Slice(all, func(i, j int) bool { return all[i].Before(all[j]) })
+		var out []time.Time
+		for _, t := range all {
+			// A folder is named in whole seconds; the export's own restore point
+			// keeps its nanoseconds and wins over the folder of the same second.
+			if n := len(out); n > 0 && out[n-1].Truncate(time.Second).Equal(t.Truncate(time.Second)) {
+				out[n-1] = t
+				continue
+			}
+			out = append(out, t)
+		}
+		return out, nil
 	}
 }
