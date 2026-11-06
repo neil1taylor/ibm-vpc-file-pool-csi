@@ -17,6 +17,8 @@ import (
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/browse"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/cosbrowse"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/cosdisk"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/qcow2"
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/replication"
 )
 
 // olderRepo is a fake repository whose export holds a backup folder snapshot
@@ -31,8 +33,10 @@ type olderRepo struct {
 	noMoments  bool
 	// propfindStatus, if set, is what the moments snapshot answers to PROPFIND.
 	propfindStatus int
-	stopped        *int
-	mounted        []string
+	// momentsPropfind is the same for the moments snapshot only.
+	momentsPropfind int
+	stopped         *int
+	mounted         []string
 }
 
 func (f *olderRepo) Snapshots(context.Context) ([]cosbrowse.Snapshot, error) {
@@ -61,19 +65,27 @@ func (f *olderRepo) StartWebDAV(_ context.Context, id string, _ func() (int, boo
 			files.ServeHTTP(w, r)
 			return
 		}
-		if f.propfindStatus != 0 {
-			w.WriteHeader(f.propfindStatus)
+		if st := f.propfindStatus; st != 0 || (id == "kmoments" && f.momentsPropfind != 0) {
+			if st == 0 {
+				st = f.momentsPropfind
+			}
+			w.WriteHeader(st)
 			return
 		}
-		entries, err := os.ReadDir(dir)
+		// Like Kopia's WebDAV server, a path that is not there answers 405.
+		listed := dir
+		if r.URL.Path != "/" {
+			listed = filepath.Join(dir, filepath.FromSlash(r.URL.Path))
+		}
+		entries, err := os.ReadDir(listed)
 		if err != nil {
-			http.NotFound(w, r)
+			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
 		var b strings.Builder
 		b.WriteString(`<?xml version="1.0"?><D:multistatus xmlns:D="DAV:"><D:response><D:href>/</D:href></D:response>`)
 		for _, e := range entries {
-			fmt.Fprintf(&b, `<D:response><D:href>/%s/</D:href></D:response>`, e.Name())
+			fmt.Fprintf(&b, `<D:response><D:href>%s%s</D:href></D:response>`, r.URL.Path, e.Name())
 		}
 		b.WriteString(`</D:multistatus>`)
 		w.WriteHeader(http.StatusMultiStatus)
@@ -218,8 +230,8 @@ func TestCOSDiskModeRefusesARestorePointOlderThanEveryFolder(t *testing.T) {
 	if !strings.Contains(string(b), "restore point") || strings.Contains(strings.ToLower(string(b)), "moment") {
 		t.Errorf("termination log = %q (%s)", b, errb.String())
 	}
-	if *f.stopped != 1 {
-		t.Errorf("%d Kopia mounts stopped, want 1", *f.stopped)
+	if *f.stopped != 2 {
+		t.Errorf("%d Kopia mounts stopped, want 2 (folders, then the backup snapshot for undo files)", *f.stopped)
 	}
 }
 
@@ -237,8 +249,8 @@ func TestCOSDiskModeRefusesAnOlderRestorePointWhenTheExportHasNoMomentsSnapshot(
 	if !strings.Contains(string(b), "no restore point in COS") {
 		t.Errorf("termination log = %q", b)
 	}
-	if len(f.mounted) != 0 {
-		t.Errorf("mounted %v; there is nothing to mount", f.mounted)
+	if len(f.mounted) != 1 || f.mounted[0] != "k1234" {
+		t.Errorf("mounted %v; only the backup snapshot is tried, for undo files", f.mounted)
 	}
 }
 
@@ -339,8 +351,8 @@ func TestCOSDiskModeListsTheRestorePointsOfAnOlderSession(t *testing.T) {
 	if got := listPoints(t, client, base, token); len(got) != len(points) {
 		t.Errorf("restore points = %v, want %v", got, points)
 	}
-	if len(f.mounted) != 1 {
-		t.Errorf("mounted %v; the one mount is reused", f.mounted)
+	if len(f.mounted) != 2 {
+		t.Errorf("mounted %v; the moments snapshot is reused and the backup snapshot is mounted once for its undo files", f.mounted)
 	}
 }
 
@@ -395,5 +407,167 @@ func TestCOSDiskModeServesARestorePointNamedInWholeSeconds(t *testing.T) {
 	defer func() { cancel(); <-exit }()
 	if got := readDisk(t, client, base, token).Moment(); !got.Equal(named) {
 		t.Errorf("served restore point %v, want %v", got, named)
+	}
+}
+
+type wholeCopy struct{ data []byte }
+
+func (c wholeCopy) Size() int64 { return int64(len(c.data)) }
+func (c wholeCopy) Walk(fn func(qcow2.Extent) error) error {
+	return fn(qcow2.Extent{Length: int64(len(c.data)), Kind: qcow2.Data})
+}
+func (c wholeCopy) DataReader(e qcow2.Extent) io.Reader {
+	return bytes.NewReader(c.data[e.Offset : e.Offset+e.Length])
+}
+
+// undoBackup makes a backup folder of a running VM's disk: disk.img at the
+// newest restore point and an undo file in .repl-undo for each earlier one. It
+// returns the restore points and what the disk held at each (as a whole-disk
+// restore gives it).
+func undoBackup(t *testing.T, start time.Time) (dir string, points []time.Time, disks [][]byte) {
+	t.Helper()
+	dir = t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "disk.img"), bytes.Repeat([]byte{1}, 3<<16), 0o660); err != nil {
+		t.Fatal(err)
+	}
+	points = []time.Time{start}
+	for i := 2; i <= 4; i++ {
+		from := points[len(points)-1]
+		if _, err := replication.ApplyCopy(wholeCopy{bytes.Repeat([]byte{byte(i)}, (3+i%2)<<16)}, filepath.Join(dir, "disk.img"),
+			replication.ApplyOptions{From: from, To: from.Add(time.Hour), Full: true}); err != nil {
+			t.Fatal(err)
+		}
+		points = append(points, from.Add(time.Hour))
+	}
+	for i, m := range points {
+		out := filepath.Join(t.TempDir(), "out.img")
+		if _, err := replication.RestoreDisk(filepath.Join(dir, "disk.img"), m.Add(10*time.Minute), out); err != nil {
+			t.Fatal(err)
+		}
+		b, err := os.ReadFile(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		disks = append(disks, b)
+		_ = i
+	}
+	return dir, points, disks
+}
+
+func serveDisk(t *testing.T, f *olderRepo, at time.Time, want time.Time, wantDisk []byte) {
+	t.Helper()
+	client, base, token, exit, cancel, _, errb := serveAt(t, at)
+	if base == "" {
+		t.Fatalf("at %v: exited with %d: %s", at, <-exit, errb.String())
+	}
+	defer func() { cancel(); <-exit }()
+	src := readDisk(t, client, base, token)
+	if !src.Moment().Equal(want) || src.Size() != int64(len(wantDisk)) {
+		t.Fatalf("at %v: moment %v size %d; want %v %d", at, src.Moment(), src.Size(), want, len(wantDisk))
+	}
+	got := make([]byte, len(wantDisk))
+	if n, err := src.ReadRange(context.Background(), got, 0); err != nil || n != len(got) || !bytes.Equal(got, wantDisk) {
+		t.Fatalf("at %v: ReadRange = %d, %v", at, n, err)
+	}
+}
+
+// A running VM: the backup snapshot holds undo files and the export has no
+// restore point folders.
+func TestCOSDiskModeServesAnOlderRestorePointFromUndoFiles(t *testing.T) {
+	dir, points, disks := undoBackup(t, firstPoint)
+	for i := 0; i < 3; i++ {
+		f := &olderRepo{backupDir: dir, noMoments: true, moment: points[3], stopped: new(int)}
+		withFakeDiskRepoAny(t, f)
+		serveDisk(t, f, points[i].Add(10*time.Minute), points[i], disks[i])
+		if *f.stopped != 1 {
+			t.Errorf("restore point %d: %d Kopia mounts stopped, want 1", i, *f.stopped)
+		}
+	}
+}
+
+// Both forms in one export: a time that a folder reaches uses the folder; an
+// earlier one falls back to the undo files.
+func TestCOSDiskModeUsesFoldersFirstThenUndoFiles(t *testing.T) {
+	dir, points, disks := undoBackup(t, firstPoint)
+	moments := t.TempDir()
+	folderDisk := bytes.Repeat([]byte{9}, 2<<16) // marks a read from the folder
+	for _, m := range points[2:] {
+		fd := filepath.Join(moments, m.Format(cosdisk.RestorePointFolderLayout))
+		if err := os.MkdirAll(fd, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(fd, "disk.img"), folderDisk, 0o660); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f := &olderRepo{backupDir: dir, momentsDir: moments, moment: points[3], stopped: new(int)}
+	withFakeDiskRepoAny(t, f)
+	serveDisk(t, f, points[2].Add(10*time.Minute), points[2], folderDisk)
+	serveDisk(t, f, points[1].Add(10*time.Minute), points[1], disks[1])
+	serveDisk(t, f, points[0].Add(10*time.Minute), points[0], disks[0])
+}
+
+func TestCOSDiskModeRefusesAnOlderRestorePointWhenNeitherFormReachesBack(t *testing.T) {
+	dir, points, _ := undoBackup(t, firstPoint)
+	moments := t.TempDir() // a moments snapshot with no folder at all
+	f := &olderRepo{backupDir: dir, momentsDir: moments, moment: points[3], stopped: new(int)}
+	withFakeDiskRepoAny(t, f)
+	_, base, _, exit, _, term, _ := serveAt(t, points[0].Add(-time.Hour))
+	if base != "" {
+		t.Fatal("a restore point before every folder and every undo file must not be served")
+	}
+	<-exit
+	b, _ := os.ReadFile(term)
+	if !strings.Contains(string(b), "no restore point in COS") {
+		t.Errorf("termination log = %q", b)
+	}
+	if *f.stopped != 2 {
+		t.Errorf("%d Kopia mounts stopped, want 2 (folders and backup)", *f.stopped)
+	}
+}
+
+// The list of a session is the union of the folders, the undo files and the
+// export's own restore point, without duplicates.
+func TestCOSDiskModeListsFoldersAndUndoFilesTogether(t *testing.T) {
+	dir, points, _ := undoBackup(t, firstPoint)
+	moments := t.TempDir()
+	extra := points[1].Add(20 * time.Minute) // a folder that no undo file knows
+	for _, m := range []time.Time{points[2], extra} {
+		fd := filepath.Join(moments, m.Format(cosdisk.RestorePointFolderLayout))
+		if err := os.MkdirAll(fd, 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f := &olderRepo{backupDir: dir, momentsDir: moments, moment: points[3], stopped: new(int)}
+	withFakeDiskRepoAny(t, f)
+	client, base, token, exit, cancel, _, errb := serveAt(t, time.Time{})
+	if base == "" {
+		t.Fatalf("exited with %d: %s", <-exit, errb.String())
+	}
+	defer func() { cancel(); <-exit }()
+	got := listPoints(t, client, base, token)
+	want := []time.Time{points[0], points[1], extra, points[2], points[3]}
+	if len(got) != len(want) {
+		t.Fatalf("restore points = %v, want %v", got, want)
+	}
+	for i := range want {
+		if !got[i].Equal(want[i]) {
+			t.Errorf("restore point %d = %v, want %v", i, got[i], want[i])
+		}
+	}
+}
+
+// A moments snapshot that cannot be listed does not hide the undo files.
+func TestCOSDiskModeListsUndoFilesWhenTheMomentsSnapshotCannotBeListed(t *testing.T) {
+	dir, points, _ := undoBackup(t, firstPoint)
+	f := &olderRepo{backupDir: dir, momentsDir: t.TempDir(), momentsPropfind: http.StatusMethodNotAllowed, moment: points[3], stopped: new(int)}
+	withFakeDiskRepoAny(t, f)
+	client, base, token, exit, cancel, _, errb := serveAt(t, time.Time{})
+	if base == "" {
+		t.Fatalf("exited with %d: %s", <-exit, errb.String())
+	}
+	defer func() { cancel(); <-exit }()
+	if got := listPoints(t, client, base, token); len(got) != len(points) {
+		t.Errorf("restore points = %v, want %v", got, points)
 	}
 }

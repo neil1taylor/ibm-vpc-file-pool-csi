@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/replication"
 )
 
 // A backup of a VM disk keeps one full copy for each restore point, in a folder
@@ -23,16 +25,12 @@ import (
 // RestorePointFolderLayout is how a folder of the moments snapshot is named.
 const RestorePointFolderLayout = "20060102T150405Z"
 
-const (
-	// maxListBytes is the most of a folder listing that is read.
-	maxListBytes = 16 << 20
-	// maxFolders is the most names in a folder listing.
-	maxFolders = 100000
-)
+// maxFolders is the most names in a folder listing.
+const maxFolders = 100000
 
 // ErrNoRestorePoint means no restore point of the disk is at or before the time
-// that was asked for.
-var ErrNoRestorePoint = errors.New("no restore point of the disk is at or before that time")
+// that was asked for. It is the error of the undo reader too.
+var ErrNoRestorePoint = replication.ErrNoRestorePoint
 
 var folderNameRE = regexp.MustCompile(`^[0-9]{8}T[0-9]{6}Z$`)
 
@@ -56,12 +54,6 @@ func ParseRestorePointFolder(name string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return t, true
-}
-
-type multistatus struct {
-	Responses []struct {
-		Href string `xml:"href"`
-	} `xml:"response"`
 }
 
 // ListRestorePointFolders lists the restore point folders at the root of the

@@ -33,8 +33,9 @@ type BackupPick struct {
 // export that covers the time, which is the oldest export at or after it (the
 // newest if there is none), as a restore from COS does. The disk of the backup
 // snapshot is at the export's moment. An older restore point of the disk is a
-// full copy in the export's moments snapshot (BackupPick.Moments), and it is the
-// disk server that refuses a time that no folder there reaches back to.
+// full copy in the export's moments snapshot (BackupPick.Moments) or is rebuilt
+// from undo files in the backup snapshot, and it is the disk server that refuses
+// a time that neither reaches back to.
 func ChooseBackup(snaps []Snapshot, p Params) (BackupPick, error) {
 	exports := exportsOf(snaps, p)
 	if len(exports) == 0 {

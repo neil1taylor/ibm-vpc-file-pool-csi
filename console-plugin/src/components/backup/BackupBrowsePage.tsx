@@ -191,7 +191,7 @@ const BackupBrowsePage: React.FC = () => {
   }, [sessionName, guest]);
 
   const momentOptions = useMemo(() => {
-    // A plain volume in COS offers only its newest copy; a VM disk lists its restore points (from the export's restore point folders).
+    // A plain volume in COS offers only its newest copy; a VM disk lists its restore points (from the export's restore point folders and undo files).
     if (fromCOS && !guest) return [];
     const isos = moments.map(momentToISO).filter((m): m is string => !!m);
     isos.sort().reverse();

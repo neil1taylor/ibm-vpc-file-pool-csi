@@ -21,7 +21,7 @@ To make a release:
 
 ### Fixed
 
-- **Older restore points of a VM disk in COS now come from the export's restore point folder (issue #409, phase 6d).** The first build looked for undo files in the backup folder of the export, but a backup keeps a full copy of the disk for each restore point in its restore point folder, and no undo files. The disk server now mounts the export's restore point snapshot, serves the newest folder at or before the time you ask for, and lists the restore points from the folder names. A restore point with no folder is refused in words. The reader of undo files in COS is removed. Found on the lab (v0.19.1); the cold-read speed of an older restore point is still to be measured.
+- **Older restore points of a VM disk in COS now also come from the export's restore point folder (issue #409, phase 6d).** A VM disk is stored in two forms: a running VM keeps undo files, and a VM that was stopped when it was backed up keeps a full copy in a restore point folder for each restore point. The first build read only undo files, so a stopped VM's older restore points were refused. The disk server now looks first for the newest folder at or before the time in the export's restore point snapshot, then rebuilds from the undo files, and refuses in words only if neither reaches back. `ls --restore-points` lists the folders, the undo file restore points and the export's own. A listing that answers 405 (Kopia's answer for a missing path) now means no undo files. Found on the lab (v0.19.1, a stopped VM); the undo form on a real export of a running VM, and the cold-read speed of an older restore point, are still to be proven on the lab.
 
 ## [v0.19.1] — 2026-11-06
 

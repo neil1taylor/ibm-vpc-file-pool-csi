@@ -29,7 +29,7 @@ func TestChooseBackup_NewestExportByDefault(t *testing.T) {
 
 // Phase 6d: a time before the export's restore point is no longer refused here.
 // The export that covers the time (the oldest one at or after it) is chosen, and
-// the folders of its moments snapshot decide whether the restore point exists.
+// the folders of its moments snapshot or its undo files decide whether the restore point exists.
 func TestChooseBackup_AnOlderRestorePointPicksTheCoveringExport(t *testing.T) {
 	f := newFakeRepo()
 	addExport(f, "pol", volA, at(20, 9))
