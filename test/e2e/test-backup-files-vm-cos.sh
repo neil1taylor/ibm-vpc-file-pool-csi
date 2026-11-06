@@ -13,14 +13,15 @@
 # block off, changes hello.txt on disk1 and backs up again, then turns the export
 # on (so that no export holds the first restore point as its own newest), and waits
 # until the newest restore point of each disk is in COS with its file list. The first
-# restore point of disk1 is then in COS only in the undo files of that export. Then, as a real user
+# restore point of disk1 is then in COS only as a full copy in the restore point folder
+# (the moments snapshot) of that export. Then, as a real user
 # through the gateway with --from-cos:
 # - the file systems and folders of each disk are listed; hello.txt reads "second";
 #   a 256 MiB file has the checksum it was made with;
 # - the speed bar is measured and logged as "MEASURE:" lines: first listing,
 #   another folder in the open session, the first bytes of a file, the whole file;
-# - an older restore point that no export holds as its own newest (it lives only in the undo
-#   files) is listed by ls --restore-points, read, and has its own content (hello.txt reads
+# - an older restore point that no export holds as its own newest (it lives only in the restore point
+#   folder of the export) is listed by ls --restore-points, read, and has its own content (hello.txt reads
 #   "first", the 256 MiB file has its checksum); the speed of that is logged as "MEASURE:" lines;
 # - files are restored from a VM disk in COS into a new claim (phase 6c): a small
 #   file from the XFS disk and from the NTFS disk, and the 256 MiB file, with the
@@ -257,7 +258,8 @@ fi
 [ ${#BIG_SHA} -eq 64 ] || fail "no checksum of the big file"
 
 # The policy starts without an export block. The export is turned on after the later backups, so that
-# no export holds the first restore point as its own newest: it is then only in the undo files.
+# no export holds the first restore point as its own newest: it is then only in the restore point
+# folder of the export (a full copy of the disk in the export's moments snapshot).
 policy_yaml() { # policy_yaml <schedule> <with export: yes|no>
     cat <<YAML
 apiVersion: storage.ibmcloud.io/v1alpha1
@@ -266,7 +268,7 @@ metadata: {name: $POLICY}
 spec:
   snapshotPool: $SNAP
   schedule: $1
-  keepFor: 1h
+  keepFor: 6h   # the backup keeps the first restore point's folder for the whole test (a folder goes after keepFor)
   namespaces: [$NS]
   selector: {matchLabels: {backup: "yes"}}
 YAML
@@ -296,7 +298,7 @@ wait_until 1800 "a backup of disk1 that started after the change" later_moment
 # The test schedule is 1 minute, which makes a newer restore point before an export ends, so no
 # export is ever of the newest restore point. Now that the later backups are in, the schedule is
 # stretched and the export is turned on. The first export is of the newest restore point, and it
-# holds the earlier ones (the first among them) in its undo files only.
+# holds the earlier ones (the first among them) in its restore point folder only.
 policy_yaml 24h yes | oc apply -f -
 exported() { # exported <claim>
     [ -n "$(vol "$1" '.exportedTime // empty')" ] && [ "$(vol "$1" '.exportedTime')" = "$(vol "$1" '.lastBackupTime')" ] && [ -z "$(vol "$1" '.exportError // empty')" ]
@@ -397,30 +399,30 @@ grep -q "sda1/" <<<"$OUT" || fail "disk3 file systems: $OUT"
 bk get "${D3[@]}" "${T[@]}" --fs sda1 /hello.txt --out - | grep -q first && pass "NTFS in COS: a file is read" || fail "ntfs hello.txt"
 close_all
 
-# ---- 3. an older restore point, read from the undo files (phase 6d) -------------------------------
+# ---- 3. an older restore point, read from the restore point folder of the export (phase 6d) -------------------------------
 # No export was made before the newest backup, so the first restore point is in no export as its own
-# newest. The one export holds it only in its undo files; the disk server rebuilds it from them.
+# newest. The one export holds it only as a full copy in its moments snapshot; the disk server mounts that snapshot and serves the folder of that restore point.
 POINTS=$(bk ls "${D1[@]}" "${T[@]}" --restore-points) || fail "ls --restore-points of a VM disk in COS: $POINTS"
 N_POINTS=$(grep -c . <<<"$POINTS" || true)
 log "restore points of disk1 in COS: $(tr '\n' ' ' <<<"$POINTS")"
-[ "$N_POINTS" -ge 3 ] && pass "ls --restore-points lists the restore points of the undo files and the disk ($N_POINTS)" \
+[ "$N_POINTS" -ge 3 ] && pass "ls --restore-points lists the restore points of the restore point folders and the disk ($N_POINTS)" \
     || fail "ls --restore-points of a VM disk in COS lists $N_POINTS restore points, want at least 3: $POINTS"
 OLDEST=$(sort <<<"$POINTS" | head -1)
 NEWEST=$(sort <<<"$POINTS" | tail -1)
 [ "$OLDEST" != "$NEWEST" ] || fail "the oldest and the newest restore point are the same: $POINTS"
 S=$(now)
 OUT=$(bk ls "${D1[@]}" "${T[@]}" --restore-point "$OLDEST" --fs vg0-root /) || fail "ls of an older restore point of a VM disk in COS: $OUT"
-measure "the first listing of an older restore point from the undo files (bar 300)" "$S"
+measure "the first listing of an older restore point from its restore point folder (bar 300)" "$S"
 grep -q "hello.txt" <<<"$OUT" && pass "an older restore point of a VM disk in COS is listed" || fail "older restore point listing: $OUT"
 GOT=$(bk get "${D1[@]}" "${T[@]}" --restore-point "$OLDEST" --fs vg0-root /hello.txt --out -) || fail "get from an older restore point: $GOT"
-[ "$GOT" = first ] && pass "an older restore point of a VM disk in COS reads 'first' (held only by undo files)" \
+[ "$GOT" = first ] && pass "an older restore point of a VM disk in COS reads 'first' (held only in the restore point folder)" \
     || fail "an older restore point of a VM disk in COS reads the wrong content: $GOT"
 S=$(now)
 bk get "${D1[@]}" "${T[@]}" --restore-point "$OLDEST" --fs vg0-root /big.bin --out "$WORK/got/old-big.bin" >/dev/null || fail "get of the 256 MiB file from an older restore point"
 measure "downloading the 256 MiB file from an older restore point" "$S"
 [ "$(shasum -a 256 "$WORK/got/old-big.bin" | awk '{print $1}')" = "$BIG_SHA" ] \
     && pass "a 256 MiB file from an older restore point in COS has the same checksum" || fail "older restore point big.bin checksum"
-# A restore point before every undo file is refused in words.
+# A restore point before every restore point folder is refused in words.
 if out=$(bk ls "${D1[@]}" "${T[@]}" --restore-point 2000-01-01T00:00:00Z 2>&1); then
     fail "a restore point older than every backup was browsed: $out"
 fi
@@ -474,7 +476,7 @@ restore_gone() {
 }
 wait_until 600 "the disk servers of the restores to go" restore_gone
 pass "no disk server of a restore is left"
-# Files from an older restore point of the disk, held only by undo files (phase 6d).
+# Files from an older restore point of the disk, held only in the restore point folder (phase 6d).
 bk restore-files "${D1[@]}" --restore-point "$OLDEST" --fs vg0-root --path /hello.txt --to "$NS/$PREFIX-new4" --wait --timeout 30m >/dev/null \
     || fail "restore-files from an older restore point of a VM disk in COS failed"
 OUT=$(inspect "$PREFIX-new4" 'echo "hello=$(cat vg0-root/hello.txt)"')

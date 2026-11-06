@@ -23,7 +23,7 @@ const DiskPath = "/disk"
 const FileListPath = "/filelist"
 
 // RestorePointsPath is where the disk server lists the restore points that its
-// export holds: the undo files' restore points and the disk's own.
+// export holds: the folders of its moments snapshot, the restore points of its undo files, and the disk's own.
 const RestorePointsPath = "/restorepoints"
 
 // maxRestorePoints is the most restore points the disk server lists or a reader

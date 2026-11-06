@@ -27,7 +27,7 @@ The first version of this spec allowed 5 minutes for the first listing. The owne
 - **Guest helper (phase 5).** The disk server and the libguestfs appliance run in **one container** of the helper pod and talk over a local socket. The helper pod runs in the browse namespace and holds no Secrets.
 - **Guest restore Job (phase 5, #341).** It is split into a reader, which parses the disk and holds no rights, and a writer, which holds only the target and `CHOWN`/`FOWNER`.
 - **COS reader (phase 4).** `pkg/cosbrowse` drives the pinned Kopia program as a child process. It lists snapshots and reads whole files with `kopia show`. It runs in a pod in the **driver namespace**, because it needs the COS key, the wrapped backup key and the Key Protect API key. A NetworkPolicy there lets only the gateway reach it.
-- **What an export holds.** Each export is two Kopia snapshots, tagged with the volume and the restore point. One is the backup folder, which holds the latest `disk.img`. The other is the restore points folder, which holds the undo files up to that export. A restore of a restore point uses the oldest export made at or after it. Kopia cuts files into chunks of about 4 MiB on average, by content. The export does not set compression.
+- **What an export holds.** Each export is two Kopia snapshots, tagged with the volume and the restore point. One is the backup folder, which holds the latest `disk.img` (and the saved file list). The other is the restore point folder (`.moments`), which holds one folder for each restore point the backup keeps, each with a full `disk.img` for a VM disk. For a running VM the backup folder also holds the undo files in `.repl-undo`; for a stopped VM the folders hold the earlier copies (see Phase 6d). A restore of a restore point uses the oldest export made at or after it. Kopia cuts files into chunks of about 4 MiB on average, by content. The export does not set compression.
 
 ## What is not reachable
 
@@ -37,6 +37,8 @@ The first version of this spec allowed 5 minutes for the first listing. The owne
 ## Design that meets the goal
 
 ### 1. Reading parts of `disk.img` and the undo files from COS
+
+> Correction, 6 Nov 2026: this section assumes every VM disk keeps undo files. Only a running VM does; a stopped VM keeps a full `disk.img` in a restore point folder, which the export carries in its moments snapshot. See Phase 6d for both forms.
 
 The disk view gets a small source interface: open a file by name for reads at an offset, and list the undo files. The NFS source is today's code, unchanged. The COS source reads the two Kopia snapshots of the chosen export. COS objects never change, so the COS source has no change check and no lease.
 
@@ -58,7 +60,7 @@ Reading folders straight from a disk in COS is slow: every cold read fetches a w
 - **What.** For each file system: its label and type, and for each entry the path, type, size, mode, owner, times and link target. No file contents. The list is compressed and stored in the same Kopia repository as the export, so it is encrypted with the same backup key and kept and deleted with the export.
 - **Trust.** The list comes from a hostile disk, so the reader treats it as untrusted: size limits on the list and on each name, names shown escaped as phase 3 does, and paths checked against traversal. A wrong list can only show wrong names. A download or restore reads the disk itself and refuses a path that is not there.
 - **Use.** The COS disk server reads the list (a few MiB to tens of MiB) when the session starts and answers folder requests from it. The appliance and the disk are opened only for a download or a restore.
-- **Older restore points.** An export holds the undo files back to the previous export, so it covers several restore points, but only the newest has a list. Making a list per restore point would multiply the export's work. An older restore point is listed from the disk, slowly, as the first version of this spec did. 6a measures how slow.
+- **Older restore points.** An export holds an older restore point as undo files in its backup snapshot (a running VM) or a full copy in its moments snapshot (a stopped VM) (Phase 6d), but only the newest has a file list. Making a list per restore point would multiply the export's work. An older restore point is listed from the disk, slowly, as the first version of this spec did. 6a measures how slow.
 - **No list.** Exports made before this feature, or whose list failed, are browsed from the disk, slowly, with the same notice. A failed list does not fail the export: the export is the backup and comes first. The policy's status says the list failed.
 - **Cost.** One guest file system scan per VM disk per export, measured in 6a. If it makes exports late, the list is made after the export, from the same local restore point, and the session falls back to the slow path until it exists.
 
@@ -195,7 +197,7 @@ Total: about 1.5 to 2.5 weeks of agent work, plus the lab runs.
 - The disk server's cache is 64 MiB in memory (4 MiB segments, 8 read ahead), set by flags. The spike showed that a bounded memory cache is enough, and Kopia keeps its own cache on its scratch folder.
 - The file list is saved as `.filelist.json.gz` in the volume's backup folder, next to `disk.img`, so the existing export snapshot carries it and the existing delete and measure steps cover it. A second container copies it there (a plain file of at most 256 MiB); the reader that parses the disk never writes to the share.
 - A file list counts as being for the disk if its restore point is within 30 minutes of the disk's. The 3 Nov 2026 lab run built each list for the same restore point as the disk (to the second), so it shows the rule works but did not test the edge of 30 minutes.
-- In 6b and 6c only the newest restore point of an export can be browsed in COS. Phase 6d (below) serves the undo files too, so an older restore point of a VM disk can be browsed and restored from.
+- In 6b and 6c only the newest restore point of an export can be browsed in COS. Phase 6d (below) serves the full copies in the restore point folder too, so an older restore point of a VM disk can be browsed and restored from.
 - A VM disk named directly by bucket (`--bucket`) is browsed as plain files, because nothing there says it is a VM disk. Browse it through its policy.
 - The console gets a local or COS switch for every volume type, not only VM disks.
 - VM disks from COS follow the same session limits as everything else. There is no separate limit.
@@ -208,58 +210,60 @@ Total: about 1.5 to 2.5 weeks of agent work, plus the lab runs.
 
 ## Needs from you
 
-- Nothing to decide. Phase 6c is done. Phase 6d (older restore points) is built; what remains is the lab run, to measure the speed of an older restore point and write the numbers here. The speed bar for the newest restore point is agreed: first listing within 30 seconds.
+- Nothing to decide. Phase 6c is done. Phase 6d (older restore points) is rebuilt on the lab finding below; what remains is the lab run, to measure the cold-read speed of an older restore point and write the numbers here. The speed bar for the newest restore point is agreed: first listing within 30 seconds.
 
 ## Phase 6d: older restore points of a VM disk in COS (issue #409)
 
-Date: 5 Nov 2026. Status: built, not yet run on the lab.
+Date: 6 Nov 2026. Status: rebuilt after a lab finding; not yet run again on the lab.
 
-### Phase 6d status: built, not yet run on the lab
+### Lab finding (DR cluster, v0.19.1, 6 Nov 2026)
 
-Built (PR #422 and the wiring PR): the disk server serves a VM disk at an older restore point from the export's `.repl-undo` files and refuses a restore point older than every undo file; the keep-time check counts from the restore point; an older restore point gets a longer start limit; `ls --restore-points` lists the restore points of the undo files; the console and the commands pass the restore point on for COS; the release test (stage 20) reads and restores from a restore point that no export holds as its own newest. **Not done:** the lab run, and the speed numbers of an older restore point (first listing, a download), which are to be written here. Whether the undo files are in the export (see "What the code shows") is also confirmed on the lab only.
+A VM disk is stored in two forms (`docs/BACKUP-RECOVERY.md`, "Two ways a VM disk is stored"): a **running VM** is copied by QEMU and keeps undo files in `.repl-undo` next to `disk.img`; a VM that was **stopped** when it was backed up is copied as plain files and keeps a full `disk.img` in a folder for each restore point. The first design assumed the first form for every disk and looked for undo files in the export's backup folder snapshot. The lab fixture VM was stopped, so that assumption was false there. Checked on the lab:
 
-What the build does that the design above did not say:
-
-- **Which restore points are listed.** The disk server answers a list of the restore points of the export it serves: the headers of its undo files, plus the export's own. The reader passes it on as the session's list. A session without `--restore-point` lists those of the newest export; to see those of an older export, ask for a restore point inside it. Reading the headers costs a few bytes of each undo file.
-- **Restore point names have whole seconds; restore points do not.** The disk server asks the view for the end of the named second, as the local path does, so the restore point a person copies from the list is the one they get.
-- **Keep time.** The policy records only the time of the newest export. For an older restore point the controller counts the keep time from the restore point itself, which is never later than the covering export, so it can refuse a restore point a little early and never allows one whose export is about to be deleted.
-- **Start limit.** The disk server of a VM disk session now has a start limit (it had none before the reader started): 5 minutes (`backupBrowse.cos.startTimeout`) for the newest restore point, and twice that, 10 minutes by default, for a restore point older than the newest export.
+- The root of the backup folder snapshot holds only `.filelist.json.gz`, `.subvolume-metadata.json`, `big.sha` and `disk.img`.
+- On the snapshot pool a backup of that stopped VM keeps **one full copy for each restore point**, in `/backup/<policy>/.moments/pvcs/<pvc>/<YYYYMMDDTHHMMSSZ>/`. Each folder holds `disk.img` (full), `.subvolume-metadata.json` and sometimes `big.sha`. There are no `*.undo` files for it.
+- Each export already makes two Kopia snapshots: the backup folder and the restore point folder (`export.backup` and `export.moments` in `pkg/cosbrowse/choose.go`). So the older full copies are already in COS, in the export's moments snapshot. Its root lists the folders named by restore point time.
+- The undo form for a **running VM** has **not been proven on a real export**: whether the export's backup snapshot holds `.repl-undo/` with the undo files must still be checked on the lab with a running VM. The code reads it and is tested against a fake server only.
+- The Kopia WebDAV server answers a PROPFIND on a missing path with 405, not 404.
 
 ### Goal
 
-A user can pick an older restore point of a VM disk that only COS holds, in `kubectl backup` and in the console, browse it and restore files from it. Today the disk server refuses: `ChooseBackup` in `pkg/cosbrowse/disk.go` returns "can be browsed in COS only at the restore point of an export".
+A user can pick an older restore point of a VM disk that only COS holds, in `kubectl backup` and in the console, browse it and restore files from it.
 
-Done when: the refusal is gone for restore points that the export's undo files cover; a restore point that no undo file covers is still refused in words; the speed numbers for an older restore point are measured on the lab and written here; the release test reads one older restore point from COS and compares a checksum; this spec, `docs/FEATURES.md` and `docs/BACKUP-RECOVERY.md` say so.
-
-### What the code shows (5 Nov 2026)
-
-- The undo files of a VM disk are in `.repl-undo/` next to `disk.img`, in the backup folder. The export snapshots that whole folder, so each export should already hold the undo files back to the previous export. The earlier text in this spec said they are in the restore points folder; that is true for plain volumes only. **The first step of the build checks this on a real export on the lab.** If the undo files are not in the export, the export script gets a change to include them and only exports made after the change cover older restore points.
-- The disk view (`pkg/replication/diskview.go`) opens the disk and undo files by path on a share. Nothing in the COS path uses it. The spec's "small source interface" was never built.
-- An undo file has a 40-byte header, records of an offset, a length (at most 64 KiB) and the old data, and a trailer with a record count. There is no checksum per record.
+Done when: the refusal is gone for restore points that a folder in the export's moments snapshot or its undo files cover; a restore point that neither covers is refused in words; the speed numbers for an older restore point are measured on the lab and written here; the release test reads one older restore point from COS and compares a checksum; this spec, `docs/FEATURES.md` and `docs/BACKUP-RECOVERY.md` say so.
 
 ### Design
 
-1. **Source interface under the disk view.** The disk view reads the disk and each undo file through an interface: a name list, and for each file a size and read-at-offset. The share version is today's code. The COS version reads through the Kopia WebDAV mount that already serves `disk.img`.
-2. **Indexing.** The COS version reads the 40-byte header and the trailer of each undo file to find the restore points, then reads the undo files from the chosen restore point to the newest in large ranges (4 MiB, through the same read-ahead cache), not one tiny read per record. Limits as for any hostile input: record count, offset plus length inside the old size, names ending `.undo`.
-3. **Which restore points exist.** Those the undo headers list, plus the export's own. A restore point between two headers is rounded to the newest one at or before it, as the share version does. One older than every undo file in the export is refused in words.
-4. **Disk server.** `runCOSDisk` passes the requested time on instead of failing. The header `X-Disk-Moment` (a wire name, unchanged) carries the restore point actually served, so the saved file list, which belongs to the export's newest restore point, is ignored for an older one and the listing is read from the disk.
-5. **Keep time.** The check uses the export that covers the requested time, not the newest.
-6. **Gateway, controller, CLI, console.** The gateway already routes an older time to COS. The older restore point gets the 10 minute start limit. `ls --restore-points` for a VM disk in COS lists the undo restore points. The console stops dropping the restore point when the source is COS, and warns before the wait that an older restore point is listed from the disk and can take up to 5 minutes. Help text and notices that say "cannot be browsed yet" change.
-7. **Same bytes as a restore.** For every restore point, the COS view returns byte for byte what a whole-disk restore writes.
+1. **Choosing the export.** `ChooseBackup` picks the export that covers the time, as before (the oldest export at or after it, the newest if none). The pick also carries the export's moments snapshot, or nothing if the export made none.
+2. **The newest restore point** (no time, or a time at or after the export's own): unchanged. The disk server mounts the backup folder snapshot, serves `disk.img` and the saved file list.
+3. **An older restore point.** The disk server first mounts the export's moments snapshot with the same Kopia WebDAV mount, lists its root with one PROPFIND (depth 1), reads the folder names as `20060102T150405Z`, and takes the newest folder at or before the time. If there is one, it serves `/<folder>/disk.img` through the same HTTP source and read cache as the newest. If there is none (or no moments snapshot), it mounts the backup folder snapshot and rebuilds the disk from the undo files in `.repl-undo/`, from the newest restore point back to the one asked for. Restore points are named in whole seconds, so the end of the named second is used, as the local path does. There is no saved file list for an older restore point; folders are read from the disk, so the first listing can take up to 5 minutes.
+4. **Refusal.** If no folder and no undo file reaches back to the time, the session is refused in words ("this VM disk has no restore point in COS at or before ..."). A listing of the undo folder that answers 405 or 404 means no undo files.
+5. **Which restore points are listed.** The `/restorepoints` endpoint lists the union of the folder times of the moments snapshot, the restore points of the undo files (the headers only), and the export's own restore point: sorted, without duplicates, the export's own winning over a folder of the same second. Each source is read at the first request (one extra Kopia mount for each snapshot not already mounted), kept once it worked, and skipped, not failed, if it is missing or unlistable.
+6. **Hostile input.** Folder names must match the strict pattern and be a real date; names with dots or slashes are ignored. The listing reads at most 16 MiB and 100000 entries. The disk URL is built only from a validated name, on 127.0.0.1.
+7. **Keep time and start limit.** Unchanged: the keep time counts from the restore point asked for, so an older restore point is available only inside the policy's `volumeRestorePointKeepHours` window. The start limit stays twice the COS start time for an older restore point.
+8. **Gateway, controller, CLI, console.** Unchanged from the first build; only the text about undo files changed.
 
 ### Tests
 
-- Property test: the COS view equals the share view for every restore point, and it counts the bytes fetched (not the whole undo chain's data for a small read).
-- Hostile undo files: out of order, records past the old size, huge counts, bad names.
-- A restore point older than every undo file is refused in words; a restore point between two is rounded.
-- The lab script `test-backup-files-vm-cos.sh` makes a restore point that no export holds as its own newest (it delays the export) and reads a file from it; today it only accepts a refusal. Release test stage 20 gets a named check for it.
-- Speed on the lab: first listing of an older restore point, and a download, written into this spec.
+- Folder name parsing with hostile names (`..`, `20261106T180326Z/../x`, wrong dates), huge lists and oversized replies, 405 and 404 as "no folders", only 127.0.0.1.
+- The newest folder at or before the time; no folder gives the refusal; an export without a moments snapshot gives the refusal.
+- Export with folders only, undo files only, both, and neither: the disk server serves the right bytes for each older restore point (folders first, then undo files), refuses when neither reaches back, and stops its mounts.
+- The listing endpoint: lazy mount once, the union of folders and undo files, only the export's own restore point when neither is there, and undo files still listed when the moments snapshot cannot be listed.
+- The undo reader treats 405 like 404 (no undo files).
+- The lab script `test-backup-files-vm-cos.sh` and release stage 20 (`vmc_older_restore_point`) read restore point 1 from the moments snapshot.
+
+### Limits
+
+- An older restore point exists only while its folder is kept: inside the policy's `volumeRestorePointKeepHours` window.
+- For a stopped VM each older restore point is a full copy, so a backup with many restore points is large in COS. This is how the snapshot pool already keeps them.
+- The undo form (running VM) is not yet proven on a real export; mark any claim about it as untested until the lab run.
+- Not measured: the cold-read speed of an older restore point (first listing, first byte of a download). It is to be measured on the lab and written here.
 
 ### Decisions I made for you
 
-- Older restore points come from the undo files already in the export. No new file list per restore point, as decided before: they are listed from the disk, slowly.
+- Both forms are supported: the restore point folders in the export's moments snapshot (a stopped VM) and the undo files in the backup snapshot (a running VM). Folders are tried first. The export is not changed.
+- A snapshot that Kopia cannot list, or a missing one, counts as "no older restore points from it", not as a failure, so a session on the newest restore point never fails because of it.
+- The other snapshots are mounted on the first `/restorepoints` request, not at start, so a session on the newest restore point starts as fast as before.
 - The 5 minute allowance for the first listing of an older restore point stays; the console says so first.
-- An older restore point is refused in words when no undo file in the export covers it.
-- If the undo files are not in the export, I change the export to include them. Exports made before then cover only their newest restore point.
 - The start limit of the disk server is 5 minutes for the newest restore point and twice the COS start time (10 minutes by default) for an older one. No new setting.
-- `ls --restore-points` lists the restore points of one export (the one that covers `--restore-point`, the newest by default), because reading the undo files of every export would mean mounting each of them.
+- `ls --restore-points` lists the restore points of one export (the one that covers `--restore-point`, the newest by default), because listing every export would mean mounting each of them.

@@ -63,7 +63,7 @@
 # user (the first listing within 30 seconds, another folder within 5 seconds, a
 # 256 MiB file with the same checksum, the rate inside the helper pod), restores
 # files from them into a new claim, reads and restores from an older restore point that
-# only the undo files of the export hold (and checks one older than all backups is refused),
+# only the restore point folder of the export holds (and checks one older than all backups is refused),
 # that the disk server and the reader are locked down, and that nothing is left.
 # It needs the guest image and the COS configuration of stage 18, and is "not
 # checked" without either. It records the speed numbers as MEASURE lines in its log.
@@ -94,10 +94,10 @@ VMC_LOG="$RT_OUT/backup-files-vm-cos-e2e.log"
 BACKUP_BIN="${RT_BACKUP_BIN:-$(dirname "$RT_LIB")/bin/kubectl-backup}"
 
 # The first restore point is refused when no export holds it, and read when one does.
-# An older restore point that only the undo files of the export hold (no export holds it as its own
+# An older restore point that only the restore point folder of the export holds (no export holds it as its own
 # newest) is listed, read and restored from: the content and the checksum are those of that time.
 vmc_older_restore_point() {
-    log_has_pass "$VMC_LOG" "reads 'first' (held only by undo files)" &&
+    log_has_pass "$VMC_LOG" "reads 'first' (held only in the restore point folder)" &&
         log_has_pass "$VMC_LOG" "a 256 MiB file from an older restore point in COS has the same checksum" &&
         log_has_pass "$VMC_LOG" "files restored from an older restore point of a VM disk in COS have its content"
 }
@@ -338,8 +338,8 @@ run() {
         check "a VM disk in COS: a 256 MiB file has the same checksum" log_has_pass "$VMC_LOG" "a 256 MiB file from COS has the same checksum"
         check "a VM disk in COS: the ext4 disk is read" log_has_pass "$VMC_LOG" "ext4 in COS: a file is read"
         check "a VM disk in COS: the NTFS disk is read" log_has_pass "$VMC_LOG" "NTFS in COS: a file is read"
-        check "a VM disk in COS: an older restore point (held only by undo files) is read and restored with its own content" vmc_older_restore_point
-        check "a VM disk in COS: ls --restore-points lists the restore points of the undo files" log_has_pass "$VMC_LOG" "ls --restore-points lists the restore points of the undo files and the disk"
+        check "a VM disk in COS: an older restore point (held only in the restore point folder) is read and restored with its own content" vmc_older_restore_point
+        check "a VM disk in COS: ls --restore-points lists the restore points of the restore point folders" log_has_pass "$VMC_LOG" "ls --restore-points lists the restore points of the restore point folders and the disk"
         check "a VM disk in COS: a restore point older than every backup is refused" log_has_pass "$VMC_LOG" "a restore point older than every backup in COS is refused"
         check "a VM disk in COS: a small file is restored" log_has_pass "$VMC_LOG" "restored from the XFS disk in COS has its content"
         check "a VM disk in COS: the 256 MiB file is restored with the same checksum" log_has_pass "$VMC_LOG" "the 256 MiB file restored from COS has the same checksum"

@@ -365,3 +365,15 @@ func (u *UndoView) undoLayers() int {
 	defer u.undo.mu.Unlock()
 	return len(u.undo.reads)
 }
+
+// Kopia's WebDAV server answers 405, not 404, for a path that is not there.
+func TestUndoNames_A405MeansNoUndoFiles(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}))
+	defer ts.Close()
+	got, err := RestorePointsOf(context.Background(), ts.Client(), ts.URL+"/disk.img")
+	if err != nil || len(got) != 0 {
+		t.Fatalf("got %v, %v; want no restore points and no error", got, err)
+	}
+}

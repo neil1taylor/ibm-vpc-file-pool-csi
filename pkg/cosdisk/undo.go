@@ -81,7 +81,8 @@ func (h *UndoHTTP) Names() ([]string, error) {
 		return nil, fmt.Errorf("cosdisk: listing the undo files: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode == http.StatusNotFound {
+	// Kopia's WebDAV server answers 405 for a path that is not there.
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
 		return nil, nil
 	}
 	if resp.StatusCode != http.StatusMultiStatus {
