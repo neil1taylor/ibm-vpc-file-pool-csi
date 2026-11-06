@@ -80,12 +80,13 @@ func main() {
 		printUsage(os.Stderr)
 		os.Exit(1)
 	}
-	args, err := renameOldFlags(os.Args[2:])
+	// Rename once, here: run gets the renamed arguments and finds nothing to report.
+	argv, err := renameOldFlagsInArgv(os.Args[1:])
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-	flags := parseFlags(args)
+	flags := parseFlags(argv[1:])
 	c, err := buildClient(flags["kubeconfig"])
 	switch {
 	case err != nil:
@@ -100,7 +101,7 @@ func main() {
 	case os.Args[1] == "restore" && flags["from-cos"] == "true":
 		err = runRestoreFromCOS(context.Background(), c, os.Stdout, newCOSAdmin(), flags, time.Now)
 	default:
-		err = run(context.Background(), c, os.Stdout, os.Args[1:], time.Now)
+		err = run(context.Background(), c, os.Stdout, argv, time.Now)
 	}
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -233,7 +234,7 @@ All commands:
 // work for one release, hidden from the usage text.
 var restorePointAliases = []util.FlagAlias{
 	{Old: "moment", New: "restore-point"},
-	{Old: "moments", New: "restore-points", Bool: true},
+	{Old: "moments", New: "restore-points"},
 }
 
 // renameOldFlags turns the deprecated flag names into the new ones and prints
@@ -241,6 +242,16 @@ var restorePointAliases = []util.FlagAlias{
 // is an error.
 func renameOldFlags(args []string) ([]string, error) {
 	return util.RewriteAliasedArgs(args, restorePointAliases, errOut)
+}
+
+// renameOldFlagsInArgv is renameOldFlags for an argument list that starts with
+// the subcommand, which it keeps.
+func renameOldFlagsInArgv(argv []string) ([]string, error) {
+	rest, err := renameOldFlags(argv[1:])
+	if err != nil {
+		return nil, err
+	}
+	return append([]string{argv[0]}, rest...), nil
 }
 
 // restoredRestorePoint is the restore point a BackupRestore restored: the new

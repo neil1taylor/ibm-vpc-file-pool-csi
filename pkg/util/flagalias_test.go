@@ -50,14 +50,29 @@ func TestRewriteAliasedArgs(t *testing.T) {
 	}
 }
 
-func TestRewriteAliasedArgs_BooleanFlagsTakeNoValue(t *testing.T) {
-	aliases := []FlagAlias{{Old: "moments", New: "restore-points", Bool: true}}
+func TestRewriteAliasedArgs_FlagWithoutAValueIsNotAConflict(t *testing.T) {
+	aliases := []FlagAlias{{Old: "moments", New: "restore-points"}}
 	var errb bytes.Buffer
 	got, err := RewriteAliasedArgs([]string{"--moments", "--restore-points", "/x"}, aliases, &errb)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("a flag with no value is not a different value: %v", err)
 	}
 	if want := []string{"--restore-points", "--restore-points", "/x"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("args = %v, want %v", got, want)
+	}
+}
+
+func TestRewriteAliasedArgs_NothingAfterDoubleDashIsRead(t *testing.T) {
+	var errb bytes.Buffer
+	in := []string{"--moment", "--", "--moment=x", "--restore-point=y"}
+	got, err := RewriteAliasedArgs(in, testAliases, &errb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"--restore-point", "--", "--moment=x", "--restore-point=y"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("args = %v, want %v", got, want)
+	}
+	if errb.String() != "--moment is deprecated; use --restore-point\n" {
+		t.Errorf("stderr = %q", errb.String())
 	}
 }

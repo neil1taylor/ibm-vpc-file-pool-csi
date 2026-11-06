@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -316,5 +317,68 @@ func TestDiskViewFrom_TooManyLayersAreRefused(t *testing.T) {
 	}
 	if _, err := openSourceView(t, disk, latest, src, t0.Add(3*time.Hour)); err != nil {
 		t.Fatalf("a view over %d undo files is within the limit: %v", maxViewLayers, err)
+	}
+}
+
+func TestDiskViewFrom_ChainMustBeUnbroken(t *testing.T) {
+	gap := hdr(2, 4*chunk)
+	gap.from = gap.from.Add(time.Minute) // starts after the file before it ended
+	dup := hdr(1, 4*chunk)
+	cases := []struct {
+		name  string
+		files []hostileFile
+	}{
+		{"gap between two files", []hostileFile{
+			{"0000000001.undo", hdr(1, 4*chunk), [][2]int64{{0, 10}}},
+			{"0000000002.undo", gap, [][2]int64{{0, 10}}},
+		}},
+		{"two files with the same start", []hostileFile{
+			{"0000000001.undo", hdr(1, 4*chunk), [][2]int64{{0, 10}}},
+			{"0000000002.undo", dup, [][2]int64{{0, 10}}},
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			src, disk, latest := hostileSource(t, c.files...)
+			if _, err := openSourceView(t, disk, latest, src, t0.Add(time.Hour)); !errors.Is(err, ErrUndoOrder) {
+				t.Fatalf("err = %v; want ErrUndoOrder", err)
+			}
+			if _, err := RestorePointsFrom(src); !errors.Is(err, ErrUndoOrder) {
+				t.Fatalf("RestorePointsFrom err = %v; want ErrUndoOrder", err)
+			}
+		})
+	}
+}
+
+func TestValidUndoName_OnlyTheNamesTheWriterMakes(t *testing.T) {
+	for name, want := range map[string]bool{
+		"0000000001.undo":      true,
+		"0000000042.undo":      true,
+		"12345678901.undo":     true, // the writer's %010d grows past ten digits
+		"1.undo":               false,
+		"01.undo":              false,
+		"00000000001.undo":     false, // leading zero beyond the writer's padding
+		"0000000000.undo":      false, // the writer starts at 1
+		"0.undo":               false,
+		"0000000001.undo.part": false,
+		"-000000001.undo":      false,
+	} {
+		if got := ValidUndoName(name); got != want {
+			t.Errorf("ValidUndoName(%q) = %v; want %v", name, got, want)
+		}
+	}
+}
+
+func TestDiskViewFrom_RecordBudgetFitsTheDiskServerPod(t *testing.T) {
+	if maxViewRecords != 2<<20 {
+		t.Fatalf("maxViewRecords = %d; want 2M records (about 48 MB of index)", maxViewRecords)
+	}
+	saved := maxViewRecords
+	defer func() { maxViewRecords = saved }()
+	maxViewRecords = 2
+	src, disk, latest := hostileSource(t, hostileFile{"0000000001.undo", hdr(1, 4*chunk), [][2]int64{{0, 1}, {2, 1}, {4, 1}}})
+	_, err := openSourceView(t, disk, latest, src, t0.Add(time.Hour))
+	if err == nil || !strings.Contains(err.Error(), "too large to browse") {
+		t.Fatalf("err = %v; want a plain too-large message", err)
 	}
 }

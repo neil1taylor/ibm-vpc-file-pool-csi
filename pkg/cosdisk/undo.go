@@ -221,13 +221,6 @@ func (u *UndoView) Close() error {
 	return err
 }
 
-// undoLayers is how many undo files the view reads records from.
-func (u *UndoView) undoLayers() int {
-	u.undo.mu.Lock()
-	defer u.undo.mu.Unlock()
-	return len(u.undo.reads)
-}
-
 // UndoCachedBytes is what the caches of the undo files hold now.
 func (u *UndoView) UndoCachedBytes() int64 {
 	u.undo.mu.Lock()

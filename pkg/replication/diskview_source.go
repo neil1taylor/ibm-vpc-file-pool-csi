@@ -21,10 +21,12 @@ import (
 // that was asked for.
 var ErrNoRestorePoint = errors.New("no restore point of the disk is at or before that time")
 
-// maxViewRecords is the most undo records one view indexes. A record costs
-// about 24 bytes of memory; an undo file from a hostile backup must not use up
-// the memory of the helper.
-var maxViewRecords = 1 << 23
+// maxViewRecords is the most undo records one view indexes, over all its
+// layers. A record costs 24 bytes, and the index slice grows by doubling, so
+// 2M records use about 48 MB, 96 MB at worst while it grows. That fits the
+// disk server pod (256Mi request, 1Gi limit); an undo file from a hostile
+// backup must not use up the memory of the helper.
+var maxViewRecords = 2 << 20
 
 // maxViewLayers is the most undo files one view reads records from, so the
 // caches and open requests of a view have a fixed total.
@@ -66,10 +68,19 @@ type UndoSource interface {
 	Open(name string, use UndoUse) (UndoFile, error)
 }
 
-var undoNameRE = regexp.MustCompile(`^[0-9]{1,12}` + regexp.QuoteMeta(undoApplied) + `$`)
+var undoNameRE = regexp.MustCompile(`^[0-9]{10,18}` + regexp.QuoteMeta(undoApplied) + `$`)
 
-// ValidUndoName says whether name is the name of a restore point undo file.
-func ValidUndoName(name string) bool { return undoNameRE.MatchString(name) }
+// ValidUndoName says whether name is the name of a restore point undo file, in
+// the one form the writer makes: the number from 1, written with %010d. Any
+// other spelling of a number (1.undo, 01.undo) would give two names the same
+// place in the order.
+func ValidUndoName(name string) bool {
+	if !undoNameRE.MatchString(name) {
+		return false
+	}
+	seq, err := strconv.Atoi(strings.TrimSuffix(name, undoApplied))
+	return err == nil && seq >= 1 && fmt.Sprintf("%010d%s", seq, undoApplied) == name
+}
 
 type sourceUndo struct {
 	seq  int
@@ -171,8 +182,10 @@ func headersFrom(src UndoSource) ([]sourceUndo, error) {
 		if herr != nil {
 			return nil, herr
 		}
-		if i > 0 && h.from.Before(files[i-1].hdr.from) {
-			return nil, fmt.Errorf("%s: %w", files[i].name, ErrUndoOrder)
+		// Each copy starts from the moment the disk showed after the one before
+		// (the receiver refuses any other start), so the files form a chain.
+		if i > 0 && !h.from.Equal(files[i-1].hdr.to) {
+			return nil, fmt.Errorf("%s does not continue from the undo file before it: %w", files[i].name, ErrUndoOrder)
 		}
 		files[i].hdr = h
 	}
@@ -226,7 +239,7 @@ func indexFrom(src UndoSource, name string, budget *int) (viewLayer, error) {
 			return fmt.Errorf("%s: %w", name, ErrUndoOrder)
 		}
 		if *budget--; *budget < 0 {
-			return fmt.Errorf("%s: the undo files hold more than %d records", name, maxViewRecords)
+			return fmt.Errorf("%s: this disk's older restore points are too large to browse (more than %d changed blocks in the undo files)", name, maxViewRecords)
 		}
 		prevEnd = off + int64(len(data))
 		l.recs = append(l.recs, viewRec{off: off, n: int32(len(data)), pos: pos}) // #nosec G115 -- a record is at most compareChunk bytes

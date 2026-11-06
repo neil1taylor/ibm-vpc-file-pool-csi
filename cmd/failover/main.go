@@ -105,7 +105,7 @@ Status flags:
 
 // restorePointAliases are the old names of the restore-point flags. They still
 // work for one release, hidden from the usage text.
-var restorePointAliases = []util.FlagAlias{{Old: "list-moments", New: "list-restore-points", Bool: true}}
+var restorePointAliases = []util.FlagAlias{{Old: "list-moments", New: "list-restore-points"}}
 
 // stderr is where the deprecation lines go. Tests replace it.
 var stderr io.Writer = os.Stderr

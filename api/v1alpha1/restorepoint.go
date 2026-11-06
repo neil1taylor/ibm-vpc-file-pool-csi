@@ -56,11 +56,6 @@ func (s *BackupBrowseSpec) EffectiveRestorePoint() *metav1.Time {
 	return effectiveTime(s.RestorePoint, s.Moment)
 }
 
-// CheckRestorePointFields checks restorePoint against the deprecated moment.
-func (s *BackupBrowseSpec) CheckRestorePointFields() (string, error) {
-	return CheckRestorePointFields(s.RestorePoint, s.Moment, "restorePoint", "moment")
-}
-
 // EffectiveVolumeRestorePointKeepHours is spec.volumeRestorePointKeepHours, or
 // spec.momentKeepHours if only that is set.
 func (s *ReplicationPolicySpec) EffectiveVolumeRestorePointKeepHours() *int32 {
