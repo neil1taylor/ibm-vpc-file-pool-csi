@@ -19,6 +19,10 @@ To make a release:
 
 ## [Unreleased]
 
+## [v0.19.3] — 2026-11-06
+
+v0.19.0 to v0.19.2 were never deployed, so v0.19.3 is the first release since v0.17.2 to deploy. Fixed: the COS disk server mounts two snapshots of an export, and the second mount took the port of the first, so the list of restore point folders read the wrong snapshot and an older restore point of a VM disk in COS was not listed.
+
 ## [v0.19.2] — 2026-11-06
 
 v0.19.0 and v0.19.1 were never deployed, so v0.19.2 is the first release since v0.17.2 to deploy; the older restore point reader in those two could not read the exports of stopped VMs.
