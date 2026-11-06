@@ -188,6 +188,14 @@ func (bc *BackupController) watchGuestCOS(ctx context.Context, bb *v1alpha1.Back
 		klog.ErrorS(err, "Failed to read the state of a disk server", "session", bb.Name)
 		return true
 	}
+	var startLimit *time.Duration
+	limit := func() time.Duration {
+		if startLimit == nil {
+			d := bc.diskStartTimeout(ctx, bb)
+			startLimit = &d
+		}
+		return *startLimit
+	}
 	switch {
 	case ds.Finished && !ds.Succeeded:
 		bc.endBrowse(ctx, bb, counts, browsePhaseFailed, "", "the disk server failed: "+helperFailureText(ds.Reason))
@@ -214,11 +222,10 @@ func (bc *BackupController) watchGuestCOS(ctx context.Context, bb *v1alpha1.Back
 	case reader.Exists:
 		return false // the reader is up: the usual watch goes on
 	case (!ds.Ready || ds.PodIP == "") && bb.Status.Phase == browsePhaseStarting && bb.Status.StartedTime != nil &&
-		bc.nowFunc().Sub(bb.Status.StartedTime.Time) >= bc.diskStartTimeout(ctx, bb):
-		limit := bc.diskStartTimeout(ctx, bb)
+		bc.nowFunc().Sub(bb.Status.StartedTime.Time) >= limit(): // asked once: the limit reads the policy
 		bc.endBrowse(ctx, bb, counts, browsePhaseFailed, "", fmt.Sprintf(
 			"the disk server was not ready after %s. Check that the Secrets named by the export block exist in namespace %s and hold the keys access_key_id, secret_access_key, wrappedKey and apikey, and that the image can be pulled. An older restore point is read from the undo files in the backup, which takes longer",
-			limit, bc.browse.COSNamespace))
+			limit(), bc.browse.COSNamespace))
 		return true
 	case !ds.Ready || ds.PodIP == "":
 		bc.setBrowseStatus(ctx, bb, browsePhaseStarting, "starting the disk server")

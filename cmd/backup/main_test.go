@@ -242,6 +242,21 @@ func captureErrOut(t *testing.T) *bytes.Buffer {
 	return &b
 }
 
+func TestOldFlagIsReportedOnceFromMainToRun(t *testing.T) {
+	errb := captureErrOut(t)
+	argv, err := renameOldFlagsInArgv([]string{"restore", "--policy", "nightly", "--pvc", "vms/web-root",
+		"--to", "vms/x", "--moment=2026-10-20T12:00:00Z"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = run(context.Background(), newClient(testPolicy()), &bytes.Buffer{}, argv, time.Now); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := errb.String(), "--moment is deprecated; use --restore-point\n"; got != want {
+		t.Errorf("stderr = %q, want exactly one line: %q", got, want)
+	}
+}
+
 func TestRestore_OldMomentFlagStillWorksAndWarns(t *testing.T) {
 	errb := captureErrOut(t)
 	c := newClient(testPolicy())

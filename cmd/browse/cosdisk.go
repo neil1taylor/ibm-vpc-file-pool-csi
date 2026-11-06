@@ -124,13 +124,14 @@ func runCOSDisk(ctx context.Context, a cosDiskArgs, stdout, stderr io.Writer, on
 	// keeps its nanoseconds, so the view is asked for the end of that second.
 	viewAt := guestfs.AtEndOfSecond(a.at)
 	older := !viewAt.IsZero() && viewAt.Before(pick.Moment)
+	davClient := &http.Client{Timeout: 5 * time.Minute}
 	var (
 		reader   cosdisk.DiskReader
 		served   = pick.Moment
 		closeAll func()
 	)
 	if older {
-		uv, uerr := cosdisk.OpenUndoView(ctx, &http.Client{Timeout: 5 * time.Minute}, dav.URL, pick.Moment, viewAt,
+		uv, uerr := cosdisk.OpenUndoView(ctx, davClient, dav.URL, pick.Moment, viewAt,
 			cosdisk.Options{SegmentSize: a.segmentMB << 20, ReadAhead: a.readAhead, MaxBytes: int64(a.cacheMB) << 20})
 		if uerr != nil {
 			failStart(stderr, a.termLog, olderRefusal(uerr, a.at))
@@ -139,7 +140,7 @@ func runCOSDisk(ctx context.Context, a cosDiskArgs, stdout, stderr io.Writer, on
 		reader, served, closeAll = uv.View, uv.View.Moment(), func() { _ = uv.Close() }
 	} else {
 		hctx, cancel := context.WithTimeout(ctx, time.Minute)
-		httpSrc, herr := cosdisk.NewHTTPSource(hctx, &http.Client{Timeout: 5 * time.Minute}, dav.URL)
+		httpSrc, herr := cosdisk.NewHTTPSource(hctx, davClient, dav.URL)
 		cancel()
 		if herr != nil {
 			failStart(stderr, a.termLog, fmt.Errorf("the backup has no readable disk: %w", herr))
@@ -164,7 +165,7 @@ func runCOSDisk(ctx context.Context, a cosDiskArgs, stdout, stderr io.Writer, on
 		// older one the folders are read from the disk.
 		opts = append(opts, cosdisk.WithFileList(func(ctx context.Context) (io.ReadCloser, int64, error) { return fetchFileList(ctx, dav.URL) }))
 	}
-	opts = append(opts, cosdisk.WithRestorePoints(restorePointsOf(dav.URL, pick.Moment)))
+	opts = append(opts, cosdisk.WithRestorePoints(restorePointsOf(davClient, dav.URL, pick.Moment)))
 	diskHandler, err := cosdisk.NewHandler(reader, token, opts...)
 	if err != nil {
 		failStart(stderr, a.termLog, err)
@@ -269,7 +270,7 @@ func olderRefusal(err error, at time.Time) error {
 // restorePointsOf lists the restore points that the export holds: those of its
 // undo files and the disk's own. It reads a few bytes at each end of each undo
 // file, once; a failed listing is tried again at the next request.
-func restorePointsOf(diskURL string, own time.Time) func(context.Context) ([]time.Time, error) {
+func restorePointsOf(client *http.Client, diskURL string, own time.Time) func(context.Context) ([]time.Time, error) {
 	var (
 		mu   sync.Mutex
 		done []time.Time
@@ -280,7 +281,7 @@ func restorePointsOf(diskURL string, own time.Time) func(context.Context) ([]tim
 		if done != nil {
 			return done, nil
 		}
-		undo, err := cosdisk.RestorePointsOf(ctx, &http.Client{Timeout: 5 * time.Minute}, diskURL)
+		undo, err := cosdisk.RestorePointsOf(ctx, client, diskURL)
 		if err != nil {
 			return nil, err
 		}

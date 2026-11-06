@@ -9,11 +9,8 @@ import (
 
 // FlagAlias is a flag that was renamed. The old name still works, is hidden
 // from the usage text, and prints one line on stderr when it is used.
-//
-// Bool is true for a flag that takes no value.
 type FlagAlias struct {
 	Old, New string
-	Bool     bool
 }
 
 func deprecationLine(a FlagAlias) string {
@@ -25,8 +22,11 @@ func conflict(a FlagAlias) error {
 }
 
 // RewriteAliasedArgs renames old flags to their new names in an argument list,
-// for the standard flag package, which cannot hide a flag. Every aliased flag
-// must take a value. Arguments after "--" are left alone.
+// for the standard flag package, which cannot hide a flag. Arguments after "--"
+// are positional and are left alone. The two names are said to conflict only
+// when both were given a value (--flag=value, or a next argument that is not a
+// flag) and the values differ; the function does not guess which flags take a
+// value.
 func RewriteAliasedArgs(args []string, aliases []FlagAlias, stderr io.Writer) ([]string, error) {
 	byOld, byNew := map[string]FlagAlias{}, map[string]FlagAlias{}
 	for _, a := range aliases {
@@ -54,27 +54,32 @@ func RewriteAliasedArgs(args []string, aliases []FlagAlias, stderr io.Writer) ([
 		if !isOld && !isNew {
 			continue
 		}
-		if !hasVal && !a.Bool && i+1 < len(out) {
-			val = out[i+1]
+		if !hasVal && i+1 < len(out) && !strings.HasPrefix(out[i+1], "-") {
+			val, hasVal = out[i+1], true
 		}
 		if isOld {
 			if !oldSeen[a.New] {
 				_, _ = io.WriteString(stderr, deprecationLine(a))
 			}
 			oldSeen[a.New] = true
-			oldVal[a.New] = val
+			if hasVal {
+				oldVal[a.New] = val
+			}
 			out[i] = dashes + a.New + rest
 		} else {
-			newVal[name] = val
+			if hasVal {
+				newVal[name] = val
+			}
 		}
 	}
 	var news []string
-	for n := range oldVal {
+	for n := range oldSeen {
 		news = append(news, n)
 	}
 	sort.Strings(news)
 	for _, n := range news {
-		if v, both := newVal[n]; both && v != oldVal[n] {
+		ov, oldHas := oldVal[n]
+		if v, newHas := newVal[n]; oldHas && newHas && v != ov {
 			return nil, conflict(byNew[n])
 		}
 	}

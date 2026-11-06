@@ -358,3 +358,10 @@ func TestRestorePointsOf_OnlyAThisHostUndoServerIsUsed(t *testing.T) {
 		t.Fatal("a disk URL on another host must be refused")
 	}
 }
+
+// undoLayers is how many undo files the view reads records from.
+func (u *UndoView) undoLayers() int {
+	u.undo.mu.Lock()
+	defer u.undo.mu.Unlock()
+	return len(u.undo.reads)
+}
