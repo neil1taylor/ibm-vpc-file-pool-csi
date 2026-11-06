@@ -45,7 +45,7 @@ Before upgrading, complete every item:
 | v0.11.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.12.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.13.0–v0.13.2 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
-| v0.14.0–v0.19.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
+| v0.14.0–v0.19.1 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
 
 ---
 
@@ -124,6 +124,23 @@ kubectl get crd filesharepools.storage.ibmcloud.io -o json | \
 ---
 
 ## Version-Specific Upgrade Notes
+
+### Upgrading to v0.19.1 (from v0.17.x, v0.18.0 or v0.19.0)
+
+**v0.18.0 and v0.19.0 were never deployed anywhere. Upgrade from v0.17.x straight to v0.19.1.** The v0.18.0 and v0.19.0 notes below apply in full.
+
+**Changes:**
+- The reader of undo files in COS refuses a broken or gapped chain of undo files and accepts only the exact undo file names the writer makes.
+- The reader uses a smaller memory limit (2 million records). A restore point that is too large to browse says so.
+- `kubectl backup` prints the deprecation line for old flag names once.
+
+**CRD changes:** the same as v0.18.0 and v0.19.0.
+
+**Chart changes:** nothing new to configure.
+
+**Action required:** nothing new. Set `image.tag` and `consolePlugin.image.tag` to `v0.19.1` if you pin them, and move any pinned Job image to `v0.19.1` too.
+
+To go back, run `helm rollback`.
 
 ### Upgrading to v0.19.0 (from v0.17.x or v0.18.0)
 
