@@ -86,13 +86,19 @@ func (w *WebDAV) Stop() { w.stop() }
 // StartWebDAV runs `kopia mount SNAPSHOT '*' --webdav --no-browse`. The mount
 // point '*' means that nothing is mounted in the operating system; only the
 // WebDAV server runs, on a loopback port that Kopia chooses. find says which
-// port that is (nil reads /proc/net/tcp); StartWebDAV waits up to wait for it.
+// port that is (nil reads /proc/net/tcp and takes the first loopback port that
+// was not listening before this mount started, so a second mount in the same
+// pod does not pick up the first one's port); StartWebDAV waits up to wait for it.
 func (k *KopiaRepo) StartWebDAV(ctx context.Context, snapshotID string, find func() (int, bool), wait time.Duration) (*WebDAV, error) {
 	if !ValidOID(snapshotID) {
 		return nil, &ReadError{Msg: "the backup holds a damaged entry"}
 	}
 	if find == nil {
-		find = procListenPort
+		known := map[int]bool{}
+		for _, p := range procListenPorts() {
+			known[p] = true
+		}
+		find = func() (int, bool) { return newListenPort(procListenPorts(), known) }
 	}
 	cctx, cancel := context.WithCancel(ctx)
 	cmd := k.command(cctx, "mount", snapshotID, "*", "--webdav", "--no-browse")
@@ -129,19 +135,19 @@ func (k *KopiaRepo) StartWebDAV(ctx context.Context, snapshotID string, find fun
 	}
 }
 
-// procListenPort reads the first listening TCP port on 127.0.0.1 from /proc.
-// In the disk server pod only the Kopia child listens there.
-func procListenPort() (int, bool) {
+// procListenPorts reads the listening TCP ports on 127.0.0.1 from /proc.
+func procListenPorts() []int {
 	b, err := os.ReadFile("/proc/net/tcp")
 	if err != nil {
-		return 0, false
+		return nil
 	}
-	return parseListenPort(string(b))
+	return parseListenPorts(string(b))
 }
 
-// parseListenPort finds the first line in the state LISTEN (0A) whose local
-// address is 127.0.0.1 (0100007F in /proc order).
-func parseListenPort(proc string) (int, bool) {
+// parseListenPorts finds the lines in the state LISTEN (0A) whose local address
+// is 127.0.0.1 (0100007F in /proc order) and returns their ports in file order.
+func parseListenPorts(proc string) []int {
+	var out []int
 	for _, line := range strings.Split(proc, "\n") {
 		f := strings.Fields(line)
 		if len(f) < 4 || f[3] != "0A" {
@@ -155,7 +161,17 @@ func parseListenPort(proc string) (int, bool) {
 		if err != nil || n == 0 {
 			continue
 		}
-		return int(n), true
+		out = append(out, int(n))
+	}
+	return out
+}
+
+// newListenPort returns the first port in ports that is not in known.
+func newListenPort(ports []int, known map[int]bool) (int, bool) {
+	for _, p := range ports {
+		if !known[p] {
+			return p, true
+		}
 	}
 	return 0, false
 }

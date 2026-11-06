@@ -78,18 +78,33 @@ func TestChooseBackup_NoBackupAndOtherVolumes(t *testing.T) {
 	}
 }
 
-func TestParseListenPort_FindsTheLoopbackListener(t *testing.T) {
+func TestParseListenPorts_FindsTheLoopbackListeners(t *testing.T) {
 	tcp := `  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
    0: 00000000:1FA4 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 11111 1 0000000000000000 100 0 0 10 0
    1: 0100007F:C350 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 22222 1 0000000000000000 100 0 0 10 0
    2: 0100007F:C351 0100007F:C350 01 00000000:00000000 00:00000000 00000000     0        0 33333 1 0000000000000000 100 0 0 10 0
+   3: 0100007F:C352 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 44444 1 0000000000000000 100 0 0 10 0
 `
-	port, ok := parseListenPort(tcp)
-	if !ok || port != 0xC350 {
-		t.Fatalf("port = %d, %v; want 50000", port, ok)
+	got := parseListenPorts(tcp)
+	if len(got) != 2 || got[0] != 0xC350 || got[1] != 0xC352 {
+		t.Fatalf("ports = %v; want [50000 50002]", got)
 	}
-	if _, ok := parseListenPort("  sl  local_address\n"); ok {
-		t.Error("no listener should give no port")
+	if got := parseListenPorts("  sl  local_address\n"); len(got) != 0 {
+		t.Errorf("no listener should give no port, got %v", got)
+	}
+}
+
+// A second mount in the same pod must get its own port, not the first mount's.
+func TestNewListenPort_SkipsPortsThatWereOpenBefore(t *testing.T) {
+	known := map[int]bool{50000: true}
+	if p, ok := newListenPort([]int{50000}, known); ok {
+		t.Errorf("got %d; the only listener was there before", p)
+	}
+	if p, ok := newListenPort([]int{50000, 50002}, known); !ok || p != 50002 {
+		t.Errorf("got %d, %v; want 50002", p, ok)
+	}
+	if p, ok := newListenPort([]int{50002}, nil); !ok || p != 50002 {
+		t.Errorf("got %d, %v; want 50002 with nothing known", p, ok)
 	}
 }
 
