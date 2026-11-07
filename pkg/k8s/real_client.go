@@ -7,7 +7,9 @@ import (
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -289,8 +291,29 @@ func (r *realClient) UpdateReplicationPolicy(ctx context.Context, rp *v1alpha1.R
 	return r.client.Update(ctx, rp)
 }
 
+// UpdateReplicationPolicyStatus writes the status of rp. The replication
+// controller owns the whole status, so when the policy has changed since rp was
+// read (a label, an annotation or its spec), the status is written again onto
+// the newest version instead of being lost. A lost final write left a volume
+// marked as copying, which held its COS export back.
 func (r *realClient) UpdateReplicationPolicyStatus(ctx context.Context, rp *v1alpha1.ReplicationPolicy) error {
-	return r.client.Status().Update(ctx, rp)
+	err := r.client.Status().Update(ctx, rp)
+	if !apierrors.IsConflict(err) {
+		return err
+	}
+	status := rp.Status.DeepCopy()
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest := &v1alpha1.ReplicationPolicy{}
+		if gerr := r.client.Get(ctx, types.NamespacedName{Name: rp.Name}, latest); gerr != nil {
+			return gerr
+		}
+		latest.Status = *status.DeepCopy()
+		if uerr := r.client.Status().Update(ctx, latest); uerr != nil {
+			return uerr
+		}
+		latest.DeepCopyInto(rp)
+		return nil
+	})
 }
 
 func (r *realClient) DeleteReplicationPolicy(ctx context.Context, name string) error {

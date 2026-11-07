@@ -9,6 +9,7 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -748,5 +749,48 @@ func TestBackupPolicyUsingPool(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("pool %s: got %q, want %q", tt.pool, got, tt.want)
 		}
+	}
+}
+
+// A status write that meets a newer version of the policy must still land: the
+// replication controller owns the whole status, and a lost write left a volume
+// marked as copying, which held its COS export back until the next cycle.
+func TestUpdateReplicationPolicyStatus_SurvivesAConflict(t *testing.T) {
+	scheme := newTestScheme(t)
+	rp := &v1alpha1.ReplicationPolicy{ObjectMeta: metav1.ObjectMeta{Name: "rp"}}
+	fc := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(rp).
+		WithStatusSubresource(&v1alpha1.ReplicationPolicy{}).
+		Build()
+	c := NewClient(fc)
+	ctx := context.Background()
+
+	mine := &v1alpha1.ReplicationPolicy{}
+	if err := fc.Get(ctx, types.NamespacedName{Name: "rp"}, mine); err != nil {
+		t.Fatal(err)
+	}
+	// Someone else writes the object after we read it.
+	other := mine.DeepCopy()
+	other.Annotations = map[string]string{"x": "y"}
+	if err := fc.Update(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+
+	mine.Status.Phase = "Active"
+	mine.Status.SubVolumeStatuses = []v1alpha1.SubVolumeReplicationStatus{{SubVolumeName: "v1"}}
+	if err := c.UpdateReplicationPolicyStatus(ctx, mine); err != nil {
+		t.Fatalf("the status write must survive a conflict, got %v", err)
+	}
+
+	got := &v1alpha1.ReplicationPolicy{}
+	if err := fc.Get(ctx, types.NamespacedName{Name: "rp"}, got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Phase != "Active" || len(got.Status.SubVolumeStatuses) != 1 {
+		t.Errorf("status = %+v; want the written status", got.Status)
+	}
+	if got.Annotations["x"] != "y" {
+		t.Error("the other writer's change was lost")
 	}
 }
