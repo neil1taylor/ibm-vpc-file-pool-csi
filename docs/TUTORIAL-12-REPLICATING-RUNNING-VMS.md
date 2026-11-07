@@ -9,7 +9,7 @@ Copy a running VM with all its disks to a second cluster, while the VM keeps run
 
 How it works, in short:
 
-1. The controller freezes the guest file systems for a moment. QEMU (the program that runs the VM) starts a copy of every disk of the VM at that one point in time. The guest thaws.
+1. The controller freezes the guest file systems for a short time. QEMU (the program that runs the VM) starts a copy of every disk of the VM at that one point in time. The guest thaws.
 2. QEMU writes the copy slowly, 20 MB/s for each disk by default, so the VM keeps its speed.
 3. A Job sends the copy to the receiver on the destination cluster. The receiver applies it.
 4. QEMU keeps a change list. The next copy holds only the blocks that changed.
@@ -154,7 +154,7 @@ export RECEIVER_HOST=$(dr get route -n kube-system -l app.kubernetes.io/componen
 echo https://${RECEIVER_HOST}
 ```
 
-**Expected:** one pod `1/1 Running` (after about 45 seconds), and a host name. The chart also made the Certificate `ibm-vpc-file-pool-csi-receiver` (`READY True`) and the Secret `ibm-vpc-file-pool-csi-receiver-certs`.
+**Expected:** one pod `1/1 Running` (after about 45 to 85 seconds), and a host name. The chart also made the Certificate `ibm-vpc-file-pool-csi-receiver` (`READY True`) and the Secret `ibm-vpc-file-pool-csi-receiver-certs`.
 
 ```
 NAME                                                          READY   STATUS    RESTARTS   AGE
@@ -234,7 +234,7 @@ The phase of a copy is `Copying` while QEMU writes the staging file, and `Sendin
 {"sv":"pvc-fbe4c104-cd1","phase":null,"restorePoint":"2026-11-05T08:17:15Z","consistency":"FileSystemConsistent","err":null}
 ```
 
-In the lab a 20 GiB root disk and a 2 GiB data disk (about 2 GB used) took 11 minutes in all.
+In the lab a 20 GiB root disk and a 2 GiB data disk (about 2 GB used) took 11 minutes in all. In another run, a 12 GiB root disk and a 3 GiB data disk took about 8 minutes, with one restore point for both disks.
 
 Plan on this: in a lab test, a 12 GiB root disk and a 2 GiB data disk took 10 minutes to copy at 20 MB/s, and 4 more minutes to send. The first status can appear several minutes after you create the policy.
 
@@ -255,14 +255,14 @@ src get replicationpolicy vm-to-dr -o json | jq -c '.status.subVolumeStatuses[] 
 
 Change `cloud-user` to the user of your guest image. Set the cluster with the `KUBECONFIG` variable, as above. With `virtctl ssh --kubeconfig ...` the connection helper reads the default kubeconfig instead, and the command fails with `virtualmachineinstance ... "my-vm" not found`. If `ssh` says `Too many authentication failures`, add `-i <key> -t "-o IdentitiesOnly=yes"`.
 
-**Expected:** the second copy starts 15 minutes after the first and takes under a minute. It sends far less than the disk size: `bytesSynced` of the root disk is 52690944, about the 50 MB you wrote. `restorePoints` is now `1`, and `oldestRestorePoint` is the first restore point. Each further copy adds a restore point, until `restorePointKeepHours` passes.
+**Expected:** the second copy starts 15 minutes after the first and takes about a minute. It sends far less than the disk size. The numbers depend on what the guest writes, and a running guest writes all the time. In the example below the root disk sent 52690944 bytes, about the 50 MB you wrote. In another lab run, the root disk sent 115 MB and the data disk 130 MB. `restorePoints` is now `1`, and `oldestRestorePoint` is the first restore point. Each further copy adds a restore point, until `restorePointKeepHours` passes.
 
 ```
 {"sv":"pvc-65968d12-062","restorePoint":"2026-11-05T08:32:15Z","bytes":null,"points":1,"oldest":"2026-11-05T08:17:15Z"}
 {"sv":"pvc-fbe4c104-cd1","restorePoint":"2026-11-05T08:32:15Z","bytes":52690944,"points":1,"oldest":"2026-11-05T08:17:15Z"}
 ```
 
-`bytesSynced` is empty for a disk that did not change (here the data disk).
+`bytesSynced` is empty for a disk that did not change (here the data disk). A disk of a running guest often changes a little, so you may see a number for both disks.
 
 ---
 
