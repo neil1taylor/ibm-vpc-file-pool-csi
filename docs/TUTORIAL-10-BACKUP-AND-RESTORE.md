@@ -165,7 +165,7 @@ Check the policy:
 oc get backuppolicy ${POLICY}
 ```
 
-**Expected:** `PHASE` is `Active`. It can be empty for a few seconds after the apply; run the command again. If it is `Error`, run `oc get backuppolicy ${POLICY} -o jsonpath='{.status.message}'`. The usual cause is a snapshot pool that is not `Ready` yet.
+**Expected:** `PHASE` is `Active`, with the columns `POOL`, `SCHEDULE`, `KEEP`, `PHASE` and `VOLUMES` (`VOLUMES` is `1`). `PHASE` can be empty for about 20 seconds after the apply; run the command again. If it is `Error`, run `oc get backuppolicy ${POLICY} -o jsonpath='{.status.message}'`. The usual cause is a snapshot pool that is not `Ready` yet.
 
 The controller makes a `ReplicationPolicy` named `backup-${POLICY}-...` for each source pool. Do not edit it. The backup controller sets it back.
 
@@ -272,7 +272,7 @@ oc get backuprestore
 
 **If you do Part 17, do it before this step:** this step deletes the backups that Part 17 reads.
 
-First stop the policy from backing up the volume. Remove the label, then wait for the next list to show the volume as `retained` (it took about 20 seconds in the lab; the controller notices at its next pass).
+First stop the policy from backing up the volume. Remove the label, then wait for the next list to show the volume as `retained` (it took 6 to 20 seconds in the lab; the controller notices at its next pass).
 
 ```bash
 oc label pvc -n ${NS} files backup-
@@ -285,7 +285,7 @@ Delete the backups. The command measures them, shows the paths and the size, and
 kubectl backup delete --policy ${POLICY} --pvc ${NS}/files
 ```
 
-Use `--yes` instead of the typed answer in a script. Without a terminal, the command refuses to continue unless you pass `--yes` (`Error: this is not an interactive shell ... add --yes to confirm`). The command ends with `Removed the backups of pool-tutorial-backup/files (60.0 KiB).` The list can show the volume as `retained` for a while after that. The controller never deletes backups by itself before the keep time. The command refuses while the policy still backs up the volume, and while a restore of the volume runs.
+Use `--yes` instead of the typed answer in a script. Without a terminal, the command refuses to continue unless you pass `--yes` (`Error: this is not an interactive shell ... add --yes to confirm`). The command ends with `Removed the backups of pool-tutorial-backup/files (60.0 KiB).` The size depends on the number of restore points: in one lab run, 9 restore points were 156.0 KiB. One of the paths it shows ends in `.moments`. That is the stored folder name, from before the rename to restore point, and it stays. The list can show the volume as `retained` for a while after that. The controller never deletes backups by itself before the keep time. The command refuses while the policy still backs up the volume, and while a restore of the volume runs.
 
 ---
 
@@ -293,15 +293,16 @@ Use `--yes` instead of the typed answer in a script. Without a terminal, the com
 
 ```bash
 oc delete pod -n ${NS} files-writer files-check --ignore-not-found --force --grace-period=0
-oc delete backuprestore --all
-oc delete backupfilerestore --all
-oc delete backupbrowse --all
+oc get backuprestore,backupfilerestore,backupbrowse
+oc delete backuprestore <name> [<name> ...]
+oc delete backupfilerestore <name> [<name> ...]
+oc delete backupbrowse <name> [<name> ...]
 oc delete backuppolicy ${POLICY}
 oc delete namespace ${NS} --timeout=120s
 oc delete filesharepool ${DATA_POOL} ${SNAP_POOL}
 ```
 
-Deleting a policy keeps its backups on the share. Deleting a pool deletes its VPC shares and everything on them, including backups. The driver blocks the pool delete while volumes or snapshots remain on it, so wait for the namespace to go first. `BackupRestore`, `BackupFileRestore` and `BackupBrowse` are not in the namespace, so delete them yourself, as above, before the pools. A browse pod that still runs holds a claim on the share and blocks the pool delete.
+Deleting a policy keeps its backups on the share. Deleting a pool deletes its VPC shares and everything on them, including backups. The driver blocks the pool delete while volumes or snapshots remain on it, so wait for the namespace to go first. `BackupRestore`, `BackupFileRestore` and `BackupBrowse` are not in the namespace, so delete them yourself, by name as above, before the pools. Never use `--all` on a shared cluster: it removes the restores and sessions of other people. A browse pod that still runs holds a claim on the share and blocks the pool delete.
 
 ---
 
