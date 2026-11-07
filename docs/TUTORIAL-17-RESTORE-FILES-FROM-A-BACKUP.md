@@ -2,7 +2,7 @@
 
 > **Tutorial Series:** [Index](TUTORIAL.md) | [Part 10: Backup and Restore](TUTORIAL-10-BACKUP-AND-RESTORE.md) | **Part 17**
 
-Look inside a backup, read one file, and get back a file that you deleted. You do this without restoring the whole volume. At the end, do the same inside the disk of a VM, without starting the VM. The words restore point, restore point and snapshot pool are defined in [CONTEXT.md](CONTEXT.md).
+Look inside a backup, read one file, and get back a file that you deleted. You do this without restoring the whole volume. At the end, do the same inside the disk of a VM, without starting the VM. The words restore point and snapshot pool are defined in [CONTEXT.md](CONTEXT.md).
 
 **Time:** about 20 minutes, after Part 10 has two restore points. The VM part adds about 15 minutes.
 **Status:** file restore is Experimental. See [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md#browse-a-backup-and-restore-files-in-development) for the full reference.

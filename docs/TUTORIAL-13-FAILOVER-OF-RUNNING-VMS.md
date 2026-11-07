@@ -78,7 +78,7 @@ failover() { dr exec -n kube-system failover-tool -- /tmp/kubectl-failover "$@";
 failover version
 ```
 
-**Expected:** `pod/failover-tool condition met`, then a version line such as `kubectl-failover v0.17.1-6-g9a7d5d49`. Making the ClusterRole and the binding needs a cluster admin.
+**Expected:** `pod/failover-tool condition met`, then a version line such as `kubectl-failover v0.19.4` (a binary made with `make build-failover`; a plain `go build` prints `kubectl-failover dev`). Making the ClusterRole and the binding needs a cluster admin.
 
 Below, `failover <args>` is the pod way. On a host, read `kubectl failover <args>` instead, and add `--kubeconfig ${DR_KUBECONFIG}` to `execute` and `status`. Delete the pod, the ClusterRole and the binding when the failover is done.
 

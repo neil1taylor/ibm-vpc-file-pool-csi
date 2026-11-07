@@ -2,7 +2,7 @@
 
 > **Tutorial Series:** [Index](TUTORIAL.md) | [Part 6: Replication and Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md) | **Part 12** | [Part 13: Failover of Running VMs](TUTORIAL-13-FAILOVER-OF-RUNNING-VMS.md)
 
-Copy a running VM with all its disks to a second cluster, while the VM keeps running. Check that every copy shows one restore point for all disks, and see which copies are file-system consistent. The words restore point, restore point, change list and receiver are defined in [CONTEXT.md](CONTEXT.md).
+Copy a running VM with all its disks to a second cluster, while the VM keeps running. Check that every copy shows one restore point for all disks, and see which copies are file-system consistent. The words restore point, change list and receiver are defined in [CONTEXT.md](CONTEXT.md).
 
 **Time:** about 1 hour, most of it waiting for the first copy.
 **Status:** Experimental. Read [CROSS-REGION-DR.md](CROSS-REGION-DR.md), "Running VM disks", for the design and the lab results.

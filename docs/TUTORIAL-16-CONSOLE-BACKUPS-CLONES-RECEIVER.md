@@ -2,7 +2,7 @@
 
 > **Tutorial Series:** [Index](TUTORIAL.md) | [Part 6: Replication & Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md) | [Part 10: Backup and Restore](TUTORIAL-10-BACKUP-AND-RESTORE.md) | [Part 14: Restore a Snapshot in the Console](TUTORIAL-14-CONSOLE-RESTORE.md) | **Part 16**
 
-Do three jobs in the OpenShift console, with no YAML. First, back up a volume on a schedule, restore it, and delete its backups. Second, clone a volume to a new PVC. Third, set up a replication receiver: paste its token and certificate, let the console make the Secrets, and check the connection. The words backup, restore point, restore point and snapshot pool are defined in [CONTEXT.md](CONTEXT.md).
+Do three jobs in the OpenShift console, with no YAML. First, back up a volume on a schedule, restore it, and delete its backups. Second, clone a volume to a new PVC. Third, set up a replication receiver: paste its token and certificate, let the console make the Secrets, and check the connection. The words backup, restore point and snapshot pool are defined in [CONTEXT.md](CONTEXT.md).
 
 ![A backup policy selects a volume, copies it into the snapshot pool, and a restore makes a new volume](images/tutorial-16-backup-and-restore.drawio.svg)
 

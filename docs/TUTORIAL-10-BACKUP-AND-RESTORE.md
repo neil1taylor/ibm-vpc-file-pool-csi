@@ -2,7 +2,7 @@
 
 > **Tutorial Series:** [Index](TUTORIAL.md) | [Part 1: Pool Creation](TUTORIAL-01-POOL-CREATION.md) | **Part 10**
 
-Back up a volume on a schedule into a pool that holds only backups. Change the volume, wait for a second backup, and restore the volume as it was at the first restore point. Then delete the backups. The words restore point, restore point and snapshot pool are defined in [CONTEXT.md](CONTEXT.md).
+Back up a volume on a schedule into a pool that holds only backups. Change the volume, wait for a second backup, and restore the volume as it was at the first restore point. Then delete the backups. The words restore point and snapshot pool are defined in [CONTEXT.md](CONTEXT.md).
 
 **Time:** about 30 minutes, most of it waiting for backups.
 **Status:** backups are Experimental. See [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md) for the full reference.

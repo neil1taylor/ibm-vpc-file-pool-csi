@@ -1,6 +1,6 @@
 # Backup & Recovery Guide — IBM VPC File Pool CSI Driver
 
-Data protection strategy using the driver's snapshot, clone, backup, and replication features. For the meaning of words such as restore point, restore point and snapshot pool, see [CONTEXT.md](CONTEXT.md).
+Data protection strategy using the driver's snapshot, clone, backup, and replication features. For the meaning of words such as restore point and snapshot pool, see [CONTEXT.md](CONTEXT.md).
 
 ---
 
