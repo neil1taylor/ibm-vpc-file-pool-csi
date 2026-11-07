@@ -354,7 +354,7 @@ oc get subvolumes -l storage.ibmcloud.io/pool=spread-pool -o custom-columns=\
 NAME:.metadata.name,SHARE:.spec.shareID,SIZE:.spec.requestedGB,PVC:.spec.pvcName
 ```
 
-Expected: PVCs are distributed roughly evenly (3 per share):
+Expected: PVCs are distributed roughly evenly (3 per share). The rows are sorted by SubVolume name (a random ID), not by PVC name, so your order will differ:
 
 ```
 NAME          SHARE                SIZE   PVC
@@ -520,14 +520,13 @@ Expected phase transitions:
 ```
 NAME          ZONE      PROFILE   SHARES   CAPACITY   ALLOCATED   PVCS   PHASE
 expand-pool   eu-de-1   dp2       1        20         17          4      Ready
-expand-pool   eu-de-1   dp2       1        20         17          4      Expanding
 expand-pool   eu-de-1   dp2       2        40         17          4      Ready
 ```
 
 **What happened:**
 1. The pool detected 85% utilization (above the 80% threshold)
-2. Phase changed to `Expanding` while the new VPC file share was being created
-3. After the share was provisioned (30-90 seconds), phase returned to `Ready` with 2 shares and 40 GB capacity
+2. The pool stayed `Ready` while the new VPC file share was being created. In a lab run the `Expanding` phase did not show. `SHARES` stayed at 1 and changed to 2 only when the share was ready, about a minute later
+3. The pool then showed 2 shares and 40 GB capacity
 
 ### Step 3d: Verify via VPC CLI
 
@@ -703,7 +702,7 @@ DRAIN_PVCS=$(oc get subvolumes -o json | jq -r \
 echo "PVCs on draining share: ${DRAIN_PVCS}"
 ```
 
-Delete those PVCs:
+Delete those PVCs. Run this loop in `bash`. In `zsh` (the macOS default) the unquoted variable is not split into words, so the loop runs once with all names joined and fails. In `zsh`, use `for pvc in ${=DRAIN_PVCS}; do` instead.
 
 ```bash
 for pvc in ${DRAIN_PVCS}; do
@@ -744,17 +743,12 @@ Clean up all pools and resources created in this tutorial. Delete in reverse dep
 # 1. Delete all PVCs in the tutorial namespace
 oc delete pvc --all -n ${TUTORIAL_NS} --timeout=60s
 
-# 2. Grace period for CSI to cascade SubVolume deletes
-sleep 5
-
-# 3. Force-clean orphan SubVolumes for each pool
-for POOL in tiered-pool spread-pool binpack-pool expand-pool; do
-    for sv in $(oc get subvolumes.storage.ibmcloud.io \
-        -l storage.ibmcloud.io/pool=${POOL} -o name 2>/dev/null); do
-        oc patch "$sv" --type=merge -p '{"metadata":{"finalizers":null}}'
-    done
-    oc delete subvolumes.storage.ibmcloud.io \
-        -l storage.ibmcloud.io/pool=${POOL} --ignore-not-found
+# 2-3. Wait for the driver to delete the SubVolumes (about 35 seconds in a lab
+#      run). Do not delete SubVolumes by hand while this runs.
+for i in $(seq 1 30); do
+    [ -z "$(oc get subvolumes.storage.ibmcloud.io -o name 2>/dev/null \
+        -l 'storage.ibmcloud.io/pool in (tiered-pool,spread-pool,binpack-pool,expand-pool)')" ] && break
+    sleep 5
 done
 
 # 4. Delete pool-owned PVs
