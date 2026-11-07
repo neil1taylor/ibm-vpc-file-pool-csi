@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pool, Share and Volume</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#f4f6f8; --panel:#ffffff; --fg:#161d26; --muted:#5a6675; --line:#d5dce4; --share:#e9eef4;
+  --ok:#0e6b4f; --warn:#8a5300; --bad:#b3261e; --btn:#0f4fd6; --btn-fg:#ffffff;
+  --l0:#2b6f8f; --l1:#d9780f; --l2:#7a4fb0; --l3:#c43d63; --l4:#3a8a2b; --l5:#8d9124;
+  --font:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#10161d; --panel:#18212b; --fg:#e6ebf1; --muted:#9aa7b6; --line:#2b3745; --share:#1d2834;
+  --ok:#5fd0a6; --warn:#e0a24a; --bad:#ff8a80; --btn:#6c9bff; --btn-fg:#0b1220;
+  --l0:#5fb3d6; --l1:#f0a04b; --l2:#b595e6; --l3:#ee7f9b; --l4:#7fcb6a; --l5:#c4c76a; color-scheme:dark;}}
+:root[data-theme="dark"]{
+  --bg:#10161d; --panel:#18212b; --fg:#e6ebf1; --muted:#9aa7b6; --line:#2b3745; --share:#1d2834;
+  --ok:#5fd0a6; --warn:#e0a24a; --bad:#ff8a80; --btn:#6c9bff; --btn-fg:#0b1220;
+  --l0:#5fb3d6; --l1:#f0a04b; --l2:#b595e6; --l3:#ee7f9b; --l4:#7fcb6a; --l5:#c4c76a; color-scheme:dark;}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 var(--font);margin:0;
+  padding-block:24px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+main{max-width:860px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+nav.top{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:.85rem;color:var(--muted)}
+nav.top a{color:var(--btn);text-decoration:none}
+nav.top a:hover{text-decoration:underline}
+nav.top .off{opacity:.5}
+h1{font-size:1.5rem;line-height:1.2;margin:0;font-weight:600;text-wrap:balance}
+h2{font-size:.75rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0;font-weight:600}
+p{margin:0;max-width:65ch}
+.lead{color:var(--muted)}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button{font:inherit;font-weight:500;border:1px solid var(--line);background:var(--panel);color:var(--fg);padding:8px 14px;border-radius:6px;cursor:pointer}
+button.primary{background:var(--btn);color:var(--btn-fg);border-color:var(--btn)}
+button.on{outline:2px solid var(--btn);outline-offset:-2px;font-weight:600}
+button:disabled{opacity:.45;cursor:not-allowed}
+button:focus-visible{outline:2px solid var(--btn);outline-offset:2px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.share{background:var(--share);border:1px solid var(--line);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.mono{font-family:var(--mono);font-size:.85rem}
+.log{border-left:3px solid var(--btn);padding:6px 12px;min-height:3.4em;background:var(--panel)}
+.stats{display:flex;flex-wrap:wrap;gap:16px;color:var(--muted);font-size:.9rem}
+.stats b{color:var(--fg);font-variant-numeric:tabular-nums}
+.hint{font-size:.85rem;color:var(--muted)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:.82rem;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{display:inline-block;width:16px;height:16px;border-radius:4px;border:2px solid var(--c,var(--line));background:color-mix(in srgb,var(--c,transparent) 22%,var(--panel))}
+.sw.dash{border-style:dashed;background:transparent}
+.sw.out{box-shadow:0 0 0 2px var(--fg)}
+.blk{font-family:var(--mono);font-size:.82rem;text-align:center;padding:5px 8px;border-radius:4px;border:2px solid var(--c,var(--line));background:color-mix(in srgb,var(--c,transparent) 22%,var(--panel));min-width:0;white-space:nowrap}
+.blk.dash{border-style:dashed;background:transparent;color:var(--muted)}
+.blk.new{box-shadow:0 0 0 2px var(--fg)}
+.blk.bad{--c:var(--bad)}
+.chip{display:inline-block;font-size:.76rem;font-weight:600;padding:1px 8px;border-radius:10px;border:1px solid var(--line)}
+.chip.ok{color:var(--ok);border-color:var(--ok)}
+.chip.warn{color:var(--warn);border-color:var(--warn)}
+.chip.bad{color:var(--bad);border-color:var(--bad)}
+@media (prefers-reduced-motion:no-preference){.blk{transition:background .25s,border-color .25s}}
+[hidden]{display:none !important}
+.shares{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px}
+.sh{border:1px solid var(--line);border-top:6px solid var(--c);background:var(--panel);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.sh.creating{border-style:dashed;border-top-style:solid}
+.sh-head{display:flex;justify-content:space-between;gap:6px;flex-wrap:wrap}
+.slots{display:flex;flex-wrap:wrap;gap:4px}
+.tbl{width:100%;border-collapse:collapse;font-size:.85rem}
+.tbl th{text-align:left;color:var(--muted);font-weight:600;padding:4px 6px;border-bottom:1px solid var(--line)}
+.tbl td{padding:4px 6px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+.tblwrap{overflow-x:auto}
+.tbl tr.new td{background:color-mix(in srgb,var(--btn) 14%,var(--panel))}
+.sc{display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--c);margin-right:6px}
+</style>
+</head>
+<body>
+<main>
+<nav class="top" aria-label="Pages"><a href="index.html">All pages</a><a href="01-two-kinds-of-volume.html">&larr; Previous page</a><a href="03-replication.html">Next page &rarr;</a></nav>
+  <div>
+    <h1>Pool, Share and Volume</h1>
+    <p class="lead">A <b>share</b> is one big NFS folder that IBM Cloud runs for you. A <b>volume</b> is one small folder inside a share. A <b>pool</b> is the set of shares the driver manages together. This page shows how the driver picks the share for a new volume.</p>
+  </div>
+
+  <div class="bar">
+    <button class="primary" id="b10">1. Make a 10 GB volume</button>
+    <button id="b30">2. Make a 30 GB volume</button>
+    <button id="bdel">Delete the newest volume</button>
+    <button id="btime">Let time pass</button>
+    <button id="breset">Start again</button>
+  </div>
+  <div class="bar" role="group" aria-label="Pool settings">
+    <span class="hint">Pool settings:</span>
+    <button id="s-spread" class="on">Strategy: spread</button>
+    <button id="s-binpack">Strategy: binpack</button>
+    <button id="s-auto">Auto-expand: off</button>
+  </div>
+  <p class="hint">Try: make three 10 GB volumes with <b>spread</b>, then start again and do the same with <b>binpack</b>. Then switch auto-expand on and fill the pool. The shares here hold 100 GB each so the page stays small. A block with a white outline is new.</p>
+
+  <section class="share" aria-label="The pool">
+    <h2>The pool · its shares and the volume folders inside them</h2>
+    <div class="shares" id="shares"></div>
+    <div class="legend">
+      <span><i class="sw" style="--c:var(--l0)"></i>colour = the share that holds the volume</span>
+      <span><i class="sw dash"></i>free space in the share</span>
+      <span><i class="sw out"></i>new in the last action</span>
+      <span><span class="chip ok">stable</span> ready for volumes</span>
+      <span><span class="chip warn">creating</span> being made by IBM Cloud, not used yet</span>
+    </div>
+  </section>
+
+  <section class="card" aria-label="The records">
+    <h2>The driver's records · one SubVolume per volume</h2>
+    <p class="hint">Making a volume only writes one line here. It says which share holds the volume, which folder it uses and how big it is. The real folder name is <span class="mono">/pvcs/pvc-</span> plus a 36-character id. This page shortens it.</p>
+    <div class="tblwrap"><table class="tbl" id="subs"></table></div>
+  </section>
+
+  <div class="stats" aria-live="polite">
+    <span>Volumes: <b id="st-vol">0</b></span>
+    <span>GB given out: <b id="st-gb">0</b> of <b id="st-cap">0</b></span>
+    <span>Shares: <b id="st-sh">0</b> of 4 allowed</span>
+    <span>IBM Cloud share requests made by a volume request: <b id="st-hot">0</b></span>
+    <span>made in the background: <b id="st-bg">0</b></span>
+  </div>
+  <div class="log" id="log" aria-live="polite"></div>
+
+</main>
+<script>
+(function(){
+  var SHARE_GB=100, MAX=4, THRESH=80, IDS=["3f9a","b71c","0d42","a8e5","5c10","e2b7","94fd","17a6","c3d8","6be1","f05a","2d93","81c4","7ae0","d6b9","49f2"];
+  var NAMES="ABCD";
+  var shares, vols, strategy, autoExpand, hot, bg, nextId, lastNew, lastShare;
+
+  var logEl=document.getElementById("log");
+  function el(id){return document.getElementById(id);}
+  function reset(){
+    shares=[{n:"A",state:"stable",c:0},{n:"B",state:"stable",c:1}];
+    vols=[]; hot=0; bg=0; nextId=0; lastNew=null; lastShare=null;
+    say("The pool has 2 shares, A and B, 100 GB each. No volumes yet. Make a volume.");
+  }
+  function say(h){ logEl.innerHTML=h; render(); }
+  function used(s){ return vols.filter(function(v){return v.share===s.n;}).reduce(function(a,v){return a+v.gb;},0); }
+  function usedAll(){ return vols.reduce(function(a,v){return a+v.gb;},0); }
+  function creating(){ return shares.some(function(s){return s.state==="creating";}); }
+  function addShare(){
+    var s={n:NAMES[shares.length],state:"creating",c:shares.length}; shares.push(s); return s;
+  }
+  function pick(gb){
+    var best=null,bestFree=0;
+    shares.forEach(function(s){
+      if(s.state!=="stable") return;
+      var free=SHARE_GB-used(s); if(free<gb) return;
+      if(strategy==="spread"){ if(best===null||free>bestFree){best=s;bestFree=free;} }
+      else { if(best===null||free<bestFree){best=s;bestFree=free;} }
+    });
+    return best;
+  }
+  function create(gb){
+    lastNew=null; lastShare=null;
+    var s=pick(gb);
+    if(s){
+      var id="pvc-"+IDS[nextId%IDS.length]; nextId++;
+      vols.push({id:id,gb:gb,share:s.n}); lastNew=id; lastShare=s.n;
+      var why= strategy==="spread" ? "<b>Spread</b> picks the share with the <b>most</b> free space" : "<b>Binpack</b> picks the share with the <b>least</b> free space that still fits";
+      var msg=why+": share "+s.n+". The driver wrote one SubVolume record for <span class='mono'>"+id+"</span> ("+gb+" GB). <b>It asked IBM Cloud for nothing.</b> The folder itself is made later, on the node, when a pod first mounts the volume.";
+      var cap=shares.length*SHARE_GB, pct=Math.floor(usedAll()*100/cap);
+      if(autoExpand && pct>THRESH && shares.length<MAX && !creating()){
+        addShare(); bg++;
+        msg+=" <b>Then, in the background,</b> the pool saw it was "+pct+"% full (the limit is "+THRESH+"%) and asked IBM Cloud for a new share.";
+      }
+      say(msg); return;
+    }
+    if(!autoExpand){
+      say("<b>Refused.</b> No stable share has "+gb+" GB free, and auto-expand is off. Kubernetes gets a \"no capacity\" error. Switch auto-expand on, or delete a volume.");
+      return;
+    }
+    if(creating()){
+      say("<b>Try again shortly.</b> A new share is already being made by IBM Cloud. Kubernetes retries by itself. Press <b>Let time pass</b>.");
+      return;
+    }
+    if(shares.length>=MAX){
+      say("<b>Refused.</b> No share has "+gb+" GB free and the pool is at its limit of "+MAX+" shares.");
+      return;
+    }
+    addShare(); hot++;
+    say("<b>Try again shortly.</b> No stable share had room, so this request asked IBM Cloud for a new share (it is the one case where a volume request does that). The volume is <b>not</b> made yet. Kubernetes retries. Press <b>Let time pass</b>, then make the volume again.");
+  }
+  function timePass(){
+    var n=0; shares.forEach(function(s){ if(s.state==="creating"){ s.state="stable"; n++; } });
+    lastNew=null; lastShare=null;
+    say(n? "IBM Cloud finished "+n+" new share"+(n>1?"s":"")+". The driver added a mount target so nodes can reach it. The share is now <b>stable</b> and can take volumes." : "Nothing was waiting. Shares only change when a request or the background check asks for one.");
+  }
+  function del(){
+    if(!vols.length){ say("There is no volume to delete."); return; }
+    var v=vols.pop(); lastNew=null; lastShare=null;
+    say("Volume <span class='mono'>"+v.id+"</span> is deleted. Its folder and its SubVolume record go, and "+v.gb+" GB is free again in share "+v.share+". The share itself stays.");
+  }
+
+  function render(){
+    var h="";
+    shares.forEach(function(s){
+      var u=used(s), free=SHARE_GB-u, color="var(--l"+s.c+")";
+      h+='<div class="sh '+(s.state==="creating"?"creating":"")+'" style="--c:'+color+'">'+
+        '<div class="sh-head"><b>Share '+s.n+'</b><span class="chip '+(s.state==="stable"?"ok":"warn")+'">'+s.state+'</span></div>'+
+        '<div class="hint">'+(s.state==="stable"? u+' of '+SHARE_GB+' GB given out':'100 GB share on its way')+'</div><div class="slots">';
+      vols.filter(function(v){return v.share===s.n;}).forEach(function(v){
+        h+='<span class="blk'+(v.id===lastNew?' new':'')+'" style="--c:'+color+';flex:'+v.gb+' 1 '+Math.max(70,v.gb*1.4)+'px">'+v.id.slice(4)+' · '+v.gb+'G</span>';
+      });
+      if(s.state==="stable" && free>0) h+='<span class="blk dash" style="flex:'+free+' 1 '+Math.max(70,free*1.0)+'px">free '+free+'G</span>';
+      if(s.state==="creating") h+='<span class="blk dash" style="flex:1 1 100%">not ready</span>';
+      h+='</div></div>';
+    });
+    el("shares").innerHTML=h;
+    var t='<tr><th>SubVolume</th><th>Share</th><th>Folder on the share</th><th>Size</th></tr>';
+    if(!vols.length) t+='<tr><td colspan="4" class="hint">No records yet.</td></tr>';
+    vols.forEach(function(v){
+      var s=shares.filter(function(x){return x.n===v.share;})[0];
+      t+='<tr class="'+(v.id===lastNew?'new':'')+'"><td class="mono">'+v.id+'</td><td><i class="sc" style="--c:var(--l'+s.c+')"></i>'+v.share+'</td><td class="mono">/pvcs/'+v.id+'</td><td>'+v.gb+' GB</td></tr>';
+    });
+    el("subs").innerHTML=t;
+    el("st-vol").textContent=vols.length;
+    el("st-gb").textContent=usedAll();
+    el("st-cap").textContent=shares.filter(function(s){return s.state==="stable";}).length*SHARE_GB;
+    el("st-sh").textContent=shares.length;
+    el("st-hot").textContent=hot; el("st-bg").textContent=bg;
+    el("s-spread").className=strategy==="spread"?"on":"";
+    el("s-binpack").className=strategy==="binpack"?"on":"";
+    el("s-auto").className=autoExpand?"on":"";
+    el("s-auto").textContent="Auto-expand: "+(autoExpand?"on":"off");
+  }
+  strategy="spread"; autoExpand=false;
+  el("b10").onclick=function(){create(10);};
+  el("b30").onclick=function(){create(30);};
+  el("bdel").onclick=del;
+  el("btime").onclick=timePass;
+  el("breset").onclick=reset;
+  el("s-spread").onclick=function(){strategy="spread"; say("Strategy is now <b>spread</b>: a new volume goes to the share with the most free space.");};
+  el("s-binpack").onclick=function(){strategy="binpack"; say("Strategy is now <b>binpack</b>: a new volume goes to the share with the least free space that still fits. Fewer shares are in use.");};
+  el("s-auto").onclick=function(){autoExpand=!autoExpand; say("Auto-expand is now <b>"+(autoExpand?"on":"off")+"</b>. "+(autoExpand?"The pool may ask IBM Cloud for a new share (up to 4 here), when it is more than 80% full or when a request does not fit.":"The pool never adds a share by itself. When it is full, requests are refused."));};
+  reset();
+})();
+
+</script>
+</body>
+</html>

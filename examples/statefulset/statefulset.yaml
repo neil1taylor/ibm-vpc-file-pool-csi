@@ -1,0 +1,54 @@
+# StatefulSet with volumeClaimTemplates — each replica gets its own PVC.
+# The pool CSI driver creates a subdirectory per PVC instantly.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: web
+  namespace: default
+spec:
+  serviceName: web
+  replicas: 3
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: data
+              mountPath: /usr/share/nginx/html
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+      securityContext:
+        fsGroup: 1000
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: ibm-vpc-file-pool
+        resources:
+          requests:
+            storage: 10Gi
+---
+# Headless Service for StatefulSet DNS
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: default
+spec:
+  clusterIP: None
+  selector:
+    app: web
+  ports:
+    - port: 80

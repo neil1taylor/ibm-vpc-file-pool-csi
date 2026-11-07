@@ -1,0 +1,22 @@
+# Minimal FileSharePool — creates a pool of VPC file shares in a single zone.
+# The pool starts with 1 share and auto-expands up to 10 shares as PVCs fill capacity.
+apiVersion: storage.ibmcloud.io/v1alpha1
+kind: FileSharePool
+metadata:
+  name: general-purpose
+spec:
+  zone: us-south-1
+  profile: dp2
+  shareSizeGB: 2000
+  maxShares: 10
+  initialShares: 1
+  autoExpand: true
+  expandThresholdPercent: 80
+  allocationStrategy: spread
+  defaultPermissions: "0755"
+  defaultUID: 1000
+  defaultGID: 1000
+  resourceGroup: "your-resource-group-id"
+  tags:
+    - "env:dev"
+    - "managed-by:file-pool-csi"

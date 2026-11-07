@@ -1,0 +1,22 @@
+# Pool for availability zone us-south-1.
+# Create one pool per zone for multi-zone clusters.
+apiVersion: storage.ibmcloud.io/v1alpha1
+kind: FileSharePool
+metadata:
+  name: general-us-south-1
+spec:
+  zone: us-south-1
+  profile: dp2
+  shareSizeGB: 2000
+  maxShares: 10
+  initialShares: 1
+  autoExpand: true
+  expandThresholdPercent: 80
+  allocationStrategy: spread
+  defaultPermissions: "0755"
+  defaultUID: 1000
+  defaultGID: 1000
+  resourceGroup: "your-resource-group-id"
+  tags:
+    - "env:production"
+    - "zone:us-south-1"

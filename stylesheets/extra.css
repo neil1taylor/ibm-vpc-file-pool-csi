@@ -1,0 +1,13 @@
+/* IBM VPC File Pool CSI Driver — minimal branding overrides */
+
+:root {
+  --md-primary-fg-color: #0f62fe;      /* IBM Blue 60 */
+  --md-primary-fg-color--light: #4589ff; /* IBM Blue 50 */
+  --md-primary-fg-color--dark: #0043ce;  /* IBM Blue 70 */
+  --md-accent-fg-color: #0f62fe;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #4589ff;      /* IBM Blue 50 — better contrast on dark */
+  --md-accent-fg-color: #78a9ff;       /* IBM Blue 40 */
+}
