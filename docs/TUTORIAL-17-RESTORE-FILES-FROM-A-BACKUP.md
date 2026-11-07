@@ -56,7 +56,7 @@ kubectl backup ls --policy ${POLICY} --pvc ${NS}/files --restore-points
 2026-11-04T18:17:04Z
 ```
 
-The first call opens a session and took about 18 seconds in the lab. Take the first line as the first restore point:
+The first call opens a session and took 7 to 18 seconds in the lab. Take the first line as the first restore point:
 
 ```bash
 export FIRST=$(kubectl backup ls --policy ${POLICY} --pvc ${NS}/files --restore-points | head -1)
@@ -135,9 +135,12 @@ Restore bfr-f78b61bed75c1689-0 asked: 2 paths from pool-tutorial-backup/files (p
   Provisioning waiting for the driver to bind the new claim
   Restoring copying the files into the new claim
   Done restored 2 files, 1 folders and 0 links (12 bytes)
+Restore bfr-f78b61bed75c1689-0: Done - restored 2 files, 1 folders and 0 links (12 bytes)
+The new claim pool-tutorial-backup/files-back holds the files.
+2 files, 1 folders, 0 links, 12 bytes
 ```
 
-It took about 70 seconds. The tree is kept, so the files are at `/keep` and `/a/1` in the new PVC. The name of the restore (`bfr-...`) is yours to note: `kubectl backup restore-files --status NAME` shows it later.
+It took about 70 seconds. The tree is kept, so the files are at `/keep` and `/a/1` in the new PVC. The name of the restore (`bfr-...`) is yours to note. The next restore you start replaces it with the same name, so `kubectl backup restore-files --status NAME` shows the latest restore of this user until the next one replaces it.
 
 Read them with a pod:
 
@@ -210,7 +213,7 @@ Your own `/data/a/1` and `/data/b` did not change. To put a file back in its old
 
 The backup of a VM disk is one raw disk. The driver reads the file systems inside it with a small read-only appliance, so you can get back one file of the guest without starting the VM.
 
-This step needs a VM with a disk that a `BackupPolicy` backs up (see [Part 10](TUTORIAL-10-BACKUP-AND-RESTORE.md#vms)) and VM-disk browsing on in the install:
+This step needs a VM with a disk that a `BackupPolicy` backs up (see [Part 10](TUTORIAL-10-BACKUP-AND-RESTORE.md#vms)), on a pool that sets `defaultUID` and `defaultGID` (use `107` for both), and VM-disk browsing on in the install. The first backup of a 32 GiB VM disk took 7 to 12 minutes in the lab, and `LAST BACKUP` in `kubectl backup list` can stay `-` for several minutes after the backup ends:
 
 ```bash
 helm upgrade ibm-vpc-file-pool-csi charts/ibm-vpc-file-pool-csi -n kube-system \
@@ -231,7 +234,7 @@ export DISK=my-vm-rootdisk
 kubectl backup ls --policy ${POLICY} --pvc ${VMNS}/${DISK}
 ```
 
-**Expected:** one folder for each partition of the guest, with its type and label. The first listing took 20 seconds in the lab. Here is the list for a CentOS Stream 9 disk. A volume that cannot be read (BitLocker, LUKS, swap) is listed with the reason and cannot be opened.
+**Expected:** one folder for each partition of the guest, with its type and label. The first listing took 16 to 20 seconds in the lab. Here is the list for a CentOS Stream 9 disk. A volume that cannot be read (BitLocker, LUKS, swap) is listed with the reason and cannot be opened.
 
 ```
 dr-xr-xr-x  0:0  1048576      0001-01-01 00:00  sda1/ (not readable)  # No file system that the reader knows was found on this volume.
@@ -262,7 +265,10 @@ Restore bfr-8c79aeb7900de297-0 asked: 1 paths from tutf-vms/my-vm-rootdisk (poli
   Done restored 1 files, 2 folders and 0 links (158 bytes)
 Restore bfr-8c79aeb7900de297-0: Done - restored 1 files, 2 folders and 0 links (158 bytes)
 The new claim tutf-vms/vm-files holds the files.
+1 files, 2 folders, 0 links, 158 bytes
 ```
+
+The pool of the target claim must set `defaultUID` and `defaultGID` (a pool for VMs uses `107` for both). Without them the restore stays in `Restoring` with the message `the owner of the target claim is not known`. Set them on the pool, delete the stuck restore and the new claim, and start again.
 
 In the new claim the file is at `/sda4/etc/hosts`: the name of the file system is kept at the top.
 

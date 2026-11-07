@@ -156,7 +156,7 @@ oc wait -n ${NS} vmsnapshot/${VM}-snap2 --for=jsonpath='{.status.phase}'=Succeed
 oc get subvolume ${PV} -o jsonpath='{.status.diskChain}{"\n"}'
 ```
 
-Change the user name in `virtctl ssh` to the user of your guest image. `virtctl ssh` needs an SSH key in the guest. If it does not find your key, add `-i <key>`. A VM that has only a password (like the one in Part 1) cannot use it: log in on the console and make the file there.
+Change the user name in `virtctl ssh` to the user of your guest image. `virtctl ssh` needs an SSH key in the guest. If it does not find your key, add `-i <key>`. If you have many keys in your SSH agent, the login fails with `Too many authentication failures`; add `-t "-o IdentitiesOnly=yes"` as well. A VM that has only a password (like the one in Part 1) cannot use it: log in on the console and make the file there.
 
 **Expected:** a chain of three files, for example `["snap-50edf7f051e750e9.qcow2","snap-6d00c53ed10caf34.qcow2","disk.img"]`. A disk may have at most 16 snapshots.
 
@@ -202,17 +202,19 @@ spec:
     kind: VirtualMachine
     name: ${VM}-copy
   virtualMachineSnapshotName: ${VM}-snap2
-  patches:
-    - '{"op":"remove","path":"/spec/template/spec/domain/devices/interfaces/0/macAddress"}'
 EOF
 
 oc wait -n ${NS} vmrestore/${VM}-restore --for=jsonpath='{.status.complete}'=true --timeout=3600s
-virtctl start ${VM}-copy -n ${NS}
 ```
 
-The `patches` line removes the MAC address, so the copy does not clash with the original. Remove that line if your VM has no network interface with a fixed MAC address.
+If your VM has a network interface with a fixed MAC address, add these two lines under `spec` of the restore, so the copy does not clash with the original. Do not add them for a VM with no fixed MAC address: the restore then stops with `remove operation does not apply: doc is missing path`.
 
-**Expected:** `virtualmachinerestore.snapshot.kubevirt.io/my-vm-restore condition met` after 2.5 minutes for a 20 GiB disk, then `VM my-vm-copy was scheduled to start`. The new VM starts and has the file `/var/tmp/marker-two`.
+```yaml
+  patches:
+    - '{"op":"remove","path":"/spec/template/spec/domain/devices/interfaces/0/macAddress"}'
+```
+
+**Expected:** `virtualmachinerestore.snapshot.kubevirt.io/my-vm-restore condition met` after 2.5 minutes for a 20 GiB disk (5.5 minutes for a 32 GiB disk in another lab run). The copy keeps the `runStrategy` of the original, so it starts by itself. If it is `Halted`, run `virtctl start ${VM}-copy -n ${NS}`. The new VM has the file `/var/tmp/marker-two`.
 
 A snapshot of a VM disk cannot be cloned. Restore the snapshot instead.
 
@@ -248,10 +250,9 @@ A VM with snapshots does not start while the Sidecar gate is off. Flatten first,
 oc delete vm -n ${NS} ${VM}-copy --ignore-not-found
 oc delete vmrestore -n ${NS} ${VM}-restore --ignore-not-found
 oc delete vmsnapshot -n ${NS} ${VM}-snap1 ${VM}-snap2 --ignore-not-found
-oc delete pvc -n ${NS} -l restore.kubevirt.io/source-vm-name=${VM}
 ```
 
-The last command removes the disk that the restore made. Deleting the copy VM does not remove it.
+The disk that the restore made goes with the copy VM, so there is nothing more to delete.
 
 ---
 
