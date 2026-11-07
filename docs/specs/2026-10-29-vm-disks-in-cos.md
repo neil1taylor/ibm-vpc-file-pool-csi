@@ -214,7 +214,7 @@ Total: about 1.5 to 2.5 weeks of agent work, plus the lab runs.
 
 ## Phase 6d: older restore points of a VM disk in COS (issue #409)
 
-Date: 6 Nov 2026. Status: rebuilt after a lab finding; not yet run again on the lab.
+Date: 6 Nov 2026. Status: built, proven on the lab for a stopped VM (folders) on 6 Nov 2026 (DR, v0.19.3) and in release test stage 20 on prod (7 Nov 2026, v0.19.4, 4883 checks). The undo form (running VM) is covered by unit tests only.
 
 ### Lab finding (DR cluster, v0.19.1, 6 Nov 2026)
 
@@ -256,8 +256,9 @@ Done when: the refusal is gone for restore points that a folder in the export's 
 
 - An older restore point exists only while its folder is kept: inside the policy's `volumeRestorePointKeepHours` window.
 - For a stopped VM each older restore point is a full copy, so a backup with many restore points is large in COS. This is how the snapshot pool already keeps them.
-- The undo form (running VM) is not yet proven on a real export; mark any claim about it as untested until the lab run.
-- Not measured: the cold-read speed of an older restore point (first listing, first byte of a download). It is to be measured on the lab and written here.
+- The undo form (running VM) is not yet proven on a real export; mark any claim about it as untested until the lab run. The lab fixture VMs are stopped, so their exports hold folders and no undo files.
+- Measured on the DR lab (6 Nov 2026, v0.19.3, KVM device on, stopped-VM fixture, 1 GiB disks): first listing 24.6 s for the newest restore point and 41.1 s for an older one (bar 300 s); a 256 MiB file through the gateway to a laptop over the VPN took 123.9 s for the newest and 96.4 s for an older one (the network is the limit there, 2 to 3 MiB/s). Inside the cluster the newest restore point gave a first byte after 11 to 13 s and 41 to 48 MiB/s after that (bar 50). A separate first-byte figure for an older restore point was not recorded.
+- Without the KVM device (`backupBrowse.guest.kvmDevice`) the first listing took 46 s and the first file read ran past the 50 second idle limit of the load balancer in front of the router, so the read failed. Turn it on where the nodes have the device.
 
 ### Decisions I made for you
 
