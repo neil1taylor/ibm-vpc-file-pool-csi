@@ -17,7 +17,7 @@ Verify the CSI driver is running:
 # Controller pod (6/6 Running)
 oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller
 
-# Node pods (3/3 Running on each schedulable node)
+# Node pods (2/2 Running on each schedulable node)
 oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node
 
 # CSI Driver registered
@@ -193,7 +193,7 @@ vpc_file_pool_share_count{pool="monitored-pool"} 1
 
 ## Step 4: Key Metrics Walkthrough
 
-The driver exposes 37 metrics across nine categories. This section walks through the first six categories (24 metrics) with PromQL queries and explains what to look for. The backup, CDI and per-share (node agent) metrics are in [MONITORING.md](MONITORING.md).
+The driver exposes 37 metrics across nine categories. A metric that has no data yet is not listed at all in the output (for example, the group snapshot metrics below). This section walks through the first six categories (24 metrics) with PromQL queries and explains what to look for. The backup, CDI and per-share (node agent) metrics are in [MONITORING.md](MONITORING.md).
 
 ### Allocation Metrics (9 metrics)
 
@@ -457,7 +457,7 @@ oc get filesharepools ${POOL_NAME}
 # ALLOCATED should show 90, which is 90% of 100 GB (SHARES stays 1)
 ```
 
-After the `for: 10m` hold-off period, the `PoolNearCapacity` alert fires. The chart's `VPCFilePoolUtilizationWarning` alert (default threshold 80%, hold-off 5 minutes) fires too. Check in the OpenShift Console under Observe > Alerting, or query Prometheus directly:
+After the `for: 10m` hold-off period, the `PoolNearCapacity` alert fires (in the lab run of 7 Nov 2026 it fired about 13 minutes after the rule was created). Any other pool on the cluster over 85% fires it too, and the example rules duplicate the chart's own alerts, so one problem sends two alerts. The chart's `VPCFilePoolUtilizationWarning` alert (default threshold 80%, hold-off 5 minutes) fires too. Check in the OpenShift Console under Observe > Alerting, or query Prometheus directly:
 
 ```bash
 # Port-forward to Prometheus (OpenShift thanos-querier: HTTPS on 9091, needs a token)
@@ -480,7 +480,9 @@ Import a pre-built dashboard for a visual overview of pool health.
 
 ### Import Instructions
 
-1. Open Grafana (OpenShift Console > Observe > Dashboards, or your standalone Grafana instance)
+> **Not run on 7 Nov 2026.** The lab cluster has no Grafana, and OpenShift Console > Observe > Dashboards has no import function. Import the JSON into your own Grafana instance. In the lab run, 12 of the 14 queries in the JSON returned data; the other 2 are the error-rate queries, which return nothing while no errors happen.
+
+1. Open your own Grafana instance
 2. Go to Dashboards > Import
 3. Paste the JSON below and click Load
 4. Select your Prometheus data source
@@ -669,13 +671,13 @@ Import a pre-built dashboard for a visual overview of pool health.
 
 ### Dashboard Tour
 
-After importing, the dashboard has five rows:
+After importing, the dashboard has four rows:
 
 - **Row 1 (Top stats):** Pool utilization gauge (color-coded: green/yellow/orange/red at 0/70/85/95%), PVC count, share count, and free capacity per pool.
 - **Row 2 (Allocation activity):** Allocation rate over time (success vs error) and allocation latency percentiles (P50/P95/P99). Spikes in the error series or elevated P99 latency indicate pool issues.
 - **Row 3 (VPC API):** API call rate by operation and status, plus P95 API latency by operation. Use this to detect VPC API degradation.
-- **Row 4 (Replication lag):** Current replication lag per policy. The chart should stay below your RPO target. Rising lag means syncs are falling behind.
-- **Row 5 (Replication sync):** Average sync duration per policy. If this exceeds the schedule interval, syncs are overlapping and the data volume is too large.
+- **Row 4 (Replication, two panels side by side):** Replication lag: Current replication lag per policy. The chart should stay below your RPO target. Rising lag means syncs are falling behind.
+  Replication sync duration: average sync duration per policy. If this exceeds the schedule interval, syncs are overlapping and the data volume is too large.
 
 ---
 
