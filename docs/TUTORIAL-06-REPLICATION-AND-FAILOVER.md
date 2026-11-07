@@ -219,7 +219,7 @@ repl-app-logs     Bound    pvc-bbb...   5Gi        RWX            repl-pool     
 repl-app-config   Bound    pvc-ccc...   2Gi        RWX            repl-pool      5s
 ```
 
-Write test data to each PVC:
+Write test data to each PVC. The files may show owner `99:99` in the writer's `ls` output; that is expected here.
 
 ```bash
 cat <<EOF | oc apply -f -
@@ -297,6 +297,8 @@ oc delete pod repl-writer -n ${REPL_NS}
 Direct NFS mode uses rsync Jobs to transfer SubVolume data from the source pool's NFS share to a destination NFS share. The destination share must be reachable from source cluster worker nodes over Transit Gateway or VPN.
 
 > **Note:** Replace `10.240.0.50` with the actual NFS mount target IP of your destination share, and `destinationExportPath` with its export path. A share in security group mode (the only mode for new shares) exports a path such as `/299a1485_593a_403d_98da_b0958e446b16`, not `/`. With `/` the sync Jobs fail. Both values are in the destination pool's status (`status.shares[].mountTargetIP` and `status.shares[].exportPath`), or in the `mount_path` of `ibmcloud is share-mount-target <DEST_SHARE_ID> <MOUNT_TARGET_ID>` (`<ip>:<export path>`).
+
+> **Note:** The nodes of the source cluster must be able to reach the target share: it needs a route between the two VPCs and a security group rule that allows NFS. Without them the sync Job pods stay in `ContainerCreating` and the pod events show `mount failed: exit status 32` (the event text is cut short). If you see this, check the route and the security group first. Not re-run on 7 Nov 2026: the lab has no route between the two clusters for direct NFS.
 
 Create a ReplicationPolicy:
 
@@ -622,10 +624,10 @@ export RECEIVER_HOST=$(oc get route -n kube-system \
 echo "Receiver endpoint: https://${RECEIVER_HOST}"
 ```
 
-Check that the receiver answers (with Option B this also shows that the Route certificate is trusted). The first call needs no token and returns `200`. The second shows that the token is needed: `401`.
+Check that the receiver answers. The first call needs no token and returns `200`. The second shows that the token is needed: `401`. With Option B the Route certificate is signed by a public CA, so the calls below work as written. With Option A the receiver's certificate comes from a private CA, so curl stops with exit code 60. Add `-k` to the calls (or `--cacert` with the CA file from Step 6d) and you get `200` and `401`.
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}\n" https://${RECEIVER_HOST}/api/v1/health
+curl -s -o /dev/null -w "%{http_code}\n" https://${RECEIVER_HOST}/api/v1/health      # Option A: add -k
 curl -s -o /dev/null -w "%{http_code}\n" https://${RECEIVER_HOST}/api/v1/auth-check
 ```
 
@@ -713,10 +715,11 @@ dr-driver   repl-pool          5m         Active   2026-02-25T15:00:00Z
 
 > **Note:** The `DEST` column is blank because driver-to-driver mode uses `destinationEndpoint` instead of `destinationNFSServer`.
 
-**How long this takes.** Expect 10 to 15 minutes for the three volumes, not seconds:
+**How long this takes.** In the lab run of 7 Nov 2026, three small volumes (a few MB) took about 1 minute. Larger volumes take longer. Some details:
 
 - `maxParallelSyncs: 2` starts two volumes at once. The third waits for the next check of the policy (`deferred: parallel limit` in the status).
-- The controller looks at a running cycle only on its schedule (every 5 minutes here). The data of a small volume is at the destination within a minute, but the policy shows `sync in progress` and an empty `LAST SYNC` until the next check.
+- The controller checks a running cycle every 7 to 30 seconds. While a cycle runs, the policy can show `sync in progress` for a volume.
+- The `LAST SYNC` column shows an age such as `119s`, not a date. The `lastSyncTime` field holds the date.
 
 Follow the Jobs while you wait: `oc get jobs -n kube-system | grep repl-`. To see the per-volume status:
 
@@ -837,7 +840,7 @@ EOF
 - `postSyncHooks` runs `thaw-app` after the sync completes
 - If the post-sync hook fails, `onError: Continue` logs the error but does not affect the sync result
 
-The pre-sync hook runs when a cycle starts, and the post-sync hook runs when the whole cycle has finished. With three volumes and one sync at a time, a cycle spans several checks of the policy, so the two hooks can be many minutes apart (see the timing note in Step 6f). Check that they ran in the controller log:
+The pre-sync hook runs when a cycle starts, and the post-sync hook runs when the whole cycle has finished. With small volumes the two hooks run close together: in the lab run they were about 53 seconds apart. With larger volumes or a parallel limit that makes volumes wait, they can be many minutes apart (see the timing note in Step 6f). Check that they ran in the controller log:
 
 ```bash
 oc logs -n kube-system -l app.kubernetes.io/component=controller -c csi-controller --tail=3000 | grep -E 'Running hook|Hook (succeeded|failed)'
@@ -985,7 +988,7 @@ oc exec -i -n kube-system ${RECEIVER_POD} -- \
 oc exec -n kube-system ${RECEIVER_POD} -- /tmp/kubectl-failover plan --nfs-mount-path /data
 ```
 
-> **Note:** You can also run the tool on any host that mounts the destination share over NFS (a VSI in the VPC, for example) and reaches the DR cluster's API. The commands below then read `kubectl failover ...` and `--nfs-mount-path` is where you mounted the share. [Part 13](TUTORIAL-13-FAILOVER-OF-RUNNING-VMS.md) shows that way. From the receiver pod, the tool uses the pod's own service account to talk to the cluster, so no kubeconfig is needed.
+> **Note:** You can also run the tool on any host that mounts the destination share over NFS (a VSI in the VPC, for example) and reaches the DR cluster's API. The commands below then read `kubectl failover ...` and `--nfs-mount-path` is where you mounted the share. [Part 13](TUTORIAL-13-FAILOVER-OF-RUNNING-VMS.md) shows that way. Do not run `execute` from the receiver pod: its service account cannot create SubVolumes, PersistentVolumes or PersistentVolumeClaims (the check `oc auth can-i create subvolumes` says `no`). Use a pod that mounts the receiver volume and runs under the `failover-tool` service account, as [Part 13](TUTORIAL-13-FAILOVER-OF-RUNNING-VMS.md) does, or run the tool on a host with a kubeconfig. `plan` only reads the mounted share, so it works in either place.
 
 Example output:
 
@@ -1004,6 +1007,8 @@ pvc-ccc11111-2222-3333-4444-555566667777      repl-app-config   pool-tutorial-re
 To execute failover, run:
   kubectl failover execute --nfs-mount-path /data --dr-pool <POOL> --dr-share-ip <IP>
 ```
+
+The last line is what the tool prints. Step 9b shows how to find the values, and you also need `--dr-export-path` (see Step 9b).
 
 **What this does:**
 - Scans `/data/pvcs/` for directories containing `.subvolume-metadata.json`
@@ -1040,7 +1045,7 @@ Example output:
 
 ```
 [dry-run] Would create SubVolume pvc-aaa11111-2222-3333-4444-555566667777
-[dry-run] Would create PV dr-pvc-aaa11111-2222-3333-4444-555566667777 (nfs://10.245.3.8/8fbb32db_4f8e_4012_b074_27fbae9536be/pvcs/pvc-cfc98075-51ab-4cdf-98e1-ca5307debf19/pvcs/pvc-aaa11111-2222-3333-4444-555566667777)
+[dry-run] Would create PV dr-pvc-aaa11111-2222-3333-4444-555566667777 (nfs://10.245.3.8/8fbb32db_4f8e_4012_b074_27fbae9536be/pvcs/pvc-cfc98075-51ab-4cdf-98e1-ca5307debf19/pvcs/pvc-aaa11111-2222-3333-4444-555566667777, mount options nfsvers=4.1,soft,timeo=600,retrans=3,sec=sys)
 [dry-run] Would create PVC pool-tutorial-repl/repl-app-data (bound to dr-pvc-aaa11111-2222-3333-4444-555566667777)
 ...
 ```
@@ -1054,6 +1059,8 @@ Example output:
 **Check the PV path.** It must end in `/pvcs/pvc-<uuid>` after the receiver's folder. Without `--dr-export-path`, the path is `/pvcs/pvc-<uuid>` from the root of the share, which is not where the receiver wrote the data, and the volume would be empty or would not mount.
 
 ### Step 9c: Execute the Failover
+
+> **Not re-run on 7 Nov 2026:** Steps 9c and 9d were not run in the lab for this part. [Part 13](TUTORIAL-13-FAILOVER-OF-RUNNING-VMS.md) covers a full failover.
 
 The tool creates each PVC in the namespace it had on the source cluster. Make that namespace on the DR cluster first (or pass `--namespace` to put every PVC in one namespace). Then run the failover:
 
